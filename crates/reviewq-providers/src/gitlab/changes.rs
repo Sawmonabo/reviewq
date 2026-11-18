@@ -1,9 +1,10 @@
 use std::fmt::Write as _;
+use std::sync::Arc;
 
+use reqwest::header::HeaderMap;
 use reviewq_app::access::{AppError, AppFuture};
 use reviewq_app::changes::{
-    ChangeSource, Discussion, PatchAvailability, PatchBytes, PatchFile, PatchMetrics,
-    PatchRevision, SourcePage,
+    ChangeSource, Discussion, PatchBytes, PatchFile, PatchRevision, SourcePage,
 };
 use reviewq_domain::identity::{GitSha, MrIdentity};
 use serde::Deserialize;
@@ -11,10 +12,15 @@ use serde::de::DeserializeOwned;
 use sha2::{Digest, Sha256};
 
 use super::GitLab;
+use crate::http;
 
 mod discussions;
+mod lease;
+mod wire;
 
-const MAX_PATCH_QUERY_BYTES: usize = 8 * 1024 * 1024;
+use lease::Key;
+pub(super) use lease::Leases;
+
 const MAX_PATCH_FILES: u32 = 10_000;
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
@@ -24,22 +30,6 @@ pub(super) struct DiffRefs {
     head_sha: String,
 }
 
-#[derive(Deserialize)]
-struct Diff {
-    old_path: String,
-    new_path: String,
-    diff: String,
-    renamed_file: bool,
-    new_file: bool,
-    deleted_file: bool,
-    #[serde(default)]
-    collapsed: bool,
-    #[serde(default)]
-    too_large: bool,
-    #[serde(default)]
-    binary: bool,
-}
-
 impl ChangeSource for GitLab {
     fn files(
         &self,
@@ -47,28 +37,53 @@ impl ChangeSource for GitLab {
         revision: Option<String>,
         page: u32,
         limit: u16,
+        selected_file: Option<String>,
     ) -> AppFuture<'_, SourcePage<PatchFile>> {
         Box::pin(async move {
             if !(1..=10).contains(&limit) {
                 return Err(AppError::InvalidRequest);
             }
-            let offset = page
-                .checked_sub(1)
-                .and_then(|n| n.checked_mul(u32::from(limit)))
-                .filter(|offset| *offset < MAX_PATCH_FILES)
-                .ok_or(AppError::PayloadTooLarge)?;
+            let selected = selected_file.as_deref();
+            let first_choice = selected
+                .map(|id| ordinal(id).ok_or(AppError::InvalidRequest))
+                .transpose()?;
+            let page = if page == 1 {
+                first_choice.map_or(page, |ordinal| 1 + (ordinal - 1) / u32::from(limit))
+            } else {
+                page
+            };
             let current = self.patch_revision(&source, revision.as_deref()).await?;
-            let (rows, next) = self
-                .read_diff_rows::<Diff>(&source, "diffs", page, limit, MAX_PATCH_QUERY_BYTES)
+            let (scan, next) = self
+                .scan_diffs(&source, page, limit, selected, page == 1)
                 .await?;
-            let mut files = Vec::with_capacity(rows.len());
-            for (index, diff) in rows.into_iter().enumerate() {
-                files.push(diff.file(offset + index as u32 + 1)?);
+            if selected.is_some_and(|file| !scan.files.iter().any(|candidate| candidate.id == file))
+            {
+                return Err(AppError::NotFound);
             }
             self.patch_revision(&source, Some(&current.id)).await?;
+            if let Some((file, body)) = scan.selected
+                && let Ok(slot) = self
+                    .patches
+                    .slot(Key {
+                        source,
+                        revision: current.id.clone(),
+                        file: file.id.clone(),
+                    })
+                    .await
+            {
+                let _ = slot
+                    .get_or_init(|| async {
+                        PatchBytes {
+                            revision: current.clone(),
+                            file,
+                            body: Arc::new(body),
+                        }
+                    })
+                    .await;
+            }
             Ok(SourcePage {
                 revision: current,
-                items: files,
+                items: scan.files,
                 next_page: next,
             })
         })
@@ -81,30 +96,37 @@ impl ChangeSource for GitLab {
         file: String,
     ) -> AppFuture<'_, PatchBytes> {
         Box::pin(async move {
-            let ordinal = file
-                .split_once('-')
-                .and_then(|(n, _)| n.parse::<u32>().ok())
-                .filter(|n| (1..=MAX_PATCH_FILES).contains(n))
-                .ok_or(AppError::InvalidRequest)?;
+            let ordinal = ordinal(&file).ok_or(AppError::InvalidRequest)?;
             let current = self.patch_revision(&source, Some(&revision)).await?;
-            let (mut rows, _) = self
-                .read_diff_rows::<Diff>(&source, "diffs", ordinal, 1, MAX_PATCH_QUERY_BYTES)
+            let slot = self
+                .patches
+                .slot(Key {
+                    source: source.clone(),
+                    revision,
+                    file: file.clone(),
+                })
                 .await?;
-            let diff = rows.pop().ok_or(AppError::NotFound)?;
-            let metadata = diff.file(ordinal)?;
-            if metadata.id != file {
-                return Err(AppError::NotFound);
-            }
-            self.patch_revision(&source, Some(&current.id)).await?;
-            let bytes = match metadata.availability {
-                PatchAvailability::Complete => diff.diff.into_bytes(),
-                _ => Vec::new(),
-            };
-            Ok(PatchBytes {
-                revision: current,
-                file: metadata,
-                bytes,
-            })
+            let patch = slot
+                .get_or_try_init(|| async {
+                    let (scan, _) = self
+                        .scan_diffs(&source, ordinal, 1, Some(&file), false)
+                        .await?;
+                    let (metadata, body) = match scan.selected {
+                        Some(selected) => selected,
+                        None if scan.files.iter().any(|row| row.id == file) => {
+                            return Err(AppError::Unavailable);
+                        }
+                        None => return Err(AppError::NotFound),
+                    };
+                    self.patch_revision(&source, Some(&current.id)).await?;
+                    Ok(PatchBytes {
+                        revision: current,
+                        file: metadata,
+                        body: Arc::new(body),
+                    })
+                })
+                .await?;
+            Ok(patch.clone())
         })
     }
 
@@ -165,6 +187,57 @@ impl GitLab {
         limit: u16,
         byte_limit: usize,
     ) -> Result<(Vec<T>, Option<u32>), AppError> {
+        let url = self.page_url(source, leaf, page, limit)?;
+        let (headers, bytes) = self.get(url, byte_limit).await?;
+        let rows: Vec<T> = serde_json::from_slice(&bytes).map_err(|_| AppError::Unavailable)?;
+        if rows.len() > usize::from(limit) {
+            return Err(AppError::Unavailable);
+        }
+        Ok((rows, next_page(&headers, page)?))
+    }
+
+    async fn scan_diffs(
+        &self,
+        source: &MrIdentity,
+        page: u32,
+        limit: u16,
+        preferred: Option<&str>,
+        default: bool,
+    ) -> Result<(wire::DiffPage, Option<u32>), AppError> {
+        let first = page
+            .checked_sub(1)
+            .and_then(|page| page.checked_mul(u32::from(limit)))
+            .and_then(|offset| offset.checked_add(1))
+            .filter(|first| first <= &MAX_PATCH_FILES)
+            .ok_or(AppError::PayloadTooLarge)?;
+        let url = self.page_url(source, "diffs", page, limit)?;
+        let (body, next) = {
+            let _permit = self
+                .requests
+                .acquire()
+                .await
+                .map_err(|_| AppError::Unavailable)?;
+            let response = http::get(&self.http, url, self.headers.clone()).await?;
+            let next = next_page(response.headers(), page)?;
+            (wire::receive(response, &self.patches.profile).await?, next)
+        };
+        let profile = self.patches.profile.clone();
+        let preferred = preferred.map(str::to_owned);
+        let scanned = tokio::task::spawn_blocking(move || {
+            wire::decode(body, &profile, first, limit, preferred.as_deref(), default)
+        })
+        .await
+        .map_err(|_| AppError::Unavailable)??;
+        Ok((scanned, next))
+    }
+
+    fn page_url(
+        &self,
+        source: &MrIdentity,
+        leaf: &str,
+        page: u32,
+        limit: u16,
+    ) -> Result<url::Url, AppError> {
         let mut url = self.url(&format!(
             "api/v4/projects/{}/merge_requests/{}/{leaf}",
             source.project_id(),
@@ -176,79 +249,33 @@ impl GitLab {
         if leaf == "diffs" {
             url.query_pairs_mut().append_pair("unidiff", "true");
         }
-        let (headers, bytes) = self.get(url, byte_limit).await?;
-        let rows: Vec<T> = serde_json::from_slice(&bytes).map_err(|_| AppError::Unavailable)?;
-        if rows.len() > usize::from(limit) {
-            return Err(AppError::Unavailable);
-        }
-        let next = match headers.get("x-next-page") {
-            Some(value) if !value.is_empty() => {
-                let next: u32 = value
-                    .to_str()
-                    .ok()
-                    .and_then(|raw| raw.parse().ok())
-                    .ok_or(AppError::Unavailable)?;
-                if page.checked_add(1) != Some(next) {
-                    return Err(AppError::Unavailable);
-                }
-                Some(next)
-            }
-            _ => None,
-        };
-        Ok((rows, next))
+        Ok(url)
     }
 }
 
-impl Diff {
-    fn file(&self, ordinal: u32) -> Result<PatchFile, AppError> {
-        if !safe_path(&self.old_path) || !safe_path(&self.new_path) {
-            return Err(AppError::Unavailable);
-        }
-        let availability = if self.binary
-            || self.diff.starts_with("Binary files ")
-            || self.diff.starts_with("GIT binary patch")
-        {
-            PatchAvailability::Binary
-        } else if self.too_large {
-            PatchAvailability::ProviderLimited
-        } else if self.collapsed {
-            PatchAvailability::Incomplete
-        } else {
-            PatchAvailability::Complete
-        };
-        Ok(PatchFile {
-            id: format!(
-                "{ordinal}-{}",
-                fingerprint(&[&self.old_path, &self.new_path])
-            ),
-            old_path: self.old_path.clone(),
-            new_path: self.new_path.clone(),
-            renamed: self.renamed_file,
-            created: self.new_file,
-            deleted: self.deleted_file,
-            availability,
-            metrics: (availability == PatchAvailability::Complete)
-                .then(|| metrics(self.diff.as_bytes())),
-        })
+fn next_page(headers: &HeaderMap, page: u32) -> Result<Option<u32>, AppError> {
+    let Some(value) = headers.get("x-next-page").filter(|value| !value.is_empty()) else {
+        return Ok(None);
+    };
+    let next: u32 = value
+        .to_str()
+        .ok()
+        .and_then(|raw| raw.parse().ok())
+        .ok_or(AppError::Unavailable)?;
+    if page.checked_add(1) != Some(next) {
+        return Err(AppError::Unavailable);
     }
+    Ok(Some(next))
 }
 
-fn metrics(bytes: &[u8]) -> PatchMetrics {
-    let mut count = 0;
-    let mut maximum = 0;
-    for physical in bytes.split_inclusive(|byte| *byte == b'\n') {
-        let line = physical
-            .strip_suffix(b"\n")
-            .map_or(physical, |line| line.strip_suffix(b"\r").unwrap_or(line));
-        count += 1;
-        maximum = maximum.max(line.len());
-    }
-    PatchMetrics {
-        byte_length: bytes.len(),
-        line_count: count,
-        max_line_bytes: maximum,
-        etag: format!("\"{}\"", hex(&Sha256::digest(bytes))),
-    }
+fn ordinal(file: &str) -> Option<u32> {
+    let (raw, hash) = file.split_once('-')?;
+    let index = raw.parse().ok()?;
+    let canonical = hash.len() == 64
+        && hash
+            .bytes()
+            .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase());
+    (canonical && (1..=MAX_PATCH_FILES).contains(&index)).then_some(index)
 }
 
 fn safe_path(path: &str) -> bool {

@@ -6,6 +6,7 @@ import { QueueView } from "./views/QueueView";
 import "./workspace.css";
 
 type Address = { readonly reviewId: string; readonly runId?: string };
+type ReviewTab = "overview" | "changes";
 type Overview = { readonly review: ReviewOverview; readonly run: RunDetail | undefined };
 type QueueRequest = { readonly cursors: readonly string[] };
 type QueueResult = {
@@ -17,6 +18,7 @@ type QueueResult = {
 export function App() {
   const [queue, setQueue] = useState<QueueResult>();
   const [address, setAddress] = useState<Address | undefined>(readAddress);
+  const [tab, setTab] = useState<ReviewTab>(readTab);
   const [overview, setOverview] = useState<Overview>();
   const [error, setError] = useState<string>();
   const [refreshing, setRefreshing] = useState(false);
@@ -55,6 +57,7 @@ export function App() {
       setOverview(undefined);
       setSelectionError(undefined);
       setAddress(readAddress());
+      setTab(readTab());
     }
     window.addEventListener("popstate", restoreAddress);
     return () => window.removeEventListener("popstate", restoreAddress);
@@ -79,10 +82,22 @@ export function App() {
     else url.searchParams.delete("reviewId");
     if (next?.runId) url.searchParams.set("runId", next.runId);
     else url.searchParams.delete("runId");
+    if (next?.reviewId !== address?.reviewId) {
+      url.searchParams.delete("tab");
+      setTab("overview");
+    }
     window.history.pushState(window.history.state, "", url);
     setOverview(undefined);
     setSelectionError(undefined);
     setAddress(next);
+  }
+
+  function selectTab(next: ReviewTab) {
+    if (next === tab) return;
+    const url = new URL(window.location.href);
+    url.searchParams.set("tab", next);
+    window.history.pushState(window.history.state, "", url);
+    setTab(next);
   }
 
   return (
@@ -135,12 +150,20 @@ export function App() {
         <ReviewDrawer
           overview={overview.review}
           run={overview.run}
+          tab={tab}
+          onTab={selectTab}
           onRun={(runId) => select({ reviewId: address.reviewId, runId })}
           onClose={() => select(undefined)}
         />
       )}
     </main>
   );
+}
+
+function readTab(): ReviewTab {
+  return new URLSearchParams(window.location.search).get("tab") === "changes"
+    ? "changes"
+    : "overview";
 }
 
 function readAddress(): Address | undefined {

@@ -1,0 +1,99 @@
+.changes {
+  min-width: 0;
+  padding: 10px 18px 20px;
+}
+
+.changes-file-toolbar,
+.patch-toolbar,
+.range-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-block: 8px;
+}
+
+.changes-file-toolbar select {
+  max-width: min(390px, 65vw);
+}
+
+.patch-toolbar a {
+  color: #a5c8f6;
+  font-size: 0.88rem;
+}
+
+.range-toolbar {
+  color: #bbcada;
+  font-size: 0.85rem;
+}
+
+.changes-notice {
+  color: #ffc29d;
+}
+
+.patch-source {
+  height: min(58vh, 680px);
+  overflow: auto;
+  margin: 0;
+  padding: 6px;
+  color: #dce8f0;
+  background: #171b22;
+  border: 1px solid #404754;
+  border-radius: 5px;
+  line-height: 1.5;
+  tab-size: 4;
+}
+
+.patch-row::before {
+  display: inline-block;
+  min-width: 12ch;
+  padding-inline: 4px;
+  color: #92a5ba;
+  content: attr(data-old) " " attr(data-new);
+  user-select: none;
+}
+
+.patch-add {
+  background: #19382c;
+}
+
+.patch-delete {
+  background: #462a30;
+}
+
+.patch-hunk {
+  color: #9dbdf0;
+}
+
+.patch-thread-slot {
+  display: block;
+  white-space: normal;
+  font:
+    0.9rem system-ui,
+    sans-serif;
+}
+
+.patch-discussion {
+  width: min(100%, 620px);
+  margin-block: 4px;
+  padding: 6px;
+  border: 1px solid #434752;
+  border-radius: 4px;
+  color: #e4eaf5;
+  background: #232932;
+}
+
+.patch-discussion summary {
+  width: fit-content;
+  cursor: pointer;
+}
+
+.discussion-note {
+  margin: 8px;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.discussion-list h3 {
+  font-size: 1rem;
+}

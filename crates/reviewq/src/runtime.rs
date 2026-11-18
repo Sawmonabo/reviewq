@@ -106,11 +106,11 @@ pub(crate) async fn serve(profile: PathBuf, options: Serve) -> Result<(), Failur
             {
                 return Err("validation sources must be loopback".into());
             }
-            Some(GitLab::new(origin, None)?)
+            Some(GitLab::new(origin, None, profile.clone())?)
         }
         Some(origin) => {
             let token = std::env::var("REVIEWQ_GITLAB_TOKEN").ok();
-            Some(GitLab::new(origin, token.as_deref())?)
+            Some(GitLab::new(origin, token.as_deref(), profile.clone())?)
         }
         None => None,
     };

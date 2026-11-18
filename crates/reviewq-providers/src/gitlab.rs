@@ -5,6 +5,7 @@ use reviewq_app::sources::{ReviewResolution, ReviewSourceReader};
 use reviewq_app::workspace::ConfiguredProject;
 use reviewq_domain::identity::{GitLabOrigin, MrIdentity, ProjectId};
 use serde::Deserialize;
+use tokio::sync::Semaphore;
 use url::{Host, Url};
 
 use crate::http;
@@ -21,6 +22,8 @@ pub struct GitLab {
     identity: GitLabOrigin,
     http: Client,
     headers: header::HeaderMap,
+    patches: changes::Leases,
+    requests: Semaphore,
 }
 
 impl ReviewSourceReader for GitLab {
@@ -62,7 +65,7 @@ struct MergeRequest {
 
 impl GitLab {
     /// Allows HTTP only on numeric loopback without credentials.
-    pub fn new(origin: &str, token: Option<&str>) -> Result<Self, AppError> {
+    pub fn new(origin: &str, token: Option<&str>, profile: PathBuf) -> Result<Self, AppError> {
         let origin = Url::parse(origin).map_err(|_| AppError::InvalidRequest)?;
         let local = match origin.host() {
             Some(Host::Ipv4(ip)) => ip.is_loopback(),
@@ -93,6 +96,8 @@ impl GitLab {
             identity,
             http: http::client(local)?,
             headers,
+            patches: changes::Leases::new(profile),
+            requests: Semaphore::new(4),
         })
     }
 
@@ -209,6 +214,12 @@ impl GitLab {
     }
 
     async fn get(&self, url: Url, max: usize) -> Result<(header::HeaderMap, Vec<u8>), AppError> {
+        let _permit = self
+            .requests
+            .acquire()
+            .await
+            .map_err(|_| AppError::Unavailable)?;
         http::bounded_response(&self.http, url, self.headers.clone(), max).await
     }
 }
+use std::path::PathBuf;

@@ -24,11 +24,12 @@ const FILE_CURSOR: &[u8] = b"reviewq-changes-files-v1";
 const DISCUSSION_CURSOR: &[u8] = b"reviewq-changes-discussions-v1";
 
 #[derive(Default, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(super) struct ChangeQuery {
     revision: Option<String>,
     limit: Option<u16>,
     cursor: Option<String>,
+    preferred_file_id: Option<String>,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -48,11 +49,18 @@ pub(super) async fn files(
     let actor = entry.auth.browser_actor(&headers, false)?;
     let review_id = parse_review(&review)?;
     let source = read_source(&entry, &actor, &review_id).await?;
+    let selected = query.preferred_file_id.clone();
+    if selected
+        .as_deref()
+        .is_some_and(|id| id.is_empty() || id.len() > 80)
+    {
+        return Err(AppError::InvalidRequest.into());
+    }
     let (limit, page, revision) =
         query.position(&entry.auth.endpoint, FILE_CURSOR, &review_id, 10)?;
     let provider = entry.source.as_deref().ok_or(AppError::Unavailable)?;
     let response = provider
-        .files(source.value.clone(), revision, page, limit)
+        .files(source.value.clone(), revision, page, limit, selected)
         .await?;
     check_source(&entry, &actor, &review_id, &source.value).await?;
     let position = response.next_page.map(|page| Position {
@@ -87,6 +95,9 @@ pub(super) async fn discussions(
     Path(review): Path<String>,
     Query(query): Query<ChangeQuery>,
 ) -> Result<Json<dto::PatchDiscussionsResponse>, ApiError> {
+    if query.preferred_file_id.is_some() {
+        return Err(AppError::InvalidRequest.into());
+    }
     let actor = entry.auth.browser_actor(&headers, false)?;
     let review_id = parse_review(&review)?;
     let source = read_source(&entry, &actor, &review_id).await?;

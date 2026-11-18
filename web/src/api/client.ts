@@ -70,17 +70,22 @@ export async function refreshQueue(): Promise<void> {
   if (!response.ok) throw await apiError(response);
 }
 
-async function read<T>(
+export async function read<T>(
   path: string,
   accepts: (data: unknown) => data is T,
   signal: AbortSignal,
 ): Promise<T> {
-  await requireSession();
-  const response = await fetch(`/api/v1${path}`, { signal });
-  if (!response.ok) throw await apiError(response);
+  const response = await request(path, { signal });
   const payload: unknown = await response.json();
   if (!accepts(payload)) throw new Error("ReviewQ returned an invalid response.");
   return payload;
+}
+
+export async function request(path: string, options: RequestInit = {}): Promise<Response> {
+  await requireSession();
+  const response = await fetch(`/api/v1${path}`, options);
+  if (!response.ok) throw await apiError(response);
+  return response;
 }
 
 function requireSession(): Promise<string> {
@@ -128,7 +133,15 @@ async function bootstrapSession(): Promise<string> {
 
 async function apiError(response: Response): Promise<Error> {
   const payload: unknown = await response.json().catch(() => null);
-  return new Error(
-    isFailure(payload) ? payload.error.message : "ReviewQ could not complete the request.",
-  );
+  if (isFailure(payload)) return new ApiResponseError(payload.error.code, payload.error.message);
+  return new Error("ReviewQ could not complete the request.");
+}
+
+export class ApiResponseError extends Error {
+  constructor(
+    readonly code: string,
+    message: string,
+  ) {
+    super(message);
+  }
 }

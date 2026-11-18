@@ -1,11 +1,13 @@
 use std::ops::Range;
 use std::sync::Arc;
 
+use axum::body::{Body, Bytes};
 use axum::extract::State;
 use axum::http::{HeaderMap, HeaderName, HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use reviewq_app::access::AppError;
 use reviewq_app::changes::PatchAvailability;
+use reviewq_app::changes::PatchContent;
 use serde::Deserialize;
 
 use super::{
@@ -84,7 +86,7 @@ pub(in crate::entry) async fn patch(
     if etag_match(&headers, header::IF_NONE_MATCH, etag, true) {
         return Ok((StatusCode::NOT_MODIFIED, result).into_response());
     }
-    let length = patch.bytes.len();
+    let length = metrics.byte_length;
     if headers.contains_key(header::RANGE) {
         let range = headers
             .get(header::RANGE)
@@ -98,8 +100,17 @@ pub(in crate::entry) async fn patch(
                 header::CONTENT_RANGE,
                 &format!("bytes {}-{}/{length}", requested.start, requested.end - 1),
             )?;
-            let slice = axum::body::Bytes::from(patch.bytes).slice(requested);
-            return Ok((StatusCode::PARTIAL_CONTENT, result, slice).into_response());
+            put(
+                &mut result,
+                header::CONTENT_LENGTH,
+                &requested.len().to_string(),
+            )?;
+            return Ok((
+                StatusCode::PARTIAL_CONTENT,
+                result,
+                stream(patch.body, requested),
+            )
+                .into_response());
         }
         let mut error = ApiError(AppError::RangeNotSatisfiable).into_response();
         put(
@@ -109,7 +120,25 @@ pub(in crate::entry) async fn patch(
         )?;
         return Ok(error);
     }
-    Ok((result, patch.bytes).into_response())
+    put(&mut result, header::CONTENT_LENGTH, &length.to_string())?;
+    Ok((result, stream(patch.body, 0..length)).into_response())
+}
+
+fn stream(body: Arc<dyn PatchContent>, range: Range<usize>) -> Body {
+    Body::from_stream(futures_util::stream::try_unfold(
+        (body, range),
+        |(body, range)| async move {
+            if range.is_empty() {
+                return Ok::<_, AppError>(None);
+            }
+            let length = range.len().min(64 * 1024);
+            let bytes = body.read(range.start, length).await?;
+            Ok(Some((
+                Bytes::from(bytes),
+                (body, range.start + length..range.end),
+            )))
+        },
+    ))
 }
 
 fn etag_match(headers: &HeaderMap, name: HeaderName, etag: &str, weak: bool) -> bool {

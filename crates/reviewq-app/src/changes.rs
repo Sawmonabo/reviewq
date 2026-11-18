@@ -1,5 +1,7 @@
 //! Revision-bound source reads for a selected merge request.
 
+use std::sync::Arc;
+
 use reviewq_domain::identity::{GitSha, MrIdentity};
 
 use crate::access::AppFuture;
@@ -27,7 +29,7 @@ pub enum PatchAvailability {
     ProviderLimited,
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct PatchFile {
     pub id: String,
     pub old_path: String,
@@ -39,7 +41,7 @@ pub struct PatchFile {
     pub metrics: Option<PatchMetrics>,
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct PatchMetrics {
     pub byte_length: usize,
     pub line_count: usize,
@@ -47,11 +49,15 @@ pub struct PatchMetrics {
     pub etag: String,
 }
 
-#[derive(Debug)]
+#[derive(Clone)]
 pub struct PatchBytes {
     pub revision: PatchRevision,
     pub file: PatchFile,
-    pub bytes: Vec<u8>,
+    pub body: Arc<dyn PatchContent>,
+}
+
+pub trait PatchContent: Send + Sync {
+    fn read(&self, offset: usize, length: usize) -> AppFuture<'_, Vec<u8>>;
 }
 
 #[derive(Debug)]
@@ -86,6 +92,7 @@ pub trait ChangeSource: Send + Sync {
         revision: Option<String>,
         page: u32,
         limit: u16,
+        selected_file: Option<String>,
     ) -> AppFuture<'_, SourcePage<PatchFile>>;
 
     fn patch(
