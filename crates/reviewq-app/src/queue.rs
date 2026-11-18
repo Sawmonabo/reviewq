@@ -67,8 +67,15 @@ pub trait ReviewLookup: Send + Sync {
 pub const MAX_QUEUE_PAGE: u16 = 100;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct QueuePosition {
+pub struct PageContext {
     pub generation: Revision,
+    pub authority: [u8; 32],
+    pub limit: u16,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct QueuePosition {
+    pub context: PageContext,
     pub updated_at_ms: i64,
     pub review_id: ReviewId,
 }
@@ -90,13 +97,16 @@ pub struct QueuePage {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RunPosition {
+    pub context: PageContext,
+    pub review_id: ReviewId,
     pub started_at_ms: i64,
     pub run_id: RunId,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RunSummary {
-    pub position: RunPosition,
+    pub run_id: RunId,
+    pub started_at_ms: i64,
     pub lead_session_key: SessionKey,
     pub provider: HostProvider,
 }
@@ -117,10 +127,17 @@ pub struct SessionSummary {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SessionPosition {
+    pub context: PageContext,
+    pub run_id: RunId,
+    pub session_key: SessionKey,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RunDetail {
     pub lead: LeadTarget,
     pub sessions: Vec<SessionSummary>,
-    pub next_session: Option<SessionKey>,
+    pub next_session: Option<SessionPosition>,
 }
 
 pub trait QueueStore: Send + Sync {
@@ -150,7 +167,7 @@ pub trait QueueStore: Send + Sync {
         &self,
         actor: Actor,
         run_id: RunId,
-        after: Option<SessionKey>,
+        after: Option<SessionPosition>,
         limit: u16,
     ) -> AppFuture<'_, Snapshot<RunDetail>>;
 }

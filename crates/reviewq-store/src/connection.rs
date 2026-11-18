@@ -14,12 +14,14 @@ use crate::StoreError;
 
 mod database;
 mod profile;
+mod staging;
+mod wal;
 
 pub use database::StoreIdentity;
 
 const QUEUE_CAPACITY: usize = 64;
 
-type Job = Box<dyn FnOnce(&mut Connection) + Send>;
+type Job = Box<dyn FnOnce(&mut Connection, &profile::Profile) + Send>;
 
 struct Worker {
     sender: Option<mpsc::Sender<Job>>,
@@ -80,8 +82,8 @@ impl SqliteStore {
 
     /// Creates a verified recovery copy at a new private destination.
     pub async fn backup(&self, path: AbsolutePath) -> Result<StoreIdentity, StoreError> {
-        self.submit(false, move |connection| {
-            database::backup_database(connection, &path)
+        self.submit(false, move |connection, source_profile| {
+            database::backup_database(connection, source_profile, &path)
         })
         .await
     }
@@ -120,7 +122,7 @@ impl SqliteStore {
         T: Send + 'static,
         F: FnOnce(&Transaction<'_>) -> Result<T, StoreError> + Send + 'static,
     {
-        self.submit(false, move |connection| {
+        self.submit(false, move |connection, _| {
             let tx = connection.transaction_with_behavior(TransactionBehavior::Deferred)?;
             let value = f(&tx)?;
             tx.commit()?;
@@ -135,7 +137,7 @@ impl SqliteStore {
         F: FnOnce(&mut WriteTx<'_>) -> Result<T, StoreError> + Send + 'static,
     {
         let wakeup = self.wakeup.clone();
-        self.submit(true, move |connection| {
+        self.submit(true, move |connection, _| {
             let sql = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
             let mut tx = WriteTx { sql, wakeup: None };
             let result = f(&mut tx)?;
@@ -151,7 +153,7 @@ impl SqliteStore {
     async fn submit<T, F>(&self, write: bool, f: F) -> Result<T, StoreError>
     where
         T: Send + 'static,
-        F: FnOnce(&mut Connection) -> Result<T, StoreError> + Send + 'static,
+        F: FnOnce(&mut Connection, &profile::Profile) -> Result<T, StoreError> + Send + 'static,
     {
         let (response, receiver) = oneshot::channel();
         {
@@ -163,8 +165,8 @@ impl SqliteStore {
             };
             let sender = worker.sender.as_ref().ok_or(AppError::Unavailable)?;
             sender
-                .try_send(Box::new(move |connection| {
-                    let _ = response.send(f(connection));
+                .try_send(Box::new(move |connection, profile| {
+                    let _ = response.send(f(connection, profile));
                 }))
                 .map_err(|error| match error {
                     mpsc::error::TrySendError::Full(_) => AppError::Busy,
@@ -189,7 +191,7 @@ impl Worker {
         };
         let join = thread::Builder::new().name(name.into()).spawn(move || {
             while let Some(job) = receiver.blocking_recv() {
-                job(&mut connection);
+                job(&mut connection, &profile);
             }
             if writer {
                 let _ = connection.execute_batch("PRAGMA wal_checkpoint(PASSIVE)");

@@ -60,6 +60,16 @@ impl Profile {
         self.path.parent().expect("validated profile parent")
     }
 
+    pub(super) fn directory_metadata(&self) -> Result<Metadata, StoreError> {
+        Ok(self.directory.metadata()?)
+    }
+
+    pub(super) fn shares_directory(&self, other: &Self) -> Result<bool, StoreError> {
+        let this = self.directory_metadata()?;
+        let that = other.directory_metadata()?;
+        Ok((this.dev(), this.ino()) == (that.dev(), that.ino()))
+    }
+
     pub(super) fn file(&self, suffix: &str) -> Result<Option<File>, StoreError> {
         let mut name = self.name.clone();
         name.push(suffix);

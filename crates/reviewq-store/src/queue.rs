@@ -7,12 +7,12 @@ use std::str::FromStr;
 use reviewq_app::access::{Actor, AppError, AppFuture};
 use reviewq_app::events::{ResourceKey, Snapshot};
 use reviewq_app::queue::{
-    MAX_QUEUE_PAGE, MergeRequestState, QueueItem, QueuePage, QueuePosition, QueueStore,
-    ReviewLookup, ReviewOverview, ReviewSource, RunDetail, RunPosition, RunSummary, SelectedLead,
-    SessionSummary,
+    MAX_QUEUE_PAGE, MergeRequestState, PageContext, QueueItem, QueuePage, QueuePosition,
+    QueueStore, ReviewLookup, ReviewOverview, ReviewSource, RunDetail, RunPosition, RunSummary,
+    SelectedLead, SessionPosition, SessionSummary,
 };
 use reviewq_domain::identity::{
-    GitLabOrigin, MergeRequestIid, MrIdentity, ProjectId, ReviewId, RunId, SessionKey,
+    GitLabOrigin, MergeRequestIid, MrIdentity, ProjectId, ReviewId, RunId,
 };
 use reviewq_domain::session::{
     AbsolutePath, HostProvider, LeadTarget, NativeBinding, NativeIdentity, SessionTarget,
@@ -22,7 +22,8 @@ use uuid::Uuid;
 
 use crate::events::snapshot;
 use crate::workspace::{
-    ReadScope, advance_queue, allow_review, operator, queue_revision, scope, settings_revision,
+    ReadScope, actor_key, advance_queue, allow_review, operator, queue_revision, scope,
+    settings_revision,
 };
 use crate::{SqliteStore, StoreError};
 
@@ -102,7 +103,7 @@ impl QueueStore for SqliteStore {
         &self,
         actor: Actor,
         run_id: RunId,
-        after: Option<SessionKey>,
+        after: Option<SessionPosition>,
         limit: u16,
     ) -> AppFuture<'_, Snapshot<RunDetail>> {
         Box::pin(async move {
@@ -155,6 +156,23 @@ fn check_limit(limit: u16) -> Result<(), AppError> {
     Ok(())
 }
 
+fn page_context(
+    connection: &Connection,
+    actor: &Actor,
+    limit: u16,
+    previous: Option<&PageContext>,
+) -> Result<PageContext, StoreError> {
+    let context = PageContext {
+        generation: queue_revision(connection)?,
+        authority: actor_key(actor),
+        limit,
+    };
+    if previous.is_some_and(|previous| previous != &context) {
+        return Err(AppError::CursorExpired.into());
+    }
+    Ok(context)
+}
+
 fn queue(
     connection: &Connection,
     actor: Actor,
@@ -162,13 +180,12 @@ fn queue(
     limit: u16,
 ) -> Result<QueuePage, StoreError> {
     let access = scope(connection, &actor)?;
-    let generation = queue_revision(connection)?;
-    if after
-        .as_ref()
-        .is_some_and(|position| position.generation != generation)
-    {
-        return Err(AppError::CursorExpired.into());
-    }
+    let context = page_context(
+        connection,
+        &actor,
+        limit,
+        after.as_ref().map(|row| &row.context),
+    )?;
     let (scope_code, scope_id) = match &access {
         ReadScope::Local => (0, None),
         ReadScope::Grant => (1, None),
@@ -194,7 +211,7 @@ fn queue(
     let next = if items.len() > usize::from(limit) {
         items.pop();
         items.last().map(|item| QueuePosition {
-            generation,
+            context,
             updated_at_ms: item.source.updated_at_ms,
             review_id: item.review_id.clone(),
         })
@@ -219,6 +236,15 @@ fn overview(
     let access = scope(connection, &actor)?;
     let identity = identity_for_review(connection, &review_id)?;
     allow_review(connection, access, &review_id, &identity)?;
+    let context = page_context(
+        connection,
+        &actor,
+        limit,
+        after.as_ref().map(|row| &row.context),
+    )?;
+    if after.as_ref().is_some_and(|row| row.review_id != review_id) {
+        return Err(AppError::CursorExpired.into());
+    }
     let mut statement = connection.prepare_cached(&format!(
         "SELECT {ITEM_COLUMNS} FROM reviews AS r WHERE r.review_id=?1"
     ))?;
@@ -238,17 +264,20 @@ fn overview(
     let mut runs = Vec::new();
     while let Some(row) = rows.next()? {
         runs.push(RunSummary {
-            position: RunPosition {
-                started_at_ms: row.get(1)?,
-                run_id: parse(text(row, 0)?)?,
-            },
+            started_at_ms: row.get(1)?,
+            run_id: parse(text(row, 0)?)?,
             lead_session_key: parse(text(row, 2)?)?,
             provider: provider(text(row, 3)?)?,
         });
     }
     let next_run = if runs.len() > usize::from(limit) {
         runs.pop();
-        runs.last().map(|run| run.position.clone())
+        runs.last().map(|run| RunPosition {
+            context,
+            review_id,
+            started_at_ms: run.started_at_ms,
+            run_id: run.run_id.clone(),
+        })
     } else {
         None
     };
@@ -264,20 +293,29 @@ fn run_detail(
     connection: &Connection,
     actor: Actor,
     run_id: RunId,
-    after: Option<SessionKey>,
+    after: Option<SessionPosition>,
     limit: u16,
 ) -> Result<RunDetail, StoreError> {
     let access = scope(connection, &actor)?;
     let lead = lead_for_run(connection, &run_id)?.ok_or(AppError::NotFound)?;
     let source = identity_for_review(connection, lead.review_id())?;
     allow_review(connection, access, lead.review_id(), &source)?;
+    let context = page_context(
+        connection,
+        &actor,
+        limit,
+        after.as_ref().map(|row| &row.context),
+    )?;
+    if after.as_ref().is_some_and(|row| row.run_id != run_id) {
+        return Err(AppError::CursorExpired.into());
+    }
     let mut statement = connection.prepare_cached(
         "SELECT session_key, parent_session_key, provider FROM sessions
          WHERE run_id=?1 AND session_key>?2 ORDER BY session_key LIMIT ?3",
     )?;
     let mut rows = statement.query(params![
         run_id.as_str(),
-        after.as_ref().map_or("", SessionKey::as_str),
+        after.as_ref().map_or("", |row| row.session_key.as_str()),
         limit + 1
     ])?;
     let mut sessions = Vec::new();
@@ -294,7 +332,11 @@ fn run_detail(
     }
     let next_session = if sessions.len() > usize::from(limit) {
         sessions.pop();
-        sessions.last().map(|session| session.session_key.clone())
+        sessions.last().map(|session| SessionPosition {
+            context,
+            run_id,
+            session_key: session.session_key.clone(),
+        })
     } else {
         None
     };

@@ -2,7 +2,7 @@
 
 use std::fmt::Write as _;
 use std::fs::File;
-use std::io::{self, Read};
+use std::io::{self, Read, Seek};
 use std::os::unix::{ffi::OsStrExt, fs::MetadataExt};
 use std::path::Path;
 use std::time::{Duration, Instant};
@@ -10,10 +10,11 @@ use std::time::{Duration, Instant};
 use reviewq_app::access::AppError;
 use reviewq_domain::session::AbsolutePath;
 use rusqlite::{Connection, OpenFlags, OptionalExtension, TransactionBehavior, backup};
-use tempfile::{Builder, NamedTempFile};
 use uuid::Uuid;
 
 use super::profile::Profile;
+use super::staging::{self, Stage};
+use super::wal;
 use crate::StoreError;
 
 const SCHEMA: &str = include_str!("../schema.sql");
@@ -40,7 +41,11 @@ pub(super) fn open_profile(
     let profile = Profile::resolve(path)?;
     profile.try_lock()?;
     let identity = match profile.file("")? {
-        Some(database) => inspect_existing(&profile, database)?,
+        Some(database) => {
+            let identity = inspect_existing(&profile, database)?;
+            staging::reclaim(&profile)?;
+            identity
+        }
         None => initialize(&profile)?,
     };
 
@@ -96,8 +101,10 @@ fn initialize(profile: &Profile) -> Result<StoreIdentity, StoreError> {
             ));
         }
     }
-    let temporary = new_staged_file(profile.parent())?;
-    let mut connection = Connection::open_with_flags(temporary.path(), WRITE_FLAGS)?;
+    staging::reclaim(profile)?;
+    let stage = Stage::new(profile)?;
+    let staged_file = staging::create_private(&stage.database)?;
+    let mut connection = Connection::open_with_flags(&stage.database, WRITE_FLAGS)?;
     configure(&connection, false)?;
     connection.pragma_update(None, "synchronous", "FULL")?;
     let identity = StoreIdentity {
@@ -115,14 +122,14 @@ fn initialize(profile: &Profile) -> Result<StoreIdentity, StoreError> {
     )?;
     tx.commit()?;
     drop(connection);
-    temporary.as_file().sync_all()?;
-    profile.publish(temporary.path())?;
+    staged_file.sync_all()?;
+    profile.publish(&stage.database)?;
     Ok(identity)
 }
 
 fn inspect_existing(profile: &Profile, mut database: File) -> Result<StoreIdentity, StoreError> {
     let original = profile.path();
-    let wal = profile.file("-wal")?;
+    let mut wal = profile.file("-wal")?;
     let shm = profile.file("-shm")?;
     let journal = profile.file("-journal")?;
     let wal_is_retained = wal
@@ -162,28 +169,35 @@ fn inspect_existing(profile: &Profile, mut database: File) -> Result<StoreIdenti
         ));
     }
 
-    let result = if wal_is_retained {
-        // An immutable SQLite handle skips committed WAL frames. A normal mode=ro
-        // handle can create or modify the WAL index. Let SQLite recover the copy.
-        let staging = Builder::new()
-            .prefix(".reviewq-probe-")
-            .tempdir_in(profile.parent())?;
-        let staged_db = staging.path().join("profile.sqlite3");
-        let staged_wal = staging.path().join("profile.sqlite3-wal");
-        use std::io::Seek as _;
-        database.rewind()?;
-        copy_stable(database, &staged_db)?;
-        copy_stable(wal.expect("retained WAL"), &staged_wal)?;
-        let connection = Connection::open_with_flags(staged_db, READ_FLAGS)?;
-        verify(&connection, original)
-    } else {
-        let connection = Connection::open_with_flags(
+    let inspect = || -> Result<StoreIdentity, StoreError> {
+        let base = Connection::open_with_flags(
             immutable_uri(original),
             READ_FLAGS | OpenFlags::SQLITE_OPEN_URI,
         )?;
-        verify(&connection, original)
+        if !wal_is_retained {
+            return verify(&base, original);
+        }
+        let mut retained = wal.take().expect("retained WAL");
+        wal::verify_header(&mut retained, &header, original)?;
+        configure(&base, true)?;
+        let base_id = read_store_id(&base, original)?;
+        // An immutable SQLite handle skips committed WAL frames. A normal mode=ro
+        // handle can create or modify the WAL index. Let SQLite recover the copy.
+        let stage = Stage::new(profile)?;
+        database.rewind()?;
+        copy_stable(database, &stage.database)?;
+        copy_stable(retained, &stage.wal())?;
+        let connection = Connection::open_with_flags(&stage.database, READ_FLAGS)?;
+        let recovered = verify(&connection, original)?;
+        if recovered.store_id != base_id {
+            return Err(StoreError::path(
+                original,
+                "SQLite WAL belongs to a different store identity",
+            ));
+        }
+        Ok(recovered)
     };
-    match result {
+    match inspect() {
         Err(error) if error.is_sqlite() => {
             Err(StoreError::path(original, "SQLite verification failed"))
         }
@@ -205,12 +219,7 @@ fn immutable_uri(path: &Path) -> String {
 }
 
 fn copy_stable(mut source: File, destination: &Path) -> Result<(), StoreError> {
-    use std::os::unix::fs::OpenOptionsExt as _;
-    let mut output = File::options()
-        .write(true)
-        .create_new(true)
-        .mode(0o600)
-        .open(destination)?;
+    let mut output = staging::create_private(destination)?;
     let before = source.metadata()?;
     let copied = io::copy(&mut source, &mut output)?;
     let after = source.metadata()?;
@@ -267,29 +276,31 @@ fn verify(connection: &Connection, path: &Path) -> Result<StoreIdentity, StoreEr
             "SQLite integrity or foreign-key verification failed",
         ));
     }
+    Ok(StoreIdentity {
+        application_id,
+        format,
+        store_id: read_store_id(connection, path)?,
+    })
+}
+
+fn read_store_id(connection: &Connection, path: &Path) -> Result<Uuid, StoreError> {
     let id = connection.query_row(
         "SELECT store_id FROM service_state WHERE singleton = 1",
         [],
         |row| row.get::<_, String>(0),
     )?;
-    let store_id =
-        Uuid::parse_str(&id).map_err(|_| StoreError::path(path, "invalid store identity"))?;
-    Ok(StoreIdentity {
-        application_id,
-        format,
-        store_id,
-    })
-}
-
-fn new_staged_file(parent: &Path) -> Result<NamedTempFile, StoreError> {
-    Ok(Builder::new().prefix(".reviewq-db-").tempfile_in(parent)?)
+    Uuid::parse_str(&id).map_err(|_| StoreError::path(path, "invalid store identity"))
 }
 
 pub(super) fn backup_database(
     source: &Connection,
+    source_profile: &Profile,
     destination: &AbsolutePath,
 ) -> Result<StoreIdentity, StoreError> {
     let profile = Profile::resolve(destination)?;
+    if !profile.shares_directory(source_profile)? {
+        profile.try_lock()?;
+    }
     for suffix in ["", "-wal", "-shm", "-journal"] {
         if profile.file(suffix)?.is_some() {
             return Err(StoreError::path(
@@ -298,8 +309,10 @@ pub(super) fn backup_database(
             ));
         }
     }
-    let temporary = new_staged_file(profile.parent())?;
-    let mut target = Connection::open_with_flags(temporary.path(), WRITE_FLAGS)?;
+    staging::reclaim(&profile)?;
+    let stage = Stage::new(&profile)?;
+    let staged_file = staging::create_private(&stage.database)?;
+    let mut target = Connection::open_with_flags(&stage.database, WRITE_FLAGS)?;
     configure(&target, false)?;
     target.pragma_update(None, "synchronous", "FULL")?;
     {
@@ -319,7 +332,7 @@ pub(super) fn backup_database(
     target.pragma_update(None, "journal_mode", "DELETE")?;
     let identity = verify(&target, profile.path())?;
     drop(target);
-    temporary.as_file().sync_all()?;
-    profile.publish(temporary.path())?;
+    staged_file.sync_all()?;
+    profile.publish(&stage.database)?;
     Ok(identity)
 }
