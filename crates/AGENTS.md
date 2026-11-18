@@ -1,5 +1,6 @@
 # Rust rules
 
+- Follow the [Rust conventions](../docs/rust-conventions.md) for file organization, types and visibility.
 - Put business rules in `reviewq-domain`, wire types in `reviewq-protocol`, and shared use cases in `reviewq-app`.
 - Put SQLite access in `reviewq-store`, external integrations in `reviewq-providers`, and HTTP and MCP adapters in `reviewq-transport`. Wire adapters in the `reviewq` binary.
 - Run network and provider calls outside SQLite write transactions.

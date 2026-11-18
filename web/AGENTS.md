@@ -1,5 +1,6 @@
 # Web rules
 
+- Follow the [React and TypeScript conventions](../docs/react-typescript-conventions.md) for module ownership, names, types and rendering.
 - Keep layout, styling, and interaction behavior consistent. When changing one to fix a bug or usability issue, identify the problem the change solves.
 - Put navigation views in `src/app/views/`, API access in `src/api/`, and feature-specific code beside its consumer. Use `src/components/`, `src/hooks/`, and `src/lib/` for components, hooks, and plain functions shared across features. Follow the [import rules](dependency-cruiser.mjs).
 - Match component and view filenames to their PascalCase exports, such as `ReviewDrawer.tsx`. Match custom hook filenames to their camelCase exports, such as `useHistory.ts`. Use kebab-case for plain modules, such as `submit-key.ts`.
