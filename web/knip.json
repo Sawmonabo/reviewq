@@ -1,0 +1,7 @@
+{
+  "entry": ["src/main.tsx!"],
+  "project": ["src/**/*.{ts,tsx}!"],
+  "ignoreIssues": {
+    "src/api/generated/**": ["exports", "types"]
+  }
+}

@@ -1,0 +1,13 @@
+[profile.default]
+test-threads = 2
+
+[profile.low-memory]
+test-threads = 1
+
+[test-groups.service-process]
+max-threads = 1
+
+[[profile.default.overrides]]
+filter = 'test(/^workflow::/)'
+test-group = 'service-process'
+threads-required = 2
