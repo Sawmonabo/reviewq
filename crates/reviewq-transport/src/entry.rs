@@ -21,6 +21,7 @@ use tokio::sync::{Mutex, watch};
 use tower_http::services::{ServeDir, ServeFile};
 
 mod auth;
+mod changes;
 mod control;
 mod error;
 mod hosts;
@@ -101,6 +102,12 @@ pub fn router(
         .route("/queue/refresh", post(refresh))
         .route("/reviews/resolve", get(pages::resolve))
         .route("/reviews/{review_id}", get(pages::overview))
+        .route("/reviews/{review_id}/changes/files", get(changes::files))
+        .route("/reviews/{review_id}/changes/patch", get(changes::patch))
+        .route(
+            "/reviews/{review_id}/changes/discussions",
+            get(changes::discussions),
+        )
         .route("/runs/{run_id}", get(pages::run))
         .route("/native/codex/link", post(hosts::link))
         .fallback(api_not_found)

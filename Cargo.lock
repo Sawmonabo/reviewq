@@ -1216,11 +1216,13 @@ version = "0.1.0"
 dependencies = [
  "futures-util",
  "jiff",
+ "percent-encoding",
  "reqwest",
  "reviewq-app",
  "reviewq-domain",
  "serde",
  "serde_json",
+ "sha2",
  "tokio",
  "tokio-tungstenite",
  "url",

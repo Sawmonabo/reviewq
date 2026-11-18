@@ -67,18 +67,18 @@ const schema27 = {
   type: "string",
 };
 const pattern4 = new RegExp("^[^\\ud800-\\udfff]*$", "u");
-const pattern6 = new RegExp("^([0-9A-Fa-f]{40}|[0-9A-Fa-f]{64})$", "u");
-const schema37 = {
+const pattern6 = new RegExp("^[A-Za-z0-9_-]{1,512}$", "u");
+const pattern7 = new RegExp("^([0-9A-Fa-f]{40}|[0-9A-Fa-f]{64})$", "u");
+const schema43 = {
   enum: ["complete", "incomplete", "binary", "provider_limited", "missing"],
   type: "string",
 };
-const pattern7 = new RegExp('^"[0-9a-f]{64}"$', "u");
-const pattern8 = new RegExp("^[A-Za-z0-9_-]{1,512}$", "u");
+const pattern8 = new RegExp('^"[0-9a-f]{64}"$', "u");
 const pattern9 = new RegExp(
   "^([1-9][0-9]{0,17}|[1-8][0-9]{18}|9[0-1][0-9]{17}|92[0-1][0-9]{16}|922[0-2][0-9]{15}|9223[0-2][0-9]{14}|92233[0-6][0-9]{13}|922337[0-1][0-9]{12}|92233720[0-2][0-9]{10}|922337203[0-5][0-9]{9}|9223372036[0-7][0-9]{8}|92233720368[0-4][0-9]{7}|922337203685[0-3][0-9]{6}|9223372036854[0-6][0-9]{5}|92233720368547[0-6][0-9]{4}|922337203685477[0-4][0-9]{3}|9223372036854775[0-7][0-9]{2}|922337203685477580[0-6][0-9]{0}|9223372036854775807)$",
   "u",
 );
-const schema47 = {
+const schema52 = {
   properties: {
     author: {
       anyOf: [{ $ref: "#/definitions/NamedUpstreamId" }, { type: "null" }],
@@ -127,16 +127,16 @@ const schema47 = {
   ],
   type: "object",
 };
-const schema48 = { enum: ["open", "closed", "merged"], type: "string" };
-const schema49 = {
+const schema53 = { enum: ["open", "closed", "merged"], type: "string" };
+const schema54 = {
   enum: ["needs_review", "waiting_author", "followup", "reviewed", "archive"],
   type: "string",
 };
-const schema50 = {
+const schema55 = {
   enum: ["needs_input", "working", "waiting", "archived"],
   type: "string",
 };
-const schema52 = {
+const schema57 = {
   properties: {
     assignee: { type: ["string", "null"] },
     key: { $ref: "#/definitions/CheckpointIdDto" },
@@ -147,11 +147,11 @@ const schema52 = {
   required: ["key", "title", "status", "priority", "assignee"],
   type: "object",
 };
-const schema54 = {
+const schema59 = {
   enum: ["setup", "connected", "disconnected"],
   type: "string",
 };
-const schema59 = { enum: ["codex", "claude"], type: "string" };
+const schema64 = { enum: ["codex", "claude"], type: "string" };
 export {
   func0,
   pattern0,
@@ -166,15 +166,15 @@ export {
   schema27,
   pattern4,
   pattern6,
-  schema37,
   pattern7,
+  schema43,
   pattern8,
   pattern9,
-  schema47,
-  schema48,
-  schema49,
-  schema50,
   schema52,
+  schema53,
   schema54,
+  schema55,
+  schema57,
   schema59,
+  schema64,
 };

@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 use std::error::Error;
 use std::io::{self, Write};
 
-use reviewq_protocol::changes::PatchFileIndexResponse;
+use reviewq_protocol::changes::{PatchDiscussionsResponse, PatchFileIndexResponse};
 use reviewq_protocol::events::{InvalidateEvent, ResetEvent};
 use reviewq_protocol::history::HistoryPageResponse;
 use reviewq_protocol::queue::{QueuePageResponse, ReviewOverviewResponse, ReviewSelectionResponse};
@@ -31,6 +31,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     registry.response::<ReviewSelectionResponse>("ReviewSelectionResponse")?;
     registry.response::<RunDetailResponse>("RunDetailResponse")?;
     registry.response::<PatchFileIndexResponse>("PatchFileIndexResponse")?;
+    registry.response::<PatchDiscussionsResponse>("PatchDiscussionsResponse")?;
     registry.response::<HistoryPageResponse>("HistoryPageResponse")?;
     registry.response::<DeliveryReceiptResponse>("DeliveryReceiptResponse")?;
     registry.response::<Failure>("Failure")?;

@@ -2,12 +2,13 @@ use std::sync::Arc;
 
 use axum::Json;
 use axum::extract::State;
-use axum::http::{HeaderMap, header};
+use axum::http::{HeaderMap, StatusCode, header};
+use axum::response::{IntoResponse, Response};
 use reviewq_app::access::AppError;
-use reviewq_app::hosts::link_codex;
+use reviewq_app::hosts::{NativeLink, link_codex};
 use reviewq_protocol::queue::{ReviewSelection, ReviewSelectionResponse};
-use reviewq_protocol::{EventCursorDto, ReviewIdDto, RunIdDto, SessionKeyDto, Success};
-use serde::Deserialize;
+use reviewq_protocol::{EventCursorDto, Failure, ReviewIdDto, RunIdDto, SessionKeyDto, Success};
+use serde::{Deserialize, Serialize};
 
 use super::error::ApiBytes;
 use super::{ApiError, Entry};
@@ -20,11 +21,18 @@ struct LinkCommand {
     target: String,
 }
 
+#[derive(Serialize)]
+struct AmbiguousTarget {
+    #[serde(flatten)]
+    failure: Failure,
+    candidates: Vec<String>,
+}
+
 pub(super) async fn link(
     State(entry): State<Arc<Entry>>,
     headers: HeaderMap,
     ApiBytes(bytes): ApiBytes,
-) -> Result<Json<ReviewSelectionResponse>, ApiError> {
+) -> Result<Response, ApiError> {
     entry.auth.endpoint.verify_bridge(&headers)?;
     if bytes.len() > 4_096
         || !headers
@@ -45,9 +53,23 @@ pub(super) async fn link(
         .thread_id
         .parse()
         .map_err(|_| AppError::InvalidRequest)?;
-    let registered = link_codex(entry.store.as_ref(), source, host, thread, command.target).await?;
+    let registered =
+        match link_codex(entry.store.as_ref(), source, host, thread, command.target).await? {
+            NativeLink::Linked(registered) => registered,
+            NativeLink::Ambiguous(candidates) => {
+                let (_, failure) = super::error::failure(AppError::Conflict);
+                return Ok((
+                    StatusCode::CONFLICT,
+                    Json(AmbiguousTarget {
+                        failure,
+                        candidates,
+                    }),
+                )
+                    .into_response());
+            }
+        };
     let target = registered.value;
-    Ok(Json(Success {
+    let response: ReviewSelectionResponse = Success {
         data: ReviewSelection::WithLead {
             review_id: ReviewIdDto::new(target.review_id().as_str()).ok_or(AppError::Internal)?,
             run_id: RunIdDto::new(target.run_id().as_str()).ok_or(AppError::Internal)?,
@@ -55,5 +77,6 @@ pub(super) async fn link(
                 .ok_or(AppError::Internal)?,
         },
         cursor: EventCursorDto::new(registered.cursor.get()).ok_or(AppError::Internal)?,
-    }))
+    };
+    Ok(Json(response).into_response())
 }

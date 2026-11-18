@@ -1,7 +1,7 @@
 use reqwest::{Client, header};
 use reviewq_app::access::{AppError, AppFuture};
 use reviewq_app::queue::{MergeRequestState, ReviewSource};
-use reviewq_app::sources::ReviewSourceReader;
+use reviewq_app::sources::{ReviewResolution, ReviewSourceReader};
 use reviewq_app::workspace::ConfiguredProject;
 use reviewq_domain::identity::{GitLabOrigin, MrIdentity, ProjectId};
 use serde::Deserialize;
@@ -9,6 +9,7 @@ use url::{Host, Url};
 
 use crate::http;
 
+mod changes;
 mod lookup;
 
 const METADATA_LIMIT: usize = 1024 * 1024;
@@ -36,7 +37,7 @@ impl ReviewSourceReader for GitLab {
         &self,
         projects: Vec<ConfiguredProject>,
         target: String,
-    ) -> AppFuture<'_, ReviewSource> {
+    ) -> AppFuture<'_, ReviewResolution> {
         Box::pin(self.resolve_target(projects, target))
     }
 }
@@ -56,6 +57,7 @@ struct MergeRequest {
     state: String,
     updated_at: String,
     source_branch: String,
+    diff_refs: Option<changes::DiffRefs>,
 }
 
 impl GitLab {
@@ -147,12 +149,20 @@ impl GitLab {
 
     async fn project(&self, project_id: ProjectId) -> Result<Project, AppError> {
         let url = self.url(&format!("api/v4/projects/{project_id}"))?;
-        let (_, bytes) = self.get(url, METADATA_LIMIT).await?;
-        let project: Project = serde_json::from_slice(&bytes).map_err(|_| AppError::Unavailable)?;
+        let project = self.project_metadata(url).await?;
         if project.id != project_id.get() {
             return Err(AppError::Conflict);
         }
-        if project.path_with_namespace.is_empty() || project.path_with_namespace.len() > 512 {
+        Ok(project)
+    }
+
+    async fn project_metadata(&self, url: Url) -> Result<Project, AppError> {
+        let (_, bytes) = self.get(url, METADATA_LIMIT).await?;
+        let project: Project = serde_json::from_slice(&bytes).map_err(|_| AppError::Unavailable)?;
+        if project.path_with_namespace.is_empty()
+            || project.path_with_namespace.len() > 512
+            || project.path_with_namespace.chars().any(char::is_control)
+        {
             return Err(AppError::Unavailable);
         }
         Ok(project)

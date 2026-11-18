@@ -8,6 +8,7 @@ import type {
   DeliveryReceiptResponse,
   Failure,
   HistoryPageResponse,
+  PatchDiscussionsResponse,
   PatchFileIndexResponse,
   QueuePageResponse,
   ReviewOverviewResponse,
@@ -28,6 +29,9 @@ export function isFailure(value: unknown): value is Failure;
 export function isHistoryPageResponse(
   value: unknown,
 ): value is HistoryPageResponse;
+export function isPatchDiscussionsResponse(
+  value: unknown,
+): value is PatchDiscussionsResponse;
 export function isPatchFileIndexResponse(
   value: unknown,
 ): value is PatchFileIndexResponse;

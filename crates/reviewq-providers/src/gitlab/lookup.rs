@@ -1,10 +1,16 @@
+use std::borrow::Cow;
+
+use percent_encoding::percent_decode_str;
 use reviewq_app::access::AppError;
-use reviewq_app::queue::ReviewSource;
+use reviewq_app::queue::{MergeRequestState, ReviewSource};
+use reviewq_app::sources::ReviewResolution;
 use reviewq_app::workspace::ConfiguredProject;
 use reviewq_domain::identity::{MergeRequestIid, ProjectId};
 use url::Url;
 
 use super::{GitLab, MAX_PROVIDER_PAGES, METADATA_LIMIT, MergeRequest};
+
+const MAX_CANDIDATES: usize = 20;
 
 enum Target<'a> {
     Web(Url),
@@ -12,44 +18,47 @@ enum Target<'a> {
     Ticket(String),
 }
 
+#[derive(Default)]
+struct Matches {
+    open: Vec<ReviewSource>,
+    historical: Vec<ReviewSource>,
+}
+
 impl GitLab {
     pub(super) async fn resolve_target(
         &self,
         projects: Vec<ConfiguredProject>,
         target: String,
-    ) -> Result<ReviewSource, AppError> {
+    ) -> Result<ReviewResolution, AppError> {
         if target.len() > 2_048 || target.is_empty() || target.trim() != target {
             return Err(AppError::InvalidRequest);
         }
-        let target = Target::parse(&target)?;
-        let mut found = None;
-        for project in projects
+        let projects: Vec<_> = projects
             .into_iter()
             .filter(|project| project.origin == self.identity)
-        {
-            let metadata = self.project(project.project_id).await?;
-            match &target {
-                Target::Ticket(key) => {
-                    self.match_ticket(
-                        project.project_id,
-                        &metadata.path_with_namespace,
-                        key,
-                        &mut found,
-                    )
-                    .await?;
+            .map(|project| project.project_id)
+            .collect();
+        match Target::parse(&target)? {
+            Target::Ticket(key) => {
+                let mut found = Matches::default();
+                for project in projects {
+                    let metadata = self.project(project).await?;
+                    self.match_ticket(project, &metadata.path_with_namespace, &key, &mut found)
+                        .await?;
                 }
-                _ => {
-                    if let Some(iid) = self.direct_match(&target, &metadata.path_with_namespace)? {
-                        let row = self.merge_request(project.project_id, iid).await?;
-                        add(
-                            &mut found,
-                            self.review(project.project_id, &metadata.path_with_namespace, row)?,
-                        )?;
-                    }
-                }
+                found.resolve(self)
             }
+            Target::Web(url) => {
+                let (path, iid) = self.web_address(&url)?;
+                self.direct(projects, &path, iid)
+                    .await
+                    .map(ReviewResolution::Found)
+            }
+            Target::Project { path, iid } => self
+                .direct(projects, path, iid)
+                .await
+                .map(ReviewResolution::Found),
         }
-        found.ok_or(AppError::NotFound)
     }
 
     async fn match_ticket(
@@ -57,13 +66,13 @@ impl GitLab {
         project: ProjectId,
         path: &str,
         key: &str,
-        found: &mut Option<ReviewSource>,
+        found: &mut Matches,
     ) -> Result<(), AppError> {
         for page in 1..=MAX_PROVIDER_PAGES {
             let (rows, more) = self.merge_requests(project, page).await?;
             for row in rows {
                 if contains_key(&row.title, key) || contains_key(&row.source_branch, key) {
-                    add(found, self.review(project, path, row)?)?;
+                    found.add(self.review(project, path, row)?);
                 }
             }
             if !more {
@@ -71,6 +80,29 @@ impl GitLab {
             }
         }
         Err(AppError::PayloadTooLarge)
+    }
+
+    async fn direct(
+        &self,
+        projects: Vec<ProjectId>,
+        path: &str,
+        iid: MergeRequestIid,
+    ) -> Result<ReviewSource, AppError> {
+        if projects.is_empty() || !valid_path(path) {
+            return Err(AppError::NotFound);
+        }
+        let mut url = self.url("api/v4/projects/")?;
+        url.path_segments_mut()
+            .map_err(|_| AppError::Internal)?
+            .pop_if_empty()
+            .push(path);
+        let project = self.project_metadata(url).await?;
+        let id = ProjectId::try_from(project.id).map_err(|_| AppError::Unavailable)?;
+        if project.path_with_namespace != path || !projects.contains(&id) {
+            return Err(AppError::NotFound);
+        }
+        let row = self.merge_request(id, iid).await?;
+        self.review(id, &project.path_with_namespace, row)
     }
 
     pub(super) async fn merge_request(
@@ -88,37 +120,65 @@ impl GitLab {
         Ok(row)
     }
 
-    fn direct_match(
-        &self,
-        target: &Target<'_>,
-        path: &str,
-    ) -> Result<Option<MergeRequestIid>, AppError> {
-        match target {
-            Target::Project {
-                path: requested,
-                iid,
-            } => Ok((*requested == path).then_some(*iid)),
-            Target::Web(url) => {
-                if url.origin() != self.origin.origin() {
-                    return Err(AppError::NotFound);
-                }
-                let Some(iid) = url
-                    .path_segments()
-                    .and_then(Iterator::last)
-                    .and_then(|value| value.parse::<MergeRequestIid>().ok())
-                else {
-                    return Err(AppError::InvalidRequest);
-                };
-                let mut expected = self.origin.clone();
-                expected
-                    .path_segments_mut()
-                    .map_err(|_| AppError::Internal)?
-                    .extend(path.split('/'))
-                    .extend(["-", "merge_requests", &iid.to_string()]);
-                Ok((url.path() == expected.path()).then_some(iid))
-            }
-            Target::Ticket(_) => Err(AppError::Internal),
+    fn web_address<'a>(&self, url: &'a Url) -> Result<(Cow<'a, str>, MergeRequestIid), AppError> {
+        if url.origin() != self.origin.origin() {
+            return Err(AppError::NotFound);
         }
+        let (path, iid) = url
+            .path()
+            .strip_prefix('/')
+            .and_then(|raw| raw.rsplit_once("/-/merge_requests/"))
+            .ok_or(AppError::InvalidRequest)?;
+        let path = percent_decode_str(path)
+            .decode_utf8()
+            .map_err(|_| AppError::InvalidRequest)?;
+        Ok((path, iid.parse().map_err(|_| AppError::InvalidRequest)?))
+    }
+
+    fn review_url(&self, row: &ReviewSource) -> Result<String, AppError> {
+        let mut url = self.origin.clone();
+        url.path_segments_mut()
+            .map_err(|_| AppError::Internal)?
+            .extend(row.project_path.split('/'))
+            .extend(["-", "merge_requests", &row.identity.iid().to_string()]);
+        Ok(url.into())
+    }
+}
+
+impl Matches {
+    fn add(&mut self, candidate: ReviewSource) {
+        let group = if candidate.state == MergeRequestState::Open {
+            &mut self.open
+        } else {
+            &mut self.historical
+        };
+        if group.len() < MAX_CANDIDATES
+            && !group.iter().any(|row| row.identity == candidate.identity)
+        {
+            group.push(candidate);
+        }
+    }
+
+    fn resolve(self, gitlab: &GitLab) -> Result<ReviewResolution, AppError> {
+        let mut candidates = if self.open.is_empty() {
+            self.historical
+        } else {
+            self.open
+        };
+        if candidates.len() == 1 {
+            return candidates
+                .pop()
+                .map(ReviewResolution::Found)
+                .ok_or(AppError::NotFound);
+        }
+        if candidates.is_empty() {
+            return Err(AppError::NotFound);
+        }
+        let urls = candidates
+            .iter()
+            .map(|row| gitlab.review_url(row))
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(ReviewResolution::Ambiguous(urls))
     }
 }
 
@@ -134,7 +194,7 @@ impl<'a> Target<'a> {
             return Ok(Self::Web(url));
         }
         if let Some((project, iid)) = target.rsplit_once('!') {
-            if project.is_empty() {
+            if !valid_path(project) {
                 return Err(AppError::InvalidRequest);
             }
             return Ok(Self::Project {
@@ -156,28 +216,27 @@ impl<'a> Target<'a> {
     }
 }
 
-fn add(found: &mut Option<ReviewSource>, candidate: ReviewSource) -> Result<(), AppError> {
-    if found
-        .as_ref()
-        .is_some_and(|review| review.identity != candidate.identity)
-    {
-        return Err(AppError::Conflict);
-    }
-    *found = Some(candidate);
-    Ok(())
+fn valid_path(path: &str) -> bool {
+    path.len() <= 512
+        && path.contains('/')
+        && path.split('/').all(|part| {
+            !part.is_empty() && part != "." && part != ".." && !part.chars().any(char::is_control)
+        })
 }
 
 fn contains_key(value: &str, key: &str) -> bool {
-    let upper = value.to_ascii_uppercase();
-    upper.match_indices(key).any(|(offset, _)| {
-        let end = offset + key.len();
-        !value[..offset]
-            .chars()
-            .next_back()
-            .is_some_and(char::is_alphanumeric)
-            && !value[end..]
+    value
+        .to_ascii_uppercase()
+        .match_indices(key)
+        .any(|(offset, _)| {
+            let end = offset + key.len();
+            !value[..offset]
                 .chars()
-                .next()
+                .next_back()
                 .is_some_and(char::is_alphanumeric)
-    })
+                && !value[end..]
+                    .chars()
+                    .next()
+                    .is_some_and(char::is_alphanumeric)
+        })
 }

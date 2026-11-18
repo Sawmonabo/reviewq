@@ -11,7 +11,7 @@ use reviewq_domain::session::{
 use crate::access::{Actor, AppError, AppFuture};
 use crate::events::Snapshot;
 use crate::queue::ReviewSource;
-use crate::sources::ReviewSourceReader;
+use crate::sources::{ReviewResolution, ReviewSourceReader};
 use crate::workspace::WorkspaceStore;
 
 const MAX_MESSAGE_CHARACTERS: usize = 12_000;
@@ -24,6 +24,11 @@ pub trait NativeHost: Send + Sync {
     fn prove(&self, native_id: NativeSessionId) -> AppFuture<'_, NativeBinding>;
 }
 
+pub enum NativeLink {
+    Linked(Snapshot<LeadTarget>),
+    Ambiguous(Vec<String>),
+}
+
 /// Registers a verified Codex conversation in the current configured review scope.
 pub async fn link_codex(
     store: &(impl WorkspaceStore + LeadStore + ?Sized),
@@ -31,7 +36,7 @@ pub async fn link_codex(
     host: &dyn NativeHost,
     native_id: NativeSessionId,
     target: String,
-) -> Result<Snapshot<LeadTarget>, AppError> {
+) -> Result<NativeLink, AppError> {
     let binding = host.prove(native_id).await?;
     let identity = binding.identity();
     if identity.provider() != HostProvider::Codex {
@@ -41,7 +46,10 @@ pub async fn link_codex(
         .workspace_context(Actor::local_operator())
         .await?
         .value;
-    let review = source.resolve(workspace.projects, target).await?;
+    let review = match source.resolve(workspace.projects, target).await? {
+        ReviewResolution::Found(review) => review,
+        ReviewResolution::Ambiguous(urls) => return Ok(NativeLink::Ambiguous(urls)),
+    };
     // Codex's global thread UUID remains stable across repeated binds.
     let session_key = identity
         .native_id()
@@ -61,6 +69,7 @@ pub async fn link_codex(
             },
         )
         .await
+        .map(NativeLink::Linked)
 }
 
 /// The provider-verified review and lead to register in one transaction.

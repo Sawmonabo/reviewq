@@ -39,6 +39,11 @@ struct Linked {
     lead_session_key: String,
 }
 
+#[derive(Deserialize)]
+struct AmbiguousTarget {
+    candidates: Vec<String>,
+}
+
 pub(crate) async fn link(profile: &Path, target: String) -> Result<(), Failure> {
     let native: NativeSessionId = std::env::var("CODEX_THREAD_ID")
         .ok()
@@ -62,11 +67,20 @@ pub(crate) async fn link(profile: &Path, target: String) -> Result<(), Failure> 
         .send()
         .await?;
     let status = response.status();
-    let bytes = bounded(response, 8192).await?;
+    let bytes = bounded(response, 16 * 1024).await?;
     if !status.is_success() {
         let message = match status.as_u16() {
             404 => "The native conversation or requested review could not be verified.",
-            409 => "The review target is ambiguous or this conversation is already linked.",
+            409 => {
+                if let Ok(ambiguity) = serde_json::from_slice::<AmbiguousTarget>(&bytes) {
+                    return Err(format!(
+                        "Choose one of these reviews and link its URL.\n{}",
+                        ambiguity.candidates.join("\n")
+                    )
+                    .into());
+                }
+                "This conversation is already linked to a different review."
+            }
             _ => "The service could not link the current Codex conversation.",
         };
         return Err(message.into());

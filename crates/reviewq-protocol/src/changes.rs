@@ -5,7 +5,7 @@ use serde::Serialize;
 use crate::scalar::{
     FileIdDto, GitShaDto, PatchETagDto, PatchRevisionDto, ReviewIdDto, SafeCountDto,
 };
-use crate::{Page, Success};
+use crate::{Page, Success, UtcTimestampDto};
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -51,4 +51,47 @@ pub enum PatchAvailability {
     Binary,
     ProviderLimited,
     Missing,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct PatchDiscussions {
+    pub review_id: ReviewIdDto,
+    pub revision: PatchRevisionDto,
+    #[serde(flatten)]
+    pub page: Page<PatchDiscussion>,
+}
+
+pub type PatchDiscussionsResponse = Success<PatchDiscussions>;
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct PatchDiscussion {
+    pub discussion_id: String,
+    pub anchor: Option<PatchDiscussionAnchor>,
+    pub outdated: bool,
+    pub notes: Vec<PatchDiscussionNote>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct PatchDiscussionAnchor {
+    pub old_path: String,
+    pub new_path: String,
+    pub old_line: Option<SafeCountDto>,
+    pub new_line: Option<SafeCountDto>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct PatchDiscussionNote {
+    pub note_id: String,
+    pub author: String,
+    pub body: String,
+    pub created_at: Option<UtcTimestampDto>,
+    pub resolved: bool,
 }

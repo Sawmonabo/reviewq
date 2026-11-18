@@ -1,11 +1,12 @@
 use reviewq_domain::identity::{EventCursor, Revision};
 
 use crate::access::{Actor, AppError, AppFuture};
+use crate::changes::ChangeSource;
 use crate::queue::ReviewSource;
 use crate::workspace::{ConfiguredProject, WorkspaceStore};
 
 /// Reads verified provider metadata outside the store transaction.
-pub trait ReviewSourceReader: Send + Sync {
+pub trait ReviewSourceReader: ChangeSource {
     fn reviews(&self, project: ConfiguredProject) -> AppFuture<'_, Vec<ReviewSource>>;
 
     /// Resolves a user-supplied URL, project/IID or unique ticket in configured projects.
@@ -13,7 +14,12 @@ pub trait ReviewSourceReader: Send + Sync {
         &self,
         projects: Vec<ConfiguredProject>,
         target: String,
-    ) -> AppFuture<'_, ReviewSource>;
+    ) -> AppFuture<'_, ReviewResolution>;
+}
+
+pub enum ReviewResolution {
+    Found(ReviewSource),
+    Ambiguous(Vec<String>),
 }
 
 /// Total compact records accepted in one atomic source publication.
