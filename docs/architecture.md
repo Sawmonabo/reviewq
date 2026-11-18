@@ -22,7 +22,7 @@ When the user sends feedback, the client freezes the displayed run, session and 
 | Domain | Validated identifiers and pure rules for review classification, action, report and follow-up transitions. Standard library only. | Application and adapters |
 | Protocol | Owned versioned DTOs, discriminants, error envelopes and schema generation. No workspace dependencies. | Transport, CLI client and generated browser bindings |
 | Application | Use cases, operation-specific input/output and ports. Callers supply resolved authority and scope. | HTTP, CLI, MCP, background tasks |
-| Store | SQLite connections, embedded migrations, queries and complete transactions, including events and recoverable receipts. | Application ports implemented by the adapter |
+| Store | SQLite connections, the current schema, queries and complete transactions, including events and recoverable receipts. | Application ports implemented by the adapter |
 | Providers | GitLab/Jira reads, native Codex/Claude control, bounded history access and factual observations. | Application ports implemented by the adapters |
 | Transport | Axum routes, auth middleware, SSE, MCP request mapping and domain/protocol conversion. | The executable mounts the adapters |
 | Binary | Build the Tokio runtime, open the profile, instantiate concrete adapters, bind local listeners, install host integrations and handle CLI lifecycle. | One installed command |
@@ -41,7 +41,7 @@ The service bounds simultaneous upstream requests, pending DB work, subscriber r
 - **Workspace.** A complete scoped GitLab/Jira observation can publish a new queue generation. A failed or partial scan preserves the last good snapshot with its age and error. Registration, report history, decisions and alert receipts survive rediscovery. [Queue and Settings](specs/queue-and-settings.md)
 - **Workflow.** Committing a mutation writes its invalidations atomically. A small durable SSE journal lets a browser catch up. Missing retained events trigger authoritative reads for mounted views. Ephemeral native deltas use the separately selected session and native source generation. Reopening the shell restores the confirmed selection only after verifying its identities. [Wire contract](specs/data-contracts.md)
 - **Provider work.** A restart rechecks outstanding deliveries, handoffs, author-thread observations and interrupted sessions against the exact stored native binding. Recovery fences stale workers. An unavailable provider keeps its work visible with a reason. [Workflow transitions](specs/review-workflow.md)
-- **Installation.** A fresh install creates a private database. A user can explicitly transfer supported state into a separate fresh candidate. Package activation checks data and installed host assets before enabling writes. [Transfer](plans/06-release/transfer.md) · [Packaging](plans/06-release/packaging.md)
+- **Installation.** Create a fresh private database or reopen verified current-schema data. An unrecognized file stays untouched. Package activation checks the store and installed host assets before enabling writes. [Packaging](plans/06-release/packaging.md)
 
 ## Implementation order
 

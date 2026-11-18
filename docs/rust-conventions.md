@@ -18,7 +18,7 @@ Matching names makes it easy to find a package's source from a command like `car
 | `reviewq-store` | SQLite connection ownership, SQL, row conversion and atomic commits. | Commit the submission and its dispatch intent together. |
 | `reviewq-providers` | Native host, GitLab and Jira adapters, upstream DTOs, reads and effects. | Verify the target session and observe native delivery. |
 | `reviewq-transport` | HTTP, event and MCP endpoints, authentication, input limits and mapping between protocol and app types. | Browser and MCP invoke the same send use case. |
-| `reviewq` | CLI, composition, installation, transfer and process lifetime. | Construct adapters and pass them into app services at startup. |
+| `reviewq` | CLI, composition, installation and process lifetime. | Construct adapters and pass them into app services at startup. |
 
 Start in the file that owns the behavior. A single operation may need only a new function. Keep field mapping at the boundary where meanings differ. A SQL row, native JSON payload and public HTTP response can each change independently. For a shared rule or identity, use one canonical domain definition. Trace the binary route, adapter, use case and all callers before changing its semantics. The [crate checker](../tools/check-crate-deps.mjs) lists every allowed workspace edge.
 
