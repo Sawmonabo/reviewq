@@ -57,6 +57,7 @@ contracts-verify contracts-verify-browser:
 	@set -eu; \
 		scratch=$$(mktemp -d); trap 'find "$$scratch" -depth -delete' EXIT; \
 		cargo run --locked --quiet -p reviewq-protocol --example delivery-receipt > "$$scratch/receipt.ndjson"; \
+		cargo run --locked --quiet -p reviewq-protocol --example first-review-contracts -- "$$scratch/fixtures"; \
 		node web/tools/contracts/verify.mjs "$$scratch" $(if $(filter contracts-verify-browser,$@),--browser)
 
 crate-deps:

@@ -203,6 +203,7 @@ macro_rules! bounded_integer {
 
             fn from_str(value: &str) -> Result<Self, Self::Err> {
                 if value.is_empty()
+                    || value.len() > 19
                     || (value.len() > 1 && value.starts_with('0'))
                     || !value.bytes().all(|byte| byte.is_ascii_digit())
                 {

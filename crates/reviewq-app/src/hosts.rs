@@ -11,6 +11,9 @@ use crate::events::Snapshot;
 use crate::queue::ReviewSource;
 
 const MAX_MESSAGE_CHARACTERS: usize = 12_000;
+const MAX_SAFE_INTEGER: u64 = 9_007_199_254_740_991;
+/// Maximum size of a startup delivery scan page.
+pub const MAX_RECOVERY_LIMIT: u16 = 128;
 
 /// The provider-verified review and lead to register in one transaction.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -73,11 +76,34 @@ pub struct ReportRef {
     pub quote: Option<ReportQuote>,
 }
 
-/// The exact source quote and optional proven range in Unicode scalar values.
+/// Exact nonempty source text at a Unicode scalar range in the displayed report.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ReportQuote {
-    pub text: MessageBody,
-    pub offset: Option<u32>,
+    text: MessageBody,
+    offset: u64,
+}
+
+impl ReportQuote {
+    /// Bounds the addressed range without changing the supplied source bytes.
+    pub fn new(text: MessageBody, offset: u64) -> Result<Self, AppError> {
+        let length = text.as_str().chars().count() as u64;
+        if offset > MAX_SAFE_INTEGER - length {
+            return Err(AppError::InvalidRequest);
+        }
+        Ok(Self { text, offset })
+    }
+
+    pub fn text(&self) -> &MessageBody {
+        &self.text
+    }
+
+    pub fn offset(&self) -> u64 {
+        self.offset
+    }
+
+    pub fn length(&self) -> u64 {
+        self.text.as_str().chars().count() as u64
+    }
 }
 
 /// The durable state used by the send and lookup operations.
@@ -88,6 +114,28 @@ pub enum DeliveryState {
     Started,
     Rejected,
     Uncertain,
+}
+
+/// Distinguishes safe dispatch from states requiring native reconciliation.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum RecoverableDeliveryState {
+    Queued,
+    Dispatching,
+    Uncertain,
+}
+
+/// Stable ascending key of one outbox row, independent of state changes.
+#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
+pub struct DeliveryRecoveryCursor {
+    pub created_at_ms: i64,
+    pub delivery_id: DeliveryId,
+}
+
+/// One candidate discovered without loading its private message.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RecoverableDelivery {
+    pub cursor: DeliveryRecoveryCursor,
+    pub state: RecoverableDeliveryState,
 }
 
 /// The stored receipt. The internal delivery ID is never the client retry key.
@@ -159,6 +207,17 @@ pub trait LeadStore: Send + Sync {
         target: SessionTarget,
         submission_id: SubmissionId,
     ) -> AppFuture<'_, Snapshot<DeliveryReceipt>>;
+
+    /// Scans recoverable rows after an exclusive key in ascending creation/ID order.
+    ///
+    /// Accepts 1 through `MAX_RECOVERY_LIMIT`. Start at None on startup or a new
+    /// reconciliation pass. The last row's cursor continues the current pass.
+    /// State is a hint; dispatch must first confirm queued state and acquire a fence.
+    fn recoverable_deliveries(
+        &self,
+        after: Option<DeliveryRecoveryCursor>,
+        limit: u16,
+    ) -> AppFuture<'_, Vec<RecoverableDelivery>>;
 
     /// Claims the service delivery ID in the exact expected state.
     fn claim_delivery(

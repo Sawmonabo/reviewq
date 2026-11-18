@@ -1,8 +1,47 @@
-use serde::Serialize;
+use serde::{Deserialize, Deserializer, Serialize, de};
 
-use crate::{Success, UtcTimestampDto};
+use crate::scalar::{ReviewIdDto, RunIdDto, SessionKeyDto, SubmissionIdDto};
+use crate::{Page, Success, UtcTimestampDto};
 
-const MAX_ID_BYTES: usize = 512;
+const MAX_MESSAGE_CHARACTERS: usize = 12_000;
+
+/// The browser body for POST /runs/{runId}/sessions/{sessionKey}/messages.
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct SendMessageRequest {
+    pub submission_id: SubmissionIdDto,
+    pub text: MessageTextDto,
+}
+
+/// Exact message text bounded in Unicode scalar values.
+#[derive(Debug, Serialize)]
+#[serde(transparent)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct MessageTextDto(
+    #[cfg_attr(feature = "schema", schemars(schema_with = "message_text_schema"))] Box<str>,
+);
+
+impl MessageTextDto {
+    pub fn new(value: impl Into<Box<str>>) -> Option<Self> {
+        let value = value.into();
+        (!value.is_empty()
+            && value.chars().take(MAX_MESSAGE_CHARACTERS + 1).count() <= MAX_MESSAGE_CHARACTERS)
+            .then_some(Self(value))
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl<'de> Deserialize<'de> for MessageTextDto {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        Self::new(Box::<str>::deserialize(deserializer)?).ok_or_else(|| {
+            de::Error::custom("message must contain 1 to 12000 Unicode scalar values")
+        })
+    }
+}
 
 /// The addressed receipt for the message send and receipt lookup routes.
 #[derive(Debug, Serialize)]
@@ -32,47 +71,40 @@ pub enum DeliveryState {
     Uncertain,
 }
 
-macro_rules! delivery_id {
-    ($(#[$doc:meta])* $name:ident) => {
-        $(#[$doc])*
-        #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
-        #[serde(transparent)]
-        #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-        pub struct $name(
-            #[cfg_attr(feature = "schema", schemars(schema_with = "id_schema"))] Box<str>,
-        );
-
-        impl $name {
-            /// Accepts a nonempty identifier up to 512 UTF-8 bytes with no controls.
-            pub fn new(value: impl Into<Box<str>>) -> Option<Self> {
-                let value = value.into();
-                let valid = !value.is_empty()
-                    && value.len() <= MAX_ID_BYTES
-                    && !value.chars().any(char::is_control);
-                valid.then_some(Self(value))
-            }
-        }
-    };
+/// Confirmed run detail, with the exact lead and bounded safe session summaries.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct RunDetail {
+    pub review_id: ReviewIdDto,
+    pub run_id: RunIdDto,
+    pub lead_session_key: SessionKeyDto,
+    pub sessions: Page<SessionSummary>,
 }
 
-delivery_id!(
-    /// The client-supplied submission identifier scoped to the operation.
-    SubmissionIdDto
-);
-delivery_id!(
-    /// The registered run identifier.
-    RunIdDto
-);
-delivery_id!(
-    /// The exact native session key registered for a run.
-    SessionKeyDto
-);
+pub type RunDetailResponse = Success<RunDetail>;
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct SessionSummary {
+    pub session_key: SessionKeyDto,
+    pub parent_session_key: Option<SessionKeyDto>,
+    pub provider: HostProviderDto,
+}
+
+#[derive(Clone, Copy, Debug, Serialize)]
+#[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub enum HostProviderDto {
+    Codex,
+    Claude,
+}
 
 #[cfg(feature = "schema")]
-fn id_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
+fn message_text_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
     schemars::json_schema!({
         "type": "string",
-        "pattern": r"^[^\u0000-\u001f\u007f-\u009f\ud800-\udfff]+$",
-        "maxUtf8Bytes": MAX_ID_BYTES,
+        "pattern": format!(r"^[^\ud800-\udfff]{{1,{MAX_MESSAGE_CHARACTERS}}}$"),
     })
 }

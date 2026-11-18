@@ -1,8 +1,9 @@
+import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { build } from "vite";
-import { verifyReceipt } from "./cases.mjs";
+import { verifyFirstReview, verifyReceipt } from "./cases.mjs";
 
 const [scratch, mode] = process.argv.slice(2);
 const decoderPath = join(scratch, "receipt-decoder.mjs");
@@ -12,7 +13,16 @@ const additiveUrl = new URL(
   import.meta.url,
 );
 const [success, failure] = (await readFile(join(scratch, "receipt.ndjson"), "utf8")).split("\n");
-const fixture = { success, failure, additive: await readFile(additiveUrl, "utf8") };
+const patchUrl = new URL("../../../fixtures/contracts/example.patch", import.meta.url);
+const fixture = {
+  success,
+  failure,
+  additive: await readFile(additiveUrl, "utf8"),
+  payloads: await readPayloads(),
+  expectedPatchETag: `"${createHash("sha256")
+    .update(await readFile(patchUrl))
+    .digest("hex")}"`,
+};
 
 await build({
   configFile: false,
@@ -26,12 +36,38 @@ await build({
     },
   },
 });
-verifyReceipt(await import(pathToFileURL(decoderPath).href), fixture);
-console.log("Delivery receipt contract passed in Node.");
+const decoder = await import(pathToFileURL(decoderPath).href);
+verifyReceipt(decoder, fixture);
+verifyFirstReview(decoder, fixture);
+console.log("First-review contracts passed in Node.");
 
 if (mode === "--browser") {
   await verifyInBrowser();
-  console.log("Delivery receipt contract passed in Chromium.");
+  console.log("First-review contracts passed in Chromium.");
+}
+
+async function readPayloads() {
+  const names = [
+    "queue",
+    "overview",
+    "selection",
+    "run",
+    "patchPending",
+    "patchA",
+    "patchB",
+    "history",
+    "sendRequest",
+    "eventReplayCursor",
+    "invalidate",
+    "reset",
+  ];
+  const entries = await Promise.all(
+    names.map(async (name) => [
+      name,
+      await readFile(join(scratch, "fixtures", `${name}.json`), "utf8"),
+    ]),
+  );
+  return Object.fromEntries(entries);
 }
 
 async function verifyInBrowser() {
@@ -57,6 +93,7 @@ async function verifyInBrowser() {
       const cases = await import("/cases.mjs");
       const decoder = await import("/receipt-decoder.mjs");
       cases.verifyReceipt(decoder, wireFixture);
+      cases.verifyFirstReview(decoder, wireFixture);
     }, fixture);
   } finally {
     await browser.close();

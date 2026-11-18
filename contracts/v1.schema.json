@@ -1,6 +1,27 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "definitions": {
+    "CheckpointIdDto": {
+      "description": "A signed handle for a displayed review checkpoint.",
+      "maxUtf8Bytes": 512,
+      "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f\\ud800-\\udfff]+$",
+      "type": "string"
+    },
+    "CompactTicket": {
+      "properties": {
+        "key": {
+          "$ref": "#/definitions/TicketKeyDto"
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "key",
+        "title"
+      ],
+      "type": "object"
+    },
     "DeliveryReceipt": {
       "description": "The addressed receipt for the message send and receipt lookup routes.",
       "properties": {
@@ -102,8 +123,14 @@
       "type": "object"
     },
     "EventCursorDto": {
-      "description": "A durable event head, serialized as a canonical decimal string.",
+      "description": "A durable event cursor serialized as a canonical decimal string.",
       "pattern": "^(0|[1-9][0-9]{0,17}|[1-8][0-9]{18}|9[0-1][0-9]{17}|92[0-1][0-9]{16}|922[0-2][0-9]{15}|9223[0-2][0-9]{14}|92233[0-6][0-9]{13}|922337[0-1][0-9]{12}|92233720[0-2][0-9]{10}|922337203[0-5][0-9]{9}|9223372036[0-7][0-9]{8}|92233720368[0-4][0-9]{7}|922337203685[0-3][0-9]{6}|9223372036854[0-6][0-9]{5}|92233720368547[0-6][0-9]{4}|922337203685477[0-4][0-9]{3}|9223372036854775[0-7][0-9]{2}|922337203685477580[0-6][0-9]{0}|9223372036854775807)$",
+      "type": "string"
+    },
+    "EventReplayCursor": {
+      "description": "A durable event cursor serialized as a canonical decimal string.",
+      "pattern": "^(0|[1-9][0-9]{0,17}|[1-8][0-9]{18}|9[0-1][0-9]{17}|92[0-1][0-9]{16}|922[0-2][0-9]{15}|9223[0-2][0-9]{14}|92233[0-6][0-9]{13}|922337[0-1][0-9]{12}|92233720[0-2][0-9]{10}|922337203[0-5][0-9]{9}|9223372036[0-7][0-9]{8}|92233720368[0-4][0-9]{7}|922337203685[0-3][0-9]{6}|9223372036854[0-6][0-9]{5}|92233720368547[0-6][0-9]{4}|922337203685477[0-4][0-9]{3}|9223372036854775[0-7][0-9]{2}|922337203685477580[0-6][0-9]{0}|9223372036854775807)$",
+      "title": "EventReplayCursor",
       "type": "string"
     },
     "Failure": {
@@ -130,22 +157,1207 @@
       "title": "Failure",
       "type": "object"
     },
-    "RunIdDto": {
-      "description": "The registered run identifier.",
+    "FileIdDto": {
+      "description": "A file identity at a specified patch revision.",
       "maxUtf8Bytes": 512,
       "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f\\ud800-\\udfff]+$",
       "type": "string"
+    },
+    "GitShaDto": {
+      "description": "A full SHA-1 or SHA-256 Git object name.",
+      "pattern": "^([0-9A-Fa-f]{40}|[0-9A-Fa-f]{64})$",
+      "type": "string"
+    },
+    "HistoryAvailability": {
+      "enum": [
+        "available",
+        "partial",
+        "unavailable"
+      ],
+      "type": "string"
+    },
+    "HistoryCursorDto": {
+      "description": "An opaque continuation for one bounded native history source.",
+      "maxUtf8Bytes": 8192,
+      "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f\\ud800-\\udfff]+$",
+      "type": "string"
+    },
+    "HistoryEntry": {
+      "description": "A visible native entry. Provider timestamps can be unknown.",
+      "properties": {
+        "entryId": {
+          "$ref": "#/definitions/HistoryEntryIdDto"
+        },
+        "parts": {
+          "items": {
+            "$ref": "#/definitions/HistoryPart"
+          },
+          "type": "array"
+        },
+        "timestamp": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/UtcTimestampDto"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "turnId": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/HistoryTurnIdDto"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "entryId",
+        "turnId",
+        "timestamp",
+        "parts"
+      ],
+      "type": "object"
+    },
+    "HistoryEntryIdDto": {
+      "description": "A visible source entry's provider-native identity.",
+      "maxUtf8Bytes": 512,
+      "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f\\ud800-\\udfff]+$",
+      "type": "string"
+    },
+    "HistoryGenerationDto": {
+      "description": "A generation independent of the global event journal.",
+      "maxUtf8Bytes": 512,
+      "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f\\ud800-\\udfff]+$",
+      "type": "string"
+    },
+    "HistoryPage": {
+      "properties": {
+        "availability": {
+          "$ref": "#/definitions/HistoryAvailability"
+        },
+        "generation": {
+          "$ref": "#/definitions/HistoryGenerationDto"
+        },
+        "items": {
+          "items": {
+            "$ref": "#/definitions/HistoryEntry"
+          },
+          "maxItems": 100,
+          "type": "array"
+        },
+        "nextCursor": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/HistoryCursorDto"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "previousCursor": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/HistoryCursorDto"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "reset": {
+          "type": "boolean"
+        },
+        "retryAfterMs": {
+          "$ref": "#/definitions/SafeCountDto"
+        },
+        "runId": {
+          "$ref": "#/definitions/RunIdDto"
+        },
+        "sessionKey": {
+          "$ref": "#/definitions/SessionKeyDto"
+        }
+      },
+      "required": [
+        "runId",
+        "sessionKey",
+        "generation",
+        "availability",
+        "reset",
+        "items",
+        "nextCursor",
+        "previousCursor"
+      ],
+      "type": "object"
+    },
+    "HistoryPageResponse": {
+      "description": "The resource and event head from the same authorized snapshot.",
+      "properties": {
+        "cursor": {
+          "$ref": "#/definitions/EventCursorDto"
+        },
+        "data": {
+          "$ref": "#/definitions/HistoryPage"
+        }
+      },
+      "required": [
+        "data",
+        "cursor"
+      ],
+      "title": "HistoryPageResponse",
+      "type": "object"
+    },
+    "HistoryPart": {
+      "description": "Ordered visible content for the first Codex reader.",
+      "oneOf": [
+        {
+          "properties": {
+            "kind": {
+              "const": "user_prompt",
+              "type": "string"
+            },
+            "text": {
+              "$ref": "#/definitions/HistoryText"
+            }
+          },
+          "required": [
+            "kind",
+            "text"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "kind": {
+              "const": "assistant_text",
+              "type": "string"
+            },
+            "text": {
+              "$ref": "#/definitions/HistoryText"
+            }
+          },
+          "required": [
+            "kind",
+            "text"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "HistoryText": {
+      "description": "Visible text bounded by its exact decoded UTF-8 byte length.",
+      "maxUtf8Bytes": 65536,
+      "pattern": "^[^\\ud800-\\udfff]*$",
+      "type": "string"
+    },
+    "HistoryTurnIdDto": {
+      "description": "A provider-native turn in a scoped source.",
+      "maxUtf8Bytes": 512,
+      "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f\\ud800-\\udfff]+$",
+      "type": "string"
+    },
+    "HostProviderDto": {
+      "enum": [
+        "codex",
+        "claude"
+      ],
+      "type": "string"
+    },
+    "InvalidateEvent": {
+      "description": "Bounded resource descriptors for an `invalidate` event.",
+      "properties": {
+        "resources": {
+          "items": {
+            "$ref": "#/definitions/ResourceKeyDto"
+          },
+          "maxItems": 32,
+          "minItems": 1,
+          "type": "array"
+        }
+      },
+      "required": [
+        "resources"
+      ],
+      "title": "InvalidateEvent",
+      "type": "object"
+    },
+    "MergeRequestIidDto": {
+      "description": "A positive merge request IID within its GitLab project.",
+      "pattern": "^([1-9][0-9]{0,17}|[1-8][0-9]{18}|9[0-1][0-9]{17}|92[0-1][0-9]{16}|922[0-2][0-9]{15}|9223[0-2][0-9]{14}|92233[0-6][0-9]{13}|922337[0-1][0-9]{12}|92233720[0-2][0-9]{10}|922337203[0-5][0-9]{9}|9223372036[0-7][0-9]{8}|92233720368[0-4][0-9]{7}|922337203685[0-3][0-9]{6}|9223372036854[0-6][0-9]{5}|92233720368547[0-6][0-9]{4}|922337203685477[0-4][0-9]{3}|9223372036854775[0-7][0-9]{2}|922337203685477580[0-6][0-9]{0}|9223372036854775807)$",
+      "type": "string"
+    },
+    "MergeRequestRow": {
+      "properties": {
+        "author": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/NamedUpstreamId"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "draft": {
+          "type": "boolean"
+        },
+        "hasAgentQuestions": {
+          "type": "boolean"
+        },
+        "iid": {
+          "$ref": "#/definitions/MergeRequestIidDto"
+        },
+        "mrState": {
+          "$ref": "#/definitions/MergeRequestStatus"
+        },
+        "ourComments": {
+          "$ref": "#/definitions/SafeCountDto"
+        },
+        "own": {
+          "type": "boolean"
+        },
+        "personalApproval": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "projectId": {
+          "$ref": "#/definitions/ProjectIdDto"
+        },
+        "projectPath": {
+          "type": "string"
+        },
+        "queueState": {
+          "$ref": "#/definitions/QueueStatus"
+        },
+        "reasonKind": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "registeredLeadCount": {
+          "$ref": "#/definitions/SafeCountDto"
+        },
+        "reviewId": {
+          "$ref": "#/definitions/ReviewIdDto"
+        },
+        "runStage": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/RunStage"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "sourceSha": {
+          "$ref": "#/definitions/GitShaDto"
+        },
+        "tickets": {
+          "items": {
+            "$ref": "#/definitions/CompactTicket"
+          },
+          "type": "array"
+        },
+        "title": {
+          "type": "string"
+        },
+        "unreadReplies": {
+          "$ref": "#/definitions/SafeCountDto"
+        },
+        "updatedAt": {
+          "$ref": "#/definitions/UtcTimestampDto"
+        }
+      },
+      "required": [
+        "reviewId",
+        "projectId",
+        "projectPath",
+        "iid",
+        "title",
+        "tickets",
+        "author",
+        "sourceSha",
+        "mrState",
+        "queueState",
+        "updatedAt",
+        "draft",
+        "own",
+        "ourComments",
+        "unreadReplies",
+        "personalApproval",
+        "registeredLeadCount",
+        "runStage",
+        "reasonKind",
+        "hasAgentQuestions"
+      ],
+      "type": "object"
+    },
+    "MergeRequestStatus": {
+      "enum": [
+        "open",
+        "closed",
+        "merged"
+      ],
+      "type": "string"
+    },
+    "MessageTextDto": {
+      "description": "Exact message text bounded in Unicode scalar values.",
+      "pattern": "^[^\\ud800-\\udfff]{1,12000}$",
+      "type": "string"
+    },
+    "NamedUpstreamId": {
+      "properties": {
+        "id": {
+          "$ref": "#/definitions/UpstreamIdDto"
+        },
+        "label": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "label"
+      ],
+      "type": "object"
+    },
+    "PageCursorDto": {
+      "description": "An opaque keyset continuation for list resources.",
+      "maxUtf8Bytes": 8192,
+      "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f\\ud800-\\udfff]+$",
+      "type": "string"
+    },
+    "PatchAvailability": {
+      "enum": [
+        "complete",
+        "incomplete",
+        "binary",
+        "provider_limited",
+        "missing"
+      ],
+      "type": "string"
+    },
+    "PatchETagDto": {
+      "description": "The strong quoted SHA-256 ETag of a complete patch.",
+      "pattern": "^\"[0-9a-f]{64}\"$",
+      "type": "string"
+    },
+    "PatchFile": {
+      "description": "One immutable address even when another revision serves identical bytes.",
+      "properties": {
+        "availability": {
+          "$ref": "#/definitions/PatchAvailability"
+        },
+        "byteLength": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SafeCountDto"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "created": {
+          "type": "boolean"
+        },
+        "deleted": {
+          "type": "boolean"
+        },
+        "fileId": {
+          "$ref": "#/definitions/FileIdDto"
+        },
+        "lineCount": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SafeCountDto"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "maxLineBytes": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SafeCountDto"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "newPath": {
+          "type": "string"
+        },
+        "oldPath": {
+          "type": "string"
+        },
+        "patchETag": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/PatchETagDto"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "renamed": {
+          "type": "boolean"
+        },
+        "reviewId": {
+          "$ref": "#/definitions/ReviewIdDto"
+        },
+        "revision": {
+          "$ref": "#/definitions/PatchRevisionDto"
+        }
+      },
+      "required": [
+        "reviewId",
+        "revision",
+        "fileId",
+        "oldPath",
+        "newPath",
+        "renamed",
+        "created",
+        "deleted",
+        "availability",
+        "byteLength",
+        "lineCount",
+        "maxLineBytes",
+        "patchETag"
+      ],
+      "type": "object"
+    },
+    "PatchFileIndex": {
+      "description": "A bounded compact list with a required nullable keyset continuation.",
+      "properties": {
+        "baseSha": {
+          "$ref": "#/definitions/GitShaDto"
+        },
+        "headSha": {
+          "$ref": "#/definitions/GitShaDto"
+        },
+        "items": {
+          "items": {
+            "$ref": "#/definitions/PatchFile"
+          },
+          "maxItems": 100,
+          "type": "array"
+        },
+        "nextCursor": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/PageCursorDto"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "revision": {
+          "$ref": "#/definitions/PatchRevisionDto"
+        },
+        "startSha": {
+          "$ref": "#/definitions/GitShaDto"
+        }
+      },
+      "required": [
+        "revision",
+        "baseSha",
+        "startSha",
+        "headSha",
+        "items",
+        "nextCursor"
+      ],
+      "type": "object"
+    },
+    "PatchFileIndexResponse": {
+      "description": "The resource and event head from the same authorized snapshot.",
+      "properties": {
+        "cursor": {
+          "$ref": "#/definitions/EventCursorDto"
+        },
+        "data": {
+          "$ref": "#/definitions/PatchFileIndex"
+        }
+      },
+      "required": [
+        "data",
+        "cursor"
+      ],
+      "title": "PatchFileIndexResponse",
+      "type": "object"
+    },
+    "PatchRevisionDto": {
+      "description": "An opaque review-bound patch revision, independent of its content hash.",
+      "maxUtf8Bytes": 512,
+      "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f\\ud800-\\udfff]+$",
+      "type": "string"
+    },
+    "ProjectIdDto": {
+      "description": "A positive GitLab project identity.",
+      "pattern": "^([1-9][0-9]{0,17}|[1-8][0-9]{18}|9[0-1][0-9]{17}|92[0-1][0-9]{16}|922[0-2][0-9]{15}|9223[0-2][0-9]{14}|92233[0-6][0-9]{13}|922337[0-1][0-9]{12}|92233720[0-2][0-9]{10}|922337203[0-5][0-9]{9}|9223372036[0-7][0-9]{8}|92233720368[0-4][0-9]{7}|922337203685[0-3][0-9]{6}|9223372036854[0-6][0-9]{5}|92233720368547[0-6][0-9]{4}|922337203685477[0-4][0-9]{3}|9223372036854775[0-7][0-9]{2}|922337203685477580[0-6][0-9]{0}|9223372036854775807)$",
+      "type": "string"
+    },
+    "QueueFacets": {
+      "properties": {
+        "authors": {
+          "items": {
+            "$ref": "#/definitions/NamedUpstreamId"
+          },
+          "type": "array"
+        },
+        "boards": {
+          "items": {
+            "$ref": "#/definitions/NamedUpstreamId"
+          },
+          "type": "array"
+        },
+        "hideInProgress": {
+          "$ref": "#/definitions/SafeCountDto"
+        },
+        "hideReviewed": {
+          "$ref": "#/definitions/SafeCountDto"
+        },
+        "projects": {
+          "items": {
+            "$ref": "#/definitions/NamedUpstreamId"
+          },
+          "type": "array"
+        },
+        "sprints": {
+          "items": {
+            "$ref": "#/definitions/SprintFacet"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "boards",
+        "projects",
+        "sprints",
+        "authors",
+        "hideReviewed",
+        "hideInProgress"
+      ],
+      "type": "object"
+    },
+    "QueuePage": {
+      "description": "A bounded compact list with a required nullable keyset continuation.",
+      "properties": {
+        "facets": {
+          "$ref": "#/definitions/QueueFacets"
+        },
+        "items": {
+          "items": {
+            "$ref": "#/definitions/QueueRow"
+          },
+          "maxItems": 100,
+          "type": "array"
+        },
+        "nextCursor": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/PageCursorDto"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "settingsRevision": {
+          "$ref": "#/definitions/RevisionDto"
+        },
+        "sync": {
+          "$ref": "#/definitions/QueueSync"
+        },
+        "totalMrs": {
+          "$ref": "#/definitions/SafeCountDto"
+        },
+        "totalRows": {
+          "$ref": "#/definitions/SafeCountDto"
+        }
+      },
+      "required": [
+        "items",
+        "nextCursor",
+        "totalRows",
+        "totalMrs",
+        "facets",
+        "sync",
+        "settingsRevision"
+      ],
+      "type": "object"
+    },
+    "QueuePageResponse": {
+      "description": "The resource and event head from the same authorized snapshot.",
+      "properties": {
+        "cursor": {
+          "$ref": "#/definitions/EventCursorDto"
+        },
+        "data": {
+          "$ref": "#/definitions/QueuePage"
+        }
+      },
+      "required": [
+        "data",
+        "cursor"
+      ],
+      "title": "QueuePageResponse",
+      "type": "object"
+    },
+    "QueueRow": {
+      "oneOf": [
+        {
+          "allOf": [
+            {
+              "$ref": "#/definitions/MergeRequestRow"
+            }
+          ],
+          "properties": {
+            "kind": {
+              "const": "mr",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "allOf": [
+            {
+              "$ref": "#/definitions/UnmatchedTicket"
+            }
+          ],
+          "properties": {
+            "kind": {
+              "const": "unmatched_ticket",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "QueueStatus": {
+      "enum": [
+        "needs_review",
+        "waiting_author",
+        "followup",
+        "reviewed",
+        "archive"
+      ],
+      "type": "string"
+    },
+    "QueueSync": {
+      "properties": {
+        "active": {
+          "type": "boolean"
+        },
+        "error": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ErrorDto"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "lastAttemptAt": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/UtcTimestampDto"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "lastSuccessAt": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/UtcTimestampDto"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "mode": {
+          "$ref": "#/definitions/QueueSyncMode"
+        },
+        "stale": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "mode",
+        "active",
+        "stale",
+        "lastAttemptAt",
+        "lastSuccessAt",
+        "error"
+      ],
+      "type": "object"
+    },
+    "QueueSyncMode": {
+      "enum": [
+        "setup",
+        "connected",
+        "disconnected"
+      ],
+      "type": "string"
+    },
+    "ResetEvent": {
+      "description": "The terminal `reset` event body. A reset has no SSE id.",
+      "properties": {
+        "reason": {
+          "$ref": "#/definitions/ResetReasonDto"
+        }
+      },
+      "required": [
+        "reason"
+      ],
+      "title": "ResetEvent",
+      "type": "object"
+    },
+    "ResetReasonDto": {
+      "enum": [
+        "cursor_expired",
+        "cursor_ahead",
+        "stream_lag"
+      ],
+      "type": "string"
+    },
+    "ResourceIdDto": {
+      "description": "The public ID carried by a resource invalidation, interpreted by its kind.",
+      "maxUtf8Bytes": 512,
+      "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f\\ud800-\\udfff]+$",
+      "type": "string"
+    },
+    "ResourceKeyDto": {
+      "description": "Reload one resource or the whole family when its ID is omitted.",
+      "properties": {
+        "id": {
+          "$ref": "#/definitions/ResourceIdDto"
+        },
+        "kind": {
+          "$ref": "#/definitions/ResourceKindDto"
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "type": "object"
+    },
+    "ResourceKindDto": {
+      "enum": [
+        "queue",
+        "review",
+        "run",
+        "session",
+        "history",
+        "changes",
+        "discussions",
+        "report",
+        "action",
+        "followup",
+        "ticket",
+        "notification",
+        "settings"
+      ],
+      "type": "string"
+    },
+    "ReviewIdDto": {
+      "description": "One opaque, path-safe ReviewQ review ID.",
+      "pattern": "^[A-Za-z0-9_-]{1,512}$",
+      "type": "string"
+    },
+    "ReviewOverview": {
+      "properties": {
+        "checkpointId": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/CheckpointIdDto"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "decisionRevision": {
+          "$ref": "#/definitions/RevisionDto"
+        },
+        "review": {
+          "$ref": "#/definitions/MergeRequestRow"
+        },
+        "runs": {
+          "$ref": "#/definitions/RunSummaryPage"
+        },
+        "settingsRevision": {
+          "$ref": "#/definitions/RevisionDto"
+        }
+      },
+      "required": [
+        "review",
+        "decisionRevision",
+        "settingsRevision",
+        "checkpointId",
+        "runs"
+      ],
+      "type": "object"
+    },
+    "ReviewOverviewResponse": {
+      "description": "The resource and event head from the same authorized snapshot.",
+      "properties": {
+        "cursor": {
+          "$ref": "#/definitions/EventCursorDto"
+        },
+        "data": {
+          "$ref": "#/definitions/ReviewOverview"
+        }
+      },
+      "required": [
+        "data",
+        "cursor"
+      ],
+      "title": "ReviewOverviewResponse",
+      "type": "object"
+    },
+    "ReviewSelection": {
+      "properties": {
+        "leadSessionKey": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SessionKeyDto"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "reviewId": {
+          "$ref": "#/definitions/ReviewIdDto"
+        },
+        "runId": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/RunIdDto"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "reviewId",
+        "runId",
+        "leadSessionKey"
+      ],
+      "type": "object"
+    },
+    "ReviewSelectionResponse": {
+      "description": "The resource and event head from the same authorized snapshot.",
+      "properties": {
+        "cursor": {
+          "$ref": "#/definitions/EventCursorDto"
+        },
+        "data": {
+          "$ref": "#/definitions/ReviewSelection"
+        }
+      },
+      "required": [
+        "data",
+        "cursor"
+      ],
+      "title": "ReviewSelectionResponse",
+      "type": "object"
+    },
+    "RevisionDto": {
+      "description": "A logical settings or decision revision.",
+      "pattern": "^(0|[1-9][0-9]{0,17}|[1-8][0-9]{18}|9[0-1][0-9]{17}|92[0-1][0-9]{16}|922[0-2][0-9]{15}|9223[0-2][0-9]{14}|92233[0-6][0-9]{13}|922337[0-1][0-9]{12}|92233720[0-2][0-9]{10}|922337203[0-5][0-9]{9}|9223372036[0-7][0-9]{8}|92233720368[0-4][0-9]{7}|922337203685[0-3][0-9]{6}|9223372036854[0-6][0-9]{5}|92233720368547[0-6][0-9]{4}|922337203685477[0-4][0-9]{3}|9223372036854775[0-7][0-9]{2}|922337203685477580[0-6][0-9]{0}|9223372036854775807)$",
+      "type": "string"
+    },
+    "RunDetail": {
+      "description": "Confirmed run detail, with the exact lead and bounded safe session summaries.",
+      "properties": {
+        "leadSessionKey": {
+          "$ref": "#/definitions/SessionKeyDto"
+        },
+        "reviewId": {
+          "$ref": "#/definitions/ReviewIdDto"
+        },
+        "runId": {
+          "$ref": "#/definitions/RunIdDto"
+        },
+        "sessions": {
+          "$ref": "#/definitions/SessionSummaryPage"
+        }
+      },
+      "required": [
+        "reviewId",
+        "runId",
+        "leadSessionKey",
+        "sessions"
+      ],
+      "type": "object"
+    },
+    "RunDetailResponse": {
+      "description": "The resource and event head from the same authorized snapshot.",
+      "properties": {
+        "cursor": {
+          "$ref": "#/definitions/EventCursorDto"
+        },
+        "data": {
+          "$ref": "#/definitions/RunDetail"
+        }
+      },
+      "required": [
+        "data",
+        "cursor"
+      ],
+      "title": "RunDetailResponse",
+      "type": "object"
+    },
+    "RunIdDto": {
+      "description": "A registered run identifier.",
+      "maxUtf8Bytes": 512,
+      "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f\\ud800-\\udfff]+$",
+      "type": "string"
+    },
+    "RunStage": {
+      "enum": [
+        "needs_input",
+        "working",
+        "waiting",
+        "archived"
+      ],
+      "type": "string"
+    },
+    "RunSummary": {
+      "properties": {
+        "leadSessionKey": {
+          "$ref": "#/definitions/SessionKeyDto"
+        },
+        "provider": {
+          "$ref": "#/definitions/HostProviderDto"
+        },
+        "runId": {
+          "$ref": "#/definitions/RunIdDto"
+        },
+        "startedAt": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/UtcTimestampDto"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "runId",
+        "leadSessionKey",
+        "provider",
+        "startedAt"
+      ],
+      "type": "object"
+    },
+    "RunSummaryPage": {
+      "description": "A bounded compact list with a required nullable keyset continuation.",
+      "properties": {
+        "items": {
+          "items": {
+            "$ref": "#/definitions/RunSummary"
+          },
+          "maxItems": 100,
+          "type": "array"
+        },
+        "nextCursor": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/PageCursorDto"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "items",
+        "nextCursor"
+      ],
+      "type": "object"
+    },
+    "SafeCountDto": {
+      "description": "A nonnegative, exactly representable JSON count or byte offset.",
+      "maximum": 9007199254740991,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "SendMessageRequest": {
+      "additionalProperties": false,
+      "description": "The browser body for POST /runs/{runId}/sessions/{sessionKey}/messages.",
+      "properties": {
+        "submissionId": {
+          "$ref": "#/definitions/SubmissionIdDto"
+        },
+        "text": {
+          "$ref": "#/definitions/MessageTextDto"
+        }
+      },
+      "required": [
+        "submissionId",
+        "text"
+      ],
+      "title": "SendMessageRequest",
+      "type": "object"
     },
     "SessionKeyDto": {
-      "description": "The exact native session key registered for a run.",
+      "description": "The verified native session key within a run.",
       "maxUtf8Bytes": 512,
       "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f\\ud800-\\udfff]+$",
       "type": "string"
     },
+    "SessionSummary": {
+      "properties": {
+        "parentSessionKey": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SessionKeyDto"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "provider": {
+          "$ref": "#/definitions/HostProviderDto"
+        },
+        "sessionKey": {
+          "$ref": "#/definitions/SessionKeyDto"
+        }
+      },
+      "required": [
+        "sessionKey",
+        "parentSessionKey",
+        "provider"
+      ],
+      "type": "object"
+    },
+    "SessionSummaryPage": {
+      "description": "A bounded compact list with a required nullable keyset continuation.",
+      "properties": {
+        "items": {
+          "items": {
+            "$ref": "#/definitions/SessionSummary"
+          },
+          "maxItems": 100,
+          "type": "array"
+        },
+        "nextCursor": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/PageCursorDto"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "items",
+        "nextCursor"
+      ],
+      "type": "object"
+    },
+    "SprintFacet": {
+      "properties": {
+        "boardId": {
+          "$ref": "#/definitions/UpstreamIdDto"
+        },
+        "id": {
+          "$ref": "#/definitions/UpstreamIdDto"
+        },
+        "label": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "boardId",
+        "id",
+        "label"
+      ],
+      "type": "object"
+    },
     "SubmissionIdDto": {
-      "description": "The client-supplied submission identifier scoped to the operation.",
+      "description": "The client-provided stable retry key.",
       "maxUtf8Bytes": 512,
       "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f\\ud800-\\udfff]+$",
+      "type": "string"
+    },
+    "TicketKeyDto": {
+      "description": "A Jira issue key.",
+      "maxUtf8Bytes": 512,
+      "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f\\ud800-\\udfff]+$",
+      "type": "string"
+    },
+    "UnmatchedTicket": {
+      "properties": {
+        "assignee": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "key": {
+          "$ref": "#/definitions/TicketKeyDto"
+        },
+        "priority": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "status": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "key",
+        "title",
+        "status",
+        "priority",
+        "assignee"
+      ],
+      "type": "object"
+    },
+    "UpstreamIdDto": {
+      "description": "A positive upstream numeric identity in a compact projection.",
+      "pattern": "^([1-9][0-9]{0,17}|[1-8][0-9]{18}|9[0-1][0-9]{17}|92[0-1][0-9]{16}|922[0-2][0-9]{15}|9223[0-2][0-9]{14}|92233[0-6][0-9]{13}|922337[0-1][0-9]{12}|92233720[0-2][0-9]{10}|922337203[0-5][0-9]{9}|9223372036[0-7][0-9]{8}|92233720368[0-4][0-9]{7}|922337203685[0-3][0-9]{6}|9223372036854[0-6][0-9]{5}|92233720368547[0-6][0-9]{4}|922337203685477[0-4][0-9]{3}|9223372036854775[0-7][0-9]{2}|922337203685477580[0-6][0-9]{0}|9223372036854775807)$",
       "type": "string"
     },
     "UtcTimestampDto": {
@@ -155,8 +1367,24 @@
       "type": "string"
     }
   },
-  "x-reviewq-responses": {
-    "DeliveryReceiptResponse": "#/definitions/DeliveryReceiptResponse",
-    "Failure": "#/definitions/Failure"
+  "x-reviewq-roots": {
+    "events": {
+      "InvalidateEvent": "#/definitions/InvalidateEvent",
+      "ResetEvent": "#/definitions/ResetEvent"
+    },
+    "requests": {
+      "EventReplayCursor": "#/definitions/EventReplayCursor",
+      "SendMessageRequest": "#/definitions/SendMessageRequest"
+    },
+    "responses": {
+      "DeliveryReceiptResponse": "#/definitions/DeliveryReceiptResponse",
+      "Failure": "#/definitions/Failure",
+      "HistoryPageResponse": "#/definitions/HistoryPageResponse",
+      "PatchFileIndexResponse": "#/definitions/PatchFileIndexResponse",
+      "QueuePageResponse": "#/definitions/QueuePageResponse",
+      "ReviewOverviewResponse": "#/definitions/ReviewOverviewResponse",
+      "ReviewSelectionResponse": "#/definitions/ReviewSelectionResponse",
+      "RunDetailResponse": "#/definitions/RunDetailResponse"
+    }
   }
 }
