@@ -14,7 +14,7 @@ The repository contains a Rust workspace, a Vite browser app and their checks. T
 | `web/{vite.config,playwright.config,dependency-cruiser,eslint.config}.mjs`, `web/knip.json`, `web/.prettierrc.json` | Dev/build, browser test, import boundaries, lint, unused reachability and formatting |
 | `web/index.html`, `web/src/main.tsx`, `web/src/app/App.tsx`, `web/tests/` | Browser entry, application shell and initial browser checks |
 
-The integration writer changes workspace/member manifests, locks, shared module roots, command registries, route assembly and application composition on the current integration revision. Each leaf owner supplies concrete symbols, dependency features, auth/limits, first caller and focused check. It can build a disposable composed checkout with those changes while other owners work. Merge the leaf implementation and reviewed registration together. The downstream owner starts from the accepted revision; a later regeneration of shared outputs uses that combined tree. [Integration procedure](plans/roadmap.md) · [Build tools](../Makefile)
+The integration writer changes workspace/member manifests, locks, shared module roots, command registries, route assembly and application composition on the current integration revision. Each leaf owner supplies concrete symbols, dependency features, auth/limits, first caller and focused check. Build and review the leaf with its registrations in an existing writer checkout. Merge them together. The downstream owner starts from the accepted revision and regenerates shared outputs from that tree when needed. [Integration procedure](plans/roadmap.md) · [Build tools](../Makefile)
 
 ## Rust source
 

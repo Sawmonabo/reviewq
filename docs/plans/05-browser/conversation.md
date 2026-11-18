@@ -1,6 +1,6 @@
 # CHATUI · Read a native conversation and send to its lead
 
-**Acceptance needs SHELL and REPORT.** Start after SHELL on the [first working review](../01-foundation/first-review.md) with feature fixtures. Use the [native reader](../02-sessions/history.md) and [host adapters](../02-sessions/hosts.md) for live closure. **Outcome** is a long, readable conversation that stays in place during activity, preserves input through navigation, and can account for exactly one native acceptance at the intended lead. [Native session contract](../../specs/agent-sessions.md) · [Browser experience](../../specs/browser-experience.md)
+**Start after SHELL and REPORT.** Extend the [first working review](../01-foundation/first-review.md) with feature fixtures. Use the [native reader](../02-sessions/history.md) and [host adapters](../02-sessions/hosts.md) for live closure. **Outcome** is a long, readable conversation that stays in place during activity, preserves input through navigation, and can account for exactly one native acceptance at the intended lead. [Native session contract](../../specs/agent-sessions.md) · [Browser experience](../../specs/browser-experience.md)
 
 ## Implement the transcript and composer
 

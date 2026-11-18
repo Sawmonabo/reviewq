@@ -2,7 +2,7 @@
 
 **First milestone.** Link a running Codex terminal to an MR, find that run from a second ordinary chat over MCP, open its Changes and Agent tabs, and send one message back to the original terminal. An independent reviewer verifies its native input ID, the selected patch bytes, and the restored file/line after switching reviews. This exercises the Rust service, SQLite, real host, native reader and React entry together before the rest of the dashboard is built. [First review](01-foundation/first-review.md) · [Acceptance](../specs/acceptance.md)
 
-**Starting point.** The greenfield repository at scaffold revision `b2a6da7` contains seven Rust workspace packages, a version-only CLI, and a React shell. The briefs specify future implementation. When implementation starts, record the design revision shared by the workers. For one assignment read the linked brief, its specifications, the applicable repository rules and the accepted predecessor handoffs. [Architecture](../architecture.md) · [Project layout](../project-layout.md) · [Repository rules](../../AGENTS.md) · [Dependency decisions](../dependency-decisions.md)
+Pin the accepted design revision before dispatching work. For one assignment read the linked brief, its specifications, the applicable repository rules and the accepted predecessor handoffs. [Architecture](../architecture.md) · [Project layout](../project-layout.md) · [Repository rules](../../AGENTS.md) · [Dependency decisions](../dependency-decisions.md)
 
 ## Task graph
 
@@ -15,13 +15,13 @@
 | STORE | CONTRACT | [SQLite storage](01-foundation/storage.md) | Store opening, migration ledger, writer, read snapshots, event and delivery transactions. Reopen a disposable profile after interrupted or repeated commands and verify stable facts, identities and receipts. |
 | SLICE | STORE, FIXTURE | [First working review](01-foundation/first-review.md) | First production registrations, reads, raw patch, MCP, browser, send and event path. Run the real terminal-to-browser-to-terminal exercise and measure the selected patch on demand. Hand those same files to the full lanes below. |
 | HOST | SLICE | [Native hosts](02-sessions/hosts.md) | Claude/Codex companion assets, native registration, launch, send, interrupt, question handling, recovery and terminal handoff. Prove one native receipt at the selected lead, one blocked input and exact resume target. |
-| HISTORY | SLICE | [Native history](02-sessions/history.md) | Bounded native source projection, pages, content ranges, landmarks, tool grouping, live reconciliation and evidence reads. Check older/rotated/absent sources, exact child identity and cancellation without launching a turn. |
+| HISTORY | HOST | [Native history](02-sessions/history.md) | Bounded native source projection, pages, content ranges, landmarks, tool grouping, live reconciliation and evidence reads. Check older/rotated/absent sources, exact child identity and cancellation without launching a turn. |
 | SOURCES | SLICE | [GitLab and Jira reads](03-workspace/sources.md) | Expand the slice's reads into scoped GitLab/Jira discovery, ticket detail and MR revision/files/patch/discussions/approval facts. Reconcile exact refs and complete paged results with the provider observations. |
 | SHELL | SLICE | [Browser shell](05-browser/shell.md) | Promote the first real browser entry, route and confirmed target, sizing, focus, shared client and event ownership. Cross a delayed same-IID switch and reopen the correct file, run and draft. |
 | QUEUE | SOURCES | [Workspace and queue](03-workspace/queue.md) | Publish a coherent workspace snapshot, classifications, inbox, archive and local decisions. In two scoped projects, refresh/acknowledge/record a decision and reconcile independent heads and unread work. |
 | PREFS | SOURCES, HOST | [Preferences and scope](03-workspace/preferences.md) | Validate credentials, boards, repository settings and policy. Preserve independent drafts, atomically activate the selected bindings, and recheck a revoked grant before execution. |
-| ACTION | HOST, HISTORY, SOURCES | [Publication actions](04-workflow/actions.md) | Bind publication authority to a lead, instruction, bodies and exact SHA. Reconcile personal approval and exact notes against GitLab evidence after loss of an acknowledgement. |
-| REPORT | HOST, HISTORY, SOURCES | [Reports and findings](04-workflow/reports.md) | Verify native provenance, immutable report bytes, accepted receipt and reviewed revision. Reconcile source hash after restart and quote the exact accepted report from its run. |
+| ACTION | HISTORY, SOURCES | [Publication actions](04-workflow/actions.md) | Bind publication authority to a lead, instruction, bodies and exact SHA. Reconcile personal approval and exact notes against GitLab evidence after loss of an acknowledgement. |
+| REPORT | HISTORY, SOURCES | [Reports and findings](04-workflow/reports.md) | Verify native provenance, immutable report bytes, accepted receipt and reviewed revision. Reconcile source hash after restart and quote the exact accepted report from its run. |
 | FOLLOW | ACTION, REPORT, QUEUE | [Monitored follow-ups](04-workflow/followups.md) | Detect enrolled discussion changes, coalesce/reserve work, record one checked head and reconcile scoped results. Preserve the full-review checkpoint, untouched findings and dispositions. |
 | QUEUEUI | SHELL, FOLLOW | [Queue, Runs and inbox](05-browser/queue-view.md) | Populated current/archive, ticket, run, inbox and batch-launch views operate through the live service on the versioned fixture sources. Select two same-IID MRs and check distinct launches and notification acknowledgements. |
 | REVIEWUI | CHATUI, FOLLOW | [Review drawer](05-browser/review-view.md) | Ticket/Overview, Changes, Findings, reports, diffs, discussions and quoted feedback. Preserve a live selection and logical line after insertions, find the last unvisited line, and open the correct findings source. |
@@ -41,21 +41,22 @@ These are dependency layers. Several IDs on a line give the lead a choice of rea
 1  CONTRACT · FIXTURE
 2  STORE
 3  SLICE
-4  HOST · HISTORY · SOURCES · SHELL
-5  QUEUE · PREFS · ACTION · REPORT
-6  FOLLOW · CHATUI
-7  ENTRY · TRANSFER · QUEUEUI · REVIEWUI
-8  PREFUI
-9  PACK
-10 BROWSERQA
-11 RELEASE
+4  HOST · SOURCES · SHELL
+5  QUEUE · PREFS · HISTORY
+6  ACTION · REPORT
+7  FOLLOW · CHATUI
+8  ENTRY · TRANSFER · QUEUEUI · REVIEWUI
+9  PREFUI
+10 PACK
+11 BROWSERQA
+12 RELEASE
 ```
 
 - Begin CONTRACT in the primary checkout. FIXTURE is independently eligible if its generator and expected bytes use external source formats and share no implementation with CONTRACT. Otherwise take it next. STORE follows accepted CONTRACT. Once STORE and FIXTURE pass, keep the first native/source → service → browser path in SLICE with one writer so registrations, readers and client code have one owner.
 - **Qualify the first browser implementation before extending it.** Run SLICE on the representative desktop. Record Chrome’s tab counter at idle, ordinary, large, peak and settled states, backend RSS, time to selectable code, switch latency and frame behavior during a fast scroll with a live update. Confirm the selected line and the native recipient. Use retained reference readings only where the input, counter, interaction and environment are comparable. If a workflow fails or measured cost exceeds the applicable budget, trace and correct the relevant flow or renderer and repeat the affected workload at SLICE. Show the owner the actual everyday tab readings to settle a meaningful memory target. Broader UI work uses the technically accepted implementation. [First milestone](01-foundation/first-review.md#gate-and-independent-review) · [Browser budgets](../specs/acceptance.md#browser-budgets)
-- After SLICE, choose among HOST, HISTORY, SOURCES and SHELL. Extend the scoped Codex read connection once for HOST and HISTORY. QUEUE needs SOURCES. PREFS also needs HOST for the native catalog and launch-preparation check. ACTION and REPORT need the accepted native reader, host and provider reads. FOLLOW joins both workflows with QUEUE.
+- After SLICE, choose among HOST, SOURCES and SHELL. HOST extends the existing Codex connection and hands its read-only methods to HISTORY. QUEUE needs SOURCES. PREFS also needs HOST for the native catalog and launch-preparation check. ACTION and REPORT need the accepted native reader, host and provider reads. FOLLOW joins both workflows with QUEUE.
 - CHATUI uses SHELL and REPORT. QUEUEUI uses SHELL and FOLLOW. REVIEWUI joins FOLLOW with the real CHATUI composer. ENTRY and TRANSFER use PREFS and FOLLOW. PREFUI exercises ENTRY’s real checkout projection. PACK needs the three completed UI branches of the graph. Stage BROWSERQA with PACK and TRANSFER, then give RELEASE that exact bundle.
-- With equal task lengths one longest dependency chain is **CONTRACT → STORE → SLICE → HISTORY → REPORT → FOLLOW → ENTRY → PREFUI → PACK → BROWSERQA → RELEASE**. HOST or SOURCES can replace HISTORY, and ACTION can replace REPORT. Actual scheduling also depends on native-host and desktop availability.
+- With equal task lengths one longest dependency chain is **CONTRACT → STORE → SLICE → HOST → HISTORY → REPORT → FOLLOW → ENTRY → PREFUI → PACK → BROWSERQA → RELEASE**. ACTION can replace REPORT. Actual scheduling also depends on native-host and desktop availability.
 
 ## Shared files and working copies
 
@@ -101,4 +102,4 @@ The lead keeps a private ledger of task-created branch names, checkout paths, te
 
 Keep synthetic recipes and contract examples in the repository. Capture real conversations, settings, screenshots, traces and per-run logs privately. Move required acceptance evidence to its recorded private destination before removing disposable output. Use existing checks first. The total first-party automated test ceiling is **500 cases** across Rust and web, counted per parameterized instance. Add a test for a specific uncovered regression and record which existing check misses it. [Acceptance and evidence policy](../specs/acceptance.md#release-evidence)
 
-SLICE acceptance covers its stated Codex workflow. BROWSERQA records measured values and failures for the real artifact, including the open everyday Chrome tab memory target. RELEASE records pass/fail/unverified per installed case and names the supported environments actually exercised. Resolve material failures on the affected revision. Record a missing real host, desktop, profile or user decision as a proof limit and keep the corresponding case open. Stop the task-owned service and preserve the candidate hash, comparison and reviewer receipt for the user. This handoff delivers the implementation plans. Packaging and activation checks use the disposable account specified in RELEASE.
+SLICE acceptance covers its stated Codex workflow. BROWSERQA records measured values and failures for the real artifact, including the open everyday Chrome tab memory target. RELEASE records pass/fail/unverified per installed case and names the supported environments actually exercised. Resolve material failures on the affected revision. Record a missing real host, desktop, profile or user decision as a proof limit and keep the corresponding case open. Stop the task-owned service and preserve the candidate hash, comparison and reviewer receipt for the user. Packaging and activation checks use the disposable account specified in RELEASE.
