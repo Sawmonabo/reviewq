@@ -7,12 +7,14 @@ use hmac::{Hmac, KeyInit, Mac};
 use reviewq_app::access::AppError;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use subtle::ConstantTimeEq;
 
 pub(super) const MAX_CONTROL_AGE: u64 = 15;
 const INSTANCE: &str = "x-reviewq-instance";
 const NONCE: &str = "x-reviewq-nonce";
 const ISSUED: &str = "x-reviewq-issued";
 const PROOF: &str = "x-reviewq-control";
+const BRIDGE: &str = "x-reviewq-native-bridge";
 
 type HmacSha256 = Hmac<Sha256>;
 
@@ -79,6 +81,38 @@ impl ServiceEndpoint {
     }
     pub fn identity(&self) -> &ServiceIdentity {
         &self.identity
+    }
+
+    pub fn bridge_headers(&self) -> Result<HeaderMap, AppError> {
+        let mut headers = HeaderMap::new();
+        put(&mut headers, INSTANCE, &self.instance)?;
+        put(
+            &mut headers,
+            BRIDGE,
+            &URL_SAFE_NO_PAD.encode(self.bridge_key),
+        )?;
+        headers
+            .get_mut(BRIDGE)
+            .ok_or(AppError::Internal)?
+            .set_sensitive(true);
+        Ok(headers)
+    }
+
+    pub(super) fn verify_bridge(&self, headers: &HeaderMap) -> Result<(), AppError> {
+        if headers.get_all(BRIDGE).iter().count() != 1
+            || value(headers, INSTANCE) != Some(self.instance())
+            || value(headers, "host") != Some(self.native.to_string().as_str())
+            || headers.contains_key("origin")
+        {
+            return Err(AppError::Unauthorized);
+        }
+        let key = value(headers, BRIDGE)
+            .and_then(decode)
+            .ok_or(AppError::Unauthorized)?;
+        if !bool::from(self.bridge_key.ct_eq(&key)) {
+            return Err(AppError::Unauthorized);
+        }
+        Ok(())
     }
 
     pub fn is_valid(&self) -> bool {

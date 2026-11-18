@@ -4,16 +4,64 @@ use reviewq_domain::identity::{
     DeliveryFence, DeliveryId, NativeInputId, NativeSessionId, NativeTurnId, ReceiptId, ReportHash,
     RunId, SessionKey, SubmissionId,
 };
-use reviewq_domain::session::{AbsolutePath, HostProvider, LeadTarget, SessionTarget};
+use reviewq_domain::session::{
+    AbsolutePath, HostProvider, LeadTarget, NativeBinding, SessionTarget,
+};
 
 use crate::access::{Actor, AppError, AppFuture};
 use crate::events::Snapshot;
 use crate::queue::ReviewSource;
+use crate::sources::ReviewSourceReader;
+use crate::workspace::WorkspaceStore;
 
 const MAX_MESSAGE_CHARACTERS: usize = 12_000;
 const MAX_SAFE_INTEGER: u64 = 9_007_199_254_740_991;
 /// Maximum size of a startup delivery scan page.
 pub const MAX_RECOVERY_LIMIT: u16 = 128;
+
+/// Read-only provider proof of the exact native conversation and working directory.
+pub trait NativeHost: Send + Sync {
+    fn prove(&self, native_id: NativeSessionId) -> AppFuture<'_, NativeBinding>;
+}
+
+/// Registers a verified Codex conversation in the current configured review scope.
+pub async fn link_codex(
+    store: &(impl WorkspaceStore + LeadStore + ?Sized),
+    source: &dyn ReviewSourceReader,
+    host: &dyn NativeHost,
+    native_id: NativeSessionId,
+    target: String,
+) -> Result<Snapshot<LeadTarget>, AppError> {
+    let binding = host.prove(native_id).await?;
+    let identity = binding.identity();
+    if identity.provider() != HostProvider::Codex {
+        return Err(AppError::Forbidden);
+    }
+    let workspace = store
+        .workspace_context(Actor::local_operator())
+        .await?
+        .value;
+    let review = source.resolve(workspace.projects, target).await?;
+    // Codex's global thread UUID remains stable across repeated binds.
+    let session_key = identity
+        .native_id()
+        .as_str()
+        .parse()
+        .map_err(|_| AppError::InvalidRequest)?;
+    store
+        .register_lead(
+            Actor::native_session(identity.clone()),
+            RegisterLead {
+                review,
+                provider: identity.provider(),
+                profile: identity.profile().clone(),
+                native_id: identity.native_id().clone(),
+                session_key,
+                cwd: binding.cwd().clone(),
+            },
+        )
+        .await
+}
 
 /// The provider-verified review and lead to register in one transaction.
 #[derive(Clone, Debug, Eq, PartialEq)]

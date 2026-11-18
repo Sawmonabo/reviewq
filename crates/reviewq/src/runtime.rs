@@ -9,10 +9,11 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use reviewq_app::access::Actor;
+use reviewq_app::hosts::NativeHost;
 use reviewq_app::sources::{ReviewSourceReader, SourceRefreshStore};
 use reviewq_app::workspace::{WorkspaceConfig, WorkspaceStore};
 use reviewq_domain::session::AbsolutePath;
-use reviewq_providers::GitLab;
+use reviewq_providers::{Codex, GitLab};
 use reviewq_store::SqliteStore;
 use reviewq_transport::{ServiceEndpoint, ServiceIdentity};
 use sha2::{Digest, Sha256};
@@ -137,7 +138,13 @@ pub(crate) async fn serve(profile: PathBuf, options: Serve) -> Result<(), Failur
         }
     }
     let source = source.map(|source| Arc::new(source) as Arc<dyn ReviewSourceReader>);
-    let router = reviewq_transport::router(store.clone(), source, endpoint.clone(), &web);
+    let host = match (options.codex_bin, options.codex_home) {
+        (Some(executable), Some(home)) => {
+            Some(Arc::new(Codex::new(executable, home)?) as Arc<dyn NativeHost>)
+        }
+        _ => None,
+    };
+    let router = reviewq_transport::router(store.clone(), source, host, endpoint.clone(), &web);
     publish(&profile, &endpoint)?;
     println!("ReviewQ http://{browser}/");
 

@@ -2,6 +2,7 @@ use std::path::Path;
 use std::time::Duration;
 
 use reqwest::Client;
+use reviewq_domain::identity::{NativeSessionId, ReviewId, RunId};
 use reviewq_transport::{ServiceEndpoint, ServiceIdentity};
 use serde::Deserialize;
 
@@ -28,6 +29,63 @@ struct Ready {
 #[derive(Deserialize)]
 struct Ticket {
     ticket: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct Linked {
+    review_id: String,
+    run_id: String,
+    lead_session_key: String,
+}
+
+pub(crate) async fn link(profile: &Path, target: String) -> Result<(), Failure> {
+    let native: NativeSessionId = std::env::var("CODEX_THREAD_ID")
+        .ok()
+        .and_then(|id| id.parse().ok())
+        .ok_or("Run reviewq link from inside the Codex conversation you want to link.")?;
+    let endpoint = runtime::read_endpoint(profile)?;
+    let client = client()?;
+    let status = signed(&client, &endpoint, "GET", "/api/v1/status", b"").await?;
+    verify_ready(&endpoint, &status)?;
+    let body = serde_json::to_vec(&serde_json::json!({
+        "protocolVersion": 1, "threadId": native.as_str(), "target": target
+    }))?;
+    let response = client
+        .post(format!(
+            "http://{}/api/v1/native/codex/link",
+            endpoint.native()
+        ))
+        .headers(endpoint.bridge_headers()?)
+        .header("content-type", "application/json")
+        .body(body)
+        .send()
+        .await?;
+    let status = response.status();
+    let bytes = bounded(response, 8192).await?;
+    if !status.is_success() {
+        let message = match status.as_u16() {
+            404 => "The native conversation or requested review could not be verified.",
+            409 => "The review target is ambiguous or this conversation is already linked.",
+            _ => "The service could not link the current Codex conversation.",
+        };
+        return Err(message.into());
+    }
+    let linked = serde_json::from_slice::<Envelope<Linked>>(&bytes)?.data;
+    let review: ReviewId = linked.review_id.parse()?;
+    let run: RunId = linked.run_id.parse()?;
+    if linked.lead_session_key != native.as_str() {
+        return Err("The service returned a different native lead.".into());
+    }
+    let mut url = reqwest::Url::parse(&format!("http://{}/", endpoint.browser()))?;
+    url.query_pairs_mut()
+        .append_pair("reviewId", review.as_str())
+        .append_pair("runId", run.as_str())
+        .append_pair("tab", "agent");
+    println!(
+        "Linked this Codex conversation.\n{url}\nContinue the review in this terminal or open it with ReviewQ."
+    );
+    Ok(())
 }
 
 pub(crate) async fn status(profile: &Path) -> Result<(), Failure> {

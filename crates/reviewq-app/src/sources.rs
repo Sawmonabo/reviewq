@@ -7,6 +7,13 @@ use crate::workspace::{ConfiguredProject, WorkspaceStore};
 /// Reads verified provider metadata outside the store transaction.
 pub trait ReviewSourceReader: Send + Sync {
     fn reviews(&self, project: ConfiguredProject) -> AppFuture<'_, Vec<ReviewSource>>;
+
+    /// Resolves a user-supplied URL, project/IID or unique ticket in configured projects.
+    fn resolve(
+        &self,
+        projects: Vec<ConfiguredProject>,
+        target: String,
+    ) -> AppFuture<'_, ReviewSource>;
 }
 
 /// Total compact records accepted in one atomic source publication.
