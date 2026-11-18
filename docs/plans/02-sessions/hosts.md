@@ -8,10 +8,10 @@ Complete the [session contract](../../specs/agent-sessions.md) for terminal-star
 
 | Files | Responsibility |
 | --- | --- |
-| `crates/app/src/hosts.rs`, `crates/store/src/hosts.rs` | Registration, launch, interruption recovery, input, terminal and observation use cases and typed host port. Use the central run/session/outbox repository for durable mutations. Store adapter implements required conditional writes on the agreed schema. |
-| `crates/providers/src/codex/{connection,session,inputs,capacity}.rs` | Shared daemon client, lifecycle, catalog, start/steer/resume/interrupt, versioned live question handles. Supply restricted read access to HISTORY. |
-| `crates/providers/src/claude/{session,companion}.rs`, `crates/providers/src/terminal.rs` | CLI catalog and process/job discovery, companion protocol adaptation and bounded native terminal launching. |
-| `crates/protocol/src/hosts.rs`, `crates/transport/src/hosts.rs` | Session presentation and native bridge DTOs, adapters for exact registration/terminal/questions/host callbacks. Use ENTRY's listener/auth guard and PACK's [private native bridge descriptor](../../specs/operations.md). |
+| `crates/reviewq-app/src/hosts.rs`, `crates/reviewq-store/src/hosts.rs` | Registration, launch, interruption recovery, input, terminal and observation use cases and typed host port. Use the central run/session/outbox repository for durable mutations. Store adapter implements required conditional writes on the agreed schema. |
+| `crates/reviewq-providers/src/codex/{connection,session,inputs,capacity}.rs` | Shared daemon client, lifecycle, catalog, start/steer/resume/interrupt, versioned live question handles. Supply restricted read access to HISTORY. |
+| `crates/reviewq-providers/src/claude/{session,companion}.rs`, `crates/reviewq-providers/src/terminal.rs` | CLI catalog and process/job discovery, companion protocol adaptation and bounded native terminal launching. |
+| `crates/reviewq-protocol/src/hosts.rs`, `crates/reviewq-transport/src/hosts.rs` | Session presentation and native bridge DTOs, adapters for exact registration/terminal/questions/host callbacks. Use ENTRY's listener/auth guard and PACK's [private native bridge descriptor](../../specs/operations.md). |
 | `hosts/claude/.claude-plugin/marketplace.json`, `hosts/claude/plugin/.claude-plugin/plugin.json`, `hosts/claude/plugin/hooks/{hooks.json,register.jsx}` | Actual marketplace, plugin, native JSX Mod and settings hook registrations. Use host-native JavaScript/JSX for the small in-process component and the installed Rust helper for bound settings hooks. |
 | `hosts/codex/skills/reviewq/{SKILL.md,agents/openai.yaml}`, `hosts/shared/skills/reviewq-manage/SKILL.md` | Explicit in-session linking and ordinary-chat management guidance. [PACK](../06-release/packaging.md) stages these exact paths. [ENTRY](entrypoints.md) reconciles project-scoped grants. |
 

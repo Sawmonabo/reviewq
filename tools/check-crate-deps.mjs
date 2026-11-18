@@ -1,4 +1,5 @@
 import { execFileSync } from "node:child_process";
+import { join, relative } from "node:path";
 
 const allowed = {
   "reviewq-domain": [],
@@ -17,6 +18,11 @@ const packages = metadata.packages.filter((pkg) => metadata.workspace_members.in
 const memberNames = new Set(packages.map((pkg) => pkg.name));
 const errors = [];
 for (const pkg of packages) {
+  const actualManifest = relative(metadata.workspace_root, pkg.manifest_path);
+  const expectedManifest = join("crates", pkg.name, "Cargo.toml");
+  if (actualManifest !== expectedManifest) {
+    errors.push(`${pkg.name} must use ${expectedManifest}, found ${actualManifest}`);
+  }
   if (!Object.hasOwn(allowed, pkg.name)) {
     errors.push(`Choose an import policy for new workspace member ${pkg.name}`);
     continue;

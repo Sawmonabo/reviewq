@@ -8,8 +8,8 @@
 
 | File | Responsibility |
 |---|---|
-| `crates/store/src/transfer.rs` (source reader) | Recognize and stream the supported input schema into typed transfer facts, read-only. This code runs only for an explicit transfer command. Keep SQLite ownership inside `reviewq-store`. |
-| `crates/store/src/transfer.rs` (candidate and comparison) | `inspect(source: &SourcePaths) -> Result<Inventory>`, `prepare(source: &SourcePaths, destination: &Path) -> Result<Comparison>`, `verify(directory: &Path) -> Result<Comparison>`. Own isolated import, normalization, coverage accounting and independent readback through target repositories. |
+| `crates/reviewq-store/src/transfer.rs` (source reader) | Recognize and stream the supported input schema into typed transfer facts, read-only. This code runs only for an explicit transfer command. Keep SQLite ownership inside `reviewq-store`. |
+| `crates/reviewq-store/src/transfer.rs` (candidate and comparison) | `inspect(source: &SourcePaths) -> Result<Inventory>`, `prepare(source: &SourcePaths, destination: &Path) -> Result<Comparison>`, `verify(directory: &Path) -> Result<Comparison>`. Own isolated import, normalization, coverage accounting and independent readback through target repositories. |
 | `crates/reviewq/src/transfer.rs` | CLI argument/path handling, owner-private scratch directory, safe summary/exit code and destination receipt passed to PACK. ENTRY owns clap registration. No service IPC, host activation or provider calls. |
 | `fixtures/transfer/thread-followup-v1.sql`, `fixtures/transfer/README.md` | Reproducible schema, independent nonsecret source rows, synthetic setup/runtime inputs, expected IDs, hashes and relationships. Include the source fingerprint and precise generation commands. Keep real data and comparison output private. |
 
