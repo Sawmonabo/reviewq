@@ -27,6 +27,10 @@ contracts contracts-check:
 			mkdir -p contracts; \
 			scratch=$$(mktemp -d contracts/.generate.XXXXXX); \
 		else \
+			unexpected_schemas=$$(find "$(dir $(CONTRACT_SCHEMA))" -maxdepth 1 -name '*.schema.json' ! -path "$(CONTRACT_SCHEMA)" -print); \
+			if [ -n "$$unexpected_schemas" ]; then \
+				printf 'Unexpected contract schemas\n%s\n' "$$unexpected_schemas" >&2; exit 1; \
+			fi; \
 			scratch=$$(mktemp -d); \
 		fi; \
 		trap 'find "$$scratch" -depth -delete' EXIT; \
