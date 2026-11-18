@@ -11,7 +11,7 @@ mod scalar;
 pub use common::{ErrorCode, ErrorDto, Failure, Page, Success, UtcTimestampDto};
 pub use hosts::{
     DeliveryReceipt, DeliveryReceiptResponse, DeliveryState, HostProviderDto, MessageTextDto,
-    RunDetail, RunDetailResponse, SendMessageRequest, SessionSummary,
+    ObservedInputDto, RunDetail, RunDetailResponse, SendMessageRequest, SessionSummary,
 };
 pub use scalar::{
     CheckpointIdDto, EventCursorDto, FileIdDto, GitShaDto, HistoryCursorDto, HistoryEntryIdDto,

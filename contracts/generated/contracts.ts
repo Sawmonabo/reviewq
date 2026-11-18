@@ -36,6 +36,17 @@ export type MessageTextDto = string;
  */
 export type EventCursorDto = string;
 /**
+ * The addressed receipt for the message send and receipt lookup routes.
+ */
+export type DeliveryReceipt = {
+  createdAt: UtcTimestampDto;
+  runId: RunIdDto;
+  sessionKey: SessionKeyDto;
+  submissionId: SubmissionIdDto;
+  updatedAt: UtcTimestampDto;
+  [k: string]: unknown;
+} & DeliveryReceipt1;
+/**
  * An RFC 3339 UTC timestamp with exact millisecond precision and a trailing Z.
  */
 export type UtcTimestampDto = string;
@@ -47,11 +58,40 @@ export type RunIdDto = string;
  * The verified native session key within a run.
  */
 export type SessionKeyDto = string;
+export type DeliveryReceipt1 =
+  | {
+      observedInput: null;
+      state: "queued";
+      [k: string]: unknown;
+    }
+  | {
+      observedInput: null;
+      state: "dispatching";
+      [k: string]: unknown;
+    }
+  | {
+      observedInput: ObservedInputDto;
+      state: "started";
+      [k: string]: unknown;
+    }
+  | {
+      observedInput: null;
+      state: "rejected";
+      [k: string]: unknown;
+    }
+  | {
+      observedInput: null;
+      state: "uncertain";
+      [k: string]: unknown;
+    };
 /**
- * The known durable state of one message submission.
+ * A visible source entry's provider-native identity.
  */
-export type DeliveryState =
-  "queued" | "dispatching" | "started" | "rejected" | "uncertain";
+export type HistoryEntryIdDto = string;
+/**
+ * A provider-native turn in a scoped source.
+ */
+export type HistoryTurnIdDto = string;
 /**
  * Stable error codes for the public JSON envelope.
  */
@@ -70,15 +110,15 @@ export type ErrorCode =
   | "busy"
   | "unavailable"
   | "internal";
+/**
+ * The history HTTP envelope, available as checked JSON bytes.
+ */
+export type HistoryPageResponse = Success;
 export type HistoryAvailability = "available" | "partial" | "unavailable";
 /**
  * A generation independent of the global event journal.
  */
 export type HistoryGenerationDto = string;
-/**
- * A visible source entry's provider-native identity.
- */
-export type HistoryEntryIdDto = string;
 /**
  * Ordered visible content for the first Codex reader.
  */
@@ -97,10 +137,6 @@ export type HistoryPart =
  * Visible text bounded by its exact decoded UTF-8 byte length.
  */
 export type HistoryText = string;
-/**
- * A provider-native turn in a scoped source.
- */
-export type HistoryTurnIdDto = string;
 /**
  * An opaque continuation for one bounded native history source.
  */
@@ -174,6 +210,19 @@ export type QueueSyncMode = "setup" | "connected" | "disconnected";
  */
 export type CheckpointIdDto = string;
 export type HostProviderDto = "codex" | "claude";
+export type ReviewSelection =
+  | {
+      leadSessionKey: SessionKeyDto;
+      reviewId: ReviewIdDto;
+      runId: RunIdDto;
+      [k: string]: unknown;
+    }
+  | {
+      leadSessionKey: null;
+      reviewId: ReviewIdDto;
+      runId: null;
+      [k: string]: unknown;
+    };
 
 export interface Contracts {
   InvalidateEvent: InvalidateEvent;
@@ -231,15 +280,11 @@ export interface DeliveryReceiptResponse {
   [k: string]: unknown;
 }
 /**
- * The addressed receipt for the message send and receipt lookup routes.
+ * The native input confirmed for this submission within the addressed run/session.
  */
-export interface DeliveryReceipt {
-  createdAt: UtcTimestampDto;
-  runId: RunIdDto;
-  sessionKey: SessionKeyDto;
-  state: DeliveryState;
-  submissionId: SubmissionIdDto;
-  updatedAt: UtcTimestampDto;
+export interface ObservedInputDto {
+  entryId: HistoryEntryIdDto;
+  turnId: HistoryTurnIdDto;
   [k: string]: unknown;
 }
 /**
@@ -262,7 +307,7 @@ export interface ErrorDto {
 /**
  * The resource and event head from the same authorized snapshot.
  */
-export interface HistoryPageResponse {
+export interface Success {
   cursor: EventCursorDto;
   data: HistoryPage;
   [k: string]: unknown;
@@ -463,12 +508,6 @@ export interface RunSummary {
 export interface ReviewSelectionResponse {
   cursor: EventCursorDto;
   data: ReviewSelection;
-  [k: string]: unknown;
-}
-export interface ReviewSelection {
-  leadSessionKey: SessionKeyDto | null;
-  reviewId: ReviewIdDto;
-  runId: RunIdDto | null;
   [k: string]: unknown;
 }
 /**

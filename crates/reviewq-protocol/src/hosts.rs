@@ -1,6 +1,8 @@
 use serde::{Deserialize, Deserializer, Serialize, de};
 
-use crate::scalar::{ReviewIdDto, RunIdDto, SessionKeyDto, SubmissionIdDto};
+use crate::scalar::{
+    HistoryEntryIdDto, HistoryTurnIdDto, ReviewIdDto, RunIdDto, SessionKeyDto, SubmissionIdDto,
+};
 use crate::{Page, Success, UtcTimestampDto};
 
 const MAX_MESSAGE_CHARACTERS: usize = 12_000;
@@ -51,6 +53,7 @@ pub struct DeliveryReceipt {
     pub submission_id: SubmissionIdDto,
     pub run_id: RunIdDto,
     pub session_key: SessionKeyDto,
+    #[serde(flatten)]
     pub state: DeliveryState,
     pub created_at: UtcTimestampDto,
     pub updated_at: UtcTimestampDto,
@@ -60,15 +63,28 @@ pub struct DeliveryReceipt {
 pub type DeliveryReceiptResponse = Success<DeliveryReceipt>;
 
 /// The known durable state of one message submission.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "snake_case")]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(
+    tag = "state",
+    rename_all = "snake_case",
+    rename_all_fields = "camelCase"
+)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub enum DeliveryState {
-    Queued,
-    Dispatching,
-    Started,
-    Rejected,
-    Uncertain,
+    Queued { observed_input: () },
+    Dispatching { observed_input: () },
+    Started { observed_input: ObservedInputDto },
+    Rejected { observed_input: () },
+    Uncertain { observed_input: () },
+}
+
+/// The native input confirmed for this submission within the addressed run/session.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct ObservedInputDto {
+    pub turn_id: HistoryTurnIdDto,
+    pub entry_id: HistoryEntryIdDto,
 }
 
 /// Confirmed run detail, with the exact lead and bounded safe session summaries.

@@ -38,7 +38,7 @@ await build({
 });
 const decoder = await import(pathToFileURL(decoderPath).href);
 verifyReceipt(decoder, fixture);
-verifyFirstReview(decoder, fixture);
+await verifyFirstReview(decoder, fixture);
 console.log("First-review contracts passed in Node.");
 
 if (mode === "--browser") {
@@ -51,11 +51,15 @@ async function readPayloads() {
     "queue",
     "overview",
     "selection",
+    "selectionUnstarted",
     "run",
     "patchPending",
     "patchA",
     "patchB",
     "history",
+    "historyOversized",
+    "observedA",
+    "observedB",
     "sendRequest",
     "eventReplayCursor",
     "invalidate",
@@ -93,7 +97,7 @@ async function verifyInBrowser() {
       const cases = await import("/cases.mjs");
       const decoder = await import("/receipt-decoder.mjs");
       cases.verifyReceipt(decoder, wireFixture);
-      cases.verifyFirstReview(decoder, wireFixture);
+      await cases.verifyFirstReview(decoder, wireFixture);
     }, fixture);
   } finally {
     await browser.close();

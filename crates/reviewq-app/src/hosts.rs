@@ -144,9 +144,26 @@ pub struct DeliveryReceipt {
     pub delivery_id: DeliveryId,
     pub submission_id: SubmissionId,
     pub target: SessionTarget,
-    pub state: DeliveryState,
+    pub outcome: DeliveryOutcome,
     pub created_at_ms: i64,
     pub updated_at_ms: i64,
+}
+
+/// An exact native input address within the receipt's run/session.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ObservedInput {
+    pub turn_id: NativeTurnId,
+    pub entry_id: NativeInputId,
+}
+
+/// The recorded result. Started always includes the input that proves it.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum DeliveryOutcome {
+    Queued,
+    Dispatching,
+    Started(ObservedInput),
+    Rejected,
+    Uncertain,
 }
 
 /// Exact accepted delivery, attempt fence and native binding checked before dispatch.
@@ -167,8 +184,8 @@ pub enum DeliveryObservation {
     NotSubmitted,
     /// A native input provably correlated with this delivery ID.
     Started {
-        turn_id: NativeTurnId,
-        input_id: NativeInputId,
+        delivery_id: DeliveryId,
+        input: ObservedInput,
     },
     /// The host rejected the input definitively.
     Rejected,
@@ -226,7 +243,8 @@ pub trait LeadStore: Send + Sync {
         expected_state: DeliveryState,
     ) -> AppFuture<'_, Option<DeliveryClaim>>;
 
-    /// Commits a matching claim and fence. A stale observation returns conflict.
+    /// Commits a matching claim and fence. Started also requires its observed
+    /// delivery ID to match the claim. A stale observation returns conflict.
     fn finish_delivery(
         &self,
         claim: DeliveryClaim,

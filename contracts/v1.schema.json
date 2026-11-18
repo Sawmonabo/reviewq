@@ -24,6 +24,88 @@
     },
     "DeliveryReceipt": {
       "description": "The addressed receipt for the message send and receipt lookup routes.",
+      "oneOf": [
+        {
+          "properties": {
+            "observedInput": {
+              "type": "null"
+            },
+            "state": {
+              "const": "queued",
+              "type": "string"
+            }
+          },
+          "required": [
+            "state",
+            "observedInput"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "observedInput": {
+              "type": "null"
+            },
+            "state": {
+              "const": "dispatching",
+              "type": "string"
+            }
+          },
+          "required": [
+            "state",
+            "observedInput"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "observedInput": {
+              "$ref": "#/definitions/ObservedInputDto"
+            },
+            "state": {
+              "const": "started",
+              "type": "string"
+            }
+          },
+          "required": [
+            "state",
+            "observedInput"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "observedInput": {
+              "type": "null"
+            },
+            "state": {
+              "const": "rejected",
+              "type": "string"
+            }
+          },
+          "required": [
+            "state",
+            "observedInput"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "observedInput": {
+              "type": "null"
+            },
+            "state": {
+              "const": "uncertain",
+              "type": "string"
+            }
+          },
+          "required": [
+            "state",
+            "observedInput"
+          ],
+          "type": "object"
+        }
+      ],
       "properties": {
         "createdAt": {
           "$ref": "#/definitions/UtcTimestampDto"
@@ -33,9 +115,6 @@
         },
         "sessionKey": {
           "$ref": "#/definitions/SessionKeyDto"
-        },
-        "state": {
-          "$ref": "#/definitions/DeliveryState"
         },
         "submissionId": {
           "$ref": "#/definitions/SubmissionIdDto"
@@ -48,7 +127,6 @@
         "submissionId",
         "runId",
         "sessionKey",
-        "state",
         "createdAt",
         "updatedAt"
       ],
@@ -70,17 +148,6 @@
       ],
       "title": "DeliveryReceiptResponse",
       "type": "object"
-    },
-    "DeliveryState": {
-      "description": "The known durable state of one message submission.",
-      "enum": [
-        "queued",
-        "dispatching",
-        "started",
-        "rejected",
-        "uncertain"
-      ],
-      "type": "string"
     },
     "ErrorCode": {
       "description": "Stable error codes for the public JSON envelope.",
@@ -296,21 +363,13 @@
       "type": "object"
     },
     "HistoryPageResponse": {
-      "description": "The resource and event head from the same authorized snapshot.",
-      "properties": {
-        "cursor": {
-          "$ref": "#/definitions/EventCursorDto"
-        },
-        "data": {
-          "$ref": "#/definitions/HistoryPage"
+      "allOf": [
+        {
+          "$ref": "#/definitions/Success"
         }
-      },
-      "required": [
-        "data",
-        "cursor"
       ],
-      "title": "HistoryPageResponse",
-      "type": "object"
+      "description": "The history HTTP envelope, available as checked JSON bytes.",
+      "title": "HistoryPageResponse"
     },
     "HistoryPart": {
       "description": "Ordered visible content for the first Codex reader.",
@@ -526,6 +585,22 @@
       "required": [
         "id",
         "label"
+      ],
+      "type": "object"
+    },
+    "ObservedInputDto": {
+      "description": "The native input confirmed for this submission within the addressed run/session.",
+      "properties": {
+        "entryId": {
+          "$ref": "#/definitions/HistoryEntryIdDto"
+        },
+        "turnId": {
+          "$ref": "#/definitions/HistoryTurnIdDto"
+        }
+      },
+      "required": [
+        "turnId",
+        "entryId"
       ],
       "type": "object"
     },
@@ -1041,37 +1116,46 @@
       "type": "object"
     },
     "ReviewSelection": {
-      "properties": {
-        "leadSessionKey": {
-          "anyOf": [
-            {
+      "anyOf": [
+        {
+          "properties": {
+            "leadSessionKey": {
               "$ref": "#/definitions/SessionKeyDto"
             },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "reviewId": {
-          "$ref": "#/definitions/ReviewIdDto"
-        },
-        "runId": {
-          "anyOf": [
-            {
-              "$ref": "#/definitions/RunIdDto"
+            "reviewId": {
+              "$ref": "#/definitions/ReviewIdDto"
             },
-            {
+            "runId": {
+              "$ref": "#/definitions/RunIdDto"
+            }
+          },
+          "required": [
+            "reviewId",
+            "runId",
+            "leadSessionKey"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "leadSessionKey": {
+              "type": "null"
+            },
+            "reviewId": {
+              "$ref": "#/definitions/ReviewIdDto"
+            },
+            "runId": {
               "type": "null"
             }
-          ]
+          },
+          "required": [
+            "reviewId",
+            "runId",
+            "leadSessionKey"
+          ],
+          "type": "object"
         }
-      },
-      "required": [
-        "reviewId",
-        "runId",
-        "leadSessionKey"
-      ],
-      "type": "object"
+      ]
     },
     "ReviewSelectionResponse": {
       "description": "The resource and event head from the same authorized snapshot.",
@@ -1315,6 +1399,22 @@
       "maxUtf8Bytes": 512,
       "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f\\ud800-\\udfff]+$",
       "type": "string"
+    },
+    "Success": {
+      "description": "The resource and event head from the same authorized snapshot.",
+      "properties": {
+        "cursor": {
+          "$ref": "#/definitions/EventCursorDto"
+        },
+        "data": {
+          "$ref": "#/definitions/HistoryPage"
+        }
+      },
+      "required": [
+        "data",
+        "cursor"
+      ],
+      "type": "object"
     },
     "TicketKeyDto": {
       "description": "A Jira issue key.",

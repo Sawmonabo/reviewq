@@ -10,7 +10,8 @@ use reviewq_protocol::events::{
     InvalidateEvent, ResetEvent, ResetReasonDto, ResourceKeyDto, ResourceKindDto,
 };
 use reviewq_protocol::history::{
-    HistoryAvailability, HistoryEntry, HistoryPage, HistoryPart, HistoryText, HistoryWindow,
+    HistoryAvailability, HistoryEntry, HistoryPage, HistoryPageEncodeError, HistoryPageResponse,
+    HistoryPart, HistoryText, HistoryWindow, MAX_HISTORY_PAGE_BYTES,
 };
 use reviewq_protocol::queue::{
     CompactTicket, MergeRequestRow, MergeRequestStatus, NamedUpstreamId, QueueFacets, QueuePage,
@@ -18,16 +19,20 @@ use reviewq_protocol::queue::{
     RunSummary, UnmatchedTicket,
 };
 use reviewq_protocol::{
-    CheckpointIdDto, EventCursorDto, FileIdDto, GitShaDto, HistoryEntryIdDto, HistoryGenerationDto,
-    HistoryTurnIdDto, HostProviderDto, MergeRequestIidDto, Page, PatchETagDto, PatchRevisionDto,
-    ProjectIdDto, ResourceIdDto, ReviewIdDto, RevisionDto, RunDetail, RunIdDto, SafeCountDto,
-    SendMessageRequest, SessionKeyDto, SessionSummary, Success, TicketKeyDto, UpstreamIdDto,
-    UtcTimestampDto,
+    CheckpointIdDto, DeliveryReceipt, DeliveryState, EventCursorDto, FileIdDto, GitShaDto,
+    HistoryEntryIdDto, HistoryGenerationDto, HistoryTurnIdDto, HostProviderDto, MergeRequestIidDto,
+    ObservedInputDto, Page, PatchETagDto, PatchRevisionDto, ProjectIdDto, ResourceIdDto,
+    ReviewIdDto, RevisionDto, RunDetail, RunIdDto, SafeCountDto, SendMessageRequest, SessionKeyDto,
+    SessionSummary, SubmissionIdDto, Success, TicketKeyDto, UpstreamIdDto, UtcTimestampDto,
 };
 
 const REVIEW: &str = "rq-alpha";
 const RUN: &str = "run-active";
 const LEAD: &str = "codex:active";
+const TURN: &str = "active-turn-1";
+const ENTRY_A: &str = "native-input-a";
+const ENTRY_B: &str = "native-input-b";
+const SAME_PROMPT: &str = "Reply with the same text.";
 const SHA: &str = "000000000000000000000000000000000000000a";
 const STAMP: &str = "2026-11-01T00:00:00.000Z";
 const PATCH_ETAG: &str = "\"42b57a299915c31e805d8c61c892ef72b03652f047fdddae52d74e427d675f54\"";
@@ -40,6 +45,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     );
     fs::create_dir(&output)?;
     emit_resources(&output)?;
+    emit_history_and_receipt(&output)?;
     emit_request_and_events(&output)?;
     Ok(())
 }
@@ -110,10 +116,19 @@ fn emit_resources(output: &Path) -> Result<(), Box<dyn Error>> {
     emit(
         output,
         "selection",
-        &snapshot(ReviewSelection {
+        &snapshot(ReviewSelection::WithLead {
             review_id: ReviewIdDto::new(REVIEW).unwrap(),
-            run_id: Some(RunIdDto::new(RUN).unwrap()),
-            lead_session_key: Some(SessionKeyDto::new(LEAD).unwrap()),
+            run_id: RunIdDto::new(RUN).unwrap(),
+            lead_session_key: SessionKeyDto::new(LEAD).unwrap(),
+        }),
+    )?;
+    emit(
+        output,
+        "selectionUnstarted",
+        &snapshot(ReviewSelection::WithoutLead {
+            review_id: ReviewIdDto::new(REVIEW).unwrap(),
+            run_id: (),
+            lead_session_key: (),
         }),
     )?;
     emit(
@@ -153,32 +168,90 @@ fn emit_resources(output: &Path) -> Result<(), Box<dyn Error>> {
             Some(PATCH_ETAG),
         )),
     )?;
-    emit(
-        output,
-        "history",
-        &snapshot(HistoryPage {
-            run_id: RunIdDto::new(RUN).unwrap(),
-            session_key: SessionKeyDto::new(LEAD).unwrap(),
-            generation: HistoryGenerationDto::new("source-generation").unwrap(),
-            availability: HistoryAvailability::Available,
-            reset: false,
-            retry_after_ms: None,
-            window: HistoryWindow::new(
-                vec![HistoryEntry {
-                    entry_id: HistoryEntryIdDto::new("active-item-0").unwrap(),
-                    turn_id: Some(HistoryTurnIdDto::new("active-turn-0").unwrap()),
-                    timestamp: None,
-                    parts: vec![HistoryPart::AssistantText {
-                        text: HistoryText::new("Ready.").unwrap(),
-                    }],
-                }],
-                None,
-                None,
-            )
-            .unwrap(),
-        }),
-    )?;
     Ok(())
+}
+
+fn emit_history_and_receipt(output: &Path) -> Result<(), Box<dyn Error>> {
+    let page = history_page(vec![
+        HistoryEntry {
+            entry_id: HistoryEntryIdDto::new("active-item-0").unwrap(),
+            turn_id: Some(HistoryTurnIdDto::new("active-turn-0").unwrap()),
+            timestamp: None,
+            parts: vec![HistoryPart::AssistantText {
+                text: HistoryText::new("Ready.").unwrap(),
+            }],
+        },
+        user_entry(ENTRY_B, SAME_PROMPT.into()),
+        user_entry(ENTRY_A, SAME_PROMPT.into()),
+    ]);
+    let response = HistoryPageResponse::new(page, snapshot(()).cursor);
+    fs::write(output.join("history.json"), response.encode()?)?;
+    for (name, submission, entry) in [
+        ("observedA", "send_identical_a", ENTRY_A),
+        ("observedB", "send_identical_b", ENTRY_B),
+    ] {
+        emit(
+            output,
+            name,
+            &snapshot(DeliveryReceipt {
+                submission_id: SubmissionIdDto::new(submission).unwrap(),
+                run_id: RunIdDto::new(RUN).unwrap(),
+                session_key: SessionKeyDto::new(LEAD).unwrap(),
+                state: DeliveryState::Started {
+                    observed_input: ObservedInputDto {
+                        turn_id: HistoryTurnIdDto::new(TURN).unwrap(),
+                        entry_id: HistoryEntryIdDto::new(entry).unwrap(),
+                    },
+                },
+                created_at: stamp(),
+                updated_at: stamp(),
+            }),
+        )?;
+    }
+
+    let mut text = "\t🧪🧪".repeat(7_281);
+    text.push_str("padding");
+    assert_eq!(text.len(), 64 * 1024);
+    let oversized = || {
+        history_page(
+            (0..5)
+                .map(|index| user_entry(&format!("oversized-{index}"), text.clone()))
+                .collect(),
+        )
+    };
+    let response = HistoryPageResponse::new(oversized(), snapshot(()).cursor);
+    assert!(matches!(
+        response.encode(),
+        Err(HistoryPageEncodeError::TooLarge)
+    ));
+    // A deliberately unbounded Serde capture proves the browser rejects these exact bytes.
+    let bytes = serde_json::to_vec(&snapshot(oversized()))?;
+    assert!(bytes.len() > MAX_HISTORY_PAGE_BYTES);
+    fs::write(output.join("historyOversized.json"), bytes)?;
+    Ok(())
+}
+
+fn history_page(items: Vec<HistoryEntry>) -> HistoryPage {
+    HistoryPage {
+        run_id: RunIdDto::new(RUN).unwrap(),
+        session_key: SessionKeyDto::new(LEAD).unwrap(),
+        generation: HistoryGenerationDto::new("source-generation").unwrap(),
+        availability: HistoryAvailability::Available,
+        reset: false,
+        retry_after_ms: None,
+        window: HistoryWindow::new(items, None, None).unwrap(),
+    }
+}
+
+fn user_entry(entry: &str, text: String) -> HistoryEntry {
+    HistoryEntry {
+        entry_id: HistoryEntryIdDto::new(entry).unwrap(),
+        turn_id: Some(HistoryTurnIdDto::new(TURN).unwrap()),
+        timestamp: None,
+        parts: vec![HistoryPart::UserPrompt {
+            text: HistoryText::new(text).unwrap(),
+        }],
+    }
 }
 
 fn emit_request_and_events(output: &Path) -> Result<(), Box<dyn Error>> {

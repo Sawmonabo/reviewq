@@ -2,7 +2,10 @@ export function verifyReceipt({ decodeDeliveryReceipt, decodeFailure }, fixture)
   const address = { submissionId: "send_42", runId: "run_active", sessionKey: "codex:active" };
   const receipt = decodeDeliveryReceipt(fixture.success, address);
   expect(receipt?.cursor === "9007199254740993", "preserves the exact Serde cursor");
-  expect(receipt.data.state === "queued", "decodes the receipt state");
+  expect(
+    receipt.data.state === "queued" && receipt.data.observedInput === null,
+    "decodes the queued receipt without an observed input",
+  );
   expect(
     decodeDeliveryReceipt(fixture.additive, address)?.cursor === receipt.cursor,
     "accepts an additive v1 field",
@@ -63,13 +66,16 @@ export function verifyReceipt({ decodeDeliveryReceipt, decodeFailure }, fixture)
   );
 }
 
-export function verifyFirstReview({ firstReviewDecoders: read }, { payloads, expectedPatchETag }) {
+export async function verifyFirstReview(
+  { firstReviewDecoders: read, decodeDeliveryReceipt, findObservedInput },
+  { payloads, expectedPatchETag },
+) {
   const reviewId = "rq-alpha";
   const runId = "run-active";
   const sessionKey = "codex:active";
   const queue = read.queue(payloads.queue);
   const overview = read.overview(payloads.overview);
-  const selection = read.selection(payloads.selection);
+  const selection = read.selection(payloads.selection, { reviewId, runId });
   const run = read.run(payloads.run);
 
   expect(queue?.data.items[0]?.reviewId === reviewId, "reads the queued review");
@@ -88,6 +94,23 @@ export function verifyFirstReview({ firstReviewDecoders: read }, { payloads, exp
       run.data.leadSessionKey === sessionKey,
     "reads the exact scoped lead and run",
   );
+  expect(
+    read.selection(payloads.selectionUnstarted, { reviewId })?.data.leadSessionKey === null &&
+      !read.selection(payloads.selectionUnstarted, { reviewId, runId }) &&
+      !read.selection(payloads.selection, { reviewId: "rq-beta" }) &&
+      !read.selection(payloads.selection, { reviewId, runId: "run-other" }),
+    "requires the requested review and any explicit run before enabling actions",
+  );
+  expect(
+    !read.selection(JSON.stringify({ ...selection, data: { ...selection.data, runId: null } }), {
+      reviewId,
+    }) &&
+      !read.selection(
+        JSON.stringify({ ...selection, data: { ...selection.data, leadSessionKey: null } }),
+        { reviewId },
+      ),
+    "rejects either half of an identified lead",
+  );
 
   const patchAddress = { reviewId, revision: "patch-a" };
   const pending = read.patch(payloads.patchPending, patchAddress)?.data.items[0];
@@ -103,13 +126,64 @@ export function verifyFirstReview({ firstReviewDecoders: read }, { payloads, exp
   );
   expect(!read.patch(payloads.patchB, patchAddress), "rejects the same bytes at another revision");
 
-  const history = read.history(payloads.history);
+  const address = { runId, sessionKey };
+  const encoder = new TextEncoder();
+  const history = await read.readHistory(new Response(encoder.encode(payloads.history)), address);
   expect(
     history?.data.runId === runId &&
       history.data.sessionKey === sessionKey &&
       history.data.items[0]?.timestamp === null &&
       history.data.items[0]?.parts[0]?.kind === "assistant_text",
     "reads native session history with unknown time",
+  );
+  const oversized = encoder.encode(payloads.historyOversized);
+  let offset = 0;
+  let cancelled = false;
+  const stream = new ReadableStream({
+    pull(controller) {
+      if (offset >= oversized.byteLength) {
+        controller.close();
+        return;
+      }
+      controller.enqueue(oversized.subarray(offset, offset + 32 * 1024));
+      offset += 32 * 1024;
+    },
+    cancel() {
+      cancelled = true;
+    },
+  });
+  expect(
+    payloads.historyOversized.length < 256 * 1024 &&
+      oversized.byteLength > 256 * 1024 &&
+      !read.history(oversized, address) &&
+      !(await read.readHistory(new Response(stream), address)) &&
+      cancelled,
+    "rejects the encoded page before decoding or collecting the oversized stream",
+  );
+  const observedA = decodeDeliveryReceipt(payloads.observedA, {
+    ...address,
+    submissionId: "send_identical_a",
+  });
+  const observedB = decodeDeliveryReceipt(payloads.observedB, {
+    ...address,
+    submissionId: "send_identical_b",
+  });
+  const entryA = observedA && findObservedInput(observedA.data, history.data);
+  const entryB = observedB && findObservedInput(observedB.data, history.data);
+  expect(
+    entryA?.entryId === "native-input-a" &&
+      entryB?.entryId === "native-input-b" &&
+      entryA.turnId === entryB.turnId &&
+      entryA.parts[0]?.text === entryB.parts[0]?.text &&
+      !findObservedInput(observedA.data, { ...history.data, sessionKey: "codex:other" }),
+    "matches identical sends by their exact confirmed native entry within the selected session",
+  );
+  expect(
+    !decodeDeliveryReceipt(
+      JSON.stringify({ ...observedA, data: { ...observedA.data, observedInput: null } }),
+      { ...address, submissionId: "send_identical_a" },
+    ),
+    "rejects started receipts without matched native input",
   );
   const message = read.sendRequest(payloads.sendRequest);
   expect(message?.submissionId === "send_42", "reads the exact serialized mutation request");

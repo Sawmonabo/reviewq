@@ -14,6 +14,8 @@
 
 Mount `GET /api/v1/queue`, selected review/run detail, `/reviews/{reviewId}/changes/{files,patch,discussions}` under the same prefix, a scoped history page/content/stream and global `GET /api/v1/events`. Read the patch by `fileId` and revision. The selected session's messages POST and submission-ID GET use `/api/v1/runs/{runId}/sessions/{sessionKey}` as their base. The in-session CLI calls the documented native bind operation. Use the authenticated MCP tool schemas from the same entry; a native history source/receipt must match the shared contract.
 
+Serve the scoped history page through `HistoryPageResponse::encode` and keep a valid continuation when shortening an over-budget page. Move the development history reader into the browser API client so it caps the response stream before assembling and decoding JSON. Read back the addressed receipt after a lost send reply and reconcile its confirmed native turn and entry with the selected history page.
+
 ## Reproduce from a clean checkout
 
 Use a disposable Linux/WSL user or VM, an independently signed-in task-owned Codex profile, two empty Git checkouts and a fresh desktop browser profile. Pin the selected Codex executable/root and service address for the three terminals. One account runs ordinary foreground `reviewq serve` with its own data, Rust binary and web assets. The production validation mode disables sends. Keep it for read-only visual fixtures. Before PACK is available, the development helper stages the same asset/skill layout and private project MCP grant inside the disposable account. Run only the synthetic GitLab/Jira source for this exercise. Write no settings into an everyday account.

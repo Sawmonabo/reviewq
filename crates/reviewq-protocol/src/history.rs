@@ -1,12 +1,15 @@
 //! Bounded visible page for one exact registered source.
 
+use std::fmt;
+use std::io::{self, Write};
+
 use serde::Serialize;
 
 use crate::Success;
 use crate::UtcTimestampDto;
 use crate::scalar::{
-    HistoryCursorDto, HistoryEntryIdDto, HistoryGenerationDto, HistoryTurnIdDto, RunIdDto,
-    SafeCountDto, SessionKeyDto,
+    EventCursorDto, HistoryCursorDto, HistoryEntryIdDto, HistoryGenerationDto, HistoryTurnIdDto,
+    RunIdDto, SafeCountDto, SessionKeyDto,
 };
 
 /// Encoded JSON budget for one history page.
@@ -29,7 +32,84 @@ pub struct HistoryPage {
     pub window: HistoryWindow,
 }
 
-pub type HistoryPageResponse = Success<HistoryPage>;
+/// The history HTTP envelope, available as checked JSON bytes.
+#[derive(Debug)]
+#[cfg_attr(
+    feature = "schema",
+    derive(schemars::JsonSchema),
+    schemars(transparent)
+)]
+pub struct HistoryPageResponse(Success<HistoryPage>);
+
+/// An over-budget history page or a JSON serializer failure.
+#[derive(Debug)]
+pub enum HistoryPageEncodeError {
+    TooLarge,
+    Serialization(serde_json::Error),
+}
+
+impl HistoryPageResponse {
+    pub fn new(data: HistoryPage, cursor: EventCursorDto) -> Self {
+        Self(Success { data, cursor })
+    }
+
+    /// Encodes the entire HTTP envelope, including JSON escapes, within 256 KiB.
+    pub fn encode(&self) -> Result<Vec<u8>, HistoryPageEncodeError> {
+        let mut writer = HistoryPageWriter::default();
+        match serde_json::to_writer(&mut writer, &self.0) {
+            Ok(()) => Ok(writer.bytes),
+            Err(_) if writer.overflowed => Err(HistoryPageEncodeError::TooLarge),
+            Err(error) => Err(HistoryPageEncodeError::Serialization(error)),
+        }
+    }
+}
+
+impl fmt::Display for HistoryPageEncodeError {
+    fn fmt(&self, output: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let message = match self {
+            Self::TooLarge => "history page exceeds its encoded byte budget",
+            Self::Serialization(_) => "history page serialization failed",
+        };
+        output.write_str(message)
+    }
+}
+
+impl std::error::Error for HistoryPageEncodeError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::TooLarge => None,
+            Self::Serialization(error) => Some(error),
+        }
+    }
+}
+
+#[derive(Default)]
+struct HistoryPageWriter {
+    bytes: Vec<u8>,
+    overflowed: bool,
+}
+
+impl Write for HistoryPageWriter {
+    fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+        if bytes.len() > MAX_HISTORY_PAGE_BYTES - self.bytes.len() {
+            self.overflowed = true;
+            return Err(io::Error::other("history page byte budget exceeded"));
+        }
+        let required = self.bytes.len() + bytes.len();
+        if required > self.bytes.capacity() {
+            let capacity = (2 * self.bytes.capacity())
+                .max(required)
+                .min(MAX_HISTORY_PAGE_BYTES);
+            self.bytes.reserve_exact(capacity - self.bytes.len());
+        }
+        self.bytes.extend_from_slice(bytes);
+        Ok(bytes.len())
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
+}
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]

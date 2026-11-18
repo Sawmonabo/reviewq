@@ -178,12 +178,19 @@ pub struct RunSummary {
 }
 
 #[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(untagged, rename_all_fields = "camelCase")]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-pub struct ReviewSelection {
-    pub review_id: ReviewIdDto,
-    pub run_id: Option<RunIdDto>,
-    pub lead_session_key: Option<SessionKeyDto>,
+pub enum ReviewSelection {
+    WithLead {
+        review_id: ReviewIdDto,
+        run_id: RunIdDto,
+        lead_session_key: SessionKeyDto,
+    },
+    WithoutLead {
+        review_id: ReviewIdDto,
+        run_id: (),
+        lead_session_key: (),
+    },
 }
 
 pub type ReviewSelectionResponse = Success<ReviewSelection>;

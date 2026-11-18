@@ -15,7 +15,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             submission_id: SubmissionIdDto::new("send_42").unwrap(),
             run_id: RunIdDto::new("run_active").unwrap(),
             session_key: SessionKeyDto::new("codex:active").unwrap(),
-            state: DeliveryState::Queued,
+            state: DeliveryState::Queued { observed_input: () },
             created_at: UtcTimestampDto::new("2026-11-01T00:00:00.000Z").unwrap(),
             updated_at: UtcTimestampDto::new("2026-11-01T00:00:00.000Z").unwrap(),
         },
