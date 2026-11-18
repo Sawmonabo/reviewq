@@ -1,0 +1,37 @@
+[
+  {
+    "alias": "active",
+    "parent": null,
+    "provider": "codex",
+    "review": "review-0",
+    "state": "working"
+  },
+  {
+    "alias": "child",
+    "parent": "active",
+    "provider": "codex",
+    "review": "review-0",
+    "state": "completed"
+  },
+  {
+    "alias": "earlier",
+    "parent": null,
+    "provider": "codex",
+    "review": "review-0",
+    "state": "completed"
+  },
+  {
+    "alias": "quiet",
+    "parent": null,
+    "provider": "claude",
+    "review": "review-1",
+    "state": "completed"
+  },
+  {
+    "alias": "large",
+    "parent": null,
+    "provider": "codex",
+    "review": "review-2",
+    "state": "completed"
+  }
+]

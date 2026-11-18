@@ -6,74 +6,11 @@
 
 ## Source material
 
-Implement `tools/dev/seed-review` and keep the input manifest and small hand-authored examples under `fixtures/reviews/`. Use only synthetic text, fixed UTC timestamps, LF and UTF-8. Give the generator a required output directory. Fail on an occupied destination. Accept a deterministic preset, use relative paths in its manifest and write standard provider-shaped inputs, expected IDs, version, byte lengths and SHA-256 digests. The generated inputs can travel to a second host without access to the original checkout. Generate long bodies locally. Keep the timeline of actions separate from the initial data so an independent reviewer can cause a missed event, delivery or late reply on cue.
+Keep the input manifest and small source examples under `fixtures/reviews/`. Use synthetic text, fixed UTC timestamps, LF and UTF-8. Each preset writes a versioned manifest with relative paths, byte lengths and SHA-256 digests. Generate long bodies locally and keep the timeline of actions separate from the initial data. The generated inputs can travel to a second host without access to the original checkout.
 
-This Python 3 recipe creates the worked source manifest, patch files, native-input observations and event script in a new directory. Copy the block unchanged into Python on either machine. It prints the directory and deterministic manifest digest. The document hashes cover the raw UTF-8 patch bodies. GitLab discussion wrappers, response headers and encoded transfer size have separate measurements.
+Run `tools/dev/seed-review --preset worked --out <new-directory>` with Python 3.8 or later. The parent must exist. The generator creates the destination and refuses any existing path. It prints the output path and manifest SHA-256.
 
-```python
-import hashlib
-import json
-import tempfile
-from pathlib import Path
-
-root = Path(tempfile.mkdtemp(prefix="reviewq-worked-"))
-def put_json(name, obj):
-    data = json.dumps(obj, sort_keys=True, ensure_ascii=False, indent=2) + "\n"
-    (root / name).write_bytes(data.encode("utf-8"))
-
-cases = (
-    ("quiet", 20, 596, "d2beb4febf98c5a723cb01ce717537855da75c23ce883e4a3ff0f68f318782f5"),
-    ("active", 1200, 38598, "860e21b1c8ecc9c3fc758c0bd9ebbaf0dd4ca7a2af18af71e0871e5beec5d8d9"),
-    ("large", 12000, 409799, "28301b2f3985845ed768817514257a5334d3af9c1f2cfba98a00450c4b9fc0f3"),
-)
-for name, count, size, digest in cases:
-    header = f"@@ -0,0 +1,{count} @@"
-    additions = [f"+export const example{i} = {i};" for i in range(count)]
-    data = "\n".join([header, *additions]).encode("utf-8")
-    assert len(data) == size and hashlib.sha256(data).hexdigest() == digest
-    (root / f"{name}.patch").write_bytes(data)
-
-reviews = []
-worked = [("alpha", 41, 41, "active"), ("beta", 41, 42, "quiet"), ("alpha", 43, 43, "large")]
-for i in range(12):
-    project, iid, ticket, case = worked[i] if i < 3 else ("alpha", 100+i, 100+i, "quiet")
-    reviews.append(dict(project=project, project_id={"alpha": 11, "beta": 22}[project],
-                        iid=iid, ticket=f"RQ-{ticket}", title="Review the parser" if i < 2 else f"Review {i}",
-                        head=f"{10+i:040x}", base=f"{1000+i:040x}", start=f"{2000+i:040x}",
-                        path="src/example.ts", patch=f"{case}.patch", alias=f"review-{i}"))
-put_json("reviews.json", reviews)
-sessions = [
-    ("active", "review-0", "codex", "working", None),
-    ("child", "review-0", "codex", "completed", "active"),
-    ("earlier", "review-0", "codex", "completed", None),
-    ("quiet", "review-1", "claude", "completed", None),
-    ("large", "review-2", "codex", "completed", None),
-]
-put_json("sessions.json", [dict(alias=a, review=r, provider=p, state=s, parent=b)
-                            for a, r, p, s, b in sessions])
-def entry(lead, i, text):
-    return dict(lead=lead, id=f"{lead}-item-{i}", turn=f"{lead}-turn-{i}",
-                text=text, observed_at="2026-11-01T00:00:00Z")
-put_json("history.json", [entry("active", i, f"Update {i} " + "Visible conversation text. " * 10)
-                           for i in range(100)] + [entry("quiet", 0, "Quiet complete")])
-put_json("discussions.json", [dict(review=r, id=f"{r}-thread-{n}", new_line=n)
-                               for r in ("review-0", "review-2") for n in (8, 600)])
-put_json("timeline.json", [
-    {"action": "invalidate", "review": "review-0"},
-    {"action": "add-thread", "review": "review-0", "new_line": 1060},
-    {"action": "add-thread", "review": "review-0", "new_line": 12},
-    {"action": "append", "entry": entry("active", 100, "Live message 1")},
-    {"action": "close-stream", "lead": "active"},
-    {"action": "append", "entry": entry("active", 101, "Live message 2")},
-])
-put_json("manifest.json", {"version": 1, "outbox": [], "files": {
-    p.name: {"bytes": p.stat().st_size, "sha256": hashlib.sha256(p.read_bytes()).hexdigest()}
-    for p in sorted(root.iterdir())
-}})
-print(root, hashlib.sha256((root / "manifest.json").read_bytes()).hexdigest())
-```
-
-The worked manifest digest is `7aff00aad90e93bbb4abc2297c1305077696786fce28c2f3122f3fb45e92b313`. It lists eight input files containing 12 review rows, five session/child aliases and 101 initial history entries across Active and Quiet. The driver maps these source observations to real revision-bound thread positions and provider-native shapes. The application exposes its ordinary versioned projections. To interrupt the browser stream, use the actual browser reconnect path and expose fixture controls through the driver's own listener.
+The version-1 source inputs live in [`fixtures/reviews/worked/`](../../../fixtures/reviews/worked/). The generator copies `reviews.json`, `sessions.json`, `discussions.json` and `timeline.json`, generates `quiet.patch`, `active.patch`, `large.patch` and `history.json`, then writes `manifest.json`. The worked manifest digest is `7aff00aad90e93bbb4abc2297c1305077696786fce28c2f3122f3fb45e92b313`. It indexes eight inputs containing 12 review rows, five session aliases and 101 initial conversation observations. All paths are relative to the export. The patch hashes cover the raw UTF-8 patch bodies. GitLab discussion wrappers, response headers and encoded transfer size have separate measurements.
 
 ### Worked review set
 
@@ -83,9 +20,21 @@ The worked manifest digest is `7aff00aad90e93bbb4abc2297c1305077696786fce28c2f31
 | Quiet, `forge/beta!41`, ticket `RQ-42` | Different project, same displayed IID and similar MR title. Completed run, 20 additions, short history, a saved report, no pending activity or live output. | Exactly 20 added lines. The last line contains `example19 = 19`. The run, report and draft differ from Active. Reading this review never starts a turn. |
 | Large, `forge/alpha!43`, ticket `RQ-43` | 12,000 additions in `src/example.ts`, discussions at 8 and 600, a separate mixed/wrapped file and a long read-only history. | One selected patch with 12,000 code lines plus the hunk header. Find reaches `example11999 = 11999` before visiting the last screen. A switch to the mixed file transfers only that file's patch. |
 
-Use a stable, distinct GitLab instance/project ID/IID, revision triple, path, ReviewQ run, native root/session, turn/item and report receipt for every worked identity. The version-1 source indices are `0..11` for 12 queue entries and `0..99` for 100 native entries on Active. Give each entry its own ID, turn and visible `Update i` marker. The basic profile mounts the ordinary working run with the two original discussions and empty outbox. Deliver two further native items with unique IDs, the second across reconnect. Quiet and Large receive neither item. For the real native exercise, register actual host IDs and record their mapping to the synthetic review aliases in private output. A fabricated file never demonstrates native delivery.
+| Patch | Raw bytes | SHA-256 | Zero-based byte ranges for added lines, excluding LF |
+| --- | --- | --- | --- |
+| `quiet.patch` | 596 | `d2beb4febf98c5a723cb01ce717537855da75c23ce883e4a3ff0f68f318782f5` | Line 20 `[567, 596)` |
+| `active.patch` | 38,598 | `860e21b1c8ecc9c3fc758c0bd9ebbaf0dd4ca7a2af18af71e0871e5beec5d8d9` | Line 820 `[26007, 26038)`, line 1200 `[38565, 38598)` |
+| `large.patch` | 409,799 | `28301b2f3985845ed768817514257a5334d3af9c1f2cfba98a00450c4b9fc0f3` | Line 12000 `[409764, 409799)` |
 
-The **reference profile** projects these inputs into 12 queue MRs, exactly one working registered lead with 100 entries, empty outbox and one selected file with discussions at 8 and 600. For each fresh launch pick either the byte-exact 1,200- or 12,000-line patch for that file. The production shell, Files/All conversations controls, inline open/close, working Agent, live append/reconnect, draft, send-once and return must all operate. Keep this frozen comparison profile separate from the populated three-review switching and physical desktop scenarios. Supply both profiles without a resident service or connection per review.
+The ranges start at the patch's `+` prefix. Each patch has one hunk header and ends at the final line's semicolon. The worked review aliases `review-0`, `review-1` and `review-2` use project ID/IID pairs `(11, 41)`, `(22, 41)` and `(11, 43)`. Row index `i` uses `10 + i` for head, `1000 + i` for base and `2000 + i` for start, each zero-padded to 40 hexadecimal digits. Active's initial markers run from `Update 0` through `Update 99` with corresponding `active-item-0`…`active-item-99` and `active-turn-0`…`active-turn-99`. Quiet's sole observation is `quiet-item-0` in `quiet-turn-0`, with text `Quiet complete`. The timeline adds `active-item-100` (`Live message 1`), closes the stream, then adds `active-item-101` (`Live message 2`). The initial outbox is empty.
+
+### Provider replay and release profiles
+
+The worked export supplies the source observations and cues. The provider driver maps them to real revision-bound thread positions and provider-native shapes. It also supplies Quiet's saved report and Large's mixed file and long history. To trigger an interruption, use controls on the driver's listener and the actual browser reconnect path.
+
+Bind each worked review to a distinct GitLab instance/project ID/IID, revision triple, path, ReviewQ run, native root/session, turn/item and report receipt. Deliver both additional items to Active. For the real native exercise, register actual host IDs, verify delivery from native evidence and record their mapping to the synthetic review aliases in private output.
+
+The **measurement profile** projects these inputs into 12 queue MRs, exactly one working registered lead with 100 entries, empty outbox and one selected file with discussions at 8 and 600. For each fresh launch pick either the byte-exact 1,200- or 12,000-line patch for that file. The production shell, Files/All conversations controls, inline open/close, working Agent, live append/reconnect, draft, send-once and return must all operate. Use the populated three-review profile for switching and physical desktop scenarios. Supply both profiles without a resident service or connection per review.
 
 | Preset | Additional data and exercise |
 | --- | --- |
@@ -100,4 +49,26 @@ Expose the fixture through a loopback-only provider driver, using the same Rust 
 
 ## Handoff
 
-Publish the implemented invocation as `tools/dev/seed-review --preset worked --out <new-directory>`. Move the worked recipe into that generator at handoff and replace this document’s code block with its invocation. Keep the independent manifest digest and expected observations here. Document the actual source files, port discovery, independent manifest checker and the command to run the temporary provider. Provide `empty`, `busy`, `rich` and `reader` with the same output convention. The generator supplies inputs, never pre-rendered review rows or a screenshot as the UI. Run twice in separate directories, compare normalized manifests and input bytes, then open the working set in [SLICE](first-review.md). Verify an independent reader can obtain the final line, distinct review keys, expected native markers and raw bytes from the exported inputs in an empty directory. Retain the required measurement evidence and remove the generated fixture directories when verification finishes. Fixture generation and visual inspection are development tools. The [test policy](../../../AGENTS.md) applies to any permanent cases added around them.
+Run the worked command twice into separate directories and compare the manifest and all input bytes. To verify an export on any host with Python 3, set `new_directory` to the exported directory and run this checker. It reads only the export.
+
+```sh
+python3 -I - "$new_directory" <<'PY'
+import hashlib
+import json
+import sys
+from pathlib import Path
+
+root = Path(sys.argv[1])
+manifest = (root / "manifest.json").read_bytes()
+assert hashlib.sha256(manifest).hexdigest() == "7aff00aad90e93bbb4abc2297c1305077696786fce28c2f3122f3fb45e92b313"
+files = json.loads(manifest)["files"]
+assert set(p.name for p in root.iterdir()) == {"manifest.json", *files}
+for name, expected in files.items():
+    data = (root / name).read_bytes()
+    assert len(data) == expected["bytes"], name
+    assert hashlib.sha256(data).hexdigest() == expected["sha256"], name
+print("Worked manifest and all eight input files match")
+PY
+```
+
+The next FIXTURE slices provide `empty`, `busy`, `rich` and `reader` with the same output convention, plus the temporary provider command and port discovery. Open the working set through the production entry points in [SLICE](first-review.md). Compare the final line, distinct review keys, native markers and raw bytes against the exported sources. Retain the required measurement evidence and remove the generated fixture directories when verification finishes. Fixture generation and visual inspection are development tools. The [test policy](../../../AGENTS.md) applies to any permanent cases added around them.

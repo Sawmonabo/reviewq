@@ -1,0 +1,40 @@
+[
+  {
+    "action": "invalidate",
+    "review": "review-0"
+  },
+  {
+    "action": "add-thread",
+    "new_line": 1060,
+    "review": "review-0"
+  },
+  {
+    "action": "add-thread",
+    "new_line": 12,
+    "review": "review-0"
+  },
+  {
+    "action": "append",
+    "entry": {
+      "id": "active-item-100",
+      "lead": "active",
+      "observed_at": "2026-11-01T00:00:00Z",
+      "text": "Live message 1",
+      "turn": "active-turn-100"
+    }
+  },
+  {
+    "action": "close-stream",
+    "lead": "active"
+  },
+  {
+    "action": "append",
+    "entry": {
+      "id": "active-item-101",
+      "lead": "active",
+      "observed_at": "2026-11-01T00:00:00Z",
+      "text": "Live message 2",
+      "turn": "active-turn-101"
+    }
+  }
+]
