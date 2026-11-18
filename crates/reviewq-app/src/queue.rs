@@ -1,7 +1,7 @@
 //! Verified review observations and scoped selection reads.
 
-use reviewq_domain::identity::{GitSha, MrIdentity, ReviewId, RunId};
-use reviewq_domain::session::LeadTarget;
+use reviewq_domain::identity::{GitSha, MrIdentity, ReviewId, Revision, RunId, SessionKey};
+use reviewq_domain::session::{HostProvider, LeadTarget};
 
 use crate::access::{Actor, AppError, AppFuture};
 use crate::events::Snapshot;
@@ -61,4 +61,96 @@ pub trait ReviewLookup: Send + Sync {
         review_id: ReviewId,
         run_id: Option<RunId>,
     ) -> AppFuture<'_, Snapshot<SelectedLead>>;
+}
+
+/// Maximum rows in one compact queue, overview, or run-detail read.
+pub const MAX_QUEUE_PAGE: u16 = 100;
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct QueuePosition {
+    pub generation: Revision,
+    pub updated_at_ms: i64,
+    pub review_id: ReviewId,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct QueueItem {
+    pub review_id: ReviewId,
+    pub source: ReviewSource,
+    pub registered_lead_count: u64,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct QueuePage {
+    pub items: Vec<QueueItem>,
+    pub next: Option<QueuePosition>,
+    pub total: u64,
+    pub settings_revision: Revision,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RunPosition {
+    pub started_at_ms: i64,
+    pub run_id: RunId,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RunSummary {
+    pub position: RunPosition,
+    pub lead_session_key: SessionKey,
+    pub provider: HostProvider,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ReviewOverview {
+    pub item: QueueItem,
+    pub settings_revision: Revision,
+    pub runs: Vec<RunSummary>,
+    pub next_run: Option<RunPosition>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SessionSummary {
+    pub session_key: SessionKey,
+    pub parent: Option<SessionKey>,
+    pub provider: HostProvider,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RunDetail {
+    pub lead: LeadTarget,
+    pub sessions: Vec<SessionSummary>,
+    pub next_session: Option<SessionKey>,
+}
+
+pub trait QueueStore: Send + Sync {
+    /// Persists verified provider observations after provider I/O has completed.
+    fn observe_reviews(
+        &self,
+        actor: Actor,
+        source: Vec<ReviewSource>,
+    ) -> AppFuture<'_, Snapshot<Vec<ReviewId>>>;
+
+    fn read_queue(
+        &self,
+        actor: Actor,
+        after: Option<QueuePosition>,
+        limit: u16,
+    ) -> AppFuture<'_, Snapshot<QueuePage>>;
+
+    fn read_review(
+        &self,
+        actor: Actor,
+        review_id: ReviewId,
+        after: Option<RunPosition>,
+        limit: u16,
+    ) -> AppFuture<'_, Snapshot<ReviewOverview>>;
+
+    fn read_run(
+        &self,
+        actor: Actor,
+        run_id: RunId,
+        after: Option<SessionKey>,
+        limit: u16,
+    ) -> AppFuture<'_, Snapshot<RunDetail>>;
 }

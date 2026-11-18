@@ -1,0 +1,47 @@
+//! Current project membership and the authority epochs of managed checkouts.
+
+use reviewq_domain::identity::{GitLabOrigin, GrantId, ProjectId, Revision};
+use reviewq_domain::session::AbsolutePath;
+
+use crate::access::{Actor, AppFuture};
+use crate::events::Snapshot;
+
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+pub struct ConfiguredProject {
+    pub origin: GitLabOrigin,
+    pub project_id: ProjectId,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct GrantBinding {
+    pub id: GrantId,
+    pub issuing_project: ConfiguredProject,
+    pub checkout: AbsolutePath,
+    pub common_dir: AbsolutePath,
+    pub epoch: Revision,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct WorkspaceConfig {
+    pub projects: Vec<ConfiguredProject>,
+    pub grants: Vec<GrantBinding>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct WorkspaceContext {
+    pub revision: Revision,
+    pub projects: Vec<ConfiguredProject>,
+}
+
+pub trait WorkspaceStore: Send + Sync {
+    fn workspace_context(&self, actor: Actor) -> AppFuture<'_, Snapshot<WorkspaceContext>>;
+
+    /// Replaces active memberships and checkout authority under one settings revision.
+    /// A revoked or rotated grant cannot be reactivated at its older epoch.
+    fn replace_workspace(
+        &self,
+        actor: Actor,
+        expected: Revision,
+        input: WorkspaceConfig,
+    ) -> AppFuture<'_, Snapshot<WorkspaceContext>>;
+}

@@ -1,0 +1,527 @@
+//! Durable admission, claim fencing, reconciliation and exact receipt lookup.
+
+use reviewq_app::access::{Actor, ActorScope, AppError};
+use reviewq_app::events::{ResourceKey, Snapshot};
+use reviewq_app::hosts::{
+    DeliveryClaim, DeliveryObservation, DeliveryOutcome, DeliveryReceipt, DeliveryRecoveryCursor,
+    DeliveryWork, MessageBody, MessagePurpose, ObservedInput, RecoverableDelivery,
+    RecoverableDeliveryState, ReportQuote, ReportRef, SubmitMessage,
+};
+use reviewq_domain::identity::{DeliveryFence, DeliveryId, Revision, SubmissionId};
+use reviewq_domain::session::{LeadTarget, SessionTarget};
+use rusqlite::{Connection, ErrorCode, OptionalExtension, Row, params};
+use sha2::{Digest, Sha256};
+use uuid::Uuid;
+
+use super::allow_target;
+use crate::StoreError;
+use crate::connection::WriteTx;
+use crate::events::{now_ms, snapshot};
+use crate::queue::{lead_for_run, parse, text};
+use crate::workspace::{actor_key, hash_field};
+
+const OPERATION: &str = "message";
+const RECEIPT_COLUMNS: &str =
+    "d.delivery_id, d.submission_id, r.review_id, d.run_id, d.session_key, d.state,
+     d.created_at_ms, d.updated_at_ms, d.native_turn_id, d.native_input_id, d.fence,
+     d.purpose, d.claim_kind, m.grant_id, m.grant_epoch";
+const RECEIPT_JOIN: &str =
+    "outbox d JOIN runs r ON r.run_id=d.run_id
+     JOIN mutation_receipts m ON m.actor_key=d.actor_key AND m.operation=d.operation AND m.submission_id=d.submission_id";
+
+struct Delivery {
+    receipt: DeliveryReceipt,
+    fence: DeliveryFence,
+    purpose: MessagePurpose,
+    claim: Option<ClaimKind>,
+    grant: Option<(String, Revision)>,
+}
+
+#[derive(Clone, Copy, Eq, PartialEq)]
+enum ClaimKind {
+    Dispatch,
+    Reconcile,
+}
+
+impl ClaimKind {
+    fn from_work(work: &DeliveryWork) -> Self {
+        match work {
+            DeliveryWork::Dispatch { .. } => Self::Dispatch,
+            DeliveryWork::Reconcile => Self::Reconcile,
+        }
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            Self::Dispatch => "dispatch",
+            Self::Reconcile => "reconcile",
+        }
+    }
+}
+
+pub(super) fn admit(
+    tx: &mut WriteTx<'_>,
+    actor: Actor,
+    input: SubmitMessage,
+) -> Result<Snapshot<DeliveryReceipt>, StoreError> {
+    let registered = validate_target(&tx.sql, &actor, input.target.target())?;
+    if registered != input.target {
+        return Err(AppError::Conflict.into());
+    }
+    if (input.purpose == MessagePurpose::ReportFeedback) != input.report_ref.is_some() {
+        return Err(AppError::InvalidRequest.into());
+    }
+    let digest = request_digest(&input);
+    let key = actor_key(&actor);
+    if let Some((delivery, existing)) = find_receipt(&tx.sql, &key, &input.submission_id)? {
+        if digest.as_slice() != existing {
+            return Err(AppError::IdempotencyConflict.into());
+        }
+        return snapshot(
+            &tx.sql,
+            by_id(&tx.sql, &delivery)?
+                .ok_or(AppError::Internal)?
+                .receipt,
+        );
+    }
+    let delivery_id: DeliveryId = parse(&Uuid::new_v4().to_string())?;
+    let grant = match actor.scope() {
+        ActorScope::CheckoutGrant(grant) => Some(grant.as_str()),
+        _ => None,
+    };
+    tx.sql.execute(
+        "INSERT INTO mutation_receipts(actor_key, operation, submission_id, request_digest, grant_id, grant_epoch)
+         VALUES(?1, ?2, ?3, ?4, ?5, ?6)",
+        params![key.as_slice(), OPERATION, input.submission_id.as_str(), digest.as_slice(),
+                grant, actor.grant_epoch().map(Revision::as_sqlite_integer)],
+    )?;
+    let quote = input
+        .report_ref
+        .as_ref()
+        .and_then(|reference| reference.quote.as_ref());
+    let offset = quote
+        .map(|quote| i64::try_from(quote.offset()))
+        .transpose()
+        .map_err(|_| AppError::Internal)?;
+    let time = now_ms()?;
+    tx.sql.execute(
+        "INSERT INTO outbox(delivery_id, actor_key, operation, submission_id, run_id, session_key, purpose,
+                            body, receipt_id, report_hash, quoted_text, quoted_offset, state,
+                            created_at_ms, updated_at_ms)
+         VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, 'queued', ?13, ?13)",
+        params![
+            delivery_id.as_str(), key.as_slice(), OPERATION, input.submission_id.as_str(),
+            input.target.run_id().as_str(), input.target.session_key().as_str(), purpose_label(input.purpose),
+            input.text.as_str(), input.report_ref.as_ref().map(|r| r.receipt_id.as_str()),
+            input.report_ref.as_ref().map(|r| r.report_hash.as_str()),
+            quote.map(|q| q.text().as_str()), offset, time,
+        ],
+    )?;
+    emit_delivery(tx, input.target.target())?;
+    snapshot(
+        &tx.sql,
+        DeliveryReceipt {
+            delivery_id,
+            submission_id: input.submission_id,
+            target: input.target.target().clone(),
+            outcome: DeliveryOutcome::Queued,
+            created_at_ms: time,
+            updated_at_ms: time,
+        },
+    )
+}
+
+pub(super) fn read_receipt(
+    connection: &Connection,
+    actor: Actor,
+    target: SessionTarget,
+    submission_id: SubmissionId,
+) -> Result<Snapshot<DeliveryReceipt>, StoreError> {
+    validate_target(connection, &actor, &target)?;
+    let (id, _) =
+        find_receipt(connection, &actor_key(&actor), &submission_id)?.ok_or(AppError::NotFound)?;
+    let receipt = by_id(connection, &id)?.ok_or(AppError::Internal)?.receipt;
+    if receipt.target != target {
+        return Err(AppError::NotFound.into());
+    }
+    snapshot(connection, receipt)
+}
+
+fn validate_target(
+    connection: &Connection,
+    actor: &Actor,
+    target: &SessionTarget,
+) -> Result<LeadTarget, StoreError> {
+    let lead = lead_for_run(connection, target.run_id())?.ok_or(AppError::NotFound)?;
+    if lead.target() != target {
+        return Err(AppError::NotFound.into());
+    }
+    allow_target(connection, actor, &lead)?;
+    Ok(lead)
+}
+
+fn find_receipt(
+    connection: &Connection,
+    key: &[u8; 32],
+    submission: &SubmissionId,
+) -> Result<Option<(DeliveryId, Vec<u8>)>, StoreError> {
+    let row = connection.query_row(
+        "SELECT d.delivery_id, m.request_digest FROM mutation_receipts m
+         JOIN outbox d ON d.actor_key=m.actor_key AND d.operation=m.operation AND d.submission_id=m.submission_id
+         WHERE m.actor_key=?1 AND m.operation=?2 AND m.submission_id=?3",
+        params![key.as_slice(), OPERATION, submission.as_str()],
+        |row| Ok((row.get::<_, String>(0)?, row.get::<_, Vec<u8>>(1)?)),
+    ).optional()?;
+    row.map(|(id, digest)| Ok((parse(&id)?, digest)))
+        .transpose()
+}
+
+fn request_digest(input: &SubmitMessage) -> [u8; 32] {
+    let mut digest = Sha256::new();
+    digest.update(b"reviewq.message.v1");
+    let mut field = |value: &str| hash_field(&mut digest, value.as_bytes());
+    field(input.target.review_id().as_str());
+    field(input.target.run_id().as_str());
+    field(input.target.session_key().as_str());
+    field(purpose_label(input.purpose));
+    field(input.text.as_str());
+    if let Some(reference) = &input.report_ref {
+        field(reference.receipt_id.as_str());
+        field(reference.report_hash.as_str());
+        if let Some(quote) = &reference.quote {
+            field(quote.text().as_str());
+            digest.update(quote.offset().to_be_bytes());
+        }
+    }
+    digest.finalize().into()
+}
+
+pub(super) fn recoverable(
+    connection: &Connection,
+    after: Option<DeliveryRecoveryCursor>,
+    limit: u16,
+) -> Result<Vec<RecoverableDelivery>, StoreError> {
+    let (time, id) = after.as_ref().map_or((i64::MIN, ""), |v| {
+        (v.created_at_ms, v.delivery_id.as_str())
+    });
+    let mut select = connection.prepare_cached(
+        "SELECT created_at_ms, delivery_id, state FROM outbox
+         WHERE state IN ('queued', 'dispatching', 'uncertain') AND (created_at_ms, delivery_id) > (?1, ?2)
+         ORDER BY created_at_ms, delivery_id LIMIT ?3"
+    )?;
+    let mut rows = select.query(params![time, id, limit])?;
+    let mut values = Vec::new();
+    while let Some(row) = rows.next()? {
+        values.push(RecoverableDelivery {
+            cursor: DeliveryRecoveryCursor {
+                created_at_ms: row.get(0)?,
+                delivery_id: parse(text(row, 1)?)?,
+            },
+            state: match text(row, 2)? {
+                "queued" => RecoverableDeliveryState::Queued,
+                "dispatching" => RecoverableDeliveryState::Dispatching,
+                "uncertain" => RecoverableDeliveryState::Uncertain,
+                _ => return Err(AppError::Internal.into()),
+            },
+        });
+    }
+    Ok(values)
+}
+
+pub(super) fn claim(
+    tx: &mut WriteTx<'_>,
+    delivery_id: DeliveryId,
+    expected: RecoverableDeliveryState,
+) -> Result<Option<DeliveryClaim>, StoreError> {
+    let Some(delivery) = by_id(&tx.sql, &delivery_id)? else {
+        return Ok(None);
+    };
+    let prior = recoverable_label(expected);
+    if outcome_label(&delivery.receipt.outcome) != prior {
+        return Ok(None);
+    }
+    let target = registered_lead(&tx.sql, &delivery)?;
+    let (kind, state, work) = match expected {
+        RecoverableDeliveryState::Queued => {
+            if !grant_current(&tx.sql, &delivery)? {
+                tx.sql.execute(
+                    "UPDATE outbox SET state='rejected', updated_at_ms=max(updated_at_ms, ?2)
+                     WHERE delivery_id=?1 AND state='queued'",
+                    params![delivery_id.as_str(), now_ms()?],
+                )?;
+                emit_delivery(tx, target.target())?;
+                return Ok(None);
+            }
+            (
+                ClaimKind::Dispatch,
+                "dispatching",
+                dispatch_work(&tx.sql, &delivery_id)?,
+            )
+        }
+        RecoverableDeliveryState::Dispatching | RecoverableDeliveryState::Uncertain => {
+            (ClaimKind::Reconcile, prior, DeliveryWork::Reconcile)
+        }
+    };
+    let fence = delivery.fence.checked_add(1).ok_or(AppError::Internal)?;
+    let changed = tx.sql.execute(
+        "UPDATE outbox SET fence=?3, claim_kind=?4, state=?5,
+             updated_at_ms=CASE WHEN state=?5 THEN updated_at_ms ELSE max(updated_at_ms, ?6) END
+         WHERE delivery_id=?1 AND state=?2 AND fence=?7",
+        params![
+            delivery_id.as_str(),
+            prior,
+            fence.as_sqlite_integer(),
+            kind.label(),
+            state,
+            now_ms()?,
+            delivery.fence.as_sqlite_integer()
+        ],
+    )?;
+    if changed != 1 {
+        return Err(AppError::Conflict.into());
+    }
+    if state != prior {
+        emit_delivery(tx, target.target())?;
+    }
+    Ok(Some(DeliveryClaim {
+        delivery_id,
+        fence,
+        target,
+        purpose: delivery.purpose,
+        work,
+    }))
+}
+
+fn registered_lead(connection: &Connection, delivery: &Delivery) -> Result<LeadTarget, StoreError> {
+    let target =
+        lead_for_run(connection, delivery.receipt.target.run_id())?.ok_or(AppError::Internal)?;
+    if target.target() != &delivery.receipt.target {
+        return Err(AppError::Internal.into());
+    }
+    Ok(target)
+}
+
+fn grant_current(connection: &Connection, delivery: &Delivery) -> Result<bool, StoreError> {
+    let Some((id, epoch)) = &delivery.grant else {
+        return Ok(true);
+    };
+    let current = connection.query_row(
+        "SELECT 1 FROM repo_grants g
+         JOIN configured_projects issued ON issued.origin=g.origin AND issued.project_id=g.project_id
+         JOIN reviews r ON r.review_id=?3
+         JOIN configured_projects target ON target.origin=r.origin AND target.project_id=r.project_id
+         WHERE g.grant_id=?1 AND g.epoch=?2 AND g.active=1",
+        params![id, epoch.as_sqlite_integer(), delivery.receipt.target.review_id().as_str()],
+        |_| Ok(()),
+    ).optional()?;
+    Ok(current.is_some())
+}
+
+pub(super) fn authorize_dispatch(
+    connection: &Connection,
+    claim: DeliveryClaim,
+) -> Result<(), StoreError> {
+    if ClaimKind::from_work(&claim.work) != ClaimKind::Dispatch {
+        return Err(AppError::Forbidden.into());
+    }
+    let stored = matching_claim(connection, &claim)?;
+    if !grant_current(connection, &stored)? {
+        return Err(AppError::Forbidden.into());
+    }
+    if claim.work != dispatch_work(connection, &claim.delivery_id)? {
+        return Err(AppError::Conflict.into());
+    }
+    Ok(())
+}
+
+pub(super) fn finish(
+    tx: &mut WriteTx<'_>,
+    claim: DeliveryClaim,
+    observation: DeliveryObservation,
+) -> Result<DeliveryReceipt, StoreError> {
+    let mut stored = matching_claim(&tx.sql, &claim)?;
+    let outcome = match observation {
+        DeliveryObservation::NotSubmitted => DeliveryOutcome::Queued,
+        DeliveryObservation::Started { delivery_id, input } => {
+            if delivery_id != claim.delivery_id {
+                return Err(AppError::Conflict.into());
+            }
+            DeliveryOutcome::Started(input)
+        }
+        DeliveryObservation::Rejected => DeliveryOutcome::Rejected,
+        DeliveryObservation::Uncertain => DeliveryOutcome::Uncertain,
+    };
+    let state = outcome_label(&outcome);
+    let prior = outcome_label(&stored.receipt.outcome);
+    let timestamp = now_ms()?.max(stored.receipt.updated_at_ms);
+    let (turn, item) = match &outcome {
+        DeliveryOutcome::Started(input) => {
+            (Some(input.turn_id.as_str()), Some(input.entry_id.as_str()))
+        }
+        _ => (None, None),
+    };
+    let changed = tx.sql.execute(
+        "UPDATE outbox SET state=?4, claim_kind=NULL, updated_at_ms=?5, native_turn_id=?6, native_input_id=?7
+         WHERE delivery_id=?1 AND fence=?2 AND claim_kind=?3 AND state=?8",
+        params![claim.delivery_id.as_str(), claim.fence.as_sqlite_integer(),
+                ClaimKind::from_work(&claim.work).label(), state, timestamp, turn, item, prior],
+    ).map_err(|error| {
+        if error.sqlite_error_code() == Some(ErrorCode::ConstraintViolation) {
+            StoreError::from(AppError::Conflict)
+        } else {
+            error.into()
+        }
+    })?;
+    if changed != 1 {
+        return Err(AppError::Conflict.into());
+    }
+    if state != prior || timestamp != stored.receipt.updated_at_ms {
+        emit_delivery(tx, &stored.receipt.target)?;
+    }
+    stored.receipt.outcome = outcome;
+    stored.receipt.updated_at_ms = timestamp;
+    Ok(stored.receipt)
+}
+
+fn matching_claim(connection: &Connection, claim: &DeliveryClaim) -> Result<Delivery, StoreError> {
+    let delivery = by_id(connection, &claim.delivery_id)?.ok_or(AppError::NotFound)?;
+    let kind = ClaimKind::from_work(&claim.work);
+    if delivery.claim != Some(kind)
+        || delivery.fence != claim.fence
+        || delivery.purpose != claim.purpose
+        || registered_lead(connection, &delivery)? != claim.target
+    {
+        return Err(AppError::Conflict.into());
+    }
+    Ok(delivery)
+}
+
+fn by_id(connection: &Connection, delivery: &DeliveryId) -> Result<Option<Delivery>, StoreError> {
+    let query = format!("SELECT {RECEIPT_COLUMNS} FROM {RECEIPT_JOIN} WHERE d.delivery_id=?1");
+    let mut statement = connection.prepare_cached(&query)?;
+    let mut rows = statement.query([delivery.as_str()])?;
+    rows.next()?.map(delivery_row).transpose()
+}
+
+fn delivery_row(row: &Row<'_>) -> Result<Delivery, StoreError> {
+    let outcome = match text(row, 5)? {
+        "queued" => DeliveryOutcome::Queued,
+        "dispatching" => DeliveryOutcome::Dispatching,
+        "started" => DeliveryOutcome::Started(ObservedInput {
+            turn_id: parse(text(row, 8)?)?,
+            entry_id: parse(text(row, 9)?)?,
+        }),
+        "rejected" => DeliveryOutcome::Rejected,
+        "uncertain" => DeliveryOutcome::Uncertain,
+        _ => return Err(AppError::Internal.into()),
+    };
+    let purpose = match text(row, 11)? {
+        "user" => MessagePurpose::User,
+        "report_feedback" => MessagePurpose::ReportFeedback,
+        _ => return Err(AppError::Internal.into()),
+    };
+    let claim = match row.get::<_, Option<String>>(12)?.as_deref() {
+        Some("dispatch") => Some(ClaimKind::Dispatch),
+        Some("reconcile") => Some(ClaimKind::Reconcile),
+        None => None,
+        _ => return Err(AppError::Internal.into()),
+    };
+    let grant = row
+        .get::<_, Option<String>>(13)?
+        .zip(row.get::<_, Option<i64>>(14)?)
+        .map(|(id, epoch)| Revision::try_from(epoch).map(|epoch| (id, epoch)))
+        .transpose()
+        .map_err(|_| AppError::Internal)?;
+    let receipt = DeliveryReceipt {
+        delivery_id: parse(text(row, 0)?)?,
+        submission_id: parse(text(row, 1)?)?,
+        target: SessionTarget::new(
+            parse(text(row, 2)?)?,
+            parse(text(row, 3)?)?,
+            parse(text(row, 4)?)?,
+        ),
+        outcome,
+        created_at_ms: row.get(6)?,
+        updated_at_ms: row.get(7)?,
+    };
+    let fence = DeliveryFence::try_from(row.get::<_, i64>(10)?).map_err(|_| AppError::Internal)?;
+    Ok(Delivery {
+        receipt,
+        fence,
+        purpose,
+        claim,
+        grant,
+    })
+}
+
+fn dispatch_work(connection: &Connection, id: &DeliveryId) -> Result<DeliveryWork, StoreError> {
+    let mut statement = connection.prepare_cached(
+        "SELECT body, receipt_id, report_hash, quoted_text, quoted_offset FROM outbox WHERE delivery_id=?1"
+    )?;
+    let mut rows = statement.query([id.as_str()])?;
+    let row = rows.next()?.ok_or(AppError::Internal)?;
+    let text_value = MessageBody::new(text(row, 0)?).map_err(|_| AppError::Internal)?;
+    let report_ref = match (
+        row.get::<_, Option<String>>(1)?,
+        row.get::<_, Option<String>>(2)?,
+    ) {
+        (Some(receipt), Some(hash)) => {
+            let quote = match (
+                row.get::<_, Option<String>>(3)?,
+                row.get::<_, Option<i64>>(4)?,
+            ) {
+                (Some(quoted), Some(offset)) => {
+                    let value = MessageBody::new(&quoted).map_err(|_| AppError::Internal)?;
+                    let offset = u64::try_from(offset).map_err(|_| AppError::Internal)?;
+                    Some(ReportQuote::new(value, offset).map_err(|_| AppError::Internal)?)
+                }
+                (None, None) => None,
+                _ => return Err(AppError::Internal.into()),
+            };
+            Some(ReportRef {
+                receipt_id: parse(&receipt)?,
+                report_hash: parse(&hash)?,
+                quote,
+            })
+        }
+        (None, None) => None,
+        _ => return Err(AppError::Internal.into()),
+    };
+    Ok(DeliveryWork::Dispatch {
+        text: text_value,
+        report_ref,
+    })
+}
+
+fn emit_delivery(tx: &mut WriteTx<'_>, target: &SessionTarget) -> Result<(), StoreError> {
+    tx.emit(&[
+        ResourceKey::Run(Some(target.run_id().clone())),
+        ResourceKey::Session(Some(target.session_key().clone())),
+    ])?;
+    Ok(())
+}
+
+fn purpose_label(purpose: MessagePurpose) -> &'static str {
+    match purpose {
+        MessagePurpose::User => "user",
+        MessagePurpose::ReportFeedback => "report_feedback",
+    }
+}
+
+fn outcome_label(outcome: &DeliveryOutcome) -> &'static str {
+    match outcome {
+        DeliveryOutcome::Queued => "queued",
+        DeliveryOutcome::Dispatching => "dispatching",
+        DeliveryOutcome::Started(_) => "started",
+        DeliveryOutcome::Rejected => "rejected",
+        DeliveryOutcome::Uncertain => "uncertain",
+    }
+}
+
+fn recoverable_label(state: RecoverableDeliveryState) -> &'static str {
+    match state {
+        RecoverableDeliveryState::Queued => "queued",
+        RecoverableDeliveryState::Dispatching => "dispatching",
+        RecoverableDeliveryState::Uncertain => "uncertain",
+    }
+}

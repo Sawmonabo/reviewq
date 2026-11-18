@@ -172,9 +172,18 @@ pub struct DeliveryClaim {
     pub delivery_id: DeliveryId,
     pub fence: DeliveryFence,
     pub target: LeadTarget,
-    pub text: MessageBody,
     pub purpose: MessagePurpose,
-    pub report_ref: Option<ReportRef>,
+    pub work: DeliveryWork,
+}
+
+/// Only an exact queued claim carries input authorized for native dispatch.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum DeliveryWork {
+    Dispatch {
+        text: MessageBody,
+        report_ref: Option<ReportRef>,
+    },
+    Reconcile,
 }
 
 /// An outcome established by the host adapter for this exact claim.
@@ -236,12 +245,15 @@ pub trait LeadStore: Send + Sync {
         limit: u16,
     ) -> AppFuture<'_, Vec<RecoverableDelivery>>;
 
-    /// Claims the service delivery ID in the exact expected state.
+    /// Claims the service delivery ID in the exact expected recoverable state.
     fn claim_delivery(
         &self,
         delivery_id: DeliveryId,
-        expected_state: DeliveryState,
+        expected_state: RecoverableDeliveryState,
     ) -> AppFuture<'_, Option<DeliveryClaim>>;
+
+    /// Rechecks the current dispatch fence and authority immediately before native I/O.
+    fn authorize_dispatch(&self, claim: DeliveryClaim) -> AppFuture<'_, ()>;
 
     /// Commits a matching claim and fence. Started also requires its observed
     /// delivery ID to match the claim. A stale observation returns conflict.
