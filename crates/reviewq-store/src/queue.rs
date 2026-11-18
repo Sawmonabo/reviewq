@@ -11,8 +11,9 @@ use reviewq_app::queue::{
     QueueStore, ReviewLookup, ReviewOverview, ReviewSource, RunDetail, RunPosition, RunSummary,
     SelectedLead, SessionPosition, SessionSummary,
 };
+use reviewq_app::sources::MAX_PUBLICATION_REVIEWS;
 use reviewq_domain::identity::{
-    GitLabOrigin, MergeRequestIid, MrIdentity, ProjectId, ReviewId, RunId,
+    GitLabOrigin, MergeRequestIid, MrIdentity, ProjectId, ReviewId, Revision, RunId,
 };
 use reviewq_domain::session::{
     AbsolutePath, HostProvider, LeadTarget, NativeBinding, NativeIdentity, SessionTarget,
@@ -20,9 +21,10 @@ use reviewq_domain::session::{
 use rusqlite::{Connection, OptionalExtension, Row, params};
 use uuid::Uuid;
 
+use crate::connection::WriteTx;
 use crate::events::snapshot;
 use crate::workspace::{
-    ReadScope, actor_key, advance_queue, allow_review, operator, queue_revision, scope,
+    ReadScope, actor_key, advance_queue, allow_review, configured, operator, queue_revision, scope,
     settings_revision,
 };
 use crate::{SqliteStore, StoreError};
@@ -46,24 +48,36 @@ impl QueueStore for SqliteStore {
                 if source.is_empty() || source.len() > usize::from(MAX_QUEUE_PAGE) {
                     return Err(AppError::InvalidRequest.into());
                 }
-                let mut results = Vec::with_capacity(source.len());
-                let mut changed = Vec::new();
-                for item in source {
-                    let (id, written) = save_review(&tx.sql, &item, true)?;
-                    if written {
-                        changed.push(ResourceKey::Review(Some(id.clone())));
-                    }
-                    results.push(id);
-                }
-                if !changed.is_empty() {
-                    advance_queue(&tx.sql)?;
-                    for group in changed.chunks(reviewq_app::events::MAX_INVALIDATION_KEYS - 1) {
-                        let mut keys = vec![ResourceKey::Queue];
-                        keys.extend_from_slice(group);
-                        tx.emit(&keys)?;
-                    }
-                }
+                let results = save_observations(tx, &source)?;
                 snapshot(&tx.sql, results)
+            })
+            .await
+            .map_err(StoreError::app)
+        })
+    }
+
+    fn publish_reviews(
+        &self,
+        actor: Actor,
+        expected_settings: Revision,
+        source: Vec<ReviewSource>,
+    ) -> AppFuture<'_, Snapshot<()>> {
+        Box::pin(async move {
+            if source.len() > MAX_PUBLICATION_REVIEWS {
+                return Err(AppError::PayloadTooLarge);
+            }
+            self.write(move |tx| {
+                operator(&actor)?;
+                if settings_revision(&tx.sql)? != expected_settings {
+                    return Err(AppError::StaleRevision.into());
+                }
+                for item in &source {
+                    if !configured(&tx.sql, &item.identity)? {
+                        return Err(AppError::NotFound.into());
+                    }
+                }
+                save_observations(tx, &source)?;
+                snapshot(&tx.sql, ())
             })
             .await
             .map_err(StoreError::app)
@@ -113,6 +127,30 @@ impl QueueStore for SqliteStore {
                 .map_err(StoreError::app)
         })
     }
+}
+
+fn save_observations(
+    tx: &mut WriteTx<'_>,
+    source: &[ReviewSource],
+) -> Result<Vec<ReviewId>, StoreError> {
+    let mut results = Vec::with_capacity(source.len());
+    let mut changed = Vec::new();
+    for item in source {
+        let (id, written) = save_review(&tx.sql, item, true)?;
+        if written {
+            changed.push(ResourceKey::Review(Some(id.clone())));
+        }
+        results.push(id);
+    }
+    if !changed.is_empty() {
+        advance_queue(&tx.sql)?;
+        for group in changed.chunks(reviewq_app::events::MAX_INVALIDATION_KEYS - 1) {
+            let mut keys = vec![ResourceKey::Queue];
+            keys.extend_from_slice(group);
+            tx.emit(&keys)?;
+        }
+    }
+    Ok(results)
 }
 
 impl ReviewLookup for SqliteStore {

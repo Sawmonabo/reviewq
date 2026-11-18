@@ -79,6 +79,11 @@ pub enum ErrorCode {
 }
 
 impl UtcTimestampDto {
+    pub fn from_unix_milliseconds(value: i64) -> Option<Self> {
+        let timestamp = jiff::Timestamp::from_millisecond(value).ok()?;
+        Self::new(&format!("{timestamp:.3}"))
+    }
+
     /// Accepts a valid calendar date written as YYYY-MM-DDTHH:MM:SS.sssZ.
     pub fn new(value: &str) -> Option<Self> {
         if value.len() != 24 {

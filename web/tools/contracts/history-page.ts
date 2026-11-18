@@ -1,5 +1,5 @@
-import type { HistoryPageResponse } from "../../../contracts/generated/contracts";
-import { isHistoryPageResponse } from "../../../contracts/generated/validators.mjs";
+import type { HistoryPageResponse } from "../../src/api/generated/contracts";
+import { isHistoryPageResponse } from "../../src/api/generated/validators.mjs";
 
 type HistoryAddress = Pick<HistoryPageResponse["data"], "runId" | "sessionKey">;
 

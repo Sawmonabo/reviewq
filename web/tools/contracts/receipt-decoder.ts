@@ -2,7 +2,7 @@ import type {
   DeliveryReceiptResponse,
   Failure,
   HistoryPageResponse,
-} from "../../../contracts/generated/contracts";
+} from "../../src/api/generated/contracts";
 import {
   isDeliveryReceiptResponse,
   isEventReplayCursor,
@@ -15,7 +15,7 @@ import {
   isReviewSelectionResponse,
   isRunDetailResponse,
   isSendMessageRequest,
-} from "../../../contracts/generated/validators.mjs";
+} from "../../src/api/generated/validators.mjs";
 import { decodeHistoryPage, readHistoryPage } from "./history-page";
 
 type Address = Pick<DeliveryReceiptResponse["data"], "submissionId" | "runId" | "sessionKey">;

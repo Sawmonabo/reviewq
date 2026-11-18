@@ -8,7 +8,7 @@ const allowed = {
   "reviewq-store": ["reviewq-app", "reviewq-domain"],
   "reviewq-providers": ["reviewq-app", "reviewq-domain"],
   "reviewq-transport": ["reviewq-app", "reviewq-domain", "reviewq-protocol"],
-  reviewq: ["reviewq-app", "reviewq-protocol", "reviewq-store", "reviewq-providers", "reviewq-transport"],
+  reviewq: ["reviewq-app", "reviewq-domain", "reviewq-protocol", "reviewq-store", "reviewq-providers", "reviewq-transport"],
 };
 
 const metadata = JSON.parse(

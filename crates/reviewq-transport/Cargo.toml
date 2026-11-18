@@ -5,5 +5,19 @@ edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true
 
+[dependencies]
+axum = { version = "=0.8.9", default-features = false, features = ["http1", "json", "original-uri", "query", "tokio"] }
+base64 = "0.22"
+getrandom = "0.4.3"
+hmac = "0.13"
+reviewq-app = { path = "../reviewq-app" }
+reviewq-domain = { path = "../reviewq-domain" }
+reviewq-protocol = { path = "../reviewq-protocol" }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+sha2 = "0.11.1"
+subtle = "2.6"
+tower-http = { version = "=0.6.11", features = ["fs"] }
+
 [lints]
 workspace = true

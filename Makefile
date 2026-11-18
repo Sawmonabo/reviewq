@@ -5,7 +5,7 @@ BUILD_JOBS ?= 2
 TEST_THREADS ?= 2
 PACKAGE ?= reviewq
 override CONTRACT_SCHEMA := contracts/v1.schema.json
-override CONTRACT_OUTPUT := contracts/generated
+override CONTRACT_OUTPUT := web/src/api/generated
 ifeq ($(CARGO_DRIVER),mbx)
 # Cached build-script artifacts can be read-only when plain Cargo recompiles them.
 RUST_COMMAND = CARGO_TARGET_DIR="$(or $(CARGO_TARGET_DIR),target)/mbx" mbx
@@ -40,6 +40,7 @@ contracts contracts-check:
 			diff -u "$(CONTRACT_SCHEMA)" "$$scratch/v1.schema.json"; \
 			diff -ru "$(CONTRACT_OUTPUT)" "$$scratch/generated"; \
 		else \
+			mkdir -p "$(dir $(CONTRACT_OUTPUT))"; \
 			if [ -d "$(CONTRACT_OUTPUT)" ]; then \
 				mv -T -- "$(CONTRACT_OUTPUT)" "$$scratch/previous-generated"; \
 			fi; \

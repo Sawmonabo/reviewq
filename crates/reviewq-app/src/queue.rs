@@ -148,6 +148,14 @@ pub trait QueueStore: Send + Sync {
         source: Vec<ReviewSource>,
     ) -> AppFuture<'_, Snapshot<Vec<ReviewId>>>;
 
+    /// Publishes a complete bounded source scan under the current settings revision.
+    fn publish_reviews(
+        &self,
+        actor: Actor,
+        expected_settings: Revision,
+        source: Vec<ReviewSource>,
+    ) -> AppFuture<'_, Snapshot<()>>;
+
     fn read_queue(
         &self,
         actor: Actor,

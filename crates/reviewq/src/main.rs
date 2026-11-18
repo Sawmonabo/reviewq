@@ -1,11 +1,15 @@
-use std::{env, process::ExitCode};
+use std::process::ExitCode;
+
+mod cli;
+mod native_client;
+mod runtime;
 
 fn main() -> ExitCode {
-    if env::args_os().skip(1).eq(["--version"]) {
-        println!("reviewq {}", env!("CARGO_PKG_VERSION"));
-        return ExitCode::SUCCESS;
+    match cli::run() {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(error) => {
+            eprintln!("reviewq: {error}");
+            ExitCode::FAILURE
+        }
     }
-
-    eprintln!("Usage: reviewq --version");
-    ExitCode::FAILURE
 }
