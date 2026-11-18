@@ -1,0 +1,39 @@
+#!/usr/bin/env python3
+"""Replay generated sources as a loopback-only GitLab and Jira fixture."""
+
+import argparse
+import json
+import sys
+from pathlib import Path
+
+sys.dont_write_bytecode = True
+
+from review_fixture.export import PROFILES
+from review_fixture.replay import Replay
+from review_fixture.server import Server
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--inputs", type=Path, required=True, help="directory produced by seed-review")
+    parser.add_argument("--profile", choices=PROFILES, default="populated")
+    parser.add_argument("--port", type=int, default=0, help="loopback port, default an available port")
+    args = parser.parse_args()
+    if not 0 <= args.port <= 65535:
+        parser.error("--port must be between 0 and 65535")
+    try:
+        replay = Replay(args.inputs, args.profile)
+        with Server(args.port, replay) as server:
+            print(json.dumps({
+                "gitlab": server.origin, "jira": server.origin, "controls": f"{server.origin}/fixture",
+                "preset": replay.preset, "profile": replay.profile,
+            }), flush=True)
+            server.serve_forever()
+    except (OSError, ValueError, KeyError, TypeError) as error:
+        parser.exit(1, f"{parser.prog}: {error}\n")
+    except KeyboardInterrupt:
+        pass
+
+
+if __name__ == "__main__":
+    main()

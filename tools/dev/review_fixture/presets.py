@@ -29,11 +29,12 @@ def busy_session(i, reviews):
 
 
 def busy_outbox(sessions):
+    leads = [session for session in sessions if session["parent"] is None]
     return [
         {"submission_id": fixture_id("submission", str(i)), "lead": lead["alias"],
          "review": lead["review"], "operation": "message", "state": "queued",
          "text": f"Queued fixture message {i}.", "created_at": STAMP}
-        for i, lead in enumerate(sessions[:200])
+        for i, lead in enumerate(leads[:200])
     ]
 
 

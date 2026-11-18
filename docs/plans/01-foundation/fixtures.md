@@ -47,6 +47,31 @@ For bounded source mode add one patch or report crossing each independent [full-
 
 Expose the fixture through a loopback-only provider driver, using the same Rust read paths and SQL writes as ordinary operation. Support ordered release of the selected response, a forced stream disconnect, observer counts, an external-authority error and a terminal submission whose response is lost after acceptance. Keep controls in the harness. The application must have a single read/send path in a fixture session. Provide visual specimens from these data for wide, narrow, wrapped and reduced-motion review.
 
+## Run the provider
+
+Run `tools/dev/fixture-provider --inputs "$new_directory"` in the foreground. It verifies both byte manifests, binds an available `127.0.0.1` port and prints one JSON readiness line with `gitlab`, `jira` and `controls` URLs. Set `site` and `controls` to the printed GitLab and controls values. `--port` selects a specific loopback port and Ctrl+C stops the listener. The driver uses Python's standard library and needs only the generated export.
+
+Use `--profile populated` for the three-review workflow. `--profile measurement-active` and `--profile measurement-large` are available with `worked`. Both expose the same 12 MRs, Active lead, 100 initial entries, empty outbox, one selected file and discussions at 8 and 600. They select the 38,598- or 409,799-byte patch for Active.
+
+Point the production GitLab adapter at `gitlab` and Jira at `jira`. The GitLab read endpoints are `/api/v4/user`, `/api/v4/projects`, `/api/v4/merge_requests` and `/api/v4/projects/{id}/merge_requests/{iid}` with `diffs`, `discussions`, `versions`, `approvals` and `approval_state`. GitLab lists honor `page` and `per_page` and return its pagination headers. For example `/api/v4/projects/11/merge_requests/43/diffs?unidiff=true&per_page=1&page=2` returns the mixed file alone. Jira exposes v2 issue/issue comment/search and Agile board/sprint reads. Its fixture search supports the preset's project, sprint and exact issue-key scopes. [GitLab MR API](https://docs.gitlab.com/api/merge_requests/) · [GitLab discussions](https://docs.gitlab.com/api/discussions/) · [Jira REST v2](https://developer.atlassian.com/cloud/jira/platform/rest/v2/api-group-issues/)
+
+The harness exposes registration intents at `GET /fixture/registrations`, report references at `GET /fixture/report-sources`, and queued intents at `GET /fixture/outbox`. The isolated launcher applies those intents through normal application registration, receipt and persistence paths. Native replay reads `GET /fixture/native/{alias}` for original NDJSON followed by new observations. `GET /fixture/native/{alias}/stream` streams that lead's live records. `GET /fixture/events` streams all harness changes. Both accept `after` and `Last-Event-ID`. Harness events describe which provider data changed. Use product routes and native host evidence for the terminal-to-browser qualification. [SLICE](first-review.md) · [Codex App Server](https://developers.openai.com/codex/app-server/) · [Claude transcript hooks](https://code.claude.com/docs/en/hooks)
+
+### Operator controls
+
+Read `"$controls/status"` for the timeline position, upstream request counts, held responses, active observers and the number of accepted synthetic submissions. Send controls as JSON with `Content-Type: application/json` to `"$controls/control"`. These requests use the printed loopback Host and a local tool such as curl.
+
+| Control JSON | Effect |
+| --- | --- |
+| `{"action":"step"}` | Advances one cue from `GET /fixture/timeline`. Worked publishes an unchanged revision, adds discussions at 1060 and 12, appends item 100, disconnects the harness streams and appends item 101. Busy adds duplicate event delivery. Reader and Rich append 100 further entries at the seventh-page cue. Rich then changes the head and adds a new revision anchor while retaining the raw patch bytes. |
+| `{"action":"hold","id":"quiet","path":"/api/v4/projects/22/merge_requests/41/diffs"}` | Holds the next matching completed response up to 20 seconds. Use a full path and query to match one exact page. The status reports `waiting: true` after capture. |
+| `{"action":"release","id":"quiet"}` | Releases the captured response. Capture Active and Quiet responses, release Active first, then Quiet to exercise late delivery. |
+| `{"action":"fail-next","path":"/api/v4/projects/11/merge_requests/41/approval_state","status":403}` | Returns one external authority error on the requested route. The supported statuses are 401, 403, 429 and 503. |
+| `{"action":"disconnect"}` | Ends live harness streams. Exercise browser disconnect with its actual event connection and ordinary reconnect in SLICE. |
+| `{"action":"drop-next-ack","lead":"active"}` | Accepts the next synthetic Codex input and closes that request before sending its response. Read the receipt and exact native item, then replay the same intent to verify one acceptance. |
+
+For the acknowledgement exercise, obtain Active's `native_id` from registrations. POST to `/fixture/native/active/messages` with `threadId`, an unused UUID `clientUserMessageId` and `input: [{"type":"text","text":"Fixture message"}]`. The connection ends without a response after acceptance. Read `GET /fixture/native/active/messages/{submissionId}` to compare `threadId`, `turnId`, `itemId` and `submissionId` against the matching native `item/completed` event. Its user-message correlation field is `clientId`. A replay of the same request returns the same receipt. Changed text with that UUID returns 409.
+
 ## Handoff
 
 Run the worked command twice into separate directories and compare the manifest and all input bytes. To verify an export on any host with Python 3, set `new_directory` to the exported directory and run this checker. It reads only the export.
@@ -68,7 +93,10 @@ for name, expected in files.items():
     assert len(data) == expected["bytes"], name
     assert hashlib.sha256(data).hexdigest() == expected["sha256"], name
 provider = root / "provider"
-companion = json.loads((provider / "manifest.json").read_bytes())
+provider_manifest = (provider / "manifest.json").read_bytes()
+assert hashlib.sha256(provider_manifest).hexdigest() == "c43aacc7e36daee946ae21a4fa3fa11ff70948ec7148ceee71ed880a0528ea8a"
+companion = json.loads(provider_manifest)
+assert {p.relative_to(provider).as_posix() for p in provider.rglob("*") if p.is_file()} == {"manifest.json", *companion["files"]}
 for name, expected in companion["files"].items():
     data = (provider / name).read_bytes()
     assert len(data) == expected["bytes"], name
@@ -77,4 +105,21 @@ print("Worked baseline and provider input bytes match")
 PY
 ```
 
-Generate `empty`, `busy`, `busy-filter`, `rich` and `reader` with the same command and a different preset. `busy-filter` selects the 300-MR variation. The provider driver reads these bundles in the next slice. Open the working set through the production entry points in [SLICE](first-review.md). Compare the final line, distinct review keys, native markers and raw bytes against the exported sources. Retain the required measurement evidence and remove the generated fixture directories when verification finishes. Fixture generation and visual inspection are development tools. The [test policy](../../../AGENTS.md) applies to any permanent cases added around them.
+Generate `empty`, `busy`, `busy-filter`, `rich` and `reader` with the same command and a different preset. `busy-filter` selects the 300-MR variation. The same provider command reads each bundle. Open the working set through the production entry points in [SLICE](first-review.md). Compare the final line, distinct review keys, native markers and raw bytes against the exported sources. Retain the required measurement evidence and remove the generated fixture directories when verification finishes. Fixture generation and visual inspection are development tools. The [test policy](../../../AGENTS.md) applies to any permanent cases added around them.
+
+### Independent fixture checks
+
+| Preset | MRs / registrations / queued intents | Provider manifest SHA-256 |
+| --- | --- | --- |
+| `empty` | 0 / 0 / 0 | `6e3101bd90a4eb076a380ac73a247af4b7886129e4df67e792b7e71c626a3edd` |
+| `worked` | 12 / 5 / 0 | `c43aacc7e36daee946ae21a4fa3fa11ff70948ec7148ceee71ed880a0528ea8a` |
+| `busy` | 67 / 506 / 200 | `6bb286d09f9ea0133298eed4db70da72f3d5a10905479dc8930a50e37c52d85a` |
+| `busy-filter` | 300 / 506 / 200 | `dd9087ab1f3663014f02bc59185f30deb12c3bc1fd952c86d850997751d38e72` |
+| `reader` | 12 / 8 / 0 | `8c5df173bbb5da318db365dcfb18a812761344e61df91fe5ccc949c47615b893` |
+| `rich` | 12 / 8 / 0 | `b4d7d17ab5e2c695623d72ffcdeabd32e7e7b782a66d3858101691f798addb45` |
+
+- Active's native source ID is `af785ec1-cf3a-56f6-8329-0a800b8ef407` and run ID is `9eeca80e-4e18-5c48-a465-5dc4acbbff92`. Its child uses the same run and names Active as its native parent. Quiet's native source ID is `ca43678e-b86c-593f-8e90-3dc74f835451` and report receipt is `fixture-quiet-report-1`. It has one Claude assistant record containing `Quiet complete`. Large has 240 initial Codex items and its own run.
+- Busy queues 200 distinct leads. `busy-5` has a pending native question. The two closed branch-only MRs use `feature/RQ-641-fix` and `feature/RQ-6410-fix`. Match only the first to Jira `RQ-641`. Busy-filter has 15 titles with the prefix `Review the parser ` and 200 Active messages of 12,000 ASCII bytes each.
+- Reader has 10,000 completed items and 400 matching command starts. Each 25th item is a user prompt, with equal text at 25 and 50 and distinct item IDs. The first, middle and last IDs are `reader-item-0`, `reader-item-5000` and `reader-item-9999`. Item 5's decoded output is exactly 327,680 bytes and ends with `READER-OUTPUT-TAIL`. The explicit page cue ends at `reader-item-10099`.
+- Rich's renamed mixed patch is 6,482 bytes with 244 physical lines. Its initial large review has 205 discussions, including 200 distributed over the mixed file. The `crlf-limit.patch` longest line is exactly 16,384 bytes before CRLF. `over-bytes.patch` is 2,249,289 bytes, `over-lines.patch` has 20,002 physical lines, and `unicode-line.patch` has a 16,819-byte line. The provider manifest records each document's digest, line measurements and exact final bytes.
+- Rich's `reports/rich.md` has 1,056,499 bytes and ends in `REPORT-BYTE-TAIL\n`. Its second quote is at byte range `[1056459, 1056481)` and scalar range `[1056453, 1056472)`. The source is `**one** &amp; two 🧪`, and the visible text is `one & two 🧪`. `provider/report-sources.json` binds source and quote to receipt `fixture-rich-report-3`. The manifest also records expected clipboard bytes, accessible reading order and viewport settings for the wide, narrow, wrapped and reduced-motion specimens. Record actual presentation through the browser.

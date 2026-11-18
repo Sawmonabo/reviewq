@@ -1,10 +1,13 @@
 """Synthetic Codex app-server and Claude transcript source records."""
 
-import json
+from datetime import datetime
 from uuid import NAMESPACE_URL, uuid5
 
 from .bundle import encode_lines
 from .source import STAMP
+
+
+STAMP_MS = int(datetime.fromisoformat(STAMP.replace("Z", "+00:00")).timestamp() * 1000)
 
 
 def fixture_id(kind, alias):
@@ -29,7 +32,8 @@ def registrations(sessions):
 
 
 def codex_event(native_id, turn, item, phase="completed"):
-    return {"method": f"item/{phase}", "params": {"threadId": native_id, "turnId": turn, "item": item}}
+    params = {"threadId": native_id, "turnId": turn, "item": item, f"{phase}AtMs": STAMP_MS}
+    return {"method": f"item/{phase}", "params": params}
 
 
 def codex_message(native_id, turn, item_id, text, *, user=False, client_id=None):
@@ -38,31 +42,42 @@ def codex_message(native_id, turn, item_id, text, *, user=False, client_id=None)
             {"type": "text", "text": text, "text_elements": []},
         ]}
         if client_id is not None:
-            item["clientUserMessageId"] = client_id
+            item["clientId"] = client_id
     else:
         item = {"type": "agentMessage", "id": item_id, "text": text, "phase": None}
     return codex_event(native_id, turn, item)
 
 
 def claude_message(native_id, index, text):
-    is_user = index == 0
-    role = "user" if is_user else "assistant"
-    record = {
-        "type": role, "sessionId": native_id, "uuid": fixture_id("claude-message", f"{native_id}-{index}"),
+    return {
+        "type": "assistant", "sessionId": native_id, "uuid": fixture_id("claude-message", f"{native_id}-{index}"),
         "parentUuid": fixture_id("claude-message", f"{native_id}-{index-1}") if index else None,
         "isSidechain": False, "timestamp": STAMP, "cwd": "/fixture/source",
-        "message": {"role": role, "content": [{"type": "text", "text": text}]},
+        "message": {
+            "role": "assistant", "content": [{"type": "text", "text": text}],
+            "id": f"msg_fixture_{index}", "type": "message", "model": "fixture-claude",
+            "stop_reason": "end_turn", "stop_sequence": None, "usage": {"input_tokens": 1, "output_tokens": 4},
+        }
     }
-    if not is_user:
-        record["message"].update({"id": f"msg_fixture_{index}", "type": "message", "model": "fixture-claude",
-                                  "stop_reason": "end_turn", "stop_sequence": None, "usage": {
-                                      "input_tokens": 1, "output_tokens": 4,
-                                  }})
-    return record
 
 
 def observation_event(native_id, entry):
     return codex_message(native_id, entry["turn"], entry["id"], entry["text"])
+
+
+def pending_question(native_id):
+    return {
+        "method": "item/tool/requestUserInput", "id": 5005,
+        "params": {"threadId": native_id, "turnId": "busy-5-turn-0", "itemId": "busy-5-question",
+                   "isBlocking": True, "questions": [
+                       {"id": "parser-scope", "header": "Parser scope",
+                        "question": "Which parser input should the review cover?",
+                        "options": [
+                            {"label": "Empty input", "description": "Check empty instructions."},
+                            {"label": "Whitespace", "description": "Check whitespace-only instructions."},
+                        ]},
+                   ]},
+    }
 
 
 def reader_events(native_id):
@@ -98,8 +113,7 @@ def native_inventory(rows, observations):
         identity = record["native_id"]
         entries = observations_by_alias.get(alias, ())
         if record["provider"] == "claude":
-            items = [claude_message(identity, 0, "Read the selected parser.")]
-            items.extend(claude_message(identity, i, entry["text"]) for i, entry in enumerate(entries, 1))
+            items = (claude_message(identity, i, entry["text"]) for i, entry in enumerate(entries))
         elif alias == "reader":
             items = reader_events(identity)
         elif alias == "large":
@@ -107,11 +121,9 @@ def native_inventory(rows, observations):
                      for i in range(240))
         elif entries:
             items = (observation_event(identity, entry) for entry in entries)
+        elif record["state"] == "waiting_input":
+            items = [pending_question(identity)]
         else:
             items = [codex_message(identity, f"{alias}-turn-0", f"{alias}-item-0", f"Visible text for {alias}.")]
         files[record["source"]] = encode_lines(items)
     return files
-
-
-def decode_native(data):
-    return [json.loads(line) for line in data.splitlines()]
