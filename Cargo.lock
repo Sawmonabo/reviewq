@@ -121,6 +121,9 @@ version = "0.1.0"
 [[package]]
 name = "reviewq-app"
 version = "0.1.0"
+dependencies = [
+ "reviewq-domain",
+]
 
 [[package]]
 name = "reviewq-domain"
