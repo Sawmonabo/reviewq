@@ -11,9 +11,8 @@ use reviewq_app::queue::{
     QueueStore, ReviewLookup, ReviewOverview, ReviewSource, RunDetail, RunPosition, RunSummary,
     SelectedLead, SessionPosition, SessionSummary,
 };
-use reviewq_app::sources::MAX_PUBLICATION_REVIEWS;
 use reviewq_domain::identity::{
-    GitLabOrigin, MergeRequestIid, MrIdentity, ProjectId, ReviewId, Revision, RunId,
+    GitLabOrigin, MergeRequestIid, MrIdentity, ProjectId, ReviewId, RunId,
 };
 use reviewq_domain::session::{
     AbsolutePath, HostProvider, LeadTarget, NativeBinding, NativeIdentity, SessionTarget,
@@ -24,7 +23,7 @@ use uuid::Uuid;
 use crate::connection::WriteTx;
 use crate::events::snapshot;
 use crate::workspace::{
-    ReadScope, actor_key, advance_queue, allow_review, configured, operator, queue_revision, scope,
+    ReadScope, actor_key, advance_queue, allow_review, operator, queue_revision, scope,
     settings_revision,
 };
 use crate::{SqliteStore, StoreError};
@@ -33,7 +32,11 @@ const ITEM_COLUMNS: &str =
     "r.review_id, r.origin, r.project_id, r.iid, r.project_path, r.title, r.head_sha, r.state, r.updated_at_ms,
      (SELECT count(*) FROM runs WHERE runs.review_id=r.review_id)";
 const SCOPE_PREDICATE: &str =
-    "(?1 = 0 OR (?1 = 1 AND EXISTS (SELECT 1 FROM configured_projects c WHERE c.origin=r.origin AND c.project_id=r.project_id))
+    "(((?1 = 0 OR ?1 = 1)
+       AND EXISTS (SELECT 1 FROM configured_projects c WHERE c.origin=r.origin AND c.project_id=r.project_id)
+       AND (EXISTS (SELECT 1 FROM review_discoveries d WHERE d.review_id=r.review_id)
+            OR EXISTS (SELECT 1 FROM runs WHERE runs.review_id=r.review_id)))
+      OR (?1 = 0 AND EXISTS (SELECT 1 FROM runs WHERE runs.review_id=r.review_id))
       OR (?1 = 2 AND r.review_id=?2))";
 
 impl QueueStore for SqliteStore {
@@ -49,35 +52,11 @@ impl QueueStore for SqliteStore {
                     return Err(AppError::InvalidRequest.into());
                 }
                 let results = save_observations(tx, &source)?;
+                if mark_discovered(&tx.sql, &results)? {
+                    advance_queue(&tx.sql)?;
+                    tx.emit(&[ResourceKey::Queue])?;
+                }
                 snapshot(&tx.sql, results)
-            })
-            .await
-            .map_err(StoreError::app)
-        })
-    }
-
-    fn publish_reviews(
-        &self,
-        actor: Actor,
-        expected_settings: Revision,
-        source: Vec<ReviewSource>,
-    ) -> AppFuture<'_, Snapshot<()>> {
-        Box::pin(async move {
-            if source.len() > MAX_PUBLICATION_REVIEWS {
-                return Err(AppError::PayloadTooLarge);
-            }
-            self.write(move |tx| {
-                operator(&actor)?;
-                if settings_revision(&tx.sql)? != expected_settings {
-                    return Err(AppError::StaleRevision.into());
-                }
-                for item in &source {
-                    if !configured(&tx.sql, &item.identity)? {
-                        return Err(AppError::NotFound.into());
-                    }
-                }
-                save_observations(tx, &source)?;
-                snapshot(&tx.sql, ())
             })
             .await
             .map_err(StoreError::app)
@@ -129,7 +108,21 @@ impl QueueStore for SqliteStore {
     }
 }
 
-fn save_observations(
+pub(crate) fn mark_discovered(
+    connection: &Connection,
+    reviews: &[ReviewId],
+) -> Result<bool, StoreError> {
+    let mut insert = connection.prepare_cached(
+        "INSERT INTO review_discoveries(review_id) VALUES(?1) ON CONFLICT DO NOTHING",
+    )?;
+    let mut changed = false;
+    for review in reviews {
+        changed |= insert.execute([review.as_str()])? != 0;
+    }
+    Ok(changed)
+}
+
+pub(crate) fn save_observations(
     tx: &mut WriteTx<'_>,
     source: &[ReviewSource],
 ) -> Result<Vec<ReviewId>, StoreError> {
@@ -256,11 +249,13 @@ fn queue(
     } else {
         None
     };
+    let settings_revision = settings_revision(connection)?;
     Ok(QueuePage {
         items,
         next,
         total,
-        settings_revision: settings_revision(connection)?,
+        settings_revision,
+        sync: crate::refresh::read_sync(connection, settings_revision)?,
     })
 }
 

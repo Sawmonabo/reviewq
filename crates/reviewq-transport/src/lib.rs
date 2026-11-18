@@ -2,4 +2,4 @@
 
 mod entry;
 
-pub use entry::{ControlRequest, ServiceEndpoint, Store, router};
+pub use entry::{ControlRequest, ServiceEndpoint, ServiceIdentity, Store, router};

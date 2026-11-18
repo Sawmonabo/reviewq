@@ -5,6 +5,7 @@ mod error;
 mod events;
 mod hosts;
 mod queue;
+mod refresh;
 mod workspace;
 
 pub use connection::{SqliteStore, StoreIdentity};

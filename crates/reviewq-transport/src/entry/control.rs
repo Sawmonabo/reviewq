@@ -23,9 +23,21 @@ pub struct ServiceEndpoint {
     browser: SocketAddr,
     native: SocketAddr,
     instance: String,
+    identity: ServiceIdentity,
     control_key: [u8; 32],
     bridge_key: [u8; 32],
     cursor_key: [u8; 32],
+}
+
+/// Identity established from the running executable, canonical profile and opened store.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ServiceIdentity {
+    pub build_digest: String,
+    pub profile_id: String,
+    pub store_id: String,
+    pub store_application_id: i64,
+    pub store_schema: i64,
 }
 
 pub struct ControlRequest<'a> {
@@ -37,7 +49,11 @@ pub struct ControlRequest<'a> {
 }
 
 impl ServiceEndpoint {
-    pub fn new(browser: SocketAddr, native: SocketAddr) -> Result<Self, AppError> {
+    pub fn new(
+        browser: SocketAddr,
+        native: SocketAddr,
+        identity: ServiceIdentity,
+    ) -> Result<Self, AppError> {
         if !browser.ip().is_loopback() || !native.ip().is_loopback() {
             return Err(AppError::InvalidRequest);
         }
@@ -45,6 +61,7 @@ impl ServiceEndpoint {
             browser,
             native,
             instance: URL_SAFE_NO_PAD.encode(random()?),
+            identity,
             control_key: random()?,
             bridge_key: random()?,
             cursor_key: random()?,
@@ -59,6 +76,9 @@ impl ServiceEndpoint {
     }
     pub fn instance(&self) -> &str {
         &self.instance
+    }
+    pub fn identity(&self) -> &ServiceIdentity {
+        &self.identity
     }
 
     pub fn is_valid(&self) -> bool {

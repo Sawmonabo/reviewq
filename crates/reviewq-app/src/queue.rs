@@ -5,6 +5,7 @@ use reviewq_domain::session::{HostProvider, LeadTarget};
 
 use crate::access::{Actor, AppError, AppFuture};
 use crate::events::Snapshot;
+use crate::sources::SourceSync;
 
 /// Current provider evidence used to create the compact registered review.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -93,6 +94,7 @@ pub struct QueuePage {
     pub next: Option<QueuePosition>,
     pub total: u64,
     pub settings_revision: Revision,
+    pub sync: SourceSync,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -147,14 +149,6 @@ pub trait QueueStore: Send + Sync {
         actor: Actor,
         source: Vec<ReviewSource>,
     ) -> AppFuture<'_, Snapshot<Vec<ReviewId>>>;
-
-    /// Publishes a complete bounded source scan under the current settings revision.
-    fn publish_reviews(
-        &self,
-        actor: Actor,
-        expected_settings: Revision,
-        source: Vec<ReviewSource>,
-    ) -> AppFuture<'_, Snapshot<()>>;
 
     fn read_queue(
         &self,

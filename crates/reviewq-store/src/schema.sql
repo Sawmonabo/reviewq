@@ -13,6 +13,16 @@ CREATE TABLE events (
     committed_at_ms INTEGER NOT NULL
 ) STRICT;
 
+CREATE TABLE source_refresh (
+    singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+    attempt INTEGER NOT NULL CHECK (attempt > 0),
+    settings_revision INTEGER NOT NULL CHECK (settings_revision >= 0),
+    started_at_ms INTEGER NOT NULL,
+    last_success_at_ms INTEGER,
+    active INTEGER NOT NULL CHECK (active IN (0, 1)),
+    error TEXT CHECK (error IN ('unavailable', 'too_large', 'interrupted'))
+) STRICT;
+
 CREATE TABLE configured_projects (
     origin TEXT NOT NULL,
     project_id INTEGER NOT NULL CHECK (project_id > 0),
@@ -46,6 +56,10 @@ CREATE TABLE reviews (
 
 CREATE INDEX reviews_queue_order ON reviews(updated_at_ms DESC, review_id DESC);
 CREATE INDEX reviews_project_order ON reviews(origin, project_id, updated_at_ms DESC, review_id DESC);
+
+CREATE TABLE review_discoveries (
+    review_id TEXT PRIMARY KEY REFERENCES reviews(review_id) ON DELETE CASCADE
+) STRICT, WITHOUT ROWID;
 
 CREATE TABLE runs (
     run_id TEXT PRIMARY KEY,

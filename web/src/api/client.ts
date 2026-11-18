@@ -14,8 +14,12 @@ import {
 
 let session: Promise<string> | undefined;
 
-export async function readQueue(signal: AbortSignal): Promise<QueuePageResponse> {
-  return read("/queue", isQueuePageResponse, signal);
+export async function readQueue(
+  signal: AbortSignal,
+  cursor: string | undefined,
+): Promise<QueuePageResponse> {
+  const query = cursor === undefined ? "" : `?${new URLSearchParams({ cursor })}`;
+  return read(`/queue${query}`, isQueuePageResponse, signal);
 }
 
 export async function readOverview(

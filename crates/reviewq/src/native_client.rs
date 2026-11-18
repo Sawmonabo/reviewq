@@ -2,7 +2,7 @@ use std::path::Path;
 use std::time::Duration;
 
 use reqwest::Client;
-use reviewq_transport::ServiceEndpoint;
+use reviewq_transport::{ServiceEndpoint, ServiceIdentity};
 use serde::Deserialize;
 
 use crate::cli::Open;
@@ -19,6 +19,10 @@ struct Envelope<T> {
 struct Ready {
     instance: String,
     ready: bool,
+    browser: String,
+    native: String,
+    #[serde(flatten)]
+    identity: ServiceIdentity,
 }
 
 #[derive(Deserialize)]
@@ -39,15 +43,8 @@ pub(crate) async fn refresh(profile: &Path) -> Result<(), Failure> {
     let client = client()?;
     let body = signed(&client, &endpoint, "GET", "/api/v1/status", b"").await?;
     verify_ready(&endpoint, &body)?;
-    let target = "/api/v1/queue/refresh";
-    let proof = endpoint.sign("POST", target, b"")?;
-    let response = client
-        .post(format!("http://{}{}", endpoint.native(), target))
-        .headers(proof.headers)
-        .send()
-        .await?
-        .error_for_status()?;
-    println!("{}", String::from_utf8(bounded(response, 8192).await?)?);
+    let bytes = signed(&client, &endpoint, "POST", "/api/v1/queue/refresh", b"").await?;
+    println!("{}", String::from_utf8(bytes)?);
     Ok(())
 }
 
@@ -115,7 +112,12 @@ async fn signed(
 
 fn verify_ready(endpoint: &ServiceEndpoint, bytes: &[u8]) -> Result<(), Failure> {
     let ready = serde_json::from_slice::<Envelope<Ready>>(bytes)?.data;
-    if ready.instance != endpoint.instance() || !ready.ready {
+    if ready.instance != endpoint.instance()
+        || ready.identity != *endpoint.identity()
+        || ready.browser != endpoint.browser().to_string()
+        || ready.native != endpoint.native().to_string()
+        || !ready.ready
+    {
         return Err("service instance is not ready".into());
     }
     Ok(())

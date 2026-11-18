@@ -1,9 +1,8 @@
 use std::path::Path;
 use std::sync::Arc;
 
-use axum::body::Bytes;
 use axum::extract::{DefaultBodyLimit, OriginalUri, Request, State};
-use axum::http::{HeaderMap, StatusCode, header};
+use axum::http::{HeaderMap, header};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
@@ -13,10 +12,12 @@ use reviewq_app::access::{Actor, AppError};
 use reviewq_app::events::EventLog;
 use reviewq_app::hosts::LeadStore;
 use reviewq_app::queue::{QueueStore, ReviewLookup};
-use reviewq_app::sources::{ReviewSourceReader, refresh_queue};
+use reviewq_app::sources::{ReviewSourceReader, SourceRefreshStore, refresh_queue};
 use reviewq_app::workspace::WorkspaceStore;
+use reviewq_protocol::queue::QueueSync;
 use reviewq_protocol::{EventCursorDto, Success};
 use serde::{Deserialize, Serialize};
+use tokio::sync::{Mutex, watch};
 use tower_http::services::{ServeDir, ServeFile};
 
 mod auth;
@@ -24,19 +25,28 @@ mod control;
 mod error;
 mod pages;
 
-pub use control::{ControlRequest, ServiceEndpoint};
+pub use control::{ControlRequest, ServiceEndpoint, ServiceIdentity};
 
 use auth::Auth;
-use error::ApiError;
+use error::{ApiBytes, ApiError};
 
 /// Shared application ports for one ReviewQ listener pair.
-pub trait Store: WorkspaceStore + QueueStore + ReviewLookup + EventLog + LeadStore {}
-impl<S: WorkspaceStore + QueueStore + ReviewLookup + EventLog + LeadStore> Store for S {}
+pub trait Store:
+    WorkspaceStore + QueueStore + ReviewLookup + EventLog + LeadStore + SourceRefreshStore
+{
+}
+impl<S: WorkspaceStore + QueueStore + ReviewLookup + EventLog + LeadStore + SourceRefreshStore>
+    Store for S
+{
+}
+
+type RefreshResult = Option<Result<usize, AppError>>;
 
 pub(super) struct Entry {
     store: Arc<dyn Store>,
     source: Option<Arc<dyn ReviewSourceReader>>,
     auth: Auth,
+    refresh: Mutex<Option<watch::Receiver<RefreshResult>>>,
 }
 
 #[derive(Deserialize)]
@@ -53,10 +63,12 @@ struct Status<'a> {
     build: &'a str,
     browser: String,
     native: String,
-    store_application_id: u32,
-    store_schema: u32,
+    #[serde(flatten)]
+    identity: &'a ServiceIdentity,
     ready: bool,
     configured_projects: usize,
+    total_mrs: u64,
+    sync: QueueSync,
 }
 
 #[derive(Serialize)]
@@ -76,6 +88,7 @@ pub fn router(
         store,
         source,
         auth: Auth::new(endpoint),
+        refresh: Mutex::new(None),
     });
     let api = Router::new()
         .route("/status", get(status))
@@ -124,9 +137,13 @@ async fn status(
         .ok_or(AppError::InvalidRequest)?
         .as_str();
     let proof = entry.auth.control("GET", target, &headers, b"")?;
-    let snapshot = entry
+    let workspace = entry
         .store
         .workspace_context(Actor::local_operator())
+        .await?;
+    let queue = entry
+        .store
+        .read_queue(Actor::local_operator(), None, 1)
         .await?;
     let endpoint = &entry.auth.endpoint;
     let response = Success {
@@ -135,12 +152,13 @@ async fn status(
             build: env!("CARGO_PKG_VERSION"),
             browser: endpoint.browser().to_string(),
             native: endpoint.native().to_string(),
-            store_application_id: 0x52565132,
-            store_schema: 1,
+            identity: endpoint.identity(),
             ready: true,
-            configured_projects: snapshot.value.projects.len(),
+            configured_projects: workspace.value.projects.len(),
+            total_mrs: queue.value.total,
+            sync: pages::queue_sync(entry.source.is_some(), queue.value.sync),
         },
-        cursor: EventCursorDto::new(snapshot.cursor.get()).ok_or(AppError::Internal)?,
+        cursor: EventCursorDto::new(queue.cursor.get()).ok_or(AppError::Internal)?,
     };
     let body = serde_json::to_vec(&response).map_err(|_| AppError::Internal)?;
     let mut response_headers = HeaderMap::new();
@@ -165,7 +183,7 @@ async fn start_session(
     State(entry): State<Arc<Entry>>,
     OriginalUri(uri): OriginalUri,
     headers: HeaderMap,
-    bytes: Bytes,
+    ApiBytes(bytes): ApiBytes,
 ) -> Result<Response, ApiError> {
     if !headers
         .get(header::CONTENT_TYPE)
@@ -216,37 +234,87 @@ async fn refresh(
     State(entry): State<Arc<Entry>>,
     OriginalUri(uri): OriginalUri,
     headers: HeaderMap,
-) -> Result<impl IntoResponse, ApiError> {
-    let actor = if headers.contains_key("x-reviewq-control") {
-        entry.auth.control(
-            "POST",
-            uri.path_and_query()
-                .ok_or(AppError::InvalidRequest)?
-                .as_str(),
-            &headers,
-            b"",
-        )?;
-        Actor::local_operator()
+) -> Result<Response, ApiError> {
+    let proof = if headers.contains_key("x-reviewq-control") {
+        Some(
+            entry.auth.control(
+                "POST",
+                uri.path_and_query()
+                    .ok_or(AppError::InvalidRequest)?
+                    .as_str(),
+                &headers,
+                b"",
+            )?,
+        )
     } else {
-        entry.auth.browser_actor(&headers, true)?
+        entry.auth.browser_actor(&headers, true)?;
+        None
     };
-    let count = refresh_queue(
-        entry.store.as_ref(),
-        entry.source.as_deref().ok_or(AppError::Unavailable)?,
-        actor,
-    )
-    .await?;
-    let cursor = entry.head().await?;
+    let result = entry.refresh().await;
+    let (status, body) = match result {
+        Ok(count) => (
+            200,
+            serde_json::to_vec(&Success {
+                data: serde_json::json!({"totalRows": count}),
+                cursor: entry.head().await?,
+            })
+            .map_err(|_| AppError::Internal)?,
+        ),
+        Err(error) => {
+            let (status, failure) = error::failure(error);
+            (
+                status.as_u16(),
+                serde_json::to_vec(&failure).map_err(|_| AppError::Internal)?,
+            )
+        }
+    };
+    let mut response_headers = HeaderMap::new();
+    response_headers.insert(header::CONTENT_TYPE, "application/json".parse().unwrap());
+    if let Some(proof) = proof {
+        entry
+            .auth
+            .endpoint
+            .response_proof(&proof, status, &mut response_headers, &body)?;
+    }
     Ok((
-        StatusCode::OK,
-        Json(Success {
-            data: serde_json::json!({"totalRows": count}),
-            cursor,
-        }),
-    ))
+        axum::http::StatusCode::from_u16(status).map_err(|_| AppError::Internal)?,
+        response_headers,
+        body,
+    )
+        .into_response())
 }
 
 impl Entry {
+    async fn refresh(self: &Arc<Self>) -> Result<usize, AppError> {
+        let source = self.source.clone().ok_or(AppError::Unavailable)?;
+        let mut receiver = {
+            let mut active = self.refresh.lock().await;
+            if let Some(receiver) = active
+                .as_ref()
+                .filter(|receiver| receiver.borrow().is_none())
+            {
+                receiver.clone()
+            } else {
+                let (send, receive) = watch::channel(None);
+                let store = self.store.clone();
+                tokio::spawn(async move {
+                    let result =
+                        refresh_queue(store.as_ref(), source.as_ref(), Actor::local_operator())
+                            .await;
+                    send.send_replace(Some(result));
+                });
+                *active = Some(receive.clone());
+                receive
+            }
+        };
+        loop {
+            if let Some(result) = *receiver.borrow_and_update() {
+                return result;
+            }
+            receiver.changed().await.map_err(|_| AppError::Internal)?;
+        }
+    }
+
     async fn head(&self) -> Result<EventCursorDto, AppError> {
         let snapshot = self
             .store

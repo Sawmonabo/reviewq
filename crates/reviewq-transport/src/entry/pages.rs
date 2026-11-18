@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use axum::Json;
-use axum::extract::{Path, Query, State};
+use axum::extract::State;
 use axum::http::HeaderMap;
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use hmac::Mac;
@@ -11,6 +11,7 @@ use reviewq_app::queue::{
     MAX_QUEUE_PAGE, MergeRequestState, PageContext, QueueItem, QueuePosition, RunPosition,
     SessionPosition,
 };
+use reviewq_app::sources::{SourceFailure, SourceSync};
 use reviewq_domain::identity::{EventCursor, ReviewId, RunId};
 use reviewq_domain::session::HostProvider;
 use reviewq_protocol::queue::{
@@ -19,12 +20,13 @@ use reviewq_protocol::queue::{
     ReviewSelectionResponse, RunSummary,
 };
 use reviewq_protocol::{
-    EventCursorDto, GitShaDto, HostProviderDto, MergeRequestIidDto, Page, PageCursorDto,
-    ProjectIdDto, ReviewIdDto, RevisionDto, RunDetail, RunDetailResponse, RunIdDto, SafeCountDto,
-    SessionKeyDto, SessionSummary, Success, UtcTimestampDto,
+    ErrorCode, ErrorDto, EventCursorDto, GitShaDto, HostProviderDto, MergeRequestIidDto, Page,
+    PageCursorDto, ProjectIdDto, ReviewIdDto, RevisionDto, RunDetail, RunDetailResponse, RunIdDto,
+    SafeCountDto, SessionKeyDto, SessionSummary, Success, UtcTimestampDto,
 };
 use serde::{Deserialize, Serialize};
 
+use super::error::{ApiPath as Path, ApiQuery as Query};
 use super::{ApiError, Entry, ServiceEndpoint};
 
 #[derive(Default, Deserialize)]
@@ -120,23 +122,57 @@ pub(super) async fn queue(
                 hide_reviewed: self::count(0)?,
                 hide_in_progress: self::count(0)?,
             },
-            sync: QueueSync {
-                mode: if entry.source.is_some() {
-                    QueueSyncMode::Connected
-                } else {
-                    QueueSyncMode::Setup
-                },
-                active: false,
-                stale: false,
-                last_attempt_at: None,
-                last_success_at: None,
-                error: None,
-            },
+            sync: queue_sync(entry.source.is_some(), value.sync),
             settings_revision: RevisionDto::new(value.settings_revision.get())
                 .ok_or(AppError::Internal)?,
         },
         cursor,
     )?))
+}
+
+pub(super) fn queue_sync(configured: bool, sync: SourceSync) -> QueueSync {
+    let error = sync.error.map(|failure| {
+        let (code, message, retryable) = match failure {
+            SourceFailure::Unavailable => (
+                ErrorCode::Unavailable,
+                "Could not reach the configured review source.",
+                true,
+            ),
+            SourceFailure::TooLarge => (
+                ErrorCode::PayloadTooLarge,
+                "The review source exceeded the refresh limit.",
+                false,
+            ),
+            SourceFailure::Interrupted => (
+                ErrorCode::Unavailable,
+                "The previous refresh was interrupted.",
+                true,
+            ),
+        };
+        ErrorDto {
+            code,
+            message: message.into(),
+            retryable,
+        }
+    });
+    QueueSync {
+        mode: if error.is_some() {
+            QueueSyncMode::Disconnected
+        } else if configured {
+            QueueSyncMode::Connected
+        } else {
+            QueueSyncMode::Setup
+        },
+        active: sync.active,
+        stale: configured && (sync.last_success_at_ms.is_none() || error.is_some()),
+        last_attempt_at: sync
+            .last_attempt_at_ms
+            .and_then(UtcTimestampDto::from_unix_milliseconds),
+        last_success_at: sync
+            .last_success_at_ms
+            .and_then(UtcTimestampDto::from_unix_milliseconds),
+        error,
+    }
 }
 
 pub(super) async fn overview(

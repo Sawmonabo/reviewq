@@ -1,18 +1,21 @@
+use std::fmt::Write as _;
 use std::fs::{self, DirBuilder, File, OpenOptions};
 use std::io::{Read, Write};
 use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr};
+use std::os::unix::ffi::OsStrExt;
 use std::os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt};
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
 use reviewq_app::access::Actor;
-use reviewq_app::sources::ReviewSourceReader;
+use reviewq_app::sources::{ReviewSourceReader, SourceRefreshStore};
 use reviewq_app::workspace::{WorkspaceConfig, WorkspaceStore};
 use reviewq_domain::session::AbsolutePath;
 use reviewq_providers::GitLab;
 use reviewq_store::SqliteStore;
-use reviewq_transport::ServiceEndpoint;
+use reviewq_transport::{ServiceEndpoint, ServiceIdentity};
+use sha2::{Digest, Sha256};
 use socket2::{Domain, Protocol, Socket, Type};
 use tokio::net::TcpListener;
 use tokio::sync::watch;
@@ -67,13 +70,26 @@ pub(crate) async fn serve(profile: PathBuf, options: Serve) -> Result<(), Failur
         .map(TcpListener::local_addr)
         .transpose()?
         .unwrap_or(browser);
-    let endpoint = ServiceEndpoint::new(browser, native)?;
+    let build_digest = executable_digest()?;
     let store = Arc::new(
         SqliteStore::open(AbsolutePath::from_canonical(
             profile.join("reviewq.sqlite3"),
         )?)
         .await?,
     );
+    let identity = store.identity();
+    let endpoint = ServiceEndpoint::new(
+        browser,
+        native,
+        ServiceIdentity {
+            build_digest,
+            profile_id: profile_id(&profile),
+            store_id: identity.store_id.to_string(),
+            store_application_id: identity.application_id,
+            store_schema: identity.format,
+        },
+    )?;
+    store.recover_refresh(Actor::local_operator()).await?;
 
     let source = match options.gitlab.as_ref() {
         Some(origin) if options.validation => {
@@ -161,16 +177,38 @@ async fn wait_for_stop(mut watch: watch::Receiver<bool>) {
 }
 
 fn create_profile(path: &Path) -> Result<(), Failure> {
-    if !path.is_absolute() {
-        return Err("the profile must be an absolute path".into());
+    if !path.is_absolute() || path.components().any(|part| part == Component::ParentDir) {
+        return Err("the profile must be a canonical absolute path".into());
     }
-    match fs::symlink_metadata(path) {
-        Ok(_) => (),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            DirBuilder::new().mode(0o700).create(path)?;
+    let user = rustix::process::getuid().as_raw();
+    let mut current = PathBuf::from("/");
+    for name in path.components().filter_map(|part| match part {
+        Component::Normal(name) => Some(name),
+        _ => None,
+    }) {
+        current.push(name);
+        match current.symlink_metadata() {
+            Ok(meta) if meta.is_dir() => {}
+            Ok(_) => return Err("profile ancestors must be real directories".into()),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                if current
+                    .parent()
+                    .ok_or("missing profile parent")?
+                    .metadata()?
+                    .uid()
+                    != user
+                {
+                    return Err("cannot create a profile below an unowned parent".into());
+                }
+                DirBuilder::new().mode(0o700).create(&current)?;
+            }
+            Err(error) => return Err(error.into()),
         }
-        Err(error) => return Err(error.into()),
     }
+    validate_profile(path)
+}
+
+fn validate_profile(path: &Path) -> Result<(), Failure> {
     let meta = fs::symlink_metadata(path)?;
     if !meta.is_dir()
         || meta.uid() != rustix::process::getuid().as_raw()
@@ -183,6 +221,7 @@ fn create_profile(path: &Path) -> Result<(), Failure> {
 }
 
 pub(crate) fn read_endpoint(profile: &Path) -> Result<ServiceEndpoint, Failure> {
+    validate_profile(profile)?;
     let file = private_file(&profile.join(RUNTIME))?;
     let mut data = Vec::new();
     file.take(MAX_DESCRIPTOR + 1).read_to_end(&mut data)?;
@@ -190,10 +229,39 @@ pub(crate) fn read_endpoint(profile: &Path) -> Result<ServiceEndpoint, Failure> 
         return Err("service descriptor exceeds limit".into());
     }
     let endpoint: ServiceEndpoint = serde_json::from_slice(&data)?;
-    if !endpoint.is_valid() {
-        return Err("invalid service endpoint".into());
+    let identity = endpoint.identity();
+    if !endpoint.is_valid()
+        || identity.profile_id != profile_id(profile)
+        || identity.build_digest != executable_digest()?
+    {
+        return Err("service endpoint does not match this build and profile".into());
     }
     Ok(endpoint)
+}
+
+fn profile_id(path: &Path) -> String {
+    hex(&Sha256::digest(path.as_os_str().as_bytes()))
+}
+
+fn executable_digest() -> Result<String, Failure> {
+    let mut file = File::open("/proc/self/exe")?;
+    let mut digest = Sha256::new();
+    let mut buffer = [0; 32 * 1024];
+    loop {
+        let read = file.read(&mut buffer)?;
+        if read == 0 {
+            return Ok(hex(&digest.finalize()));
+        }
+        digest.update(&buffer[..read]);
+    }
+}
+
+fn hex(bytes: &[u8]) -> String {
+    let mut result = String::with_capacity(bytes.len() * 2);
+    for byte in bytes {
+        write!(&mut result, "{byte:02x}").expect("writing to a String");
+    }
+    result
 }
 
 fn private_file(path: &Path) -> Result<File, Failure> {

@@ -1177,6 +1177,7 @@ dependencies = [
  "rustix",
  "serde",
  "serde_json",
+ "sha2",
  "socket2",
  "tokio",
 ]
@@ -1247,6 +1248,7 @@ dependencies = [
  "serde_json",
  "sha2",
  "subtle",
+ "tokio",
  "tower-http",
 ]
 

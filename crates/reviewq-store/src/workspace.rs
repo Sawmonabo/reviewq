@@ -94,9 +94,23 @@ pub(crate) fn allow_review(
     id: &ReviewId,
     source: &MrIdentity,
 ) -> Result<(), StoreError> {
+    let retained = || {
+        Ok::<_, StoreError>(connection.query_row(
+            "SELECT EXISTS(SELECT 1 FROM runs WHERE review_id=?1)",
+            [id.as_str()],
+            |row| row.get::<_, bool>(0),
+        )?)
+    };
+    let discovered = || {
+        Ok::<_, StoreError>(connection.query_row(
+            "SELECT EXISTS(SELECT 1 FROM review_discoveries WHERE review_id=?1)",
+            [id.as_str()],
+            |row| row.get::<_, bool>(0),
+        )?)
+    };
     let allowed = match scope {
-        ReadScope::Local => true,
-        ReadScope::Grant => configured(connection, source)?,
+        ReadScope::Local => retained()? || (configured(connection, source)? && discovered()?),
+        ReadScope::Grant => configured(connection, source)? && (retained()? || discovered()?),
         ReadScope::Review(own) => &own == id,
     };
     if !allowed {

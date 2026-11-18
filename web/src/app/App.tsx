@@ -7,28 +7,34 @@ import "./workspace.css";
 
 type Address = { readonly reviewId: string; readonly runId?: string };
 type Overview = { readonly review: ReviewOverview; readonly run: RunDetail | undefined };
+type QueueRequest = { readonly cursors: readonly string[] };
+type QueueResult = {
+  readonly request: QueueRequest;
+  readonly page?: QueuePage;
+  readonly error?: string;
+};
 
 export function App() {
-  const [queue, setQueue] = useState<QueuePage>();
+  const [queue, setQueue] = useState<QueueResult>();
   const [address, setAddress] = useState<Address | undefined>(readAddress);
   const [overview, setOverview] = useState<Overview>();
   const [error, setError] = useState<string>();
   const [refreshing, setRefreshing] = useState(false);
-  const [queueGeneration, setQueueGeneration] = useState(0);
+  const [queueRequest, setQueueRequest] = useState<QueueRequest>({ cursors: [] });
   const [selectionError, setSelectionError] = useState<string>();
 
   useEffect(() => {
     const controller = new AbortController();
-    void readQueue(controller.signal).then(
+    void readQueue(controller.signal, queueRequest.cursors.at(-1)).then(
       (response) => {
-        if (!controller.signal.aborted) setQueue(response.data);
+        if (!controller.signal.aborted) setQueue({ request: queueRequest, page: response.data });
       },
       (reason: unknown) => {
-        if (!controller.signal.aborted) setError(message(reason));
+        if (!controller.signal.aborted) setQueue({ request: queueRequest, error: message(reason) });
       },
     );
     return () => controller.abort();
-  }, [queueGeneration]);
+  }, [queueRequest]);
 
   useEffect(() => {
     if (!address) return;
@@ -59,10 +65,10 @@ export function App() {
     setRefreshing(true);
     try {
       await refreshQueue();
-      setQueueGeneration((generation) => generation + 1);
     } catch (reason) {
       setError(message(reason));
     } finally {
+      setQueueRequest({ cursors: [] });
       setRefreshing(false);
     }
   }
@@ -88,12 +94,37 @@ export function App() {
         </button>
       </header>
       <section aria-label="Review queue">
-        {error && (
+        {(error ?? queue?.error) && (
           <p role="alert" className="workspace-error">
-            {error}
+            {error ?? queue?.error}
           </p>
         )}
-        <QueueView queue={queue} onReview={(reviewId) => select({ reviewId })} />
+        <QueueView queue={queue?.page} onReview={(reviewId) => select({ reviewId })} />
+        {queue?.request === queueRequest &&
+          (queueRequest.cursors.length > 0 || queue.page?.nextCursor) && (
+            <nav className="queue-pages" aria-label="Queue pages">
+              {queueRequest.cursors.length > 0 && (
+                <button
+                  onClick={() => setQueueRequest({ cursors: queueRequest.cursors.slice(0, -1) })}
+                >
+                  Previous page
+                </button>
+              )}
+              {queue.error && (
+                <button onClick={() => setQueueRequest({ cursors: [] })}>First page</button>
+              )}
+              {queue.page?.nextCursor && (
+                <button
+                  onClick={() => {
+                    const next = queue.page?.nextCursor;
+                    if (next) setQueueRequest({ cursors: [...queueRequest.cursors, next] });
+                  }}
+                >
+                  Next page
+                </button>
+              )}
+            </nav>
+          )}
       </section>
       {selectionError && (
         <p role="alert" className="workspace-error">

@@ -17,6 +17,7 @@ reviewq-transport = { path = "../reviewq-transport" }
 rustix = { version = "1.1", features = ["fs", "process"] }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.154"
+sha2 = "0.11.1"
 socket2 = "0.6"
 tokio = { version = "1.54.1", features = ["macros", "net", "rt-multi-thread", "signal", "sync"] }
 
