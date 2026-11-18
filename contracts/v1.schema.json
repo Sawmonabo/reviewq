@@ -1,0 +1,162 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "DeliveryReceipt": {
+      "description": "The addressed receipt for the message send and receipt lookup routes.",
+      "properties": {
+        "createdAt": {
+          "$ref": "#/definitions/UtcTimestampDto"
+        },
+        "runId": {
+          "$ref": "#/definitions/RunIdDto"
+        },
+        "sessionKey": {
+          "$ref": "#/definitions/SessionKeyDto"
+        },
+        "state": {
+          "$ref": "#/definitions/DeliveryState"
+        },
+        "submissionId": {
+          "$ref": "#/definitions/SubmissionIdDto"
+        },
+        "updatedAt": {
+          "$ref": "#/definitions/UtcTimestampDto"
+        }
+      },
+      "required": [
+        "submissionId",
+        "runId",
+        "sessionKey",
+        "state",
+        "createdAt",
+        "updatedAt"
+      ],
+      "type": "object"
+    },
+    "DeliveryReceiptResponse": {
+      "description": "The resource and event head from the same authorized snapshot.",
+      "properties": {
+        "cursor": {
+          "$ref": "#/definitions/EventCursorDto"
+        },
+        "data": {
+          "$ref": "#/definitions/DeliveryReceipt"
+        }
+      },
+      "required": [
+        "data",
+        "cursor"
+      ],
+      "title": "DeliveryReceiptResponse",
+      "type": "object"
+    },
+    "DeliveryState": {
+      "description": "The known durable state of one message submission.",
+      "enum": [
+        "queued",
+        "dispatching",
+        "started",
+        "rejected",
+        "uncertain"
+      ],
+      "type": "string"
+    },
+    "ErrorCode": {
+      "description": "Stable error codes for the public JSON envelope.",
+      "enum": [
+        "invalid_request",
+        "unauthorized",
+        "forbidden",
+        "not_found",
+        "conflict",
+        "stale_revision",
+        "idempotency_conflict",
+        "cursor_expired",
+        "precondition_failed",
+        "payload_too_large",
+        "range_not_satisfiable",
+        "busy",
+        "unavailable",
+        "internal"
+      ],
+      "type": "string"
+    },
+    "ErrorDto": {
+      "description": "A safe error projection suitable for the requesting client.",
+      "properties": {
+        "code": {
+          "$ref": "#/definitions/ErrorCode"
+        },
+        "message": {
+          "type": "string"
+        },
+        "retryable": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "code",
+        "message",
+        "retryable"
+      ],
+      "type": "object"
+    },
+    "EventCursorDto": {
+      "description": "A durable event head, serialized as a canonical decimal string.",
+      "pattern": "^(0|[1-9][0-9]{0,17}|[1-8][0-9]{18}|9[0-1][0-9]{17}|92[0-1][0-9]{16}|922[0-2][0-9]{15}|9223[0-2][0-9]{14}|92233[0-6][0-9]{13}|922337[0-1][0-9]{12}|92233720[0-2][0-9]{10}|922337203[0-5][0-9]{9}|9223372036[0-7][0-9]{8}|92233720368[0-4][0-9]{7}|922337203685[0-3][0-9]{6}|9223372036854[0-6][0-9]{5}|92233720368547[0-6][0-9]{4}|922337203685477[0-4][0-9]{3}|9223372036854775[0-7][0-9]{2}|922337203685477580[0-6][0-9]{0}|9223372036854775807)$",
+      "type": "string"
+    },
+    "Failure": {
+      "description": "The error envelope for a rejected JSON operation.",
+      "properties": {
+        "cursor": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/EventCursorDto"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "error": {
+          "$ref": "#/definitions/ErrorDto"
+        }
+      },
+      "required": [
+        "error",
+        "cursor"
+      ],
+      "title": "Failure",
+      "type": "object"
+    },
+    "RunIdDto": {
+      "description": "The registered run identifier.",
+      "maxUtf8Bytes": 512,
+      "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f\\ud800-\\udfff]+$",
+      "type": "string"
+    },
+    "SessionKeyDto": {
+      "description": "The exact native session key registered for a run.",
+      "maxUtf8Bytes": 512,
+      "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f\\ud800-\\udfff]+$",
+      "type": "string"
+    },
+    "SubmissionIdDto": {
+      "description": "The client-supplied submission identifier scoped to the operation.",
+      "maxUtf8Bytes": 512,
+      "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f\\ud800-\\udfff]+$",
+      "type": "string"
+    },
+    "UtcTimestampDto": {
+      "description": "An RFC 3339 UTC timestamp with exact millisecond precision and a trailing Z.",
+      "format": "date-time",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}Z$",
+      "type": "string"
+    }
+  },
+  "x-reviewq-responses": {
+    "DeliveryReceiptResponse": "#/definitions/DeliveryReceiptResponse",
+    "Failure": "#/definitions/Failure"
+  }
+}

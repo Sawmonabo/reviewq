@@ -1,0 +1,12 @@
+{
+  "data": {
+    "submissionId": "send_42",
+    "runId": "run_active",
+    "sessionKey": "codex:active",
+    "state": "queued",
+    "createdAt": "2026-11-01T00:00:00.000Z",
+    "updatedAt": "2026-11-01T00:00:00.000Z",
+    "deliveryHint": "Waiting for the lead"
+  },
+  "cursor": "9007199254740993"
+}
