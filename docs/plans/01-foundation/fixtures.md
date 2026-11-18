@@ -10,7 +10,7 @@ Keep the input manifest and small source examples under `fixtures/reviews/`. Use
 
 Run `tools/dev/seed-review --preset worked --out <new-directory>` with Python 3.8 or later. The parent must exist. The generator creates the destination and refuses any existing path. It prints the output path and manifest SHA-256.
 
-The version-1 source inputs live in [`fixtures/reviews/worked/`](../../../fixtures/reviews/worked/). The generator copies `reviews.json`, `sessions.json`, `discussions.json` and `timeline.json`, generates `quiet.patch`, `active.patch`, `large.patch` and `history.json`, then writes `manifest.json`. The worked manifest digest is `7aff00aad90e93bbb4abc2297c1305077696786fce28c2f3122f3fb45e92b313`. It indexes eight inputs containing 12 review rows, five session aliases and 101 initial conversation observations. All paths are relative to the export. The patch hashes cover the raw UTF-8 patch bodies. GitLab discussion wrappers, response headers and encoded transfer size have separate measurements.
+The version-1 source inputs live in [`fixtures/reviews/worked/`](../../../fixtures/reviews/worked/). The generator copies `reviews.json`, `sessions.json`, `discussions.json` and `timeline.json`, generates `quiet.patch`, `active.patch`, `large.patch` and `history.json`, then writes `manifest.json`. The worked manifest digest is `7aff00aad90e93bbb4abc2297c1305077696786fce28c2f3122f3fb45e92b313`. It indexes eight inputs containing 12 review rows, five session aliases and 101 initial conversation observations. All paths are relative to the export. The independently indexed `provider/` directory contains GitLab and Jira source records, native samples, raw documents and expected identities. Its own version-1 manifest covers all companion bytes. The worked baseline remains nine root files. The patch hashes cover the raw UTF-8 patch bodies. GitLab discussion wrappers, response headers and encoded transfer size have separate measurements.
 
 ### Worked review set
 
@@ -62,13 +62,19 @@ root = Path(sys.argv[1])
 manifest = (root / "manifest.json").read_bytes()
 assert hashlib.sha256(manifest).hexdigest() == "7aff00aad90e93bbb4abc2297c1305077696786fce28c2f3122f3fb45e92b313"
 files = json.loads(manifest)["files"]
-assert set(p.name for p in root.iterdir()) == {"manifest.json", *files}
+assert set(p.name for p in root.iterdir()) == {"manifest.json", "provider", *files}
 for name, expected in files.items():
     data = (root / name).read_bytes()
     assert len(data) == expected["bytes"], name
     assert hashlib.sha256(data).hexdigest() == expected["sha256"], name
-print("Worked manifest and all eight input files match")
+provider = root / "provider"
+companion = json.loads((provider / "manifest.json").read_bytes())
+for name, expected in companion["files"].items():
+    data = (provider / name).read_bytes()
+    assert len(data) == expected["bytes"], name
+    assert hashlib.sha256(data).hexdigest() == expected["sha256"], name
+print("Worked baseline and provider input bytes match")
 PY
 ```
 
-The next FIXTURE slices provide `empty`, `busy`, `rich` and `reader` with the same output convention, plus the temporary provider command and port discovery. Open the working set through the production entry points in [SLICE](first-review.md). Compare the final line, distinct review keys, native markers and raw bytes against the exported sources. Retain the required measurement evidence and remove the generated fixture directories when verification finishes. Fixture generation and visual inspection are development tools. The [test policy](../../../AGENTS.md) applies to any permanent cases added around them.
+Generate `empty`, `busy`, `busy-filter`, `rich` and `reader` with the same command and a different preset. `busy-filter` selects the 300-MR variation. The provider driver reads these bundles in the next slice. Open the working set through the production entry points in [SLICE](first-review.md). Compare the final line, distinct review keys, native markers and raw bytes against the exported sources. Retain the required measurement evidence and remove the generated fixture directories when verification finishes. Fixture generation and visual inspection are development tools. The [test policy](../../../AGENTS.md) applies to any permanent cases added around them.

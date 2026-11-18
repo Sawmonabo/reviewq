@@ -1,0 +1,10 @@
+h2. Parser fixture
+{code:typescript}
+const status = "visible";
+{code}
+||Input||Expected||
+|Empty|Explain the error|
+# Open the selected review.
+# Inspect the selected file.
+[Parser guide|https://example.invalid/parser]
+{fixture-unknown}Keep this visible{fixture-unknown}
