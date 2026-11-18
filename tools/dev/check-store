@@ -1,0 +1,109 @@
+#!/usr/bin/env python3
+"""Qualify the real SQLite store against worked inputs and independent SQLite reads."""
+
+from contextlib import closing
+import json
+from pathlib import Path
+import sqlite3
+import stat
+import subprocess
+import tempfile
+
+
+ROOT = Path(__file__).resolve().parents[2]
+
+
+def run(*args, **options):
+    return subprocess.run(args, cwd=ROOT, check=True, **options)
+
+
+def signature(directory):
+    return {
+        item.name: (item.read_bytes(), stat.S_IMODE(item.stat().st_mode), item.stat().st_mtime_ns)
+        for item in directory.iterdir()
+    }
+
+
+def refuse(binary, database, reason):
+    before = signature(database.parent)
+    for action in ("probe", "open"):
+        result = subprocess.run([binary, action, database], capture_output=True, text=True, cwd=ROOT)
+        assert result.returncode and reason in result.stderr, result
+        assert signature(database.parent) == before
+
+
+def sidecar(database, suffix, data):
+    path = database.with_name(database.name + suffix)
+    path.write_bytes(data)
+    path.chmod(0o600)
+    return path
+
+
+def database(root, name):
+    directory = root / name
+    directory.mkdir(mode=0o700)
+    return directory / "reviewq.sqlite3"
+
+
+def verify_backup(backup):
+    with closing(sqlite3.connect(f"{backup.as_uri()}?mode=ro&immutable=1", uri=True)) as connection:
+        for pragma, expected in (("application_id", 1381388594), ("user_version", 1), ("integrity_check", "ok")):
+            assert connection.execute(f"PRAGMA {pragma}").fetchone() == (expected,)
+        assert connection.execute("PRAGMA foreign_key_check").fetchall() == []
+        assert connection.execute("SELECT count(*) FROM outbox").fetchone() == (2,)
+        query = "EXPLAIN QUERY PLAN SELECT cursor FROM events WHERE cursor > 10 ORDER BY cursor LIMIT 128"
+        assert "INTEGER PRIMARY KEY (rowid>?)" in connection.execute(query).fetchone()[-1]
+
+
+def main():
+    run("cargo", "build", "--locked", "-p", "reviewq-store", "--example", "qualify-store")
+    result = run("cargo", "metadata", "--locked", "--no-deps", "--format-version", "1", capture_output=True)
+    binary = Path(json.loads(result.stdout)["target_directory"]) / "debug/examples/qualify-store"
+    with tempfile.TemporaryDirectory(prefix="reviewq-store-check-") as scratch:
+        root = Path(scratch)
+        inputs = root / "inputs"
+        run(ROOT / "tools/dev/seed-review", "--preset", "worked", "--out", inputs)
+        working = database(root, "working")
+        backup = database(root, "backup")
+        run(binary, "exercise", working, backup, inputs)
+        verify_backup(backup)
+
+        foreign = database(root, "foreign")
+        foreign.touch(mode=0o600)
+        with closing(sqlite3.connect(foreign)) as connection:
+            connection.execute("PRAGMA journal_mode=WAL")
+            connection.execute("CREATE TABLE foreign_data(value TEXT)")
+        refuse(binary, foreign, "SQLite application ID")
+
+        malformed = database(root, "malformed")
+        run(binary, "open", malformed)
+        sidecar(malformed, "-wal", b"unrecognized WAL contents for QA" * 10)
+        sidecar(malformed, "-shm", bytes(270))
+        refuse(binary, malformed, "unrecognized SQLite WAL header")
+
+        donor = database(root, "donor")
+        victim = database(root, "victim")
+        run(binary, "open", donor)
+        run(binary, "open", victim)
+        with closing(sqlite3.connect(donor)) as connection:
+            connection.execute("UPDATE service_state SET settings_revision=settings_revision+1")
+            connection.commit()
+            sidecar(victim, "-wal", donor.with_suffix(".sqlite3-wal").read_bytes())
+        refuse(binary, victim, "SQLite WAL belongs to a different store identity")
+
+        crashed = database(root, "crash")
+        run(binary, "leave-wal", crashed, inputs)
+        retained = crashed.with_suffix(".sqlite3-wal")
+        assert retained.stat().st_size > 32
+        assert all(stat.S_IMODE(file.stat().st_mode) == 0o600 for file in crashed.parent.iterdir())
+        before = signature(crashed.parent)
+        run(binary, "probe", crashed)
+        assert signature(crashed.parent) == before
+        with retained.open("ab") as wal:
+            wal.write(b"interrupted trailing frame")
+        run(binary, "check-wal", crashed)
+    print("Independent integrity, indexed replay, foreign DB/WAL rejection and cleanup passed.")
+
+
+if __name__ == "__main__":
+    main()

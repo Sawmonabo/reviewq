@@ -50,7 +50,7 @@ pub(super) fn verify_header(
 
     let mut first = 0u32;
     let mut second = 0u32;
-    for pair in header[..24].chunks_exact(8) {
+    for pair in header[..24].as_chunks::<8>().0 {
         let word = |start| {
             let bytes = pair[start..start + 4]
                 .try_into()

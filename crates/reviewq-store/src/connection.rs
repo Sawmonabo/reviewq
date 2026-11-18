@@ -166,7 +166,9 @@ impl SqliteStore {
             let sender = worker.sender.as_ref().ok_or(AppError::Unavailable)?;
             sender
                 .try_send(Box::new(move |connection, profile| {
-                    let _ = response.send(f(connection, profile));
+                    if write || !response.is_closed() {
+                        let _ = response.send(f(connection, profile));
+                    }
                 }))
                 .map_err(|error| match error {
                     mpsc::error::TrySendError::Full(_) => AppError::Busy,

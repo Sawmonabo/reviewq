@@ -2,7 +2,7 @@
 
 use std::fs::{self, File, Metadata, OpenOptions};
 use std::io::{Read, Write};
-use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
+use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 
 use rustix::process::geteuid;
@@ -30,7 +30,10 @@ pub(super) struct Stage {
 
 impl Stage {
     pub(super) fn new(profile: &Profile) -> Result<Self, StoreError> {
-        let root = Builder::new().prefix(PREFIX).tempdir_in(profile.parent())?;
+        let root = Builder::new()
+            .prefix(PREFIX)
+            .permissions(fs::Permissions::from_mode(0o700))
+            .tempdir_in(profile.parent())?;
         let root_metadata = fs::symlink_metadata(root.path())?;
         let mut file = create_private(&root.path().join(MARKER))?;
         file.write_all(&marker(&root_metadata, &profile.directory_metadata()?))?;
