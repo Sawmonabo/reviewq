@@ -11,6 +11,9 @@ from .gitlab import CHANGED_HEAD, discussion
 from .native import codex_message, fixture_id, observation_event
 
 
+MAX_NATIVE_MESSAGE_SCALARS = 12_000
+
+
 class ReplayError(Exception):
     def __init__(self, status, message):
         super().__init__(message)
@@ -136,8 +139,12 @@ class Replay:
             message = text_input["text"]
         except (KeyError, TypeError, ValueError, AttributeError) as error:
             raise ReplayError(400, "Expected Codex turn/start parameters with one text input.") from error
-        if not isinstance(message, str) or not message.strip() or len(message.encode("utf-8")) > 12000:
-            raise ReplayError(400, "Expected between 1 and 12000 UTF-8 bytes of text.")
+        if not isinstance(message, str) or len(message) > MAX_NATIVE_MESSAGE_SCALARS or not message.strip():
+            raise ReplayError(400, f"Expected nonblank text of up to {MAX_NATIVE_MESSAGE_SCALARS} Unicode scalars.")
+        try:
+            message.encode("utf-8")
+        except UnicodeEncodeError as error:
+            raise ReplayError(400, "Expected text containing only Unicode scalar values.") from error
         key = (alias, submission_id)
         with self.condition:
             if key in self.receipts:

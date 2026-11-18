@@ -6,8 +6,13 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from threading import BoundedSemaphore
 from urllib.parse import parse_qs, urlsplit
 
-from .replay import ReplayError
+from .replay import MAX_NATIVE_MESSAGE_SCALARS, ReplayError
 from .routes import Response, gitlab_get, jira_get, json_response
+
+
+CONTROL_BODY_LIMIT = 16 * 1024
+# A supplementary scalar can consume two six-byte JSON escapes. Leave room for the request envelope.
+NATIVE_MESSAGE_BODY_LIMIT = 12 * MAX_NATIVE_MESSAGE_SCALARS + 16 * 1024
 
 
 class Server(ThreadingHTTPServer):
@@ -106,7 +111,7 @@ class Handler(BaseHTTPRequestHandler):
         replay.await_release(path, self.path)
         return result
 
-    def read_json(self):
+    def read_json(self, limit):
         if self.headers.get_content_type() != "application/json" or self.headers.get("Transfer-Encoding"):
             raise ReplayError(415, "Expected application/json with a Content-Length.")
         try:
@@ -115,7 +120,7 @@ class Handler(BaseHTTPRequestHandler):
             size = int(length)
         except (TypeError, ValueError) as error:
             raise ReplayError(400, "Expected one valid Content-Length.") from error
-        if not 0 < size <= 16384:
+        if not 0 < size <= limit:
             raise ReplayError(413, "Fixture request body exceeds its size limit.")
         raw = self.rfile.read(size)
         if len(raw) != size:
@@ -131,7 +136,7 @@ class Handler(BaseHTTPRequestHandler):
     def fixture_route(self, method, path, query):
         replay = self.server.replay
         if method == "POST" and path == "/fixture/control":
-            return json_response(replay.control(self.read_json()))
+            return json_response(replay.control(self.read_json(CONTROL_BODY_LIMIT)))
         if method == "GET":
             if path == "/fixture/status":
                 return json_response(replay.status())
@@ -154,7 +159,7 @@ class Handler(BaseHTTPRequestHandler):
             if method == "GET" and action == "messages" and receipt is not None:
                 return json_response(replay.receipt(alias, receipt))
             if method == "POST" and action == "messages" and receipt is None:
-                accepted, drop = replay.submit(alias, self.read_json())
+                accepted, drop = replay.submit(alias, self.read_json(NATIVE_MESSAGE_BODY_LIMIT))
                 if not drop:
                     return json_response(accepted)
                 return None
