@@ -60,21 +60,7 @@ export function ReviewRow({
           </span>
           {row.own && <span className="row-tag">Yours</span>}
           {row.draft && <span className="row-tag">Draft</span>}
-          {row.personalApproval && (
-            <span className="row-tag" data-review-kind="reviewed">
-              You approved
-            </span>
-          )}
-          {row.ourComments > 0 && (
-            <span className="row-tag" data-review-kind="commented">
-              Commented · {row.ourComments}
-            </span>
-          )}
-          {row.unreadReplies > 0 && (
-            <span className="row-tag" data-review-kind="thread_reply">
-              New {row.unreadReplies === 1 ? "reply" : "replies"} · {row.unreadReplies}
-            </span>
-          )}
+          <ReviewBadges review={row} />
         </div>
         <strong className="row-title">{row.title}</strong>
         <div className="row-foot">
@@ -131,6 +117,32 @@ export function UnmatchedReviewRow({
       </div>
       <ReviewPerson name={row.assignee ?? undefined} role="Assignee" arrow />
     </button>
+  );
+}
+
+export function ReviewBadges({
+  review,
+}: {
+  readonly review: Pick<MergeRequestRow, "personalApproval" | "ourComments" | "unreadReplies">;
+}) {
+  return (
+    <>
+      {review.personalApproval && (
+        <span className="row-tag" data-review-kind="reviewed">
+          You approved
+        </span>
+      )}
+      {review.ourComments > 0 && (
+        <span className="row-tag" data-review-kind="commented">
+          Commented · {review.ourComments}
+        </span>
+      )}
+      {review.unreadReplies > 0 && (
+        <span className="row-tag" data-review-kind="thread_reply">
+          New {review.unreadReplies === 1 ? "reply" : "replies"} · {review.unreadReplies}
+        </span>
+      )}
+    </>
   );
 }
 

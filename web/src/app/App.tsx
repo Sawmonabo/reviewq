@@ -350,15 +350,6 @@ export function App() {
                     ]}
                   />
                 )}
-                <ActionMenu
-                  label="Workspace display"
-                  trigger={<Icon name="more" />}
-                  items={[
-                    { label: compact ? "Regular spacing" : "Compact spacing", run: toggleDensity },
-                    { label: theme === "dark" ? "Light theme" : "Dark theme", run: toggleTheme },
-                    { label: "Unsent drafts", run: () => setOverlay({ kind: "drafts" }) },
-                  ]}
-                />
               </div>
             </header>
             {offline && <Notice>Offline. Showing the last available information.</Notice>}
@@ -507,6 +498,28 @@ export function App() {
           )}
           {settings && (
             <SettingsPane
+              displayOptions={
+                <details className="settings-display">
+                  <summary>Appearance</summary>
+                  <div className="actions">
+                    <button type="button" onClick={toggleDensity}>
+                      {compact ? "Regular spacing" : "Compact spacing"}
+                    </button>
+                    <button type="button" onClick={toggleTheme}>
+                      {theme === "dark" ? "Light theme" : "Dark theme"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSettings(false);
+                        setOverlay({ kind: "drafts" });
+                      }}
+                    >
+                      Unsent drafts
+                    </button>
+                  </div>
+                </details>
+              }
               onClose={() => setSettings(false)}
               onSave={() => {
                 setRevision((value) => value + 1);

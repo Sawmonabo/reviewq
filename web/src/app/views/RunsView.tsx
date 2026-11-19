@@ -1,22 +1,25 @@
 import { useState } from "react";
-import type { RunStage } from "../../api/generated/contracts";
+import type { ReactNode } from "react";
+import type { RunCard, RunStage } from "../../api/generated/contracts";
 import { readArchive, readQueue, readRuns } from "../../api/workspace";
+import { FilterSelect } from "../../components/FilterSelect";
 import { Icon } from "../../components/Icon";
 import { Pagination } from "../../components/Pagination";
 import { Empty, Loading, Notice } from "../../components/PanelState";
-import { ReviewRow } from "../../components/ReviewRow";
+import { ReviewBadges } from "../../components/ReviewRow";
 import { localDateRange, presets } from "../../features/queue/archive-filters";
 import type { DatePreset } from "../../features/queue/archive-filters";
 import type { Launch, LaunchTarget, OpenReview } from "../../features/queue/types";
 import { useResource } from "../../hooks/useResource";
-import { formatTime, readable } from "../../lib/presentation";
+import { formatActivityTime, readable } from "../../lib/presentation";
 import { savedValue, saveValue } from "../../lib/view-preferences";
+import "./runs.css";
 
 const stages = [
-  ["needs_input", "Awaiting input", "needsInput", "rose"],
-  ["working", "Working", "working", "green"],
-  ["waiting", "Waiting", "waiting", "amber"],
-  ["archived", "Archived", "archived", ""],
+  ["needs_input", "Awaiting input", "needsInput"],
+  ["working", "Working", "working"],
+  ["waiting", "Waiting", "waiting"],
+  ["archived", "Archived", "archived"],
 ] as const;
 
 export function RunsView({
@@ -67,13 +70,12 @@ export function RunsView({
 
   return (
     <>
-      <div className="stage-grid" aria-label="Run stage">
-        {stages.map(([id, label, field, color]) => (
+      <div className="run-stage-tabs" aria-label="Filter review runs">
+        {stages.map(([id, label, field]) => (
           <button
             type="button"
             key={id}
             aria-pressed={id === stage}
-            className="stage-control"
             onClick={() => {
               setStage(id);
               setTrail([]);
@@ -81,7 +83,6 @@ export function RunsView({
               saveValue("runs.stage", id);
             }}
           >
-            <span className={`stage-dot ${color}`} />
             <span>{label}</span>
             <strong>{(runs.data?.stageCounts ?? counts.data?.stageCounts)?.[field] ?? "—"}</strong>
           </button>
@@ -92,12 +93,12 @@ export function RunsView({
         <ArchiveView selectedReview={selectedReview} onReview={onReview} />
       ) : (
         <>
-          <div className="filter-stack">
-            <label className="search-field">
-              <Icon name="search" />
+          <div className="run-search-controls">
+            <label className="run-search">
+              <Icon name="search" size={14} />
               <input
                 aria-label="Search review runs"
-                placeholder="Search review runs"
+                placeholder="Search ticket or title"
                 value={query}
                 maxLength={200}
                 onChange={(event) => {
@@ -107,8 +108,8 @@ export function RunsView({
                 }}
               />
             </label>
-            <div className="actions">
-              <label>
+            {(stage === "working" || questions) && (
+              <label className="run-question-filter">
                 <input
                   type="checkbox"
                   checked={questions}
@@ -117,24 +118,22 @@ export function RunsView({
                     setTrail([]);
                     setChecked([]);
                   }}
-                />{" "}
+                />
                 Agent questions
               </label>
-              {reason && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setReason("");
-                    setTrail([]);
-                  }}
-                >
-                  Clear reason · {readable(reason)}
-                </button>
-              )}
-            </div>
-          </div>
-          <div className="list-heading">
-            <strong>{runs.data?.totalMatching ?? "—"}</strong> matching reviews
+            )}
+            {reason && (
+              <button
+                type="button"
+                className="filter-control"
+                onClick={() => {
+                  setReason("");
+                  setTrail([]);
+                }}
+              >
+                Clear reason · {readable(reason)}
+              </button>
+            )}
           </div>
           {selecting && (
             <div className="selection-bar actions">
@@ -196,17 +195,22 @@ export function RunsView({
             </Empty>
           )}
           {runs.data && runs.data.items.length > 0 && (
-            <ul className="review-list">
+            <ul className="run-items">
               {runs.data.items.map((row) => (
                 <li key={row.reviewId}>
-                  <ReviewRow
+                  <RunRow
                     row={row}
                     selected={row.reviewId === selectedReview}
+                    disabled={selecting && !eligible.includes(row)}
                     onOpen={() => onReview(row.reviewId, row.focusedRunId ?? undefined)}
-                    detail={
-                      <span>
-                        {row.runIds.length} {row.runIds.length === 1 ? "run" : "runs"}
-                      </span>
+                    onReason={
+                      row.reasonKind
+                        ? () => {
+                            setReason(row.reasonKind ?? "");
+                            setTrail([]);
+                            setChecked([]);
+                          }
+                        : undefined
                     }
                     {...(selecting && eligible.includes(row)
                       ? {
@@ -222,19 +226,6 @@ export function RunsView({
                         }
                       : {})}
                   />
-                  {row.reasonKind && (
-                    <button
-                      type="button"
-                      className="row-reason-filter"
-                      onClick={() => {
-                        setReason(row.reasonKind ?? "");
-                        setTrail([]);
-                        setChecked([]);
-                      }}
-                    >
-                      Filter by {readable(row.reasonKind)}
-                    </button>
-                  )}
                 </li>
               ))}
             </ul>
@@ -316,12 +307,12 @@ function ArchiveView({
 
   return (
     <>
-      <div className="filter-stack">
-        <label className="search-field">
-          <Icon name="search" />
+      <div className="archive-controls">
+        <label className="run-search">
+          <Icon name="search" size={14} />
           <input
             aria-label="Search archive"
-            placeholder="Search archived reviews"
+            placeholder="Search ticket or title"
             maxLength={200}
             value={q}
             onChange={(event) =>
@@ -329,81 +320,97 @@ function ArchiveView({
             }
           />
         </label>
-        <div className="filter-bar">
-          <label>
-            Reviewed
-            <select
-              value={preset}
-              onChange={(event) =>
-                setField("archive.date", changePreset, event.currentTarget.value as DatePreset)
-              }
-            >
-              {Object.entries(presets).map(([value, label]) => (
-                <option key={value} value={value}>
-                  {label}
-                </option>
-              ))}
-            </select>
-          </label>
-          {preset === "custom" && (
-            <>
-              <label>
-                From
-                <input
-                  type="date"
-                  value={start}
-                  onChange={(event) =>
-                    setField("archive.start", changeStart, event.currentTarget.value)
-                  }
-                />
-              </label>
-              <label>
-                Through
-                <input
-                  type="date"
-                  value={end}
-                  onChange={(event) =>
-                    setField("archive.end", changeEnd, event.currentTarget.value)
-                  }
-                />
-              </label>
-            </>
-          )}
-          <details className="filter-popover">
-            <summary>
-              Sprints {sprintPair.length > 0 && `(${sprintPair.length})`}{" "}
-              <Icon name="chevron" size={12} />
-            </summary>
-            <div>
-              {known.size ? (
-                [...known].map(([id, label]) => {
-                  const board = id.split(":")[0];
-                  return (
-                    <label key={id}>
-                      <input
-                        type="checkbox"
-                        checked={sprintPair.includes(id)}
-                        onChange={(event) => {
-                          const next = event.currentTarget.checked
-                            ? [...sprintPair, id].slice(0, 32)
-                            : sprintPair.filter((pair) => pair !== id);
-                          setPairs(next);
-                          setTrail([]);
-                          saveValue("archive.pairs", next);
-                        }}
-                      />{" "}
-                      {label} ·{" "}
-                      {archive.data?.boards.find((entry) => entry.id === board)?.label ??
-                        `Board ${board}`}
-                    </label>
-                  );
-                })
-              ) : (
-                <p>No qualified sprints found.</p>
-              )}
-            </div>
-          </details>
-        </div>
+        <FilterSelect
+          label="Reviewed"
+          value={preset}
+          options={Object.entries(presets).map(([value, label]) => ({ value, label }))}
+          onChange={(value) => setField("archive.date", changePreset, value as DatePreset)}
+        />
+        {preset === "custom" && (
+          <>
+            <label>
+              From
+              <input
+                type="date"
+                value={start}
+                onChange={(event) =>
+                  setField("archive.start", changeStart, event.currentTarget.value)
+                }
+              />
+            </label>
+            <label>
+              Through
+              <input
+                type="date"
+                value={end}
+                onChange={(event) => setField("archive.end", changeEnd, event.currentTarget.value)}
+              />
+            </label>
+          </>
+        )}
+        <details className="filter-popover queue-hide">
+          <summary className="filter-control">
+            <span className="filter-label">Sprint</span>
+            {sprintPair.length ? `${sprintPair.length} selected` : "All sprints"}
+            <Icon name="chevron" size={12} />
+          </summary>
+          <div>
+            {known.size ? (
+              [...known].map(([id, label]) => {
+                const board = id.split(":")[0];
+                return (
+                  <label key={id}>
+                    <input
+                      type="checkbox"
+                      checked={sprintPair.includes(id)}
+                      onChange={(event) => {
+                        const next = event.currentTarget.checked
+                          ? [...sprintPair, id].slice(0, 32)
+                          : sprintPair.filter((pair) => pair !== id);
+                        setPairs(next);
+                        setTrail([]);
+                        saveValue("archive.pairs", next);
+                      }}
+                    />{" "}
+                    {label} ·{" "}
+                    {archive.data?.boards.find((entry) => entry.id === board)?.label ??
+                      `Board ${board}`}
+                  </label>
+                );
+              })
+            ) : (
+              <p>No qualified sprints found.</p>
+            )}
+          </div>
+        </details>
+        {(preset !== "all" || sprintPair.length > 0 || q) && (
+          <button
+            type="button"
+            className="filter-control clear-filters"
+            aria-label="Clear archive filters"
+            title="Clear archive filters"
+            onClick={() => {
+              changeSearch("");
+              changePreset("all");
+              changeStart("");
+              changeEnd("");
+              setPairs([]);
+              setTrail([]);
+              saveValue("archive.search", "");
+              saveValue("archive.date", "all");
+              saveValue("archive.start", "");
+              saveValue("archive.end", "");
+              saveValue("archive.pairs", []);
+            }}
+          >
+            <Icon name="clearFilters" size={17} />
+          </button>
+        )}
+        {archive.data && (
+          <span className="archive-match-count">
+            {archive.data.totalMatching} {archive.data.totalMatching === 1 ? "review" : "reviews"}
+          </span>
+        )}
       </div>
       {dates.invalid && <Notice>Choose an end date on or after the start date.</Notice>}
       {archive.error && (
@@ -419,9 +426,6 @@ function ArchiveView({
       {archive.pending && !dates.invalid && <Loading label="Loading archive…" />}
       {archive.data && (
         <>
-          <div className="list-heading">
-            <strong>{archive.data.totalMatching}</strong> of {archive.data.totalArchived} archived
-          </div>
           {archive.data.boards.some((board) => !board.available) && (
             <Notice>
               Sprint membership unavailable for{" "}
@@ -433,35 +437,131 @@ function ArchiveView({
             </Notice>
           )}
           {!archive.data.items.length && <Empty title="No archived reviews match these filters" />}
-          <ul className="review-list">
-            {archive.data.items.map((row) => (
-              <li key={row.reviewId}>
-                <ReviewRow
-                  row={row}
-                  selected={row.reviewId === selectedReview}
-                  onOpen={() => onReview(row.reviewId, row.focusedRunId ?? row.runIds[0])}
-                  detail={
-                    <>
-                      <span>
-                        {row.latestMatchingReviewAt
-                          ? `Reviewed ${formatTime(row.latestMatchingReviewAt)}`
-                          : "Review date unavailable"}
-                      </span>
-                      {row.membership !== "verified" ? (
-                        <span>{readable(row.membership)} sprint membership</span>
-                      ) : (
-                        !row.sprintPairs.length && <span>No sprint</span>
-                      )}
-                    </>
-                  }
-                />
-              </li>
-            ))}
+          <ul className="run-items">
+            {archive.data.items.map((row) => {
+              const date = row.latestMatchingReviewAt;
+              const sprintNames = row.sprintPairs.map(
+                ({ boardId, sprintId }) =>
+                  known.get(`${boardId}:${sprintId}`) ?? `Sprint ${sprintId}`,
+              );
+              return (
+                <li key={row.reviewId}>
+                  <RunRow
+                    row={row}
+                    selected={row.reviewId === selectedReview}
+                    onOpen={() => onReview(row.reviewId, row.focusedRunId ?? row.runIds[0])}
+                    archiveDetails={
+                      <>
+                        {date ? (
+                          <time dateTime={date} title={formatActivityTime(date)}>
+                            Reviewed {new Date(date).toLocaleDateString()}
+                          </time>
+                        ) : (
+                          "Review date unavailable"
+                        )}
+                        {" · "}
+                        {row.membership !== "verified"
+                          ? `${readable(row.membership)} sprint membership`
+                          : sprintNames.length
+                            ? sprintNames.join(", ")
+                            : "No sprint"}
+                      </>
+                    }
+                  />
+                </li>
+              );
+            })}
           </ul>
           <Pagination trail={trail} next={archive.data.nextCursor} onPage={setTrail} />
         </>
       )}
     </>
+  );
+}
+
+function RunRow({
+  row,
+  selected,
+  disabled = false,
+  onOpen,
+  onReason,
+  selection,
+  archiveDetails,
+}: {
+  readonly row: RunCard;
+  readonly selected: boolean;
+  readonly disabled?: boolean;
+  readonly onOpen: () => void;
+  readonly onReason?: (() => void) | undefined;
+  readonly selection?: { readonly checked: boolean; readonly onToggle: () => void };
+  readonly archiveDetails?: ReactNode;
+}) {
+  const reason = row.reasonKind ?? row.runStage;
+  const label =
+    reason === "needs_input" ? "Agent needs input" : reason ? readable(reason) : undefined;
+  return (
+    <article className="run-card">
+      <button
+        type="button"
+        className="run-card-open"
+        disabled={disabled}
+        aria-current={selected || undefined}
+        aria-pressed={selection?.checked}
+        onClick={selection?.onToggle ?? onOpen}
+      >
+        <div className="run-card-head">
+          {selection && (
+            <span className="row-checkbox" aria-hidden="true">
+              {selection.checked && <Icon name="check" size={13} />}
+            </span>
+          )}
+          {row.tickets.length > 0 && (
+            <span className="ticket-key">
+              {row.tickets.map((ticket) => ticket.key).join(" · ")}
+            </span>
+          )}
+          <span>!{row.iid}</span>
+          <span>
+            {row.runIds.length} {row.runIds.length === 1 ? "run" : "runs"}
+          </span>
+          <ReviewBadges review={row} />
+          {row.runStage === "working" && row.hasAgentQuestions && (
+            <span className="row-tag" data-review-kind="agent_input">
+              Question pending
+            </span>
+          )}
+          {label && (!onReason || Boolean(selection)) && (
+            <span className="row-tag run-reason" data-review-kind={reason}>
+              {label}
+            </span>
+          )}
+        </div>
+        <h3>{row.title}</h3>
+        <p className="run-card-project">{row.projectPath}</p>
+        <div className="run-card-footer">
+          <span>
+            {row.fullMrReviewedSha && `Last full review ${row.fullMrReviewedSha.slice(0, 8)}`}
+          </span>
+          <span>
+            {archiveDetails ??
+              (row.lastActivityAt && (
+                <time dateTime={row.lastActivityAt}>{formatActivityTime(row.lastActivityAt)}</time>
+              ))}
+          </span>
+        </div>
+      </button>
+      {label && onReason && !selection && (
+        <button
+          type="button"
+          className="row-tag run-reason run-reason-filter"
+          data-review-kind={reason}
+          aria-label={`Filter by ${label}`}
+          onClick={onReason}
+        >
+          {label}
+        </button>
+      )}
+    </article>
   );
 }
 
