@@ -6,6 +6,8 @@ export type TimelineBookmark = {
   readonly offset: number;
   readonly following: boolean;
   readonly generation: string;
+  readonly toolEntry?: boolean;
+  readonly callId?: string;
 };
 
 export const PAGE_LIMIT = 6;
@@ -43,6 +45,12 @@ export function readBookmark(key: string): TimelineBookmark | undefined {
       offset: value.offset,
       following: value.following,
       generation: value.generation,
+      ...("toolEntry" in value && typeof value.toolEntry === "boolean"
+        ? { toolEntry: value.toolEntry }
+        : {}),
+      ...("callId" in value && typeof value.callId === "string" && value.callId.length <= 256
+        ? { callId: value.callId }
+        : {}),
     };
   }
 }
