@@ -2,6 +2,7 @@
 
 use reviewq_domain::identity::{GitLabOrigin, GrantId, ProjectId, Revision};
 use reviewq_domain::session::AbsolutePath;
+use reviewq_domain::settings::CheckoutBinding;
 
 use crate::access::{Actor, AppFuture};
 use crate::events::Snapshot;
@@ -41,6 +42,7 @@ pub struct IssueGrant {
     pub checkout: AbsolutePath,
     pub common_dir: AbsolutePath,
     pub verifier: [u8; 32],
+    pub operator_requested: bool,
 }
 
 pub struct GrantAddress {
@@ -51,10 +53,48 @@ pub struct GrantAddress {
     pub verifier: [u8; 32],
 }
 
+#[derive(Clone)]
+pub struct CheckoutProjection {
+    pub settings: Revision,
+    pub project: ConfiguredProject,
+    pub checkout: CheckoutBinding,
+    pub desired: bool,
+}
+
+pub enum ProjectionOutcome {
+    Applied([u8; 32]),
+    Removed,
+    Deferred(String),
+}
+
+pub trait RepositoryChatProjectionStore: Send + Sync {
+    fn checkout_projections(
+        &self,
+        include_applied: bool,
+        after: Option<AbsolutePath>,
+    ) -> AppFuture<'_, Vec<CheckoutProjection>>;
+    fn check_checkout_projection(&self, job: CheckoutProjection) -> AppFuture<'_, ()>;
+    fn retired_checkout_verifier(
+        &self,
+        job: CheckoutProjection,
+        verifier: [u8; 32],
+    ) -> AppFuture<'_, bool>;
+    fn finish_checkout_projection(
+        &self,
+        job: CheckoutProjection,
+        outcome: ProjectionOutcome,
+    ) -> AppFuture<'_, ()>;
+}
+
 pub trait WorkspaceStore: Send + Sync {
     fn workspace_context(&self, actor: Actor) -> AppFuture<'_, Snapshot<WorkspaceContext>>;
     fn authenticate_grant(&self, verifier: [u8; 32]) -> AppFuture<'_, Actor>;
     fn granted(
+        &self,
+        actor: Actor,
+        expected: GrantAddress,
+    ) -> AppFuture<'_, Snapshot<GrantBinding>>;
+    fn confirm_grant_projection(
         &self,
         actor: Actor,
         expected: GrantAddress,

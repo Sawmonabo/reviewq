@@ -51,6 +51,7 @@ pub(super) fn issue(
     if settings_revision(&tx.sql)? != input.settings {
         return Err(AppError::StaleRevision.into());
     }
+    crate::settings::projection::check_issuance(&tx.sql, &input)?;
     let retired = tx.sql.query_row(
         "SELECT EXISTS(SELECT 1 FROM repo_grants WHERE active=0 AND verifier=?1)",
         [input.verifier.as_slice()],
@@ -166,11 +167,12 @@ pub(super) fn revoke(
     tx: &mut WriteTx<'_>,
     common: AbsolutePath,
 ) -> Result<Snapshot<bool>, StoreError> {
+    let suppressed = crate::settings::projection::suppress(&tx.sql, &common)?;
     let changed = tx.sql.execute(
         "UPDATE repo_grants SET active=0 WHERE common_dir=?1 AND active=1",
         [common.as_path().as_os_str().as_bytes()],
     )? > 0;
-    if changed {
+    if changed || suppressed {
         tx.emit(&[ResourceKey::Settings])?;
     }
     snapshot(&tx.sql, changed)

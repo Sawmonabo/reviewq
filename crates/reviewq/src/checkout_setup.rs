@@ -14,6 +14,7 @@ use crate::{native_client, runtime};
 mod files;
 mod git;
 mod projection;
+pub(crate) mod reconcile;
 
 type Failure = Box<dyn std::error::Error + Send + Sync>;
 const GRANT: &str = "/api/v1/checkout/grant";
@@ -38,14 +39,16 @@ pub(crate) async fn install(
     )?;
     let url = format!("http://{}/mcp", endpoint.native());
     let claude = projection::claude_config(claude_home.as_deref())?;
-    let mut changes = prepare(profile, checkout, &url, claude).await?;
+    let lock = files::hold(profile, &checkout.common)?;
+    let mut changes = prepare(profile, checkout, &url, claude, lock).await?;
     let address = json!({
         "settingsRevision":revision, "projectId":project.to_string(),
-        "checkout":changes.checkout.primary, "commonDir":changes.checkout.common,
+        "checkout":changes.checkout.root, "commonDir":changes.checkout.common,
         "verifier":URL_SAFE_NO_PAD.encode(changes.verifier),
     });
     let request = serde_json::to_vec(&json!({"action":"issue","address":address}))?;
     let confirm = serde_json::to_vec(&json!({"action":"status","address":address}))?;
+    let applied = serde_json::to_vec(&json!({"action":"applied","address":address}))?;
     let issued = native_client::signed(&client, &endpoint, "POST", GRANT, &request).await;
     if let Ok(bytes) = issued {
         verify_binding(&bytes, &changes.checkout, project, revision)?;
@@ -54,7 +57,7 @@ pub(crate) async fn install(
         .map_err(|_|"ReviewQ could not confirm management access for this exact checkout and settings revision.")?;
     verify_binding(&bytes, &changes.checkout, project, revision)?;
     changes.apply().await?;
-    match native_client::signed(&client, &endpoint, "POST", GRANT, &confirm)
+    match native_client::signed(&client, &endpoint, "POST", GRANT, &applied)
         .await
         .and_then(|bytes| verify_binding(&bytes, &changes.checkout, project, revision))
     {
@@ -96,8 +99,8 @@ async fn prepare(
     checkout: git::Checkout,
     url: &str,
     claude: Option<PathBuf>,
+    lock: File,
 ) -> Result<Prepared, Failure> {
-    let lock = files::hold(profile, &checkout.common)?;
     projection::require_untracked(&checkout, claude.as_deref()).await?;
     let key = files::credential(profile, &checkout.common)?;
     let inventory = files::inventory(profile, &checkout.common)?;
@@ -109,7 +112,8 @@ async fn prepare(
         &URL_SAFE_NO_PAD.encode(key),
         claude.as_deref(),
         previous,
-    )?;
+    )
+    .await?;
     Ok(Prepared {
         checkout,
         claude,
@@ -162,7 +166,7 @@ fn verify_binding(
         || bound.settings_revision != revision
         || GitLabOrigin::from_canonical(&bound.origin).is_err()
         || bound.project_id != project.to_string()
-        || bound.checkout != checkout.primary
+        || bound.checkout != checkout.root
         || bound.common_dir != checkout.common
     {
         return Err("ReviewQ returned a different checkout binding.".into());
@@ -179,20 +183,23 @@ pub(crate) async fn revoke(profile: &Path, directory: Option<PathBuf>) -> Result
     let _lock = files::hold(profile, &common)?;
     let body = serde_json::to_vec(&json!({"action":"revoke","commonDir":common}))?;
     native_client::signed(&client, &endpoint, "POST", GRANT, &body).await?;
-    clean_owned(profile, &common)?;
+    clean_owned(profile, &common).await?;
     println!("ReviewQ management access was revoked for this repository.");
     Ok(())
 }
 
-fn clean_owned(profile: &Path, common: &Path) -> Result<(), Failure> {
+async fn clean_owned(profile: &Path, common: &Path) -> Result<(), Failure> {
     let inventory = files::inventory(profile, common)?;
     let previous = projection::Inventory::load(&inventory)?;
     let _client_locks = lock_clients(profile, &previous, None)?;
     let key = files::existing_credential(profile, common)?;
-    previous.cleanup(
-        &inventory,
-        &key.map_or_else(String::new, |key| URL_SAFE_NO_PAD.encode(key)),
-    )?;
+    previous
+        .cleanup(
+            &inventory,
+            common,
+            &key.map_or_else(String::new, |key| URL_SAFE_NO_PAD.encode(key)),
+        )
+        .await?;
     files::forget(profile, &common)?;
     Ok(())
 }

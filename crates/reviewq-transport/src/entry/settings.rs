@@ -269,7 +269,7 @@ fn view(snapshot: Snapshot<app::Connections>) -> Result<dto::SettingsResponse, A
         gitlab,
         jira,
         scope,
-        chat_setup_pending,
+        chat_setup,
     } = snapshot.value;
     let mode = if gitlab.is_none() && jira.is_none() {
         dto::Mode::Setup
@@ -334,12 +334,14 @@ fn view(snapshot: Snapshot<app::Connections>) -> Result<dto::SettingsResponse, A
                 .collect::<Result<_, _>>()?,
             additional_reviewer_ids: scope::number_dtos(scope.additional_reviewers)?,
             chat_setup: dto::ChatSetup {
-                state: if chat_setup_pending {
+                state: if chat_setup.cleanup_conflict {
+                    dto::ChatSetupState::CleanupConflict
+                } else if chat_setup.pending {
                     dto::ChatSetupState::Pending
                 } else {
                     dto::ChatSetupState::Ready
                 },
-                issues: Vec::new(),
+                issues: chat_setup.issues,
             },
         },
         snapshot.cursor,
