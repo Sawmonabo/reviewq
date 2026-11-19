@@ -38,6 +38,9 @@ pub struct GetReview {
     pub offset: Option<u32>,
     pub limit: Option<u16>,
     pub launch_submission_id: Option<SubmissionIdDto>,
+    pub message_submission_id: Option<SubmissionIdDto>,
+    pub session_cursor: Option<crate::PageCursorDto>,
+    pub session_limit: Option<u16>,
     pub question_id: Option<ResourceIdDto>,
     pub report: Option<ReportRead>,
 }

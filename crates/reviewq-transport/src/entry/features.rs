@@ -4,7 +4,7 @@ pub(super) mod actions;
 pub(super) mod decisions;
 pub(super) mod followups;
 pub(super) mod notifications;
-mod recovery;
+pub(super) mod recovery;
 pub(super) mod reports;
 
 use std::sync::Arc;

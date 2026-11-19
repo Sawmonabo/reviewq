@@ -4,8 +4,8 @@ use reviewq_domain::identity::ReviewId;
 use rusqlite::{Connection, Row, params};
 
 use super::{
-    ITEM_COLUMNS, ITEM_FROM, ReadScope, SCOPE_PREDICATE, allow_review, identity_for_review, parse,
-    provider, queue_item, scope, settings_revision, text,
+    CACHED_ITEM_FROM, ITEM_COLUMNS, ITEM_FROM, ReadScope, SCOPE_PREDICATE, allow_review, cached,
+    identity_for_review, parse, provider, queue_item, scope, settings_revision, text,
 };
 use crate::StoreError;
 use crate::refresh::read_sync;
@@ -18,6 +18,7 @@ pub(super) fn reviews(
     limit: u16,
 ) -> Result<ManagementReviews, StoreError> {
     let access = scope(tx, &actor)?;
+    cached::projection(tx)?;
     let (scope_kind, scope_id) = match &access {
         ReadScope::Local => (0, None),
         ReadScope::Grant => (1, None),
@@ -33,10 +34,10 @@ pub(super) fn reviews(
         ManagementFilter::AgentQuestions => "r.state='open' AND f.has_questions=1",
     };
     let selected = format!("{SCOPE_PREDICATE} AND ({source})");
-    let total_sql = format!("SELECT count(*) {ITEM_FROM} WHERE {selected}");
+    let total_sql = format!("SELECT count(*) {CACHED_ITEM_FROM} WHERE {selected}");
     let total: i64 = tx.query_row(&total_sql, params![scope_kind, scope_id], |row| row.get(0))?;
     let page_sql = format!(
-        "SELECT {ITEM_COLUMNS} {ITEM_FROM}
+        "SELECT {ITEM_COLUMNS} {CACHED_ITEM_FROM}
         WHERE {selected} ORDER BY CASE WHEN f.run_id IS NULL THEN r.updated_at_ms ELSE f.last_activity END DESC,r.review_id LIMIT ?3 OFFSET ?4"
     );
     let mut prepare = tx.prepare_cached(&page_sql)?;
@@ -45,10 +46,12 @@ pub(super) fn reviews(
     while let Some(row) = rows.next()? {
         items.push(queue_item(row)?);
     }
+    let settings = settings_revision(tx)?;
     Ok(ManagementReviews {
         items,
         total: total.try_into().map_err(|_| AppError::Internal)?,
-        sync: read_sync(tx, settings_revision(tx)?)?,
+        sync: read_sync(tx, settings)?,
+        settings,
     })
 }
 
@@ -77,11 +80,13 @@ pub(super) fn runs(
     while let Some(row) = rows.next()? {
         runs.push(run(row)?);
     }
+    let settings = settings_revision(tx)?;
     Ok(ManagementRuns {
         total: item.registered_lead_count,
         item,
         runs,
-        sync: read_sync(tx, settings_revision(tx)?)?,
+        sync: read_sync(tx, settings)?,
+        settings,
     })
 }
 

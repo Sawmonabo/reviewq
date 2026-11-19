@@ -10,11 +10,11 @@ use reviewq_protocol::mcp::{
 use serde_json::{Value, json};
 
 use crate::entry::Entry;
-use crate::entry::features::{actions, followups, reports};
+use crate::entry::features::{actions, followups, recovery, reports};
 use crate::entry::history::{ContentQuery, HistoryQuery, read, read_content};
 use crate::entry::launch;
 use crate::entry::messages;
-use crate::entry::pages::{parse, project_review, queue_sync};
+use crate::entry::pages::{PageQuery, parse, project_review, queue_sync, read_run};
 use crate::entry::{questions, targets};
 
 pub(super) use crate::entry::targets::{ResolvedReview, resolve};
@@ -48,7 +48,11 @@ pub(super) async fn list(
             "dashboard": dashboard(entry, &item.review_id, None),
         }));
     }
-    let sync = queue_sync(&entry.active_source().await?, page.sync);
+    let active = entry.active_source().await?;
+    if active.revision != page.settings {
+        return Err(AppError::StaleRevision);
+    }
+    let sync = queue_sync(&active, page.sync);
     fit_page(&values, offset, page.total, |items, next| {
         json!({
             "lastSyncAt": sync.last_success_at,
@@ -104,23 +108,54 @@ pub(super) async fn get(entry: &Entry, actor: Actor, args: GetReview) -> Result<
             .map(|target| (target.run_id().clone(), target.session_key().clone())),
     };
     let question_id = args.question_id.map(|id| id.as_str().to_owned());
-    let (report, questions, action, sessions) = if let Some((run, session)) = &selected {
-        let detail = entry
+    let (report, questions, action, sessions, recovery, delivery) = if let Some((run, session)) =
+        &selected
+    {
+        let detail = read_run(
+            entry,
+            actor.clone(),
+            run.clone(),
+            PageQuery {
+                limit: Some(list_limit(args.session_limit)?),
+                cursor: args.session_cursor.map(|id| id.as_str().to_owned()),
+            },
+        )
+        .await?
+        .data;
+        let lead: SessionKey = parse(detail.lead_session_key.as_str())?;
+        let recovery = entry
             .store
-            .read_run(actor.clone(), run.clone(), None, 25)
+            .recovery_state(actor.clone(), run.clone(), lead.clone())
             .await?
-            .value;
-        let sessions: Vec<_> = detail
-            .sessions
-            .into_iter()
-            .map(|session| {
-                json!({
-                    "sessionKey":session.session_key.as_str(),
-                    "parentSessionKey":session.parent.as_ref().map(|key| key.as_str()),
-                    "provider":provider_label(session.provider),
-                })
-            })
-            .collect();
+            .value
+            .map(recovery::episode)
+            .transpose()?;
+        let delivery = if let Some(submission) = args.message_submission_id {
+            let stored = reviewq_app::hosts::receipt(
+                entry.store.as_ref(),
+                actor.clone(),
+                run.clone(),
+                lead.clone(),
+                parse(submission.as_str())?,
+            )
+            .await?;
+            json!({"receipt":messages::project(stored)?.data})
+        } else {
+            let last = entry
+                .store
+                .read_messages(actor.clone(), run.clone(), lead, None, 1)
+                .await?
+                .value
+                .items
+                .into_iter()
+                .next();
+            last.map_or(Value::Null, |value| json!({
+                "submissionId":value.submission_id.as_str(),
+                "state": messages::recorded_state(value.state),
+                "updatedAt":reviewq_protocol::UtcTimestampDto::from_unix_milliseconds(value.updated_at_ms),
+                "outcomeDetail":value.outcome_detail,
+            }))
+        };
         let report = read_report(entry, actor.clone(), run.clone(), args.report).await?;
         let questions = questions::read(
             entry,
@@ -142,13 +177,19 @@ pub(super) async fn get(entry: &Entry, actor: Actor, args: GetReview) -> Result<
             report,
             Some(questions),
             action,
-            Some(json!({"items": sessions, "more": detail.next_session.is_some()})),
+            Some(detail.sessions),
+            recovery,
+            delivery,
         )
     } else {
-        if args.report.is_some() || question_id.is_some() {
+        if args.report.is_some()
+            || question_id.is_some()
+            || args.session_cursor.is_some()
+            || args.message_submission_id.is_some()
+        {
             return Err(AppError::NotFound);
         }
-        (Value::Null, None, None, None)
+        (Value::Null, None, None, None, None, Value::Null)
     };
     let followups = followups::project_enrollment(
         entry
@@ -167,7 +208,11 @@ pub(super) async fn get(entry: &Entry, actor: Actor, args: GetReview) -> Result<
         .iter()
         .map(|run| run_summary(entry, &review, run))
         .collect();
-    let sync = queue_sync(&entry.active_source().await?, page.sync);
+    let active = entry.active_source().await?;
+    if active.revision != page.settings {
+        return Err(AppError::StaleRevision);
+    }
+    let sync = queue_sync(&active, page.sync);
     let item = project_review(&page.item)?;
     fit_page(&runs, offset, page.total, |runs, next| {
         json!({
@@ -175,7 +220,8 @@ pub(super) async fn get(entry: &Entry, actor: Actor, args: GetReview) -> Result<
             "runs":runs, "total":page.total,
             "nextOffset": next,
             "lastSyncAt":sync.last_success_at, "syncFailed":sync.error.is_some(),
-            "dashboard":dashboard(entry, &review, selected.as_ref().map(|(run, _)| run)),
+            "dashboard":dashboard_session(entry,&review,selected.as_ref().map(|(run,_)|run),
+                selected.as_ref().map(|(_,key)|key)),
             "selectedSessionKey": selected.as_ref().map(|(_, key)| key.as_str()),
             "launch": launch,
             "questions": questions,
@@ -183,6 +229,8 @@ pub(super) async fn get(entry: &Entry, actor: Actor, args: GetReview) -> Result<
             "followups": followups,
             "action": action,
             "sessions": sessions,
+            "delivery": delivery,
+            "recovery": recovery,
         })
     })
 }
@@ -472,6 +520,15 @@ async fn select(
 }
 
 pub(super) fn dashboard(entry: &Entry, review: &ReviewId, run: Option<&RunId>) -> String {
+    dashboard_session(entry, review, run, None)
+}
+
+fn dashboard_session(
+    entry: &Entry,
+    review: &ReviewId,
+    run: Option<&RunId>,
+    session: Option<&SessionKey>,
+) -> String {
     let root = entry.auth.endpoint.browser();
     let mut query = url::form_urlencoded::Serializer::new(String::new());
     query.append_pair("view", if run.is_some() { "runs" } else { "queue" });
@@ -480,6 +537,9 @@ pub(super) fn dashboard(entry: &Entry, review: &ReviewId, run: Option<&RunId>) -
         query
             .append_pair("runId", run.as_str())
             .append_pair("tab", "agent");
+    }
+    if let Some(session) = session {
+        query.append_pair("sessionKey", session.as_str());
     }
     format!("http://{root}/?{}", query.finish())
 }

@@ -29,6 +29,7 @@ use crate::workspace::{
 };
 use crate::{SqliteStore, StoreError};
 
+mod cached;
 mod filters;
 mod lookup;
 mod management;
@@ -66,6 +67,8 @@ const ITEM_COLUMNS: &str =
      f.stage_reason, f.queue_state, f.focus_run, f.focus_session, f.full_mr_reviewed_sha, f.coverage, f.last_activity";
 const ITEM_FROM: &str = "FROM reviews AS r LEFT JOIN review_decisions AS d USING(review_id)
                          JOIN review_activity AS f ON f.review_id=r.review_id";
+const CACHED_ITEM_FROM: &str = "FROM reviews AS r LEFT JOIN review_decisions AS d USING(review_id)
+                         JOIN queue_projection AS f ON f.review_id=r.review_id";
 const SCOPE_PREDICATE: &str =
     "(((?1 = 0 OR ?1 = 1)
        AND EXISTS (SELECT 1 FROM configured_projects c WHERE c.origin=r.origin AND c.project_id=r.project_id)
@@ -229,10 +232,21 @@ fn page_context(
     limit: u16,
     previous: Option<&PageContext>,
 ) -> Result<PageContext, StoreError> {
+    make_context(connection, actor, limit, previous, None)
+}
+
+fn make_context(
+    connection: &Connection,
+    actor: &Actor,
+    limit: u16,
+    previous: Option<&PageContext>,
+    projection: Option<i64>,
+) -> Result<PageContext, StoreError> {
     let context = PageContext {
         generation: queue_revision(connection)?,
         authority: actor_key(actor),
         limit,
+        projection,
     };
     if previous.is_some_and(|previous| previous != &context) {
         return Err(AppError::CursorExpired.into());

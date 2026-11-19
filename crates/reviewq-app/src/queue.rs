@@ -142,6 +142,7 @@ pub struct ManagementReviews {
     pub items: Vec<QueueItem>,
     pub total: u64,
     pub sync: SourceSync,
+    pub settings: Revision,
 }
 
 #[derive(Debug)]
@@ -150,6 +151,7 @@ pub struct ManagementRuns {
     pub runs: Vec<RunSummary>,
     pub total: u64,
     pub sync: SourceSync,
+    pub settings: Revision,
 }
 
 /// Maximum rows in one compact queue, overview, or run-detail read.
@@ -160,6 +162,7 @@ pub struct PageContext {
     pub generation: Revision,
     pub authority: [u8; 32],
     pub limit: u16,
+    pub projection: Option<i64>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

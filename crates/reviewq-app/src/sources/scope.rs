@@ -4,6 +4,7 @@ use reviewq_domain::identity::{MrIdentity, ProjectId, TicketKey};
 use reviewq_domain::settings::{BoardScope, BoardType, WorkspaceScope};
 
 use crate::access::AppError;
+use crate::queue::LoadedSprint;
 use crate::queue::ReviewSource;
 use crate::workspace::ConfiguredProject;
 
@@ -52,6 +53,7 @@ pub struct SourceObservation {
     pub owned: Vec<ReviewSource>,
     pub issues: Vec<ScopedIssue>,
     pub sprints: Vec<ScopedSprint>,
+    pub loaded_sprints: Vec<LoadedSprint>,
 }
 
 impl SourceObservation {
@@ -165,10 +167,48 @@ pub(super) async fn collect(
             }
         }
     }
+    let mut loaded_count = 0;
+    for sprint in store.loaded_sprint_catalog(attempt).await? {
+        let board = scope
+            .boards
+            .iter()
+            .find(|board| {
+                board.selection.enabled
+                    && board.board_type == BoardType::Scrum
+                    && board.selection.board_id == sprint.board
+            })
+            .ok_or(AppError::StaleRevision)?;
+        let tickets = if observation
+            .sprints
+            .iter()
+            .any(|current| (current.board, current.id) == (sprint.board, sprint.id))
+        {
+            observation
+                .issues
+                .iter()
+                .filter(|issue| {
+                    issue.board == sprint.board && issue.sprint_ids.contains(&sprint.id)
+                })
+                .map(|issue| issue.ticket.key.clone())
+                .collect::<std::collections::BTreeSet<_>>()
+        } else {
+            issues(jira, board, Some(sprint.id))
+                .await?
+                .into_keys()
+                .collect()
+        };
+        loaded_count += tickets.len();
+        if loaded_count > MAX_ASSOCIATIONS {
+            return Err(AppError::PayloadTooLarge);
+        }
+        observation
+            .loaded_sprints
+            .push(LoadedSprint { sprint, tickets });
+    }
     Ok(observation)
 }
 
-async fn issues(
+pub(crate) async fn issues(
     jira: &dyn TicketSourceReader,
     board: &BoardScope,
     sprint: Option<u64>,

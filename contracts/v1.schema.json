@@ -449,11 +449,15 @@
     "CancelRecoveryRequest": {
       "additionalProperties": false,
       "properties": {
+        "episodeId": {
+          "$ref": "#/definitions/ResourceIdDto"
+        },
         "expectedRevision": {
           "$ref": "#/definitions/RevisionDto"
         }
       },
       "required": [
+        "episodeId",
         "expectedRevision"
       ],
       "title": "CancelRecoveryRequest",
@@ -2830,6 +2834,7 @@
     "InterruptState": {
       "enum": [
         "interrupted",
+        "deferred",
         "rejected",
         "uncertain"
       ],

@@ -34,3 +34,13 @@ CREATE TEMP TABLE IF NOT EXISTS refresh_review_issues (
     review_id TEXT NOT NULL, board_id INTEGER NOT NULL, ticket_key TEXT NOT NULL,
     PRIMARY KEY (review_id, board_id, ticket_key)
 ) STRICT, WITHOUT ROWID;
+
+CREATE TEMP TABLE IF NOT EXISTS refresh_loaded_sprints (
+    board_id INTEGER NOT NULL, sprint_id INTEGER NOT NULL,
+    PRIMARY KEY (board_id,sprint_id)
+) STRICT, WITHOUT ROWID;
+
+CREATE TEMP TABLE IF NOT EXISTS refresh_loaded_sprint_issues (
+    board_id INTEGER NOT NULL, sprint_id INTEGER NOT NULL,ticket_key TEXT NOT NULL,
+    PRIMARY KEY (board_id,sprint_id,ticket_key)
+) STRICT, WITHOUT ROWID;

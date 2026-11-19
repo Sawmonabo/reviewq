@@ -2,8 +2,8 @@
 import { func0 } from "../runtime.mjs";
 import { schema177 } from "../metadata-4.mjs";
 import { validate25 } from "./checkpoint-id-dto.mjs";
-import { validate208 } from "./utc-timestamp-dto.mjs";
-function validate540(
+import { validate209 } from "./utc-timestamp-dto.mjs";
+function validate541(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -18,7 +18,7 @@ function validate540(
         let data0 = data.desktopReason;
         const _errs1 = errors;
         if (typeof data0 !== "string" && data0 !== null) {
-          validate540.errors = [
+          validate541.errors = [
             {
               instancePath: instancePath + "/desktopReason",
               schemaPath: "#/properties/desktopReason/type",
@@ -40,7 +40,7 @@ function validate540(
           let data1 = data.desktopStatus;
           const _errs3 = errors;
           if (typeof data1 !== "string" && data1 !== null) {
-            validate540.errors = [
+            validate541.errors = [
               {
                 instancePath: instancePath + "/desktopStatus",
                 schemaPath: "#/properties/desktopStatus/type",
@@ -109,7 +109,7 @@ function validate540(
                 vErrors.push(err1);
               }
               errors++;
-              validate540.errors = vErrors;
+              validate541.errors = vErrors;
               return false;
             } else {
               errors = _errs6;
@@ -150,7 +150,7 @@ function validate540(
               if (data.kind !== undefined && func0.call(data, "kind")) {
                 const _errs11 = errors;
                 if (typeof data.kind !== "string") {
-                  validate540.errors = [
+                  validate541.errors = [
                     {
                       instancePath: instancePath + "/kind",
                       schemaPath: "#/properties/kind/type",
@@ -168,7 +168,7 @@ function validate540(
                 if (data.label !== undefined && func0.call(data, "label")) {
                   const _errs13 = errors;
                   if (typeof data.label !== "string") {
-                    validate540.errors = [
+                    validate541.errors = [
                       {
                         instancePath: instancePath + "/label",
                         schemaPath: "#/properties/label/type",
@@ -193,7 +193,7 @@ function validate540(
                     let valid2 = false;
                     const _errs17 = errors;
                     if (
-                      !validate208(data6, {
+                      !validate209(data6, {
                         instancePath: instancePath + "/notifiedAt",
                         parentData: data,
                         parentDataProperty: "notifiedAt",
@@ -202,8 +202,8 @@ function validate540(
                     ) {
                       vErrors =
                         vErrors === null
-                          ? validate208.errors
-                          : vErrors.concat(validate208.errors);
+                          ? validate209.errors
+                          : vErrors.concat(validate209.errors);
                       errors = vErrors.length;
                     }
                     var _valid1 = _errs17 === errors;
@@ -240,7 +240,7 @@ function validate540(
                         vErrors.push(err3);
                       }
                       errors++;
-                      validate540.errors = vErrors;
+                      validate541.errors = vErrors;
                       return false;
                     } else {
                       errors = _errs16;
@@ -263,7 +263,7 @@ function validate540(
                     ) {
                       const _errs20 = errors;
                       if (
-                        !validate208(data.occurredAt, {
+                        !validate209(data.occurredAt, {
                           instancePath: instancePath + "/occurredAt",
                           parentData: data,
                           parentDataProperty: "occurredAt",
@@ -272,8 +272,8 @@ function validate540(
                       ) {
                         vErrors =
                           vErrors === null
-                            ? validate208.errors
-                            : vErrors.concat(validate208.errors);
+                            ? validate209.errors
+                            : vErrors.concat(validate209.errors);
                         errors = vErrors.length;
                       }
                       var valid0 = _errs20 === errors;
@@ -288,7 +288,7 @@ function validate540(
         }
       }
     } else {
-      validate540.errors = [
+      validate541.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -299,7 +299,7 @@ function validate540(
       return false;
     }
   }
-  validate540.errors = vErrors;
+  validate541.errors = vErrors;
   return errors === 0;
 }
-export { validate540 };
+export { validate541 };

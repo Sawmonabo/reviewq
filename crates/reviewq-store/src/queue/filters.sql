@@ -42,7 +42,7 @@ base AS (
       (SELECT m.ticket_key FROM matched m WHERE m.review_id=r.review_id
          ORDER BY reviewq_fold(substr(m.ticket_key,1,instr(m.ticket_key,'-')-1)),
                   length(m.ticket_key)-instr(m.ticket_key,'-'),m.ticket_key LIMIT 1) AS key
-    FROM reviews r JOIN review_activity f USING(review_id)
+    FROM reviews r JOIN queue_projection f USING(review_id)
     WHERE (__SCOPE__) AND :empty_scope=0
       AND (NOT EXISTS (SELECT 1 FROM requested_projects) OR r.project_id IN (SELECT id FROM requested_projects))
       AND (EXISTS(SELECT 1 FROM matched m WHERE m.review_id=r.review_id)
