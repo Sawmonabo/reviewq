@@ -1,3 +1,5 @@
+import { invoke } from "./bridge.js";
+
 const MAX_PENDING = 64;
 const RETRY_MS = 30000;
 
@@ -5,7 +7,7 @@ export function childrenChanged(state) {
   state.inspectChildren = true;
 }
 
-export async function reconcileChildren($, invoke, state) {
+export async function reconcileChildren($, state) {
   if (state.inspectChildren) {
     state.inspectChildren = false;
     const agents = await $.agent.list();

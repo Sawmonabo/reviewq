@@ -92,7 +92,7 @@ async function heartbeat($, state, allowDelivery = true) {
       state.label = result.data.label;
       if (allowDelivery) {
         await deliver($, state, result.data.offer);
-        await reconcileChildren($, invoke, state);
+        await reconcileChildren($, state);
       }
     }
     $.ui.invalidate("ui.render");
