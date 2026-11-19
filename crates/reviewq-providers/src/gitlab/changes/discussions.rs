@@ -16,6 +16,7 @@ const MAX_DISCUSSION_BYTES: usize = 512 * 1024;
 #[derive(Deserialize)]
 struct UpstreamDiscussion {
     id: String,
+    individual_note: Option<bool>,
     notes: Vec<UpstreamNote>,
 }
 
@@ -259,6 +260,7 @@ impl GitLab {
                 if let Some(resolved) = resolved {
                     discussions.push(WorkflowDiscussion {
                         id: discussion.id,
+                        individual_note: discussion.individual_note,
                         resolved,
                         notes,
                     });
@@ -275,17 +277,28 @@ impl GitLab {
             identity.project_id(),
             identity.iid()
         ))?;
-        let (_, approvals) = self.get(url, MAX_DISCUSSION_BYTES).await?;
-        let approvals: ApprovalState =
-            serde_json::from_slice(&approvals).map_err(|_| AppError::Unavailable)?;
-        if approvals
-            .project_id
-            .is_some_and(|id| id != identity.project_id().get())
-            || approvals.iid.is_some_and(|iid| iid != identity.iid().get())
-            || approvals.approved_by.iter().any(|actor| actor.user.id == 0)
-        {
-            return Err(AppError::Unavailable);
-        }
+        let personal_approval = match self.get(url, MAX_DISCUSSION_BYTES).await {
+            Ok((_, approvals)) => {
+                let approvals: ApprovalState =
+                    serde_json::from_slice(&approvals).map_err(|_| AppError::Unavailable)?;
+                if approvals
+                    .project_id
+                    .is_some_and(|id| id != identity.project_id().get())
+                    || approvals.iid.is_some_and(|id| id != identity.iid().get())
+                    || approvals.approved_by.iter().any(|actor| actor.user.id == 0)
+                {
+                    return Err(AppError::Unavailable);
+                }
+                Some(
+                    approvals
+                        .approved_by
+                        .iter()
+                        .any(|actor| actor.user.id == user.id),
+                )
+            }
+            Err(AppError::Unavailable | AppError::NotFound | AppError::Forbidden) => None,
+            Err(error) => return Err(error),
+        };
         let after = ReviewSourceReader::review(self, identity.clone()).await?;
         if before != after || after.identity != identity {
             return Err(AppError::StaleRevision);
@@ -293,10 +306,7 @@ impl GitLab {
         Ok(WorkflowSnapshot {
             review: after,
             authenticated_actor: user.id,
-            personal_approval: approvals
-                .approved_by
-                .iter()
-                .any(|actor| actor.user.id == user.id),
+            personal_approval,
             observed_at_ms: jiff::Timestamp::now().as_millisecond(),
             discussions,
         })

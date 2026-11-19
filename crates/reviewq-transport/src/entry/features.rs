@@ -46,6 +46,14 @@ pub(super) fn routes() -> Router<Arc<Entry>> {
         )
         .route("/runs/{run_id}/action", get(actions::current))
         .route(
+            "/native/actions/declare",
+            axum::routing::post(actions::declare).layer(DefaultBodyLimit::max(80 * 1024)),
+        )
+        .route(
+            "/native/actions/reconcile",
+            axum::routing::post(actions::reconcile),
+        )
+        .route(
             "/reviews/{review_id}/decisions",
             axum::routing::post(decisions::save),
         )

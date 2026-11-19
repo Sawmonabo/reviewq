@@ -2,6 +2,7 @@
 
 mod claude;
 mod codex;
+mod desktop;
 mod gitlab;
 mod history;
 mod http;
@@ -11,6 +12,7 @@ mod workflow;
 
 pub use claude::Claude;
 pub use codex::Codex;
+pub use desktop::LinuxDesktopNotifier;
 pub use gitlab::GitLab;
 pub use history::FileHistory;
 pub use report_file::RegisteredReportFiles;

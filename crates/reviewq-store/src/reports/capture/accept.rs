@@ -415,6 +415,7 @@ fn emit(
                 event_ref: Some(id),
                 label: label.to_owned(),
                 occurred_at_ms: time,
+                desktop_episode: None,
             },
         )? {
             keys.push(ResourceKey::Notification(Some(id)));

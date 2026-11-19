@@ -1,0 +1,103 @@
+use std::net::SocketAddr;
+use std::path::PathBuf;
+use std::process::Stdio;
+use std::time::Duration;
+
+use reviewq_app::access::AppFuture;
+use reviewq_app::notifications::{DesktopClaim, DesktopNotifier, DesktopOutcome, Kind};
+use tokio::process::Command;
+use url::Url;
+
+/// Linux desktop delivery via the installed notification client.
+pub struct LinuxDesktopNotifier {
+    origin: Url,
+    executable: PathBuf,
+}
+
+impl LinuxDesktopNotifier {
+    pub fn new(browser: SocketAddr, executable: PathBuf) -> Option<Self> {
+        if !browser.ip().is_loopback() || !executable.is_absolute() {
+            return None;
+        }
+        let origin = Url::parse(&format!("http://{browser}/")).ok()?;
+        Some(Self { origin, executable })
+    }
+}
+
+impl DesktopNotifier for LinuxDesktopNotifier {
+    fn notify<'a>(&'a self, claim: &'a DesktopClaim) -> AppFuture<'a, DesktopOutcome> {
+        Box::pin(async move {
+            let mut url = self.origin.clone();
+            let tab = match claim.kind {
+                Kind::Reply
+                | Kind::EditedReply
+                | Kind::Reopened
+                | Kind::Resolved
+                | Kind::NewHead => "changes",
+                Kind::ReportReady | Kind::ReportFailed | Kind::FollowupReady => "findings",
+                Kind::AgentFailure | Kind::AgentPermission | Kind::AgentQuestion | Kind::Quota => {
+                    "agent"
+                }
+                _ => "overview",
+            };
+            {
+                let mut query = url.query_pairs_mut();
+                query
+                    .append_pair("reviewId", claim.review.as_str())
+                    .append_pair("tab", tab);
+                if let Some(run) = &claim.run {
+                    query.append_pair("runId", run.as_str());
+                }
+            }
+            let label: String = claim
+                .label
+                .chars()
+                .filter(|ch| !ch.is_control())
+                .take(120)
+                .collect();
+            let mut body = escape(&label);
+            if claim.event_count > 1 {
+                body.push_str(&format!("\n{} updates", claim.event_count));
+            }
+            body.push_str(&format!(
+                "\n<a href=\"{}\">Open ReviewQ</a>",
+                escape(url.as_str())
+            ));
+            let spawned = Command::new(&self.executable)
+                .args([
+                    "--app-name=ReviewQ",
+                    "--urgency=normal",
+                    "--",
+                    "ReviewQ",
+                    &body,
+                ])
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .kill_on_drop(true)
+                .spawn();
+            let mut child = match spawned {
+                Ok(child) => child,
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                    return Ok(DesktopOutcome::NotStarted("desktop_client_unavailable"));
+                }
+                Err(_) => return Ok(DesktopOutcome::NotStarted("desktop_client_failed_to_start")),
+            };
+            match tokio::time::timeout(Duration::from_secs(5), child.wait()).await {
+                Ok(Ok(status)) if status.success() => Ok(DesktopOutcome::Delivered),
+                _ => Ok(DesktopOutcome::Uncertain(
+                    "desktop_acknowledgement_unavailable",
+                )),
+            }
+        })
+    }
+}
+
+fn escape(input: &str) -> String {
+    input
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&apos;")
+}

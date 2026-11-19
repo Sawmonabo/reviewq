@@ -1,10 +1,11 @@
 //! Scoped read of the current action and its bounded individual targets.
 
 use reviewq_app::access::{Actor, AppError, AppFuture};
+mod commands;
 use reviewq_app::actions::{Action, ActionStore, Target};
 use reviewq_app::events::Snapshot;
 use reviewq_domain::identity::{ActionId, Revision, RunId};
-use rusqlite::{Connection, Row, params};
+use rusqlite::{Connection, OptionalExtension, Row, params};
 
 use crate::events::snapshot;
 use crate::queue::{parse, text};
@@ -25,14 +26,26 @@ impl ActionStore for SqliteStore {
 }
 
 fn current(db: &Connection, run: &RunId) -> Result<Option<Action>, StoreError> {
+    let id = db
+        .query_row(
+            "SELECT action_id FROM action_heads WHERE run_id=?1",
+            [run.as_str()],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()?;
+    let Some(id) = id else { return Ok(None) };
+    by_id(db, run, &id)
+}
+
+fn by_id(db: &Connection, run: &RunId, action: &str) -> Result<Option<Action>, StoreError> {
     let mut statement = db.prepare_cached(
         "SELECT a.action_id, a.request_entry_id, a.native_turn_id, a.native_call_id, a.reviewed_sha,
             a.authority_verified, a.revision, a.intent, a.state, a.approval_state, a.approval_observed_at_ms,
             a.attempts, a.pending_submission_id, a.last_executed_submission_id, a.last_executed_turn_id,
             a.due_at_ms, a.reason, a.checked_at_ms
-         FROM action_heads h JOIN actions a USING(run_id, action_id) WHERE h.run_id=?1",
+         FROM actions a WHERE a.run_id=?1 AND a.action_id=?2",
     )?;
-    let mut rows = statement.query([run.as_str()])?;
+    let mut rows = statement.query(params![run.as_str(), action])?;
     let Some(row) = rows.next()? else {
         return Ok(None);
     };

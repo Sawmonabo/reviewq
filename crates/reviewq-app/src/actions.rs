@@ -1,5 +1,12 @@
 //! Exact native publication authority and independently observed target evidence.
 
+mod publication;
+
+pub use publication::{
+    ActionCommandStore, ActionDeclaration, ActionWork, CommentTarget, PublicationEvidence,
+    TargetObservation, declare_publication, reconcile_publication,
+};
+
 use reviewq_domain::identity::{
     ActionId, GitSha, NativeInputId, NativeTurnId, ReportHash, Revision, RunId, SubmissionId,
 };

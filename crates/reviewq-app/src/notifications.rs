@@ -1,5 +1,8 @@
 //! Private inbox occurrences and independent desktop delivery receipts.
 
+mod desktop;
+pub use desktop::{DesktopClaim, DesktopNotifier, DesktopOutcome, DesktopStore, dispatch_desktop};
+
 use reviewq_domain::identity::{NotificationId, ReviewId, Revision, RunId, SessionKey};
 
 use crate::access::{Actor, AppFuture};
@@ -59,6 +62,7 @@ pub struct Observation {
     pub event_ref: Option<String>,
     pub label: String,
     pub occurred_at_ms: i64,
+    pub desktop_episode: Option<String>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -85,6 +89,8 @@ pub struct Notification {
     pub occurred_at_ms: i64,
     pub read_at_ms: Option<i64>,
     pub notified_at_ms: Option<i64>,
+    pub desktop_status: Option<String>,
+    pub desktop_reason: Option<String>,
 }
 
 pub struct InboxPage {
