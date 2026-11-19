@@ -13,8 +13,9 @@ use reviewq_domain::settings::NativeSkill;
 use reviewq_protocol::launch as dto;
 use reviewq_protocol::settings::Skill;
 use reviewq_protocol::{
-    GitShaDto, HostProviderDto, ResourceIdDto, ReviewIdDto, RevisionDto, RunIdDto, SessionKeyDto,
-    SubmissionIdDto, UtcTimestampDto,
+    GitShaDto, HistoryEntryIdDto, HistoryTurnIdDto, HostProviderDto, ObservedInputDto,
+    ResourceIdDto, ReviewIdDto, RevisionDto, RunIdDto, SessionKeyDto, SubmissionIdDto,
+    UtcTimestampDto,
 };
 use serde::de::DeserializeOwned;
 use sha2::{Digest, Sha256};
@@ -93,7 +94,8 @@ pub(super) struct LaunchCommand {
     pub provider: HostProvider,
     pub submission: SubmissionId,
     pub selection: app::LaunchSelection,
-    pub expected: Option<(Revision, GitSha)>,
+    pub expected_revision: Option<Revision>,
+    pub expected_sha: Option<GitSha>,
     pub digest: [u8; 32],
 }
 
@@ -115,11 +117,11 @@ pub(super) async fn start(
             input.model,
             input.effort,
         )?,
-        expected: Some((
+        expected_revision: Some(
             Revision::try_from(input.expected_settings_revision.get())
                 .map_err(|_| AppError::InvalidRequest)?,
-            parse(input.source_sha.as_str())?,
-        )),
+        ),
+        expected_sha: Some(parse(input.source_sha.as_str())?),
         digest: Sha256::digest(canonical).into(),
     };
     let stored = execute(&entry, actor, command).await?;
@@ -139,20 +141,21 @@ pub(super) async fn execute(
         provider,
         submission,
         selection,
-        expected,
+        expected_revision,
+        expected_sha,
         digest,
     } = command;
     if let Some(found) = entry
         .store
         .launch_receipt(
             actor.clone(),
-            review.clone(),
+            Some(review.clone()),
             submission.clone(),
             Some(digest),
         )
         .await?
     {
-        return Ok(found);
+        return reconcile(entry, actor, found).await;
     }
     if !entry.sends_allowed {
         return Err(AppError::Forbidden);
@@ -165,9 +168,10 @@ pub(super) async fn execute(
         .map_err(|_| AppError::Busy)?;
     let prepared = load(entry, actor.clone(), review.clone(), provider).await?;
     let input = prepared.value.select(selection)?;
-    if expected
-        .as_ref()
-        .is_some_and(|(revision, sha)| *revision != input.settings || &input.source.head_sha != sha)
+    if expected_revision.is_some_and(|revision| revision != input.settings)
+        || expected_sha
+            .as_ref()
+            .is_some_and(|sha| &input.source.head_sha != sha)
     {
         return Err(AppError::StaleRevision);
     }
@@ -176,7 +180,7 @@ pub(super) async fn execute(
         .claim_launch(actor.clone(), input.clone(), submission, digest)
         .await?
     {
-        app::LaunchClaim::Existing(found) => return Ok(found),
+        app::LaunchClaim::Existing(found) => return reconcile(entry, actor, found).await,
         app::LaunchClaim::Admitted(id) => id,
     };
     let store = entry.store.clone();
@@ -196,9 +200,15 @@ pub(super) async fn receipt(
     let actor = entry.auth.browser_actor(&headers, false)?;
     let stored = entry
         .store
-        .launch_receipt(actor, parse(&review)?, parse(&submission)?, None)
+        .launch_receipt(
+            actor.clone(),
+            Some(parse(&review)?),
+            parse(&submission)?,
+            None,
+        )
         .await?
         .ok_or(AppError::NotFound)?;
+    let stored = reconcile(&entry, actor, stored).await?;
     Ok(Json(success(
         project_receipt(stored.value)?,
         stored.cursor,
@@ -228,11 +238,81 @@ pub(super) fn project_receipt(receipt: app::LaunchReceipt) -> Result<dto::Receip
             .native
             .map(|native| ResourceIdDto::new(native.as_str()).ok_or(AppError::Internal))
             .transpose()?,
+        native_job_id: receipt
+            .job
+            .map(|id| ResourceIdDto::new(id).ok_or(AppError::Internal))
+            .transpose()?,
+        observed_input: receipt
+            .observed_input
+            .map(|input| {
+                Ok::<_, AppError>(ObservedInputDto {
+                    turn_id: HistoryTurnIdDto::new(input.turn_id.as_str())
+                        .ok_or(AppError::Internal)?,
+                    entry_id: HistoryEntryIdDto::new(input.entry_id.as_str())
+                        .ok_or(AppError::Internal)?,
+                })
+            })
+            .transpose()?,
         created_at: UtcTimestampDto::from_unix_milliseconds(receipt.created_at_ms)
             .ok_or(AppError::Internal)?,
         updated_at: UtcTimestampDto::from_unix_milliseconds(receipt.updated_at_ms)
             .ok_or(AppError::Internal)?,
     })
+}
+
+pub(super) async fn reconcile(
+    entry: &Entry,
+    actor: Actor,
+    receipt: Snapshot<app::LaunchReceipt>,
+) -> Result<Snapshot<app::LaunchReceipt>, AppError> {
+    let value = &receipt.value;
+    if value.state != app::LaunchState::Uncertain || value.run.is_none() {
+        return Ok(receipt);
+    }
+    if value.observed_input.is_some() {
+        return entry
+            .store
+            .finish_launch(value.id.clone(), app::NativeLaunchResult::Confirmed)
+            .await;
+    }
+    let Ok(host) = entry.launchers.select(value.provider) else {
+        return Ok(receipt);
+    };
+    let selected = entry
+        .store
+        .resolve_selection(actor.clone(), value.review.clone(), value.run.clone())
+        .await?
+        .value;
+    let Some(target) = selected.lead().filter(|target| {
+        Some(target.session_key()) == value.session.as_ref()
+            && Some(target.binding().identity().native_id()) == value.native.as_ref()
+    }) else {
+        return Ok(receipt);
+    };
+    let Ok(Some(input)) = host.reconcile(target.clone(), value.id.clone()).await else {
+        return Ok(receipt);
+    };
+    let current = entry
+        .store
+        .launch_receipt(
+            actor,
+            Some(value.review.clone()),
+            value.submission.clone(),
+            None,
+        )
+        .await?
+        .ok_or(AppError::NotFound)?;
+    if current.value.state != app::LaunchState::Uncertain {
+        return Ok(current);
+    }
+    entry
+        .store
+        .record_launch_input(value.id.clone(), input)
+        .await?;
+    entry
+        .store
+        .finish_launch(value.id.clone(), app::NativeLaunchResult::Confirmed)
+        .await
 }
 
 pub(super) async fn load(
@@ -250,7 +330,8 @@ pub(super) async fn load(
     if stored.value.settings_revision != active.revision {
         return Err(AppError::StaleRevision);
     }
-    let identity = stored.value.item.source.identity;
+    let prior_source = stored.value.item.source;
+    let identity = prior_source.identity.clone();
     let repository = active
         .scope
         .repositories
@@ -265,11 +346,11 @@ pub(super) async fn load(
         origin: identity.origin().clone(),
         project_id: identity.project_id(),
     };
+    let models = entry.models.reader(provider)?;
+    let skills = entry.skills.reader(provider)?;
     reader
         .verify_launch_checkout(project, checkout.clone())
         .await?;
-    let models = entry.models.reader(provider)?;
-    let skills = entry.skills.reader(provider)?;
     let (source, models, skills) = tokio::try_join!(
         reader.review(identity.clone()),
         models.models(checkout.root.clone()),
@@ -284,6 +365,7 @@ pub(super) async fn load(
         .await?;
     if current.value.settings_revision != active.revision
         || current.value.item.source.identity != identity
+        || (current.value.item.source != prior_source && current.value.item.source != source)
     {
         return Err(AppError::StaleRevision);
     }
@@ -295,6 +377,7 @@ pub(super) async fn load(
         cursor: current.cursor,
         value: app::LaunchPreparation {
             review,
+            prior_source: current.value.item.source,
             source,
             settings: active.revision,
             provider,

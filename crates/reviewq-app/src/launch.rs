@@ -75,6 +75,7 @@ pub enum Invocation {
 #[derive(Clone)]
 pub struct LaunchInput {
     pub review: ReviewId,
+    pub prior_source: ReviewSource,
     pub source: ReviewSource,
     pub settings: Revision,
     pub provider: HostProvider,
@@ -119,6 +120,7 @@ impl LaunchInput {
 
 pub struct LaunchPreparation {
     pub review: ReviewId,
+    pub prior_source: ReviewSource,
     pub source: ReviewSource,
     pub settings: Revision,
     pub provider: HostProvider,
@@ -166,6 +168,7 @@ impl LaunchPreparation {
         };
         Ok(LaunchInput {
             review: self.review,
+            prior_source: self.prior_source,
             source: self.source,
             settings: self.settings,
             provider: self.provider,

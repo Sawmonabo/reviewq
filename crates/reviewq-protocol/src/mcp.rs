@@ -3,8 +3,8 @@
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    HostProviderDto, MessageTextDto, ResourceIdDto, RevisionDto, RunIdDto, SessionKeyDto,
-    SubmissionIdDto,
+    GitShaDto, HostProviderDto, MessageTextDto, ResourceIdDto, RevisionDto, RunIdDto,
+    SessionKeyDto, SubmissionIdDto,
 };
 
 #[derive(Deserialize)]
@@ -37,6 +37,7 @@ pub struct GetReview {
     pub session_key: Option<SessionKeyDto>,
     pub offset: Option<u32>,
     pub limit: Option<u16>,
+    pub launch_submission_id: Option<SubmissionIdDto>,
 }
 
 #[derive(Deserialize)]
@@ -80,6 +81,7 @@ pub struct StartReview {
     pub target: String,
     pub provider: HostProviderDto,
     pub submission_id: SubmissionIdDto,
+    pub expected_sha: Option<GitShaDto>,
     pub invocation: Option<crate::launch::Invocation>,
     pub context: Option<String>,
     pub model: Option<String>,

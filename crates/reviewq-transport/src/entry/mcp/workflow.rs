@@ -1,6 +1,6 @@
 use reviewq_app::access::{Actor, AppError};
 use reviewq_app::followups::{MonitorCommand, MonitorRequest, MonitorState};
-use reviewq_domain::identity::{ReviewId, Revision, RunId, SessionKey};
+use reviewq_domain::identity::{ReviewId, Revision, RunId, SessionKey, SubmissionId};
 use reviewq_protocol::mcp::{
     AnswerReviewQuestion, ConfigureFollowups, FollowupAction, StartReview,
 };
@@ -19,26 +19,47 @@ pub(super) async fn start(
     actor: Actor,
     args: StartReview,
 ) -> Result<Value, AppError> {
+    let canonical = serde_json::to_vec(&args).map_err(|_| AppError::Internal)?;
+    let digest: [u8; 32] = Sha256::digest(canonical).into();
+    let submission: SubmissionId = parse(args.submission_id.as_str())?;
+    if let Some(found) = entry
+        .store
+        .launch_receipt(actor.clone(), None, submission.clone(), Some(digest))
+        .await?
+    {
+        let stored = launch::reconcile(entry, actor, found).await?;
+        return launch_output(entry, stored.value);
+    }
     let review = match resolve(entry, &actor, &args.target).await? {
         ResolvedReview::Review(id) => id,
         ResolvedReview::Alternatives(urls) => return Ok(alternatives(urls)),
     };
-    let canonical = serde_json::to_vec(&args).map_err(|_| AppError::Internal)?;
     let stored = launch::execute(
         entry,
         actor,
         launch::LaunchCommand {
             review: review.clone(),
             provider: launch::provider(args.provider),
-            submission: parse(args.submission_id.as_str())?,
+            submission,
             selection: launch::selection(args.invocation, args.context, args.model, args.effort)?,
-            expected: None,
-            digest: Sha256::digest(canonical).into(),
+            expected_revision: None,
+            expected_sha: args
+                .expected_sha
+                .map(|sha| parse(sha.as_str()))
+                .transpose()?,
+            digest,
         },
     )
     .await?;
-    let url = dashboard(entry, &review, stored.value.run.as_ref());
-    let receipt = launch::project_receipt(stored.value)?;
+    launch_output(entry, stored.value)
+}
+
+fn launch_output(
+    entry: &Entry,
+    stored: reviewq_app::launch::LaunchReceipt,
+) -> Result<Value, AppError> {
+    let url = dashboard(entry, &stored.review, stored.run.as_ref());
+    let receipt = launch::project_receipt(stored)?;
     let session = if matches!(receipt.state, reviewq_protocol::launch::State::Confirmed) {
         Some(
             json!({"runId":receipt.run_id, "sessionKey":receipt.session_key,"nativeId":receipt.native_id}),

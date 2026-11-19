@@ -206,7 +206,7 @@ impl Codex {
     }
 }
 
-async fn proved_new_turn(
+pub(super) async fn proved_new_turn(
     lead: &LeadTarget,
     path: &Option<std::path::PathBuf>,
     turn: String,

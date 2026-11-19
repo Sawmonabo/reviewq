@@ -4,8 +4,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::settings::Skill;
 use crate::{
-    GitShaDto, HostProviderDto, ResourceIdDto, ReviewIdDto, RevisionDto, RunIdDto, SessionKeyDto,
-    SubmissionIdDto, Success, UtcTimestampDto,
+    GitShaDto, HostProviderDto, ObservedInputDto, ResourceIdDto, ReviewIdDto, RevisionDto,
+    RunIdDto, SessionKeyDto, SubmissionIdDto, Success, UtcTimestampDto,
 };
 
 #[derive(Deserialize)]
@@ -120,6 +120,8 @@ pub struct Receipt {
     pub run_id: Option<RunIdDto>,
     pub session_key: Option<SessionKeyDto>,
     pub native_id: Option<ResourceIdDto>,
+    pub native_job_id: Option<ResourceIdDto>,
+    pub observed_input: Option<ObservedInputDto>,
     pub created_at: UtcTimestampDto,
     pub updated_at: UtcTimestampDto,
 }

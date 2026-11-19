@@ -10,6 +10,7 @@ use serde_json::{Value, json};
 
 use crate::entry::Entry;
 use crate::entry::history::{ContentQuery, HistoryQuery, read, read_content};
+use crate::entry::launch;
 use crate::entry::messages;
 use crate::entry::pages::{parse, project_review, queue_sync};
 
@@ -64,6 +65,22 @@ pub(super) async fn get(entry: &Entry, actor: Actor, args: GetReview) -> Result<
     };
     let limit = list_limit(args.limit)?;
     let offset = args.offset.unwrap_or(0);
+    let launch = if let Some(id) = args.launch_submission_id {
+        let stored = entry
+            .store
+            .launch_receipt(
+                actor.clone(),
+                Some(review.clone()),
+                parse(id.as_str())?,
+                None,
+            )
+            .await?
+            .ok_or(AppError::NotFound)?;
+        let stored = launch::reconcile(entry, actor.clone(), stored).await?;
+        Some(launch::project_receipt(stored.value)?)
+    } else {
+        None
+    };
     let selected = match args.session_key {
         Some(session) => Some(
             entry
@@ -90,6 +107,7 @@ pub(super) async fn get(entry: &Entry, actor: Actor, args: GetReview) -> Result<
         "nextOffset": next_offset(offset, runs.len(), page.total),
         "lastSyncAt":sync.last_success_at, "syncFailed":sync.error.is_some(),
         "dashboard":dashboard(entry, &review, selected.as_ref()),
+        "launch": launch,
     }))
 }
 
