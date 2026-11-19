@@ -155,7 +155,7 @@ async fn receive(
             let declaration = declaration(handoff, expected)?;
             declaration.validate()?;
             let settings = if declaration.requires_review_refresh() {
-                let source = entry.source.as_ref().ok_or(AppError::Unavailable)?;
+                let source = entry.source_reader().await?;
                 let (identity, settings) = entry.store.report_source(lead.clone()).await?;
                 if source.review(identity.clone()).await?.identity != identity {
                     return Err(AppError::Conflict.into());
