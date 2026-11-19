@@ -1,0 +1,163 @@
+.modal.launch-pane {
+  --launch-width: min(100vw, calc((100vw - var(--sidebar-width, 198px)) / 2));
+  position: fixed;
+  inset: 0 0 0 auto;
+  width: var(--launch-width);
+  height: 100dvh;
+  max-width: 100vw;
+  max-height: 100dvh;
+  margin: 0;
+  border: 0;
+  border-inline-start: 1px solid var(--strong-line);
+  border-radius: 0;
+  box-shadow: none;
+}
+.workspace.rail-small .modal.launch-pane {
+  --launch-width: calc((100vw - 66px) / 2);
+}
+.modal.launch-pane::backdrop {
+  background: transparent;
+}
+.launch-pane .modal-frame {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  max-height: 100%;
+}
+.launch-pane .modal-frame > header {
+  min-height: 54px;
+  padding: 22px 27px 0;
+  border: 0;
+}
+.launch-pane .modal-frame > header h2 {
+  font-size: 11px;
+  font-weight: 610;
+  letter-spacing: normal;
+}
+.launch-pane .modal-frame > header .icon-button {
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font-size: 21px;
+}
+.launch-pane .modal-body {
+  flex: 1 1 auto;
+  padding: 12px 27px 24px;
+  scrollbar-width: thin;
+}
+.launch-pane .modal-frame > footer {
+  justify-content: flex-start;
+  padding: 13px 27px 18px;
+}
+.launch-pane .modal-frame > footer button {
+  font-size: 11px;
+}
+.launch-body {
+  gap: 17px;
+}
+.launch-heading h3 {
+  font-size: 20px;
+  font-weight: 560;
+  letter-spacing: -0.4px;
+  margin-bottom: 6px;
+}
+.launch-heading .meta,
+.launch-body .field {
+  font-size: 11px;
+}
+.launch-target {
+  padding: 11px 12px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  font-size: 11px;
+}
+.launch-target strong,
+.launch-target small {
+  display: block;
+  overflow-wrap: anywhere;
+}
+.launch-target strong {
+  margin-top: 3px;
+  font-weight: 500;
+  font-size: 12px;
+}
+.launch-target small {
+  color: var(--muted);
+  margin-top: 4px;
+}
+.launch-instructions {
+  border: 0;
+  padding: 0;
+  gap: 18px;
+}
+.launch-modes {
+  display: flex;
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+.launch-modes button {
+  flex: 1;
+  border: 0;
+  padding: 8px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 11px;
+}
+.launch-modes button[aria-pressed="true"] {
+  background: var(--hover);
+  color: var(--text);
+}
+.launch-models {
+  grid-template-columns: 1fr 1fr;
+}
+.launch-disclosure,
+.launch-preview-panel {
+  padding: 10px 0;
+  border-top: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 11px;
+}
+.launch-disclosure[open] > :is(form, label),
+.launch-preview-panel > div {
+  margin-top: 11px;
+}
+.launch-preview-panel {
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: var(--surface);
+}
+.picked-mr {
+  padding: 12px;
+  border-inline-start: 2px solid var(--focus);
+  background: var(--surface);
+}
+.registration-guide textarea {
+  overflow-wrap: anywhere;
+  resize: vertical;
+}
+.launch-pane input:not([type="checkbox"]),
+.launch-pane select,
+.launch-pane textarea {
+  width: 100%;
+  padding: 8px 10px;
+  background: var(--surface);
+  border-color: var(--strong-line);
+}
+@media (min-width: 701px) {
+  .workspace:has(.launch-pane[open]) .workspace-panes:not(.has-detail) {
+    margin-inline-end: calc((100vw - var(--sidebar-width, 198px)) / 2);
+  }
+}
+@media (max-width: 700px) {
+  .workspace .modal.launch-pane {
+    --launch-width: 100vw;
+  }
+  .launch-pane .modal-body,
+  .launch-pane .modal-frame > header,
+  .launch-pane .modal-frame > footer {
+    padding-inline: 17px;
+  }
+}
