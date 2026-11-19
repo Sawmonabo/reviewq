@@ -122,6 +122,7 @@ export interface PatchDiscussionNote {
   resolvable: boolean | null;
   resolved: boolean | null;
   resolvedBy: UpstreamIdDto | null;
+  webUrl: string;
   [k: string]: unknown;
 }
 

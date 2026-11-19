@@ -3,7 +3,9 @@
 import type {
   CompactTicket,
   Coverage,
+  Disposition,
   EventCursorDto,
+  FocusedActivity,
   FocusedLaunch,
   GitShaDto,
   HostProviderDto,
@@ -55,9 +57,11 @@ export interface ArchiveBoard {
 export interface ArchiveItem {
   author: NamedUpstreamId | null;
   coverage: Coverage | null;
+  currentDisposition: Disposition | null;
   dateSource: ArchiveDate | null;
   draft: boolean;
   focusSessionKey: SessionKeyDto | null;
+  focusedActivity: FocusedActivity | null;
   focusedLaunch: FocusedLaunch | null;
   focusedProvider: HostProviderDto | null;
   focusedReportReviewedSha: GitShaDto | null;
@@ -77,6 +81,7 @@ export interface ArchiveItem {
   queueState: QueueStatus;
   reasonKind: string | null;
   registeredLeadCount: SafeCountDto;
+  registeredProviders: HostProviderDto[];
   reviewId: ReviewIdDto;
   runIds: RunIdDto[];
   runStage: RunStage | null;
@@ -84,6 +89,7 @@ export interface ArchiveItem {
   sprintPairs: SprintPair[];
   tickets: CompactTicket[];
   title: string;
+  unreadNonReplyCount: SafeCountDto;
   unreadReplies: SafeCountDto;
   updatedAt: UtcTimestampDto;
   [k: string]: unknown;

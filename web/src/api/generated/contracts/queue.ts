@@ -7,6 +7,7 @@ import type {
   Disposition,
   ErrorDto,
   EventCursorDto,
+  FocusedActivity,
   FocusedLaunch,
   GitShaDto,
   HostProviderDto,
@@ -123,8 +124,10 @@ export interface SprintFacet {
 export interface MergeRequestRow {
   author: NamedUpstreamId | null;
   coverage: Coverage | null;
+  currentDisposition: Disposition | null;
   draft: boolean;
   focusSessionKey: SessionKeyDto | null;
+  focusedActivity: FocusedActivity | null;
   focusedLaunch: FocusedLaunch | null;
   focusedProvider: HostProviderDto | null;
   focusedReportReviewedSha: GitShaDto | null;
@@ -142,11 +145,13 @@ export interface MergeRequestRow {
   queueState: QueueStatus;
   reasonKind: string | null;
   registeredLeadCount: SafeCountDto;
+  registeredProviders: HostProviderDto[];
   reviewId: ReviewIdDto;
   runStage: RunStage | null;
   sourceSha: GitShaDto;
   tickets: CompactTicket[];
   title: string;
+  unreadNonReplyCount: SafeCountDto;
   unreadReplies: SafeCountDto;
   updatedAt: UtcTimestampDto;
   [k: string]: unknown;
@@ -291,8 +296,10 @@ export interface RunCards {
 export interface RunCard {
   author: NamedUpstreamId | null;
   coverage: Coverage | null;
+  currentDisposition: Disposition | null;
   draft: boolean;
   focusSessionKey: SessionKeyDto | null;
+  focusedActivity: FocusedActivity | null;
   focusedLaunch: FocusedLaunch | null;
   focusedProvider: HostProviderDto | null;
   focusedReportReviewedSha: GitShaDto | null;
@@ -310,12 +317,14 @@ export interface RunCard {
   queueState: QueueStatus;
   reasonKind: string | null;
   registeredLeadCount: SafeCountDto;
+  registeredProviders: HostProviderDto[];
   reviewId: ReviewIdDto;
   runIds: RunIdDto[];
   runStage: RunStage | null;
   sourceSha: GitShaDto;
   tickets: CompactTicket[];
   title: string;
+  unreadNonReplyCount: SafeCountDto;
   unreadReplies: SafeCountDto;
   updatedAt: UtcTimestampDto;
   [k: string]: unknown;

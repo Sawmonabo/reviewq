@@ -2,9 +2,9 @@
 import { func0 } from "../runtime.mjs";
 import { validate25 } from "./checkpoint-id-dto.mjs";
 import { validate134 } from "./report-hash-dto.mjs";
-import { validate910 } from "./artifact-stats.mjs";
+import { validate919 } from "./artifact-stats.mjs";
 import { validate127 } from "./safe-count-dto.mjs";
-function validate906(
+function validate915(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -15,7 +15,7 @@ function validate906(
       if (data.reason !== undefined && func0.call(data, "reason")) {
         const _errs1 = errors;
         if (typeof data.reason !== "string") {
-          validate906.errors = [
+          validate915.errors = [
             {
               instancePath: instancePath + "/reason",
               schemaPath: "#/properties/reason/type",
@@ -108,7 +108,7 @@ function validate906(
                 vErrors.push(err1);
               }
               errors++;
-              validate906.errors = vErrors;
+              validate915.errors = vErrors;
               return false;
             } else {
               errors = _errs5;
@@ -149,7 +149,7 @@ function validate906(
               if (data.stats !== undefined && func0.call(data, "stats")) {
                 const _errs10 = errors;
                 if (
-                  !validate910(data.stats, {
+                  !validate919(data.stats, {
                     instancePath: instancePath + "/stats",
                     parentData: data,
                     parentDataProperty: "stats",
@@ -158,8 +158,8 @@ function validate906(
                 ) {
                   vErrors =
                     vErrors === null
-                      ? validate910.errors
-                      : vErrors.concat(validate910.errors);
+                      ? validate919.errors
+                      : vErrors.concat(validate919.errors);
                   errors = vErrors.length;
                 }
                 var valid0 = _errs10 === errors;
@@ -170,7 +170,7 @@ function validate906(
                 if (data.text !== undefined && func0.call(data, "text")) {
                   const _errs11 = errors;
                   if (typeof data.text !== "string") {
-                    validate906.errors = [
+                    validate915.errors = [
                       {
                         instancePath: instancePath + "/text",
                         schemaPath: "#/properties/text/type",
@@ -240,7 +240,7 @@ function validate906(
         }
       }
     } else {
-      validate906.errors = [
+      validate915.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -251,7 +251,7 @@ function validate906(
       return false;
     }
   }
-  validate906.errors = vErrors;
+  validate915.errors = vErrors;
   return errors === 0;
 }
-export { validate906 };
+export { validate915 };

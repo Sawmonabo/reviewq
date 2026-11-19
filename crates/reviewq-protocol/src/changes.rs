@@ -124,6 +124,7 @@ pub struct PatchDiscussionLine {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct PatchDiscussionNote {
     pub note_id: String,
+    pub web_url: String,
     pub author: String,
     pub author_id: Option<crate::UpstreamIdDto>,
     pub ours: bool,

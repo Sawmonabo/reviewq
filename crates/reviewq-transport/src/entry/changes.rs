@@ -311,12 +311,12 @@ fn file_metadata(
 
 fn discussion(
     discussion: Discussion,
-    web_url: &str,
+    mr_web_url: &str,
     context: &ActiveSource,
 ) -> dto::PatchDiscussion {
     let web_url = discussion.notes.first().map_or_else(
-        || web_url.to_string(),
-        |first| format!("{web_url}#note_{}", first.id),
+        || mr_web_url.to_string(),
+        |first| format!("{mr_web_url}#note_{}", first.id),
     );
     let ours = |id: Option<u64>| {
         id.is_some_and(|id| {
@@ -354,6 +354,7 @@ fn discussion(
         .into_iter()
         .map(|row| dto::PatchDiscussionNote {
             note_id: row.id.to_string(),
+            web_url: format!("{mr_web_url}#note_{}", row.id),
             author: row.author,
             author_id: row.author_id.and_then(reviewq_protocol::UpstreamIdDto::new),
             ours: ours(row.author_id),

@@ -122,11 +122,7 @@ pub(in crate::entry) fn domain_disposition(value: dto::Disposition) -> Dispositi
 
 pub(in crate::entry) fn project(value: &Decision) -> Result<dto::DecisionView, AppError> {
     Ok(dto::DecisionView {
-        disposition: value.disposition.map(|value| match value {
-            Disposition::Reviewed => dto::Disposition::Reviewed,
-            Disposition::WaitingAuthor => dto::Disposition::WaitingAuthor,
-            Disposition::NeedsReview => dto::Disposition::NeedsReview,
-        }),
+        disposition: value.disposition.map(project_disposition),
         reviewed_sha: value
             .reviewed_sha
             .as_ref()
@@ -137,6 +133,14 @@ pub(in crate::entry) fn project(value: &Decision) -> Result<dto::DecisionView, A
             .map(|time| UtcTimestampDto::from_unix_milliseconds(time).ok_or(AppError::Internal))
             .transpose()?,
     })
+}
+
+pub(in crate::entry) fn project_disposition(value: Disposition) -> dto::Disposition {
+    match value {
+        Disposition::Reviewed => dto::Disposition::Reviewed,
+        Disposition::WaitingAuthor => dto::Disposition::WaitingAuthor,
+        Disposition::NeedsReview => dto::Disposition::NeedsReview,
+    }
 }
 
 fn revision(value: RevisionDto) -> Result<Revision, AppError> {

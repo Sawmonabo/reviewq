@@ -3,8 +3,8 @@ import { func0 } from "../runtime.mjs";
 import { validate25 } from "./checkpoint-id-dto.mjs";
 import { validate35 } from "./event-cursor-dto.mjs";
 import { validate114 } from "./review-id-dto.mjs";
-import { validate466 } from "./monitor-state.mjs";
-function validate477(
+import { validate471 } from "./monitor-state.mjs";
+function validate482(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -26,7 +26,7 @@ function validate477(
         ((data.batchId === undefined || !func0.call(data, "batchId")) &&
           (missing0 = "batchId"))
       ) {
-        validate477.errors = [
+        validate482.errors = [
           {
             instancePath,
             schemaPath: "#/required",
@@ -90,7 +90,7 @@ function validate477(
               vErrors.push(err1);
             }
             errors++;
-            validate477.errors = vErrors;
+            validate482.errors = vErrors;
             return false;
           } else {
             errors = _errs2;
@@ -152,7 +152,7 @@ function validate477(
               if (data.state !== undefined && func0.call(data, "state")) {
                 const _errs8 = errors;
                 if (
-                  !validate466(data.state, {
+                  !validate471(data.state, {
                     instancePath: instancePath + "/state",
                     parentData: data,
                     parentDataProperty: "state",
@@ -161,8 +161,8 @@ function validate477(
                 ) {
                   vErrors =
                     vErrors === null
-                      ? validate466.errors
-                      : vErrors.concat(validate466.errors);
+                      ? validate471.errors
+                      : vErrors.concat(validate471.errors);
                   errors = vErrors.length;
                 }
                 var valid0 = _errs8 === errors;
@@ -199,7 +199,7 @@ function validate477(
         }
       }
     } else {
-      validate477.errors = [
+      validate482.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -210,7 +210,7 @@ function validate477(
       return false;
     }
   }
-  validate477.errors = vErrors;
+  validate482.errors = vErrors;
   return errors === 0;
 }
-export { validate477 };
+export { validate482 };

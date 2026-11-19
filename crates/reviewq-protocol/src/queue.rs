@@ -98,11 +98,26 @@ pub struct MergeRequestRow {
     pub focused_run_id: Option<RunIdDto>,
     pub focus_session_key: Option<SessionKeyDto>,
     pub focused_provider: Option<HostProviderDto>,
+    pub focused_activity: Option<FocusedActivity>,
+    pub registered_providers: Vec<HostProviderDto>,
+    pub unread_non_reply_count: SafeCountDto,
+    pub current_disposition: Option<crate::decisions::Disposition>,
     pub focused_launch: Option<FocusedLaunch>,
     pub focused_report_reviewed_sha: Option<GitShaDto>,
     pub full_mr_reviewed_sha: Option<GitShaDto>,
     pub coverage: Option<crate::reports::Coverage>,
     pub last_activity_at: Option<UtcTimestampDto>,
+}
+
+/// Most recent verified phase on the focused native session.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub enum FocusedActivity {
+    Idle,
+    Working,
+    Blocked,
+    Failed,
 }
 
 #[derive(Debug, Serialize)]

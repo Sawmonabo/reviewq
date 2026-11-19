@@ -8,6 +8,7 @@ use reviewq_domain::session::{HostProvider, LeadTarget, SessionTarget};
 use crate::access::{Actor, AppError, AppFuture};
 use crate::decisions::{Decision, Frontier};
 use crate::events::Snapshot;
+use crate::hosts::HostPhase;
 use crate::sources::SourceSync;
 
 mod archive;
@@ -233,6 +234,9 @@ pub struct ReviewSignals {
     pub run: Option<RunId>,
     pub focus: Option<SessionKey>,
     pub focused_provider: Option<HostProvider>,
+    pub focused_activity: Option<HostPhase>,
+    pub registered_providers: Vec<HostProvider>,
+    pub unread_non_reply_count: u64,
     pub focused_launch: Option<FocusedLaunch>,
     pub focused_report_reviewed_sha: Option<GitSha>,
     pub full_mr_reviewed_sha: Option<GitSha>,

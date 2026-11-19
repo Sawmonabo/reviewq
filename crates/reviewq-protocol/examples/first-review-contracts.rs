@@ -338,6 +338,10 @@ fn review() -> MergeRequestRow {
         focused_run_id: Some(RunIdDto::new(RUN).unwrap()),
         focus_session_key: Some(SessionKeyDto::new(LEAD).unwrap()),
         focused_provider: Some(HostProviderDto::Codex),
+        focused_activity: Some(reviewq_protocol::queue::FocusedActivity::Blocked),
+        registered_providers: vec![HostProviderDto::Codex],
+        unread_non_reply_count: count(1),
+        current_disposition: None,
         focused_launch: Some(FocusedLaunch {
             observed_model: Some("fixture-model".into()),
             observed_effort: Some("high".into()),

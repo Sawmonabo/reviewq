@@ -60,6 +60,7 @@ export function ReviewRow({
           {row.own && <span className="row-tag">Yours</span>}
           {row.draft && <span className="row-tag">Draft</span>}
           <ReviewBadges review={row} />
+          <ReviewEvidenceBadges review={row} />
         </div>
         <strong className="row-title">{row.tickets[0]?.title || row.title}</strong>
         <div className="row-foot">
@@ -154,6 +155,44 @@ export function ReviewBadges({
       {review.unreadReplies > 0 && (
         <span className="row-tag" data-review-kind="thread_reply">
           New {review.unreadReplies === 1 ? "reply" : "replies"} · {review.unreadReplies}
+        </span>
+      )}
+    </>
+  );
+}
+
+export function ReviewEvidenceBadges({ review }: { readonly review: MergeRequestRow }) {
+  const phase = review.focusedActivity;
+  const disposition = review.currentDisposition;
+  const kind = phase === "blocked" ? "agent_input" : phase === "failed" ? "agent_failed" : phase;
+  return (
+    <>
+      {review.mrState === "open" && phase && (
+        <span className="row-tag" data-review-kind={kind}>
+          {
+            {
+              idle: "Agent idle",
+              working: "Agent working",
+              blocked: "Agent blocked",
+              failed: "Agent failed",
+            }[phase]
+          }
+        </span>
+      )}
+      {disposition && (
+        <span className="row-tag" data-review-kind={disposition}>
+          {
+            {
+              reviewed: "Marked reviewed",
+              waiting_author: "Marked waiting for author",
+              needs_review: "Marked for review",
+            }[disposition]
+          }
+        </span>
+      )}
+      {review.unreadNonReplyCount > 0 && (
+        <span className="row-tag" data-review-kind="discussion_update">
+          New activity · {review.unreadNonReplyCount}
         </span>
       )}
     </>

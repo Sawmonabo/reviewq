@@ -2,7 +2,7 @@
 import { func0 } from "../runtime.mjs";
 import { validate25 } from "./checkpoint-id-dto.mjs";
 import { validate71 } from "./host-provider-dto.mjs";
-function validate1157(
+function validate1172(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -24,7 +24,7 @@ function validate1157(
         ((data.cwd === undefined || !func0.call(data, "cwd")) &&
           (missing0 = "cwd"))
       ) {
-        validate1157.errors = [
+        validate1172.errors = [
           {
             instancePath,
             schemaPath: "#/required",
@@ -37,7 +37,7 @@ function validate1157(
         if (data.cwd !== undefined && func0.call(data, "cwd")) {
           const _errs1 = errors;
           if (typeof data.cwd !== "string") {
-            validate1157.errors = [
+            validate1172.errors = [
               {
                 instancePath: instancePath + "/cwd",
                 schemaPath: "#/properties/cwd/type",
@@ -130,7 +130,7 @@ function validate1157(
                   vErrors.push(err1);
                 }
                 errors++;
-                validate1157.errors = vErrors;
+                validate1172.errors = vErrors;
                 return false;
               } else {
                 errors = _errs5;
@@ -197,7 +197,7 @@ function validate1157(
         }
       }
     } else {
-      validate1157.errors = [
+      validate1172.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -208,7 +208,7 @@ function validate1157(
       return false;
     }
   }
-  validate1157.errors = vErrors;
+  validate1172.errors = vErrors;
   return errors === 0;
 }
-export { validate1157 };
+export { validate1172 };

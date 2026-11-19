@@ -588,6 +588,9 @@ fn queue_item(row: &Row<'_>) -> Result<QueueItem, StoreError> {
                 .map(parse)
                 .transpose()?,
             focused_provider: None,
+            focused_activity: None,
+            registered_providers: Vec::new(),
+            unread_non_reply_count: 0,
             focused_launch: None,
             focused_report_reviewed_sha: None,
             full_mr_reviewed_sha: row

@@ -80,6 +80,40 @@ pre.patch-source {
   min-width: 0;
   overflow-wrap: anywhere;
 }
+.discussion-heading {
+  display: inline-flex;
+  align-items: baseline;
+  max-width: calc(100% - 15px);
+  min-width: 0;
+  gap: 7px;
+}
+.discussion-subject {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.discussion-heading small {
+  white-space: nowrap;
+  color: var(--muted);
+}
+.discussion-location {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin-top: 8px;
+  color: var(--muted);
+  font-size: 11px;
+}
+.discussion-note-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+.discussion-note-meta .avatar {
+  width: 22px;
+  height: 22px;
+}
 .discussion-note {
   margin-top: 7px;
   border-top: 1px solid var(--line);

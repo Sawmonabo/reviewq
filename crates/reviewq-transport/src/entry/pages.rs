@@ -6,6 +6,7 @@ use axum::http::HeaderMap;
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use reviewq_app::access::AppError;
 use reviewq_app::events::Snapshot;
+use reviewq_app::hosts::HostPhase;
 use reviewq_app::queue::{
     MAX_QUEUE_PAGE, MergeRequestState, PageContext, QueueItem, RunPosition, SessionPosition,
 };
@@ -389,6 +390,24 @@ pub(super) fn project_review(item: &QueueItem) -> Result<MergeRequestRow, AppErr
             .map(|id| SessionKeyDto::new(id.as_str()).ok_or(AppError::Internal))
             .transpose()?,
         focused_provider: signals.focused_provider.map(provider),
+        focused_activity: signals.focused_activity.map(|phase| match phase {
+            HostPhase::Idle => reviewq_protocol::queue::FocusedActivity::Idle,
+            HostPhase::Working => reviewq_protocol::queue::FocusedActivity::Working,
+            HostPhase::Blocked => reviewq_protocol::queue::FocusedActivity::Blocked,
+            HostPhase::Failed => reviewq_protocol::queue::FocusedActivity::Failed,
+        }),
+        registered_providers: signals
+            .registered_providers
+            .iter()
+            .copied()
+            .map(provider)
+            .collect(),
+        unread_non_reply_count: count(signals.unread_non_reply_count)?,
+        current_disposition: item
+            .decision
+            .disposition
+            .filter(|_| item.decision.reviewed_sha.as_ref() == Some(&source.head_sha))
+            .map(super::features::decisions::project_disposition),
         focused_launch: signals.focused_launch.as_ref().map(|launch| FocusedLaunch {
             observed_model: launch.observed_model.clone(),
             observed_effort: launch.observed_effort.clone(),
