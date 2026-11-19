@@ -164,35 +164,7 @@ impl Compare<'_> {
             "SELECT resolved,version FROM notification_gitlab_threads WHERE review_id=?1 AND root_note_id=?2",
             params![self.review.as_str(),root], |row| Ok((row.get(0)?,row.get(1)?)),
         ).optional()?;
-        let changed = prior.is_none_or(|(resolved, _)| resolved != discussion.resolved);
-        let version = next_version(prior.map_or(0, |(_, version)| version), changed)?;
-        if changed {
-            self.db.prepare_cached(
-                "INSERT INTO notification_gitlab_threads VALUES(?1,?2,?3,?4)
-                 ON CONFLICT(review_id,root_note_id) DO UPDATE SET resolved=excluded.resolved,version=excluded.version",
-            )?.execute(params![self.review.as_str(),root,discussion.resolved,version])?;
-        }
-        if self.last.is_some()
-            && prior.is_some()
-            && changed
-            && !discussion
-                .resolved_by
-                .is_some_and(|actor| self.reviewers.contains(&actor))
-        {
-            let kind = if discussion.resolved {
-                Kind::Resolved
-            } else {
-                Kind::Reopened
-            };
-            self.event(
-                discussion,
-                kind,
-                &format!("thread-{root}"),
-                None,
-                None,
-                version,
-            )?;
-        }
+        self.resolution(discussion, &root, prior)?;
         let mut lookup = self.db.prepare_cached(
             "SELECT actor_id,sha256,version FROM notification_gitlab_notes WHERE review_id=?1 AND note_id=?2"
         )?;
@@ -244,6 +216,47 @@ impl Compare<'_> {
                     version,
                 )?;
             }
+        }
+        Ok(())
+    }
+
+    fn resolution(
+        &mut self,
+        discussion: &WorkflowDiscussion,
+        root: &str,
+        prior: Option<(bool, i64)>,
+    ) -> Result<(), StoreError> {
+        let Some(resolved) = discussion.resolved else {
+            return Ok(());
+        };
+        let changed = prior.is_none_or(|(previous, _)| previous != resolved);
+        let version = next_version(prior.map_or(0, |(_, version)| version), changed)?;
+        if changed {
+            self.db.prepare_cached(
+                "INSERT INTO notification_gitlab_threads VALUES(?1,?2,?3,?4)
+                 ON CONFLICT(review_id,root_note_id) DO UPDATE SET resolved=excluded.resolved,version=excluded.version",
+            )?.execute(params![self.review.as_str(),root,resolved,version])?;
+        }
+        if self.last.is_some()
+            && prior.is_some()
+            && changed
+            && !discussion
+                .resolved_by
+                .is_some_and(|actor| self.reviewers.contains(&actor))
+        {
+            let kind = if resolved {
+                Kind::Resolved
+            } else {
+                Kind::Reopened
+            };
+            self.event(
+                discussion,
+                kind,
+                &format!("thread-{root}"),
+                None,
+                None,
+                version,
+            )?;
         }
         Ok(())
     }

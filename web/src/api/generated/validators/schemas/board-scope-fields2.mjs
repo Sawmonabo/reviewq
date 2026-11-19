@@ -2,7 +2,7 @@
 import { func0 } from "../runtime.mjs";
 import { validate25 } from "./checkpoint-id-dto.mjs";
 import { validate195 } from "./board-type.mjs";
-function validate1188(
+function validate1190(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -64,7 +64,7 @@ function validate1188(
             vErrors.push(err1);
           }
           errors++;
-          validate1188.errors = vErrors;
+          validate1190.errors = vErrors;
           return false;
         } else {
           errors = _errs2;
@@ -103,7 +103,7 @@ function validate1188(
         }
       }
     } else {
-      validate1188.errors = [
+      validate1190.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -114,7 +114,7 @@ function validate1188(
       return false;
     }
   }
-  validate1188.errors = vErrors;
+  validate1190.errors = vErrors;
   return errors === 0;
 }
-export { validate1188 };
+export { validate1190 };

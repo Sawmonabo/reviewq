@@ -1,7 +1,7 @@
 use reviewq_app::access::AppError;
 use reviewq_app::changes::{
-    Discussion, DiscussionAnchor, DiscussionLine, DiscussionNote, DiscussionRange, PatchRevision,
-    SourcePage,
+    Discussion, DiscussionAnchor, DiscussionLine, DiscussionNote, DiscussionRange,
+    DiscussionResolution, PatchRevision, SourcePage,
 };
 use reviewq_app::sources::{
     DiscoveryEvidence, ReviewSourceReader, WorkflowDiscussion, WorkflowNote, WorkflowSnapshot,
@@ -277,14 +277,33 @@ impl GitLab {
                     .first()
                     .filter(|note| !note.system && !note.confidential)
                     .map(|note| note.id);
-                let resolved_by = discussion
-                    .notes
-                    .first()
-                    .and_then(|note| note.resolved_by.as_ref())
-                    .map(|user| user.id)
-                    .filter(|id| *id > 0);
+                let visible = || {
+                    discussion
+                        .notes
+                        .iter()
+                        .filter(|note| !note.system && !note.confidential)
+                };
+                let resolved = DiscussionResolution::from_notes(
+                    visible().map(|note| (note.resolvable, note.resolved)),
+                )
+                .resolved();
+                let resolved_by = resolved.and_then(|resolved| {
+                    let mut actors = visible()
+                        .filter(|note| {
+                            note.resolvable == Some(true) && note.resolved == Some(resolved)
+                        })
+                        .map(|note| {
+                            note.resolved_by
+                                .as_ref()
+                                .map(|user| user.id)
+                                .filter(|id| *id > 0)
+                        });
+                    let actor = actors.next().flatten()?;
+                    actors
+                        .all(|observed| observed == Some(actor))
+                        .then_some(actor)
+                });
                 let mut notes = Vec::new();
-                let mut resolved = None;
                 for note in discussion.notes {
                     if note.system || note.confidential {
                         continue;
@@ -310,7 +329,6 @@ impl GitLab {
                     if note_ids.len() > MAX_WORKFLOW_NOTES {
                         return Err(AppError::PayloadTooLarge);
                     }
-                    resolved.get_or_insert(note.resolved.unwrap_or(false));
                     let positioned_head = note
                         .position
                         .map(|position| position.refs.head_sha.parse())
@@ -326,7 +344,7 @@ impl GitLab {
                         created_at_ms: created.as_millisecond(),
                     });
                 }
-                if let Some(resolved) = resolved {
+                if !notes.is_empty() {
                     discussions.push(WorkflowDiscussion {
                         id: discussion.id,
                         root_note_id,

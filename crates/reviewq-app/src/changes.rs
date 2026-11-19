@@ -68,6 +68,47 @@ pub struct Discussion {
     pub notes: Vec<DiscussionNote>,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum DiscussionResolution {
+    Open,
+    Resolved,
+    Comment,
+    Unknown,
+}
+
+impl DiscussionResolution {
+    pub fn from_notes(notes: impl IntoIterator<Item = (Option<bool>, Option<bool>)>) -> Self {
+        let mut saw_resolved = false;
+        let mut saw_comment = false;
+        let mut uncertain = false;
+        for (resolvable, resolved) in notes {
+            match (resolvable, resolved) {
+                (Some(true), Some(false)) => return Self::Open,
+                (Some(true), Some(true)) => saw_resolved = true,
+                (Some(false), _) => saw_comment = true,
+                _ => uncertain = true,
+            }
+        }
+        if uncertain {
+            Self::Unknown
+        } else if saw_resolved {
+            Self::Resolved
+        } else if saw_comment {
+            Self::Comment
+        } else {
+            Self::Unknown
+        }
+    }
+
+    pub fn resolved(self) -> Option<bool> {
+        match self {
+            Self::Open => Some(false),
+            Self::Resolved => Some(true),
+            Self::Comment | Self::Unknown => None,
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct DiscussionAnchor {
     pub old_path: String,

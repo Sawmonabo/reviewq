@@ -219,7 +219,7 @@ fn fingerprint(discussion: &WorkflowDiscussion) -> ReportHash {
     notes.sort_unstable_by_key(|note| note.id);
     let mut digest = Sha256::new();
     hash_field(&mut digest, discussion.id.as_bytes());
-    digest.update([u8::from(discussion.resolved)]);
+    digest.update([discussion.resolved.map_or(2, u8::from)]);
     for note in notes {
         digest.update(note.id.to_be_bytes());
         digest.update(note.author.to_be_bytes());
@@ -620,13 +620,13 @@ pub(super) fn adopt_remote(
             .checked_add(1)
             .ok_or(AppError::Internal)?;
         let mut observed = Vec::new();
-        if let Some(prior) = previous.1
-            && prior != discussion.resolved
+        if let (Some(prior), Some(resolved)) = (previous.1, discussion.resolved)
+            && prior != resolved
             && !discussion
                 .resolved_by
                 .is_some_and(|actor| reviewers.contains(&actor))
         {
-            observed.push(if discussion.resolved {
+            observed.push(if resolved {
                 ("resolved", Kind::Resolved, None, discussion.resolved_by)
             } else {
                 ("reopened", Kind::Reopened, None, discussion.resolved_by)

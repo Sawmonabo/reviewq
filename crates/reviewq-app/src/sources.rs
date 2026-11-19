@@ -284,7 +284,7 @@ pub struct WorkflowDiscussion {
     pub id: String,
     pub root_note_id: Option<u64>,
     pub resolved_by: Option<u64>,
-    pub resolved: bool,
+    pub resolved: Option<bool>,
     pub notes: Vec<WorkflowNote>,
 }
 

@@ -2,6 +2,7 @@
 import { func0 } from "../runtime.mjs";
 import { validate718 } from "./patch-discussion-anchor.mjs";
 import { validate729 } from "./patch-discussion-note.mjs";
+import { validate738 } from "./discussion-resolution.mjs";
 function validate717(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
@@ -24,6 +25,8 @@ function validate717(
         ((data.ourParticipation === undefined ||
           !func0.call(data, "ourParticipation")) &&
           (missing0 = "ourParticipation")) ||
+        ((data.resolution === undefined || !func0.call(data, "resolution")) &&
+          (missing0 = "resolution")) ||
         ((data.notes === undefined || !func0.call(data, "notes")) &&
           (missing0 = "notes"))
       ) {
@@ -216,22 +219,50 @@ function validate717(
                   var valid0 = true;
                 }
                 if (valid0) {
-                  if (data.webUrl !== undefined && func0.call(data, "webUrl")) {
+                  if (
+                    data.resolution !== undefined &&
+                    func0.call(data, "resolution")
+                  ) {
                     const _errs15 = errors;
-                    if (typeof data.webUrl !== "string") {
-                      validate717.errors = [
-                        {
-                          instancePath: instancePath + "/webUrl",
-                          schemaPath: "#/properties/webUrl/type",
-                          keyword: "type",
-                          params: { type: "string" },
-                        },
-                      ];
-                      return false;
+                    if (
+                      !validate738(data.resolution, {
+                        instancePath: instancePath + "/resolution",
+                        parentData: data,
+                        parentDataProperty: "resolution",
+                        rootData,
+                      })
+                    ) {
+                      vErrors =
+                        vErrors === null
+                          ? validate738.errors
+                          : vErrors.concat(validate738.errors);
+                      errors = vErrors.length;
                     }
                     var valid0 = _errs15 === errors;
                   } else {
                     var valid0 = true;
+                  }
+                  if (valid0) {
+                    if (
+                      data.webUrl !== undefined &&
+                      func0.call(data, "webUrl")
+                    ) {
+                      const _errs16 = errors;
+                      if (typeof data.webUrl !== "string") {
+                        validate717.errors = [
+                          {
+                            instancePath: instancePath + "/webUrl",
+                            schemaPath: "#/properties/webUrl/type",
+                            keyword: "type",
+                            params: { type: "string" },
+                          },
+                        ];
+                        return false;
+                      }
+                      var valid0 = _errs16 === errors;
+                    } else {
+                      var valid0 = true;
+                    }
                   }
                 }
               }

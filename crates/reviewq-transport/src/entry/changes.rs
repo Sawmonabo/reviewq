@@ -4,7 +4,9 @@ use axum::Json;
 use axum::extract::State;
 use axum::http::HeaderMap;
 use reviewq_app::access::{Actor, AppError};
-use reviewq_app::changes::{Discussion, DiscussionLine, PatchAvailability, PatchFile};
+use reviewq_app::changes::{
+    Discussion, DiscussionLine, DiscussionResolution, PatchAvailability, PatchFile,
+};
 use reviewq_app::queue::ReviewSource;
 use reviewq_app::settings::ActiveSource;
 use reviewq_domain::identity::ReviewId;
@@ -322,6 +324,17 @@ fn discussion(
         })
     };
     let our_participation = discussion.notes.iter().any(|note| ours(note.author_id));
+    let resolution = match DiscussionResolution::from_notes(
+        discussion
+            .notes
+            .iter()
+            .map(|note| (note.resolvable, note.resolved)),
+    ) {
+        DiscussionResolution::Open => dto::DiscussionResolution::Open,
+        DiscussionResolution::Resolved => dto::DiscussionResolution::Resolved,
+        DiscussionResolution::Comment => dto::DiscussionResolution::Comment,
+        DiscussionResolution::Unknown => dto::DiscussionResolution::Unknown,
+    };
     let anchor = discussion.anchor.map(|anchor| dto::PatchDiscussionAnchor {
         old_path: anchor.old_path,
         new_path: anchor.new_path,
@@ -361,6 +374,7 @@ fn discussion(
         outdated: discussion.outdated,
         web_url,
         our_participation,
+        resolution,
         notes,
     }
 }

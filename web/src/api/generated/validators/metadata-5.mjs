@@ -124,7 +124,11 @@ const schema231 = {
     resolved: { type: ["boolean", "null"] },
   },
 };
-const schema237 = {
+const schema233 = {
+  enum: ["open", "resolved", "comment", "unknown"],
+  type: "string",
+};
+const schema238 = {
   enum: ["complete", "incomplete", "binary", "provider_limited", "missing"],
   type: "string",
 };
@@ -137,5 +141,6 @@ export {
   schema220,
   schema221,
   schema231,
-  schema237,
+  schema233,
+  schema238,
 };

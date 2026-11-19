@@ -1,6 +1,7 @@
-import { lazy, Suspense, useState } from "react";
+import { lazy, Suspense, useMemo, useState } from "react";
 import { readTicket } from "../../api/tickets";
 import type { TicketCommentOrder } from "../../api/tickets";
+import type { TicketComment } from "../../api/generated/contracts";
 import { Empty, Loading, Notice } from "../../components/PanelState";
 import { useResource } from "../../hooks/useResource";
 import { formatTime, safeUrl } from "../../lib/presentation";
@@ -51,18 +52,27 @@ function TicketDetail({ ticketKey }: { readonly ticketKey: string }) {
   const [trail, setTrail] = useState<readonly string[]>([]);
   const cursor = trail.at(-1);
   const detail = useResource(
-    JSON.stringify(["ticket", ticketKey, order, cursor]),
-    (signal) => readTicket(ticketKey, order, cursor, signal),
+    `ticket:${ticketKey}`,
+    async (signal) => {
+      const response = await readTicket(ticketKey, order, cursor, signal);
+      return { ...response, data: { ticket: response.data, order, cursor } };
+    },
     [{ kind: "ticket", id: ticketKey }],
   );
-  const ticket = detail.data;
-  if (!ticket)
+  const loaded = detail.data;
+  if (!loaded)
     return detail.error ? (
-      <Notice retry={trail.length ? () => setTrail([]) : detail.retry}>{detail.error}</Notice>
+      <Notice retry={() => selectPage([])}>{detail.error}</Notice>
     ) : (
       <Loading label={`Loading ${ticketKey}…`} />
     );
+  const ticket = loaded.ticket;
   const url = safeUrl(ticket.url);
+  const switching = loaded.order !== order || loaded.cursor !== cursor;
+  function selectPage(next: readonly string[]) {
+    setTrail(next);
+    detail.retry();
+  }
   return (
     <>
       <header className="ticket-heading">
@@ -115,42 +125,31 @@ function TicketDetail({ ticketKey }: { readonly ticketKey: string }) {
               <TicketPerson name={ticket.reporter} fallback="Unknown" />
             </dd>
           </div>
+          {ticket.components.length > 0 && (
+            <div>
+              <dt>Components</dt>
+              <dd>{ticket.components.join(", ")}</dd>
+            </div>
+          )}
+          {ticket.labels.length > 0 && (
+            <div>
+              <dt>Labels</dt>
+              <dd>{ticket.labels.join(", ")}</dd>
+            </div>
+          )}
         </dl>
-        {ticket.labels.length > 0 && (
-          <div className="actions">
-            <span className="meta">Labels</span>
-            {ticket.labels.map((label) => (
-              <span className="badge" key={label}>
-                {label}
-              </span>
-            ))}
-          </div>
-        )}
-        {ticket.components.length > 0 && (
-          <div className="actions">
-            <span className="meta">Components</span>
-            {ticket.components.map((component) => (
-              <span className="badge" key={component}>
-                {component}
-              </span>
-            ))}
-          </div>
-        )}
       </header>
-      {detail.error && <Notice retry={detail.retry}>{detail.error}</Notice>}
       {ticket.warnings.map((warning) => (
         <Notice key={warning}>{warning}</Notice>
       ))}
       {ticket.description && (
         <section className="ticket-description" aria-label="Description and scope">
           <h3>Description &amp; scope</h3>
-          <Suspense fallback={<pre className="prose-source">{ticket.description}</pre>}>
-            <Markdown source={jiraWiki(ticket.description)} base={url} />
-          </Suspense>
+          <TicketMarkdown body={ticket.description} base={url} />
         </section>
       )}
       <section className="ticket-comments stack" aria-label="Jira comments">
-        <div className="spread">
+        <header className="ticket-comments-heading spread">
           <h3>
             Comments <span className="badge">{ticket.commentCount}</span>
           </h3>
@@ -162,61 +161,106 @@ function TicketDetail({ ticketKey }: { readonly ticketKey: string }) {
               disabled={ticket.commentCount < 2}
               onChange={(event) => {
                 setOrder(event.currentTarget.value === "oldest" ? "oldest" : "newest");
-                setTrail([]);
+                selectPage([]);
               }}
             >
               <option value="newest">Newest first</option>
               <option value="oldest">Oldest first</option>
             </select>
           </label>
-        </div>
+        </header>
+        {detail.error && <Notice retry={() => selectPage([])}>{detail.error}</Notice>}
+        {switching && !detail.error && (
+          <p role="status" className="meta">
+            Loading comments. Showing the previous page.
+          </p>
+        )}
         {!ticket.items.length && <p className="meta">No comments.</p>}
-        {ticket.items.map((comment) => (
-          <article className="surface-card ticket-comment" key={comment.id}>
-            <div className="spread">
-              <strong>{comment.author ?? "Unknown author"}</strong>
-              <time className="meta" dateTime={comment.createdAt}>
-                {formatTime(comment.createdAt)}
-              </time>
-            </div>
-            {comment.body.length > 1800 ? (
-              <details>
-                <summary>Read comment</summary>
-                <Suspense fallback={null}>
-                  <Markdown source={jiraWiki(comment.body)} base={url} />
-                </Suspense>
-              </details>
-            ) : (
-              <Suspense fallback={<p>{comment.body}</p>}>
-                <Markdown source={jiraWiki(comment.body)} base={url} />
-              </Suspense>
-            )}
-            {safeUrl(comment.url) && (
-              <a className="meta" href={safeUrl(comment.url)} target="_blank" rel="noreferrer">
-                Comment permalink ↗
-              </a>
-            )}
-          </article>
-        ))}
-        <div className="actions">
-          {trail.length > 0 && (
-            <button type="button" onClick={() => setTrail(trail.slice(0, -1))}>
-              Previous comments
-            </button>
-          )}
-          {ticket.nextCursor && (
+        <div className="ticket-comment-list" aria-busy={switching && !detail.error}>
+          {ticket.items.map((comment) => (
+            <CommentCard key={comment.id} comment={comment} base={url} />
+          ))}
+        </div>
+        {(trail.length > 0 || ticket.nextCursor) && (
+          <div className="actions">
             <button
               type="button"
+              aria-disabled={switching || trail.length === 0}
               onClick={() => {
-                if (ticket.nextCursor) setTrail([...trail, ticket.nextCursor]);
+                if (!switching && trail.length) selectPage(trail.slice(0, -1));
+              }}
+            >
+              Previous comments
+            </button>
+            <button
+              type="button"
+              aria-disabled={switching || !ticket.nextCursor}
+              onClick={() => {
+                if (!switching && ticket.nextCursor) selectPage([...trail, ticket.nextCursor]);
               }}
             >
               More comments
             </button>
-          )}
-        </div>
+          </div>
+        )}
       </section>
     </>
+  );
+}
+
+function TicketMarkdown({
+  body,
+  base,
+}: {
+  readonly body: string;
+  readonly base?: string | undefined;
+}) {
+  const markdown = useMemo(() => jiraWiki(body), [body]);
+  return (
+    <Suspense fallback={<p className="prose-source">{body}</p>}>
+      <Markdown source={markdown} base={base} />
+    </Suspense>
+  );
+}
+
+function CommentCard({
+  comment,
+  base,
+}: {
+  readonly comment: TicketComment;
+  readonly base?: string | undefined;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const collapsible = comment.body.length > 1400;
+  const body = collapsible && !expanded ? `${comment.body.slice(0, 1400)}…` : comment.body;
+  const permalink = safeUrl(comment.url);
+  const stamp = <time dateTime={comment.createdAt}>{formatTime(comment.createdAt)}</time>;
+  return (
+    <article className="ticket-comment">
+      <div className="ticket-comment-meta">
+        <strong>
+          <TicketPerson name={comment.author} fallback="Unknown author" />
+        </strong>
+        {permalink ? (
+          <a href={permalink} target="_blank" rel="noreferrer" title="Open comment in Jira">
+            {stamp}
+          </a>
+        ) : (
+          stamp
+        )}
+      </div>
+      <TicketMarkdown body={body} base={base} />
+      {collapsible && (
+        <button
+          type="button"
+          className="text-button"
+          aria-expanded={expanded}
+          onClick={() => setExpanded(!expanded)}
+        >
+          {expanded ? "Show less" : "Show more"}
+        </button>
+      )}
+    </article>
   );
 }
 

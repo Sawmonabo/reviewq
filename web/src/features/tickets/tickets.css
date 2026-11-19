@@ -107,7 +107,42 @@
 }
 .ticket-comment {
   display: grid;
-  gap: 6px;
+  justify-items: start;
+  gap: 9px;
+  padding: 14px 0;
+  border-bottom: 1px solid var(--line);
+}
+.ticket-comment:last-child {
+  border-bottom: 0;
+}
+.ticket-comments-heading label,
+.ticket-comment-meta,
+.ticket-comment-meta strong {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.ticket-comments-heading label,
+.ticket-comment-meta {
+  font-size: 11px;
+  color: var(--muted);
+}
+.ticket-comments-heading h3 {
+  margin-bottom: 0;
+}
+.ticket-comment-meta strong {
+  color: var(--text);
+}
+.ticket-comment-meta a {
+  color: var(--muted);
+}
+.ticket-comment-meta a:hover {
+  color: var(--link);
+}
+.ticket-description .prose pre,
+.ticket-comment .prose pre {
+  background: var(--canvas);
 }
 .prose-source {
   white-space: pre-wrap;
