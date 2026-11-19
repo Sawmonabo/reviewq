@@ -1,3 +1,7 @@
+mod native;
+
+pub(super) use native::{declare, reconcile};
+
 use std::sync::Arc;
 
 use axum::Json;

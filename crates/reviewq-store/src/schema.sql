@@ -467,6 +467,9 @@ CREATE TABLE actions (
     native_turn_id TEXT,
     native_call_id TEXT,
     request_entry_id TEXT,
+    source_generation TEXT,
+    source_position INTEGER CHECK (source_position >= 0),
+    settings_revision INTEGER CHECK (settings_revision >= 0),
     declaration_sha256 TEXT CHECK (length(declaration_sha256) = 64),
     reviewed_sha TEXT CHECK (length(reviewed_sha) IN (40, 64)),
     authenticated_actor_id TEXT,
@@ -491,7 +494,8 @@ CREATE TABLE actions (
     FOREIGN KEY (run_id, attention_receipt_id) REFERENCES report_versions(run_id, receipt_id),
     CHECK (authority_verified=0 OR (native_turn_id IS NOT NULL AND native_call_id IS NOT NULL
         AND request_entry_id IS NOT NULL AND declaration_sha256 IS NOT NULL
-        AND reviewed_sha IS NOT NULL AND authenticated_actor_id IS NOT NULL))
+        AND reviewed_sha IS NOT NULL AND authenticated_actor_id IS NOT NULL
+        AND source_generation IS NOT NULL AND source_position IS NOT NULL AND settings_revision IS NOT NULL))
 ) STRICT;
 
 CREATE UNIQUE INDEX action_native_call ON actions(run_id, lead_session_key, native_turn_id, native_call_id)

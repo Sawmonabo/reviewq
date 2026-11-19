@@ -7,7 +7,7 @@ use crate::{
     SubmissionIdDto, UtcTimestampDto, reports::ReportHashDto,
 };
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, serde::Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub enum Intent {
@@ -83,4 +83,37 @@ pub struct Action {
     pub last_executed_turn_id: Option<HistoryTurnIdDto>,
     pub next_check_at: Option<UtcTimestampDto>,
     pub reason: Option<String>,
+}
+
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct DeclareCommand {
+    pub session_key: crate::SessionKeyDto,
+    pub call_id: ResourceIdDto,
+    pub turn_id: Option<HistoryTurnIdDto>,
+    pub request_entry_id: Option<HistoryEntryIdDto>,
+    pub declaration: Declaration,
+}
+
+#[derive(Debug, serde::Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct Declaration {
+    pub intent: Intent,
+    pub reviewed_sha: GitShaDto,
+    #[serde(default)]
+    pub comments: Vec<CommentTarget>,
+}
+
+#[derive(Debug, serde::Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CommentTarget {
+    pub body_sha256: ReportHashDto,
+    pub discussion_id: Option<ResourceIdDto>,
+}
+
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ReconcileCommand {
+    pub session_key: crate::SessionKeyDto,
+    pub call_id: ResourceIdDto,
 }

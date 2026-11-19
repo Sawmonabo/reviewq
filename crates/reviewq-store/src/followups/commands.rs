@@ -292,7 +292,7 @@ fn monitor(
                 return Err(AppError::NotFound.into());
             }
             let observation = validated_observation(db, &input.review, observation)?;
-            if observation.personal_approval && *state == MonitorState::Enabled {
+            if observation.personal_approval != Some(false) && *state == MonitorState::Enabled {
                 return Err(AppError::Conflict.into());
             }
             let selected = observations::verified_threads(&observation, selections)?;
@@ -334,7 +334,7 @@ fn monitor(
             let pause = matches!(input.command, MonitorCommand::Pause);
             if !pause {
                 let observation = validated_observation(db, &input.review, observation)?;
-                if observation.personal_approval || !previous.verified {
+                if observation.personal_approval != Some(false) || !previous.verified {
                     return Err(AppError::Conflict.into());
                 }
                 observations::require_known_threads(
@@ -364,7 +364,7 @@ fn monitor(
             let live = validated_observation(db, &input.review, observation)?;
             if previous.state == MonitorState::Archived
                 || !previous.verified
-                || live.personal_approval
+                || live.personal_approval != Some(false)
             {
                 return Err(AppError::Conflict.into());
             }

@@ -101,13 +101,14 @@ async fn scan(
 pub struct WorkflowSnapshot {
     pub review: ReviewSource,
     pub authenticated_actor: u64,
-    pub personal_approval: bool,
+    pub personal_approval: Option<bool>,
     pub observed_at_ms: i64,
     pub discussions: Vec<WorkflowDiscussion>,
 }
 
 pub struct WorkflowDiscussion {
     pub id: String,
+    pub individual_note: Option<bool>,
     pub resolved: bool,
     pub notes: Vec<WorkflowNote>,
 }
