@@ -2,9 +2,10 @@ use std::sync::atomic::AtomicBool;
 
 use reviewq_app::access::AppError;
 use reviewq_app::history::{
-    ContentReference, FileContentRef, HistoryBookmark, NativeHead, NativeHistoryPage,
-    NativeNavigation, NativePlan, NativePosition, NavigationQuery, PromptGroup, PromptPosition,
-    PromptPreview, SourceAnchor, VisibleKind, VisiblePart, VisiblePartKind,
+    ContentReference, FileContentRef, FilePosition, HistoryBookmark, NativeHead, NativeHistoryPage,
+    NativeNavigation, NativePlan, NativePosition, NavigationQuery, PromptGroup,
+    PromptOverviewCheckpoint, PromptPosition, PromptPreview, SourceAnchor, VisibleKind,
+    VisiblePart, VisiblePartKind,
 };
 use reviewq_domain::identity::NativeInputId;
 
@@ -169,6 +170,91 @@ pub(super) fn read(
     }
 }
 
+pub(super) fn extend(
+    source: &Source,
+    mut checkpoint: PromptOverviewCheckpoint,
+    pinned_start: Option<FilePosition>,
+    cancel: &AtomicBool,
+) -> Result<PromptOverviewCheckpoint, AppError> {
+    let observed = head(source, Some(&checkpoint.anchor), cancel)?;
+    if observed.reset {
+        return Err(AppError::CursorExpired);
+    }
+    let file = &source.file;
+    let complete = observed.anchor.file.high_water;
+    let end = if let Some(point) = pinned_start {
+        if point.offset != checkpoint.start_offset {
+            return Err(AppError::CursorExpired);
+        }
+        file::verify_position(file, &point, complete)?;
+        point.high_water
+    } else {
+        complete
+    };
+    let from = checkpoint.anchor.file.high_water;
+    if end < from {
+        return Err(AppError::CursorExpired);
+    }
+    if end == from {
+        return Ok(checkpoint);
+    }
+    checkpoint.anchor.file = file::file_position(file, end, end)?;
+    if let Some(next) = &mut checkpoint.next {
+        // An incomplete scan has already published a full window. Widen its
+        // continuation across an append without revisiting the completed prefix.
+        let saved = next.bookmark.clone().into_file()?;
+        file::verify_position(file, &saved, from)?;
+        next.bookmark = HistoryBookmark::File(file::file_position(file, saved.offset, end)?);
+        return Ok(checkpoint);
+    }
+    let resume = PromptPosition {
+        next_ordinal: checkpoint.total.checked_add(1).ok_or(AppError::Internal)?,
+        bookmark: HistoryBookmark::File(file::file_position(file, from, end)?),
+    };
+    let NativeNavigation::Overview {
+        total,
+        groups,
+        next,
+        ..
+    } = overview(
+        source,
+        checkpoint.anchor.generation.clone(),
+        32,
+        resume,
+        cancel,
+    )?
+    else {
+        return Err(AppError::Internal);
+    };
+    checkpoint.groups.extend(groups);
+    checkpoint.total = total;
+    checkpoint.next = next;
+    if checkpoint.groups.len() > 32 {
+        checkpoint.groups = checkpoint
+            .groups
+            .chunks(2)
+            .map(|pair| {
+                let mut group = pair[0].clone();
+                group.last = pair.last().expect("nonempty chunk").last;
+                group
+            })
+            .collect();
+    }
+    let scanned = checkpoint
+        .next
+        .as_ref()
+        .map(|point| point.bookmark.clone().into_file().map(|point| point.offset))
+        .transpose()?
+        .unwrap_or(end);
+    for group in &mut checkpoint.groups {
+        let saved = group.start.bookmark.clone().into_file()?;
+        file::verify_position(file, &saved, scanned)?;
+        group.start.bookmark =
+            HistoryBookmark::File(file::file_position(file, saved.offset, scanned)?);
+    }
+    Ok(checkpoint)
+}
+
 fn overview(
     source: &Source,
     generation: String,
@@ -195,7 +281,10 @@ fn overview(
         if offset >= end || budget == 0 {
             break;
         }
-        let next = lines.next(offset, end, &mut budget)?;
+        let next = match lines.next(offset, end, &mut budget) {
+            Err(AppError::PayloadTooLarge) if offset > position.offset => break,
+            result => result?,
+        };
         if project(source, lines.input(offset, next), 0)
             .is_some_and(|record| record.kind == VisibleKind::User)
         {
