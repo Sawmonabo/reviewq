@@ -81,6 +81,8 @@ pub struct ReportSummary {
     pub revision_reason: Option<String>,
     pub full_mr_reviewed_sha: Option<GitShaDto>,
     pub coverage: Coverage,
+    pub coverage_source_sha: Option<GitShaDto>,
+    pub coverage_target_sha: Option<GitShaDto>,
     pub verdict: Verdict,
     pub semantic_index: SemanticIndex,
     pub finding_count: Option<SafeCountDto>,
@@ -162,7 +164,8 @@ pub enum Descriptor {
         finding_id: String,
         conclusion: FindingConclusion,
         reason: String,
-        checked_sha: GitShaDto,
+        checked_sha: Option<GitShaDto>,
+        discussion_ids: Vec<ResourceIdDto>,
     },
     Disposition {
         finding_id: String,

@@ -19,6 +19,7 @@ pub struct NativeCall {
     pub turn_id: NativeTurnId,
     pub call_id: String,
     pub source_generation: String,
+    pub source_position: u64,
     pub request_entry_id: Option<NativeInputId>,
     pub tool: WorkflowTool,
 }

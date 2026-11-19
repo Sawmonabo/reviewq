@@ -200,8 +200,10 @@ CREATE TABLE report_handoffs (
     turn_id TEXT NOT NULL,
     call_id TEXT NOT NULL,
     source_generation TEXT NOT NULL CHECK (length(CAST(source_generation AS BLOB)) BETWEEN 1 AND 512),
+    source_position INTEGER NOT NULL CHECK (source_position >= 0),
     request_entry_id TEXT,
     result_entry_id TEXT,
+    request_sha256 TEXT NOT NULL CHECK (length(request_sha256) = 64),
     declaration_sha256 TEXT NOT NULL CHECK (length(declaration_sha256) = 64),
     form TEXT NOT NULL CHECK (form IN ('final', 'unchanged', 'needs_input')),
     state TEXT NOT NULL CHECK (state IN ('pending_completion', 'recorded', 'failed')),
@@ -221,6 +223,7 @@ CREATE TABLE report_handoffs (
     reason TEXT CHECK (length(CAST(reason AS BLOB)) <= 2048),
     created_at_ms INTEGER NOT NULL,
     updated_at_ms INTEGER NOT NULL CHECK (updated_at_ms >= created_at_ms),
+    settings_revision INTEGER NOT NULL CHECK (settings_revision >= 0),
     CHECK ((expected_receipt_id IS NULL) = (expected_sha256 IS NULL)),
     CHECK ((source_kind='file') = (source_path IS NOT NULL)),
     CHECK ((form='final') = (verdict IS NOT NULL)),
@@ -230,6 +233,7 @@ CREATE TABLE report_handoffs (
     UNIQUE (run_id, lead_session_key, turn_id, call_id)
 ) STRICT;
 
+CREATE UNIQUE INDEX report_handoff_native_order ON report_handoffs(run_id, source_generation, source_position);
 CREATE INDEX report_handoff_latest ON report_handoffs(run_id, created_at_ms DESC, receipt_id DESC);
 CREATE INDEX report_handoff_artifact ON report_handoffs(artifact_id);
 CREATE INDEX report_handoff_pending ON report_handoffs(due_at_ms, receipt_id)
@@ -246,6 +250,8 @@ CREATE TABLE report_versions (
     revision_reason TEXT CHECK (length(CAST(revision_reason AS BLOB)) BETWEEN 1 AND 1024),
     full_mr_reviewed_sha TEXT CHECK (length(full_mr_reviewed_sha) IN (40, 64)),
     coverage TEXT NOT NULL CHECK (coverage IN ('full_mr', 'selected_threads')),
+    coverage_source_sha TEXT CHECK (length(coverage_source_sha) IN (40, 64)),
+    coverage_target_sha TEXT CHECK (length(coverage_target_sha) IN (40, 64)),
     verdict TEXT NOT NULL CHECK (verdict IN ('approve', 'request_changes', 'blocked', 'not_specified')),
     semantic_index TEXT NOT NULL CHECK (semantic_index IN ('ready', 'source_only')),
     finding_count INTEGER CHECK (finding_count >= 0),
@@ -308,9 +314,19 @@ CREATE TABLE report_changes (
     conclusion TEXT NOT NULL CHECK (conclusion IN (
         'fixed', 'clarified_withdrawn', 'superseded', 'partly_addressed', 'still_present', 'unverified')),
     reason TEXT NOT NULL CHECK (length(CAST(reason AS BLOB)) BETWEEN 1 AND 384),
-    checked_sha TEXT NOT NULL CHECK (length(checked_sha) IN (40, 64)),
+    checked_sha TEXT CHECK (length(checked_sha) IN (40, 64)),
     PRIMARY KEY (run_id, receipt_id, finding_id),
     FOREIGN KEY (run_id, receipt_id) REFERENCES report_versions(run_id, receipt_id)
+) STRICT, WITHOUT ROWID;
+
+CREATE TABLE report_change_discussions (
+    run_id TEXT NOT NULL,
+    receipt_id TEXT NOT NULL,
+    finding_id TEXT NOT NULL,
+    discussion_id TEXT NOT NULL CHECK (length(CAST(discussion_id AS BLOB)) BETWEEN 1 AND 256),
+    PRIMARY KEY (run_id, receipt_id, finding_id, discussion_id),
+    FOREIGN KEY (run_id, receipt_id, finding_id)
+        REFERENCES report_changes(run_id, receipt_id, finding_id)
 ) STRICT, WITHOUT ROWID;
 
 CREATE TABLE finding_dispositions (

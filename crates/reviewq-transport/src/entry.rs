@@ -16,7 +16,9 @@ use reviewq_app::followups::{FollowupCommands, FollowupStore};
 use reviewq_app::hosts::{LeadStore, MessageHistoryStore, NativeHost};
 use reviewq_app::notifications::InboxStore;
 use reviewq_app::queue::{QueueStore, ReviewLookup};
-use reviewq_app::reports::{ReportCaptureStore, ReportMutationStore, ReportStore};
+use reviewq_app::reports::{
+    ReportCaptureStore, ReportFileSource, ReportMutationStore, ReportStore,
+};
 use reviewq_app::sources::{ReviewSourceReader, SourceRefreshStore, refresh_queue};
 use reviewq_app::workflow::NativeWorkflowProof;
 use reviewq_app::workspace::WorkspaceStore;
@@ -82,11 +84,17 @@ impl<
 
 type RefreshResult = Option<Result<usize, AppError>>;
 
+/// Native proof and guarded artifact reads for the workflow routes.
+pub struct WorkflowIntegration {
+    pub proof: Arc<dyn NativeWorkflowProof>,
+    pub report_files: Arc<dyn ReportFileSource>,
+}
+
 pub(super) struct Entry {
     store: Arc<dyn Store>,
     source: Option<Arc<dyn ReviewSourceReader>>,
     host: Option<Arc<dyn NativeHost>>,
-    workflow: Option<Arc<dyn NativeWorkflowProof>>,
+    workflow: Option<WorkflowIntegration>,
     sends_allowed: bool,
     auth: Auth,
     refresh: Mutex<Option<watch::Receiver<RefreshResult>>>,
@@ -138,7 +146,7 @@ pub fn router_with_workflow(
     store: Arc<dyn Store>,
     source: Option<Arc<dyn ReviewSourceReader>>,
     host: Option<Arc<dyn NativeHost>>,
-    workflow: Option<Arc<dyn NativeWorkflowProof>>,
+    workflow: Option<WorkflowIntegration>,
     sends_allowed: bool,
     endpoint: ServiceEndpoint,
     web: &Path,

@@ -53,6 +53,18 @@ pub enum Declaration {
 
 impl Declaration {
     pub fn validate(&self) -> Result<(), AppError> {
+        if matches!(
+            self,
+            Self::Final {
+                source: Source::File { hash: None, .. },
+                ..
+            } | Self::Unchanged {
+                source: Source::File { hash: None, .. },
+                ..
+            }
+        ) {
+            return Err(AppError::InvalidRequest);
+        }
         let reason = match self {
             Self::Final {
                 revision: RevisionEvidence::Unknown(reason),
@@ -97,6 +109,7 @@ pub struct CapturedArtifact {
     pub hash: ReportHash,
     pub stats: ArtifactStats,
     pub index: Option<Vec<Descriptor>>,
+    pub semantic_failure: bool,
 }
 
 pub struct AcceptedReport {
@@ -121,7 +134,8 @@ pub trait ReportCaptureStore: Send + Sync {
         &self,
         call: NativeCall,
         declaration: Declaration,
-        digest: ReportHash,
+        request_sha256: ReportHash,
+        declaration_sha256: ReportHash,
     ) -> AppFuture<'_, Snapshot<HandoffReceipt>>;
 
     fn report_handoff_status(
@@ -152,6 +166,31 @@ pub trait ReportCaptureStore: Send + Sync {
         reason: &'static str,
         native_result: Option<reviewq_domain::identity::NativeInputId>,
     ) -> AppFuture<'_, ()>;
+}
+
+pub async fn hash_report_file(
+    files: &dyn ReportFileSource,
+    call: NativeCall,
+    path: AbsolutePath,
+) -> Result<ReportHash, AppError> {
+    let source = files.open_report(call, path).await?;
+    let total = source.byte_length();
+    if total == 0 || total > i64::MAX as u64 {
+        return Err(AppError::InvalidRequest);
+    }
+    let mut digest = Sha256::new();
+    let mut offset = 0;
+    while offset < total {
+        let length = (total - offset).min(CHUNK_BYTES as u64) as usize;
+        let bytes = source.read(offset, length).await?;
+        if bytes.len() != length {
+            return Err(AppError::Conflict);
+        }
+        digest.update(bytes);
+        offset += length as u64;
+    }
+    source.verify_unchanged().await?;
+    Ok(ReportHash::from_sha256(digest.finalize().into()))
 }
 
 pub async fn reconcile_reports(
@@ -359,11 +398,12 @@ async fn read_source(
     if persisted != total || !has_content {
         return Err(AppError::InvalidRequest);
     }
-    let index = match index_source {
-        Some(source) => tokio::task::spawn_blocking(move || index::parse(&source))
-            .await
-            .map_err(|_| AppError::Internal)??,
-        None => None,
+    let (index, semantic_failure) = match index_source {
+        Some(source) => match tokio::task::spawn_blocking(move || index::parse(&source)).await {
+            Ok(Ok(index)) => (index, false),
+            Ok(Err(_)) | Err(_) => (None, true),
+        },
+        None => (None, false),
     };
     let (line_count, max_line_bytes) = count.finish();
     Ok(CapturedArtifact {
@@ -376,6 +416,7 @@ async fn read_source(
             complete: true,
         },
         index,
+        semantic_failure,
     })
 }
 

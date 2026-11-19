@@ -18,7 +18,7 @@ use super::optional;
 use crate::connection::WriteTx;
 use crate::events::{now_ms, snapshot};
 use crate::queue::{lead_for_run, parse, text};
-use crate::workspace::configured;
+use crate::workspace::{configured, settings_revision};
 use crate::{SqliteStore, StoreError};
 
 mod accept;
@@ -53,11 +53,12 @@ impl ReportCaptureStore for SqliteStore {
         &self,
         call: NativeCall,
         declaration: Declaration,
-        digest: ReportHash,
+        request_sha256: ReportHash,
+        declaration_sha256: ReportHash,
     ) -> AppFuture<'_, Snapshot<HandoffReceipt>> {
         Box::pin(async move {
             declaration.validate()?;
-            self.write(move |tx| stage(tx, call, declaration, digest))
+            self.write(move |tx| stage(tx, call, declaration, request_sha256, declaration_sha256))
                 .await
                 .map_err(StoreError::app)
         })
@@ -270,7 +271,8 @@ fn saved(
     digest: &ReportHash,
 ) -> Result<Option<HandoffReceipt>, StoreError> {
     let mut statement = db.prepare_cached(
-        "SELECT receipt_id, state, declaration_sha256, source_generation FROM report_handoffs
+        "SELECT receipt_id, state, request_sha256, source_generation, source_position,
+                request_entry_id, declaration_sha256 FROM report_handoffs
          WHERE run_id=?1 AND lead_session_key=?2 AND turn_id=?3 AND call_id=?4",
     )?;
     let mut rows = statement.query(params![
@@ -282,12 +284,16 @@ fn saved(
     let Some(row) = rows.next()? else {
         return Ok(None);
     };
-    if text(row, 2)? != digest.as_str() || text(row, 3)? != call.source_generation {
+    if text(row, 2)? != digest.as_str()
+        || text(row, 3)? != call.source_generation
+        || row.get::<_, i64>(4)? != db_int(call.source_position)?
+        || optional::<NativeInputId>(row, 5)? != call.request_entry_id
+    {
         return Err(AppError::IdempotencyConflict.into());
     }
     Ok(Some(HandoffReceipt {
         receipt_id: parse(text(row, 0)?)?,
-        declaration_sha256: digest.clone(),
+        declaration_sha256: parse(text(row, 6)?)?,
         state: parse(text(row, 1)?)?,
     }))
 }
@@ -296,11 +302,12 @@ fn stage(
     tx: &mut WriteTx<'_>,
     call: NativeCall,
     declaration: Declaration,
-    digest: ReportHash,
+    request_sha256: ReportHash,
+    declaration_sha256: ReportHash,
 ) -> Result<Snapshot<HandoffReceipt>, StoreError> {
     let db = &tx.sql;
     check_call(db, &call)?;
-    if let Some(receipt) = saved(db, &call, &digest)? {
+    if let Some(receipt) = saved(db, &call, &request_sha256)? {
         return snapshot(db, receipt);
     }
     if !configured(
@@ -353,16 +360,18 @@ fn stage(
         "INSERT INTO report_handoffs(receipt_id, run_id, lead_session_key, turn_id, call_id,
            source_generation, request_entry_id, declaration_sha256, form, source_kind, source_path,
            source_hash, reviewed_sha, revision_reason, verdict, expected_receipt_id, expected_sha256,
-           base_receipt_id, disposition_version, reason, state, due_at_ms, created_at_ms, updated_at_ms)
+           base_receipt_id, disposition_version, reason, state, due_at_ms, created_at_ms, updated_at_ms,
+           source_position, request_sha256, settings_revision)
          VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,
-                'pending_completion',?21,?21,?21)",
+                'pending_completion',?21,?21,?21,?22,?23,?24)",
         params![
             receipt_id, run.as_str(), call.lead.session_key().as_str(), call.turn_id.as_str(), call.call_id,
-            call.source_generation, call.request_entry_id.as_ref().map(|id| id.as_str()), digest.as_str(),
+            call.source_generation, call.request_entry_id.as_ref().map(|id| id.as_str()), declaration_sha256.as_str(),
             form, kind, path.as_ref().map(|path| path.as_path().as_os_str().as_bytes()),
             hash.as_ref().map(|hash| hash.as_str()), head.as_ref().map(|sha| sha.as_str()), revision_reason,
             verdict.map(|value| value.to_string()), expected.as_ref().map(|value| value.receipt_id.as_str()),
             expected.as_ref().map(|value| value.hash.as_str()), base, version, reason, time,
+            db_int(call.source_position)?, request_sha256.as_str(), settings_revision(db)?.as_sqlite_integer(),
         ],
     )?;
     tx.emit(&[
@@ -373,7 +382,7 @@ fn stage(
         &tx.sql,
         HandoffReceipt {
             receipt_id: parse(&receipt_id)?,
-            declaration_sha256: digest,
+            declaration_sha256,
             state: reviewq_app::reports::HandoffState::PendingCompletion,
         },
     )
@@ -384,7 +393,7 @@ fn claim(db: &Connection, limit: u16) -> Result<Vec<ReportWork>, StoreError> {
     let mut query = db.prepare_cached(
         "SELECT receipt_id, run_id, lead_session_key, turn_id, call_id, source_generation,
             request_entry_id, declaration_sha256, form, source_kind, source_path, source_hash,
-            reviewed_sha, revision_reason, verdict, expected_receipt_id, expected_sha256, reason, fence
+            reviewed_sha, revision_reason, verdict, expected_receipt_id, expected_sha256, reason, fence, source_position
          FROM report_handoffs WHERE state='pending_completion' AND due_at_ms<=?1
          ORDER BY due_at_ms, receipt_id LIMIT ?2",
     )?;
@@ -405,6 +414,8 @@ fn claim(db: &Connection, limit: u16) -> Result<Vec<ReportWork>, StoreError> {
                 turn_id: parse(text(row, 3)?)?,
                 call_id: row.get(4)?,
                 source_generation: row.get(5)?,
+                source_position: u64::try_from(row.get::<_, i64>(19)?)
+                    .map_err(|_| AppError::Internal)?,
                 request_entry_id: optional(row, 6)?,
                 tool: WorkflowTool::Report,
             },

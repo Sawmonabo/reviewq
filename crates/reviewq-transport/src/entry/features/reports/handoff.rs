@@ -87,10 +87,11 @@ async fn receive(
     lookup: bool,
 ) -> Result<Json<Success<dto::HandoffReceipt>>, ApiError> {
     authenticate(entry, headers)?;
-    let proof = entry.workflow.as_deref().ok_or(AppError::Unavailable)?;
+    let workflow = entry.workflow.as_ref().ok_or(AppError::Unavailable)?;
+    let proof = workflow.proof.as_ref();
     let command: dto::HandoffCommand =
         serde_json::from_slice(bytes).map_err(|_| AppError::InvalidRequest)?;
-    let (session, turn, call_id, expected, handoff) = match command {
+    let (session, turn, call_id, expected, mut handoff) = match command {
         dto::HandoffCommand::Codex(value) => (
             value.session_key,
             None,
@@ -110,9 +111,7 @@ async fn receive(
     if canonical.len() > 128 * 1024 {
         return Err(AppError::PayloadTooLarge.into());
     }
-    let digest = ReportHash::from_sha256(Sha256::digest(canonical).into());
-    let declaration = declaration(handoff, expected)?;
-    declaration.validate()?;
+    let request_sha256 = ReportHash::from_sha256(Sha256::digest(canonical).into());
     let lead = entry.store.report_lead(parse(session.as_str())?).await?;
     if lead.binding().identity().provider() != expected {
         return Err(AppError::NotFound.into());
@@ -127,18 +126,51 @@ async fn receive(
         .await?;
     if verified.lead != lead
         || verified.call_id != call_id.as_str()
-        || turn.is_some_and(|turn| verified.turn_id != turn)
+        || turn.as_ref().is_some_and(|turn| &verified.turn_id != turn)
         || verified.tool != WorkflowTool::Report
     {
         return Err(AppError::NotFound.into());
     }
-    let stored = if lookup {
-        entry.store.report_handoff_status(verified, digest).await?
-    } else {
-        entry
-            .store
-            .stage_report(verified, declaration, digest)
-            .await?
+    let existing = entry
+        .store
+        .report_handoff_status(verified.clone(), request_sha256.clone())
+        .await;
+    let stored = match existing {
+        Ok(stored) => stored,
+        Err(AppError::NotFound) if !lookup => {
+            if let Some(dto::ReportSource::File { path, sha256 }) = source_mut(&mut handoff)
+                && sha256.is_none()
+            {
+                if expected != HostProvider::Claude {
+                    return Err(AppError::InvalidRequest.into());
+                }
+                let path = absolute_path(path)?;
+                let hash_value =
+                    app::hash_report_file(workflow.report_files.as_ref(), verified.clone(), path)
+                        .await?;
+                let current = proof
+                    .verify_active_call(
+                        lead,
+                        turn,
+                        call_id.as_str().to_owned(),
+                        WorkflowTool::Report,
+                    )
+                    .await?;
+                if current != verified {
+                    return Err(AppError::Conflict.into());
+                }
+                *sha256 = Some(hash(hash_value.as_str())?);
+            }
+            let bound = serde_json::to_vec(&handoff).map_err(|_| AppError::Internal)?;
+            let declaration_sha256 = ReportHash::from_sha256(Sha256::digest(bound).into());
+            let declaration = declaration(handoff, expected)?;
+            declaration.validate()?;
+            entry
+                .store
+                .stage_report(verified, declaration, request_sha256, declaration_sha256)
+                .await?
+        }
+        Err(error) => return Err(error.into()),
     };
     Ok(Json(success(
         dto::HandoffReceipt {
@@ -206,19 +238,33 @@ fn declaration(input: dto::Handoff, provider: HostProvider) -> Result<Declaratio
     })
 }
 
+fn source_mut(handoff: &mut dto::Handoff) -> Option<&mut dto::ReportSource> {
+    match handoff {
+        dto::Handoff::Final { source, .. } | dto::Handoff::Unchanged { source, .. } => Some(source),
+        dto::Handoff::NeedsInput { .. } => None,
+    }
+}
+
+fn absolute_path(path: &str) -> Result<AbsolutePath, AppError> {
+    if path.len() > 4096 || path.contains(' ') {
+        return Err(AppError::InvalidRequest);
+    }
+    AbsolutePath::from_canonical(PathBuf::from(path)).map_err(|_| AppError::InvalidRequest)
+}
+
 fn project_source(source: dto::ReportSource, provider: HostProvider) -> Result<Source, AppError> {
     Ok(match source {
         dto::ReportSource::Response => Source::Response,
         dto::ReportSource::File { path, sha256 } => {
-            if path.len() > 4096
-                || path.contains('\0')
-                || (sha256.is_none() && provider == HostProvider::Codex)
-            {
-                return Err(AppError::InvalidRequest);
+            if sha256.is_none() {
+                return Err(if provider == HostProvider::Codex {
+                    AppError::InvalidRequest
+                } else {
+                    AppError::Conflict
+                });
             }
             Source::File {
-                path: AbsolutePath::from_canonical(PathBuf::from(path))
-                    .map_err(|_| AppError::InvalidRequest)?,
+                path: absolute_path(&path)?,
                 hash: sha256.map(|value| parse(value.as_str())).transpose()?,
             }
         }

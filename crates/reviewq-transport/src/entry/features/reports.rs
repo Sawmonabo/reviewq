@@ -531,6 +531,8 @@ fn summary(value: app::ReportSummary) -> Result<dto::ReportSummary, AppError> {
         reviewed_sha: value.reviewed_sha.as_ref().map(sha).transpose()?,
         revision_reason: value.revision_reason,
         full_mr_reviewed_sha: value.full_mr_reviewed_sha.as_ref().map(sha).transpose()?,
+        coverage_source_sha: value.coverage_source_sha.as_ref().map(sha).transpose()?,
+        coverage_target_sha: value.coverage_target_sha.as_ref().map(sha).transpose()?,
         coverage: match value.coverage {
             app::Coverage::FullMr => dto::Coverage::FullMr,
             app::Coverage::SelectedThreads => dto::Coverage::SelectedThreads,
@@ -597,10 +599,15 @@ fn descriptor(value: Descriptor) -> Result<dto::Descriptor, AppError> {
             conclusion,
             reason,
             checked_sha,
+            discussion_ids,
         } => dto::Descriptor::Change {
             finding_id: id,
             reason,
-            checked_sha: sha(&checked_sha)?,
+            checked_sha: checked_sha.as_ref().map(sha).transpose()?,
+            discussion_ids: discussion_ids
+                .iter()
+                .map(|id| resource(id))
+                .collect::<Result<_, _>>()?,
             conclusion: match conclusion {
                 app::FindingConclusion::Fixed => dto::FindingConclusion::Fixed,
                 app::FindingConclusion::ClarifiedWithdrawn => {
