@@ -47,7 +47,7 @@ export default function Changes({
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState<Status>("any");
   const [involving, setInvolving] = useState(false);
-  const participant = useRef<HTMLInputElement>(null);
+  const participant = useRef<HTMLSelectElement>(null);
   const indexKey = JSON.stringify([reviewId, epoch, positions.at(-1)]);
   const index = useResource(indexKey, async (signal) => {
     const position = positions.at(-1);
@@ -89,7 +89,11 @@ export default function Changes({
     index.data?.items.filter((file) =>
       `${file.newPath} ${file.oldPath}`.toLowerCase().includes(query.toLowerCase()),
     ) ?? [];
-  const file = available.find((entry) => entry.fileId === fileId) ?? available[0];
+  const files = index.data?.items ?? [];
+  const file = files.find((entry) => entry.fileId === fileId) ?? files[0];
+  const filePosition = file ? files.indexOf(file) : -1;
+  const fileSearch = useRef<HTMLInputElement>(null);
+  const picker = useRef<HTMLDetailsElement>(null);
   const filtered = (threads.data?.items ?? []).filter(
     (thread) =>
       (!involving || thread.ourParticipation) &&
@@ -103,6 +107,11 @@ export default function Changes({
         ? filtered.filter((thread) => !thread.anchor)
         : filtered;
 
+  function selectFile(next: PatchFile) {
+    setFileId(next.fileId);
+    saveValue(`changes.file.${reviewId}`, next.fileId);
+  }
+
   function refreshIndex() {
     setPositions([]);
     setFrozenRevision(undefined);
@@ -110,9 +119,33 @@ export default function Changes({
     setEpoch((value) => value + 1);
   }
 
+  if (index.pending && !frozenRevision && !index.error) return <Loading label="Loading changes…" />;
+
   return (
     <section className="changes stack" aria-label="Changes">
-      <Approvals reviewId={reviewId} />
+      <div className="changes-top">
+        <div>
+          <h3>Changes &amp; conversations</h3>
+          {index.data && (
+            <p className="meta">
+              {files.length}
+              {index.data.nextCursor ? "+" : ""} files · {filtered.length}
+              {threads.data?.nextCursor ? "+" : ""} conversations
+            </p>
+          )}
+        </div>
+        <Approvals reviewId={reviewId} />
+      </div>
+      {index.data && (
+        <div className="diff-revision">
+          <span>
+            Source <code>{index.data.headSha.slice(0, 12)}</code>
+          </span>
+          <span>
+            Base <code>{index.data.baseSha.slice(0, 12)}</code>
+          </span>
+        </div>
+      )}
       {changed && (
         <Notice>
           The source revision changed. The displayed patch remains on{" "}
@@ -125,19 +158,29 @@ export default function Changes({
       <div className="actions changes-tabs">
         {tabs.map(([id, label]) => (
           <button key={id} type="button" aria-pressed={tab === id} onClick={() => setTab(id)}>
-            {label}
+            {label}{" "}
+            <strong className="changes-count">
+              {id === "files"
+                ? files.length
+                : id === "general"
+                  ? filtered.filter((thread) => !thread.anchor).length
+                  : filtered.length}
+              {(id === "files" ? index.data?.nextCursor : threads.data?.nextCursor) && "+"}
+            </strong>
           </button>
         ))}
       </div>
       <div className="actions thread-filters">
         <label>
-          <input
+          Show{" "}
+          <select
             ref={participant}
-            type="checkbox"
-            checked={involving}
-            onChange={(event) => setInvolving(event.currentTarget.checked)}
-          />{" "}
-          Involving you
+            value={involving ? "mine" : "all"}
+            onChange={(event) => setInvolving(event.currentTarget.value === "mine")}
+          >
+            <option value="all">Everyone</option>
+            <option value="mine">Involving you</option>
+          </select>
         </label>
         <label>
           {" "}
@@ -146,7 +189,7 @@ export default function Changes({
             value={status}
             onChange={(event) => setStatus(event.currentTarget.value as Status)}
           >
-            <option value="any">Any</option>
+            <option value="any">Any status</option>
             <option value="open">Open</option>
             <option value="resolved">Resolved</option>
           </select>
@@ -179,51 +222,64 @@ export default function Changes({
           {index.pending && <Loading label="Loading changed files…" />}
           {index.data && (
             <>
-              <div className="stack">
+              <details
+                className="changed-file-picker"
+                ref={picker}
+                onToggle={(event) => {
+                  if (event.currentTarget.open) fileSearch.current?.focus();
+                }}
+              >
+                <summary>
+                  Changed files{" "}
+                  <small>
+                    {files.length}
+                    {index.data.nextCursor ? "+" : ""}
+                  </small>
+                </summary>
                 <label className="search-field">
-                  <Icon name="search" />
+                  <Icon name="search" size={13} />
                   <input
+                    ref={fileSearch}
                     aria-label="Search files on this page"
                     value={query}
-                    placeholder="Find changed file"
+                    placeholder="Find a file"
                     onChange={(event) => setQuery(event.currentTarget.value)}
                   />
                 </label>
-                {available.length > 0 && (
-                  <label className="field">
-                    Selected file
-                    <select
-                      value={file?.fileId ?? ""}
-                      onChange={(event) => {
-                        setFileId(event.currentTarget.value);
-                        saveValue(`changes.file.${reviewId}`, event.currentTarget.value);
-                      }}
+                <nav aria-label="Changed files">
+                  {available.map((item) => (
+                    <button
+                      type="button"
+                      key={item.fileId}
+                      aria-current={item.fileId === file?.fileId || undefined}
+                      onClick={() => selectFile(item)}
                     >
-                      {available.map((file) => (
-                        <option key={file.fileId} value={file.fileId}>
-                          {file.renamed ? `${file.oldPath} → ${file.newPath}` : file.newPath}
-                          {file.created ? " · Added" : file.deleted ? " · Deleted" : ""}
-                          {file.availability !== "complete" ? ` · ${file.availability}` : ""}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                )}
-                {!available.length && (
-                  <Empty title={query ? "No matching files on this page" : "No changed files"} />
-                )}
+                      <span className="file-initial" aria-label={fileKind(item)}>
+                        {fileKind(item).charAt(0)}
+                      </span>
+                      <code>
+                        {item.renamed ? `${item.oldPath} → ${item.newPath}` : item.newPath}
+                      </code>
+                      {item.lineCount != null && <small>{item.lineCount} rows</small>}
+                    </button>
+                  ))}
+                  {!available.length && (
+                    <p className="meta">
+                      {query ? "No matching files on this page." : "No changed files."}
+                    </p>
+                  )}
+                </nav>
                 <Pagination
                   trail={positions.map((position) => position.cursor)}
                   next={index.data.nextCursor}
                   onPage={(trail) => {
-                    if (!index.data) return;
-                    setFrozenRevision(index.data.revision);
-                    setPositions(
-                      trail.map((cursor) => ({ revision: index.data?.revision ?? "", cursor })),
-                    );
+                    const shown = index.data;
+                    if (!shown) return;
+                    setFrozenRevision(shown.revision);
+                    setPositions(trail.map((cursor) => ({ revision: shown.revision, cursor })));
                   }}
                 />
-              </div>
+              </details>
               {file && (
                 <SelectedPatch
                   key={JSON.stringify([file.reviewId, file.revision, file.fileId])}
@@ -231,6 +287,16 @@ export default function Changes({
                   threads={anchors}
                   webUrl={webUrl}
                   onReload={refreshIndex}
+                  position={filePosition}
+                  total={files.length}
+                  onPrevious={() => {
+                    const next = files[filePosition - 1];
+                    if (next) selectFile(next);
+                  }}
+                  onNext={() => {
+                    const next = files[filePosition + 1];
+                    if (next) selectFile(next);
+                  }}
                 />
               )}
             </>
@@ -274,11 +340,19 @@ function SelectedPatch({
   threads,
   webUrl,
   onReload,
+  position,
+  total,
+  onPrevious,
+  onNext,
 }: {
   readonly file: PatchFile;
   readonly threads: readonly PatchDiscussion[];
   readonly webUrl: string;
   readonly onReload: () => void;
+  readonly position: number;
+  readonly total: number;
+  readonly onPrevious: () => void;
+  readonly onNext: () => void;
 }) {
   const [sourceMode, setSourceMode] = useState(!isRichPatch(file));
   const [window, setWindow] = useState<Window>({ offset: 0 });
@@ -315,21 +389,47 @@ function SelectedPatch({
   }
 
   return (
-    <section className="stack" aria-label={`Patch for ${file.newPath}`}>
+    <section className="selected-patch" aria-label={`Patch for ${file.newPath}`}>
       <div className="spread patch-toolbar">
-        <strong>
-          <code>{file.newPath}</code>
-        </strong>
-        <div className="actions">
-          {file.created && <span className="badge green">Added</span>}
-          {file.deleted && <span className="badge red">Deleted</span>}
-          {file.lineCount !== null && <span className="meta">{file.lineCount} rows</span>}
-          {file.availability === "complete" && <a href={downloadPatchUrl(file)}>Download patch</a>}
-          {source && (
-            <a href={`${source}/diffs`} target="_blank" rel="noreferrer">
-              GitLab changes ↗
-            </a>
-          )}
+        <div>
+          <strong>
+            <code>{file.renamed ? `${file.oldPath} → ${file.newPath}` : file.newPath}</code>
+          </strong>
+          <div className="actions patch-links">
+            <span className="meta">
+              {fileKind(file)}
+              {file.lineCount !== null && ` · ${file.lineCount} rows`}
+            </span>
+            {file.availability === "complete" && (
+              <a href={downloadPatchUrl(file)}>Download patch</a>
+            )}
+            {source && (
+              <a href={`${source}/diffs`} target="_blank" rel="noreferrer">
+                GitLab changes ↗
+              </a>
+            )}
+          </div>
+        </div>
+        <div className="actions patch-arrows" aria-label="Files on this page">
+          <button
+            type="button"
+            aria-label="Previous file"
+            disabled={position < 1}
+            onClick={onPrevious}
+          >
+            ‹
+          </button>
+          <small>
+            {position + 1} / {total}
+          </small>
+          <button
+            type="button"
+            aria-label="Next file"
+            disabled={position + 1 >= total}
+            onClick={onNext}
+          >
+            ›
+          </button>
         </div>
       </div>
       {file.availability !== "complete" ? (
@@ -425,11 +525,12 @@ function SelectedPatch({
 function Approvals({ reviewId }: { readonly reviewId: string }) {
   const [open, setOpen] = useState(false);
   return (
-    <details
-      className="surface-card approval-card"
-      onToggle={(event) => setOpen(event.currentTarget.open)}
-    >
-      <summary>Approval requirements</summary>
+    <details className="approval-card" onToggle={(event) => setOpen(event.currentTarget.open)}>
+      <summary className="button-label">
+        <Icon name="check" size={14} />
+        Approvals
+        <Icon name="chevron" size={11} />
+      </summary>
       {open && <ApprovalDetail reviewId={reviewId} />}
     </details>
   );
@@ -443,7 +544,8 @@ function ApprovalDetail({ reviewId }: { readonly reviewId: string }) {
   );
   const value = approvals.data;
   return (
-    <div className="stack">
+    <div className="stack approval-popup">
+      <h3>Approval requirements</h3>
       {approvals.error && <Notice retry={approvals.retry}>{approvals.error}</Notice>}
       {approvals.pending && <Loading label="Loading approval requirements…" />}
       {value && (
@@ -494,6 +596,12 @@ function matches(thread: PatchDiscussion, file: PatchFile) {
     thread.anchor.newPath === file.newPath &&
     (thread.anchor.newLine !== null || thread.anchor.oldLine !== null)
   );
+}
+
+function fileKind(file: PatchFile) {
+  if (file.deleted) return "Deleted";
+  if (file.created) return "Added";
+  return file.renamed ? "Renamed" : "Modified";
 }
 
 function availability(state: PatchFile["availability"]) {

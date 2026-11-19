@@ -86,3 +86,184 @@ pre.patch-source {
   padding-top: 7px;
   user-select: text;
 }
+.changes {
+  gap: 15px;
+}
+.changes-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  margin-bottom: 2px;
+}
+.changes-top h3 {
+  font-size: 14px;
+  font-weight: 550;
+}
+.changes-top p {
+  margin-top: 5px;
+  font-size: 11px;
+}
+.diff-revision {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 14px;
+  color: var(--muted);
+  font-size: 10px;
+}
+.diff-revision code {
+  font-size: inherit;
+}
+.changes .changes-tabs {
+  gap: 4px;
+  padding: 3px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+.changes .changes-tabs button {
+  flex: 1;
+  padding: 8px 6px;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font-size: 11px;
+}
+.changes .changes-tabs button[aria-pressed="true"] {
+  background: var(--hover);
+  color: var(--text);
+}
+.changes-count {
+  margin-left: 4px;
+  color: var(--muted);
+  font-size: 9px;
+  font-weight: 500;
+}
+.thread-filters {
+  color: var(--muted);
+  font-size: 11px;
+}
+.thread-filters select,
+.thread-filters button {
+  font-size: 11px;
+}
+.changed-file-picker {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface);
+}
+.changed-file-picker > summary {
+  padding: 11px 13px;
+  font-size: 11px;
+}
+.changed-file-picker > summary small {
+  float: right;
+  color: var(--muted);
+}
+.changed-file-picker > .search-field {
+  margin: 0 10px 6px;
+}
+.changed-file-picker nav {
+  max-height: 210px;
+  overflow: auto;
+  overscroll-behavior: contain;
+  padding: 0 4px 4px;
+}
+.changed-file-picker nav button {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 9px;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  color: var(--muted);
+}
+.changed-file-picker nav button[aria-current="true"] {
+  background: var(--selected);
+  color: var(--text);
+}
+.changed-file-picker nav button code {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-size: 11px;
+}
+.changed-file-picker nav small {
+  flex: 0 0 auto;
+  font-size: 10px;
+}
+.changed-file-picker .file-initial {
+  flex: 0 0 auto;
+  width: 12px;
+  color: var(--link);
+  font-size: 10px;
+}
+.changed-file-picker .pagination {
+  padding: 6px 9px;
+}
+.selected-patch {
+  border: 1px solid var(--strong-line);
+  border-radius: 6px;
+  overflow: hidden;
+  background: var(--surface);
+}
+.selected-patch .patch-toolbar {
+  background: var(--raised);
+  padding: 12px 14px;
+}
+.patch-toolbar strong code {
+  font-size: 11px;
+  font-weight: 550;
+}
+.patch-toolbar .patch-links {
+  margin-top: 4px;
+  font-size: 10px;
+}
+.patch-toolbar .patch-links .meta {
+  font-size: inherit;
+}
+.patch-arrows {
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-size: 11px;
+}
+.patch-arrows button {
+  min-height: 23px;
+  padding: 0 7px;
+  border: 1px solid var(--strong-line);
+  font-size: 17px;
+}
+.selected-patch .patch-source {
+  border: 0;
+  border-radius: 0;
+}
+.selected-patch > :is(.notice, .surface-card, .patch-discussion) {
+  margin: 8px;
+}
+.changes .approval-card {
+  position: relative;
+  padding: 0;
+}
+.approval-card > summary {
+  list-style: none;
+  color: var(--link);
+  white-space: nowrap;
+  font-size: 11px;
+}
+.approval-popup {
+  position: absolute;
+  z-index: 5;
+  right: 0;
+  top: calc(100% + 8px);
+  width: min(310px, 75vw);
+  padding: 16px;
+  border: 1px solid var(--strong-line);
+  border-radius: 7px;
+  background: var(--raised);
+  box-shadow: 0 12px 36px #0009;
+}
+.discussion-list h3 {
+  font-size: 13px;
+}
