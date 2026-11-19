@@ -2,9 +2,9 @@
 import { func0 } from "../runtime.mjs";
 import { validate25 } from "./checkpoint-id-dto.mjs";
 import { validate113 } from "./report-hash-dto.mjs";
-import { validate744 } from "./artifact-stats.mjs";
+import { validate789 } from "./artifact-stats.mjs";
 import { validate106 } from "./safe-count-dto.mjs";
-function validate740(
+function validate785(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -15,7 +15,7 @@ function validate740(
       if (data.reason !== undefined && func0.call(data, "reason")) {
         const _errs1 = errors;
         if (typeof data.reason !== "string") {
-          validate740.errors = [
+          validate785.errors = [
             {
               instancePath: instancePath + "/reason",
               schemaPath: "#/properties/reason/type",
@@ -108,7 +108,7 @@ function validate740(
                 vErrors.push(err1);
               }
               errors++;
-              validate740.errors = vErrors;
+              validate785.errors = vErrors;
               return false;
             } else {
               errors = _errs5;
@@ -149,7 +149,7 @@ function validate740(
               if (data.stats !== undefined && func0.call(data, "stats")) {
                 const _errs10 = errors;
                 if (
-                  !validate744(data.stats, {
+                  !validate789(data.stats, {
                     instancePath: instancePath + "/stats",
                     parentData: data,
                     parentDataProperty: "stats",
@@ -158,8 +158,8 @@ function validate740(
                 ) {
                   vErrors =
                     vErrors === null
-                      ? validate744.errors
-                      : vErrors.concat(validate744.errors);
+                      ? validate789.errors
+                      : vErrors.concat(validate789.errors);
                   errors = vErrors.length;
                 }
                 var valid0 = _errs10 === errors;
@@ -170,7 +170,7 @@ function validate740(
                 if (data.text !== undefined && func0.call(data, "text")) {
                   const _errs11 = errors;
                   if (typeof data.text !== "string") {
-                    validate740.errors = [
+                    validate785.errors = [
                       {
                         instancePath: instancePath + "/text",
                         schemaPath: "#/properties/text/type",
@@ -240,7 +240,7 @@ function validate740(
         }
       }
     } else {
-      validate740.errors = [
+      validate785.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -251,7 +251,7 @@ function validate740(
       return false;
     }
   }
-  validate740.errors = vErrors;
+  validate785.errors = vErrors;
   return errors === 0;
 }
-export { validate740 };
+export { validate785 };

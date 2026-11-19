@@ -15,8 +15,10 @@ use super::error::ApiQuery as Query;
 use super::pages::{Context, count, parse, project_review, success};
 use super::{ApiError, Entry};
 
+mod archive;
 mod queue;
 mod sprints;
+pub(super) use archive::{ArchiveCache, list as archive};
 pub(super) use queue::list as queue;
 pub(super) use sprints::load as load_sprints;
 

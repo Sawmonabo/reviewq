@@ -9,9 +9,14 @@ use crate::scalar::{
 };
 use crate::{ErrorDto, EventCursorDto, Page, Success, UtcTimestampDto};
 
+mod archive;
 mod sprints;
 mod tracking;
 mod workspace;
+pub use archive::{
+    ArchiveBoard, ArchiveDate, ArchiveItem, ArchiveMembership, ArchivePage, ArchivePageResponse,
+    parse_archive_bound,
+};
 pub use sprints::{LoadSprintsRequest, LoadSprintsResponse, LoadedSprints, SprintPair};
 pub use tracking::{
     TicketComment, TicketDetail, TicketDetailResponse, TrackReviewRequest, TrackReviewResponse,

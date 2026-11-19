@@ -96,6 +96,8 @@ import type {
   PatchFileIndexResponse,
 } from "./changes.js";
 
+import type { ArchivePageResponse } from "./archive.js";
+
 import type { CurrentActionResponse } from "./actions.js";
 
 import type {
@@ -136,6 +138,7 @@ export interface Contracts {
   TestConnection: TestConnection;
   TrackReviewRequest: TrackReviewRequest;
   ApprovalViewResponse: ApprovalViewResponse;
+  ArchivePageResponse: ArchivePageResponse;
   CancelRecoveryResponse: CancelRecoveryResponse;
   CatalogResponse: CatalogResponse;
   CurrentActionResponse: CurrentActionResponse;

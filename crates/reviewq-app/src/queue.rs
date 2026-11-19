@@ -10,10 +10,15 @@ use crate::decisions::{Decision, Frontier};
 use crate::events::Snapshot;
 use crate::sources::SourceSync;
 
+mod archive;
 mod filters;
 mod sprints;
 mod tracking;
 mod workspace;
+pub use archive::{
+    ArchiveBoard, ArchiveDate, ArchiveFilter, ArchiveItem, ArchiveMembership, ArchiveMetadata,
+    ArchivePage, ArchivePosition, ArchiveScope, ArchiveStore, ArchiveTarget, read_archive_metadata,
+};
 pub use filters::{
     QueueFacet, QueueFacets, QueueFilter, QueueOrder, QueueOwnership, QueuePhase, QueueSortKey,
     SprintFilter, SprintPair,

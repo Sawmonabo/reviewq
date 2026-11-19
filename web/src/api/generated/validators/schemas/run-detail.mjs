@@ -2,8 +2,8 @@
 import { func0 } from "../runtime.mjs";
 import { validate25 } from "./checkpoint-id-dto.mjs";
 import { validate136 } from "./review-id-dto.mjs";
-import { validate964 } from "./session-summary-page.mjs";
-function validate960(
+import { validate1009 } from "./session-summary-page.mjs";
+function validate1005(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -23,7 +23,7 @@ function validate960(
         ((data.sessions === undefined || !func0.call(data, "sessions")) &&
           (missing0 = "sessions"))
       ) {
-        validate960.errors = [
+        validate1005.errors = [
           {
             instancePath,
             schemaPath: "#/required",
@@ -102,7 +102,7 @@ function validate960(
               if (data.sessions !== undefined && func0.call(data, "sessions")) {
                 const _errs4 = errors;
                 if (
-                  !validate964(data.sessions, {
+                  !validate1009(data.sessions, {
                     instancePath: instancePath + "/sessions",
                     parentData: data,
                     parentDataProperty: "sessions",
@@ -111,8 +111,8 @@ function validate960(
                 ) {
                   vErrors =
                     vErrors === null
-                      ? validate964.errors
-                      : vErrors.concat(validate964.errors);
+                      ? validate1009.errors
+                      : vErrors.concat(validate1009.errors);
                   errors = vErrors.length;
                 }
                 var valid0 = _errs4 === errors;
@@ -124,7 +124,7 @@ function validate960(
         }
       }
     } else {
-      validate960.errors = [
+      validate1005.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -135,7 +135,7 @@ function validate960(
       return false;
     }
   }
-  validate960.errors = vErrors;
+  validate1005.errors = vErrors;
   return errors === 0;
 }
-export { validate960 };
+export { validate1005 };

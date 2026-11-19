@@ -54,6 +54,10 @@ fn main() -> Result<(), Box<dyn Error>> {
     registry
         .response::<reviewq_protocol::queue::LoadSprintsResponse>("queue", "LoadSprintsResponse")?;
     registry.response::<reviewq_protocol::queue::RunCardsResponse>("queue", "RunCardsResponse")?;
+    registry.response::<reviewq_protocol::queue::ArchivePageResponse>(
+        "archive",
+        "ArchivePageResponse",
+    )?;
     registry.response::<ReviewOverviewResponse>("queue", "ReviewOverviewResponse")?;
     registry.response::<ReviewSelectionResponse>("queue", "ReviewSelectionResponse")?;
     registry.response::<reviewq_protocol::queue::RefreshResponse>("queue", "RefreshResponse")?;

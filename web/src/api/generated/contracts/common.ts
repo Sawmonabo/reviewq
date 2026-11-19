@@ -56,9 +56,22 @@ export type EventCursorDto = string;
 
 export type UtcTimestampDto = string;
 
-export type HistoryEntryIdDto = string;
+export type Coverage = "full_mr" | "selected_threads";
 
 export type SessionKeyDto = string;
+
+export type MergeRequestIidDto = string;
+
+export type MergeRequestStatus = "open" | "closed" | "merged";
+
+export type QueueStatus =
+  "needs_review" | "waiting_author" | "followup" | "reviewed" | "archive";
+
+export type RunStage = "needs_input" | "working" | "waiting" | "archived";
+
+export type TicketKeyDto = string;
+
+export type HistoryEntryIdDto = string;
 
 export type ErrorCode =
   | "ticket_unverified"
@@ -76,10 +89,6 @@ export type ErrorCode =
   | "busy"
   | "unavailable"
   | "internal";
-
-export type Coverage = "full_mr" | "selected_threads";
-
-export type TicketKeyDto = string;
 
 export interface InvalidateEvent {
   /**
@@ -101,9 +110,26 @@ export interface ResetEvent {
   [k: string]: unknown;
 }
 
+export interface SprintPair {
+  boardId: UpstreamIdDto;
+  sprintId: UpstreamIdDto;
+}
+
 export interface Skill {
   name: string;
   path: string;
+}
+
+export interface NamedUpstreamId {
+  id: UpstreamIdDto;
+  label: string;
+  [k: string]: unknown;
+}
+
+export interface CompactTicket {
+  key: TicketKeyDto;
+  title: string;
+  [k: string]: unknown;
 }
 
 export interface ObservedInputDto {

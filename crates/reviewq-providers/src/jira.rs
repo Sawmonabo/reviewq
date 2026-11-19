@@ -15,6 +15,7 @@ use url::Url;
 use crate::http::SourceNetwork;
 use crate::settings::{origin, safe_label};
 
+mod archive;
 mod issues;
 mod tickets;
 pub(crate) use issues::valid_project;

@@ -191,6 +191,305 @@
       ],
       "type": "object"
     },
+    "ArchiveBoard": {
+      "properties": {
+        "available": {
+          "type": "boolean"
+        },
+        "id": {
+          "$ref": "#/definitions/UpstreamIdDto"
+        },
+        "label": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "label",
+        "available"
+      ],
+      "type": "object"
+    },
+    "ArchiveDate": {
+      "enum": [
+        "decision",
+        "report",
+        "followup"
+      ],
+      "type": "string"
+    },
+    "ArchiveItem": {
+      "properties": {
+        "author": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/NamedUpstreamId"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "coverage": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/Coverage"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "dateSource": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ArchiveDate"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "draft": {
+          "type": "boolean"
+        },
+        "focusSessionKey": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SessionKeyDto"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "focusedRunId": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/RunIdDto"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "fullMrReviewedSha": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/GitShaDto"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "hasAgentQuestions": {
+          "type": "boolean"
+        },
+        "iid": {
+          "$ref": "#/definitions/MergeRequestIidDto"
+        },
+        "lastActivityAt": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/UtcTimestampDto"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "latestMatchingReviewAt": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/UtcTimestampDto"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "membership": {
+          "$ref": "#/definitions/ArchiveMembership"
+        },
+        "mrState": {
+          "$ref": "#/definitions/MergeRequestStatus"
+        },
+        "ourComments": {
+          "$ref": "#/definitions/SafeCountDto"
+        },
+        "own": {
+          "type": "boolean"
+        },
+        "personalApproval": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "projectId": {
+          "$ref": "#/definitions/ProjectIdDto"
+        },
+        "projectPath": {
+          "type": "string"
+        },
+        "queueState": {
+          "$ref": "#/definitions/QueueStatus"
+        },
+        "reasonKind": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "registeredLeadCount": {
+          "$ref": "#/definitions/SafeCountDto"
+        },
+        "reviewId": {
+          "$ref": "#/definitions/ReviewIdDto"
+        },
+        "runIds": {
+          "items": {
+            "$ref": "#/definitions/RunIdDto"
+          },
+          "type": "array"
+        },
+        "runStage": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/RunStage"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "sourceSha": {
+          "$ref": "#/definitions/GitShaDto"
+        },
+        "sprintPairs": {
+          "items": {
+            "$ref": "#/definitions/SprintPair"
+          },
+          "type": "array"
+        },
+        "tickets": {
+          "items": {
+            "$ref": "#/definitions/CompactTicket"
+          },
+          "type": "array"
+        },
+        "title": {
+          "type": "string"
+        },
+        "unreadReplies": {
+          "$ref": "#/definitions/SafeCountDto"
+        },
+        "updatedAt": {
+          "$ref": "#/definitions/UtcTimestampDto"
+        }
+      },
+      "required": [
+        "reviewId",
+        "projectId",
+        "projectPath",
+        "iid",
+        "title",
+        "tickets",
+        "author",
+        "sourceSha",
+        "mrState",
+        "queueState",
+        "updatedAt",
+        "draft",
+        "own",
+        "ourComments",
+        "unreadReplies",
+        "personalApproval",
+        "registeredLeadCount",
+        "runStage",
+        "reasonKind",
+        "hasAgentQuestions",
+        "focusedRunId",
+        "focusSessionKey",
+        "fullMrReviewedSha",
+        "coverage",
+        "lastActivityAt",
+        "runIds",
+        "latestMatchingReviewAt",
+        "dateSource",
+        "sprintPairs",
+        "membership"
+      ],
+      "type": "object"
+    },
+    "ArchiveMembership": {
+      "enum": [
+        "verified",
+        "partial",
+        "unknown"
+      ],
+      "type": "string"
+    },
+    "ArchivePage": {
+      "description": "A bounded compact list with a required nullable keyset continuation.",
+      "properties": {
+        "boards": {
+          "items": {
+            "$ref": "#/definitions/ArchiveBoard"
+          },
+          "type": "array"
+        },
+        "items": {
+          "items": {
+            "$ref": "#/definitions/ArchiveItem"
+          },
+          "maxItems": 100,
+          "type": "array"
+        },
+        "nextCursor": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/PageCursorDto"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "totalArchived": {
+          "$ref": "#/definitions/SafeCountDto"
+        },
+        "totalMatching": {
+          "$ref": "#/definitions/SafeCountDto"
+        }
+      },
+      "required": [
+        "items",
+        "nextCursor",
+        "totalArchived",
+        "totalMatching",
+        "boards"
+      ],
+      "type": "object"
+    },
+    "ArchivePageResponse": {
+      "description": "The resource and event head from the same authorized snapshot.",
+      "properties": {
+        "cursor": {
+          "$ref": "#/definitions/EventCursorDto"
+        },
+        "data": {
+          "$ref": "#/definitions/ArchivePage"
+        }
+      },
+      "required": [
+        "data",
+        "cursor"
+      ],
+      "title": "ArchivePageResponse",
+      "type": "object"
+    },
     "ArtifactStats": {
       "properties": {
         "byteLength": {
@@ -7381,6 +7680,7 @@
   },
   "x-reviewq-features": {
     "ApprovalViewResponse": "changes",
+    "ArchivePageResponse": "archive",
     "CancelRecoveryRequest": "recovery",
     "CancelRecoveryResponse": "recovery",
     "CatalogRequest": "settings",
@@ -7481,6 +7781,7 @@
     },
     "responses": {
       "ApprovalViewResponse": "#/definitions/ApprovalViewResponse",
+      "ArchivePageResponse": "#/definitions/ArchivePageResponse",
       "CancelRecoveryResponse": "#/definitions/CancelRecoveryResponse",
       "CatalogResponse": "#/definitions/CatalogResponse",
       "CurrentActionResponse": "#/definitions/CurrentActionResponse",

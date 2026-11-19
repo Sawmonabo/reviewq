@@ -4,7 +4,7 @@ import { validate106 } from "./safe-count-dto.mjs";
 import { validate109 } from "./offset-unit.mjs";
 import { validate113 } from "./report-hash-dto.mjs";
 import { validate25 } from "./checkpoint-id-dto.mjs";
-function validate829(
+function validate874(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -15,7 +15,7 @@ function validate829(
       if (data.complete !== undefined && func0.call(data, "complete")) {
         const _errs1 = errors;
         if (typeof data.complete !== "boolean") {
-          validate829.errors = [
+          validate874.errors = [
             {
               instancePath: instancePath + "/complete",
               schemaPath: "#/properties/complete/type",
@@ -84,7 +84,7 @@ function validate829(
               vErrors.push(err1);
             }
             errors++;
-            validate829.errors = vErrors;
+            validate874.errors = vErrors;
             return false;
           } else {
             errors = _errs4;
@@ -203,7 +203,7 @@ function validate829(
                     vErrors.push(err3);
                   }
                   errors++;
-                  validate829.errors = vErrors;
+                  validate874.errors = vErrors;
                   return false;
                 } else {
                   errors = _errs11;
@@ -268,7 +268,7 @@ function validate829(
                     if (data.text !== undefined && func0.call(data, "text")) {
                       const _errs17 = errors;
                       if (typeof data.text !== "string") {
-                        validate829.errors = [
+                        validate874.errors = [
                           {
                             instancePath: instancePath + "/text",
                             schemaPath: "#/properties/text/type",
@@ -290,7 +290,7 @@ function validate829(
         }
       }
     } else {
-      validate829.errors = [
+      validate874.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -301,7 +301,7 @@ function validate829(
       return false;
     }
   }
-  validate829.errors = vErrors;
+  validate874.errors = vErrors;
   return errors === 0;
 }
-export { validate829 };
+export { validate874 };
