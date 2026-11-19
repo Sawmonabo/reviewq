@@ -141,6 +141,7 @@ async fn respond(
             submission: parse(submission.as_str())?,
             expected_generation: expected.map(input_revision).transpose()?,
             command,
+            original: None,
         },
     )
     .await?;

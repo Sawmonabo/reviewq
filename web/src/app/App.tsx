@@ -525,6 +525,7 @@ export function App() {
             <BulkLaunch
               mode={overlay.mode}
               targets={overlay.targets}
+              openOverview={overview.data}
               settingsRevision={revision}
               onSettings={() => setSettings(true)}
               onClose={() => setOverlay(undefined)}

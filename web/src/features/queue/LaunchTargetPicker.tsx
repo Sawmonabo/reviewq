@@ -1,3 +1,4 @@
+import { useState } from "react";
 import type { LaunchTarget } from "./types";
 import { Loading, Notice } from "../../components/PanelState";
 
@@ -30,45 +31,67 @@ export function LaunchTargetPicker({
   readonly onUrl: (value: string) => void;
   readonly onTrack: () => void;
 }) {
+  const [searchOpen, setSearchOpen] = useState(false);
+  const options =
+    active && !choices.some((choice) => choice.reviewId === active.reviewId)
+      ? [active, ...choices]
+      : choices;
   return (
     <div className="launch-picker stack">
-      <label className="field">
-        Search open merge requests
-        <input
-          type="search"
-          maxLength={200}
-          value={search}
-          placeholder="Search ticket or title"
-          onChange={(event) => onSearch(event.currentTarget.value)}
-        />
-      </label>
-      <label className="field">
-        Merge request
-        <select
-          value={active?.reviewId ?? ""}
-          onChange={(event) => {
-            const chosen = choices.find((item) => item.reviewId === event.currentTarget.value);
-            if (chosen) onSelect(chosen);
+      <div className="launch-picker-heading">
+        <label htmlFor="launch-review-target">Merge request</label>
+        <button
+          type="button"
+          className="quiet-button"
+          aria-expanded={searchOpen}
+          disabled={disabled}
+          onClick={() => {
+            if (searchOpen && search) onSearch("");
+            setSearchOpen(!searchOpen);
           }}
         >
-          <option value="" disabled>
-            Choose a merge request
+          {searchOpen ? "Close search" : "Search"}
+        </button>
+      </div>
+      {searchOpen && (
+        <label className="field">
+          <span className="sr-only">Search open merge requests</span>
+          <input
+            type="search"
+            maxLength={200}
+            value={search}
+            disabled={disabled}
+            placeholder="Search ticket or title"
+            onChange={(event) => onSearch(event.currentTarget.value)}
+          />
+        </label>
+      )}
+      <select
+        id="launch-review-target"
+        disabled={disabled || !options.length}
+        value={active?.reviewId ?? ""}
+        onChange={(event) => {
+          const chosen = choices.find((item) => item.reviewId === event.currentTarget.value);
+          if (chosen) onSelect(chosen);
+        }}
+      >
+        <option value="" disabled>
+          Choose a merge request
+        </option>
+        {options.map((target) => (
+          <option value={target.reviewId} key={target.reviewId}>
+            {[
+              ...target.tickets.map((ticket) => ticket.key),
+              `${target.projectPath} !${target.iid}`,
+            ].join(" · ")}
           </option>
-          {active && !choices.some((item) => item.reviewId === active.reviewId) && (
-            <option value={active.reviewId}>
-              {active.projectPath}!{active.iid} · {active.title}
-            </option>
-          )}
-          {choices.map((target) => (
-            <option value={target.reviewId} key={target.reviewId}>
-              {target.tickets[0]?.key ? `${target.tickets[0].key} · ` : ""}
-              {target.projectPath}!{target.iid} · {target.title}
-            </option>
-          ))}
-        </select>
-      </label>
+        ))}
+      </select>
       {pending && !choices.length && <Loading label="Finding merge requests…" />}
       {error && <Notice retry={retry}>{error}</Notice>}
+      {search && !pending && !error && !choices.length && (
+        <p className="meta">No matching open merge requests.</p>
+      )}
       {active && <p className="picked-mr">{active.tickets[0]?.title ?? active.title}</p>}
       {onPrepare && (
         <div className="actions">
@@ -95,6 +118,7 @@ export function LaunchTargetPicker({
             GitLab merge request
             <input
               type="url"
+              disabled={disabled}
               value={url}
               maxLength={2048}
               onChange={(event) => onUrl(event.currentTarget.value)}

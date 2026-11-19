@@ -215,6 +215,9 @@
 .report-metadata strong {
   color: var(--text);
 }
+.report-authored .table-scroll:has(> .report-before-after) {
+  overflow-x: clip;
+}
 .report-authored .prose .report-before-after {
   table-layout: fixed;
   border-collapse: separate;
@@ -226,7 +229,13 @@
   width: 50%;
   border-block-end: 0;
   padding: 9px 12px;
+  overflow-wrap: anywhere;
   vertical-align: top;
+}
+.report-before-after :is(code, pre) {
+  max-inline-size: 100%;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
 }
 .report-authored .prose .report-before-after th {
   border-start-start-radius: 8px;
@@ -259,9 +268,14 @@
 }
 .report-previous-threads .report-thread-outcome {
   display: block;
-  margin-top: 3px;
   font-size: 10px;
   font-weight: 600;
+}
+.report-previous-threads .report-thread-outcome:first-child {
+  margin-bottom: 4px;
+}
+.report-previous-threads .report-thread-outcome:last-child {
+  margin-top: 4px;
 }
 .report-provenance,
 .report-retired-finding {
@@ -307,9 +321,7 @@
 }
 .report-finding {
   --finding-line: color-mix(in srgb, var(--strong-line) 65%, var(--line));
-  --finding-key-width: 92px;
-  --finding-field-gap: 14px;
-  padding: 24px;
+  padding: 16px 18px 18px;
   border: 1px solid var(--finding-line);
   border-top: 3px solid var(--muted);
   border-radius: 11px;
@@ -325,9 +337,14 @@
   margin-bottom: 16px;
 }
 .report-finding:has(.report-finding-fields) .report-finding-header {
-  margin-bottom: 20px;
-  padding-bottom: 17px;
+  margin-bottom: 14px;
+  padding-bottom: 12px;
   border-bottom: 1px solid var(--finding-line);
+}
+.report-finding:has(.report-finding-field[data-field="location"]) .report-finding-header {
+  margin-bottom: 12px;
+  padding-bottom: 0;
+  border-bottom: 0;
 }
 .report-finding-kicker {
   display: flex;
@@ -366,9 +383,12 @@
 }
 .report-finding-field {
   display: grid;
-  grid-template-columns: var(--finding-key-width) minmax(0, 1fr);
-  gap: var(--finding-field-gap);
-  margin-bottom: 18px;
+  gap: 5px;
+  margin-bottom: 16px;
+}
+.report-finding-field[data-field="location"]:not(:last-child) {
+  border-bottom: 1px solid var(--finding-line);
+  padding-bottom: 12px;
 }
 .report-finding-field:last-child {
   margin-bottom: 0;
@@ -436,9 +456,5 @@
 @container review-detail (max-width: 465px) {
   .report-finding {
     padding: 16px;
-  }
-  .report-finding-field {
-    grid-template-columns: minmax(0, 1fr);
-    gap: 5px;
   }
 }

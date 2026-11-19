@@ -1,12 +1,12 @@
 use reviewq_app::access::{Actor, ActorScope, AppError, AppFuture};
 use reviewq_app::events::{ResourceKey, Snapshot};
 use reviewq_app::followups::{
-    FollowupCommands, MonitorCommand, MonitorReceipt, MonitorRequest, MonitorState,
+    FollowupCommands, MonitorCommand, MonitorReceipt, MonitorReplay, MonitorRequest, MonitorState,
     MonitoredReview, Preferences, UpdatePreferences,
 };
 use reviewq_app::queue::MergeRequestState;
 use reviewq_app::sources::WorkflowSnapshot;
-use reviewq_domain::identity::{MrIdentity, ReviewId, Revision};
+use reviewq_domain::identity::{MrIdentity, ReviewId, Revision, SubmissionId};
 use rusqlite::{Connection, params};
 use sha2::{Digest, Sha256};
 
@@ -47,12 +47,19 @@ impl FollowupCommands for SqliteStore {
     fn read_monitor_replay(
         &self,
         actor: Actor,
-        input: MonitorRequest,
+        input: MonitorReplay,
     ) -> AppFuture<'_, Option<Snapshot<MonitorReceipt>>> {
         Box::pin(async move {
             self.read(move |db| {
-                authorize_command(db, &actor, &input.review)?;
-                replay(db, &actor, &input)?
+                let (review, submission, digest) = match &input {
+                    MonitorReplay::Resolved(input) => (
+                        Some(&input.review),
+                        &input.submission,
+                        monitor_digest(input),
+                    ),
+                    MonitorReplay::Original { submission, digest } => (None, submission, *digest),
+                };
+                replay(db, &actor, review, submission, &digest)?
                     .map(|receipt| snapshot(db, receipt))
                     .transpose()
             })
@@ -179,36 +186,51 @@ fn validated_observation(
 fn replay(
     db: &Connection,
     actor: &Actor,
-    input: &MonitorRequest,
+    review: Option<&ReviewId>,
+    submission: &SubmissionId,
+    digest: &[u8; 32],
 ) -> Result<Option<MonitorReceipt>, StoreError> {
-    let key = actor_key(actor);
-    if !verify_replay(db, &key, MONITOR, &input.submission, &monitor_digest(input))? {
-        return Ok(None);
+    if let Some(review) = review {
+        authorize_command(db, actor, review)?;
     }
+    let key = actor_key(actor);
     let mut statement = db.prepare_cached(
-        "SELECT generation, state, batch_id FROM followup_command_receipts
+        "SELECT review_id, generation, state, batch_id FROM followup_command_receipts
          WHERE actor_key=?1 AND operation=?2 AND submission_id=?3",
     )?;
-    let mut rows = statement.query(params![key.as_slice(), MONITOR, input.submission.as_str()])?;
-    let row = rows.next()?.ok_or(AppError::Internal)?;
+    let mut rows = statement.query(params![key.as_slice(), MONITOR, submission.as_str()])?;
+    let Some(row) = rows.next()? else {
+        return Ok(None);
+    };
+    let saved_review = parse(text(row, 0)?)?;
+    if review != Some(&saved_review) {
+        authorize_command(db, actor, &saved_review)?;
+    }
+    if !verify_replay(db, &key, MONITOR, submission, digest)? {
+        return Err(AppError::Internal.into());
+    }
     Ok(Some(MonitorReceipt {
-        review: input.review.clone(),
-        submission: input.submission.clone(),
-        generation: revision(row.get(0)?)?,
-        state: parse(text(row, 1)?)?,
-        batch_id: row.get(2)?,
+        review: saved_review,
+        submission: submission.clone(),
+        generation: revision(row.get(1)?)?,
+        state: parse(text(row, 2)?)?,
+        batch_id: row.get(3)?,
     }))
 }
 
 fn monitor_digest(input: &MonitorRequest) -> [u8; 32] {
+    if let Some(original) = &input.original {
+        return original.digest;
+    }
     let mut digest = Sha256::new();
     hash_field(&mut digest, input.review.as_str().as_bytes());
-    digest.update(
-        input
-            .expected_generation
-            .map_or(0, Revision::get)
-            .to_be_bytes(),
-    );
+    let generation = input.expected_generation.map(Revision::get);
+    digest.update(generation.unwrap_or_default().to_be_bytes());
+    // A zero value alone represents first enrollment. Distinguish an explicitly
+    // supplied zero while keeping fingerprints for existing valid generations.
+    if generation == Some(0) {
+        digest.update(b"explicit-generation-zero");
+    }
     match &input.command {
         MonitorCommand::Configure {
             run,
@@ -274,11 +296,19 @@ fn monitor(
     observation: Option<WorkflowSnapshot>,
 ) -> Result<Snapshot<MonitorReceipt>, StoreError> {
     let db = &tx.sql;
-    authorize_command(db, &actor, &input.review)?;
-    if let Some(previous) = replay(db, &actor, &input)? {
+    let digest = monitor_digest(&input);
+    if let Some(previous) = replay(db, &actor, Some(&input.review), &input.submission, &digest)? {
         return snapshot(db, previous);
     }
     let previous = current(db, &input.review)?;
+    if let Some(run) = input
+        .original
+        .as_ref()
+        .and_then(|value| value.transition_run.as_ref())
+        && previous.as_ref().and_then(|value| value.run.as_deref()) != Some(run.as_str())
+    {
+        return Err(AppError::Conflict.into());
+    }
     if settings != settings_revision(db)?
         || input.expected_generation != previous.as_ref().map(|value| value.generation)
     {
@@ -469,13 +499,7 @@ fn monitor(
             (previous.generation, previous.state, Some(batch))
         }
     };
-    let key = record_receipt(
-        db,
-        &actor,
-        MONITOR,
-        &input.submission,
-        &monitor_digest(&input),
-    )?;
+    let key = record_receipt(db, &actor, MONITOR, &input.submission, &digest)?;
     db.execute(
         "INSERT INTO followup_command_receipts(actor_key, operation, submission_id, review_id, generation, state, batch_id)
          VALUES(?1,?2,?3,?4,?5,?6,?7)",

@@ -15,10 +15,11 @@ import { historyParts } from "../../../api/history";
 import type { SessionAddress } from "../../../api/history";
 import { Icon } from "../../../components/Icon";
 import { Empty, Loading, Notice } from "../../../components/PanelState";
-import { describeError, formatClockTime, formatTime, readable } from "../../../lib/presentation";
+import { describeError, formatTime, readable } from "../../../lib/presentation";
 import { EntryBody } from "./EntryBody";
 import { entriesIn, readBookmark, rememberBookmark } from "./history-window";
 import { PromptNavigator } from "./PromptNavigator";
+import { HistoryTimestamp } from "./HistoryTimestamp";
 import { FileReadPack, ToolRunHeader } from "./ToolActivity";
 import { activityRows, openKey, toolCatalog, toolOnly } from "./tool-activity";
 import type { ReadPack, ReadTarget, ToolRun } from "./tool-activity";
@@ -592,9 +593,7 @@ export function Transcript({
                       </span>
                       <strong>{role}</strong>
                       {timestamp && (
-                        <time dateTime={timestamp} title={formatTime(timestamp)}>
-                          {formatClockTime(timestamp)}
-                        </time>
+                        <HistoryTimestamp timestamp={timestamp} delivery={!row.entry?.timestamp} />
                       )}
                       {row.delivery && (
                         <span className="badge">{readable(row.delivery.state)}</span>

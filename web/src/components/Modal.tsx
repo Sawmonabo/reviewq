@@ -1,25 +1,38 @@
 import { useEffect, useId, useRef } from "react";
 import type { ReactNode } from "react";
 
-export function Modal({
-  title,
-  eyebrow,
-  className,
-  nonmodal = false,
-  children,
-  footer,
-  onClose,
-  busy = false,
-}: {
+type DialogProps = {
   readonly title: string;
   readonly eyebrow?: string;
   readonly className?: string;
   readonly nonmodal?: boolean;
   readonly children: ReactNode;
-  readonly footer?: ReactNode;
   readonly onClose: () => void;
   readonly busy?: boolean;
-}) {
+};
+
+export function Modal({
+  children,
+  footer,
+  ...dialog
+}: DialogProps & { readonly footer?: ReactNode }) {
+  return (
+    <ModalFrame {...dialog}>
+      <div className="modal-body">{children}</div>
+      {footer && <footer>{footer}</footer>}
+    </ModalFrame>
+  );
+}
+
+export function ModalFrame({
+  title,
+  eyebrow,
+  className,
+  nonmodal = false,
+  children,
+  onClose,
+  busy = false,
+}: DialogProps) {
   const titleId = useId();
   const dialog = useRef<HTMLDialogElement>(null);
   const backdrop = useRef(false);
@@ -74,8 +87,7 @@ export function Modal({
             ×
           </button>
         </header>
-        <div className="modal-body">{children}</div>
-        {footer && <footer>{footer}</footer>}
+        {children}
       </div>
     </dialog>
   );

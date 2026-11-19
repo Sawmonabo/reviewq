@@ -32,6 +32,11 @@ export function readRoute(): Route {
 
 export function writeRoute(route: Route, replace = false) {
   const url = new URL(location.href);
+  if (!replace && !url.searchParams.has("view")) {
+    // Back must restore this entry's view even after navigation changes the saved preference.
+    url.searchParams.set("view", readRoute().view);
+    history.replaceState(history.state, "", url);
+  }
   for (const key of ["view", "tab", "reviewId", "runId", "sessionKey", "ticket"] as const) {
     const value = route[key];
     if (value) url.searchParams.set(key, value);

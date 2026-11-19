@@ -120,6 +120,11 @@
 }
 .run-card-open[aria-current="true"],
 .run-card-open[aria-checked="true"] {
+  border-color: #555b77;
+  background: #13141b;
+  box-shadow: inset 2px 0 #9baee8;
+}
+:root[data-theme="light"] .run-card-open:is([aria-current="true"], [aria-checked="true"]) {
   border-color: var(--strong-line);
   background: var(--row-selected);
   box-shadow: inset 2px 0 var(--focus);

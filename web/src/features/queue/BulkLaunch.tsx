@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { readOverview } from "../../api/client";
 import type {
   HostProviderDto,
+  ReviewOverview,
   RunPrepareRequest,
   RunStartRequest,
 } from "../../api/generated/contracts";
@@ -36,6 +37,7 @@ type Attempt = {
 type Props = {
   readonly mode: LaunchMode;
   readonly targets: readonly LaunchTarget[];
+  readonly openOverview: ReviewOverview | null | undefined;
   readonly settingsRevision: number;
   readonly onSettings: () => void;
   readonly onClose: () => void;
@@ -52,6 +54,7 @@ export default function BulkLaunch(props: Props) {
 function LaunchEditor({
   mode,
   targets: initialTargets,
+  openOverview,
   settingsRevision,
   onSettings,
   onClose,
@@ -73,6 +76,7 @@ function LaunchEditor({
   const [choosing, setChoosing] = useState(mode === "pick" && initialTargets.length === 0);
   const [advanced, setAdvanced] = useState(false);
   const [nativeId, setNativeId] = useState("");
+  const registering = useRef(false);
   const [preview, setPreview] = useState<{ revision: number; items: readonly Preview[] }>();
   const [attempts, setAttempts] = useState<readonly Attempt[]>([]);
   const [busy, setBusy] = useState(false);
@@ -110,14 +114,18 @@ function LaunchEditor({
   const choices = (pick.data?.items ?? []).flatMap((item) =>
     item.kind === "mr" && item.mrState === "open" ? [item] : [],
   );
-  const active = targets[0] ?? (pickMode ? choices[0] : undefined);
-  const registration = useResource(
-    `registration-target:${register ? (active?.reviewId ?? "") : ""}`,
-    (signal) =>
-      register && active
-        ? readOverview(active.reviewId, signal)
-        : Promise.resolve({ data: null, cursor: "" }),
-  );
+  const active = targets[0] ?? (pickMode && !search ? choices[0] : undefined);
+  const knownUrl =
+    targets[0]?.webUrl ??
+    (openOverview && openOverview.review.reviewId === active?.reviewId
+      ? openOverview.webUrl
+      : undefined);
+  const missingUrlId = register && !knownUrl ? active?.reviewId : undefined;
+  const registrationUrl = useResource(`registration-url:${missingUrlId ?? ""}`, async (signal) => {
+    if (!missingUrlId) return { data: undefined, cursor: "" };
+    const { data, cursor } = await readOverview(missingUrlId, signal);
+    return { data: data.webUrl, cursor };
+  });
   const catalogs = useResource(
     `catalog:${settingsRevision}:${provider}:${JSON.stringify(targets.map((target) => target.reviewId))}:${pickMode}`,
     async (signal) => {
@@ -153,6 +161,7 @@ function LaunchEditor({
 
   function selectTarget(target: LaunchTarget) {
     setTargets([target]);
+    if (target.reviewId !== active?.reviewId) setNativeId("");
     setSkill(undefined);
     setModel("");
     setEffort("");
@@ -172,7 +181,7 @@ function LaunchEditor({
       });
       const overview = await readOverview(tracked.data.reviewId, controller.signal);
       if (controller.signal.aborted) return;
-      selectTarget(overview.data.review);
+      selectTarget({ ...overview.data.review, webUrl: overview.data.webUrl });
       setUrl("");
       pick.retry();
     } catch (error) {
@@ -280,7 +289,12 @@ function LaunchEditor({
   }
 
   async function registerSelected() {
-    if (!active || !nativeId.trim() || busy) return;
+    if (!advanced || !active || !nativeId.trim() || busy || registering.current) return;
+    registering.current = true;
+    const controller = new AbortController();
+    request.current = controller;
+    const field =
+      document.activeElement instanceof HTMLInputElement ? document.activeElement : null;
     setBusy(true);
     setNotice(undefined);
     try {
@@ -289,10 +303,18 @@ function LaunchEditor({
         provider,
         nativeId: nativeId.trim(),
       });
-      onOpen(result.reviewId, result.runId);
+      if (!controller.signal.aborted) onOpen(result.reviewId, result.runId);
     } catch (error) {
+      if (controller.signal.aborted) return;
       setNotice(describeError(error));
+      if (field)
+        requestAnimationFrame(() => {
+          if (field.isConnected && document.activeElement === document.body) {
+            field.focus({ preventScroll: true });
+          }
+        });
     } finally {
+      registering.current = false;
       setBusy(false);
     }
   }
@@ -327,7 +349,7 @@ function LaunchEditor({
                     disabled={busy || !active || !nativeId.trim() || !advanced}
                     onClick={() => void registerSelected()}
                   >
-                    Register session
+                    {busy ? "Registering…" : "Register session"}
                   </button>
                 )
               : !attempts.length &&
@@ -421,7 +443,14 @@ function LaunchEditor({
             retry={pick.retry}
             disabled={busy}
             url={url}
-            onSearch={setSearch}
+            onSearch={(value) => {
+              setSearch(value);
+              if (value) {
+                setTargets([]);
+                setNativeId("");
+              }
+              clearPreview();
+            }}
             onSelect={selectTarget}
             {...(choosing
               ? {
@@ -444,6 +473,7 @@ function LaunchEditor({
               disabled={busy || attempts.length > 0}
               onChange={(event) => {
                 setProvider(event.currentTarget.value === "claude" ? "claude" : "codex");
+                setNativeId("");
                 setSkill(undefined);
                 setModel("");
                 setEffort("");
@@ -455,17 +485,23 @@ function LaunchEditor({
             </select>
           </label>
         )}
-        {register && registration.error && (
-          <Notice retry={registration.retry}>{registration.error}</Notice>
+        {registrationUrl.error && (
+          <Notice retry={registrationUrl.retry}>{registrationUrl.error}</Notice>
         )}
         {register && (
           <RegistrationGuide
+            key={JSON.stringify([provider, active?.reviewId])}
             provider={provider}
-            webUrl={registration.data?.webUrl}
+            webUrl={knownUrl ?? registrationUrl.data}
+            selected={Boolean(active)}
             advanced={advanced}
             nativeId={nativeId}
             onAdvanced={setAdvanced}
-            onNativeId={setNativeId}
+            onNativeId={(value) => {
+              if (!targets.length && active) setTargets([active]);
+              setNativeId(value);
+            }}
+            onRegister={() => void registerSelected()}
             disabled={busy}
           />
         )}

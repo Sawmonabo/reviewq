@@ -1,0 +1,57 @@
+.reported-plan {
+  --plan-pending: #858595;
+  --plan-completed: #a9bdb3;
+  --plan-current: #c3cfed;
+  --plan-completed-line: #456053;
+  --plan-current-line: #7489ba;
+  --plan-current-bg: #253044;
+  margin: 8px 0 15px;
+  padding: 0;
+  list-style: none;
+}
+:root[data-theme="light"] .reported-plan {
+  --plan-pending: var(--dim-text);
+  --plan-completed: var(--green);
+  --plan-current: var(--link);
+  --plan-completed-line: var(--green);
+  --plan-current-line: var(--focus);
+  --plan-current-bg: var(--selected);
+}
+.reported-plan li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 0;
+  color: var(--plan-pending);
+  font-size: 11px;
+  line-height: 1.7;
+  overflow-wrap: anywhere;
+}
+.reported-plan-step {
+  display: grid;
+  place-items: center;
+  flex: 0 0 18px;
+  width: 18px;
+  height: 18px;
+  border: 1px solid var(--strong-line);
+  border-radius: 50%;
+  font-size: 9px;
+}
+.reported-plan [data-plan-status="completed"] {
+  color: var(--plan-completed);
+}
+.reported-plan [data-plan-status="completed"] .reported-plan-step {
+  border-color: var(--plan-completed-line);
+}
+.reported-plan [aria-current="step"] {
+  color: var(--plan-current);
+}
+.reported-plan [aria-current="step"] .reported-plan-step {
+  border-color: var(--plan-current-line);
+  background: var(--plan-current-bg);
+}
+.reported-plan small {
+  margin-inline-start: auto;
+  color: var(--plan-pending);
+  font-size: 9px;
+}

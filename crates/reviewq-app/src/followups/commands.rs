@@ -33,6 +33,21 @@ pub struct MonitorRequest {
     pub submission: SubmissionId,
     pub expected_generation: Option<Revision>,
     pub command: MonitorCommand,
+    pub original: Option<OriginalMonitorRequest>,
+}
+
+#[derive(Clone)]
+pub struct OriginalMonitorRequest {
+    pub digest: [u8; 32],
+    pub transition_run: Option<RunId>,
+}
+
+pub enum MonitorReplay {
+    Resolved(MonitorRequest),
+    Original {
+        submission: SubmissionId,
+        digest: [u8; 32],
+    },
 }
 
 pub struct MonitorReceipt {
@@ -59,7 +74,7 @@ pub trait FollowupCommands: Send + Sync {
     fn read_monitor_replay(
         &self,
         actor: Actor,
-        input: MonitorRequest,
+        input: MonitorReplay,
     ) -> AppFuture<'_, Option<Snapshot<MonitorReceipt>>>;
     fn monitor_source(
         &self,
@@ -83,7 +98,7 @@ pub async fn execute_monitor_command(
 ) -> Result<Snapshot<MonitorReceipt>, AppError> {
     validate(&input.command)?;
     if let Some(previous) = store
-        .read_monitor_replay(actor.clone(), input.clone())
+        .read_monitor_replay(actor.clone(), MonitorReplay::Resolved(input.clone()))
         .await?
     {
         return Ok(previous);

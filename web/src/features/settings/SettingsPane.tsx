@@ -11,7 +11,7 @@ import type {
   SettingsView,
   TokenInput,
 } from "../../api/generated/contracts/settings";
-import { Modal } from "../../components/Modal";
+import { ModalFrame } from "../../components/Modal";
 import { Loading, Notice } from "../../components/PanelState";
 import { useResource } from "../../hooks/useResource";
 import { describeError, readable } from "../../lib/presentation";
@@ -38,21 +38,34 @@ export default function SettingsPane({
   readonly displayOptions?: ReactNode;
 }) {
   const read = useResource("settings", readSettings);
-  return read.data ? (
-    <SettingsEditor
-      initial={read.data}
+  const [busy, setBusy] = useState(false);
+  return (
+    <ModalFrame
+      title="Settings"
+      eyebrow="Your workspace"
+      className="settings-pane"
       onClose={onClose}
-      onSave={onSave}
-      displayOptions={displayOptions}
-    />
-  ) : (
-    <Modal title="Settings" eyebrow="Your workspace" className="settings-pane" onClose={onClose}>
-      {read.error ? (
-        <Notice retry={read.retry}>{read.error}</Notice>
+      busy={busy}
+    >
+      {read.data ? (
+        <SettingsEditor
+          initial={read.data}
+          onClose={onClose}
+          onSave={onSave}
+          displayOptions={displayOptions}
+          busy={busy}
+          setBusy={setBusy}
+        />
       ) : (
-        <Loading label="Loading workspace settings…" />
+        <div className="modal-body">
+          {read.error ? (
+            <Notice retry={read.retry}>{read.error}</Notice>
+          ) : (
+            <Loading label="Loading workspace settings…" />
+          )}
+        </div>
       )}
-    </Modal>
+    </ModalFrame>
   );
 }
 
@@ -61,14 +74,17 @@ function SettingsEditor({
   onClose,
   onSave,
   displayOptions,
+  busy,
+  setBusy,
 }: {
+  readonly busy: boolean;
+  readonly setBusy: (busy: boolean) => void;
   readonly initial: SettingsView;
   readonly onClose: () => void;
   readonly onSave: () => void;
   readonly displayOptions?: ReactNode;
 }) {
   const [editor, setEditor] = useState(() => fromSaved(initial));
-  const [busy, setBusy] = useState(false);
   const [testing, setTesting] = useState<Provider>();
   const [confirmation, setConfirmation] = useState<Provider>();
   const [verified, setVerified] = useState<Partial<Record<Provider, Verified>>>({});
@@ -101,7 +117,10 @@ function SettingsEditor({
     setSaved(false);
   }
   function connectionChanged(provider: Provider) {
-    setCredentialEpoch((previous) => ({ ...previous, [provider]: previous[provider] + 1 }));
+    setCredentialEpoch((previous) => ({
+      ...previous,
+      [provider]: previous[provider] + 1,
+    }));
     tests.current[provider]?.abort();
     setTesting((value) => (value === provider ? undefined : value));
     setVerified((previous) => ({ ...previous, [provider]: undefined }));
@@ -109,7 +128,10 @@ function SettingsEditor({
   }
   function writeToken(provider: Provider, value: string) {
     connectionChanged(provider);
-    setEditor((previous) => ({ ...previous, tokens: { ...previous.tokens, [provider]: value } }));
+    setEditor((previous) => ({
+      ...previous,
+      tokens: { ...previous.tokens, [provider]: value },
+    }));
     setSaved(false);
   }
   function scoped(provider: Provider) {
@@ -130,12 +152,18 @@ function SettingsEditor({
     try {
       const { data } = await testConnection(body, controller.signal);
       if (!controller.signal.aborted && data.provider === provider) {
-        setVerified((previous) => ({ ...previous, [provider]: { identity: data.identity.label } }));
+        setVerified((previous) => ({
+          ...previous,
+          [provider]: { identity: data.identity.label },
+        }));
         setErrors((previous) => ({ ...previous, [provider]: undefined }));
       }
     } catch (error) {
       if (!controller.signal.aborted)
-        setErrors((previous) => ({ ...previous, [provider]: describeError(error) }));
+        setErrors((previous) => ({
+          ...previous,
+          [provider]: describeError(error),
+        }));
     } finally {
       if (!controller.signal.aborted) setTesting(undefined);
     }
@@ -198,7 +226,10 @@ function SettingsEditor({
       ...previous,
       boards: previous.boards.map((board) =>
         board.scopeId === scopeId
-          ? { ...board, projectIds: toggleMembership(board.projectIds, projectId, include) }
+          ? {
+              ...board,
+              projectIds: toggleMembership(board.projectIds, projectId, include),
+            }
           : board,
       ),
     }));
@@ -251,7 +282,10 @@ function SettingsEditor({
           : await saveSettings({
               expectedRevision: snapshot.settingsRevision,
               draft: { ...draft, additionalReviewerIds: reviewerIds },
-              tokens: { gitlab: tokenInput(tokens.gitlab), jira: tokenInput(tokens.jira) },
+              tokens: {
+                gitlab: tokenInput(tokens.gitlab),
+                jira: tokenInput(tokens.jira),
+              },
             });
       setEditor(fromSaved(result.data));
       setReviewers(result.data.additionalReviewerIds.join(", "));
@@ -282,29 +316,8 @@ function SettingsEditor({
   }
 
   return (
-    <Modal
-      title="Settings"
-      eyebrow="Your workspace"
-      className="settings-pane"
-      onClose={onClose}
-      busy={busy}
-      footer={
-        <>
-          <button type="button" disabled={busy} onClick={onClose}>
-            {saved ? "Done" : "Cancel"}
-          </button>
-          <button
-            type="submit"
-            form="workspace-settings"
-            className="primary"
-            disabled={busy || resolvingBoard || Boolean(conflict)}
-          >
-            {busy ? "Saving…" : "Save changes"}
-          </button>
-        </>
-      }
-    >
-      <div className="settings-body">
+    <>
+      <div className="modal-body settings-body">
         <AgentPreferences />
         <form
           className="stack"
@@ -387,7 +400,10 @@ function SettingsEditor({
                           value={draft.gitlab.origin}
                           onChange={(event) => {
                             connectionChanged(provider);
-                            edit({ ...draft, gitlab: { origin: event.currentTarget.value } });
+                            edit({
+                              ...draft,
+                              gitlab: { origin: event.currentTarget.value },
+                            });
                           }}
                           placeholder="https://gitlab.example.com"
                         />
@@ -403,7 +419,10 @@ function SettingsEditor({
                               connectionChanged(provider);
                               edit({
                                 ...draft,
-                                jira: { ...draft.jira, site: event.currentTarget.value },
+                                jira: {
+                                  ...draft.jira,
+                                  site: event.currentTarget.value,
+                                },
                               });
                             }}
                             placeholder="https://team.atlassian.net"
@@ -418,7 +437,10 @@ function SettingsEditor({
                               connectionChanged(provider);
                               edit({
                                 ...draft,
-                                jira: { ...draft.jira, email: event.currentTarget.value },
+                                jira: {
+                                  ...draft.jira,
+                                  email: event.currentTarget.value,
+                                },
                               });
                             }}
                           />
@@ -548,7 +570,20 @@ function SettingsEditor({
         </form>
         {displayOptions}
       </div>
-    </Modal>
+      <footer>
+        <button type="button" disabled={busy} onClick={onClose}>
+          {saved ? "Done" : "Cancel"}
+        </button>
+        <button
+          type="submit"
+          form="workspace-settings"
+          className="primary"
+          disabled={busy || resolvingBoard || Boolean(conflict)}
+        >
+          {busy ? "Saving…" : "Save changes"}
+        </button>
+      </footer>
+    </>
   );
 }
 

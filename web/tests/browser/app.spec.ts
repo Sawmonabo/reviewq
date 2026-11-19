@@ -1,6 +1,15 @@
 import { expect, test } from "@playwright/test";
 
-test("mounts the application from the browser entry point", async ({ page }) => {
+test("Back and Forward restore the workspace opened from the home URL", async ({ page }) => {
   await page.goto("/");
-  await expect(page.getByRole("heading", { name: "ReviewQ", level: 1 })).toBeVisible();
+  const queue = page.getByRole("heading", { name: "Review queue", level: 1 });
+  const runs = page.getByRole("heading", { name: "Review runs", level: 1 });
+  await expect(queue).toBeVisible();
+
+  await page.getByRole("button", { name: "Review runs", exact: true }).click();
+  await expect(runs).toBeVisible();
+  await page.goBack();
+  await expect(queue).toBeVisible();
+  await page.goForward();
+  await expect(runs).toBeVisible();
 });

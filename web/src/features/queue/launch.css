@@ -150,6 +150,18 @@
   border-inline-start: 2px solid var(--focus);
   background: var(--surface);
 }
+.launch-picker-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  font-size: 11px;
+}
+.launch-picker-heading .quiet-button {
+  padding-block: 0;
+}
+.registration-copy {
+  width: 100%;
+}
 .registration-guide textarea {
   overflow-wrap: anywhere;
   resize: vertical;
