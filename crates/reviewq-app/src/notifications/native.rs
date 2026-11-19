@@ -15,6 +15,7 @@ pub struct TrackedNative {
 pub struct NativeAttention {
     pub activity: HostActivity,
     pub terminal_failure: Option<NativeTurnId>,
+    pub recoverable: Option<crate::hosts::recovery::NativeFailure>,
     pub events: Vec<NativeOccurrence>,
 }
 

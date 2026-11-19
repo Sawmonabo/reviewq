@@ -200,6 +200,14 @@ impl Codex {
         lead: &LeadTarget,
         thread: &Thread,
     ) -> Result<WorkflowReadiness, AppError> {
+        self.workflow_readiness(lead, thread, None).await
+    }
+    pub(super) async fn workflow_readiness(
+        &self,
+        lead: &LeadTarget,
+        thread: &Thread,
+        failed: Option<&NativeTurnId>,
+    ) -> Result<WorkflowReadiness, AppError> {
         use WorkflowReadiness::{Held, Ready};
         match &thread.status {
             ThreadStatus::Idle => {}
@@ -213,8 +221,12 @@ impl Codex {
         let Some(turn) = page.data.pop() else {
             return Ok(Held(WorkflowHold::UnknownSettings));
         };
-        if turn.status != "completed" {
-            return Ok(Held(WorkflowHold::ActiveWork));
+        match failed {
+            Some(id) if turn.id != id.as_str() || turn.status != "failed" => {
+                return Err(AppError::StaleRevision);
+            }
+            None if turn.status != "completed" => return Ok(Held(WorkflowHold::ActiveWork)),
+            _ => {}
         }
         let mut latest: Option<NativeInputId> = None;
         for item in turn.items.iter().rev() {
@@ -233,13 +245,13 @@ impl Codex {
         let Some(path) = &thread.path else {
             return Ok(Held(WorkflowHold::UnknownSettings));
         };
-        let (model, effort) = match crate::history::codex_turn_settings(
-            lead.binding().clone(),
-            path.clone(),
-            turn.id.clone(),
-        )
-        .await
-        {
+        let binding = lead.binding().clone();
+        let settings = if failed.is_some() {
+            crate::history::codex_exact_turn_settings(binding, path.clone(), turn.id.clone()).await
+        } else {
+            crate::history::codex_turn_settings(binding, path.clone(), turn.id.clone()).await
+        };
+        let (model, effort) = match settings {
             Ok(Some(settings)) => settings,
             _ => return Ok(Held(WorkflowHold::UnknownSettings)),
         };

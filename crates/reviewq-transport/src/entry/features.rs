@@ -4,6 +4,7 @@ pub(super) mod actions;
 pub(super) mod decisions;
 pub(super) mod followups;
 pub(super) mod notifications;
+mod recovery;
 pub(super) mod reports;
 
 use std::sync::Arc;
@@ -15,6 +16,7 @@ use super::Entry;
 
 pub(super) fn routes() -> Router<Arc<Entry>> {
     Router::new()
+        .merge(recovery::routes())
         .route(
             "/followups/preferences",
             get(followups::preferences).put(followups::save_preferences),

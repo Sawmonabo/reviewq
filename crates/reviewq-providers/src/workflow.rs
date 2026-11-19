@@ -43,6 +43,31 @@ impl Workflows {
 }
 
 impl NativeWorkflowProof for Workflows {
+    fn prepare_recovery(
+        &self,
+        candidate: &reviewq_app::hosts::recovery::Candidate,
+    ) -> AppFuture<
+        '_,
+        (
+            reviewq_app::hosts::recovery::RecoveryAuthorization,
+            reviewq_app::workflow::ReadyWorkflow,
+        ),
+    > {
+        let lead = candidate.lead.clone();
+        let id = candidate.episode.id.clone();
+        let turn = candidate.episode.turn.clone();
+        let kind = candidate.episode.kind;
+        let account = candidate.account.clone();
+        let provider = candidate.model_provider.clone();
+        Box::pin(async move {
+            self.codex
+                .as_ref()
+                .ok_or(AppError::Unavailable)?
+                .prepare_continuation(&lead, id, turn, kind, account, provider, false)
+                .await
+        })
+    }
+
     fn observe_attention(
         &self,
         target: reviewq_app::notifications::TrackedNative,

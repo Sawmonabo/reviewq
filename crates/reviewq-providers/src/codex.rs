@@ -12,6 +12,7 @@ mod history;
 mod history_reads;
 mod launch;
 mod questions;
+mod recovery;
 mod session;
 mod workflow;
 
@@ -19,6 +20,7 @@ pub struct Codex {
     profile: AbsolutePath,
     connection: connection::Connection,
     question_proofs: tokio::sync::Semaphore,
+    capacity: tokio::sync::Mutex<Option<(std::time::Instant, recovery::Usage)>>,
     turn_settings: Option<(String, String)>,
 }
 
@@ -54,6 +56,7 @@ impl Codex {
         Ok(Self {
             connection: connection::Connection::new(executable, profile.clone(), metadata.uid()),
             question_proofs: tokio::sync::Semaphore::new(4),
+            capacity: tokio::sync::Mutex::new(None),
             profile: AbsolutePath::from_canonical(profile).map_err(|_| AppError::InvalidRequest)?,
             turn_settings,
         })

@@ -28,18 +28,27 @@ pub(crate) fn admit_workflow(
         head: command.head,
         ready: command.ready,
     };
-    let (operation, purpose, batch, action) = match &guard.binding {
+    let (operation, purpose, batch, action, recovery) = match &guard.binding {
         WorkflowBinding::Action(id) => (
             "publication_retry",
             MessagePurpose::Publication,
             None,
             Some(id.as_str()),
+            None,
         ),
         WorkflowBinding::Followup(id) => (
             "followup_dispatch",
             MessagePurpose::ThreadFollowup,
             Some(id.as_str()),
             None,
+            None,
+        ),
+        WorkflowBinding::Recovery(auth) => (
+            "codex_recovery",
+            MessagePurpose::CodexRecovery,
+            None,
+            None,
+            Some(auth.episode.as_str()),
         ),
     };
     if guard.ready.model.is_empty()
@@ -77,11 +86,11 @@ pub(crate) fn admit_workflow(
     let (id, _) = insert_intent(tx, &actor, &input, operation, &digest, None, batch)?;
     tx.sql.execute(
         "INSERT INTO workflow_dispatch(delivery_id,review_id,action_id,batch_id,settings_revision,head_sha,
-              model,effort,latest_user_entry_id,latest_user_turn_id,authority_revision) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)",
+              model,effort,latest_user_entry_id,latest_user_turn_id,authority_revision,recovery_id) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)",
         params![id.as_str(),input.target.review_id().as_str(),action,batch,guard.settings.as_sqlite_integer(),
             guard.head.as_str(),guard.ready.model,guard.ready.effort,
             guard.ready.latest_user_entry_id.as_ref().map(|id|id.as_str()),
-            guard.ready.latest_user_turn_id.as_ref().map(|id|id.as_str()), guard.authority_revision.as_sqlite_integer()],
+            guard.ready.latest_user_turn_id.as_ref().map(|id|id.as_str()), guard.authority_revision.as_sqlite_integer(),recovery],
     )?;
     emit_delivery(tx, input.target.target())?;
     Ok(id)
@@ -93,6 +102,7 @@ fn workflow_digest(guard: &WorkflowGuard, input: &SubmitMessage) -> [u8; 32] {
     let binding = match &guard.binding {
         WorkflowBinding::Action(action) => action.as_str(),
         WorkflowBinding::Followup(batch) => batch,
+        WorkflowBinding::Recovery(auth) => auth.episode.as_str(),
     };
     for field in [
         binding,
@@ -121,7 +131,7 @@ pub(super) fn read_guard(
     id: &DeliveryId,
 ) -> Result<Option<WorkflowGuard>, StoreError> {
     let mut statement = db.prepare_cached(
-        "SELECT action_id,batch_id,settings_revision,head_sha,model,effort,latest_user_entry_id,latest_user_turn_id,authority_revision
+        "SELECT action_id,batch_id,settings_revision,head_sha,model,effort,latest_user_entry_id,latest_user_turn_id,authority_revision,recovery_id
          FROM workflow_dispatch WHERE delivery_id=?1",
     )?;
     let mut rows = statement.query([id.as_str()])?;
@@ -131,9 +141,13 @@ pub(super) fn read_guard(
     let binding = match (
         row.get::<_, Option<String>>(0)?,
         row.get::<_, Option<String>>(1)?,
+        row.get::<_, Option<String>>(9)?,
     ) {
-        (Some(action), None) => WorkflowBinding::Action(parse(&action)?),
-        (None, Some(batch)) => WorkflowBinding::Followup(batch),
+        (Some(action), None, None) => WorkflowBinding::Action(parse(&action)?),
+        (None, Some(batch), None) => WorkflowBinding::Followup(batch),
+        (None, None, Some(id)) => {
+            WorkflowBinding::Recovery(crate::hosts::recovery::read_authorization(db, &id)?)
+        }
         _ => return Err(AppError::Internal.into()),
     };
     Ok(Some(WorkflowGuard {
@@ -184,6 +198,7 @@ pub(super) fn current(
         return Ok(false);
     }
     match &guard.binding {
+        WorkflowBinding::Recovery(auth)=>crate::hosts::recovery::current(db,target,submission,auth),
         WorkflowBinding::Action(action) => Ok(db.query_row(
             "SELECT EXISTS(SELECT 1 FROM action_heads h JOIN actions a USING(run_id,action_id)
              WHERE h.run_id=?1 AND a.action_id=?2 AND a.lead_session_key=?3
@@ -214,6 +229,10 @@ pub(super) fn current(
 
 fn authority_revision(db: &Connection, binding: &WorkflowBinding) -> Result<Revision, StoreError> {
     let (query, id) = match binding {
+        WorkflowBinding::Recovery(auth) => (
+            "SELECT revision FROM recovery_episodes WHERE episode_id=?1",
+            auth.episode.as_str(),
+        ),
         WorkflowBinding::Action(id) => (
             "SELECT revision FROM actions WHERE action_id=?1 AND authority_verified=1",
             id.as_str(),
@@ -241,6 +260,7 @@ pub(super) fn requirements(
 ) -> Result<WorkflowRequirements, StoreError> {
     let identity = identity_for_review(db, lead.review_id())?;
     match &guard.binding {
+        WorkflowBinding::Recovery(auth) => crate::hosts::recovery::requirements(db, identity, auth),
         WorkflowBinding::Action(id) => {
             let (reviewer, approval): (String, String) = db.query_row(
                 "SELECT authenticated_actor_id,approval_state FROM actions WHERE action_id=?1",
@@ -336,6 +356,11 @@ pub(super) fn advance(
         _ => return Ok(()),
     };
     let resource = match &guard.binding {
+        WorkflowBinding::Recovery(auth) => {
+            return crate::hosts::recovery::advance(
+                tx, target, submission, auth, outcome, timestamp,
+            );
+        }
         WorkflowBinding::Followup(batch) => {
             let changed = if rejected {
                 tx.sql.execute(
@@ -395,6 +420,16 @@ fn uncertain(
     time: i64,
 ) -> Result<(), StoreError> {
     let resource = match &guard.binding {
+        WorkflowBinding::Recovery(auth) => {
+            return crate::hosts::recovery::advance(
+                tx,
+                target,
+                submission,
+                auth,
+                &DeliveryOutcome::Uncertain,
+                time,
+            );
+        }
         WorkflowBinding::Action(action) => {
             let changed=tx.sql.execute(
                 "UPDATE actions SET state='needs_input',reason='publication_delivery_uncertain',due_at_ms=?3,

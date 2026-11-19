@@ -87,6 +87,7 @@ pub trait Store:
     + FollowupCommands
     + SettingsStore
     + LaunchStore
+    + reviewq_app::hosts::recovery::RecoveryStore
 {
 }
 impl<
@@ -111,7 +112,8 @@ impl<
         + FollowupStore
         + FollowupCommands
         + SettingsStore
-        + LaunchStore,
+        + LaunchStore
+        + reviewq_app::hosts::recovery::RecoveryStore,
 > Store for S
 {
 }

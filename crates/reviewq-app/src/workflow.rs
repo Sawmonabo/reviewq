@@ -96,6 +96,7 @@ pub enum WorkflowReadiness {
 pub enum WorkflowBinding {
     Action(ActionId),
     Followup(String),
+    Recovery(crate::hosts::recovery::RecoveryAuthorization),
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -128,6 +129,7 @@ pub enum WorkflowRequirement {
         remaining_targets: Vec<crate::actions::CommentTarget>,
         approval_pending: bool,
     },
+    Recovery,
     Followup {
         discussions: Vec<SelectedDiscussion>,
         configured_reviewers: std::collections::BTreeSet<u64>,
@@ -161,6 +163,7 @@ impl WorkflowRequirements {
             return Err(AppError::StaleRevision);
         }
         match &self.requirement {
+            WorkflowRequirement::Recovery => {}
             WorkflowRequirement::Publication {
                 remaining_targets,
                 approval_pending,
@@ -200,6 +203,13 @@ impl WorkflowRequirements {
 }
 
 pub trait NativeWorkflowProof: Send + Sync {
+    fn prepare_recovery(
+        &self,
+        _candidate: &crate::hosts::recovery::Candidate,
+    ) -> AppFuture<'_, (crate::hosts::recovery::RecoveryAuthorization, ReadyWorkflow)> {
+        Box::pin(async { Err(crate::access::AppError::Unavailable) })
+    }
+
     fn observe_attention(
         &self,
         _target: crate::notifications::TrackedNative,

@@ -299,6 +299,9 @@ pub(super) fn complete(
             }
         }
     }
+    if !matches!(work.declaration, Declaration::NeedsInput { .. }) {
+        crate::hosts::recovery::complete_turn(tx, &work.call.lead, &work.call.turn_id)?;
+    }
     emit(tx, &work, time, notification)
 }
 
