@@ -43,6 +43,8 @@ pub struct Episode {
     pub kind: Kind,
     pub state: State,
     pub reason: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub next_attempt_at: Option<crate::UtcTimestampDto>,
 }
 
 #[derive(Serialize)]

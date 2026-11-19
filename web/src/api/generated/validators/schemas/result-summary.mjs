@@ -3,8 +3,8 @@ import { func0 } from "../runtime.mjs";
 import { validate25 } from "./checkpoint-id-dto.mjs";
 import { validate147 } from "./git-sha-dto.mjs";
 import { validate232 } from "./utc-timestamp-dto.mjs";
-import { validate457 } from "./result-kind.mjs";
-function validate453(
+import { validate458 } from "./result-kind.mjs";
+function validate454(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -27,7 +27,7 @@ function validate453(
         ((data.completedAt === undefined || !func0.call(data, "completedAt")) &&
           (missing0 = "completedAt"))
       ) {
-        validate453.errors = [
+        validate454.errors = [
           {
             instancePath,
             schemaPath: "#/required",
@@ -112,7 +112,7 @@ function validate453(
                 vErrors.push(err1);
               }
               errors++;
-              validate453.errors = vErrors;
+              validate454.errors = vErrors;
               return false;
             } else {
               errors = _errs3;
@@ -156,7 +156,7 @@ function validate453(
               if (data.kind !== undefined && func0.call(data, "kind")) {
                 const _errs8 = errors;
                 if (
-                  !validate457(data.kind, {
+                  !validate458(data.kind, {
                     instancePath: instancePath + "/kind",
                     parentData: data,
                     parentDataProperty: "kind",
@@ -165,8 +165,8 @@ function validate453(
                 ) {
                   vErrors =
                     vErrors === null
-                      ? validate457.errors
-                      : vErrors.concat(validate457.errors);
+                      ? validate458.errors
+                      : vErrors.concat(validate458.errors);
                   errors = vErrors.length;
                 }
                 var valid0 = _errs8 === errors;
@@ -231,7 +231,7 @@ function validate453(
                       vErrors.push(err3);
                     }
                     errors++;
-                    validate453.errors = vErrors;
+                    validate454.errors = vErrors;
                     return false;
                   } else {
                     errors = _errs10;
@@ -275,7 +275,7 @@ function validate453(
         }
       }
     } else {
-      validate453.errors = [
+      validate454.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -286,7 +286,7 @@ function validate453(
       return false;
     }
   }
-  validate453.errors = vErrors;
+  validate454.errors = vErrors;
   return errors === 0;
 }
-export { validate453 };
+export { validate454 };

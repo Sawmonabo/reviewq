@@ -219,8 +219,16 @@ export interface HistoryResultResponse {
 export interface HistoryResult {
   availability: HistoryAvailability;
   entry: HistoryEntry | null;
+  failure?: ChildResultFailure | null;
   generation: HistoryGenerationDto | null;
   runId: RunIdDto;
   sessionKey: SessionKeyDto;
+  [k: string]: unknown;
+}
+
+export interface ChildResultFailure {
+  completedAt: UtcTimestampDto;
+  followedByLeadReport: boolean;
+  turnId: HistoryTurnIdDto;
   [k: string]: unknown;
 }

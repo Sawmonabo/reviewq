@@ -3,7 +3,7 @@ import { func0 } from "../runtime.mjs";
 import { validate25 } from "./checkpoint-id-dto.mjs";
 import { validate195 } from "./board-type.mjs";
 import { schema118 } from "../metadata-3.mjs";
-function validate328(
+function validate329(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -31,7 +31,7 @@ function validate328(
           !func0.call(data, "estimateField")) &&
           (missing0 = "estimateField"))
       ) {
-        validate328.errors = [
+        validate329.errors = [
           {
             instancePath,
             schemaPath: "#/required",
@@ -95,7 +95,7 @@ function validate328(
               vErrors.push(err1);
             }
             errors++;
-            validate328.errors = vErrors;
+            validate329.errors = vErrors;
             return false;
           } else {
             errors = _errs2;
@@ -166,7 +166,7 @@ function validate328(
                 vErrors.push(err3);
               }
               errors++;
-              validate328.errors = vErrors;
+              validate329.errors = vErrors;
               return false;
             } else {
               errors = _errs7;
@@ -190,7 +190,7 @@ function validate328(
               let data2 = data.estimateField;
               const _errs11 = errors;
               if (typeof data2 !== "string" && data2 !== null) {
-                validate328.errors = [
+                validate329.errors = [
                   {
                     instancePath: instancePath + "/estimateField",
                     schemaPath: "#/properties/estimateField/type",
@@ -229,7 +229,7 @@ function validate328(
                 if (data.label !== undefined && func0.call(data, "label")) {
                   const _errs14 = errors;
                   if (typeof data.label !== "string") {
-                    validate328.errors = [
+                    validate329.errors = [
                       {
                         instancePath: instancePath + "/label",
                         schemaPath: "#/properties/label/type",
@@ -248,7 +248,7 @@ function validate328(
                     let data5 = data.path;
                     const _errs16 = errors;
                     if (typeof data5 !== "string" && data5 !== null) {
-                      validate328.errors = [
+                      validate329.errors = [
                         {
                           instancePath: instancePath + "/path",
                           schemaPath: "#/properties/path/type",
@@ -267,7 +267,7 @@ function validate328(
                       let data6 = data.state;
                       const _errs18 = errors;
                       if (typeof data6 !== "string" && data6 !== null) {
-                        validate328.errors = [
+                        validate329.errors = [
                           {
                             instancePath: instancePath + "/state",
                             schemaPath: "#/properties/state/type",
@@ -315,7 +315,7 @@ function validate328(
                               }
                             }
                           } else {
-                            validate328.errors = [
+                            validate329.errors = [
                               {
                                 instancePath: instancePath + "/statusIds",
                                 schemaPath: "#/properties/statusIds/type",
@@ -339,7 +339,7 @@ function validate328(
         }
       }
     } else {
-      validate328.errors = [
+      validate329.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -350,7 +350,7 @@ function validate328(
       return false;
     }
   }
-  validate328.errors = vErrors;
+  validate329.errors = vErrors;
   return errors === 0;
 }
-export { validate328 };
+export { validate329 };

@@ -277,6 +277,12 @@ pub struct NativePlan {
 pub struct NativeFinalResponse {
     pub generation: String,
     pub entry: Option<VisibleEntry>,
+    pub failure: Option<NativeTerminalFailure>,
+}
+
+pub struct NativeTerminalFailure {
+    pub turn: NativeTurnId,
+    pub completed_at_ms: i64,
 }
 
 pub struct NativeTask {
