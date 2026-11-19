@@ -24,12 +24,21 @@ function canSend(state) {
 async function postOutcome($, invoke, state, attempt) {
   const { offer, outcome } = attempt;
   if (!outcome || outcome === attempt.posted || await $.session.id() !== state.id) return;
-  const result = await invoke($, "hook", state.id, { offer, outcome });
+  let accepted = outcome;
+  let result = await invoke($, "hook", state.id, { offer, outcome });
+  if (result.error && attempt.authorizationUnknown && !attempt.started
+      && outcome.kind === "deferred" && await $.session.id() === state.id
+      && state.delivery === attempt) {
+    // A lost authorization reply can leave a sealed fence. This Mod has never
+    // called prompt.submit for the offer, so it can safely settle either state.
+    accepted = { kind: "dropped" };
+    result = await invoke($, "hook", state.id, { offer, outcome: accepted });
+  }
   if (!result.error && state.delivery === attempt) {
-    attempt.posted = outcome;
-    if (outcome.kind !== "uncertain") {
+    attempt.posted = accepted;
+    if (accepted.kind !== "uncertain") {
       state.delivery = undefined;
-      if (outcome.kind === "started") await $.store.delete(deliveryKey(state));
+      if (accepted.kind === "started") await $.store.delete(deliveryKey(state));
     }
   }
 }
@@ -70,8 +79,7 @@ export async function deliver($, invoke, state, offer) {
   }
   const authorization = await invoke($, "delivery-check", state.id, { offer });
   if (!authorization.data) {
-    // The response can be lost after the server sealed its single-use authorization.
-    // Only the still-unissued server state accepts a deferral.
+    attempt.authorizationUnknown = true;
     attempt.outcome = { kind: "deferred" };
     await postOutcome($, invoke, state, attempt);
     return;

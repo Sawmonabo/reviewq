@@ -139,7 +139,14 @@ impl NativeWorkflowProof for Codex {
                 aggregated_output,
             } = (match result {
                 Ok(item) => item.item,
-                Err(AppError::NotFound) => return Ok(ReportCompletion::Pending),
+                Err(AppError::NotFound) => {
+                    let ended = crate::history::codex_report_terminal(call, path, false).await?;
+                    return Ok(if ended.is_some() {
+                        ReportCompletion::Unproved
+                    } else {
+                        ReportCompletion::Pending
+                    });
+                }
                 Err(error) => return Err(error),
             })
             else {
