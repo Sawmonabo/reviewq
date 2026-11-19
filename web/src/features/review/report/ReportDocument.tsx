@@ -92,7 +92,7 @@ export default function ReportDocument({ run, report, current, drafts, reviewTit
       {quote && <blockquote className="report-quote"><p>{quote.text}</p><cite>Source offset {quote.reference.offset} · {report.sha256.slice(0, 12)}</cite>
         <button type="button" onClick={() => { drafts.set(quoteKey, `Quote · ${reviewTitle}`, ""); setNotice(undefined); }}>Remove quote</button></blockquote>}
       <Composer store={drafts} target={target} draftKey={JSON.stringify(["feedback", run.reviewId, run.runId, run.leadSessionKey, report.receiptId, report.sha256])}
-        label="Write feedback on this report" targetLabel={`To selected lead · report ${report.sha256.slice(0, 12)}`}
+        label="Write feedback on this report" draftLabel={`Feedback · ${reviewTitle}`} targetLabel={`To selected lead · report ${report.sha256.slice(0, 12)}`}
         send={(text, submissionId) => reportFeedback(target, { text, submissionId, quote: quote?.text ?? "",
           quoteRef: quote?.reference ?? null, receiptId: report.receiptId, reportHash: report.sha256 })}
         onAccepted={() => { if (drafts.getSnapshot().entries.find((draft) => draft.key === quoteKey)?.text === quoteDraft) {

@@ -10,7 +10,7 @@ import type { DraftStore } from "../../lib/drafts";
 import { describeError } from "../../lib/presentation";
 import { submits } from "../../lib/submit-key";
 
-type Attempt = { readonly submissionId: string; readonly text: string; readonly receipt?: DeliveryReceipt; readonly error?: string };
+type Attempt = { readonly submissionId: string; readonly dispatch: () => Promise<DeliveryReceipt>; readonly accepted?: () => void; readonly receipt?: DeliveryReceipt; readonly error?: string };
 const attempts = new WeakMap<DraftStore, Map<string, Attempt>>();
 const labels = {
   queued: "Queued", dispatching: "Delivering", started: "Delivered", uncertain: "Delivery uncertain", rejected: "Rejected",
@@ -23,12 +23,13 @@ type Props = {
   readonly draftKey: string;
   readonly label: string;
   readonly targetLabel: string;
+  readonly draftLabel?: string;
   readonly send?: (text: string, submissionId: string) => Promise<DeliveryReceipt>;
   readonly onAccepted?: () => void;
   readonly disabled?: boolean;
 };
 
-export function Composer({ store, target, draftKey, label, targetLabel, send, onAccepted, disabled = false }: Props) {
+export function Composer({ store, target, draftKey, label, targetLabel, draftLabel = label, send, onAccepted, disabled = false }: Props) {
   const text = useDraft(store, draftKey);
   const input = useId();
   const [managed] = useState(() => {
@@ -42,7 +43,7 @@ export function Composer({ store, target, draftKey, label, targetLabel, send, on
   const [busy, setBusy] = useState(false);
   const [rejectedEdit, setRejectedEdit] = useState(false);
   const [composition, setComposition] = useState<string>();
-  const current = last?.submissionId === managed.get(draftKey)?.submissionId ? managed.get(draftKey) : last;
+  const current = managed.get(draftKey) ?? last;
   const unconfirmed = Boolean(current && (!current.receipt || !["started", "rejected"].includes(current.receipt.state)));
   const chars = [...text].length;
   const available = !disabled && !busy && !unconfirmed && text.trim().length > 0 && chars <= MAX_MESSAGE;
@@ -54,12 +55,12 @@ export function Composer({ store, target, draftKey, label, targetLabel, send, on
   }
 
   function finish(attempt: Attempt, receipt: DeliveryReceipt) {
-    remember({ submissionId: attempt.submissionId, text: attempt.text, receipt });
+    remember({ ...attempt, receipt });
     const accepted = receipt.state !== "rejected";
-    if (accepted) {
+    if (accepted && !attempt.receipt) {
       store.finish(draftKey, true);
-      onAccepted?.();
-    } else store.finish(draftKey, false);
+      attempt.accepted?.();
+    } else if (!accepted) store.finish(draftKey, false);
   }
 
   async function reconcile(attempt: Attempt, retry: boolean) {
@@ -71,7 +72,7 @@ export function Composer({ store, target, draftKey, label, targetLabel, send, on
     } catch (error) {
       if (retry && error instanceof ApiResponseError && error.code === "not_found") {
         try {
-          const receipt = await (send?.(attempt.text, attempt.submissionId) ?? sendMessage(target, { text: attempt.text, submissionId: attempt.submissionId }));
+          const receipt = await attempt.dispatch();
           finish(attempt, receipt);
         } catch (retryError) { remember({ ...attempt, error: describeError(retryError) }); }
       } else remember({ ...attempt, error: describeError(error) });
@@ -82,11 +83,16 @@ export function Composer({ store, target, draftKey, label, targetLabel, send, on
     if (!available || managed.has(draftKey)) return;
     const captured = store.freeze(draftKey);
     if (!captured) return;
-    const attempt = { submissionId: crypto.randomUUID(), text: captured.text };
+    const submissionId = crypto.randomUUID();
+    const attempt: Attempt = {
+      submissionId,
+      dispatch: () => send?.(captured.text, submissionId) ?? sendMessage(target, { text: captured.text, submissionId }),
+      ...(onAccepted ? { accepted: onAccepted } : {}),
+    };
     remember(attempt);
     setBusy(true);
     try {
-      const receipt = await (send?.(attempt.text, attempt.submissionId) ?? sendMessage(target, { text: attempt.text, submissionId: attempt.submissionId }));
+      const receipt = await attempt.dispatch();
       finish(attempt, receipt);
     } catch (error) {
       if (error instanceof ApiResponseError && !error.retryable) {
@@ -107,7 +113,7 @@ export function Composer({ store, target, draftKey, label, targetLabel, send, on
   const [failure, setFailure] = useState<string>();
   function edit(value: string) {
     setFailure(undefined);
-    const accepted = store.set(draftKey, label, value);
+    const accepted = store.set(draftKey, draftLabel, value);
     setRejectedEdit(!accepted);
   }
 

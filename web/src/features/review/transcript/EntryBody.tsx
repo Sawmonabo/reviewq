@@ -75,10 +75,10 @@ function ExpandedOutput({ target, entryId, generation, reference }: {
   const [ranges, setRanges] = useState<readonly HistoryContent[]>([]);
   const [error, setError] = useState<string>();
   const [waiting, setWaiting] = useState(false);
-  const history = useRef<readonly string[]>([]);
   const request = useRef<AbortController | undefined>(undefined);
   const text = useRef<HTMLPreElement>(null);
   const latest = ranges.at(-1);
+  useEffect(() => () => request.current?.abort(), []);
 
   async function read(cursor?: string, replace = false) {
     if (request.current) return;
@@ -94,7 +94,6 @@ function ExpandedOutput({ target, entryId, generation, reference }: {
       if (controller.signal.aborted) return;
       const expectedOffset = latest ? latest.offset + encoder.encode(latest.text).length : 0;
       if ((!replace && range.offset !== expectedOffset) || encoder.encode(range.text).length > 65_536) throw new Error("The next native output range is unavailable.");
-      if (cursor && !replace) history.current = [...history.current, cursor].slice(-LIMIT);
       setRanges((items) => replace ? [range] : [...items, range].slice(-LIMIT));
       setWaiting(false);
     } catch (failure) { if (!controller.signal.aborted) setError(describeError(failure)); }
@@ -106,7 +105,7 @@ function ExpandedOutput({ target, entryId, generation, reference }: {
     {error && <Notice>{error}</Notice>}
     {ranges.length > 0 && <pre ref={text} className="tool-output-line" aria-label="Native output text">{ranges.map((range) => range.text).join("")}</pre>}
     <div className="actions">
-      {(ranges[0]?.offset ?? 0) > 0 && <button type="button" onClick={() => { history.current = []; void read(undefined, true); }}>Start of output</button>}
+      {(ranges[0]?.offset ?? 0) > 0 && <button type="button" onClick={() => void read(undefined, true)}>Start of output</button>}
       {latest?.nextCursor && <button type="button" onClick={() => void read(latest.nextCursor ?? undefined)}>More output</button>}
     </div>
     {waiting && <Notice>More output available. <button type="button" onClick={() => { getSelection()?.removeAllRanges(); setWaiting(false); }}>Clear selection</button></Notice>}

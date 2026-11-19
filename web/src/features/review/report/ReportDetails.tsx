@@ -12,6 +12,7 @@ import { describeError, readable } from "../../../lib/presentation";
 type Collection = "findings" | "changes" | "sections";
 type Finding = Extract<Descriptor, { kind: "finding" }>;
 type Saved = Extract<Descriptor, { kind: "disposition" }>;
+type DispositionDraft = { readonly blocking: string; readonly publication: "" | "authorized" | "published" | "withheld"; readonly reason: string };
 
 export function ReportDetails({ run, report, collection, current, drafts, reviewTitle, onSource }: {
   readonly run: RunDetail;
@@ -86,7 +87,7 @@ function FindingCard({ item, report, run, saved, drafts, version, current, revie
     !patch || !expanded || !patch.length ? Promise.resolve({ data: null, cursor: "" }) :
       reportSection(run.runId, report.receiptId, report.sha256, patch.offset, signal, Math.min(patch.length, 12_000)));
 
-  function change(next: ReturnType<typeof decode>) {
+  function change(next: DispositionDraft) {
     setNotice(drafts.set(draftKey, label, JSON.stringify(next)) ? undefined : "Draft storage full.");
   }
 
@@ -141,9 +142,9 @@ function FindingCard({ item, report, run, saved, drafts, version, current, revie
   </article>;
 }
 
-function decode(value: string): { blocking: string; publication: "" | "authorized" | "published" | "withheld"; reason: string } {
+function decode(value: string): DispositionDraft {
   if (value) {
-    try { return JSON.parse(value) as ReturnType<typeof decode>; } catch { /* Either an empty draft or a current editor value. */ }
+    try { return JSON.parse(value) as DispositionDraft; } catch { /* Either an empty draft or a current editor value. */ }
   }
   return { blocking: "", publication: "", reason: "" };
 }

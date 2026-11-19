@@ -50,11 +50,9 @@ export default function ReviewDrawer({
   const [busy, setBusy] = useState(false);
   const mutation = useRef(false);
   const [outcome, setOutcome] = useState<{ key: string; message: string; terminal?: string }>();
-  const [childTab, setChildTab] = useState<{ key: string; view: "conversation" | "result" }>();
   const buttonRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const session = run?.sessions.items.find((entry) => entry.sessionKey === (selectedSession ?? run.leadSessionKey));
   const child = session && session.sessionKey !== run?.leadSessionKey ? session : undefined;
-  const chosenChildTab = child && childTab?.key === child.sessionKey ? childTab.view : "conversation";
   const unavailableChild = Boolean(selectedSession && run && !session);
   const source = safeUrl(overview.webUrl);
   const scope = [review.reviewId, run?.runId, session?.sessionKey].join("/");
@@ -72,7 +70,7 @@ export default function ReviewDrawer({
   });
   const runs = runTrail.length ? otherRuns.data : overview.runs;
   const visibleTabs = child ? [["agent", "Conversation"], ["findings", "Result"]] as const : tabs;
-  const activeTab = child ? chosenChildTab === "result" ? "findings" : "agent" : tab;
+  const activeTab = child && tab !== "findings" ? "agent" : tab;
 
   async function commandFor(action: "open" | "copy") {
     if (!run || !session || mutation.current) return;
@@ -121,8 +119,7 @@ export default function ReviewDrawer({
   }
 
   function activate(next: Tab) {
-    if (child) setChildTab({ key: child.sessionKey, view: next === "findings" ? "result" : "conversation" });
-    else onTab(next);
+    onTab(next);
   }
 
   return <aside className="drawer-surface" aria-labelledby="review-title">
@@ -191,11 +188,11 @@ export default function ReviewDrawer({
             monitor={follows.data?.monitor?.state} onLaunch={onLaunch} onSettings={onSettings} pending={selectionPending} />}
           {activeTab === "changes" && <Changes key={review.reviewId} reviewId={review.reviewId} webUrl={overview.webUrl} />}
           {activeTab === "agent" && (run && session && !unavailableChild ? <AgentPanel key={scope}
-            run={run} session={session} reviewTitle={review.title} state={review.runStage} drafts={drafts}
+            run={run} session={session} reviewTitle={review.title} state={review.focusedRunId === run.runId ? review.runStage : null} drafts={drafts}
             onSession={onSession} onTerminal={() => void commandFor("open")} /> : selectionPending
             ? <Loading label="Resolving selected run…" /> : <Empty title="No confirmed conversation" />)}
           {activeTab === "findings" && (child && run ? <AgentPanel key={`${scope}:result`} run={run} session={child} reviewTitle={review.title}
-            state={review.runStage} drafts={drafts} onSession={onSession} onTerminal={() => void commandFor("open")} resultOnly />
+            state={review.focusedRunId === run.runId ? review.runStage : null} drafts={drafts} onSession={onSession} onTerminal={() => void commandFor("open")} resultOnly />
             : run && session ? <Findings key={run.runId} run={run} drafts={drafts} reviewTitle={review.title} webUrl={overview.webUrl} followup={follows.data?.latestCompletedResult} />
               : selectionPending ? <Loading label="Resolving selected run…" /> : <Empty title="No registered review report" />)}
         </Suspense>

@@ -23,7 +23,10 @@ export default function MonitorPane({ targets, pause, onClose }: { readonly targ
   const [busy, setBusy] = useState(false);
   const [results, setResults] = useState<Readonly<Record<string, string>>>({});
   const [confirm, setConfirm] = useState(false);
-  const selected = targets.flatMap((target) => commands[target.reviewId] ? [commands[target.reviewId]] : []);
+  const selected = targets.flatMap((target) => {
+    const command = commands[target.reviewId];
+    return command ? [command] : [];
+  });
 
   function update(command: Command | undefined, target: Target) {
     setCommands((previous) => {
@@ -94,7 +97,7 @@ function TargetMonitor({ target, pause, locked, onChoice, result }: {
   const monitor = value?.enrollment.monitor;
   const selectedLead = lead || monitor?.runId || (value?.runs.length === 1 ? value.runs[0]?.runId : undefined) || "";
   const available = [...(value?.discussions ?? []), ...added].filter((thread) => thread.notes.some((note) => note.ours && /^\d+$/.test(note.noteId)));
-  const next = cursor ?? value?.next;
+  const next = cursor === undefined ? value?.next : cursor;
   const eligible = monitor?.state === "enabled" || monitor?.state === "paused";
 
   function select(ids: readonly string[], run: string, action: Command["action"] = "configure") {

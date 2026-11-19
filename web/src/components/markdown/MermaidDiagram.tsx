@@ -9,7 +9,7 @@ export default function MermaidDiagram({ source }: { readonly source: string }) 
   const [state, setState] = useState<"idle" | "ready" | "error">("idle");
   const [zoom, setZoom] = useState(1);
   const [offset, setOffset] = useState({ x: 0, y: 0 });
-  const pointer = useRef<{ x: number; y: number }>();
+  const pointer = useRef<{ x: number; y: number } | undefined>(undefined);
   useEffect(() => {
     const host = frame.current;
     const target = canvas.current;

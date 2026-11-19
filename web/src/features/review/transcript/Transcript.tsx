@@ -35,6 +35,7 @@ export function Transcript({ target, messages, resultOnly, onObservedTurn }: Pro
   const selectionState = useRef({ hasText: false, ids: new Set<string>() });
   const scrollIntent = useRef(false);
   const requestedLatest = useRef(false);
+  const activeLatest = useRef(false);
 
   const history = useHistory(target, bookmark, following, pinned, (position, wanted) => {
     if (position === "around" && wanted) {
@@ -48,7 +49,7 @@ export function Transcript({ target, messages, resultOnly, onObservedTurn }: Pro
   const inProgress = history.live?.entryId && !canonical.has(history.live.entryId) ? history.live : undefined;
   const entries = useMemo<Visible[]>(() => {
     if (resultOnly) {
-      const result = historyEntries.findLast((entry) => entry.parts.some((part) => part.kind === "assistant_text"));
+      const result = [...historyEntries].reverse().find((entry) => entry.parts.some((part) => part.kind === "assistant_text"));
       return result ? [{ id: result.entryId, entry: result }] : [];
     }
     const rows: Visible[] = historyEntries.map((entry) => ({ id: entry.entryId, entry }));
@@ -179,8 +180,16 @@ export function Transcript({ target, messages, resultOnly, onObservedTurn }: Pro
   function latest() {
     clear(); setFollowing(true);
     requestedLatest.current = true;
-    if (!selectedText && !pinned.size) void history.load("latest");
+    activeLatest.current = true;
+    if (!selectedText && !pinned.size) { activeLatest.current = false; void history.load("latest"); }
   }
+
+  useEffect(() => {
+    if (activeLatest.current && !pinned.size && !history.loading) {
+      activeLatest.current = false;
+      void history.load("latest");
+    }
+  }, [pinned, history]);
 
   return <section className="transcript-shell" aria-label={resultOnly ? "Latest child output" : "Native conversation"}>
     {!resultOnly && <div className="timeline-controls">
@@ -205,7 +214,11 @@ export function Transcript({ target, messages, resultOnly, onObservedTurn }: Pro
     {history.availability && history.availability !== "available" && <Notice>{history.availability === "partial" ? "Only part of this conversation is available." : `Native history · ${readable(history.availability)}`}</Notice>}
     {resultOnly && <p className="timeline-live meta">Latest assistant output from this child session</p>}
     <div className="timeline-viewport" ref={viewport} tabIndex={0} onScroll={recordScroll}
-      onWheel={(event) => gesture(event.deltaY < 0)} onPointerDown={() => { scrollIntent.current = true; }}
+      onWheel={(event) => { if (event.deltaY) gesture(event.deltaY < 0); }}
+      onTouchMove={() => { scrollIntent.current = true; }} onPointerDown={(event) => {
+        const box = event.currentTarget.getBoundingClientRect();
+        if (event.target === event.currentTarget && box.right - event.clientX < 17) scrollIntent.current = true;
+      }}
       onKeyDown={(event) => {
         if (["PageUp", "ArrowUp", "Home"].includes(event.key)) gesture(true);
         else if (["PageDown", "ArrowDown", "End", " "].includes(event.key)) gesture(false);

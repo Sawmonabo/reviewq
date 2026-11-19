@@ -84,7 +84,7 @@ export default function AgentPanel({ run, session, reviewTitle, state, drafts, o
     </header>
     <Transcript target={target} messages={cursor ? [] : outbox.data?.items ?? []} resultOnly={resultOnly} onObservedTurn={setTurn} />
     {!resultOnly && <NativeQuestions target={target} store={drafts} reviewTitle={reviewTitle} onTerminal={onTerminal} />}
-    {!resultOnly && lead && <Composer store={drafts} target={target} label="Message the lead" targetLabel={`To ${readable(session.provider)} lead · ${session.nativeId.slice(0, 12)}`}
+    {!resultOnly && lead && <Composer store={drafts} target={target} label="Message the lead" draftLabel={`Message · ${reviewTitle}`} targetLabel={`To ${readable(session.provider)} lead · ${session.nativeId.slice(0, 12)}`}
       draftKey={JSON.stringify(["message", run.reviewId, run.runId, run.leadSessionKey])} onAccepted={outbox.retry} />}
   </div>;
 }

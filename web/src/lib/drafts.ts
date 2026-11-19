@@ -20,20 +20,20 @@ export class DraftStore {
 
   set(key: string, label: string, text: string): boolean {
     const current = this.#entries.get(key);
+    if (current?.text === text && current.label === label) return true;
     const frozen = this.#pending.get(key);
     const alreadyShared = current === frozen;
     const charge = this.#budget();
     const next = text ? { key, label, text } : undefined;
     const subtract = current && !alreadyShared ? size(current) : 0;
     const count = charge.count - (current && !alreadyShared ? 1 : 0) + (next ? 1 : 0);
-    if (next && (charge.bytes - subtract + size(next) > MAX_BYTES || count > MAX_DRAFTS)
-      && text.length > (current?.text.length ?? 0)) {
+    if (next && (charge.bytes - subtract + size(next) > MAX_BYTES || count > MAX_DRAFTS)) {
       this.#publish(true);
       return false;
     }
     if (next) this.#entries.set(key, next);
     else this.#entries.delete(key);
-    this.#publish(false);
+    this.#publish(this.#snapshot.full && !released(current, frozen, next));
     return true;
   }
 
@@ -66,4 +66,8 @@ export class DraftStore {
 
 function size(draft: Draft) {
   return ENTRY_BYTES + 2 * (draft.key.length + draft.label.length + draft.text.length);
+}
+
+function released(before: Draft | undefined, frozen: Draft | undefined, after: Draft | undefined) {
+  return before !== undefined && before !== frozen && (!after || size(after) < size(before));
 }
