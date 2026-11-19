@@ -32,6 +32,7 @@ type Position = {
 type Tab = "files" | "general" | "all";
 type Status = "any" | "open" | "resolved";
 type Window = { readonly offset: number; readonly etag?: string; readonly last?: boolean };
+const MAX_EMPTY_DISCUSSION_PAGES = 4;
 const tabs = [
   ["files", "Files"],
   ["general", "General comments"],
@@ -91,12 +92,38 @@ export default function Changes({
   );
   const changed = Boolean(revision && current.data && current.data.revision !== revision);
   const [threadTrail, setThreadTrail] = useState<readonly string[]>([]);
+  const discussionScope = tab === "general" ? "general" : "all";
+  const filtering = involving || status !== "any";
   const threads = useResource(
-    `discussions:${reviewId}:${revision ?? ""}:${threadTrail.at(-1) ?? ""}`,
-    (signal) =>
-      revision
-        ? readPatchDiscussions(reviewId, revision, signal, threadTrail.at(-1))
-        : Promise.resolve({ data: null, cursor: "" }),
+    JSON.stringify([
+      "discussions",
+      reviewId,
+      revision,
+      discussionScope,
+      involving,
+      status,
+      threadTrail.at(-1),
+    ]),
+    async (signal) => {
+      if (!revision) return { data: null, cursor: "" };
+      let page = await readPatchDiscussions(reviewId, revision, signal, threadTrail.at(-1));
+      if (!filtering && discussionScope === "all") return page;
+      for (let skipped = 0; skipped < MAX_EMPTY_DISCUSSION_PAGES; skipped++) {
+        const next = page.data.nextCursor;
+        if (
+          !next ||
+          signal.aborted ||
+          page.data.items.some(
+            (thread) =>
+              matchesFilters(thread, status, involving) &&
+              (discussionScope === "all" || isGeneral(thread)),
+          )
+        )
+          break;
+        page = await readPatchDiscussions(reviewId, revision, signal, next);
+      }
+      return page;
+    },
     [{ kind: "discussions", id: reviewId }],
   );
   const available =
@@ -109,12 +136,10 @@ export default function Changes({
   const pageNumber = shown?.pageNumber ?? 1;
   const fileSearch = useRef<HTMLInputElement>(null);
   const picker = useRef<HTMLDetailsElement>(null);
-  const filtered = (threads.data?.items ?? []).filter(
-    (thread) =>
-      (!involving || thread.ourParticipation) && (status === "any" || thread.resolution === status),
+  const filtered = (threads.data?.items ?? []).filter((thread) =>
+    matchesFilters(thread, status, involving),
   );
-  const general = filtered.filter((thread) => !thread.anchor && !thread.outdated);
-  const filtering = involving || status !== "any";
+  const general = filtered.filter(isGeneral);
   const anchors = file ? filtered.filter((thread) => matches(thread, file)) : [];
   const visible =
     tab === "files"
@@ -144,6 +169,7 @@ export default function Changes({
   function clearConversationFilters() {
     setInvolving(false);
     setStatus("any");
+    setThreadTrail([]);
     participant.current?.focus({ preventScroll: true });
   }
 
@@ -185,7 +211,17 @@ export default function Changes({
       )}
       <div className="actions changes-tabs">
         {tabs.map(([id, label]) => (
-          <button key={id} type="button" aria-pressed={tab === id} onClick={() => setTab(id)}>
+          <button
+            key={id}
+            type="button"
+            aria-pressed={tab === id}
+            onClick={() => {
+              if (tab !== id) {
+                setTab(id);
+                setThreadTrail([]);
+              }
+            }}
+          >
             {label}{" "}
             <strong className="changes-count">
               {id === "files" ? files.length : id === "general" ? general.length : filtered.length}
@@ -203,7 +239,10 @@ export default function Changes({
             ref={participant}
             aria-label="Conversation participants"
             value={involving ? "mine" : "all"}
-            onChange={(event) => setInvolving(event.currentTarget.value === "mine")}
+            onChange={(event) => {
+              setInvolving(event.currentTarget.value === "mine");
+              setThreadTrail([]);
+            }}
           >
             <option value="all">All participants</option>
             <option value="mine">Involving you</option>
@@ -215,7 +254,10 @@ export default function Changes({
           <select
             aria-label="Conversation status"
             value={status}
-            onChange={(event) => setStatus(event.currentTarget.value as Status)}
+            onChange={(event) => {
+              setStatus(event.currentTarget.value as Status);
+              setThreadTrail([]);
+            }}
           >
             <option value="any">Any status</option>
             <option value="open">Open only</option>
@@ -367,15 +409,21 @@ export default function Changes({
             <div role="status">
               <Icon name="inbox" size={28} />
               <h3>
-                {filtering
-                  ? tab === "general"
-                    ? "No matching comments"
-                    : "No matching conversations"
-                  : tab === "general"
-                    ? "No general comments yet"
-                    : "No conversations yet"}
+                {threads.data.nextCursor
+                  ? "No matching conversations on this page"
+                  : filtering
+                    ? tab === "general"
+                      ? "No matching comments"
+                      : "No matching conversations"
+                    : tab === "general"
+                      ? "No general comments yet"
+                      : "No conversations yet"}
               </h3>
-              {filtering && <p className="meta">Try changing your filters.</p>}
+              {threads.data.nextCursor ? (
+                <p className="meta">More discussion pages are available below.</p>
+              ) : (
+                filtering && <p className="meta">Try changing your filters.</p>
+              )}
             </div>
             {filtering && (
               <button type="button" onClick={clearConversationFilters}>
@@ -626,6 +674,16 @@ function matches(thread: PatchDiscussion, file: PatchFile) {
     thread.anchor.newPath === file.newPath &&
     (thread.anchor.newLine !== null || thread.anchor.oldLine !== null)
   );
+}
+
+function matchesFilters(thread: PatchDiscussion, status: Status, involving: boolean) {
+  return (
+    (!involving || thread.ourParticipation) && (status === "any" || thread.resolution === status)
+  );
+}
+
+function isGeneral(thread: PatchDiscussion) {
+  return !thread.anchor && !thread.outdated;
 }
 
 function fileKind(file: PatchFile) {
