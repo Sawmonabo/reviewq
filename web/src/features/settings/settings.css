@@ -1,9 +1,9 @@
 .modal.settings-pane {
   --settings-input: #111114;
-  --settings-focus: #8b9fe7;
+  --settings-input-line: #36363e;
+  --settings-button-line: #303039;
+  --settings-button-hover-line: #454550;
   --settings-summary: #b8b8c2;
-  --settings-quiet: #a4aecb;
-  --settings-quiet-hover: #d8e0f8;
   --settings-primary-hover: #dce2f3;
   position: fixed;
   inset: 0 0 0 auto;
@@ -19,10 +19,10 @@
 }
 :root[data-theme="light"] .modal.settings-pane {
   --settings-input: var(--control);
-  --settings-focus: var(--focus);
+  --settings-input-line: var(--strong-line);
+  --settings-button-line: var(--control-line);
+  --settings-button-hover-line: var(--control-hover-line);
   --settings-summary: var(--muted);
-  --settings-quiet: var(--link);
-  --settings-quiet-hover: var(--text);
   --settings-primary-hover: color-mix(in srgb, var(--primary), var(--link) 18%);
 }
 .settings-pane::backdrop {
@@ -51,8 +51,9 @@
 }
 .settings-pane .modal-frame > header .icon-button {
   background: transparent;
-  border-color: transparent;
-  color: var(--muted);
+  border: 0;
+  border-radius: 0;
+  color: var(--close-text);
   font-size: 22px;
 }
 .settings-pane .modal-body {
@@ -78,7 +79,7 @@
 .settings-pane
   :is(.modal-frame > footer, .connection-fields, .settings-concurrency, .settings-search)
   button:not(.primary, .quiet-button, .icon-button) {
-  border-color: var(--control-line);
+  border-color: var(--settings-button-line);
   background: var(--workspace-secondary);
   color: var(--workspace-secondary-text);
   font-size: 11px;
@@ -86,7 +87,7 @@
 .settings-pane
   :is(.modal-frame > footer, .connection-fields, .settings-concurrency, .settings-search)
   button:not(.primary, .quiet-button, .icon-button):hover:not(:disabled) {
-  border-color: var(--control-hover-line);
+  border-color: var(--settings-button-hover-line);
   background: var(--workspace-secondary-hover);
 }
 .settings-pane button.primary:hover:not(:disabled) {
@@ -95,15 +96,18 @@
 .settings-pane .quiet-button {
   border: 0;
   border-radius: 0;
-  color: var(--settings-quiet);
+  color: var(--quiet-text);
   font-size: 10px;
 }
 .settings-pane .quiet-button:hover:not(:disabled) {
-  color: var(--settings-quiet-hover);
+  color: var(--quiet-hover-text);
   background: transparent;
 }
-.settings-pane :is(input, select, button, summary):focus-visible {
-  outline-color: var(--settings-focus);
+@media (forced-colors: none) {
+  .settings-pane :is(input, select):focus-visible {
+    outline-color: light-dark(var(--focus), #8b9fe7);
+    outline-offset: 2px;
+  }
 }
 .settings-body form {
   display: block;
@@ -135,15 +139,16 @@
   height: 40px;
   padding: 9px 12px;
   background: var(--settings-input);
-  border-color: var(--strong-line);
+  border-color: var(--settings-input-line);
   font-size: 13px;
 }
 .settings-section select:enabled {
   cursor: pointer;
 }
-.settings-section select:hover:enabled {
+.settings-section select:enabled:is(:hover, :active) {
   background: var(--control-hover);
   border-color: var(--control-hover-line);
+  color: light-dark(var(--text), #fafafa);
 }
 .connection-grid {
   display: grid;
@@ -328,7 +333,6 @@
 }
 .settings-selection-body .quiet-button {
   justify-self: start;
-  color: var(--link);
   font-size: 11px;
 }
 .settings-choices {

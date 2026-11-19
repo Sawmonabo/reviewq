@@ -21,15 +21,15 @@
 .drawer-breadcrumb .quiet-button {
   min-height: 0;
   padding: 0;
-  color: var(--ticket-text);
+  color: light-dark(var(--ticket-text), #bbc4e2);
   font-family: inherit;
   font-size: 11px;
   font-weight: 560;
   border-radius: 0;
 }
-.drawer-breadcrumb .quiet-button:is(:hover, :active) {
+.drawer-breadcrumb .quiet-button:enabled:is(:hover, :active) {
+  border-color: transparent;
   background: transparent;
-  color: var(--link);
 }
 .drawer-breadcrumb a {
   color: var(--muted);
@@ -46,12 +46,18 @@
   padding: 4px;
   border: 0;
   background: transparent;
-  color: var(--muted);
 }
-.drawer-actions :is(.menu-trigger, .icon-button):hover,
-.drawer-actions .menu-trigger[data-state="open"] {
-  background: var(--hover);
-  color: var(--text);
+.drawer-actions .menu-trigger {
+  color: light-dark(var(--muted), #b8bac4);
+}
+.drawer-actions .menu-trigger:is(:hover, :active, [data-state="open"]) {
+  background: light-dark(var(--hover), #28282f);
+  color: light-dark(var(--text), #fff);
+}
+.drawer-actions .icon-button:enabled {
+  border-radius: 0;
+  background: transparent;
+  color: var(--close-text);
 }
 .drawer-actions .menu-trigger svg {
   width: 23px;
@@ -329,8 +335,4 @@
   .drawer-surface .drawer-tabs {
     gap: 20px;
   }
-}
-.drawer-surface .drawer-actions button {
-  border: 0;
-  background: transparent;
 }

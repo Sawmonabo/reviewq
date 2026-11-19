@@ -12,6 +12,7 @@ import {
   readPatchFiles,
 } from "../../../api/changes";
 import type { PatchDiscussion, PatchFile, PatchFileIndex } from "../../../api/generated/contracts";
+import { FilterSelect } from "../../../components/FilterSelect";
 import { Icon } from "../../../components/Icon";
 import { Pagination } from "../../../components/Pagination";
 import { Empty, Loading, Notice } from "../../../components/PanelState";
@@ -233,37 +234,34 @@ export default function Changes({
         ))}
       </div>
       <div className="actions thread-filters">
-        <label>
-          Show{" "}
-          <select
-            ref={participant}
-            aria-label="Conversation participants"
-            value={involving ? "mine" : "all"}
-            onChange={(event) => {
-              setInvolving(event.currentTarget.value === "mine");
-              setThreadTrail([]);
-            }}
-          >
-            <option value="all">All participants</option>
-            <option value="mine">Involving you</option>
-          </select>
-        </label>
-        <label>
-          {" "}
-          Status{" "}
-          <select
-            aria-label="Conversation status"
-            value={status}
-            onChange={(event) => {
-              setStatus(event.currentTarget.value as Status);
-              setThreadTrail([]);
-            }}
-          >
-            <option value="any">Any status</option>
-            <option value="open">Open only</option>
-            <option value="resolved">Resolved only</option>
-          </select>
-        </label>
+        <FilterSelect
+          label="Show"
+          accessibleLabel="Conversation participants"
+          selectRef={participant}
+          value={involving ? "mine" : "all"}
+          options={[
+            { value: "all", label: "Everyone" },
+            { value: "mine", label: "Involving you" },
+          ]}
+          onChange={(value) => {
+            setInvolving(value === "mine");
+            setThreadTrail([]);
+          }}
+        />
+        <FilterSelect
+          label="Status"
+          accessibleLabel="Conversation status"
+          value={status}
+          options={[
+            { value: "any", label: "Any status" },
+            { value: "open", label: "Open only" },
+            { value: "resolved", label: "Resolved only" },
+          ]}
+          onChange={(value) => {
+            setStatus(value as Status);
+            setThreadTrail([]);
+          }}
+        />
         {filtering && (
           <button
             type="button"

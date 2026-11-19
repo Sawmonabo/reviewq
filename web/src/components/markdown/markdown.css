@@ -43,6 +43,10 @@
   border-inline-start: 2px solid var(--focus);
   margin-inline: 0;
 }
+.prose a {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
 .prose :not(pre) > code {
   border-radius: 3px;
   background: var(--raised);
@@ -106,6 +110,7 @@
   color: #bfb0cd;
   background: transparent;
   border: 1px solid transparent;
+  border-radius: 4px;
   font: inherit;
 }
 .diagram-controls button:not(:disabled):hover {
@@ -146,6 +151,9 @@
   margin: 0;
   border-top: 1px solid #302a35;
   font-size: 11px;
+}
+.diagram-source > summary {
+  color: light-dark(var(--muted), #aeb9d2);
 }
 .mermaid-figure .diagram-source[open] pre {
   margin: 6px 0;

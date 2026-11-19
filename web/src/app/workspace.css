@@ -292,6 +292,7 @@
   background: var(--workspace-bg);
 }
 .workspace-inner {
+  container: workspace-content / inline-size;
   max-width: 1660px;
   padding: 36px var(--gutter);
   margin-inline: auto;

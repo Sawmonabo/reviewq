@@ -263,7 +263,7 @@ function CommentCard({
       {collapsible && (
         <button
           type="button"
-          className="text-button"
+          className="ticket-comment-toggle"
           aria-expanded={expanded}
           onClick={() => setExpanded(!expanded)}
         >

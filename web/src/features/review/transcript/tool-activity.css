@@ -108,14 +108,14 @@
   border: 0;
   border-radius: 4px;
   background: transparent;
-  color: var(--muted);
+  color: light-dark(var(--muted), #b0b0be);
   line-height: 1.4;
   text-align: start;
   cursor: pointer;
 }
-.transcript-tool-run:is(:hover, :focus-visible),
-.tool-disclosure summary:is(:hover, :focus-visible) {
-  background: var(--raised);
+.transcript-tool-run:enabled:is(:hover, :active, :focus-visible),
+.tool-disclosure summary:is(:hover, :active, :focus-visible) {
+  background: light-dark(var(--raised), #121216);
 }
 .tool-disclosure summary {
   list-style: none;

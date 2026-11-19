@@ -50,10 +50,16 @@
   z-index: 1;
   inset: 0 0 auto auto;
   width: 26px;
-  min-height: 27px;
+  height: 28px;
+  min-height: 28px;
   padding: 0;
   opacity: 0;
+  border: 0;
+  background: var(--raised);
   color: var(--muted);
+}
+.message-navigator .message-navigator-reveal:enabled:is(:hover, :active) {
+  background: var(--raised);
 }
 .message-navigator-reveal:focus-visible {
   opacity: 1;

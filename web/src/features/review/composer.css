@@ -63,11 +63,18 @@
   padding: 0;
   border: 0;
   border-radius: 50%;
-  background: var(--primary);
-  color: var(--primary-text);
+  background: light-dark(var(--primary), #c9d2ee);
+  color: light-dark(var(--primary-text), #151820);
 }
-.composer .composer-send:not(:disabled):hover {
-  background: color-mix(in srgb, var(--primary) 72%, white);
+.composer .composer-send:enabled:is(:hover, :active) {
+  background: light-dark(color-mix(in srgb, var(--primary) 72%, white), #e0e6f7);
+  color: light-dark(var(--primary-text), var(--canvas));
+}
+.composer :is(.composer-send, .feedback-send):disabled {
+  opacity: 0.5;
+}
+.composer :is(.composer-send, .feedback-send)[aria-busy="true"] {
+  cursor: wait;
 }
 .feedback-composer-shell .composer {
   padding: 0;

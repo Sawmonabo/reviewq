@@ -26,11 +26,11 @@
 }
 .ticket-jira-link {
   margin-left: auto;
-  color: var(--link);
+  color: light-dark(var(--link), #9faacc);
   white-space: nowrap;
 }
 .ticket-jira-link:is(:hover, :active) {
-  color: color-mix(in srgb, var(--link), var(--text) 65%);
+  color: var(--quiet-hover-text);
 }
 .ticket-status-line .ticket-status {
   height: 26px;
@@ -157,12 +157,15 @@
   width: auto;
   padding: 6px 9px;
   font-size: 11px;
-  background: var(--surface);
+  background: light-dark(var(--surface), #101116);
+  border-color: light-dark(var(--line), #2b2e38);
+  color: light-dark(var(--text), #bfc4d3);
   cursor: pointer;
 }
-.ticket-comments-heading select:is(:hover, :active) {
-  background: var(--hover);
-  color: var(--text);
+.ticket-comments-heading select:enabled:is(:hover, :active) {
+  background: var(--control-hover);
+  border-color: var(--control-hover-line);
+  color: light-dark(var(--text), #fafafa);
 }
 .ticket-comment-meta {
   gap: 10px;
@@ -182,7 +185,7 @@
   width: 27px;
   height: 27px;
 }
-.ticket-comment > :is(.ticket-comment-body, .text-button) {
+.ticket-comment > :is(.ticket-comment-body, .ticket-comment-toggle) {
   margin-inline-start: 37px;
 }
 .ticket-comment-folded {
@@ -190,20 +193,26 @@
   overflow: clip;
   mask-image: linear-gradient(#000 73%, transparent);
 }
-.ticket-comment .text-button {
+.ticket-comment-toggle {
   justify-self: start;
   padding-inline-start: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: light-dark(var(--link), #a8b9e2);
   font-size: 11px;
+}
+.ticket-comment-toggle:enabled:is(:hover, :active) {
+  background: transparent;
+  color: var(--quiet-hover-text);
 }
 .ticket-comment .prose {
   font-size: 12px;
   line-height: 1.8;
 }
 .ticket-comment-meta a {
-  color: var(--muted);
-}
-.ticket-comment-meta a:hover {
-  color: var(--link);
+  color: light-dark(var(--muted), #828a9e);
+  text-decoration: none;
 }
 .ticket-description .prose pre,
 .ticket-comment .prose pre {
