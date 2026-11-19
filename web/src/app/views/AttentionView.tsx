@@ -327,7 +327,7 @@ export function AttentionView({
                     {unread ? `${unread} unread` : "Read"}
                   </span>
                 </div>
-                <strong>{context?.title ?? latest.label}</strong>
+                <strong>{context?.ticketTitle || context?.title || latest.label}</strong>
                 {context && <span className="inbox-preview">{latest.label}</span>}
                 <div className="inbox-meta inbox-caption">
                   <span>{updates}</span>

@@ -6828,6 +6828,12 @@
           "maxItems": 16,
           "type": "array"
         },
+        "ticketTitle": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "title": {
           "type": "string"
         },
@@ -6838,6 +6844,7 @@
       "required": [
         "reviewId",
         "title",
+        "ticketTitle",
         "projectPath",
         "iid",
         "ticketKeys",
@@ -8712,6 +8719,9 @@
             "null"
           ]
         },
+        "fetchedAt": {
+          "$ref": "#/definitions/UtcTimestampDto"
+        },
         "issueType": {
           "type": [
             "string",
@@ -8771,6 +8781,16 @@
         "title": {
           "type": "string"
         },
+        "updatedAt": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/UtcTimestampDto"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "url": {
           "type": "string"
         },
@@ -8796,6 +8816,8 @@
         "components",
         "description",
         "estimate",
+        "updatedAt",
+        "fetchedAt",
         "warnings",
         "commentCount",
         "items",

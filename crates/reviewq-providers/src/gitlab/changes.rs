@@ -177,11 +177,12 @@ impl GitLab {
         let row = self
             .merge_request(source.project_id(), source.iid())
             .await?;
+        let source_head = row.head_sha()?;
         let refs = row.diff_refs.ok_or(AppError::Unavailable)?;
         let base = git_sha(&refs.base_sha)?;
         let start = git_sha(&refs.start_sha)?;
         let head = git_sha(&refs.head_sha)?;
-        if head != git_sha(&row.sha)? {
+        if head != source_head {
             return Err(AppError::Unavailable);
         }
         let id = fingerprint(&[

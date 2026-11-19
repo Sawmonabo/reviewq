@@ -44,6 +44,8 @@ pub struct TicketDetail {
     pub description: Option<String>,
     #[cfg_attr(feature = "schema", schemars(range(min = 0)))]
     pub estimate: Option<f64>,
+    pub updated_at: Option<UtcTimestampDto>,
+    pub fetched_at: UtcTimestampDto,
     pub warnings: Vec<&'static str>,
     pub comment_count: crate::SafeCountDto,
     #[serde(flatten)]

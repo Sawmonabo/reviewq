@@ -220,6 +220,8 @@ pub(super) async fn ticket(
             components: result.components,
             description: result.description,
             estimate: result.estimate,
+            updated_at: result.updated_at_ms.map(timestamp).transpose()?,
+            fetched_at: timestamp(result.fetched_at_ms)?,
             warnings: result.warning.into_iter().collect(),
             comment_count: super::pages::count(u64::from(result.comment_count))?,
             comments: Page::new(comments, next).ok_or(AppError::Internal)?,

@@ -111,6 +111,7 @@ pub struct InboxPage {
 pub struct ReviewContext {
     pub review_id: ReviewId,
     pub title: String,
+    pub ticket_title: Option<String>,
     pub project_path: String,
     pub iid: MergeRequestIid,
     pub ticket_keys: Vec<TicketKey>,

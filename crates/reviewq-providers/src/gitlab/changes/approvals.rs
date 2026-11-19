@@ -59,7 +59,7 @@ impl GitLab {
         let before = self
             .merge_request(source.project_id(), source.iid())
             .await?;
-        let head: GitSha = before.sha.parse().map_err(|_| AppError::Unavailable)?;
+        let head = before.head_sha()?;
         if expected.as_ref().is_some_and(|expected| expected != &head) {
             return Err(AppError::Conflict);
         }
@@ -74,7 +74,7 @@ impl GitLab {
         let after = self
             .merge_request(source.project_id(), source.iid())
             .await?;
-        if before.sha != after.sha || before.updated_at != after.updated_at {
+        if head != after.head_sha()? || before.updated_at != after.updated_at {
             return Err(AppError::StaleRevision);
         }
         let personal_approval = approvals.as_ref().and_then(|facts| {

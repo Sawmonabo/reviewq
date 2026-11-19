@@ -84,7 +84,8 @@ const schema223 = {
   enum: ["changes", "agent", "findings", "overview"],
   type: "string",
 };
-const schema224 = {
+const schema225 = {
+  type: "object",
   properties: {
     iid: { $ref: "#/definitions/MergeRequestIidDto" },
     ourComments: { $ref: "#/definitions/SafeCountDto" },
@@ -96,22 +97,11 @@ const schema224 = {
       maxItems: 16,
       type: "array",
     },
+    ticketTitle: { type: ["string", "null"] },
     title: { type: "string" },
-    unreadReplies: { $ref: "#/definitions/SafeCountDto" },
   },
-  required: [
-    "reviewId",
-    "title",
-    "projectPath",
-    "iid",
-    "ticketKeys",
-    "ourComments",
-    "unreadReplies",
-    "personalApproval",
-  ],
-  type: "object",
 };
-const schema234 = {
+const schema236 = {
   type: "object",
   properties: {
     author: { type: "string" },
@@ -128,11 +118,11 @@ const schema234 = {
     resolved: { type: ["boolean", "null"] },
   },
 };
-const schema236 = {
+const schema238 = {
   enum: ["open", "resolved", "comment", "unknown"],
   type: "string",
 };
-const schema241 = {
+const schema243 = {
   enum: ["complete", "incomplete", "binary", "provider_limited", "missing"],
   type: "string",
 };
@@ -144,8 +134,8 @@ export {
   schema217,
   schema221,
   schema223,
-  schema224,
-  schema234,
+  schema225,
   schema236,
-  schema241,
+  schema238,
+  schema243,
 };

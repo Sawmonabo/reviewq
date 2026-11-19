@@ -3,7 +3,7 @@ import { func0 } from "../runtime.mjs";
 import { validate147 } from "./git-sha-dto.mjs";
 import { validate419 } from "./finding-conclusion.mjs";
 import { validate25 } from "./checkpoint-id-dto.mjs";
-function validate953(
+function validate957(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -27,7 +27,7 @@ function validate953(
           !func0.call(data, "discussionIds")) &&
           (missing0 = "discussionIds"))
       ) {
-        validate953.errors = [
+        validate957.errors = [
           {
             instancePath,
             schemaPath: "#/required",
@@ -91,7 +91,7 @@ function validate953(
               vErrors.push(err1);
             }
             errors++;
-            validate953.errors = vErrors;
+            validate957.errors = vErrors;
             return false;
           } else {
             errors = _errs2;
@@ -161,7 +161,7 @@ function validate953(
                     }
                   }
                 } else {
-                  validate953.errors = [
+                  validate957.errors = [
                     {
                       instancePath: instancePath + "/discussionIds",
                       schemaPath: "#/properties/discussionIds/type",
@@ -183,7 +183,7 @@ function validate953(
               ) {
                 const _errs10 = errors;
                 if (typeof data.findingId !== "string") {
-                  validate953.errors = [
+                  validate957.errors = [
                     {
                       instancePath: instancePath + "/findingId",
                       schemaPath: "#/properties/findingId/type",
@@ -202,7 +202,7 @@ function validate953(
                   let data5 = data.kind;
                   const _errs12 = errors;
                   if (typeof data5 !== "string") {
-                    validate953.errors = [
+                    validate957.errors = [
                       {
                         instancePath: instancePath + "/kind",
                         schemaPath: "#/properties/kind/type",
@@ -213,7 +213,7 @@ function validate953(
                     return false;
                   }
                   if ("change" !== data5) {
-                    validate953.errors = [
+                    validate957.errors = [
                       {
                         instancePath: instancePath + "/kind",
                         schemaPath: "#/properties/kind/const",
@@ -231,7 +231,7 @@ function validate953(
                   if (data.reason !== undefined && func0.call(data, "reason")) {
                     const _errs14 = errors;
                     if (typeof data.reason !== "string") {
-                      validate953.errors = [
+                      validate957.errors = [
                         {
                           instancePath: instancePath + "/reason",
                           schemaPath: "#/properties/reason/type",
@@ -252,7 +252,7 @@ function validate953(
         }
       }
     } else {
-      validate953.errors = [
+      validate957.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -263,7 +263,7 @@ function validate953(
       return false;
     }
   }
-  validate953.errors = vErrors;
+  validate957.errors = vErrors;
   return errors === 0;
 }
-export { validate953 };
+export { validate957 };

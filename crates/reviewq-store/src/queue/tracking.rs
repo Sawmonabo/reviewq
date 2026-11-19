@@ -77,11 +77,25 @@ impl TrackingStore for SqliteStore {
                 if !present {
                     return Err(AppError::NotFound.into());
                 }
+                let project = key.as_str().rsplit_once('-').map_or("", |(project, _)| project);
                 let mut stmt = db.prepare_cached(
-                    "SELECT DISTINCT b.estimate_field FROM scoped_issues i JOIN settings_boards b USING(board_id)
-                     WHERE i.ticket_key=?1 AND b.estimate_field IS NOT NULL ORDER BY b.estimate_field",
+                    "SELECT b.estimate_field FROM scoped_issues i JOIN settings_boards b USING(board_id)
+                     WHERE i.ticket_key=?1 AND b.estimate_field IS NOT NULL
+                     UNION
+                     SELECT b.estimate_field FROM settings_boards b
+                     WHERE b.enabled=1 AND b.estimate_field IS NOT NULL
+                       AND NOT EXISTS (SELECT 1 FROM scoped_issues WHERE ticket_key=?1)
+                       AND (json_array_length(b.jira_projects)=0 OR ?2 IN (SELECT value FROM json_each(b.jira_projects)))
+                       AND EXISTS (
+                           SELECT 1 FROM retained_review_tickets t JOIN reviews r USING(review_id)
+                           JOIN configured_projects p USING(origin,project_id)
+                           JOIN settings_repositories repo USING(project_id)
+                           WHERE t.ticket_key=?1 AND (repo.board_selection='any'
+                               OR r.project_id IN (SELECT value FROM json_each(b.projects)))
+                       )
+                     ORDER BY 1",
                 )?;
-                let estimate_fields = stmt.query_map([key.as_str()], |row| row.get(0))?
+                let estimate_fields = stmt.query_map(params![key.as_str(), project], |row| row.get(0))?
                     .collect::<Result<Vec<String>,_>>()?;
                 snapshot(db, TicketAuthority { settings:settings_revision(db)?, estimate_fields })
             }).await.map_err(StoreError::app)
