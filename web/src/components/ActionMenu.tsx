@@ -4,7 +4,10 @@ import type { ReactNode } from "react";
 
 type Item = {
   readonly label: string;
-  readonly run: () => void;
+  readonly run?: () => void;
+  readonly href?: string;
+  readonly target?: string;
+  readonly rel?: string;
   readonly disabled?: boolean;
   readonly separatorBefore?: boolean;
   readonly trailing?: ReactNode;
@@ -38,10 +41,19 @@ export function ActionMenu({
           {items.map((item) => (
             <Fragment key={item.label}>
               {item.separatorBefore && <Menu.Separator />}
-              <Menu.Item disabled={item.disabled ?? false} onSelect={item.run}>
-                {item.label}
-                {item.trailing}
-              </Menu.Item>
+              {item.href && !item.disabled ? (
+                <Menu.Item asChild onSelect={item.run}>
+                  <a href={item.href} target={item.target} rel={item.rel}>
+                    {item.label}
+                    {item.trailing}
+                  </a>
+                </Menu.Item>
+              ) : (
+                <Menu.Item disabled={item.disabled ?? false} onSelect={item.run}>
+                  {item.label}
+                  {item.trailing}
+                </Menu.Item>
+              )}
             </Fragment>
           ))}
         </Menu.Content>
