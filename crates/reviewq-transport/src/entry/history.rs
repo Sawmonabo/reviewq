@@ -24,6 +24,7 @@ use super::{ApiError, Entry, ServiceEndpoint};
 
 const CURSOR: &[u8] = b"reviewq-native-history-v1";
 const DEFAULT_PAGE_LIMIT: u16 = 30;
+const DEFAULT_JUMP_LIMIT: u16 = 10;
 const DEFAULT_PAGE_BYTES: usize = 64 * 1024;
 
 mod content;
@@ -208,11 +209,25 @@ pub(super) async fn read(
             .as_deref()
             .map(|token| explore::open_anchor(endpoint, &run, &session, &around, token))
             .transpose()?;
-        let current = around_page(entry, lead.value.clone(), &around, anchor.clone(), limit).await;
+        // A marker jump needs the target and its immediate surroundings. Keep
+        // adjacent-page cursors at the regular limit so scrolling refills normally.
+        let jump_limit = if anchor.is_some() && query.limit.is_none() {
+            DEFAULT_JUMP_LIMIT
+        } else {
+            limit
+        };
+        let current = around_page(
+            entry,
+            lead.value.clone(),
+            &around,
+            anchor.clone(),
+            jump_limit,
+        )
+        .await;
         let (mut result, reset) = match current {
             Ok(current) => (current, false),
             Err(AppError::CursorExpired) if anchor.is_some() => (
-                around_page(entry, lead.value.clone(), &around, None, limit).await?,
+                around_page(entry, lead.value.clone(), &around, None, jump_limit).await?,
                 true,
             ),
             Err(error) => return Err(error),
