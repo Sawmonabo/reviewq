@@ -83,6 +83,9 @@ pub trait NativeHistoryReader: Send + Sync {
 
     fn plan(&self, session: HistorySession) -> AppFuture<'_, Option<NativePlan>>;
 
+    fn final_response(&self, session: HistorySession)
+    -> AppFuture<'_, Option<NativeFinalResponse>>;
+
     fn watch(
         &self,
         _session: HistorySession,
@@ -255,6 +258,11 @@ pub struct NativePlan {
     pub generation: String,
     pub entry: Option<(NativeInputId, VisiblePart)>,
     pub tasks: Option<Vec<NativeTask>>,
+}
+
+pub struct NativeFinalResponse {
+    pub generation: String,
+    pub entry: Option<VisibleEntry>,
 }
 
 pub struct NativeTask {

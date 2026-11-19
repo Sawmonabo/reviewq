@@ -47,6 +47,7 @@ import type {
   HistoryPageResponse,
   HistoryPartPageResponse,
   HistoryPlanResponse,
+  HistoryResultResponse,
   InterruptResponse,
   InterruptTargetResponse,
   LaunchReceiptResponse,
@@ -199,6 +200,9 @@ export function isHistoryPartPageResponse(
 export function isHistoryPlanResponse(
   value: unknown,
 ): value is HistoryPlanResponse;
+export function isHistoryResultResponse(
+  value: unknown,
+): value is HistoryResultResponse;
 export function isInterruptResponse(value: unknown): value is InterruptResponse;
 export function isInterruptTargetResponse(
   value: unknown,

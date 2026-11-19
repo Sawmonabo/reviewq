@@ -5,9 +5,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use reviewq_app::access::{AppError, AppFuture};
 use reviewq_app::history::{
-    FileContentRef, HistorySession, NativeContent, NativeHead, NativeHistoryPage,
-    NativeHistoryReader, NativeNavigation, NativePlan, NativePosition, NavigationQuery,
-    SourceAnchor,
+    FileContentRef, HistorySession, NativeContent, NativeFinalResponse, NativeHead,
+    NativeHistoryPage, NativeHistoryReader, NativeNavigation, NativePlan, NativePosition,
+    NavigationQuery, SourceAnchor,
 };
 use reviewq_domain::identity::NativeInputId;
 use tokio::sync::Semaphore;
@@ -139,6 +139,15 @@ impl NativeHistoryReader for FileHistory {
             })?;
             plan.tasks = tasks;
             Ok(plan)
+        })
+    }
+
+    fn final_response(
+        &self,
+        session: HistorySession,
+    ) -> AppFuture<'_, Option<NativeFinalResponse>> {
+        self.inspect(session, move |source, cancel| {
+            file::final_response(&source, cancel)
         })
     }
 

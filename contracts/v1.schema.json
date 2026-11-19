@@ -3458,6 +3458,64 @@
       "title": "HistoryPlanResponse",
       "type": "object"
     },
+    "HistoryResult": {
+      "properties": {
+        "availability": {
+          "$ref": "#/definitions/HistoryAvailability"
+        },
+        "entry": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/HistoryEntry"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "generation": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/HistoryGenerationDto"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "runId": {
+          "$ref": "#/definitions/RunIdDto"
+        },
+        "sessionKey": {
+          "$ref": "#/definitions/SessionKeyDto"
+        }
+      },
+      "required": [
+        "runId",
+        "sessionKey",
+        "generation",
+        "availability",
+        "entry"
+      ],
+      "type": "object"
+    },
+    "HistoryResultResponse": {
+      "description": "The resource and event head from the same authorized snapshot.",
+      "properties": {
+        "cursor": {
+          "$ref": "#/definitions/EventCursorDto"
+        },
+        "data": {
+          "$ref": "#/definitions/HistoryResult"
+        }
+      },
+      "required": [
+        "data",
+        "cursor"
+      ],
+      "title": "HistoryResultResponse",
+      "type": "object"
+    },
     "HistoryText": {
       "description": "Visible text bounded by its exact decoded UTF-8 byte length.",
       "maxUtf8Bytes": 65536,
@@ -9211,6 +9269,7 @@
     "HistoryPageResponse": "history",
     "HistoryPartPageResponse": "history",
     "HistoryPlanResponse": "history",
+    "HistoryResultResponse": "history",
     "InterruptRequest": "recovery",
     "InterruptResponse": "recovery",
     "InterruptTargetResponse": "recovery",
@@ -9320,6 +9379,7 @@
       "HistoryPageResponse": "#/definitions/HistoryPageResponse",
       "HistoryPartPageResponse": "#/definitions/HistoryPartPageResponse",
       "HistoryPlanResponse": "#/definitions/HistoryPlanResponse",
+      "HistoryResultResponse": "#/definitions/HistoryResultResponse",
       "InterruptResponse": "#/definitions/InterruptResponse",
       "InterruptTargetResponse": "#/definitions/InterruptTargetResponse",
       "LaunchReceiptResponse": "#/definitions/LaunchReceiptResponse",

@@ -31,6 +31,7 @@ mod explore;
 pub(super) use content::{ContentQuery, content, read_content};
 mod live;
 mod parts;
+mod result;
 pub(super) use live::Watchers;
 
 pub(super) fn routes() -> axum::Router<Arc<Entry>> {
@@ -47,6 +48,10 @@ pub(super) fn routes() -> axum::Router<Arc<Entry>> {
         .route(
             "/runs/{run_id}/sessions/{session_key}/history/plan",
             get(explore::plan),
+        )
+        .route(
+            "/runs/{run_id}/sessions/{session_key}/history/result",
+            get(result::read),
         )
         .route(
             "/runs/{run_id}/sessions/{session_key}/history/stream",

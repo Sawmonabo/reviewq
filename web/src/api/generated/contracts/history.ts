@@ -209,3 +209,18 @@ export interface PlanTask {
   title: string;
   [k: string]: unknown;
 }
+
+export interface HistoryResultResponse {
+  cursor: EventCursorDto;
+  data: HistoryResult;
+  [k: string]: unknown;
+}
+
+export interface HistoryResult {
+  availability: HistoryAvailability;
+  entry: HistoryEntry | null;
+  generation: HistoryGenerationDto | null;
+  runId: RunIdDto;
+  sessionKey: SessionKeyDto;
+  [k: string]: unknown;
+}
