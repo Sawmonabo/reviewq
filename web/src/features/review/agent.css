@@ -114,6 +114,7 @@
   display: flex;
   flex-direction: column;
   position: relative;
+  container: transcript / inline-size;
 }
 .timeline-controls {
   position: absolute;
@@ -283,33 +284,6 @@
 }
 .output-reader {
   min-width: 0;
-}
-.prompt-navigator {
-  position: relative;
-  margin-left: auto;
-}
-.prompt-navigator summary {
-  border: 1px solid var(--line);
-  padding: 3px 7px;
-  border-radius: 4px;
-  background: var(--raised);
-}
-.prompt-pages {
-  position: absolute;
-  z-index: 5;
-  top: calc(100% + 5px);
-  right: 0;
-  width: min(290px, 70vw);
-  max-height: 42vh;
-  overflow: auto;
-  padding: 8px;
-  background: var(--raised);
-  border: 1px solid var(--strong-line);
-  border-radius: 5px;
-  box-shadow: 0 6px 20px #0005;
-}
-.prompt-preview {
-  text-align: left;
 }
 .timeline-live {
   padding: 6px 15px 10px;

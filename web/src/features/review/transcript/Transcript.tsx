@@ -356,14 +356,6 @@ export function Transcript({
               </button>
             </>
           )}
-          <PromptNavigator
-            target={target}
-            generation={history.generation}
-            onJump={(id, locator) => {
-              setFollowing(false);
-              void history.load("around", { entryId: id, locator });
-            }}
-          />
         </div>
       )}
       {actionNotice && <Notice>{actionNotice}</Notice>}
@@ -510,6 +502,19 @@ export function Transcript({
           </p>
         )}
       </div>
+      {!resultOnly && history.generation && (
+        <PromptNavigator
+          key={history.generation}
+          target={target}
+          generation={history.generation}
+          following={following}
+          onReturnFocus={() => viewport.current?.focus({ preventScroll: true })}
+          onJump={(id, locator) => {
+            setFollowing(false);
+            void history.load("around", { entryId: id, locator });
+          }}
+        />
+      )}
       {!resultOnly && (!following || history.waiting) && (
         <button type="button" className="timeline-jump" onClick={latest}>
           <span aria-hidden="true">↓ </span>
