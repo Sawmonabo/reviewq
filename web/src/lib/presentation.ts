@@ -5,6 +5,18 @@ export function formatTime(value: string | number): string {
   return Number.isNaN(date.getTime()) ? "Unknown time" : dateFormat.format(date);
 }
 
+const activityTimeFormat = new Intl.DateTimeFormat(undefined, {
+  month: "short",
+  day: "numeric",
+  hour: "numeric",
+  minute: "2-digit",
+});
+
+export function formatActivityTime(value: string): string {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? "Unknown time" : activityTimeFormat.format(date);
+}
+
 export function readable(value: string): string {
   const words = value.replaceAll("_", " ");
   return words.charAt(0).toUpperCase() + words.slice(1);

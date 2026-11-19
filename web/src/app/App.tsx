@@ -24,6 +24,7 @@ import { RunsView } from "./views/RunsView";
 import "../styles/tokens.css";
 import "../styles/base.css";
 import "./workspace.css";
+import "./views/lists.css";
 
 const ReviewDrawer = lazy(() => import("../features/review/ReviewDrawer"));
 const SettingsPane = lazy(() => import("../features/settings/SettingsPane"));
@@ -365,6 +366,7 @@ export function App() {
               {route.view === "queue" && (
                 <QueueView
                   selectedReview={reviewId}
+                  selectedTicket={ticket}
                   revision={revision}
                   selecting={selecting}
                   onSelect={setSelecting}
@@ -528,7 +530,7 @@ export function App() {
   );
 }
 
-function NavIcon({ view }: { readonly view: View | "settings" }) {
+function NavIcon({ view }: { readonly view: Route["view"] | "settings" }) {
   return (
     <svg
       className="rail-symbol"
