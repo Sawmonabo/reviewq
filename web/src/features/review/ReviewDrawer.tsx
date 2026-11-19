@@ -581,6 +581,15 @@ export default function ReviewDrawer({
           <Notice>
             Auto-resume {readable(recovery.data.state).toLowerCase()}
             {recovery.data.reason && ` · ${readable(recovery.data.reason)}`}
+            {recovery.data.nextAttemptAt && (
+              <>
+                <br />
+                Next automatic retry{" "}
+                <time dateTime={recovery.data.nextAttemptAt}>
+                  {formatActivityTime(recovery.data.nextAttemptAt)}
+                </time>
+              </>
+            )}
           </Notice>
         )}
         {selectionError && (

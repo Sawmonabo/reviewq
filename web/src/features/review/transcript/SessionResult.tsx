@@ -31,6 +31,15 @@ export default function SessionResult({ target }: { readonly target: SessionAddr
       {value.availability === "partial" && (
         <Notice>Only part of this native session is available.</Notice>
       )}
+      {value.failure && (
+        <Notice>
+          <strong>{value.failure.followedByLeadReport ? "Failed earlier" : "Failed"}</strong>
+          <br />
+          {value.failure.followedByLeadReport
+            ? "The lead returned a response after this subagent failed."
+            : "This subagent reported a failed turn."}
+        </Notice>
+      )}
       {entry && response ? (
         <>
           <h3>Result</h3>
