@@ -150,7 +150,7 @@ pub(crate) async fn open(profile: &Path, options: Open) -> Result<(), Failure> {
     Ok(())
 }
 
-async fn signed(
+pub(crate) async fn signed(
     client: &Client,
     endpoint: &ServiceEndpoint,
     method: &str,
@@ -180,7 +180,7 @@ async fn signed(
     Ok(bytes)
 }
 
-fn verify_ready(endpoint: &ServiceEndpoint, bytes: &[u8]) -> Result<(), Failure> {
+pub(crate) fn verify_ready(endpoint: &ServiceEndpoint, bytes: &[u8]) -> Result<(), Failure> {
     let ready = serde_json::from_slice::<Envelope<Ready>>(bytes)?.data;
     if ready.instance != endpoint.instance()
         || ready.identity != *endpoint.identity()
@@ -204,7 +204,7 @@ async fn bounded(mut response: reqwest::Response, max: usize) -> Result<Vec<u8>,
     Ok(bytes)
 }
 
-fn client() -> Result<Client, Failure> {
+pub(crate) fn client() -> Result<Client, Failure> {
     Ok(Client::builder()
         .no_proxy()
         .redirect(reqwest::redirect::Policy::none())

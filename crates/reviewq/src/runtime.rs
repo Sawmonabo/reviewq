@@ -45,14 +45,21 @@ pub(crate) fn profile(override_path: Option<PathBuf>) -> Result<PathBuf, Failure
 }
 
 pub(crate) async fn serve(profile: PathBuf, options: Serve) -> Result<(), Failure> {
-    create_profile(&profile)?;
-    let web = options.web.canonicalize()?;
+    let web = match options.web.as_ref() {
+        Some(path) => path.clone(),
+        None if options.validation => {
+            return Err("validation requires an explicit web asset directory".into());
+        }
+        None => profile.join("current/web"),
+    }
+    .canonicalize()?;
     if !web.join("index.html").is_file() {
         return Err("build the browser assets before serving".into());
     }
     if options.validation && profile == self::profile(None)? {
         return Err("validation requires a separate private runtime".into());
     }
+    create_profile(&profile)?;
     let v4 = TcpListener::bind((Ipv4Addr::LOCALHOST, options.port)).await?;
     let v6 = match native_listener(options.native_port) {
         Ok(listener) => Some(listener),
@@ -172,12 +179,16 @@ pub(crate) async fn serve(profile: PathBuf, options: Serve) -> Result<(), Failur
             shutdown: wait.clone(),
         },
     );
+    let mut terminate = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
     publish(&profile, &endpoint)?;
     println!("ReviewQ http://{browser}/");
 
     let listener_shutdown = wait.clone();
     let stop = tokio::spawn(async move {
-        let _ = tokio::signal::ctrl_c().await;
+        tokio::select! {
+            _ = tokio::signal::ctrl_c() => {},
+            _ = terminate.recv() => {},
+        }
         shutdown.send_replace(true);
     });
     let serve_v4 = axum::serve(v4, router.clone()).with_graceful_shutdown(wait_for_stop(wait));

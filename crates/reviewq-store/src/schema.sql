@@ -43,6 +43,7 @@ CREATE TABLE repo_grants (
 
 CREATE UNIQUE INDEX repo_grants_active_checkout ON repo_grants(common_dir) WHERE active = 1;
 CREATE UNIQUE INDEX repo_grants_active_verifier ON repo_grants(verifier) WHERE active = 1 AND verifier IS NOT NULL;
+CREATE INDEX repo_grants_retired_verifier ON repo_grants(verifier) WHERE active = 0 AND verifier IS NOT NULL;
 
 CREATE TABLE reviews (
     review_id TEXT PRIMARY KEY,

@@ -7,6 +7,12 @@ use crate::workspace::{ConfiguredProject, WorkspaceStore};
 
 /// Reads verified provider metadata outside the store transaction.
 pub trait ReviewSourceReader: ChangeSource {
+    fn verify_checkout(
+        &self,
+        project: ConfiguredProject,
+        remote: String,
+    ) -> AppFuture<'_, ConfiguredProject>;
+
     fn review(&self, identity: MrIdentity) -> AppFuture<'_, ReviewSource>;
 
     fn reviews(&self, project: ConfiguredProject) -> AppFuture<'_, Vec<ReviewSource>>;

@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use clap::{Args, Parser, Subcommand};
 use reviewq_domain::identity::ProjectId;
 
-use crate::{native_client, runtime};
+use crate::{checkout_setup, native_client, runtime};
 
 type Failure = Box<dyn std::error::Error + Send + Sync>;
 
@@ -31,12 +31,32 @@ enum Command {
     Refresh,
     /// Link the current Codex terminal to an exact review without opening a browser.
     Link { target: String },
+    /// Manage the authorization of a local Git checkout.
+    #[command(subcommand)]
+    Checkout(Checkout),
+}
+
+#[derive(Subcommand)]
+enum Checkout {
+    /// Configure private ReviewQ management in this project.
+    Setup {
+        project: ProjectId,
+        #[arg(long, value_name = "DIR")]
+        directory: Option<PathBuf>,
+        #[arg(long, value_name = "DIR")]
+        claude_home: Option<PathBuf>,
+    },
+    /// Revoke the management credential for this repository.
+    Revoke {
+        #[arg(long, value_name = "DIR")]
+        directory: Option<PathBuf>,
+    },
 }
 
 #[derive(Args)]
 pub(crate) struct Serve {
     #[arg(long, value_name = "DIR")]
-    pub(crate) web: PathBuf,
+    pub(crate) web: Option<PathBuf>,
     #[arg(long, default_value_t = 8766)]
     pub(crate) port: u16,
     #[arg(long, default_value_t = 8767)]
@@ -96,6 +116,22 @@ async fn execute(options: CommandLine) -> Result<(), Failure> {
         Some(Command::Refresh) => native_client::refresh(&runtime::profile(options.profile)?).await,
         Some(Command::Link { target }) => {
             native_client::link(&runtime::profile(options.profile)?, target).await
+        }
+        Some(Command::Checkout(Checkout::Setup {
+            project,
+            directory,
+            claude_home,
+        })) => {
+            checkout_setup::install(
+                &runtime::profile(options.profile)?,
+                directory,
+                project,
+                claude_home,
+            )
+            .await
+        }
+        Some(Command::Checkout(Checkout::Revoke { directory })) => {
+            checkout_setup::revoke(&runtime::profile(options.profile)?, directory).await
         }
         Some(Command::Open(open)) => {
             native_client::open(&runtime::profile(options.profile)?, open).await

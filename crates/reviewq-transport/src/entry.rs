@@ -27,6 +27,7 @@ use tower_http::services::{ServeDir, ServeFile};
 
 mod auth;
 mod changes;
+mod checkout;
 mod control;
 mod error;
 mod events;
@@ -150,6 +151,7 @@ pub fn router(
     let web = runtime.web;
     let api = Router::new()
         .route("/status", get(status))
+        .route("/checkout/grant", post(checkout::grant))
         .route("/events", get(events::feed))
         .route("/session", get(session).post(start_session))
         .route("/queue", get(pages::queue))

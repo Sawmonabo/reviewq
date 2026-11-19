@@ -34,9 +34,21 @@ pub struct WorkspaceContext {
     pub projects: Vec<ConfiguredProject>,
 }
 
+#[derive(Clone, Debug)]
+pub struct IssueGrant {
+    pub project: ConfiguredProject,
+    pub checkout: AbsolutePath,
+    pub common_dir: AbsolutePath,
+    pub verifier: [u8; 32],
+}
+
 pub trait WorkspaceStore: Send + Sync {
     fn workspace_context(&self, actor: Actor) -> AppFuture<'_, Snapshot<WorkspaceContext>>;
     fn authenticate_grant(&self, verifier: [u8; 32]) -> AppFuture<'_, Actor>;
+    fn issue_grant(&self, actor: Actor, input: IssueGrant)
+    -> AppFuture<'_, Snapshot<GrantBinding>>;
+    fn revoke_grant(&self, actor: Actor, common_dir: AbsolutePath)
+    -> AppFuture<'_, Snapshot<bool>>;
 
     /// Replaces active memberships and checkout authority under one settings revision.
     /// A revoked or rotated grant cannot be reactivated at its older epoch.

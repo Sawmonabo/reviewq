@@ -6,16 +6,18 @@ use std::os::unix::ffi::OsStrExt;
 use reviewq_app::access::{Actor, ActorScope, AppError, AppFuture};
 use reviewq_app::events::{ResourceKey, Snapshot};
 use reviewq_app::workspace::{
-    ConfiguredProject, GrantBinding, WorkspaceConfig, WorkspaceContext, WorkspaceStore,
+    ConfiguredProject, GrantBinding, IssueGrant, WorkspaceConfig, WorkspaceContext, WorkspaceStore,
 };
 use reviewq_domain::identity::{GitLabOrigin, MrIdentity, ProjectId, ReviewId, Revision};
-use reviewq_domain::session::{HostProvider, NativeIdentity};
+use reviewq_domain::session::{AbsolutePath, HostProvider, NativeIdentity};
 use rusqlite::{Connection, OptionalExtension, params};
 use sha2::{Digest, Sha256};
 use subtle::ConstantTimeEq;
 
 use crate::events::snapshot;
 use crate::{SqliteStore, StoreError};
+
+mod grants;
 
 pub(crate) enum ReadScope {
     Local,
@@ -186,6 +188,36 @@ pub(crate) fn advance_queue(connection: &Connection) -> Result<(), StoreError> {
 }
 
 impl WorkspaceStore for SqliteStore {
+    fn issue_grant(
+        &self,
+        actor: Actor,
+        input: IssueGrant,
+    ) -> AppFuture<'_, Snapshot<GrantBinding>> {
+        Box::pin(async move {
+            self.write(move |tx| {
+                operator(&actor)?;
+                grants::issue(tx, input)
+            })
+            .await
+            .map_err(StoreError::app)
+        })
+    }
+
+    fn revoke_grant(
+        &self,
+        actor: Actor,
+        common_dir: AbsolutePath,
+    ) -> AppFuture<'_, Snapshot<bool>> {
+        Box::pin(async move {
+            self.write(move |tx| {
+                operator(&actor)?;
+                grants::revoke(tx, common_dir)
+            })
+            .await
+            .map_err(StoreError::app)
+        })
+    }
+
     fn authenticate_grant(&self, verifier: [u8; 32]) -> AppFuture<'_, Actor> {
         Box::pin(async move {
             self.read(move |tx| {

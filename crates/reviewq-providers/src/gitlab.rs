@@ -11,6 +11,7 @@ use url::{Host, Url};
 use crate::http;
 
 mod changes;
+mod checkout;
 mod lookup;
 
 const METADATA_LIMIT: usize = 1024 * 1024;
@@ -27,6 +28,13 @@ pub struct GitLab {
 }
 
 impl ReviewSourceReader for GitLab {
+    fn verify_checkout(
+        &self,
+        project: ConfiguredProject,
+        remote: String,
+    ) -> AppFuture<'_, ConfiguredProject> {
+        Box::pin(self.verify_checkout_remote(project, remote))
+    }
     fn review(&self, identity: MrIdentity) -> AppFuture<'_, ReviewSource> {
         Box::pin(async move {
             if identity.origin() != &self.identity {
