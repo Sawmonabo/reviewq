@@ -1,4 +1,5 @@
 import { useCallback, useRef, useState } from "react";
+import type { ReactNode } from "react";
 import { ResponseSizeLimit } from "../../../api/bounded-bytes";
 import { ApiResponseError } from "../../../api/client";
 import {
@@ -35,9 +36,11 @@ const tabs = [
 export default function Changes({
   reviewId,
   webUrl,
+  children,
 }: {
   readonly reviewId: string;
   readonly webUrl: string;
+  readonly children?: ReactNode;
 }) {
   const [fileId, setFileId] = useState(() => storedFile(reviewId));
   const [positions, setPositions] = useState<readonly Position[]>([]);
@@ -136,6 +139,7 @@ export default function Changes({
         </div>
         <Approvals reviewId={reviewId} />
       </div>
+      {children}
       {index.data && (
         <div className="diff-revision">
           <span>

@@ -102,6 +102,8 @@ export function Transcript({ target, messages, resultOnly, working, onObservedTu
     [entries, pinned],
   );
 
+  // Keep scroll measurements and the TanStack instance within this component.
+  // eslint-disable-next-line react-hooks/incompatible-library
   const list = useVirtualizer({
     count: entries.length,
     getScrollElement: () => viewport.current,

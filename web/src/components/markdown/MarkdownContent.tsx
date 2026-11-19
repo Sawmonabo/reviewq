@@ -1,7 +1,8 @@
 import { lazy, Suspense, useMemo } from "react";
+import type { ReactNode } from "react";
 import { Fragment, jsx, jsxs } from "react/jsx-runtime";
 import { toJsxRuntime } from "hast-util-to-jsx-runtime";
-import type { ElementContent, Root } from "hast";
+import type { Element, Root } from "hast";
 import { parseMarkdown } from "./parse-markdown";
 import "./markdown.css";
 
@@ -35,25 +36,7 @@ export function MarkdownTree({ tree }: { readonly tree: Root }) {
         jsxs,
         passNode: true,
         components: {
-          pre: ({ node, children }) => {
-            const child = node?.children[0];
-            if (
-              child?.type === "element" &&
-              child.tagName === "code" &&
-              Array.isArray(child.properties.className) &&
-              child.properties.className.includes("language-mermaid")
-            ) {
-              const source = child.children
-                .map((item: ElementContent) => (item.type === "text" ? item.value : ""))
-                .join("");
-              return (
-                <Suspense fallback={<pre>{source}</pre>}>
-                  <MermaidDiagram source={source} />
-                </Suspense>
-              );
-            }
-            return <pre>{children}</pre>;
-          },
+          pre: CodeBlock,
           table: ({ children }) => (
             <div className="table-scroll" tabIndex={0}>
               <table>{children}</table>
@@ -63,4 +46,28 @@ export function MarkdownTree({ tree }: { readonly tree: Root }) {
       })}
     </div>
   );
+}
+
+function CodeBlock({
+  node,
+  children,
+}: {
+  readonly node?: Element | undefined;
+  readonly children?: ReactNode;
+}) {
+  const child = node?.children[0];
+  if (
+    child?.type === "element" &&
+    child.tagName === "code" &&
+    Array.isArray(child.properties.className) &&
+    child.properties.className.includes("language-mermaid")
+  ) {
+    const source = child.children.map((item) => (item.type === "text" ? item.value : "")).join("");
+    return (
+      <Suspense fallback={<pre>{source}</pre>}>
+        <MermaidDiagram source={source} />
+      </Suspense>
+    );
+  }
+  return <pre>{children}</pre>;
 }

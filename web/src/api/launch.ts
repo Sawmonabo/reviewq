@@ -1,5 +1,6 @@
 import { read, write } from "./client";
 import type {
+  LaunchReceiptResponse,
   RegisterSessionRequest,
   RunCatalogRequest,
   RunPrepareRequest,
@@ -54,11 +55,7 @@ export async function registerRun(body: RegisterSessionRequest) {
   return data;
 }
 
-function verifyLaunch(
-  result: import("./generated/contracts/launch").LaunchReceiptResponse,
-  reviewId: string,
-  submissionId: string,
-) {
+function verifyLaunch(result: LaunchReceiptResponse, reviewId: string, submissionId: string) {
   if (result.data.reviewId !== reviewId || result.data.submissionId !== submissionId)
     throw new Error("ReviewQ could not confirm this launch receipt.");
   return result.data;

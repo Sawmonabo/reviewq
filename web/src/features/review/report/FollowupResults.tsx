@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import type { RunDetail } from "../../../api/generated/contracts";
 import type { ResultSummary } from "../../../api/generated/contracts/followups";
 import { readFollowupAssessments, readFollowupResults } from "../../../api/review";
@@ -42,7 +42,7 @@ export function FollowupResults({
   const batch = choice ?? (latest?.runId === run.runId ? latest : undefined);
 
   return (
-    <details className="surface-card stack" onToggle={(event) => setOpen(event.currentTarget.open)}>
+    <details className="report-earlier" onToggle={(event) => setOpen(event.currentTarget.open)}>
       <summary>
         Earlier evidence
         {batch?.kind === "unchanged" ? " · Findings unchanged" : ""}
@@ -115,46 +115,35 @@ function Assessments({
   readonly onAcknowledge: () => Promise<void>;
 }) {
   const [trail, setTrail] = useState<readonly string[]>([]);
-  const [rendered, setRendered] = useState<{
-    through: string;
-    count: number;
-    complete: boolean;
-    exact: boolean;
-  }>({ through: batch.batchId, count: 0, complete: false, exact: false });
+  const [readPages, setReadPages] = useState<ReadonlyMap<string | undefined, boolean>>(
+    () => new Map(),
+  );
   const assessments = useResource(
     `assessments:${reviewId}:${batch.batchId}:${trail.at(-1) ?? ""}`,
     (signal) => readFollowupAssessments(reviewId, batch.batchId, trail.at(-1), signal),
   );
   const data = assessments.data;
-  const depth = trail.length + 1;
-
-  useEffect(() => {
-    if (!data || data.throughBatchId !== batch.batchId) return;
-    setRendered((previous) => {
-      if (previous.through !== batch.batchId || depth > previous.count + 1) return previous;
-      const exact =
-        previous.exact ||
-        data.items.some(
-          (item) => item.batchId === batch.batchId && item.receiptId === batch.receiptId,
-        );
-      if (previous.count >= depth && previous.exact === exact) return previous;
-      return {
-        through: batch.batchId,
-        count: Math.max(depth, previous.count),
-        complete: data.nextCursor === null || previous.complete,
-        exact,
-      };
-    });
-  }, [batch.batchId, batch.receiptId, data, depth]);
-
+  const cursor = trail.at(-1);
+  const exactAssessment = Boolean(
+    data?.items.some(
+      (item) => item.batchId === batch.batchId && item.receiptId === batch.receiptId,
+    ),
+  );
   const matching = currentRun === batch.runId && receipt && receipt === batch.receiptId;
+  const priorCursors = trail.length > 0 ? [undefined, ...trail.slice(0, -1)] : [];
   const ready = Boolean(
     matching &&
-    data?.nextCursor === null &&
-    rendered.through === batch.batchId &&
-    rendered.complete &&
-    rendered.exact,
+    data?.throughBatchId === batch.batchId &&
+    data.nextCursor === null &&
+    priorCursors.every((cursor) => readPages.has(cursor)) &&
+    (exactAssessment || priorCursors.some((cursor) => readPages.get(cursor))),
   );
+  function turnPage(next: readonly string[]) {
+    if (data?.throughBatchId === batch.batchId) {
+      setReadPages((pages) => new Map(pages).set(cursor, exactAssessment));
+    }
+    setTrail(next);
+  }
   return (
     <div className="surface-card stack" aria-label="Selected follow-up assessments">
       <div className="spread">
@@ -191,7 +180,7 @@ function Assessments({
           </p>
         </article>
       ))}
-      <Pagination trail={trail} next={data?.nextCursor} onPage={setTrail} />
+      <Pagination trail={trail} next={data?.nextCursor} onPage={turnPage} />
       {currentRun !== batch.runId && (
         <button
           type="button"

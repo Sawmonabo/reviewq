@@ -1,6 +1,7 @@
+import type Mermaid from "mermaid";
 import { useEffect, useId, useRef, useState } from "react";
 
-let engine: Promise<typeof import("mermaid").default> | undefined;
+let engine: Promise<typeof Mermaid> | undefined;
 
 export default function MermaidDiagram({ source }: { readonly source: string }) {
   const id = useId().replace(/[^a-zA-Z0-9_-]/g, "");

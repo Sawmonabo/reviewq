@@ -98,12 +98,8 @@ function SettingsEditor({
     setCredentialEpoch((previous) => ({ ...previous, [provider]: previous[provider] + 1 }));
     tests.current[provider]?.abort();
     setTesting((value) => (value === provider ? undefined : value));
-    setVerified(
-      (previous) => ({ ...previous, [provider]: undefined }) as Partial<Record<Provider, Verified>>,
-    );
-    setErrors(
-      (previous) => ({ ...previous, [provider]: undefined }) as Partial<Record<Provider, string>>,
-    );
+    setVerified((previous) => ({ ...previous, [provider]: undefined }));
+    setErrors((previous) => ({ ...previous, [provider]: undefined }));
   }
   function writeToken(provider: Provider, value: string) {
     connectionChanged(provider);
@@ -129,10 +125,7 @@ function SettingsEditor({
       const { data } = await testConnection(body, controller.signal);
       if (!controller.signal.aborted && data.provider === provider) {
         setVerified((previous) => ({ ...previous, [provider]: { identity: data.identity.label } }));
-        setErrors(
-          (previous) =>
-            ({ ...previous, [provider]: undefined }) as Partial<Record<Provider, string>>,
-        );
+        setErrors((previous) => ({ ...previous, [provider]: undefined }));
       }
     } catch (error) {
       if (!controller.signal.aborted)
