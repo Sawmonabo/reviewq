@@ -3,12 +3,16 @@ import type { ReactNode } from "react";
 
 export function Modal({
   title,
+  eyebrow,
+  className,
   children,
   footer,
   onClose,
   busy = false,
 }: {
   readonly title: string;
+  readonly eyebrow?: string;
+  readonly className?: string;
   readonly children: ReactNode;
   readonly footer?: ReactNode;
   readonly onClose: () => void;
@@ -29,7 +33,7 @@ export function Modal({
   return (
     <dialog
       ref={dialog}
-      className="modal"
+      className={className ? `modal ${className}` : "modal"}
       aria-labelledby={titleId}
       aria-busy={busy}
       onCancel={(event) => {
@@ -46,7 +50,10 @@ export function Modal({
     >
       <div className="modal-frame">
         <header>
-          <h2 id={titleId}>{title}</h2>
+          <div>
+            {eyebrow && <p className="modal-eyebrow">{eyebrow}</p>}
+            <h2 id={titleId}>{title}</h2>
+          </div>
           <button
             type="button"
             className="icon-button"
