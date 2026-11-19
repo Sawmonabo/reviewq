@@ -33,16 +33,19 @@ pub(super) struct DiffPage {
 }
 
 pub(super) async fn receive(
-    mut response: reqwest::Response,
+    mut response: crate::http::Response,
     profile: &Path,
 ) -> Result<Wire, AppError> {
     let mut prefix = Vec::new();
     let mut spool: Option<tokio::fs::File> = None;
     let mut length = 0;
-    while let Some(chunk) = response.chunk().await.map_err(|_| AppError::Unavailable)? {
-        if chunk.len() > MAX_DIFF_RESPONSE - length {
-            return Err(AppError::PayloadTooLarge);
-        }
+    if response
+        .content_length()
+        .is_some_and(|value| value > MAX_DIFF_RESPONSE as u64)
+    {
+        return Err(AppError::PayloadTooLarge);
+    }
+    while let Some(chunk) = response.chunk().await? {
         length += chunk.len();
         if spool.is_none() && length > MEMORY_LIMIT {
             let path = profile.to_owned();

@@ -1,14 +1,15 @@
-use reqwest::{Client, header};
+use std::sync::Arc;
+
+use reqwest::header;
 use reviewq_app::access::{AppError, AppFuture};
 use reviewq_app::queue::{MergeRequestState, ReviewSource};
 use reviewq_app::sources::{ReviewResolution, ReviewSourceReader, WorkflowSnapshot};
 use reviewq_app::workspace::ConfiguredProject;
 use reviewq_domain::identity::{GitLabOrigin, MrIdentity, ProjectId};
 use serde::Deserialize;
-use tokio::sync::Semaphore;
 use url::{Host, Url};
 
-use crate::http;
+use crate::http::SourceNetwork;
 
 mod changes;
 mod checkout;
@@ -21,10 +22,9 @@ const MAX_PROVIDER_PAGES: u32 = 40;
 pub struct GitLab {
     origin: Url,
     identity: GitLabOrigin,
-    http: Client,
+    http: Arc<SourceNetwork>,
     headers: header::HeaderMap,
     patches: changes::Leases,
-    requests: Semaphore,
 }
 
 impl ReviewSourceReader for GitLab {
@@ -90,7 +90,12 @@ struct MergeRequest {
 
 impl GitLab {
     /// Allows HTTP only on numeric loopback without credentials.
-    pub fn new(origin: &str, token: Option<&str>, profile: PathBuf) -> Result<Self, AppError> {
+    pub fn new(
+        origin: &str,
+        token: Option<&str>,
+        profile: PathBuf,
+        http: Arc<SourceNetwork>,
+    ) -> Result<Self, AppError> {
         let origin = Url::parse(origin).map_err(|_| AppError::InvalidRequest)?;
         let local = match origin.host() {
             Some(Host::Ipv4(ip)) => ip.is_loopback(),
@@ -119,10 +124,9 @@ impl GitLab {
         Ok(Self {
             origin,
             identity,
-            http: http::client(local)?,
+            http,
             headers,
             patches: changes::Leases::new(profile),
-            requests: Semaphore::new(4),
         })
     }
 
@@ -239,12 +243,12 @@ impl GitLab {
     }
 
     async fn get(&self, url: Url, max: usize) -> Result<(header::HeaderMap, Vec<u8>), AppError> {
-        let _permit = self
-            .requests
-            .acquire()
+        if url.origin() != self.origin.origin() {
+            return Err(AppError::Forbidden);
+        }
+        self.http
+            .bounded_response(url, self.headers.clone(), max)
             .await
-            .map_err(|_| AppError::Unavailable)?;
-        http::bounded_response(&self.http, url, self.headers.clone(), max).await
     }
 }
 use std::path::PathBuf;

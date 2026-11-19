@@ -17,8 +17,8 @@ use reviewq_app::sources::{ReviewSourceReader, SourceRefreshStore};
 use reviewq_app::workspace::{WorkspaceConfig, WorkspaceStore};
 use reviewq_domain::session::{AbsolutePath, HostProvider};
 use reviewq_providers::{
-    Claude, Codex, FileHistory, GitLab, RegisteredReportFiles, Terminal, TerminalProvider,
-    Workflows,
+    Claude, Codex, FileHistory, GitLab, RegisteredReportFiles, SourceNetwork, Terminal,
+    TerminalProvider, Workflows,
 };
 use reviewq_store::SqliteStore;
 use reviewq_transport::{ServiceEndpoint, ServiceIdentity, WorkflowIntegration};
@@ -118,6 +118,7 @@ pub(crate) async fn serve(profile: PathBuf, options: Serve) -> Result<(), Failur
     store.recover_refresh(Actor::local_operator()).await?;
     store.recover_delivery_claims().await?;
 
+    let network = Arc::new(SourceNetwork::new()?);
     let source = match options.gitlab.as_ref() {
         Some(origin) if options.validation => {
             let url = reqwest::Url::parse(origin)?;
@@ -132,11 +133,16 @@ pub(crate) async fn serve(profile: PathBuf, options: Serve) -> Result<(), Failur
             {
                 return Err("validation sources must be loopback".into());
             }
-            Some(GitLab::new(origin, None, profile.clone())?)
+            Some(GitLab::new(origin, None, profile.clone(), network.clone())?)
         }
         Some(origin) => {
             let token = std::env::var("REVIEWQ_GITLAB_TOKEN").ok();
-            Some(GitLab::new(origin, token.as_deref(), profile.clone())?)
+            Some(GitLab::new(
+                origin,
+                token.as_deref(),
+                profile.clone(),
+                network.clone(),
+            )?)
         }
         None => None,
     };

@@ -15,6 +15,7 @@ pub use codex::Codex;
 pub use desktop::LinuxDesktopNotifier;
 pub use gitlab::GitLab;
 pub use history::FileHistory;
+pub use http::SourceNetwork;
 pub use report_file::RegisteredReportFiles;
 pub use terminal::{Terminal, TerminalProvider};
 pub use workflow::Workflows;
