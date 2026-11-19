@@ -1,5 +1,8 @@
 use reviewq_app::access::{Actor, AppError};
-use reviewq_app::followups::{MonitorCommand, MonitorRequest, MonitorState};
+use reviewq_app::followups::{
+    MonitorCommand, MonitorReceipt, MonitorReplay, MonitorRequest, MonitorState,
+    OriginalMonitorRequest,
+};
 use reviewq_domain::identity::{ReviewId, Revision, RunId, SessionKey, SubmissionId};
 use reviewq_protocol::mcp::{
     AnswerReviewQuestion, ConfigureFollowups, FollowupAction, StartReview,
@@ -75,6 +78,22 @@ pub(super) async fn followups(
     actor: Actor,
     args: ConfigureFollowups,
 ) -> Result<Value, AppError> {
+    let submission: SubmissionId = parse(args.submission_id.as_str())?;
+    let canonical = serde_json::to_vec(&args).map_err(|_| AppError::Internal)?;
+    let digest = Sha256::digest(canonical).into();
+    if let Some(found) = entry
+        .store
+        .read_monitor_replay(
+            actor.clone(),
+            MonitorReplay::Original {
+                submission: submission.clone(),
+                digest,
+            },
+        )
+        .await?
+    {
+        return followup_output(entry, found.value);
+    }
     let (review, target_session) = match resolve(entry, &actor, &args.target).await? {
         ResolvedReview::Review(id, session) => (id, session),
         ResolvedReview::Alternatives(urls) => return Ok(alternatives(urls)),
@@ -88,7 +107,7 @@ pub(super) async fn followups(
         args.session_key.as_ref().map(|key| key.as_str()),
     )?;
     let explicit = exact_lead(entry, &actor, &review, run, session.as_ref()).await?;
-    let command = match args.action {
+    let (command, transition_run) = match args.action {
         FollowupAction::Configure => {
             let run = match explicit {
                 Some(run) => run,
@@ -129,52 +148,53 @@ pub(super) async fn followups(
                 .into_iter()
                 .map(selection)
                 .collect();
-            MonitorCommand::Configure {
-                run,
-                state,
-                selections,
-            }
+            (
+                MonitorCommand::Configure {
+                    run,
+                    state,
+                    selections,
+                },
+                None,
+            )
         }
         other => {
             if args.threads.is_some() || args.state.is_some() {
                 return Err(AppError::InvalidRequest);
             }
-            if let Some(run) = explicit {
-                let enrollment = entry
-                    .store
-                    .read_followups(actor.clone(), review.clone())
-                    .await?
-                    .value;
-                if enrollment.monitor.and_then(|item| item.run).as_ref() != Some(&run) {
-                    return Err(AppError::Conflict);
-                }
-            }
-            match other {
+            let command = match other {
                 FollowupAction::Pause => MonitorCommand::Pause,
                 FollowupAction::Resume => MonitorCommand::Resume,
                 FollowupAction::ReviewNow if entry.sends_allowed => MonitorCommand::ReviewNow,
                 _ => return Err(AppError::Forbidden),
-            }
+            };
+            (command, explicit)
         }
     };
     let result = execute(
         entry,
         actor,
         MonitorRequest {
-            review: review.clone(),
-            submission: parse(args.submission_id.as_str())?,
+            review,
+            submission,
             expected_generation: args
                 .expected_generation
                 .map(|value| Revision::try_from(value.get()).map_err(|_| AppError::InvalidRequest))
                 .transpose()?,
             command,
+            original: Some(OriginalMonitorRequest {
+                digest,
+                transition_run,
+            }),
         },
     )
     .await?;
-    Ok(json!({
-        "submissionId":result.value.submission.as_str(), "followups":project_receipt(result.value)?,
-        "dashboard":dashboard(entry, &review, None),
-    }))
+    followup_output(entry, result.value)
+}
+
+fn followup_output(entry: &Entry, receipt: MonitorReceipt) -> Result<Value, AppError> {
+    let url = dashboard(entry, &receipt.review, None);
+    let projected = project_receipt(receipt)?;
+    Ok(json!({"submissionId":projected.submission_id,"followups":projected,"dashboard":url}))
 }
 
 pub(super) async fn answer(

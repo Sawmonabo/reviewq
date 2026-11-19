@@ -8,8 +8,8 @@ pub use work::{
 };
 
 pub use commands::{
-    FollowupCommands, MonitorCommand, MonitorReceipt, MonitorRequest, Selection, UpdatePreferences,
-    execute_monitor_command,
+    FollowupCommands, MonitorCommand, MonitorReceipt, MonitorReplay, MonitorRequest,
+    OriginalMonitorRequest, Selection, UpdatePreferences, execute_monitor_command,
 };
 
 use reviewq_domain::identity::{GitSha, ReceiptId, ReviewId, Revision, RunId, SubmissionId};

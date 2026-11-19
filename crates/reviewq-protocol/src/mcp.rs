@@ -126,7 +126,7 @@ pub struct StartReview {
     pub effort: Option<String>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct ConfigureFollowups {
@@ -140,7 +140,7 @@ pub struct ConfigureFollowups {
     pub state: Option<crate::followups::EnrollmentState>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub enum FollowupAction {
