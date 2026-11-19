@@ -162,6 +162,8 @@ pub struct ReviewOverview {
     pub decision_revision: RevisionDto,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub decision: Option<crate::decisions::DecisionView>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub attention: Option<crate::decisions::Attention>,
     pub settings_revision: RevisionDto,
     pub checkpoint_id: Option<CheckpointIdDto>,
     pub runs: Page<RunSummary>,

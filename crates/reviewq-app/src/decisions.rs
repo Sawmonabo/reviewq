@@ -5,12 +5,14 @@ use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use reviewq_domain::identity::{
-    GitSha, MrIdentity, ReceiptId, ReviewId, Revision, RunId, SessionKey, SubmissionId,
+    GitSha, MrIdentity, NotificationId, ReceiptId, ReviewId, Revision, RunId, SessionKey,
+    SubmissionId,
 };
 
 use crate::access::{Actor, AppError, AppFuture};
 use crate::events::Snapshot;
 use crate::labels::labels;
+use crate::notifications::Kind;
 use crate::queue::MergeRequestState;
 use crate::sources::ReviewSourceReader;
 
@@ -31,19 +33,28 @@ pub struct Decision {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ReportFrontier {
     pub run: RunId,
+    pub receipt: ReceiptId,
     pub attention: ReceiptId,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ObservedAttention {
+    pub ordinal: i64,
+    pub id: NotificationId,
+    pub kind: Kind,
+    pub label: String,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SessionFrontier {
     pub run: RunId,
     pub session: SessionKey,
-    pub ordinal: i64,
+    pub event: ObservedAttention,
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct Frontier {
-    pub source_ordinal: Option<i64>,
+    pub source: Vec<ObservedAttention>,
     pub reports: Vec<ReportFrontier>,
     pub sessions: Vec<SessionFrontier>,
 }

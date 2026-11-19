@@ -183,6 +183,10 @@ fn notification(value: app::Notification) -> Result<dto::Notification, AppError>
             .map(|id| SessionKeyDto::new(id.as_str()).ok_or(AppError::Internal))
             .transpose()?,
         label: value.label,
+        event_ref: value
+            .event_ref
+            .map(|id| ResourceIdDto::new(id).ok_or(AppError::Internal))
+            .transpose()?,
         occurred_at: time(value.occurred_at_ms)?,
         read_at: value.read_at_ms.map(time).transpose()?,
         notified_at: value.notified_at_ms.map(time).transpose()?,

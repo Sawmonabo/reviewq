@@ -9,11 +9,11 @@ use reviewq_app::notifications::{
     MAX_INBOX_SELECTION, Notification, NotificationAction, UnreadCounts,
 };
 use reviewq_domain::identity::{NotificationId, Revision};
-use rusqlite::{Connection, OptionalExtension, Row, params};
+use rusqlite::{Connection, Row, params};
 
 use crate::events::{now_ms, snapshot};
-use crate::queue::{identity_for_review, parse, text};
-use crate::workspace::{ReadScope, actor_key, allow_review, scope, settings_revision};
+use crate::queue::{parse, text};
+use crate::workspace::{ReadScope, actor_key, scope, settings_revision};
 use crate::{SqliteStore, StoreError};
 
 impl InboxStore for SqliteStore {
@@ -44,43 +44,27 @@ impl InboxStore for SqliteStore {
             if ids.is_empty() || ids.len() > MAX_INBOX_SELECTION {
                 return Err(AppError::InvalidRequest);
             }
+            let mut deduplicated = HashSet::new();
+            let ids: Vec<_> = ids
+                .into_iter()
+                .filter(|id| deduplicated.insert(id.clone()))
+                .collect();
+            let selection =
+                serde_json::to_string(&ids.iter().map(|id| id.as_str()).collect::<Vec<_>>())
+                    .map_err(|_| AppError::Internal)?;
             self.write(move |tx| {
                 let (scope_code, scope_id) = define_scope(scope(&tx.sql, &actor)?);
-                let mut seen = HashSet::new();
-                let mut authorized = Vec::new();
-                for id in ids {
-                    if !seen.insert(id.clone()) {
-                        continue;
-                    }
-                    let review = tx.sql.query_row(
-                        "SELECT review_id FROM notifications WHERE notification_id=?1",
-                        [id.as_str()], |row| row.get::<_, String>(0),
-                    ).optional()?.ok_or(AppError::NotFound)?;
-                    let review = parse(&review)?;
-                    allow_review(&tx.sql, scope(&tx.sql, &actor)?, &review,
-                        &identity_for_review(&tx.sql, &review)?)?;
-                    authorized.push(id);
+                let authorized_sql = format!(
+                    "SELECT count(*) FROM json_each(?3) selected
+                     JOIN notifications n ON n.notification_id=selected.value
+                     JOIN reviews r ON r.review_id=n.review_id WHERE {SCOPE_PREDICATE}"
+                );
+                let approved: i64 = tx.sql.prepare_cached(&authorized_sql)?
+                    .query_row(params![scope_code, scope_id, selection], |row| row.get(0))?;
+                if approved != ids.len() as i64 {
+                    return Err(AppError::NotFound.into());
                 }
-                let time = now_ms()?;
-                let mut affected = Vec::new();
-                let sql = match action {
-                    NotificationAction::Read => "UPDATE notifications SET read_at_ms=?2
-                         WHERE notification_id=?1 AND dismissed_at_ms IS NULL AND read_at_ms IS NULL",
-                    NotificationAction::Unread => "UPDATE notifications SET read_at_ms=NULL
-                         WHERE notification_id=?1 AND dismissed_at_ms IS NULL AND read_at_ms IS NOT NULL",
-                    NotificationAction::Dismiss => "UPDATE notifications SET dismissed_at_ms=?2
-                         WHERE notification_id=?1 AND dismissed_at_ms IS NULL",
-                };
-                for id in authorized {
-                    let changed = if matches!(action, NotificationAction::Unread) {
-                        tx.sql.prepare_cached(sql)?.execute([id.as_str()])?
-                    } else {
-                        tx.sql.prepare_cached(sql)?.execute(params![id.as_str(), time])?
-                    };
-                    if changed != 0 {
-                        affected.push(id);
-                    }
-                }
+                let affected = assign(&tx.sql, action, ids, &selection)?;
                 if !affected.is_empty() {
                     tx.sql.execute(
                         "UPDATE service_state SET inbox_revision=inbox_revision+1 WHERE singleton=1", [],
@@ -100,12 +84,39 @@ impl InboxStore for SqliteStore {
     }
 }
 
-const JOIN_SCOPE: &str = "
-    FROM notifications n JOIN reviews r ON r.review_id=n.review_id
-    WHERE n.ordinal<=?3 AND n.dismissed_at_ms IS NULL
-      AND (?1=0 OR (?1=1 AND EXISTS(
+const SCOPE_PREDICATE: &str = "(?1=0 OR (?1=1 AND EXISTS(
         SELECT 1 FROM configured_projects p WHERE p.origin=r.origin AND p.project_id=r.project_id
       )) OR (?1=2 AND n.review_id=?2))";
+
+const JOIN_SCOPE: &str = "FROM notifications n JOIN reviews r ON r.review_id=n.review_id
+    WHERE n.ordinal<=?3 AND n.dismissed_at_ms IS NULL";
+
+fn assign(
+    db: &Connection,
+    action: NotificationAction,
+    ids: Vec<NotificationId>,
+    selection: &str,
+) -> Result<Vec<NotificationId>, StoreError> {
+    let (field, only_if) = match action {
+        NotificationAction::Read => ("read_at_ms=?2", "AND read_at_ms IS NULL"),
+        NotificationAction::Unread => ("read_at_ms=NULL", "AND read_at_ms IS NOT NULL"),
+        NotificationAction::Dismiss => ("dismissed_at_ms=?2", ""),
+    };
+    let sql = format!(
+        "UPDATE notifications SET {field} WHERE dismissed_at_ms IS NULL {only_if}
+         AND notification_id IN (SELECT value FROM json_each(?1)) RETURNING notification_id"
+    );
+    let mut statement = db.prepare_cached(&sql)?;
+    let mut rows = match action {
+        NotificationAction::Unread => statement.query([selection])?,
+        _ => statement.query(params![selection, now_ms()?])?,
+    };
+    let mut updates = HashSet::<NotificationId>::new();
+    while let Some(row) = rows.next()? {
+        updates.insert(parse(text(row, 0)?)?);
+    }
+    Ok(ids.into_iter().filter(|id| updates.contains(id)).collect())
+}
 
 fn define_scope(scope: ReadScope) -> (i64, String) {
     match scope {
@@ -160,8 +171,8 @@ fn page(
     };
     let sql = format!(
         "SELECT n.notification_id, n.source, n.kind, n.review_id, n.run_id, n.session_key,
-             n.label, n.occurred_at_ms, n.read_at_ms, n.notified_at_ms
-         {JOIN_SCOPE}
+             n.label, n.occurred_at_ms, n.read_at_ms, n.notified_at_ms, n.event_ref
+         {JOIN_SCOPE} AND {SCOPE_PREDICATE}
            AND (?4 OR n.read_at_ms IS NULL)
            AND (?5 IS NULL OR n.occurred_at_ms<?5 OR
              (n.occurred_at_ms=?5 AND (n.source>?6 OR (n.source=?6 AND n.notification_id<?7))))
@@ -223,6 +234,7 @@ fn decode(row: &Row<'_>) -> Result<Notification, StoreError> {
         occurred_at_ms: row.get(7)?,
         read_at_ms: row.get(8)?,
         notified_at_ms: row.get(9)?,
+        event_ref: row.get(10)?,
     })
 }
 
@@ -233,7 +245,7 @@ fn counts(
     watermark: i64,
 ) -> Result<UnreadCounts, StoreError> {
     let sql = format!(
-        "SELECT count(*), count(DISTINCT n.review_id) {JOIN_SCOPE} AND n.read_at_ms IS NULL"
+        "SELECT count(*), count(DISTINCT n.review_id) {JOIN_SCOPE} AND {SCOPE_PREDICATE} AND n.read_at_ms IS NULL"
     );
     let (events, mrs): (i64, i64) =
         db.query_row(&sql, params![scope, scope_id, watermark], |row| {

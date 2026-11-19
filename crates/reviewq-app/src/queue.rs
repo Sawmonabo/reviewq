@@ -89,6 +89,8 @@ pub struct QueueItem {
     pub registered_lead_count: u64,
     pub decision: Decision,
     pub pending_source_updates: bool,
+    pub pending_native_attention: bool,
+    pub pending_report_attention: bool,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
