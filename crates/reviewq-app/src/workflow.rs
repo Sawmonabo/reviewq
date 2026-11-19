@@ -2,10 +2,13 @@
 
 use std::sync::Arc;
 
-use reviewq_domain::identity::{NativeInputId, NativeTurnId, ReceiptId, ReportHash};
+use reviewq_domain::identity::{
+    ActionId, GitSha, NativeInputId, NativeTurnId, ReceiptId, ReportHash, Revision, SubmissionId,
+};
 use reviewq_domain::session::LeadTarget;
 
 use crate::access::AppFuture;
+use crate::hosts::MessageBody;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum WorkflowTool {
@@ -83,6 +86,22 @@ impl WorkflowHold {
 pub enum WorkflowReadiness {
     Ready(ReadyWorkflow),
     Held(WorkflowHold),
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum WorkflowBinding {
+    Action(ActionId),
+    Followup(String),
+}
+
+pub struct WorkflowAdmission {
+    pub target: LeadTarget,
+    pub submission: SubmissionId,
+    pub body: MessageBody,
+    pub binding: WorkflowBinding,
+    pub settings: Revision,
+    pub head: GitSha,
+    pub ready: ReadyWorkflow,
 }
 
 pub trait NativeWorkflowProof: Send + Sync {
