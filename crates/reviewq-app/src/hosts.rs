@@ -222,6 +222,8 @@ impl std::fmt::Debug for MessageBody {
 pub enum MessagePurpose {
     User,
     ReportFeedback,
+    Publication,
+    ThreadFollowup,
 }
 
 /// The displayed immutable report referenced by a message.
@@ -347,6 +349,7 @@ pub enum DeliveryWork {
     Dispatch {
         text: MessageBody,
         report_ref: Option<ReportRef>,
+        workflow: Option<crate::workflow::WorkflowGuard>,
     },
     Reconcile {
         cursor: Option<String>,

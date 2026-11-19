@@ -4,7 +4,7 @@ mod publication;
 
 pub use publication::{
     ActionCommandStore, ActionDeclaration, ActionWork, CommentTarget, PublicationEvidence,
-    TargetObservation, declare_publication, reconcile_publication,
+    TargetObservation, confirms_prior_target, declare_publication, reconcile_publication,
 };
 
 use reviewq_domain::identity::{

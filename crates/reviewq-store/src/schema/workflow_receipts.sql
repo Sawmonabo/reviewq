@@ -64,9 +64,14 @@ CREATE TABLE workflow_dispatch (
     head_sha TEXT NOT NULL CHECK (length(head_sha) IN (40, 64)),
     model TEXT NOT NULL CHECK (length(model) BETWEEN 1 AND 128),
     effort TEXT NOT NULL CHECK (length(effort) BETWEEN 1 AND 64),
+    latest_user_entry_id TEXT,
+    latest_user_turn_id TEXT,
     FOREIGN KEY (review_id, batch_id) REFERENCES followup_batches(review_id, batch_id),
-    CHECK ((action_id IS NULL) <> (batch_id IS NULL))
+    CHECK ((action_id IS NULL) <> (batch_id IS NULL)),
+    CHECK (action_id IS NULL OR (latest_user_entry_id IS NOT NULL AND latest_user_turn_id IS NOT NULL))
 ) STRICT, WITHOUT ROWID;
 
 CREATE INDEX workflow_dispatch_action ON workflow_dispatch(action_id);
 CREATE INDEX workflow_dispatch_batch ON workflow_dispatch(review_id, batch_id);
+
+CREATE UNIQUE INDEX workflow_dispatch_one_batch ON workflow_dispatch(batch_id) WHERE batch_id IS NOT NULL;

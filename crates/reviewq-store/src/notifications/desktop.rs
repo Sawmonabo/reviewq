@@ -34,19 +34,11 @@ impl DesktopStore for SqliteStore {
         Box::pin(async move { self.write(|tx| claim(tx)).await.map_err(StoreError::app) })
     }
 
-    fn desktop_still_unread(&self, claim: &DesktopClaim) -> AppFuture<'_, bool> {
-        let id = claim.id.clone();
-        let fence = claim.fence;
+    fn refresh_desktop_claim(&self, claim: DesktopClaim) -> AppFuture<'_, Option<DesktopClaim>> {
         Box::pin(async move {
-            self.read(move |db| {
-                let fence = i64::try_from(fence).map_err(|_| AppError::Internal)?;
-                Ok(db.query_row(
-                    "SELECT EXISTS(SELECT 1 FROM desktop_receipts d JOIN notifications n USING(notification_id)
-                      WHERE d.receipt_id=?1 AND d.fence=?2 AND d.state='claimed'
-                        AND n.read_at_ms IS NULL AND n.dismissed_at_ms IS NULL)",
-                    params![id,fence], |row| row.get(0),
-                )?)
-            }).await.map_err(StoreError::app)
+            self.write(move |tx| refresh_claim(&tx.sql, claim))
+                .await
+                .map_err(StoreError::app)
         })
     }
 
@@ -72,15 +64,48 @@ impl DesktopStore for SqliteStore {
     }
 }
 
+const UNREAD_ELIGIBLE_MEMBER: &str = "
+    FROM desktop_members m JOIN notifications n USING(notification_id)
+    WHERE m.receipt_id=d.receipt_id AND n.desktop_eligible=1 AND n.read_at_ms IS NULL
+      AND n.dismissed_at_ms IS NULL AND n.notified_at_ms IS NULL";
+
+fn refresh_claim(db: &Connection, claim: DesktopClaim) -> Result<Option<DesktopClaim>, StoreError> {
+    let fence = i64::try_from(claim.fence).map_err(|_| AppError::Internal)?;
+    let sql = format!(
+        "SELECT (SELECT n.notification_id {UNREAD_ELIGIBLE_MEMBER}
+                 ORDER BY (n.notification_id=d.notification_id) DESC, n.ordinal LIMIT 1)
+         FROM desktop_receipts d WHERE receipt_id=?1 AND fence=?2 AND state='claimed'"
+    );
+    let representative: Option<String> = db
+        .prepare_cached(&sql)?
+        .query_row(params![claim.id, fence], |row| row.get(0))
+        .optional()?
+        .ok_or(AppError::Conflict)?;
+    let Some(item) = representative else {
+        return Ok(None);
+    };
+    if item != claim.notification.as_str() {
+        db.execute(
+            "UPDATE desktop_receipts SET notification_id=?2 WHERE receipt_id=?1",
+            params![claim.id, item],
+        )?;
+    }
+    read_claim(db, &claim.id).map(Some)
+}
+
 fn claim(tx: &mut WriteTx<'_>) -> Result<Option<DesktopClaim>, StoreError> {
     let db = &tx.sql;
     let now = now_ms()?;
-    let retry = db.query_row(
-        "SELECT d.receipt_id FROM desktop_receipts d JOIN notifications n USING(notification_id)
-         WHERE d.state='failed' AND d.due_at_ms<=?1 AND d.attempts<3 AND n.read_at_ms IS NULL
-           AND n.dismissed_at_ms IS NULL ORDER BY d.due_at_ms,d.receipt_id LIMIT 1",
-        [now], |row| row.get::<_, String>(0),
-    ).optional()?;
+    let retry_sql = format!(
+        "SELECT d.receipt_id FROM desktop_receipts d
+         WHERE d.state='failed' AND d.due_at_ms<=?1 AND d.attempts<3
+            AND EXISTS(SELECT 1 {UNREAD_ELIGIBLE_MEMBER})
+         ORDER BY d.due_at_ms,d.receipt_id LIMIT 1"
+    );
+    let retry = db
+        .prepare_cached(&retry_sql)?
+        .query_row([now], |row| row.get::<_, String>(0))
+        .optional()?;
     if let Some(retry) = retry {
         db.execute(
             "UPDATE desktop_receipts SET state='claimed',fence=fence+1,attempts=attempts+1,
@@ -122,11 +147,12 @@ fn claim(tx: &mut WriteTx<'_>) -> Result<Option<DesktopClaim>, StoreError> {
 }
 
 fn read_claim(db: &Connection, id: &str) -> Result<DesktopClaim, StoreError> {
-    let mut statement = db.prepare_cached(
+    let sql = format!(
         "SELECT d.fence,n.notification_id,n.review_id,n.run_id,n.session_key,n.kind,n.label,
-           (SELECT count(*) FROM desktop_members WHERE receipt_id=d.receipt_id)
-         FROM desktop_receipts d JOIN notifications n USING(notification_id) WHERE d.receipt_id=?1",
-    )?;
+           (SELECT count(*) {UNREAD_ELIGIBLE_MEMBER})
+         FROM desktop_receipts d JOIN notifications n USING(notification_id) WHERE d.receipt_id=?1"
+    );
+    let mut statement = db.prepare_cached(&sql)?;
     let mut rows = statement.query([id])?;
     let row = rows.next()?.ok_or(AppError::Internal)?;
     Ok(DesktopClaim {
@@ -179,7 +205,7 @@ fn finish(
     if state == "delivered" {
         db.execute(
             "UPDATE notifications SET notified_at_ms=?2
-             WHERE notification_id IN (SELECT notification_id FROM desktop_members WHERE receipt_id=?1)",
+             WHERE desktop_eligible=1 AND notification_id IN (SELECT notification_id FROM desktop_members WHERE receipt_id=?1)",
             params![claim.id,time],
         )?;
     }

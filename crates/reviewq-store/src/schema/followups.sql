@@ -11,11 +11,12 @@ CREATE TABLE followup_monitors (
     generation INTEGER NOT NULL CHECK (generation > 0),
     state TEXT NOT NULL CHECK (state IN ('enabled', 'paused', 'archived')),
     policy_override INTEGER CHECK (policy_override IN (0, 1)),
+    reviewer_id TEXT,
     binding_verified INTEGER NOT NULL CHECK (binding_verified IN (0, 1)),
     reason TEXT CHECK (length(CAST(reason AS BLOB)) <= 1024),
     updated_at_ms INTEGER NOT NULL,
     FOREIGN KEY (review_id, run_id) REFERENCES runs(review_id, run_id),
-    CHECK (binding_verified=0 OR run_id IS NOT NULL)
+    CHECK (binding_verified=0 OR (run_id IS NOT NULL AND reviewer_id IS NOT NULL))
 ) STRICT, WITHOUT ROWID;
 
 CREATE TABLE followup_threads (
@@ -169,3 +170,17 @@ CREATE TABLE followup_result_reads (
 ) STRICT, WITHOUT ROWID;
 
 CREATE INDEX followup_result_read_owner ON followup_result_reads(review_id, batch_id);
+
+CREATE TABLE followup_observation_origins (
+    review_id TEXT NOT NULL,
+    observation_id TEXT NOT NULL,
+    generation INTEGER NOT NULL,
+    original_note_id TEXT NOT NULL,
+    PRIMARY KEY (review_id, observation_id, original_note_id),
+    FOREIGN KEY (review_id, observation_id) REFERENCES followup_observations(review_id, observation_id),
+    FOREIGN KEY (review_id, generation, original_note_id)
+        REFERENCES followup_threads(review_id, generation, original_note_id)
+) STRICT, WITHOUT ROWID;
+
+CREATE INDEX followup_observation_original_note
+    ON followup_observation_origins(review_id, generation, original_note_id);

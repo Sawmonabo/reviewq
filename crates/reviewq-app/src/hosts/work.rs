@@ -14,10 +14,35 @@ use super::{
 pub struct DispatchGuard {
     store: Arc<dyn LeadStore>,
     claim: DeliveryClaim,
+    workflow_confirmed: bool,
 }
 
 impl DispatchGuard {
+    pub fn workflow(&self) -> Option<&crate::workflow::WorkflowGuard> {
+        match &self.claim.work {
+            DeliveryWork::Dispatch { workflow, .. } => workflow.as_ref(),
+            DeliveryWork::Reconcile { .. } => None,
+        }
+    }
+
+    /// Records successful revalidation by the adapter immediately before automatic delivery.
+    pub fn confirm_workflow(
+        mut self,
+        settings: &crate::workflow::ReadyWorkflow,
+        head: &reviewq_domain::identity::GitSha,
+    ) -> Result<Self, AppError> {
+        let guard = self.workflow().ok_or(AppError::InvalidRequest)?;
+        if &guard.ready != settings || &guard.head != head {
+            return Err(AppError::StaleRevision);
+        }
+        self.workflow_confirmed = true;
+        Ok(self)
+    }
+
     pub async fn check(self) -> Result<(), AppError> {
+        if self.workflow().is_some() && !self.workflow_confirmed {
+            return Err(AppError::Forbidden);
+        }
         self.store.authorize_dispatch(self.claim).await
     }
 }
@@ -57,7 +82,9 @@ pub async fn recover_delivery(
         return Ok(());
     };
     let result = match &claim.work {
-        DeliveryWork::Dispatch { text, report_ref } => {
+        DeliveryWork::Dispatch {
+            text, report_ref, ..
+        } => {
             host.dispatch(
                 claim.target.clone(),
                 claim.delivery_id.clone(),
@@ -66,6 +93,7 @@ pub async fn recover_delivery(
                 DispatchGuard {
                     store: store.clone(),
                     claim: claim.clone(),
+                    workflow_confirmed: false,
                 },
             )
             .await

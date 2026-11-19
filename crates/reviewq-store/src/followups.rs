@@ -2,6 +2,8 @@
 
 mod commands;
 mod observations;
+mod poll;
+pub(crate) mod work;
 
 use reviewq_app::access::{Actor, AppError, AppFuture};
 use reviewq_app::events::Snapshot;

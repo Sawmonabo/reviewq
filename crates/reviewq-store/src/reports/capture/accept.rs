@@ -8,7 +8,7 @@ use reviewq_app::reports::{
 use reviewq_domain::identity::NativeInputId;
 use rusqlite::{Connection, OptionalExtension, params};
 
-use super::{db_int, ensure_claim};
+use super::{batch, db_int, ensure_claim};
 use crate::StoreError;
 use crate::connection::WriteTx;
 use crate::events::now_ms;
@@ -21,6 +21,7 @@ pub(super) fn complete(
     work: ReportWork,
     result: NativeInputId,
     artifact: Option<CapturedArtifact>,
+    scoped_preserved: bool,
 ) -> Result<(), StoreError> {
     let db = &tx.sql;
     let stage = ensure_claim(db, &work)?;
@@ -68,6 +69,35 @@ pub(super) fn complete(
             Some(&result),
         );
     }
+    let scoped = match batch::manifest(db, &work).map_err(StoreError::app) {
+        Ok(value) => value,
+        Err(AppError::Conflict) => {
+            return reject(
+                tx,
+                &work,
+                artifact.as_ref(),
+                "followup_binding_changed",
+                Some(&result),
+            );
+        }
+        Err(error) => return Err(error.into()),
+    };
+    if let Some(scope) = &scoped {
+        if scope.report_receipt_id != current.receipt
+            || scope.report_hash != current.hash
+            || scope.disposition_version != current.disposition_version as u64
+            || (!matches!(work.declaration, Declaration::NeedsInput { .. })
+                && !batch::assessments_match(scope, work.declaration.assessments()))
+        {
+            return reject(
+                tx,
+                &work,
+                artifact.as_ref(),
+                "followup_scope_changed",
+                Some(&result),
+            );
+        }
+    }
     let notification = match &work.declaration {
         Declaration::Final {
             revision,
@@ -85,6 +115,20 @@ pub(super) fn complete(
                     "report_semantic_evidence_invalid",
                     Some(&result),
                 );
+            }
+            if let Some(scope) = &scoped {
+                if !scoped_preserved
+                    || amends.is_some()
+                    || !matches!(revision,RevisionEvidence::Exact(sha) if sha.as_str()==scope.source_sha)
+                {
+                    return reject(
+                        tx,
+                        &work,
+                        Some(captured),
+                        "followup_continuity_unproved",
+                        Some(&result),
+                    );
+                }
             }
             if let Some(reference) = amends {
                 if !current.complete
@@ -118,12 +162,17 @@ pub(super) fn complete(
                 amends.is_some(),
                 captured,
                 time,
+                scoped
+                    .as_ref()
+                    .map(|manifest| (manifest, work.declaration.assessments())),
             )?;
             amends
                 .is_none()
                 .then_some((Kind::ReportReady, "Report ready"))
         }
-        Declaration::Unchanged { accepted, source } => {
+        Declaration::Unchanged {
+            accepted, source, ..
+        } => {
             let original = match source {
                 ReportSource::Response => current.source_kind.as_deref() == Some("response"),
                 ReportSource::File { path, .. } => {
@@ -145,7 +194,9 @@ pub(super) fn complete(
                     Some(&result),
                 );
             }
-            None
+            scoped
+                .is_some()
+                .then_some((Kind::FollowupReady, "Review follow-up ready"))
         }
         Declaration::NeedsInput { .. } => Some((Kind::AgentQuestion, "Review needs input")),
     };
@@ -154,6 +205,23 @@ pub(super) fn complete(
             updated_at_ms=max(updated_at_ms, ?3) WHERE receipt_id=?1",
         params![receipt, result.as_str(), time],
     )?;
+    if let Some(manifest) = &scoped {
+        match &work.declaration {
+            Declaration::Final { .. } => batch::complete(tx, &work, manifest, receipt, time)?,
+            Declaration::Unchanged { accepted, .. } => {
+                batch::complete(tx, &work, manifest, accepted.receipt_id.as_str(), time)?
+            }
+            Declaration::NeedsInput { .. } => {
+                tx.sql.execute(
+                    "UPDATE followup_batches SET hold_reason='followup_native_input_required' WHERE batch_id=?1
+                     AND state='executing' AND authority_verified=1", [&manifest.batch_id],
+                )?;
+                tx.emit(&[ResourceKey::Followup(Some(
+                    work.call.lead.review_id().clone(),
+                ))])?;
+            }
+        }
+    }
     emit(tx, &work, time, notification)
 }
 
@@ -275,12 +343,16 @@ fn promote(
     amendment: bool,
     captured: &CapturedArtifact,
     time: i64,
+    scoped: Option<(
+        &crate::followups::work::FrozenManifest,
+        &[reviewq_app::reports::Assessment],
+    )>,
 ) -> Result<(), StoreError> {
     let (reviewed, reason) = match revision {
         RevisionEvidence::Exact(sha) => (Some(sha.as_str()), None),
         RevisionEvidence::Unknown(reason) => (None, Some(reason.as_str())),
     };
-    let known_full = if amendment {
+    let known_full = if amendment || scoped.is_some() {
         previous.full_sha.as_deref()
     } else {
         reviewed.or(previous.full_sha.as_deref())
@@ -292,9 +364,20 @@ fn promote(
     };
     let coverage = if amendment {
         previous.coverage.as_deref().ok_or(AppError::Internal)?
+    } else if scoped.is_some() {
+        "selected_threads"
     } else {
         "full_mr"
     };
+    let changes = scoped
+        .map(|(_, assessments)| {
+            assessments
+                .iter()
+                .flat_map(|a| a.finding_ids.iter())
+                .collect::<std::collections::HashSet<_>>()
+                .len() as i64
+        })
+        .unwrap_or(0);
     let count = captured.index.as_ref().map(|items| {
         items
             .iter()
@@ -320,13 +403,16 @@ fn promote(
           starting_disposition_version, coverage_source_sha, coverage_target_sha)
          VALUES(?1,?2,?3,?2,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17)",
         params![run, receipt, artifact, previous.receipt, attention, reviewed, reason, known_full,
-            coverage, verdict.to_string(), semantic, count, count.map(|_| 0_i64), time,
+            coverage, verdict.to_string(), semantic, count, count.map(|_| changes), time,
             previous.disposition_version,
             if amendment { previous.coverage_source.as_deref() } else { reviewed },
-            if amendment { previous.coverage_target.as_deref() } else { None }],
+            if amendment { previous.coverage_target.as_deref() } else { scoped.and_then(|(manifest,_)| manifest.target_sha.as_deref()) }],
     )?;
     if let Some(items) = &captured.index {
         write_index(db, run, receipt, items)?;
+    }
+    if let Some((manifest, assessment)) = scoped {
+        super::batch::write_changes(db, run, receipt, manifest, assessment)?;
     }
     db.execute(
         "INSERT INTO report_heads(run_id, receipt_id, disposition_version) VALUES(?1, ?2, ?3)

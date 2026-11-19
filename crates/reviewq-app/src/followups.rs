@@ -1,6 +1,11 @@
 //! Monitor ownership, frozen work and scoped result projections.
 
 mod commands;
+mod work;
+pub use work::{
+    CheckMember, FollowupWorkerStore, MAX_FROZEN_OBSERVATIONS, PendingCheck, PreparedCheck,
+    run_due_followups,
+};
 
 pub use commands::{
     FollowupCommands, MonitorCommand, MonitorReceipt, MonitorRequest, Selection, UpdatePreferences,
@@ -141,4 +146,53 @@ pub trait FollowupStore: Send + Sync {
         after: Option<AssessmentPosition>,
         limit: u16,
     ) -> AppFuture<'_, Snapshot<AssessmentPage>>;
+}
+
+/// One monitored review and its exact current registration/configuration proof.
+#[derive(Clone)]
+pub struct MonitoredReview {
+    pub review: ReviewId,
+    pub run: RunId,
+    pub identity: reviewq_domain::identity::MrIdentity,
+    pub generation: Revision,
+    pub settings: Revision,
+}
+
+pub trait FollowupObservationStore: Send + Sync {
+    fn monitored_reviews(
+        &self,
+        after: Option<ReviewId>,
+        limit: u16,
+    ) -> AppFuture<'_, Vec<MonitoredReview>>;
+    fn record_monitor_observation(
+        &self,
+        target: MonitoredReview,
+        observation: crate::sources::WorkflowSnapshot,
+    ) -> AppFuture<'_, ()>;
+}
+
+pub async fn poll_monitored_reviews(
+    store: &dyn FollowupObservationStore,
+    source: &dyn crate::sources::ReviewSourceReader,
+    after: Option<ReviewId>,
+) -> Result<Option<ReviewId>, crate::access::AppError> {
+    const LIMIT: u16 = 8;
+    let rows = store.monitored_reviews(after, LIMIT).await?;
+    let next = (rows.len() == usize::from(LIMIT))
+        .then(|| rows.last().map(|row| row.review.clone()))
+        .flatten();
+    for row in rows {
+        if let Ok(observation) = source.workflow_snapshot(row.identity.clone()).await {
+            let committed = store.record_monitor_observation(row, observation).await;
+            if let Err(error) = committed
+                && !matches!(
+                    error,
+                    crate::access::AppError::StaleRevision | crate::access::AppError::Conflict
+                )
+            {
+                return Err(error);
+            }
+        }
+    }
+    Ok(next)
 }

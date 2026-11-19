@@ -55,6 +55,8 @@ CREATE TABLE report_handoffs (
     reason TEXT CHECK (length(CAST(reason AS BLOB)) <= 2048),
     created_at_ms INTEGER NOT NULL,
     updated_at_ms INTEGER NOT NULL CHECK (updated_at_ms >= created_at_ms),
+    batch_id TEXT REFERENCES followup_batches(batch_id),
+    assessments TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(assessments) AND length(CAST(assessments AS BLOB)) <= 131072),
     settings_revision INTEGER NOT NULL CHECK (settings_revision >= 0),
     CHECK ((expected_receipt_id IS NULL) = (expected_sha256 IS NULL)),
     CHECK ((source_kind='file') = (source_path IS NOT NULL)),
@@ -67,6 +69,7 @@ CREATE TABLE report_handoffs (
 
 CREATE UNIQUE INDEX report_handoff_native_order ON report_handoffs(run_id, source_generation, source_position);
 CREATE INDEX report_handoff_latest ON report_handoffs(run_id, created_at_ms DESC, receipt_id DESC);
+CREATE INDEX report_handoff_batch ON report_handoffs(batch_id);
 CREATE INDEX report_handoff_artifact ON report_handoffs(artifact_id);
 CREATE INDEX report_handoff_pending ON report_handoffs(due_at_ms, receipt_id)
     WHERE state='pending_completion';
@@ -145,7 +148,7 @@ CREATE TABLE report_changes (
     finding_id TEXT NOT NULL CHECK (length(finding_id) BETWEEN 1 AND 64),
     conclusion TEXT NOT NULL CHECK (conclusion IN (
         'fixed', 'clarified_withdrawn', 'superseded', 'partly_addressed', 'still_present', 'unverified')),
-    reason TEXT NOT NULL CHECK (length(CAST(reason AS BLOB)) BETWEEN 1 AND 384),
+    reason TEXT NOT NULL CHECK (length(CAST(reason AS BLOB)) BETWEEN 1 AND 1024),
     checked_sha TEXT CHECK (length(checked_sha) IN (40, 64)),
     PRIMARY KEY (run_id, receipt_id, finding_id),
     FOREIGN KEY (run_id, receipt_id) REFERENCES report_versions(run_id, receipt_id)

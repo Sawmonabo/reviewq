@@ -1,0 +1,154 @@
+use reviewq_domain::identity::{GitSha, Revision};
+use reviewq_domain::session::LeadTarget;
+
+use crate::access::{AppError, AppFuture};
+use crate::hosts::MessageBody;
+use crate::queue::MergeRequestState;
+use crate::reports::ReportReference;
+use crate::sources::ReviewSourceReader;
+use crate::workflow::{NativeWorkflowProof, ReadyWorkflow, WorkflowReadiness};
+
+use super::MonitoredReview;
+
+pub const MAX_FROZEN_OBSERVATIONS: u16 = 10;
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CheckMember {
+    pub observation_id: String,
+    pub discussion_id: String,
+    pub discussion_version: String,
+    pub original_note_ids: Vec<String>,
+    pub finding_ids: Vec<String>,
+    pub prior_batch_id: Option<String>,
+}
+
+pub struct PendingCheck {
+    pub batch_id: String,
+    pub monitor: MonitoredReview,
+    pub lead: LeadTarget,
+    pub members: Vec<CheckMember>,
+    pub base: Option<ReportReference>,
+    pub disposition_version: Revision,
+}
+
+pub struct PreparedCheck {
+    pub pending: PendingCheck,
+    pub checked_head: GitSha,
+    pub ready: ReadyWorkflow,
+    pub prompt: MessageBody,
+}
+
+pub trait FollowupWorkerStore: Send + Sync {
+    fn due_checks(&self, limit: u16) -> AppFuture<'_, Vec<PendingCheck>>;
+    fn hold_check(&self, check: PendingCheck, reason: &'static str) -> AppFuture<'_, ()>;
+    fn reserve_check(&self, check: PreparedCheck) -> AppFuture<'_, ()>;
+}
+
+pub async fn run_due_followups(
+    store: &dyn FollowupWorkerStore,
+    source: &dyn ReviewSourceReader,
+    native: &dyn NativeWorkflowProof,
+) -> Result<(), AppError> {
+    for pending in store.due_checks(4).await? {
+        match prepare(&pending, source, native).await {
+            Ok((checked_head, ready, prompt)) => {
+                let result = store
+                    .reserve_check(PreparedCheck {
+                        pending,
+                        checked_head,
+                        ready,
+                        prompt,
+                    })
+                    .await;
+                if let Err(error) = result
+                    && !matches!(
+                        error,
+                        AppError::StaleRevision | AppError::Conflict | AppError::Busy
+                    )
+                {
+                    return Err(error);
+                }
+            }
+            Err(reason) => {
+                let result = store.hold_check(pending, reason).await;
+                if let Err(error) = result
+                    && !matches!(error, AppError::StaleRevision | AppError::Conflict)
+                {
+                    return Err(error);
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+async fn prepare(
+    check: &PendingCheck,
+    source: &dyn ReviewSourceReader,
+    native: &dyn NativeWorkflowProof,
+) -> Result<(GitSha, ReadyWorkflow, MessageBody), &'static str> {
+    let source = source
+        .workflow_snapshot(check.monitor.identity.clone())
+        .await
+        .map_err(|_| "followup_source_unavailable")?;
+    if source.review.identity != check.monitor.identity
+        || source.review.state != MergeRequestState::Open
+    {
+        return Err("followup_merge_request_unavailable");
+    }
+    match source.personal_approval {
+        Some(false) => {}
+        Some(true) => return Err("reviewer_approval_confirmed"),
+        None => return Err("reviewer_approval_unknown"),
+    }
+    for member in &check.members {
+        if !source.discussions.iter().any(|discussion| {
+            discussion.id == member.discussion_id
+                && member.original_note_ids.iter().all(|original| {
+                    discussion.notes.iter().any(|note| {
+                        note.author == source.authenticated_actor
+                            && original.parse::<u64>().ok() == Some(note.id)
+                    })
+                })
+        }) {
+            return Err("followup_selected_discussion_unavailable");
+        }
+    }
+    let ready = match native.dispatch_readiness(check.lead.clone()).await {
+        Ok(WorkflowReadiness::Ready(ready)) => ready,
+        Ok(WorkflowReadiness::Held(reason)) => return Err(reason.reason()),
+        Err(_) => return Err("native_provider_unavailable"),
+    };
+    if ready.model.is_empty()
+        || ready.model.len() > 128
+        || ready.effort.is_empty()
+        || ready.effort.len() > 64
+    {
+        return Err("native_settings_unproved");
+    }
+    let mut prompt = format!(
+        "Privately reassess selected ReviewQ discussions for {} !{} at source SHA {}. Batch {}.          Read each identified discussion and the current code. Preserve unrelated findings, questions, qualifications and user dispositions.          Do not post or edit GitLab notes, approve, merge, resolve discussions, or change Jira.          Return one evidence-backed assessment for every listed discussion, binding this batch and its exact observations.",
+        source.review.project_path,
+        source.review.identity.iid(),
+        source.review.head_sha,
+        check.batch_id,
+    );
+    if let Some(base) = &check.base {
+        prompt.push_str(&format!(
+            "\nAccepted baseline receipt {} (SHA-256 {}), disposition revision {}.",
+            base.receipt_id, base.hash, check.disposition_version
+        ));
+    }
+    for member in &check.members {
+        prompt.push_str(&format!(
+            "\nDiscussion {} original note {} observation {} at {}. Finding IDs: {}.",
+            member.discussion_id,
+            member.original_note_ids.join(", "),
+            member.observation_id,
+            member.discussion_version,
+            member.finding_ids.join(", ")
+        ));
+    }
+    let prompt = MessageBody::new(&prompt).map_err(|_| "followup_prompt_too_large")?;
+    Ok((source.review.head_sha, ready, prompt))
+}

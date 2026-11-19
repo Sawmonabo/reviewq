@@ -4,9 +4,9 @@ mod capture;
 mod index;
 
 pub use capture::{
-    AcceptedReport, ArtifactChunk, CHUNK_BYTES, CapturedArtifact, Declaration, HandoffReceipt,
-    HandoffState, ReportCaptureStore, ReportFileSource, ReportWork, RevisionEvidence, Source,
-    hash_report_file, reconcile_reports,
+    AcceptedReport, ArtifactChunk, Assessment, CHUNK_BYTES, CapturedArtifact, Declaration,
+    HandoffReceipt, HandoffState, ReportCaptureStore, ReportFileSource, ReportWork,
+    RevisionEvidence, Source, hash_report_file, reconcile_reports,
 };
 
 use reviewq_domain::identity::{GitSha, ReceiptId, ReportHash, Revision, RunId};

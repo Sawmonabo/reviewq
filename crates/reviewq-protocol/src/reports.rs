@@ -9,7 +9,7 @@ use crate::{
 
 macro_rules! wire_enum {
     ($name:ident { $($value:ident),+ $(,)? }) => {
-        #[derive(Clone, Debug, Serialize)]
+        #[derive(Clone, Debug, serde::Deserialize, Serialize)]
         #[serde(rename_all = "snake_case")]
         #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
         pub enum $name { $($value),+ }
@@ -289,6 +289,6 @@ pub struct FeedbackRequest {
 
 mod handoff;
 pub use handoff::{
-    AcceptedReport, Handoff, HandoffCommand, HandoffReceipt, HandoffState, NativeContext,
-    NativeReportAddress, ReportRevision, ReportSource, ReportVerdict,
+    AcceptedReport, Assessment, Handoff, HandoffCommand, HandoffReceipt, HandoffState,
+    NativeContext, NativeReportAddress, ReportRevision, ReportSource, ReportVerdict,
 };
