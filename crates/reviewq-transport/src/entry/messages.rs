@@ -6,12 +6,10 @@ use axum::http::{HeaderMap, StatusCode};
 use reviewq_app::access::AppError;
 use reviewq_app::events::Snapshot;
 use reviewq_app::hosts::{DeliveryOutcome, DeliveryReceipt, MessageBody, receipt, send_message};
-use reviewq_protocol::hosts::{
-    DeliveryReceiptResponse, DeliveryState, ObservedInputDto, SendMessageRequest,
-};
 use reviewq_protocol::{
-    EventCursorDto, HistoryEntryIdDto, HistoryTurnIdDto, RunIdDto, SessionKeyDto, SubmissionIdDto,
-    Success, UtcTimestampDto,
+    DeliveryReceipt as ReceiptDto, DeliveryReceiptResponse, DeliveryState, EventCursorDto,
+    HistoryEntryIdDto, HistoryTurnIdDto, ObservedInputDto, RunIdDto, SendMessageRequest,
+    SessionKeyDto, SubmissionIdDto, Success, UtcTimestampDto,
 };
 
 use super::error::{ApiBytes, ApiPath as Path};
@@ -78,7 +76,7 @@ pub(super) fn project(
     };
     Ok(Success {
         cursor: EventCursorDto::new(stored.cursor.get()).ok_or(AppError::Internal)?,
-        data: reviewq_protocol::hosts::DeliveryReceipt {
+        data: ReceiptDto {
             submission_id: SubmissionIdDto::new(row.submission_id.as_str())
                 .ok_or(AppError::Internal)?,
             run_id: RunIdDto::new(row.target.run_id().as_str()).ok_or(AppError::Internal)?,
