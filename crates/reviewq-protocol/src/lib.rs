@@ -6,6 +6,7 @@ pub mod events;
 pub mod history;
 mod hosts;
 pub mod queue;
+pub mod reports;
 mod scalar;
 
 pub use common::{ErrorCode, ErrorDto, Failure, Page, Success, UtcTimestampDto};

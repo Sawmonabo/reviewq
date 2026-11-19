@@ -117,6 +117,21 @@ string_dto!(
     "etag_schema"
 );
 
+string_dto!(
+    /// SHA-256 of exact report bytes or their declaration.
+    ReportHashDto,
+    |value: &str| value.len() == 64
+        && value
+            .bytes()
+            .all(|byte| matches!(byte, b'0'..=b'9' | b'a'..=b'f')),
+    "report_hash_schema"
+);
+
+#[cfg(feature = "schema")]
+fn report_hash_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
+    schemars::json_schema!({"type": "string", "pattern": "^[0-9a-f]{64}$"})
+}
+
 macro_rules! decimal_dto {
     ($(#[$doc:meta])* $name:ident, $minimum:literal, $schema:literal) => {
         $(#[$doc])*

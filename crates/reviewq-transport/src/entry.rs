@@ -12,6 +12,7 @@ use reviewq_app::access::{Actor, AppError};
 use reviewq_app::events::EventLog;
 use reviewq_app::hosts::{LeadStore, NativeHost};
 use reviewq_app::queue::{QueueStore, ReviewLookup};
+use reviewq_app::reports::ReportStore;
 use reviewq_app::sources::{ReviewSourceReader, SourceRefreshStore, refresh_queue};
 use reviewq_app::workspace::WorkspaceStore;
 use reviewq_protocol::queue::QueueSync;
@@ -24,6 +25,7 @@ mod auth;
 mod changes;
 mod control;
 mod error;
+mod features;
 mod history;
 mod hosts;
 mod messages;
@@ -36,10 +38,10 @@ use error::{ApiBytes, ApiError};
 
 /// Shared application ports for one ReviewQ listener pair.
 pub trait Store:
-    WorkspaceStore + QueueStore + ReviewLookup + EventLog + LeadStore + SourceRefreshStore
+    WorkspaceStore + QueueStore + ReviewLookup + EventLog + LeadStore + SourceRefreshStore + ReportStore
 {
 }
-impl<S: WorkspaceStore + QueueStore + ReviewLookup + EventLog + LeadStore + SourceRefreshStore>
+impl<S: WorkspaceStore + QueueStore + ReviewLookup + EventLog + LeadStore + SourceRefreshStore + ReportStore>
     Store for S
 {
 }
@@ -115,6 +117,7 @@ pub fn router(
         )
         .route("/runs/{run_id}", get(pages::run))
         .route("/native/codex/link", post(hosts::link))
+        .merge(features::routes())
         .route(
             "/runs/{run_id}/sessions/{session_key}/history/page",
             get(history::page),

@@ -378,7 +378,7 @@ fn provider(value: HostProvider) -> HostProviderDto {
     }
 }
 
-fn count(value: u64) -> Result<SafeCountDto, AppError> {
+pub(super) fn count(value: u64) -> Result<SafeCountDto, AppError> {
     SafeCountDto::new(value).ok_or(AppError::Internal)
 }
 
