@@ -44,16 +44,25 @@ export function useResource<T>(
   useEffect(() => {
     const controller = new AbortController();
     const registered = lease.current;
-    const hide = () => controller.abort();
+    let pending = true;
+    function hide() {
+      if (pending) controller.abort();
+    }
+    function restore(event: PageTransitionEvent) {
+      if (event.persisted && controller.signal.aborted) setEpoch((value) => value + 1);
+    }
     window.addEventListener("pagehide", hide);
+    window.addEventListener("pageshow", restore);
     void readCurrent(controller.signal).then(
       ({ data, cursor }) => {
+        pending = false;
         if (controller.signal.aborted) return;
         setResult({ key, data, confirmedAt: Date.now() });
         if (registered) registered.snapshot(cursor);
         else observeSnapshot(cursor);
       },
       (error: unknown) => {
+        pending = false;
         if (!controller.signal.aborted) {
           setResult((previous) => ({
             ...(previous?.key === key ? previous : {}),
@@ -66,6 +75,7 @@ export function useResource<T>(
     return () => {
       controller.abort();
       window.removeEventListener("pagehide", hide);
+      window.removeEventListener("pageshow", restore);
     };
   }, [key, keys, epoch]);
 
