@@ -62,7 +62,7 @@
 .run-search > svg {
   flex: none;
 }
-.run-search input {
+.run-search > input:not([type]) {
   width: 100%;
   min-width: 0;
   padding: 0;
@@ -135,7 +135,7 @@
   font-size: 10px;
 }
 .run-card:has(.run-reason-filter) .run-card-head {
-  padding-right: 120px;
+  padding-inline-end: min(165px, 45%);
 }
 .run-card h3 {
   margin: 0 0 14px;
@@ -160,7 +160,7 @@
   position: absolute;
   top: 19px;
   right: 19px;
-  max-width: calc(100% - 38px);
+  max-width: min(165px, 45%);
   white-space: normal;
 }
 .run-card-footer {

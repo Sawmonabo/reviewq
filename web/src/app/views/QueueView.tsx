@@ -6,7 +6,7 @@ import { Pagination } from "../../components/Pagination";
 import { Empty, Loading, Notice } from "../../components/PanelState";
 import { ReviewRow, UnmatchedReviewRow } from "../../components/ReviewRow";
 import { useResource } from "../../hooks/useResource";
-import { describeError, formatTime } from "../../lib/presentation";
+import { describeError, formatActivityTime, formatTime } from "../../lib/presentation";
 import { savedValue, saveValue } from "../../lib/view-preferences";
 import {
   clearedFilters,
@@ -19,7 +19,9 @@ import {
 } from "../../features/queue/filters";
 import type { QueueFilters } from "../../features/queue/filters";
 import type { Launch, LaunchTarget, OpenReview } from "../../features/queue/types";
-import type { QueueRow } from "../../api/generated/contracts";
+import type { QueueFacets, QueueRow } from "../../api/generated/contracts";
+
+const filterKeys = Object.keys(clearedFilters) as (keyof QueueFilters)[];
 
 type QueueProps = {
   readonly selectedReview?: string | undefined;
@@ -55,8 +57,7 @@ export function QueueView({
   const [loadingSprint, setLoadingSprint] = useState(false);
   const search = useRef<HTMLInputElement>(null);
   const sprintRequest = useRef(0);
-  const [lastFacets, setLastFacets] =
-    useState<import("../../api/generated/contracts").QueueFacets>();
+  const [lastFacets, setLastFacets] = useState<QueueFacets>();
   const params = queueParams({ ...filters, q: query }, trail.at(-1));
   const list = useResource(
     `queue:${revision}:${JSON.stringify(params)}`,
@@ -135,6 +136,7 @@ export function QueueView({
       <div className="queue-filters" aria-label="Review filters">
         <FilterSelect
           label="Board"
+          scope
           value={filters.boardId}
           options={[
             { value: "", label: "All team boards" },
@@ -148,6 +150,7 @@ export function QueueView({
         />
         <FilterSelect
           label="Sprint"
+          scope
           value={filters.sprint === "active" ? "" : filters.sprint}
           disabled={loadingSprint}
           options={[
@@ -165,6 +168,7 @@ export function QueueView({
         />
         <FilterSelect
           label="Repo"
+          scope
           value={filters.projectId}
           options={[
             { value: "", label: "All repositories" },
@@ -236,7 +240,7 @@ export function QueueView({
           options={Object.entries(sorts).map(([value, label]) => ({ value, label }))}
           onChange={(value) => update({ ...filters, sort: value as QueueFilters["sort"] })}
         />
-        {JSON.stringify(filters) !== JSON.stringify(clearedFilters) && (
+        {filterKeys.some((key) => filters[key] !== clearedFilters[key]) && (
           <button
             type="button"
             className="filter-control clear-filters"
@@ -425,12 +429,17 @@ export function QueueView({
           setTrail(next);
         }}
       />
-      {currentSync?.lastSuccessAt && (
+      {currentSync && (currentSync.lastSuccessAt || currentSync.mode === "connected") && (
         <footer className="workspace-sync">
-          <span title={formatTime(currentSync.lastSuccessAt)}>
-            {currentSync.stale ? "Last successful sync" : "Last updated"}:{" "}
-            {formatTime(currentSync.lastSuccessAt)}
-          </span>
+          {currentSync.lastSuccessAt && (
+            <time
+              dateTime={currentSync.lastSuccessAt}
+              title={formatTime(currentSync.lastSuccessAt)}
+            >
+              {currentSync.stale ? "Last successful sync" : "Last updated"}:{" "}
+              {formatActivityTime(currentSync.lastSuccessAt)}
+            </time>
+          )}
           <button
             className="icon-button quiet-button"
             type="button"

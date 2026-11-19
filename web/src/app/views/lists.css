@@ -278,7 +278,11 @@
   background: #1e1828;
   color: #c3b6df;
 }
-.row-tag:is([data-review-kind="thread_reply"], [data-review-kind="followup"]) {
+.row-tag:is(
+  [data-review-kind="thread_reply"],
+  [data-review-kind="discussion_update"],
+  [data-review-kind="followup"]
+) {
   border-color: #5b4c2c;
   background: var(--amber-bg);
   color: var(--amber);
@@ -286,21 +290,36 @@
 .row-tag:is(
   [data-review-kind="agent_input"],
   [data-review-kind="needs_input"],
-  [data-review-kind="agent_question"]
+  [data-review-kind="permission_required"],
+  [data-review-kind="action_needs_input"]
 ) {
   border-color: #6b3a45;
   background: var(--rose-bg);
   color: var(--rose);
 }
-.row-tag:is([data-review-kind="working"], [data-review-kind="reviewed"]) {
+.row-tag:is(
+  [data-review-kind="working"],
+  [data-review-kind="lead_working"],
+  [data-review-kind="session_working"],
+  [data-review-kind="reviewed"]
+) {
   border-color: #354c41;
   background: var(--green-bg);
   color: var(--green);
 }
-.row-tag:is([data-review-kind="report_ready"], [data-review-kind="waiting_author"]) {
+.row-tag:is(
+  [data-review-kind="report_ready"],
+  [data-review-kind="followup_pending"],
+  [data-review-kind="waiting_author"]
+) {
   border-color: #344765;
   background: var(--selected);
   color: var(--link);
+}
+.row-tag:is([data-review-kind="report_failed"], [data-review-kind="agent_failed"]) {
+  border-color: #74453e;
+  background: var(--red-bg);
+  color: var(--red);
 }
 .row-checkbox {
   display: inline-grid;
@@ -347,6 +366,10 @@
   .queue-filters > .select-filter {
     flex: 1 1 auto;
     justify-content: space-between;
+  }
+  .queue-filters > .scope-filter {
+    flex: 0 1 auto;
+    justify-content: flex-start;
   }
   .queue-filters .filter-value {
     max-width: 96px;
