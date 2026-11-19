@@ -17,6 +17,7 @@ CREATE TABLE actions (
     approval_state TEXT NOT NULL CHECK (approval_state IN ('not_requested', 'unknown', 'absent', 'confirmed')),
     approval_observed_at_ms INTEGER,
     attempts INTEGER NOT NULL CHECK (attempts BETWEEN 0 AND 3),
+    uncertainty_checks INTEGER NOT NULL DEFAULT 0 CHECK (uncertainty_checks BETWEEN 0 AND 4),
     revision INTEGER NOT NULL CHECK (revision > 0),
     authority_verified INTEGER NOT NULL CHECK (authority_verified IN (0, 1)),
     due_at_ms INTEGER,

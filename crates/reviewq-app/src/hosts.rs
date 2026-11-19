@@ -370,6 +370,11 @@ pub enum DeliveryWork {
 pub enum DeliveryObservation {
     /// The host proved no native input occurred and the same delivery can retry.
     NotSubmitted,
+    /// The input is observable, but starting an independent turn is unproved.
+    UncertainInput {
+        delivery_id: DeliveryId,
+        input: ObservedInput,
+    },
     /// A native input provably correlated with this delivery ID.
     Started {
         delivery_id: DeliveryId,
@@ -445,6 +450,12 @@ pub trait LeadStore: Send + Sync {
 
     /// Rechecks the current dispatch fence and authority immediately before native I/O.
     fn authorize_dispatch(&self, claim: DeliveryClaim) -> AppFuture<'_, ()>;
+
+    /// Fresh-source proof requirements for exactly one current automatic claim.
+    fn workflow_requirements(
+        &self,
+        claim: &DeliveryClaim,
+    ) -> AppFuture<'_, crate::workflow::WorkflowRequirements>;
 
     /// Commits a matching claim and fence. Started also requires its observed
     /// delivery ID to match the claim. A stale observation returns conflict.

@@ -37,6 +37,24 @@ pub(super) fn complete(
             Some(&result),
         );
     }
+    if let Some(hold) =
+        crate::hosts::unresolved_workflow_input(db, &work.call.lead, &work.call.turn_id)?
+    {
+        if hold == AppError::Busy {
+            db.execute(
+                "UPDATE report_handoffs SET due_at_ms=?2 WHERE receipt_id=?1",
+                params![receipt, time.saturating_add(super::RECHECK_MS)],
+            )?;
+            return Ok(());
+        }
+        return reject(
+            tx,
+            &work,
+            artifact.as_ref(),
+            "workflow_turn_start_unproved",
+            Some(&result),
+        );
+    }
     let current = head(db, run)?;
     let base = db.query_row(
         "SELECT base_receipt_id, disposition_version, settings_revision FROM report_handoffs WHERE receipt_id=?1",

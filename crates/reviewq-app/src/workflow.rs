@@ -3,7 +3,8 @@
 use std::sync::Arc;
 
 use reviewq_domain::identity::{
-    ActionId, GitSha, NativeInputId, NativeTurnId, ReceiptId, ReportHash, Revision, SubmissionId,
+    ActionId, GitSha, MrIdentity, NativeInputId, NativeTurnId, ReceiptId, ReportHash, Revision,
+    SubmissionId,
 };
 use reviewq_domain::session::LeadTarget;
 
@@ -69,6 +70,7 @@ pub enum WorkflowHold {
     PendingNativeInput,
     UnknownSettings,
     MissingCompanion,
+    IdleSendUnavailable,
 }
 
 impl WorkflowHold {
@@ -79,6 +81,7 @@ impl WorkflowHold {
             Self::PendingNativeInput => "native_input_required",
             Self::UnknownSettings => "native_settings_unproved",
             Self::MissingCompanion => "native_companion_unavailable",
+            Self::IdleSendUnavailable => "native_idle_only_delivery_unavailable",
         }
     }
 }
@@ -97,6 +100,7 @@ pub enum WorkflowBinding {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct WorkflowGuard {
     pub binding: WorkflowBinding,
+    pub authority_revision: Revision,
     pub settings: Revision,
     pub head: GitSha,
     pub ready: ReadyWorkflow,
@@ -110,6 +114,76 @@ pub struct WorkflowAdmission {
     pub settings: Revision,
     pub head: GitSha,
     pub ready: ReadyWorkflow,
+}
+
+pub struct WorkflowRequirements {
+    pub identity: MrIdentity,
+    pub reviewer_id: u64,
+    pub requirement: WorkflowRequirement,
+}
+
+pub enum WorkflowRequirement {
+    Publication {
+        remaining_targets: Vec<crate::actions::CommentTarget>,
+        approval_pending: bool,
+    },
+    Followup {
+        discussions: Vec<SelectedDiscussion>,
+    },
+}
+
+pub struct SelectedDiscussion {
+    pub discussion_id: String,
+    pub original_note_ids: Vec<u64>,
+}
+
+impl WorkflowRequirements {
+    /// Verifies fresh provider evidence immediately before a workflow input may be sent.
+    pub fn check(
+        &self,
+        source: &crate::sources::WorkflowSnapshot,
+        pinned_head: &GitSha,
+    ) -> Result<(), crate::access::AppError> {
+        use crate::access::AppError;
+        if source.review.identity != self.identity
+            || &source.review.head_sha != pinned_head
+            || source.review.state != crate::queue::MergeRequestState::Open
+            || source.authenticated_actor != self.reviewer_id
+        {
+            return Err(AppError::StaleRevision);
+        }
+        match &self.requirement {
+            WorkflowRequirement::Publication {
+                remaining_targets,
+                approval_pending,
+            } => {
+                if (*approval_pending && source.personal_approval != Some(false))
+                    || remaining_targets.iter().any(|target| {
+                        !crate::actions::proves_target_absence(source, target, pinned_head)
+                    })
+                {
+                    return Err(AppError::Conflict);
+                }
+            }
+            WorkflowRequirement::Followup { discussions } => {
+                if source.personal_approval != Some(false)
+                    || discussions.iter().any(|expected| {
+                        !source.discussions.iter().any(|actual| {
+                            actual.id == expected.discussion_id
+                                && expected.original_note_ids.iter().all(|id| {
+                                    actual.notes.iter().any(|note| {
+                                        note.id == *id && note.author == self.reviewer_id
+                                    })
+                                })
+                        })
+                    })
+                {
+                    return Err(AppError::Conflict);
+                }
+            }
+        }
+        Ok(())
+    }
 }
 
 pub trait NativeWorkflowProof: Send + Sync {

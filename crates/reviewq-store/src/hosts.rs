@@ -23,7 +23,7 @@ use crate::workspace::{advance_queue, allow_review, configured, provider_label, 
 use crate::{SqliteStore, StoreError};
 
 mod delivery;
-pub(crate) use delivery::admit_workflow;
+pub(crate) use delivery::{admit_workflow, unresolved_workflow_input};
 mod messages;
 
 impl SqliteStore {
@@ -163,6 +163,18 @@ impl LeadStore for SqliteStore {
     fn authorize_dispatch(&self, claim: DeliveryClaim) -> AppFuture<'_, ()> {
         Box::pin(async move {
             self.read(move |tx| delivery::authorize_dispatch(tx, claim))
+                .await
+                .map_err(StoreError::app)
+        })
+    }
+
+    fn workflow_requirements(
+        &self,
+        claim: &DeliveryClaim,
+    ) -> AppFuture<'_, reviewq_app::workflow::WorkflowRequirements> {
+        let claim = claim.clone();
+        Box::pin(async move {
+            self.read(move |db| delivery::workflow_requirements(db, claim))
                 .await
                 .map_err(StoreError::app)
         })

@@ -2,6 +2,7 @@
 
 use reviewq_app::access::{Actor, AppError, AppFuture};
 mod commands;
+mod work;
 use reviewq_app::actions::{Action, ActionStore, Target};
 use reviewq_app::events::Snapshot;
 use reviewq_domain::identity::{ActionId, Revision, RunId};

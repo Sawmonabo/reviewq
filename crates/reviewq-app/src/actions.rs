@@ -1,6 +1,9 @@
 //! Exact native publication authority and independently observed target evidence.
 
 mod publication;
+mod work;
+pub(crate) use publication::proves_target_absence;
+pub use work::{PublicationRetry, PublicationWorkerStore, run_due_publications};
 
 pub use publication::{
     ActionCommandStore, ActionDeclaration, ActionWork, CommentTarget, PublicationEvidence,

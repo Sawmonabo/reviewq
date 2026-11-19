@@ -61,6 +61,7 @@ CREATE TABLE workflow_dispatch (
     action_id TEXT REFERENCES actions(action_id),
     batch_id TEXT,
     settings_revision INTEGER NOT NULL CHECK (settings_revision >= 0),
+    authority_revision INTEGER NOT NULL CHECK (authority_revision > 0),
     head_sha TEXT NOT NULL CHECK (length(head_sha) IN (40, 64)),
     model TEXT NOT NULL CHECK (length(model) BETWEEN 1 AND 128),
     effort TEXT NOT NULL CHECK (length(effort) BETWEEN 1 AND 64),
