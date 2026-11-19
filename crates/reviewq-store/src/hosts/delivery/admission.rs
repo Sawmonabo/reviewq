@@ -32,12 +32,8 @@ pub(in crate::hosts) fn admit(
     if registered != input.target {
         return Err(AppError::Conflict.into());
     }
-    if matches!(
-        input.purpose,
-        MessagePurpose::Publication
-            | MessagePurpose::ThreadFollowup
-            | MessagePurpose::CodexRecovery
-    ) || (input.purpose == MessagePurpose::ReportFeedback) != input.report_ref.is_some()
+    if input.purpose.requires_new_turn()
+        || (input.purpose == MessagePurpose::ReportFeedback) != input.report_ref.is_some()
     {
         return Err(AppError::InvalidRequest.into());
     }

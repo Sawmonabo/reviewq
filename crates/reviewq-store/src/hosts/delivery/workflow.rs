@@ -1,6 +1,6 @@
 use reviewq_app::access::{Actor, AppError};
 use reviewq_app::events::ResourceKey;
-use reviewq_app::hosts::{DeliveryOutcome, MessagePurpose, SubmitMessage};
+use reviewq_app::hosts::{DeliveryOutcome, SubmitMessage};
 use reviewq_app::workflow::{
     ReadyWorkflow, SelectedDiscussion, WorkflowAdmission, WorkflowBinding, WorkflowGuard,
     WorkflowRequirement, WorkflowRequirements,
@@ -28,28 +28,12 @@ pub(crate) fn admit_workflow(
         head: command.head,
         ready: command.ready,
     };
-    let (operation, purpose, batch, action, recovery) = match &guard.binding {
-        WorkflowBinding::Action(id) => (
-            "publication_retry",
-            MessagePurpose::Publication,
-            None,
-            Some(id.as_str()),
-            None,
-        ),
-        WorkflowBinding::Followup(id) => (
-            "followup_dispatch",
-            MessagePurpose::ThreadFollowup,
-            Some(id.as_str()),
-            None,
-            None,
-        ),
-        WorkflowBinding::Recovery(auth) => (
-            "codex_recovery",
-            MessagePurpose::CodexRecovery,
-            None,
-            None,
-            Some(auth.episode.as_str()),
-        ),
+    let (operation, batch, action, recovery) = match &guard.binding {
+        WorkflowBinding::Action(id) => ("publication_retry", None, Some(id.as_str()), None),
+        WorkflowBinding::Followup(id) => ("followup_dispatch", Some(id.as_str()), None, None),
+        WorkflowBinding::Recovery(auth) => {
+            ("codex_recovery", None, None, Some(auth.episode.as_str()))
+        }
     };
     if guard.ready.model.is_empty()
         || guard.ready.model.len() > 128
@@ -68,7 +52,7 @@ pub(crate) fn admit_workflow(
         target,
         submission_id: command.submission,
         text: command.body,
-        purpose,
+        purpose: guard.binding.message_purpose(),
         report_ref: None,
     };
     let digest = workflow_digest(&guard, &input);
