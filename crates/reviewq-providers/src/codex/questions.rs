@@ -1,19 +1,22 @@
 use std::collections::{HashMap, HashSet};
+use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use reviewq_app::access::{AppError, AppFuture};
 use reviewq_app::history::HistorySession;
 use reviewq_app::hosts::{
-    Question, QuestionAnswer, QuestionForm, QuestionOption, QuestionStatus, QuestionsPort,
+    Question, QuestionAccess, QuestionAdmission, QuestionAnswer, QuestionForm, QuestionKey,
+    QuestionOption, QuestionReceipt, QuestionStatus, QuestionsPort,
 };
-use reviewq_domain::identity::SubmissionId;
+use reviewq_domain::identity::ReportHash;
 use reviewq_domain::session::HostProvider;
 use serde::Deserialize;
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
-use uuid::Uuid;
 
 use super::Codex;
+use super::connection::AnswerError;
+use super::session::{Thread, ThreadStatus, canonical_cwd};
 
 const MAX_FORMS: usize = 64;
 const MAX_QUESTIONS: usize = 16;
@@ -34,15 +37,7 @@ struct Live {
 }
 
 struct Submission {
-    id: SubmissionId,
-    digest: [u8; 32],
     expires: Instant,
-}
-
-pub(super) struct AnswerProof {
-    pub request: String,
-    pub item: String,
-    pub digest: [u8; 32],
 }
 
 #[derive(Deserialize)]
@@ -77,38 +72,69 @@ struct NativeOption {
 impl QuestionsPort for Codex {
     fn questions(
         &self,
-        session: HistorySession,
+        access: QuestionAccess,
         request: Option<String>,
     ) -> AppFuture<'_, Vec<QuestionForm>> {
         Box::pin(async move {
+            let session = access.session();
             let native = session.binding.identity();
             if native.profile() != &self.profile || native.provider() != HostProvider::Codex {
                 return Err(AppError::NotFound);
             }
-            let thread = native.native_id().as_str();
-            let pending = self
+            let mut forms = self
                 .connection
-                .question_proofs(thread, request.as_deref())?;
-            if !pending.is_empty()
-                && let Ok(_permit) = self.question_proofs.try_acquire()
-                && let Ok(observed) = self.read_thread(native.native_id()).await
-                && let Some(path) = observed.path
-            {
-                for proof in pending {
-                    if crate::history::codex_question_answered(
-                        session.binding.clone(),
-                        path.clone(),
-                        proof.item.clone(),
-                        proof.digest,
-                    )
-                    .await
-                    .unwrap_or(false)
-                    {
-                        self.connection.question_answered(thread, proof)?;
+                .questions(native.native_id().as_str(), request.as_deref())?;
+            // A remembered socket handle can only describe the currently bound cwd and lineage.
+            // Durable receipts below remain readable with their independently verified file.
+            if !forms.is_empty() && self.question_thread(session, false).await.is_err() {
+                forms.clear();
+            }
+            let focused = request.is_some();
+            let receipts = access.attempts(request).await?;
+            let mut active = receipts
+                .iter()
+                .filter(|receipt| needs_question_proof(receipt, focused))
+                .take(2)
+                .count();
+            let verify = if active != 0 {
+                self.question_proofs.try_acquire().ok()
+            } else {
+                None
+            };
+            let path = if verify.is_some() {
+                self.question_readback_path(session).await
+            } else {
+                None
+            };
+            for mut receipt in receipts {
+                let form = forms.iter_mut().find(|form| receipt.matches(form));
+                if needs_question_proof(&receipt, focused)
+                    && active != 0
+                    && let Some(path) = &path
+                {
+                    active -= 1;
+                    self.reconcile_question(&access, &mut receipt, path.clone())
+                        .await?;
+                }
+                match form {
+                    Some(form) => {
+                        form.state = display_status(receipt.state, Some(form.state));
+                    }
+                    None => {
+                        let mut form = receipt.form();
+                        form.state = display_status(receipt.state, None);
+                        forms.push(form);
                     }
                 }
             }
-            self.connection.questions(thread, request.as_deref())
+            forms.sort_by_key(|form| {
+                !matches!(
+                    form.state,
+                    QuestionStatus::Pending | QuestionStatus::Submitting
+                )
+            });
+            forms.truncate(8);
+            Ok(forms)
         })
     }
 
@@ -119,31 +145,180 @@ impl QuestionsPort for Codex {
             {
                 return Err(AppError::NotFound);
             }
+            let digest = answer.digest()?;
+            if let Some(mut saved) = answer.replay(digest).await? {
+                if needs_question_proof(&saved, true)
+                    && let Ok(_permit) = self.question_proofs.try_acquire()
+                    && let Some(path) = self.question_readback_path(answer.session()).await
+                {
+                    self.reconcile_question(&answer.access, &mut saved, path)
+                        .await?;
+                }
+                return self.receipt_form(&answer.access, saved);
+            }
             let forms = self.connection.questions(
                 answer.identity().native_id().as_str(),
                 Some(&answer.request),
             )?;
-            let form = forms.first().ok_or(AppError::NotFound)?;
-            if form.state == QuestionStatus::Pending {
-                let _permit = self
-                    .question_proofs
-                    .try_acquire()
-                    .map_err(|_| AppError::Busy)?;
-                let session = answer.session();
-                if session.parent.is_some() {
-                    return Err(AppError::Unavailable);
-                }
-                let native = self.read_thread(answer.identity().native_id()).await?;
-                let path = native.path.ok_or(AppError::Unavailable)?;
-                crate::history::codex_question_opening(
-                    session.binding.clone(),
-                    path,
-                    form.item.as_str().to_owned(),
-                )
-                .await?;
+            let Some(form) = forms.into_iter().next() else {
+                return Err(AppError::NotFound);
+            };
+            if form.state != QuestionStatus::Pending {
+                return Ok(form);
             }
-            self.connection.answer(answer).await
+            let secret = answer.validate(&form)?;
+            let _permit = self
+                .question_proofs
+                .try_acquire()
+                .map_err(|_| AppError::Busy)?;
+            let session = answer.session();
+            let thread = self.question_thread(session, true).await?;
+            if !matches!(thread.status, ThreadStatus::Active { .. }) {
+                return Err(AppError::Conflict);
+            }
+            let page = self.turns(&thread.id, None, false, 1, false).await?;
+            if !page
+                .data
+                .first()
+                .is_some_and(|turn| turn.id == form.turn.as_str() && turn.status == "inProgress")
+            {
+                return Err(AppError::Conflict);
+            }
+            let path = thread.path.ok_or(AppError::Unavailable)?;
+            let anchor = crate::history::codex_question_opening(
+                session.clone(),
+                path,
+                form.item.as_str().to_owned(),
+            )
+            .await?;
+            let attempted = QuestionReceipt {
+                key: QuestionKey {
+                    request: form.request.clone(),
+                    turn: form.turn.clone(),
+                    item: form.item.clone(),
+                    anchor,
+                },
+                blocking: form.blocking,
+                state: QuestionStatus::Submitting,
+                digest: (!secret).then_some(digest),
+            };
+            let receipt = match answer.reserve(attempted).await? {
+                QuestionAdmission::Existing(receipt) => {
+                    return self.receipt_form(&answer.access, receipt);
+                }
+                QuestionAdmission::Reserved(receipt) => receipt,
+            };
+            let access = answer.access.clone();
+            match self.connection.answer(answer, form.clone()).await {
+                Ok(current) if current.state == QuestionStatus::Submitting => Ok(current),
+                Ok(current) => {
+                    if current.state == QuestionStatus::Unavailable {
+                        access.settle(&receipt, QuestionStatus::Unavailable).await?;
+                    }
+                    Ok(current)
+                }
+                Err(failure) => {
+                    let state = match failure {
+                        AnswerError::BeforeSend => QuestionStatus::Unavailable,
+                        AnswerError::Uncertain => QuestionStatus::Uncertain,
+                    };
+                    access.settle(&receipt, state).await?;
+                    Ok(QuestionForm { state, ..form })
+                }
+            }
         })
+    }
+}
+
+impl Codex {
+    async fn question_thread(
+        &self,
+        session: &HistorySession,
+        active: bool,
+    ) -> Result<Thread, AppError> {
+        let thread = self
+            .read_thread(session.binding.identity().native_id())
+            .await?;
+        let cwd_matches = if active {
+            canonical_cwd(thread.cwd.clone()).await? == *session.binding.cwd()
+        } else {
+            super::session::retained_cwd(&thread, session.binding.cwd()).await?
+        };
+        if !cwd_matches
+            || thread.parent_thread_id.as_deref()
+                != session
+                    .parent
+                    .as_ref()
+                    .map(|parent| parent.native_id.as_str())
+        {
+            return Err(AppError::Conflict);
+        }
+        Ok(thread)
+    }
+
+    async fn question_readback_path(&self, session: &HistorySession) -> Option<PathBuf> {
+        if let Some(path) = &session.source {
+            return Some(path.as_path().to_owned());
+        }
+        self.question_thread(session, false)
+            .await
+            .ok()
+            .and_then(|thread| thread.path)
+    }
+
+    fn receipt_form(
+        &self,
+        access: &QuestionAccess,
+        receipt: QuestionReceipt,
+    ) -> Result<QuestionForm, AppError> {
+        let forms = self.connection.questions(
+            access.session().binding.identity().native_id().as_str(),
+            Some(&receipt.key.request),
+        )?;
+        let live = forms.into_iter().find(|form| receipt.matches(form));
+        let state = display_status(receipt.state, live.as_ref().map(|form| form.state));
+        Ok(QuestionForm {
+            state,
+            ..live.unwrap_or_else(|| receipt.form())
+        })
+    }
+
+    async fn reconcile_question(
+        &self,
+        access: &QuestionAccess,
+        receipt: &mut QuestionReceipt,
+        path: PathBuf,
+    ) -> Result<(), AppError> {
+        if let Ok(Some(state)) = crate::history::codex_question_answered(
+            access.session().clone(),
+            path,
+            receipt.key.clone(),
+            receipt.digest,
+        )
+        .await
+        {
+            access.settle(receipt, state).await?;
+            receipt.state = state;
+        }
+        Ok(())
+    }
+}
+
+fn needs_question_proof(receipt: &QuestionReceipt, focused: bool) -> bool {
+    receipt.state.can_settle()
+        || (focused && receipt.state == QuestionStatus::Closed && receipt.digest.is_some())
+}
+
+fn display_status(durable: QuestionStatus, live: Option<QuestionStatus>) -> QuestionStatus {
+    match (durable, live) {
+        (QuestionStatus::Submitting, Some(QuestionStatus::Submitting)) => {
+            QuestionStatus::Submitting
+        }
+        (QuestionStatus::Submitting | QuestionStatus::Uncertain, Some(QuestionStatus::Closed)) => {
+            QuestionStatus::Closed
+        }
+        (QuestionStatus::Submitting, _) => QuestionStatus::Uncertain,
+        (durable, _) => durable,
     }
 }
 
@@ -207,10 +382,11 @@ impl Questions {
             || !visible(&native.thread_id, 256, false)
             || native.questions.is_empty()
             || native.questions.len() > MAX_QUESTIONS
-            || self
-                .0
-                .values()
-                .any(|live| live.thread == native.thread_id && live.native_id == native_id)
+            || self.0.values().any(|live| {
+                live.thread == native.thread_id
+                    && live.native_id == native_id
+                    && (live.form.state != QuestionStatus::Unavailable || live.submission.is_some())
+            })
         {
             return;
         }
@@ -254,7 +430,17 @@ impl Questions {
                 secret: question.is_secret,
             });
         }
-        let request = Uuid::new_v4().to_string();
+        let mut digest = Sha256::new();
+        for field in [&native.thread_id, &native.turn_id, &native.item_id] {
+            digest.update((field.len() as u64).to_be_bytes());
+            digest.update(field.as_bytes());
+        }
+        let request = ReportHash::from_sha256(digest.finalize().into()).to_string();
+        if self.0.get(&request).is_some_and(|prior| {
+            prior.form.state != QuestionStatus::Unavailable || prior.submission.is_some()
+        }) {
+            return;
+        }
         self.0.insert(
             request.clone(),
             Live {
@@ -302,6 +488,7 @@ impl Questions {
     pub(super) fn prepare(
         &mut self,
         answer: QuestionAnswer,
+        expected: QuestionForm,
     ) -> Result<(QuestionForm, Option<Value>), AppError> {
         self.prune();
         let live = self
@@ -309,41 +496,14 @@ impl Questions {
             .get_mut(&answer.request)
             .filter(|live| live.thread == answer.identity().native_id().as_str())
             .ok_or(AppError::NotFound)?;
-        let encoded = serde_json::to_vec(&answer.answers).map_err(|_| AppError::InvalidRequest)?;
-        if encoded.len() > FRAME_BUDGET {
-            return Err(AppError::PayloadTooLarge);
-        }
-        let digest: [u8; 32] = Sha256::digest(encoded).into();
-        if let Some(prior) = &live.submission {
-            if prior.id != answer.submission || prior.digest != digest {
-                return Err(AppError::Conflict);
-            }
-            return Ok((live.form.clone(), None));
-        }
         if live.form.state != QuestionStatus::Pending {
             return Ok((live.form.clone(), None));
         }
-        if ((!live.form.blocking || !answer.allows_secret())
-            && live.form.questions.iter().any(|question| question.secret))
-            || answer.answers.len() != live.form.questions.len()
-        {
-            return Err(AppError::InvalidRequest);
+        if live.form != expected || live.submission.is_some() {
+            return Err(AppError::Conflict);
         }
-        for question in &live.form.questions {
-            let Some([value]) = answer.answers.get(&question.id).map(Vec::as_slice) else {
-                return Err(AppError::InvalidRequest);
-            };
-            if !visible(value, 8192, true)
-                || (!question.allows_other
-                    && !question.options.is_empty()
-                    && !question.options.iter().any(|option| &option.label == value))
-            {
-                return Err(AppError::InvalidRequest);
-            }
-        }
+        answer.validate(&live.form)?;
         live.submission = Some(Submission {
-            id: answer.submission,
-            digest,
             expires: Instant::now() + Duration::from_secs(MAX_RESULT_SECONDS),
         });
         live.form.state = QuestionStatus::Submitting;
@@ -365,42 +525,6 @@ impl Questions {
                 QuestionStatus::Submitting => QuestionStatus::Uncertain,
                 existing => existing,
             };
-        }
-    }
-
-    pub(super) fn proofs(&self, thread: &str, request: Option<&str>) -> Vec<AnswerProof> {
-        let now = Instant::now();
-        self.0
-            .values()
-            .filter_map(|live| {
-                let submission = live.submission.as_ref()?;
-                if live.thread != thread
-                    || live.form.state != QuestionStatus::Closed
-                    || request.is_some_and(|request| live.form.request != request)
-                    || now > submission.expires + Duration::from_secs(25)
-                {
-                    return None;
-                }
-                Some(AnswerProof {
-                    request: live.form.request.clone(),
-                    item: live.form.item.as_str().to_owned(),
-                    digest: submission.digest,
-                })
-            })
-            .take(2)
-            .collect()
-    }
-
-    pub(super) fn confirmed(&mut self, thread: &str, proof: AnswerProof) {
-        if let Some(live) = self.0.get_mut(&proof.request)
-            && live.thread == thread
-            && live.form.item.as_str() == proof.item
-            && live
-                .submission
-                .as_ref()
-                .is_some_and(|submission| submission.digest == proof.digest)
-        {
-            live.form.state = QuestionStatus::Answered;
         }
     }
 

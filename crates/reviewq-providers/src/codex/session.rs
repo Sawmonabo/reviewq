@@ -26,7 +26,7 @@ pub(super) struct ThreadRead {
 pub(super) struct Thread {
     pub id: String,
     pub cwd: PathBuf,
-    parent_thread_id: Option<String>,
+    pub(super) parent_thread_id: Option<String>,
     source: Option<serde_json::Value>,
     pub path: Option<PathBuf>,
     pub status: ThreadStatus,
@@ -224,6 +224,16 @@ impl Codex {
         }
         Ok(found.thread)
     }
+}
+
+pub(super) async fn retained_cwd(
+    thread: &Thread,
+    expected: &AbsolutePath,
+) -> Result<bool, AppError> {
+    if thread.cwd == expected.as_path() {
+        return Ok(true);
+    }
+    Ok(canonical_cwd(thread.cwd.clone()).await? == *expected)
 }
 
 pub(super) async fn canonical_cwd(path: PathBuf) -> Result<AbsolutePath, AppError> {

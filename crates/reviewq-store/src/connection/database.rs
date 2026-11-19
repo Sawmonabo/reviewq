@@ -45,6 +45,8 @@ const SCHEMA: &str = concat!(
     include_str!("../schema/claude.sql"),
     "\n",
     include_str!("../schema/queue.sql"),
+    "\n",
+    include_str!("../schema/questions.sql"),
 );
 pub(super) const APPLICATION_ID: i64 = 0x5256_5132;
 pub(super) const FORMAT_ID: i64 = 1;

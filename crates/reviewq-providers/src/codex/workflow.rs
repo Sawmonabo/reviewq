@@ -6,7 +6,7 @@ use reviewq_app::workflow::{
     ReportCompletion, WorkflowHold, WorkflowReadiness, WorkflowTool,
 };
 use reviewq_domain::identity::{NativeInputId, NativeTurnId};
-use reviewq_domain::session::LeadTarget;
+use reviewq_domain::session::{HostProvider, LeadTarget};
 use serde::Deserialize;
 
 use super::Codex;
@@ -115,7 +115,15 @@ impl NativeWorkflowProof for Codex {
             if call.tool != WorkflowTool::Report {
                 return Err(AppError::Forbidden);
             }
-            let thread = self.verified_thread(&call.lead).await?;
+            let binding = call.lead.binding();
+            let native = binding.identity();
+            if native.provider() != HostProvider::Codex || native.profile() != &self.profile {
+                return Err(AppError::Forbidden);
+            }
+            let thread = self.read_thread(native.native_id()).await?;
+            if !super::session::retained_cwd(&thread, binding.cwd()).await? {
+                return Err(AppError::Conflict);
+            }
             let path = thread.path.ok_or(AppError::Unavailable)?;
             let result_entry: NativeInputId =
                 call.call_id.parse().map_err(|_| AppError::Conflict)?;
