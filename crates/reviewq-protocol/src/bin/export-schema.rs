@@ -13,6 +13,9 @@ use reviewq_protocol::queue::{QueuePageResponse, ReviewOverviewResponse, ReviewS
 use reviewq_protocol::{
     DeliveryReceiptResponse, EventCursorDto, Failure, RunDetailResponse, SendMessageRequest,
 };
+use reviewq_protocol::{
+    Success, actions, decisions, followups, launch, notifications, questions, reports, settings,
+};
 use schemars::{JsonSchema, generate::SchemaSettings};
 use serde_json::{Value, json};
 
@@ -48,9 +51,39 @@ fn main() -> Result<(), Box<dyn Error>> {
     registry.response::<HistoryPlanResponse>("HistoryPlanResponse")?;
     registry.response::<HistoryContentResponse>("HistoryContentResponse")?;
     registry.response::<DeliveryReceiptResponse>("DeliveryReceiptResponse")?;
+    registry.response::<reviewq_protocol::queue::RefreshResponse>("RefreshResponse")?;
+    registry.response::<launch::CatalogResponse>("RunCatalogResponse")?;
+    registry.response::<launch::PreviewResponse>("RunPreviewResponse")?;
+    registry.response::<launch::ReceiptResponse>("LaunchReceiptResponse")?;
+    registry.response::<questions::FormsResponse>("QuestionFormsResponse")?;
+    registry.response::<questions::AnswerResponse>("QuestionAnswerResponse")?;
+    registry.response::<Success<decisions::DecisionResult>>("ReviewDecisionResponse")?;
+    registry.response::<Success<notifications::NotificationPage>>("NotificationPageResponse")?;
+    registry.response::<Success<notifications::StateResult>>("NotificationStateResponse")?;
+    registry.response::<Success<followups::Enrollment>>("FollowupEnrollmentResponse")?;
+    registry.response::<Success<followups::Preferences>>("FollowupPreferencesResponse")?;
+    registry.response::<Success<followups::MonitorReceipt>>("FollowupMonitorResponse")?;
+    registry.response::<Success<Option<actions::Action>>>("CurrentActionResponse")?;
+    registry.response::<Success<reports::ReportView>>("ReportViewResponse")?;
+    registry.response::<Success<reports::ReportHistory>>("ReportHistoryResponse")?;
+    registry.response::<Success<reports::ReportSection>>("ReportSectionResponse")?;
+    registry.response::<Success<reports::CandidateReport>>("ReportCandidateResponse")?;
+    registry.response::<Success<reports::ReportContext>>("ReportContextResponse")?;
     registry.response::<Failure>("Failure")?;
     registry.event::<InvalidateEvent>("InvalidateEvent")?;
     registry.event::<ResetEvent>("ResetEvent")?;
+    registry.request::<settings::SaveSettings>("SaveSettings")?;
+    registry.request::<launch::CatalogRequest>("RunCatalogRequest")?;
+    registry.request::<launch::PrepareRequest>("RunPrepareRequest")?;
+    registry.request::<launch::StartRequest>("RunStartRequest")?;
+    registry.request::<questions::Answer>("QuestionAnswerRequest")?;
+    registry.request::<decisions::DecisionRequest>("ReviewDecisionRequest")?;
+    registry.request::<decisions::CheckpointRequest>("ReviewCheckpointRequest")?;
+    registry.request::<notifications::StateRequest>("NotificationStateRequest")?;
+    registry.request::<followups::PreferencesRequest>("FollowupPreferencesRequest")?;
+    registry.request::<followups::ConfigureRequest>("FollowupConfigureRequest")?;
+    registry.request::<followups::MonitorRequest>("FollowupMonitorRequest")?;
+    registry.request::<reports::FeedbackRequest>("ReportFeedbackRequest")?;
 
     let mut output = io::stdout().lock();
     serde_json::to_writer_pretty(
@@ -102,13 +135,45 @@ impl Registry {
             return Err(format!("expected object schema for {name}").into());
         };
         root.remove("$schema");
+        let mut renames = BTreeMap::new();
         if let Some(Value::Object(definitions)) = root.remove("definitions") {
-            for (definition_name, definition) in definitions {
-                self.insert_definition(definition_name, definition)?;
+            loop {
+                let mut changed = false;
+                for (field, definition) in &definitions {
+                    if renames.contains_key(field) {
+                        continue;
+                    }
+                    if field == name
+                        || self.definitions.get(field).is_some_and(|existing| {
+                            let mut incoming = definition.clone();
+                            rewrite_references(&mut incoming, &renames);
+                            existing != &incoming
+                        })
+                    {
+                        renames.insert(field.clone(), format!("{name}{field}"));
+                        changed = true;
+                    }
+                }
+                if !changed {
+                    break;
+                }
+            }
+            for (definition_name, mut definition) in definitions {
+                rewrite_references(&mut definition, &renames);
+                if let Some(owner) = renames.get(&definition_name) {
+                    if let Some(object) = definition.as_object_mut() {
+                        object.insert("title".into(), json!(owner));
+                    }
+                    self.insert_definition(owner.clone(), definition)?;
+                } else {
+                    self.insert_definition(definition_name, definition)?;
+                }
             }
         }
         root.insert("title".into(), json!(name));
-        self.insert_definition(name.into(), Value::Object(root))
+        let mut root = Value::Object(root);
+        rewrite_references(&mut root, &renames);
+        self.insert_definition(name.into(), root)
     }
 
     fn insert_definition(&mut self, name: String, schema: Value) -> Result<(), Box<dyn Error>> {
@@ -120,5 +185,27 @@ impl Registry {
             self.definitions.insert(name, schema);
         }
         Ok(())
+    }
+}
+
+fn rewrite_references(schema: &mut Value, renames: &BTreeMap<String, String>) {
+    match schema {
+        Value::Object(object) => {
+            if let Some(Value::String(reference)) = object.get_mut("$ref")
+                && let Some(prefix) = reference.strip_prefix("#/definitions/")
+                && let Some(mapped) = renames.get(prefix)
+            {
+                *reference = format!("#/definitions/{mapped}");
+            }
+            for value in object.values_mut() {
+                rewrite_references(value, renames);
+            }
+        }
+        Value::Array(items) => {
+            for item in items {
+                rewrite_references(item, renames);
+            }
+        }
+        _ => (),
     }
 }
