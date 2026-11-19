@@ -19,7 +19,10 @@ use crate::history::{
     Cancel, claude_anchor, claude_confirm_prompt, verified_claude_child, verified_claude_source,
 };
 
+mod cli;
+pub(crate) mod jobs;
 mod workflow;
+pub use cli::ClaudeCli;
 pub use workflow::ClaudeWorkflow;
 
 pub struct Claude {
