@@ -21,8 +21,8 @@ use reviewq_app::sources::{ReviewSourceReader, SourceRefreshStore};
 use reviewq_app::workspace::{WorkspaceConfig, WorkspaceStore};
 use reviewq_domain::session::{AbsolutePath, HostProvider};
 use reviewq_providers::{
-    Claude, ClaudeWorkflow, Codex, FileHistory, GitLab, RegisteredReportFiles, SourceAccounts,
-    SourceNetwork, Terminal, TerminalProvider, Workflows,
+    Claude, ClaudeCli, ClaudeWorkflow, Codex, FileHistory, GitLab, RegisteredReportFiles,
+    SourceAccounts, SourceNetwork, Terminal, TerminalProvider, Workflows,
 };
 use reviewq_store::SqliteStore;
 use reviewq_transport::{ServiceEndpoint, ServiceIdentity, WorkflowIntegration};
@@ -206,18 +206,6 @@ pub(crate) async fn serve(profile: PathBuf, options: Serve) -> Result<(), Failur
         _ => None,
     };
     let host = codex.clone().map(|host| host as Arc<dyn NativeHost>);
-    let skills = NativeSkills {
-        codex: codex.clone().map(|host| host as Arc<dyn NativeSkillReader>),
-        claude: None,
-    };
-    let models = NativeModels {
-        codex: codex.clone().map(|host| host as Arc<dyn NativeModelReader>),
-        claude: None,
-    };
-    let launchers = NativeLaunchers {
-        codex: codex.clone().map(|host| host as Arc<dyn NativeLauncher>),
-        claude: None,
-    };
     let report_files = Arc::new(RegisteredReportFiles);
     let claude_home = match options.claude_home {
         Some(home) => Some(home),
@@ -233,7 +221,7 @@ pub(crate) async fn serve(profile: PathBuf, options: Serve) -> Result<(), Failur
         Arc::new(ClaudeWorkflow::new(native.clone(), store.clone()))
             as Arc<dyn reviewq_app::workflow::NativeWorkflowProof>
     });
-    let workflow = Arc::new(Workflows::new(codex).with_claude(claude_workflow));
+    let workflow = Arc::new(Workflows::new(codex.clone()).with_claude(claude_workflow));
     let sends_allowed = !options.validation && (host.is_some() || claude.is_some());
     let claude = claude.map(|native| native as Arc<dyn ClaudeCompanion>);
     let claude_executable = options.claude_bin.or_else(|| {
@@ -243,6 +231,28 @@ pub(crate) async fn serve(profile: PathBuf, options: Serve) -> Result<(), Failur
             options.validation,
         )
     });
+    let claude_cli = claude_executable
+        .clone()
+        .zip(claude_home.clone())
+        .map(|(executable, home)| ClaudeCli::new(executable, home, None))
+        .transpose()?
+        .map(Arc::new);
+    let skills = NativeSkills {
+        codex: codex.clone().map(|host| host as Arc<dyn NativeSkillReader>),
+        claude: claude_cli
+            .clone()
+            .map(|host| host as Arc<dyn NativeSkillReader>),
+    };
+    let models = NativeModels {
+        codex: codex.clone().map(|host| host as Arc<dyn NativeModelReader>),
+        claude: claude_cli
+            .clone()
+            .map(|host| host as Arc<dyn NativeModelReader>),
+    };
+    let launchers = NativeLaunchers {
+        codex: codex.map(|host| host as Arc<dyn NativeLauncher>),
+        claude: claude_cli.map(|host| host as Arc<dyn NativeLauncher>),
+    };
     let terminal_provider = |executable: Option<PathBuf>, profile: Option<PathBuf>| {
         executable
             .zip(profile)
