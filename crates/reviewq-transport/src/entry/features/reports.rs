@@ -1,4 +1,7 @@
+mod handoff;
 mod mutations;
+
+pub(super) use handoff::{accepted, handoff, handoff_status};
 
 pub(super) use mutations::{feedback, set_disposition, viewed};
 

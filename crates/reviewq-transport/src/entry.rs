@@ -16,8 +16,9 @@ use reviewq_app::followups::FollowupStore;
 use reviewq_app::hosts::{LeadStore, MessageHistoryStore, NativeHost};
 use reviewq_app::notifications::InboxStore;
 use reviewq_app::queue::{QueueStore, ReviewLookup};
-use reviewq_app::reports::{ReportMutationStore, ReportStore};
+use reviewq_app::reports::{ReportCaptureStore, ReportMutationStore, ReportStore};
 use reviewq_app::sources::{ReviewSourceReader, SourceRefreshStore, refresh_queue};
+use reviewq_app::workflow::NativeWorkflowProof;
 use reviewq_app::workspace::WorkspaceStore;
 use reviewq_protocol::queue::QueueSync;
 use reviewq_protocol::{EventCursorDto, Success};
@@ -42,11 +43,38 @@ use error::{ApiBytes, ApiError};
 
 /// Shared application ports for one ReviewQ listener pair.
 pub trait Store:
-    WorkspaceStore + QueueStore + ReviewLookup + EventLog + LeadStore + SourceRefreshStore + ReportStore + ReportMutationStore + MessageHistoryStore + InboxStore + DecisionStore + ActionStore + FollowupStore
+    WorkspaceStore
+    + QueueStore
+    + ReviewLookup
+    + EventLog
+    + LeadStore
+    + SourceRefreshStore
+    + ReportStore
+    + ReportMutationStore
+    + ReportCaptureStore
+    + MessageHistoryStore
+    + InboxStore
+    + DecisionStore
+    + ActionStore
+    + FollowupStore
 {
 }
-impl<S: WorkspaceStore + QueueStore + ReviewLookup + EventLog + LeadStore + SourceRefreshStore + ReportStore + ReportMutationStore + MessageHistoryStore + InboxStore + DecisionStore + ActionStore + FollowupStore>
-    Store for S
+impl<
+    S: WorkspaceStore
+        + QueueStore
+        + ReviewLookup
+        + EventLog
+        + LeadStore
+        + SourceRefreshStore
+        + ReportStore
+        + ReportMutationStore
+        + ReportCaptureStore
+        + MessageHistoryStore
+        + InboxStore
+        + DecisionStore
+        + ActionStore
+        + FollowupStore,
+> Store for S
 {
 }
 
@@ -56,6 +84,7 @@ pub(super) struct Entry {
     store: Arc<dyn Store>,
     source: Option<Arc<dyn ReviewSourceReader>>,
     host: Option<Arc<dyn NativeHost>>,
+    workflow: Option<Arc<dyn NativeWorkflowProof>>,
     sends_allowed: bool,
     auth: Auth,
     refresh: Mutex<Option<watch::Receiver<RefreshResult>>>,
@@ -99,10 +128,24 @@ pub fn router(
     endpoint: ServiceEndpoint,
     web: &Path,
 ) -> Router {
+    router_with_workflow(store, source, host, None, sends_allowed, endpoint, web)
+}
+
+/// Mounts the service with the native reader that can prove report and action tool calls.
+pub fn router_with_workflow(
+    store: Arc<dyn Store>,
+    source: Option<Arc<dyn ReviewSourceReader>>,
+    host: Option<Arc<dyn NativeHost>>,
+    workflow: Option<Arc<dyn NativeWorkflowProof>>,
+    sends_allowed: bool,
+    endpoint: ServiceEndpoint,
+    web: &Path,
+) -> Router {
     let entry = Arc::new(Entry {
         store,
         source,
         host,
+        workflow,
         sends_allowed,
         auth: Auth::new(endpoint),
         refresh: Mutex::new(None),

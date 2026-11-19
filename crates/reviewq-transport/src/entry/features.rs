@@ -51,6 +51,18 @@ pub(super) fn routes() -> Router<Arc<Entry>> {
             "/runs/{run_id}/report/feedback",
             axum::routing::post(reports::feedback).layer(DefaultBodyLimit::max(160 * 1024)),
         )
+        .route(
+            "/native/reports/accepted",
+            axum::routing::post(reports::accepted),
+        )
+        .route(
+            "/native/reports/handoff",
+            axum::routing::post(reports::handoff).layer(DefaultBodyLimit::max(144 * 1024)),
+        )
+        .route(
+            "/native/reports/handoff-status",
+            axum::routing::post(reports::handoff_status).layer(DefaultBodyLimit::max(144 * 1024)),
+        )
         .route("/runs/{run_id}/report", get(reports::current))
         .route("/runs/{run_id}/report/history", get(reports::history))
         .route("/runs/{run_id}/report/context", get(reports::context))

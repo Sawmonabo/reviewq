@@ -2,4 +2,6 @@
 
 mod entry;
 
-pub use entry::{ControlRequest, ServiceEndpoint, ServiceIdentity, Store, router};
+pub use entry::{
+    ControlRequest, ServiceEndpoint, ServiceIdentity, Store, router, router_with_workflow,
+};

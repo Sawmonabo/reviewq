@@ -1,5 +1,14 @@
 //! Review reports, immutable source reads and finding projections.
 
+mod capture;
+mod index;
+
+pub use capture::{
+    AcceptedReport, ArtifactChunk, CHUNK_BYTES, CapturedArtifact, Declaration, HandoffReceipt,
+    HandoffState, ReportCaptureStore, ReportFileSource, ReportWork, RevisionEvidence, Source,
+    reconcile_reports,
+};
+
 use reviewq_domain::identity::{GitSha, ReceiptId, ReportHash, Revision, RunId};
 
 use crate::access::{Actor, AppError, AppFuture};

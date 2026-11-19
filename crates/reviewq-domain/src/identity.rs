@@ -97,6 +97,18 @@ text_identity!(
     ReportHash,
     |value: &str| lowercase_hex(value, 64)
 );
+impl ReportHash {
+    /// Formats a verified SHA-256 digest in the canonical hexadecimal representation.
+    pub fn from_sha256(digest: [u8; 32]) -> Self {
+        use std::fmt::Write as _;
+        let mut text = String::with_capacity(64);
+        for byte in digest {
+            write!(&mut text, "{byte:02x}").expect("writing to a String");
+        }
+        Self(text.into_boxed_str())
+    }
+}
+
 text_identity!(
     /// The stable checkout-grant ID. This contains no bearer credential.
     GrantId,

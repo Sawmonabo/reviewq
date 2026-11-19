@@ -1,5 +1,6 @@
 //! Scoped reads over accepted report versions and their immutable bytes.
 
+mod capture;
 mod context;
 mod mutations;
 

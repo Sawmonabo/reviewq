@@ -283,3 +283,9 @@ pub struct FeedbackRequest {
     pub quote_ref: Option<QuoteRef>,
     pub text: crate::MessageTextDto,
 }
+
+mod handoff;
+pub use handoff::{
+    AcceptedReport, Handoff, HandoffCommand, HandoffReceipt, HandoffState, NativeContext,
+    NativeReportAddress, ReportRevision, ReportSource, ReportVerdict,
+};
