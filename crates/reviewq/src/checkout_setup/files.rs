@@ -125,6 +125,10 @@ pub(super) fn forget(profile: &Path, common: &Path) -> Result<(), Failure> {
 }
 
 pub(super) fn read(path: &Path) -> Result<Option<Existing>, Failure> {
+    read_limited(path, FILE_LIMIT)
+}
+
+pub(super) fn read_limited(path: &Path, limit: u64) -> Result<Option<Existing>, Failure> {
     let flags = (OFlags::NOFOLLOW | OFlags::NONBLOCK).bits() as i32;
     let file = match OpenOptions::new().read(true).custom_flags(flags).open(path) {
         Ok(file) => file,
@@ -140,8 +144,8 @@ pub(super) fn read(path: &Path) -> Result<Option<Existing>, Failure> {
         return Err("Expected an owned regular checkout file.".into());
     }
     let mut bytes = Vec::new();
-    file.take(FILE_LIMIT + 1).read_to_end(&mut bytes)?;
-    if bytes.len() as u64 > FILE_LIMIT {
+    file.take(limit + 1).read_to_end(&mut bytes)?;
+    if bytes.len() as u64 > limit {
         return Err("Checkout file exceeds the operation limit.".into());
     }
     Ok(Some(Existing {

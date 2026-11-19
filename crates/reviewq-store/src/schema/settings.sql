@@ -44,6 +44,7 @@ CREATE TABLE checkout_projections (
     suppressed INTEGER NOT NULL CHECK (suppressed IN (0, 1)),
     ready INTEGER NOT NULL CHECK (ready IN (0, 1)),
     generation INTEGER NOT NULL DEFAULT 0 CHECK (generation >= 0),
+    requested_topology BLOB CHECK (length(requested_topology) = 32),
     issue TEXT CHECK (length(CAST(issue AS BLOB)) <= 1024),
     CHECK (ready=0 OR (desired=1 AND suppressed=0 AND issue IS NULL))
 ) STRICT, WITHOUT ROWID;

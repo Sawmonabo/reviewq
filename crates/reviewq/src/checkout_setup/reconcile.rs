@@ -158,7 +158,7 @@ async fn one(
             },
         )
         .await?;
-    let observe = changes.apply().await?;
+    changes.apply().await?;
     if let Err(error) = store
         .finish_checkout_projection(job.clone(), ProjectionOutcome::Applied(changes.verifier))
         .await
@@ -167,5 +167,5 @@ async fn one(
         return Err(error.into());
     }
     changes.finish()?;
-    Ok(observe.then_some(topology))
+    Ok(Some(topology))
 }

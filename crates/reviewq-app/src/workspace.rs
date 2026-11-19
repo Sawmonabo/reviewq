@@ -109,6 +109,7 @@ pub trait WorkspaceStore: Send + Sync {
         actor: Actor,
         settings: Revision,
         common_dir: AbsolutePath,
+        topology: [u8; 32],
     ) -> AppFuture<'_, Snapshot<bool>>;
 
     /// Replaces active memberships and checkout authority under one settings revision.

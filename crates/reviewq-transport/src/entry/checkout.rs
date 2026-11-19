@@ -40,6 +40,7 @@ enum Command {
     ProjectWorktree {
         settings_revision: RevisionDto,
         common_dir: PathBuf,
+        topology: String,
     },
 }
 
@@ -164,13 +165,19 @@ async fn apply(entry: &Entry, input: Command) -> Result<Success<GrantResponse>, 
         Command::ProjectWorktree {
             settings_revision,
             common_dir,
+            topology,
         } => {
             let common = directory(common_dir).await?;
             let revision = Revision::try_from(settings_revision.get())
                 .map_err(|_| AppError::InvalidRequest)?;
+            let topology = URL_SAFE_NO_PAD
+                .decode(topology)
+                .ok()
+                .and_then(|bytes| bytes.try_into().ok())
+                .ok_or(AppError::InvalidRequest)?;
             let stored = entry
                 .store
-                .request_checkout_projection(actor, revision, common)
+                .request_checkout_projection(actor, revision, common, topology)
                 .await?;
             success(
                 GrantResponse::Scheduled {
