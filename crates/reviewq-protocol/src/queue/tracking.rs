@@ -37,6 +37,7 @@ pub struct TicketDetail {
     pub assignee: Option<String>,
     pub assignee_id: Option<String>,
     pub description: Option<String>,
+    #[cfg_attr(feature = "schema", schemars(range(min = 0)))]
     pub estimate: Option<f64>,
     pub warnings: Vec<&'static str>,
     #[serde(flatten)]

@@ -32,6 +32,7 @@ export type HistoryNavigation1 =
   | {
       groups: PromptGroup[];
       kind: "overview";
+      nextWindowCursor?: HistoryCursorDto;
       total: SafeCountDto;
       [k: string]: unknown;
     }

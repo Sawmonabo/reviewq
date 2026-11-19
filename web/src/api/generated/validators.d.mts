@@ -20,6 +20,7 @@ import type {
   SaveSettings,
   SendMessageRequest,
   TestConnection,
+  TrackReviewRequest,
   CatalogResponse,
   CurrentActionResponse,
   DeliveryReceiptResponse,
@@ -39,6 +40,7 @@ import type {
   QuestionAnswerResponse,
   QuestionFormsResponse,
   QueuePageResponse,
+  QueueSyncResponse,
   RefreshResponse,
   ReportCandidateResponse,
   ReportContextResponse,
@@ -53,6 +55,8 @@ import type {
   RunPreviewResponse,
   SettingsResponse,
   TerminalResponse,
+  TicketDetailResponse,
+  TrackReviewResponse,
   VerifiedConnectionResponse,
 } from "./contracts.js";
 
@@ -95,6 +99,9 @@ export function isSendMessageRequest(
   value: unknown,
 ): value is SendMessageRequest;
 export function isTestConnection(value: unknown): value is TestConnection;
+export function isTrackReviewRequest(
+  value: unknown,
+): value is TrackReviewRequest;
 export function isCatalogResponse(value: unknown): value is CatalogResponse;
 export function isCurrentActionResponse(
   value: unknown,
@@ -146,6 +153,7 @@ export function isQuestionFormsResponse(
   value: unknown,
 ): value is QuestionFormsResponse;
 export function isQueuePageResponse(value: unknown): value is QueuePageResponse;
+export function isQueueSyncResponse(value: unknown): value is QueueSyncResponse;
 export function isRefreshResponse(value: unknown): value is RefreshResponse;
 export function isReportCandidateResponse(
   value: unknown,
@@ -180,6 +188,12 @@ export function isRunPreviewResponse(
 ): value is RunPreviewResponse;
 export function isSettingsResponse(value: unknown): value is SettingsResponse;
 export function isTerminalResponse(value: unknown): value is TerminalResponse;
+export function isTicketDetailResponse(
+  value: unknown,
+): value is TicketDetailResponse;
+export function isTrackReviewResponse(
+  value: unknown,
+): value is TrackReviewResponse;
 export function isVerifiedConnectionResponse(
   value: unknown,
 ): value is VerifiedConnectionResponse;

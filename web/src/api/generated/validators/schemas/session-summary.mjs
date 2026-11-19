@@ -2,7 +2,7 @@
 import { func0 } from "../runtime.mjs";
 import { validate25 } from "./checkpoint-id-dto.mjs";
 import { validate123 } from "./host-provider-dto.mjs";
-function validate827(
+function validate833(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -20,7 +20,7 @@ function validate827(
         ((data.provider === undefined || !func0.call(data, "provider")) &&
           (missing0 = "provider"))
       ) {
-        validate827.errors = [
+        validate833.errors = [
           {
             instancePath,
             schemaPath: "#/required",
@@ -87,7 +87,7 @@ function validate827(
               vErrors.push(err1);
             }
             errors++;
-            validate827.errors = vErrors;
+            validate833.errors = vErrors;
             return false;
           } else {
             errors = _errs2;
@@ -152,7 +152,7 @@ function validate827(
         }
       }
     } else {
-      validate827.errors = [
+      validate833.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -163,7 +163,7 @@ function validate827(
       return false;
     }
   }
-  validate827.errors = vErrors;
+  validate833.errors = vErrors;
   return errors === 0;
 }
-export { validate827 };
+export { validate833 };

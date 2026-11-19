@@ -14,3 +14,4 @@ export type * from "./contracts/queue.js";
 export type * from "./contracts/registry.js";
 export type * from "./contracts/reports.js";
 export type * from "./contracts/settings.js";
+export type * from "./contracts/tickets.js";

@@ -2,9 +2,9 @@
 import { func0 } from "../runtime.mjs";
 import { validate102 } from "./report-hash-dto.mjs";
 import { validate25 } from "./checkpoint-id-dto.mjs";
-import { validate230 } from "./evidence.mjs";
-import { validate207 } from "./utc-timestamp-dto.mjs";
-function validate227(
+import { validate232 } from "./evidence.mjs";
+import { validate209 } from "./utc-timestamp-dto.mjs";
+function validate229(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -26,7 +26,7 @@ function validate227(
         ((data.observedAt === undefined || !func0.call(data, "observedAt")) &&
           (missing0 = "observedAt"))
       ) {
-        validate227.errors = [
+        validate229.errors = [
           {
             instancePath,
             schemaPath: "#/required",
@@ -114,7 +114,7 @@ function validate227(
                 vErrors.push(err1);
               }
               errors++;
-              validate227.errors = vErrors;
+              validate229.errors = vErrors;
               return false;
             } else {
               errors = _errs3;
@@ -134,7 +134,7 @@ function validate227(
             if (data.evidence !== undefined && func0.call(data, "evidence")) {
               const _errs7 = errors;
               if (
-                !validate230(data.evidence, {
+                !validate232(data.evidence, {
                   instancePath: instancePath + "/evidence",
                   parentData: data,
                   parentDataProperty: "evidence",
@@ -143,8 +143,8 @@ function validate227(
               ) {
                 vErrors =
                   vErrors === null
-                    ? validate230.errors
-                    : vErrors.concat(validate230.errors);
+                    ? validate232.errors
+                    : vErrors.concat(validate232.errors);
                 errors = vErrors.length;
               }
               var valid0 = _errs7 === errors;
@@ -206,7 +206,7 @@ function validate227(
                     vErrors.push(err3);
                   }
                   errors++;
-                  validate227.errors = vErrors;
+                  validate229.errors = vErrors;
                   return false;
                 } else {
                   errors = _errs9;
@@ -233,7 +233,7 @@ function validate227(
                   let valid3 = false;
                   const _errs15 = errors;
                   if (
-                    !validate207(data4, {
+                    !validate209(data4, {
                       instancePath: instancePath + "/observedAt",
                       parentData: data,
                       parentDataProperty: "observedAt",
@@ -242,8 +242,8 @@ function validate227(
                   ) {
                     vErrors =
                       vErrors === null
-                        ? validate207.errors
-                        : vErrors.concat(validate207.errors);
+                        ? validate209.errors
+                        : vErrors.concat(validate209.errors);
                     errors = vErrors.length;
                   }
                   var _valid2 = _errs15 === errors;
@@ -280,7 +280,7 @@ function validate227(
                       vErrors.push(err5);
                     }
                     errors++;
-                    validate227.errors = vErrors;
+                    validate229.errors = vErrors;
                     return false;
                   } else {
                     errors = _errs14;
@@ -302,7 +302,7 @@ function validate227(
         }
       }
     } else {
-      validate227.errors = [
+      validate229.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -313,7 +313,7 @@ function validate227(
       return false;
     }
   }
-  validate227.errors = vErrors;
+  validate229.errors = vErrors;
   return errors === 0;
 }
-export { validate227 };
+export { validate229 };

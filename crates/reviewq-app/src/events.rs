@@ -22,6 +22,7 @@ pub struct Snapshot<T> {
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub enum ResourceKey {
     Queue,
+    QueueSync,
     Review(Option<ReviewId>),
     Run(Option<RunId>),
     Session(Option<SessionKey>),

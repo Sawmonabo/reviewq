@@ -35,6 +35,7 @@ pub struct ResourceKeyDto {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub enum ResourceKindDto {
     Queue,
+    QueueSync,
     Review,
     Run,
     Session,

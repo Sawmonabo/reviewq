@@ -85,9 +85,7 @@ fn list(
          FROM reviews r LEFT JOIN followup_monitors m USING(review_id)
          WHERE r.review_id>?1 AND (r.state='open' OR m.state='enabled')
            AND EXISTS(SELECT 1 FROM configured_projects p WHERE p.origin=r.origin AND p.project_id=r.project_id)
-           AND (m.review_id IS NOT NULL OR EXISTS(SELECT 1 FROM runs x WHERE x.review_id=r.review_id)
-              OR EXISTS(SELECT 1 FROM review_decisions x WHERE x.review_id=r.review_id)
-              OR EXISTS(SELECT 1 FROM notifications x WHERE x.review_id=r.review_id))
+           AND (m.review_id IS NOT NULL OR EXISTS(SELECT 1 FROM retained_reviews x WHERE x.review_id=r.review_id))
          ORDER BY r.review_id LIMIT ?2"
     );
     let mut statement = db.prepare_cached(&sql)?;

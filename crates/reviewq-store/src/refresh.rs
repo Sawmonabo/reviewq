@@ -9,13 +9,31 @@ use rusqlite::{Connection, OptionalExtension, params};
 
 use crate::connection::WriteTx;
 use crate::events::{now_ms, snapshot};
-use crate::queue::{check_observation, identity, mark_discovered, save_observations};
-use crate::workspace::{advance_queue, configured, operator, settings_revision};
+use crate::queue::identity;
+use crate::workspace::{operator, settings_revision};
 use crate::{SqliteStore, StoreError};
 
 mod scope;
 
 impl SourceRefreshStore for SqliteStore {
+    fn refresh_sync(
+        &self,
+        actor: Actor,
+        settings: Revision,
+    ) -> AppFuture<'_, Snapshot<SourceSync>> {
+        Box::pin(async move {
+            operator(&actor).map_err(StoreError::app)?;
+            self.read(move |db| {
+                if settings_revision(db)? != settings {
+                    return Err(AppError::StaleRevision.into());
+                }
+                snapshot(db, read_sync(db, settings)?)
+            })
+            .await
+            .map_err(StoreError::app)
+        })
+    }
+
     fn begin_refresh(&self, actor: Actor, revision: Revision) -> AppFuture<'_, RefreshAdmission> {
         Box::pin(async move {
             self.write(move |tx| {
@@ -35,7 +53,7 @@ impl SourceRefreshStore for SqliteStore {
                     "UPDATE source_refresh_receipts SET state='superseded',finished_at_ms=?1
                      WHERE state='running'", [now],
                 )?;
-                let id = tx.emit(&[ResourceKey::Queue])?;
+                let id = tx.emit(&[ResourceKey::QueueSync])?;
                 tx.sql.execute(
                     "INSERT INTO source_refresh(singleton,attempt,settings_revision,started_at_ms,active)
                      VALUES(1,?1,?2,?3,1)
@@ -130,7 +148,7 @@ impl SourceRefreshStore for SqliteStore {
                      WHERE state='running'",[now_ms()?],
                 )?;
                 if updated != 0 {
-                    tx.emit(&[ResourceKey::Queue])?;
+                    tx.emit(&[ResourceKey::QueueSync])?;
                 }
                 Ok(())
             })
@@ -147,78 +165,29 @@ fn finish(
 ) -> Result<(), StoreError> {
     let now = now_ms()?;
     if settings_revision(&tx.sql)? != attempt.settings_revision {
-        let changed = tx.sql.execute(
-            "UPDATE source_refresh_receipts SET state='superseded',finished_at_ms=?2 WHERE id=?1 AND state='running'",
-            params![attempt.id.as_sqlite_integer(),now],
-        )?;
-        if changed != 0 {
-            tx.sql.execute(
-                "UPDATE source_refresh SET active=0 WHERE attempt=?1",
-                [attempt.id.as_sqlite_integer()],
-            )?;
-            tx.emit(&[ResourceKey::Queue])?;
-        }
-        return Ok(());
+        return supersede(tx, attempt, now);
     }
-    let error = result.as_ref().err().map(|error| failure_label(*error));
-    let updated = tx.sql.execute(
-        "UPDATE source_refresh SET active=0,error=?3,
-         last_success_at_ms=CASE WHEN ?3 IS NULL THEN ?4 ELSE last_success_at_ms END
-         WHERE settings_revision=?1 AND attempt=?2 AND active=1",
-        params![
-            attempt.settings_revision.as_sqlite_integer(),
-            attempt.id.as_sqlite_integer(),
-            error,
-            now
-        ],
+    let active = tx.sql.query_row(
+        "SELECT EXISTS(SELECT 1 FROM source_refresh WHERE attempt=?1 AND settings_revision=?2 AND active=1)",
+        params![attempt.id.as_sqlite_integer(),attempt.settings_revision.as_sqlite_integer()],
+        |row| row.get::<_,bool>(0),
     )?;
-    if updated != 1 {
+    if !active {
         return Ok(());
     }
-    let mut total = None;
-    if let Ok(source) = result {
-        let SourceObservation {
-            reviews,
-            owned,
-            issues,
-            sprints,
-        } = source;
-        if reviews.len() > MAX_PUBLICATION_REVIEWS || owned.len() > MAX_PUBLICATION_REVIEWS {
-            return Err(AppError::PayloadTooLarge.into());
-        }
-        let (rows, matches): (Vec<_>, Vec<_>) = reviews.into_values().unzip();
-        for item in &rows {
-            if !configured(&tx.sql, &item.identity)? {
-                return Err(AppError::NotFound.into());
-            }
-        }
-        for item in rows.iter().chain(&owned) {
-            check_observation(&tx.sql, attempt.id, item)?;
-        }
-        let discovered = save_observations(tx, &rows)?;
-        let matched = matches
-            .iter()
-            .flatten()
-            .map(|selection| &selection.key)
-            .collect::<std::collections::HashSet<_>>();
-        let unmatched = issues
-            .iter()
-            .map(|issue| &issue.ticket.key)
-            .filter(|key| !matched.contains(key))
-            .collect::<std::collections::HashSet<_>>();
-        total = Some((discovered.len() + unmatched.len()) as i64);
-        save_observations(tx, &owned)?;
-        tx.sql.execute("DELETE FROM review_discoveries", [])?;
-        mark_discovered(&tx.sql, &discovered)?;
-        scope::replace(
-            &tx.sql,
-            issues,
-            sprints,
-            discovered.into_iter().zip(matches),
-        )?;
-        advance_queue(&tx.sql)?;
-        tx.emit(&[ResourceKey::Ticket(None)])?;
-    }
+    let (total, error) = match result {
+        Ok(source) => match scope::publish(tx, attempt, source)? {
+            Some(rows) => (Some(rows), None),
+            None => return supersede(tx, attempt, now),
+        },
+        Err(error) => (None, Some(failure_label(error))),
+    };
+    tx.sql.execute(
+        "UPDATE source_refresh SET active=0,error=?2,
+         last_success_at_ms=CASE WHEN ?2 IS NULL THEN ?3 ELSE last_success_at_ms END
+         WHERE attempt=?1",
+        params![attempt.id.as_sqlite_integer(), error, now],
+    )?;
     let terminal = if error.is_some() {
         "failed"
     } else {
@@ -239,7 +208,22 @@ fn finish(
     if written != 1 {
         return Err(AppError::Internal.into());
     }
-    tx.emit(&[ResourceKey::Queue])?;
+    tx.emit(&[ResourceKey::QueueSync])?;
+    Ok(())
+}
+
+fn supersede(tx: &mut WriteTx<'_>, attempt: RefreshAttempt, now: i64) -> Result<(), StoreError> {
+    let changed = tx.sql.execute(
+        "UPDATE source_refresh_receipts SET state='superseded',finished_at_ms=?2 WHERE id=?1 AND state='running'",
+        params![attempt.id.as_sqlite_integer(),now],
+    )?;
+    if changed != 0 {
+        tx.sql.execute(
+            "UPDATE source_refresh SET active=0 WHERE attempt=?1",
+            [attempt.id.as_sqlite_integer()],
+        )?;
+        tx.emit(&[ResourceKey::QueueSync])?;
+    }
     Ok(())
 }
 

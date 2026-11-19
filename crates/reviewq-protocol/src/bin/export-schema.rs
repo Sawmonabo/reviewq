@@ -53,6 +53,8 @@ fn main() -> Result<(), Box<dyn Error>> {
     registry.response::<ReviewSelectionResponse>("queue", "ReviewSelectionResponse")?;
     registry.response::<reviewq_protocol::queue::RefreshResponse>("queue", "RefreshResponse")?;
     registry
+        .response::<Success<reviewq_protocol::queue::QueueSync>>("queue", "QueueSyncResponse")?;
+    registry
         .request::<reviewq_protocol::queue::TrackReviewRequest>("queue", "TrackReviewRequest")?;
     registry
         .response::<reviewq_protocol::queue::TrackReviewResponse>("queue", "TrackReviewResponse")?;

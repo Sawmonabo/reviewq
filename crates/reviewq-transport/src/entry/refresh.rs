@@ -8,11 +8,24 @@ use reviewq_app::access::{Actor, AppError};
 use reviewq_app::events::Snapshot;
 use reviewq_app::sources::{RefreshReceipt, RefreshState, refresh_queue};
 use reviewq_protocol::queue as dto;
-use reviewq_protocol::{EventCursorDto, RevisionDto, UtcTimestampDto};
+use reviewq_protocol::{EventCursorDto, RevisionDto, Success, UtcTimestampDto};
 
 use super::error::ApiPath as Path;
-use super::pages::{count, parse, source_failure, success};
+use super::pages::{count, parse, queue_sync, source_failure, success};
 use super::{ApiError, Entry, control_ops};
+
+pub(super) async fn sync(
+    State(entry): State<Arc<Entry>>,
+    headers: HeaderMap,
+) -> Result<Json<Success<dto::QueueSync>>, ApiError> {
+    let actor = entry.auth.browser_actor(&headers, false)?;
+    let active = entry.active_source().await?;
+    let state = entry.store.refresh_sync(actor, active.revision).await?;
+    Ok(Json(success(
+        queue_sync(&active, state.value),
+        state.cursor,
+    )?))
+}
 
 pub(super) async fn start(
     State(entry): State<Arc<Entry>>,
