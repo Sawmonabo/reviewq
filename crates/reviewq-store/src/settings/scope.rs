@@ -171,6 +171,11 @@ pub(super) fn replace(
         [origin],
     )?;
     super::projection::set_desired(db)?;
+    db.execute(
+        "DELETE FROM source_history_projects AS h WHERE NOT EXISTS(
+            SELECT 1 FROM configured_projects p WHERE (p.origin,p.project_id)=(h.origin,h.project_id))",
+        [],
+    )?;
     Ok(())
 }
 

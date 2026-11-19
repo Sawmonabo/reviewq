@@ -2,7 +2,9 @@ use std::collections::{BTreeSet, HashSet};
 
 use aho_corasick::AhoCorasick;
 use reviewq_app::access::AppError;
-use reviewq_app::sources::{MAX_PUBLICATION_REVIEWS, MatchedReview};
+use reviewq_app::sources::{
+    HistoryCandidate, MAX_PUBLICATION_REVIEWS, MatchedReview, ProjectHistoryPage, ProjectHistoryRow,
+};
 use reviewq_app::workspace::ConfiguredProject;
 use reviewq_domain::identity::TicketKey;
 
@@ -54,11 +56,10 @@ pub(super) fn candidate_keys(title: &str, branch: &str) -> Result<Vec<TicketKey>
 }
 
 impl GitLab {
-    pub(super) async fn match_ticket_page_set(
+    pub(super) async fn match_open_reviews(
         &self,
         project: ConfiguredProject,
         keys: Vec<TicketKey>,
-        open: bool,
     ) -> Result<Vec<MatchedReview>, AppError> {
         if project.origin != self.identity || keys.is_empty() {
             return Err(AppError::InvalidRequest);
@@ -71,18 +72,14 @@ impl GitLab {
         let metadata = self.project(id).await?;
         let mut seen = HashSet::new();
         let mut matches = Vec::new();
-        let state = if open { "opened" } else { "all" };
         for page in 1..=PAGE_LIMIT {
-            let (rows, more) = self.merge_requests(id, page, state).await?;
+            let (rows, more) = self.merge_requests(id, page, "opened").await?;
             for row in rows {
                 if !seen.insert(row.iid) {
                     return Err(AppError::Conflict);
                 }
-                if row.state != "opened" && open {
+                if row.state != "opened" {
                     return Err(AppError::Conflict);
-                }
-                if row.state == "opened" && !open {
-                    continue;
                 }
                 let mut matching = HashSet::new();
                 for field in [&row.title, &row.source_branch] {
@@ -111,5 +108,89 @@ impl GitLab {
             }
         }
         Err(AppError::PayloadTooLarge)
+    }
+
+    pub(super) async fn history_page(
+        &self,
+        project: ConfiguredProject,
+        page: u32,
+        since: Option<i64>,
+    ) -> Result<ProjectHistoryPage, AppError> {
+        if project.origin != self.identity || !(1..=PAGE_LIMIT).contains(&page) {
+            return Err(AppError::InvalidRequest);
+        }
+        let (rows, more) = self
+            .merge_request_page(project.project_id, page, "all", true, since)
+            .await?;
+        let rows = rows
+            .into_iter()
+            .map(|row| {
+                let iid = row.iid.try_into().map_err(|_| AppError::Unavailable)?;
+                let closed = match row.state.as_str() {
+                    "closed" | "merged" => true,
+                    "opened" => false,
+                    _ => return Err(AppError::Unavailable),
+                };
+                if row.title.len() > 4096 || row.source_branch.len() > 1024 {
+                    return Err(AppError::PayloadTooLarge);
+                }
+                let updated_at_ms = row
+                    .updated_at
+                    .parse::<jiff::Timestamp>()
+                    .map_err(|_| AppError::Unavailable)?
+                    .as_millisecond();
+                let keys = if closed {
+                    candidate_keys(&row.title, &row.source_branch)?
+                } else {
+                    Vec::new()
+                };
+                Ok(ProjectHistoryRow {
+                    iid,
+                    closed,
+                    updated_at_ms,
+                    title: row.title,
+                    branch: row.source_branch,
+                    keys,
+                })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(ProjectHistoryPage { rows, more })
+    }
+
+    pub(super) async fn history_candidates(
+        &self,
+        project: ConfiguredProject,
+        candidates: Vec<HistoryCandidate>,
+    ) -> Result<Vec<MatchedReview>, AppError> {
+        if project.origin != self.identity || candidates.len() > MAX_PUBLICATION_REVIEWS {
+            return Err(AppError::InvalidRequest);
+        }
+        if candidates.is_empty() {
+            return Ok(Vec::new());
+        }
+        let id = project.project_id;
+        let metadata = self.project(id).await?;
+        let mut verified = Vec::new();
+        for candidate in candidates {
+            let row = match self.merge_request(id, candidate.iid).await {
+                Ok(row) => row,
+                Err(AppError::NotFound) => continue,
+                Err(error) => return Err(error),
+            };
+            let mut exact = candidate_keys(&row.title, &row.source_branch)?;
+            exact.retain(|key| candidate.keys.contains(key));
+            if exact.is_empty() {
+                continue;
+            }
+            let review = self.review(id, &metadata.path_with_namespace, row)?;
+            if review.state == reviewq_app::queue::MergeRequestState::Open {
+                return Err(AppError::Conflict);
+            }
+            verified.push(MatchedReview {
+                review,
+                keys: exact,
+            });
+        }
+        Ok(verified)
     }
 }

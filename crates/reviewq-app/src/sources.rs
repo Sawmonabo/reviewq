@@ -8,8 +8,12 @@ use crate::queue::ReviewSource;
 use crate::settings::ActiveSource;
 use crate::workspace::{ConfiguredProject, WorkspaceStore};
 
+mod project_history;
 mod scope;
 mod tickets;
+pub use project_history::{
+    HistoryCandidate, ProjectHistoryPage, ProjectHistoryRow, ProjectHistoryStore,
+};
 pub(crate) use scope::issues as scoped_issues;
 pub use scope::{MatchedReview, ScopedIssue, ScopedMatch, ScopedSprint, SourceObservation};
 pub use tickets::{TicketComment, TicketDetail, TicketIdentity, UnverifiedTrack};
@@ -41,7 +45,17 @@ pub trait ReviewSourceReader: ChangeSource {
         &self,
         project: ConfiguredProject,
         keys: Vec<TicketKey>,
-        open: bool,
+    ) -> AppFuture<'_, Vec<MatchedReview>>;
+    fn project_history_page(
+        &self,
+        project: ConfiguredProject,
+        page: u32,
+        since: Option<i64>,
+    ) -> AppFuture<'_, ProjectHistoryPage>;
+    fn verify_history_candidates(
+        &self,
+        project: ConfiguredProject,
+        candidates: Vec<HistoryCandidate>,
     ) -> AppFuture<'_, Vec<MatchedReview>>;
 
     /// Resolves a user-supplied URL, project/IID or unique ticket in configured projects.
@@ -152,7 +166,7 @@ pub enum SourceFailure {
     Interrupted,
 }
 
-pub trait SourceRefreshStore: Send + Sync {
+pub trait SourceRefreshStore: Send + Sync + ProjectHistoryStore {
     fn refresh_sync(&self, actor: Actor, settings: Revision)
     -> AppFuture<'_, Snapshot<SourceSync>>;
 

@@ -39,6 +39,7 @@ const SCHEMA: &str = concat!(
     include_str!("../schema/settings.sql"),
     "\n",
     include_str!("../schema/sources.sql"),
+    include_str!("../schema/source_history.sql"),
     "\n",
     include_str!("../schema/launches.sql"),
     "\n",

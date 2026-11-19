@@ -101,6 +101,18 @@ pub(crate) fn observe_source(
             ResourceKey::Queue,
             ResourceKey::Review(Some(review.clone())),
         ])?;
+    } else {
+        tx.sql
+            .prepare_cached(
+                "UPDATE review_source_signals SET observed_at_ms=?4
+             WHERE (review_id,settings_revision,source_sha)=(?1,?2,?3) AND observed_at_ms<?4-60000",
+            )?
+            .execute(params![
+                review.as_str(),
+                settings.as_sqlite_integer(),
+                source.review.head_sha.as_str(),
+                source.observed_at_ms
+            ])?;
     }
     Ok(())
 }

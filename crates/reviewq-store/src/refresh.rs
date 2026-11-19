@@ -13,6 +13,7 @@ use crate::queue::identity;
 use crate::workspace::{operator, settings_revision};
 use crate::{SqliteStore, StoreError};
 
+mod history;
 mod scope;
 
 impl SourceRefreshStore for SqliteStore {

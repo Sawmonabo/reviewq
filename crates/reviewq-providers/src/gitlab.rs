@@ -95,9 +95,25 @@ impl ReviewSourceReader for GitLab {
         &self,
         project: ConfiguredProject,
         keys: Vec<TicketKey>,
-        open: bool,
     ) -> AppFuture<'_, Vec<MatchedReview>> {
-        Box::pin(self.match_ticket_page_set(project, keys, open))
+        Box::pin(self.match_open_reviews(project, keys))
+    }
+
+    fn project_history_page(
+        &self,
+        project: ConfiguredProject,
+        page: u32,
+        since: Option<i64>,
+    ) -> AppFuture<'_, reviewq_app::sources::ProjectHistoryPage> {
+        Box::pin(self.history_page(project, page, since))
+    }
+
+    fn verify_history_candidates(
+        &self,
+        project: ConfiguredProject,
+        candidates: Vec<reviewq_app::sources::HistoryCandidate>,
+    ) -> AppFuture<'_, Vec<MatchedReview>> {
+        Box::pin(self.history_candidates(project, candidates))
     }
 
     fn resolve(
@@ -229,12 +245,35 @@ impl GitLab {
         page: u32,
         state: &str,
     ) -> Result<(Vec<MergeRequest>, bool), AppError> {
+        self.merge_request_page(project, page, state, false, None)
+            .await
+    }
+
+    async fn merge_request_page(
+        &self,
+        project: ProjectId,
+        page: u32,
+        state: &str,
+        history: bool,
+        since: Option<i64>,
+    ) -> Result<(Vec<MergeRequest>, bool), AppError> {
         let mut url = self.url(&format!("api/v4/projects/{project}/merge_requests"))?;
         url.query_pairs_mut()
             .append_pair("page", &page.to_string())
             .append_pair("per_page", "100")
             .append_pair("scope", "all")
             .append_pair("state", state);
+        if history {
+            url.query_pairs_mut()
+                .append_pair("order_by", "updated_at")
+                .append_pair("sort", "asc");
+            if let Some(since) = since {
+                let time = jiff::Timestamp::from_millisecond(since)
+                    .map_err(|_| AppError::InvalidRequest)?;
+                url.query_pairs_mut()
+                    .append_pair("updated_after", &time.to_string());
+            }
+        }
         let (metadata, bytes) = self.get(url, METADATA_LIMIT).await?;
         let rows: Vec<MergeRequest> =
             serde_json::from_slice(&bytes).map_err(|_| AppError::Unavailable)?;
