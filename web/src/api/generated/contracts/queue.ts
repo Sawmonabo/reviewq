@@ -219,9 +219,18 @@ export interface ReviewOverview {
 }
 
 export interface Attention {
+  followups: FollowupAttention[];
   reports: ReportAttention[];
   sessions: SessionAttention[];
   source: ObservedAttention[];
+  [k: string]: unknown;
+}
+
+export interface FollowupAttention {
+  batchId: ResourceIdDto;
+  completedAt: UtcTimestampDto;
+  receiptId: ResourceIdDto | null;
+  runId: RunIdDto;
   [k: string]: unknown;
 }
 

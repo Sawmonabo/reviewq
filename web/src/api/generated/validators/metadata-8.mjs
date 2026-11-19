@@ -12,7 +12,7 @@ const schema328 = {
   required: ["report", "delivery"],
   type: "object",
 };
-const schema343 = {
+const schema344 = {
   properties: {
     leadName: { type: ["string", "null"] },
     leadSessionKey: { $ref: "#/definitions/CheckpointIdDto" },
@@ -25,7 +25,7 @@ const schema343 = {
   required: ["runId", "leadSessionKey", "provider", "leadName", "startedAt"],
   type: "object",
 };
-const schema352 = {
+const schema353 = {
   type: "object",
   properties: {
     author: {
@@ -48,7 +48,7 @@ const schema352 = {
     focusedLeadName: { type: ["string", "null"] },
   },
 };
-const schema354 = {
+const schema355 = {
   type: "object",
   properties: {
     ourComments: { $ref: "#/definitions/SafeCountDto" },
@@ -61,7 +61,7 @@ const schema354 = {
     registeredLeadCount: { $ref: "#/definitions/SafeCountDto" },
   },
 };
-const schema360 = {
+const schema361 = {
   properties: {
     defaultEffort: { type: ["string", "null"] },
     efforts: { items: { type: "string" }, type: "array" },
@@ -72,7 +72,7 @@ const schema360 = {
   required: ["id", "label", "isDefault", "defaultEffort", "efforts"],
   type: "object",
 };
-const schema361 = {
+const schema362 = {
   properties: {
     description: { type: ["string", "null"] },
     name: { type: "string" },
@@ -81,4 +81,4 @@ const schema361 = {
   required: ["name", "path"],
   type: "object",
 };
-export { schema328, schema343, schema352, schema354, schema360, schema361 };
+export { schema328, schema344, schema353, schema355, schema361, schema362 };

@@ -8,7 +8,9 @@ use reviewq_app::reports::{
     AcceptedReport, ArtifactChunk, CapturedArtifact, Declaration, HandoffReceipt,
     ReportCaptureStore, ReportReference, ReportWork, RevisionEvidence, Source,
 };
-use reviewq_app::workflow::{ExpectedAcknowledgement, NativeCall, WorkflowTool};
+use reviewq_app::workflow::{
+    ExpectedAcknowledgement, NativeCall, ReportFailureAddress, WorkflowTool,
+};
 use reviewq_domain::identity::{MrIdentity, NativeInputId, ReportHash, Revision, SessionKey};
 use reviewq_domain::session::{AbsolutePath, LeadTarget};
 use rusqlite::{Connection, OptionalExtension, Row, params};
@@ -24,6 +26,7 @@ use crate::{SqliteStore, StoreError};
 mod accept;
 mod batch;
 mod edits;
+mod failures;
 mod reconciliation;
 
 const CLAIM_MS: i64 = 60_000;
@@ -122,14 +125,21 @@ impl ReportCaptureStore for SqliteStore {
                 if !configured(db,&crate::queue::identity_for_review(db,call.lead.review_id())?)? {
                     return Err(AppError::Unavailable.into());
                 }
+                let time = now_ms()?;
                 let inserted=db.execute(
                     "INSERT INTO report_correction_requests(run_id,lead_session_key,turn_id,call_id,source_generation,source_position,requested_at_ms)
                      VALUES(?1,?2,?3,?4,?5,?6,?7) ON CONFLICT DO NOTHING",
                     params![call.lead.run_id().as_str(),call.lead.session_key().as_str(),call.turn_id.as_str(),
-                        call.call_id,call.source_generation,db_int(call.source_position)?,now_ms()?],
+                        call.call_id,call.source_generation,db_int(call.source_position)?,time],
                 )?;
-                if inserted == 1 {
-                    tx.emit(&[ResourceKey::Report(Some(call.lead.run_id().clone()))])?;
+                if inserted == 1
+                    && let Some(notification) = failures::note(db, &call, Uuid::new_v4().to_string(),
+                        "report_correction_required", "report_delivery_rejection", time)?
+                {
+                    crate::workspace::advance_queue(db)?;
+                    tx.emit(&[ResourceKey::Queue, ResourceKey::Report(Some(call.lead.run_id().clone())),
+                        ResourceKey::Review(Some(call.lead.review_id().clone())),
+                        ResourceKey::Run(Some(call.lead.run_id().clone())), ResourceKey::Notification(Some(notification))])?;
                 }
                 Ok(inserted==1)
             }).await.map_err(StoreError::app)
@@ -251,11 +261,33 @@ impl ReportCaptureStore for SqliteStore {
         work: ReportWork,
         result_entry: NativeInputId,
         mut artifact: Option<CapturedArtifact>,
+        resolved: Vec<ReportFailureAddress>,
     ) -> AppFuture<'_, ()> {
         Box::pin(async move {
             let continuity_verified = edits::verify(self, &work, artifact.as_mut()).await?;
             self.write(move |tx| {
-                accept::complete(tx, work, result_entry, artifact, continuity_verified)
+                accept::complete(
+                    tx,
+                    work,
+                    result_entry,
+                    artifact,
+                    continuity_verified,
+                    resolved,
+                )
+            })
+            .await
+            .map_err(StoreError::app)
+        })
+    }
+
+    fn unresolved_report_failures(
+        &self,
+        call: NativeCall,
+    ) -> AppFuture<'_, Vec<ReportFailureAddress>> {
+        Box::pin(async move {
+            self.read(move |db| {
+                check_call(db, &call)?;
+                failures::unresolved(db, &call)
             })
             .await
             .map_err(StoreError::app)

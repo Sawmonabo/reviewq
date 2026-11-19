@@ -321,9 +321,12 @@ fn read_delivery(
             FROM report_handoffs WHERE run_id=?1 AND reconciled_by_batch_id IS NULL
             ORDER BY created_at_ms DESC, receipt_id DESC LIMIT 1
          ), failure AS (
-            SELECT NULL AS receipt_id, 'failed' AS delivery, reason, 1 AS priority
-            FROM report_delivery_failures WHERE run_id=?1 AND resolved_by_receipt_id IS NULL
-            ORDER BY occurred_at_ms DESC, notification_id DESC LIMIT 1
+            SELECT h.receipt_id, 'failed' AS delivery, f.reason, 1 AS priority
+            FROM report_delivery_failures f
+            LEFT JOIN report_handoffs h ON (h.run_id,h.lead_session_key,h.turn_id,h.call_id)=
+                (f.run_id,f.lead_session_key,f.native_turn_id,f.native_call_id) AND h.state='failed'
+            WHERE f.run_id=?1 AND f.resolved_by_receipt_id IS NULL
+            ORDER BY f.occurred_at_ms DESC, f.notification_id DESC LIMIT 1
          )
          SELECT receipt_id, delivery, reason, priority FROM latest
          UNION ALL SELECT receipt_id, delivery, reason, priority FROM failure

@@ -791,7 +791,10 @@ function captureAttention(overview: ReviewOverview): AttentionSnapshot | undefin
   if (
     !checkpointId ||
     !attention ||
-    (!attention.source.length && !attention.sessions.length && !attention.reports.length)
+    (!attention.source.length &&
+      !attention.sessions.length &&
+      !attention.reports.length &&
+      !attention.followups.length)
   )
     return;
   return {

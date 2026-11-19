@@ -3,7 +3,7 @@ use std::path::Path;
 use reviewq_app::access::{AppError, AppFuture};
 use reviewq_app::workflow::{
     CompletedReportCall, ExpectedAcknowledgement, NativeCall, NativeWorkflowProof, ReadyWorkflow,
-    ReportCompletion, WorkflowHold, WorkflowReadiness, WorkflowTool,
+    ReportCompletion, ReportFailureAddress, WorkflowHold, WorkflowReadiness, WorkflowTool,
 };
 use reviewq_domain::identity::{NativeInputId, NativeTurnId};
 use reviewq_domain::session::LeadTarget;
@@ -175,6 +175,18 @@ impl NativeWorkflowProof for Codex {
                 normal_turn_completion: evidence.normal,
                 final_response: evidence.response,
             })))
+        })
+    }
+
+    fn earlier_report_failures(
+        &self,
+        call: NativeCall,
+        candidates: Vec<ReportFailureAddress>,
+    ) -> AppFuture<'_, Vec<ReportFailureAddress>> {
+        Box::pin(async move {
+            let thread = self.retained_thread(&call.lead).await?;
+            let path = thread.path.ok_or(AppError::Unavailable)?;
+            crate::history::codex_earlier_report_failures(call, path, candidates).await
         })
     }
 }

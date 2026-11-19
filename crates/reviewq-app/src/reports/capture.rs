@@ -9,7 +9,7 @@ use crate::events::Snapshot;
 use crate::labels::labels;
 use crate::workflow::{
     CompletedReportCall, ExpectedAcknowledgement, NativeCall, NativeWorkflowProof,
-    ReportCompletion, ReportContent,
+    ReportCompletion, ReportContent, ReportFailureAddress,
 };
 
 use super::index;
@@ -214,11 +214,17 @@ pub trait ReportCaptureStore: Send + Sync {
 
     fn append_report_chunk(&self, work: ReportWork, chunk: ArtifactChunk) -> AppFuture<'_, ()>;
 
+    fn unresolved_report_failures(
+        &self,
+        call: NativeCall,
+    ) -> AppFuture<'_, Vec<ReportFailureAddress>>;
+
     fn accept_report(
         &self,
         work: ReportWork,
         result_entry: reviewq_domain::identity::NativeInputId,
         artifact: Option<CapturedArtifact>,
+        resolved: Vec<ReportFailureAddress>,
     ) -> AppFuture<'_, ()>;
 
     fn reject_report(
@@ -382,8 +388,24 @@ async fn reconcile_one(
             Some(captured)
         }
     };
+    let resolved = if matches!(&work.declaration, Declaration::Final {
+        revision: RevisionEvidence::Exact(_), assessments, amends: None, ..
+    } if assessments.is_empty())
+    {
+        let candidates = store.unresolved_report_failures(work.call.clone()).await?;
+        if candidates.is_empty() {
+            Vec::new()
+        } else {
+            proof
+                .earlier_report_failures(work.call.clone(), candidates)
+                .await
+                .unwrap_or_default()
+        }
+    } else {
+        Vec::new()
+    };
     store
-        .accept_report(work, evidence.result_entry_id, artifact)
+        .accept_report(work, evidence.result_entry_id, artifact, resolved)
         .await
 }
 

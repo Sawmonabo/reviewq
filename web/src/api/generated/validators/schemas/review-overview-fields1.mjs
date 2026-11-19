@@ -2,11 +2,11 @@
 import { func0 } from "../runtime.mjs";
 import { validate1125 } from "./attention.mjs";
 import { validate25 } from "./checkpoint-id-dto.mjs";
-import { validate1141 } from "./decision-view.mjs";
+import { validate1147 } from "./decision-view.mjs";
 import { validate35 } from "./event-cursor-dto.mjs";
-import { validate1147 } from "./discussion-counts.mjs";
+import { validate1153 } from "./discussion-counts.mjs";
 import { validate888 } from "./merge-request-row.mjs";
-import { validate1152 } from "./run-summary-page.mjs";
+import { validate1158 } from "./run-summary-page.mjs";
 function validate1124(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
@@ -167,7 +167,7 @@ function validate1124(
             let valid3 = false;
             const _errs13 = errors;
             if (
-              !validate1141(data2, {
+              !validate1147(data2, {
                 instancePath: instancePath + "/decision",
                 parentData: data,
                 parentDataProperty: "decision",
@@ -176,8 +176,8 @@ function validate1124(
             ) {
               vErrors =
                 vErrors === null
-                  ? validate1141.errors
-                  : vErrors.concat(validate1141.errors);
+                  ? validate1147.errors
+                  : vErrors.concat(validate1147.errors);
               errors = vErrors.length;
             }
             var _valid2 = _errs13 === errors;
@@ -265,7 +265,7 @@ function validate1124(
                 let valid4 = false;
                 const _errs19 = errors;
                 if (
-                  !validate1147(data4, {
+                  !validate1153(data4, {
                     instancePath: instancePath + "/ourDiscussions",
                     parentData: data,
                     parentDataProperty: "ourDiscussions",
@@ -274,8 +274,8 @@ function validate1124(
                 ) {
                   vErrors =
                     vErrors === null
-                      ? validate1147.errors
-                      : vErrors.concat(validate1147.errors);
+                      ? validate1153.errors
+                      : vErrors.concat(validate1153.errors);
                   errors = vErrors.length;
                 }
                 var _valid3 = _errs19 === errors;
@@ -353,7 +353,7 @@ function validate1124(
                   if (data.runs !== undefined && func0.call(data, "runs")) {
                     const _errs23 = errors;
                     if (
-                      !validate1152(data.runs, {
+                      !validate1158(data.runs, {
                         instancePath: instancePath + "/runs",
                         parentData: data,
                         parentDataProperty: "runs",
@@ -362,8 +362,8 @@ function validate1124(
                     ) {
                       vErrors =
                         vErrors === null
-                          ? validate1152.errors
-                          : vErrors.concat(validate1152.errors);
+                          ? validate1158.errors
+                          : vErrors.concat(validate1158.errors);
                       errors = vErrors.length;
                     }
                     var valid0 = _errs23 === errors;
