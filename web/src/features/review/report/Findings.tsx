@@ -227,6 +227,16 @@ export default function Findings({ run, drafts, reviewTitle, webUrl, followup, o
                   {report.reviewedSha?.slice(0, 12) ?? "Unknown"}
                 </code>
               </p>
+              {(report.findingCount !== null || report.changeCount !== null) && (
+                <p className="meta">
+                  {[
+                    report.findingCount !== null && `${report.findingCount} indexed findings`,
+                    report.changeCount !== null && `${report.changeCount} declared changes`,
+                  ]
+                    .filter(Boolean)
+                    .join(" · ")}
+                </p>
+              )}
               {report.revisionReason && <p>{report.revisionReason}</p>}
               <div className="actions">
                 <a href={reportDownload(run.runId, report.receiptId)}>Download Markdown</a>

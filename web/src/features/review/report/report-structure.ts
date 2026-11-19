@@ -1,8 +1,25 @@
 import type { Element, ElementContent, RootContent, Text } from "hast";
-import type { ReportSummary, Verdict } from "../../../api/generated/contracts/reports";
+import type { Descriptor, ReportSummary, Verdict } from "../../../api/generated/contracts/reports";
+import type { FindingConclusion } from "../../../api/generated/contracts/common";
 
 type ReportHeader = Pick<ReportSummary, "verdict" | "findingCount" | "changeCount">;
+export type AcceptedFindingChange = Extract<Descriptor, { kind: "change" }>;
 type Tone = "approve" | "request_changes" | "blocked" | "neutral";
+export const outcomeLabels: Readonly<Record<FindingConclusion, string>> = {
+  fixed: "Fixed",
+  clarified_withdrawn: "Clarified and withdrawn",
+  superseded: "Superseded",
+  partly_addressed: "Partly addressed",
+  still_present: "Still present",
+  unverified: "Unverified",
+};
+export function isRetired(change: AcceptedFindingChange | undefined) {
+  return (
+    change?.conclusion === "fixed" ||
+    change?.conclusion === "clarified_withdrawn" ||
+    change?.conclusion === "superseded"
+  );
+}
 const verdictLabels: Readonly<Record<Verdict, string>> = {
   approve: "Approve",
   request_changes: "Request changes",
@@ -14,23 +31,42 @@ const threadSections =
 const countLabel =
   "(?:P[0-3](?: findings?)?|(?:nonblocking|blocking)(?: findings?)?|(?:functional|quality|scale)(?: findings?)?)";
 const countToken = new RegExp(`(?:\\d+\\s+${countLabel}|${countLabel}\\s*:\\s*\\d+)`, "gi");
-const metadata = /^(?:publication|disposition|scope|reviewed (?:sha|revision)|coverage)\s*:/i;
+const coverMetadata =
+  /^(?:scope|reviewed (?:source|target|sha|revision)|coverage|checked at|provenance)\s*:/i;
+const contextMetadata = /^(?:publication|disposition)\s*:/i;
 
 export function reportStructure(
   nodes: readonly RootContent[],
   source: string,
   summary: ReportHeader,
+  changes: ReadonlyMap<string, AcceptedFindingChange> | null | undefined,
 ): readonly RootContent[] {
   const article = nodes.filter((node) => node.type !== "text" || node.value.trim());
   const output: RootContent[] = [];
-  let intro = true;
-  let sawVerdict = false;
-  let sawCounts = false;
+  const firstSection = article.findIndex(
+    (node) =>
+      node.type === "element" &&
+      (/^h[23]$/.test(node.tagName) || node.tagName === "table") &&
+      !authoredVerdict(node),
+  );
+  const introEnd = firstSection < 0 ? article.length : firstSection;
+  const introduction = article.slice(0, introEnd);
+  const hasAuthoredVerdict = introduction.some(
+    (node) => node.type === "element" && authoredVerdict(node),
+  );
+  const hasAuthoredCounts = introduction.some(
+    (node) => paragraph(node) && isCounts(reportText(node)),
+  );
+  let addedVerdict = false;
+  let addedCounts = false;
   let previousThreads = false;
 
   function addSummary() {
-    if (!sawVerdict && summary.verdict !== "not_specified") output.push(verdict(summary.verdict));
-    if (!sawCounts) {
+    if (!addedVerdict && !hasAuthoredVerdict && summary.verdict !== "not_specified") {
+      output.push(verdict(summary.verdict));
+      addedVerdict = true;
+    }
+    if (!addedCounts && !hasAuthoredCounts) {
       const items = [
         [summary.findingCount, "indexed finding"],
         [summary.changeCount, "declared change"],
@@ -39,6 +75,7 @@ export function reportStructure(
         amount === null ? [] : [countBadge(String(amount), label + (amount === 1 ? "" : "s"))],
       );
       if (counting.length) output.push(element("div", "report-counts", counting));
+      addedCounts = true;
     }
   }
 
@@ -50,7 +87,8 @@ export function reportStructure(
     }
     const next = article[index + 1];
     const previous = article[index - 1];
-    if (intro) {
+    if (index === introEnd) addSummary();
+    if (index < introEnd) {
       const recognized = authoredVerdict(node);
       if (recognized) {
         const { tone, label, inline } = recognized;
@@ -69,17 +107,12 @@ export function reportStructure(
             : undefined;
         output.push(verdict(supplied, label, rationale, recorded));
         if (following) index++;
-        sawVerdict = true;
         continue;
       }
 
       if (paragraph(node) && isCounts(reportText(node))) {
-        if (!sawVerdict && summary.verdict !== "not_specified") {
-          output.push(verdict(summary.verdict));
-          sawVerdict = true;
-        }
+        addSummary();
         output.push(authoredCounts(node, source));
-        sawCounts = true;
         continue;
       }
 
@@ -91,9 +124,24 @@ export function reportStructure(
         output.push(styled(node, "report-identity"));
         continue;
       }
+      if (paragraph(node) && coverMetadata.test(reportText(node).trim())) {
+        const provenance = [node];
+        while (index + 1 < introEnd) {
+          const candidate = article[index + 1];
+          if (!paragraph(candidate) || !coverMetadata.test(reportText(candidate).trim())) break;
+          provenance.push(candidate);
+          index++;
+        }
+        output.push(
+          element("details", "report-provenance", [
+            element("summary", "", [literal("Scope and revision details")]),
+            ...provenance.map((entry) => styled(entry, "report-metadata")),
+          ]),
+        );
+        continue;
+      }
       if (isMetadata(node)) {
         addSummary();
-        sawVerdict = sawCounts = true;
         output.push(styled(node, "report-metadata"));
         continue;
       }
@@ -101,15 +149,11 @@ export function reportStructure(
         output.push(styled(node, "report-lede"));
         continue;
       }
-      if (node.tagName === "h2" || node.tagName === "h3" || node.tagName === "table") {
-        addSummary();
-        intro = false;
-      }
     }
     if (node.tagName === "h2") previousThreads = threadSections.test(reportText(node).trim());
-    output.push(node.tagName === "table" ? reportTable(node, previousThreads) : node);
+    output.push(node.tagName === "table" ? reportTable(node, previousThreads, changes) : node);
   }
-  if (intro) addSummary();
+  if (firstSection < 0) addSummary();
   return output;
 }
 
@@ -171,7 +215,8 @@ function verdict(
 }
 
 function isMetadata(node: Element) {
-  return node.tagName === "p" && metadata.test(reportText(node).trim());
+  const label = reportText(node).trim();
+  return node.tagName === "p" && (contextMetadata.test(label) || coverMetadata.test(label));
 }
 
 function isCounts(text: string) {
@@ -181,7 +226,11 @@ function isCounts(text: string) {
 }
 
 function authoredCounts(node: Element, source: string) {
-  const first = node.children[0];
+  const child = node.children[0];
+  const first =
+    child?.type === "element" && child.tagName === "strong" && child.children.length === 1
+      ? child.children[0]
+      : child;
   const begin = first?.position?.start.offset;
   const end = first?.position?.end.offset;
   if (
@@ -199,8 +248,7 @@ function authoredCounts(node: Element, source: string) {
     if (start > offset)
       children.push(element("span", "report-count-separator", [textRange(first, offset, start)]));
     const label = entry[0];
-    const digits =
-      /\d+$/.exec(label) && /^\D/.test(label) ? /\d+$/.exec(label) : /^\d+/.exec(label);
+    const digits = /^\d+/.exec(label) ?? /\d+$/.exec(label);
     if (!digits) continue;
     const numberStart = start + digits.index;
     const numberEnd = numberStart + digits[0].length;
@@ -213,7 +261,11 @@ function authoredCounts(node: Element, source: string) {
     if (numberEnd < offset) parts.push(textRange(first, numberEnd, offset));
     children.push({
       ...element("span", "report-count", parts),
-      properties: { className: ["report-count"], dataReportCount: countTone(label) },
+      properties: {
+        className: ["report-count"],
+        dataReportCount: countTone(label),
+        dataReportCountValue: Number(digits[0]),
+      },
     });
   }
   if (offset < first.value.length) children.push(textRange(first, offset, first.value.length));
@@ -235,7 +287,11 @@ function countBadge(amount: string, label: string) {
   ]);
 }
 
-function reportTable(node: Element, previousThreads: boolean): Element {
+function reportTable(
+  node: Element,
+  previousThreads: boolean,
+  changes: ReadonlyMap<string, AcceptedFindingChange> | null | undefined,
+): Element {
   const head = node.children.find((child) => child.type === "element" && child.tagName === "thead");
   const rows =
     head?.type === "element" ? head.children.filter((child) => child.type === "element") : [];
@@ -250,10 +306,13 @@ function reportTable(node: Element, previousThreads: boolean): Element {
     return styled(node, "report-before-after");
   if (!previousThreads) return node;
   const statusColumns = headings?.flatMap((label, index) =>
-    /^(?:status|assessment|conclusion|outcome|gitlab)$/.test(label) ? [index] : [],
+    /^(?:status|assessment|conclusion|outcome(?: and verification)?|gitlab)$/.test(label)
+      ? [index]
+      : [],
   );
+  const findingColumn = headings?.findIndex((label) => /^(?:finding|id)$/.test(label)) ?? -1;
   const table = styled(node, "report-previous-threads");
-  if (!statusColumns?.length) return table;
+  if (!statusColumns?.length && findingColumn < 0) return table;
   return {
     ...table,
     children: table.children.map((body) =>
@@ -264,7 +323,12 @@ function reportTable(node: Element, previousThreads: boolean): Element {
               row.type === "element" && row.tagName === "tr"
                 ? {
                     ...row,
-                    children: styleStatuses(row.children, statusColumns),
+                    children: styleStatuses(
+                      row.children,
+                      statusColumns ?? [],
+                      findingColumn,
+                      changes,
+                    ),
                   }
                 : row,
             ),
@@ -274,12 +338,39 @@ function reportTable(node: Element, previousThreads: boolean): Element {
   };
 }
 
-function styleStatuses(cells: ElementContent[], columns: number[]) {
+function styleStatuses(
+  cells: ElementContent[],
+  columns: number[],
+  findingColumn: number,
+  changes: ReadonlyMap<string, AcceptedFindingChange> | null | undefined,
+) {
   let column = 0;
   return cells.map((cell) => {
     if (cell.type !== "element" || cell.tagName !== "td") return cell;
-    if (!columns.includes(column++)) return cell;
+    const index = column++;
     const label = reportText(cell).trim();
+    if (index === findingColumn) {
+      const id = /^(F-\d+)\b/.exec(label)?.[1];
+      const accepted = id ? changes?.get(id) : undefined;
+      if (accepted)
+        return {
+          ...cell,
+          children: [
+            ...cell.children,
+            {
+              ...element("span", "report-thread-outcome", [
+                literal(outcomeLabels[accepted.conclusion]),
+              ]),
+              properties: {
+                className: ["report-thread-outcome"],
+                title: accepted.reason,
+                dataReportThreadStatus: isRetired(accepted) ? "confirmed" : "attention",
+              },
+            },
+          ],
+        };
+    }
+    if (!columns.includes(index)) return cell;
     const tone =
       /^(?:fixed(?: in code)?|resolved(?: in GitLab)?|clarified(?: and withdrawn)?|withdrawn|superseded)$/i.test(
         label,

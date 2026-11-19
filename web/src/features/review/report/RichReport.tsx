@@ -6,6 +6,8 @@ import { MarkdownTree } from "../../../components/markdown/MarkdownContent";
 import { savedValue, saveValue } from "../../../lib/view-preferences";
 import { parentElement, reportBlocks, selectionSource } from "./report-presentation";
 import type { ReportBlock } from "./report-presentation";
+import { isRetired, outcomeLabels } from "./report-structure";
+import type { AcceptedFindingChange } from "./report-structure";
 
 type Bookmark = { readonly top: number; readonly offset?: number; readonly inset?: number };
 type Quote = { readonly text: string; readonly offset: number };
@@ -15,6 +17,7 @@ export function RichReport({
   tree,
   source,
   report,
+  changes,
   bookmark,
   onQuote,
   onSource,
@@ -22,6 +25,7 @@ export function RichReport({
   readonly tree: Root;
   readonly source: string;
   readonly report: ReportSummary;
+  readonly changes: ReadonlyMap<string, AcceptedFindingChange> | null | undefined;
   readonly bookmark: string;
   readonly onQuote: (text: string, offset: number) => void;
   readonly onSource: (offset: number) => void;
@@ -33,7 +37,10 @@ export function RichReport({
   const [selection, setSelection] = useState<Selection>();
   const [saved] = useState(() => readBookmark(bookmark));
   const [restored, setRestored] = useState(!saved);
-  const blocks = useMemo(() => reportBlocks(tree, source, report), [tree, source, report]);
+  const blocks = useMemo(
+    () => reportBlocks(tree, source, report, changes),
+    [tree, source, report, changes],
+  );
   const navigationAfter = Math.max(0, blocks.findIndex((block) => block.name || block.finding) - 1);
   const sections = blocks.flatMap((block, index) =>
     block.name && !block.finding ? [{ index, label: block.name }] : [],
@@ -61,7 +68,7 @@ export function RichReport({
     count: usesVirtual ? blocks.length : 0,
     estimateSize: () => 230,
     getScrollElement: () => scroll,
-    getItemKey: (index) => blocks[index]?.offset ?? index,
+    getItemKey: (index) => `${index}:${blocks[index]?.offset ?? -1}`,
     scrollMargin: margin,
     overscan: 3,
     rangeExtractor: range,
@@ -157,9 +164,12 @@ export function RichReport({
         setPinned([]);
         return;
       }
-      const exact = selectionSource(selected, source, start, end);
+      const inSourceOrder = blocks
+        .slice(first, last + 1)
+        .every((block, index) => block.sourceOrder === start.sourceOrder + index);
+      const exact = inSourceOrder ? selectionSource(selected, source, start, end) : undefined;
       setSelection({
-        fallback: start.offset,
+        fallback: Math.max(0, start.offset),
         ...(exact ? { quote: exact } : {}),
       });
       if (usesVirtual) {
@@ -185,43 +195,69 @@ export function RichReport({
 
   function renderBlock(block: ReportBlock, index: number) {
     const finding = block.finding;
+    const change = finding?.change;
+    const outcome = change ? outcomeLabels[change.conclusion] : undefined;
+    const retired = isRetired(change);
+    const card = finding && (
+      <article
+        className="report-authored report-finding"
+        data-blocking={finding.blocking}
+        aria-label={finding.id}
+      >
+        <header className="report-finding-header">
+          <div className="report-finding-kicker">
+            <strong>{finding.id}</strong>
+            {finding.severity && (
+              <span className="report-finding-severity">{finding.severity}</span>
+            )}
+            {finding.category && <span>{finding.category}</span>}
+            {finding.blocking !== undefined && (
+              <span>{finding.blocking ? "Blocking" : "Nonblocking"}</span>
+            )}
+            {outcome && (
+              <span className="report-finding-assessment" title={change?.reason}>
+                {!retired && change?.checkedSha === report.reviewedSha ? "Updated · " : ""}
+                {outcome}
+              </span>
+            )}
+          </div>
+          <MarkdownTree tree={{ type: "root", children: [...finding.header] }} />
+        </header>
+        {finding.fields.length > 0 && (
+          <dl className="report-finding-fields">
+            {finding.fields.map(({ label, nodes }, ordinal) => (
+              <div
+                className="report-finding-field"
+                key={`${ordinal}:${label}`}
+                data-field={label.toLowerCase()}
+              >
+                <dt>{label}</dt>
+                <dd>
+                  <MarkdownTree tree={{ type: "root", children: [...nodes] }} />
+                </dd>
+              </div>
+            ))}
+          </dl>
+        )}
+      </article>
+    );
     return (
       <>
         {finding ? (
-          <article
-            className="report-authored report-finding"
-            data-blocking={finding.blocking}
-            aria-label={finding.id}
-          >
-            <header className="report-finding-header">
-              <div className="report-finding-kicker">
-                <strong>{finding.id}</strong>
-                {finding.severity && (
-                  <span className="report-finding-severity">{finding.severity}</span>
-                )}
-                {finding.blocking !== undefined && (
-                  <span>{finding.blocking ? "Blocking" : "Nonblocking"}</span>
-                )}
-              </div>
-              <MarkdownTree tree={{ type: "root", children: [...finding.header] }} />
-            </header>
-            {finding.fields.length > 0 && (
-              <dl className="report-finding-fields">
-                {finding.fields.map(({ label, nodes }, ordinal) => (
-                  <div
-                    className="report-finding-field"
-                    key={`${ordinal}:${label}`}
-                    data-field={label.toLowerCase()}
-                  >
-                    <dt>{label}</dt>
-                    <dd>
-                      <MarkdownTree tree={{ type: "root", children: [...nodes] }} />
-                    </dd>
-                  </div>
-                ))}
-              </dl>
-            )}
-          </article>
+          retired ? (
+            <details className="report-retired-finding">
+              <summary>
+                <strong>
+                  {finding.id} · {outcome}
+                </strong>
+                {finding.title && ` · ${finding.title}`}
+              </summary>
+              {change?.reason && <p className="meta">{change.reason}</p>}
+              {card}
+            </details>
+          ) : (
+            card
+          )
         ) : (
           <div className="report-authored">
             <MarkdownTree tree={{ type: "root", children: [...block.nodes] }} />
@@ -315,7 +351,12 @@ function bookmarkAt(host: HTMLElement, scroll: HTMLElement): Bookmark {
   for (const row of host.querySelectorAll<HTMLElement>("[data-report-offset]")) {
     const bounds = row.getBoundingClientRect();
     const offset = Number(row.dataset.reportOffset);
-    if (bounds.bottom > frame.top && bounds.top < frame.bottom && Number.isSafeInteger(offset)) {
+    if (
+      bounds.bottom > frame.top &&
+      bounds.top < frame.bottom &&
+      Number.isSafeInteger(offset) &&
+      offset >= 0
+    ) {
       return { top, offset, inset: bounds.top - frame.top };
     }
   }

@@ -182,7 +182,10 @@
   white-space: nowrap;
 }
 .report-count-separator {
-  color: var(--muted);
+  display: none;
+}
+.report-count[data-report-count-value="0"] {
+  display: none;
 }
 .report-count-amount {
   color: var(--text);
@@ -213,13 +216,26 @@
   color: var(--text);
 }
 .report-authored .prose .report-before-after {
-  width: 100%;
   table-layout: fixed;
+  border-collapse: separate;
+  border-spacing: 12px 0;
+  margin-inline: -12px;
+  width: calc(100% + 24px);
 }
-.report-before-after :is(th, td) {
+.report-authored .prose .report-before-after :is(th, td) {
   width: 50%;
+  border-block-end: 0;
   padding: 9px 12px;
   vertical-align: top;
+}
+.report-authored .prose .report-before-after th {
+  border-start-start-radius: 8px;
+  border-start-end-radius: 8px;
+}
+.report-authored .prose .report-before-after tbody tr:last-child td {
+  border-end-start-radius: 8px;
+  border-end-end-radius: 8px;
+  border-block-end: 1px solid var(--line);
 }
 .report-before-after th:first-child {
   color: var(--rose);
@@ -236,6 +252,31 @@
   color: var(--green);
 }
 .report-previous-threads [data-report-thread-status="attention"] {
+  color: var(--amber);
+}
+.report-previous-threads :is(th, td) {
+  border-inline: 0;
+}
+.report-previous-threads .report-thread-outcome {
+  display: block;
+  margin-top: 3px;
+  font-size: 10px;
+  font-weight: 600;
+}
+.report-provenance,
+.report-retired-finding {
+  padding: 4px 0;
+  color: var(--muted);
+  font-size: 10px;
+}
+.report-provenance[open] > summary,
+.report-retired-finding[open] > summary {
+  margin-bottom: 12px;
+}
+.report-retired-finding .report-finding {
+  margin-top: 12px;
+}
+.report-finding-assessment {
   color: var(--amber);
 }
 .rich-report .report-authored blockquote {

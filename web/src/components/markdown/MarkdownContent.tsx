@@ -36,7 +36,7 @@ export function MarkdownTree({ tree }: { readonly tree: Root }) {
         passNode: true,
         components: {
           pre: CodeBlock,
-          table: ({ children, className }) => (
+          table: ({ children, className }: { children?: ReactNode; className?: string }) => (
             <div className="table-scroll" tabIndex={0}>
               <table className={className}>{children}</table>
             </div>
