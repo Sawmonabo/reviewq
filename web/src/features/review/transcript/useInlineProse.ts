@@ -39,6 +39,7 @@ export function useInlineProse(
   const { runId, sessionKey } = target;
   const scope = JSON.stringify([runId, sessionKey, generation]);
   const pending = useRef(new Map<string, AbortController>());
+  const requested = useRef(false);
   const [cache, setCache] = useState<Cache>({ scope, entries: empty });
   const [shown, setShown] = useState(cache);
   if (!hold && shown !== cache) setShown(cache);
@@ -58,6 +59,7 @@ export function useInlineProse(
 
   useEffect(() => {
     const requests = pending.current;
+    requested.current = false;
     function cancel() {
       for (const controller of requests.values()) controller.abort();
       requests.clear();
@@ -81,11 +83,14 @@ export function useInlineProse(
     }
 
     const known = cache.scope === scope ? cache.entries : empty;
+    // A fresh conversation's closing prose is already at its resting position.
+    const debounce = requested.current ? 80 : 0;
     const timer = window.setTimeout(() => {
       for (const { entryId, reference } of addresses) {
         if (requests.size >= MAX_REQUESTS) break;
         if (known.has(reference) || requests.has(reference)) continue;
         const controller = new AbortController();
+        requested.current = true;
         requests.set(reference, controller);
         function save(text: string | null) {
           if (controller.signal.aborted) return;
@@ -122,7 +127,7 @@ export function useInlineProse(
           () => save(null),
         );
       }
-    }, 80);
+    }, debounce);
     return () => window.clearTimeout(timer);
   }, [cache, generation, runId, scope, sessionKey, wanted]);
 
