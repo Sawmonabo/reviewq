@@ -9,7 +9,8 @@ use reviewq_app::events::{ResourceKey, Snapshot};
 use reviewq_app::queue::{
     CompactTicket, MAX_QUEUE_PAGE, MergeRequestState, PageContext, QueueItem, QueueKey,
     QueueListItem, QueuePage, QueuePosition, QueueStore, ReviewAuthor, ReviewOverview,
-    ReviewSource, RunDetail, RunPosition, RunSummary, SessionPosition, SessionSummary,
+    ReviewSignals, ReviewSource, RunDetail, RunPosition, RunSummary, SessionPosition,
+    SessionSummary,
 };
 use reviewq_domain::identity::{
     EventCursor, GitLabOrigin, MergeRequestIid, MrIdentity, ProjectId, ReviewId, RunId,
@@ -32,7 +33,9 @@ use crate::{SqliteStore, StoreError};
 mod discovery;
 mod lookup;
 mod management;
+pub(crate) mod stage;
 pub(crate) mod tracking;
+mod workspace;
 
 const ITEM_COLUMNS: &str =
     "r.review_id, r.origin, r.project_id, r.iid, r.project_path, r.title, r.head_sha, r.state, r.updated_at_ms,
@@ -58,7 +61,11 @@ const ITEM_COLUMNS: &str =
              SELECT i.ticket_key, i.title, 0 AS retained FROM scoped_review_issues si
              JOIN scoped_issues i USING(board_id,ticket_key) WHERE si.review_id=r.review_id
              UNION ALL SELECT ticket_key, title, 1 FROM retained_review_tickets WHERE review_id=r.review_id
-         ) GROUP BY ticket_key ORDER BY ticket_key)), r.author_id, r.author_username, r.draft";
+         ) GROUP BY ticket_key ORDER BY ticket_key)), r.author_id, r.author_username, r.draft,
+     f.own, f.personal_approval, f.our_comments, f.unread_replies, f.has_questions,
+     f.stage_reason, f.queue_state, f.run_id, f.focus_session, f.full_mr_reviewed_sha, f.coverage, f.last_activity";
+const ITEM_FROM: &str = "FROM reviews AS r LEFT JOIN review_decisions AS d USING(review_id)
+                         JOIN review_activity AS f ON f.review_id=r.review_id";
 const SCOPE_PREDICATE: &str =
     "(((?1 = 0 OR ?1 = 1)
        AND EXISTS (SELECT 1 FROM configured_projects c WHERE c.origin=r.origin AND c.project_id=r.project_id)
@@ -246,7 +253,7 @@ fn queue(
             _ => (i64::MAX, "~"),
         };
         let page_sql = format!(
-            "SELECT {ITEM_COLUMNS} FROM reviews AS r LEFT JOIN review_decisions AS d USING (review_id) WHERE {SCOPE_PREDICATE}
+            "SELECT {ITEM_COLUMNS} {ITEM_FROM} WHERE {SCOPE_PREDICATE}
              AND (r.updated_at_ms, r.review_id) < (?3, ?4) ORDER BY r.updated_at_ms DESC, r.review_id DESC LIMIT ?5"
         );
         let mut statement = connection.prepare_cached(&page_sql)?;
@@ -308,7 +315,7 @@ fn overview(
         return Err(AppError::CursorExpired.into());
     }
     let mut statement = connection.prepare_cached(&format!(
-        "SELECT {ITEM_COLUMNS} FROM reviews AS r LEFT JOIN review_decisions AS d USING (review_id) WHERE r.review_id=?1"
+        "SELECT {ITEM_COLUMNS} {ITEM_FROM} WHERE r.review_id=?1"
     ))?;
     let mut rows = statement.query([review_id.as_str()])?;
     let item = queue_item(rows.next()?.ok_or(AppError::NotFound)?)?;
@@ -595,6 +602,33 @@ fn queue_item(row: &Row<'_>) -> Result<QueueItem, StoreError> {
         pending_source_updates: row.get(14)?,
         pending_native_attention: row.get(15)?,
         pending_report_attention: row.get(16)?,
+        signals: ReviewSignals {
+            own: row.get(21)?,
+            personal_approval: row.get(22)?,
+            our_comments: u64::try_from(row.get::<_, i64>(23)?).map_err(|_| AppError::Internal)?,
+            unread_replies: u64::try_from(row.get::<_, i64>(24)?)
+                .map_err(|_| AppError::Internal)?,
+            has_questions: row.get(25)?,
+            stage_reason: row.get(26)?,
+            queue_state: row.get(27)?,
+            run: row
+                .get::<_, Option<String>>(28)?
+                .as_deref()
+                .map(parse)
+                .transpose()?,
+            focus: row
+                .get::<_, Option<String>>(29)?
+                .as_deref()
+                .map(parse)
+                .transpose()?,
+            full_mr_reviewed_sha: row
+                .get::<_, Option<String>>(30)?
+                .as_deref()
+                .map(parse)
+                .transpose()?,
+            coverage: row.get(31)?,
+            last_activity_ms: row.get(32)?,
+        },
     })
 }
 

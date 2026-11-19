@@ -61,6 +61,7 @@ export type HistoryEntryIdDto = string;
 export type SessionKeyDto = string;
 
 export type ErrorCode =
+  | "ticket_unverified"
   | "invalid_request"
   | "unauthorized"
   | "forbidden"
@@ -75,6 +76,8 @@ export type ErrorCode =
   | "busy"
   | "unavailable"
   | "internal";
+
+export type Coverage = "full_mr" | "selected_threads";
 
 export type TicketKeyDto = string;
 

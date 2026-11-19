@@ -91,6 +91,8 @@ export type HistoryPart =
 
 export type HistoryToolState = "running" | "completed" | "failed" | "unknown";
 
+export type PlanTaskStatus = "pending" | "in_progress" | "completed";
+
 export interface HistoryContentResponse {
   cursor: EventCursorDto;
   data: HistoryContent;
@@ -159,9 +161,23 @@ export interface HistoryEntry {
   contentRef?: HistoryCursorDto;
   entryId: HistoryEntryIdDto;
   parts: HistoryPart[];
+  partsCursor?: HistoryCursorDto;
   textBytes?: SafeCountDto;
   timestamp: UtcTimestampDto | null;
   turnId: HistoryTurnIdDto | null;
+  [k: string]: unknown;
+}
+
+export interface HistoryPartPageResponse {
+  cursor: EventCursorDto;
+  data: HistoryPartPage;
+  [k: string]: unknown;
+}
+
+export interface HistoryPartPage {
+  entryId: HistoryEntryIdDto;
+  nextCursor: HistoryCursorDto | null;
+  parts: HistoryPart[];
   [k: string]: unknown;
 }
 
@@ -177,11 +193,19 @@ export interface HistoryPlan {
   plan: PlanEntry | null;
   runId: RunIdDto;
   sessionKey: SessionKeyDto;
+  tasks?: PlanTask[];
   [k: string]: unknown;
 }
 
 export interface PlanEntry {
   entryId: HistoryEntryIdDto;
   part: HistoryPart;
+  [k: string]: unknown;
+}
+
+export interface PlanTask {
+  id: string;
+  status: PlanTaskStatus;
+  title: string;
   [k: string]: unknown;
 }

@@ -41,6 +41,8 @@ const SCHEMA: &str = concat!(
     include_str!("../schema/launches.sql"),
     "\n",
     include_str!("../schema/claude.sql"),
+    "\n",
+    include_str!("../schema/queue.sql"),
 );
 pub(super) const APPLICATION_ID: i64 = 0x5256_5132;
 pub(super) const FORMAT_ID: i64 = 1;
@@ -100,6 +102,7 @@ pub(super) fn probe(path: &AbsolutePath) -> Result<StoreIdentity, StoreError> {
 }
 
 fn configure(connection: &Connection, read_only: bool) -> Result<(), StoreError> {
+    crate::queue::stage::register(connection)?;
     connection.busy_timeout(BUSY_TIMEOUT)?;
     // SQLite creates WAL/SHM using the already-owner-only database mode.
     // Memory-backed temp storage keeps independent scratch files off disk.

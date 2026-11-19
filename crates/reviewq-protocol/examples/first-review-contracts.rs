@@ -179,10 +179,12 @@ fn emit_history_and_receipt(output: &Path) -> Result<(), Box<dyn Error>> {
             entry_id: HistoryEntryIdDto::new("active-item-0").unwrap(),
             turn_id: Some(HistoryTurnIdDto::new("active-turn-0").unwrap()),
             timestamp: None,
+            parts_cursor: None,
             content_ref: None,
             text_bytes: None,
             parts: vec![HistoryPart::AssistantText {
                 text: HistoryText::new("Ready.").unwrap(),
+                content_ref: None,
             }],
         },
         user_entry(ENTRY_B, SAME_PROMPT.into()),
@@ -253,10 +255,12 @@ fn user_entry(entry: &str, text: String) -> HistoryEntry {
         entry_id: HistoryEntryIdDto::new(entry).unwrap(),
         turn_id: Some(HistoryTurnIdDto::new(TURN).unwrap()),
         timestamp: None,
+        parts_cursor: None,
         content_ref: None,
         text_bytes: None,
         parts: vec![HistoryPart::UserPrompt {
             text: HistoryText::new(text).unwrap(),
+            content_ref: None,
         }],
     }
 }
@@ -325,6 +329,11 @@ fn review() -> MergeRequestRow {
         run_stage: Some(RunStage::Working),
         reason_kind: None,
         has_agent_questions: false,
+        focused_run_id: None,
+        focus_session_key: None,
+        full_mr_reviewed_sha: None,
+        coverage: None,
+        last_activity_at: None,
     }
 }
 

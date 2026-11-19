@@ -49,6 +49,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     registry.request::<settings::SaveSettings>("settings", "SaveSettings")?;
 
     registry.response::<QueuePageResponse>("queue", "QueuePageResponse")?;
+    registry.response::<reviewq_protocol::queue::RunCardsResponse>("queue", "RunCardsResponse")?;
     registry.response::<ReviewOverviewResponse>("queue", "ReviewOverviewResponse")?;
     registry.response::<ReviewSelectionResponse>("queue", "ReviewSelectionResponse")?;
     registry.response::<reviewq_protocol::queue::RefreshResponse>("queue", "RefreshResponse")?;
@@ -76,6 +77,10 @@ fn main() -> Result<(), Box<dyn Error>> {
     registry.response::<HistoryPageResponse>("history", "HistoryPageResponse")?;
     registry.response::<HistoryNavigationResponse>("history", "HistoryNavigationResponse")?;
     registry.response::<HistoryPlanResponse>("history", "HistoryPlanResponse")?;
+    registry.response::<reviewq_protocol::history::HistoryPartPageResponse>(
+        "history",
+        "HistoryPartPageResponse",
+    )?;
     registry.response::<HistoryContentResponse>("history", "HistoryContentResponse")?;
 
     registry.request::<SendMessageRequest>("delivery", "SendMessageRequest")?;

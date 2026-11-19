@@ -32,6 +32,7 @@ import type {
   HistoryContentResponse,
   HistoryNavigationResponse,
   HistoryPageResponse,
+  HistoryPartPageResponse,
   HistoryPlanResponse,
   LaunchReceiptResponse,
   NotificationPageResponse,
@@ -51,6 +52,7 @@ import type {
   ReviewDecisionResponse,
   ReviewOverviewResponse,
   ReviewSelectionResponse,
+  RunCardsResponse,
   RunCatalogResponse,
   RunDetailResponse,
   RunPreviewResponse,
@@ -132,6 +134,9 @@ export function isHistoryNavigationResponse(
 export function isHistoryPageResponse(
   value: unknown,
 ): value is HistoryPageResponse;
+export function isHistoryPartPageResponse(
+  value: unknown,
+): value is HistoryPartPageResponse;
 export function isHistoryPlanResponse(
   value: unknown,
 ): value is HistoryPlanResponse;
@@ -183,6 +188,7 @@ export function isReviewOverviewResponse(
 export function isReviewSelectionResponse(
   value: unknown,
 ): value is ReviewSelectionResponse;
+export function isRunCardsResponse(value: unknown): value is RunCardsResponse;
 export function isRunCatalogResponse(
   value: unknown,
 ): value is RunCatalogResponse;

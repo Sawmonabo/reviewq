@@ -141,6 +141,13 @@ fn record(
     let reviewers = observations::monitored_reviewers(db, observation.authenticated_actor)?;
     let events = gitlab::collect(db, &tracked.review, &observation, &reviewers)?;
     save_observations(tx, std::slice::from_ref(&observation.review))?;
+    crate::queue::stage::observe_source(
+        tx,
+        &tracked.review,
+        tracked.settings,
+        &observation,
+        &reviewers,
+    )?;
     publish(tx, &events)?;
     let Some(mut target) = tracked.monitor else {
         return Ok(());

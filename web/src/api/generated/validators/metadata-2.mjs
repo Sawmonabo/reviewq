@@ -134,6 +134,7 @@ const schema94 = { enum: ["unknown", "absent", "confirmed"], type: "string" };
 const schema106 = {
   description: "Stable error codes for the public JSON envelope.",
   enum: [
+    "ticket_unverified",
     "invalid_request",
     "unauthorized",
     "forbidden",

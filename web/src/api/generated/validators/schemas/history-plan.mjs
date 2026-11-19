@@ -2,8 +2,9 @@
 import { func0 } from "../runtime.mjs";
 import { validate361 } from "./history-availability.mjs";
 import { validate25 } from "./checkpoint-id-dto.mjs";
-import { validate462 } from "./plan-entry.mjs";
-function validate459(
+import { validate470 } from "./plan-entry.mjs";
+import { validate476 } from "./plan-task.mjs";
+function validate467(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -25,7 +26,7 @@ function validate459(
         ((data.plan === undefined || !func0.call(data, "plan")) &&
           (missing0 = "plan"))
       ) {
-        validate459.errors = [
+        validate467.errors = [
           {
             instancePath,
             schemaPath: "#/required",
@@ -87,7 +88,7 @@ function validate459(
               let valid1 = false;
               const _errs5 = errors;
               if (
-                !validate462(data2, {
+                !validate470(data2, {
                   instancePath: instancePath + "/plan",
                   parentData: data,
                   parentDataProperty: "plan",
@@ -96,8 +97,8 @@ function validate459(
               ) {
                 vErrors =
                   vErrors === null
-                    ? validate462.errors
-                    : vErrors.concat(validate462.errors);
+                    ? validate470.errors
+                    : vErrors.concat(validate470.errors);
                 errors = vErrors.length;
               }
               var _valid0 = _errs5 === errors;
@@ -134,7 +135,7 @@ function validate459(
                   vErrors.push(err1);
                 }
                 errors++;
-                validate459.errors = vErrors;
+                validate467.errors = vErrors;
                 return false;
               } else {
                 errors = _errs4;
@@ -195,13 +196,59 @@ function validate459(
                 } else {
                   var valid0 = true;
                 }
+                if (valid0) {
+                  if (data.tasks !== undefined && func0.call(data, "tasks")) {
+                    let data5 = data.tasks;
+                    const _errs10 = errors;
+                    if (errors === _errs10) {
+                      if (Array.isArray(data5)) {
+                        var valid2 = true;
+                        const len0 = data5.length;
+                        for (let i0 = 0; i0 < len0; i0++) {
+                          const _errs12 = errors;
+                          if (
+                            !validate476(data5[i0], {
+                              instancePath: instancePath + "/tasks/" + i0,
+                              parentData: data5,
+                              parentDataProperty: i0,
+                              rootData,
+                            })
+                          ) {
+                            vErrors =
+                              vErrors === null
+                                ? validate476.errors
+                                : vErrors.concat(validate476.errors);
+                            errors = vErrors.length;
+                          }
+                          var valid2 = _errs12 === errors;
+                          if (!valid2) {
+                            break;
+                          }
+                        }
+                      } else {
+                        validate467.errors = [
+                          {
+                            instancePath: instancePath + "/tasks",
+                            schemaPath: "#/properties/tasks/type",
+                            keyword: "type",
+                            params: { type: "array" },
+                          },
+                        ];
+                        return false;
+                      }
+                    }
+                    var valid0 = _errs10 === errors;
+                  } else {
+                    var valid0 = true;
+                  }
+                }
               }
             }
           }
         }
       }
     } else {
-      validate459.errors = [
+      validate467.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -212,7 +259,7 @@ function validate459(
       return false;
     }
   }
-  validate459.errors = vErrors;
+  validate467.errors = vErrors;
   return errors === 0;
 }
-export { validate459 };
+export { validate467 };

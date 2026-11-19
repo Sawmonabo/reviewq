@@ -73,6 +73,7 @@ import type {
   RefreshResponse,
   ReviewOverviewResponse,
   ReviewSelectionResponse,
+  RunCardsResponse,
   TrackReviewRequest,
   TrackReviewResponse,
 } from "./queue.js";
@@ -89,6 +90,7 @@ import type {
   HistoryContentResponse,
   HistoryNavigationResponse,
   HistoryPageResponse,
+  HistoryPartPageResponse,
   HistoryPlanResponse,
 } from "./history.js";
 
@@ -128,6 +130,7 @@ export interface Contracts {
   HistoryContentResponse: HistoryContentResponse;
   HistoryNavigationResponse: HistoryNavigationResponse;
   HistoryPageResponse: HistoryPageResponse;
+  HistoryPartPageResponse: HistoryPartPageResponse;
   HistoryPlanResponse: HistoryPlanResponse;
   LaunchReceiptResponse: LaunchReceiptResponse;
   NotificationPageResponse: NotificationPageResponse;
@@ -147,6 +150,7 @@ export interface Contracts {
   ReviewDecisionResponse: ReviewDecisionResponse;
   ReviewOverviewResponse: ReviewOverviewResponse;
   ReviewSelectionResponse: ReviewSelectionResponse;
+  RunCardsResponse: RunCardsResponse;
   RunCatalogResponse: RunCatalogResponse;
   RunDetailResponse: RunDetailResponse;
   RunPreviewResponse: RunPreviewResponse;

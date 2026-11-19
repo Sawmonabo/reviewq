@@ -2,6 +2,7 @@
 
 import type {
   CheckpointIdDto,
+  Coverage,
   Disposition,
   ErrorDto,
   EventCursorDto,
@@ -107,9 +108,14 @@ export interface SprintFacet {
 
 export interface MergeRequestRow {
   author: NamedUpstreamId | null;
+  coverage: Coverage | null;
   draft: boolean;
+  focusSessionKey: SessionKeyDto | null;
+  focusedRunId: RunIdDto | null;
+  fullMrReviewedSha: GitShaDto | null;
   hasAgentQuestions: boolean;
   iid: MergeRequestIidDto;
+  lastActivityAt: UtcTimestampDto | null;
   mrState: MergeRequestStatus;
   ourComments: SafeCountDto;
   own: boolean;
@@ -250,6 +256,61 @@ export interface RunSummary {
 export interface ReviewSelectionResponse {
   cursor: EventCursorDto;
   data: ReviewSelection;
+  [k: string]: unknown;
+}
+
+export interface RunCardsResponse {
+  cursor: EventCursorDto;
+  data: RunCards;
+  [k: string]: unknown;
+}
+
+export interface RunCards {
+  /**
+   * @maxItems 100
+   */
+  items: RunCard[];
+  nextCursor: PageCursorDto | null;
+  stageCounts: StageCounts;
+  totalMatching: SafeCountDto;
+  [k: string]: unknown;
+}
+
+export interface RunCard {
+  author: NamedUpstreamId | null;
+  coverage: Coverage | null;
+  draft: boolean;
+  focusSessionKey: SessionKeyDto | null;
+  focusedRunId: RunIdDto | null;
+  fullMrReviewedSha: GitShaDto | null;
+  hasAgentQuestions: boolean;
+  iid: MergeRequestIidDto;
+  lastActivityAt: UtcTimestampDto | null;
+  mrState: MergeRequestStatus;
+  ourComments: SafeCountDto;
+  own: boolean;
+  personalApproval: boolean | null;
+  projectId: ProjectIdDto;
+  projectPath: string;
+  queueState: QueueStatus;
+  reasonKind: string | null;
+  registeredLeadCount: SafeCountDto;
+  reviewId: ReviewIdDto;
+  runIds: RunIdDto[];
+  runStage: RunStage | null;
+  sourceSha: GitShaDto;
+  tickets: CompactTicket[];
+  title: string;
+  unreadReplies: SafeCountDto;
+  updatedAt: UtcTimestampDto;
+  [k: string]: unknown;
+}
+
+export interface StageCounts {
+  archived: SafeCountDto;
+  needsInput: SafeCountDto;
+  waiting: SafeCountDto;
+  working: SafeCountDto;
   [k: string]: unknown;
 }
 
