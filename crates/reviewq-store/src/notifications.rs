@@ -1,6 +1,7 @@
 //! Inbox occurrence admission, scoped projection and exact-ID acknowledgement.
 
 use std::collections::HashSet;
+mod desktop;
 
 use reviewq_app::access::{Actor, AppError, AppFuture};
 use reviewq_app::events::{ResourceKey, Snapshot};
@@ -171,7 +172,11 @@ fn page(
     };
     let sql = format!(
         "SELECT n.notification_id, n.source, n.kind, n.review_id, n.run_id, n.session_key,
-             n.label, n.occurred_at_ms, n.read_at_ms, n.notified_at_ms, n.event_ref
+             n.label, n.occurred_at_ms, n.read_at_ms, n.notified_at_ms, n.event_ref,
+             (SELECT d.state FROM desktop_members m JOIN desktop_receipts d USING(receipt_id)
+               WHERE m.notification_id=n.notification_id),
+             (SELECT d.reason FROM desktop_members m JOIN desktop_receipts d USING(receipt_id)
+               WHERE m.notification_id=n.notification_id)
          {JOIN_SCOPE} AND {SCOPE_PREDICATE}
            AND (?4 OR n.read_at_ms IS NULL)
            AND (?5 IS NULL OR n.occurred_at_ms<?5 OR
@@ -235,6 +240,8 @@ fn decode(row: &Row<'_>) -> Result<Notification, StoreError> {
         read_at_ms: row.get(8)?,
         notified_at_ms: row.get(9)?,
         event_ref: row.get(10)?,
+        desktop_status: row.get(11)?,
+        desktop_reason: row.get(12)?,
     })
 }
 
@@ -265,8 +272,8 @@ pub(crate) fn insert_notification(
     let id = uuid::Uuid::new_v4().to_string();
     let changed = db.execute(
         "INSERT INTO notifications(notification_id, source, occurrence_id, kind, review_id, run_id,
-                                    session_key, event_ref, label, occurred_at_ms)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+                                    session_key, event_ref, label, occurred_at_ms, desktop_eligible, desktop_episode)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, 1, ?11)
          ON CONFLICT(source, occurrence_id) DO NOTHING",
         params![
             id,
@@ -278,7 +285,7 @@ pub(crate) fn insert_notification(
             input.session.as_ref().map(|v| v.as_str()),
             input.event_ref,
             input.label,
-            input.occurred_at_ms,
+            input.occurred_at_ms, input.desktop_episode,
         ],
     )?;
     (changed == 1).then(|| parse(&id)).transpose()

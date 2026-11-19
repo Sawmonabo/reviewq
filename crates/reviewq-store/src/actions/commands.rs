@@ -417,6 +417,7 @@ fn emit(tx: &mut WriteTx<'_>, target: &LeadTarget, notify: Option<&str>) -> Resu
                 event_ref: Some(action.to_owned()),
                 label: "Publication outcome needs verification".to_owned(),
                 occurred_at_ms: now_ms()?,
+                desktop_episode: None,
             },
         )? {
             keys.push(ResourceKey::Notification(Some(notification)));

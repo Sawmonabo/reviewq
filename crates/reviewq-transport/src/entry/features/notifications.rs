@@ -190,6 +190,8 @@ fn notification(value: app::Notification) -> Result<dto::Notification, AppError>
         occurred_at: time(value.occurred_at_ms)?,
         read_at: value.read_at_ms.map(time).transpose()?,
         notified_at: value.notified_at_ms.map(time).transpose()?,
+        desktop_status: value.desktop_status,
+        desktop_reason: value.desktop_reason,
         tab,
     })
 }

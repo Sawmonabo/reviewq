@@ -57,6 +57,8 @@ pub struct Notification {
     pub occurred_at: UtcTimestampDto,
     pub read_at: Option<UtcTimestampDto>,
     pub notified_at: Option<UtcTimestampDto>,
+    pub desktop_status: Option<String>,
+    pub desktop_reason: Option<String>,
     pub tab: Tab,
 }
 
