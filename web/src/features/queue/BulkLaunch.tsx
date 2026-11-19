@@ -5,7 +5,7 @@ import type {
   RunPrepareRequest,
   RunStartRequest,
 } from "../../api/generated/contracts";
-import type { Catalog, Preview, Receipt } from "../../api/generated/contracts/launch";
+import type { Preview, Receipt } from "../../api/generated/contracts/launch";
 import { prepareRun, registerRun, runCatalog, startRun } from "../../api/launch";
 import { readQueue, trackReview } from "../../api/workspace";
 import { Modal } from "../../components/Modal";
@@ -14,6 +14,7 @@ import { useResource } from "../../hooks/useResource";
 import { describeError, readable } from "../../lib/presentation";
 import { LaunchReceiptCard, LaunchReceipts } from "./LaunchReceipts";
 import { LaunchTargetPicker } from "./LaunchTargetPicker";
+import { defaultLaunchSkill, launchSkills } from "./launch-skills";
 import { RegistrationGuide } from "./RegistrationGuide";
 import type { PendingLaunch } from "./pending-launches";
 import {
@@ -60,7 +61,7 @@ function LaunchEditor({
   const [provider, setProvider] = useState<HostProviderDto>(
     mode === "register" ? "claude" : "codex",
   );
-  const [skill, setSkill] = useState("");
+  const [skill, setSkill] = useState<string>();
   const [invocation, setInvocation] = useState<"skill" | "custom">("skill");
   const [args, setArgs] = useState("");
   const [prompt, setPrompt] = useState("");
@@ -129,13 +130,11 @@ function LaunchEditor({
     [{ kind: "settings" }],
   );
   useEffect(() => () => request.current?.abort(), []);
-  const skills = sharedSkills(catalogs.data ?? []);
-  const defaultSkill = catalogs.data?.every(
-    (catalog) => catalog.defaultSkill?.name === catalogs.data?.[0]?.defaultSkill?.name,
-  )
-    ? (catalogs.data?.[0]?.defaultSkill?.name ?? "")
-    : "";
-  const selectedSkill = skill || (skills.includes(defaultSkill) ? defaultSkill : "");
+  const skills = launchSkills(catalogs.data ?? []);
+  const selectedSkill =
+    skill === undefined
+      ? defaultLaunchSkill(skills, catalogs.data ?? [])
+      : skills.find((choice) => choice.id === skill);
   const models = (catalogs.data?.[0]?.models ?? []).filter((candidate) =>
     catalogs.data?.every((entry) => entry.models.some((item) => item.id === candidate.id)),
   );
@@ -154,7 +153,7 @@ function LaunchEditor({
 
   function selectTarget(target: LaunchTarget) {
     setTargets([target]);
-    setSkill("");
+    setSkill(undefined);
     setModel("");
     setEffort("");
     clearPreview();
@@ -184,7 +183,14 @@ function LaunchEditor({
   }
 
   async function prepare() {
-    if (busy || blocked || !catalogs.data?.length || !targets.length) return;
+    if (
+      busy ||
+      blocked ||
+      !catalogs.data?.length ||
+      !targets.length ||
+      (invocation === "skill" ? !selectedSkill : !prompt.trim())
+    )
+      return;
     setBusy(true);
     setNotice(undefined);
     const controller = new AbortController();
@@ -192,26 +198,28 @@ function LaunchEditor({
     try {
       const source = await Promise.all(
         targets.map((target) => {
-          const skillChoice = catalogs.data
-            ?.find((catalog) => catalog.reviewId === target.reviewId)
-            ?.skills.find((item) => item.name === selectedSkill);
+          const skillChoice = selectedSkill?.sources.get(target.reviewId);
           const resolvedPrompt = expandTicket(prompt, target);
           const resolvedContext = expandTicket(context, target);
+          const selectedInvocation: RunPrepareRequest["invocation"] =
+            invocation === "custom"
+              ? { kind: "custom", prompt: resolvedPrompt }
+              : skillChoice && {
+                  kind: "skill",
+                  name: skillChoice.name,
+                  path: skillChoice.path,
+                  args: expandTicket(args, target) || null,
+                };
+          if (!selectedInvocation) {
+            throw new Error("The selected skill is unavailable in a target checkout.");
+          }
           const body: RunPrepareRequest = {
             reviewId: target.reviewId,
             provider,
             context: resolvedContext || null,
             model: model || null,
             effort: effort || null,
-            invocation:
-              invocation === "custom"
-                ? { kind: "custom", prompt: resolvedPrompt }
-                : {
-                    kind: "skill",
-                    name: selectedSkill,
-                    path: skillChoice?.path ?? null,
-                    args: expandTicket(args, target) || null,
-                  },
+            invocation: selectedInvocation,
           };
           return prepareRun(body, controller.signal);
         }),
@@ -436,7 +444,7 @@ function LaunchEditor({
               disabled={busy || attempts.length > 0}
               onChange={(event) => {
                 setProvider(event.currentTarget.value === "claude" ? "claude" : "codex");
-                setSkill("");
+                setSkill(undefined);
                 setModel("");
                 setEffort("");
                 clearPreview();
@@ -535,20 +543,28 @@ function LaunchEditor({
                       <label className="field">
                         Skill
                         <select
-                          value={selectedSkill}
+                          value={selectedSkill?.id ?? ""}
                           onChange={(event) => {
                             setSkill(event.currentTarget.value);
                             clearPreview();
                           }}
                         >
                           <option value="">Choose a skill</option>
-                          {skills.map((name) => (
-                            <option key={name}>{name}</option>
+                          {skills.map((choice) => (
+                            <option key={choice.id} value={choice.id}>
+                              {choice.label}
+                            </option>
                           ))}
                         </select>
                       </label>
                     ) : (
-                      <Empty title="No shared skills in these checkouts">
+                      <Empty
+                        title={
+                          targets.length === 1
+                            ? "No skills in this checkout"
+                            : "No shared skills in these checkouts"
+                        }
+                      >
                         <button
                           type="button"
                           onClick={() => {
@@ -559,6 +575,23 @@ function LaunchEditor({
                           Write a custom prompt
                         </button>
                       </Empty>
+                    )}
+                    {selectedSkill && (
+                      <details className="launch-disclosure launch-skill-source">
+                        <summary>Selected skill source</summary>
+                        <ul>
+                          {targets.map((target) => (
+                            <li key={target.reviewId}>
+                              {targets.length > 1 && (
+                                <span>
+                                  {target.projectPath} !{target.iid}
+                                </span>
+                              )}
+                              <code>{selectedSkill.sources.get(target.reviewId)?.path}</code>
+                            </li>
+                          ))}
+                        </ul>
+                      </details>
                     )}
                     <label className="field">
                       Skill arguments
@@ -680,14 +713,6 @@ function LaunchEditor({
         })}
       </div>
     </Modal>
-  );
-}
-
-function sharedSkills(catalogs: readonly Catalog[]) {
-  const first = catalogs[0];
-  if (!first) return [];
-  return [...new Set(first.skills.map((skill) => skill.name))].filter((name) =>
-    catalogs.every((catalog) => catalog.skills.filter((skill) => skill.name === name).length === 1),
   );
 }
 

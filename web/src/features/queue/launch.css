@@ -124,6 +124,21 @@
 .launch-preview-panel > div {
   margin-top: 11px;
 }
+.launch-skill-source ul {
+  display: grid;
+  gap: 6px;
+  margin: 7px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.launch-skill-source :is(span, code) {
+  display: block;
+  overflow-wrap: anywhere;
+}
+.launch-skill-source code {
+  color: var(--text);
+  font-size: 11px;
+}
 .launch-preview-panel {
   padding: 12px;
   border: 1px solid var(--line);
