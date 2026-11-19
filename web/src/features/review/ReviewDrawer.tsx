@@ -644,13 +644,6 @@ export default function ReviewDrawer({
                   run={run}
                   drafts={drafts}
                   reviewTitle={review.title}
-                  identity={[
-                    review.projectPath.split("/").at(-1)?.replaceAll("-", " "),
-                    `MR !${review.iid}`,
-                    review.tickets[0]?.key,
-                  ]
-                    .filter(Boolean)
-                    .join(" · ")}
                   webUrl={overview.webUrl}
                   followup={follows.data?.latestCompletedResult}
                   onRun={onRun}

@@ -69,6 +69,41 @@
 .composer .composer-send:not(:disabled):hover {
   background: color-mix(in srgb, var(--primary) 72%, white);
 }
+.feedback-composer-shell .composer {
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+.feedback-composer-shell .composer textarea {
+  min-height: 84px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: var(--control);
+}
+.feedback-composer-shell .composer textarea:focus-visible {
+  border-color: var(--focus);
+}
+.feedback-composer-shell .composer-bottom {
+  justify-content: space-between;
+  gap: 12px;
+  padding: 0;
+}
+.feedback-composer-shell .feedback-label,
+.feedback-composer-shell .feedback-send {
+  font-size: 11px;
+}
+.feedback-composer-shell .feedback-send {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+@container review-detail (max-width: 390px) {
+  .feedback-composer-shell .composer-bottom {
+    flex-wrap: wrap;
+  }
+}
 @media (pointer: coarse) {
   .composer .composer-send {
     width: 44px;

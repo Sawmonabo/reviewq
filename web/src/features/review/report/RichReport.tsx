@@ -1,208 +1,252 @@
 import { defaultRangeExtractor, useVirtualizer } from "@tanstack/react-virtual";
-import type { Root, RootContent } from "hast";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { ReportSummary } from "../../../api/generated/contracts/reports";
-import { readable } from "../../../lib/presentation";
+import type { Root } from "hast";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useState } from "react";
 import { MarkdownTree } from "../../../components/markdown/MarkdownContent";
-import { Notice } from "../../../components/PanelState";
+import { savedValue, saveValue } from "../../../lib/view-preferences";
+import { parentElement, reportBlocks, selectionSource } from "./report-presentation";
+import type { ReportBlock } from "./report-presentation";
 
-type Block = {
-  readonly offset: number;
-  readonly end: number;
-  readonly children: RootContent[];
-  readonly name?: string;
-};
+type Bookmark = { readonly top: number; readonly offset?: number; readonly inset?: number };
+type Quote = { readonly text: string; readonly offset: number };
+type Selection = { readonly quote?: Quote; readonly fallback: number };
 
 export function RichReport({
   tree,
   source,
-  identity,
-  report,
+  bookmark,
   onQuote,
   onSource,
 }: {
   readonly tree: Root;
   readonly source: string;
-  readonly identity: string;
-  readonly report: ReportSummary;
+  readonly bookmark: string;
   readonly onQuote: (text: string, offset: number) => void;
   readonly onSource: (offset: number) => void;
 }) {
-  const root = useRef<HTMLDivElement>(null);
+  const [host, setHost] = useState<HTMLDivElement | null>(null);
   const [scroll, setScroll] = useState<HTMLElement | null>(null);
   const [margin, setMargin] = useState(0);
   const [pinned, setPinned] = useState<readonly number[]>([]);
-  const [error, setError] = useState<string>();
-  const blocks = useMemo(() => semanticBlocks(tree, source.length), [tree, source.length]);
+  const [selection, setSelection] = useState<Selection>();
+  const [saved] = useState(() => readBookmark(bookmark));
+  const [restored, setRestored] = useState(!saved);
+  const blocks = useMemo(() => reportBlocks(tree, source), [tree, source]);
+  const usesVirtual = blocks.length > 17;
+  const restoreIndex =
+    !restored && saved?.offset !== undefined
+      ? blocks.findIndex((block) => block.offset === saved.offset)
+      : -1;
+  const setRoot = useCallback((node: HTMLDivElement | null) => {
+    setHost(node);
+    setScroll(node?.closest<HTMLElement>(".drawer-body") ?? null);
+  }, []);
   const range = useCallback(
-    (value: Parameters<typeof defaultRangeExtractor>[0]) =>
-      [...new Set([...defaultRangeExtractor(value), ...pinned])].sort((a, b) => a - b),
-    [pinned],
+    (value: Parameters<typeof defaultRangeExtractor>[0]) => {
+      const indexes = new Set([...defaultRangeExtractor(value), ...pinned]);
+      if (restoreIndex >= 0) indexes.add(restoreIndex);
+      return [...indexes].sort((a, b) => a - b);
+    },
+    [pinned, restoreIndex],
   );
-  // Keep the TanStack instance and measured rows local to this unmemoized renderer.
+  // The measured rows and virtualizer stay inside this renderer.
   // eslint-disable-next-line react-hooks/incompatible-library
   const virtual = useVirtualizer({
-    count: blocks.length,
-    estimateSize: () => 260,
+    count: usesVirtual ? blocks.length : 0,
+    estimateSize: () => 230,
     getScrollElement: () => scroll,
+    getItemKey: (index) => blocks[index]?.offset ?? index,
     scrollMargin: margin,
     overscan: 3,
     rangeExtractor: range,
   });
-  const usesVirtual = blocks.length > 17;
 
-  useEffect(() => {
-    const host = root.current;
-    const scroller = host?.closest<HTMLElement>(".drawer-body");
-    if (!host || !scroller || !usesVirtual) return;
-    setScroll(scroller);
-    function measurePosition() {
-      if (host && scroller)
-        setMargin(
-          scroller.scrollTop +
-            host.getBoundingClientRect().top -
-            scroller.getBoundingClientRect().top,
-        );
+  useLayoutEffect(() => {
+    if (!host || !scroll || !usesVirtual) return;
+    const element = host;
+    const container = scroll;
+    function measure() {
+      setMargin(
+        container.scrollTop +
+          element.getBoundingClientRect().top -
+          container.getBoundingClientRect().top,
+      );
     }
-    const resize = new ResizeObserver(measurePosition);
-    resize.observe(scroller);
-    resize.observe(host);
-    measurePosition();
-    window.addEventListener("resize", measurePosition);
+    const observer = new ResizeObserver(measure);
+    observer.observe(container);
+    observer.observe(element);
+    const frame = requestAnimationFrame(measure);
     return () => {
-      resize.disconnect();
-      window.removeEventListener("resize", measurePosition);
+      cancelAnimationFrame(frame);
+      observer.disconnect();
     };
-  }, [usesVirtual]);
+  }, [host, scroll, usesVirtual]);
+
+  useLayoutEffect(() => {
+    if (!host || !scroll || restored || !saved) return;
+    const element = host;
+    const container = scroll;
+    const position = saved;
+    let frame = requestAnimationFrame(restore);
+    let attempts = 0;
+    function restore() {
+      const row = restoreIndex >= 0 ? blockElement(element, restoreIndex) : undefined;
+      if (row && position.inset !== undefined) {
+        container.scrollTop +=
+          row.getBoundingClientRect().top - container.getBoundingClientRect().top - position.inset;
+      } else if (restoreIndex >= 0 && usesVirtual) {
+        virtual.scrollToIndex(restoreIndex, { align: "start" });
+      } else {
+        container.scrollTop = position.top;
+      }
+      if (++attempts < 3) frame = requestAnimationFrame(restore);
+      else setRestored(true);
+    }
+    return () => cancelAnimationFrame(frame);
+  }, [host, scroll, restored, saved, restoreIndex, usesVirtual, virtual]);
 
   useEffect(() => {
-    const host = root.current;
-    if (!host || !usesVirtual) return;
-    function pin() {
-      const selection = getSelection();
-      const values: number[] = [];
-      if (host && selection && !selection.isCollapsed && selection.rangeCount) {
-        const selectionRange = selection.getRangeAt(0);
-        for (const node of host.querySelectorAll<HTMLElement>("[data-report-block]")) {
-          if (selectionRange.intersectsNode(node)) values.push(Number(node.dataset.reportBlock));
-        }
-      }
-      setPinned(values);
+    if (!host || !scroll || !restored) return;
+    const element = host;
+    const container = scroll;
+    let last = bookmarkAt(element, container);
+    let timer: number | undefined;
+    function record() {
+      last = bookmarkAt(element, container);
+      if (timer !== undefined) window.clearTimeout(timer);
+      timer = window.setTimeout(commit, 180);
     }
-    document.addEventListener("selectionchange", pin);
-    return () => document.removeEventListener("selectionchange", pin);
-  }, [usesVirtual]);
+    function commit() {
+      saveValue(bookmark, last);
+    }
+    container.addEventListener("scroll", record, { passive: true });
+    window.addEventListener("pagehide", commit);
+    return () => {
+      container.removeEventListener("scroll", record);
+      window.removeEventListener("pagehide", commit);
+      if (timer !== undefined) window.clearTimeout(timer);
+      commit();
+    };
+  }, [bookmark, host, scroll, restored]);
 
-  function quote() {
-    const selection = getSelection();
-    if (!selection || selection.isCollapsed || !selection.rangeCount) {
-      setError("Select a passage in the report to quote.");
-      return;
-    }
-    const selected = selection.getRangeAt(0);
-    const start = blockId(selected.startContainer);
-    const end = blockId(selected.endContainer);
-    const block = blocks[start];
-    if (!block || !root.current?.contains(selected.commonAncestorContainer)) {
-      setError("Select a passage in the report body.");
-      return;
-    }
-    const exact = selected.toString();
-    const container = root.current.querySelector(`[data-report-block="${start}"] .report-authored`);
-    if (!container?.contains(selected.startContainer)) {
-      setError("Select authored report text to quote.");
-      return;
-    }
-    const preceding = document.createRange();
-    setError(undefined);
-    if (end === start && container.contains(selected.endContainer) && exact.trim()) {
-      preceding.selectNodeContents(container);
-      preceding.setEnd(selected.startContainer, selected.startOffset);
-      const prefix = preceding.toString();
-      const absolute = block.offset + prefix.length;
-      if (source.slice(block.offset, absolute + exact.length) === prefix + exact) {
-        onQuote(exact, [...source.slice(0, absolute)].length);
+  useEffect(() => {
+    if (!host) return;
+    const element = host;
+    function capture() {
+      const active = getSelection();
+      if (!active || active.isCollapsed || !active.rangeCount) {
+        if (!document.activeElement?.closest(".report-selection-action")) {
+          setSelection(undefined);
+          setPinned([]);
+        }
         return;
       }
+      const selected = active.getRangeAt(0);
+      const first = blockIndex(selected.startContainer);
+      const last = blockIndex(selected.endContainer);
+      const start = blocks[first];
+      const end = blocks[last];
+      if (!start || !end || !element.contains(selected.commonAncestorContainer)) {
+        setSelection(undefined);
+        setPinned([]);
+        return;
+      }
+      const exact = selectionSource(selected, element, source, start, end);
+      setSelection({
+        fallback: [...source.slice(0, start.offset)].length,
+        ...(exact
+          ? { quote: { text: exact.text, offset: [...source.slice(0, exact.offset)].length } }
+          : {}),
+      });
+      if (usesVirtual) {
+        const indexes = [...element.querySelectorAll<HTMLElement>("[data-report-block]")]
+          .filter((row) => selected.intersectsNode(row))
+          .map((row) => Number(row.dataset.reportBlock));
+        setPinned(indexes);
+      }
     }
-    onSource([...source.slice(0, block.offset)].length);
-  }
+    document.addEventListener("selectionchange", capture);
+    return () => document.removeEventListener("selectionchange", capture);
+  }, [blocks, host, source, usesVirtual]);
 
-  const verdictBlock = blocks.findIndex((block) => /^verdict$/i.test(block.name ?? ""));
   function jump(index: number) {
+    if (!host || !scroll) return;
     if (usesVirtual) virtual.scrollToIndex(index, { align: "start" });
-    else
-      root.current
-        ?.querySelector(`[data-report-block="${index}"]`)
-        ?.scrollIntoView({ block: "start" });
+    else {
+      const row = blockElement(host, index);
+      if (row)
+        scroll.scrollTop += row.getBoundingClientRect().top - scroll.getBoundingClientRect().top;
+    }
   }
 
-  function sectionLinks() {
-    return (
-      <nav className="report-section-nav" aria-label="Report sections">
-        {blocks.map((block, index) =>
-          index > 0 && index !== verdictBlock && block.name ? (
-            <button type="button" className="quiet-button" key={index} onClick={() => jump(index)}>
-              {block.name}
-            </button>
-          ) : null,
-        )}
-        <button type="button" className="quiet-button" onClick={quote}>
-          Quote selection
-        </button>
-      </nav>
-    );
-  }
-
-  function evidence(block: Block, index: number) {
-    const authoredVerdict = index === verdictBlock;
-    const header = index === 0;
-    const toolsFollow = authoredVerdict || (header && verdictBlock < 0);
-    const nodes = authoredVerdict ? block.children.slice(1) : block.children;
+  function renderBlock(block: ReportBlock, index: number) {
+    const finding = block.finding;
     return (
       <>
-        {header && identity && <p className="report-identity">{identity}</p>}
-        <div className={authoredVerdict ? `report-verdict ${report.verdict}` : undefined}>
-          {authoredVerdict && (
-            <strong className="report-verdict-label">{readable(report.verdict)}</strong>
-          )}
+        {finding ? (
+          <article
+            className="report-authored report-finding"
+            data-blocking={finding.blocking}
+            aria-label={finding.id}
+          >
+            <header className="report-finding-header">
+              <div className="report-finding-kicker">
+                <strong>{finding.id}</strong>
+                {finding.severity && (
+                  <span className="report-finding-severity">{finding.severity}</span>
+                )}
+                {finding.blocking !== undefined && (
+                  <span>{finding.blocking ? "Blocking" : "Nonblocking"}</span>
+                )}
+              </div>
+              <MarkdownTree tree={{ type: "root", children: [...finding.header] }} />
+            </header>
+            {finding.fields.length > 0 && (
+              <dl className="report-finding-fields">
+                {finding.fields.map(({ label, nodes }, ordinal) => (
+                  <div
+                    className="report-finding-field"
+                    key={`${ordinal}:${label}`}
+                    data-field={label.toLowerCase()}
+                  >
+                    <dt>{label}</dt>
+                    <dd>
+                      <MarkdownTree tree={{ type: "root", children: [...nodes] }} />
+                    </dd>
+                  </div>
+                ))}
+              </dl>
+            )}
+          </article>
+        ) : (
           <div className="report-authored">
-            <MarkdownTree tree={{ type: "root", children: nodes }} />
-          </div>
-        </div>
-        {header && verdictBlock < 0 && report.verdict !== "not_specified" && (
-          <div className={`report-verdict ${report.verdict}`}>
-            <strong className="report-verdict-label">{readable(report.verdict)}</strong>
+            <MarkdownTree tree={{ type: "root", children: [...block.nodes] }} />
           </div>
         )}
-        {toolsFollow && (
-          <>
-            <div className="report-counts">
-              {report.findingCount !== null && (
-                <span>
-                  <strong>{report.findingCount}</strong>{" "}
-                  {report.findingCount === 1 ? "finding" : "findings"}
-                </span>
-              )}
-              {report.changeCount ? (
-                <span>
-                  <strong>{report.changeCount}</strong> recorded changes
-                </span>
-              ) : null}
-            </div>
-            {sectionLinks()}
-          </>
+        {index === 0 && blocks.slice(1).some((part) => part.name && !part.finding) && (
+          <nav className="report-section-nav" aria-label="Report sections">
+            {blocks.map((part, position) =>
+              position > 0 && part.name && !part.finding ? (
+                <button
+                  type="button"
+                  className="quiet-button"
+                  key={part.offset}
+                  onClick={() => jump(position)}
+                >
+                  {part.name}
+                </button>
+              ) : null,
+            )}
+          </nav>
         )}
       </>
     );
   }
 
   return (
-    <section className="rich-report stack" aria-label="Formatted accepted report">
-      {error && <Notice>{error}</Notice>}
+    <section className="rich-report" aria-label="Formatted accepted report">
       <div
         className="report-blocks"
-        ref={root}
+        ref={setRoot}
         style={usesVirtual ? { height: virtual.getTotalSize(), position: "relative" } : undefined}
       >
         {usesVirtual
@@ -214,59 +258,88 @@ export function RichReport({
                   key={item.key}
                   data-index={item.index}
                   data-report-block={item.index}
+                  data-report-offset={block.offset}
                   ref={virtual.measureElement}
                   style={{
                     position: "absolute",
-                    top: 0,
-                    left: 0,
-                    width: "100%",
+                    inset: "0 0 auto",
                     transform: `translateY(${item.start - margin}px)`,
                   }}
                 >
-                  {evidence(block, item.index)}
+                  {renderBlock(block, item.index)}
                 </div>
               );
             })
           : blocks.map((block, index) => (
-              <div key={index} data-report-block={index}>
-                {evidence(block, index)}
+              <div key={index} data-report-block={index} data-report-offset={block.offset}>
+                {renderBlock(block, index)}
               </div>
             ))}
       </div>
+      {selection && (
+        <div className="report-selection-action">
+          <button
+            className="secondary"
+            type="button"
+            onPointerDown={(event) => event.preventDefault()}
+            onClick={() =>
+              selection.quote
+                ? onQuote(selection.quote.text, selection.quote.offset)
+                : onSource(selection.fallback)
+            }
+          >
+            Comment on selected finding
+          </button>
+        </div>
+      )}
     </section>
   );
 }
 
-function semanticBlocks(tree: Root, total: number): Block[] {
-  const blocks: { offset: number; children: RootContent[]; name?: string }[] = [];
-  let current: (typeof blocks)[number] | undefined;
-  for (const node of tree.children) {
-    const heading =
-      node.type === "element" && /^h[1-6]$/.test(node.tagName)
-        ? node.children
-            .map((content) => (content.type === "text" ? content.value : ""))
-            .join("")
-            .trim()
-        : "";
-    if (
-      !current ||
-      heading ||
-      (current.children.length >= 22 && node.position?.start.offset != null)
-    ) {
-      current = {
-        offset: node.position?.start.offset ?? 0,
-        children: [],
-        ...(heading ? { name: heading } : {}),
-      };
-      blocks.push(current);
-    }
-    current.children.push(node);
-  }
-  return blocks.map((block, index) => ({ ...block, end: blocks[index + 1]?.offset ?? total }));
+function blockElement(root: HTMLElement, index: number) {
+  return root.querySelector<HTMLElement>(`[data-report-block="${index}"]`);
 }
 
-function blockId(node: Node) {
-  const element = node instanceof Element ? node : node.parentElement;
-  const id = element?.closest<HTMLElement>("[data-report-block]")?.dataset.reportBlock;
-  return id === undefined ? -1 : Number(id);
+function blockIndex(node: Node) {
+  const author = parentElement(node)?.closest(".report-authored");
+  const value = author?.closest<HTMLElement>("[data-report-block]")?.dataset.reportBlock;
+  return value === undefined ? -1 : Number(value);
+}
+
+function bookmarkAt(host: HTMLElement, scroll: HTMLElement): Bookmark {
+  const top = scroll.scrollTop;
+  const frame = scroll.getBoundingClientRect();
+  for (const row of host.querySelectorAll<HTMLElement>("[data-report-offset]")) {
+    const bounds = row.getBoundingClientRect();
+    const offset = Number(row.dataset.reportOffset);
+    if (bounds.bottom > frame.top && bounds.top < frame.bottom && Number.isSafeInteger(offset)) {
+      return { top, offset, inset: bounds.top - frame.top };
+    }
+  }
+  return { top };
+}
+
+function readBookmark(key: string): Bookmark | undefined {
+  const item = savedValue(key);
+  if (
+    !item ||
+    typeof item !== "object" ||
+    !("top" in item) ||
+    typeof item.top !== "number" ||
+    !Number.isFinite(item.top) ||
+    item.top < 0
+  )
+    return;
+  if (
+    "offset" in item &&
+    typeof item.offset === "number" &&
+    Number.isSafeInteger(item.offset) &&
+    item.offset >= 0 &&
+    "inset" in item &&
+    typeof item.inset === "number" &&
+    Number.isFinite(item.inset)
+  ) {
+    return { top: item.top, offset: item.offset, inset: item.inset };
+  }
+  return { top: item.top };
 }
