@@ -73,7 +73,7 @@ The first review owns the initial Changes, transcript, composer and drawer files
 | `tools/package/assemble.mjs` | PACK's deterministic release assembly. |
 | `web/tests/browser/`, `crates/reviewq/tests/` | Keep useful journey and service checks around actual entry points. Use disposable profiles and bounded inputs. Browser and release qualification reuse the same data. |
 | `docs/specs/`, `docs/plans/` | User behavior, interfaces and ownership, then one implementation brief per roadmap ID. |
-| `.agents/tmp/`, `target/`, `web/dist/` | Optional scratch output, compiled binaries and production browser assets. Release bundle includes the matching executable, web assets and host integrations. |
+| `target/`, `web/dist/` | Compiled binaries and production browser assets. Release bundle includes the matching executable, web assets and host integrations. |
 
 ## Installed files
 
