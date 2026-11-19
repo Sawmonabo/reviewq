@@ -40,6 +40,21 @@ CREATE TABLE scoped_review_issues (
 ) STRICT, WITHOUT ROWID;
 
 CREATE INDEX scoped_review_issues_key ON scoped_review_issues(ticket_key, board_id, review_id);
+
+CREATE TABLE loaded_sprints (
+    board_id INTEGER NOT NULL REFERENCES settings_boards(board_id) ON DELETE CASCADE,
+    sprint_id INTEGER NOT NULL CHECK (sprint_id>0),
+    label TEXT NOT NULL,
+    PRIMARY KEY (board_id,sprint_id)
+) STRICT, WITHOUT ROWID;
+
+CREATE TABLE loaded_sprint_issues (
+    board_id INTEGER NOT NULL,
+    sprint_id INTEGER NOT NULL,
+    ticket_key TEXT NOT NULL,
+    PRIMARY KEY (board_id,sprint_id,ticket_key),
+    FOREIGN KEY (board_id,sprint_id) REFERENCES loaded_sprints ON DELETE CASCADE
+) STRICT, WITHOUT ROWID;
 CREATE TABLE source_refresh_receipts (
     id INTEGER PRIMARY KEY CHECK (id > 0),
     settings_revision INTEGER NOT NULL CHECK (settings_revision >= 0),

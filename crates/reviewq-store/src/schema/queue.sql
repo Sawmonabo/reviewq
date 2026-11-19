@@ -60,11 +60,16 @@ CREATE VIEW review_activity_evidence AS
       coalesce(d.reviewed_at_ms IS NOT NULL OR report.full_mr_reviewed_sha IS NOT NULL,0) AS hide_reviewed,
       coalesce(d.reviewed_sha<>r.head_sha OR report.full_mr_reviewed_sha<>r.head_sha,
          d.reviewed_sha<>r.head_sha,report.full_mr_reviewed_sha<>r.head_sha,0) AS changed_after_handoff,
-      coalesce((SELECT s.session_key FROM review_active_sessions s WHERE s.run_id=x.run_id
+      coalesce((SELECT s.session_key FROM review_active_sessions s JOIN runs z USING(run_id)
+          WHERE z.review_id=r.review_id
+          AND (s.run_id=x.run_id OR (s.host_questions=1 AND EXISTS (
+             SELECT 1 FROM notifications q WHERE q.run_id=s.run_id AND q.session_key=s.session_key
+                AND q.kind='agent_question' AND q.occurred_at_ms>=x.started_at_ms)))
           AND (s.host_questions=1 OR s.host_activity IN ('blocked','working','failed'))
-          ORDER BY CASE WHEN s.host_activity='blocked' THEN 0
-                        WHEN s.session_key=x.lead_session_key AND s.host_activity='working' THEN 1
-                        WHEN s.host_activity='working' THEN 2 WHEN s.host_questions=1 THEN 3 ELSE 4 END,
+          ORDER BY CASE WHEN s.host_activity='blocked' AND s.host_questions=1 THEN 0
+                        WHEN s.host_activity='blocked' THEN 1
+                        WHEN s.session_key=x.lead_session_key AND s.host_activity='working' THEN 2
+                        WHEN s.host_activity='working' THEN 3 WHEN s.host_questions=1 THEN 4 ELSE 5 END,
                    s.session_key LIMIT 1), x.lead_session_key) AS focus_session,
       max(coalesce(x.started_at_ms,0),coalesce(action.updated_at_ms,0),coalesce(report.captured_at_ms,0),
           coalesce((SELECT n.occurred_at_ms FROM notifications n WHERE n.review_id=r.review_id
@@ -83,7 +88,7 @@ CREATE VIEW review_activity_evidence AS
     LEFT JOIN actions action ON action.action_id=ah.action_id AND action.authority_verified=1 AND action.reviewed_sha=r.head_sha;
 
 CREATE VIEW review_activity AS
-    SELECT e.*, reviewq_stage(
+    SELECT e.*, (SELECT run_id FROM sessions s WHERE s.session_key=e.focus_session) AS focus_run, reviewq_stage(
         is_open,run_id IS NOT NULL,host_activity,blocking_question,has_questions,family_working,family_failed,
         action_state,action_intent,report_state,followup_state,uncertain_delivery,personal_approval,
         approval_withdrawn,pending_source,pending_report,current_decision,our_comments>0,recovery_state

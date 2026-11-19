@@ -49,6 +49,10 @@ fn main() -> Result<(), Box<dyn Error>> {
     registry.request::<settings::SaveSettings>("settings", "SaveSettings")?;
 
     registry.response::<QueuePageResponse>("queue", "QueuePageResponse")?;
+    registry
+        .request::<reviewq_protocol::queue::LoadSprintsRequest>("queue", "LoadSprintsRequest")?;
+    registry
+        .response::<reviewq_protocol::queue::LoadSprintsResponse>("queue", "LoadSprintsResponse")?;
     registry.response::<reviewq_protocol::queue::RunCardsResponse>("queue", "RunCardsResponse")?;
     registry.response::<ReviewOverviewResponse>("queue", "ReviewOverviewResponse")?;
     registry.response::<ReviewSelectionResponse>("queue", "ReviewSelectionResponse")?;

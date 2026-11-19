@@ -84,7 +84,12 @@ pub trait TicketSourceReader: Send + Sync {
         offset: u32,
         limit: u16,
     ) -> AppFuture<'_, TicketDetail>;
-    fn sprints(&self, board: u64, offset: u32) -> AppFuture<'_, scope::SprintPage>;
+    fn sprints(
+        &self,
+        board: u64,
+        offset: u32,
+        include_closed: bool,
+    ) -> AppFuture<'_, scope::SprintPage>;
     fn issues(
         &self,
         board: BoardScope,

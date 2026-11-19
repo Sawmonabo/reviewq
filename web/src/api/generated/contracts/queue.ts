@@ -58,9 +58,35 @@ export type ReviewSelection =
       [k: string]: unknown;
     };
 
+export interface LoadSprintsRequest {
+  expectedRevision: RevisionDto;
+  /**
+   * @minItems 1
+   * @maxItems 32
+   */
+  pairs: [SprintPair, ...SprintPair[]];
+}
+
+export interface SprintPair {
+  boardId: UpstreamIdDto;
+  sprintId: UpstreamIdDto;
+}
+
 export interface TrackReviewRequest {
   expectedRevision: RevisionDto;
   url: string;
+}
+
+export interface LoadSprintsResponse {
+  cursor: EventCursorDto;
+  data: LoadedSprints;
+  [k: string]: unknown;
+}
+
+export interface LoadedSprints {
+  loadedPairs: SprintPair[];
+  settingsRevision: RevisionDto;
+  [k: string]: unknown;
 }
 
 export interface QueuePageResponse {

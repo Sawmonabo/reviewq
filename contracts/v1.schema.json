@@ -2997,6 +2997,63 @@
       "title": "LaunchReceiptResponse",
       "type": "object"
     },
+    "LoadSprintsRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "expectedRevision": {
+          "$ref": "#/definitions/RevisionDto"
+        },
+        "pairs": {
+          "items": {
+            "$ref": "#/definitions/SprintPair"
+          },
+          "maxItems": 32,
+          "minItems": 1,
+          "type": "array"
+        }
+      },
+      "required": [
+        "expectedRevision",
+        "pairs"
+      ],
+      "title": "LoadSprintsRequest",
+      "type": "object"
+    },
+    "LoadSprintsResponse": {
+      "description": "The resource and event head from the same authorized snapshot.",
+      "properties": {
+        "cursor": {
+          "$ref": "#/definitions/EventCursorDto"
+        },
+        "data": {
+          "$ref": "#/definitions/LoadedSprints"
+        }
+      },
+      "required": [
+        "data",
+        "cursor"
+      ],
+      "title": "LoadSprintsResponse",
+      "type": "object"
+    },
+    "LoadedSprints": {
+      "properties": {
+        "loadedPairs": {
+          "items": {
+            "$ref": "#/definitions/SprintPair"
+          },
+          "type": "array"
+        },
+        "settingsRevision": {
+          "$ref": "#/definitions/RevisionDto"
+        }
+      },
+      "required": [
+        "settingsRevision",
+        "loadedPairs"
+      ],
+      "type": "object"
+    },
     "MergeRequestIidDto": {
       "description": "A positive merge request IID within its GitLab project.",
       "pattern": "^([1-9][0-9]{0,17}|[1-8][0-9]{18}|9[0-1][0-9]{17}|92[0-1][0-9]{16}|922[0-2][0-9]{15}|9223[0-2][0-9]{14}|92233[0-6][0-9]{13}|922337[0-1][0-9]{12}|92233720[0-2][0-9]{10}|922337203[0-5][0-9]{9}|9223372036[0-7][0-9]{8}|92233720368[0-4][0-9]{7}|922337203685[0-3][0-9]{6}|9223372036854[0-6][0-9]{5}|92233720368547[0-6][0-9]{4}|922337203685477[0-4][0-9]{3}|9223372036854775[0-7][0-9]{2}|922337203685477580[0-6][0-9]{0}|9223372036854775807)$",
@@ -6648,6 +6705,22 @@
       ],
       "type": "object"
     },
+    "SprintPair": {
+      "additionalProperties": false,
+      "properties": {
+        "boardId": {
+          "$ref": "#/definitions/UpstreamIdDto"
+        },
+        "sprintId": {
+          "$ref": "#/definitions/UpstreamIdDto"
+        }
+      },
+      "required": [
+        "boardId",
+        "sprintId"
+      ],
+      "type": "object"
+    },
     "StageCounts": {
       "properties": {
         "archived": {
@@ -7327,6 +7400,8 @@
     "InterruptResponse": "recovery",
     "InvalidateEvent": "common",
     "LaunchReceiptResponse": "launch",
+    "LoadSprintsRequest": "queue",
+    "LoadSprintsResponse": "queue",
     "NotificationPageResponse": "notifications",
     "NotificationStateRequest": "notifications",
     "NotificationStateResponse": "notifications",
@@ -7384,6 +7459,7 @@
       "FollowupMonitorRequest": "#/definitions/FollowupMonitorRequest",
       "FollowupPreferencesRequest": "#/definitions/FollowupPreferencesRequest",
       "InterruptRequest": "#/definitions/InterruptRequest",
+      "LoadSprintsRequest": "#/definitions/LoadSprintsRequest",
       "NotificationStateRequest": "#/definitions/NotificationStateRequest",
       "QuestionAnswerRequest": "#/definitions/QuestionAnswerRequest",
       "ReportFeedbackRequest": "#/definitions/ReportFeedbackRequest",
@@ -7415,6 +7491,7 @@
       "HistoryPlanResponse": "#/definitions/HistoryPlanResponse",
       "InterruptResponse": "#/definitions/InterruptResponse",
       "LaunchReceiptResponse": "#/definitions/LaunchReceiptResponse",
+      "LoadSprintsResponse": "#/definitions/LoadSprintsResponse",
       "NotificationPageResponse": "#/definitions/NotificationPageResponse",
       "NotificationStateResponse": "#/definitions/NotificationStateResponse",
       "PatchDiscussionsResponse": "#/definitions/PatchDiscussionsResponse",

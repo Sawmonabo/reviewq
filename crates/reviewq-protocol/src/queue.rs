@@ -9,8 +9,10 @@ use crate::scalar::{
 };
 use crate::{ErrorDto, EventCursorDto, Page, Success, UtcTimestampDto};
 
+mod sprints;
 mod tracking;
 mod workspace;
+pub use sprints::{LoadSprintsRequest, LoadSprintsResponse, LoadedSprints, SprintPair};
 pub use tracking::{
     TicketComment, TicketDetail, TicketDetailResponse, TrackReviewRequest, TrackReviewResponse,
     TrackedReview,

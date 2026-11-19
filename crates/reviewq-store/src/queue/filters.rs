@@ -198,9 +198,13 @@ fn read_facets(
         ORDER BY 2,p.project_id",&[])?;
     let authors=facets(db,&format!("{shape} SELECT author_id,min(author_username)
         FROM base WHERE author_id IS NOT NULL GROUP BY author_id ORDER BY reviewq_fold(min(author_username)),author_id"),args)?;
-    let mut query=db.prepare_cached(
-        "SELECT s.board_id,s.sprint_id,s.label FROM scoped_sprints s JOIN settings_boards b USING(board_id)
-         WHERE b.enabled=1 ORDER BY b.label,s.label,s.board_id,s.sprint_id"
+    let mut query = db.prepare_cached(
+        "SELECT s.board_id,s.sprint_id,s.label FROM (
+           SELECT board_id,sprint_id,label FROM scoped_sprints
+           UNION ALL SELECT l.board_id,l.sprint_id,l.label FROM loaded_sprints l WHERE NOT EXISTS (
+             SELECT 1 FROM scoped_sprints s WHERE (s.board_id,s.sprint_id)=(l.board_id,l.sprint_id))
+         ) s JOIN settings_boards b USING(board_id)
+         WHERE b.enabled=1 ORDER BY b.label,s.label,s.board_id,s.sprint_id",
     )?;
     let mut rows = query.query([])?;
     let mut sprints = Vec::new();

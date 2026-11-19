@@ -86,14 +86,14 @@ const schema37 = {
   title: "FollowupPreferencesRequest",
   type: "object",
 };
-const schema40 = { enum: ["read", "unread", "dismiss"], type: "string" };
-const schema46 = { enum: ["unicode_codepoints"], type: "string" };
-const schema52 = {
+const schema42 = { enum: ["read", "unread", "dismiss"], type: "string" };
+const schema48 = { enum: ["unicode_codepoints"], type: "string" };
+const schema54 = {
   enum: ["reviewed", "waiting_author", "needs_review"],
   type: "string",
 };
-const schema54 = { enum: ["codex", "claude"], type: "string" };
-const schema56 = {
+const schema56 = { enum: ["codex", "claude"], type: "string" };
+const schema58 = {
   additionalProperties: false,
   properties: {
     context: { type: ["string", "null"] },
@@ -112,7 +112,7 @@ const schema56 = {
   title: "RunPrepareRequest",
   type: "object",
 };
-const schema58 = {
+const schema60 = {
   additionalProperties: false,
   properties: {
     args: { type: ["string", "null"] },
@@ -123,7 +123,7 @@ const schema58 = {
   required: ["kind", "name"],
   type: "object",
 };
-const schema60 = {
+const schema62 = {
   additionalProperties: false,
   properties: {
     context: true,
@@ -151,7 +151,7 @@ const schema60 = {
     { $ref: "#/definitions/RunStartRequestFields2" },
   ],
 };
-const schema61 = {
+const schema63 = {
   type: "object",
   properties: {
     context: { type: ["string", "null"] },
@@ -162,56 +162,6 @@ const schema61 = {
     provider: { $ref: "#/definitions/HostProviderDto" },
     reviewId: { $ref: "#/definitions/ReviewIdDto" },
     sourceSha: { $ref: "#/definitions/GitShaDto" },
-  },
-};
-const schema66 = {
-  additionalProperties: false,
-  properties: {
-    boardId: true,
-    enabled: true,
-    jiraProjectKeys: true,
-    name: true,
-    projectIds: true,
-    reviewStatusIds: true,
-    scopeId: true,
-    storyPointsField: true,
-    teamFilterId: true,
-    type: true,
-  },
-  required: [
-    "scopeId",
-    "boardId",
-    "name",
-    "type",
-    "enabled",
-    "projectIds",
-    "reviewStatusIds",
-    "jiraProjectKeys",
-  ],
-  title: "SaveSettingsBoardScope",
-  type: "object",
-  allOf: [
-    { $ref: "#/definitions/SaveSettingsBoardScopeFields1" },
-    { $ref: "#/definitions/SaveSettingsBoardScopeFields2" },
-  ],
-};
-const schema67 = {
-  type: "object",
-  properties: {
-    boardId: { $ref: "#/definitions/CheckpointIdDto" },
-    enabled: { type: "boolean" },
-    jiraProjectKeys: { items: { type: "string" }, type: "array" },
-    name: { type: "string" },
-    projectIds: {
-      items: { $ref: "#/definitions/MergeRequestIidDto" },
-      type: "array",
-    },
-    reviewStatusIds: {
-      items: { $ref: "#/definitions/CheckpointIdDto" },
-      type: "array",
-    },
-    scopeId: { $ref: "#/definitions/CheckpointIdDto" },
-    storyPointsField: { type: ["string", "null"] },
   },
 };
 export {
@@ -225,14 +175,12 @@ export {
   schema29,
   schema33,
   schema37,
-  schema40,
-  schema46,
-  schema52,
+  schema42,
+  schema48,
   schema54,
   schema56,
   schema58,
   schema60,
-  schema61,
-  schema66,
-  schema67,
+  schema62,
+  schema63,
 };

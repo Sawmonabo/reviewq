@@ -11,6 +11,7 @@ import type {
   FollowupMonitorRequest,
   FollowupPreferencesRequest,
   InterruptRequest,
+  LoadSprintsRequest,
   NotificationStateRequest,
   QuestionAnswerRequest,
   ReportFeedbackRequest,
@@ -40,6 +41,7 @@ import type {
   HistoryPlanResponse,
   InterruptResponse,
   LaunchReceiptResponse,
+  LoadSprintsResponse,
   NotificationPageResponse,
   NotificationStateResponse,
   PatchDiscussionsResponse,
@@ -90,6 +92,9 @@ export function isFollowupPreferencesRequest(
   value: unknown,
 ): value is FollowupPreferencesRequest;
 export function isInterruptRequest(value: unknown): value is InterruptRequest;
+export function isLoadSprintsRequest(
+  value: unknown,
+): value is LoadSprintsRequest;
 export function isNotificationStateRequest(
   value: unknown,
 ): value is NotificationStateRequest;
@@ -161,6 +166,9 @@ export function isInterruptResponse(value: unknown): value is InterruptResponse;
 export function isLaunchReceiptResponse(
   value: unknown,
 ): value is LaunchReceiptResponse;
+export function isLoadSprintsResponse(
+  value: unknown,
+): value is LoadSprintsResponse;
 export function isNotificationPageResponse(
   value: unknown,
 ): value is NotificationPageResponse;

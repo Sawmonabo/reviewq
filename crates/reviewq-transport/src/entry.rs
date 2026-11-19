@@ -21,7 +21,7 @@ use reviewq_app::hosts::{
 };
 use reviewq_app::launch::{LaunchStore, NativeLaunchers, NativeModels};
 use reviewq_app::notifications::InboxStore;
-use reviewq_app::queue::{QueueStore, ReviewLookup, TrackingStore, WorkspaceQueue};
+use reviewq_app::queue::{QueueStore, ReviewLookup, SprintStore, TrackingStore, WorkspaceQueue};
 use reviewq_app::reports::{
     ReportCaptureStore, ReportFileSource, ReportMutationStore, ReportStore,
 };
@@ -68,6 +68,7 @@ use error::{ApiBytes, ApiError};
 pub trait Store:
     WorkspaceStore
     + QueueStore
+    + SprintStore
     + WorkspaceQueue
     + TrackingStore
     + ReviewLookup
@@ -95,6 +96,7 @@ pub trait Store:
 impl<
     S: WorkspaceStore
         + QueueStore
+        + SprintStore
         + WorkspaceQueue
         + TrackingStore
         + ReviewLookup
@@ -136,6 +138,7 @@ pub(super) struct Entry {
     launchers: NativeLaunchers,
     launch_slots: Arc<Semaphore>,
     refresh_wakeup: Notify,
+    sprint_load: tokio::sync::Mutex<()>,
     host: Option<Arc<dyn NativeHost>>,
     claude: Option<Arc<dyn ClaudeCompanion>>,
     file_history: Arc<dyn NativeHistoryReader>,
@@ -213,6 +216,7 @@ pub fn router(
         launchers: runtime.launchers,
         launch_slots: Arc::new(Semaphore::new(if runtime.launches_allowed { 4 } else { 0 })),
         refresh_wakeup: Notify::new(),
+        sprint_load: tokio::sync::Mutex::new(()),
         host,
         claude: runtime.claude,
         file_history,
@@ -246,6 +250,7 @@ pub fn router(
         .route("/session", get(session).post(start_session))
         .route("/queue", get(workspace::queue))
         .route("/queue/sync", get(refresh::sync))
+        .route("/queue/sprints", post(workspace::load_sprints))
         .route("/queue/refresh", post(refresh::start))
         .route("/queue/refresh/{refresh_id}", get(refresh::status))
         .route("/tracking", post(tracking::track))

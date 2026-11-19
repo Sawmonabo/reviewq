@@ -47,24 +47,29 @@ impl TicketSourceReader for Jira {
         Box::pin(self.ticket_detail(key, estimate_fields, offset, limit))
     }
 
-    fn sprints(&self, board: u64, offset: u32) -> AppFuture<'_, SprintPage> {
+    fn sprints(&self, board: u64, offset: u32, include_closed: bool) -> AppFuture<'_, SprintPage> {
         Box::pin(async move {
+            let mut parameters = vec![
+                ("startAt", offset.to_string()),
+                ("maxResults", "100".into()),
+            ];
+            if !include_closed {
+                parameters.push(("state", "active,future".into()));
+            }
             let page = self
                 .catalog_page(
                     &format!("rest/agile/1.0/board/{board}/sprint"),
                     "values",
-                    &[
-                        ("startAt", offset.to_string()),
-                        ("maxResults", "100".into()),
-                        ("state", "active,future".into()),
-                    ],
+                    &parameters,
                     offset,
                     Some(board),
                 )
                 .await?;
             let mut items = Vec::with_capacity(page.items.len());
             for item in page.items {
-                if !matches!(item.state.as_deref(), Some("active" | "future")) {
+                if !matches!(item.state.as_deref(), Some("active" | "future"))
+                    && !(include_closed && item.state.as_deref() == Some("closed"))
+                {
                     return Err(AppError::Conflict);
                 }
                 items.push(ScopedSprint {

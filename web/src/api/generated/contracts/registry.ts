@@ -37,6 +37,19 @@ import type {
 } from "./followups.js";
 
 import type {
+  LoadSprintsRequest,
+  LoadSprintsResponse,
+  QueuePageResponse,
+  QueueSyncResponse,
+  RefreshResponse,
+  ReviewOverviewResponse,
+  ReviewSelectionResponse,
+  RunCardsResponse,
+  TrackReviewRequest,
+  TrackReviewResponse,
+} from "./queue.js";
+
+import type {
   NotificationPageResponse,
   NotificationStateRequest,
   NotificationStateResponse,
@@ -78,17 +91,6 @@ import type {
 } from "./delivery.js";
 
 import type {
-  QueuePageResponse,
-  QueueSyncResponse,
-  RefreshResponse,
-  ReviewOverviewResponse,
-  ReviewSelectionResponse,
-  RunCardsResponse,
-  TrackReviewRequest,
-  TrackReviewResponse,
-} from "./queue.js";
-
-import type {
   ApprovalViewResponse,
   PatchDiscussionsResponse,
   PatchFileIndexResponse,
@@ -119,6 +121,7 @@ export interface Contracts {
   FollowupMonitorRequest: FollowupMonitorRequest;
   FollowupPreferencesRequest: FollowupPreferencesRequest;
   InterruptRequest: InterruptRequest;
+  LoadSprintsRequest: LoadSprintsRequest;
   NotificationStateRequest: NotificationStateRequest;
   QuestionAnswerRequest: QuestionAnswerRequest;
   ReportFeedbackRequest: ReportFeedbackRequest;
@@ -148,6 +151,7 @@ export interface Contracts {
   HistoryPlanResponse: HistoryPlanResponse;
   InterruptResponse: InterruptResponse;
   LaunchReceiptResponse: LaunchReceiptResponse;
+  LoadSprintsResponse: LoadSprintsResponse;
   NotificationPageResponse: NotificationPageResponse;
   NotificationStateResponse: NotificationStateResponse;
   PatchDiscussionsResponse: PatchDiscussionsResponse;

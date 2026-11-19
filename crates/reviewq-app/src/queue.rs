@@ -11,12 +11,14 @@ use crate::events::Snapshot;
 use crate::sources::SourceSync;
 
 mod filters;
+mod sprints;
 mod tracking;
 mod workspace;
 pub use filters::{
     QueueFacet, QueueFacets, QueueFilter, QueueOrder, QueueOwnership, QueuePhase, QueueSortKey,
     SprintFilter, SprintPair,
 };
+pub use sprints::{LoadedSprint, SprintStore, collect_sprint_pairs};
 pub use tracking::{TicketAuthority, TrackReview, TrackedReviewReceipt, TrackingStore};
 pub use workspace::{
     RunCard, RunCards, RunCardsFilter, RunCardsPosition, StageCounts, WorkspaceQueue,

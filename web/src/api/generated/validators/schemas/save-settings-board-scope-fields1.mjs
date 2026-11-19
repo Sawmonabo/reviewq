@@ -2,8 +2,8 @@
 import { func0 } from "../runtime.mjs";
 import { validate25 } from "./checkpoint-id-dto.mjs";
 import { validate78 } from "./merge-request-iid-dto.mjs";
-import { schema67 } from "../metadata-1.mjs";
-function validate157(
+import { schema69 } from "../metadata-2.mjs";
+function validate163(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -35,7 +35,7 @@ function validate157(
         if (data.enabled !== undefined && func0.call(data, "enabled")) {
           const _errs2 = errors;
           if (typeof data.enabled !== "boolean") {
-            validate157.errors = [
+            validate163.errors = [
               {
                 instancePath: instancePath + "/enabled",
                 schemaPath: "#/properties/enabled/type",
@@ -63,7 +63,7 @@ function validate157(
                 for (let i0 = 0; i0 < len0; i0++) {
                   const _errs6 = errors;
                   if (typeof data2[i0] !== "string") {
-                    validate157.errors = [
+                    validate163.errors = [
                       {
                         instancePath: instancePath + "/jiraProjectKeys/" + i0,
                         schemaPath: "#/properties/jiraProjectKeys/items/type",
@@ -79,7 +79,7 @@ function validate157(
                   }
                 }
               } else {
-                validate157.errors = [
+                validate163.errors = [
                   {
                     instancePath: instancePath + "/jiraProjectKeys",
                     schemaPath: "#/properties/jiraProjectKeys/type",
@@ -98,7 +98,7 @@ function validate157(
             if (data.name !== undefined && func0.call(data, "name")) {
               const _errs8 = errors;
               if (typeof data.name !== "string") {
-                validate157.errors = [
+                validate163.errors = [
                   {
                     instancePath: instancePath + "/name",
                     schemaPath: "#/properties/name/type",
@@ -145,7 +145,7 @@ function validate157(
                       }
                     }
                   } else {
-                    validate157.errors = [
+                    validate163.errors = [
                       {
                         instancePath: instancePath + "/projectIds",
                         schemaPath: "#/properties/projectIds/type",
@@ -194,7 +194,7 @@ function validate157(
                         }
                       }
                     } else {
-                      validate157.errors = [
+                      validate163.errors = [
                         {
                           instancePath: instancePath + "/reviewStatusIds",
                           schemaPath: "#/properties/reviewStatusIds/type",
@@ -241,13 +241,13 @@ function validate157(
                       let data10 = data.storyPointsField;
                       const _errs17 = errors;
                       if (typeof data10 !== "string" && data10 !== null) {
-                        validate157.errors = [
+                        validate163.errors = [
                           {
                             instancePath: instancePath + "/storyPointsField",
                             schemaPath: "#/properties/storyPointsField/type",
                             keyword: "type",
                             params: {
-                              type: schema67.properties.storyPointsField.type,
+                              type: schema69.properties.storyPointsField.type,
                             },
                           },
                         ];
@@ -265,7 +265,7 @@ function validate157(
         }
       }
     } else {
-      validate157.errors = [
+      validate163.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -276,7 +276,7 @@ function validate157(
       return false;
     }
   }
-  validate157.errors = vErrors;
+  validate163.errors = vErrors;
   return errors === 0;
 }
-export { validate157 };
+export { validate163 };

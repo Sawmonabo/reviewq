@@ -37,11 +37,21 @@ impl TrackingStore for SqliteStore {
                     [id.as_str()],
                 )? != 0;
                 for ticket in input.tickets {
-                    changed |= tx.sql.prepare_cached(
-                        "INSERT INTO retained_review_tickets VALUES (?1,?2,?3,?4)
+                    let affected = tx.sql.prepare_cached(
+                        "INSERT INTO retained_review_tickets VALUES (?1,?2,?3,
+                           (SELECT event_head+1 FROM service_state WHERE singleton=1))
                          ON CONFLICT(review_id,ticket_key) DO UPDATE SET title=excluded.title,verified_cursor=excluded.verified_cursor
-                         WHERE title<>excluded.title AND verified_cursor<=excluded.verified_cursor",
+                         WHERE title<>excluded.title AND verified_cursor<=?4",
                     )?.execute(params![id.as_str(),ticket.key.as_str(),ticket.title,input.before.as_sqlite_integer()])? != 0;
+                    if !affected {
+                        let same=tx.sql.prepare_cached(
+                            "SELECT title=?3 FROM retained_review_tickets WHERE review_id=?1 AND ticket_key=?2"
+                        )?.query_row(params![id.as_str(),ticket.key.as_str(),ticket.title],|row|row.get::<_,bool>(0))?;
+                        if !same {
+                            return Err(AppError::StaleRevision.into());
+                        }
+                    }
+                    changed |= affected;
                 }
                 if changed {
                     advance_queue(&tx.sql)?;

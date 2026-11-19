@@ -26,6 +26,9 @@ tickets AS (
                WHERE (m.board_id,m.ticket_key)=(i.board_id,i.ticket_key) AND sprint.active=1))
          OR (:sprint='selected' AND EXISTS (
                SELECT 1 FROM scoped_issue_sprints m JOIN requested_sprints s ON (s.board,s.sprint)=(m.board_id,m.sprint_id)
+               WHERE (m.board_id,m.ticket_key)=(i.board_id,i.ticket_key)
+               UNION ALL
+               SELECT 1 FROM loaded_sprint_issues m JOIN requested_sprints s ON (s.board,s.sprint)=(m.board_id,m.sprint_id)
                WHERE (m.board_id,m.ticket_key)=(i.board_id,i.ticket_key)))
        ))
 ),
@@ -47,7 +50,9 @@ base AS (
            OR (:default_scope=1 AND :sprint IN ('any','active') AND (
               (NOT EXISTS(SELECT 1 FROM settings_boards) AND
                EXISTS(SELECT 1 FROM review_discoveries d WHERE d.review_id=r.review_id))
-              OR (:phase<>'archive' AND EXISTS(SELECT 1 FROM review_tracking s WHERE s.review_id=r.review_id)
+              OR (:phase<>'archive'
+                  AND (:sprint='any' OR NOT EXISTS(SELECT 1 FROM boards WHERE kind='scrum'))
+                  AND EXISTS(SELECT 1 FROM review_tracking s WHERE s.review_id=r.review_id)
                   AND EXISTS(SELECT 1 FROM configured_projects p WHERE (p.origin,p.project_id)=(r.origin,r.project_id)))
            )))
       AND (__MR_SEARCH__)

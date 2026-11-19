@@ -16,7 +16,9 @@ use super::pages::{Context, count, parse, project_review, success};
 use super::{ApiError, Entry};
 
 mod queue;
+mod sprints;
 pub(super) use queue::list as queue;
+pub(super) use sprints::load as load_sprints;
 
 const RUNS: &[u8] = b"reviewq-run-cards-v1";
 

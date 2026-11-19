@@ -214,7 +214,7 @@ async fn active_sprints(
     let mut seen = HashSet::new();
     let mut offset = 0;
     for _ in 0..MAX_PAGES {
-        let page = jira.sprints(board, offset).await?;
+        let page = jira.sprints(board, offset, false).await?;
         if sprints.len() + page.items.len() > MAX_SPRINTS {
             return Err(AppError::PayloadTooLarge);
         }

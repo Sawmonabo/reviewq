@@ -32,6 +32,7 @@ use crate::{SqliteStore, StoreError};
 mod filters;
 mod lookup;
 mod management;
+mod sprints;
 pub(crate) mod stage;
 pub(crate) mod tracking;
 mod workspace;
@@ -62,7 +63,7 @@ const ITEM_COLUMNS: &str =
              UNION ALL SELECT ticket_key, title, 1 FROM retained_review_tickets WHERE review_id=r.review_id
          ) GROUP BY ticket_key ORDER BY ticket_key)), r.author_id, r.author_username, r.draft,
      f.own, f.personal_approval, f.our_comments, f.unread_replies, f.has_questions,
-     f.stage_reason, f.queue_state, f.run_id, f.focus_session, f.full_mr_reviewed_sha, f.coverage, f.last_activity";
+     f.stage_reason, f.queue_state, f.focus_run, f.focus_session, f.full_mr_reviewed_sha, f.coverage, f.last_activity";
 const ITEM_FROM: &str = "FROM reviews AS r LEFT JOIN review_decisions AS d USING(review_id)
                          JOIN review_activity AS f ON f.review_id=r.review_id";
 const SCOPE_PREDICATE: &str =
