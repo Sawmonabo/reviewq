@@ -5,6 +5,7 @@ export function Modal({
   title,
   eyebrow,
   className,
+  nonmodal = false,
   children,
   footer,
   onClose,
@@ -13,6 +14,7 @@ export function Modal({
   readonly title: string;
   readonly eyebrow?: string;
   readonly className?: string;
+  readonly nonmodal?: boolean;
   readonly children: ReactNode;
   readonly footer?: ReactNode;
   readonly onClose: () => void;
@@ -24,12 +26,13 @@ export function Modal({
   useEffect(() => {
     const node = dialog.current;
     const opener = document.activeElement;
-    node?.showModal();
+    if (nonmodal) node?.show();
+    else node?.showModal();
     return () => {
       node?.close();
       if (opener instanceof HTMLElement && opener.isConnected) opener.focus();
     };
-  }, []);
+  }, [nonmodal]);
   return (
     <dialog
       ref={dialog}
@@ -39,6 +42,13 @@ export function Modal({
       onCancel={(event) => {
         event.preventDefault();
         if (!busy) onClose();
+      }}
+      onKeyDown={(event) => {
+        if (nonmodal && event.key === "Escape" && !event.defaultPrevented && !busy) {
+          event.preventDefault();
+          event.stopPropagation();
+          onClose();
+        }
       }}
       onPointerDown={(event) => {
         backdrop.current = event.target === event.currentTarget;
