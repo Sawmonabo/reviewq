@@ -16,7 +16,7 @@ use reviewq_app::events::EventLog;
 use reviewq_app::followups::{FollowupCommands, FollowupStore};
 use reviewq_app::history::{HistoryStore, NativeHistoryReader};
 use reviewq_app::hosts::{
-    ClaudeCompanion, LeadStore, MessageHistoryStore, NativeHost, NativeTerminal,
+    ClaudeCompanion, ClaudeStore, LeadStore, MessageHistoryStore, NativeHost, NativeTerminal,
 };
 use reviewq_app::notifications::InboxStore;
 use reviewq_app::queue::{QueueStore, ReviewLookup};
@@ -62,6 +62,7 @@ pub trait Store:
     + ReviewLookup
     + EventLog
     + LeadStore
+    + ClaudeStore
     + HistoryStore
     + SourceRefreshStore
     + ReportStore
@@ -83,6 +84,7 @@ impl<
         + ReviewLookup
         + EventLog
         + LeadStore
+        + ClaudeStore
         + HistoryStore
         + SourceRefreshStore
         + ReportStore
@@ -229,6 +231,7 @@ pub fn router(
         )
         .route("/native/codex/link", post(hosts::link))
         .route("/native/claude/link", post(hosts::claude_link))
+        .merge(hosts::claude::routes())
         .route(
             "/native/claude/registration",
             post(hosts::claude_registration),

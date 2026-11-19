@@ -1,0 +1,86 @@
+use reviewq_app::access::{Actor, AppError, AppFuture};
+use reviewq_app::events::{ResourceKey, Snapshot};
+use reviewq_app::hosts::{ClaudeHeartbeat, ClaudeHeartbeatResult, ClaudeStore};
+use reviewq_domain::session::{HostProvider, LeadTarget};
+use rusqlite::params;
+
+use super::{activity_columns, allow_target};
+use crate::connection::WriteTx;
+use crate::events::{now_ms, snapshot};
+use crate::queue::lead_for_run;
+use crate::workspace::advance_queue;
+use crate::{SqliteStore, StoreError};
+
+pub(super) const COMPANION_FRESH_MS: i64 = 30_000;
+
+impl ClaudeStore for SqliteStore {
+    fn record_claude_heartbeat(
+        &self,
+        lead: LeadTarget,
+        observation: ClaudeHeartbeat,
+    ) -> AppFuture<'_, Snapshot<ClaudeHeartbeatResult>> {
+        Box::pin(async move {
+            observation.validate()?;
+            self.write(move |tx| heartbeat(tx, lead, observation))
+                .await
+                .map_err(StoreError::app)
+        })
+    }
+}
+
+fn heartbeat(
+    tx: &mut WriteTx<'_>,
+    lead: LeadTarget,
+    observation: ClaudeHeartbeat,
+) -> Result<Snapshot<ClaudeHeartbeatResult>, StoreError> {
+    let db = &tx.sql;
+    let native = lead.binding().identity();
+    if native.provider() != HostProvider::Claude
+        || lead_for_run(db, lead.run_id())?.as_ref() != Some(&lead)
+    {
+        return Err(AppError::NotFound.into());
+    }
+    allow_target(db, &Actor::native_session(native.clone()), &lead)?;
+    let key = lead.session_key().as_str();
+    let now = now_ms()?;
+    let recorded = db.execute(
+        "INSERT INTO claude_companions(session_key,generation,sequence,seen_at_ms,turn_id,latest_prompt_id,model,effort)
+         VALUES(?1,?2,?3,?4,?5,?6,?7,?8)
+         ON CONFLICT(session_key) DO UPDATE SET
+            generation=excluded.generation, sequence=excluded.sequence, seen_at_ms=excluded.seen_at_ms,
+            turn_id=excluded.turn_id, latest_prompt_id=excluded.latest_prompt_id,
+            model=excluded.model,effort=excluded.effort
+         WHERE (generation=excluded.generation AND sequence<excluded.sequence) OR
+               (generation<>excluded.generation AND seen_at_ms<=?9)",
+        params![key, observation.generation, observation.sequence as i64, now,
+            observation.turn.as_ref().map(|value| value.as_str()),
+            observation.latest_prompt.as_ref().map(|value| value.as_str()),
+            observation.model, observation.effort, now.saturating_sub(COMPANION_FRESH_MS)],
+    )?;
+    if recorded == 0 {
+        return Err(AppError::StaleRevision.into());
+    }
+    if let Some(activity) = observation.activity {
+        let (phase, questions) = activity_columns(Some(activity));
+        let changed = db.execute(
+            "UPDATE sessions SET host_activity=?2, host_questions=?3
+             WHERE session_key=?1 AND (host_activity,host_questions) IS DISTINCT FROM (?2,?3)",
+            params![key, phase, questions],
+        )?;
+        if changed != 0 {
+            advance_queue(db)?;
+            tx.emit(&[
+                ResourceKey::Queue,
+                ResourceKey::Run(Some(lead.run_id().clone())),
+                ResourceKey::Review(Some(lead.review_id().clone())),
+                ResourceKey::Session(Some(lead.session_key().clone())),
+            ])?;
+        }
+    }
+    let label = tx.sql.query_row(
+        "SELECT project_path || ' · !' || iid FROM reviews WHERE review_id=?1",
+        [lead.review_id().as_str()],
+        |row| row.get(0),
+    )?;
+    snapshot(&tx.sql, ClaudeHeartbeatResult { label })
+}

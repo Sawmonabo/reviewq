@@ -22,6 +22,7 @@ use crate::queue::{identity_for_review, lead_for_run, parse, save_review};
 use crate::workspace::{advance_queue, allow_review, configured, provider_label, scope};
 use crate::{SqliteStore, StoreError};
 
+mod claude;
 mod delivery;
 pub(crate) use delivery::{admit_workflow, unresolved_workflow_input};
 mod messages;

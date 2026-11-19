@@ -14,6 +14,8 @@ use serde::{Deserialize, Serialize};
 use super::error::ApiBytes;
 use super::{ApiError, Entry};
 
+pub(super) mod claude;
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct LinkCommand {

@@ -40,6 +40,11 @@ enum Command {
 
 #[derive(Subcommand)]
 enum Internal {
+    ClaudeBridge {
+        #[arg(value_enum)]
+        operation: native_client::ClaudeBridgeOperation,
+        session_id: String,
+    },
     ClaudeCompanion {
         session_id: String,
         #[arg(long, allow_hyphen_values = true)]
@@ -152,6 +157,13 @@ async fn execute(options: CommandLine) -> Result<(), Failure> {
         }
         Some(Command::Checkout(Checkout::Revoke { directory })) => {
             checkout_setup::revoke(&runtime::profile(options.profile)?, directory).await
+        }
+        Some(Command::Internal(Internal::ClaudeBridge {
+            operation,
+            session_id,
+        })) => {
+            native_client::claude_bridge(&runtime::profile(options.profile)?, operation, session_id)
+                .await
         }
         Some(Command::Internal(Internal::ClaudeCompanion { session_id, target })) => {
             native_client::claude(&runtime::profile(options.profile)?, session_id, target).await
