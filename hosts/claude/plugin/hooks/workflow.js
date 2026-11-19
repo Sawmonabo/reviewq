@@ -1,3 +1,5 @@
+import { invoke } from "./bridge.js";
+
 const sha = { type: "string", pattern: "^(?:[a-f0-9]{40}|[a-f0-9]{64})$" };
 const digest = { type: "string", pattern: "^[a-f0-9]{64}$" };
 const id = { type: "string", minLength: 1, maxLength: 512 };
@@ -62,14 +64,14 @@ export async function registerWorkflowTools($) {
   });
 }
 
-export async function stageReport($, invoke, state, event) {
+export async function stageReport($, state, event) {
   const context = { turnId: state.activeTurn, callId: event.tool_use_id, handoff: event.handoff };
   let result = await invoke($, "report", state.id, context);
   if (result.error && !result.correctionRequested) result = await invoke($, "report-status", state.id, context);
   return stringifyResult(result);
 }
 
-export async function stageAction($, invoke, state, event) {
+export async function stageAction($, state, event) {
   const context = { callId: event.tool_use_id };
   const declare = event.operation === "declare";
   if (declare) {
@@ -80,7 +82,7 @@ export async function stageAction($, invoke, state, event) {
   return stringifyResult(result);
 }
 
-export async function reportTurn($, invoke, state, event) {
+export async function reportTurn($, state, event) {
   let response = null;
   if (event.reason === "answer" && state.lastResponse && event.answer) {
     const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(event.answer));

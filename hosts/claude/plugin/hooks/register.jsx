@@ -206,7 +206,7 @@ export function register(on) {
       const state = session;
       if (state.linked) {
         await heartbeat($, state, false);
-        await reportTurn($, invoke, state, event);
+        await reportTurn($, state, event);
       }
       state.activeTurn = undefined;
       session.phase = event.reason === "error" ? "failed" : "idle";
@@ -254,7 +254,7 @@ export function register(on) {
       return { result: "Link the active lead with /reviewq before handing off a report.", isError: true };
     }
     await heartbeat($, state, false);
-    return stageReport($, invoke, state, event);
+    return stageReport($, state, event);
   });
 
   on("tool.call", { tool: "mcp__reviewq__review_action" }, async ($, event) => {
@@ -263,7 +263,7 @@ export function register(on) {
       return { result: "A ReviewQ action requires the linked lead and current user turn.", isError: true };
     }
     await heartbeat($, state, false);
-    return stageAction($, invoke, state, event);
+    return stageAction($, state, event);
   });
 
   on("tool.call", { tool: "AskUserQuestion" }, async ($, event, next) => {
