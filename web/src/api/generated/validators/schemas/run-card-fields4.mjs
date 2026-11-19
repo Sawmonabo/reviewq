@@ -2,7 +2,7 @@
 import { func0 } from "../runtime.mjs";
 import { validate127 } from "./safe-count-dto.mjs";
 import { validate232 } from "./utc-timestamp-dto.mjs";
-function validate1068(
+function validate1089(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -56,7 +56,7 @@ function validate1068(
         }
       }
     } else {
-      validate1068.errors = [
+      validate1089.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -67,7 +67,7 @@ function validate1068(
       return false;
     }
   }
-  validate1068.errors = vErrors;
+  validate1089.errors = vErrors;
   return errors === 0;
 }
-export { validate1068 };
+export { validate1089 };

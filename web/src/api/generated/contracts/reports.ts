@@ -3,6 +3,7 @@
 import type {
   Coverage,
   EventCursorDto,
+  FindingConclusion,
   GitShaDto,
   HistoryTurnIdDto,
   MessageTextDto,
@@ -54,14 +55,6 @@ export type Descriptor =
       title: string;
       [k: string]: unknown;
     };
-
-export type FindingConclusion =
-  | "fixed"
-  | "clarified_withdrawn"
-  | "superseded"
-  | "partly_addressed"
-  | "still_present"
-  | "unverified";
 
 export type Publication = "withheld" | "authorized" | "published";
 

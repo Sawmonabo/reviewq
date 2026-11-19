@@ -17,15 +17,20 @@ export interface TicketDetailResponse {
 export interface TicketDetail {
   assignee: string | null;
   assigneeId: string | null;
+  components: string[];
   description: string | null;
   estimate: number | null;
+  issueType: string | null;
   /**
    * @maxItems 100
    */
   items: TicketComment[];
   key: TicketKeyDto;
+  labels: string[];
   nextCursor: PageCursorDto | null;
   priority: string | null;
+  reporter: string | null;
+  reporterId: string | null;
   status: string | null;
   title: string;
   url: string;

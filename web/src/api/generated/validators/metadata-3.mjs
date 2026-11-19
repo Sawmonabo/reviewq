@@ -67,6 +67,18 @@ const schema139 = {
   type: "string",
 };
 const schema143 = {
+  enum: [
+    "fixed",
+    "clarified_withdrawn",
+    "superseded",
+    "partly_addressed",
+    "still_present",
+    "unverified",
+  ],
+  type: "string",
+};
+const schema144 = { enum: ["review", "waiting_author"], type: "string" };
+const schema148 = {
   type: "object",
   properties: {
     authorityVerified: { type: "boolean" },
@@ -85,7 +97,7 @@ const schema143 = {
     holdReason: { type: ["string", "null"] },
   },
 };
-const schema145 = {
+const schema150 = {
   enum: [
     "pending",
     "reserved",
@@ -96,8 +108,8 @@ const schema145 = {
   ],
   type: "string",
 };
-const schema147 = { enum: ["final", "unchanged"], type: "string" };
-const schema148 = {
+const schema152 = { enum: ["final", "unchanged"], type: "string" };
+const schema153 = {
   properties: {
     bindingVerified: { type: "boolean" },
     generation: { $ref: "#/definitions/EventCursorDto" },
@@ -125,7 +137,7 @@ const schema148 = {
   ],
   type: "object",
 };
-const schema149 = {
+const schema154 = {
   properties: {
     discussionId: {
       anyOf: [{ $ref: "#/definitions/CheckpointIdDto" }, { type: "null" }],
@@ -155,7 +167,7 @@ const schema149 = {
   ],
   type: "object",
 };
-const schema150 = { enum: ["enabled", "paused", "archived"], type: "string" };
+const schema155 = { enum: ["enabled", "paused", "archived"], type: "string" };
 export {
   schema121,
   schema122,
@@ -164,9 +176,11 @@ export {
   schema127,
   schema139,
   schema143,
-  schema145,
-  schema147,
+  schema144,
   schema148,
-  schema149,
   schema150,
+  schema152,
+  schema153,
+  schema154,
+  schema155,
 };

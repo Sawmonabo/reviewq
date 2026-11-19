@@ -5,7 +5,7 @@ import { validate260 } from "./coverage.mjs";
 import { validate25 } from "./checkpoint-id-dto.mjs";
 import { validate147 } from "./git-sha-dto.mjs";
 import { validate69 } from "./merge-request-iid-dto.mjs";
-function validate768(
+function validate790(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -67,7 +67,7 @@ function validate768(
             vErrors.push(err1);
           }
           errors++;
-          validate768.errors = vErrors;
+          validate790.errors = vErrors;
           return false;
         } else {
           errors = _errs2;
@@ -138,7 +138,7 @@ function validate768(
               vErrors.push(err3);
             }
             errors++;
-            validate768.errors = vErrors;
+            validate790.errors = vErrors;
             return false;
           } else {
             errors = _errs7;
@@ -158,7 +158,7 @@ function validate768(
           if (data.draft !== undefined && func0.call(data, "draft")) {
             const _errs11 = errors;
             if (typeof data.draft !== "boolean") {
-              validate768.errors = [
+              validate790.errors = [
                 {
                   instancePath: instancePath + "/draft",
                   schemaPath: "#/properties/draft/type",
@@ -230,7 +230,7 @@ function validate768(
                   vErrors.push(err5);
                 }
                 errors++;
-                validate768.errors = vErrors;
+                validate790.errors = vErrors;
                 return false;
               } else {
                 errors = _errs14;
@@ -304,7 +304,7 @@ function validate768(
                     vErrors.push(err7);
                   }
                   errors++;
-                  validate768.errors = vErrors;
+                  validate790.errors = vErrors;
                   return false;
                 } else {
                   errors = _errs19;
@@ -379,7 +379,7 @@ function validate768(
                       vErrors.push(err9);
                     }
                     errors++;
-                    validate768.errors = vErrors;
+                    validate790.errors = vErrors;
                     return false;
                   } else {
                     errors = _errs24;
@@ -402,7 +402,7 @@ function validate768(
                   ) {
                     const _errs28 = errors;
                     if (typeof data.hasAgentQuestions !== "boolean") {
-                      validate768.errors = [
+                      validate790.errors = [
                         {
                           instancePath: instancePath + "/hasAgentQuestions",
                           schemaPath: "#/properties/hasAgentQuestions/type",
@@ -445,7 +445,7 @@ function validate768(
         }
       }
     } else {
-      validate768.errors = [
+      validate790.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -456,7 +456,7 @@ function validate768(
       return false;
     }
   }
-  validate768.errors = vErrors;
+  validate790.errors = vErrors;
   return errors === 0;
 }
-export { validate768 };
+export { validate790 };

@@ -3,10 +3,10 @@ import { func0 } from "../runtime.mjs";
 import { validate232 } from "./utc-timestamp-dto.mjs";
 import { validate274 } from "./merge-request-status.mjs";
 import { validate127 } from "./safe-count-dto.mjs";
-import { schema243 } from "../metadata-6.mjs";
+import { schema250 } from "../metadata-6.mjs";
 import { validate69 } from "./merge-request-iid-dto.mjs";
 import { validate280 } from "./queue-status.mjs";
-function validate776(
+function validate798(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -71,7 +71,7 @@ function validate776(
             vErrors.push(err1);
           }
           errors++;
-          validate776.errors = vErrors;
+          validate798.errors = vErrors;
           return false;
         } else {
           errors = _errs2;
@@ -136,7 +136,7 @@ function validate776(
             if (data.own !== undefined && func0.call(data, "own")) {
               const _errs8 = errors;
               if (typeof data.own !== "boolean") {
-                validate776.errors = [
+                validate798.errors = [
                   {
                     instancePath: instancePath + "/own",
                     schemaPath: "#/properties/own/type",
@@ -158,13 +158,13 @@ function validate776(
                 let data4 = data.personalApproval;
                 const _errs10 = errors;
                 if (typeof data4 !== "boolean" && data4 !== null) {
-                  validate776.errors = [
+                  validate798.errors = [
                     {
                       instancePath: instancePath + "/personalApproval",
                       schemaPath: "#/properties/personalApproval/type",
                       keyword: "type",
                       params: {
-                        type: schema243.properties.personalApproval.type,
+                        type: schema250.properties.personalApproval.type,
                       },
                     },
                   ];
@@ -205,7 +205,7 @@ function validate776(
                   ) {
                     const _errs13 = errors;
                     if (typeof data.projectPath !== "string") {
-                      validate776.errors = [
+                      validate798.errors = [
                         {
                           instancePath: instancePath + "/projectPath",
                           schemaPath: "#/properties/projectPath/type",
@@ -251,7 +251,7 @@ function validate776(
         }
       }
     } else {
-      validate776.errors = [
+      validate798.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -262,7 +262,7 @@ function validate776(
       return false;
     }
   }
-  validate776.errors = vErrors;
+  validate798.errors = vErrors;
   return errors === 0;
 }
-export { validate776 };
+export { validate798 };

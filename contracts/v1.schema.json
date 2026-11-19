@@ -517,6 +517,88 @@
       ],
       "type": "object"
     },
+    "Assessment": {
+      "properties": {
+        "batchId": {
+          "$ref": "#/definitions/ResourceIdDto"
+        },
+        "conclusion": {
+          "$ref": "#/definitions/FindingConclusion"
+        },
+        "discussionId": {
+          "$ref": "#/definitions/ResourceIdDto"
+        },
+        "findingIds": {
+          "items": {
+            "$ref": "#/definitions/ResourceIdDto"
+          },
+          "type": "array"
+        },
+        "nextAction": {
+          "$ref": "#/definitions/NextAction"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "receiptId": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ResourceIdDto"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "batchId",
+        "receiptId",
+        "discussionId",
+        "conclusion",
+        "reason",
+        "nextAction",
+        "findingIds"
+      ],
+      "type": "object"
+    },
+    "AssessmentPage": {
+      "properties": {
+        "items": {
+          "items": {
+            "$ref": "#/definitions/Assessment"
+          },
+          "maxItems": 500,
+          "type": "array"
+        },
+        "nextCursor": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/PageCursorDto"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "throughBatchId": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ResourceIdDto"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "items",
+        "nextCursor",
+        "throughBatchId"
+      ],
+      "type": "object"
+    },
     "Attention": {
       "properties": {
         "reports": {
@@ -2242,6 +2324,23 @@
       ],
       "type": "string"
     },
+    "FollowupAssessmentsResponse": {
+      "description": "The resource and event head from the same authorized snapshot.",
+      "properties": {
+        "cursor": {
+          "$ref": "#/definitions/EventCursorDto"
+        },
+        "data": {
+          "$ref": "#/definitions/AssessmentPage"
+        }
+      },
+      "required": [
+        "data",
+        "cursor"
+      ],
+      "title": "FollowupAssessmentsResponse",
+      "type": "object"
+    },
     "FollowupConfigureRequest": {
       "additionalProperties": false,
       "properties": {
@@ -2430,6 +2529,23 @@
         "revision"
       ],
       "title": "FollowupPreferencesResponsePreferences",
+      "type": "object"
+    },
+    "FollowupResultsResponse": {
+      "description": "The resource and event head from the same authorized snapshot.",
+      "properties": {
+        "cursor": {
+          "$ref": "#/definitions/EventCursorDto"
+        },
+        "data": {
+          "$ref": "#/definitions/ResultSummaryPage"
+        }
+      },
+      "required": [
+        "data",
+        "cursor"
+      ],
+      "title": "FollowupResultsResponse",
       "type": "object"
     },
     "Form": {
@@ -4012,6 +4128,13 @@
         "label"
       ],
       "type": "object"
+    },
+    "NextAction": {
+      "enum": [
+        "review",
+        "waiting_author"
+      ],
+      "type": "string"
     },
     "Notification": {
       "properties": {
@@ -6285,6 +6408,33 @@
       ],
       "type": "object"
     },
+    "ResultSummaryPage": {
+      "description": "A bounded compact list with a required nullable keyset continuation.",
+      "properties": {
+        "items": {
+          "items": {
+            "$ref": "#/definitions/ResultSummary"
+          },
+          "maxItems": 100,
+          "type": "array"
+        },
+        "nextCursor": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/PageCursorDto"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "items",
+        "nextCursor"
+      ],
+      "type": "object"
+    },
     "ReviewCheckpointRequest": {
       "additionalProperties": false,
       "properties": {
@@ -8054,6 +8204,12 @@
             "null"
           ]
         },
+        "components": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
         "description": {
           "type": [
             "string",
@@ -8068,6 +8224,12 @@
             "null"
           ]
         },
+        "issueType": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "items": {
           "items": {
             "$ref": "#/definitions/TicketComment"
@@ -8077,6 +8239,12 @@
         },
         "key": {
           "$ref": "#/definitions/TicketKeyDto"
+        },
+        "labels": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
         },
         "nextCursor": {
           "anyOf": [
@@ -8089,6 +8257,18 @@
           ]
         },
         "priority": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "reporter": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "reporterId": {
           "type": [
             "string",
             "null"
@@ -8121,6 +8301,11 @@
         "priority",
         "assignee",
         "assigneeId",
+        "reporter",
+        "reporterId",
+        "issueType",
+        "labels",
+        "components",
         "description",
         "estimate",
         "warnings",
@@ -8416,12 +8601,14 @@
     "DisconnectSettings": "settings",
     "EventReplayCursor": "common",
     "Failure": "common",
+    "FollowupAssessmentsResponse": "followups",
     "FollowupConfigureRequest": "followups",
     "FollowupEnrollmentResponse": "followups",
     "FollowupMonitorRequest": "followups",
     "FollowupMonitorResponse": "followups",
     "FollowupPreferencesRequest": "followups",
     "FollowupPreferencesResponse": "followups",
+    "FollowupResultsResponse": "followups",
     "HistoryContentResponse": "history",
     "HistoryNavigationResponse": "history",
     "HistoryPageResponse": "history",
@@ -8525,9 +8712,11 @@
       "CurrentActionResponse": "#/definitions/CurrentActionResponse",
       "DeliveryReceiptResponse": "#/definitions/DeliveryReceiptResponse",
       "Failure": "#/definitions/Failure",
+      "FollowupAssessmentsResponse": "#/definitions/FollowupAssessmentsResponse",
       "FollowupEnrollmentResponse": "#/definitions/FollowupEnrollmentResponse",
       "FollowupMonitorResponse": "#/definitions/FollowupMonitorResponse",
       "FollowupPreferencesResponse": "#/definitions/FollowupPreferencesResponse",
+      "FollowupResultsResponse": "#/definitions/FollowupResultsResponse",
       "HistoryContentResponse": "#/definitions/HistoryContentResponse",
       "HistoryNavigationResponse": "#/definitions/HistoryNavigationResponse",
       "HistoryPageResponse": "#/definitions/HistoryPageResponse",

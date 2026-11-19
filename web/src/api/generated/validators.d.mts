@@ -37,9 +37,11 @@ import type {
   CurrentActionResponse,
   DeliveryReceiptResponse,
   Failure,
+  FollowupAssessmentsResponse,
   FollowupEnrollmentResponse,
   FollowupMonitorResponse,
   FollowupPreferencesResponse,
+  FollowupResultsResponse,
   HistoryContentResponse,
   HistoryNavigationResponse,
   HistoryPageResponse,
@@ -166,6 +168,9 @@ export function isDeliveryReceiptResponse(
   value: unknown,
 ): value is DeliveryReceiptResponse;
 export function isFailure(value: unknown): value is Failure;
+export function isFollowupAssessmentsResponse(
+  value: unknown,
+): value is FollowupAssessmentsResponse;
 export function isFollowupEnrollmentResponse(
   value: unknown,
 ): value is FollowupEnrollmentResponse;
@@ -175,6 +180,9 @@ export function isFollowupMonitorResponse(
 export function isFollowupPreferencesResponse(
   value: unknown,
 ): value is FollowupPreferencesResponse;
+export function isFollowupResultsResponse(
+  value: unknown,
+): value is FollowupResultsResponse;
 export function isHistoryContentResponse(
   value: unknown,
 ): value is HistoryContentResponse;

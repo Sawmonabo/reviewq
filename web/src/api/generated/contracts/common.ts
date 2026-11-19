@@ -90,6 +90,14 @@ export type ErrorCode =
   | "unavailable"
   | "internal";
 
+export type FindingConclusion =
+  | "fixed"
+  | "clarified_withdrawn"
+  | "superseded"
+  | "partly_addressed"
+  | "still_present"
+  | "unverified";
+
 export type State = "pending" | "confirmed" | "rejected" | "uncertain";
 
 export type Invocation =

@@ -3,10 +3,10 @@ import { func0 } from "../runtime.mjs";
 import { validate232 } from "./utc-timestamp-dto.mjs";
 import { validate274 } from "./merge-request-status.mjs";
 import { validate127 } from "./safe-count-dto.mjs";
-import { schema314 } from "../metadata-7.mjs";
+import { schema320 } from "../metadata-7.mjs";
 import { validate69 } from "./merge-request-iid-dto.mjs";
 import { validate280 } from "./queue-status.mjs";
-function validate1053(
+function validate1074(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -71,7 +71,7 @@ function validate1053(
             vErrors.push(err1);
           }
           errors++;
-          validate1053.errors = vErrors;
+          validate1074.errors = vErrors;
           return false;
         } else {
           errors = _errs2;
@@ -136,7 +136,7 @@ function validate1053(
             if (data.own !== undefined && func0.call(data, "own")) {
               const _errs8 = errors;
               if (typeof data.own !== "boolean") {
-                validate1053.errors = [
+                validate1074.errors = [
                   {
                     instancePath: instancePath + "/own",
                     schemaPath: "#/properties/own/type",
@@ -158,13 +158,13 @@ function validate1053(
                 let data4 = data.personalApproval;
                 const _errs10 = errors;
                 if (typeof data4 !== "boolean" && data4 !== null) {
-                  validate1053.errors = [
+                  validate1074.errors = [
                     {
                       instancePath: instancePath + "/personalApproval",
                       schemaPath: "#/properties/personalApproval/type",
                       keyword: "type",
                       params: {
-                        type: schema314.properties.personalApproval.type,
+                        type: schema320.properties.personalApproval.type,
                       },
                     },
                   ];
@@ -205,7 +205,7 @@ function validate1053(
                   ) {
                     const _errs13 = errors;
                     if (typeof data.projectPath !== "string") {
-                      validate1053.errors = [
+                      validate1074.errors = [
                         {
                           instancePath: instancePath + "/projectPath",
                           schemaPath: "#/properties/projectPath/type",
@@ -251,7 +251,7 @@ function validate1053(
         }
       }
     } else {
-      validate1053.errors = [
+      validate1074.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -262,7 +262,7 @@ function validate1053(
       return false;
     }
   }
-  validate1053.errors = vErrors;
+  validate1074.errors = vErrors;
   return errors === 0;
 }
-export { validate1053 };
+export { validate1074 };

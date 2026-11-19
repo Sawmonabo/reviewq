@@ -30,12 +30,14 @@ import type {
 } from "./settings.js";
 
 import type {
+  FollowupAssessmentsResponse,
   FollowupConfigureRequest,
   FollowupEnrollmentResponse,
   FollowupMonitorRequest,
   FollowupMonitorResponse,
   FollowupPreferencesRequest,
   FollowupPreferencesResponse,
+  FollowupResultsResponse,
 } from "./followups.js";
 
 import type {
@@ -161,9 +163,11 @@ export interface Contracts {
   CurrentActionResponse: CurrentActionResponse;
   DeliveryReceiptResponse: DeliveryReceiptResponse;
   Failure: Failure;
+  FollowupAssessmentsResponse: FollowupAssessmentsResponse;
   FollowupEnrollmentResponse: FollowupEnrollmentResponse;
   FollowupMonitorResponse: FollowupMonitorResponse;
   FollowupPreferencesResponse: FollowupPreferencesResponse;
+  FollowupResultsResponse: FollowupResultsResponse;
   HistoryContentResponse: HistoryContentResponse;
   HistoryNavigationResponse: HistoryNavigationResponse;
   HistoryPageResponse: HistoryPageResponse;

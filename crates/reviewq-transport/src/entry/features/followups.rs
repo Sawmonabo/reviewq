@@ -95,7 +95,7 @@ pub(super) async fn results(
     headers: HeaderMap,
     Path(review): Path<String>,
     Query(query): Query<PageQuery>,
-) -> Result<Json<Success<Page<dto::ResultSummary>>>, ApiError> {
+) -> Result<Json<dto::ResultsResponse>, ApiError> {
     let actor = entry.auth.browser_actor(&headers, false)?;
     let limit = query.limit.unwrap_or(MAX_RESULTS);
     let scope = format!("browser-followup-results:{limit}:{review}");
@@ -202,7 +202,7 @@ pub(super) async fn assessments(
         } else {
             None
         };
-        let value = success(
+        let value: dto::AssessmentsResponse<&dto::Assessment> = success(
             dto::AssessmentPage {
                 items: prefix.iter().map(|(item, _)| item).collect(),
                 next_cursor,
