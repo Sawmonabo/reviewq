@@ -186,6 +186,18 @@ pub(crate) fn advance_queue(connection: &Connection) -> Result<(), StoreError> {
 }
 
 impl WorkspaceStore for SqliteStore {
+    fn granted(
+        &self,
+        actor: Actor,
+        address: reviewq_app::workspace::GrantAddress,
+    ) -> AppFuture<'_, Snapshot<GrantBinding>> {
+        Box::pin(async move {
+            operator(&actor).map_err(StoreError::app)?;
+            self.read(move |db| grants::exact(db, address))
+                .await
+                .map_err(StoreError::app)
+        })
+    }
     fn issue_grant(
         &self,
         actor: Actor,

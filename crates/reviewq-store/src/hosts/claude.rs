@@ -193,6 +193,14 @@ fn heartbeat(
     allow_target(db, &Actor::native_session(native.clone()), &lead)?;
     let key = lead.session_key().as_str();
     let now = now_ms()?;
+    let was_connected: bool = db
+        .prepare_cached(
+            "SELECT EXISTS(SELECT 1 FROM claude_companions WHERE session_key=?1 AND seen_at_ms>?2)",
+        )?
+        .query_row(
+            params![key, now.saturating_sub(COMPANION_FRESH_MS)],
+            |row| row.get(0),
+        )?;
     let recorded = db.execute(
         "INSERT INTO claude_companions(session_key,generation,sequence,seen_at_ms,turn_id,latest_prompt_id,model,effort,latest_prompt_turn_id,latest_prompt_manual,turn_step)
          VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)
@@ -217,6 +225,7 @@ fn heartbeat(
     if recorded == 0 {
         return Err(AppError::StaleRevision.into());
     }
+    let mut visible = !was_connected;
     let mut attention = Vec::new();
     if let Some(activity) = observation.activity {
         let permission: bool = db.query_row(
@@ -273,15 +282,16 @@ fn heartbeat(
              WHERE session_key=?1 AND (host_activity,host_questions) IS DISTINCT FROM (?2,?3)",
             params![key, phase, questions],
         )?;
-        if changed != 0 {
-            advance_queue(db)?;
-            tx.emit(&[
-                ResourceKey::Queue,
-                ResourceKey::Run(Some(lead.run_id().clone())),
-                ResourceKey::Review(Some(lead.review_id().clone())),
-                ResourceKey::Session(Some(lead.session_key().clone())),
-            ])?;
-        }
+        visible |= changed != 0;
+    }
+    if visible {
+        advance_queue(db)?;
+        tx.emit(&[
+            ResourceKey::Queue,
+            ResourceKey::Run(Some(lead.run_id().clone())),
+            ResourceKey::Review(Some(lead.review_id().clone())),
+            ResourceKey::Session(Some(lead.session_key().clone())),
+        ])?;
     }
     crate::notifications::publish(tx, &attention)?;
     let label = tx.sql.query_row(

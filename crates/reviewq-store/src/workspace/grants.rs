@@ -2,20 +2,55 @@ use std::os::unix::ffi::OsStrExt;
 
 use reviewq_app::access::AppError;
 use reviewq_app::events::{ResourceKey, Snapshot};
-use reviewq_app::workspace::{ConfiguredProject, GrantBinding, IssueGrant};
-use reviewq_domain::identity::{GrantId, Revision};
+use reviewq_app::workspace::{ConfiguredProject, GrantAddress, GrantBinding, IssueGrant};
+use reviewq_domain::identity::{GitLabOrigin, GrantId, Revision};
 use reviewq_domain::session::AbsolutePath;
-use rusqlite::{OptionalExtension, params};
+use rusqlite::{Connection, OptionalExtension, params};
 use uuid::Uuid;
 
+use super::settings_revision;
 use crate::StoreError;
 use crate::connection::WriteTx;
 use crate::events::snapshot;
+
+pub(super) fn exact(
+    db: &Connection,
+    address: GrantAddress,
+) -> Result<Snapshot<GrantBinding>, StoreError> {
+    if settings_revision(db)? != address.settings {
+        return Err(AppError::StaleRevision.into());
+    }
+    let lookup=db.prepare_cached(
+        "SELECT g.grant_id,g.origin,g.epoch FROM repo_grants g JOIN configured_projects USING(origin,project_id)
+         WHERE g.active=1 AND (g.project_id,g.checkout,g.common_dir,g.verifier)=(?1,?2,?3,?4)"
+    )?.query_row(
+        params![address.project.as_sqlite_integer(),address.checkout.as_path().as_os_str().as_bytes(),
+           address.common_dir.as_path().as_os_str().as_bytes(),address.verifier.as_slice()],
+       |row|Ok((row.get::<_,String>(0)?,row.get::<_,String>(1)?,row.get::<_,i64>(2)?)),
+    ).optional()?.ok_or(AppError::NotFound)?;
+    snapshot(
+        db,
+        GrantBinding {
+            id: lookup.0.parse().map_err(|_| AppError::Internal)?,
+            issuing_project: ConfiguredProject {
+                origin: GitLabOrigin::from_canonical(&lookup.1).map_err(|_| AppError::Internal)?,
+                project_id: address.project,
+            },
+            checkout: address.checkout,
+            common_dir: address.common_dir,
+            epoch: Revision::try_from(lookup.2).map_err(|_| AppError::Internal)?,
+            verifier: Some(address.verifier),
+        },
+    )
+}
 
 pub(super) fn issue(
     tx: &mut WriteTx<'_>,
     input: IssueGrant,
 ) -> Result<Snapshot<GrantBinding>, StoreError> {
+    if settings_revision(&tx.sql)? != input.settings {
+        return Err(AppError::StaleRevision.into());
+    }
     let retired = tx.sql.query_row(
         "SELECT EXISTS(SELECT 1 FROM repo_grants WHERE active=0 AND verifier=?1)",
         [input.verifier.as_slice()],
@@ -41,6 +76,13 @@ pub(super) fn issue(
     }
     let checkout = input.checkout.as_path().as_os_str().as_bytes();
     let common = input.common_dir.as_path().as_os_str().as_bytes();
+    let matches = tx.sql.prepare_cached(
+        "SELECT NOT EXISTS(SELECT 1 FROM settings_repositories WHERE project_id=?1)
+              OR EXISTS(SELECT 1 FROM settings_repositories WHERE project_id=?1 AND (checkout,common_dir)=(?2,?3))"
+    )?.query_row(params![project.project_id.as_sqlite_integer(),checkout,common],|row|row.get::<_,bool>(0))?;
+    if !matches {
+        return Err(AppError::Conflict.into());
+    }
     let current = tx
         .sql
         .query_row(

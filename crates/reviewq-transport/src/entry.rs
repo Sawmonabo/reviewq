@@ -175,6 +175,7 @@ struct Status<'a> {
     #[serde(flatten)]
     identity: &'a ServiceIdentity,
     ready: bool,
+    settings_revision: reviewq_protocol::RevisionDto,
     configured_projects: usize,
     total_mrs: u64,
     sync: QueueSync,
@@ -405,6 +406,8 @@ async fn status(
             native: endpoint.native().to_string(),
             identity: endpoint.identity(),
             ready: true,
+            settings_revision: reviewq_protocol::RevisionDto::new(queue.value.settings.get())
+                .ok_or(AppError::Internal)?,
             configured_projects: queue.value.projects,
             total_mrs: queue.value.total_mrs,
             sync: pages::queue_sync(&active, queue.value.sync),

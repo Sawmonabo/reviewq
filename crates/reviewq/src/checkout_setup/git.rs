@@ -15,7 +15,6 @@ pub(super) struct Checkout {
     pub worktree: PathBuf,
     pub common: PathBuf,
     pub primary: PathBuf,
-    pub remote: String,
 }
 
 pub(super) async fn discover(directory: Option<&Path>) -> Result<Checkout, Failure> {
@@ -77,7 +76,6 @@ pub(super) async fn discover(directory: Option<&Path>) -> Result<Checkout, Failu
         worktree,
         common,
         primary,
-        remote: remote.into(),
     })
 }
 

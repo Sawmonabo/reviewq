@@ -60,6 +60,7 @@ fn archive_scope(db: &Connection, actor: Actor) -> Result<ArchiveScope, StoreErr
           UNION SELECT ticket_key FROM scoped_review_issues WHERE review_id=r.review_id
           ORDER BY ticket_key LIMIT 65))
        FROM reviews r WHERE {SCOPE_PREDICATE} AND r.state<>'open'
+          AND EXISTS(SELECT 1 FROM configured_projects q WHERE (q.origin,q.project_id)=(r.origin,r.project_id))
           AND EXISTS(SELECT 1 FROM runs x WHERE x.review_id=r.review_id)
        ORDER BY r.review_id LIMIT 4097"
     );
@@ -149,9 +150,10 @@ fn archive(
             UNION ALL
             SELECT x.review_id,v.captured_at_ms,'report' FROM selected s JOIN runs x USING(review_id)
             JOIN report_versions v USING(run_id) JOIN artifacts a USING(artifact_id)
-            JOIN report_handoffs h ON h.run_id=v.run_id AND h.receipt_id=v.handoff_receipt_id
-            WHERE a.sealed=1 AND a.complete=1 AND v.coverage='full_mr'
-               AND h.form='final' AND h.expected_receipt_id IS NULL
+            LEFT JOIN report_handoffs h ON h.run_id=v.run_id AND h.receipt_id=v.handoff_receipt_id
+            WHERE a.sealed=1 AND v.coverage='full_mr'
+              AND ((v.handoff_receipt_id IS NULL AND v.attention_receipt_id=v.receipt_id)
+                   OR (a.complete=1 AND h.form='final' AND h.expected_receipt_id IS NULL))
             UNION ALL
             SELECT f.review_id,f.completed_at_ms,'followup' FROM followup_results f JOIN selected s USING(review_id)),
          ranked AS (
