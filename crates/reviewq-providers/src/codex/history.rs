@@ -48,6 +48,7 @@ pub(super) enum Item {
         id: String,
         text: String,
         phase: Option<String>,
+        questions: Option<Vec<serde_json::Value>>,
     },
     CommandExecution {
         id: String,

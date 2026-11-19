@@ -68,11 +68,11 @@ enum Checkout {
 pub(crate) struct Serve {
     #[arg(long, value_name = "DIR")]
     pub(crate) web: Option<PathBuf>,
-    #[arg(long, default_value_t = 8766)]
-    pub(crate) port: u16,
-    #[arg(long, default_value_t = 8767)]
-    pub(crate) native_port: u16,
     #[arg(long)]
+    pub(crate) port: Option<u16>,
+    #[arg(long)]
+    pub(crate) native_port: Option<u16>,
+    #[arg(long, requires = "validation")]
     pub(crate) gitlab: Option<String>,
     #[arg(long = "project", requires = "gitlab")]
     pub(crate) projects: Vec<ProjectId>,

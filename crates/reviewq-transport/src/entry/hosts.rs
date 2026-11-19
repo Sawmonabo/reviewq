@@ -36,13 +36,22 @@ pub(super) async fn link(
 ) -> Result<Response, ApiError> {
     let command: LinkCommand = bridge_command(&entry, &headers, &bytes, 4_096)?;
     protocol(command.protocol_version)?;
-    let source = entry.source.as_deref().ok_or(AppError::Unavailable)?;
+    let source = entry.source_reader().await?;
     let host = entry.host.as_deref().ok_or(AppError::Unavailable)?;
     let thread = command
         .thread_id
         .parse()
         .map_err(|_| AppError::InvalidRequest)?;
-    link_response(link_codex(entry.store.as_ref(), source, host, thread, command.target).await?)
+    link_response(
+        link_codex(
+            entry.store.as_ref(),
+            source.as_ref(),
+            host,
+            thread,
+            command.target,
+        )
+        .await?,
+    )
 }
 
 #[derive(Deserialize)]
@@ -121,10 +130,10 @@ pub(super) async fn claude_link(
     let command: ClaudeCommand = bridge_command(&entry, &headers, &bytes, 16_384)?;
     protocol(command.protocol_version)?;
     let companion = entry.claude.as_deref().ok_or(AppError::Unavailable)?;
-    let source = entry.source.as_deref().ok_or(AppError::Unavailable)?;
+    let source = entry.source_reader().await?;
     let proof = companion.prove(command.context()?).await?;
     let target = command.target.ok_or(AppError::InvalidRequest)?;
-    link_response(link_proven(entry.store.as_ref(), source, proof, target).await?)
+    link_response(link_proven(entry.store.as_ref(), source.as_ref(), proof, target).await?)
 }
 
 fn bridge_command<T: serde::de::DeserializeOwned>(

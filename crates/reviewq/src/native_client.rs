@@ -178,10 +178,20 @@ fn link_text(
 }
 
 pub(crate) async fn status(profile: &Path) -> Result<(), Failure> {
+    let path = crate::runtime_settings::config_path(profile, false);
+    if !runtime::has_descriptor(profile)? {
+        println!(
+            "{}",
+            serde_json::json!({"data": {"ready": false, "runtimeConfig": path}})
+        );
+        return Ok(());
+    }
     let endpoint = runtime::read_endpoint(profile)?;
     let body = signed(&client()?, &endpoint, "GET", "/api/v1/status", b"").await?;
     verify_ready(&endpoint, &body)?;
-    println!("{}", String::from_utf8(body)?);
+    let mut status: serde_json::Value = serde_json::from_slice(&body)?;
+    status["data"]["runtimeConfig"] = serde_json::to_value(path)?;
+    println!("{status}");
     Ok(())
 }
 

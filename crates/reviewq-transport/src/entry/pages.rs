@@ -123,7 +123,7 @@ pub(super) async fn queue(
                 hide_reviewed: self::count(0)?,
                 hide_in_progress: self::count(0)?,
             },
-            sync: queue_sync(entry.source.is_some(), value.sync),
+            sync: queue_sync(entry.active_source().await?.collection_enabled, value.sync),
             settings_revision: RevisionDto::new(value.settings_revision.get())
                 .ok_or(AppError::Internal)?,
         },

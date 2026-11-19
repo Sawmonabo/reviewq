@@ -75,8 +75,12 @@ pub async fn refresh_queue(
     store: &(impl WorkspaceStore + SourceRefreshStore + ?Sized),
     source: &dyn ReviewSourceReader,
     actor: Actor,
+    expected: Revision,
 ) -> Result<usize, AppError> {
     let workspace = store.workspace_context(actor.clone()).await?.value;
+    if workspace.revision != expected {
+        return Err(AppError::StaleRevision);
+    }
     let attempt = store.begin_refresh(actor, workspace.revision).await?;
     let result = scan(source, workspace.projects).await;
     let count = result.as_ref().map(Vec::len).map_err(|error| *error);

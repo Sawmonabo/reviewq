@@ -29,6 +29,303 @@
       ],
       "type": "object"
     },
+    "BoardScope": {
+      "additionalProperties": false,
+      "properties": {
+        "boardId": {
+          "$ref": "#/definitions/ResourceIdDto"
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "jiraProjectKeys": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "name": {
+          "type": "string"
+        },
+        "projectIds": {
+          "items": {
+            "$ref": "#/definitions/ProjectIdDto"
+          },
+          "type": "array"
+        },
+        "reviewStatusIds": {
+          "items": {
+            "$ref": "#/definitions/ResourceIdDto"
+          },
+          "type": "array"
+        },
+        "scopeId": {
+          "$ref": "#/definitions/ResourceIdDto"
+        },
+        "storyPointsField": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "teamFilterId": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ResourceIdDto"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "type": {
+          "$ref": "#/definitions/BoardType"
+        }
+      },
+      "required": [
+        "scopeId",
+        "boardId",
+        "name",
+        "type",
+        "enabled",
+        "projectIds",
+        "reviewStatusIds",
+        "jiraProjectKeys",
+        "teamFilterId",
+        "storyPointsField"
+      ],
+      "type": "object"
+    },
+    "BoardSelection": {
+      "enum": [
+        "selected",
+        "any"
+      ],
+      "type": "string"
+    },
+    "BoardType": {
+      "enum": [
+        "scrum",
+        "kanban"
+      ],
+      "type": "string"
+    },
+    "CatalogItem": {
+      "properties": {
+        "boardId": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ResourceIdDto"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "boardType": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/BoardType"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "estimateField": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "id": {
+          "$ref": "#/definitions/ResourceIdDto"
+        },
+        "label": {
+          "type": "string"
+        },
+        "path": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "state": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "statusIds": {
+          "items": {
+            "$ref": "#/definitions/ResourceIdDto"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "label",
+        "path",
+        "boardId",
+        "state",
+        "boardType",
+        "statusIds",
+        "estimateField"
+      ],
+      "type": "object"
+    },
+    "CatalogKind": {
+      "enum": [
+        "projects",
+        "boards",
+        "board",
+        "statuses",
+        "filters",
+        "sprints"
+      ],
+      "type": "string"
+    },
+    "CatalogRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "boardId": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ResourceIdDto"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "connection": {
+          "$ref": "#/definitions/ConnectionDraft"
+        },
+        "cursor": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/PageCursorDto"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "expectedRevision": {
+          "$ref": "#/definitions/RevisionDto"
+        },
+        "kind": {
+          "$ref": "#/definitions/CatalogKind"
+        },
+        "provider": {
+          "$ref": "#/definitions/Provider"
+        },
+        "q": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "states": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "token": {
+          "$ref": "#/definitions/TokenInput"
+        },
+        "view": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ProjectView"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "expectedRevision",
+        "provider",
+        "connection",
+        "token",
+        "kind"
+      ],
+      "title": "CatalogRequest",
+      "type": "object"
+    },
+    "CatalogResponse": {
+      "description": "The resource and event head from the same authorized snapshot.",
+      "properties": {
+        "cursor": {
+          "$ref": "#/definitions/EventCursorDto"
+        },
+        "data": {
+          "$ref": "#/definitions/CatalogResult"
+        }
+      },
+      "required": [
+        "data",
+        "cursor"
+      ],
+      "title": "CatalogResponse",
+      "type": "object"
+    },
+    "CatalogResult": {
+      "properties": {
+        "items": {
+          "items": {
+            "$ref": "#/definitions/CatalogItem"
+          },
+          "type": "array"
+        },
+        "nextCursor": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/PageCursorDto"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "items",
+        "nextCursor"
+      ],
+      "type": "object"
+    },
+    "ChatSetup": {
+      "properties": {
+        "issues": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "state": {
+          "$ref": "#/definitions/ChatSetupState"
+        }
+      },
+      "required": [
+        "state",
+        "issues"
+      ],
+      "type": "object"
+    },
+    "ChatSetupState": {
+      "enum": [
+        "ready",
+        "pending",
+        "cleanup_conflict"
+      ],
+      "type": "string"
+    },
     "CheckpointIdDto": {
       "description": "A signed handle for a displayed review checkpoint.",
       "maxUtf8Bytes": 512,
@@ -47,6 +344,31 @@
       "required": [
         "key",
         "title"
+      ],
+      "type": "object"
+    },
+    "ConnectionDraft": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/GitlabDraft"
+        },
+        {
+          "$ref": "#/definitions/JiraDraft"
+        }
+      ]
+    },
+    "Connections": {
+      "properties": {
+        "gitlab": {
+          "$ref": "#/definitions/GitlabConnection"
+        },
+        "jira": {
+          "$ref": "#/definitions/JiraConnection"
+        }
+      },
+      "required": [
+        "gitlab",
+        "jira"
       ],
       "type": "object"
     },
@@ -87,6 +409,36 @@
         "disposition",
         "reviewedSha",
         "reviewedAt"
+      ],
+      "type": "object"
+    },
+    "DefaultSkills": {
+      "additionalProperties": false,
+      "properties": {
+        "claude": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/Skill"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "codex": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/Skill"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "codex",
+        "claude"
       ],
       "type": "object"
     },
@@ -253,6 +605,23 @@
       ],
       "type": "object"
     },
+    "DisconnectSettings": {
+      "additionalProperties": false,
+      "properties": {
+        "expectedRevision": {
+          "$ref": "#/definitions/RevisionDto"
+        },
+        "provider": {
+          "$ref": "#/definitions/Provider"
+        }
+      },
+      "required": [
+        "expectedRevision",
+        "provider"
+      ],
+      "title": "DisconnectSettings",
+      "type": "object"
+    },
     "Disposition": {
       "enum": [
         "reviewed",
@@ -346,6 +715,47 @@
       "description": "A full SHA-1 or SHA-256 Git object name.",
       "pattern": "^([0-9A-Fa-f]{40}|[0-9A-Fa-f]{64})$",
       "type": "string"
+    },
+    "GitlabConnection": {
+      "properties": {
+        "configured": {
+          "type": "boolean"
+        },
+        "identity": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/Identity"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "origin": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "origin",
+        "configured",
+        "identity"
+      ],
+      "type": "object"
+    },
+    "GitlabDraft": {
+      "additionalProperties": false,
+      "properties": {
+        "origin": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "origin"
+      ],
+      "type": "object"
     },
     "HistoryAvailability": {
       "enum": [
@@ -616,6 +1026,21 @@
       ],
       "type": "string"
     },
+    "Identity": {
+      "properties": {
+        "id": {
+          "$ref": "#/definitions/ResourceIdDto"
+        },
+        "label": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "label"
+      ],
+      "type": "object"
+    },
     "InvalidateEvent": {
       "description": "Bounded resource descriptors for an `invalidate` event.",
       "properties": {
@@ -632,6 +1057,73 @@
         "resources"
       ],
       "title": "InvalidateEvent",
+      "type": "object"
+    },
+    "JiraConnection": {
+      "properties": {
+        "configured": {
+          "type": "boolean"
+        },
+        "email": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "identity": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/Identity"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "site": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "tokenType": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/TokenType"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "site",
+        "email",
+        "tokenType",
+        "configured",
+        "identity"
+      ],
+      "type": "object"
+    },
+    "JiraDraft": {
+      "additionalProperties": false,
+      "properties": {
+        "email": {
+          "type": "string"
+        },
+        "site": {
+          "type": "string"
+        },
+        "tokenType": {
+          "$ref": "#/definitions/TokenType"
+        }
+      },
+      "required": [
+        "site",
+        "email",
+        "tokenType"
+      ],
       "type": "object"
     },
     "MergeRequestIidDto": {
@@ -760,6 +1252,14 @@
     "MessageTextDto": {
       "description": "Exact message text bounded in Unicode scalar values.",
       "pattern": "^[^\\ud800-\\udfff]{1,12000}$",
+      "type": "string"
+    },
+    "Mode": {
+      "enum": [
+        "setup",
+        "connected",
+        "disconnected"
+      ],
       "type": "string"
     },
     "NamedUpstreamId": {
@@ -1148,6 +1648,21 @@
       "pattern": "^([1-9][0-9]{0,17}|[1-8][0-9]{18}|9[0-1][0-9]{17}|92[0-1][0-9]{16}|922[0-2][0-9]{15}|9223[0-2][0-9]{14}|92233[0-6][0-9]{13}|922337[0-1][0-9]{12}|92233720[0-2][0-9]{10}|922337203[0-5][0-9]{9}|9223372036[0-7][0-9]{8}|92233720368[0-4][0-9]{7}|922337203685[0-3][0-9]{6}|9223372036854[0-6][0-9]{5}|92233720368547[0-6][0-9]{4}|922337203685477[0-4][0-9]{3}|9223372036854775[0-7][0-9]{2}|922337203685477580[0-6][0-9]{0}|9223372036854775807)$",
       "type": "string"
     },
+    "ProjectView": {
+      "enum": [
+        "member",
+        "starred",
+        "all"
+      ],
+      "type": "string"
+    },
+    "Provider": {
+      "enum": [
+        "gitlab",
+        "jira"
+      ],
+      "type": "string"
+    },
     "QueueFacets": {
       "properties": {
         "authors": {
@@ -1386,6 +1901,37 @@
       "description": "SHA-256 of exact report bytes or their declaration.",
       "pattern": "^[0-9a-f]{64}$",
       "type": "string"
+    },
+    "RepositoryBinding": {
+      "additionalProperties": false,
+      "properties": {
+        "boardSelection": {
+          "$ref": "#/definitions/BoardSelection"
+        },
+        "checkout": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "defaultSkills": {
+          "$ref": "#/definitions/DefaultSkills"
+        },
+        "path": {
+          "type": "string"
+        },
+        "projectId": {
+          "$ref": "#/definitions/ProjectIdDto"
+        }
+      },
+      "required": [
+        "projectId",
+        "path",
+        "checkout",
+        "boardSelection",
+        "defaultSkills"
+      ],
+      "type": "object"
     },
     "ResetEvent": {
       "description": "The terminal `reset` event body. A reset has no SSE id.",
@@ -1810,6 +2356,83 @@
       ],
       "type": "object"
     },
+    "SettingsResponse": {
+      "description": "The resource and event head from the same authorized snapshot.",
+      "properties": {
+        "cursor": {
+          "$ref": "#/definitions/EventCursorDto"
+        },
+        "data": {
+          "$ref": "#/definitions/SettingsView"
+        }
+      },
+      "required": [
+        "data",
+        "cursor"
+      ],
+      "title": "SettingsResponse",
+      "type": "object"
+    },
+    "SettingsView": {
+      "properties": {
+        "additionalReviewerIds": {
+          "items": {
+            "$ref": "#/definitions/ResourceIdDto"
+          },
+          "type": "array"
+        },
+        "boards": {
+          "items": {
+            "$ref": "#/definitions/BoardScope"
+          },
+          "type": "array"
+        },
+        "chatSetup": {
+          "$ref": "#/definitions/ChatSetup"
+        },
+        "connections": {
+          "$ref": "#/definitions/Connections"
+        },
+        "mode": {
+          "$ref": "#/definitions/Mode"
+        },
+        "repositories": {
+          "items": {
+            "$ref": "#/definitions/RepositoryBinding"
+          },
+          "type": "array"
+        },
+        "settingsRevision": {
+          "$ref": "#/definitions/RevisionDto"
+        }
+      },
+      "required": [
+        "settingsRevision",
+        "mode",
+        "connections",
+        "boards",
+        "repositories",
+        "additionalReviewerIds",
+        "chatSetup"
+      ],
+      "type": "object"
+    },
+    "Skill": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "path"
+      ],
+      "type": "object"
+    },
     "SprintFacet": {
       "properties": {
         "boardId": {
@@ -1961,10 +2584,78 @@
       ],
       "type": "object"
     },
+    "TestConnection": {
+      "additionalProperties": false,
+      "properties": {
+        "connection": {
+          "$ref": "#/definitions/ConnectionDraft"
+        },
+        "expectedRevision": {
+          "$ref": "#/definitions/RevisionDto"
+        },
+        "provider": {
+          "$ref": "#/definitions/Provider"
+        },
+        "token": {
+          "$ref": "#/definitions/TokenInput"
+        }
+      },
+      "required": [
+        "expectedRevision",
+        "provider",
+        "connection",
+        "token"
+      ],
+      "title": "TestConnection",
+      "type": "object"
+    },
     "TicketKeyDto": {
       "description": "A Jira issue key.",
       "maxUtf8Bytes": 512,
       "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f\\ud800-\\udfff]+$",
+      "type": "string"
+    },
+    "TokenInput": {
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "action": {
+              "const": "keep",
+              "type": "string"
+            }
+          },
+          "required": [
+            "action"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "action": {
+              "const": "replace",
+              "type": "string"
+            },
+            "value": {
+              "maxLength": 8192,
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          "required": [
+            "action",
+            "value"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "TokenType": {
+      "enum": [
+        "scoped",
+        "unscoped"
+      ],
       "type": "string"
     },
     "UnmatchedTicket": {
@@ -2010,6 +2701,38 @@
       "format": "date-time",
       "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}Z$",
       "type": "string"
+    },
+    "VerifiedConnection": {
+      "properties": {
+        "identity": {
+          "$ref": "#/definitions/Identity"
+        },
+        "provider": {
+          "$ref": "#/definitions/Provider"
+        }
+      },
+      "required": [
+        "provider",
+        "identity"
+      ],
+      "type": "object"
+    },
+    "VerifiedConnectionResponse": {
+      "description": "The resource and event head from the same authorized snapshot.",
+      "properties": {
+        "cursor": {
+          "$ref": "#/definitions/EventCursorDto"
+        },
+        "data": {
+          "$ref": "#/definitions/VerifiedConnection"
+        }
+      },
+      "required": [
+        "data",
+        "cursor"
+      ],
+      "title": "VerifiedConnectionResponse",
+      "type": "object"
     }
   },
   "x-reviewq-roots": {
@@ -2018,10 +2741,14 @@
       "ResetEvent": "#/definitions/ResetEvent"
     },
     "requests": {
+      "CatalogRequest": "#/definitions/CatalogRequest",
+      "DisconnectSettings": "#/definitions/DisconnectSettings",
       "EventReplayCursor": "#/definitions/EventReplayCursor",
-      "SendMessageRequest": "#/definitions/SendMessageRequest"
+      "SendMessageRequest": "#/definitions/SendMessageRequest",
+      "TestConnection": "#/definitions/TestConnection"
     },
     "responses": {
+      "CatalogResponse": "#/definitions/CatalogResponse",
       "DeliveryReceiptResponse": "#/definitions/DeliveryReceiptResponse",
       "Failure": "#/definitions/Failure",
       "HistoryContentResponse": "#/definitions/HistoryContentResponse",
@@ -2032,7 +2759,9 @@
       "ReviewOverviewResponse": "#/definitions/ReviewOverviewResponse",
       "ReviewSelectionResponse": "#/definitions/ReviewSelectionResponse",
       "RunDetailResponse": "#/definitions/RunDetailResponse",
-      "TerminalResponse": "#/definitions/TerminalResponse"
+      "SettingsResponse": "#/definitions/SettingsResponse",
+      "TerminalResponse": "#/definitions/TerminalResponse",
+      "VerifiedConnectionResponse": "#/definitions/VerifiedConnectionResponse"
     }
   }
 }

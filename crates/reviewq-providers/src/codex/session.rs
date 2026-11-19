@@ -95,8 +95,9 @@ impl NativeHost for Codex {
         target: LeadTarget,
         delivery: DeliveryId,
         cursor: Option<String>,
+        require_new_turn: bool,
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = DeliveryObservation> + Send + '_>> {
-        Box::pin(self.find_input(target, delivery, cursor))
+        Box::pin(self.find_input(target, delivery, cursor, require_new_turn))
     }
 }
 

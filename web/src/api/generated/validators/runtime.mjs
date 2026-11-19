@@ -27,23 +27,84 @@ const schema13 = {
   enum: ["cursor_expired", "cursor_ahead", "stream_lag"],
   type: "string",
 };
-const pattern1 = new RegExp(
+const schema14 = {
+  additionalProperties: false,
+  properties: {
+    boardId: {
+      anyOf: [{ $ref: "#/definitions/CheckpointIdDto" }, { type: "null" }],
+    },
+    connection: { $ref: "#/definitions/ConnectionDraft" },
+    cursor: {
+      anyOf: [{ $ref: "#/definitions/HistoryCursorDto" }, { type: "null" }],
+    },
+    expectedRevision: { $ref: "#/definitions/EventCursorDto" },
+    kind: { $ref: "#/definitions/CatalogKind" },
+    provider: { $ref: "#/definitions/Provider" },
+    q: { type: ["string", "null"] },
+    states: { default: [], items: { type: "string" }, type: "array" },
+    token: { $ref: "#/definitions/TokenInput" },
+    view: { anyOf: [{ $ref: "#/definitions/ProjectView" }, { type: "null" }] },
+  },
+  required: ["expectedRevision", "provider", "connection", "token", "kind"],
+  title: "CatalogRequest",
+  type: "object",
+};
+const schema18 = { enum: ["scoped", "unscoped"], type: "string" };
+const pattern2 = new RegExp(
   "^(0|[1-9][0-9]{0,17}|[1-8][0-9]{18}|9[0-1][0-9]{17}|92[0-1][0-9]{16}|922[0-2][0-9]{15}|9223[0-2][0-9]{14}|92233[0-6][0-9]{13}|922337[0-1][0-9]{12}|92233720[0-2][0-9]{10}|922337203[0-5][0-9]{9}|9223372036[0-7][0-9]{8}|92233720368[0-4][0-9]{7}|922337203685[0-3][0-9]{6}|9223372036854[0-6][0-9]{5}|92233720368547[0-6][0-9]{4}|922337203685477[0-4][0-9]{3}|9223372036854775[0-7][0-9]{2}|922337203685477580[0-6][0-9]{0}|9223372036854775807)$",
   "u",
 );
-const pattern2 = new RegExp("^[^\\ud800-\\udfff]{1,12000}$", "u");
+const schema21 = {
+  enum: ["projects", "boards", "board", "statuses", "filters", "sprints"],
+  type: "string",
+};
+const schema22 = { enum: ["gitlab", "jira"], type: "string" };
+const func83 = require("ajv/dist/runtime/ucs2length").default;
+const schema24 = { enum: ["member", "starred", "all"], type: "string" };
+const pattern4 = new RegExp("^[^\\ud800-\\udfff]{1,12000}$", "u");
+const schema32 = {
+  properties: {
+    boardId: {
+      anyOf: [{ $ref: "#/definitions/CheckpointIdDto" }, { type: "null" }],
+    },
+    boardType: {
+      anyOf: [{ $ref: "#/definitions/BoardType" }, { type: "null" }],
+    },
+    estimateField: { type: ["string", "null"] },
+    id: { $ref: "#/definitions/CheckpointIdDto" },
+    label: { type: "string" },
+    path: { type: ["string", "null"] },
+    state: { type: ["string", "null"] },
+    statusIds: {
+      items: { $ref: "#/definitions/CheckpointIdDto" },
+      type: "array",
+    },
+  },
+  required: [
+    "id",
+    "label",
+    "path",
+    "boardId",
+    "state",
+    "boardType",
+    "statusIds",
+    "estimateField",
+  ],
+  type: "object",
+};
+const schema33 = { enum: ["scrum", "kanban"], type: "string" };
 const formats0 = {
   "date-time": function isUtcTimestamp(value) {
     const date = new Date(value);
     return Number.isFinite(date.getTime()) && date.toISOString() === value;
   },
 }["date-time"];
-const pattern3 = new RegExp(
+const pattern5 = new RegExp(
   "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}Z$",
   "u",
 );
-const pattern4 = new RegExp("^[0-9a-f]{64}$", "u");
-const schema25 = {
+const pattern6 = new RegExp("^[0-9a-f]{64}$", "u");
+const schema42 = {
   description: "Stable error codes for the public JSON envelope.",
   enum: [
     "invalid_request",
@@ -63,23 +124,23 @@ const schema25 = {
   ],
   type: "string",
 };
-const schema28 = {
+const schema45 = {
   enum: ["available", "partial", "unavailable"],
   type: "string",
 };
-const pattern6 = new RegExp("^[^\\ud800-\\udfff]*$", "u");
-const pattern7 = new RegExp("^[A-Za-z0-9_-]{1,512}$", "u");
-const pattern8 = new RegExp("^([0-9A-Fa-f]{40}|[0-9A-Fa-f]{64})$", "u");
-const schema47 = {
+const pattern7 = new RegExp("^[^\\ud800-\\udfff]*$", "u");
+const pattern8 = new RegExp("^[A-Za-z0-9_-]{1,512}$", "u");
+const pattern9 = new RegExp("^([0-9A-Fa-f]{40}|[0-9A-Fa-f]{64})$", "u");
+const schema63 = {
   enum: ["complete", "incomplete", "binary", "provider_limited", "missing"],
   type: "string",
 };
-const pattern9 = new RegExp('^"[0-9a-f]{64}"$', "u");
-const pattern10 = new RegExp(
+const pattern10 = new RegExp('^"[0-9a-f]{64}"$', "u");
+const pattern11 = new RegExp(
   "^([1-9][0-9]{0,17}|[1-8][0-9]{18}|9[0-1][0-9]{17}|92[0-1][0-9]{16}|922[0-2][0-9]{15}|9223[0-2][0-9]{14}|92233[0-6][0-9]{13}|922337[0-1][0-9]{12}|92233720[0-2][0-9]{10}|922337203[0-5][0-9]{9}|9223372036[0-7][0-9]{8}|92233720368[0-4][0-9]{7}|922337203685[0-3][0-9]{6}|9223372036854[0-6][0-9]{5}|92233720368547[0-6][0-9]{4}|922337203685477[0-4][0-9]{3}|9223372036854775[0-7][0-9]{2}|922337203685477580[0-6][0-9]{0}|9223372036854775807)$",
   "u",
 );
-const schema56 = {
+const schema72 = {
   properties: {
     author: {
       anyOf: [{ $ref: "#/definitions/NamedUpstreamId" }, { type: "null" }],
@@ -128,16 +189,16 @@ const schema56 = {
   ],
   type: "object",
 };
-const schema57 = { enum: ["open", "closed", "merged"], type: "string" };
-const schema58 = {
+const schema73 = { enum: ["open", "closed", "merged"], type: "string" };
+const schema74 = {
   enum: ["needs_review", "waiting_author", "followup", "reviewed", "archive"],
   type: "string",
 };
-const schema59 = {
+const schema75 = {
   enum: ["needs_input", "working", "waiting", "archived"],
   type: "string",
 };
-const schema61 = {
+const schema77 = {
   properties: {
     assignee: { type: ["string", "null"] },
     key: { $ref: "#/definitions/CheckpointIdDto" },
@@ -148,40 +209,135 @@ const schema61 = {
   required: ["key", "title", "status", "priority", "assignee"],
   type: "object",
 };
-const schema63 = {
+const schema79 = {
   enum: ["setup", "connected", "disconnected"],
   type: "string",
 };
-const schema71 = {
+const schema87 = {
   enum: ["reviewed", "waiting_author", "needs_review"],
   type: "string",
 };
-const schema74 = { enum: ["codex", "claude"], type: "string" };
+const schema90 = { enum: ["codex", "claude"], type: "string" };
+const schema99 = {
+  additionalProperties: false,
+  properties: {
+    boardId: { $ref: "#/definitions/CheckpointIdDto" },
+    enabled: { type: "boolean" },
+    jiraProjectKeys: { items: { type: "string" }, type: "array" },
+    name: { type: "string" },
+    projectIds: {
+      items: { $ref: "#/definitions/MergeRequestIidDto" },
+      type: "array",
+    },
+    reviewStatusIds: {
+      items: { $ref: "#/definitions/CheckpointIdDto" },
+      type: "array",
+    },
+    scopeId: { $ref: "#/definitions/CheckpointIdDto" },
+    storyPointsField: { type: ["string", "null"] },
+    teamFilterId: {
+      anyOf: [{ $ref: "#/definitions/CheckpointIdDto" }, { type: "null" }],
+    },
+    type: { $ref: "#/definitions/BoardType" },
+  },
+  required: [
+    "scopeId",
+    "boardId",
+    "name",
+    "type",
+    "enabled",
+    "projectIds",
+    "reviewStatusIds",
+    "jiraProjectKeys",
+    "teamFilterId",
+    "storyPointsField",
+  ],
+  type: "object",
+};
+const schema101 = {
+  enum: ["ready", "pending", "cleanup_conflict"],
+  type: "string",
+};
+const schema103 = {
+  properties: {
+    configured: { type: "boolean" },
+    identity: { anyOf: [{ $ref: "#/definitions/Identity" }, { type: "null" }] },
+    origin: { type: ["string", "null"] },
+  },
+  required: ["origin", "configured", "identity"],
+  type: "object",
+};
+const schema105 = {
+  properties: {
+    configured: { type: "boolean" },
+    email: { type: ["string", "null"] },
+    identity: { anyOf: [{ $ref: "#/definitions/Identity" }, { type: "null" }] },
+    site: { type: ["string", "null"] },
+    tokenType: {
+      anyOf: [{ $ref: "#/definitions/TokenType" }, { type: "null" }],
+    },
+  },
+  required: ["site", "email", "tokenType", "configured", "identity"],
+  type: "object",
+};
+const schema106 = {
+  additionalProperties: false,
+  properties: {
+    boardSelection: { $ref: "#/definitions/BoardSelection" },
+    checkout: { type: ["string", "null"] },
+    defaultSkills: { $ref: "#/definitions/DefaultSkills" },
+    path: { type: "string" },
+    projectId: { $ref: "#/definitions/MergeRequestIidDto" },
+  },
+  required: [
+    "projectId",
+    "path",
+    "checkout",
+    "boardSelection",
+    "defaultSkills",
+  ],
+  type: "object",
+};
+const schema107 = { enum: ["selected", "any"], type: "string" };
 export {
   func0,
   pattern0,
   func49,
   schema11,
   schema13,
-  pattern1,
+  schema14,
+  schema18,
   pattern2,
-  formats0,
-  pattern3,
+  schema21,
+  schema22,
+  func83,
+  schema24,
   pattern4,
-  schema25,
-  schema28,
+  schema32,
+  schema33,
+  formats0,
+  pattern5,
   pattern6,
+  schema42,
+  schema45,
   pattern7,
   pattern8,
-  schema47,
   pattern9,
-  pattern10,
-  schema56,
-  schema57,
-  schema58,
-  schema59,
-  schema61,
   schema63,
-  schema71,
+  pattern10,
+  pattern11,
+  schema72,
+  schema73,
   schema74,
+  schema75,
+  schema77,
+  schema79,
+  schema87,
+  schema90,
+  schema99,
+  schema101,
+  schema103,
+  schema105,
+  schema106,
+  schema107,
 };

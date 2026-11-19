@@ -95,6 +95,7 @@ async fn setup(
         .register_lead(
             operator,
             RegisterLead {
+                expected_settings: Revision::try_from(1u64)?,
                 review: source[0].clone(),
                 provider: HostProvider::Codex,
                 profile: absolute(&root.join("native")),

@@ -12,6 +12,7 @@ mod notifications;
 mod queue;
 mod refresh;
 mod reports;
+mod settings;
 mod workspace;
 
 pub use connection::{SqliteStore, StoreIdentity};

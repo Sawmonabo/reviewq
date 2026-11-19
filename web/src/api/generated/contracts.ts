@@ -19,6 +19,28 @@ export type ResourceKindDto =
   | "notification"
   | "settings";
 export type ResetReasonDto = "cursor_expired" | "cursor_ahead" | "stream_lag";
+export type ConnectionDraft = GitlabDraft | JiraDraft;
+export type TokenType = "scoped" | "unscoped";
+/**
+ * An opaque keyset continuation for list resources.
+ */
+export type PageCursorDto = string;
+/**
+ * A logical settings or decision revision.
+ */
+export type RevisionDto = string;
+export type CatalogKind =
+  "projects" | "boards" | "board" | "statuses" | "filters" | "sprints";
+export type Provider = "gitlab" | "jira";
+export type TokenInput =
+  | {
+      action: "keep";
+    }
+  | {
+      action: "replace";
+      value: string;
+    };
+export type ProjectView = "member" | "starred" | "all";
 /**
  * A durable event cursor serialized as a canonical decimal string.
  */
@@ -35,6 +57,7 @@ export type MessageTextDto = string;
  * A durable event cursor serialized as a canonical decimal string.
  */
 export type EventCursorDto = string;
+export type BoardType = "scrum" | "kanban";
 /**
  * The addressed receipt for the message send and receipt lookup routes.
  */
@@ -151,10 +174,6 @@ export type HistoryPart =
       [k: string]: unknown;
     };
 /**
- * An opaque keyset continuation for list resources.
- */
-export type PageCursorDto = string;
-/**
  * One opaque, path-safe ReviewQ review ID.
  */
 export type ReviewIdDto = string;
@@ -205,10 +224,6 @@ export type RunStage = "needs_input" | "working" | "waiting" | "archived";
  * A Jira issue key.
  */
 export type TicketKeyDto = string;
-/**
- * A logical settings or decision revision.
- */
-export type RevisionDto = string;
 export type QueueSyncMode = "setup" | "connected" | "disconnected";
 /**
  * A signed handle for a displayed review checkpoint.
@@ -229,6 +244,9 @@ export type ReviewSelection =
       runId: null;
       [k: string]: unknown;
     };
+export type ChatSetupState = "ready" | "pending" | "cleanup_conflict";
+export type Mode = "setup" | "connected" | "disconnected";
+export type BoardSelection = "selected" | "any";
 export type TerminalResult = {
   nativeId: ResourceIdDto;
   provider: HostProviderDto;
@@ -263,8 +281,12 @@ export type TerminalResult1 =
 export interface Contracts {
   InvalidateEvent: InvalidateEvent;
   ResetEvent: ResetEvent;
+  CatalogRequest: CatalogRequest;
+  DisconnectSettings: DisconnectSettings;
   EventReplayCursor: EventReplayCursor;
   SendMessageRequest: SendMessageRequest;
+  TestConnection: TestConnection;
+  CatalogResponse: CatalogResponse;
   DeliveryReceiptResponse: DeliveryReceiptResponse;
   Failure: Failure;
   HistoryContentResponse: HistoryContentResponse;
@@ -275,7 +297,9 @@ export interface Contracts {
   ReviewOverviewResponse: ReviewOverviewResponse;
   ReviewSelectionResponse: ReviewSelectionResponse;
   RunDetailResponse: RunDetailResponse;
+  SettingsResponse: SettingsResponse;
   TerminalResponse: TerminalResponse;
+  VerifiedConnectionResponse: VerifiedConnectionResponse;
 }
 /**
  * Bounded resource descriptors for an `invalidate` event.
@@ -303,12 +327,66 @@ export interface ResetEvent {
   reason: ResetReasonDto;
   [k: string]: unknown;
 }
+export interface CatalogRequest {
+  boardId?: ResourceIdDto | null;
+  connection: ConnectionDraft;
+  cursor?: PageCursorDto | null;
+  expectedRevision: RevisionDto;
+  kind: CatalogKind;
+  provider: Provider;
+  q?: string | null;
+  states?: string[];
+  token: TokenInput;
+  view?: ProjectView | null;
+}
+export interface GitlabDraft {
+  origin: string;
+}
+export interface JiraDraft {
+  email: string;
+  site: string;
+  tokenType: TokenType;
+}
+export interface DisconnectSettings {
+  expectedRevision: RevisionDto;
+  provider: Provider;
+}
 /**
  * The browser body for POST /runs/{runId}/sessions/{sessionKey}/messages.
  */
 export interface SendMessageRequest {
   submissionId: SubmissionIdDto;
   text: MessageTextDto;
+}
+export interface TestConnection {
+  connection: ConnectionDraft;
+  expectedRevision: RevisionDto;
+  provider: Provider;
+  token: TokenInput;
+}
+/**
+ * The resource and event head from the same authorized snapshot.
+ */
+export interface CatalogResponse {
+  cursor: EventCursorDto;
+  data: CatalogResult;
+  [k: string]: unknown;
+}
+export interface CatalogResult {
+  items: CatalogItem[];
+  nextCursor: PageCursorDto | null;
+  [k: string]: unknown;
+}
+export interface CatalogItem {
+  boardId: ResourceIdDto | null;
+  boardType: BoardType | null;
+  estimateField: string | null;
+  id: ResourceIdDto;
+  label: string;
+  path: string | null;
+  state: string | null;
+  statusIds: ResourceIdDto[];
+  [k: string]: unknown;
 }
 /**
  * The resource and event head from the same authorized snapshot.
@@ -693,8 +771,95 @@ export interface SessionSummary {
 /**
  * The resource and event head from the same authorized snapshot.
  */
+export interface SettingsResponse {
+  cursor: EventCursorDto;
+  data: SettingsView;
+  [k: string]: unknown;
+}
+export interface SettingsView {
+  additionalReviewerIds: ResourceIdDto[];
+  boards: BoardScope[];
+  chatSetup: ChatSetup;
+  connections: Connections;
+  mode: Mode;
+  repositories: RepositoryBinding[];
+  settingsRevision: RevisionDto;
+  [k: string]: unknown;
+}
+export interface BoardScope {
+  boardId: ResourceIdDto;
+  enabled: boolean;
+  jiraProjectKeys: string[];
+  name: string;
+  projectIds: ProjectIdDto[];
+  reviewStatusIds: ResourceIdDto[];
+  scopeId: ResourceIdDto;
+  storyPointsField: string | null;
+  teamFilterId: ResourceIdDto | null;
+  type: BoardType;
+}
+export interface ChatSetup {
+  issues: string[];
+  state: ChatSetupState;
+  [k: string]: unknown;
+}
+export interface Connections {
+  gitlab: GitlabConnection;
+  jira: JiraConnection;
+  [k: string]: unknown;
+}
+export interface GitlabConnection {
+  configured: boolean;
+  identity: Identity | null;
+  origin: string | null;
+  [k: string]: unknown;
+}
+export interface Identity {
+  id: ResourceIdDto;
+  label: string;
+  [k: string]: unknown;
+}
+export interface JiraConnection {
+  configured: boolean;
+  email: string | null;
+  identity: Identity | null;
+  site: string | null;
+  tokenType: TokenType | null;
+  [k: string]: unknown;
+}
+export interface RepositoryBinding {
+  boardSelection: BoardSelection;
+  checkout: string | null;
+  defaultSkills: DefaultSkills;
+  path: string;
+  projectId: ProjectIdDto;
+}
+export interface DefaultSkills {
+  claude: Skill | null;
+  codex: Skill | null;
+}
+export interface Skill {
+  name: string;
+  path: string;
+}
+/**
+ * The resource and event head from the same authorized snapshot.
+ */
 export interface TerminalResponse {
   cursor: EventCursorDto;
   data: TerminalResult;
+  [k: string]: unknown;
+}
+/**
+ * The resource and event head from the same authorized snapshot.
+ */
+export interface VerifiedConnectionResponse {
+  cursor: EventCursorDto;
+  data: VerifiedConnection;
+  [k: string]: unknown;
+}
+export interface VerifiedConnection {
+  identity: Identity;
+  provider: Provider;
   [k: string]: unknown;
 }

@@ -47,7 +47,7 @@ pub(super) async fn list(
             "dashboard": dashboard(entry, &item.review_id, None),
         }));
     }
-    let sync = queue_sync(entry.source.is_some(), page.sync);
+    let sync = queue_sync(entry.active_source().await?.collection_enabled, page.sync);
     Ok(json!({
         "lastSyncAt": sync.last_success_at,
         "lastSyncAttemptAt": sync.last_attempt_at,
@@ -83,7 +83,7 @@ pub(super) async fn get(entry: &Entry, actor: Actor, args: GetReview) -> Result<
         .iter()
         .map(|run| run_summary(entry, &review, run))
         .collect();
-    let sync = queue_sync(entry.source.is_some(), page.sync);
+    let sync = queue_sync(entry.active_source().await?.collection_enabled, page.sync);
     Ok(json!({
         "review": project_review(&page.item)?,
         "runs":runs, "total":page.total,
@@ -259,7 +259,11 @@ async fn resolve(entry: &Entry, actor: &Actor, target: &str) -> Result<ResolvedR
             Err(error) => return Err(error),
         }
     }
-    let source = entry.source.as_ref().ok_or(AppError::NotFound)?;
+    let source = entry
+        .active_source()
+        .await?
+        .reader
+        .ok_or(AppError::NotFound)?;
     let workspace = entry.store.workspace_context(actor.clone()).await?.value;
     match source
         .resolve(workspace.projects, target.to_owned())

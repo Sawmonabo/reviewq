@@ -70,7 +70,7 @@ pub(super) async fn grant(
             if scope.next().is_some() {
                 return Err(AppError::Conflict.into());
             }
-            let source = entry.source.as_deref().ok_or(AppError::Unavailable)?;
+            let source = entry.source_reader().await?;
             let selected = source.verify_checkout(selected, remote).await?;
             let checksum = URL_SAFE_NO_PAD
                 .decode(verifier)

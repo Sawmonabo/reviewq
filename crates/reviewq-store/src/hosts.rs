@@ -198,6 +198,9 @@ fn register(
     actor: Actor,
     input: RegisterLead,
 ) -> Result<Snapshot<LeadTarget>, StoreError> {
+    if crate::workspace::settings_revision(&tx.sql)? != input.expected_settings {
+        return Err(AppError::StaleRevision.into());
+    }
     let identity = NativeIdentity::new(input.provider, input.profile, input.native_id);
     let binding = NativeBinding::new(identity, input.cwd);
     match actor.scope() {

@@ -114,6 +114,9 @@ impl WriteTx<'_> {
             params![head, floor],
         )?;
         self.wakeup = Some(cursor);
+        self.desktop_changed |= keys
+            .iter()
+            .any(|key| matches!(key, ResourceKey::Notification(_)));
         Ok(cursor)
     }
 }

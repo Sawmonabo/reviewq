@@ -1,5 +1,6 @@
 use std::path::Path;
 use std::sync::Arc;
+use std::time::Duration;
 
 use axum::extract::{DefaultBodyLimit, OriginalUri, Request, State};
 use axum::http::{HeaderMap, header};
@@ -22,14 +23,15 @@ use reviewq_app::queue::{QueueStore, ReviewLookup};
 use reviewq_app::reports::{
     ReportCaptureStore, ReportFileSource, ReportMutationStore, ReportStore,
 };
-use reviewq_app::sources::{ReviewSourceReader, SourceRefreshStore, refresh_queue};
+use reviewq_app::settings::{ConnectionSources, RuntimeSources, SettingsStore};
+use reviewq_app::sources::{SourceRefreshStore, refresh_queue};
 use reviewq_app::workflow::NativeWorkflowProof;
 use reviewq_app::workspace::WorkspaceStore;
-use reviewq_domain::identity::EventCursor;
+use reviewq_domain::identity::{EventCursor, Revision};
 use reviewq_protocol::queue::QueueSync;
 use reviewq_protocol::{EventCursorDto, Success};
 use serde::{Deserialize, Serialize};
-use tokio::sync::{Mutex, Semaphore, watch};
+use tokio::sync::{Mutex, Notify, Semaphore, watch};
 use tower_http::services::{ServeDir, ServeFile};
 
 mod auth;
@@ -44,6 +46,8 @@ mod hosts;
 mod mcp;
 mod messages;
 mod pages;
+mod settings;
+mod sources;
 mod terminal;
 
 pub use control::{ControlRequest, ServiceEndpoint, ServiceIdentity};
@@ -70,6 +74,7 @@ pub trait Store:
     + ActionCommandStore
     + FollowupStore
     + FollowupCommands
+    + SettingsStore
 {
 }
 impl<
@@ -89,7 +94,8 @@ impl<
         + ActionStore
         + ActionCommandStore
         + FollowupStore
-        + FollowupCommands,
+        + FollowupCommands
+        + SettingsStore,
 > Store for S
 {
 }
@@ -104,7 +110,9 @@ pub struct WorkflowIntegration {
 
 pub(super) struct Entry {
     store: Arc<dyn Store>,
-    source: Option<Arc<dyn ReviewSourceReader>>,
+    source: Arc<RuntimeSources>,
+    settings_sources: Arc<dyn ConnectionSources>,
+    refresh_wakeup: Notify,
     host: Option<Arc<dyn NativeHost>>,
     claude: Option<Arc<dyn ClaudeCompanion>>,
     file_history: Arc<dyn NativeHistoryReader>,
@@ -115,7 +123,7 @@ pub(super) struct Entry {
     shutdown: watch::Receiver<bool>,
     event_slots: Arc<Semaphore>,
     auth: Auth,
-    refresh: Mutex<Option<watch::Receiver<RefreshResult>>>,
+    refresh: Mutex<Option<(Revision, watch::Receiver<RefreshResult>)>>,
     checkpoints: Checkpoints,
 }
 
@@ -152,6 +160,8 @@ pub struct ServiceRuntime<'a> {
     pub endpoint: ServiceEndpoint,
     pub web: &'a Path,
     pub sends_allowed: bool,
+    pub source_poll_interval: Option<Duration>,
+    pub settings_sources: Arc<dyn ConnectionSources>,
     pub claude: Option<Arc<dyn ClaudeCompanion>>,
     pub workflow: WorkflowIntegration,
     pub terminal: Arc<dyn NativeTerminal>,
@@ -162,7 +172,7 @@ pub struct ServiceRuntime<'a> {
 /// Mounts production assets and the private versioned HTTP routes.
 pub fn router(
     store: Arc<dyn Store>,
-    source: Option<Arc<dyn ReviewSourceReader>>,
+    source: Arc<RuntimeSources>,
     host: Option<Arc<dyn NativeHost>>,
     file_history: Arc<dyn NativeHistoryReader>,
     runtime: ServiceRuntime<'_>,
@@ -170,6 +180,8 @@ pub fn router(
     let entry = Arc::new(Entry {
         store,
         source,
+        settings_sources: runtime.settings_sources,
+        refresh_wakeup: Notify::new(),
         host,
         claude: runtime.claude,
         file_history,
@@ -184,8 +196,15 @@ pub fn router(
         checkpoints: Checkpoints::default(),
     });
     let web = runtime.web;
+    if let Some(interval) = runtime.source_poll_interval {
+        tokio::spawn(poll_source(entry.clone(), interval));
+    }
     let api = Router::new()
         .route("/status", get(status))
+        .route("/settings", get(settings::read).put(settings::save))
+        .route("/settings/test", post(settings::test))
+        .route("/settings/catalog", post(settings::catalog))
+        .route("/settings/disconnect", post(settings::disconnect))
         .route("/checkout/grant", post(checkout::grant))
         .route("/events", get(events::feed))
         .route("/session", get(session).post(start_session))
@@ -243,6 +262,21 @@ pub fn router(
         .with_state(entry)
 }
 
+async fn poll_source(entry: Arc<Entry>, interval: Duration) {
+    let mut shutdown = entry.shutdown.clone();
+    while !*shutdown.borrow_and_update() {
+        tokio::select! {
+            _ = shutdown.changed() => break,
+            () = tokio::time::sleep(interval) => {},
+            () = entry.refresh_wakeup.notified() => {},
+        }
+        tokio::select! {
+            _ = shutdown.changed() => break,
+            _ = entry.refresh() => {},
+        }
+    }
+}
+
 async fn guard(State(entry): State<Arc<Entry>>, request: Request, next: Next) -> Response {
     if !entry.auth.allowed_host(request.headers()) {
         return ApiError(AppError::Forbidden).into_response();
@@ -290,7 +324,10 @@ async fn status(
             ready: true,
             configured_projects: workspace.value.projects.len(),
             total_mrs: queue.value.total,
-            sync: pages::queue_sync(entry.source.is_some(), queue.value.sync),
+            sync: pages::queue_sync(
+                entry.active_source().await?.collection_enabled,
+                queue.value.sync,
+            ),
         },
         cursor: EventCursorDto::new(queue.cursor.get()).ok_or(AppError::Internal)?,
     };
@@ -420,24 +457,33 @@ async fn refresh(
 
 impl Entry {
     async fn refresh(self: &Arc<Self>) -> Result<usize, AppError> {
-        let source = self.source.clone().ok_or(AppError::Unavailable)?;
+        let context = self.active_source().await?;
+        if !context.collection_enabled {
+            return Err(AppError::Unavailable);
+        }
+        let source = context.reader.ok_or(AppError::Unavailable)?;
+        let revision = context.revision;
         let mut receiver = {
             let mut active = self.refresh.lock().await;
-            if let Some(receiver) = active
+            if let Some((_, receiver)) = active
                 .as_ref()
-                .filter(|receiver| receiver.borrow().is_none())
+                .filter(|(scope, receiver)| *scope == revision && receiver.borrow().is_none())
             {
                 receiver.clone()
             } else {
                 let (send, receive) = watch::channel(None);
                 let store = self.store.clone();
                 tokio::spawn(async move {
-                    let result =
-                        refresh_queue(store.as_ref(), source.as_ref(), Actor::local_operator())
-                            .await;
+                    let result = refresh_queue(
+                        store.as_ref(),
+                        source.as_ref(),
+                        Actor::local_operator(),
+                        revision,
+                    )
+                    .await;
                     send.send_replace(Some(result));
                 });
-                *active = Some(receive.clone());
+                *active = Some((revision, receive.clone()));
                 receive
             }
         };

@@ -2,3 +2,4 @@
 
 pub mod identity;
 pub mod session;
+pub mod settings;

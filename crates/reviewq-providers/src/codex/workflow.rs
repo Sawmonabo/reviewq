@@ -3,8 +3,8 @@ use std::sync::Arc;
 
 use reviewq_app::access::{AppError, AppFuture};
 use reviewq_app::workflow::{
-    CompletedReportCall, ExpectedAcknowledgement, NativeCall, NativeWorkflowProof,
-    ReportCompletion, ReportContent, WorkflowTool,
+    CompletedReportCall, ExpectedAcknowledgement, NativeCall, NativeWorkflowProof, ReadyWorkflow,
+    ReportCompletion, ReportContent, WorkflowHold, WorkflowReadiness, WorkflowTool,
 };
 use reviewq_domain::identity::{NativeInputId, NativeTurnId};
 use reviewq_domain::session::{HostProvider, LeadTarget};
@@ -31,6 +31,15 @@ impl Acknowledgement {
 }
 
 impl NativeWorkflowProof for Codex {
+    fn dispatch_readiness(&self, lead: LeadTarget) -> AppFuture<'_, WorkflowReadiness> {
+        Box::pin(async move {
+            let Ok(thread) = self.verified_thread(&lead).await else {
+                return Ok(WorkflowReadiness::Held(WorkflowHold::ProviderUnavailable));
+            };
+            self.idle_readiness(&lead, &thread).await
+        })
+    }
+
     fn verify_active_call(
         &self,
         lead: LeadTarget,
@@ -164,6 +173,76 @@ impl NativeWorkflowProof for Codex {
 }
 
 impl Codex {
+    pub(super) async fn idle_readiness(
+        &self,
+        lead: &LeadTarget,
+        thread: &Thread,
+    ) -> Result<WorkflowReadiness, AppError> {
+        use WorkflowReadiness::{Held, Ready};
+        match &thread.status {
+            ThreadStatus::Idle => {}
+            ThreadStatus::Active { active_flags } if active_flags.is_empty() => {
+                return Ok(Held(WorkflowHold::ActiveWork));
+            }
+            ThreadStatus::Active { .. } => return Ok(Held(WorkflowHold::PendingNativeInput)),
+            _ => return Ok(Held(WorkflowHold::ProviderUnavailable)),
+        }
+        let mut page = self.turns(&thread.id, None, false, 1, true).await?;
+        let Some(turn) = page.data.pop() else {
+            return Ok(Held(WorkflowHold::UnknownSettings));
+        };
+        if turn.status != "completed" {
+            return Ok(Held(WorkflowHold::ActiveWork));
+        }
+        let mut latest: Option<NativeInputId> = None;
+        for item in turn.items.iter().rev() {
+            match item {
+                Item::AgentMessage {
+                    questions: Some(questions),
+                    ..
+                } if !questions.is_empty() => return Ok(Held(WorkflowHold::PendingNativeInput)),
+                Item::UserMessage { id, .. } => {
+                    latest = Some(id.parse().map_err(|_| AppError::Unavailable)?);
+                    break;
+                }
+                _ => {}
+            }
+        }
+        let Some(path) = &thread.path else {
+            return Ok(Held(WorkflowHold::UnknownSettings));
+        };
+        let (model, effort) = match crate::history::codex_turn_settings(
+            lead.binding().clone(),
+            path.clone(),
+            turn.id.clone(),
+        )
+        .await
+        {
+            Ok(Some(settings)) => settings,
+            _ => return Ok(Held(WorkflowHold::UnknownSettings)),
+        };
+        if model.is_empty()
+            || !model
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || b"._-".contains(&byte))
+            || !matches!(
+                effort.as_str(),
+                "none" | "minimal" | "low" | "medium" | "high" | "xhigh"
+            )
+        {
+            return Ok(Held(WorkflowHold::UnknownSettings));
+        }
+        Ok(Ready(ReadyWorkflow {
+            model,
+            effort,
+            latest_user_turn_id: latest
+                .as_ref()
+                .map(|_| turn.id.parse().map_err(|_| AppError::Unavailable))
+                .transpose()?,
+            latest_user_entry_id: latest,
+        }))
+    }
+
     async fn workflow_turn(
         &self,
         thread: &Thread,

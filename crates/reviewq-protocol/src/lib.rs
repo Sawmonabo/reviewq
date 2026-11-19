@@ -13,6 +13,7 @@ pub mod notifications;
 pub mod queue;
 pub mod reports;
 mod scalar;
+pub mod settings;
 
 pub use common::{ErrorCode, ErrorDto, Failure, Page, Success, UtcTimestampDto};
 pub use hosts::{

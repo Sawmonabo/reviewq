@@ -31,7 +31,7 @@ pub(in crate::entry::features) async fn declare(
         return Err(AppError::PayloadTooLarge.into());
     }
     let proof = entry.workflow.proof.as_ref();
-    let source = entry.source.as_deref().ok_or(AppError::Unavailable)?;
+    let source = entry.source_reader().await?;
     let lead = entry
         .store
         .report_lead(parse(command.session_key.as_str())?)
@@ -83,7 +83,7 @@ pub(in crate::entry::features) async fn declare(
     let stored = declare_publication(
         entry.store.as_ref(),
         proof,
-        source,
+        source.as_ref(),
         native,
         declaration,
         digest,
@@ -101,7 +101,7 @@ pub(in crate::entry::features) async fn reconcile(
     let command: dto::ReconcileCommand =
         serde_json::from_slice(&bytes).map_err(|_| AppError::InvalidRequest)?;
     let proof = entry.workflow.proof.as_ref();
-    let source = entry.source.as_deref().ok_or(AppError::Unavailable)?;
+    let source = entry.source_reader().await?;
     let lead = entry
         .store
         .report_lead(parse(command.session_key.as_str())?)
@@ -121,7 +121,7 @@ pub(in crate::entry::features) async fn reconcile(
         return Err(AppError::NotFound.into());
     }
     if let Some(stored) =
-        reconcile_publication(entry.store.as_ref(), proof, source, verified).await?
+        reconcile_publication(entry.store.as_ref(), proof, source.as_ref(), verified).await?
     {
         return Ok(Json(success(Some(project(stored.value)?), stored.cursor)?));
     }

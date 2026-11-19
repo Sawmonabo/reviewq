@@ -58,7 +58,7 @@ pub(super) async fn files(
     }
     let (limit, page, revision) =
         query.position(&entry.auth.endpoint, FILE_CURSOR, &review_id, 10)?;
-    let provider = entry.source.as_deref().ok_or(AppError::Unavailable)?;
+    let provider = entry.source_reader().await?;
     let response = provider
         .files(source.value.clone(), revision, page, limit, selected)
         .await?;
@@ -104,7 +104,7 @@ pub(super) async fn discussions(
     let (limit, page, revision) =
         query.position(&entry.auth.endpoint, DISCUSSION_CURSOR, &review_id, 20)?;
     let revision = revision.ok_or(AppError::InvalidRequest)?;
-    let provider = entry.source.as_deref().ok_or(AppError::Unavailable)?;
+    let provider = entry.source_reader().await?;
     let response = provider
         .discussions(source.value.clone(), revision, page, limit)
         .await?;

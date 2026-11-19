@@ -28,6 +28,7 @@ pub trait DesktopStore: Send + Sync {
     fn claim_desktop(&self) -> AppFuture<'_, Option<DesktopClaim>>;
     fn refresh_desktop_claim(&self, claim: DesktopClaim) -> AppFuture<'_, Option<DesktopClaim>>;
     fn finish_desktop(&self, claim: DesktopClaim, result: DesktopOutcome) -> AppFuture<'_, ()>;
+    fn next_desktop_due(&self) -> AppFuture<'_, Option<i64>>;
 }
 
 pub trait DesktopNotifier: Send + Sync {
@@ -37,21 +38,23 @@ pub trait DesktopNotifier: Send + Sync {
 pub async fn dispatch_desktop(
     store: &dyn DesktopStore,
     notifier: &dyn DesktopNotifier,
-) -> Result<(), AppError> {
+) -> Result<bool, AppError> {
     let Some(claim) = store.claim_desktop().await? else {
-        return Ok(());
+        return Ok(false);
     };
     let Some(current) = store.refresh_desktop_claim(claim.clone()).await? else {
-        return store
+        store
             .finish_desktop(
                 claim,
                 DesktopOutcome::NotStarted("notification_no_longer_unread"),
             )
-            .await;
+            .await?;
+        return Ok(true);
     };
     let result = match notifier.notify(&current).await {
         Ok(result) => result,
         Err(_) => DesktopOutcome::Uncertain("notification_bridge_unknown"),
     };
-    store.finish_desktop(current, result).await
+    store.finish_desktop(current, result).await?;
+    Ok(true)
 }

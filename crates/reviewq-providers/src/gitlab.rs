@@ -1,18 +1,21 @@
-use reqwest::{Client, header};
+use std::sync::Arc;
+
+use reqwest::header;
 use reviewq_app::access::{AppError, AppFuture};
 use reviewq_app::queue::{MergeRequestState, ReviewSource};
+use reviewq_app::settings::SourceLease;
 use reviewq_app::sources::{ReviewResolution, ReviewSourceReader, WorkflowSnapshot};
 use reviewq_app::workspace::ConfiguredProject;
 use reviewq_domain::identity::{GitLabOrigin, MrIdentity, ProjectId};
 use serde::Deserialize;
-use tokio::sync::Semaphore;
 use url::{Host, Url};
 
-use crate::http;
+use crate::http::SourceNetwork;
 
 mod changes;
 mod checkout;
 mod lookup;
+mod settings;
 
 const METADATA_LIMIT: usize = 1024 * 1024;
 const MAX_PROVIDER_PAGES: u32 = 40;
@@ -21,10 +24,10 @@ const MAX_PROVIDER_PAGES: u32 = 40;
 pub struct GitLab {
     origin: Url,
     identity: GitLabOrigin,
-    http: Client,
+    http: Arc<SourceNetwork>,
     headers: header::HeaderMap,
     patches: changes::Leases,
-    requests: Semaphore,
+    lease: Option<SourceLease>,
 }
 
 impl ReviewSourceReader for GitLab {
@@ -90,7 +93,22 @@ struct MergeRequest {
 
 impl GitLab {
     /// Allows HTTP only on numeric loopback without credentials.
-    pub fn new(origin: &str, token: Option<&str>, profile: PathBuf) -> Result<Self, AppError> {
+    pub fn new(
+        origin: &str,
+        token: Option<&str>,
+        profile: PathBuf,
+        http: Arc<SourceNetwork>,
+    ) -> Result<Self, AppError> {
+        Self::authenticated(origin, token, profile, http, false)
+    }
+
+    pub(crate) fn authenticated(
+        origin: &str,
+        token: Option<&str>,
+        profile: PathBuf,
+        http: Arc<SourceNetwork>,
+        fixture: bool,
+    ) -> Result<Self, AppError> {
         let origin = Url::parse(origin).map_err(|_| AppError::InvalidRequest)?;
         let local = match origin.host() {
             Some(Host::Ipv4(ip)) => ip.is_loopback(),
@@ -103,7 +121,7 @@ impl GitLab {
             || !origin.username().is_empty()
             || origin.password().is_some()
             || (origin.scheme() != "https"
-                && !(origin.scheme() == "http" && local && token.is_none()))
+                && !(origin.scheme() == "http" && local && (token.is_none() || fixture)))
         {
             return Err(AppError::InvalidRequest);
         }
@@ -119,10 +137,10 @@ impl GitLab {
         Ok(Self {
             origin,
             identity,
-            http: http::client(local)?,
+            http,
             headers,
             patches: changes::Leases::new(profile),
-            requests: Semaphore::new(4),
+            lease: None,
         })
     }
 
@@ -131,6 +149,11 @@ impl GitLab {
             origin: self.identity.clone(),
             project_id,
         }
+    }
+
+    pub(crate) fn with_lease(mut self, lease: SourceLease) -> Self {
+        self.lease = Some(lease);
+        self
     }
 
     /// Reads verified metadata for the configured project before store observation.
@@ -239,12 +262,12 @@ impl GitLab {
     }
 
     async fn get(&self, url: Url, max: usize) -> Result<(header::HeaderMap, Vec<u8>), AppError> {
-        let _permit = self
-            .requests
-            .acquire()
+        if url.origin() != self.origin.origin() {
+            return Err(AppError::Forbidden);
+        }
+        self.http
+            .bounded_response(url, self.headers.clone(), max, self.lease.as_ref())
             .await
-            .map_err(|_| AppError::Unavailable)?;
-        http::bounded_response(&self.http, url, self.headers.clone(), max).await
     }
 }
 use std::path::PathBuf;

@@ -4,6 +4,7 @@ mod checkout_setup;
 mod cli;
 mod native_client;
 mod runtime;
+mod runtime_settings;
 
 fn main() -> ExitCode {
     match cli::run() {

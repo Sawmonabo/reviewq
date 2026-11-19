@@ -4,7 +4,8 @@ use std::sync::Arc;
 
 use reviewq_app::access::{AppError, AppFuture};
 use reviewq_app::workflow::{
-    ExpectedAcknowledgement, NativeCall, NativeWorkflowProof, ReportCompletion, WorkflowTool,
+    ExpectedAcknowledgement, NativeCall, NativeWorkflowProof, ReportCompletion, WorkflowHold,
+    WorkflowReadiness, WorkflowTool,
 };
 use reviewq_domain::identity::NativeTurnId;
 use reviewq_domain::session::{HostProvider, LeadTarget};
@@ -33,6 +34,18 @@ impl Workflows {
 }
 
 impl NativeWorkflowProof for Workflows {
+    fn dispatch_readiness(&self, lead: LeadTarget) -> AppFuture<'_, WorkflowReadiness> {
+        Box::pin(async move {
+            match self.reader(&lead) {
+                Ok(reader) => reader.dispatch_readiness(lead).await,
+                Err(_) if lead.binding().identity().provider() == HostProvider::Claude => {
+                    Ok(WorkflowReadiness::Held(WorkflowHold::MissingCompanion))
+                }
+                Err(_) => Ok(WorkflowReadiness::Held(WorkflowHold::ProviderUnavailable)),
+            }
+        })
+    }
+
     fn verify_active_call(
         &self,
         lead: LeadTarget,
