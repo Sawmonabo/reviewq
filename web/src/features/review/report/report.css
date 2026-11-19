@@ -215,20 +215,46 @@
 .report-metadata strong {
   color: var(--text);
 }
+.report-authored {
+  --comparison-before: #111113;
+  --comparison-after: #131116;
+  --comparison-border: #343138;
+  --comparison-after-border: #38303f;
+  --comparison-divider: #2d2930;
+  --comparison-heading: #b5a9c3;
+  --thread-divider: #302a35;
+  --thread-heading: #d2c1df;
+}
+:root[data-theme="light"] .report-authored {
+  --comparison-before: var(--surface);
+  --comparison-after: var(--raised);
+  --comparison-border: var(--control-line);
+  --comparison-after-border: var(--control-line);
+  --comparison-divider: var(--line);
+  --comparison-heading: var(--muted);
+  --thread-divider: var(--line);
+  --thread-heading: var(--text);
+}
 .report-authored .table-scroll:has(> .report-before-after) {
+  margin-block: 0;
   overflow-x: clip;
 }
 .report-authored .prose .report-before-after {
+  --comparison-gap: 14px;
   table-layout: fixed;
   border-collapse: separate;
-  border-spacing: 12px 0;
-  margin-inline: -12px;
-  width: calc(100% + 24px);
+  border-spacing: var(--comparison-gap) 0;
+  /* Cancel the outer table spacing and leave the gap between the two columns. */
+  margin: 0 calc(-1 * var(--comparison-gap));
+  width: calc(100% + 2 * var(--comparison-gap));
 }
 .report-authored .prose .report-before-after :is(th, td) {
   width: 50%;
-  border-block-end: 0;
-  padding: 9px 12px;
+  min-width: 0;
+  max-width: none;
+  padding: 15px 16px;
+  border: 1px solid var(--comparison-border);
+  background: var(--comparison-before);
   overflow-wrap: anywhere;
   vertical-align: top;
 }
@@ -238,33 +264,73 @@
   white-space: pre-wrap;
 }
 .report-authored .prose .report-before-after th {
-  border-start-start-radius: 8px;
-  border-start-end-radius: 8px;
+  padding-block-end: 7px;
+  border-block-end: 0;
+  border-start-start-radius: 9px;
+  border-start-end-radius: 9px;
+  color: var(--comparison-heading);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
 }
-.report-authored .prose .report-before-after tbody tr:last-child td {
-  border-end-start-radius: 8px;
-  border-end-end-radius: 8px;
-  border-block-end: 1px solid var(--line);
+.report-authored .prose .report-before-after td {
+  border-block-start: 0;
+  border-block-end-color: var(--comparison-divider);
+  font-size: 12px;
+  line-height: 1.8;
 }
-.report-before-after th:first-child {
-  color: var(--rose);
+.report-authored .prose .report-before-after tbody tr:first-child > td {
+  padding-block-start: 0;
 }
-.report-before-after th:last-child {
-  color: var(--green);
+.report-authored .prose .report-before-after tbody tr:last-child > td {
+  border-block-end-color: var(--comparison-border);
+  border-end-start-radius: 9px;
+  border-end-end-radius: 9px;
+}
+.report-authored .prose .report-before-after :is(th, td):last-child {
+  border-inline-color: var(--comparison-after-border);
+  background: var(--comparison-after);
+}
+.report-authored .prose .report-previous-threads {
+  width: 100%;
+  margin: 0;
+  font-size: 12px;
+}
+.report-authored .table-scroll:has(> .report-previous-threads) {
+  margin-block: 16px;
+}
+.report-authored .prose .report-previous-threads :is(th, td) {
+  min-width: 0;
+  max-width: none;
+  padding: 14px 12px;
+  border: 0;
+  border-block-end: 1px solid var(--thread-divider);
+  vertical-align: top;
 }
 .report-authored .prose .report-previous-threads th {
-  color: var(--muted);
-  font-size: 10px;
-  font-weight: 650;
+  color: var(--thread-heading);
+  background: transparent;
+  font-size: 11px;
+  font-weight: 600;
+}
+.report-authored .prose .report-previous-threads :is(th, td):first-child {
+  width: 1%;
+  min-width: min(100px, 24vw);
+  padding-inline-start: 0;
+}
+.report-authored .prose .report-previous-threads :is(th, td):last-child {
+  padding-inline-end: 0;
+}
+.report-previous-threads:has(> thead > tr > th:nth-child(3):last-child)
+  :is(th, td):nth-child(3):last-child {
+  width: 30%;
 }
 .report-previous-threads [data-report-thread-status="confirmed"] {
   color: var(--green);
 }
 .report-previous-threads [data-report-thread-status="attention"] {
   color: var(--amber);
-}
-.report-authored .prose .report-previous-threads :is(th, td) {
-  border-inline: 0;
 }
 .report-previous-threads .report-thread-outcome {
   display: block;

@@ -709,7 +709,7 @@ function DrawerSummary({
       ? review.reasonKind
       : null;
   const known: Readonly<Record<string, readonly [string, string]>> = {
-    agent_input: ["Agent needs input", "rose"],
+    agent_input: ["Awaiting input", "rose"],
     permission_required: ["Agent needs input", "rose"],
     report_ready: ["Response ready", "blue"],
     report_failed: ["Findings could not be saved", "red"],
