@@ -1,6 +1,6 @@
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import type { HistoryContent, HistoryEntry, HistoryPart } from "../../../api/generated/contracts";
-import { historyContent, historyParts } from "../../../api/history";
+import { historyContent } from "../../../api/history";
 import type { SessionAddress } from "../../../api/history";
 import { Notice } from "../../../components/PanelState";
 import { describeError, readable } from "../../../lib/presentation";
@@ -17,26 +17,13 @@ type Props = {
   readonly onReference: (reference: string | undefined) => void;
   readonly expanded: ReadonlySet<string>;
   readonly toggle: (key: string, open: boolean) => void;
+  readonly extra?: { readonly items: readonly HistoryPart[]; readonly next: string | null };
+  readonly onMoreParts: (cursor: string) => void;
 };
 
-export function EntryBody({ entry, target, generation, reference, onReference, expanded, toggle }: Props) {
-  const [extra, setExtra] = useState<{ items: readonly HistoryPart[]; next: string | null }>();
-  const [error, setError] = useState<string>();
-  const request = useRef<AbortController | undefined>(undefined);
+export function EntryBody({ entry, target, generation, reference, onReference, expanded, toggle, extra, onMoreParts }: Props) {
   const next = extra ? extra.next : entry.partsCursor;
   const parts = groupParts([...entry.parts, ...(extra?.items ?? [])]);
-  useEffect(() => () => request.current?.abort(), [generation, entry.entryId]);
-
-  async function loadParts() {
-    if (!next || request.current || (extra?.items.length ?? 0) > 60) return;
-    const controller = new AbortController();
-    request.current = controller;
-    try {
-      const result = await historyParts(target, entry.entryId, next, controller.signal);
-      if (!controller.signal.aborted) setExtra((previous) => ({ items: [...(previous?.items ?? []), ...result.parts], next: result.nextCursor }));
-    } catch (failure) { if (!controller.signal.aborted) setError(describeError(failure)); }
-    finally { if (request.current === controller) request.current = undefined; }
-  }
 
   function value(part: HistoryPart, key: string) {
     return <div className="stack" key={key}>
@@ -56,16 +43,15 @@ export function EntryBody({ entry, target, generation, reference, onReference, e
       const key = `${entry.entryId}:tool:${index}`;
       return <details className="tool-group" key={key} open={expanded.has(key)} onToggle={(event) => toggle(key, event.currentTarget.open)}>
         <summary>{group.label} · {group.count} {group.count === 1 ? "call" : "calls"}{group.partial && " · Partial"}{group.status !== "completed" && ` · ${readable(group.status)}`}</summary>
-        <div className="stack">{group.parts.map((item, ordinal) => <section className="stack" key={`${ordinal}:${item.kind}`}>
+        {expanded.has(key) && <div className="stack">{group.parts.map((item, ordinal) => <section className="stack" key={`${ordinal}:${item.kind}`}>
           {item.kind === "tool_call" && <strong>{item.label || item.name}</strong>}{value(item, `tool:${ordinal}`)}
-        </section>)}</div>
+        </section>)}</div>}
       </details>;
     })}
     {entry.contentRef && <button type="button" onClick={() => onReference(reference === entry.contentRef ? undefined : entry.contentRef)}
       aria-expanded={reference === entry.contentRef}>{reference === entry.contentRef ? "Close complete entry" : "Read complete entry"}</button>}
-    {next && <button type="button" onClick={() => void loadParts()}>More parts</button>}
+    {next && <button type="button" onClick={() => onMoreParts(next)}>More parts</button>}
     {reference && <ExpandedOutput key={reference} target={target} generation={generation} entryId={entry.entryId} reference={reference} />}
-    {error && <Notice>{error}</Notice>}
   </>;
 }
 
@@ -103,7 +89,7 @@ function ExpandedOutput({ target, entryId, generation, reference }: {
   return <div className="output-reader surface-card stack">
     {!ranges.length && <button type="button" onClick={() => void read()}>Load native output</button>}
     {error && <Notice>{error}</Notice>}
-    {ranges.length > 0 && <pre ref={text} className="tool-output-line" aria-label="Native output text">{ranges.map((range) => range.text).join("")}</pre>}
+    {ranges.length > 0 && <pre ref={text} className="tool-output-line" aria-label="Native output text">{ranges.map((range) => <span key={range.offset}>{range.text}</span>)}</pre>}
     <div className="actions">
       {(ranges[0]?.offset ?? 0) > 0 && <button type="button" onClick={() => void read(undefined, true)}>Start of output</button>}
       {latest?.nextCursor && <button type="button" onClick={() => void read(latest.nextCursor ?? undefined)}>More output</button>}

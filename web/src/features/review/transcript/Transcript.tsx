@@ -1,7 +1,8 @@
 import { defaultRangeExtractor, useVirtualizer } from "@tanstack/react-virtual";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import type { HistoryEntry } from "../../../api/generated/contracts";
+import type { HistoryEntry, HistoryPart } from "../../../api/generated/contracts";
 import type { MessageHistoryItem } from "../../../api/generated/contracts/delivery";
+import { historyParts } from "../../../api/history";
 import type { SessionAddress } from "../../../api/history";
 import { Icon } from "../../../components/Icon";
 import { Empty, Loading, Notice } from "../../../components/PanelState";
@@ -12,6 +13,7 @@ import { PromptNavigator } from "./PromptNavigator";
 import { useHistory } from "./useHistory";
 
 type Position = { readonly id: string; readonly offset: number };
+type ExtraParts = { readonly entryId: string; readonly generation: string; readonly pages: number; readonly items: readonly HistoryPart[]; readonly next: string | null };
 type OutputSelection = { readonly entryId: string; readonly reference: string };
 type Visible = { readonly id: string; readonly entry?: HistoryEntry; readonly delivery?: MessageHistoryItem; readonly provisional?: string };
 type Props = {
@@ -30,6 +32,8 @@ export function Transcript({ target, messages, resultOnly, onObservedTurn }: Pro
   const [actionNotice, setActionNotice] = useState<string>();
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set());
   const [output, setOutput] = useState<OutputSelection>();
+  const [extraParts, setExtraParts] = useState<ExtraParts>();
+  const partsRequest = useRef<AbortController | undefined>(undefined);
   const viewport = useRef<HTMLDivElement>(null);
   const anchor = useRef<Position | undefined>(saved ? { id: saved.entryId, offset: saved.offset } : undefined);
   const selectionState = useRef({ hasText: false, ids: new Set<string>() });
@@ -45,6 +49,7 @@ export function Transcript({ target, messages, resultOnly, onObservedTurn }: Pro
     }
   });
   const historyEntries = useMemo(() => entriesIn(history.pages), [history.pages]);
+  useEffect(() => () => partsRequest.current?.abort(), [history.generation]);
   const canonical = useMemo(() => new Set(historyEntries.map((item) => item.entryId)), [historyEntries]);
   const inProgress = history.live?.entryId && !canonical.has(history.live.entryId) ? history.live : undefined;
   const entries = useMemo<Visible[]>(() => {
@@ -191,6 +196,32 @@ export function Transcript({ target, messages, resultOnly, onObservedTurn }: Pro
     }
   }, [pinned, history]);
 
+  async function moreParts(entryId: string, cursor: string) {
+    const generation = history.generation;
+    if (!generation || partsRequest.current) return;
+    if (extraParts && extraParts.entryId !== entryId && pinned.has(extraParts.entryId)) {
+      setActionNotice("Clear the active selection before opening another long entry.");
+      return;
+    }
+    const prior = extraParts?.generation === generation && extraParts.entryId === entryId ? extraParts : undefined;
+    if (prior && prior.pages >= 4) {
+      setActionNotice("This entry has more parts than fit in one window. Use its complete output or open the session in the terminal.");
+      return;
+    }
+    const controller = new AbortController();
+    partsRequest.current = controller;
+    setActionNotice(undefined);
+    try {
+      const result = await historyParts(target, entryId, cursor, controller.signal);
+      if (!controller.signal.aborted) setExtraParts({
+        entryId, generation, pages: (prior?.pages ?? 0) + 1,
+        items: [...(prior?.items ?? []), ...result.parts], next: result.nextCursor,
+      });
+    } catch (error) {
+      if (!controller.signal.aborted) setActionNotice(describeError(error));
+    } finally { if (partsRequest.current === controller) partsRequest.current = undefined; }
+  }
+
   return <section className="transcript-shell" aria-label={resultOnly ? "Latest child output" : "Native conversation"}>
     {!resultOnly && <div className="timeline-controls">
       <button type="button" disabled={!history.older || history.loading} onClick={() => { setFollowing(false); void history.load("older"); }}>Earlier</button>
@@ -240,13 +271,15 @@ export function Transcript({ target, messages, resultOnly, onObservedTurn }: Pro
                 {row.provisional !== undefined && <span className="badge green">Working</span>}</div>
               {row.provisional !== undefined && <p className="message-copy">{row.provisional}</p>}
               {row.delivery && <p className="message-copy">{row.delivery.text}</p>}
-              {row.entry && history.generation && <EntryBody target={target} generation={history.generation} entry={row.entry}
+              {row.entry && history.generation && <EntryBody key={history.generation} target={target} generation={history.generation} entry={row.entry}
                 expanded={expanded} toggle={(key, open) => setExpanded((known) => {
                   const next = new Set(known);
                   if (open) next.add(key); else next.delete(key);
                   return next.size > 160 ? new Set([...next].slice(-160)) : next;
                 })}
                 reference={output?.entryId === row.id ? output.reference : undefined}
+                {...(extraParts?.generation === history.generation && extraParts.entryId === row.id ? { extra: extraParts } : {})}
+                onMoreParts={(cursor) => void moreParts(row.id, cursor)}
                 onReference={(reference) => setOutput(reference ? { entryId: row.id, reference } : undefined)} />}
             </div>
           </article>;

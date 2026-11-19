@@ -72,14 +72,20 @@ export function RichReport({ tree, source, onQuote, onSource }: {
     const block = blocks[start];
     if (!block || !root.current?.contains(selected.commonAncestorContainer)) { setError("Select a passage in the report body."); return; }
     const exact = selected.toString();
-    const fragment = source.slice(block.offset, block.end);
-    const found = fragment.indexOf(exact);
+    const container = root.current.querySelector(`[data-report-block="${start}"]`);
+    const preceding = document.createRange();
     setError(undefined);
-    if (end === start && exact.trim() && found !== -1 && fragment.indexOf(exact, found + 1) === -1) {
-      onQuote(exact, [...source.slice(0, block.offset + found)].length);
-    } else {
-      onSource([...source.slice(0, block.offset)].length);
+    if (end === start && container && exact.trim()) {
+      preceding.selectNodeContents(container);
+      preceding.setEnd(selected.startContainer, selected.startOffset);
+      const prefix = preceding.toString();
+      const absolute = block.offset + prefix.length;
+      if (source.slice(block.offset, absolute + exact.length) === prefix + exact) {
+        onQuote(exact, [...source.slice(0, absolute)].length);
+        return;
+      }
     }
+    onSource([...source.slice(0, block.offset)].length);
   }
 
   return <section className="rich-report stack" aria-label="Formatted accepted report">
