@@ -124,8 +124,31 @@ impl Codex {
         &self,
         session: HistorySession,
         id: NativeInputId,
+        anchor: Option<(NativePosition, String)>,
         limit: u16,
     ) -> Result<NativeHistoryPage, AppError> {
+        if let Some((position, generation)) = anchor {
+            let mut page = self.read_history(session, position, 32).await?;
+            let index = page
+                .entries
+                .iter()
+                .position(|entry| entry.id == id)
+                .filter(|_| page.generation == generation)
+                .ok_or(AppError::CursorExpired)?;
+            let first = index.saturating_sub(usize::from(limit / 2));
+            let end = first
+                .saturating_add(usize::from(limit))
+                .min(page.entries.len());
+            page.older = page.older_after_trim(first);
+            page.newer = page.newer_after_trim(end);
+            page.entries = page
+                .entries
+                .into_iter()
+                .skip(first)
+                .take(end - first)
+                .collect();
+            return Ok(page);
+        }
         let mut position = NativePosition::default();
         for _ in 0..24 {
             let page = self

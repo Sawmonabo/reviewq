@@ -91,10 +91,19 @@ pub trait NativeHost: QuestionsPort + Send + Sync {
         Box::pin(async { Err(AppError::Unavailable) })
     }
 
+    fn history_navigation(
+        &self,
+        _target: HistorySession,
+        _query: crate::history::NavigationQuery,
+    ) -> AppFuture<'_, crate::history::NativeNavigation> {
+        Box::pin(async { Err(AppError::Unavailable) })
+    }
+
     fn history_around(
         &self,
         _target: HistorySession,
         _id: NativeInputId,
+        _anchor: Option<(NativePosition, String)>,
         _limit: u16,
     ) -> AppFuture<'_, NativeHistoryPage> {
         Box::pin(async { Err(AppError::Unavailable) })

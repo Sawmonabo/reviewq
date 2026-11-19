@@ -2,9 +2,9 @@ use std::sync::atomic::AtomicBool;
 
 use reviewq_app::access::AppError;
 use reviewq_app::history::{
-    ContentReference, FileContentRef, NativeHead, NativeHistoryPage, NativeNavigation, NativePlan,
-    NativePosition, NavigationQuery, PromptGroup, PromptPosition, PromptPreview, SourceAnchor,
-    VisibleKind, VisiblePart, VisiblePartKind,
+    ContentReference, FileContentRef, HistoryBookmark, NativeHead, NativeHistoryPage,
+    NativeNavigation, NativePlan, NativePosition, NavigationQuery, PromptGroup, PromptPosition,
+    PromptPreview, SourceAnchor, VisibleKind, VisiblePart, VisiblePartKind,
 };
 use reviewq_domain::identity::NativeInputId;
 
@@ -133,12 +133,17 @@ pub(super) fn read(
                 if generation != anchor.generation {
                     return Err(AppError::CursorExpired);
                 }
-                file::verify_position(&source.file, &start.file, complete)?;
+                let point = start.bookmark.clone().into_file()?;
+                file::verify_position(&source.file, &point, complete)?;
                 start
             } else {
                 PromptPosition {
                     next_ordinal: 1,
-                    file: file::file_position(&source.file, 0, complete)?,
+                    bookmark: HistoryBookmark::File(file::file_position(
+                        &source.file,
+                        0,
+                        complete,
+                    )?),
                 }
             };
             overview(source, anchor.generation, groups, start, cancel)
@@ -155,7 +160,8 @@ pub(super) fn read(
             {
                 return Err(AppError::CursorExpired);
             }
-            file::verify_position(&source.file, &start.file, complete)?;
+            let point = start.bookmark.clone().into_file()?;
+            file::verify_position(&source.file, &point, complete)?;
             previews(source, generation, start, first, limit, cancel)
         }
     }
@@ -171,8 +177,9 @@ fn overview(
     if !(1..=64).contains(&groups) {
         return Err(AppError::InvalidRequest);
     }
-    let end = start.file.high_water;
-    let mut offset = start.file.offset;
+    let position = start.bookmark.into_file()?;
+    let end = position.high_water;
+    let mut offset = position.offset;
     let previous = start
         .next_ordinal
         .checked_sub(1)
@@ -217,7 +224,11 @@ fn overview(
                 last,
                 start: PromptPosition {
                     next_ordinal: sample.0,
-                    file: file::file_position(&source.file, sample.1, offset)?,
+                    bookmark: HistoryBookmark::File(file::file_position(
+                        &source.file,
+                        sample.1,
+                        offset,
+                    )?),
                 },
             });
             first = last + 1;
@@ -232,7 +243,11 @@ fn overview(
             .then(|| {
                 Ok::<_, AppError>(PromptPosition {
                     next_ordinal: cursor + 1,
-                    file: file::file_position(&source.file, offset, end)?,
+                    bookmark: HistoryBookmark::File(file::file_position(
+                        &source.file,
+                        offset,
+                        end,
+                    )?),
                 })
             })
             .transpose()?,
@@ -247,8 +262,9 @@ fn previews(
     limit: u16,
     cancel: &AtomicBool,
 ) -> Result<NativeNavigation, AppError> {
-    let end = start.file.high_water;
-    let mut offset = start.file.offset;
+    let position = start.bookmark.into_file()?;
+    let end = position.high_water;
+    let mut offset = position.offset;
     let mut ordinal = start.next_ordinal;
     let mut items = Vec::with_capacity(usize::from(limit));
     let mut budget = READ_BUDGET;
@@ -273,10 +289,14 @@ fn previews(
                         .chars()
                         .take(160)
                         .collect(),
-                    anchor: file::file_position(&source.file, offset, end)?,
+                    anchor: HistoryBookmark::File(file::file_position(&source.file, offset, end)?),
                     after: PromptPosition {
                         next_ordinal: ordinal + 1,
-                        file: file::file_position(&source.file, next, end)?,
+                        bookmark: HistoryBookmark::File(file::file_position(
+                            &source.file,
+                            next,
+                            end,
+                        )?),
                     },
                 });
             }
@@ -288,7 +308,7 @@ fn previews(
         .then(|| {
             Ok::<_, AppError>(PromptPosition {
                 next_ordinal: ordinal,
-                file: file::file_position(&source.file, offset, end)?,
+                bookmark: HistoryBookmark::File(file::file_position(&source.file, offset, end)?),
             })
         })
         .transpose()?;

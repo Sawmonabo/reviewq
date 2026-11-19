@@ -5,7 +5,9 @@ use axum::extract::State;
 use axum::http::{HeaderMap, header};
 use axum::response::{IntoResponse, Response};
 use reviewq_app::access::AppError;
-use reviewq_app::history::{NativeNavigation, NavigationQuery, PromptPosition, SourceAnchor};
+use reviewq_app::history::{
+    HistoryBookmark, HistorySession, NativeNavigation, NavigationQuery, PromptPosition,
+};
 use reviewq_domain::identity::{NativeInputId, RunId, SessionKey};
 use reviewq_protocol::history::{
     HistoryAvailability, HistoryNavigation, HistoryPlan, HistoryPlanResponse, HistoryText,
@@ -17,7 +19,7 @@ use reviewq_protocol::{
 };
 use serde::{Deserialize, Serialize};
 
-use super::{Entry, Point, ServiceEndpoint, visible_part};
+use super::{Cursor, Entry, Point, ServiceEndpoint, visible_part};
 use crate::entry::error::{ApiError, ApiPath as Path, ApiQuery as Query};
 use crate::entry::pages::{parse, success};
 
@@ -42,7 +44,7 @@ struct OverviewCursor {
     generation: String,
     groups: u16,
     next_ordinal: u64,
-    point: Point,
+    point: Bookmark,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -52,7 +54,7 @@ struct PromptCursor {
     generation: String,
     next_ordinal: u64,
     wanted: u64,
-    point: Point,
+    point: Bookmark,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -61,7 +63,58 @@ struct EntryLocator {
     session: String,
     generation: String,
     entry: String,
-    point: Point,
+    point: Bookmark,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(tag = "source", rename_all = "snake_case")]
+enum Bookmark {
+    File { point: Point },
+    Rpc { position: Cursor },
+}
+
+impl Bookmark {
+    fn from_bookmark(
+        bookmark: &HistoryBookmark,
+        run: &RunId,
+        session: &SessionKey,
+        generation: &str,
+    ) -> Self {
+        match bookmark {
+            HistoryBookmark::File(point) => Self::File {
+                point: point.clone().into(),
+            },
+            HistoryBookmark::Rpc(position) => Self::Rpc {
+                position: Cursor::new(run, session, generation, (32, 64 * 1024), position.clone()),
+            },
+        }
+    }
+    fn open(self) -> Result<HistoryBookmark, AppError> {
+        Ok(match self {
+            Self::File { point } => HistoryBookmark::File(point.into()),
+            Self::Rpc { position } => HistoryBookmark::Rpc(position.native_position()?),
+        })
+    }
+}
+
+async fn native_navigation(
+    entry: &Entry,
+    source: &HistorySession,
+    query: NavigationQuery,
+) -> Result<NativeNavigation, AppError> {
+    if let Some(result) = entry
+        .file_history
+        .navigation(source.clone(), query.clone())
+        .await?
+    {
+        return Ok(result);
+    }
+    entry
+        .host
+        .as_ref()
+        .ok_or(AppError::Unavailable)?
+        .history_navigation(source.clone(), query)
+        .await
 }
 
 pub(super) fn open_anchor(
@@ -70,7 +123,7 @@ pub(super) fn open_anchor(
     session: &SessionKey,
     entry: &NativeInputId,
     token: &str,
-) -> Result<SourceAnchor, AppError> {
+) -> Result<(String, HistoryBookmark), AppError> {
     let locator: EntryLocator = endpoint.decode_cursor(AROUND, token)?;
     if locator.run != run.as_str()
         || locator.session != session.as_str()
@@ -78,10 +131,7 @@ pub(super) fn open_anchor(
     {
         return Err(AppError::CursorExpired);
     }
-    Ok(SourceAnchor {
-        generation: locator.generation,
-        file: locator.point.into(),
-    })
+    Ok((locator.generation, locator.point.open()?))
 }
 
 pub(in crate::entry) async fn navigation(
@@ -116,7 +166,7 @@ pub(in crate::entry) async fn navigation(
             start: Some((
                 PromptPosition {
                     next_ordinal: cursor.next_ordinal,
-                    file: cursor.point.into(),
+                    bookmark: cursor.point.open()?,
                 },
                 cursor.generation,
             )),
@@ -132,7 +182,7 @@ pub(in crate::entry) async fn navigation(
         NavigationQuery::Previews {
             start: PromptPosition {
                 next_ordinal: cursor.next_ordinal,
-                file: cursor.point.into(),
+                bookmark: cursor.point.open()?,
             },
             first: cursor.wanted,
             limit: query.limit.unwrap_or(30),
@@ -147,28 +197,22 @@ pub(in crate::entry) async fn navigation(
             start: None,
         }
     };
-    let (result, reset) = match entry
-        .file_history
-        .navigation(source.value.clone(), nav)
-        .await
-    {
-        Ok(value) => (value, false),
+    let (result, reset) = match native_navigation(&entry, &source.value, nav).await {
+        Ok(result) => (result, false),
         Err(AppError::CursorExpired) => (
-            entry
-                .file_history
-                .navigation(
-                    source.value.clone(),
-                    NavigationQuery::Overview {
-                        groups,
-                        start: None,
-                    },
-                )
-                .await?,
+            native_navigation(
+                &entry,
+                &source.value,
+                NavigationQuery::Overview {
+                    groups,
+                    start: None,
+                },
+            )
+            .await?,
             true,
         ),
         Err(error) => return Err(error.into()),
     };
-    let result = result.ok_or(AppError::Unavailable)?;
     if entry
         .store
         .history_session(actor, run.clone(), session.clone())
@@ -185,7 +229,7 @@ pub(in crate::entry) async fn navigation(
             generation: generation.to_owned(),
             next_ordinal: position.next_ordinal,
             wanted,
-            point: position.file.clone().into(),
+            point: Bookmark::from_bookmark(&position.bookmark, &run, &session, generation),
         };
         HistoryCursorDto::new(endpoint.encode_cursor(PREVIEWS, &value)?).ok_or(AppError::Internal)
     };
@@ -221,7 +265,12 @@ pub(in crate::entry) async fn navigation(
                         generation: generation.clone(),
                         groups,
                         next_ordinal: position.next_ordinal,
-                        point: position.file.into(),
+                        point: Bookmark::from_bookmark(
+                            &position.bookmark,
+                            &run,
+                            &session,
+                            &generation,
+                        ),
                     };
                     HistoryCursorDto::new(endpoint.encode_cursor(OVERVIEW, &cursor)?)
                         .ok_or(AppError::Internal)
@@ -264,7 +313,12 @@ pub(in crate::entry) async fn navigation(
                             session: session.to_string(),
                             generation: generation.clone(),
                             entry: item.entry.to_string(),
-                            point: item.anchor.clone().into(),
+                            point: Bookmark::from_bookmark(
+                                &item.anchor,
+                                &run,
+                                &session,
+                                &generation,
+                            ),
                         };
                         Ok(PromptPreview {
                             ordinal: valid_count(item.ordinal)?,

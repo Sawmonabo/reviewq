@@ -9,6 +9,7 @@ mod catalog;
 mod connection;
 mod delivery;
 mod history;
+mod history_navigation;
 mod history_reads;
 mod launch;
 mod questions;

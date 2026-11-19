@@ -203,31 +203,14 @@ pub(super) async fn read(
             .as_deref()
             .map(|token| explore::open_anchor(endpoint, &run, &session, &around, token))
             .transpose()?;
-        let history = entry
-            .file_history
-            .around(lead.value.clone(), around.clone(), anchor.clone(), limit)
-            .await;
-        let (result, reset) = match history {
-            Ok(history) => (history, false),
+        let current = around_page(entry, lead.value.clone(), &around, anchor.clone(), limit).await;
+        let (mut result, reset) = match current {
+            Ok(current) => (current, false),
             Err(AppError::CursorExpired) if anchor.is_some() => (
-                entry
-                    .file_history
-                    .around(lead.value.clone(), around.clone(), None, limit)
-                    .await?,
+                around_page(entry, lead.value.clone(), &around, None, limit).await?,
                 true,
             ),
             Err(error) => return Err(error),
-        };
-        let mut result = match result {
-            Some(result) => result,
-            None => {
-                entry
-                    .host
-                    .as_ref()
-                    .ok_or(AppError::Unavailable)?
-                    .history_around(lead.value.clone(), around.clone(), limit)
-                    .await?
-            }
         };
         bind_observed_turns(entry, actor, lead.value, &mut result).await?;
         return encode(
@@ -311,6 +294,61 @@ async fn bind_observed_turns(
         }
     }
     Ok(())
+}
+
+async fn around_page(
+    entry: &Entry,
+    session: HistorySession,
+    id: &NativeInputId,
+    anchor: Option<(String, reviewq_app::history::HistoryBookmark)>,
+    limit: u16,
+) -> Result<NativeHistoryPage, AppError> {
+    use reviewq_app::history::{HistoryBookmark, SourceAnchor};
+    if let Some((generation, HistoryBookmark::Rpc(position))) = anchor.as_ref() {
+        if entry
+            .file_history
+            .head(session.clone(), None)
+            .await?
+            .is_some()
+        {
+            return Err(AppError::CursorExpired);
+        }
+        return entry
+            .host
+            .as_ref()
+            .ok_or(AppError::Unavailable)?
+            .history_around(
+                session,
+                id.clone(),
+                Some((position.clone(), generation.clone())),
+                limit,
+            )
+            .await;
+    }
+    let file = anchor
+        .map(|(generation, bookmark)| {
+            Ok(SourceAnchor {
+                generation,
+                file: bookmark.into_file()?,
+            })
+        })
+        .transpose()?;
+    if let Some(result) = entry
+        .file_history
+        .around(session.clone(), id.clone(), file.clone(), limit)
+        .await?
+    {
+        return Ok(result);
+    }
+    if file.is_some() {
+        return Err(AppError::CursorExpired);
+    }
+    entry
+        .host
+        .as_ref()
+        .ok_or(AppError::Unavailable)?
+        .history_around(session, id.clone(), None, limit)
+        .await
 }
 
 async fn native_page(
