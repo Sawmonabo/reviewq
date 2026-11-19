@@ -70,15 +70,15 @@ export function CatalogPicker({ label, scope, kind, unavailable, onAdd }: Props)
       if (!open) requestAnimationFrame(() => search.current?.focus());
     }}>{label}</button>
     {open && <section className="surface-card stack" aria-label={label}>
-      <form className="actions" onSubmit={(event) => { event.preventDefault(); setForced((count) => count + 1); }}>
+      <div className="actions">
         <input ref={search} aria-label={`Search ${label.toLowerCase()}`} placeholder="Search by name" value={q} maxLength={200}
           onChange={(event) => { setQuery(event.currentTarget.value); setForced(0); }}
-          onKeyDown={(event) => { if (event.key === "ArrowDown") { event.preventDefault(); first.current?.focus(); } }} />
+          onKeyDown={(event) => { if (event.key === "ArrowDown") { event.preventDefault(); first.current?.focus(); } else if (event.key === "Enter") { event.preventDefault(); setForced((count) => count + 1); } }} />
         {kind === "projects" && <select aria-label="Repository visibility" value={view} onChange={(event) => setView(event.currentTarget.value as ProjectView)}>
           <option value="member">Member projects</option><option value="starred">Starred projects</option><option value="all">All visible projects</option>
         </select>}
-        <button type="submit">Search</button>
-      </form>
+        <button type="button" onClick={() => setForced((count) => count + 1)}>Search</button>
+      </div>
       {busy && !bound && <Loading label="Looking up choices…" />}
       {error?.query === query && <Notice retry={() => setForced((count) => count + 1)}>{error.message}</Notice>}
       {visible?.length === 0 && <Empty title={q ? "No matching choices" : "No available choices"} />}

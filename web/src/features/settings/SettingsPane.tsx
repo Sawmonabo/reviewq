@@ -6,6 +6,7 @@ import { Modal } from "../../components/Modal";
 import { Loading, Notice } from "../../components/PanelState";
 import { useResource } from "../../hooks/useResource";
 import { describeError, readable } from "../../lib/presentation";
+import { CheckoutSkill } from "./CheckoutSkill";
 import { AgentPreferences } from "./AgentPreferences";
 import { CatalogPicker } from "./CatalogPicker";
 import "./settings.css";
@@ -191,10 +192,11 @@ function SettingsEditor({ initial, onClose, onSave }: { readonly initial: Settin
               <label className="field">Local review checkout<input id={`checkout-${repo.projectId}`} value={repo.checkout ?? ""} onChange={(event) => patchRepo({ ...repo, checkout: event.currentTarget.value || null, defaultSkills: {} })} placeholder="/home/me/repos/project" /></label>
               <label className="field">Board access<select value={repo.boardSelection} onChange={(event) => patchRepo({ ...repo, boardSelection: event.currentTarget.value === "any" ? "any" : "selected" })}><option value="selected">Selected boards</option><option value="any">Any tracked board</option></select></label>
             </div>
-            {repo.checkout && <div className="fields">{(["codex", "claude"] as const).map((provider) => <div className="stack" key={provider}>
-              <label className="field">{readable(provider)} default skill name<input value={repo.defaultSkills[provider]?.name ?? ""} onChange={(event) => patchRepo({ ...repo, defaultSkills: { ...repo.defaultSkills, [provider]: { name: event.currentTarget.value, path: repo.defaultSkills[provider]?.path ?? "" } } })} /></label>
-              <label className="field">Skill path<input value={repo.defaultSkills[provider]?.path ?? ""} onChange={(event) => patchRepo({ ...repo, defaultSkills: { ...repo.defaultSkills, [provider]: { name: repo.defaultSkills[provider]?.name ?? "", path: event.currentTarget.value } } })} /></label>
-            </div>)}</div>}
+            {repo.checkout && <div className="fields">{(["codex", "claude"] as const).map((provider) =>
+              <CheckoutSkill key={JSON.stringify([provider, repo.projectId, repo.checkout, draft.gitlab.origin, snapshot.settingsRevision])}
+                body={{ expectedRevision: snapshot.settingsRevision, projectId: repo.projectId, checkout: repo.checkout ?? "", gitlab: draft.gitlab, token: tokenInput(tokens.gitlab), provider }}
+                selected={repo.defaultSkills[provider] ?? null}
+                onSelect={(skill) => patchRepo({ ...repo, defaultSkills: { ...repo.defaultSkills, [provider]: skill } })} />)}</div>}
           </div>)}
         </section>
         <section className="settings-section stack" aria-labelledby="additional-reviewers"><h3 id="additional-reviewers">Additional reviewers</h3>

@@ -1,9 +1,9 @@
 import { read, write } from "./client";
 import type {
-  CatalogRequest, DisconnectSettings, FollowupPreferencesRequest, SaveRecoveryPreferencesRequest, SaveSettings, TestConnection,
+  CatalogRequest, CheckoutSkillsRequest, DisconnectSettings, FollowupPreferencesRequest, SaveRecoveryPreferencesRequest, SaveSettings, TestConnection,
 } from "./generated/contracts";
 import {
-  isCatalogResponse, isFollowupPreferencesResponse, isRecoveryPreferencesResponse, isSettingsResponse, isVerifiedConnectionResponse,
+  isCatalogResponse, isCheckoutSkillsResponse, isFollowupPreferencesResponse, isRecoveryPreferencesResponse, isSettingsResponse, isVerifiedConnectionResponse,
 } from "./generated/validators.mjs";
 
 export function readSettings(signal: AbortSignal) {
@@ -40,4 +40,12 @@ export function readFollowupPreference(signal: AbortSignal) {
 
 export function saveFollowupPreference(body: FollowupPreferencesRequest) {
   return write("/followups/preferences", "PUT", body, isFollowupPreferencesResponse);
+}
+
+export async function checkoutSkills(body: CheckoutSkillsRequest, signal: AbortSignal) {
+  const result = await write("/settings/checkout/skills", "POST", body, isCheckoutSkillsResponse, signal);
+  if (result.data.projectId !== body.projectId || result.data.provider !== body.provider || result.data.settingsRevision !== body.expectedRevision) {
+    throw new Error("The checkout skill catalog changed.");
+  }
+  return result;
 }
