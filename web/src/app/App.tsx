@@ -56,7 +56,9 @@ export function App() {
   const [railSmall, setRailSmall] = useState(savedValue("rail") === true);
   const [theme, setTheme] = useState(savedValue("theme") === "light" ? "light" : "dark");
   const [compact, setCompact] = useState(savedValue("compact") === true);
-  const [settings, setSettings] = useState(savedValue("settings.open") === true);
+  const [settings, setSettings] = useState(
+    () => savedValue("settings.open") === settingsScope(route),
+  );
   const [revision, setRevision] = useState(0);
   const [overlay, setOverlay] = useState<Overlay>();
   const overlayHost = useRef<HTMLDivElement>(null);
@@ -103,6 +105,9 @@ export function App() {
     reviewId ? [{ kind: "run" }, { kind: "session" }] : [],
   );
   const selectedRun = selected.data ?? undefined;
+  const settingsAddress = settingsScope(
+    selectedRun && !route.runId ? { ...route, runId: selectedRun.runId } : route,
+  );
   const desiredSession = sessionKey ?? selectedRun?.leadSessionKey;
   const firstPageSession = selectedRun?.sessions.items.find(
     (item) => item.sessionKey === desiredSession,
@@ -136,7 +141,9 @@ export function App() {
   useEffect(() => {
     function restore() {
       resolvedRun.current = undefined;
-      setRoute(readRoute());
+      const next = readRoute();
+      setRoute(next);
+      setSettings(savedValue("settings.open") === settingsScope(next));
       setOverlay(undefined);
       setSelecting(false);
     }
@@ -156,7 +163,9 @@ export function App() {
     document.documentElement.dataset.theme = theme;
     document.documentElement.dataset.density = compact ? "compact" : "regular";
   }, [theme, compact]);
-  useEffect(() => saveValue("settings.open", settings), [settings]);
+  useEffect(() => {
+    saveValue("settings.open", settings ? settingsAddress : null);
+  }, [settings, settingsAddress]);
   useEffect(() => {
     const host = panes.current;
     if (!host) return;
@@ -250,6 +259,7 @@ export function App() {
     const active = selectedRun;
     const canonical =
       !next.runId && next.reviewId === reviewId && active ? { ...next, runId: active.runId } : next;
+    if (settingsScope(canonical) !== settingsAddress) setSettings(false);
     writeRoute(canonical);
     setRoute(canonical);
   }
@@ -699,6 +709,17 @@ export function App() {
       )}
     </main>
   );
+}
+
+function settingsScope(route: Route): string {
+  return JSON.stringify([
+    route.view,
+    route.reviewId,
+    route.runId,
+    route.sessionKey,
+    route.ticket,
+    route.tab,
+  ]);
 }
 
 function NavIcon({ view }: { readonly view: Route["view"] | "settings" }) {
