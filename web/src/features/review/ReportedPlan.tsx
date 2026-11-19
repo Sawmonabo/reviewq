@@ -74,7 +74,9 @@ function PlanDetails({
 }
 
 function readNativePlan(source: string): { tasks: PlanTask[]; explanation?: string } | undefined {
-  if (!/^\s*[\[{]/.test(source) || source.length > 64_000) return;
+  if (source.length > 64_000) return;
+  const first = source.trimStart()[0];
+  if (first !== "[" && first !== "{") return;
   let value: unknown;
   try {
     value = JSON.parse(source);

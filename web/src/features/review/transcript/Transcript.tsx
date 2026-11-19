@@ -595,7 +595,7 @@ export function Transcript({
                       {timestamp && (
                         <HistoryTimestamp
                           timestamp={timestamp}
-                          delivery={!row.entry && Boolean(row.delivery)}
+                          delivery={!row.entry?.timestamp}
                         />
                       )}
                       {row.delivery && (
