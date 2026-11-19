@@ -3,6 +3,7 @@ import {
   useCallback,
   useDeferredValue,
   useEffect,
+  useEffectEvent,
   useLayoutEffect,
   useMemo,
   useRef,
@@ -16,7 +17,7 @@ import type { SessionAddress } from "../../../api/history";
 import { Empty, Loading, Notice } from "../../../components/PanelState";
 import { describeError, formatTime, readable } from "../../../lib/presentation";
 import { EntryBody } from "./EntryBody";
-import { entriesIn, readBookmark, rememberBookmark } from "./history-window";
+import { entriesIn, readBookmark, rememberBookmark, type TimelineBookmark } from "./history-window";
 import { ProviderMark } from "./ProviderMark";
 import { PromptNavigator } from "./PromptNavigator";
 import { HistoryTimestamp } from "./HistoryTimestamp";
@@ -89,6 +90,7 @@ export function Transcript({ target, provider, child, messages, working }: Props
   );
   const selectionState = useRef({ hasText: false, ids: new Set<string>() });
   const scrollIntent = useRef(false);
+  const readingPosition = useRef<TimelineBookmark | undefined>(undefined);
   const requestedLatest = useRef(false);
   const activeLatest = useRef(false);
   const toolFocus = useRef<ReadTarget | undefined>(undefined);
@@ -275,26 +277,27 @@ export function Transcript({ target, provider, child, messages, working }: Props
     };
   }, []);
 
-  useEffect(() => {
-    const host = viewport.current;
-    function save() {
-      const current = visibleAnchor(host);
-      if (current && history.generation)
-        rememberBookmark(bookmark, {
-          entryId: current.id,
-          offset: current.offset,
-          following,
-          generation: history.generation,
-          toolEntry: current.toolEntry ?? false,
-          ...(current.callId ? { callId: current.callId } : {}),
-        });
+  const savePosition = useEffectEvent((host: HTMLDivElement | null) => {
+    const position = historyBookmark(host, history.generation, following);
+    const previous = readingPosition.current;
+    if (position) {
+      rememberBookmark(bookmark, position);
+    } else if (previous && previous.generation === history.generation) {
+      rememberBookmark(bookmark, previous);
     }
+  });
+
+  useLayoutEffect(() => {
+    const host = viewport.current;
+    const save = () => savePosition(host);
+    host?.addEventListener("scrollend", save);
     window.addEventListener("pagehide", save);
     return () => {
       save();
+      host?.removeEventListener("scrollend", save);
       window.removeEventListener("pagehide", save);
     };
-  }, [bookmark, following, history.generation]);
+  }, [bookmark]);
 
   function recordScroll() {
     const host = viewport.current;
@@ -304,26 +307,22 @@ export function Transcript({ target, provider, child, messages, working }: Props
       setFollowing(nearEnd);
       scrollIntent.current = false;
     }
-    const current = visibleAnchor(host);
-    if (current && history.generation)
-      rememberBookmark(bookmark, {
-        entryId: current.id,
-        offset: current.offset,
-        following: nearEnd,
-        generation: history.generation,
-        toolEntry: current.toolEntry ?? false,
-        ...(current.callId ? { callId: current.callId } : {}),
-      });
+    const position = historyBookmark(host, history.generation, nearEnd);
+    if (position) readingPosition.current = position;
   }
 
   function gesture(up: boolean) {
     scrollIntent.current = true;
     const host = viewport.current;
     if (!host || history.loading) return;
-    if (up && host.scrollTop < 2 && history.older) {
+    if (up && host.scrollTop < 160 && history.older) {
       setFollowing(false);
       void history.load("older");
-    } else if (!up && host.scrollHeight - host.clientHeight - host.scrollTop < 2 && history.newer) {
+    } else if (
+      !up &&
+      host.scrollHeight - host.clientHeight - host.scrollTop < 160 &&
+      history.newer
+    ) {
       void history.load("newer");
     }
   }
@@ -655,6 +654,23 @@ export function Transcript({ target, provider, child, messages, working }: Props
       )}
     </section>
   );
+}
+
+function historyBookmark(
+  host: HTMLDivElement | null,
+  generation: string | undefined,
+  following: boolean,
+): TimelineBookmark | undefined {
+  const current = visibleAnchor(host);
+  if (!current || !generation) return;
+  return {
+    entryId: current.id,
+    offset: current.offset,
+    following,
+    generation,
+    toolEntry: current.toolEntry ?? false,
+    ...(current.callId ? { callId: current.callId } : {}),
+  };
 }
 
 function visibleAnchor(host: HTMLDivElement | null): Position | undefined {
