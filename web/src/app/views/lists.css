@@ -26,21 +26,45 @@
 .filter-control > svg {
   flex: none;
 }
-.filter-control:hover,
+.filter-control:hover:not(:disabled),
 .filter-control:focus-within,
-.filter-control[aria-expanded="true"],
-.queue-hide[open] > .filter-control {
+.filter-control[aria-expanded="true"] {
   background: var(--control-hover);
   border-color: var(--control-hover-line);
 }
 .filter-control:focus-within,
-.filter-control[aria-expanded="true"],
-.queue-hide[open] > .filter-control {
+.filter-control[aria-expanded="true"] {
   outline: 2px solid var(--focus);
   outline-offset: -2px;
 }
 .filter-control:is(:focus-within, [aria-expanded="true"]) {
   border-color: var(--focus);
+}
+.filter-popup {
+  position: fixed;
+  inset: auto;
+  margin: 6px 0;
+  position-area: block-end span-inline-end;
+  position-try-fallbacks:
+    flip-inline,
+    flip-block,
+    flip-inline flip-block;
+  justify-self: start;
+  max-width: calc(100vw - 32px);
+  max-height: calc(100dvh - 32px);
+  padding: 0;
+  overflow: auto;
+  color: var(--text);
+  background: var(--popup-bg);
+  border: 1px solid var(--popup-border);
+  border-radius: 6px;
+  box-shadow: 0 10px 30px #0008;
+}
+@supports not (position-area: block-end span-inline-end) {
+  .filter-popup {
+    inset: 20% 0 auto;
+    margin-inline: auto;
+  }
 }
 .select-filter > select {
   position: absolute;
@@ -64,26 +88,6 @@
   max-width: 170px;
   overflow: hidden;
   text-overflow: ellipsis;
-}
-.queue-hide > .filter-control {
-  height: 35px;
-  padding: 0 9px;
-  gap: 8px;
-  background: var(--control);
-  border-color: var(--control-line);
-}
-.queue-hide > .filter-control::-webkit-details-marker {
-  display: none;
-}
-.queue-hide > div {
-  left: 0;
-  right: auto;
-}
-.queue-hide label {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  white-space: nowrap;
 }
 .hide-count {
   display: grid;
@@ -209,6 +213,20 @@
   letter-spacing: 1px;
   text-transform: uppercase;
 }
+.review-empty {
+  display: grid;
+  justify-items: center;
+  gap: 6px;
+  padding: 45px 20px;
+  color: var(--muted);
+  text-align: center;
+  font-size: 11px;
+}
+.review-empty h3 {
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 500;
+}
 .review-list > li + li,
 .review-items > li + li {
   border-top: 1px solid var(--row-line);
@@ -258,6 +276,15 @@
 }
 .row-foot {
   gap: 12px;
+}
+.provider-pill {
+  padding: 3px 6px;
+  border: 1px solid var(--popup-border);
+  border-radius: 4px;
+  color: var(--avatar-text);
+  font-size: 9px;
+  font-weight: 500;
+  white-space: nowrap;
 }
 .mr-id {
   overflow-wrap: anywhere;
@@ -323,7 +350,7 @@
   align-items: center;
   gap: 4px;
   padding: 0 5px;
-  border: 1px solid var(--checkbox-line);
+  border: 1px solid var(--strong-line);
   border-radius: 3px;
   color: var(--muted);
   font-size: 9px;
@@ -361,27 +388,33 @@
   [data-review-kind="working"],
   [data-review-kind="lead_working"],
   [data-review-kind="session_working"],
+  [data-review-kind="awaiting_merge"],
   [data-review-kind="reviewed"]
 ) {
   border-color: #354c41;
   background: var(--green-bg);
   color: var(--green);
 }
-.row-tag:is(
-  [data-review-kind="report_ready"],
-  [data-review-kind="followup_pending"],
-  [data-review-kind="waiting_author"]
-) {
+.row-tag:is([data-review-kind="followup_pending"], [data-review-kind="waiting_author"]) {
   border-color: #344765;
   background: var(--selected);
-  color: var(--primary-text);
+  color: var(--link);
 }
-:is([aria-checked="true"], [aria-checked="mixed"]) > .row-checkbox,
-.run-card-open[aria-checked="true"] .row-checkbox {
-  background: var(--primary);
-  border-color: var(--primary);
+.row-tag[data-review-kind="report_ready"] {
+  border-color: var(--report-line);
+  background: var(--report-bg);
+  color: var(--report-text);
 }
-.row-tag:is([data-review-kind="report_failed"], [data-review-kind="agent_failed"]) {
+.row-tag[data-review-kind="code_changed"] {
+  border-color: var(--changed-line);
+  background: var(--changed-bg);
+  color: var(--changed-text);
+}
+.row-tag:is(
+  [data-review-kind="report_failed"],
+  [data-review-kind="agent_failed"],
+  [data-review-kind="approval_withdrawn"]
+) {
   border-color: #74453e;
   background: var(--red-bg);
   color: var(--red);
@@ -392,10 +425,15 @@
   height: 18px;
   flex: 0 0 auto;
   place-items: center;
-  border: 1px solid var(--strong-line);
+  border: 1px solid var(--checkbox-line);
   border-radius: 4px;
   background: var(--canvas);
-  color: var(--link);
+  color: var(--primary-text);
+}
+:is([aria-checked="true"], [aria-checked="mixed"]) > .row-checkbox,
+.run-card-open[aria-checked="true"] .row-checkbox {
+  background: var(--primary);
+  border-color: var(--primary);
 }
 .select-all-reviews {
   display: inline-flex;
@@ -435,10 +473,6 @@
   .queue-filters > .select-filter {
     flex: 1 1 auto;
     justify-content: space-between;
-  }
-  .queue-filters > .scope-filter {
-    flex: 0 1 auto;
-    justify-content: flex-start;
   }
   .queue-filters .filter-value {
     max-width: 96px;

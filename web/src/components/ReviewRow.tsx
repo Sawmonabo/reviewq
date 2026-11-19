@@ -25,6 +25,8 @@ export function ReviewRow({
 }) {
   const status = row.reasonKind ?? row.runStage ?? row.queueState;
   const tracked = row.registeredLeadCount > 0;
+  const currentReport = row.fullMrReviewedSha === row.sourceSha;
+  const changed = row.mrState === "open" && row.fullMrReviewedSha && !currentReport;
   return (
     <button
       type="button"
@@ -61,11 +63,25 @@ export function ReviewRow({
         </div>
         <strong className="row-title">{row.tickets[0]?.title || row.title}</strong>
         <div className="row-foot">
-          {row.focusedProvider && <span>{providerLabel(row.focusedProvider)}</span>}
+          {row.focusedProvider && (
+            <span className="provider-pill">{providerLabel(row.focusedProvider)}</span>
+          )}
           {!tracked && <span>No review run started</span>}
-          {(tracked || (status !== "needs_review" && status !== "all_open")) && (
-            <span className="row-tag" data-review-kind={status}>
-              {reviewReasonLabel(status)}
+          {(tracked || (status !== "needs_review" && status !== "all_open")) &&
+            !(currentReport && status === "report_ready") &&
+            !(changed && status === "followup") && (
+              <span className="row-tag" data-review-kind={status}>
+                {reviewReasonLabel(status)}
+              </span>
+            )}
+          {currentReport && (
+            <span className="row-tag" data-review-kind="report_ready">
+              Agent report ready
+            </span>
+          )}
+          {changed && (
+            <span className="row-tag" data-review-kind="code_changed">
+              New commits need review
             </span>
           )}
           {detail}

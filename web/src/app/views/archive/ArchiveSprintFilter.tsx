@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Icon } from "../../../components/Icon";
-import { ArchivePopover } from "./ArchivePopover";
+import { FilterPopover } from "../FilterPopover";
 
 type Sprint = { readonly id: string; readonly label: string; readonly board: string };
 
@@ -22,7 +22,14 @@ export function ArchiveSprintFilter({
         ? `${selected.length} selected`
         : "Any sprint";
   return (
-    <ArchivePopover kind="sprint" label="Sprint" value={label}>
+    <FilterPopover
+      label="Sprint"
+      value={label}
+      triggerLabel="Filter by sprint"
+      popupLabel="Choose sprints"
+      popupClass="archive-sprint-popover"
+      icon={<Icon name="refresh" size={15} />}
+    >
       {(close) => (
         <SprintOptions
           options={options}
@@ -32,7 +39,7 @@ export function ArchiveSprintFilter({
           close={close}
         />
       )}
-    </ArchivePopover>
+    </FilterPopover>
   );
 }
 

@@ -58,6 +58,13 @@
   --popup-bg: #131317;
   --popup-border: #393943;
   --popup-hover: #2a2a33;
+  --report-line: #355b67;
+  --report-bg: #14272d;
+  --report-text: #94d2e4;
+  --changed-line: #694a39;
+  --changed-bg: #2b1e18;
+  --changed-text: #e6ac8f;
+  --scroll-thumb: #62626e;
   --avatar-bg: #25252c;
   --avatar-text: #b0b0bd;
   --dim-text: #80808e;
@@ -74,6 +81,13 @@
   --popup-bg: #fff;
   --popup-border: #c6c0d1;
   --popup-hover: #eae8f2;
+  --report-line: #689eac;
+  --report-bg: #d9f2f8;
+  --report-text: #155864;
+  --changed-line: #ab7b65;
+  --changed-bg: #fae8df;
+  --changed-text: #713b26;
+  --scroll-thumb: #a29aaf;
   --avatar-bg: #eae8f2;
   --avatar-text: #575364;
   --dim-text: #646073;

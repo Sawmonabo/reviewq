@@ -158,12 +158,22 @@ export function App() {
     if (!target) return;
     const saved = savedValue(`scroll.${route.view}`);
     if (typeof saved === "number" && Number.isFinite(saved)) target.scrollTop = saved;
+    let scrollbar: number | undefined;
+    function showScrollbar() {
+      target?.classList.add("is-scrolling");
+      window.clearTimeout(scrollbar);
+      scrollbar = window.setTimeout(() => target?.classList.remove("is-scrolling"), 900);
+    }
     function save() {
       if (target) saveValue(`scroll.${route.view}`, target.scrollTop);
     }
+    target.addEventListener("scroll", showScrollbar, { passive: true });
     target.addEventListener("scrollend", save);
     window.addEventListener("pagehide", save);
     return () => {
+      target.removeEventListener("scroll", showScrollbar);
+      target.classList.remove("is-scrolling");
+      window.clearTimeout(scrollbar);
       target.removeEventListener("scrollend", save);
       window.removeEventListener("pagehide", save);
     };
