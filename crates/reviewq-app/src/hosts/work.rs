@@ -1,9 +1,10 @@
 use std::sync::Arc;
 
-use reviewq_domain::identity::{RunId, SessionKey, SubmissionId};
+use reviewq_domain::identity::{GitSha, RunId, SessionKey, SubmissionId};
 
 use crate::access::{Actor, AppError};
 use crate::events::Snapshot;
+use crate::settings::RuntimeSources;
 
 use super::{
     DeliveryClaim, DeliveryReceipt, DeliveryWork, LeadStore, MessageBody, MessagePurpose,
@@ -15,6 +16,7 @@ pub struct DispatchGuard {
     store: Arc<dyn LeadStore>,
     claim: DeliveryClaim,
     workflow_confirmed: bool,
+    sources: Arc<RuntimeSources>,
 }
 
 impl DispatchGuard {
@@ -29,6 +31,22 @@ impl DispatchGuard {
         &self,
     ) -> Result<crate::workflow::WorkflowRequirements, AppError> {
         self.store.workflow_requirements(&self.claim).await
+    }
+
+    /// Uses the current credential generation to observe the actual remote workflow requirements.
+    pub async fn verify_workflow_source(&self) -> Result<GitSha, AppError> {
+        let guard = self.workflow().ok_or(AppError::InvalidRequest)?;
+        let views = self.sources.current().await?;
+        if views.revision != guard.settings || !views.collection_enabled {
+            return Err(AppError::StaleRevision);
+        }
+        let reader = views.reader.ok_or(AppError::Unavailable)?;
+        let requirements = self.workflow_requirements().await?;
+        let snapshot = reader
+            .workflow_snapshot(requirements.identity.clone())
+            .await?;
+        requirements.check(&snapshot, &guard.head)?;
+        Ok(snapshot.review.head_sha)
     }
 
     /// Records successful revalidation by the adapter immediately before automatic delivery.
@@ -80,6 +98,7 @@ pub async fn recover_delivery(
     store: Arc<dyn LeadStore>,
     host: &dyn NativeHost,
     candidate: RecoverableDelivery,
+    sources: Arc<RuntimeSources>,
 ) -> Result<(), AppError> {
     let Some(claim) = store
         .claim_delivery(candidate.cursor.delivery_id, candidate.state)
@@ -100,6 +119,7 @@ pub async fn recover_delivery(
                     store: store.clone(),
                     claim: claim.clone(),
                     workflow_confirmed: false,
+                    sources,
                 },
             )
             .await

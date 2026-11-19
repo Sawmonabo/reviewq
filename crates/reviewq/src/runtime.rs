@@ -31,6 +31,7 @@ use tokio::sync::watch;
 use crate::{cli::Serve, runtime_settings};
 
 mod desktop;
+mod workflow;
 
 const RUNTIME: &str = "service.json";
 const MAX_DESCRIPTOR: u64 = 8192;
@@ -248,6 +249,7 @@ pub(crate) async fn serve(profile: PathBuf, options: Serve) -> Result<(), Failur
             store.clone(),
             host.clone(),
             store.subscribe_deliveries(),
+            source.clone(),
         ))
     });
     let reports = if options.validation {
@@ -267,6 +269,14 @@ pub(crate) async fn serve(profile: PathBuf, options: Serve) -> Result<(), Failur
         None
     };
     let (shutdown, wait) = watch::channel(false);
+    let workflow_worker = (!options.validation).then(|| {
+        tokio::spawn(workflow::run(
+            store.clone(),
+            source.clone(),
+            workflow.clone(),
+            wait.clone(),
+        ))
+    });
     let router = reviewq_transport::router(
         store.clone(),
         source,
@@ -322,6 +332,10 @@ pub(crate) async fn serve(profile: PathBuf, options: Serve) -> Result<(), Failur
     if let Some(desktop) = desktop {
         desktop.abort();
         let _ = desktop.await;
+    }
+    if let Some(worker) = workflow_worker {
+        worker.abort();
+        let _ = worker.await;
     }
     fs::remove_file(profile.join(RUNTIME))?;
     store.close(Duration::from_secs(10)).await?;
@@ -388,6 +402,7 @@ async fn dispatch_deliveries(
     store: Arc<dyn LeadStore>,
     host: Arc<dyn NativeHost>,
     mut commits: watch::Receiver<()>,
+    sources: Arc<RuntimeSources>,
 ) {
     const CONCURRENCY: usize = 4;
     let mut running = tokio::task::JoinSet::new();
@@ -411,11 +426,12 @@ async fn dispatch_deliveries(
                         }
                         let store = store.clone();
                         let host = host.clone();
+                        let sources = sources.clone();
                         let task = running.spawn(async move {
                             if !matches!(
                                 tokio::time::timeout(
                                     Duration::from_secs(60),
-                                    recover_delivery(store, host.as_ref(), candidate)
+                                    recover_delivery(store, host.as_ref(), candidate, sources)
                                 )
                                 .await,
                                 Ok(Ok(()))
