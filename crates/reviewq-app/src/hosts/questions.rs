@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use reviewq_domain::identity::{NativeInputId, NativeTurnId, SubmissionId};
+use reviewq_domain::identity::{NativeInputId, NativeTurnId, ReceiptId, SubmissionId};
 use reviewq_domain::session::NativeIdentity;
 
 use crate::access::{Actor, ActorScope, AppError, AppFuture};
@@ -89,6 +89,7 @@ impl QuestionAccess {
                 self.actor.clone(),
                 self.session.clone(),
                 receipt.key.clone(),
+                receipt.attempt_id.clone(),
                 state,
             )
             .await
@@ -110,6 +111,7 @@ pub struct QuestionKey {
 }
 
 pub struct QuestionReceipt {
+    pub attempt_id: ReceiptId,
     pub key: QuestionKey,
     pub blocking: bool,
     pub state: QuestionStatus,
@@ -169,6 +171,7 @@ pub trait QuestionStore: HistoryStore + Send + Sync {
         actor: Actor,
         session: HistorySession,
         key: QuestionKey,
+        attempt_id: ReceiptId,
         state: QuestionStatus,
     ) -> AppFuture<'_, ()>;
 }

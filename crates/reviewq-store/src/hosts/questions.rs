@@ -4,7 +4,7 @@ use reviewq_app::history::HistorySession;
 use reviewq_app::hosts::{
     QuestionAdmission, QuestionAnchor, QuestionKey, QuestionReceipt, QuestionStatus, QuestionStore,
 };
-use reviewq_domain::identity::SubmissionId;
+use reviewq_domain::identity::{ReceiptId, SubmissionId};
 use reviewq_domain::session::HostProvider;
 use rusqlite::{Connection, Row, params};
 
@@ -16,7 +16,7 @@ use crate::workspace::actor_key;
 use crate::{SqliteStore, StoreError};
 
 const FIELDS: &str = "request_id,native_turn_id,native_item_id,source_generation,source_position,
-                     blocking,answer_digest,state";
+                     blocking,answer_digest,state,attempt_id";
 
 impl QuestionStore for SqliteStore {
     fn question_attempts(
@@ -34,8 +34,9 @@ impl QuestionStore for SqliteStore {
                     ("", 1)
                 };
                 let mut read = db.prepare_cached(&format!(
-                    "SELECT {FIELDS} FROM question_attempts WHERE session_key=?1{address}
-                     ORDER BY updated_at_ms DESC, request_id LIMIT 8"
+                    "SELECT {FIELDS} FROM question_attempts WHERE attempt_id IN (
+                         SELECT attempt_id FROM question_receipt_heads WHERE session_key=?1{address}
+                     ) ORDER BY updated_at_ms DESC, request_id LIMIT 8"
                 ))?;
                 let values = [
                     Some(session.target.session_key().as_str()),
@@ -90,6 +91,7 @@ impl QuestionStore for SqliteStore {
         actor: Actor,
         session: HistorySession,
         key: QuestionKey,
+        attempt_id: ReceiptId,
         state: QuestionStatus,
     ) -> AppFuture<'_, ()> {
         Box::pin(async move {
@@ -105,12 +107,12 @@ impl QuestionStore for SqliteStore {
                 let changed = tx.sql.execute(
                     "UPDATE question_attempts SET state=?7,updated_at_ms=?8
                      WHERE session_key=?1 AND request_id=?2 AND native_turn_id=?3 AND native_item_id=?4
-                       AND source_generation=?5 AND source_position=?6 AND state!=?7
+                       AND source_generation=?5 AND source_position=?6 AND state!=?7 AND attempt_id=?9
                        AND ((?7='answered' AND answer_digest IS NOT NULL AND state IN ('submitting','closed','uncertain'))
                            OR (?7='closed' AND state IN ('submitting','uncertain'))
                            OR (?7 IN ('uncertain','unavailable') AND state='submitting'))",
                     params![session.target.session_key().as_str(),key.request,key.turn.as_str(),
-                        key.item.as_str(),key.anchor.generation,offset(key.anchor.opening)?,state,now_ms()?],
+                        key.item.as_str(),key.anchor.generation,offset(key.anchor.opening)?,state,now_ms()?,attempt_id.as_str()],
                 )?;
                 if changed != 0 {
                     emit(tx, &session)?;
@@ -158,17 +160,26 @@ fn reserve(
     }
     let inserted = tx.sql.execute(
         "INSERT INTO question_attempts(session_key,request_id,native_turn_id,native_item_id,
-             source_generation,source_position,blocking,actor_key,submission_id,answer_digest,state,updated_at_ms)
-         VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,'submitting',?11)
-         ON CONFLICT(session_key,native_turn_id,native_item_id) DO NOTHING",
+             source_generation,source_position,blocking,actor_key,submission_id,answer_digest,state,updated_at_ms,attempt_id)
+         VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,'submitting',?11,?12)
+         ON CONFLICT DO NOTHING",
         params![session.target.session_key().as_str(),key.request,key.turn.as_str(),
             key.item.as_str(),key.anchor.generation,offset(key.anchor.opening)?,receipt.blocking,
             actor_key(&actor).as_slice(),submission.as_str(),receipt.digest.as_ref().map(|digest| digest.as_slice()),
-            now_ms()?],
+            now_ms()?,receipt.attempt_id.as_str()],
     )?;
     if inserted != 1 {
         return Err(AppError::Conflict.into());
     }
+    tx.sql.execute(
+        "INSERT INTO question_receipt_heads VALUES(?1,?2,?3)
+         ON CONFLICT(session_key,request_id) DO UPDATE SET attempt_id=excluded.attempt_id",
+        params![
+            session.target.session_key().as_str(),
+            key.request,
+            receipt.attempt_id.as_str()
+        ],
+    )?;
     emit(tx, &session)?;
     Ok(QuestionAdmission::Reserved(receipt))
 }
@@ -189,7 +200,7 @@ fn replay(
         return Ok(None);
     };
     let found = receipt(row)?;
-    if text(row, 8)? != session.target.session_key().as_str()
+    if text(row, 9)? != session.target.session_key().as_str()
         || found.key.request != request
         || found.digest.is_none()
         || digest != found.digest
@@ -214,6 +225,7 @@ fn receipt(row: &Row<'_>) -> Result<QuestionReceipt, StoreError> {
         _ => return Err(AppError::Internal.into()),
     };
     Ok(QuestionReceipt {
+        attempt_id: parse(text(row, 8)?)?,
         key: QuestionKey {
             request: row.get(0)?,
             turn: parse(text(row, 1)?)?,

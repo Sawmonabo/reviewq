@@ -195,6 +195,10 @@ pub(super) fn extend(
     if end < from {
         return Err(AppError::CursorExpired);
     }
+    for group in &checkpoint.groups {
+        let point = group.start.bookmark.clone().into_file()?;
+        file::verify_position(file, &point, end)?;
+    }
     if end == from {
         return Ok(checkpoint);
     }

@@ -6,7 +6,7 @@ use reviewq_app::workflow::{
     ReportCompletion, WorkflowHold, WorkflowReadiness, WorkflowTool,
 };
 use reviewq_domain::identity::{NativeInputId, NativeTurnId};
-use reviewq_domain::session::{HostProvider, LeadTarget};
+use reviewq_domain::session::LeadTarget;
 use serde::Deserialize;
 
 use super::Codex;
@@ -41,18 +41,18 @@ impl NativeWorkflowProof for Codex {
 
     fn ended_and_idle(&self, lead: LeadTarget, turn: NativeTurnId) -> AppFuture<'_, bool> {
         Box::pin(async move {
-            let thread = self.verified_thread(&lead).await?;
+            let thread = self.retained_thread(&lead).await?;
             if !matches!(thread.status, ThreadStatus::Idle) {
                 return Ok(false);
             }
-            let Some(exact) = self.workflow_turn(&thread, &turn).await? else {
+            let Some(exact) = self.original_turn(&thread, &turn).await? else {
                 return Ok(false);
             };
             Ok(matches!(
                 exact.status.as_str(),
                 "completed" | "interrupted" | "failed"
             ) && matches!(
-                self.verified_thread(&lead).await?.status,
+                self.retained_thread(&lead).await?.status,
                 ThreadStatus::Idle
             ))
         })
@@ -115,15 +115,7 @@ impl NativeWorkflowProof for Codex {
             if call.tool != WorkflowTool::Report {
                 return Err(AppError::Forbidden);
             }
-            let binding = call.lead.binding();
-            let native = binding.identity();
-            if native.provider() != HostProvider::Codex || native.profile() != &self.profile {
-                return Err(AppError::Forbidden);
-            }
-            let thread = self.read_thread(native.native_id()).await?;
-            if !super::session::retained_cwd(&thread, binding.cwd()).await? {
-                return Err(AppError::Conflict);
-            }
+            let thread = self.retained_thread(&call.lead).await?;
             let path = thread.path.ok_or(AppError::Unavailable)?;
             let result_entry: NativeInputId =
                 call.call_id.parse().map_err(|_| AppError::Conflict)?;
@@ -268,30 +260,6 @@ impl Codex {
                 .transpose()?,
             latest_user_entry_id: latest,
         }))
-    }
-
-    async fn workflow_turn(
-        &self,
-        thread: &Thread,
-        id: &NativeTurnId,
-    ) -> Result<Option<Turn>, AppError> {
-        let mut cursor = None;
-        for _ in 0..8 {
-            let mut page = self
-                .turns(&thread.id, cursor.as_deref(), false, 1, false)
-                .await?;
-            if let Some(turn) = page.data.pop().filter(|turn| turn.id == id.as_str()) {
-                return Ok(Some(turn));
-            }
-            let Some(next) = page.next_cursor.take() else {
-                break;
-            };
-            if cursor.as_ref() == Some(&next) {
-                break;
-            }
-            cursor = Some(next);
-        }
-        Ok(None)
     }
 }
 
