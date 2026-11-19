@@ -7,10 +7,14 @@ import { historyParts } from "../../../api/history";
 import type { SessionAddress } from "../../../api/history";
 import { Icon } from "../../../components/Icon";
 import { Empty, Loading, Notice } from "../../../components/PanelState";
-import { describeError, formatActivityTime, formatTime, readable } from "../../../lib/presentation";
-import { EntryBody, TranscriptMarkdown } from "./EntryBody";
+import { describeError, formatClockTime, formatTime, readable } from "../../../lib/presentation";
+import { EntryBody } from "./EntryBody";
 import { entriesIn, readBookmark, rememberBookmark } from "./history-window";
 import { PromptNavigator } from "./PromptNavigator";
+import { FileReadPack, ToolRunHeader } from "./ToolActivity";
+import { activityRows, openKey, toolCatalog, toolOnly } from "./tool-activity";
+import type { ReadPack, ReadTarget, ToolRun } from "./tool-activity";
+import { TranscriptMarkdown } from "./TranscriptMarkdown";
 import { useHistory } from "./useHistory";
 
 type Position = { readonly id: string; readonly offset: number };
@@ -22,12 +26,15 @@ type ExtraParts = {
   readonly next: string | null;
 };
 type OutputSelection = { readonly entryId: string; readonly reference: string };
-type Visible = {
+type MessageRow = {
+  readonly kind: "native" | "live" | "delivery";
   readonly id: string;
   readonly entry?: HistoryEntry;
   readonly delivery?: MessageHistoryItem;
   readonly provisional?: string;
+  readonly grouped?: boolean;
 };
+type Visible = MessageRow | ToolRun | ReadPack;
 type Props = {
   readonly target: SessionAddress;
   readonly provider: HostProviderDto;
@@ -53,6 +60,8 @@ export function Transcript({
   const [selectedText, setSelectedText] = useState(false);
   const [actionNotice, setActionNotice] = useState<string>();
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set());
+  const [expandedRuns, setExpandedRuns] = useState<ReadonlySet<string>>(() => new Set());
+  const [expandedReads, setExpandedReads] = useState<ReadonlySet<string>>(() => new Set());
   const [output, setOutput] = useState<OutputSelection>();
   const [extraParts, setExtraParts] = useState<ExtraParts>();
   const partsRequest = useRef<AbortController | undefined>(undefined);
@@ -64,6 +73,7 @@ export function Transcript({
   const scrollIntent = useRef(false);
   const requestedLatest = useRef(false);
   const activeLatest = useRef(false);
+  const toolFocus = useRef<ReadTarget | undefined>(undefined);
 
   const history = useHistory(target, bookmark, following, pinned, (position, wanted) => {
     if (position === "around" && wanted) {
@@ -76,6 +86,7 @@ export function Transcript({
     }
   });
   const historyEntries = useMemo(() => entriesIn(history.pages), [history.pages]);
+  const knownTools = useMemo(() => toolCatalog(historyEntries), [historyEntries]);
   useEffect(() => () => partsRequest.current?.abort(), [history.generation]);
   const canonical = useMemo(
     () => new Set(historyEntries.map((item) => item.entryId)),
@@ -83,37 +94,59 @@ export function Transcript({
   );
   const inProgress =
     history.live?.entryId && !canonical.has(history.live.entryId) ? history.live : undefined;
+  const clippedStart = Boolean(history.older);
+  const clippedEnd = Boolean(history.newer || inProgress);
   const entries = useMemo<Visible[]>(() => {
     if (resultOnly) {
       const result = [...historyEntries]
         .reverse()
         .find((entry) => entry.parts.some((part) => part.kind === "assistant_text"));
-      return result ? [{ id: result.entryId, entry: result }] : [];
+      return result ? [{ kind: "native", id: result.entryId, entry: result }] : [];
     }
     const deliveries = new Map(
       messages.flatMap((delivery) =>
         delivery.nativeEntryId ? [[delivery.nativeEntryId, delivery] as const] : [],
       ),
     );
-    const rows: Visible[] = historyEntries.map((entry) => {
-      const delivery = deliveries.get(entry.entryId);
-      return { id: entry.entryId, entry, ...(delivery ? { delivery } : {}) };
+    const rows: Visible[] = activityRows(
+      historyEntries,
+      knownTools,
+      expandedRuns,
+      expandedReads,
+      clippedStart,
+      clippedEnd,
+    ).map((row) => {
+      if (row.kind !== "native") return row;
+      const delivery = deliveries.get(row.id);
+      return delivery ? { ...row, delivery } : row;
     });
     if (following && inProgress)
-      rows.push({ id: inProgress.entryId, provisional: inProgress.text });
+      rows.push({ kind: "live", id: inProgress.entryId, provisional: inProgress.text });
     for (const delivery of messages.slice().reverse()) {
       if (delivery.nativeEntryId && canonical.has(delivery.nativeEntryId)) continue;
-      rows.push({ id: `delivery:${delivery.messageId}`, delivery });
+      rows.push({ kind: "delivery", id: `delivery:${delivery.messageId}`, delivery });
     }
     return rows;
-  }, [canonical, following, historyEntries, inProgress, messages, resultOnly]);
+  }, [
+    canonical,
+    clippedEnd,
+    clippedStart,
+    expandedReads,
+    expandedRuns,
+    following,
+    historyEntries,
+    inProgress,
+    knownTools,
+    messages,
+    resultOnly,
+  ]);
 
   const rangeExtractor = useCallback(
     (range: Parameters<typeof defaultRangeExtractor>[0]) => {
       const indexes = new Set(defaultRangeExtractor(range));
       if (pinned.size)
         entries.forEach((entry, index) => {
-          if (pinned.has(entry.id)) indexes.add(index);
+          if (pinned.has(historyId(entry))) indexes.add(index);
         });
       return [...indexes].sort((left, right) => left - right);
     },
@@ -126,7 +159,8 @@ export function Transcript({
     count: entries.length,
     getScrollElement: () => viewport.current,
     getItemKey: (index) => entries[index]?.id ?? index,
-    estimateSize: () => 95,
+    estimateSize: (index) =>
+      entries[index]?.kind === "tool-run" ? 35 : entries[index]?.kind === "read-pack" ? 55 : 95,
     overscan: 7,
     rangeExtractor,
   });
@@ -139,18 +173,29 @@ export function Transcript({
       anchor.current = undefined;
     } else if (anchor.current) {
       const saved = anchor.current;
-      const index = entries.findIndex((entry) => entry.id === saved.id);
+      const focus = toolFocus.current?.entryId === saved.id ? toolFocus.current : undefined;
+      const index = entries.findIndex(
+        (entry) => (focus ? entry.id : historyId(entry)) === saved.id,
+      );
       if (index < 0) return;
       const container = viewport.current;
       list.scrollToIndex(index, { align: "start" });
       requestAnimationFrame(() => {
         if (!container?.isConnected) return;
-        const row = [...container.querySelectorAll<HTMLElement>("[data-entry]")].find(
-          (item) => item.dataset.entry === saved.id,
+        const displayed = [...container.querySelectorAll<HTMLElement>("[data-entry]")];
+        const row = displayed.find((item) =>
+          focus ? item.dataset.entry === saved.id : item.dataset.nativeEntry === saved.id,
         );
         if (row)
           container.scrollTop +=
             row.getBoundingClientRect().top - container.getBoundingClientRect().top - saved.offset;
+        if (focus && toolFocus.current === focus) {
+          const tool = [...(row?.querySelectorAll<HTMLElement>("[data-tool-call]") ?? [])].find(
+            (item) => item.dataset.toolCall === focus.callId,
+          );
+          (tool ?? container).focus({ preventScroll: true });
+          toolFocus.current = undefined;
+        }
       });
       anchor.current = undefined;
     }
@@ -171,12 +216,14 @@ export function Transcript({
         const range = selected.getRangeAt(0);
         hasText = range.intersectsNode(host);
         if (hasText)
-          for (const node of host.querySelectorAll<HTMLElement>("[data-entry]")) {
-            if (node.dataset.entry && range.intersectsNode(node)) ids.add(node.dataset.entry);
+          for (const node of host.querySelectorAll<HTMLElement>("[data-native-entry]")) {
+            if (node.dataset.nativeEntry && range.intersectsNode(node))
+              ids.add(node.dataset.nativeEntry);
           }
       }
-      const focused = document.activeElement?.closest<HTMLElement>("[data-entry]");
-      if (focused?.dataset.entry && host.contains(focused)) ids.add(focused.dataset.entry);
+      const focused = document.activeElement?.closest<HTMLElement>("[data-native-entry]");
+      if (focused?.dataset.nativeEntry && host.contains(focused))
+        ids.add(focused.dataset.nativeEntry);
       const previous = selectionState.current;
       if (
         previous.hasText !== hasText ||
@@ -309,6 +356,26 @@ export function Transcript({
     }
   }
 
+  function expandRun(run: ToolRun) {
+    anchor.current = visibleAnchor(viewport.current);
+    setFollowing(false);
+    setExpandedRuns((known) => toggleKey(known, run.id, !run.open));
+  }
+
+  function inspectRead(pack: ReadPack, at: ReadTarget) {
+    const host = viewport.current;
+    const active = document.activeElement?.closest<HTMLElement>("[data-native-entry]");
+    anchor.current = {
+      id: at.entryId,
+      offset:
+        active && host ? active.getBoundingClientRect().top - host.getBoundingClientRect().top : 0,
+    };
+    toolFocus.current = at;
+    setFollowing(false);
+    setExpandedReads((known) => toggleKey(known, pack.id, true));
+    setExpanded((known) => toggleKey(known, openKey(at.entryId, at.callId), true));
+  }
+
   return (
     <section
       className="transcript-shell"
@@ -356,14 +423,6 @@ export function Transcript({
               </button>
             </>
           )}
-          <PromptNavigator
-            target={target}
-            generation={history.generation}
-            onJump={(id, locator) => {
-              setFollowing(false);
-              void history.load("around", { entryId: id, locator });
-            }}
-          />
         </div>
       )}
       {actionNotice && <Notice>{actionNotice}</Notice>}
@@ -425,6 +484,27 @@ export function Transcript({
             {list.getVirtualItems().map((item) => {
               const row = entries[item.index];
               if (!row) return null;
+              if (row.kind === "tool-run" || row.kind === "read-pack") {
+                return (
+                  <article
+                    ref={list.measureElement}
+                    data-index={item.index}
+                    data-entry={row.id}
+                    data-native-entry={row.anchorId}
+                    data-tool-member={row.kind === "read-pack" ? "" : undefined}
+                    key={row.id}
+                    className="timeline-entry tool-entry"
+                    style={{ transform: `translateY(${item.start}px)` }}
+                  >
+                    {row.kind === "tool-run" ? (
+                      <ToolRunHeader run={row} onToggle={() => expandRun(row)} />
+                    ) : (
+                      <FileReadPack pack={row} onInspect={(entry) => inspectRead(row, entry)} />
+                    )}
+                  </article>
+                );
+              }
+              const justTools = row.entry && toolOnly(row.entry);
               const user = row.entry
                 ? row.entry.parts.some((part) => part.kind === "user_prompt")
                 : Boolean(row.delivery);
@@ -443,23 +523,31 @@ export function Transcript({
                   ref={list.measureElement}
                   data-index={item.index}
                   data-entry={row.id}
+                  data-native-entry={row.kind === "delivery" ? undefined : row.id}
+                  data-tool-member={row.grouped ? "" : undefined}
                   key={row.id}
-                  className={`timeline-entry ${user ? "user-entry" : "agent-entry"}`}
+                  className={`timeline-entry ${justTools ? "tool-entry" : user ? "user-entry" : "agent-entry"}`}
                   style={{ transform: `translateY(${item.start}px)` }}
                 >
-                  <header className="timeline-message-heading">
-                    <span className="timeline-symbol" aria-hidden="true">
-                      {user ? automatic ? "RQ" : "Y" : <ProviderMark provider={provider} />}
-                    </span>
-                    <strong>{role}</strong>
-                    {timestamp && (
-                      <time dateTime={timestamp} title={formatTime(timestamp)}>
-                        {formatActivityTime(timestamp)}
-                      </time>
-                    )}
-                    {row.delivery && <span className="badge">{readable(row.delivery.state)}</span>}
-                    {row.provisional !== undefined && <span className="badge green">Working</span>}
-                  </header>
+                  {!justTools && (
+                    <header className="timeline-message-heading">
+                      <span className="timeline-symbol" aria-hidden="true">
+                        {user ? automatic ? "RQ" : "Y" : <ProviderMark provider={provider} />}
+                      </span>
+                      <strong>{role}</strong>
+                      {timestamp && (
+                        <time dateTime={timestamp} title={formatTime(timestamp)}>
+                          {formatClockTime(timestamp)}
+                        </time>
+                      )}
+                      {row.delivery && (
+                        <span className="badge">{readable(row.delivery.state)}</span>
+                      )}
+                      {row.provisional !== undefined && (
+                        <span className="badge green">Working</span>
+                      )}
+                    </header>
+                  )}
                   <div className="message-body stack">
                     {row.provisional !== undefined && (
                       <p className="message-copy">{row.provisional}</p>
@@ -473,15 +561,9 @@ export function Transcript({
                         target={target}
                         generation={history.generation}
                         entry={row.entry}
+                        knownTools={knownTools}
                         expanded={expanded}
-                        toggle={(key, open) =>
-                          setExpanded((known) => {
-                            const next = new Set(known);
-                            if (open) next.add(key);
-                            else next.delete(key);
-                            return next.size > 160 ? new Set([...next].slice(-160)) : next;
-                          })
-                        }
+                        toggle={(key, open) => setExpanded((known) => toggleKey(known, key, open))}
                         reference={output?.entryId === row.id ? output.reference : undefined}
                         {...(extraParts?.generation === history.generation &&
                         extraParts.entryId === row.id
@@ -510,6 +592,19 @@ export function Transcript({
           </p>
         )}
       </div>
+      {!resultOnly && history.generation && (
+        <PromptNavigator
+          key={history.generation}
+          target={target}
+          generation={history.generation}
+          following={following}
+          onReturnFocus={() => viewport.current?.focus({ preventScroll: true })}
+          onJump={(id, locator) => {
+            setFollowing(false);
+            void history.load("around", { entryId: id, locator });
+          }}
+        />
+      )}
       {!resultOnly && (!following || history.waiting) && (
         <button type="button" className="timeline-jump" onClick={latest}>
           <span aria-hidden="true">↓ </span>
@@ -540,9 +635,21 @@ function ProviderMark({ provider }: { readonly provider: HostProviderDto }) {
 function visibleAnchor(host: HTMLDivElement | null): Position | undefined {
   if (!host) return;
   const boundary = host.getBoundingClientRect().top;
-  for (const node of host.querySelectorAll<HTMLElement>("[data-entry]")) {
+  for (const node of host.querySelectorAll<HTMLElement>("[data-native-entry]")) {
     const item = node.getBoundingClientRect();
-    if (item.bottom > boundary && node.dataset.entry && !node.dataset.entry.startsWith("delivery:"))
-      return { id: node.dataset.entry, offset: item.top - boundary };
+    if (item.bottom > boundary && node.dataset.nativeEntry)
+      return { id: node.dataset.nativeEntry, offset: item.top - boundary };
   }
+}
+
+function historyId(row: Visible) {
+  return "anchorId" in row ? row.anchorId : row.id;
+}
+
+function toggleKey(known: ReadonlySet<string>, key: string, open: boolean) {
+  if (known.has(key) === open) return known;
+  const next = new Set(known);
+  if (open) next.add(key);
+  else next.delete(key);
+  return next.size > 160 ? new Set([...next].slice(-160)) : next;
 }

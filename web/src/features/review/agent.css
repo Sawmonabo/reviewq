@@ -109,11 +109,13 @@
   overflow-wrap: anywhere;
 }
 .transcript-shell {
+  --timeline-gutter: 27px;
   flex: 1;
   min-height: 0;
   display: flex;
   flex-direction: column;
   position: relative;
+  container: transcript / inline-size;
 }
 .timeline-controls {
   position: absolute;
@@ -189,7 +191,7 @@
   position: absolute;
   inset-inline: 0;
   top: 0;
-  padding: 0 27px 23px;
+  padding: 0 var(--timeline-gutter) 23px;
   min-width: 0;
 }
 .timeline-entry[aria-current="true"] {
@@ -267,14 +269,16 @@
   color: var(--text);
   line-height: 1.7;
 }
-.tool-group {
-  border: 1px solid var(--line);
-  padding: 4px 8px;
-  border-radius: 4px;
-  background: var(--surface);
+.message-body .prose table {
+  min-width: 0;
+  font-size: 11px;
 }
-.tool-group summary {
-  color: var(--muted);
+.message-body .prose :is(th, td) {
+  min-width: 0;
+  padding: 7px 9px;
+}
+.message-body .prose th {
+  background: transparent;
 }
 .tool-output-line {
   white-space: pre-wrap;
@@ -284,32 +288,13 @@
 .output-reader {
   min-width: 0;
 }
-.prompt-navigator {
-  position: relative;
-  margin-left: auto;
-}
-.prompt-navigator summary {
-  border: 1px solid var(--line);
-  padding: 3px 7px;
-  border-radius: 4px;
-  background: var(--raised);
-}
-.prompt-pages {
-  position: absolute;
-  z-index: 5;
-  top: calc(100% + 5px);
-  right: 0;
-  width: min(290px, 70vw);
-  max-height: 42vh;
-  overflow: auto;
-  padding: 8px;
-  background: var(--raised);
-  border: 1px solid var(--strong-line);
-  border-radius: 5px;
-  box-shadow: 0 6px 20px #0005;
-}
-.prompt-preview {
-  text-align: left;
+.output-disclosure.quiet-button,
+.output-navigation .quiet-button {
+  justify-self: start;
+  min-height: 24px;
+  padding: 2px 0;
+  color: var(--link);
+  font-size: 11px;
 }
 .timeline-live {
   padding: 6px 15px 10px;
@@ -320,9 +305,11 @@
 }
 
 @container review-detail (max-width: 470px) {
-  .agent-meta,
-  .timeline-entry {
+  .agent-meta {
     padding-inline: 17px;
+  }
+  .transcript-shell {
+    --timeline-gutter: 17px;
   }
   .agent-composer-shell {
     padding-inline: 14px;
