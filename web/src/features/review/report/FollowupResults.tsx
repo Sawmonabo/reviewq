@@ -34,6 +34,7 @@ export function FollowupResults({
 }: Props) {
   const [trail, setTrail] = useState<readonly string[]>([]);
   const [choice, setChoice] = useState<ResultSummary>();
+  const [dismissed, setDismissed] = useState<string>();
   const [acknowledged, setAcknowledged] = useState<ReadonlySet<string>>(() => new Set());
   const results = useResource(
     `followup-results:${run.reviewId}:${open}:${trail.at(-1) ?? ""}`,
@@ -43,7 +44,15 @@ export function FollowupResults({
         : Promise.resolve({ data: null, cursor: "" }),
     open ? [{ kind: "followup", id: run.reviewId }] : [],
   );
-  const batch = choice;
+  const unchanged =
+    latest?.kind === "unchanged" &&
+    latest.runId === run.runId &&
+    receipt &&
+    latest.receiptId === receipt &&
+    latest.batchId !== dismissed
+      ? latest
+      : undefined;
+  const batch = choice ?? unchanged;
 
   return (
     <>
@@ -86,7 +95,10 @@ export function FollowupResults({
           disabled={disabled || acknowledged.has(batch.batchId)}
           onOpenRun={onOpenRun}
           onOpenReceipt={onOpenReceipt}
-          onClose={() => setChoice(undefined)}
+          onClose={() => {
+            setDismissed(batch.batchId);
+            setChoice(undefined);
+          }}
           onAcknowledge={async (automatic = false) => {
             if (await onAcknowledge(batch, automatic))
               setAcknowledged((known) => new Set([...known, batch.batchId]));

@@ -60,7 +60,7 @@ export function Approvals({
           }
         }}
       >
-        {status.met && value?.approvals?.required !== 0 && <Icon name="check" size={14} />}
+        {status.met && status.label !== "Not required" && <Icon name="check" size={14} />}
         <span>
           Approvals {label}
           {stale && " · Stale"}
@@ -115,19 +115,12 @@ function approvalStatus(value: ApprovalView | undefined): { label: string; met: 
   const required = value?.approvals?.required;
   const left = value?.approvals?.left;
   const rules = value?.rules?.filter((rule) => rule.required > 0);
-  if (required === 0 || (required == null && rules?.length === 0)) {
-    return { label: "Not required", met: true };
-  }
-  const met =
-    left != null
-      ? left === 0
-      : value?.approvals?.approved === true ||
-        Boolean(rules?.length && rules.every((rule) => rule.approved));
   if (rules?.length === 1) {
     const rule = rules[0];
-    if (rule) return { label: ruleProgress(rule, value), met };
+    if (rule) return { label: ruleProgress(rule, value), met: rule.approved };
   }
   if (rules?.length) {
+    const met = rules.every((rule) => rule.approved);
     return {
       label: met
         ? "Met"
@@ -135,8 +128,10 @@ function approvalStatus(value: ApprovalView | undefined): { label: string; met: 
       met,
     };
   }
-  if (required != null && left != null)
-    return { label: `${Math.max(0, required - left)} of ${required}`, met };
+  if ((required === 0 || (required == null && rules?.length === 0)) && !left)
+    return { label: "Not required", met: true };
+  if (required != null && left != null && left <= required)
+    return { label: `${required - left} of ${required}`, met: left === 0 };
   if (left != null && left > 0) return { label: `${left} remaining`, met: false };
   if (required != null) return { label: `${required} required`, met: false };
   return { label: "Unavailable", met: false };
