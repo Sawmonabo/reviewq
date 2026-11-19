@@ -341,6 +341,7 @@ export function App() {
                       { label: "Review MR", run: () => menuLaunch("pick") },
                       { label: "Select MRs", run: () => setSelecting(true) },
                       { label: "Register run", run: () => menuLaunch("register") },
+                      { label: "Pending launches", run: () => menuLaunch("receipts") },
                     ]}
                   />
                 )}

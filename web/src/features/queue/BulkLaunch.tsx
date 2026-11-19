@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { ApiResponseError, readOverview } from "../../api/client";
 import type {
   HostProviderDto,
@@ -13,12 +13,22 @@ import { Modal } from "../../components/Modal";
 import { Empty, Loading, Notice } from "../../components/PanelState";
 import { useResource } from "../../hooks/useResource";
 import { describeError, readable } from "../../lib/presentation";
+import { LaunchReceiptCard, LaunchReceipts } from "./LaunchReceipts";
+import type { PendingLaunch } from "./pending-launches";
+import {
+  pendingLaunches,
+  rememberPendingLaunch,
+  settleLaunchReceipt,
+  settleLaunchRefusal,
+  watchPendingLaunches,
+} from "./pending-launches";
 import type { LaunchMode, LaunchTarget } from "./types";
 
 type Attempt = {
   readonly request: RunStartRequest;
   readonly receipt?: Receipt;
   readonly error?: string;
+  readonly refused?: boolean;
 };
 type Props = {
   readonly mode: LaunchMode;
@@ -29,7 +39,13 @@ type Props = {
   readonly onOpen: (review: string, run: string) => void;
 };
 
-export default function BulkLaunch({
+export default function BulkLaunch(props: Props) {
+  if (props.mode === "receipts")
+    return <LaunchReceipts onOpen={props.onOpen} onClose={props.onClose} />;
+  return <LaunchEditor {...props} />;
+}
+
+function LaunchEditor({
   mode,
   targets: initialTargets,
   settingsRevision,
@@ -55,6 +71,13 @@ export default function BulkLaunch({
   const [attempts, setAttempts] = useState<readonly Attempt[]>([]);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string>();
+  const pending = useSyncExternalStore(watchPendingLaunches, pendingLaunches);
+  const targetIds = new Set(targets.map((target) => target.reviewId));
+  const earlier = pending.filter(
+    (item) =>
+      targetIds.has(item.reviewId) &&
+      !attempts.some((attempt) => attempt.request.submissionId === item.submissionId),
+  );
   const request = useRef<AbortController | undefined>(undefined);
   const register = mode === "register";
   const active = targets[0];
@@ -135,7 +158,7 @@ export default function BulkLaunch({
   }
 
   async function prepare() {
-    if (busy || !catalogs.data?.length || !targets.length) return;
+    if (busy || earlier.length || !catalogs.data?.length || !targets.length) return;
     setBusy(true);
     setNotice(undefined);
     const controller = new AbortController();
@@ -176,7 +199,7 @@ export default function BulkLaunch({
   }
 
   async function start() {
-    if (busy || !currentPreview || attempts.length) return;
+    if (busy || earlier.length || !currentPreview || attempts.length) return;
     setBusy(true);
     setNotice(undefined);
     try {
@@ -192,11 +215,26 @@ export default function BulkLaunch({
           context: preview.context,
           submissionId: crypto.randomUUID(),
         };
+        const reference: PendingLaunch = {
+          reviewId: item.reviewId,
+          submissionId: item.submissionId,
+          title:
+            targets.find((target) => target.reviewId === item.reviewId)?.title ?? item.reviewId,
+        };
+        if (!rememberPendingLaunch(reference)) {
+          setNotice("A launch for this review still needs to be reconciled.");
+          continue;
+        }
         try {
           const receipt = await startRun(item);
+          settleLaunchReceipt(receipt);
           setAttempts((known) => [...known, { request: item, receipt }]);
         } catch (error) {
-          setAttempts((known) => [...known, { request: item, error: describeError(error) }]);
+          const refused = settleLaunchRefusal(reference, error);
+          setAttempts((known) => [
+            ...known,
+            { request: item, error: describeError(error), refused },
+          ]);
         }
       }
     } finally {
@@ -216,6 +254,7 @@ export default function BulkLaunch({
         attempt.request.submissionId,
         controller.signal,
       );
+      settleLaunchReceipt(receipt);
       updated = { request: attempt.request, receipt };
     } catch (error) {
       updated = {
@@ -279,7 +318,7 @@ export default function BulkLaunch({
               <button
                 type="button"
                 className="primary"
-                disabled={busy}
+                disabled={busy || earlier.length > 0}
                 onClick={() => void start()}
               >
                 Start {targets.length === 1 ? "review" : `${targets.length} reviews`}
@@ -290,6 +329,7 @@ export default function BulkLaunch({
                 className="primary"
                 disabled={
                   busy ||
+                  earlier.length > 0 ||
                   !active ||
                   !catalogs.data?.length ||
                   (invocation === "skill" ? !selectedSkill : !prompt.trim())
@@ -305,6 +345,10 @@ export default function BulkLaunch({
     >
       <div className="stack">
         {notice && <Notice>{notice}</Notice>}
+        {!register &&
+          earlier.map((item) => (
+            <LaunchReceiptCard key={item.submissionId} item={item} onOpen={onOpen} />
+          ))}
         {register && (
           <div className="surface-card stack">
             <h3>Link from the native session</h3>
@@ -603,7 +647,7 @@ export default function BulkLaunch({
               <span className="badge">
                 {run
                   ? "Started"
-                  : attempt.receipt?.state === "rejected"
+                  : attempt.refused || attempt.receipt?.state === "rejected"
                     ? "Rejected"
                     : "Start unconfirmed"}
               </span>
@@ -614,6 +658,7 @@ export default function BulkLaunch({
                   Open run
                 </button>
               ) : (
+                !attempt.refused &&
                 attempt.receipt?.state !== "rejected" && (
                   <button type="button" disabled={busy} onClick={() => void reconcile(attempt)}>
                     Check saved launch receipt
