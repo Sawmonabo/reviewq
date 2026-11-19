@@ -147,6 +147,40 @@ pub(crate) fn save_observations(
 }
 
 impl ReviewLookup for SqliteStore {
+    fn review_by_mr(&self, actor: Actor, mr: MrIdentity) -> AppFuture<'_, ReviewId> {
+        Box::pin(async move {
+            self.read(move |connection| {
+                let access = scope(connection, &actor)?;
+                let id = find_review_id(connection, &mr)?.ok_or(AppError::NotFound)?;
+                allow_review(connection, access, &id, &mr)?;
+                Ok(id)
+            })
+            .await
+            .map_err(StoreError::app)
+        })
+    }
+
+    fn run_for_session(
+        &self,
+        actor: Actor,
+        review: ReviewId,
+        session: reviewq_domain::identity::SessionKey,
+    ) -> AppFuture<'_, RunId> {
+        Box::pin(async move {
+            self.read(move |connection| {
+                let access = scope(connection, &actor)?;
+                let mr = identity_for_review(connection, &review)?;
+                allow_review(connection, access, &review, &mr)?;
+                let id = connection.query_row(
+                    "SELECT r.run_id FROM runs r JOIN sessions s USING(run_id) WHERE r.review_id=?1 AND s.session_key=?2",
+                    params![review.as_str(), session.as_str()],
+                    |row| row.get::<_, String>(0),
+                ).optional()?.ok_or(AppError::NotFound)?;
+                parse(&id)
+            }).await.map_err(StoreError::app)
+        })
+    }
+
     fn resolve_selection(
         &self,
         actor: Actor,

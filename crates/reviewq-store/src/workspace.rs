@@ -12,6 +12,7 @@ use reviewq_domain::identity::{GitLabOrigin, MrIdentity, ProjectId, ReviewId, Re
 use reviewq_domain::session::{HostProvider, NativeIdentity};
 use rusqlite::{Connection, OptionalExtension, params};
 use sha2::{Digest, Sha256};
+use subtle::ConstantTimeEq;
 
 use crate::events::snapshot;
 use crate::{SqliteStore, StoreError};
@@ -183,6 +184,39 @@ pub(crate) fn advance_queue(connection: &Connection) -> Result<(), StoreError> {
 }
 
 impl WorkspaceStore for SqliteStore {
+    fn authenticate_grant(&self, verifier: [u8; 32]) -> AppFuture<'_, Actor> {
+        Box::pin(async move {
+            self.read(move |tx| {
+                let matched = tx
+                    .query_row(
+                        "SELECT g.grant_id,g.epoch,g.verifier FROM repo_grants g
+                     JOIN configured_projects p USING (origin,project_id)
+                     WHERE g.active=1 AND g.verifier=?1",
+                        [verifier.as_slice()],
+                        |row| {
+                            Ok((
+                                row.get::<_, String>(0)?,
+                                row.get::<_, i64>(1)?,
+                                row.get::<_, Vec<u8>>(2)?,
+                            ))
+                        },
+                    )
+                    .optional()?;
+                let Some((id, epoch, expected)) = matched else {
+                    return Err(AppError::Unauthorized.into());
+                };
+                if !bool::from(verifier.as_slice().ct_eq(expected.as_slice())) {
+                    return Err(AppError::Unauthorized.into());
+                }
+                let id = id.parse().map_err(|_| AppError::Internal)?;
+                let epoch = Revision::try_from(epoch).map_err(|_| AppError::Internal)?;
+                Ok(Actor::checkout_grant(id, epoch))
+            })
+            .await
+            .map_err(StoreError::app)
+        })
+    }
+
     fn workspace_context(&self, actor: Actor) -> AppFuture<'_, Snapshot<WorkspaceContext>> {
         Box::pin(async move {
             self.read(move |tx| {
@@ -275,36 +309,39 @@ fn replace(connection: &Connection, input: WorkspaceConfig) -> Result<(), StoreE
     connection.execute("UPDATE repo_grants SET active=0 WHERE active=1", [])?;
     for grant in &input.grants {
         connection.execute(
-            "INSERT INTO repo_grants(grant_id, origin, project_id, checkout, common_dir, epoch, active)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, 1)
-             ON CONFLICT(grant_id) DO UPDATE SET epoch=excluded.epoch, active=1",
+            "INSERT INTO repo_grants(grant_id, origin, project_id, checkout, common_dir, epoch, active, verifier)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, 1, ?7)
+             ON CONFLICT(grant_id) DO UPDATE SET epoch=excluded.epoch, active=1, verifier=excluded.verifier",
             params![
                 grant.id.as_str(), grant.issuing_project.origin.as_str(),
                 grant.issuing_project.project_id.as_sqlite_integer(),
                 grant.checkout.as_path().as_os_str().as_bytes(), grant.common_dir.as_path().as_os_str().as_bytes(),
                 grant.epoch.as_sqlite_integer(),
+                grant.verifier.as_ref().map(<[u8; 32]>::as_slice),
             ],
         )?;
     }
     Ok(())
 }
 
-type StoredGrant = (String, i64, Vec<u8>, Vec<u8>, i64, bool);
+type StoredGrant = (String, i64, Vec<u8>, Vec<u8>, i64, bool, Option<Vec<u8>>);
 
 fn verify_binding(connection: &Connection, grant: &GrantBinding) -> Result<(), StoreError> {
     let old: Option<StoredGrant> = connection.query_row(
-        "SELECT origin, project_id, checkout, common_dir, epoch, active FROM repo_grants WHERE grant_id=?1",
+        "SELECT origin, project_id, checkout, common_dir, epoch, active, verifier FROM repo_grants WHERE grant_id=?1",
         [grant.id.as_str()],
-        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?, row.get(5)?)),
+        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?, row.get(5)?, row.get(6)?)),
     ).optional()?;
-    if let Some((origin, project, checkout, common_dir, epoch, active)) = old {
+    if let Some((origin, project, checkout, common_dir, epoch, active, verifier)) = old {
         let requested_epoch = grant.epoch.as_sqlite_integer();
         if origin != grant.issuing_project.origin.as_str()
             || project != grant.issuing_project.project_id.as_sqlite_integer()
             || checkout != grant.checkout.as_path().as_os_str().as_bytes()
             || common_dir != grant.common_dir.as_path().as_os_str().as_bytes()
             || requested_epoch < epoch
-            || requested_epoch == epoch && !active
+            || requested_epoch == epoch
+                && (!active
+                    || verifier.as_deref() != grant.verifier.as_ref().map(<[u8; 32]>::as_slice))
         {
             return Err(AppError::Conflict.into());
         }

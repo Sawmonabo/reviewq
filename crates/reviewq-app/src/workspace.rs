@@ -19,6 +19,7 @@ pub struct GrantBinding {
     pub checkout: AbsolutePath,
     pub common_dir: AbsolutePath,
     pub epoch: Revision,
+    pub verifier: Option<[u8; 32]>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -35,6 +36,7 @@ pub struct WorkspaceContext {
 
 pub trait WorkspaceStore: Send + Sync {
     fn workspace_context(&self, actor: Actor) -> AppFuture<'_, Snapshot<WorkspaceContext>>;
+    fn authenticate_grant(&self, verifier: [u8; 32]) -> AppFuture<'_, Actor>;
 
     /// Replaces active memberships and checkout authority under one settings revision.
     /// A revoked or rotated grant cannot be reactivated at its older epoch.

@@ -36,10 +36,12 @@ CREATE TABLE repo_grants (
     checkout BLOB NOT NULL,
     common_dir BLOB NOT NULL,
     epoch INTEGER NOT NULL CHECK (epoch > 0),
+    verifier BLOB CHECK (verifier IS NULL OR length(verifier) = 32),
     active INTEGER NOT NULL CHECK (active IN (0, 1))
 ) STRICT;
 
 CREATE UNIQUE INDEX repo_grants_active_checkout ON repo_grants(common_dir) WHERE active = 1;
+CREATE UNIQUE INDEX repo_grants_active_verifier ON repo_grants(verifier) WHERE active = 1 AND verifier IS NOT NULL;
 
 CREATE TABLE reviews (
     review_id TEXT PRIMARY KEY,

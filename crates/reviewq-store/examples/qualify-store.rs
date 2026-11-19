@@ -74,6 +74,7 @@ async fn setup(
             checkout: absolute(&root.join(label)),
             common_dir: absolute(&root.join(label).join(".git")),
             epoch: 1_i64.try_into().unwrap(),
+            verifier: None,
         })
         .collect();
     let [a, b] =

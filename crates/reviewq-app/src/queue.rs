@@ -55,6 +55,15 @@ impl SelectedLead {
 
 /// Direct lookup used by review bookmarks and the selected-run browser path.
 pub trait ReviewLookup: Send + Sync {
+    fn review_by_mr(&self, actor: Actor, mr: MrIdentity) -> AppFuture<'_, ReviewId>;
+
+    fn run_for_session(
+        &self,
+        actor: Actor,
+        review: ReviewId,
+        session: SessionKey,
+    ) -> AppFuture<'_, RunId>;
+
     /// An explicit missing or foreign run always returns scoped not-found.
     fn resolve_selection(
         &self,

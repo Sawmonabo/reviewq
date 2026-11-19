@@ -27,6 +27,7 @@ mod control;
 mod error;
 mod history;
 mod hosts;
+mod mcp;
 mod messages;
 mod pages;
 
@@ -147,6 +148,7 @@ pub fn router(
         .fallback(api_not_found)
         .layer(DefaultBodyLimit::max(64 * 1024));
     Router::new()
+        .merge(mcp::mount(entry.clone()))
         .nest("/api/v1", api)
         .fallback_service(
             ServeDir::new(web).not_found_service(ServeFile::new(web.join("index.html"))),

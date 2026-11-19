@@ -5,6 +5,7 @@ mod common;
 pub mod events;
 pub mod history;
 mod hosts;
+pub mod mcp;
 pub mod queue;
 mod scalar;
 
