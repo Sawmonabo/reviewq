@@ -17,7 +17,7 @@ export type ReportBlock = {
 };
 
 const fieldName =
-  /^(Issue|Why it matters|Confirmed|Proposed comment|Location|Evidence|Suggested fix)(?=[:.\s—]|$)/i;
+  /^(Issue|Why it matters|Confirmed|Proposed comment|Location|Evidence|Suggested fix)(?=\s*(?:[:.—]|$))/i;
 
 export function reportBlocks(tree: Root, source: string): ReportBlock[] {
   const blocks: { offset: number; nodes: RootContent[]; name?: string }[] = [];
@@ -33,7 +33,7 @@ export function reportBlocks(tree: Root, source: string): ReportBlock[] {
       current = {
         offset: node.position?.start.offset ?? 0,
         nodes: [],
-        ...(heading ? { name: heading } : {}),
+        ...(heading && node.type === "element" && node.tagName === "h2" ? { name: heading } : {}),
       };
       blocks.push(current);
     }
@@ -52,15 +52,11 @@ export function reportBlocks(tree: Root, source: string): ReportBlock[] {
 
 export function selectionSource(
   range: Range,
-  root: HTMLElement,
   source: string,
   start: ReportBlock,
   end: ReportBlock,
 ): { readonly offset: number; readonly text: string } | undefined {
-  const selected = range.toString();
-  if (!selected.trim()) return;
-  const scope = source.slice(start.offset, end.end);
-  const first = scope.indexOf(selected);
+  if (!range.toString().trim()) return;
   const from = sourcePoint(source, range, "start");
   const to = sourcePoint(source, range, "end");
 
@@ -75,32 +71,34 @@ export function selectionSource(
     const trimmed = exact.trim();
     if (trimmed) return { offset: from + exact.indexOf(trimmed), text: trimmed };
   }
-
-  if (
-    first >= 0 &&
-    scope.indexOf(selected, first + selected.length) < 0 &&
-    root.contains(range.commonAncestorContainer)
-  ) {
-    return { offset: start.offset + first, text: selected };
-  }
 }
 
 function sourcePoint(source: string, range: Range, boundary: "start" | "end") {
   const container = boundary === "start" ? range.startContainer : range.endContainer;
   const offset = boundary === "start" ? range.startOffset : range.endOffset;
-  const marker = parentElement(container)?.closest<HTMLElement>("[data-report-text-start]");
-  if (!marker?.contains(container)) return;
+  const leaf =
+    container instanceof Text
+      ? container
+      : boundaryLeaf(container.childNodes[boundary === "start" ? offset : offset - 1], boundary);
+  if (!leaf || !range.intersectsNode(leaf)) return;
+  const marker = leaf.parentElement?.closest<HTMLElement>("[data-report-text-start]");
+  if (!marker || marker.firstChild !== leaf || marker.lastChild !== leaf) return;
   const sourceStart = Number(marker.dataset.reportTextStart);
   const sourceEnd = Number(marker.dataset.reportTextEnd);
   if (!Number.isSafeInteger(sourceStart) || !Number.isSafeInteger(sourceEnd)) return;
-  const preceding = document.createRange();
-  preceding.selectNodeContents(marker);
-  preceding.setEnd(container, offset);
-  const length = preceding.toString().length;
-  const rendered = marker.textContent ?? "";
+  const rendered = leaf.data;
+  const length = container === leaf ? offset : boundary === "start" ? 0 : rendered.length;
   if (source.slice(sourceStart, sourceEnd) === rendered) return sourceStart + length;
   if (length === 0) return sourceStart;
   if (length === rendered.length) return sourceEnd;
+}
+
+function boundaryLeaf(branch: ChildNode | undefined, direction: "start" | "end") {
+  if (branch instanceof Text) return branch;
+  if (!branch) return;
+  const walker = document.createTreeWalker(branch, NodeFilter.SHOW_TEXT);
+  const text = direction === "start" ? walker.nextNode() : walker.lastChild();
+  return text instanceof Text ? text : undefined;
 }
 
 export function parentElement(node: Node) {
@@ -143,27 +141,25 @@ function authoredFinding(
         blocking = metadata[2].toLowerCase() === "blocking";
     }
     const first = node.type === "element" && node.tagName === "p" ? node.children[0] : undefined;
-    const field =
-      node.type === "element" && /^h[4-6]$/.test(node.tagName)
-        ? fieldName.exec(label)
-        : first?.type === "element" && first.tagName === "strong"
-          ? fieldName.exec(text(first))
-          : undefined;
+    const headingField = node.type === "element" && /^h[4-6]$/.test(node.tagName);
+    const labelNode = headingField
+      ? node
+      : first?.type === "element" && first.tagName === "strong"
+        ? first
+        : undefined;
+    const field = labelNode ? fieldName.exec(text(labelNode).trim()) : undefined;
     if (field?.[1]) {
       const fieldLabel = field[1];
-      const remainder = first && node.type === "element" ? node.children.slice(1) : [];
-      const target =
-        first && fieldLabel.toLowerCase() === "proposed comment"
-          ? text(first)
-              .slice(fieldLabel.length)
-              .replace(/^\s*—\s*/, "")
-              .replace(/[:.]$/, "")
-              .trim()
-          : "";
       const content: RootContent[] = [];
-      if (target && first?.type === "element") content.push({ ...first, tagName: "p" });
-      if (remainder.length && node.type === "element")
-        content.push({ ...node, children: remainder });
+      const inline =
+        labelNode &&
+        text(labelNode)
+          .trim()
+          .slice(fieldLabel.length)
+          .replace(/^[:.\s—]+/, "");
+      if (inline) content.push(node);
+      else if (!headingField && node.type === "element" && node.children.length > 1)
+        content.push({ ...node, children: node.children.slice(1) });
       fields.push({ label: fieldLabel, nodes: content });
     } else {
       (fields.at(-1)?.nodes ?? lead).push(node);

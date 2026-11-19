@@ -150,12 +150,10 @@ export function RichReport({
         setPinned([]);
         return;
       }
-      const exact = selectionSource(selected, element, source, start, end);
+      const exact = selectionSource(selected, source, start, end);
       setSelection({
-        fallback: [...source.slice(0, start.offset)].length,
-        ...(exact
-          ? { quote: { text: exact.text, offset: [...source.slice(0, exact.offset)].length } }
-          : {}),
+        fallback: start.offset,
+        ...(exact ? { quote: exact } : {}),
       });
       if (usesVirtual) {
         const indexes = [...element.querySelectorAll<HTMLElement>("[data-report-block]")]
@@ -284,8 +282,8 @@ export function RichReport({
             onPointerDown={(event) => event.preventDefault()}
             onClick={() =>
               selection.quote
-                ? onQuote(selection.quote.text, selection.quote.offset)
-                : onSource(selection.fallback)
+                ? onQuote(selection.quote.text, [...source.slice(0, selection.quote.offset)].length)
+                : onSource([...source.slice(0, selection.fallback)].length)
             }
           >
             Comment on selected finding
