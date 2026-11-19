@@ -1,3 +1,4 @@
+import { useRef } from "react";
 import type { RefObject } from "react";
 
 const INITIAL = 50;
@@ -11,9 +12,13 @@ export function Splitter({
   readonly value: number;
   readonly onChange: (value: number) => void;
 }) {
-  function adjust(delta: number) {
-    const width = host.current?.getBoundingClientRect().width;
-    if (width) onChange(clampSplit(value + (delta * 100) / width, width));
+  const drag = useRef<{ x: number; value: number } | null>(null);
+
+  function adjust(start: number, delta: number) {
+    const panel = host.current;
+    if (!panel) return;
+    const width = panel.clientWidth - Number.parseFloat(getComputedStyle(panel).paddingInlineEnd);
+    if (width > 0) onChange(clampSplit(start + (delta * 100) / width, width));
   }
   return (
     <div
@@ -25,22 +30,27 @@ export function Splitter({
       aria-valuemin={24}
       aria-valuemax={76}
       aria-valuenow={Math.round(value)}
+      title="Drag to resize · Arrow keys adjust · Double-click restores 50/50"
       onDoubleClick={() => onChange(INITIAL)}
       onPointerDown={(event) => {
-        if (event.button === 0) event.currentTarget.setPointerCapture(event.pointerId);
+        if (event.button !== 0 || !event.isPrimary) return;
+        drag.current = { x: event.clientX, value };
+        event.currentTarget.setPointerCapture(event.pointerId);
       }}
       onPointerMove={(event) => {
-        if (!event.currentTarget.hasPointerCapture(event.pointerId)) return;
-        const bounds = host.current?.getBoundingClientRect();
-        if (bounds)
-          onChange(clampSplit(((event.clientX - bounds.left) * 100) / bounds.width, bounds.width));
+        if (drag.current && event.currentTarget.hasPointerCapture(event.pointerId)) {
+          adjust(drag.current.value, event.clientX - drag.current.x);
+        }
+      }}
+      onLostPointerCapture={() => {
+        drag.current = null;
       }}
       onKeyDown={(event) => {
         const step = event.shiftKey ? 50 : 20;
-        if (event.key === "ArrowLeft") adjust(-step);
-        else if (event.key === "ArrowRight") adjust(step);
-        else if (event.key === "Home") adjust(-10_000);
-        else if (event.key === "End") adjust(10_000);
+        if (event.key === "ArrowLeft") adjust(value, -step);
+        else if (event.key === "ArrowRight") adjust(value, step);
+        else if (event.key === "Home") adjust(value, -10_000);
+        else if (event.key === "End") adjust(value, 10_000);
         else return;
         event.preventDefault();
       }}

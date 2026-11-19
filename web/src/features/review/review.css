@@ -302,15 +302,6 @@
   border-radius: 4px;
 }
 @container review-detail (max-width: 470px) {
-  .drawer-surface .drawer-header {
-    padding-inline: 17px;
-  }
-  .drawer-surface > .drawer-body {
-    padding-inline: 17px;
-  }
-  .drawer-surface > .agent-body {
-    padding: 0;
-  }
   .drawer-surface .drawer-tabs {
     gap: 17px;
   }
@@ -322,7 +313,8 @@
   }
 }
 @media (max-width: 700px) {
-  .drawer-surface .drawer-header {
+  .drawer-surface .drawer-header,
+  .drawer-surface > .drawer-body:not(.agent-body) {
     padding-inline: 19px;
   }
   .drawer-heading {

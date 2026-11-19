@@ -200,11 +200,11 @@
   min-height: 0;
 }
 .workspace-panes.has-detail {
-  grid-template-columns: minmax(0, var(--split, 50%)) 5px minmax(0, 1fr);
+  grid-template-columns: minmax(0, var(--split, 50%)) 0 minmax(0, 1fr);
+  padding-inline-end: 10px;
 }
 .workspace-panes.has-form {
   grid-template-columns: minmax(0, calc(var(--split, 50%) - 5px)) 5px minmax(0, 1fr);
-  padding-inline-end: 10px;
 }
 .workspace-view,
 .drawer-host {
@@ -396,10 +396,30 @@
   pointer-events: none;
   content: "";
 }
+.workspace-panes:not(.has-form) > .splitter {
+  width: 9px;
+  margin-inline-start: 1px;
+  border: 0;
+  background: transparent;
+}
+.workspace-panes:not(.has-form) > .splitter::before {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 2px;
+  pointer-events: none;
+  content: "";
+}
+.workspace-panes:not(.has-form) > .splitter:is(:hover, :focus-visible)::before {
+  background: light-dark(var(--focus), #a3b3da);
+}
+.workspace-panes:not(.has-form) > .splitter:focus-visible {
+  outline-offset: -3px;
+}
 .drawer-host {
   display: flex;
   flex-direction: column;
   min-width: 0;
+  border-inline-start: 1px solid light-dark(var(--line), #33333d);
 }
 .drawer-host > .panel-loading {
   flex: 1;
@@ -675,6 +695,9 @@
   }
   .workspace-panes.has-detail {
     display: block;
+  }
+  .workspace-panes.has-detail:not(.has-form) {
+    padding-inline-end: 0;
   }
   .workspace-panes.has-detail .workspace-view,
   .workspace-panes.has-detail .splitter {

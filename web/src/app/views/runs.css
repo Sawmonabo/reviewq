@@ -103,6 +103,7 @@
   margin-inline-start: auto;
   color: light-dark(var(--muted), #898997);
   font-variant-numeric: tabular-nums;
+  line-height: 15px;
   white-space: nowrap;
 }
 @container workspace-content (max-width: 900px) {
