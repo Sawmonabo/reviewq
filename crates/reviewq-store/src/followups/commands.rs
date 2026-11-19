@@ -1,8 +1,8 @@
 use reviewq_app::access::{Actor, ActorScope, AppError, AppFuture};
 use reviewq_app::events::{ResourceKey, Snapshot};
 use reviewq_app::followups::{
-    FollowupCommands, MonitorCommand, MonitorReceipt, MonitorRequest, MonitorState, Preferences,
-    UpdatePreferences,
+    FollowupCommands, MonitorCommand, MonitorReceipt, MonitorRequest, MonitorState,
+    MonitoredReview, Preferences, UpdatePreferences,
 };
 use reviewq_app::queue::MergeRequestState;
 use reviewq_app::sources::WorkflowSnapshot;
@@ -283,6 +283,8 @@ fn monitor(
         return Err(AppError::StaleRevision.into());
     }
     let time = now_ms()?;
+    let mut notifications = Vec::new();
+    let mut changed = true;
     let (generation, state, batch_id) = match &input.command {
         MonitorCommand::Configure {
             run,
@@ -298,12 +300,44 @@ fn monitor(
                 return Err(AppError::Conflict.into());
             }
             let selected = observations::verified_threads(&observation, selections)?;
-            let generation = previous
-                .as_ref()
-                .map_or(revision(0)?, |value| value.generation)
-                .checked_add(1)
-                .ok_or(AppError::Internal)?;
-            db.execute(
+            let owner = observation.authenticated_actor.to_string();
+            if let Some(old) = &previous
+                && old.verified
+                && old.reviewer_id.as_deref() == Some(owner.as_str())
+                && let Some(run_id) = old.run.as_deref()
+            {
+                let target = MonitoredReview {
+                    review: input.review.clone(),
+                    run: parse(run_id)?,
+                    generation: old.generation,
+                    identity: observation.review.identity.clone(),
+                    settings,
+                };
+                notifications = observations::adopt_remote(db, &target, &observation, time)?;
+            }
+            let same = if let Some(old) = &previous {
+                old.verified
+                    && old.reviewer_id.as_deref() == Some(owner.as_str())
+                    && old.run.as_deref() == Some(run.as_str())
+                    && old.state == *state
+                    && observations::same_enrollment(db, &input.review, old.generation, &selected)?
+            } else {
+                false
+            };
+            if same {
+                changed = !notifications.is_empty();
+                (
+                    previous.as_ref().ok_or(AppError::Internal)?.generation,
+                    *state,
+                    None,
+                )
+            } else {
+                let generation = previous
+                    .as_ref()
+                    .map_or(revision(0)?, |value| value.generation)
+                    .checked_add(1)
+                    .ok_or(AppError::Internal)?;
+                db.execute(
                 "INSERT INTO followup_monitors(review_id, run_id, generation, state, policy_override,
                      binding_verified, updated_at_ms, reviewer_id) VALUES(?1,?2,?3,?4,?5,1,?6,?7)
                  ON CONFLICT(review_id) DO UPDATE SET run_id=excluded.run_id, generation=excluded.generation,
@@ -313,24 +347,25 @@ fn monitor(
                 params![input.review.as_str(), run.as_str(), generation.as_sqlite_integer(),
                     state.to_string(), *state == MonitorState::Enabled, time, observation.authenticated_actor.to_string()],
             )?;
-            observations::save_selection(
-                db,
-                &input.review,
-                generation,
-                observation.authenticated_actor,
-                selected,
-            )?;
-            if let Some(old) = previous {
-                observations::carry_pending(
+                observations::save_selection(
                     db,
                     &input.review,
-                    old.generation,
                     generation,
-                    run,
-                    time,
+                    observation.authenticated_actor,
+                    selected,
                 )?;
+                if let Some(old) = previous {
+                    observations::carry_pending(
+                        db,
+                        &input.review,
+                        old.generation,
+                        generation,
+                        run,
+                        time,
+                    )?;
+                }
+                (generation, *state, None)
             }
-            (generation, *state, None)
         }
         MonitorCommand::Pause | MonitorCommand::Resume => {
             let previous = previous.ok_or(AppError::NotFound)?;
@@ -349,6 +384,13 @@ fn monitor(
                     &input.review,
                     previous.generation,
                     &observation,
+                )?;
+            }
+            if pause {
+                db.execute(
+                    "UPDATE followup_batches SET manual_requested=0 WHERE review_id=?1 AND authority_verified=1
+                       AND state IN ('pending','reserved') AND manual_requested=1",
+                    [input.review.as_str()],
                 )?;
             }
             if pause && previous.state == MonitorState::Archived {
@@ -408,12 +450,24 @@ fn monitor(
         params![key.as_slice(), MONITOR, input.submission.as_str(), input.review.as_str(),
             generation.as_sqlite_integer(), state.to_string(), batch_id],
     )?;
-    advance_queue(db)?;
-    tx.emit(&[
-        ResourceKey::Followup(Some(input.review.clone())),
-        ResourceKey::Review(Some(input.review.clone())),
-        ResourceKey::Queue,
-    ])?;
+    if changed {
+        advance_queue(db)?;
+        let mut keys = vec![
+            ResourceKey::Followup(Some(input.review.clone())),
+            ResourceKey::Review(Some(input.review.clone())),
+            ResourceKey::Queue,
+        ];
+        if notifications.len() <= 29 {
+            keys.extend(
+                notifications
+                    .into_iter()
+                    .map(|id| ResourceKey::Notification(Some(id))),
+            );
+        } else {
+            keys.push(ResourceKey::Notification(None));
+        }
+        tx.emit(&keys)?;
+    }
     snapshot(
         &tx.sql,
         MonitorReceipt {

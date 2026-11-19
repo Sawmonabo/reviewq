@@ -6,7 +6,7 @@ use reviewq_domain::session::LeadTarget;
 use crate::access::{AppError, AppFuture};
 use crate::events::Snapshot;
 use crate::queue::MergeRequestState;
-use crate::sources::{ReviewSourceReader, WorkflowSnapshot};
+use crate::sources::{ReviewSourceReader, WorkflowDiscussion, WorkflowNote, WorkflowSnapshot};
 use crate::workflow::{NativeCall, NativeWorkflowProof, WorkflowTool};
 
 use super::{Action, Approval, Evidence, Intent};
@@ -213,10 +213,7 @@ pub(super) fn publication_observation(
             continue;
         }
         let mut matches = all_notes.iter().filter_map(|(discussion, note)| {
-            let scope = match &target.discussion_id {
-                Some(id) => &discussion.id == id,
-                None => discussion.individual_note == Some(true),
-            };
+            let scope = note_scope(discussion, note, target.discussion_id.as_deref());
             let head = match &note.positioned_head {
                 Some(sha) => work.action.reviewed_sha.as_ref() == Some(sha),
                 None => note.created_at_ms >= work.declared_at_ms,
@@ -256,4 +253,36 @@ pub(super) fn publication_observation(
         open: snapshot.review.state == MergeRequestState::Open,
         targets,
     }
+}
+
+fn note_scope(
+    discussion: &WorkflowDiscussion,
+    note: &WorkflowNote,
+    requested: Option<&str>,
+) -> bool {
+    match (requested, discussion.root_note_id) {
+        (Some(id), Some(root)) => discussion.id == id && note.id != root,
+        (None, Some(root)) => note.id == root,
+        (_, None) => false,
+    }
+}
+
+pub fn confirms_prior_target(
+    snapshot: &WorkflowSnapshot,
+    target: &CommentTarget,
+    prior_note: u64,
+    reviewed: &GitSha,
+) -> bool {
+    snapshot.discussions.iter().any(|discussion| {
+        discussion.notes.iter().any(|note| {
+            note.id == prior_note
+                && note.author == snapshot.authenticated_actor
+                && note.body_hash == target.hash
+                && note
+                    .positioned_head
+                    .as_ref()
+                    .is_none_or(|sha| sha == reviewed)
+                && note_scope(discussion, note, target.discussion.as_deref())
+        })
+    })
 }

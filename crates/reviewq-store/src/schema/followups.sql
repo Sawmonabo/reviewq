@@ -170,3 +170,17 @@ CREATE TABLE followup_result_reads (
 ) STRICT, WITHOUT ROWID;
 
 CREATE INDEX followup_result_read_owner ON followup_result_reads(review_id, batch_id);
+
+CREATE TABLE followup_observation_origins (
+    review_id TEXT NOT NULL,
+    observation_id TEXT NOT NULL,
+    generation INTEGER NOT NULL,
+    original_note_id TEXT NOT NULL,
+    PRIMARY KEY (review_id, observation_id, original_note_id),
+    FOREIGN KEY (review_id, observation_id) REFERENCES followup_observations(review_id, observation_id),
+    FOREIGN KEY (review_id, generation, original_note_id)
+        REFERENCES followup_threads(review_id, generation, original_note_id)
+) STRICT, WITHOUT ROWID;
+
+CREATE INDEX followup_observation_original_note
+    ON followup_observation_origins(review_id, generation, original_note_id);

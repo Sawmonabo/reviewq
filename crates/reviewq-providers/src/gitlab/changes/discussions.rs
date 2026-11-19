@@ -16,7 +16,6 @@ const MAX_DISCUSSION_BYTES: usize = 512 * 1024;
 #[derive(Deserialize)]
 struct UpstreamDiscussion {
     id: String,
-    individual_note: Option<bool>,
     notes: Vec<UpstreamNote>,
 }
 
@@ -34,6 +33,7 @@ struct UpstreamNote {
     system: bool,
     #[serde(default)]
     resolved: bool,
+    resolved_by: Option<ConnectedUser>,
     position: Option<Position>,
 }
 
@@ -214,6 +214,17 @@ impl GitLab {
                 if discussion_ids.len() > MAX_WORKFLOW_DISCUSSIONS {
                     return Err(AppError::PayloadTooLarge);
                 }
+                let root_note_id = discussion
+                    .notes
+                    .first()
+                    .filter(|note| !note.system && !note.confidential)
+                    .map(|note| note.id);
+                let resolved_by = discussion
+                    .notes
+                    .first()
+                    .and_then(|note| note.resolved_by.as_ref())
+                    .map(|user| user.id)
+                    .filter(|id| *id > 0);
                 let mut notes = Vec::new();
                 let mut resolved = None;
                 for note in discussion.notes {
@@ -260,7 +271,8 @@ impl GitLab {
                 if let Some(resolved) = resolved {
                     discussions.push(WorkflowDiscussion {
                         id: discussion.id,
-                        individual_note: discussion.individual_note,
+                        root_note_id,
+                        resolved_by,
                         resolved,
                         notes,
                     });

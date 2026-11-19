@@ -1,3 +1,5 @@
+use std::collections::{BTreeMap, HashMap};
+
 use reviewq_app::access::AppError;
 use reviewq_app::followups::Selection;
 use reviewq_app::sources::{WorkflowDiscussion, WorkflowSnapshot};
@@ -205,8 +207,13 @@ pub(super) fn review_now(
         return Err(AppError::Conflict.into());
     }
     let batch = batch(db, review, run, generation, time, true)?;
+    let mut by_discussion: HashMap<&String, String> = HashMap::new();
     for row in selection {
         let discussion = exact_discussion(&row, snapshot)?;
+        if let Some(id) = by_discussion.get(&discussion.id) {
+            link_original(db, review, generation, id, &row.original)?;
+            continue;
+        }
         let observation = Uuid::new_v4().to_string();
         let fingerprint = fingerprint(discussion);
         db.prepare_cached(
@@ -219,6 +226,8 @@ pub(super) fn review_now(
             snapshot.authenticated_actor.to_string(), snapshot.observed_at_ms,
         ])?;
         attach(db, review, &batch, &observation, None)?;
+        link_original(db, review, generation, &observation, &row.original)?;
+        by_discussion.insert(&discussion.id, observation);
     }
     Ok(batch)
 }
@@ -270,6 +279,57 @@ fn batch(
     Ok(id)
 }
 
+fn link_original(
+    db: &Connection,
+    review: &ReviewId,
+    generation: Revision,
+    observation: &str,
+    original: &str,
+) -> Result<(), StoreError> {
+    db.prepare_cached(
+        "INSERT INTO followup_observation_origins(review_id,observation_id,generation,original_note_id)
+         VALUES(?1,?2,?3,?4) ON CONFLICT DO NOTHING",
+    )?.execute(params![review.as_str(),observation,generation.as_sqlite_integer(),original])?;
+    Ok(())
+}
+
+pub(super) fn same_enrollment(
+    db: &Connection,
+    review: &ReviewId,
+    generation: Revision,
+    requested: &[VerifiedThread<'_>],
+) -> Result<bool, StoreError> {
+    let mut statement = db.prepare_cached(
+        "SELECT t.original_note_id,t.discussion_id,
+          (SELECT json_group_array(f.finding_id) FROM (SELECT finding_id
+             FROM followup_thread_findings WHERE review_id=t.review_id AND generation=t.generation
+               AND original_note_id=t.original_note_id ORDER BY finding_id) f)
+         FROM followup_threads t WHERE t.review_id=?1 AND t.generation=?2 AND t.selected=1 LIMIT 501",
+    )?;
+    let mut rows = statement.query(params![review.as_str(), generation.as_sqlite_integer()])?;
+    let mut current = BTreeMap::new();
+    while let Some(row) = rows.next()? {
+        let original: String = row.get(0)?;
+        let discussion: Option<String> = row.get(1)?;
+        let findings: Vec<String> =
+            serde_json::from_str(crate::queue::text(row, 2)?).map_err(|_| AppError::Internal)?;
+        current.insert(original, (discussion, findings));
+    }
+    let next: BTreeMap<_, _> = requested
+        .iter()
+        .map(|item| {
+            let mut findings = item.finding_ids.to_vec();
+            findings.sort();
+            findings.dedup();
+            (
+                item.original.to_string(),
+                (Some(item.discussion.id.clone()), findings),
+            )
+        })
+        .collect();
+    Ok(current == next)
+}
+
 fn attach(
     db: &Connection,
     review: &ReviewId,
@@ -305,12 +365,18 @@ pub(super) fn carry_pending(
         return Ok(());
     };
     let mut statement = db.prepare_cached(
-        "SELECT n.original_note_id,n.discussion_id,o.discussion_version,o.occurrence_key,o.kind,
-            o.actor_id,o.note_id,o.observed_at_ms
+        "SELECT o.discussion_id,o.discussion_version,o.occurrence_key,o.kind,o.actor_id,o.note_id,
+            o.observed_at_ms,
+            (SELECT json_group_array(s.original_note_id) FROM (
+                 SELECT n.original_note_id FROM followup_threads n WHERE n.review_id=o.review_id
+                   AND n.generation=?3 AND n.selected=1 AND n.discussion_id=o.discussion_id
+                   AND (n.original_note_id=o.original_note_id OR EXISTS (
+                       SELECT 1 FROM followup_observation_origins g WHERE g.review_id=o.review_id
+                         AND g.observation_id=o.observation_id AND g.original_note_id=n.original_note_id
+                   )) ORDER BY n.original_note_id
+             ) s)
          FROM followup_members m JOIN followup_observations o USING(review_id,observation_id)
-         JOIN followup_threads n ON n.review_id=o.review_id AND n.original_note_id=o.original_note_id
-         WHERE m.review_id=?1 AND m.batch_id=?2 AND n.generation=?3 AND n.selected=1
-           AND n.discussion_id=o.discussion_id ORDER BY o.observation_id",
+         WHERE m.review_id=?1 AND m.batch_id=?2 ORDER BY o.observation_id",
     )?;
     let mut rows = statement.query(params![review.as_str(), old, to.as_sqlite_integer()])?;
     db.execute(
@@ -320,22 +386,29 @@ pub(super) fn carry_pending(
     )?;
     let mut next = None;
     while let Some(row) = rows.next()? {
+        let origins: Vec<String> =
+            serde_json::from_str(crate::queue::text(row, 7)?).map_err(|_| AppError::Internal)?;
+        let Some(original) = origins.first() else {
+            continue;
+        };
         let id = Uuid::new_v4().to_string();
         db.prepare_cached(
             "INSERT INTO followup_observations(observation_id,review_id,generation,original_note_id,
                 discussion_id,discussion_version,occurrence_key,kind,actor_id,note_id,observed_at_ms)
              VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)",
         )?.execute(params![
-            id, review.as_str(), to.as_sqlite_integer(),
-            row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?,
-            row.get::<_, String>(3)?, row.get::<_, String>(4)?,
-            row.get::<_, Option<String>>(5)?, row.get::<_, Option<String>>(6)?, row.get::<_, i64>(7)?,
+            id, review.as_str(), to.as_sqlite_integer(), original,
+            row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?, row.get::<_, String>(3)?,
+            row.get::<_, Option<String>>(4)?, row.get::<_, Option<String>>(5)?, row.get::<_, i64>(6)?,
         ])?;
         let batch = match &next {
             Some(id) => id,
             None => next.insert(batch(db, review, run, to, time, manual)?),
         };
         attach(db, review, batch, &id, Some(&old))?;
+        for original in origins {
+            link_original(db, review, to, &id, &original)?;
+        }
     }
     Ok(())
 }
@@ -349,6 +422,7 @@ pub(super) fn adopt_remote(
     use reviewq_app::notifications::{Kind, Observation, Source};
     let mut output = Vec::new();
     let mut batch_id = None;
+    let mut occurrences: HashMap<(&String, &str, Option<u64>), String> = HashMap::new();
     for row in selected(db, &target.review, target.generation)? {
         let Ok(discussion) = exact_discussion(&row, snapshot) else {
             continue;
@@ -376,11 +450,12 @@ pub(super) fn adopt_remote(
         let mut observed = Vec::new();
         if let Some(prior) = previous.1
             && prior != discussion.resolved
+            && discussion.resolved_by != Some(snapshot.authenticated_actor)
         {
             observed.push(if discussion.resolved {
-                ("resolved", Kind::Resolved, None, None)
+                ("resolved", Kind::Resolved, None, discussion.resolved_by)
             } else {
-                ("reopened", Kind::Reopened, None, None)
+                ("reopened", Kind::Reopened, None, discussion.resolved_by)
             });
         }
         let mut stored = db.prepare_cached(
@@ -424,6 +499,17 @@ pub(super) fn adopt_remote(
                 discussion.id,version.to_string(),current_hash.as_str(),discussion.resolved],
         )?;
         for (kind, inbox_kind, note, actor) in observed {
+            let key = (&discussion.id, kind, note);
+            if let Some(existing) = occurrences.get(&key) {
+                link_original(
+                    db,
+                    &target.review,
+                    target.generation,
+                    existing,
+                    &row.original,
+                )?;
+                continue;
+            }
             let id = Uuid::new_v4().to_string();
             let provenance = format!("{}:{version}:{}", kind, note.unwrap_or(0));
             db.prepare_cached(
@@ -447,6 +533,8 @@ pub(super) fn adopt_remote(
                 )?),
             };
             attach(db, &target.review, batch, &id, None)?;
+            link_original(db, &target.review, target.generation, &id, &row.original)?;
+            occurrences.insert(key, id);
             let mut identity = Sha256::new();
             for value in [
                 target.review.as_str(),

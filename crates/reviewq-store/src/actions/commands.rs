@@ -1,7 +1,7 @@
 use reviewq_app::access::{AppError, AppFuture};
 use reviewq_app::actions::{
     Action, ActionCommandStore, ActionDeclaration, ActionWork, Approval, Evidence, Intent,
-    PublicationEvidence, State,
+    PublicationEvidence, State, confirms_prior_target,
 };
 use reviewq_app::events::{ResourceKey, Snapshot};
 use reviewq_app::notifications::{Kind, Observation, Source};
@@ -230,18 +230,38 @@ fn declare(
             call.source_generation, position, settings.as_sqlite_integer(),
         ],
     )?;
+    let mut prior = db.prepare_cached(
+        "SELECT t.note_id,t.observed_at_ms FROM action_targets t JOIN actions a USING(action_id)
+         WHERE a.run_id=?1 AND a.reviewed_sha=?2 AND a.authenticated_actor_id=?3 AND a.authority_verified=1
+           AND t.body_sha256=?4 AND t.discussion_id IS ?5 AND t.evidence_state='confirmed'
+           AND t.note_id IS NOT NULL ORDER BY t.observed_at_ms DESC LIMIT 1",
+    )?;
     for (index, target) in input.targets.iter().enumerate() {
+        let known = prior
+            .query_row(
+                params![
+                    run,
+                    input.reviewed_sha.as_str(),
+                    observed.authenticated_actor.to_string(),
+                    target.hash.as_str(),
+                    target.discussion
+                ],
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, Option<i64>>(1)?)),
+            )
+            .optional()?
+            .filter(|(note, _)| {
+                note.parse::<u64>().ok().is_some_and(|id| {
+                    confirms_prior_target(&observed, target, id, &input.reviewed_sha)
+                })
+            });
+        let (note, time) = known.map_or((None, None), |(id, time)| (Some(id), time));
         db.prepare_cached(
-            "INSERT INTO action_targets(action_id,ordinal,body_sha256,discussion_id,evidence_state)
-             VALUES(?1,?2,?3,?4,'unknown')",
-        )?
-        .execute(params![
-            id,
-            (index + 1) as i64,
-            target.hash.as_str(),
-            target.discussion
-        ])?;
+            "INSERT INTO action_targets(action_id,ordinal,body_sha256,discussion_id,evidence_state,note_id,observed_at_ms)
+             VALUES(?1,?2,?3,?4,?5,?6,?7)",
+        )?.execute(params![id, (index + 1) as i64, target.hash.as_str(), target.discussion,
+            if note.is_some() {"confirmed"} else {"unknown"},note,time])?;
     }
+    drop(prior);
     db.execute(
         "INSERT INTO action_heads(run_id,action_id) VALUES(?1,?2)
          ON CONFLICT(run_id) DO UPDATE SET action_id=excluded.action_id",
