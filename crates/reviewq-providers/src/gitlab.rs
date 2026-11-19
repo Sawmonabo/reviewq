@@ -22,6 +22,7 @@ mod settings;
 mod tickets;
 
 const METADATA_LIMIT: usize = 1024 * 1024;
+const MERGE_REQUEST_PAGE_BYTES: usize = 8 * 1024 * 1024;
 const MAX_PROVIDER_PAGES: u32 = 40;
 
 /// A GitLab client pinned to one configured, verified transport origin.
@@ -299,22 +300,29 @@ impl GitLab {
                     .append_pair("updated_after", &time.to_string());
             }
         }
-        let (metadata, bytes) = self.get(url, METADATA_LIMIT).await?;
+        let response = self
+            .http
+            .get(url, self.headers.clone(), self.lease.as_ref())
+            .await?;
+        let more = next_page(response.headers(), page)?.is_some();
+        let body = response
+            .bounded_reader(
+                &self.patches.profile,
+                METADATA_LIMIT,
+                MERGE_REQUEST_PAGE_BYTES,
+            )
+            .await?;
         let rows: Vec<MergeRequest> =
-            serde_json::from_slice(&bytes).map_err(|_| AppError::Unavailable)?;
+            tokio::task::spawn_blocking(move || serde_json::from_reader(body))
+                .await
+                .map_err(|_| AppError::Unavailable)?
+                .map_err(|_| AppError::Unavailable)?;
+        if let Some(lease) = &self.lease {
+            lease.check().await?;
+        }
         if rows.len() > 100 || rows.iter().any(|row| row.project_id != project.get()) {
             return Err(AppError::Unavailable);
         }
-        let more = match metadata.get("x-next-page") {
-            None => false,
-            Some(value) if value.is_empty() => false,
-            Some(value) => {
-                if value.to_str().ok().and_then(|value| value.parse().ok()) != Some(page + 1) {
-                    return Err(AppError::Unavailable);
-                }
-                true
-            }
-        };
         if more && rows.is_empty() {
             return Err(AppError::Unavailable);
         }
@@ -399,6 +407,21 @@ impl GitLab {
             .bounded_response(url, self.headers.clone(), max, self.lease.as_ref())
             .await
     }
+}
+
+fn next_page(headers: &header::HeaderMap, page: u32) -> Result<Option<u32>, AppError> {
+    let Some(value) = headers.get("x-next-page").filter(|value| !value.is_empty()) else {
+        return Ok(None);
+    };
+    let next: u32 = value
+        .to_str()
+        .ok()
+        .and_then(|raw| raw.parse().ok())
+        .ok_or(AppError::Unavailable)?;
+    if page.checked_add(1) != Some(next) {
+        return Err(AppError::Unavailable);
+    }
+    Ok(Some(next))
 }
 
 fn merge_request_state(state: &str) -> Result<MergeRequestState, AppError> {

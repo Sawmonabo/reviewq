@@ -1,7 +1,6 @@
 use std::fmt::Write as _;
 use std::sync::Arc;
 
-use reqwest::header::HeaderMap;
 use reviewq_app::access::{AppError, AppFuture};
 use reviewq_app::changes::{
     ApprovalView, ChangeSource, Discussion, PatchBytes, PatchFile, PatchRevision, SourcePage,
@@ -11,7 +10,7 @@ use serde::Deserialize;
 use serde::de::DeserializeOwned;
 use sha2::{Digest, Sha256};
 
-use super::GitLab;
+use super::{GitLab, next_page};
 
 mod approvals;
 mod discussions;
@@ -22,6 +21,7 @@ pub(super) use lease::Leases;
 use lease::{IndexKey, Key};
 
 const MAX_PATCH_FILES: u32 = 10_000;
+const MAX_DIFF_RESPONSE: usize = 32 * 1024 * 1024;
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
 pub(super) struct DiffRefs {
@@ -243,7 +243,13 @@ impl GitLab {
                 .get(url, self.headers.clone(), self.lease.as_ref())
                 .await?;
             let next = next_page(response.headers(), page)?;
-            let body = wire::receive(response, &self.patches.profile).await?;
+            let body = response
+                .bounded_reader(
+                    &self.patches.profile,
+                    lease::MEMORY_LIMIT,
+                    MAX_DIFF_RESPONSE,
+                )
+                .await?;
             if let Some(lease) = &self.lease {
                 lease.check().await?;
             }
@@ -279,21 +285,6 @@ impl GitLab {
         }
         Ok(url)
     }
-}
-
-fn next_page(headers: &HeaderMap, page: u32) -> Result<Option<u32>, AppError> {
-    let Some(value) = headers.get("x-next-page").filter(|value| !value.is_empty()) else {
-        return Ok(None);
-    };
-    let next: u32 = value
-        .to_str()
-        .ok()
-        .and_then(|raw| raw.parse().ok())
-        .ok_or(AppError::Unavailable)?;
-    if page.checked_add(1) != Some(next) {
-        return Err(AppError::Unavailable);
-    }
-    Ok(Some(next))
 }
 
 fn ordinal(file: &str) -> Option<u32> {
