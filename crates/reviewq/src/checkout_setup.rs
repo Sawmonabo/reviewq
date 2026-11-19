@@ -154,6 +154,7 @@ async fn prepare(
         &URL_SAFE_NO_PAD.encode(key),
         claude.as_deref(),
         previous,
+        &projection::skill(profile)?,
     )
     .await?;
     Ok(Prepared {

@@ -24,11 +24,19 @@ struct Envelope<T> {
 #[derive(Deserialize)]
 struct Ready {
     instance: String,
-    ready: bool,
     browser: String,
     native: String,
     #[serde(flatten)]
+    state: Readiness,
+    #[serde(flatten)]
     identity: ServiceIdentity,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct Readiness {
+    pub(crate) ready: bool,
+    pub(crate) recovery_complete: bool,
 }
 
 #[derive(Deserialize)]
@@ -357,13 +365,16 @@ pub(crate) async fn signed_limit(
 }
 
 pub(crate) fn verify_ready(endpoint: &ServiceEndpoint, bytes: &[u8]) -> Result<(), Failure> {
-    if !verify_service(endpoint, bytes)? {
+    if !verify_service(endpoint, bytes)?.ready {
         return Err("service instance is still starting".into());
     }
     Ok(())
 }
 
-pub(crate) fn verify_service(endpoint: &ServiceEndpoint, bytes: &[u8]) -> Result<bool, Failure> {
+pub(crate) fn verify_service(
+    endpoint: &ServiceEndpoint,
+    bytes: &[u8],
+) -> Result<Readiness, Failure> {
     let ready = serde_json::from_slice::<Envelope<Ready>>(bytes)?.data;
     if ready.instance != endpoint.instance()
         || ready.identity != *endpoint.identity()
@@ -372,7 +383,7 @@ pub(crate) fn verify_service(endpoint: &ServiceEndpoint, bytes: &[u8]) -> Result
     {
         return Err("service response identifies a different instance".into());
     }
-    Ok(ready.ready)
+    Ok(ready.state)
 }
 
 pub(crate) async fn bounded(

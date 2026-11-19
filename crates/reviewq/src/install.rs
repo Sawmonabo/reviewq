@@ -15,8 +15,9 @@ pub(crate) mod paths;
 mod windows;
 use crate::{runtime_settings, service};
 use bundle::Bundle;
-pub(crate) use managed::Managed;
+pub(crate) use managed::{Managed, StartupPermission};
 use paths::Paths;
+use service::StartupCheck;
 
 pub(crate) type Failure = Box<dyn std::error::Error + Send + Sync>;
 
@@ -51,7 +52,7 @@ impl Release {
     }
 }
 
-#[derive(Deserialize, Serialize)]
+#[derive(Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 struct Activation {
     next: Release,
@@ -59,6 +60,15 @@ struct Activation {
     was_enabled: bool,
     was_running: bool,
     store_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    recovery: Option<RecoveryApproval>,
+}
+
+#[derive(Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct RecoveryApproval {
+    release_id: String,
+    store_id: String,
 }
 
 #[derive(Default, Deserialize, Serialize)]
@@ -69,6 +79,8 @@ struct Inventory {
     pending: Option<Activation>,
     known: Vec<String>,
     removing: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    removal_stage: Option<String>,
 }
 
 fn journal(paths: &Paths) -> PathBuf {
@@ -108,6 +120,26 @@ pub(crate) fn verify_unit(paths: &Paths) -> Result<(), Failure> {
         return Ok(());
     }
     Err(paths::conflict(&paths.unit))
+}
+
+pub(crate) fn checkout_skill(profile: &Path) -> Result<Option<PathBuf>, Failure> {
+    if !crate::runtime::profile(None)
+        .as_ref()
+        .is_ok_and(|installed| installed == profile)
+    {
+        return Ok(None);
+    }
+    let paths = Paths::resolve()?;
+    let Some(release) = installed(&paths)? else {
+        return Ok(None);
+    };
+    files::verify_current(&paths, &release)?;
+    Ok(Some(
+        profile
+            .join("releases")
+            .join(release.id)
+            .join("hosts/shared/skills/reviewq-manage/SKILL.md"),
+    ))
 }
 
 pub(crate) async fn install(bundle_path: &Path) -> Result<(), Failure> {
@@ -176,9 +208,14 @@ pub(crate) async fn install(bundle_path: &Path) -> Result<(), Failure> {
             let store_id = if was_running {
                 let previous = old.ok_or("Preserved an unrelated running user service.")?;
                 Some(
-                    service::ready(&paths, &previous.binary, previous.store, true)
-                        .await?
-                        .store_id,
+                    service::ready(
+                        &paths,
+                        &previous.binary,
+                        previous.store,
+                        StartupCheck::Operational,
+                    )
+                    .await?
+                    .store_id,
                 )
             } else {
                 probe(&paths, next.store).await?
@@ -196,6 +233,7 @@ pub(crate) async fn install(bundle_path: &Path) -> Result<(), Failure> {
                 was_enabled,
                 was_running,
                 store_id,
+                recovery: None,
             });
             paths::write_json(&journal(&paths), &inventory)?;
             inventory
@@ -204,20 +242,34 @@ pub(crate) async fn install(bundle_path: &Path) -> Result<(), Failure> {
                 .ok_or("Activation was not recorded.")?
         }
     };
-    let expected_store = pending.store_id.clone();
-    let old = inventory.active.as_ref();
+    let pending = pending.clone();
+    let old = inventory.active.clone();
+    let old = old.as_ref();
     files::preflight(&paths, old, Some(&next))?;
     bridge::check(&paths, true)?;
     claude::preflight(&paths, old, &next, true).await?;
     files::stage(&paths, &bundle, &pending.staging)?;
-    let result = activate(&paths, old, &next, &unit, expected_store.as_deref()).await;
+    let result = async {
+        let identity = activate(&paths, old, &next, &unit, pending.store_id.as_deref()).await?;
+        authorize_recovery(&paths, &next, &identity, &mut inventory).await
+    }
+    .await;
     let identity = match result {
         Ok(identity) => identity,
         Err(error) => {
             if let Some(previous) = old {
-                rollback(&paths, previous, pending).await?;
+                rollback(&paths, previous, &pending, &mut inventory).await?;
                 inventory.pending = None;
                 paths::write_json(&journal(&paths), &inventory)?;
+                if pending.was_running {
+                    service::ready(
+                        &paths,
+                        &previous.binary,
+                        previous.store,
+                        StartupCheck::Operational,
+                    )
+                    .await?;
+                }
             }
             return Err(error);
         }
@@ -226,7 +278,8 @@ pub(crate) async fn install(bundle_path: &Path) -> Result<(), Failure> {
     inventory.store_id = Some(identity.store_id.clone());
     inventory.pending = None;
     paths::write_json(&journal(&paths), &inventory)?;
-    let active = service::ready(&paths, &next.binary, next.store, true).await?;
+    let active =
+        service::ready(&paths, &next.binary, next.store, StartupCheck::Operational).await?;
     if active.store_id != identity.store_id {
         return Err("A different store started after installation was committed.".into());
     }
@@ -250,6 +303,34 @@ pub(crate) async fn install(bundle_path: &Path) -> Result<(), Failure> {
         println!("Use /reload-plugins in open Claude Code sessions to load this release.");
     }
     Ok(())
+}
+
+async fn authorize_recovery(
+    paths: &Paths,
+    release: &Release,
+    identity: &reviewq_transport::ServiceIdentity,
+    inventory: &mut Inventory,
+) -> Result<reviewq_transport::ServiceIdentity, Failure> {
+    let pending = inventory
+        .pending
+        .as_mut()
+        .ok_or("The activation journal is missing.")?;
+    pending.recovery = Some(RecoveryApproval {
+        release_id: release.id.clone(),
+        store_id: identity.store_id.clone(),
+    });
+    paths::write_json(&journal(paths), inventory)?;
+    let recovered = service::ready(
+        paths,
+        &release.binary,
+        release.store,
+        StartupCheck::Recovered,
+    )
+    .await?;
+    if recovered.store_id != identity.store_id {
+        return Err("The service completed recovery against a different store.".into());
+    }
+    Ok(recovered)
 }
 
 async fn activate(
@@ -278,14 +359,19 @@ async fn activate(
     service::unit_location(paths).await?;
     service::switch("enable").await?;
     service::switch("start").await?;
-    let identity = service::ready(paths, &next.binary, next.store, false).await?;
+    let identity = service::ready(paths, &next.binary, next.store, StartupCheck::Identity).await?;
     if stopped_store.is_some_and(|id| id != identity.store_id) {
         return Err("The started service did not retain the verified store.".into());
     }
     Ok(identity)
 }
 
-async fn rollback(paths: &Paths, previous: &Release, pending: &Activation) -> Result<(), Failure> {
+async fn rollback(
+    paths: &Paths,
+    previous: &Release,
+    pending: &Activation,
+    inventory: &mut Inventory,
+) -> Result<(), Failure> {
     files::preflight(paths, Some(previous), Some(&pending.next))?;
     let bundle = Bundle::read(&paths.profile.join("releases").join(&previous.id))?;
     if bundle.id != previous.id {
@@ -328,10 +414,17 @@ async fn rollback(paths: &Paths, previous: &Release, pending: &Activation) -> Re
     .await?;
     if pending.was_running {
         service::switch("start").await?;
-        let identity = service::ready(paths, &previous.binary, previous.store, false).await?;
+        let identity = service::ready(
+            paths,
+            &previous.binary,
+            previous.store,
+            StartupCheck::Identity,
+        )
+        .await?;
         if identity.store_id != expected_store {
             return Err("The previous service opened a different store.".into());
         }
+        authorize_recovery(paths, previous, &identity, inventory).await?;
     }
     Ok(())
 }
@@ -355,8 +448,11 @@ pub(crate) async fn uninstall() -> Result<(), Failure> {
     if files::unit_digest(&paths.unit)?.is_some_and(|digest| digest != active.unit) {
         return Err(paths::conflict(&paths.unit));
     }
-    inventory.removing = true;
-    paths::write_json(&journal(&paths), &inventory)?;
+    if inventory.removal_stage.is_none() {
+        inventory.removal_stage = Some(files::reserve_removal(&paths)?);
+        inventory.removing = true;
+        paths::write_json(&journal(&paths), &inventory)?;
+    }
     if service::state().await?.1 {
         service::switch("stop").await?;
     }
@@ -383,7 +479,11 @@ pub(crate) async fn uninstall() -> Result<(), Failure> {
         windows.remove().await?;
     }
     bridge::remove(&paths)?;
-    let conflicts = files::remove(&paths, active, &inventory.known)?;
+    let removal = inventory
+        .removal_stage
+        .as_deref()
+        .ok_or("Missing removal stage.")?;
+    let conflicts = files::remove(&paths, active, &inventory.known, removal)?;
     service::reload().await?;
     if !conflicts.is_empty() {
         return Err(format!(

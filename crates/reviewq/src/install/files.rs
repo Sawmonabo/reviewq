@@ -107,27 +107,35 @@ fn allowed_link(path: &Path, allowed: impl Iterator<Item = PathBuf>) -> Result<(
 }
 
 pub(super) fn reserve_stage(paths: &Paths) -> Result<String, Failure> {
+    reserve_operation(paths, ".stage-")
+}
+
+pub(super) fn reserve_removal(paths: &Paths) -> Result<String, Failure> {
+    reserve_operation(paths, ".remove-")
+}
+
+fn reserve_operation(paths: &Paths, prefix: &str) -> Result<String, Failure> {
     let mut random = [0; 16];
     getrandom::fill(&mut random).map_err(|_| "Could not reserve release staging.")?;
     let id = bundle::hex(&random);
-    let path = stage_path(paths, &id)?;
+    let path = operation_path(paths, prefix, &id)?;
     if paths::exists(&path)? {
         return Err(paths::conflict(&path));
     }
     Ok(id)
 }
 
-fn stage_path(paths: &Paths, id: &str) -> Result<PathBuf, Failure> {
+fn operation_path(paths: &Paths, prefix: &str, id: &str) -> Result<PathBuf, Failure> {
     if id.len() != 32 || !id.bytes().all(|ch| ch.is_ascii_hexdigit()) {
         return Err("Invalid release staging identity.".into());
     }
-    Ok(paths.profile.join("releases").join(format!(".stage-{id}")))
+    Ok(paths.profile.join("releases").join(format!("{prefix}{id}")))
 }
 
 pub(super) fn stage(paths: &Paths, bundle: &Bundle, id: &str) -> Result<(), Failure> {
     let releases = paths.profile.join("releases");
     let destination = releases.join(&bundle.id);
-    let stage = stage_path(paths, id)?;
+    let stage = operation_path(paths, ".stage-", id)?;
     if paths::exists(&stage)? {
         paths::ensure_dir(&stage, true)?;
         fs::remove_dir_all(&stage)?;
@@ -276,6 +284,7 @@ pub(super) fn remove(
     paths: &Paths,
     release: &Release,
     known: &[String],
+    operation: &str,
 ) -> Result<Vec<PathBuf>, Failure> {
     let mut conflicts = Vec::new();
     if let Some(skill) = release.skill.as_deref()
@@ -315,7 +324,7 @@ pub(super) fn remove(
                 owned_assets.insert(copy, (entry.size, entry.sha256.clone()));
             }
         }
-        owned_releases.push(directory);
+        owned_releases.push((id, directory));
     }
     for (path, (size, digest)) in owned_assets {
         let valid = (|| -> Result<bool, Failure> {
@@ -333,11 +342,29 @@ pub(super) fn remove(
     if !conflicts.is_empty() {
         return Ok(conflicts);
     }
-    remove_link(&pointer, &release_target(release))?;
-    for directory in owned_releases {
-        fs::remove_dir_all(&directory)?;
-        paths::sync(paths::parent(&directory)?)?;
+    let tombstones = operation_path(paths, ".remove-", operation)?;
+    paths::ensure_dir(&tombstones, true)?;
+    for (id, directory) in owned_releases.iter().filter(|(id, _)| *id != &release.id) {
+        quarantine(&tombstones, id, directory)?;
     }
+    if let Some((id, directory)) = owned_releases.iter().find(|(id, _)| *id == &release.id) {
+        quarantine(&tombstones, id, directory)?;
+    }
+    fs::remove_dir_all(&tombstones)?;
+    paths::sync(paths::parent(&tombstones)?)?;
+    remove_link(&pointer, &release_target(release))?;
     remove_link(&paths.launcher, &launcher_target(paths))?;
     Ok(conflicts)
+}
+
+fn quarantine(tombstones: &Path, id: &str, source: &Path) -> Result<(), Failure> {
+    rustix::fs::renameat_with(
+        rustix::fs::CWD,
+        source,
+        rustix::fs::CWD,
+        tombstones.join(id),
+        rustix::fs::RenameFlags::NOREPLACE,
+    )?;
+    paths::sync(tombstones)?;
+    paths::sync(paths::parent(source)?)
 }

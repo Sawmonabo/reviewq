@@ -25,7 +25,7 @@ use reviewq_providers::{
     SourceAccounts, SourceNetwork, Terminal, TerminalProvider, Workflows,
 };
 use reviewq_store::SqliteStore;
-use reviewq_transport::{ServiceEndpoint, ServiceIdentity, WorkflowIntegration};
+use reviewq_transport::{ServiceEndpoint, ServiceIdentity, StartupState, WorkflowIntegration};
 use sha2::{Digest, Sha256};
 use socket2::{Domain, Protocol, Socket, Type};
 use tokio::net::TcpListener;
@@ -299,7 +299,7 @@ pub(crate) async fn serve(profile: PathBuf, options: Serve) -> Result<(), Failur
         distribution,
     ));
     let (shutdown, wait) = watch::channel(false);
-    let (activate, operational) = watch::channel(false);
+    let (activate, startup) = watch::channel(StartupState::Verifying);
     let windows = managed
         .as_ref()
         .map(install::Managed::windows_sender)
@@ -331,7 +331,7 @@ pub(crate) async fn serve(profile: PathBuf, options: Serve) -> Result<(), Failur
             retained_assets: retained_assets.as_deref(),
             commits: store.subscribe(),
             shutdown: wait.clone(),
-            operational,
+            startup,
         },
     );
     let mut terminate = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
@@ -354,8 +354,10 @@ pub(crate) async fn serve(profile: PathBuf, options: Serve) -> Result<(), Failur
     }
     let desktop_enabled = !options.validation && settings.desktop_notifications;
     let start = async {
-        if let Some(managed) = managed
-            && !managed.wait(&store_id, wait.clone()).await?
+        if let Some(managed) = &managed
+            && !managed
+                .wait(&store_id, install::StartupPermission::Recover, wait.clone())
+                .await?
         {
             return Ok(false);
         }
@@ -367,6 +369,18 @@ pub(crate) async fn serve(profile: PathBuf, options: Serve) -> Result<(), Failur
         }
         if desktop_enabled {
             store.recover_desktop_claims().await?;
+        }
+        activate.send_replace(StartupState::Recovered);
+        if let Some(managed) = &managed
+            && !managed
+                .wait(
+                    &store_id,
+                    install::StartupPermission::Dispatch,
+                    wait.clone(),
+                )
+                .await?
+        {
+            return Ok(false);
         }
         Ok::<_, Failure>(!*wait.borrow())
     }
@@ -406,7 +420,7 @@ pub(crate) async fn serve(profile: PathBuf, options: Serve) -> Result<(), Failur
                 Err(error) => eprintln!("ReviewQ desktop notifications unavailable ({error})."),
             }
         }
-        activate.send_replace(true);
+        activate.send_replace(StartupState::Operational);
         println!("ReviewQ http://{browser}/");
     } else {
         shutdown.send_replace(true);

@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
@@ -7,7 +8,7 @@ use sha2::{Digest, Sha256};
 use toml_edit::{DocumentMut, Item, Table, value};
 
 use super::Failure;
-use super::files::{Changes, Edit, Existing, read};
+use super::files::{Changes, Edit, Existing, read, read_limited};
 use super::git::{self, Checkout};
 
 const MARKER: &str = "# Managed by ReviewQ";
@@ -277,6 +278,7 @@ impl Plan {
         bearer: &str,
         claude_file: Option<&Path>,
         previous: Inventory,
+        skill: &[u8],
     ) -> Result<Self, Failure> {
         let mut current = Inventory {
             urls: BTreeSet::from([url.to_string()]),
@@ -300,7 +302,13 @@ impl Plan {
                 .ok_or_else(|| conflict(&file))?;
             current.entries.insert(owned);
             edits.push(Edit::new(file, before, bytes, true));
-            add_skill(root.join(CODEX[1]), &previous, &mut current, &mut edits)?;
+            add_skill(
+                root.join(CODEX[1]),
+                &previous,
+                &mut current,
+                &mut edits,
+                skill,
+            )?;
         }
         if let Some(file) = claude_file {
             let file = file.to_owned();
@@ -325,6 +333,7 @@ impl Plan {
                 &previous,
                 &mut current,
                 &mut edits,
+                skill,
             )?;
         }
         for owned in previous
@@ -428,20 +437,32 @@ fn exclusion(
     Ok(Some(Edit::new(file, before, bytes, false)))
 }
 
+pub(super) fn skill(profile: &Path) -> Result<Cow<'static, [u8]>, Failure> {
+    let Some(path) = crate::install::checkout_skill(profile)? else {
+        return Ok(Cow::Borrowed(SKILL));
+    };
+    let owned = read_limited(&path, 32 * 1024)?.ok_or_else(|| conflict(&path))?;
+    if owned.bytes != SKILL {
+        return Err(conflict(&path));
+    }
+    Ok(Cow::Owned(owned.bytes))
+}
+
 fn add_skill(
     file: PathBuf,
     previous: &Inventory,
     current: &mut Inventory,
     edits: &mut Vec<Edit>,
+    skill: &[u8],
 ) -> Result<(), Failure> {
     let before = read(&file)?;
     let owned = previous
         .entries
         .iter()
         .find(|entry| matches!(entry, Owned::Skill { file: path, .. } if *path == file));
-    let digest: [u8; 32] = Sha256::digest(SKILL).into();
+    let digest: [u8; 32] = Sha256::digest(skill).into();
     if let Some(existing) = &before {
-        if existing.bytes == SKILL {
+        if existing.bytes == skill {
             if owned.is_some() {
                 current.entries.insert(Owned::Skill { file, digest });
             }
@@ -458,7 +479,7 @@ fn add_skill(
         file: file.clone(),
         digest,
     });
-    edits.push(Edit::new(file, before, SKILL.to_vec(), false));
+    edits.push(Edit::new(file, before, skill.to_vec(), false));
     Ok(())
 }
 

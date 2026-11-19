@@ -11,6 +11,12 @@ pub(crate) struct Managed {
     expected_store: Option<String>,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum StartupPermission {
+    Recover,
+    Dispatch,
+}
+
 impl Managed {
     pub(crate) fn windows_sender(
         &self,
@@ -36,7 +42,15 @@ impl Managed {
             .cloned()
             .ok_or("The managed executable does not match the active or pending release.")?;
         let expected_store = pending
-            .and_then(|operation| operation.store_id.clone())
+            .and_then(|operation| {
+                operation.store_id.clone().or_else(|| {
+                    operation
+                        .recovery
+                        .as_ref()
+                        .filter(|approval| approval.release_id == release.id)
+                        .map(|approval| approval.store_id.clone())
+                })
+            })
             .or(inventory.store_id);
         if (pending.is_none() || expected_store.is_some())
             && probe(&paths, release.store).await? != expected_store
@@ -62,6 +76,7 @@ impl Managed {
     pub(crate) async fn wait(
         &self,
         id: &str,
+        permission: StartupPermission,
         mut shutdown: watch::Receiver<bool>,
     ) -> Result<bool, Failure> {
         loop {
@@ -72,7 +87,15 @@ impl Managed {
             if state.removing {
                 return Ok(false);
             }
-            if state.pending.is_none() {
+            if let Some(pending) = state.pending {
+                if permission == StartupPermission::Recover
+                    && pending.recovery.as_ref().is_some_and(|approval| {
+                        approval.release_id == self.release.id && approval.store_id == id
+                    })
+                {
+                    return Ok(true);
+                }
+            } else {
                 if state.active.as_ref() != Some(&self.release)
                     || state.store_id.as_deref() != Some(id)
                 {

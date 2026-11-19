@@ -156,7 +156,7 @@ pub(super) struct Entry {
     sends_allowed: bool,
     commits: watch::Receiver<EventCursor>,
     shutdown: watch::Receiver<bool>,
-    operational: watch::Receiver<bool>,
+    startup: watch::Receiver<StartupState>,
     event_slots: Arc<Semaphore>,
     auth: Auth,
     checkpoints: Checkpoints,
@@ -179,6 +179,7 @@ struct Status<'a> {
     #[serde(flatten)]
     identity: &'a ServiceIdentity,
     ready: bool,
+    recovery_complete: bool,
     settings_revision: reviewq_protocol::RevisionDto,
     configured_projects: usize,
     total_mrs: u64,
@@ -189,6 +190,13 @@ struct Status<'a> {
 #[serde(rename_all = "camelCase")]
 struct SessionResult {
     csrf_token: String,
+}
+
+#[derive(Clone, Copy, Eq, PartialEq)]
+pub enum StartupState {
+    Verifying,
+    Recovered,
+    Operational,
 }
 
 /// Runtime-owned listener identity and commit/shutdown signals.
@@ -209,7 +217,7 @@ pub struct ServiceRuntime<'a> {
     pub terminal: Arc<dyn NativeTerminal>,
     pub commits: watch::Receiver<EventCursor>,
     pub shutdown: watch::Receiver<bool>,
-    pub operational: watch::Receiver<bool>,
+    pub startup: watch::Receiver<StartupState>,
 }
 
 /// Mounts production assets and the private versioned HTTP routes.
@@ -241,7 +249,7 @@ pub fn router(
         sends_allowed: runtime.sends_allowed,
         commits: runtime.commits,
         shutdown: runtime.shutdown,
-        operational: runtime.operational.clone(),
+        startup: runtime.startup.clone(),
         event_slots: Arc::new(Semaphore::new(32)),
         auth: Auth::new(runtime.endpoint),
         checkpoints: Checkpoints::default(),
@@ -251,7 +259,7 @@ pub fn router(
         tokio::spawn(poll_source(
             entry.clone(),
             interval,
-            runtime.operational.clone(),
+            runtime.startup.clone(),
         ));
     }
     let api = Router::new()
@@ -366,18 +374,18 @@ pub fn router(
         ))
         .layer(middleware::from_fn_with_state(entry.clone(), guard))
         .layer(middleware::from_fn_with_state(
-            runtime.operational,
+            runtime.startup,
             activation_guard,
         ))
         .with_state(entry)
 }
 
 async fn activation_guard(
-    State(operational): State<watch::Receiver<bool>>,
+    State(startup): State<watch::Receiver<StartupState>>,
     request: Request,
     next: Next,
 ) -> Response {
-    if !*operational.borrow()
+    if *startup.borrow() != StartupState::Operational
         && (request.method() != axum::http::Method::GET || request.uri().path() != "/api/v1/status")
     {
         return (
@@ -393,12 +401,12 @@ async fn activation_guard(
 async fn poll_source(
     entry: Arc<Entry>,
     interval: Duration,
-    mut operational: watch::Receiver<bool>,
+    mut startup: watch::Receiver<StartupState>,
 ) {
     let mut shutdown = entry.shutdown.clone();
     tokio::select! {
         _ = shutdown.wait_for(|stop| *stop) => return,
-        result = operational.wait_for(|ready| *ready) => {
+        result = startup.wait_for(|state| *state == StartupState::Operational) => {
             if result.is_err() { return; }
         },
     }
@@ -454,6 +462,7 @@ async fn status(
         );
     }
     let endpoint = &entry.auth.endpoint;
+    let startup = *entry.startup.borrow();
     let response = Success {
         data: Status {
             instance: endpoint.instance(),
@@ -461,7 +470,8 @@ async fn status(
             browser: endpoint.browser().to_string(),
             native: endpoint.native().to_string(),
             identity: endpoint.identity(),
-            ready: *entry.operational.borrow(),
+            ready: startup == StartupState::Operational,
+            recovery_complete: startup != StartupState::Verifying,
             settings_revision: reviewq_protocol::RevisionDto::new(queue.value.settings.get())
                 .ok_or(AppError::Internal)?,
             configured_projects: queue.value.projects,
