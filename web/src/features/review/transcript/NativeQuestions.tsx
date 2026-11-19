@@ -95,8 +95,8 @@ function QuestionForm({
   const answered = status === "answered";
   const reviewable = answered ? form.questions.filter((question) => !question.isSecret) : [];
   const includesSecret = form.questions.some((question) => question.isSecret);
-  const supported = form.questions.length > 0 && (!includesSecret || form.blocking);
-  const open = status === "pending" && supported;
+  const supported = form.questions.length > 0 && (form.mode === "native" || !includesSecret);
+  const open = status === "pending" && form.answerable;
   const draftName = `Question · ${label}`;
   const prefix = [target.runId, target.sessionKey, form.requestId, form.turnId, form.itemId];
   const title = {
@@ -145,6 +145,7 @@ function QuestionForm({
         submissionId: id,
         answers: Object.fromEntries(selected.map(([key, value]) => [key, { answers: [value] }])),
       });
+      if (result.mode !== form.mode) throw new Error("The selected question changed.");
       setOutcome({ state: result.status, original: form.status });
       for (const key of locked) store.finish(key, result.status === "answered");
       if (result.status === "pending") submission.current = undefined;
@@ -236,10 +237,10 @@ function QuestionForm({
             ))}
           </details>
         )}
-        {status === "pending" && !supported && (
+        {status === "pending" && !open && (
           <div className="actions">
             <p className="meta">
-              {includesSecret
+              {form.mode === "async" && includesSecret
                 ? "Enter this asynchronous secret answer in the native session."
                 : "Use the native controls for this request."}
             </p>

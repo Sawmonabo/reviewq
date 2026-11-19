@@ -1,7 +1,7 @@
 import { useRef, useState } from "react";
 import type { RunDetail } from "../../../api/generated/contracts";
 import type { ResultSummary } from "../../../api/generated/contracts/followups";
-import { readFollowupAssessments, readFollowupResults } from "../../../api/review";
+import { readFollowupBatchAssessments, readFollowupResults } from "../../../api/review";
 import { Pagination } from "../../../components/Pagination";
 import { Loading, Notice } from "../../../components/PanelState";
 import { useResource } from "../../../hooks/useResource";
@@ -137,7 +137,7 @@ function Assessments({
   const content = useRef<HTMLDivElement>(null);
   const assessments = useResource(
     `assessments:${reviewId}:${batch.batchId}:${trail.at(-1) ?? ""}`,
-    (signal) => readFollowupAssessments(reviewId, batch.batchId, trail.at(-1), signal),
+    (signal) => readFollowupBatchAssessments(reviewId, batch.batchId, trail.at(-1), signal),
   );
   const data = assessments.data;
   const cursor = trail.at(-1);
@@ -199,9 +199,7 @@ function Assessments({
       )}
       {assessments.error && <Notice retry={assessments.retry}>{assessments.error}</Notice>}
       {assessments.pending && <Loading label="Reading exact follow-up assessments…" />}
-      {data && !data.items.length && (
-        <p className="meta">No unacknowledged assessments on this page.</p>
-      )}
+      {data && !data.items.length && <p className="meta">No assessments for this thread check.</p>}
       {data && (
         <div className="stack" ref={content}>
           {data.items.map((item) => (
@@ -215,7 +213,6 @@ function Assessments({
               <p>{item.reason}</p>
               <p className="meta">
                 {readable(item.nextAction)} · <code>{item.discussionId}</code>
-                {item.batchId !== batch.batchId && ` · Earlier batch ${item.batchId}`}
               </p>
             </article>
           ))}
