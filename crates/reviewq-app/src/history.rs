@@ -7,6 +7,7 @@ use reviewq_domain::session::{AbsolutePath, NativeBinding, SessionTarget};
 
 use crate::access::{Actor, AppFuture};
 use crate::events::Snapshot;
+use crate::hosts::{ObservedAsyncQuestion, QuestionForm};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct HistorySession {
@@ -85,6 +86,13 @@ pub trait NativeHistoryReader: Send + Sync {
 
     fn final_response(&self, session: HistorySession)
     -> AppFuture<'_, Option<NativeFinalResponse>>;
+
+    fn async_questions(
+        &self,
+        session: HistorySession,
+        known: Vec<ObservedAsyncQuestion>,
+        request: Option<String>,
+    ) -> AppFuture<'_, Option<Vec<QuestionForm>>>;
 
     fn watch(
         &self,

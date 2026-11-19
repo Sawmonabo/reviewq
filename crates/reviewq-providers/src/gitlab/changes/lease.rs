@@ -39,7 +39,7 @@ struct Lease {
 }
 
 pub(in crate::gitlab) struct Leases {
-    pub(super) profile: PathBuf,
+    pub(in crate::gitlab) profile: PathBuf,
     entries: Arc<Mutex<VecDeque<Lease>>>,
     scans: Mutex<Vec<(IndexKey, Weak<IndexSlot>)>>,
 }

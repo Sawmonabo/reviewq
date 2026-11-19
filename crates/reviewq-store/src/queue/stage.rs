@@ -1,7 +1,7 @@
 use std::collections::BTreeSet;
 
 use reviewq_app::events::ResourceKey;
-use reviewq_app::sources::WorkflowSnapshot;
+use reviewq_app::sources::{DiscussionNoteTime, WorkflowSnapshot};
 use reviewq_domain::identity::{GitSha, ReviewId, Revision};
 use reviewq_domain::review_stage::{WorkspaceEvidence, classify_review, queue_state};
 use rusqlite::functions::FunctionFlags;
@@ -81,7 +81,7 @@ pub(crate) fn observe_source(
         source.discussions.iter().map(|thread| {
             (
                 thread.resolution,
-                thread.notes.iter().map(|note| note.author),
+                thread.notes.iter().map(DiscussionNoteTime::from),
             )
         }),
         reviewers,
@@ -101,9 +101,10 @@ pub(crate) struct ObservedComments {
     count: i64,
     total: i64,
     open: Option<i64>,
+    latest_at: Option<i64>,
 }
 
-pub(crate) fn count_discussions<A: IntoIterator<Item = u64>>(
+pub(crate) fn count_discussions<A: IntoIterator<Item = DiscussionNoteTime>>(
     threads: impl Iterator<Item = (reviewq_app::changes::DiscussionResolution, A)>,
     reviewers: &BTreeSet<u64>,
 ) -> ObservedComments {
@@ -112,16 +113,21 @@ pub(crate) fn count_discussions<A: IntoIterator<Item = u64>>(
         count: 0,
         total: 0,
         open: Some(0),
+        latest_at: None,
     };
-    for (resolution, authors) in threads {
-        let ours = authors
+    for (resolution, notes) in threads {
+        let mut ours = 0;
+        for note in notes
             .into_iter()
-            .filter(|author| reviewers.contains(author))
-            .count();
+            .filter(|note| reviewers.contains(&note.author))
+        {
+            ours += 1;
+            result.latest_at = result.latest_at.max(Some(note.created_at_ms));
+        }
         if ours == 0 {
             continue;
         }
-        result.count += ours as i64;
+        result.count += ours;
         result.total += 1;
         match resolution {
             DiscussionResolution::Unknown => result.open = None,
@@ -166,13 +172,20 @@ pub(crate) fn observe_signals(
         comments.map(|value| value.count), observed_at,
         comments.map(|value| value.total), comments.and_then(|value| value.open),
     ])?;
-    if changed != 0 {
-        advance_queue(&tx.sql)?;
-        tx.emit(&[
-            ResourceKey::Queue,
-            ResourceKey::Review(Some(review.clone())),
-        ])?;
-    } else {
+    let handoff_changed = comments
+        .map(|comments| {
+            observe_reviewer_activity(
+                &tx.sql,
+                review,
+                settings,
+                head,
+                observed_at,
+                comments.latest_at,
+            )
+        })
+        .transpose()?
+        .unwrap_or(false);
+    if changed == 0 {
         // A later, identical snapshot must still fence out older observations.
         tx.sql.execute(
             "UPDATE review_source_signals SET observed_at_ms=?2
@@ -180,5 +193,34 @@ pub(crate) fn observe_signals(
             params![review.as_str(), observed_at],
         )?;
     }
+    if changed != 0 || handoff_changed {
+        advance_queue(&tx.sql)?;
+        tx.emit(&[
+            ResourceKey::Queue,
+            ResourceKey::Review(Some(review.clone())),
+        ])?;
+    }
     Ok(())
+}
+
+fn observe_reviewer_activity(
+    db: &Connection,
+    review: &ReviewId,
+    settings: Revision,
+    head: &GitSha,
+    observed_at: i64,
+    latest_comment: Option<i64>,
+) -> Result<bool, StoreError> {
+    let changed = db.prepare_cached(
+        "INSERT INTO review_reviewer_activity VALUES(?1,?2,?3,?4,?5)
+         ON CONFLICT(review_id) DO UPDATE SET settings_revision=?2,source_sha=?3,
+            latest_comment_at_ms=?4,observed_at_ms=?5
+         WHERE observed_at_ms<=?5 AND (settings_revision,source_sha,latest_comment_at_ms) IS NOT (?2,?3,?4)",
+    )?.execute(params![review.as_str(), settings.as_sqlite_integer(), head.as_str(), latest_comment, observed_at])? != 0;
+    if !changed {
+        db.prepare_cached(
+            "UPDATE review_reviewer_activity SET observed_at_ms=?2 WHERE review_id=?1 AND observed_at_ms<?2",
+        )?.execute(params![review.as_str(), observed_at])?;
+    }
+    Ok(changed)
 }

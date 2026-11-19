@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use reviewq_domain::identity::{NativeInputId, NativeTurnId, ReceiptId, SubmissionId};
+use reviewq_domain::identity::{NativeInputId, NativeTurnId, ReceiptId, ReportHash, SubmissionId};
 use reviewq_domain::session::NativeIdentity;
 
 use crate::access::{Actor, ActorScope, AppError, AppFuture};
@@ -30,8 +30,15 @@ pub struct QuestionForm {
     pub turn: NativeTurnId,
     pub item: NativeInputId,
     pub blocking: bool,
+    pub mode: QuestionMode,
     pub state: QuestionStatus,
     pub questions: Vec<Question>,
+}
+
+#[derive(Clone, Copy, Eq, PartialEq)]
+pub enum QuestionMode {
+    Native,
+    Async,
 }
 
 #[derive(Clone, Copy, Eq, PartialEq)]
@@ -110,6 +117,12 @@ pub struct QuestionKey {
     pub anchor: QuestionAnchor,
 }
 
+pub struct ObservedAsyncQuestion {
+    pub key: QuestionKey,
+    pub line_sha256: ReportHash,
+    pub state: QuestionStatus,
+}
+
 pub struct QuestionReceipt {
     pub attempt_id: ReceiptId,
     pub key: QuestionKey,
@@ -130,6 +143,7 @@ impl QuestionReceipt {
             turn: self.key.turn.clone(),
             item: self.key.item.clone(),
             blocking: self.blocking,
+            mode: QuestionMode::Native,
             state: self.state,
             questions: Vec::new(),
         }
@@ -142,6 +156,13 @@ pub enum QuestionAdmission {
 }
 
 pub trait QuestionStore: HistoryStore + Send + Sync {
+    fn observed_async_questions(
+        &self,
+        actor: Actor,
+        session: HistorySession,
+        request: Option<String>,
+    ) -> AppFuture<'_, Vec<ObservedAsyncQuestion>>;
+
     fn question_attempts(
         &self,
         actor: Actor,

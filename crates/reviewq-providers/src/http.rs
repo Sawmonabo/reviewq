@@ -8,6 +8,9 @@ use reviewq_app::settings::SourceLease;
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use tokio::time::{Instant, sleep_until, timeout_at};
 
+mod buffer;
+pub(crate) use buffer::{ResponseReader, private_file};
+
 const DEADLINE: Duration = Duration::from_secs(30);
 const MAX_RETRIES: u8 = 2;
 const MAX_ORIGINS: usize = 64;

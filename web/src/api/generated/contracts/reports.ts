@@ -197,7 +197,7 @@ export interface ReportHistory {
 
 export interface ReportDelivery {
   reason: string | null;
-  receiptId: ResourceIdDto;
+  receiptId: ResourceIdDto | null;
   state: DeliveryState;
   [k: string]: unknown;
 }

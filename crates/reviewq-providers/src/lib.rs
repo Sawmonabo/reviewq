@@ -8,6 +8,7 @@ mod gitlab;
 mod history;
 mod http;
 mod jira;
+mod question_wire;
 mod report_file;
 mod settings;
 mod terminal;

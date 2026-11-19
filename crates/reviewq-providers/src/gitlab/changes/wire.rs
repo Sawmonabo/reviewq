@@ -1,23 +1,18 @@
 use std::fs::File;
-use std::io::{BufReader, Cursor, Read, Seek, SeekFrom, Write};
-use std::os::unix::fs::PermissionsExt;
+use std::io::{Read, Write};
 use std::path::Path;
-
-use reviewq_app::access::AppError;
-use reviewq_app::changes::{PatchAvailability, PatchFile, PatchMetrics};
-use sha2::{Digest, Sha256};
-use struson::reader::{JsonReader, JsonStreamReader};
-use tokio::io::AsyncWriteExt;
 
 use super::lease::{Body, MEMORY_LIMIT};
 use super::paths::matches_digest;
 use super::{file_lookup_key, hex, safe_path};
+use crate::http::{ResponseReader, private_file};
+use reviewq_app::access::AppError;
+use reviewq_app::changes::{PatchAvailability, PatchFile, PatchMetrics};
+use sha2::{Digest, Sha256};
+use struson::reader::{JsonReader, JsonStreamReader};
 
 mod stats;
 use stats::DiffStats;
-
-pub(super) const MAX_DIFF_RESPONSE: usize = 32 * 1024 * 1024;
-pub(super) type Wire = Box<dyn Read + Send>;
 
 #[derive(Default)]
 struct Diff {
@@ -36,56 +31,8 @@ pub(super) struct DiffPage {
     pub selected: Option<(PatchFile, Body)>,
 }
 
-pub(super) async fn receive(
-    mut response: crate::http::Response,
-    profile: &Path,
-) -> Result<Wire, AppError> {
-    let mut prefix = Vec::new();
-    let mut spool: Option<tokio::fs::File> = None;
-    let mut length = 0;
-    if response
-        .content_length()
-        .is_some_and(|value| value > MAX_DIFF_RESPONSE as u64)
-    {
-        return Err(AppError::PayloadTooLarge);
-    }
-    while let Some(chunk) = response.chunk().await? {
-        length += chunk.len();
-        if spool.is_none() && length > MEMORY_LIMIT {
-            let path = profile.to_owned();
-            let file = tokio::task::spawn_blocking(move || private_file(&path))
-                .await
-                .map_err(|_| AppError::Internal)?
-                .map_err(|_| AppError::Internal)?;
-            let mut file = tokio::fs::File::from_std(file);
-            file.write_all(&prefix)
-                .await
-                .map_err(|_| AppError::Internal)?;
-            prefix = Vec::new();
-            spool = Some(file);
-        }
-        if let Some(file) = &mut spool {
-            file.write_all(&chunk)
-                .await
-                .map_err(|_| AppError::Internal)?;
-        } else {
-            prefix.extend_from_slice(&chunk);
-        }
-    }
-    match spool {
-        None => Ok(Box::new(Cursor::new(prefix))),
-        Some(mut file) => {
-            file.flush().await.map_err(|_| AppError::Internal)?;
-            let mut file = file.into_std().await;
-            file.seek(SeekFrom::Start(0))
-                .map_err(|_| AppError::Internal)?;
-            Ok(Box::new(BufReader::new(file)))
-        }
-    }
-}
-
 pub(super) fn decode(
-    wire: Wire,
+    wire: ResponseReader,
     profile: &Path,
     first: u32,
     limit: u16,
@@ -119,7 +66,7 @@ pub(super) fn decode(
 }
 
 pub(super) fn find_file(
-    wire: Wire,
+    wire: ResponseReader,
     first: u32,
     limit: u16,
     digest: &str,
@@ -163,7 +110,7 @@ pub(super) fn find_file(
 }
 
 fn read_item(
-    reader: &mut JsonStreamReader<Wire>,
+    reader: &mut JsonStreamReader<ResponseReader>,
     profile: &Path,
     ordinal: u32,
     retain: bool,
@@ -226,7 +173,7 @@ fn read_item(
     ))
 }
 
-fn path(reader: &mut JsonStreamReader<Wire>) -> Result<String, AppError> {
+fn path(reader: &mut JsonStreamReader<ResponseReader>) -> Result<String, AppError> {
     let mut raw = Vec::new();
     reader
         .next_string_reader()
@@ -340,12 +287,6 @@ fn body(
 
 fn invalid<T>(_: T) -> AppError {
     AppError::Unavailable
-}
-
-fn private_file(profile: &Path) -> std::io::Result<File> {
-    let file = tempfile::tempfile_in(profile)?;
-    file.set_permissions(std::fs::Permissions::from_mode(0o600))?;
-    Ok(file)
 }
 
 #[cfg(test)]

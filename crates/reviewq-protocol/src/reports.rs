@@ -96,7 +96,7 @@ pub struct ReportSummary {
 #[serde(rename_all = "camelCase")]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct ReportDelivery {
-    pub receipt_id: ResourceIdDto,
+    pub receipt_id: Option<ResourceIdDto>,
     pub state: DeliveryState,
     pub reason: Option<String>,
 }

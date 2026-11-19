@@ -2732,11 +2732,17 @@
     },
     "Form": {
       "properties": {
+        "answerable": {
+          "type": "boolean"
+        },
         "blocking": {
           "type": "boolean"
         },
         "itemId": {
           "$ref": "#/definitions/HistoryEntryIdDto"
+        },
+        "mode": {
+          "$ref": "#/definitions/QuestionFormsResponseMode"
         },
         "questions": {
           "items": {
@@ -2767,6 +2773,8 @@
         "turnId",
         "itemId",
         "blocking",
+        "mode",
+        "answerable",
         "status",
         "questions"
       ],
@@ -5265,6 +5273,86 @@
       "title": "PatchFileIndexResponse",
       "type": "object"
     },
+    "PatchPath": {
+      "properties": {
+        "lookupKey": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/FileIdDto"
+            }
+          ],
+          "description": "A lookup hint accepted by the checked patch index, not a verified patch address."
+        },
+        "newPath": {
+          "type": "string"
+        },
+        "oldPath": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "oldPath",
+        "newPath",
+        "lookupKey"
+      ],
+      "type": "object"
+    },
+    "PatchPaths": {
+      "description": "A bounded compact list with a required nullable keyset continuation.",
+      "properties": {
+        "items": {
+          "items": {
+            "$ref": "#/definitions/PatchPath"
+          },
+          "maxItems": 100,
+          "type": "array"
+        },
+        "nextCursor": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/PageCursorDto"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "partial": {
+          "type": "boolean"
+        },
+        "reviewId": {
+          "$ref": "#/definitions/ReviewIdDto"
+        },
+        "revision": {
+          "$ref": "#/definitions/PatchRevisionDto"
+        }
+      },
+      "required": [
+        "reviewId",
+        "revision",
+        "partial",
+        "items",
+        "nextCursor"
+      ],
+      "type": "object"
+    },
+    "PatchPathsResponse": {
+      "description": "The resource and event head from the same authorized snapshot.",
+      "properties": {
+        "cursor": {
+          "$ref": "#/definitions/EventCursorDto"
+        },
+        "data": {
+          "$ref": "#/definitions/PatchPaths"
+        }
+      },
+      "required": [
+        "data",
+        "cursor"
+      ],
+      "title": "PatchPathsResponse",
+      "type": "object"
+    },
     "PatchRevisionDto": {
       "description": "An opaque review-bound patch revision, independent of its content hash.",
       "maxUtf8Bytes": 512,
@@ -5534,7 +5622,7 @@
           "$ref": "#/definitions/EventCursorDto"
         },
         "data": {
-          "$ref": "#/definitions/Form"
+          "$ref": "#/definitions/QuestionAnswerResponseForm"
         }
       },
       "required": [
@@ -5543,6 +5631,65 @@
       ],
       "title": "QuestionAnswerResponse",
       "type": "object"
+    },
+    "QuestionAnswerResponseForm": {
+      "properties": {
+        "answerable": {
+          "type": "boolean"
+        },
+        "blocking": {
+          "type": "boolean"
+        },
+        "itemId": {
+          "$ref": "#/definitions/HistoryEntryIdDto"
+        },
+        "mode": {
+          "$ref": "#/definitions/QuestionAnswerResponseMode"
+        },
+        "questions": {
+          "items": {
+            "$ref": "#/definitions/Question"
+          },
+          "type": "array"
+        },
+        "requestId": {
+          "$ref": "#/definitions/ResourceIdDto"
+        },
+        "runId": {
+          "$ref": "#/definitions/RunIdDto"
+        },
+        "sessionKey": {
+          "$ref": "#/definitions/SessionKeyDto"
+        },
+        "status": {
+          "$ref": "#/definitions/Status"
+        },
+        "turnId": {
+          "$ref": "#/definitions/HistoryTurnIdDto"
+        }
+      },
+      "required": [
+        "runId",
+        "sessionKey",
+        "requestId",
+        "turnId",
+        "itemId",
+        "blocking",
+        "mode",
+        "answerable",
+        "status",
+        "questions"
+      ],
+      "title": "QuestionAnswerResponseForm",
+      "type": "object"
+    },
+    "QuestionAnswerResponseMode": {
+      "enum": [
+        "native",
+        "async"
+      ],
+      "title": "QuestionAnswerResponseMode",
+      "type": "string"
     },
     "QuestionFormsResponse": {
       "description": "The resource and event head from the same authorized snapshot.",
@@ -5560,6 +5707,14 @@
       ],
       "title": "QuestionFormsResponse",
       "type": "object"
+    },
+    "QuestionFormsResponseMode": {
+      "enum": [
+        "native",
+        "async"
+      ],
+      "title": "QuestionFormsResponseMode",
+      "type": "string"
     },
     "QueueFacets": {
       "properties": {
@@ -6237,7 +6392,14 @@
           ]
         },
         "receiptId": {
-          "$ref": "#/definitions/ResourceIdDto"
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ResourceIdDto"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "state": {
           "$ref": "#/definitions/DeliveryState"
@@ -9283,6 +9445,7 @@
     "NotificationStateResponse": "notifications",
     "PatchDiscussionsResponse": "changes",
     "PatchFileIndexResponse": "changes",
+    "PatchPathsResponse": "changes",
     "QuestionAnswerRequest": "questions",
     "QuestionAnswerResponse": "questions",
     "QuestionFormsResponse": "questions",
@@ -9389,6 +9552,7 @@
       "NotificationStateResponse": "#/definitions/NotificationStateResponse",
       "PatchDiscussionsResponse": "#/definitions/PatchDiscussionsResponse",
       "PatchFileIndexResponse": "#/definitions/PatchFileIndexResponse",
+      "PatchPathsResponse": "#/definitions/PatchPathsResponse",
       "QuestionAnswerResponse": "#/definitions/QuestionAnswerResponse",
       "QuestionFormsResponse": "#/definitions/QuestionFormsResponse",
       "QueuePageResponse": "#/definitions/QueuePageResponse",

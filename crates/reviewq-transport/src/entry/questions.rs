@@ -3,8 +3,10 @@ use std::sync::Arc;
 use axum::Json;
 use axum::extract::State;
 use axum::http::HeaderMap;
-use reviewq_app::access::{Actor, AppError};
-use reviewq_app::hosts::{QuestionAccess, QuestionAnswer, QuestionForm, QuestionStatus};
+use reviewq_app::access::{Actor, ActorScope, AppError};
+use reviewq_app::hosts::{
+    QuestionAccess, QuestionAnswer, QuestionForm, QuestionMode, QuestionStatus,
+};
 use reviewq_domain::identity::{RunId, SessionKey};
 use reviewq_domain::session::HostProvider;
 use reviewq_protocol::questions as dto;
@@ -58,23 +60,60 @@ pub(super) async fn read(
         .host
         .as_ref()
         .filter(|_| stored.value.binding.identity().provider() == HostProvider::Codex);
-    let (available, forms) = match host {
-        Some(host) => (
-            true,
+    let mut forms = match host {
+        Some(host) => {
             host.questions(
-                QuestionAccess::new(actor, stored.value, entry.store.clone()),
+                QuestionAccess::new(actor.clone(), stored.value.clone(), entry.store.clone()),
                 request.clone(),
             )
-            .await?,
-        ),
-        None => (false, Vec::new()),
+            .await?
+        }
+        None => Vec::new(),
     };
+    if stored.value.binding.identity().provider() == HostProvider::Codex {
+        let known = entry
+            .store
+            .observed_async_questions(actor.clone(), stored.value.clone(), request.clone())
+            .await?;
+        if let Some(observed) = entry
+            .file_history
+            .async_questions(stored.value.clone(), known, request.clone())
+            .await?
+        {
+            for form in observed {
+                if let Some(prior) = forms.iter_mut().find(|prior| prior.request == form.request) {
+                    *prior = form;
+                } else {
+                    forms.push(form);
+                }
+            }
+        }
+        forms.sort_by_key(|form| {
+            !matches!(
+                form.state,
+                QuestionStatus::Pending | QuestionStatus::Submitting
+            )
+        });
+        forms.truncate(8);
+    }
+    let can_answer = entry.sends_allowed;
+    let local_operator = matches!(actor.scope(), ActorScope::LocalOperator);
+    if entry
+        .store
+        .history_session(actor, run.clone(), session.clone())
+        .await?
+        .value
+        != stored.value
+    {
+        return Err(AppError::StaleRevision);
+    }
+    let available = host.is_some() || !forms.is_empty();
     if available && request.is_some() && forms.is_empty() {
         return Err(AppError::NotFound);
     }
     let items = forms
         .into_iter()
-        .map(|form| project(&run, &session, form))
+        .map(|form| project(&run, &session, form, can_answer, local_operator))
         .collect::<Result<_, _>>()?;
     success(
         dto::Forms {
@@ -128,6 +167,14 @@ pub(super) async fn respond(
     if stored.value.binding.identity().provider() != HostProvider::Codex {
         return Err(AppError::Unavailable);
     }
+    if !entry
+        .store
+        .observed_async_questions(actor.clone(), stored.value.clone(), Some(request.clone()))
+        .await?
+        .is_empty()
+    {
+        return Err(AppError::PreconditionFailed);
+    }
     let host = entry.host.as_ref().ok_or(AppError::Unavailable)?;
     let submission = parse(input.submission_id.as_str())?;
     let answers = input
@@ -135,6 +182,7 @@ pub(super) async fn respond(
         .into_iter()
         .map(|(id, value)| (id, value.answers))
         .collect();
+    let local_operator = matches!(actor.scope(), ActorScope::LocalOperator);
     let answer = QuestionAnswer::new(
         request,
         submission,
@@ -142,10 +190,19 @@ pub(super) async fn respond(
         QuestionAccess::new(actor, stored.value, entry.store.clone()),
     );
     let form = host.answer_question(answer).await?;
-    success(project(&run, &session, form)?, stored.cursor)
+    success(
+        project(&run, &session, form, true, local_operator)?,
+        stored.cursor,
+    )
 }
 
-fn project(run: &RunId, session: &SessionKey, value: QuestionForm) -> Result<dto::Form, AppError> {
+fn project(
+    run: &RunId,
+    session: &SessionKey,
+    value: QuestionForm,
+    can_answer: bool,
+    local_operator: bool,
+) -> Result<dto::Form, AppError> {
     Ok(dto::Form {
         run_id: run_id(run)?,
         session_key: session_key(session)?,
@@ -153,6 +210,15 @@ fn project(run: &RunId, session: &SessionKey, value: QuestionForm) -> Result<dto
         turn_id: HistoryTurnIdDto::new(value.turn.as_str()).ok_or(AppError::Internal)?,
         item_id: HistoryEntryIdDto::new(value.item.as_str()).ok_or(AppError::Internal)?,
         blocking: value.blocking,
+        mode: match value.mode {
+            QuestionMode::Native => dto::Mode::Native,
+            QuestionMode::Async => dto::Mode::Async,
+        },
+        answerable: can_answer
+            && value.mode == QuestionMode::Native
+            && value.state == QuestionStatus::Pending
+            && (!value.questions.iter().any(|question| question.secret)
+                || (value.blocking && local_operator)),
         status: match value.state {
             QuestionStatus::Pending => dto::Status::Pending,
             QuestionStatus::Submitting => dto::Status::Submitting,

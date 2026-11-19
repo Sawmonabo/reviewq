@@ -108,7 +108,7 @@ pub struct ReportSummary {
 }
 
 pub struct ReportDelivery {
-    pub receipt_id: ReceiptId,
+    pub receipt_id: Option<ReceiptId>,
     pub state: ReportDeliveryState,
     pub reason: Option<String>,
 }

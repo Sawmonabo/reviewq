@@ -79,7 +79,7 @@ impl Bundle {
         if canonical != bytes
             || manifest.format != 1
             || manifest.protocol != 1
-            || manifest.store != 1
+            || manifest.store != 2
             || manifest.target != target
             || !path_token(&manifest.version)
             || !hash_string(&manifest.source, 40)

@@ -3,7 +3,12 @@ const schema248 = {
   enum: ["complete", "incomplete", "binary", "provider_limited", "missing"],
   type: "string",
 };
-const schema255 = {
+const schema257 = {
+  enum: ["native", "async"],
+  title: "QuestionAnswerResponseMode",
+  type: "string",
+};
+const schema261 = {
   enum: [
     "pending",
     "submitting",
@@ -14,7 +19,7 @@ const schema255 = {
   ],
   type: "string",
 };
-const schema265 = {
+const schema274 = {
   type: "object",
   properties: {
     author: {
@@ -37,7 +42,7 @@ const schema265 = {
     focusedLeadName: { type: ["string", "null"] },
   },
 };
-const schema267 = {
+const schema276 = {
   type: "object",
   properties: {
     ourComments: { $ref: "#/definitions/SafeCountDto" },
@@ -50,7 +55,7 @@ const schema267 = {
     registeredLeadCount: { $ref: "#/definitions/SafeCountDto" },
   },
 };
-const schema271 = {
+const schema280 = {
   properties: {
     assignee: { type: ["string", "null"] },
     key: { $ref: "#/definitions/CheckpointIdDto" },
@@ -61,64 +66,16 @@ const schema271 = {
   required: ["key", "title", "status", "priority", "assignee"],
   type: "object",
 };
-const schema273 = {
+const schema282 = {
   enum: ["setup", "connected", "disconnected"],
   type: "string",
 };
-const schema278 = {
-  properties: {
-    episodeId: { $ref: "#/definitions/CheckpointIdDto" },
-    failedTurnId: { $ref: "#/definitions/CheckpointIdDto" },
-    kind: { $ref: "#/definitions/Kind" },
-    reason: { type: ["string", "null"] },
-    revision: { $ref: "#/definitions/EventCursorDto" },
-    state: { $ref: "#/definitions/CancelRecoveryResponseState" },
-  },
-  required: [
-    "episodeId",
-    "revision",
-    "failedTurnId",
-    "kind",
-    "state",
-    "reason",
-  ],
-  type: "object",
-};
-const schema281 = {
-  enum: ["running", "succeeded", "failed", "superseded"],
-  type: "string",
-};
-const schema283 = {
-  properties: {
-    cwd: { type: "string" },
-    leadSessionKey: { $ref: "#/definitions/CheckpointIdDto" },
-    nativeId: { $ref: "#/definitions/CheckpointIdDto" },
-    provider: { $ref: "#/definitions/HostProviderDto" },
-    reportGuidance: { type: "string" },
-    reviewCheckout: { type: ["string", "null"] },
-    reviewId: { $ref: "#/definitions/ReviewIdDto" },
-    runId: { $ref: "#/definitions/CheckpointIdDto" },
-  },
-  required: [
-    "reviewId",
-    "runId",
-    "leadSessionKey",
-    "provider",
-    "nativeId",
-    "cwd",
-    "reviewCheckout",
-    "reportGuidance",
-  ],
-  type: "object",
-};
 export {
   schema248,
-  schema255,
-  schema265,
-  schema267,
-  schema271,
-  schema273,
-  schema278,
-  schema281,
-  schema283,
+  schema257,
+  schema261,
+  schema274,
+  schema276,
+  schema280,
+  schema282,
 };

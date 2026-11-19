@@ -147,7 +147,7 @@ async function main() {
       return { path, mode: meta.mode & 0o777, size: meta.size, sha256: await hashFile(absolute) };
     }));
     const manifest = json({ format: 1, version: application.version, target: platform, source,
-      protocol: 1, store: 1, files: inventory });
+      protocol: 1, store: 2, files: inventory });
     put(join(stage, "manifest.json"), manifest);
     if (!clean() || source !== run("git", ["rev-parse", "HEAD"])) throw new Error("Source changed while packaging");
     if (run(binary, ["--version"], stage) !== `reviewq ${application.version}`) throw new Error("Wrong staged binary version");

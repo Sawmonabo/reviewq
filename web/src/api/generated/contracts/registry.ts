@@ -111,6 +111,7 @@ import type {
   ApprovalViewResponse,
   PatchDiscussionsResponse,
   PatchFileIndexResponse,
+  PatchPathsResponse,
 } from "./changes.js";
 
 import type { ArchivePageResponse } from "./archive.js";
@@ -185,6 +186,7 @@ export interface Contracts {
   NotificationStateResponse: NotificationStateResponse;
   PatchDiscussionsResponse: PatchDiscussionsResponse;
   PatchFileIndexResponse: PatchFileIndexResponse;
+  PatchPathsResponse: PatchPathsResponse;
   QuestionAnswerResponse: QuestionAnswerResponse;
   QuestionFormsResponse: QuestionFormsResponse;
   QueuePageResponse: QueuePageResponse;

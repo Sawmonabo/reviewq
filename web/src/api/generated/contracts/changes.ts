@@ -174,3 +174,31 @@ export interface PatchFile {
   revision: PatchRevisionDto;
   [k: string]: unknown;
 }
+
+export interface PatchPathsResponse {
+  cursor: EventCursorDto;
+  data: PatchPaths;
+  [k: string]: unknown;
+}
+
+export interface PatchPaths {
+  /**
+   * @maxItems 100
+   */
+  items: PatchPath[];
+  nextCursor: PageCursorDto | null;
+  partial: boolean;
+  reviewId: ReviewIdDto;
+  revision: PatchRevisionDto;
+  [k: string]: unknown;
+}
+
+export interface PatchPath {
+  /**
+   * A lookup hint accepted by the checked patch index, not a verified patch address.
+   */
+  lookupKey: FileIdDto;
+  newPath: string;
+  oldPath: string;
+  [k: string]: unknown;
+}

@@ -45,12 +45,14 @@ const SCHEMA: &str = concat!(
     "\n",
     include_str!("../schema/claude.sql"),
     "\n",
+    include_str!("../schema/projection_evidence.sql"),
+    "\n",
     include_str!("../schema/queue.sql"),
     "\n",
     include_str!("../schema/questions.sql"),
 );
 pub(super) const APPLICATION_ID: i64 = 0x5256_5132;
-pub(super) const FORMAT_ID: i64 = 1;
+pub(super) const FORMAT_ID: i64 = 2;
 const BUSY_TIMEOUT: Duration = Duration::from_secs(2);
 const BACKUP_DEADLINE: Duration = Duration::from_secs(30);
 const READ_FLAGS: OpenFlags =

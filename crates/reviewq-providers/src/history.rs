@@ -9,6 +9,7 @@ use reviewq_app::history::{
     NativeHistoryPage, NativeHistoryReader, NativeNavigation, NativePlan, NativePosition,
     NavigationQuery, SourceAnchor,
 };
+use reviewq_app::hosts::{ObservedAsyncQuestion, QuestionForm};
 use reviewq_domain::identity::NativeInputId;
 use tokio::sync::Semaphore;
 
@@ -21,6 +22,7 @@ mod identity;
 mod locator;
 mod navigation;
 mod proof;
+mod questions;
 mod reader;
 mod records;
 mod task_plan;
@@ -148,6 +150,17 @@ impl NativeHistoryReader for FileHistory {
     ) -> AppFuture<'_, Option<NativeFinalResponse>> {
         self.inspect(session, move |source, cancel| {
             file::final_response(&source, cancel)
+        })
+    }
+
+    fn async_questions(
+        &self,
+        session: HistorySession,
+        known: Vec<ObservedAsyncQuestion>,
+        request: Option<String>,
+    ) -> AppFuture<'_, Option<Vec<QuestionForm>>> {
+        self.inspect(session, move |source, cancel| {
+            questions::read(&source, known, request.as_deref(), cancel)
         })
     }
 
