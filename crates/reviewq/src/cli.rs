@@ -58,6 +58,7 @@ enum Command {
 
 #[derive(Subcommand)]
 enum Internal {
+    ClaudeHook,
     ClaudeBridge {
         #[arg(value_enum)]
         operation: native_client::ClaudeBridgeOperation,
@@ -181,6 +182,12 @@ async fn execute(options: CommandLine) -> Result<(), Failure> {
         }
         Some(Command::Checkout(Checkout::Revoke { directory })) => {
             checkout_setup::revoke(&runtime::profile(options.profile)?, directory).await
+        }
+        Some(Command::Internal(Internal::ClaudeHook)) => {
+            if let Ok(profile) = runtime::profile(options.profile) {
+                let _ = native_client::claude_hook(&profile).await;
+            }
+            Ok(())
         }
         Some(Command::Internal(Internal::ClaudeBridge {
             operation,

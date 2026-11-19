@@ -1,4 +1,52 @@
 {
   "description": "ReviewQ native Claude Code companion",
-  "modules": ["./register.jsx"]
+  "modules": [
+    "./register.jsx"
+  ],
+  "hooks": {
+    "MessageDisplay": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "if [ -n \"${REVIEWQ_CLAUDE_LINKED:-}\" ]; then \"${REVIEWQ_NATIVE_BIN:-$HOME/.local/bin/reviewq}\" internal claude-hook; fi",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "Notification": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "if [ -n \"${REVIEWQ_CLAUDE_LINKED:-}\" ]; then \"${REVIEWQ_NATIVE_BIN:-$HOME/.local/bin/reviewq}\" internal claude-hook; fi",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "PermissionRequest": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "if [ -n \"${REVIEWQ_CLAUDE_LINKED:-}\" ]; then \"${REVIEWQ_NATIVE_BIN:-$HOME/.local/bin/reviewq}\" internal claude-hook; fi",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "if [ -n \"${REVIEWQ_CLAUDE_LINKED:-}\" ]; then \"${REVIEWQ_NATIVE_BIN:-$HOME/.local/bin/reviewq}\" internal claude-hook; fi",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  }
 }

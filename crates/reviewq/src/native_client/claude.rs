@@ -101,3 +101,68 @@ pub(crate) async fn claude_bridge(
     println!("{}", String::from_utf8(body)?);
     Ok(())
 }
+
+#[derive(serde::Deserialize)]
+struct ClassicInput {
+    session_id: String,
+    transcript_path: Option<std::path::PathBuf>,
+    cwd: std::path::PathBuf,
+    hook_event_name: String,
+    agent_id: Option<String>,
+    notification_type: Option<String>,
+    turn_id: Option<String>,
+    message_id: Option<String>,
+    index: Option<u64>,
+    #[serde(rename = "final")]
+    final_chunk: Option<bool>,
+}
+
+pub(crate) async fn claude_hook(profile: &Path) -> Result<(), Failure> {
+    let Some(bound) = std::env::var_os("REVIEWQ_CLAUDE_LINKED") else {
+        return Ok(());
+    };
+    let mut bytes = Vec::new();
+    const LIMIT: u64 = 16_384;
+    std::io::stdin()
+        .lock()
+        .take(LIMIT + 1)
+        .read_to_end(&mut bytes)?;
+    if bytes.len() as u64 > LIMIT {
+        return Ok(());
+    }
+    let hook: ClassicInput = serde_json::from_slice(&bytes)?;
+    if bound != hook.session_id.as_str() || hook.agent_id.is_some() {
+        return Ok(());
+    }
+    let session: NativeSessionId = hook.session_id.parse()?;
+    let event = match hook.hook_event_name.as_str() {
+        "PermissionRequest" => serde_json::json!({"kind": "permission_pending"}),
+        "Notification" if hook.notification_type.as_deref() == Some("permission_prompt") => {
+            serde_json::json!({"kind": "permission_pending"})
+        }
+        "MessageDisplay" if hook.index == Some(0) || hook.final_chunk == Some(true) => {
+            serde_json::json!({
+                "kind": "display",
+                "turnId": hook.turn_id.ok_or("Missing native turn.")?,
+                "messageId": hook.message_id.ok_or("Missing native display message.")?,
+                "index": hook.index.ok_or("Missing native display sequence.")?,
+                "finalChunk": hook.final_chunk.unwrap_or(false),
+            })
+        }
+        "Stop" => serde_json::json!({"kind": "stopping"}),
+        _ => return Ok(()),
+    };
+    let body = serde_json::to_vec(&serde_json::json!({
+        "context": {
+            "protocolVersion": 1, "sessionId": session.as_str(), "cwd": hook.cwd.canonicalize()?,
+            "profile": runtime::claude_home()?.canonicalize()?, "transcript": hook.transcript_path,
+        },
+        "classic": event,
+    }))?;
+    let endpoint = runtime::read_endpoint(profile)?;
+    let client = client()?;
+    let status = signed(&client, &endpoint, "GET", "/api/v1/status", b"").await?;
+    verify_ready(&endpoint, &status)?;
+    let _ = bridge(&client, &endpoint, "/api/v1/native/claude/hook", body).await?;
+    Ok(())
+}

@@ -20,9 +20,9 @@ mod messages;
 mod work;
 
 pub use claude::{
-    ClaudeAnchor, ClaudeDeliveryAck, ClaudeDeliveryResult, ClaudeHeartbeat, ClaudeHeartbeatResult,
-    ClaudeOffer, ClaudeSend, ClaudeStore, ClaudeTurnResult, ClaudeWorkflowContext,
-    ClaudeWorkflowStore,
+    ClaudeAnchor, ClaudeChild, ClaudeClassicEvent, ClaudeDeliveryAck, ClaudeDeliveryResult,
+    ClaudeHeartbeat, ClaudeHeartbeatResult, ClaudeOffer, ClaudeSend, ClaudeStore, ClaudeTurnResult,
+    ClaudeWorkflowContext, ClaudeWorkflowStore, ProvenClaudeChild,
 };
 pub use messages::{
     MAX_MESSAGE_HISTORY_PAGE, MessageAttachment, MessageHistory, MessageHistoryStore,
@@ -85,6 +85,11 @@ pub trait NativeHost: Send + Sync {
 /// Resolves the companion's identity against the service-selected Claude profile.
 pub trait ClaudeCompanion: Send + Sync {
     fn prove(&self, context: ClaudeContext) -> AppFuture<'_, HostProof>;
+    fn prove_child(
+        &self,
+        root: HistorySession,
+        child: ClaudeChild,
+    ) -> AppFuture<'_, ProvenClaudeChild>;
     fn anchor(&self, session: HistorySession) -> AppFuture<'_, ClaudeAnchor>;
     fn confirm_prompt(
         &self,

@@ -7,12 +7,17 @@ use std::sync::atomic::AtomicBool;
 
 use reviewq_app::access::{AppError, AppFuture};
 use reviewq_app::history::HistorySession;
-use reviewq_app::hosts::{ClaudeAnchor, ClaudeCompanion, ClaudeContext, HostProof, MessageBody};
+use reviewq_app::hosts::{
+    ClaudeAnchor, ClaudeChild, ClaudeCompanion, ClaudeContext, HostProof, MessageBody,
+    ProvenClaudeChild,
+};
 use reviewq_domain::identity::NativeInputId;
 use reviewq_domain::session::{AbsolutePath, HostProvider, NativeBinding, NativeIdentity};
 use tokio::sync::Semaphore;
 
-use crate::history::{Cancel, claude_anchor, claude_confirm_prompt, verified_claude_source};
+use crate::history::{
+    Cancel, claude_anchor, claude_confirm_prompt, verified_claude_child, verified_claude_source,
+};
 
 mod workflow;
 pub use workflow::ClaudeWorkflow;
@@ -68,6 +73,38 @@ impl Claude {
 }
 
 impl ClaudeCompanion for Claude {
+    fn prove_child(
+        &self,
+        root: HistorySession,
+        child: ClaudeChild,
+    ) -> AppFuture<'_, ProvenClaudeChild> {
+        self.read_native(root, move |root, cancelled| {
+            let cwd = child
+                .cwd
+                .as_path()
+                .canonicalize()
+                .map_err(|_| AppError::NotFound)?;
+            let cwd = AbsolutePath::from_canonical(cwd).map_err(|_| AppError::Forbidden)?;
+            let binding = NativeBinding::new(
+                NativeIdentity::new(
+                    HostProvider::Claude,
+                    root.binding.identity().profile().clone(),
+                    child.id,
+                ),
+                cwd,
+            );
+            let source = verified_claude_child(&root, &binding, cancelled)?;
+            Ok(ProvenClaudeChild {
+                generation: child.generation,
+                sequence: child.sequence,
+                binding,
+                parent: child.parent,
+                source,
+                working: child.working,
+            })
+        })
+    }
+
     fn anchor(&self, session: HistorySession) -> AppFuture<'_, ClaudeAnchor> {
         self.read_native(session, |session, cancelled| {
             claude_anchor(&session, cancelled)

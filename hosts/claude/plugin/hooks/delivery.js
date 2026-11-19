@@ -1,3 +1,5 @@
+import { currentSettings } from "./settings.js";
+
 const PLUGIN = "reviewq";
 
 export function reviewqOrigin(origin) {
@@ -80,6 +82,16 @@ export async function deliver($, invoke, state, offer) {
     return;
   }
 
+  if (authorization.data.settings) {
+    const wanted = authorization.data.settings;
+    const observed = await currentSettings($, state);
+    if (observed?.model !== wanted.model || observed.effort !== wanted.effort
+        || !canSend(state) || attempt.revision !== state.inputRevision || await $.session.id() !== state.id) {
+      attempt.outcome = { kind: "dropped" };
+      await postOutcome($, invoke, state, attempt);
+      return;
+    }
+  }
   attempt.started = true;
   attempt.context = authorization.data.reportContext;
   try {
