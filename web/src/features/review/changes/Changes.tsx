@@ -101,12 +101,14 @@ export default function Changes({
     (thread) =>
       (!involving || thread.ourParticipation) && (status === "any" || thread.resolution === status),
   );
+  const general = filtered.filter((thread) => !thread.anchor && !thread.outdated);
+  const filtering = involving || status !== "any";
   const anchors = file ? filtered.filter((thread) => matches(thread, file)) : [];
   const visible =
     tab === "files"
       ? filtered.filter((thread) => !file || !matches(thread, file))
       : tab === "general"
-        ? filtered.filter((thread) => !thread.anchor)
+        ? general
         : filtered;
 
   function selectFile(next: PatchFile) {
@@ -119,6 +121,12 @@ export default function Changes({
     setFrozenRevision(undefined);
     setThreadTrail([]);
     setEpoch((value) => value + 1);
+  }
+
+  function clearConversationFilters() {
+    setInvolving(false);
+    setStatus("any");
+    participant.current?.focus({ preventScroll: true });
   }
 
   if (index.pending && !frozenRevision && !index.error) return <Loading label="Loading changes…" />;
@@ -136,7 +144,7 @@ export default function Changes({
             </p>
           )}
         </div>
-        <Approvals reviewId={reviewId} displayedSha={index.data?.headSha} />
+        <Approvals reviewId={reviewId} displayedSha={index.data?.headSha} webUrl={webUrl} />
       </div>
       {children}
       {index.data && (
@@ -163,11 +171,7 @@ export default function Changes({
           <button key={id} type="button" aria-pressed={tab === id} onClick={() => setTab(id)}>
             {label}{" "}
             <strong className="changes-count">
-              {id === "files"
-                ? files.length
-                : id === "general"
-                  ? filtered.filter((thread) => !thread.anchor).length
-                  : filtered.length}
+              {id === "files" ? files.length : id === "general" ? general.length : filtered.length}
               {(id === "files" ? index.data?.nextCursor : threads.data?.nextCursor) && "+"}
             </strong>
           </button>
@@ -178,10 +182,11 @@ export default function Changes({
           Show{" "}
           <select
             ref={participant}
+            aria-label="Conversation participants"
             value={involving ? "mine" : "all"}
             onChange={(event) => setInvolving(event.currentTarget.value === "mine")}
           >
-            <option value="all">Everyone</option>
+            <option value="all">All participants</option>
             <option value="mine">Involving you</option>
           </select>
         </label>
@@ -189,24 +194,24 @@ export default function Changes({
           {" "}
           Status{" "}
           <select
+            aria-label="Conversation status"
             value={status}
             onChange={(event) => setStatus(event.currentTarget.value as Status)}
           >
             <option value="any">Any status</option>
-            <option value="open">Open</option>
-            <option value="resolved">Resolved</option>
+            <option value="open">Open only</option>
+            <option value="resolved">Resolved only</option>
           </select>
         </label>
-        {(involving || status !== "any") && (
+        {filtering && (
           <button
             type="button"
-            onClick={() => {
-              setInvolving(false);
-              setStatus("any");
-              participant.current?.focus();
-            }}
+            className="filter-control clear-filters"
+            aria-label="Clear conversation filters"
+            title="Clear conversation filters"
+            onClick={clearConversationFilters}
           >
-            Clear conversation filters
+            <Icon name="clearFilters" size={16} />
           </button>
         )}
       </div>
@@ -263,7 +268,7 @@ export default function Changes({
                       <code>
                         {item.renamed ? `${item.oldPath} → ${item.newPath}` : item.newPath}
                       </code>
-                      {item.lineCount != null && <small>{item.lineCount} rows</small>}
+                      <DiffCount file={item} />
                     </button>
                   ))}
                   {!available.length && (
@@ -323,14 +328,35 @@ export default function Changes({
           </p>
         )}
         {threads.data && !visible.length && (
-          <p className="meta">
-            {involving || status !== "any"
-              ? "No conversations match the filters."
-              : "No conversations in this view."}
-          </p>
+          <div className="changes-conversation-empty">
+            <div role="status">
+              <Icon name="inbox" size={28} />
+              <h3>
+                {filtering
+                  ? tab === "general"
+                    ? "No matching comments"
+                    : "No matching conversations"
+                  : tab === "general"
+                    ? "No general comments yet"
+                    : "No conversations yet"}
+              </h3>
+              {filtering && <p className="meta">Try changing your filters.</p>}
+            </div>
+            {filtering && (
+              <button type="button" onClick={clearConversationFilters}>
+                Clear filters
+              </button>
+            )}
+          </div>
         )}
         {visible.map((thread) => (
-          <DiscussionThread key={thread.discussionId} thread={thread} />
+          <DiscussionThread
+            key={thread.discussionId}
+            thread={thread}
+            outside={Boolean(
+              !thread.outdated && thread.anchor && (!file || !matches(thread, file)),
+            )}
+          />
         ))}
         <Pagination trail={threadTrail} next={threads.data?.nextCursor} onPage={setThreadTrail} />
       </section>
@@ -393,6 +419,7 @@ function SelectedPatch({
           <strong>
             <code>{file.renamed ? `${file.oldPath} → ${file.newPath}` : file.newPath}</code>
           </strong>
+          <DiffCount file={file} />
           <div className="actions patch-links">
             <span className="meta">
               {fileKind(file)}
@@ -512,6 +539,16 @@ function SelectedPatch({
       {(sourceMode || file.availability !== "complete" || (!body && patch.error)) &&
         threads.map((thread) => <DiscussionThread key={thread.discussionId} thread={thread} />)}
     </section>
+  );
+}
+
+function DiffCount({ file }: { readonly file: PatchFile }) {
+  const { additions, deletions } = file;
+  if (typeof additions !== "number" || typeof deletions !== "number") return null;
+  return (
+    <small className="diff-count" aria-label={`${additions} additions, ${deletions} deletions`}>
+      <span>+{additions}</span> <span>−{deletions}</span>
+    </small>
   );
 }
 
