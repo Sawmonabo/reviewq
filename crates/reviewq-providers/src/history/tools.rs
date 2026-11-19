@@ -32,9 +32,10 @@ pub(super) fn part_window(window: Window, index: u16) -> Window {
 pub(super) fn body<R: Read>(
     reader: &mut JsonStreamReader<R>,
     window: Window,
+    output: Option<&mut dyn Write>,
 ) -> Result<Text, AppError> {
     match reader.peek().map_err(invalid)? {
-        ValueType::String => capture(reader, window, 0),
+        ValueType::String => capture(reader, window, 0, output),
         ValueType::Null => {
             reader.skip_value().map_err(invalid)?;
             Ok(Text::default())
@@ -43,6 +44,7 @@ pub(super) fn body<R: Read>(
             let mut writer = JsonStreamWriter::new(Slice {
                 window,
                 text: Text::default(),
+                output,
             });
             reader.transfer_to(&mut writer).map_err(invalid)?;
             Ok(writer.finish_document().map_err(invalid)?.text)
@@ -50,13 +52,17 @@ pub(super) fn body<R: Read>(
     }
 }
 
-struct Slice {
+struct Slice<'a> {
     window: Window,
     text: Text,
+    output: Option<&'a mut dyn Write>,
 }
 
-impl Write for Slice {
+impl Write for Slice<'_> {
     fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+        if let Some(output) = self.output.as_mut() {
+            output.write_all(bytes)?;
+        }
         let start = self.text.bytes;
         let end = start
             .checked_add(bytes.len() as u64)

@@ -6,8 +6,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use reviewq_app::access::AppError;
 use reviewq_app::history::{
-    FileContentRef, FilePosition, NativeContent, NativeHistoryPage, NativePosition, VisibleEntry,
-    VisiblePart, VisiblePartKind,
+    FileContentRef, FilePosition, NativeHistoryPage, NativePosition, VisibleEntry, VisiblePart,
+    VisiblePartKind,
 };
 use reviewq_domain::identity::NativeInputId;
 use reviewq_domain::session::HostProvider;
@@ -144,23 +144,30 @@ pub(super) fn page(
     })
 }
 
-pub(super) fn content(
-    source: Source,
-    reference: FileContentRef,
-    offset: u64,
-    limit: u32,
-    cancelled: &AtomicBool,
-) -> Result<NativeContent, AppError> {
-    let generation = generation(&source)?;
-    if generation != reference.generation {
+pub(super) fn verify_content(source: &Source, reference: &FileContentRef) -> Result<(), AppError> {
+    if generation(source)? != reference.generation {
         return Err(AppError::CursorExpired);
     }
-    let file = &source.file;
     verify_position(
-        file,
+        &source.file,
         &reference.position,
-        file.metadata().map_err(io_error)?.len(),
-    )?;
+        source.file.metadata().map_err(io_error)?.len(),
+    )
+}
+
+pub(super) struct ContentSource {
+    pub end: u64,
+    pub bytes: u64,
+    pub field: records::BodyField,
+}
+
+pub(super) fn content_source(
+    source: &Source,
+    reference: &FileContentRef,
+    cancelled: &AtomicBool,
+) -> Result<ContentSource, AppError> {
+    verify_content(source, reference)?;
+    let file = &source.file;
     let start = reference.position.offset;
     let mut budget = READ_BUDGET;
     let end = next_line(
@@ -173,51 +180,52 @@ pub(super) fn content(
     if end == start || !boundary(file, end)? {
         return Err(AppError::CursorExpired);
     }
-    let limit = usize::try_from(limit).map_err(|_| AppError::InvalidRequest)?;
     let mut record = records::project_window(
         source.provider,
         input(file, start, end, cancelled),
         &source.native_id,
         source.root_session.as_ref(),
         records::Window {
-            start: offset,
-            limit,
+            start: 0,
+            limit: 0,
             part: reference.part,
         },
     )
-    .filter(|entry| entry.id == reference.entry)
+    .filter(|record| record.id == reference.entry)
     .ok_or(AppError::CursorExpired)?;
-    ToolProof::new().redact(&source, start, &mut record, cancelled);
-    let (bytes, raw) = match reference.part {
-        Some(index) => {
-            let part = record
-                .parts
-                .into_iter()
-                .find(|part| part.index == index)
-                .ok_or(AppError::CursorExpired)?;
-            (part.body.bytes, part.body.picked)
-        }
-        None => (record.bytes, record.text),
+    ToolProof::new().redact(source, start, &mut record, cancelled);
+    let (bytes, field) = if let Some(index) = reference.part {
+        let part = record
+            .parts
+            .into_iter()
+            .find(|part| part.index == index)
+            .ok_or(AppError::CursorExpired)?;
+        let field = match (&part.kind, source.provider) {
+            (VisiblePartKind::Text(_), _) => records::BodyField::TextBlock(index),
+            (VisiblePartKind::Plan, HostProvider::Codex) => {
+                records::BodyField::CombinedText(record.text_blocks)
+            }
+            (VisiblePartKind::ToolCall { .. }, HostProvider::Codex) => {
+                records::BodyField::CodexField(
+                    record.argument_field.ok_or(AppError::CursorExpired)?,
+                )
+            }
+            (VisiblePartKind::ToolResult { .. }, HostProvider::Codex) => {
+                records::BodyField::CodexField(record.result_field.ok_or(AppError::CursorExpired)?)
+            }
+            (VisiblePartKind::ToolResult { .. }, HostProvider::Claude) => {
+                records::BodyField::ResultBlock(index)
+            }
+            _ => records::BodyField::InputBlock(index),
+        };
+        (part.body.bytes, field)
+    } else {
+        (
+            record.bytes,
+            records::BodyField::CombinedText(record.text_blocks),
+        )
     };
-    if offset > bytes {
-        return Err(AppError::InvalidRequest);
-    }
-    let text = readable_prefix(&raw)?.to_owned();
-    let next = offset + text.len() as u64;
-    // If a stale or hostile cursor landed inside a Unicode scalar, don't loop on the same offset.
-    if text.is_empty() && next < bytes {
-        return Err(AppError::CursorExpired);
-    }
-    verify_position(
-        file,
-        &reference.position,
-        file.metadata().map_err(io_error)?.len(),
-    )?;
-    Ok(NativeContent {
-        generation,
-        text,
-        next_offset: (next < bytes).then_some(next),
-    })
+    Ok(ContentSource { end, bytes, field })
 }
 
 struct ToolProof {

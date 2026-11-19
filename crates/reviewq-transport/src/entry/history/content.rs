@@ -105,17 +105,22 @@ pub(in crate::entry) async fn read_content(
         Err(AppError::CursorExpired) => {
             let snapshot = entry
                 .file_history
-                .page(source.value, NativePosition::default(), 1)
+                .page(source.value.clone(), NativePosition::default(), 1)
                 .await?;
             let current = snapshot.ok_or(AppError::NotFound)?;
             (current.generation, String::new(), None, true)
         }
         Err(error) => return Err(error),
     };
-    entry
+    if entry
         .store
         .history_session(actor, run.clone(), session.clone())
-        .await?;
+        .await?
+        .value
+        != source.value
+    {
+        return Err(AppError::CursorExpired);
+    }
     let next_cursor = next
         .map(|offset| {
             let mut continuation = reference.clone();
