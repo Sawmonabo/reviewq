@@ -1,10 +1,10 @@
-use reviewq_domain::identity::{EventCursor, MrIdentity, Revision, TicketKey};
+use reviewq_domain::identity::{EventCursor, GitSha, MrIdentity, Revision, TicketKey};
 use reviewq_domain::settings::{BoardScope, CheckoutBinding};
 
 use crate::access::{Actor, AppError, AppFuture};
 use crate::changes::ChangeSource;
 use crate::events::Snapshot;
-use crate::queue::ReviewSource;
+use crate::queue::{MergeRequestState, ReviewSource};
 use crate::settings::ActiveSource;
 use crate::workspace::{ConfiguredProject, WorkspaceStore};
 
@@ -38,6 +38,10 @@ pub trait ReviewSourceReader: ChangeSource {
         projects: Vec<ConfiguredProject>,
         canonical_url: String,
     ) -> AppFuture<'_, UnverifiedTrack>;
+    fn authenticated_review_head(
+        &self,
+        identity: MrIdentity,
+    ) -> AppFuture<'_, AuthenticatedReviewHead>;
     fn workflow_snapshot(&self, identity: MrIdentity) -> AppFuture<'_, WorkflowSnapshot>;
     fn discovery_evidence(&self, identity: MrIdentity) -> AppFuture<'_, DiscoveryEvidence>;
 
@@ -252,6 +256,14 @@ async fn scan(
         reviews.extend(records);
     }
     Ok(reviews)
+}
+
+/// The current MR state and actor observed through the same authorized source.
+pub struct AuthenticatedReviewHead {
+    pub identity: MrIdentity,
+    pub head_sha: GitSha,
+    pub state: MergeRequestState,
+    pub authenticated_actor: u64,
 }
 
 /// One full authorized GitLab observation pinned to a particular MR head.

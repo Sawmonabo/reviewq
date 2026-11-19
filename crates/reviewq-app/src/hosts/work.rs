@@ -5,6 +5,7 @@ use reviewq_domain::identity::{GitSha, RunId, SessionKey, SubmissionId};
 use crate::access::{Actor, AppError};
 use crate::events::Snapshot;
 use crate::settings::RuntimeSources;
+use crate::workflow::WorkflowRequirement;
 
 use super::{
     DeliveryClaim, DeliveryReceipt, DeliveryWork, LeadStore, MessageBody, NativeHost,
@@ -42,6 +43,19 @@ impl DispatchGuard {
         }
         let reader = views.reader.ok_or(AppError::Unavailable)?;
         let requirements = self.workflow_requirements().await?;
+        if matches!(requirements.requirement, WorkflowRequirement::Recovery) {
+            let live = reader
+                .authenticated_review_head(requirements.identity.clone())
+                .await?;
+            requirements.check_review(
+                &live.identity,
+                &live.head_sha,
+                live.state,
+                live.authenticated_actor,
+                &guard.head,
+            )?;
+            return Ok(live.head_sha);
+        }
         let snapshot = reader
             .workflow_snapshot(requirements.identity.clone())
             .await?;

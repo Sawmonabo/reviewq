@@ -8,8 +8,9 @@ use reviewq_domain::identity::{
 };
 use reviewq_domain::session::LeadTarget;
 
-use crate::access::AppFuture;
+use crate::access::{AppError, AppFuture};
 use crate::hosts::{MessageBody, MessagePurpose};
+use crate::queue::MergeRequestState;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum WorkflowTool {
@@ -158,20 +159,37 @@ pub struct SelectedNote {
 }
 
 impl WorkflowRequirements {
+    pub(crate) fn check_review(
+        &self,
+        identity: &MrIdentity,
+        head: &GitSha,
+        state: MergeRequestState,
+        actor: u64,
+        pinned_head: &GitSha,
+    ) -> Result<(), AppError> {
+        if identity != &self.identity
+            || head != pinned_head
+            || state != MergeRequestState::Open
+            || actor != self.reviewer_id
+        {
+            return Err(AppError::StaleRevision);
+        }
+        Ok(())
+    }
+
     /// Verifies fresh provider evidence immediately before a workflow input may be sent.
     pub fn check(
         &self,
         source: &crate::sources::WorkflowSnapshot,
         pinned_head: &GitSha,
-    ) -> Result<(), crate::access::AppError> {
-        use crate::access::AppError;
-        if source.review.identity != self.identity
-            || &source.review.head_sha != pinned_head
-            || source.review.state != crate::queue::MergeRequestState::Open
-            || source.authenticated_actor != self.reviewer_id
-        {
-            return Err(AppError::StaleRevision);
-        }
+    ) -> Result<(), AppError> {
+        self.check_review(
+            &source.review.identity,
+            &source.review.head_sha,
+            source.review.state,
+            source.authenticated_actor,
+            pinned_head,
+        )?;
         match &self.requirement {
             WorkflowRequirement::Recovery => {}
             WorkflowRequirement::Publication {

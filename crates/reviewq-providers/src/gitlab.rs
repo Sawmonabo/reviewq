@@ -5,7 +5,8 @@ use reviewq_app::access::{AppError, AppFuture};
 use reviewq_app::queue::{MergeRequestState, ReviewAuthor, ReviewSource};
 use reviewq_app::settings::SourceLease;
 use reviewq_app::sources::{
-    MatchedReview, ReviewResolution, ReviewSourceReader, UnverifiedTrack, WorkflowSnapshot,
+    AuthenticatedReviewHead, MatchedReview, ReviewResolution, ReviewSourceReader, UnverifiedTrack,
+    WorkflowSnapshot,
 };
 use reviewq_app::workspace::ConfiguredProject;
 use reviewq_domain::identity::{GitLabOrigin, MrIdentity, ProjectId, TicketKey};
@@ -72,6 +73,13 @@ impl ReviewSourceReader for GitLab {
 
     fn workflow_snapshot(&self, identity: MrIdentity) -> AppFuture<'_, WorkflowSnapshot> {
         Box::pin(self.read_workflow_snapshot(identity))
+    }
+
+    fn authenticated_review_head(
+        &self,
+        identity: MrIdentity,
+    ) -> AppFuture<'_, AuthenticatedReviewHead> {
+        Box::pin(self.read_authenticated_review_head(identity))
     }
 
     fn discovery_evidence(
@@ -336,12 +344,7 @@ impl GitLab {
         if row.title.len() > 4096 {
             return Err(AppError::PayloadTooLarge);
         }
-        let state = match row.state.as_str() {
-            "opened" => MergeRequestState::Open,
-            "closed" => MergeRequestState::Closed,
-            "merged" => MergeRequestState::Merged,
-            _ => return Err(AppError::Unavailable),
-        };
+        let state = merge_request_state(&row.state)?;
         let updated_at = row
             .updated_at
             .parse::<jiff::Timestamp>()
@@ -384,6 +387,15 @@ impl GitLab {
         self.http
             .bounded_response(url, self.headers.clone(), max, self.lease.as_ref())
             .await
+    }
+}
+
+fn merge_request_state(state: &str) -> Result<MergeRequestState, AppError> {
+    match state {
+        "opened" => Ok(MergeRequestState::Open),
+        "closed" => Ok(MergeRequestState::Closed),
+        "merged" => Ok(MergeRequestState::Merged),
+        _ => Err(AppError::Unavailable),
     }
 }
 use std::path::PathBuf;

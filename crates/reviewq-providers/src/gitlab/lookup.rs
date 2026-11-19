@@ -3,12 +3,15 @@ use std::borrow::Cow;
 use percent_encoding::percent_decode_str;
 use reviewq_app::access::AppError;
 use reviewq_app::queue::{MergeRequestState, ReviewSource};
-use reviewq_app::sources::{ReviewResolution, UnverifiedTrack};
+use reviewq_app::sources::{AuthenticatedReviewHead, ReviewResolution, UnverifiedTrack};
 use reviewq_app::workspace::ConfiguredProject;
-use reviewq_domain::identity::{MergeRequestIid, ProjectId};
+use reviewq_domain::identity::{MergeRequestIid, MrIdentity, ProjectId};
+use serde::Deserialize;
 use url::Url;
 
-use super::{GitLab, MAX_PROVIDER_PAGES, METADATA_LIMIT, MergeRequest, Project};
+use super::{
+    GitLab, MAX_PROVIDER_PAGES, METADATA_LIMIT, MergeRequest, Project, merge_request_state,
+};
 
 const MAX_CANDIDATES: usize = 20;
 
@@ -24,7 +27,42 @@ struct Matches {
     historical: Vec<ReviewSource>,
 }
 
+#[derive(Deserialize)]
+struct MergeRequestHead {
+    project_id: u64,
+    iid: u64,
+    sha: String,
+    state: String,
+}
+
 impl GitLab {
+    pub(super) async fn read_authenticated_review_head(
+        &self,
+        identity: MrIdentity,
+    ) -> Result<AuthenticatedReviewHead, AppError> {
+        if identity.origin() != &self.identity {
+            return Err(AppError::NotFound);
+        }
+        let actor = self.observe_authenticated_actor().await?;
+        if self.account.is_some_and(|expected| expected != actor) {
+            return Err(AppError::Conflict);
+        }
+        let payload = self
+            .merge_request_payload(identity.project_id(), identity.iid())
+            .await?;
+        let row: MergeRequestHead =
+            serde_json::from_slice(&payload).map_err(|_| AppError::Unavailable)?;
+        if row.project_id != identity.project_id().get() || row.iid != identity.iid().get() {
+            return Err(AppError::Conflict);
+        }
+        Ok(AuthenticatedReviewHead {
+            identity,
+            head_sha: row.sha.parse().map_err(|_| AppError::Unavailable)?,
+            state: merge_request_state(&row.state)?,
+            authenticated_actor: actor,
+        })
+    }
+
     pub(super) async fn track_url(
         &self,
         projects: Vec<ConfiguredProject>,
@@ -148,14 +186,22 @@ impl GitLab {
         project: ProjectId,
         iid: MergeRequestIid,
     ) -> Result<MergeRequest, AppError> {
-        let url = self.url(&format!("api/v4/projects/{project}/merge_requests/{iid}"))?;
-        let (_, bytes) = self.get(url, METADATA_LIMIT).await?;
+        let bytes = self.merge_request_payload(project, iid).await?;
         let row: MergeRequest =
             serde_json::from_slice(&bytes).map_err(|_| AppError::Unavailable)?;
         if row.project_id != project.get() || row.iid != iid.get() {
             return Err(AppError::Conflict);
         }
         Ok(row)
+    }
+
+    async fn merge_request_payload(
+        &self,
+        project: ProjectId,
+        iid: MergeRequestIid,
+    ) -> Result<Vec<u8>, AppError> {
+        let url = self.url(&format!("api/v4/projects/{project}/merge_requests/{iid}"))?;
+        self.get(url, METADATA_LIMIT).await.map(|(_, bytes)| bytes)
     }
 
     fn web_address<'a>(&self, url: &'a Url) -> Result<(Cow<'a, str>, MergeRequestIid), AppError> {
