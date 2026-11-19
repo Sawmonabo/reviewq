@@ -2,7 +2,7 @@ use reviewq_app::access::{AppError, AppFuture};
 use reviewq_app::events::ResourceKey;
 use reviewq_app::followups::{FollowupObservationStore, MonitoredReview, TrackedReview};
 use reviewq_app::queue::MergeRequestState;
-use reviewq_app::sources::WorkflowSnapshot;
+use reviewq_app::sources::{DiscoveryEvidence, WorkflowSnapshot};
 use reviewq_domain::identity::ReviewId;
 use rusqlite::{Connection, OptionalExtension, params};
 
@@ -26,6 +26,8 @@ const ASSIGNED_RUN: &str = "coalesce(
       ORDER BY v.captured_at_ms DESC,v.receipt_id DESC LIMIT 1),
     (SELECT min(x.run_id) FROM runs x WHERE x.review_id=r.review_id HAVING count(*)=1))";
 const DISCOVERY_REFRESH_MS: i64 = 5 * 60 * 1000;
+const DISCOVERY_RETRY_MS: i64 = 60 * 1000;
+const OWNED: &str = "(m.review_id IS NOT NULL OR EXISTS(SELECT 1 FROM retained_reviews x WHERE x.review_id=r.review_id))";
 
 impl FollowupObservationStore for SqliteStore {
     fn tracked_reviews(
@@ -68,6 +70,18 @@ impl FollowupObservationStore for SqliteStore {
                 .map_err(StoreError::app)
         })
     }
+
+    fn record_discovery_evidence(
+        &self,
+        target: TrackedReview,
+        observation: Option<DiscoveryEvidence>,
+    ) -> AppFuture<'_, ()> {
+        Box::pin(async move {
+            self.write(move |tx| record_discovery(tx, target, observation))
+                .await
+                .map_err(StoreError::app)
+        })
+    }
 }
 
 fn list(
@@ -82,14 +96,15 @@ fn list(
            CASE WHEN {ACTIVE} THEN m.run_id
                 WHEN m.review_id IS NULL AND (SELECT automatic FROM followup_preferences WHERE singleton=1)=1
                     THEN {ASSIGNED_RUN} END,
-           CASE WHEN {ACTIVE} THEN m.generation ELSE 0 END
+           CASE WHEN {ACTIVE} THEN m.generation ELSE 0 END,
+           CASE WHEN NOT {OWNED} THEN r.head_sha END
          FROM reviews r LEFT JOIN followup_monitors m USING(review_id)
          WHERE r.review_id>?1 AND (r.state='open' OR m.state='enabled')
            AND EXISTS(SELECT 1 FROM configured_projects p WHERE p.origin=r.origin AND p.project_id=r.project_id)
-           AND (m.review_id IS NOT NULL OR EXISTS(SELECT 1 FROM retained_reviews x WHERE x.review_id=r.review_id)
+           AND ({OWNED}
                 OR (EXISTS(SELECT 1 FROM review_discoveries d WHERE d.review_id=r.review_id)
-                  AND NOT EXISTS(SELECT 1 FROM review_source_signals s WHERE s.review_id=r.review_id
-                    AND s.settings_revision=?3 AND s.source_sha=r.head_sha AND s.observed_at_ms>=?4)))
+                  AND NOT EXISTS(SELECT 1 FROM review_discovery_due s WHERE s.review_id=r.review_id
+                    AND s.settings_revision=?3 AND s.source_sha=r.head_sha AND s.next_due_at_ms>?4)))
          ORDER BY r.review_id LIMIT ?2"
     );
     let mut statement = db.prepare_cached(&sql)?;
@@ -97,7 +112,7 @@ fn list(
         after.as_ref().map_or("", |id| id.as_str()),
         limit,
         settings.as_sqlite_integer(),
-        now_ms()?.saturating_sub(DISCOVERY_REFRESH_MS),
+        now_ms()?,
     ])?;
     let mut items = Vec::new();
     while let Some(row) = rows.next()? {
@@ -120,9 +135,83 @@ fn list(
             settings,
             observed_before,
             monitor,
+            discovery_head: row
+                .get::<_, Option<String>>(3)?
+                .map(|sha| parse(&sha))
+                .transpose()?,
         });
     }
     Ok(items)
+}
+
+fn record_discovery(
+    tx: &mut WriteTx<'_>,
+    target: TrackedReview,
+    observation: Option<DiscoveryEvidence>,
+) -> Result<(), StoreError> {
+    let db = &tx.sql;
+    let head = target.discovery_head.ok_or(AppError::Internal)?;
+    let current = crate::queue::source_for_review(db, &target.review)?;
+    if target.settings != settings_revision(db)?
+        || current.identity != target.identity
+        || current.head_sha != head
+        || !configured(db, &target.identity)?
+        || !db.query_row(
+            "SELECT EXISTS(SELECT 1 FROM review_discoveries WHERE review_id=?1)",
+            [target.review.as_str()],
+            |row| row.get::<_, bool>(0),
+        )?
+    {
+        return Err(AppError::StaleRevision.into());
+    }
+    let complete = observation
+        .as_ref()
+        .is_some_and(|value| value.approved_reviewers.is_some() && value.note_authors.is_some());
+    let delay = if complete {
+        DISCOVERY_REFRESH_MS
+    } else {
+        DISCOVERY_RETRY_MS
+    };
+    if let Some(value) = observation {
+        if value.review.identity != target.identity
+            || value.review.updated_at_ms < current.updated_at_ms
+        {
+            return Err(AppError::StaleRevision.into());
+        }
+        crate::queue::check_observation(db, target.observed_before, &value.review)?;
+        let reviewers = observations::monitored_reviewers(db, value.authenticated_actor)?;
+        let approval = value
+            .approved_reviewers
+            .map(|actors| actors.into_iter().any(|actor| reviewers.contains(&actor)));
+        let comments = value.note_authors.map(|actors| {
+            actors
+                .into_iter()
+                .filter(|actor| reviewers.contains(actor))
+                .count() as i64
+        });
+        save_observations(tx, std::slice::from_ref(&value.review))?;
+        crate::queue::stage::observe_signals(
+            tx,
+            &target.review,
+            target.settings,
+            &value.review.head_sha,
+            value.observed_at_ms,
+            approval,
+            comments,
+        )?;
+    }
+    tx.sql.execute(
+        "INSERT INTO review_discovery_due VALUES(?1,?2,?3,?4)
+         ON CONFLICT(review_id) DO UPDATE SET settings_revision=excluded.settings_revision,
+            source_sha=excluded.source_sha,next_due_at_ms=excluded.next_due_at_ms",
+        params![
+            target.review.as_str(),
+            target.settings.as_sqlite_integer(),
+            head.as_str(),
+            now_ms()?.saturating_add(delay)
+        ],
+    )?;
+    Ok(())
 }
 
 fn record(

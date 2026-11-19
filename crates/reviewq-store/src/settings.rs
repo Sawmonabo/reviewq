@@ -3,7 +3,8 @@
 use reviewq_app::access::{Actor, AppError, AppFuture};
 use reviewq_app::events::{ResourceKey, Snapshot};
 use reviewq_app::settings::{
-    ConnectionSummary, Connections, SavedConnection, SavedCredentials, SecretToken, SettingsStore,
+    ConnectionSummary, Connections, ReducedWorkspace, SavedConnection, SavedCredentials,
+    SecretToken, SettingsStore,
 };
 use reviewq_domain::identity::Revision;
 use reviewq_domain::settings::{
@@ -78,27 +79,48 @@ impl SettingsStore for SqliteStore {
                 let pinned = pinned(&tx.sql)?;
                 let mut changed = scope::discovery_changed(&tx.sql, &scope)?;
                 for connection in [gitlab, jira] {
-                    let prior = account(&tx.sql, connection.account.connection.provider())?;
+                    let provider = connection.account.connection.provider();
+                    let prior = account(&tx.sql, provider)?;
                     let same = prior
                         .as_ref()
                         .is_some_and(|prior| prior.same_authority(&connection.account));
                     if pinned && prior.is_some() && !same {
                         return Err(AppError::Conflict.into());
                     }
-                    changed |= !same;
+                    let secret = connection.token.as_ref().ok_or(AppError::InvalidRequest)?;
+                    let same_access = same && tx.sql.query_row(
+                        "SELECT EXISTS(SELECT 1 FROM credentials WHERE provider=?1 AND token=?2)",
+                        params![label(provider), secret.expose()],
+                        |row| row.get::<_, bool>(0),
+                    )?;
+                    changed |= !same_access;
+                    if provider == Provider::GitLab && !same_access {
+                        invalidate_history(&tx.sql)?;
+                    }
                     save(&tx.sql, connection)?;
                 }
-                if changed {
-                    crate::queue::tracking::retain_current_tickets(&tx.sql, None)?;
-                    tx.sql.execute_batch(
-                        "DELETE FROM review_discoveries;
-                         DELETE FROM scoped_issues;
-                         DELETE FROM scoped_sprints;",
-                    )?;
-                    tx.emit(&[ResourceKey::Ticket(None)])?;
-                }
-                scope::replace(&tx.sql, &origin, scope)?;
-                advance(tx, expected)
+                commit_scope(tx, expected, &origin, scope, changed)
+            })
+            .await
+            .map_err(StoreError::app)
+        })
+    }
+
+    fn reduce_workspace(
+        &self,
+        actor: Actor,
+        expected: Revision,
+        reduced: ReducedWorkspace,
+    ) -> AppFuture<'_, Snapshot<Connections>> {
+        Box::pin(async move {
+            operator(&actor).map_err(StoreError::app)?;
+            self.write(move |tx| {
+                recheck(&tx.sql, expected)?;
+                let gitlab =
+                    account(&tx.sql, Provider::GitLab)?.ok_or(AppError::PreconditionFailed)?;
+                let scope = reduced.into_scope();
+                let changed = scope::discovery_changed(&tx.sql, &scope)?;
+                commit_scope(tx, expected, gitlab.connection.origin(), scope, changed)
             })
             .await
             .map_err(StoreError::app)
@@ -122,12 +144,39 @@ impl SettingsStore for SqliteStore {
                 {
                     return snapshot(&tx.sql, view(&tx.sql)?);
                 }
+                if provider == Provider::GitLab {
+                    invalidate_history(&tx.sql)?;
+                }
                 advance(tx, expected)
             })
             .await
             .map_err(StoreError::app)
         })
     }
+}
+
+fn invalidate_history(db: &Database) -> Result<(), StoreError> {
+    db.execute(
+        "UPDATE source_history_projects SET valid=0 WHERE valid<>0",
+        [],
+    )?;
+    Ok(())
+}
+
+fn commit_scope(
+    tx: &mut WriteTx<'_>,
+    expected: Revision,
+    origin: &str,
+    scope: WorkspaceScope,
+    changed: bool,
+) -> Result<Snapshot<Connections>, StoreError> {
+    if changed {
+        crate::queue::tracking::retain_current_tickets(&tx.sql, None)?;
+        tx.sql.execute_batch("DELETE FROM review_discoveries; DELETE FROM scoped_issues; DELETE FROM scoped_sprints;")?;
+        tx.emit(&[ResourceKey::Ticket(None)])?;
+    }
+    scope::replace(&tx.sql, origin, scope)?;
+    advance(tx, expected)
 }
 
 fn account(db: &Database, provider: Provider) -> Result<Option<VerifiedAccount>, StoreError> {

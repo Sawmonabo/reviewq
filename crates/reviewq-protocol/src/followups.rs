@@ -148,6 +148,9 @@ pub struct AssessmentPage<I = Assessment> {
     pub through_batch_id: Option<ResourceIdDto>,
 }
 
+pub type ResultsResponse = crate::Success<crate::Page<ResultSummary>>;
+pub type AssessmentsResponse<I = Assessment> = crate::Success<AssessmentPage<I>>;
+
 #[derive(Debug, serde::Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]

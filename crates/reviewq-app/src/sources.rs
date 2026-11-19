@@ -39,6 +39,7 @@ pub trait ReviewSourceReader: ChangeSource {
         canonical_url: String,
     ) -> AppFuture<'_, UnverifiedTrack>;
     fn workflow_snapshot(&self, identity: MrIdentity) -> AppFuture<'_, WorkflowSnapshot>;
+    fn discovery_evidence(&self, identity: MrIdentity) -> AppFuture<'_, DiscoveryEvidence>;
 
     fn reviews(&self, project: ConfiguredProject) -> AppFuture<'_, Vec<ReviewSource>>;
     fn ticket_reviews(
@@ -260,6 +261,14 @@ pub struct WorkflowSnapshot {
     pub approved_reviewers: Option<Vec<u64>>,
     pub observed_at_ms: i64,
     pub discussions: Vec<WorkflowDiscussion>,
+}
+
+pub struct DiscoveryEvidence {
+    pub review: ReviewSource,
+    pub authenticated_actor: u64,
+    pub approved_reviewers: Option<Vec<u64>>,
+    pub note_authors: Option<Vec<u64>>,
+    pub observed_at_ms: i64,
 }
 
 impl WorkflowSnapshot {

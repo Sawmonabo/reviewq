@@ -73,6 +73,18 @@ impl Inventory {
         })
     }
 
+    pub(super) async fn has_worktree(&self, worktree: &Path) -> Result<bool, Failure> {
+        let file = worktree.join(CODEX[0]);
+        let ready = self.entries.contains(&Owned::Codex { file: file.clone() })
+            && read(&file)?.is_some_and(|file| file.mode == 0o600)
+            && read(&worktree.join(CODEX[1]))?.is_some_and(|file| file.bytes == SKILL);
+        if ready {
+            git::require_untracked(worktree, CODEX).await?;
+            git::require_ignored(worktree, CODEX).await?;
+        }
+        Ok(ready)
+    }
+
     pub(super) async fn cleanup(
         &self,
         path: &Path,
@@ -85,7 +97,7 @@ impl Inventory {
         };
         for owned in &self.entries {
             if matches!(owned, Owned::Exclusion { .. }) {
-                let dependencies = self
+                let dependencies = unresolved
                     .entries
                     .iter()
                     .filter(|entry| {

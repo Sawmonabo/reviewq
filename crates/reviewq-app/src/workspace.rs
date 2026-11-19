@@ -56,9 +56,11 @@ pub struct GrantAddress {
 #[derive(Clone)]
 pub struct CheckoutProjection {
     pub settings: Revision,
+    pub generation: Revision,
     pub project: ConfiguredProject,
     pub checkout: CheckoutBinding,
     pub desired: bool,
+    pub ready: bool,
 }
 
 pub enum ProjectionOutcome {
@@ -70,7 +72,6 @@ pub enum ProjectionOutcome {
 pub trait RepositoryChatProjectionStore: Send + Sync {
     fn checkout_projections(
         &self,
-        include_applied: bool,
         after: Option<AbsolutePath>,
     ) -> AppFuture<'_, Vec<CheckoutProjection>>;
     fn check_checkout_projection(&self, job: CheckoutProjection) -> AppFuture<'_, ()>;
@@ -103,6 +104,12 @@ pub trait WorkspaceStore: Send + Sync {
     -> AppFuture<'_, Snapshot<GrantBinding>>;
     fn revoke_grant(&self, actor: Actor, common_dir: AbsolutePath)
     -> AppFuture<'_, Snapshot<bool>>;
+    fn request_checkout_projection(
+        &self,
+        actor: Actor,
+        settings: Revision,
+        common_dir: AbsolutePath,
+    ) -> AppFuture<'_, Snapshot<bool>>;
 
     /// Replaces active memberships and checkout authority under one settings revision.
     /// A revoked or rotated grant cannot be reactivated at its older epoch.

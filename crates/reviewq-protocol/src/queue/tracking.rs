@@ -36,6 +36,11 @@ pub struct TicketDetail {
     pub priority: Option<String>,
     pub assignee: Option<String>,
     pub assignee_id: Option<String>,
+    pub reporter: Option<String>,
+    pub reporter_id: Option<String>,
+    pub issue_type: Option<String>,
+    pub labels: Vec<String>,
+    pub components: Vec<String>,
     pub description: Option<String>,
     #[cfg_attr(feature = "schema", schemars(range(min = 0)))]
     pub estimate: Option<f64>,

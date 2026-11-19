@@ -208,20 +208,11 @@ impl WorkspaceStore for SqliteStore {
             operator(&actor).map_err(StoreError::app)?;
             self.write(move |tx| {
                 let settings = expected.settings;
-                let verifier = expected.verifier;
                 let result = grants::exact(&tx.sql, expected)?;
-                crate::settings::projection::applied_address(
+                crate::settings::projection::request(
                     tx,
-                    reviewq_app::workspace::CheckoutProjection {
-                        settings,
-                        desired: true,
-                        project: result.value.issuing_project.clone(),
-                        checkout: reviewq_domain::settings::CheckoutBinding {
-                            root: result.value.checkout.clone(),
-                            common_dir: result.value.common_dir.clone(),
-                        },
-                    },
-                    verifier,
+                    settings,
+                    result.value.common_dir.clone(),
                 )?;
                 snapshot(&tx.sql, result.value)
             })
@@ -257,6 +248,20 @@ impl WorkspaceStore for SqliteStore {
             })
             .await
             .map_err(StoreError::app)
+        })
+    }
+
+    fn request_checkout_projection(
+        &self,
+        actor: Actor,
+        settings: Revision,
+        common_dir: AbsolutePath,
+    ) -> AppFuture<'_, Snapshot<bool>> {
+        Box::pin(async move {
+            operator(&actor).map_err(StoreError::app)?;
+            self.write(move |tx| crate::settings::projection::request(tx, settings, common_dir))
+                .await
+                .map_err(StoreError::app)
         })
     }
 

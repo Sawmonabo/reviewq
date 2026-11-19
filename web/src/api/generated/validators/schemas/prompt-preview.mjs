@@ -3,9 +3,9 @@ import { func0 } from "../runtime.mjs";
 import { validate25 } from "./checkpoint-id-dto.mjs";
 import { validate48 } from "./history-cursor-dto.mjs";
 import { validate127 } from "./safe-count-dto.mjs";
-import { validate479 } from "./history-text.mjs";
+import { validate501 } from "./history-text.mjs";
 import { validate232 } from "./utc-timestamp-dto.mjs";
-function validate496(
+function validate518(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -26,7 +26,7 @@ function validate496(
         ((data.locator === undefined || !func0.call(data, "locator")) &&
           (missing0 = "locator"))
       ) {
-        validate496.errors = [
+        validate518.errors = [
           {
             instancePath,
             schemaPath: "#/required",
@@ -102,7 +102,7 @@ function validate496(
               if (data.text !== undefined && func0.call(data, "text")) {
                 const _errs4 = errors;
                 if (
-                  !validate479(data.text, {
+                  !validate501(data.text, {
                     instancePath: instancePath + "/text",
                     parentData: data,
                     parentDataProperty: "text",
@@ -111,8 +111,8 @@ function validate496(
                 ) {
                   vErrors =
                     vErrors === null
-                      ? validate479.errors
-                      : vErrors.concat(validate479.errors);
+                      ? validate501.errors
+                      : vErrors.concat(validate501.errors);
                   errors = vErrors.length;
                 }
                 var valid0 = _errs4 === errors;
@@ -177,7 +177,7 @@ function validate496(
                       vErrors.push(err1);
                     }
                     errors++;
-                    validate496.errors = vErrors;
+                    validate518.errors = vErrors;
                     return false;
                   } else {
                     errors = _errs6;
@@ -199,7 +199,7 @@ function validate496(
         }
       }
     } else {
-      validate496.errors = [
+      validate518.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -210,7 +210,7 @@ function validate496(
       return false;
     }
   }
-  validate496.errors = vErrors;
+  validate518.errors = vErrors;
   return errors === 0;
 }
-export { validate496 };
+export { validate518 };

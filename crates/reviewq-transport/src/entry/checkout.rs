@@ -25,10 +25,22 @@ use super::{ApiError, Entry, control_ops};
     deny_unknown_fields
 )]
 enum Command {
-    Applied { address: Address },
-    Issue { address: Address },
-    Revoke { common_dir: PathBuf },
-    Status { address: Address },
+    Applied {
+        address: Address,
+    },
+    Issue {
+        address: Address,
+    },
+    Revoke {
+        common_dir: PathBuf,
+    },
+    Status {
+        address: Address,
+    },
+    ProjectWorktree {
+        settings_revision: RevisionDto,
+        common_dir: PathBuf,
+    },
 }
 
 #[derive(Deserialize)]
@@ -59,6 +71,9 @@ enum GrantResponse {
     },
     Revoked {
         revoked: bool,
+    },
+    Scheduled {
+        scheduled: bool,
     },
 }
 
@@ -142,6 +157,24 @@ async fn apply(entry: &Entry, input: Command) -> Result<Success<GrantResponse>, 
             success(
                 GrantResponse::Revoked {
                     revoked: stored.value,
+                },
+                stored.cursor,
+            )
+        }
+        Command::ProjectWorktree {
+            settings_revision,
+            common_dir,
+        } => {
+            let common = directory(common_dir).await?;
+            let revision = Revision::try_from(settings_revision.get())
+                .map_err(|_| AppError::InvalidRequest)?;
+            let stored = entry
+                .store
+                .request_checkout_projection(actor, revision, common)
+                .await?;
+            success(
+                GrantResponse::Scheduled {
+                    scheduled: stored.value,
                 },
                 stored.cursor,
             )

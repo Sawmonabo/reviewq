@@ -34,7 +34,7 @@ impl ProjectHistoryStore for SqliteStore {
                         project.project_id.as_sqlite_integer()
                     ],
                 )?;
-                watermark(&tx.sql, attempt, &project)
+                watermark(&tx.sql, &project)
             })
             .await
             .map_err(StoreError::app)
@@ -69,7 +69,7 @@ impl ProjectHistoryStore for SqliteStore {
         Box::pin(async move {
             self.write(move |tx| {
                 check_scan(&tx.sql, attempt, &project)?;
-                publish(&tx.sql, attempt, &project, watermark)
+                publish(&tx.sql, &project, watermark)
             })
             .await
             .map_err(StoreError::app)
@@ -85,13 +85,18 @@ impl ProjectHistoryStore for SqliteStore {
             self.write(move |tx| {
                 check_scan(&tx.sql, attempt, &project)?;
                 tx.sql.execute(
-                    "UPDATE source_history_projects SET valid=0 WHERE (origin,project_id,settings_revision)=(?1,?2,?3)",
-                    params![project.origin.as_str(),project.project_id.as_sqlite_integer(),attempt.settings_revision.as_sqlite_integer()]
+                    "UPDATE source_history_projects SET valid=0 WHERE (origin,project_id)=(?1,?2)",
+                    params![
+                        project.origin.as_str(),
+                        project.project_id.as_sqlite_integer()
+                    ],
                 )?;
                 tx.sql.execute("DELETE FROM source_history_staging", [])?;
                 tx.sql.execute("DELETE FROM source_history_scan", [])?;
                 Ok(())
-            }).await.map_err(StoreError::app)
+            })
+            .await
+            .map_err(StoreError::app)
         })
     }
 
@@ -107,7 +112,7 @@ impl ProjectHistoryStore for SqliteStore {
             }
             self.read(move |db| {
                 check(db, attempt, &project)?;
-                if watermark(db, attempt, &project)?.is_none() {
+                if watermark(db, &project)?.is_none() {
                     return Err(AppError::StaleRevision.into());
                 }
                 candidates(db, project, keys)
@@ -151,6 +156,9 @@ fn stage(db: &Connection, rows: Vec<ProjectHistoryRow>) -> Result<(), StoreError
             charge += row.title.len() + row.branch.len() + keys.len() + 64;
         }
     }
+    if charge == 0 {
+        return Err(AppError::Conflict.into());
+    }
     let charged = db.execute(
         "UPDATE source_history_scan SET bytes=bytes+?1 WHERE bytes+?1<=?2",
         params![charge as i64, MAX_SCAN_BYTES],
@@ -161,13 +169,8 @@ fn stage(db: &Connection, rows: Vec<ProjectHistoryRow>) -> Result<(), StoreError
     Ok(())
 }
 
-fn publish(
-    db: &Connection,
-    attempt: RefreshAttempt,
-    project: &ConfiguredProject,
-    next: i64,
-) -> Result<(), StoreError> {
-    let prior = watermark(db, attempt, project)?;
+fn publish(db: &Connection, project: &ConfiguredProject, next: i64) -> Result<(), StoreError> {
+    let prior = watermark(db, project)?;
     let args = params![
         project.origin.as_str(),
         project.project_id.as_sqlite_integer()
@@ -179,13 +182,12 @@ fn publish(
         )?;
     }
     db.execute(
-        "INSERT INTO source_history_projects VALUES(?1,?2,?3,?4,1)
+        "INSERT INTO source_history_projects VALUES(?1,?2,?3,1)
          ON CONFLICT(origin,project_id) DO UPDATE SET watermark_ms=excluded.watermark_ms
          WHERE watermark_ms<excluded.watermark_ms",
         params![
             project.origin.as_str(),
             project.project_id.as_sqlite_integer(),
-            attempt.settings_revision.as_sqlite_integer(),
             next
         ],
     )?;
@@ -256,19 +258,14 @@ fn candidates(
     Ok(matching)
 }
 
-fn watermark(
-    db: &Connection,
-    attempt: RefreshAttempt,
-    project: &ConfiguredProject,
-) -> Result<Option<i64>, StoreError> {
+fn watermark(db: &Connection, project: &ConfiguredProject) -> Result<Option<i64>, StoreError> {
     Ok(db
         .query_row(
             "SELECT watermark_ms FROM source_history_projects
-         WHERE (origin,project_id,settings_revision,valid)=(?1,?2,?3,1)",
+         WHERE (origin,project_id,valid)=(?1,?2,1)",
             params![
                 project.origin.as_str(),
                 project.project_id.as_sqlite_integer(),
-                attempt.settings_revision.as_sqlite_integer()
             ],
             |row| row.get(0),
         )

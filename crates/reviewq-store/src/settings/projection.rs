@@ -1,13 +1,13 @@
 use std::os::unix::ffi::OsStrExt;
 
 use reviewq_app::access::{AppError, AppFuture};
-use reviewq_app::events::ResourceKey;
+use reviewq_app::events::{ResourceKey, Snapshot};
 use reviewq_app::settings::ChatSetup;
 use reviewq_app::workspace::{
     CheckoutProjection, ConfiguredProject, IssueGrant, ProjectionOutcome,
     RepositoryChatProjectionStore,
 };
-use reviewq_domain::identity::{GitLabOrigin, ProjectId};
+use reviewq_domain::identity::{GitLabOrigin, ProjectId, Revision};
 use reviewq_domain::session::AbsolutePath;
 use reviewq_domain::settings::CheckoutBinding;
 use rusqlite::{Connection, OptionalExtension, params};
@@ -20,23 +20,23 @@ use crate::{SqliteStore, StoreError};
 impl RepositoryChatProjectionStore for SqliteStore {
     fn checkout_projections(
         &self,
-        include_applied: bool,
         after: Option<AbsolutePath>,
     ) -> AppFuture<'_, Vec<CheckoutProjection>> {
         Box::pin(async move {
             self.read(move |db| {
                 let settings = settings_revision(db)?;
                 let mut rows = db.prepare_cached(
-                    "SELECT common_dir,origin,project_id,checkout,desired FROM checkout_projections
-                     WHERE suppressed=0 AND (?1 OR ready=0) AND (?2 IS NULL OR common_dir>?2)
+                    "SELECT common_dir,origin,project_id,checkout,desired,generation,ready FROM checkout_projections
+                     WHERE suppressed=0 AND (?1 IS NULL OR common_dir>?1)
                      ORDER BY common_dir LIMIT 16",
                 )?;
-                let mut rows = rows.query(params![include_applied, after.as_ref().map(bytes)])?;
+                let mut rows = rows.query(params![after.as_ref().map(bytes)])?;
                 let mut entries = Vec::new();
                 while let Some(row) = rows.next()? {
                     let origin = row.get::<_, String>(1)?;
                     entries.push(CheckoutProjection {
                         settings,
+                        generation: Revision::try_from(row.get::<_,i64>(5)?).map_err(|_| AppError::Internal)?,
                         project: ConfiguredProject {
                             origin: GitLabOrigin::from_canonical(&origin)
                                 .map_err(|_| AppError::Internal)?,
@@ -48,6 +48,7 @@ impl RepositoryChatProjectionStore for SqliteStore {
                             common_dir: path(row.get(0)?)?,
                         },
                         desired: row.get(4)?,
+                        ready: row.get(6)?,
                     });
                 }
                 Ok(entries)
@@ -192,23 +193,26 @@ pub(crate) fn suppress(db: &Connection, common: &AbsolutePath) -> Result<bool, S
     )? != 0)
 }
 
-pub(crate) fn applied_address(
+pub(crate) fn request(
     tx: &mut WriteTx<'_>,
-    job: CheckoutProjection,
-    verifier: [u8; 32],
-) -> Result<(), StoreError> {
-    let current: bool = tx.sql.query_row(
-        "SELECT EXISTS(SELECT 1 FROM checkout_projections WHERE common_dir=?1 AND desired=1)",
-        [bytes(&job.checkout.common_dir)],
-        |row| row.get(0),
-    )?;
-    if current {
-        check(&tx.sql, &job)?;
-        if applied(tx, &job, &verifier)? != 0 {
-            tx.emit(&[ResourceKey::Settings])?;
-        }
+    settings: Revision,
+    common: AbsolutePath,
+) -> Result<Snapshot<bool>, StoreError> {
+    if settings_revision(&tx.sql)? != settings {
+        return Err(AppError::StaleRevision.into());
     }
-    Ok(())
+    let scheduled = tx.sql.execute(
+        "UPDATE checkout_projections AS p SET ready=0,issue=NULL,generation=generation+1
+         WHERE p.common_dir=?1 AND p.desired=1 AND p.suppressed=0 AND EXISTS (
+           SELECT 1 FROM repo_grants g WHERE g.active=1 AND g.verifier IS NOT NULL
+           AND (g.common_dir,g.origin,g.project_id,g.checkout)=(p.common_dir,p.origin,p.project_id,p.checkout))",
+        [bytes(&common)]
+    )? != 0;
+    if scheduled {
+        tx.projection_changed = true;
+        tx.emit(&[ResourceKey::Settings])?;
+    }
+    crate::events::snapshot(&tx.sql, scheduled)
 }
 
 fn applied(
@@ -243,13 +247,14 @@ fn check(db: &Connection, job: &CheckoutProjection) -> Result<(), StoreError> {
     if settings_revision(db)? != job.settings
         || !db.query_row(
             "SELECT EXISTS(SELECT 1 FROM checkout_projections WHERE
-          (common_dir,origin,project_id,checkout,desired,suppressed)=(?1,?2,?3,?4,?5,0))",
+          (common_dir,origin,project_id,checkout,desired,suppressed,generation)=(?1,?2,?3,?4,?5,0,?6))",
             params![
                 bytes(&job.checkout.common_dir),
                 job.project.origin.as_str(),
                 job.project.project_id.as_sqlite_integer(),
                 bytes(&job.checkout.root),
-                job.desired
+                job.desired,
+                job.generation.as_sqlite_integer()
             ],
             |row| row.get::<_, bool>(0),
         )?

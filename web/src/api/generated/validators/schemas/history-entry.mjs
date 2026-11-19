@@ -2,10 +2,10 @@
 import { func0 } from "../runtime.mjs";
 import { validate48 } from "./history-cursor-dto.mjs";
 import { validate25 } from "./checkpoint-id-dto.mjs";
-import { validate520 } from "./history-part.mjs";
+import { validate542 } from "./history-part.mjs";
 import { validate127 } from "./safe-count-dto.mjs";
 import { validate232 } from "./utc-timestamp-dto.mjs";
-function validate517(
+function validate539(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -24,7 +24,7 @@ function validate517(
         ((data.parts === undefined || !func0.call(data, "parts")) &&
           (missing0 = "parts"))
       ) {
-        validate517.errors = [
+        validate539.errors = [
           {
             instancePath,
             schemaPath: "#/required",
@@ -86,7 +86,7 @@ function validate517(
                   for (let i0 = 0; i0 < len0; i0++) {
                     const _errs5 = errors;
                     if (
-                      !validate520(data2[i0], {
+                      !validate542(data2[i0], {
                         instancePath: instancePath + "/parts/" + i0,
                         parentData: data2,
                         parentDataProperty: i0,
@@ -95,8 +95,8 @@ function validate517(
                     ) {
                       vErrors =
                         vErrors === null
-                          ? validate520.errors
-                          : vErrors.concat(validate520.errors);
+                          ? validate542.errors
+                          : vErrors.concat(validate542.errors);
                       errors = vErrors.length;
                     }
                     var valid1 = _errs5 === errors;
@@ -105,7 +105,7 @@ function validate517(
                     }
                   }
                 } else {
-                  validate517.errors = [
+                  validate539.errors = [
                     {
                       instancePath: instancePath + "/parts",
                       schemaPath: "#/properties/parts/type",
@@ -226,7 +226,7 @@ function validate517(
                         vErrors.push(err1);
                       }
                       errors++;
-                      validate517.errors = vErrors;
+                      validate539.errors = vErrors;
                       return false;
                     } else {
                       errors = _errs9;
@@ -300,7 +300,7 @@ function validate517(
                           vErrors.push(err3);
                         }
                         errors++;
-                        validate517.errors = vErrors;
+                        validate539.errors = vErrors;
                         return false;
                       } else {
                         errors = _errs14;
@@ -324,7 +324,7 @@ function validate517(
         }
       }
     } else {
-      validate517.errors = [
+      validate539.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -335,7 +335,7 @@ function validate517(
       return false;
     }
   }
-  validate517.errors = vErrors;
+  validate539.errors = vErrors;
   return errors === 0;
 }
-export { validate517 };
+export { validate539 };

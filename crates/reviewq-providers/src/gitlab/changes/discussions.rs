@@ -4,7 +4,7 @@ use reviewq_app::changes::{
     SourcePage,
 };
 use reviewq_app::sources::{
-    ReviewSourceReader, WorkflowDiscussion, WorkflowNote, WorkflowSnapshot,
+    DiscoveryEvidence, ReviewSourceReader, WorkflowDiscussion, WorkflowNote, WorkflowSnapshot,
 };
 use reviewq_domain::identity::{MrIdentity, ReportHash};
 use serde::Deserialize;
@@ -206,12 +206,46 @@ struct ConnectedUser {
 }
 
 impl GitLab {
-    pub(in crate::gitlab) async fn read_workflow_snapshot(
+    pub(in crate::gitlab) async fn read_discovery_evidence(
         &self,
         identity: MrIdentity,
-    ) -> Result<WorkflowSnapshot, AppError> {
+    ) -> Result<DiscoveryEvidence, AppError> {
         let before = ReviewSourceReader::review(self, identity.clone()).await?;
-        let user = self.approval_account().await?;
+        let authenticated_actor = self.approval_account().await?;
+        let (facts, discussions) = tokio::join!(
+            self.read_approval_facts(&identity),
+            self.workflow_discussions(&identity)
+        );
+        let approved_reviewers =
+            facts?.map(|facts| facts.approvers.into_iter().map(|value| value.id).collect());
+        let note_authors = match discussions {
+            Ok(discussions) => Some(
+                discussions
+                    .into_iter()
+                    .flat_map(|thread| thread.notes)
+                    .map(|note| note.author)
+                    .collect(),
+            ),
+            Err(AppError::StaleRevision) => return Err(AppError::StaleRevision),
+            Err(_) => None,
+        };
+        let review = ReviewSourceReader::review(self, identity).await?;
+        if before != review {
+            return Err(AppError::StaleRevision);
+        }
+        Ok(DiscoveryEvidence {
+            review,
+            authenticated_actor,
+            approved_reviewers,
+            note_authors,
+            observed_at_ms: jiff::Timestamp::now().as_millisecond(),
+        })
+    }
+
+    async fn workflow_discussions(
+        &self,
+        identity: &MrIdentity,
+    ) -> Result<Vec<WorkflowDiscussion>, AppError> {
         let mut discussions = Vec::new();
         let mut discussion_ids = std::collections::HashSet::new();
         let mut note_ids = std::collections::HashSet::new();
@@ -219,7 +253,7 @@ impl GitLab {
         loop {
             let (rows, next_page) = self
                 .read_diff_rows::<UpstreamDiscussion>(
-                    &identity,
+                    identity,
                     "discussions",
                     page,
                     30,
@@ -307,6 +341,16 @@ impl GitLab {
             }
             page = next;
         }
+        Ok(discussions)
+    }
+
+    pub(in crate::gitlab) async fn read_workflow_snapshot(
+        &self,
+        identity: MrIdentity,
+    ) -> Result<WorkflowSnapshot, AppError> {
+        let before = ReviewSourceReader::review(self, identity.clone()).await?;
+        let user = self.approval_account().await?;
+        let discussions = self.workflow_discussions(&identity).await?;
         let approved_reviewers = self.read_approval_facts(&identity).await?.map(|facts| {
             facts
                 .approvers

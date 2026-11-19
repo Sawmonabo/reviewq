@@ -347,6 +347,9 @@ pub fn router(
         .fallback_service(
             ServeDir::new(web).not_found_service(ServeFile::new(web.join("index.html"))),
         )
+        .layer(tower_http::timeout::RequestBodyTimeoutLayer::new(
+            Duration::from_secs(30),
+        ))
         .layer(middleware::from_fn_with_state(entry.clone(), guard))
         .with_state(entry)
 }

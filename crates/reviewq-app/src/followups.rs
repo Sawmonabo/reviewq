@@ -165,6 +165,7 @@ pub struct TrackedReview {
     pub settings: Revision,
     pub observed_before: reviewq_domain::identity::EventCursor,
     pub monitor: Option<MonitoredReview>,
+    pub discovery_head: Option<reviewq_domain::identity::GitSha>,
 }
 
 pub trait FollowupObservationStore: Send + Sync {
@@ -179,6 +180,11 @@ pub trait FollowupObservationStore: Send + Sync {
         target: TrackedReview,
         observation: crate::sources::WorkflowSnapshot,
     ) -> AppFuture<'_, ()>;
+    fn record_discovery_evidence(
+        &self,
+        target: TrackedReview,
+        observation: Option<crate::sources::DiscoveryEvidence>,
+    ) -> AppFuture<'_, ()>;
 }
 
 pub async fn poll_monitored_reviews(
@@ -192,12 +198,23 @@ pub async fn poll_monitored_reviews(
         .then(|| rows.last().map(|row| row.review.clone()))
         .flatten();
     for row in rows {
-        let committed = match source.workflow_snapshot(row.identity.clone()).await {
-            Ok(observation) => store.record_workflow_observation(row, observation).await,
-            Err(_) => match row.monitor {
-                Some(monitor) => store.record_monitor_unavailable(monitor).await,
-                None => continue,
-            },
+        let committed = if row.discovery_head.is_some() {
+            let observation = match source.discovery_evidence(row.identity.clone()).await {
+                Ok(observation) => Some(observation),
+                Err(crate::access::AppError::StaleRevision) => {
+                    return Err(crate::access::AppError::StaleRevision);
+                }
+                Err(_) => None,
+            };
+            store.record_discovery_evidence(row, observation).await
+        } else {
+            match source.workflow_snapshot(row.identity.clone()).await {
+                Ok(observation) => store.record_workflow_observation(row, observation).await,
+                Err(_) => match row.monitor {
+                    Some(monitor) => store.record_monitor_unavailable(monitor).await,
+                    None => continue,
+                },
+            }
         };
         if let Err(error) = committed
             && !matches!(

@@ -48,7 +48,9 @@ impl Jira {
         {
             return Err(AppError::InvalidRequest);
         }
-        let fields = std::iter::once("summary,project,status,priority,assignee,description")
+        let fields = std::iter::once(
+            "summary,project,status,priority,assignee,reporter,issuetype,labels,components,description",
+        )
             .chain(estimate_fields.iter().map(String::as_str))
             .collect::<Vec<_>>()
             .join(",");
@@ -73,6 +75,11 @@ impl Jira {
             priority: optional_label(&fields["priority"], "name")?,
             assignee: optional_label(&fields["assignee"], "displayName")?,
             assignee_id: account_id(&fields["assignee"])?,
+            reporter: optional_label(&fields["reporter"], "displayName")?,
+            reporter_id: account_id(&fields["reporter"])?,
+            issue_type: optional_label(&fields["issuetype"], "name")?,
+            labels: detail_names(&fields["labels"], None)?,
+            components: detail_names(&fields["components"], Some("name"))?,
             description,
             estimate,
             warning,
@@ -191,6 +198,23 @@ fn account_id(person: &Value) -> Result<Option<String>, AppError> {
         .as_str()
         .map(|id| safe_label(id, 512))
         .transpose()
+}
+
+fn detail_names(value: &Value, member: Option<&str>) -> Result<Vec<String>, AppError> {
+    if value.is_null() {
+        return Ok(Vec::new());
+    }
+    let entries = value.as_array().ok_or(AppError::Unavailable)?;
+    if entries.len() > 256 {
+        return Err(AppError::PayloadTooLarge);
+    }
+    entries
+        .iter()
+        .map(|item| {
+            let value = member.map_or(item, |key| &item[key]);
+            safe_label(value.as_str().ok_or(AppError::Unavailable)?, 512)
+        })
+        .collect()
 }
 
 fn estimate(fields: &Value, columns: &[String]) -> (Option<f64>, Option<&'static str>) {

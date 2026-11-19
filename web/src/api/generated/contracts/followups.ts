@@ -2,7 +2,9 @@
 
 import type {
   EventCursorDto,
+  FindingConclusion,
   GitShaDto,
+  PageCursorDto,
   ResourceIdDto,
   ReviewIdDto,
   RevisionDto,
@@ -14,6 +16,8 @@ import type {
 } from "./common.js";
 
 export type EnrollmentState = "enabled" | "paused";
+
+export type NextAction = "review" | "waiting_author";
 
 export type BatchState =
   | "pending"
@@ -51,6 +55,33 @@ export interface FollowupPreferencesRequest {
   automatic?: boolean | null;
   expectedRevision: RevisionDto;
   submissionId: SubmissionIdDto;
+}
+
+export interface FollowupAssessmentsResponse {
+  cursor: EventCursorDto;
+  data: AssessmentPage;
+  [k: string]: unknown;
+}
+
+export interface AssessmentPage {
+  /**
+   * @maxItems 500
+   */
+  items: Assessment[];
+  nextCursor: PageCursorDto | null;
+  throughBatchId: ResourceIdDto | null;
+  [k: string]: unknown;
+}
+
+export interface Assessment {
+  batchId: ResourceIdDto;
+  conclusion: FindingConclusion;
+  discussionId: ResourceIdDto;
+  findingIds: ResourceIdDto[];
+  nextAction: NextAction;
+  reason: string;
+  receiptId: ResourceIdDto | null;
+  [k: string]: unknown;
 }
 
 export interface FollowupEnrollmentResponse {
@@ -151,5 +182,20 @@ export interface FollowupPreferencesResponsePreferences {
   autoReviewConcurrency: number;
   automatic: boolean;
   revision: RevisionDto;
+  [k: string]: unknown;
+}
+
+export interface FollowupResultsResponse {
+  cursor: EventCursorDto;
+  data: ResultSummaryPage;
+  [k: string]: unknown;
+}
+
+export interface ResultSummaryPage {
+  /**
+   * @maxItems 100
+   */
+  items: ResultSummary[];
+  nextCursor: PageCursorDto | null;
   [k: string]: unknown;
 }

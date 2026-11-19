@@ -2,7 +2,7 @@
 import { func0 } from "../runtime.mjs";
 import { validate25 } from "./checkpoint-id-dto.mjs";
 import { validate71 } from "./host-provider-dto.mjs";
-function validate1111(
+function validate1132(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -24,7 +24,7 @@ function validate1111(
         ((data.cwd === undefined || !func0.call(data, "cwd")) &&
           (missing0 = "cwd"))
       ) {
-        validate1111.errors = [
+        validate1132.errors = [
           {
             instancePath,
             schemaPath: "#/required",
@@ -37,7 +37,7 @@ function validate1111(
         if (data.cwd !== undefined && func0.call(data, "cwd")) {
           const _errs1 = errors;
           if (typeof data.cwd !== "string") {
-            validate1111.errors = [
+            validate1132.errors = [
               {
                 instancePath: instancePath + "/cwd",
                 schemaPath: "#/properties/cwd/type",
@@ -130,7 +130,7 @@ function validate1111(
                   vErrors.push(err1);
                 }
                 errors++;
-                validate1111.errors = vErrors;
+                validate1132.errors = vErrors;
                 return false;
               } else {
                 errors = _errs5;
@@ -197,7 +197,7 @@ function validate1111(
         }
       }
     } else {
-      validate1111.errors = [
+      validate1132.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -208,7 +208,7 @@ function validate1111(
       return false;
     }
   }
-  validate1111.errors = vErrors;
+  validate1132.errors = vErrors;
   return errors === 0;
 }
-export { validate1111 };
+export { validate1132 };

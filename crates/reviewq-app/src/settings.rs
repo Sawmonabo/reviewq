@@ -12,9 +12,11 @@ use crate::access::{Actor, AppError, AppFuture};
 use crate::events::Snapshot;
 use crate::sources::{ReviewSourceReader, TicketSourceReader};
 
+mod reduction;
 mod runtime;
 mod skills;
 
+pub use reduction::{ReducedWorkspace, local_reduction};
 pub use runtime::{ActiveSource, RuntimeSources, SourceLease};
 pub use skills::{NativeSkillReader, NativeSkills};
 
@@ -172,6 +174,13 @@ pub trait SettingsStore: Send + Sync {
         gitlab: SavedConnection,
         jira: SavedConnection,
         scope: WorkspaceScope,
+    ) -> AppFuture<'_, Snapshot<Connections>>;
+
+    fn reduce_workspace(
+        &self,
+        actor: Actor,
+        expected: Revision,
+        scope: ReducedWorkspace,
     ) -> AppFuture<'_, Snapshot<Connections>>;
 
     fn disconnect(

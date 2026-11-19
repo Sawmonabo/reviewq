@@ -167,6 +167,9 @@ fn main() -> Result<(), Box<dyn Error>> {
         .response::<Success<followups::Preferences>>("followups", "FollowupPreferencesResponse")?;
     registry
         .response::<Success<followups::MonitorReceipt>>("followups", "FollowupMonitorResponse")?;
+    registry.response::<followups::ResultsResponse>("followups", "FollowupResultsResponse")?;
+    registry
+        .response::<followups::AssessmentsResponse>("followups", "FollowupAssessmentsResponse")?;
     registry.request::<followups::PreferencesRequest>("followups", "FollowupPreferencesRequest")?;
     registry.request::<followups::ConfigureRequest>("followups", "FollowupConfigureRequest")?;
     registry.request::<followups::MonitorRequest>("followups", "FollowupMonitorRequest")?;

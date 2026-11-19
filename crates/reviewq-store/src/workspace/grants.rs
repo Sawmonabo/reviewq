@@ -173,6 +173,7 @@ pub(super) fn revoke(
         [common.as_path().as_os_str().as_bytes()],
     )? > 0;
     if changed || suppressed {
+        tx.projection_changed = true;
         tx.emit(&[ResourceKey::Settings])?;
     }
     snapshot(&tx.sql, changed)
