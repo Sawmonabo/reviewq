@@ -56,16 +56,86 @@ pub(crate) async fn link(profile: &Path, target: String) -> Result<(), Failure> 
     let body = serde_json::to_vec(&serde_json::json!({
         "protocolVersion": 1, "threadId": native.as_str(), "target": target
     }))?;
-    let response = client
-        .post(format!(
-            "http://{}/api/v1/native/codex/link",
-            endpoint.native()
-        ))
+    let linked =
+        link_result(bridge(&client, &endpoint, "/api/v1/native/codex/link", body).await?).await?;
+    println!("{}", link_text(&endpoint, linked, "Codex")?);
+    Ok(())
+}
+
+pub(crate) async fn claude(
+    profile: &Path,
+    session_id: String,
+    target: Option<String>,
+) -> Result<(), Failure> {
+    let native: NativeSessionId = session_id.parse()?;
+    let endpoint = runtime::read_endpoint(profile)?;
+    let client = client()?;
+    let status = signed(&client, &endpoint, "GET", "/api/v1/status", b"").await?;
+    verify_ready(&endpoint, &status)?;
+    let cwd = std::env::current_dir()?.canonicalize()?;
+    let home = runtime::claude_home()?.canonicalize()?;
+    let body = serde_json::to_vec(&serde_json::json!({
+        "protocolVersion": 1,
+        "sessionId": native.as_str(),
+        "cwd": cwd,
+        "profile": home,
+        "target": target,
+    }))?;
+    let (linked, message) = if target.is_some() {
+        let linked =
+            link_result(bridge(&client, &endpoint, "/api/v1/native/claude/link", body).await?)
+                .await?;
+        (true, link_text(&endpoint, linked, "Claude Code")?)
+    } else {
+        #[derive(Deserialize)]
+        struct Registration {
+            registration: Option<Linked>,
+        }
+        let response = bridge(
+            &client,
+            &endpoint,
+            "/api/v1/native/claude/registration",
+            body,
+        )
+        .await?;
+        let status = response.status();
+        let bytes = bounded(response, 16 * 1024).await?;
+        if !status.is_success() {
+            return Err("ReviewQ could not verify this Claude Code session.".into());
+        }
+        let data = serde_json::from_slice::<Envelope<Registration>>(&bytes)?.data;
+        if let Some(linked) = data.registration {
+            (true, format!("ReviewQ · linked to {}", linked.review_id))
+        } else {
+            (
+                false,
+                "ReviewQ · use /reviewq <merge request or ticket> to link this session.".to_owned(),
+            )
+        }
+    };
+    println!(
+        "{}",
+        serde_json::json!({"linked": linked, "message": message})
+    );
+    Ok(())
+}
+
+async fn bridge(
+    client: &Client,
+    endpoint: &ServiceEndpoint,
+    path: &str,
+    body: Vec<u8>,
+) -> Result<reqwest::Response, Failure> {
+    Ok(client
+        .post(format!("http://{}{path}", endpoint.native()))
         .headers(endpoint.bridge_headers()?)
         .header("content-type", "application/json")
         .body(body)
         .send()
-        .await?;
+        .await?)
+}
+
+async fn link_result(response: reqwest::Response) -> Result<Linked, Failure> {
     let status = response.status();
     let bytes = bounded(response, 16 * 1024).await?;
     if !status.is_success() {
@@ -81,11 +151,19 @@ pub(crate) async fn link(profile: &Path, target: String) -> Result<(), Failure> 
                 }
                 "This conversation is already linked to a different review."
             }
-            _ => "The service could not link the current Codex conversation.",
+            412 => "Reload the ReviewQ integration in this native client and try again.",
+            _ => "The service could not link the current native conversation.",
         };
         return Err(message.into());
     }
-    let linked = serde_json::from_slice::<Envelope<Linked>>(&bytes)?.data;
+    Ok(serde_json::from_slice::<Envelope<Linked>>(&bytes)?.data)
+}
+
+fn link_text(
+    endpoint: &ServiceEndpoint,
+    linked: Linked,
+    provider: &str,
+) -> Result<String, Failure> {
     let review: ReviewId = linked.review_id.parse()?;
     let run: RunId = linked.run_id.parse()?;
     let _: SessionKey = linked.lead_session_key.parse()?;
@@ -94,10 +172,9 @@ pub(crate) async fn link(profile: &Path, target: String) -> Result<(), Failure> 
         .append_pair("reviewId", review.as_str())
         .append_pair("runId", run.as_str())
         .append_pair("tab", "agent");
-    println!(
-        "Linked this Codex conversation.\n{url}\nContinue the review in this terminal or open it with ReviewQ."
-    );
-    Ok(())
+    Ok(format!(
+        "Linked this {provider} conversation.\n{url}\nContinue the review in this terminal or open it with ReviewQ."
+    ))
 }
 
 pub(crate) async fn status(profile: &Path) -> Result<(), Failure> {

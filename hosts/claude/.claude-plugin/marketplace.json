@@ -1,0 +1,7 @@
+{
+  "name": "reviewq",
+  "owner": { "name": "ReviewQ" },
+  "plugins": [
+    { "name": "reviewq", "source": "./plugin", "description": "Link a Claude Code conversation to a review." }
+  ]
+}

@@ -74,6 +74,18 @@ pub trait NativeHost: Send + Sync {
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = DeliveryObservation> + Send + '_>>;
 }
 
+/// Resolves the companion's identity against the service-selected Claude profile.
+pub trait ClaudeCompanion: Send + Sync {
+    fn prove(&self, context: ClaudeContext) -> AppFuture<'_, HostProof>;
+}
+
+pub struct ClaudeContext {
+    pub session_id: NativeSessionId,
+    pub profile: AbsolutePath,
+    pub cwd: AbsolutePath,
+    pub transcript: Option<AbsolutePath>,
+}
+
 pub enum NativeLink {
     Linked(Snapshot<LeadTarget>),
     Ambiguous(Vec<String>),
@@ -87,15 +99,26 @@ pub async fn link_codex(
     native_id: NativeSessionId,
     target: String,
 ) -> Result<NativeLink, AppError> {
+    let proof = host.prove(native_id).await?;
+    if proof.binding.identity().provider() != HostProvider::Codex {
+        return Err(AppError::Forbidden);
+    }
+    link_proven(store, source, proof, target).await
+}
+
+/// Links either provider using its independently verified native identity.
+pub async fn link_proven(
+    store: &(impl WorkspaceStore + LeadStore + ?Sized),
+    source: &dyn ReviewSourceReader,
+    proof: HostProof,
+    target: String,
+) -> Result<NativeLink, AppError> {
     let HostProof {
         binding,
         source: native_source,
         activity,
-    } = host.prove(native_id).await?;
+    } = proof;
     let identity = binding.identity();
-    if identity.provider() != HostProvider::Codex {
-        return Err(AppError::Forbidden);
-    }
     let workspace = store
         .workspace_context(Actor::local_operator())
         .await?
@@ -104,12 +127,12 @@ pub async fn link_codex(
         ReviewResolution::Found(review) => review,
         ReviewResolution::Ambiguous(urls) => return Ok(NativeLink::Ambiguous(urls)),
     };
-    // Codex's global thread UUID remains stable across repeated binds.
-    let session_key = identity
-        .native_id()
-        .as_str()
-        .parse()
-        .map_err(|_| AppError::InvalidRequest)?;
+    let session_key = match identity.provider() {
+        HostProvider::Codex => identity.native_id().as_str().to_owned(),
+        HostProvider::Claude => format!("claude:{}", identity.native_id()),
+    }
+    .parse()
+    .map_err(|_| AppError::InvalidRequest)?;
     store
         .register_lead(
             Actor::native_session(identity.clone()),
@@ -333,6 +356,12 @@ pub trait LeadStore: Send + Sync {
         run_id: RunId,
         session_key: SessionKey,
     ) -> AppFuture<'_, Snapshot<LeadTarget>>;
+
+    /// Reads the existing lead by originated provider/profile/native ID and exact cwd.
+    fn lookup_native_lead(
+        &self,
+        binding: NativeBinding,
+    ) -> AppFuture<'_, Snapshot<Option<LeadTarget>>>;
 
     /// Atomically stores the intent, scoped retry receipt and invalidation.
     fn admit_message(

@@ -22,6 +22,7 @@ pub(super) struct Source {
     pub native_id: NativeSessionId,
     pub fingerprint: [u8; 32],
     pub root_session: Option<NativeSessionId>,
+    path: PathBuf,
 }
 
 pub(crate) async fn verified_codex_source(
@@ -55,10 +56,31 @@ pub(super) fn locate(
         .ok_or(AppError::NotFound)
         .map(Some);
     }
-    let identity = session.binding.identity();
+    discover(&session.binding, session.parent.as_ref(), cancelled)
+}
+
+pub(crate) fn verified_claude_source(
+    binding: &NativeBinding,
+    path: Option<&AbsolutePath>,
+    cancelled: &AtomicBool,
+) -> Result<Option<AbsolutePath>, AppError> {
+    let source = match path {
+        Some(path) => verify(binding, None, path.as_path(), cancelled)?,
+        None => discover(binding, None, cancelled)?,
+    };
+    source
+        .map(|source| AbsolutePath::from_canonical(source.path).map_err(|_| AppError::Forbidden))
+        .transpose()
+}
+
+fn discover(
+    binding: &NativeBinding,
+    child: Option<&HistoryParent>,
+    cancelled: &AtomicBool,
+) -> Result<Option<Source>, AppError> {
+    let identity = binding.identity();
     let profile = identity.profile().as_path();
     let native = identity.native_id().as_str();
-    let child = session.parent.as_ref();
     let (roots, depth, suffix) = match identity.provider() {
         HostProvider::Codex => (
             vec![profile.join("sessions"), profile.join("archived_sessions")],
@@ -82,7 +104,7 @@ pub(super) fn locate(
                 HostProvider::Codex => name.starts_with("rollout-") && name.ends_with(&suffix),
                 HostProvider::Claude => name == suffix,
             };
-            if named && let Some(source) = verify(&session.binding, child, path, cancelled)? {
+            if named && let Some(source) = verify(binding, child, path, cancelled)? {
                 if match_source.is_some() {
                     return Err(AppError::Conflict);
                 }
@@ -161,6 +183,14 @@ fn verify(
     {
         return Err(AppError::Forbidden);
     }
+    if identity.provider() == HostProvider::Claude
+        && parent.is_none()
+        && (components.count() != 2
+            || candidate.file_name().and_then(|name| name.to_str())
+                != Some(&format!("{}.jsonl", identity.native_id())))
+    {
+        return Err(AppError::Forbidden);
+    }
     let root = secure::openat2(
         secure::CWD,
         root,
@@ -226,6 +256,7 @@ fn verify(
                 } else {
                     None
                 },
+                path: candidate.to_path_buf(),
             }));
         }
         offset = end;
@@ -256,7 +287,14 @@ fn identity_matches(
                     && record.agent.as_deref() == Some(id)
                     && record.session.as_deref() == Some(parent.native_id.as_str())
             }
-            None => !record.sidechain && record.session.as_deref() == Some(id),
+            None => {
+                !record.sidechain
+                    && record.session.as_deref() == Some(id)
+                    && record.cwd.as_deref().is_some_and(|path| {
+                        path == binding.cwd().as_path()
+                            || path.canonicalize().ok().as_deref() == Some(binding.cwd().as_path())
+                    })
+            }
         },
     }
 }

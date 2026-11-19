@@ -68,6 +68,30 @@ impl LeadStore for SqliteStore {
         })
     }
 
+    fn lookup_native_lead(
+        &self,
+        binding: NativeBinding,
+    ) -> AppFuture<'_, Snapshot<Option<LeadTarget>>> {
+        Box::pin(async move {
+            self.read(move |tx| {
+                let target = native_lead(tx, binding.identity())?;
+                if let Some(target) = &target {
+                    if target.binding() != &binding {
+                        return Err(AppError::Forbidden.into());
+                    }
+                    allow_target(
+                        tx,
+                        &Actor::native_session(binding.identity().clone()),
+                        target,
+                    )?;
+                }
+                snapshot(tx, target)
+            })
+            .await
+            .map_err(StoreError::app)
+        })
+    }
+
     fn read_receipt(
         &self,
         actor: Actor,
@@ -160,20 +184,7 @@ fn register(
     }
 
     let native = binding.identity();
-    let existing = tx
-        .sql
-        .query_row(
-            "SELECT run_id FROM sessions WHERE provider=?1 AND profile=?2 AND native_id=?3",
-            params![
-                provider_label(native.provider()),
-                bytes(native.profile()),
-                native.native_id().as_str()
-            ],
-            |row| row.get::<_, String>(0),
-        )
-        .optional()?;
-    if let Some(run) = existing {
-        let target = lead_for_run(&tx.sql, &parse(&run)?)?.ok_or(AppError::Conflict)?;
+    if let Some(target) = native_lead(&tx.sql, native)? {
         if target.binding() != &binding
             || identity_for_review(&tx.sql, target.review_id())? != input.review.identity
         {
@@ -248,6 +259,25 @@ fn register(
         binding,
     );
     snapshot(&tx.sql, target)
+}
+
+fn native_lead(
+    tx: &Connection,
+    identity: &NativeIdentity,
+) -> Result<Option<LeadTarget>, StoreError> {
+    let existing = tx.query_row(
+        "SELECT run_id,parent_session_key FROM sessions WHERE provider=?1 AND profile=?2 AND native_id=?3",
+        params![provider_label(identity.provider()), bytes(identity.profile()), identity.native_id().as_str()],
+        |row| Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?)),
+    ).optional()?;
+    let Some((run, parent)) = existing else {
+        return Ok(None);
+    };
+    if parent.is_some() {
+        return Err(AppError::Conflict.into());
+    }
+    let target = lead_for_run(tx, &parse(&run)?)?.ok_or(AppError::Conflict)?;
+    Ok(Some(target))
 }
 
 fn bytes(path: &reviewq_domain::session::AbsolutePath) -> &[u8] {

@@ -9,12 +9,12 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use reviewq_app::access::Actor;
-use reviewq_app::hosts::{LeadStore, NativeHost, recover_delivery};
+use reviewq_app::hosts::{ClaudeCompanion, LeadStore, NativeHost, recover_delivery};
 use reviewq_app::sources::{ReviewSourceReader, SourceRefreshStore};
 use reviewq_app::workspace::{WorkspaceConfig, WorkspaceStore};
 use reviewq_domain::identity::EventCursor;
 use reviewq_domain::session::AbsolutePath;
-use reviewq_providers::{Codex, FileHistory, GitLab};
+use reviewq_providers::{Claude, Codex, FileHistory, GitLab};
 use reviewq_store::SqliteStore;
 use reviewq_transport::{ServiceEndpoint, ServiceIdentity};
 use sha2::{Digest, Sha256};
@@ -158,6 +158,14 @@ pub(crate) async fn serve(profile: PathBuf, options: Serve) -> Result<(), Failur
         _ => None,
     };
     let sends_allowed = !options.validation && host.is_some();
+    let claude = match options.claude_home {
+        Some(home) => Some(home),
+        None if !options.validation => claude_home().ok().filter(|path| path.is_dir()),
+        None => None,
+    }
+    .map(Claude::new)
+    .transpose()?
+    .map(|claude| Arc::new(claude) as Arc<dyn ClaudeCompanion>);
     let delivery = host.as_ref().filter(|_| sends_allowed).map(|host| {
         tokio::spawn(dispatch_deliveries(
             store.clone(),
@@ -173,6 +181,7 @@ pub(crate) async fn serve(profile: PathBuf, options: Serve) -> Result<(), Failur
         Arc::new(FileHistory::default()),
         reviewq_transport::ServiceRuntime {
             sends_allowed,
+            claude,
             endpoint: endpoint.clone(),
             web: &web,
             commits: store.subscribe(),
@@ -209,6 +218,14 @@ pub(crate) async fn serve(profile: PathBuf, options: Serve) -> Result<(), Failur
     store.close(Duration::from_secs(10)).await?;
     result?;
     Ok(())
+}
+
+pub(crate) fn claude_home() -> Result<PathBuf, Failure> {
+    std::env::var_os("CLAUDE_CONFIG_DIR")
+        .map(PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".claude")))
+        .filter(|path| path.is_absolute())
+        .ok_or_else(|| "cannot resolve the Claude configuration directory".into())
 }
 
 async fn dispatch_deliveries(

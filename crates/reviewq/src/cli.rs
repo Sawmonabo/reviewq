@@ -34,6 +34,17 @@ enum Command {
     /// Manage the authorization of a local Git checkout.
     #[command(subcommand)]
     Checkout(Checkout),
+    #[command(subcommand, hide = true)]
+    Internal(Internal),
+}
+
+#[derive(Subcommand)]
+enum Internal {
+    ClaudeCompanion {
+        session_id: String,
+        #[arg(long, allow_hyphen_values = true)]
+        target: Option<String>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -77,6 +88,9 @@ pub(crate) struct Serve {
     /// Exact Codex reasoning effort paired with the configured model.
     #[arg(long, requires = "codex_model")]
     pub(crate) codex_effort: Option<String>,
+    /// Directory belonging to the selected Claude Code profile.
+    #[arg(long, value_name = "DIR")]
+    pub(crate) claude_home: Option<PathBuf>,
     #[arg(long, requires = "runtime_root")]
     pub(crate) validation: bool,
     #[arg(long, requires = "validation")]
@@ -132,6 +146,9 @@ async fn execute(options: CommandLine) -> Result<(), Failure> {
         }
         Some(Command::Checkout(Checkout::Revoke { directory })) => {
             checkout_setup::revoke(&runtime::profile(options.profile)?, directory).await
+        }
+        Some(Command::Internal(Internal::ClaudeCompanion { session_id, target })) => {
+            native_client::claude(&runtime::profile(options.profile)?, session_id, target).await
         }
         Some(Command::Open(open)) => {
             native_client::open(&runtime::profile(options.profile)?, open).await

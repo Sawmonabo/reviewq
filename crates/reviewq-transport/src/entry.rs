@@ -14,7 +14,7 @@ use reviewq_app::decisions::{Checkpoints, DecisionStore};
 use reviewq_app::events::EventLog;
 use reviewq_app::followups::FollowupStore;
 use reviewq_app::history::{HistoryStore, NativeHistoryReader};
-use reviewq_app::hosts::{LeadStore, MessageHistoryStore, NativeHost};
+use reviewq_app::hosts::{ClaudeCompanion, LeadStore, MessageHistoryStore, NativeHost};
 use reviewq_app::notifications::InboxStore;
 use reviewq_app::queue::{QueueStore, ReviewLookup};
 use reviewq_app::reports::ReportStore;
@@ -86,6 +86,7 @@ pub(super) struct Entry {
     store: Arc<dyn Store>,
     source: Option<Arc<dyn ReviewSourceReader>>,
     host: Option<Arc<dyn NativeHost>>,
+    claude: Option<Arc<dyn ClaudeCompanion>>,
     file_history: Arc<dyn NativeHistoryReader>,
     sends_allowed: bool,
     commits: watch::Receiver<EventCursor>,
@@ -129,6 +130,7 @@ pub struct ServiceRuntime<'a> {
     pub endpoint: ServiceEndpoint,
     pub web: &'a Path,
     pub sends_allowed: bool,
+    pub claude: Option<Arc<dyn ClaudeCompanion>>,
     pub commits: watch::Receiver<EventCursor>,
     pub shutdown: watch::Receiver<bool>,
 }
@@ -145,6 +147,7 @@ pub fn router(
         store,
         source,
         host,
+        claude: runtime.claude,
         file_history,
         sends_allowed: runtime.sends_allowed,
         commits: runtime.commits,
@@ -172,6 +175,11 @@ pub fn router(
         )
         .route("/runs/{run_id}", get(pages::run))
         .route("/native/codex/link", post(hosts::link))
+        .route("/native/claude/link", post(hosts::claude_link))
+        .route(
+            "/native/claude/registration",
+            post(hosts::claude_registration),
+        )
         .merge(features::routes())
         .route(
             "/runs/{run_id}/sessions/{session_key}/history/page",

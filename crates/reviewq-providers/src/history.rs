@@ -16,7 +16,7 @@ mod locator;
 mod reader;
 mod records;
 
-pub(crate) use locator::verified_codex_source;
+pub(crate) use locator::{verified_claude_source, verified_codex_source};
 
 pub struct FileHistory {
     reads: Arc<Semaphore>,
@@ -30,7 +30,7 @@ impl Default for FileHistory {
     }
 }
 
-struct Cancel(Arc<AtomicBool>);
+pub(crate) struct Cancel(pub(crate) Arc<AtomicBool>);
 
 impl Drop for Cancel {
     fn drop(&mut self) {

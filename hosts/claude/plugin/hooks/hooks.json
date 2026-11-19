@@ -1,0 +1,4 @@
+{
+  "description": "ReviewQ native Claude Code companion",
+  "modules": ["./register.jsx"]
+}

@@ -39,6 +39,9 @@ pub(super) fn read(provider: HostProvider, source: impl Read) -> Result<Identity
         (HostProvider::Claude, "sessionId") => {
             string(reader, ID_BYTES).map(|value| proof.session = value)
         }
+        (HostProvider::Claude, "cwd") => {
+            string(reader, 4096).map(|value| proof.cwd = value.map(PathBuf::from))
+        }
         (HostProvider::Claude, "agentId") => {
             string(reader, ID_BYTES).map(|value| proof.agent = value)
         }
