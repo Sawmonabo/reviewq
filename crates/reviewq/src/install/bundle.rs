@@ -20,11 +20,15 @@ const REQUIRED: &[&str] = &[
     "hosts/claude/plugin/.claude-plugin/plugin.json",
     "hosts/claude/plugin/hooks/hooks.json",
     "hosts/claude/plugin/hooks/bridge.js",
+    "hosts/claude/plugin/hooks/children.js",
+    "hosts/claude/plugin/hooks/delivery.js",
     "hosts/claude/plugin/hooks/register.jsx",
+    "hosts/claude/plugin/hooks/workflow.js",
     "hosts/codex/skills/reviewq/SKILL.md",
     "hosts/codex/skills/reviewq/agents/openai.yaml",
     "hosts/shared/skills/reviewq-manage/SKILL.md",
     "packaging/reviewq.service.in",
+    "packaging/notification.png",
     "licenses/DEPENDENCIES.json",
 ];
 
@@ -138,7 +142,13 @@ fn walk(root: &Path, directory: &Path, output: &mut BTreeSet<String>) -> Result<
             return Err(format!("Unsupported release path {name}").into());
         }
         match entry.file_type()? {
-            kind if kind.is_dir() => walk(root, &path, output)?,
+            kind if kind.is_dir() => {
+                let before = output.len();
+                walk(root, &path, output)?;
+                if output.len() == before {
+                    return Err(format!("Empty release directory {name}").into());
+                }
+            }
             kind if kind.is_file() => {
                 output.insert(name.to_owned());
                 if output.len() > MAX_FILES + 1 {
@@ -170,7 +180,10 @@ fn path_token(value: &str) -> bool {
 
 fn allowed(path: &str) -> bool {
     path == "bin/reviewq"
-        || path == "packaging/reviewq.service.in"
+        || matches!(
+            path,
+            "packaging/reviewq.service.in" | "packaging/notification.png"
+        )
         || ["web/", "hosts/", "licenses/"]
             .iter()
             .any(|prefix| path.starts_with(prefix))

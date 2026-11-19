@@ -96,6 +96,20 @@ pub(crate) fn active(paths: &Paths) -> Result<Release, Failure> {
     Ok(active)
 }
 
+pub(crate) fn verify_unit(paths: &Paths) -> Result<(), Failure> {
+    let inventory = load(paths)?;
+    let digest = files::unit_digest(&paths.unit)?.ok_or("ReviewQ has no installed user unit.")?;
+    if inventory
+        .active
+        .iter()
+        .chain(inventory.pending.iter().map(|step| &step.next))
+        .any(|release| release.unit == digest)
+    {
+        return Ok(());
+    }
+    Err(paths::conflict(&paths.unit))
+}
+
 pub(crate) async fn install(bundle_path: &Path) -> Result<(), Failure> {
     let bundle = Bundle::read(bundle_path)?;
     let paths = Paths::resolve()?;
@@ -162,7 +176,7 @@ pub(crate) async fn install(bundle_path: &Path) -> Result<(), Failure> {
             let store_id = if was_running {
                 let previous = old.ok_or("Preserved an unrelated running user service.")?;
                 Some(
-                    service::ready(&paths, &previous.binary, previous.store)
+                    service::ready(&paths, &previous.binary, previous.store, true)
                         .await?
                         .store_id,
                 )
@@ -212,6 +226,10 @@ pub(crate) async fn install(bundle_path: &Path) -> Result<(), Failure> {
     inventory.store_id = Some(identity.store_id.clone());
     inventory.pending = None;
     paths::write_json(&journal(&paths), &inventory)?;
+    let active = service::ready(&paths, &next.binary, next.store, true).await?;
+    if active.store_id != identity.store_id {
+        return Err("A different store started after installation was committed.".into());
+    }
     let endpoint =
         crate::runtime::read_endpoint_with_build(&paths.profile, &identity.build_digest)?;
     println!(
@@ -260,7 +278,7 @@ async fn activate(
     service::unit_location(paths).await?;
     service::switch("enable").await?;
     service::switch("start").await?;
-    let identity = service::ready(paths, &next.binary, next.store).await?;
+    let identity = service::ready(paths, &next.binary, next.store, false).await?;
     if stopped_store.is_some_and(|id| id != identity.store_id) {
         return Err("The started service did not retain the verified store.".into());
     }
@@ -310,7 +328,7 @@ async fn rollback(paths: &Paths, previous: &Release, pending: &Activation) -> Re
     .await?;
     if pending.was_running {
         service::switch("start").await?;
-        let identity = service::ready(paths, &previous.binary, previous.store).await?;
+        let identity = service::ready(paths, &previous.binary, previous.store, false).await?;
         if identity.store_id != expected_store {
             return Err("The previous service opened a different store.".into());
         }

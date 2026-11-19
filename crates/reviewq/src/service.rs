@@ -90,6 +90,7 @@ pub(crate) async fn ready(
     paths: &Paths,
     digest: &str,
     schema: i64,
+    operational: bool,
 ) -> Result<ServiceIdentity, Failure> {
     let deadline = tokio::time::Instant::now() + Duration::from_secs(15);
     let executable = paths.profile.join("current/bin/reviewq").canonicalize()?;
@@ -106,12 +107,14 @@ pub(crate) async fn ready(
         {
             let status = native_client::signed(&client, &endpoint, "GET", "/api/v1/status", b"");
             if let Ok(Ok(bytes)) = tokio::time::timeout_at(deadline, status).await {
-                native_client::verify_ready(&endpoint, &bytes)?;
+                let ready = native_client::verify_service(&endpoint, &bytes)?;
                 let identity = endpoint.identity().clone();
                 if identity.store_schema != schema || identity.store_application_id != 0x5256_5132 {
                     return Err("The service opened an unexpected store format.".into());
                 }
-                return Ok(identity);
+                if ready || !operational {
+                    return Ok(identity);
+                }
             }
         }
         if tokio::time::Instant::now() >= deadline {
@@ -144,7 +147,7 @@ async fn ensure_running(paths: &Paths, record: &install::Release) -> Result<(), 
     if !state().await?.1 {
         switch("start").await?;
     }
-    ready(paths, &record.binary, record.store).await?;
+    ready(paths, &record.binary, record.store, true).await?;
     Ok(())
 }
 
@@ -172,7 +175,8 @@ pub(crate) async fn open(
 
 pub(crate) async fn logs() -> Result<(), Failure> {
     let paths = Paths::resolve()?;
-    install::active(&paths)?;
+    install::verify_unit(&paths)?;
+    unit_location(&paths).await?;
     let (_, text) = capture(
         "journalctl",
         &[
@@ -197,7 +201,7 @@ pub(crate) async fn notify() -> Result<(), Failure> {
     if let Some(release) = install::installed(&paths)?
         && let Some(windows) = release.windows_sender()?
     {
-        let identity = ready(&paths, &release.binary, release.store).await?;
+        let identity = ready(&paths, &release.binary, release.store, true).await?;
         let endpoint = runtime::read_endpoint_with_build(&paths.profile, &identity.build_digest)?;
         match windows.test(endpoint.browser()).await {
             reviewq_app::notifications::DesktopOutcome::Delivered => {

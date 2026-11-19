@@ -19,7 +19,7 @@ Run the installed binary from any directory. Loading the browser, using the MCP 
 
 ## Installation and local identity
 
-Use an active systemd user manager for the background installation, a compatible browser and configured native host executables for the integrations selected for use. Verify which OS, architecture, loader, host versions and desktop/WSL interop were exercised with each released artifact. Rust, Node and pnpm are build tools. The packaged Rust server and Claude's host-loaded JSX use the installed binary and provider CLIs at runtime. Building the web UI stays separate from normal Rust compilation. [systemd services](https://www.freedesktop.org/software/systemd/man/latest/systemd.service.html) · [Production bundle](https://vite.dev/guide/build.html)
+Use an active systemd user manager for the background installation, a compatible browser and configured native host executables for the integrations selected for use. Verify which OS, architecture, loader, host versions and desktop/WSL interop were exercised with each released artifact. Rust, Node, pnpm and `readelf` are build tools. The packaged Rust server and Claude's host-loaded JSX use the installed binary and provider CLIs at runtime. Building the web UI stays separate from normal Rust compilation. [systemd services](https://www.freedesktop.org/software/systemd/man/latest/systemd.service.html) · [Production bundle](https://vite.dev/guide/build.html)
 
 | Personal location | Content and ownership |
 |---|---|

@@ -215,7 +215,7 @@ pub(crate) async fn status(profile: &Path) -> Result<(), Failure> {
     }
     let endpoint = runtime::read_endpoint(profile)?;
     let body = signed(&client()?, &endpoint, "GET", "/api/v1/status", b"").await?;
-    verify_ready(&endpoint, &body)?;
+    verify_service(&endpoint, &body)?;
     let mut status: serde_json::Value = serde_json::from_slice(&body)?;
     status["data"]["runtimeConfig"] = serde_json::to_value(path)?;
     println!("{status}");
@@ -357,16 +357,22 @@ pub(crate) async fn signed_limit(
 }
 
 pub(crate) fn verify_ready(endpoint: &ServiceEndpoint, bytes: &[u8]) -> Result<(), Failure> {
+    if !verify_service(endpoint, bytes)? {
+        return Err("service instance is still starting".into());
+    }
+    Ok(())
+}
+
+pub(crate) fn verify_service(endpoint: &ServiceEndpoint, bytes: &[u8]) -> Result<bool, Failure> {
     let ready = serde_json::from_slice::<Envelope<Ready>>(bytes)?.data;
     if ready.instance != endpoint.instance()
         || ready.identity != *endpoint.identity()
         || ready.browser != endpoint.browser().to_string()
         || ready.native != endpoint.native().to_string()
-        || !ready.ready
     {
-        return Err("service instance is not ready".into());
+        return Err("service response identifies a different instance".into());
     }
-    Ok(())
+    Ok(ready.ready)
 }
 
 pub(crate) async fn bounded(
