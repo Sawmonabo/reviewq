@@ -3,6 +3,7 @@ use reviewq_domain::settings::{BoardScope, CheckoutBinding};
 
 use crate::access::{Actor, AppError, AppFuture};
 use crate::changes::ChangeSource;
+use crate::events::Snapshot;
 use crate::queue::ReviewSource;
 use crate::settings::ActiveSource;
 use crate::workspace::{ConfiguredProject, WorkspaceStore};
@@ -89,6 +90,27 @@ pub struct RefreshAttempt {
     pub settings_revision: Revision,
 }
 
+pub struct RefreshAdmission {
+    pub receipt: Snapshot<RefreshReceipt>,
+    pub started: bool,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum RefreshState {
+    Running,
+    Succeeded,
+    Failed,
+    Superseded,
+}
+
+pub struct RefreshReceipt {
+    pub attempt: RefreshAttempt,
+    pub state: RefreshState,
+    pub finished_at_ms: Option<i64>,
+    pub total_rows: Option<u64>,
+    pub error: Option<SourceFailure>,
+}
+
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct SourceSync {
     pub active: bool,
@@ -106,7 +128,13 @@ pub enum SourceFailure {
 
 pub trait SourceRefreshStore: Send + Sync {
     /// Starts a refresh under the current settings revision, or reports an active attempt.
-    fn begin_refresh(&self, actor: Actor, revision: Revision) -> AppFuture<'_, RefreshAttempt>;
+    fn begin_refresh(&self, actor: Actor, revision: Revision) -> AppFuture<'_, RefreshAdmission>;
+
+    fn refresh_receipt(
+        &self,
+        actor: Actor,
+        id: EventCursor,
+    ) -> AppFuture<'_, Snapshot<RefreshReceipt>>;
 
     /// Publishes a complete scan and its success together, or records a safe failure.
     fn finish_refresh(
@@ -126,39 +154,43 @@ pub async fn refresh_queue(
     store: &(impl WorkspaceStore + SourceRefreshStore + ?Sized),
     context: ActiveSource,
     actor: Actor,
-) -> Result<usize, AppError> {
-    let workspace = store.workspace_context(actor.clone()).await?.value;
-    if workspace.revision != context.revision {
-        return Err(AppError::StaleRevision);
-    }
-    let reader = context.reader.as_deref().ok_or(AppError::Unavailable)?;
-    let attempt = store.begin_refresh(actor, workspace.revision).await?;
-    let result = match context.tickets {
-        Some(jira) => {
-            scope::collect(
-                store,
-                reader,
-                jira.as_ref(),
-                &context.scope,
-                workspace.projects,
-                attempt,
-            )
-            .await
+    attempt: RefreshAttempt,
+) -> Result<(), AppError> {
+    let result = async {
+        let workspace = store.workspace_context(actor).await?.value;
+        if workspace.revision != context.revision || context.revision != attempt.settings_revision {
+            return Err(AppError::StaleRevision);
         }
-        None => scan(reader, workspace.projects)
-            .await
-            .map(SourceObservation::validation),
-    };
-    let count = result
-        .as_ref()
-        .map(|result| result.reviews.len())
-        .map_err(|error| *error);
+        let reader = context.reader.as_deref().ok_or(AppError::Unavailable)?;
+        match context.tickets {
+            Some(jira) => {
+                scope::collect(
+                    store,
+                    reader,
+                    jira.as_ref(),
+                    &context.scope,
+                    workspace.projects,
+                    attempt,
+                )
+                .await
+            }
+            None => scan(reader, workspace.projects)
+                .await
+                .map(SourceObservation::validation),
+        }
+    }
+    .await;
     let observation = result.map_err(|error| match error {
         AppError::PayloadTooLarge => SourceFailure::TooLarge,
         _ => SourceFailure::Unavailable,
     });
-    store.finish_refresh(attempt, observation).await?;
-    count
+    if let Err(error) = store.finish_refresh(attempt, observation).await {
+        let _ = store
+            .finish_refresh(attempt, Err(SourceFailure::Unavailable))
+            .await;
+        return Err(error);
+    }
+    Ok(())
 }
 
 async fn scan(

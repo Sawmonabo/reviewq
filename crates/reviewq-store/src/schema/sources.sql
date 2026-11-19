@@ -39,3 +39,16 @@ CREATE TABLE scoped_review_issues (
 ) STRICT, WITHOUT ROWID;
 
 CREATE INDEX scoped_review_issues_key ON scoped_review_issues(ticket_key, board_id, review_id);
+CREATE TABLE source_refresh_receipts (
+    id INTEGER PRIMARY KEY CHECK (id > 0),
+    settings_revision INTEGER NOT NULL CHECK (settings_revision >= 0),
+    state TEXT NOT NULL CHECK (state IN ('running', 'succeeded', 'failed', 'superseded')),
+    finished_at_ms INTEGER,
+    total_rows INTEGER CHECK (total_rows >= 0),
+    error TEXT CHECK (error IN ('unavailable', 'too_large', 'interrupted')),
+    CHECK ((finished_at_ms IS NULL) = (state = 'running')),
+    CHECK ((total_rows IS NOT NULL) = (state = 'succeeded')),
+    CHECK ((error IS NOT NULL) = (state = 'failed'))
+) STRICT;
+
+CREATE UNIQUE INDEX source_refresh_one_running ON source_refresh_receipts(state) WHERE state='running';

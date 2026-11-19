@@ -1,31 +1,40 @@
 use reviewq_app::access::{Actor, AppError, AppFuture};
-use reviewq_app::events::ResourceKey;
+use reviewq_app::events::{ResourceKey, Snapshot};
 use reviewq_app::sources::{
-    MAX_PUBLICATION_REVIEWS, RefreshAttempt, SourceFailure, SourceObservation, SourceRefreshStore,
-    SourceSync,
+    MAX_PUBLICATION_REVIEWS, RefreshAdmission, RefreshAttempt, RefreshReceipt, RefreshState,
+    SourceFailure, SourceObservation, SourceRefreshStore, SourceSync,
 };
-use reviewq_domain::identity::{MrIdentity, Revision};
+use reviewq_domain::identity::{EventCursor, MrIdentity, Revision};
 use rusqlite::{Connection, OptionalExtension, params};
 
 use crate::connection::WriteTx;
-use crate::events::now_ms;
-use crate::queue::{identity, mark_discovered, save_observations};
+use crate::events::{now_ms, snapshot};
+use crate::queue::{check_observation, identity, mark_discovered, save_observations};
 use crate::workspace::{advance_queue, configured, operator, settings_revision};
 use crate::{SqliteStore, StoreError};
 
 mod scope;
 
 impl SourceRefreshStore for SqliteStore {
-    fn begin_refresh(&self, actor: Actor, revision: Revision) -> AppFuture<'_, RefreshAttempt> {
+    fn begin_refresh(&self, actor: Actor, revision: Revision) -> AppFuture<'_, RefreshAdmission> {
         Box::pin(async move {
             self.write(move |tx| {
                 operator(&actor)?;
                 if settings_revision(&tx.sql)? != revision {
                     return Err(AppError::StaleRevision.into());
                 }
-                if read_sync(&tx.sql, revision)?.active {
-                    return Err(AppError::Busy.into());
+                let current = tx.sql.query_row(
+                    "SELECT attempt FROM source_refresh WHERE settings_revision=?1 AND active=1",
+                    [revision.as_sqlite_integer()],|row| row.get::<_,i64>(0),
+                ).optional()?;
+                if let Some(id) = current {
+                    return Ok(RefreshAdmission { receipt: receipt(&tx.sql,cursor(id)?)?, started:false });
                 }
+                let now = now_ms()?;
+                tx.sql.execute(
+                    "UPDATE source_refresh_receipts SET state='superseded',finished_at_ms=?1
+                     WHERE state='running'", [now],
+                )?;
                 let id = tx.emit(&[ResourceKey::Queue])?;
                 tx.sql.execute(
                     "INSERT INTO source_refresh(singleton,attempt,settings_revision,started_at_ms,active)
@@ -37,12 +46,34 @@ impl SourceRefreshStore for SqliteStore {
                              THEN error ELSE NULL END,
                          attempt=excluded.attempt,settings_revision=excluded.settings_revision,
                          started_at_ms=excluded.started_at_ms,active=1",
-                    params![id.as_sqlite_integer(), revision.as_sqlite_integer(), now_ms()?],
+                    params![id.as_sqlite_integer(), revision.as_sqlite_integer(), now],
                 )?;
-                Ok(RefreshAttempt { id, settings_revision: revision })
+                tx.sql.execute(
+                    "INSERT INTO source_refresh_receipts(id,settings_revision,state) VALUES (?1,?2,'running')",
+                    params![id.as_sqlite_integer(),revision.as_sqlite_integer()],
+                )?;
+                tx.sql.execute(
+                    "DELETE FROM source_refresh_receipts WHERE id < coalesce(
+                        (SELECT id FROM source_refresh_receipts ORDER BY id DESC LIMIT 1 OFFSET 511),0)",
+                    [],
+                )?;
+                Ok(RefreshAdmission { receipt:receipt(&tx.sql,id)?, started:true })
             })
             .await
             .map_err(StoreError::app)
+        })
+    }
+
+    fn refresh_receipt(
+        &self,
+        actor: Actor,
+        id: EventCursor,
+    ) -> AppFuture<'_, Snapshot<RefreshReceipt>> {
+        Box::pin(async move {
+            operator(&actor).map_err(StoreError::app)?;
+            self.read(move |db| receipt(db, id))
+                .await
+                .map_err(StoreError::app)
         })
     }
 
@@ -96,6 +127,10 @@ impl SourceRefreshStore for SqliteStore {
                     "UPDATE source_refresh SET active=0,error='interrupted' WHERE active=1",
                     [],
                 )?;
+                tx.sql.execute(
+                    "UPDATE source_refresh_receipts SET state='failed',error='interrupted',finished_at_ms=?1
+                     WHERE state='running'",[now_ms()?],
+                )?;
                 if updated != 0 {
                     tx.emit(&[ResourceKey::Queue])?;
                 }
@@ -112,8 +147,20 @@ fn finish(
     attempt: RefreshAttempt,
     result: Result<SourceObservation, SourceFailure>,
 ) -> Result<(), StoreError> {
+    let now = now_ms()?;
     if settings_revision(&tx.sql)? != attempt.settings_revision {
-        return Err(AppError::StaleRevision.into());
+        let changed = tx.sql.execute(
+            "UPDATE source_refresh_receipts SET state='superseded',finished_at_ms=?2 WHERE id=?1 AND state='running'",
+            params![attempt.id.as_sqlite_integer(),now],
+        )?;
+        if changed != 0 {
+            tx.sql.execute(
+                "UPDATE source_refresh SET active=0 WHERE attempt=?1",
+                [attempt.id.as_sqlite_integer()],
+            )?;
+            tx.emit(&[ResourceKey::Queue])?;
+        }
+        return Ok(());
     }
     let error = result.as_ref().err().map(|error| failure_label(*error));
     let updated = tx.sql.execute(
@@ -124,12 +171,13 @@ fn finish(
             attempt.settings_revision.as_sqlite_integer(),
             attempt.id.as_sqlite_integer(),
             error,
-            now_ms()?
+            now
         ],
     )?;
     if updated != 1 {
-        return Err(AppError::StaleRevision.into());
+        return Ok(());
     }
+    let mut total = None;
     if let Ok(source) = result {
         let SourceObservation {
             reviews,
@@ -146,7 +194,21 @@ fn finish(
                 return Err(AppError::NotFound.into());
             }
         }
+        for item in rows.iter().chain(&owned) {
+            check_observation(&tx.sql, attempt.id, item)?;
+        }
         let discovered = save_observations(tx, &rows)?;
+        let matched = matches
+            .iter()
+            .flatten()
+            .map(|selection| &selection.key)
+            .collect::<std::collections::HashSet<_>>();
+        let unmatched = issues
+            .iter()
+            .map(|issue| &issue.ticket.key)
+            .filter(|key| !matched.contains(key))
+            .collect::<std::collections::HashSet<_>>();
+        total = Some((discovered.len() + unmatched.len()) as i64);
         save_observations(tx, &owned)?;
         tx.sql.execute("DELETE FROM review_discoveries", [])?;
         mark_discovered(&tx.sql, &discovered)?;
@@ -159,8 +221,63 @@ fn finish(
         advance_queue(&tx.sql)?;
         tx.emit(&[ResourceKey::Ticket(None)])?;
     }
+    let terminal = if error.is_some() {
+        "failed"
+    } else {
+        "succeeded"
+    };
+    let written = tx.sql.execute(
+        "UPDATE source_refresh_receipts SET state=?2,finished_at_ms=?3,total_rows=?4,error=?5
+         WHERE id=?1 AND settings_revision=?6 AND state='running'",
+        params![
+            attempt.id.as_sqlite_integer(),
+            terminal,
+            now,
+            total,
+            error,
+            attempt.settings_revision.as_sqlite_integer()
+        ],
+    )?;
+    if written != 1 {
+        return Err(AppError::Internal.into());
+    }
     tx.emit(&[ResourceKey::Queue])?;
     Ok(())
+}
+
+fn receipt(db: &Connection, id: EventCursor) -> Result<Snapshot<RefreshReceipt>, StoreError> {
+    let value = db.query_row(
+        "SELECT settings_revision,state,finished_at_ms,total_rows,error FROM source_refresh_receipts WHERE id=?1",
+        [id.as_sqlite_integer()],|row| Ok((row.get::<_,i64>(0)?,row.get::<_,String>(1)?,
+            row.get::<_,Option<i64>>(2)?,row.get::<_,Option<i64>>(3)?,row.get::<_,Option<String>>(4)?)),
+    ).optional()?.ok_or(AppError::NotFound)?;
+    let state = match value.1.as_str() {
+        "running" => RefreshState::Running,
+        "succeeded" => RefreshState::Succeeded,
+        "failed" => RefreshState::Failed,
+        "superseded" => RefreshState::Superseded,
+        _ => return Err(AppError::Internal.into()),
+    };
+    snapshot(
+        db,
+        RefreshReceipt {
+            attempt: RefreshAttempt {
+                id,
+                settings_revision: Revision::try_from(value.0).map_err(|_| AppError::Internal)?,
+            },
+            state,
+            finished_at_ms: value.2,
+            total_rows: value
+                .3
+                .map(|count| count.try_into().map_err(|_| AppError::Internal))
+                .transpose()?,
+            error: value.4.as_deref().map(parse_failure).transpose()?,
+        },
+    )
+}
+
+fn cursor(value: i64) -> Result<EventCursor, StoreError> {
+    EventCursor::try_from(value).map_err(|_| AppError::Internal.into())
 }
 
 pub(crate) fn read_sync(
@@ -185,13 +302,7 @@ pub(crate) fn read_sync(
     let Some((attempt, last_success_at_ms, active, error)) = state else {
         return Ok(SourceSync::default());
     };
-    let error = match error.as_deref() {
-        None => None,
-        Some("unavailable") => Some(SourceFailure::Unavailable),
-        Some("too_large") => Some(SourceFailure::TooLarge),
-        Some("interrupted") => Some(SourceFailure::Interrupted),
-        Some(_) => return Err(AppError::Internal.into()),
-    };
+    let error = error.as_deref().map(parse_failure).transpose()?;
     Ok(SourceSync {
         active,
         last_attempt_at_ms: Some(attempt),
@@ -205,5 +316,14 @@ fn failure_label(error: SourceFailure) -> &'static str {
         SourceFailure::Unavailable => "unavailable",
         SourceFailure::TooLarge => "too_large",
         SourceFailure::Interrupted => "interrupted",
+    }
+}
+
+fn parse_failure(value: &str) -> Result<SourceFailure, StoreError> {
+    match value {
+        "unavailable" => Ok(SourceFailure::Unavailable),
+        "too_large" => Ok(SourceFailure::TooLarge),
+        "interrupted" => Ok(SourceFailure::Interrupted),
+        _ => Err(AppError::Internal.into()),
     }
 }

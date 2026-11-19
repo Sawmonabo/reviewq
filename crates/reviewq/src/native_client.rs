@@ -3,6 +3,7 @@ use std::time::Duration;
 
 use reqwest::Client;
 use reviewq_domain::identity::{NativeSessionId, ReviewId, RunId, SessionKey};
+use reviewq_protocol::EventCursorDto;
 use reviewq_transport::{ServiceEndpoint, ServiceIdentity};
 use serde::Deserialize;
 
@@ -212,12 +213,49 @@ pub(crate) async fn status(profile: &Path) -> Result<(), Failure> {
 }
 
 pub(crate) async fn refresh(profile: &Path) -> Result<(), Failure> {
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Refresh {
+        refresh_id: EventCursorDto,
+        state: RefreshState,
+    }
+    #[derive(Deserialize, Eq, PartialEq)]
+    #[serde(rename_all = "snake_case")]
+    enum RefreshState {
+        Running,
+        Succeeded,
+        Failed,
+        Superseded,
+    }
+
     let endpoint = runtime::read_endpoint(profile)?;
     let client = client()?;
     let body = signed(&client, &endpoint, "GET", "/api/v1/status", b"").await?;
     verify_ready(&endpoint, &body)?;
-    let bytes = signed(&client, &endpoint, "POST", "/api/v1/queue/refresh", b"").await?;
+    let mut bytes = signed(&client, &endpoint, "POST", "/api/v1/queue/refresh", b"").await?;
+    let mut receipt = serde_json::from_slice::<Envelope<Refresh>>(&bytes)?.data;
+    let id = receipt.refresh_id;
+    let path = format!("/api/v1/queue/refresh/{}", id.get());
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(180);
+    while receipt.state == RefreshState::Running && tokio::time::Instant::now() < deadline {
+        tokio::time::sleep(Duration::from_millis(750)).await;
+        bytes = signed(&client, &endpoint, "GET", &path, b"")
+            .await
+            .map_err(|error| {
+                format!(
+                    "{error}. Read refresh {} to inspect the recorded outcome.",
+                    id.get()
+                )
+            })?;
+        receipt = serde_json::from_slice::<Envelope<Refresh>>(&bytes)?.data;
+        if receipt.refresh_id != id {
+            return Err("The service returned a different refresh ID.".into());
+        }
+    }
     println!("{}", String::from_utf8(bytes)?);
+    if receipt.state != RefreshState::Succeeded {
+        return Err(format!("Refresh {} has no successful publication.", id.get()).into());
+    }
     Ok(())
 }
 
