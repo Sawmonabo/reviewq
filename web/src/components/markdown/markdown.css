@@ -116,10 +116,12 @@
   font-size: 11px;
 }
 .diagram-frame {
-  display: grid;
-  place-items: center;
-  overflow: hidden;
-  padding: 0 8px;
+  contain: inline-size;
+  overflow: auto;
+  max-height: min(360px, 45vh);
+  padding: 8px;
+  overscroll-behavior: contain;
+  overflow-anchor: none;
   background: #0b0c10;
   cursor: grab;
   touch-action: none;
@@ -129,14 +131,13 @@
   cursor: grabbing;
 }
 .diagram-art {
-  width: 100%;
-  transform-origin: left top;
+  margin-inline: auto;
 }
 .diagram-art svg {
   display: block;
   width: 100%;
   height: auto;
-  max-height: min(360px, 45vh);
+  max-width: none !important;
 }
 .mermaid-figure .diagram-source {
   padding: 7px 12px;
