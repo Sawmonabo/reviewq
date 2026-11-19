@@ -7,17 +7,16 @@ use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use reviewq_app::access::AppError;
 use reviewq_app::events::Snapshot;
 use reviewq_app::queue::{
-    MAX_QUEUE_PAGE, MergeRequestState, PageContext, QueueItem, QueueKey, QueueListItem,
-    QueuePosition, RunPosition, SessionPosition,
+    MAX_QUEUE_PAGE, MergeRequestState, PageContext, QueueItem, RunPosition, SessionPosition,
 };
 use reviewq_app::settings::ActiveSource;
 use reviewq_app::sources::{SourceFailure, SourceSync};
 use reviewq_domain::identity::{EventCursor, ReviewId, RunId};
 use reviewq_domain::session::HostProvider;
 use reviewq_protocol::queue::{
-    CompactTicket, MergeRequestRow, MergeRequestStatus, QueueFacets, QueuePage, QueuePageResponse,
-    QueueRow, QueueStatus, QueueSync, QueueSyncMode, ReviewOverview, ReviewOverviewResponse,
-    ReviewSelection, ReviewSelectionResponse, RunStage, RunSummary, UnmatchedTicket,
+    CompactTicket, MergeRequestRow, MergeRequestStatus, QueueStatus, QueueSync, QueueSyncMode,
+    ReviewOverview, ReviewOverviewResponse, ReviewSelection, ReviewSelectionResponse, RunStage,
+    RunSummary,
 };
 use reviewq_protocol::{
     CheckpointIdDto, ErrorCode, ErrorDto, EventCursorDto, GitShaDto, HostProviderDto,
@@ -47,15 +46,6 @@ pub(super) struct SelectionQuery {
 #[derive(Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 enum PagePosition {
-    Queue {
-        context: Context,
-        updated_at_ms: i64,
-        review_id: String,
-    },
-    QueueTicket {
-        context: Context,
-        key: String,
-    },
     Review {
         context: Context,
         review_id: String,
@@ -74,95 +64,6 @@ pub(super) struct Context {
     generation: u64,
     authority: [u8; 32],
     limit: u16,
-}
-
-pub(super) async fn queue(
-    State(entry): State<Arc<Entry>>,
-    headers: HeaderMap,
-    Query(query): Query<PageQuery>,
-) -> Result<Json<QueuePageResponse>, ApiError> {
-    let actor = entry.auth.browser_actor(&headers, false)?;
-    let limit = query.limit()?;
-    let endpoint = &entry.auth.endpoint;
-    let after = match query.position(endpoint)? {
-        None => None,
-        Some(PagePosition::Queue {
-            context,
-            updated_at_ms,
-            review_id,
-        }) => Some(QueuePosition {
-            context: context.try_into()?,
-            key: QueueKey::Review {
-                updated_at_ms,
-                review_id: parse(&review_id)?,
-            },
-        }),
-        Some(PagePosition::QueueTicket { context, key }) => Some(QueuePosition {
-            context: context.try_into()?,
-            key: QueueKey::Ticket(parse(&key)?),
-        }),
-        _ => return Err(AppError::CursorExpired.into()),
-    };
-    let Snapshot { value, cursor } = entry.store.read_queue(actor, after, limit).await?;
-    let count = count(value.total)?;
-    let rows = value
-        .items
-        .iter()
-        .map(|item| match item {
-            QueueListItem::Review(item) => {
-                project_review(item).map(|row| QueueRow::Mr(Box::new(row)))
-            }
-            QueueListItem::Unmatched(item) => Ok(QueueRow::UnmatchedTicket(UnmatchedTicket {
-                key: TicketKeyDto::new(item.ticket.key.as_str()).ok_or(AppError::Internal)?,
-                title: item.ticket.title.clone(),
-                status: item.status.clone(),
-                assignee: item.assignee.clone(),
-                priority: item.priority.clone(),
-            })),
-        })
-        .collect::<Result<Vec<_>, _>>()?;
-    let next = value
-        .next
-        .map(|pos| {
-            endpoint.encode_page(match pos.key {
-                QueueKey::Review {
-                    updated_at_ms,
-                    review_id,
-                } => PagePosition::Queue {
-                    context: pos.context.into(),
-                    updated_at_ms,
-                    review_id: review_id.to_string(),
-                },
-                QueueKey::Ticket(key) => PagePosition::QueueTicket {
-                    context: pos.context.into(),
-                    key: key.to_string(),
-                },
-            })
-        })
-        .transpose()?;
-    let active = entry.active_source().await?;
-    if active.revision != value.settings_revision {
-        return Err(AppError::StaleRevision.into());
-    }
-    Ok(Json(success(
-        QueuePage {
-            page: Page::new(rows, next).ok_or(AppError::Internal)?,
-            total_rows: count,
-            total_mrs: self::count(value.total_mrs)?,
-            facets: QueueFacets {
-                boards: Vec::new(),
-                projects: Vec::new(),
-                sprints: Vec::new(),
-                authors: Vec::new(),
-                hide_reviewed: self::count(0)?,
-                hide_in_progress: self::count(0)?,
-            },
-            sync: queue_sync(&active, value.sync),
-            settings_revision: RevisionDto::new(value.settings_revision.get())
-                .ok_or(AppError::Internal)?,
-        },
-        cursor,
-    )?))
 }
 
 pub(super) fn source_failure(failure: SourceFailure) -> ErrorDto {

@@ -8,6 +8,16 @@ import type {
 } from "./common.js";
 
 import type {
+  CancelRecoveryRequest,
+  CancelRecoveryResponse,
+  InterruptRequest,
+  InterruptResponse,
+  RecoveryPreferencesResponse,
+  RecoveryStateResponse,
+  SaveRecoveryPreferencesRequest,
+} from "./recovery.js";
+
+import type {
   CatalogRequest,
   CatalogResponse,
   DisconnectSettings,
@@ -101,12 +111,14 @@ import type { TicketDetailResponse } from "./tickets.js";
 export interface Contracts {
   InvalidateEvent: InvalidateEvent;
   ResetEvent: ResetEvent;
+  CancelRecoveryRequest: CancelRecoveryRequest;
   CatalogRequest: CatalogRequest;
   DisconnectSettings: DisconnectSettings;
   EventReplayCursor: EventReplayCursor;
   FollowupConfigureRequest: FollowupConfigureRequest;
   FollowupMonitorRequest: FollowupMonitorRequest;
   FollowupPreferencesRequest: FollowupPreferencesRequest;
+  InterruptRequest: InterruptRequest;
   NotificationStateRequest: NotificationStateRequest;
   QuestionAnswerRequest: QuestionAnswerRequest;
   ReportFeedbackRequest: ReportFeedbackRequest;
@@ -115,11 +127,13 @@ export interface Contracts {
   RunCatalogRequest: RunCatalogRequest;
   RunPrepareRequest: RunPrepareRequest;
   RunStartRequest: RunStartRequest;
+  SaveRecoveryPreferencesRequest: SaveRecoveryPreferencesRequest;
   SaveSettings: SaveSettings;
   SendMessageRequest: SendMessageRequest;
   TestConnection: TestConnection;
   TrackReviewRequest: TrackReviewRequest;
   ApprovalViewResponse: ApprovalViewResponse;
+  CancelRecoveryResponse: CancelRecoveryResponse;
   CatalogResponse: CatalogResponse;
   CurrentActionResponse: CurrentActionResponse;
   DeliveryReceiptResponse: DeliveryReceiptResponse;
@@ -132,6 +146,7 @@ export interface Contracts {
   HistoryPageResponse: HistoryPageResponse;
   HistoryPartPageResponse: HistoryPartPageResponse;
   HistoryPlanResponse: HistoryPlanResponse;
+  InterruptResponse: InterruptResponse;
   LaunchReceiptResponse: LaunchReceiptResponse;
   NotificationPageResponse: NotificationPageResponse;
   NotificationStateResponse: NotificationStateResponse;
@@ -141,6 +156,8 @@ export interface Contracts {
   QuestionFormsResponse: QuestionFormsResponse;
   QueuePageResponse: QueuePageResponse;
   QueueSyncResponse: QueueSyncResponse;
+  RecoveryPreferencesResponse: RecoveryPreferencesResponse;
+  RecoveryStateResponse: RecoveryStateResponse;
   RefreshResponse: RefreshResponse;
   ReportCandidateResponse: ReportCandidateResponse;
   ReportContextResponse: ReportContextResponse;

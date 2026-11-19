@@ -10,8 +10,13 @@ use crate::decisions::{Decision, Frontier};
 use crate::events::Snapshot;
 use crate::sources::SourceSync;
 
+mod filters;
 mod tracking;
 mod workspace;
+pub use filters::{
+    QueueFacet, QueueFacets, QueueFilter, QueueOrder, QueueOwnership, QueuePhase, QueueSortKey,
+    SprintFilter, SprintPair,
+};
 pub use tracking::{TicketAuthority, TrackReview, TrackedReviewReceipt, TrackingStore};
 pub use workspace::{
     RunCard, RunCards, RunCardsFilter, RunCardsPosition, StageCounts, WorkspaceQueue,
@@ -158,16 +163,7 @@ pub struct PageContext {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct QueuePosition {
     pub context: PageContext,
-    pub key: QueueKey,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub enum QueueKey {
-    Review {
-        updated_at_ms: i64,
-        review_id: ReviewId,
-    },
-    Ticket(TicketKey),
+    pub key: QueueSortKey,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -188,18 +184,6 @@ pub struct UnmatchedTicket {
 pub enum QueueListItem {
     Review(Box<QueueItem>),
     Unmatched(UnmatchedTicket),
-}
-
-impl QueueListItem {
-    pub fn key(&self) -> QueueKey {
-        match self {
-            Self::Review(item) => QueueKey::Review {
-                updated_at_ms: item.source.updated_at_ms,
-                review_id: item.review_id.clone(),
-            },
-            Self::Unmatched(item) => QueueKey::Ticket(item.ticket.key.clone()),
-        }
-    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -237,6 +221,7 @@ pub struct QueuePage {
     pub next: Option<QueuePosition>,
     pub total: u64,
     pub total_mrs: u64,
+    pub facets: QueueFacets,
     pub settings_revision: Revision,
     pub sync: SourceSync,
 }
@@ -288,6 +273,7 @@ pub struct RunDetail {
 }
 
 pub trait QueueStore: Send + Sync {
+    fn queue_readiness(&self, actor: Actor) -> AppFuture<'_, Snapshot<QueueReadiness>>;
     /// Persists verified provider observations after provider I/O has completed.
     fn observe_reviews(
         &self,
@@ -298,6 +284,7 @@ pub trait QueueStore: Send + Sync {
     fn read_queue(
         &self,
         actor: Actor,
+        filter: QueueFilter,
         after: Option<QueuePosition>,
         limit: u16,
     ) -> AppFuture<'_, Snapshot<QueuePage>>;
@@ -317,4 +304,11 @@ pub trait QueueStore: Send + Sync {
         after: Option<SessionPosition>,
         limit: u16,
     ) -> AppFuture<'_, Snapshot<RunDetail>>;
+}
+
+pub struct QueueReadiness {
+    pub settings: Revision,
+    pub projects: usize,
+    pub total_mrs: u64,
+    pub sync: SourceSync,
 }

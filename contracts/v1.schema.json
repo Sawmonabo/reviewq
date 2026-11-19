@@ -446,6 +446,84 @@
       ],
       "type": "string"
     },
+    "CancelRecoveryRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "expectedRevision": {
+          "$ref": "#/definitions/RevisionDto"
+        }
+      },
+      "required": [
+        "expectedRevision"
+      ],
+      "title": "CancelRecoveryRequest",
+      "type": "object"
+    },
+    "CancelRecoveryResponse": {
+      "description": "The resource and event head from the same authorized snapshot.",
+      "properties": {
+        "cursor": {
+          "$ref": "#/definitions/EventCursorDto"
+        },
+        "data": {
+          "$ref": "#/definitions/CancelRecoveryResponseEpisode"
+        }
+      },
+      "required": [
+        "data",
+        "cursor"
+      ],
+      "title": "CancelRecoveryResponse",
+      "type": "object"
+    },
+    "CancelRecoveryResponseEpisode": {
+      "properties": {
+        "episodeId": {
+          "$ref": "#/definitions/ResourceIdDto"
+        },
+        "failedTurnId": {
+          "$ref": "#/definitions/HistoryTurnIdDto"
+        },
+        "kind": {
+          "$ref": "#/definitions/Kind"
+        },
+        "reason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "revision": {
+          "$ref": "#/definitions/RevisionDto"
+        },
+        "state": {
+          "$ref": "#/definitions/CancelRecoveryResponseState"
+        }
+      },
+      "required": [
+        "episodeId",
+        "revision",
+        "failedTurnId",
+        "kind",
+        "state",
+        "reason"
+      ],
+      "title": "CancelRecoveryResponseEpisode",
+      "type": "object"
+    },
+    "CancelRecoveryResponseState": {
+      "enum": [
+        "disabled",
+        "waiting",
+        "queued",
+        "started",
+        "uncertain",
+        "cancelled",
+        "complete"
+      ],
+      "title": "CancelRecoveryResponseState",
+      "type": "string"
+    },
     "CandidateReport": {
       "properties": {
         "accepted": {
@@ -1577,7 +1655,7 @@
           ]
         },
         "preferences": {
-          "$ref": "#/definitions/Preferences"
+          "$ref": "#/definitions/FollowupEnrollmentResponsePreferences"
         },
         "unviewedBatchCount": {
           "$ref": "#/definitions/SafeCountDto"
@@ -1598,6 +1676,40 @@
         "paused"
       ],
       "type": "string"
+    },
+    "Episode": {
+      "properties": {
+        "episodeId": {
+          "$ref": "#/definitions/ResourceIdDto"
+        },
+        "failedTurnId": {
+          "$ref": "#/definitions/HistoryTurnIdDto"
+        },
+        "kind": {
+          "$ref": "#/definitions/Kind"
+        },
+        "reason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "revision": {
+          "$ref": "#/definitions/RevisionDto"
+        },
+        "state": {
+          "$ref": "#/definitions/RecoveryStateResponseState"
+        }
+      },
+      "required": [
+        "episodeId",
+        "revision",
+        "failedTurnId",
+        "kind",
+        "state",
+        "reason"
+      ],
+      "type": "object"
     },
     "ErrorCode": {
       "description": "Stable error codes for the public JSON envelope.",
@@ -1755,6 +1867,29 @@
       "title": "FollowupEnrollmentResponse",
       "type": "object"
     },
+    "FollowupEnrollmentResponsePreferences": {
+      "properties": {
+        "autoReviewConcurrency": {
+          "format": "uint8",
+          "maximum": 8,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "automatic": {
+          "type": "boolean"
+        },
+        "revision": {
+          "$ref": "#/definitions/RevisionDto"
+        }
+      },
+      "required": [
+        "automatic",
+        "autoReviewConcurrency",
+        "revision"
+      ],
+      "title": "FollowupEnrollmentResponsePreferences",
+      "type": "object"
+    },
     "FollowupMonitorRequest": {
       "additionalProperties": false,
       "properties": {
@@ -1834,7 +1969,7 @@
           "$ref": "#/definitions/EventCursorDto"
         },
         "data": {
-          "$ref": "#/definitions/Preferences"
+          "$ref": "#/definitions/FollowupPreferencesResponsePreferences"
         }
       },
       "required": [
@@ -1842,6 +1977,29 @@
         "cursor"
       ],
       "title": "FollowupPreferencesResponse",
+      "type": "object"
+    },
+    "FollowupPreferencesResponsePreferences": {
+      "properties": {
+        "autoReviewConcurrency": {
+          "format": "uint8",
+          "maximum": 8,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "automatic": {
+          "type": "boolean"
+        },
+        "revision": {
+          "$ref": "#/definitions/RevisionDto"
+        }
+      },
+      "required": [
+        "automatic",
+        "autoReviewConcurrency",
+        "revision"
+      ],
+      "title": "FollowupPreferencesResponsePreferences",
       "type": "object"
     },
     "Form": {
@@ -2624,6 +2782,59 @@
       ],
       "type": "string"
     },
+    "InterruptReceipt": {
+      "properties": {
+        "state": {
+          "$ref": "#/definitions/InterruptState"
+        },
+        "turnId": {
+          "$ref": "#/definitions/HistoryTurnIdDto"
+        }
+      },
+      "required": [
+        "turnId",
+        "state"
+      ],
+      "type": "object"
+    },
+    "InterruptRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "expectedTurnId": {
+          "$ref": "#/definitions/HistoryTurnIdDto"
+        }
+      },
+      "required": [
+        "expectedTurnId"
+      ],
+      "title": "InterruptRequest",
+      "type": "object"
+    },
+    "InterruptResponse": {
+      "description": "The resource and event head from the same authorized snapshot.",
+      "properties": {
+        "cursor": {
+          "$ref": "#/definitions/EventCursorDto"
+        },
+        "data": {
+          "$ref": "#/definitions/InterruptReceipt"
+        }
+      },
+      "required": [
+        "data",
+        "cursor"
+      ],
+      "title": "InterruptResponse",
+      "type": "object"
+    },
+    "InterruptState": {
+      "enum": [
+        "interrupted",
+        "rejected",
+        "uncertain"
+      ],
+      "type": "string"
+    },
     "InvalidateEvent": {
       "description": "Bounded resource descriptors for an `invalidate` event.",
       "properties": {
@@ -2760,6 +2971,14 @@
         "tokenType"
       ],
       "type": "object"
+    },
+    "Kind": {
+      "enum": [
+        "usage_limit",
+        "model_capacity",
+        "access"
+      ],
+      "type": "string"
     },
     "LaunchReceiptResponse": {
       "description": "The resource and event head from the same authorized snapshot.",
@@ -3723,13 +3942,7 @@
     },
     "Preferences": {
       "properties": {
-        "autoReviewConcurrency": {
-          "format": "uint8",
-          "maximum": 8,
-          "minimum": 1,
-          "type": "integer"
-        },
-        "automatic": {
+        "autoResumeCodexReviews": {
           "type": "boolean"
         },
         "revision": {
@@ -3737,9 +3950,8 @@
         }
       },
       "required": [
-        "automatic",
-        "autoReviewConcurrency",
-        "revision"
+        "revision",
+        "autoResumeCodexReviews"
       ],
       "type": "object"
     },
@@ -4307,6 +4519,60 @@
         "updatedAt"
       ],
       "type": "object"
+    },
+    "RecoveryPreferencesResponse": {
+      "description": "The resource and event head from the same authorized snapshot.",
+      "properties": {
+        "cursor": {
+          "$ref": "#/definitions/EventCursorDto"
+        },
+        "data": {
+          "$ref": "#/definitions/Preferences"
+        }
+      },
+      "required": [
+        "data",
+        "cursor"
+      ],
+      "title": "RecoveryPreferencesResponse",
+      "type": "object"
+    },
+    "RecoveryStateResponse": {
+      "description": "The resource and event head from the same authorized snapshot.",
+      "properties": {
+        "cursor": {
+          "$ref": "#/definitions/EventCursorDto"
+        },
+        "data": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/Episode"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "data",
+        "cursor"
+      ],
+      "title": "RecoveryStateResponse",
+      "type": "object"
+    },
+    "RecoveryStateResponseState": {
+      "enum": [
+        "disabled",
+        "waiting",
+        "queued",
+        "started",
+        "uncertain",
+        "cancelled",
+        "complete"
+      ],
+      "title": "RecoveryStateResponseState",
+      "type": "string"
     },
     "RefreshReceipt": {
       "properties": {
@@ -5869,6 +6135,23 @@
       "minimum": 0,
       "type": "integer"
     },
+    "SaveRecoveryPreferencesRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "autoResumeCodexReviews": {
+          "type": "boolean"
+        },
+        "expectedRevision": {
+          "$ref": "#/definitions/RevisionDto"
+        }
+      },
+      "required": [
+        "expectedRevision",
+        "autoResumeCodexReviews"
+      ],
+      "title": "SaveRecoveryPreferencesRequest",
+      "type": "object"
+    },
     "SaveSettings": {
       "additionalProperties": false,
       "properties": {
@@ -7020,6 +7303,8 @@
   },
   "x-reviewq-features": {
     "ApprovalViewResponse": "changes",
+    "CancelRecoveryRequest": "recovery",
+    "CancelRecoveryResponse": "recovery",
     "CatalogRequest": "settings",
     "CatalogResponse": "settings",
     "CurrentActionResponse": "actions",
@@ -7038,6 +7323,8 @@
     "HistoryPageResponse": "history",
     "HistoryPartPageResponse": "history",
     "HistoryPlanResponse": "history",
+    "InterruptRequest": "recovery",
+    "InterruptResponse": "recovery",
     "InvalidateEvent": "common",
     "LaunchReceiptResponse": "launch",
     "NotificationPageResponse": "notifications",
@@ -7050,6 +7337,8 @@
     "QuestionFormsResponse": "questions",
     "QueuePageResponse": "queue",
     "QueueSyncResponse": "queue",
+    "RecoveryPreferencesResponse": "recovery",
+    "RecoveryStateResponse": "recovery",
     "RefreshResponse": "queue",
     "ReportCandidateResponse": "reports",
     "ReportContextResponse": "reports",
@@ -7070,6 +7359,7 @@
     "RunPrepareRequest": "launch",
     "RunPreviewResponse": "launch",
     "RunStartRequest": "launch",
+    "SaveRecoveryPreferencesRequest": "recovery",
     "SaveSettings": "settings",
     "SendMessageRequest": "delivery",
     "SettingsResponse": "settings",
@@ -7086,12 +7376,14 @@
       "ResetEvent": "#/definitions/ResetEvent"
     },
     "requests": {
+      "CancelRecoveryRequest": "#/definitions/CancelRecoveryRequest",
       "CatalogRequest": "#/definitions/CatalogRequest",
       "DisconnectSettings": "#/definitions/DisconnectSettings",
       "EventReplayCursor": "#/definitions/EventReplayCursor",
       "FollowupConfigureRequest": "#/definitions/FollowupConfigureRequest",
       "FollowupMonitorRequest": "#/definitions/FollowupMonitorRequest",
       "FollowupPreferencesRequest": "#/definitions/FollowupPreferencesRequest",
+      "InterruptRequest": "#/definitions/InterruptRequest",
       "NotificationStateRequest": "#/definitions/NotificationStateRequest",
       "QuestionAnswerRequest": "#/definitions/QuestionAnswerRequest",
       "ReportFeedbackRequest": "#/definitions/ReportFeedbackRequest",
@@ -7100,6 +7392,7 @@
       "RunCatalogRequest": "#/definitions/RunCatalogRequest",
       "RunPrepareRequest": "#/definitions/RunPrepareRequest",
       "RunStartRequest": "#/definitions/RunStartRequest",
+      "SaveRecoveryPreferencesRequest": "#/definitions/SaveRecoveryPreferencesRequest",
       "SaveSettings": "#/definitions/SaveSettings",
       "SendMessageRequest": "#/definitions/SendMessageRequest",
       "TestConnection": "#/definitions/TestConnection",
@@ -7107,6 +7400,7 @@
     },
     "responses": {
       "ApprovalViewResponse": "#/definitions/ApprovalViewResponse",
+      "CancelRecoveryResponse": "#/definitions/CancelRecoveryResponse",
       "CatalogResponse": "#/definitions/CatalogResponse",
       "CurrentActionResponse": "#/definitions/CurrentActionResponse",
       "DeliveryReceiptResponse": "#/definitions/DeliveryReceiptResponse",
@@ -7119,6 +7413,7 @@
       "HistoryPageResponse": "#/definitions/HistoryPageResponse",
       "HistoryPartPageResponse": "#/definitions/HistoryPartPageResponse",
       "HistoryPlanResponse": "#/definitions/HistoryPlanResponse",
+      "InterruptResponse": "#/definitions/InterruptResponse",
       "LaunchReceiptResponse": "#/definitions/LaunchReceiptResponse",
       "NotificationPageResponse": "#/definitions/NotificationPageResponse",
       "NotificationStateResponse": "#/definitions/NotificationStateResponse",
@@ -7128,6 +7423,8 @@
       "QuestionFormsResponse": "#/definitions/QuestionFormsResponse",
       "QueuePageResponse": "#/definitions/QueuePageResponse",
       "QueueSyncResponse": "#/definitions/QueueSyncResponse",
+      "RecoveryPreferencesResponse": "#/definitions/RecoveryPreferencesResponse",
+      "RecoveryStateResponse": "#/definitions/RecoveryStateResponse",
       "RefreshResponse": "#/definitions/RefreshResponse",
       "ReportCandidateResponse": "#/definitions/ReportCandidateResponse",
       "ReportContextResponse": "#/definitions/ReportContextResponse",

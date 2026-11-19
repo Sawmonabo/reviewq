@@ -244,7 +244,7 @@ pub fn router(
         .route("/checkout/grant", post(checkout::grant))
         .route("/events", get(events::feed))
         .route("/session", get(session).post(start_session))
-        .route("/queue", get(pages::queue))
+        .route("/queue", get(workspace::queue))
         .route("/queue/sync", get(refresh::sync))
         .route("/queue/refresh", post(refresh::start))
         .route("/queue/refresh/{refresh_id}", get(refresh::status))
@@ -374,14 +374,16 @@ async fn status(
         .ok_or(AppError::InvalidRequest)?
         .as_str();
     let proof = entry.auth.control("GET", target, &headers, b"")?;
-    let workspace = entry
-        .store
-        .workspace_context(Actor::local_operator())
-        .await?;
-    let queue = entry
-        .store
-        .read_queue(Actor::local_operator(), None, 1)
-        .await?;
+    let queue = entry.store.queue_readiness(Actor::local_operator()).await?;
+    let active = entry.active_source().await?;
+    if queue.value.settings != active.revision {
+        return control_ops::signed(
+            &entry,
+            &proof,
+            axum::http::StatusCode::OK,
+            Err::<Success<Status>, _>(AppError::StaleRevision),
+        );
+    }
     let endpoint = &entry.auth.endpoint;
     let response = Success {
         data: Status {
@@ -391,9 +393,9 @@ async fn status(
             native: endpoint.native().to_string(),
             identity: endpoint.identity(),
             ready: true,
-            configured_projects: workspace.value.projects.len(),
+            configured_projects: queue.value.projects,
             total_mrs: queue.value.total_mrs,
-            sync: pages::queue_sync(&entry.active_source().await?, queue.value.sync),
+            sync: pages::queue_sync(&active, queue.value.sync),
         },
         cursor: EventCursorDto::new(queue.cursor.get()).ok_or(AppError::Internal)?,
     };

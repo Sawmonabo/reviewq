@@ -11,6 +11,7 @@ export type * from "./contracts/launch.js";
 export type * from "./contracts/notifications.js";
 export type * from "./contracts/questions.js";
 export type * from "./contracts/queue.js";
+export type * from "./contracts/recovery.js";
 export type * from "./contracts/registry.js";
 export type * from "./contracts/reports.js";
 export type * from "./contracts/settings.js";

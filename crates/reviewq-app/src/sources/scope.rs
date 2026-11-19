@@ -38,6 +38,7 @@ pub struct ScopedSprint {
     pub board: u64,
     pub id: u64,
     pub label: String,
+    pub active: bool,
 }
 
 pub struct SprintPage {

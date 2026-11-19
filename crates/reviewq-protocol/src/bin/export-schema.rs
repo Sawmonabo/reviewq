@@ -97,6 +97,33 @@ fn main() -> Result<(), Box<dyn Error>> {
     registry.response::<questions::AnswerResponse>("questions", "QuestionAnswerResponse")?;
     registry.request::<questions::Answer>("questions", "QuestionAnswerRequest")?;
 
+    registry.response::<reviewq_protocol::recovery::RecoveryPreferencesResponse>(
+        "recovery",
+        "RecoveryPreferencesResponse",
+    )?;
+    registry.request::<reviewq_protocol::recovery::SavePreferences>(
+        "recovery",
+        "SaveRecoveryPreferencesRequest",
+    )?;
+    registry.response::<reviewq_protocol::recovery::RecoveryStateResponse>(
+        "recovery",
+        "RecoveryStateResponse",
+    )?;
+    registry.request::<reviewq_protocol::recovery::CancelRecovery>(
+        "recovery",
+        "CancelRecoveryRequest",
+    )?;
+    registry.response::<reviewq_protocol::recovery::CancelRecoveryResponse>(
+        "recovery",
+        "CancelRecoveryResponse",
+    )?;
+    registry
+        .request::<reviewq_protocol::recovery::InterruptRequest>("recovery", "InterruptRequest")?;
+    registry.response::<reviewq_protocol::recovery::InterruptResponse>(
+        "recovery",
+        "InterruptResponse",
+    )?;
+
     registry
         .response::<Success<decisions::DecisionResult>>("decisions", "ReviewDecisionResponse")?;
     registry.request::<decisions::DecisionRequest>("decisions", "ReviewDecisionRequest")?;
