@@ -6,7 +6,7 @@ import { schema87 } from "../metadata-2.mjs";
 import { validate114 } from "./review-id-dto.mjs";
 import { validate241 } from "./approval-rule.mjs";
 import { validate147 } from "./git-sha-dto.mjs";
-import { validate246 } from "./approval-warning.mjs";
+import { validate247 } from "./approval-warning.mjs";
 function validate229(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
@@ -261,7 +261,7 @@ function validate229(
                           for (let i1 = 0; i1 < len1; i1++) {
                             const _errs16 = errors;
                             if (
-                              !validate246(data7[i1], {
+                              !validate247(data7[i1], {
                                 instancePath: instancePath + "/warnings/" + i1,
                                 parentData: data7,
                                 parentDataProperty: i1,
@@ -270,8 +270,8 @@ function validate229(
                             ) {
                               vErrors =
                                 vErrors === null
-                                  ? validate246.errors
-                                  : vErrors.concat(validate246.errors);
+                                  ? validate247.errors
+                                  : vErrors.concat(validate247.errors);
                               errors = vErrors.length;
                             }
                             var valid3 = _errs16 === errors;

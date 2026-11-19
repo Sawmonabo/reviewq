@@ -2,7 +2,7 @@
 import { func0 } from "../runtime.mjs";
 import { validate25 } from "./checkpoint-id-dto.mjs";
 import { schema157 } from "../metadata-4.mjs";
-function validate464(
+function validate465(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -29,7 +29,7 @@ function validate464(
         ((data.findingIds === undefined || !func0.call(data, "findingIds")) &&
           (missing0 = "findingIds"))
       ) {
-        validate464.errors = [
+        validate465.errors = [
           {
             instancePath,
             schemaPath: "#/required",
@@ -96,7 +96,7 @@ function validate464(
               vErrors.push(err1);
             }
             errors++;
-            validate464.errors = vErrors;
+            validate465.errors = vErrors;
             return false;
           } else {
             errors = _errs2;
@@ -142,7 +142,7 @@ function validate464(
                   }
                 }
               } else {
-                validate464.errors = [
+                validate465.errors = [
                   {
                     instancePath: instancePath + "/findingIds",
                     schemaPath: "#/properties/findingIds/type",
@@ -186,7 +186,7 @@ function validate464(
                 let data4 = data.resolved;
                 const _errs10 = errors;
                 if (typeof data4 !== "boolean" && data4 !== null) {
-                  validate464.errors = [
+                  validate465.errors = [
                     {
                       instancePath: instancePath + "/resolved",
                       schemaPath: "#/properties/resolved/type",
@@ -258,7 +258,7 @@ function validate464(
                       vErrors.push(err3);
                     }
                     errors++;
-                    validate464.errors = vErrors;
+                    validate465.errors = vErrors;
                     return false;
                   } else {
                     errors = _errs13;
@@ -281,7 +281,7 @@ function validate464(
                   ) {
                     const _errs17 = errors;
                     if (typeof data.selected !== "boolean") {
-                      validate464.errors = [
+                      validate465.errors = [
                         {
                           instancePath: instancePath + "/selected",
                           schemaPath: "#/properties/selected/type",
@@ -353,7 +353,7 @@ function validate464(
                           vErrors.push(err5);
                         }
                         errors++;
-                        validate464.errors = vErrors;
+                        validate465.errors = vErrors;
                         return false;
                       } else {
                         errors = _errs20;
@@ -377,7 +377,7 @@ function validate464(
         }
       }
     } else {
-      validate464.errors = [
+      validate465.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -388,7 +388,7 @@ function validate464(
       return false;
     }
   }
-  validate464.errors = vErrors;
+  validate465.errors = vErrors;
   return errors === 0;
 }
-export { validate464 };
+export { validate465 };

@@ -89,6 +89,7 @@ pub struct NotificationPage {
 pub struct ReviewContext {
     pub review_id: ReviewIdDto,
     pub title: String,
+    pub ticket_title: Option<String>,
     pub project_path: String,
     pub iid: MergeRequestIidDto,
     #[cfg_attr(feature = "schema", schemars(length(max = 16)))]

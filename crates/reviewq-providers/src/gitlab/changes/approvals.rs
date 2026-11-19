@@ -15,6 +15,7 @@ const MAX_ITEMS: usize = 1_000;
 struct User {
     id: u64,
     username: Option<String>,
+    name: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -44,6 +45,7 @@ struct Rule {
     name: String,
     approved: bool,
     approvals_required: u32,
+    approved_by: Option<Vec<User>>,
 }
 
 impl GitLab {
@@ -59,7 +61,7 @@ impl GitLab {
         let before = self
             .merge_request(source.project_id(), source.iid())
             .await?;
-        let head: GitSha = before.sha.parse().map_err(|_| AppError::Unavailable)?;
+        let head = before.head_sha()?;
         if expected.as_ref().is_some_and(|expected| expected != &head) {
             return Err(AppError::Conflict);
         }
@@ -74,7 +76,7 @@ impl GitLab {
         let after = self
             .merge_request(source.project_id(), source.iid())
             .await?;
-        if before.sha != after.sha || before.updated_at != after.updated_at {
+        if head != after.head_sha()? || before.updated_at != after.updated_at {
             return Err(AppError::StaleRevision);
         }
         let personal_approval = approvals.as_ref().and_then(|facts| {
@@ -144,6 +146,12 @@ impl GitLab {
                     .as_deref()
                     .map(|name| safe_label(name, 256))
                     .transpose()?,
+                name: row
+                    .user
+                    .name
+                    .as_deref()
+                    .map(|name| safe_label(name, 512))
+                    .transpose()?,
                 approved_at_ms: row
                     .approved_at
                     .as_deref()
@@ -186,6 +194,7 @@ impl GitLab {
                 name: safe_label(&rule.name, 512)?,
                 approved: rule.approved,
                 required: rule.approvals_required,
+                approved_count: rule.approved_by.map(approved_count).transpose()?,
             });
         }
         Ok(Some(rules))
@@ -207,6 +216,17 @@ impl GitLab {
                 .map(|(_, body)| body),
         )
     }
+}
+
+fn approved_count(users: Vec<User>) -> Result<usize, AppError> {
+    if users.len() > MAX_ITEMS {
+        return Err(AppError::PayloadTooLarge);
+    }
+    let distinct = users
+        .into_iter()
+        .map(|user| checked_id(user.id))
+        .collect::<Result<BTreeSet<_>, _>>()?;
+    Ok(distinct.len())
 }
 
 fn tolerate_unavailable<T>(result: Result<T, AppError>) -> Result<Option<T>, AppError> {

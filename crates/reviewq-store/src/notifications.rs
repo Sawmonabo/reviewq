@@ -251,10 +251,13 @@ fn review_contexts(
     let selected = serde_json::to_string(&reviews).map_err(|_| AppError::Internal)?;
     let mut statement = db.prepare_cached(
         "SELECT r.review_id,r.title,r.project_path,r.iid,
-                (SELECT json_group_array(ticket_key) FROM
-                   (SELECT ticket_key FROM scoped_review_issues WHERE review_id=r.review_id
-                    UNION SELECT ticket_key FROM retained_review_tickets WHERE review_id=r.review_id
-                    ORDER BY ticket_key LIMIT 16)),
+                (SELECT json_group_array(json_array(ticket_key,title)) FROM (
+                    SELECT ticket_key, coalesce(min(CASE WHEN retained THEN title END), min(title)) AS title
+                    FROM (
+                        SELECT i.ticket_key, i.title, 0 AS retained FROM scoped_review_issues si
+                        JOIN scoped_issues i USING(board_id,ticket_key) WHERE si.review_id=r.review_id
+                        UNION ALL SELECT ticket_key, title, 1 FROM retained_review_tickets WHERE review_id=r.review_id
+                    ) GROUP BY ticket_key ORDER BY ticket_key LIMIT 16)),
                 e.our_comments,
                 (SELECT count(*) FROM notifications n WHERE n.review_id=r.review_id
                     AND n.ordinal<=?2 AND n.source='gitlab' AND n.kind IN ('reply','edited_reply')
@@ -267,14 +270,16 @@ fn review_contexts(
     let mut rows = statement.query(params![selected, watermark])?;
     let mut contexts = Vec::with_capacity(reviews.len());
     while let Some(row) = rows.next()? {
-        let ticket_keys = serde_json::from_str::<Vec<String>>(text(row, 4)?)
-            .map_err(|_| AppError::Internal)?
+        let tickets = serde_json::from_str::<Vec<(String, String)>>(text(row, 4)?)
+            .map_err(|_| AppError::Internal)?;
+        let ticket_keys = tickets
             .iter()
-            .map(|key| parse(key))
+            .map(|(key, _)| parse(key))
             .collect::<Result<_, _>>()?;
         contexts.push(ReviewContext {
             review_id: parse(text(row, 0)?)?,
             title: row.get(1)?,
+            ticket_title: tickets.into_iter().next().map(|(_, title)| title),
             project_path: row.get(2)?,
             iid: row
                 .get::<_, i64>(3)?

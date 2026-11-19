@@ -120,6 +120,7 @@ fn review_context(value: app::ReviewContext) -> Result<dto::ReviewContext, AppEr
     Ok(dto::ReviewContext {
         review_id: ReviewIdDto::new(value.review_id.as_str()).ok_or(AppError::Internal)?,
         title: value.title,
+        ticket_title: value.ticket_title,
         project_path: value.project_path,
         iid: MergeRequestIidDto::new(value.iid.get()).ok_or(AppError::Internal)?,
         ticket_keys: value

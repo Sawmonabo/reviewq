@@ -58,12 +58,18 @@ impl Jira {
             return Err(AppError::InvalidRequest);
         }
         let fields = std::iter::once(
-            "summary,project,status,priority,assignee,reporter,issuetype,labels,components,description",
+            "summary,project,status,priority,assignee,reporter,issuetype,labels,components,description,updated",
         )
             .chain(estimate_fields.iter().map(String::as_str))
             .collect::<Vec<_>>()
             .join(",");
         let (identity, id, fields) = self.ticket(key, fields).await?;
+        let fetched_at_ms = jiff::Timestamp::now().as_millisecond();
+        let updated_at_ms = match &fields["updated"] {
+            Value::Null => None,
+            Value::String(updated) => Some(time(updated)?),
+            _ => return Err(AppError::Unavailable),
+        };
         let description = match &fields["description"] {
             Value::Null => None,
             Value::String(text) if text.len() <= DESCRIPTION_LIMIT => Some(text.clone()),
@@ -91,6 +97,8 @@ impl Jira {
             components: detail_names(&fields["components"], Some("name"))?,
             description,
             estimate,
+            updated_at_ms,
+            fetched_at_ms,
             warning,
             comments: page.comments,
             comment_count: page.total,

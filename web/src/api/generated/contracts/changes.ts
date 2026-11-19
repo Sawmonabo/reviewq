@@ -12,6 +12,8 @@ import type {
 
 export type ApprovalWarning = "approvals_unavailable" | "rules_unavailable";
 
+export type DiscussionPosition = "text" | "file" | "other";
+
 export type DiscussionResolution = "open" | "resolved" | "comment" | "unknown";
 
 export type PatchRevisionDto = string;
@@ -51,12 +53,15 @@ export interface ApprovalFacts {
 export interface Approver {
   approvedAt: UtcTimestampDto | null;
   id: UpstreamIdDto;
+  isYou: boolean | null;
+  name: string | null;
   username: string | null;
   [k: string]: unknown;
 }
 
 export interface ApprovalRule {
   approved: boolean;
+  approvedCount: SafeCountDto | null;
   id: UpstreamIdDto;
   name: string;
   required: SafeCountDto;
@@ -92,11 +97,15 @@ export interface PatchDiscussion {
 }
 
 export interface PatchDiscussionAnchor {
+  baseSha: GitShaDto;
+  headSha: GitShaDto;
   newLine: SafeCountDto | null;
   newPath: string;
   oldLine: SafeCountDto | null;
   oldPath: string;
+  positionType: DiscussionPosition;
   range: PatchDiscussionRange | null;
+  startSha: GitShaDto;
   [k: string]: unknown;
 }
 
@@ -140,16 +149,20 @@ export interface PatchFileIndex {
    */
   items: PatchFile[];
   nextCursor: PageCursorDto | null;
+  pageNumber: SafeCountDto;
+  previousCursor: PageCursorDto | null;
   revision: PatchRevisionDto;
   startSha: GitShaDto;
   [k: string]: unknown;
 }
 
 export interface PatchFile {
+  additions: SafeCountDto | null;
   availability: PatchAvailability;
   byteLength: SafeCountDto | null;
   created: boolean;
   deleted: boolean;
+  deletions: SafeCountDto | null;
   fileId: FileIdDto;
   lineCount: SafeCountDto | null;
   maxLineBytes: SafeCountDto | null;

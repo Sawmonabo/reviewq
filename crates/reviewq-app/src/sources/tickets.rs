@@ -33,6 +33,8 @@ pub struct TicketDetail {
     pub components: Vec<String>,
     pub description: Option<String>,
     pub estimate: Option<f64>,
+    pub updated_at_ms: Option<i64>,
+    pub fetched_at_ms: i64,
     pub warning: Option<&'static str>,
     pub comments: Vec<TicketComment>,
     pub comment_count: u32,

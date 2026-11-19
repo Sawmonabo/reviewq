@@ -5,7 +5,8 @@ use axum::extract::State;
 use axum::http::HeaderMap;
 use reviewq_app::access::{Actor, AppError};
 use reviewq_app::changes::{
-    Discussion, DiscussionLine, DiscussionResolution, PatchAvailability, PatchFile,
+    Discussion, DiscussionAnchor, DiscussionLine, DiscussionPosition, DiscussionResolution,
+    PatchAvailability, PatchFile,
 };
 use reviewq_app::queue::ReviewSource;
 use reviewq_app::settings::ActiveSource;
@@ -84,14 +85,20 @@ pub(super) async fn files(
         )
         .await?;
     check_source(&entry, &actor, &review_id, &source).await?;
-    let position = response.next_page.map(|page| Position {
+    let position = |page| Position {
         review: review.clone(),
         settings: source.context.revision.get(),
         revision: response.revision.id.clone(),
         page,
         limit,
-    });
-    let next = encode(&entry.auth.endpoint, FILE_CURSOR, position)?;
+    };
+    let next = encode(
+        &entry.auth.endpoint,
+        FILE_CURSOR,
+        response.next_page.map(position),
+    )?;
+    let previous = (response.page > 1).then(|| position(response.page - 1));
+    let previous_cursor = encode(&entry.auth.endpoint, FILE_CURSOR, previous)?;
     let revision = patch_revision(&response.revision.id)?;
     let items = response
         .items
@@ -106,6 +113,8 @@ pub(super) async fn files(
             start_sha: GitShaDto::new(response.revision.start.as_str())
                 .ok_or(AppError::Internal)?,
             head_sha: GitShaDto::new(response.revision.head.as_str()).ok_or(AppError::Internal)?,
+            page_number: SafeCountDto::new(u64::from(response.page)).ok_or(AppError::Internal)?,
+            previous_cursor,
             page: Page::new(items, next).ok_or(AppError::Internal)?,
         },
     }))
@@ -153,7 +162,7 @@ pub(super) async fn discussions(
         .items
         .into_iter()
         .map(|row| discussion(row, &web_url, &source.context))
-        .collect();
+        .collect::<Result<Vec<_>, _>>()?;
     Ok(Json(Success {
         cursor: EventCursorDto::new(source.cursor.get()).ok_or(AppError::Internal)?,
         data: dto::PatchDiscussions {
@@ -283,14 +292,15 @@ fn file_metadata(
         PatchAvailability::Binary => dto::PatchAvailability::Binary,
         PatchAvailability::ProviderLimited => dto::PatchAvailability::ProviderLimited,
     };
-    let (byte_length, line_count, max_line_bytes, patch_etag) = match file.metrics {
+    let (byte_length, line_count, max_line_bytes, line_changes, patch_etag) = match file.metrics {
         Some(data) => (
             SafeCountDto::new(data.byte_length as u64),
             SafeCountDto::new(data.line_count as u64),
             SafeCountDto::new(data.max_line_bytes as u64),
+            data.line_changes,
             PatchETagDto::new(data.etag),
         ),
-        None => (None, None, None, None),
+        None => (None, None, None, None, None),
     };
     Ok(dto::PatchFile {
         review_id: ReviewIdDto::new(review).ok_or(AppError::Internal)?,
@@ -305,6 +315,8 @@ fn file_metadata(
         byte_length,
         line_count,
         max_line_bytes,
+        additions: line_changes.and_then(|changes| SafeCountDto::new(changes.additions as u64)),
+        deletions: line_changes.and_then(|changes| SafeCountDto::new(changes.deletions as u64)),
         patch_etag,
     })
 }
@@ -313,7 +325,7 @@ fn discussion(
     discussion: Discussion,
     mr_web_url: &str,
     context: &ActiveSource,
-) -> dto::PatchDiscussion {
+) -> Result<dto::PatchDiscussion, AppError> {
     let web_url = discussion.notes.first().map_or_else(
         || mr_web_url.to_string(),
         |first| format!("{mr_web_url}#note_{}", first.id),
@@ -335,20 +347,7 @@ fn discussion(
         DiscussionResolution::Comment => dto::DiscussionResolution::Comment,
         DiscussionResolution::Unknown => dto::DiscussionResolution::Unknown,
     };
-    let anchor = discussion.anchor.map(|anchor| dto::PatchDiscussionAnchor {
-        old_path: anchor.old_path,
-        new_path: anchor.new_path,
-        old_line: anchor
-            .old_line
-            .and_then(|line| SafeCountDto::new(u64::from(line))),
-        new_line: anchor
-            .new_line
-            .and_then(|line| SafeCountDto::new(u64::from(line))),
-        range: anchor.range.map(|range| dto::PatchDiscussionRange {
-            start: project_line(range.start),
-            end: project_line(range.end),
-        }),
-    });
+    let anchor = discussion.anchor.map(project_anchor).transpose()?;
     let notes = discussion
         .notes
         .into_iter()
@@ -369,7 +368,7 @@ fn discussion(
                 .and_then(reviewq_protocol::UpstreamIdDto::new),
         })
         .collect();
-    dto::PatchDiscussion {
+    Ok(dto::PatchDiscussion {
         discussion_id: discussion.id,
         anchor,
         outdated: discussion.outdated,
@@ -377,7 +376,33 @@ fn discussion(
         our_participation,
         resolution,
         notes,
-    }
+    })
+}
+
+fn project_anchor(anchor: DiscussionAnchor) -> Result<dto::PatchDiscussionAnchor, AppError> {
+    let position_type = match anchor.position_type {
+        DiscussionPosition::Text => dto::DiscussionPosition::Text,
+        DiscussionPosition::File => dto::DiscussionPosition::File,
+        DiscussionPosition::Other => dto::DiscussionPosition::Other,
+    };
+    Ok(dto::PatchDiscussionAnchor {
+        base_sha: GitShaDto::new(anchor.base_sha.as_str()).ok_or(AppError::Internal)?,
+        start_sha: GitShaDto::new(anchor.start_sha.as_str()).ok_or(AppError::Internal)?,
+        head_sha: GitShaDto::new(anchor.head_sha.as_str()).ok_or(AppError::Internal)?,
+        position_type,
+        old_path: anchor.old_path,
+        new_path: anchor.new_path,
+        old_line: anchor
+            .old_line
+            .and_then(|line| SafeCountDto::new(u64::from(line))),
+        new_line: anchor
+            .new_line
+            .and_then(|line| SafeCountDto::new(u64::from(line))),
+        range: anchor.range.map(|range| dto::PatchDiscussionRange {
+            start: project_line(range.start),
+            end: project_line(range.end),
+        }),
+    })
 }
 
 fn project_line(line: DiscussionLine) -> dto::PatchDiscussionLine {

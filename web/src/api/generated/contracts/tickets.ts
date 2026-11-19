@@ -22,6 +22,7 @@ export interface TicketDetail {
   components: string[];
   description: string | null;
   estimate: number | null;
+  fetchedAt: UtcTimestampDto;
   issueType: string | null;
   /**
    * @maxItems 100
@@ -35,6 +36,7 @@ export interface TicketDetail {
   reporterId: string | null;
   status: string | null;
   title: string;
+  updatedAt: UtcTimestampDto | null;
   url: string;
   warnings: string[];
   [k: string]: unknown;

@@ -62,6 +62,10 @@ pub(in crate::entry) async fn approvals(
                         name: row.name,
                         approved: row.approved,
                         required: count(u64::from(row.required))?,
+                        approved_count: row
+                            .approved_count
+                            .map(|value| count(value as u64))
+                            .transpose()?,
                     })
                 })
                 .collect::<Result<Vec<_>, AppError>>()
@@ -73,7 +77,10 @@ pub(in crate::entry) async fn approvals(
             source_sha: GitShaDto::new(current.head.as_str()).ok_or(AppError::Internal)?,
             observed_at: timestamp(current.observed_at_ms)?,
             personal_approval: current.personal_approval,
-            approvals: current.approvals.map(facts).transpose()?,
+            approvals: current
+                .approvals
+                .map(|value| facts(value, source.context.gitlab_account))
+                .transpose()?,
             rules,
             warnings,
         },
@@ -81,7 +88,7 @@ pub(in crate::entry) async fn approvals(
     )?))
 }
 
-fn facts(facts: ApprovalFacts) -> Result<dto::ApprovalFacts, AppError> {
+fn facts(facts: ApprovalFacts, account: Option<u64>) -> Result<dto::ApprovalFacts, AppError> {
     Ok(dto::ApprovalFacts {
         approved: facts.approved,
         required: facts
@@ -99,6 +106,8 @@ fn facts(facts: ApprovalFacts) -> Result<dto::ApprovalFacts, AppError> {
                 Ok(dto::Approver {
                     id: UpstreamIdDto::new(person.id).ok_or(AppError::Unavailable)?,
                     username: person.username,
+                    name: person.name,
+                    is_you: account.map(|id| id == person.id),
                     approved_at: person.approved_at_ms.map(timestamp).transpose()?,
                 })
             })

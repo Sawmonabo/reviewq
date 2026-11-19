@@ -124,9 +124,11 @@ const schema89 = {
       anyOf: [{ $ref: "#/definitions/UtcTimestampDto" }, { type: "null" }],
     },
     id: { $ref: "#/definitions/MergeRequestIidDto" },
+    isYou: { type: ["boolean", "null"] },
+    name: { type: ["string", "null"] },
     username: { type: ["string", "null"] },
   },
-  required: ["id", "username", "approvedAt"],
+  required: ["id", "username", "name", "isYou", "approvedAt"],
   type: "object",
 };
 const schema92 = {

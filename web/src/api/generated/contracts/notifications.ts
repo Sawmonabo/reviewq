@@ -220,6 +220,7 @@ export interface ReviewContext {
         TicketKeyDto,
         TicketKeyDto,
       ];
+  ticketTitle: string | null;
   title: string;
   unreadReplies: SafeCountDto;
   [k: string]: unknown;

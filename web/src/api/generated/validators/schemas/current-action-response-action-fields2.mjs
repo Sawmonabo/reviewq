@@ -5,7 +5,7 @@ import { validate232 } from "./utc-timestamp-dto.mjs";
 import { schema126 } from "../metadata-3.mjs";
 import { validate147 } from "./git-sha-dto.mjs";
 import { validate35 } from "./event-cursor-dto.mjs";
-function validate356(
+function validate357(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -70,7 +70,7 @@ function validate356(
             vErrors.push(err1);
           }
           errors++;
-          validate356.errors = vErrors;
+          validate357.errors = vErrors;
           return false;
         } else {
           errors = _errs2;
@@ -144,7 +144,7 @@ function validate356(
               vErrors.push(err3);
             }
             errors++;
-            validate356.errors = vErrors;
+            validate357.errors = vErrors;
             return false;
           } else {
             errors = _errs7;
@@ -218,7 +218,7 @@ function validate356(
                 vErrors.push(err5);
               }
               errors++;
-              validate356.errors = vErrors;
+              validate357.errors = vErrors;
               return false;
             } else {
               errors = _errs12;
@@ -292,7 +292,7 @@ function validate356(
                   vErrors.push(err7);
                 }
                 errors++;
-                validate356.errors = vErrors;
+                validate357.errors = vErrors;
                 return false;
               } else {
                 errors = _errs17;
@@ -313,7 +313,7 @@ function validate356(
                 let data4 = data.reason;
                 const _errs21 = errors;
                 if (typeof data4 !== "string" && data4 !== null) {
-                  validate356.errors = [
+                  validate357.errors = [
                     {
                       instancePath: instancePath + "/reason",
                       schemaPath: "#/properties/reason/type",
@@ -385,7 +385,7 @@ function validate356(
                       vErrors.push(err9);
                     }
                     errors++;
-                    validate356.errors = vErrors;
+                    validate357.errors = vErrors;
                     return false;
                   } else {
                     errors = _errs24;
@@ -459,7 +459,7 @@ function validate356(
                         vErrors.push(err11);
                       }
                       errors++;
-                      validate356.errors = vErrors;
+                      validate357.errors = vErrors;
                       return false;
                     } else {
                       errors = _errs29;
@@ -507,7 +507,7 @@ function validate356(
         }
       }
     } else {
-      validate356.errors = [
+      validate357.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -518,7 +518,7 @@ function validate356(
       return false;
     }
   }
-  validate356.errors = vErrors;
+  validate357.errors = vErrors;
   return errors === 0;
 }
-export { validate356 };
+export { validate357 };

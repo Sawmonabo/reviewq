@@ -9,7 +9,7 @@ use reviewq_app::sources::{
     WorkflowSnapshot,
 };
 use reviewq_app::workspace::ConfiguredProject;
-use reviewq_domain::identity::{GitLabOrigin, MrIdentity, ProjectId, TicketKey};
+use reviewq_domain::identity::{GitLabOrigin, GitSha, MrIdentity, ProjectId, TicketKey};
 use serde::Deserialize;
 use url::{Host, Url};
 
@@ -151,7 +151,7 @@ struct MergeRequest {
     project_id: u64,
     iid: u64,
     title: String,
-    sha: String,
+    sha: Option<String>,
     state: String,
     updated_at: String,
     source_branch: String,
@@ -159,6 +159,16 @@ struct MergeRequest {
     #[serde(default)]
     draft: bool,
     diff_refs: Option<changes::DiffRefs>,
+}
+
+impl MergeRequest {
+    fn head_sha(&self) -> Result<GitSha, AppError> {
+        self.sha
+            .as_deref()
+            .ok_or(AppError::Unavailable)?
+            .parse()
+            .map_err(|_| AppError::Unavailable)
+    }
 }
 
 #[derive(Deserialize)]
@@ -344,6 +354,7 @@ impl GitLab {
         if row.title.len() > 4096 {
             return Err(AppError::PayloadTooLarge);
         }
+        let head_sha = row.head_sha()?;
         let state = merge_request_state(&row.state)?;
         let updated_at = row
             .updated_at
@@ -370,7 +381,7 @@ impl GitLab {
                 })
                 .transpose()?,
             draft: row.draft,
-            head_sha: row.sha.parse().map_err(|_| AppError::Unavailable)?,
+            head_sha,
             state,
             updated_at_ms: updated_at.as_millisecond(),
         })
