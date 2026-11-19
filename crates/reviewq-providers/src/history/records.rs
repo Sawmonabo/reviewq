@@ -272,7 +272,7 @@ fn codex<R: Read>(
                 "thread_id" => string(reader, ID_BYTES).map(|value| event.thread = value),
                 "turn_id" => string(reader, ID_BYTES).map(|value| event.turn = value),
                 "item" if reader.peek().map_err(invalid)? == ValueType::Object => {
-                    message(reader, window, output).map(|value| event.item = value)
+                    codex_item(reader, window, output).map(|value| event.item = value)
                 }
                 _ => reader.skip_value().map_err(invalid),
             })
@@ -361,7 +361,8 @@ fn claude<R: Read>(
 ) -> Result<Projection, AppError> {
     let mut item = Message::default();
     let mut id = None;
-    let mut role = None;
+    let mut record_type = None;
+    let mut message_role = None;
     let mut stamp = None;
     let mut hidden = false;
     let mut sidechain = false;
@@ -371,7 +372,7 @@ fn claude<R: Read>(
     let mut parent = None;
     let mut tool_parent = None;
     object(reader, |name, reader| match name {
-        "type" => string(reader, ID_BYTES).map(|value| role = value),
+        "type" => string(reader, ID_BYTES).map(|value| record_type = value),
         "uuid" => string(reader, ID_BYTES).map(|value| id = value),
         "parentUuid" => string(reader, ID_BYTES).map(|value| parent = value),
         "sourceToolAssistantUUID" => string(reader, ID_BYTES).map(|value| tool_parent = value),
@@ -397,7 +398,11 @@ fn claude<R: Read>(
             })
         }
         "message" if reader.peek().map_err(invalid)? == ValueType::Object => {
-            message(reader, window, output).map(|value| item = value)
+            object(reader, |name, reader| match name {
+                "role" => string(reader, ID_BYTES).map(|value| message_role = value),
+                "content" => contents(reader, window, &mut item, output),
+                _ => reader.skip_value().map_err(invalid),
+            })
         }
         _ => reader.skip_value().map_err(invalid),
     })?;
@@ -416,7 +421,7 @@ fn claude<R: Read>(
         item.parts
             .retain(|part| !matches!(part.kind, VisiblePartKind::ToolResult { .. }));
     }
-    let kind = match (role.as_deref(), item.kind.as_deref()) {
+    let kind = match (record_type.as_deref(), message_role.as_deref()) {
         (Some("user"), Some("user")) if item.text.bytes > 0 => VisibleKind::User,
         (Some("user"), Some("user")) => VisibleKind::Assistant,
         (Some("assistant"), Some("assistant")) => VisibleKind::Assistant,
@@ -427,14 +432,14 @@ fn claude<R: Read>(
     Ok(Some((item, kind, stamp, None)))
 }
 
-fn message<R: Read>(
+fn codex_item<R: Read>(
     reader: &mut JsonStreamReader<R>,
     window: Window,
     output: &mut BodySink<'_>,
 ) -> Result<Message, AppError> {
     let mut item = Message::default();
     object(reader, |name, reader| match name {
-        "type" | "role" => string(reader, ID_BYTES).map(|value| item.kind = value),
+        "type" => string(reader, ID_BYTES).map(|value| item.kind = value),
         "id" => string(reader, ID_BYTES).map(|value| item.id = value),
         "content" => contents(reader, window, &mut item, output),
         "text" => tools::body(reader, window, output.for_field(BodyField::Text))

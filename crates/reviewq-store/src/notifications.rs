@@ -67,7 +67,7 @@ impl InboxStore for SqliteStore {
                 if approved != ids.len() as i64 {
                     return Err(AppError::NotFound.into());
                 }
-                let (affected,queue_changed) = assign(&tx.sql, action, ids, &selection)?;
+                let (affected,stage_changed) = assign(&tx.sql, action, ids, &selection)?;
                 if !affected.is_empty() {
                     tx.sql.execute(
                         "UPDATE service_state SET inbox_revision=inbox_revision+1 WHERE singleton=1", [],
@@ -78,10 +78,10 @@ impl InboxStore for SqliteStore {
                     } else {
                         vec![ResourceKey::Notification(None)]
                     };
-                    if queue_changed {
+                    if stage_changed {
                         crate::workspace::advance_queue(&tx.sql)?;
-                        keys.push(ResourceKey::Queue);
                     }
+                    keys.push(ResourceKey::Queue);
                     tx.emit(&keys)?;
                 }
                 let counts = counts(&tx.sql, scope_code, &scope_id, i64::MAX)?;
@@ -120,14 +120,14 @@ fn assign(
         _ => statement.query(params![selection, now_ms()?])?,
     };
     let mut updates = HashSet::<NotificationId>::new();
-    let mut queue_changed = false;
+    let mut stage_changed = false;
     while let Some(row) = rows.next()? {
         updates.insert(parse(text(row, 0)?)?);
-        queue_changed |= row.get::<_, bool>(1)?;
+        stage_changed |= row.get::<_, bool>(1)?;
     }
     Ok((
         ids.into_iter().filter(|id| updates.contains(id)).collect(),
-        queue_changed,
+        stage_changed,
     ))
 }
 
