@@ -134,6 +134,10 @@ export default function ReviewDrawer({
   );
   const runs = runTrail.length ? otherRuns.data : overview.runs;
   const monitor = follows.data?.monitor;
+  const monitorEnabled = monitor?.state === "enabled";
+  const recoveryActive = recovery.data && ["waiting", "queued"].includes(recovery.data.state);
+  const disposition =
+    overview.decision?.reviewedSha === review.sourceSha ? overview.decision.disposition : null;
   const monitorLead = overview.runs.items.find((item) => item.runId === monitor?.runId);
   const visibleTabs = child
     ? ([
@@ -346,7 +350,17 @@ export default function ReviewDrawer({
             <ActionMenu
               label="Review actions"
               trigger={<Icon name="more" />}
+              contentClassName="review-action-menu"
               items={[
+                ...(recoveryActive
+                  ? [
+                      {
+                        label: "Cancel auto-resume",
+                        run: () => void stopRecovery(),
+                        disabled: !selected || busy,
+                      },
+                    ]
+                  : []),
                 {
                   label: "Open in terminal",
                   run: () => void commandFor("open"),
@@ -363,51 +377,63 @@ export default function ReviewDrawer({
                     if (source) window.open(source, "_blank", "noopener,noreferrer");
                   },
                   disabled: !source,
+                  trailing: <Icon name="external" size={12} />,
                 },
-                {
-                  label: "Cancel auto-resume",
-                  run: () => void stopRecovery(),
-                  disabled:
-                    !selected ||
-                    !recovery.data ||
-                    !["waiting", "queued"].includes(recovery.data.state) ||
-                    busy,
-                },
-                {
-                  label:
-                    follows.data?.monitor?.state === "enabled"
-                      ? "Edit monitored discussions"
-                      : "Configure auto-review",
-                  run: () => onMonitor([review], false),
-                  disabled: !canMutate || busy,
-                },
-                {
-                  label: "Pause auto-review",
-                  run: () => onMonitor([review], true),
-                  disabled: !canMutate || follows.data?.monitor?.state !== "enabled" || busy,
-                },
-                {
-                  label: "Review follow-up evidence",
-                  run: () => {
-                    if (snapshot) setAcknowledgement(snapshot);
-                  },
-                  disabled: !canMutate || !snapshot || busy,
-                },
-                {
-                  label: "Review complete",
-                  run: () => void decide("reviewed"),
-                  disabled: !canMutate || busy,
-                },
-                {
-                  label: "Waiting on author",
-                  run: () => void decide("waiting_author"),
-                  disabled: !canMutate || busy,
-                },
-                {
-                  label: "Clear local review record",
-                  run: () => void decide("needs_review"),
-                  disabled: !canMutate || busy,
-                },
+                ...(review.mrState === "open"
+                  ? [
+                      {
+                        label: monitorEnabled
+                          ? "Disable automatic follow-ups for this MR"
+                          : "Enable automatic follow-ups for this MR",
+                        run: () => onMonitor([review], monitorEnabled),
+                        disabled: !canMutate || !follows.data || busy,
+                        separatorBefore: true,
+                      },
+                      ...(monitorEnabled
+                        ? [
+                            {
+                              label: "Manage monitored threads",
+                              run: () => onMonitor([review], false),
+                              disabled: !canMutate || busy,
+                            },
+                          ]
+                        : []),
+                      ...(snapshot
+                        ? [
+                            {
+                              label: "Follow-up handled",
+                              run: () => setAcknowledgement(snapshot),
+                              disabled: !canMutate || busy,
+                              separatorBefore: true,
+                            },
+                          ]
+                        : []),
+                      {
+                        label: disposition === "reviewed" ? "✓ Review complete" : "Review complete",
+                        run: () => void decide("reviewed"),
+                        disabled: !canMutate || busy || (disposition === "reviewed" && !snapshot),
+                        separatorBefore: !snapshot,
+                      },
+                      {
+                        label:
+                          disposition === "waiting_author"
+                            ? "✓ Waiting on author"
+                            : "Waiting on author",
+                        run: () => void decide("waiting_author"),
+                        disabled:
+                          !canMutate || busy || (disposition === "waiting_author" && !snapshot),
+                      },
+                      ...(overview.decision?.reviewedSha
+                        ? [
+                            {
+                              label: "Clear local review record",
+                              run: () => void decide("needs_review"),
+                              disabled: !canMutate || busy,
+                            },
+                          ]
+                        : []),
+                    ]
+                  : []),
               ]}
             />
             <button

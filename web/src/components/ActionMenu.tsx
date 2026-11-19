@@ -1,7 +1,14 @@
 import * as Menu from "@radix-ui/react-dropdown-menu";
+import { Fragment } from "react";
 import type { ReactNode } from "react";
 
-type Item = { readonly label: string; readonly run: () => void; readonly disabled?: boolean };
+type Item = {
+  readonly label: string;
+  readonly run: () => void;
+  readonly disabled?: boolean;
+  readonly separatorBefore?: boolean;
+  readonly trailing?: ReactNode;
+};
 
 export function ActionMenu({
   label,
@@ -29,9 +36,13 @@ export function ActionMenu({
           collisionPadding={12}
         >
           {items.map((item) => (
-            <Menu.Item key={item.label} disabled={item.disabled ?? false} onSelect={item.run}>
-              {item.label}
-            </Menu.Item>
+            <Fragment key={item.label}>
+              {item.separatorBefore && <Menu.Separator />}
+              <Menu.Item disabled={item.disabled ?? false} onSelect={item.run}>
+                {item.label}
+                {item.trailing}
+              </Menu.Item>
+            </Fragment>
           ))}
         </Menu.Content>
       </Menu.Portal>

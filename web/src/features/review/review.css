@@ -43,7 +43,8 @@
   background: transparent;
   color: var(--muted);
 }
-.drawer-actions :is(.menu-trigger, .icon-button):hover {
+.drawer-actions :is(.menu-trigger, .icon-button):hover,
+.drawer-actions .menu-trigger[data-state="open"] {
   background: var(--hover);
   color: var(--text);
 }
@@ -54,6 +55,35 @@
 .drawer-actions .icon-button svg {
   width: 16px;
   height: 16px;
+}
+.action-menu.review-action-menu {
+  min-width: 230px;
+  max-width: calc(100vw - 24px);
+  border-color: var(--popup-border);
+  background: var(--popup-bg);
+  box-shadow: 0 10px 30px #0008;
+}
+.review-action-menu [role="menuitem"] {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 32px;
+  gap: 12px;
+  padding: 7px 10px;
+  font-size: 12px;
+}
+.review-action-menu [role="menuitem"][data-highlighted] {
+  background: var(--popup-hover);
+}
+.review-action-menu [role="separator"] {
+  height: 1px;
+  margin: 4px 6px;
+  background: var(--line);
+}
+@media (pointer: coarse) {
+  .review-action-menu [role="menuitem"] {
+    min-height: 44px;
+  }
 }
 .drawer-heading {
   padding-top: 12px;
