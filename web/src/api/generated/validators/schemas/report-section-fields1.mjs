@@ -4,7 +4,7 @@ import { validate95 } from "./safe-count-dto.mjs";
 import { validate98 } from "./offset-unit.mjs";
 import { validate102 } from "./report-hash-dto.mjs";
 import { validate25 } from "./checkpoint-id-dto.mjs";
-function validate731(
+function validate732(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -15,7 +15,7 @@ function validate731(
       if (data.complete !== undefined && func0.call(data, "complete")) {
         const _errs1 = errors;
         if (typeof data.complete !== "boolean") {
-          validate731.errors = [
+          validate732.errors = [
             {
               instancePath: instancePath + "/complete",
               schemaPath: "#/properties/complete/type",
@@ -84,7 +84,7 @@ function validate731(
               vErrors.push(err1);
             }
             errors++;
-            validate731.errors = vErrors;
+            validate732.errors = vErrors;
             return false;
           } else {
             errors = _errs4;
@@ -203,7 +203,7 @@ function validate731(
                     vErrors.push(err3);
                   }
                   errors++;
-                  validate731.errors = vErrors;
+                  validate732.errors = vErrors;
                   return false;
                 } else {
                   errors = _errs11;
@@ -268,7 +268,7 @@ function validate731(
                     if (data.text !== undefined && func0.call(data, "text")) {
                       const _errs17 = errors;
                       if (typeof data.text !== "string") {
-                        validate731.errors = [
+                        validate732.errors = [
                           {
                             instancePath: instancePath + "/text",
                             schemaPath: "#/properties/text/type",
@@ -290,7 +290,7 @@ function validate731(
         }
       }
     } else {
-      validate731.errors = [
+      validate732.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -301,7 +301,7 @@ function validate731(
       return false;
     }
   }
-  validate731.errors = vErrors;
+  validate732.errors = vErrors;
   return errors === 0;
 }
-export { validate731 };
+export { validate732 };

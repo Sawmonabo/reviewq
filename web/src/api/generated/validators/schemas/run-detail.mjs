@@ -2,8 +2,8 @@
 import { func0 } from "../runtime.mjs";
 import { validate25 } from "./checkpoint-id-dto.mjs";
 import { validate125 } from "./review-id-dto.mjs";
-import { validate825 } from "./session-summary-page.mjs";
-function validate821(
+import { validate826 } from "./session-summary-page.mjs";
+function validate822(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -23,7 +23,7 @@ function validate821(
         ((data.sessions === undefined || !func0.call(data, "sessions")) &&
           (missing0 = "sessions"))
       ) {
-        validate821.errors = [
+        validate822.errors = [
           {
             instancePath,
             schemaPath: "#/required",
@@ -102,7 +102,7 @@ function validate821(
               if (data.sessions !== undefined && func0.call(data, "sessions")) {
                 const _errs4 = errors;
                 if (
-                  !validate825(data.sessions, {
+                  !validate826(data.sessions, {
                     instancePath: instancePath + "/sessions",
                     parentData: data,
                     parentDataProperty: "sessions",
@@ -111,8 +111,8 @@ function validate821(
                 ) {
                   vErrors =
                     vErrors === null
-                      ? validate825.errors
-                      : vErrors.concat(validate825.errors);
+                      ? validate826.errors
+                      : vErrors.concat(validate826.errors);
                   errors = vErrors.length;
                 }
                 var valid0 = _errs4 === errors;
@@ -124,7 +124,7 @@ function validate821(
         }
       }
     } else {
-      validate821.errors = [
+      validate822.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -135,7 +135,7 @@ function validate821(
       return false;
     }
   }
-  validate821.errors = vErrors;
+  validate822.errors = vErrors;
   return errors === 0;
 }
-export { validate821 };
+export { validate822 };

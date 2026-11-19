@@ -2,7 +2,7 @@
 import { func0 } from "../runtime.mjs";
 import { validate25 } from "./checkpoint-id-dto.mjs";
 import { validate102 } from "./report-hash-dto.mjs";
-import { validate645 } from "./artifact-stats.mjs";
+import { validate646 } from "./artifact-stats.mjs";
 import { validate95 } from "./safe-count-dto.mjs";
 function validate642(
   data,
@@ -51,109 +51,187 @@ function validate642(
           var valid0 = true;
         }
         if (valid0) {
-          if (data.sha256 !== undefined && func0.call(data, "sha256")) {
+          if (
+            data.reconciledByBatchId !== undefined &&
+            func0.call(data, "reconciledByBatchId")
+          ) {
+            let data2 = data.reconciledByBatchId;
             const _errs4 = errors;
+            const _errs5 = errors;
+            let valid1 = false;
+            const _errs6 = errors;
             if (
-              !validate102(data.sha256, {
-                instancePath: instancePath + "/sha256",
+              !validate25(data2, {
+                instancePath: instancePath + "/reconciledByBatchId",
                 parentData: data,
-                parentDataProperty: "sha256",
+                parentDataProperty: "reconciledByBatchId",
                 rootData,
               })
             ) {
               vErrors =
                 vErrors === null
-                  ? validate102.errors
-                  : vErrors.concat(validate102.errors);
+                  ? validate25.errors
+                  : vErrors.concat(validate25.errors);
               errors = vErrors.length;
+            }
+            var _valid0 = _errs6 === errors;
+            valid1 = valid1 || _valid0;
+            if (!valid1) {
+              const _errs7 = errors;
+              if (data2 !== null) {
+                const err0 = {
+                  instancePath: instancePath + "/reconciledByBatchId",
+                  schemaPath: "#/properties/reconciledByBatchId/anyOf/1/type",
+                  keyword: "type",
+                  params: { type: "null" },
+                };
+                if (vErrors === null) {
+                  vErrors = [err0];
+                } else {
+                  vErrors.push(err0);
+                }
+                errors++;
+              }
+              var _valid0 = _errs7 === errors;
+              valid1 = valid1 || _valid0;
+            }
+            if (!valid1) {
+              const err1 = {
+                instancePath: instancePath + "/reconciledByBatchId",
+                schemaPath: "#/properties/reconciledByBatchId/anyOf",
+                keyword: "anyOf",
+                params: {},
+              };
+              if (vErrors === null) {
+                vErrors = [err1];
+              } else {
+                vErrors.push(err1);
+              }
+              errors++;
+              validate642.errors = vErrors;
+              return false;
+            } else {
+              errors = _errs5;
+              if (vErrors !== null) {
+                if (_errs5) {
+                  vErrors.length = _errs5;
+                } else {
+                  vErrors = null;
+                }
+              }
             }
             var valid0 = _errs4 === errors;
           } else {
             var valid0 = true;
           }
           if (valid0) {
-            if (data.stats !== undefined && func0.call(data, "stats")) {
-              const _errs5 = errors;
+            if (data.sha256 !== undefined && func0.call(data, "sha256")) {
+              const _errs9 = errors;
               if (
-                !validate645(data.stats, {
-                  instancePath: instancePath + "/stats",
+                !validate102(data.sha256, {
+                  instancePath: instancePath + "/sha256",
                   parentData: data,
-                  parentDataProperty: "stats",
+                  parentDataProperty: "sha256",
                   rootData,
                 })
               ) {
                 vErrors =
                   vErrors === null
-                    ? validate645.errors
-                    : vErrors.concat(validate645.errors);
+                    ? validate102.errors
+                    : vErrors.concat(validate102.errors);
                 errors = vErrors.length;
               }
-              var valid0 = _errs5 === errors;
+              var valid0 = _errs9 === errors;
             } else {
               var valid0 = true;
             }
             if (valid0) {
-              if (data.text !== undefined && func0.call(data, "text")) {
-                const _errs6 = errors;
-                if (typeof data.text !== "string") {
-                  validate642.errors = [
-                    {
-                      instancePath: instancePath + "/text",
-                      schemaPath: "#/properties/text/type",
-                      keyword: "type",
-                      params: { type: "string" },
-                    },
-                  ];
-                  return false;
+              if (data.stats !== undefined && func0.call(data, "stats")) {
+                const _errs10 = errors;
+                if (
+                  !validate646(data.stats, {
+                    instancePath: instancePath + "/stats",
+                    parentData: data,
+                    parentDataProperty: "stats",
+                    rootData,
+                  })
+                ) {
+                  vErrors =
+                    vErrors === null
+                      ? validate646.errors
+                      : vErrors.concat(validate646.errors);
+                  errors = vErrors.length;
                 }
-                var valid0 = _errs6 === errors;
+                var valid0 = _errs10 === errors;
               } else {
                 var valid0 = true;
               }
               if (valid0) {
-                if (
-                  data.totalCodePoints !== undefined &&
-                  func0.call(data, "totalCodePoints")
-                ) {
-                  const _errs8 = errors;
-                  if (
-                    !validate95(data.totalCodePoints, {
-                      instancePath: instancePath + "/totalCodePoints",
-                      parentData: data,
-                      parentDataProperty: "totalCodePoints",
-                      rootData,
-                    })
-                  ) {
-                    vErrors =
-                      vErrors === null
-                        ? validate95.errors
-                        : vErrors.concat(validate95.errors);
-                    errors = vErrors.length;
+                if (data.text !== undefined && func0.call(data, "text")) {
+                  const _errs11 = errors;
+                  if (typeof data.text !== "string") {
+                    validate642.errors = [
+                      {
+                        instancePath: instancePath + "/text",
+                        schemaPath: "#/properties/text/type",
+                        keyword: "type",
+                        params: { type: "string" },
+                      },
+                    ];
+                    return false;
                   }
-                  var valid0 = _errs8 === errors;
+                  var valid0 = _errs11 === errors;
                 } else {
                   var valid0 = true;
                 }
                 if (valid0) {
-                  if (data.turnId !== undefined && func0.call(data, "turnId")) {
-                    const _errs9 = errors;
+                  if (
+                    data.totalCodePoints !== undefined &&
+                    func0.call(data, "totalCodePoints")
+                  ) {
+                    const _errs13 = errors;
                     if (
-                      !validate25(data.turnId, {
-                        instancePath: instancePath + "/turnId",
+                      !validate95(data.totalCodePoints, {
+                        instancePath: instancePath + "/totalCodePoints",
                         parentData: data,
-                        parentDataProperty: "turnId",
+                        parentDataProperty: "totalCodePoints",
                         rootData,
                       })
                     ) {
                       vErrors =
                         vErrors === null
-                          ? validate25.errors
-                          : vErrors.concat(validate25.errors);
+                          ? validate95.errors
+                          : vErrors.concat(validate95.errors);
                       errors = vErrors.length;
                     }
-                    var valid0 = _errs9 === errors;
+                    var valid0 = _errs13 === errors;
                   } else {
                     var valid0 = true;
+                  }
+                  if (valid0) {
+                    if (
+                      data.turnId !== undefined &&
+                      func0.call(data, "turnId")
+                    ) {
+                      const _errs14 = errors;
+                      if (
+                        !validate25(data.turnId, {
+                          instancePath: instancePath + "/turnId",
+                          parentData: data,
+                          parentDataProperty: "turnId",
+                          rootData,
+                        })
+                      ) {
+                        vErrors =
+                          vErrors === null
+                            ? validate25.errors
+                            : vErrors.concat(validate25.errors);
+                        errors = vErrors.length;
+                      }
+                      var valid0 = _errs14 === errors;
+                    } else {
+                      var valid0 = true;
+                    }
                   }
                 }
               }
