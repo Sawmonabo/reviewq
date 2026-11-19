@@ -303,6 +303,7 @@ pub fn router(
             "/runs/{run_id}/sessions/{session_key}/questions/{request_id}/answer",
             post(questions::answer),
         )
+        .route("/sessions/register", post(hosts::register::register))
         .route("/native/codex/link", post(hosts::link))
         .route(
             "/native/codex/registration",

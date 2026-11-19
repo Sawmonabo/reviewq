@@ -6,8 +6,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use reviewq_app::access::AppError;
 use reviewq_app::history::{HistoryParent, HistorySession};
+use reviewq_app::hosts::HostProof;
 use reviewq_domain::identity::NativeSessionId;
-use reviewq_domain::session::{AbsolutePath, HostProvider, NativeBinding};
+use reviewq_domain::session::{AbsolutePath, HostProvider, NativeBinding, NativeIdentity};
 use rustix::fs::{self as secure, Mode, OFlags, ResolveFlags};
 use sha2::{Digest, Sha256};
 
@@ -71,6 +72,92 @@ pub(crate) fn verified_claude_source(
     source
         .map(|source| AbsolutePath::from_canonical(source.path).map_err(|_| AppError::Forbidden))
         .transpose()
+}
+
+/// Reads the exact user's requested lead UUID in this profile. The cwd comes from
+/// the native row, since the configured review checkout is a separate choice.
+pub(crate) fn inspect_claude_lead(
+    profile: AbsolutePath,
+    native: NativeSessionId,
+    cancelled: &AtomicBool,
+) -> Result<HostProof, AppError> {
+    let identity = NativeIdentity::new(HostProvider::Claude, profile, native);
+    let profile_root = identity.profile().as_path();
+    let projects = profile_root.join("projects");
+    let directory = match fs::symlink_metadata(&projects) {
+        Ok(metadata) if metadata.is_dir() => fs::read_dir(&projects).map_err(fs_error)?,
+        Ok(_) => return Err(AppError::Forbidden),
+        Err(error) => return Err(fs_error(error)),
+    };
+    let filename = format!("{}.jsonl", identity.native_id());
+    let mut found = None;
+    for (index, directory) in directory.enumerate() {
+        if cancelled.load(Ordering::Relaxed) {
+            return Err(AppError::Unavailable);
+        }
+        if index >= MAX_DISCOVERY_ENTRIES {
+            return Err(AppError::Busy);
+        }
+        let directory = directory.map_err(fs_error)?;
+        if !directory.file_type().map_err(fs_error)?.is_dir() {
+            continue;
+        }
+        let candidate = directory.path().join(&filename);
+        let rel = candidate
+            .strip_prefix(profile_root)
+            .map_err(|_| AppError::Forbidden)?;
+        let Some(file) = source_file(profile_root, rel)? else {
+            continue;
+        };
+        let length = file.metadata().map_err(fs_error)?.len();
+        let mut budget = IDENTITY_SCAN_BYTES;
+        let mut offset = 0;
+        for _ in 0..64 {
+            if offset == length {
+                break;
+            }
+            let end = file::next_line(&file, offset, length, &mut budget, cancelled)?;
+            let record = identity::read(
+                HostProvider::Claude,
+                file::input(&file, offset, end, cancelled),
+            );
+            offset = end;
+            let Ok(record) = record else {
+                continue;
+            };
+            if record.sidechain || record.session.as_deref() != Some(identity.native_id().as_str())
+            {
+                continue;
+            }
+            let Some(cwd) = record.cwd.filter(|cwd| cwd.is_absolute()) else {
+                continue;
+            };
+            let cwd = cwd.canonicalize().map_err(fs_error)?;
+            if !cwd.is_dir() {
+                return Err(AppError::NotFound);
+            }
+            let binding = NativeBinding::new(
+                identity.clone(),
+                AbsolutePath::from_canonical(cwd).map_err(|_| AppError::Forbidden)?,
+            );
+            let source = verified_claude_source(
+                &binding,
+                Some(&AbsolutePath::from_canonical(candidate).map_err(|_| AppError::Forbidden)?),
+                cancelled,
+            )?
+            .ok_or(AppError::Conflict)?;
+            if found.is_some() {
+                return Err(AppError::Conflict);
+            }
+            found = Some(HostProof {
+                binding,
+                source: Some(source),
+                activity: None,
+            });
+            break;
+        }
+    }
+    found.ok_or(AppError::NotFound)
 }
 
 fn discover(
@@ -191,34 +278,10 @@ pub(super) fn verify(
     {
         return Err(AppError::Forbidden);
     }
-    let root = secure::openat2(
-        secure::CWD,
-        root,
-        OFlags::RDONLY | OFlags::DIRECTORY | OFlags::CLOEXEC,
-        Mode::empty(),
-        ResolveFlags::NO_SYMLINKS | ResolveFlags::NO_MAGICLINKS,
-    )
-    .map(File::from)
-    .map_err(|error| fs_error(error.into()))?;
-    let file = match secure::openat2(
-        &root,
-        rel,
-        OFlags::RDONLY | OFlags::CLOEXEC | OFlags::NONBLOCK,
-        Mode::empty(),
-        ResolveFlags::BENEATH | ResolveFlags::NO_SYMLINKS | ResolveFlags::NO_MAGICLINKS,
-    ) {
-        Ok(fd) => File::from(fd),
-        Err(rustix::io::Errno::NOENT) => return Ok(None),
-        Err(error) => return Err(fs_error(error.into())),
+    let Some(file) = source_file(root, rel)? else {
+        return Ok(None);
     };
-    let owner = rustix::process::getuid().as_raw();
     let metadata = file.metadata().map_err(fs_error)?;
-    if !metadata.is_file()
-        || metadata.uid() != owner
-        || root.metadata().map_err(fs_error)?.uid() != owner
-    {
-        return Err(AppError::Forbidden);
-    }
     let provider = identity.provider();
     let mut budget = IDENTITY_SCAN_BYTES;
     let mut offset = 0;
@@ -262,6 +325,38 @@ pub(super) fn verify(
         offset = end;
     }
     Ok(None)
+}
+
+fn source_file(root: &Path, rel: &Path) -> Result<Option<File>, AppError> {
+    let root = secure::openat2(
+        secure::CWD,
+        root,
+        OFlags::RDONLY | OFlags::DIRECTORY | OFlags::CLOEXEC,
+        Mode::empty(),
+        ResolveFlags::NO_SYMLINKS | ResolveFlags::NO_MAGICLINKS,
+    )
+    .map(File::from)
+    .map_err(|error| fs_error(error.into()))?;
+    let file = match secure::openat2(
+        &root,
+        rel,
+        OFlags::RDONLY | OFlags::CLOEXEC | OFlags::NONBLOCK,
+        Mode::empty(),
+        ResolveFlags::BENEATH | ResolveFlags::NO_SYMLINKS | ResolveFlags::NO_MAGICLINKS,
+    ) {
+        Ok(fd) => File::from(fd),
+        Err(rustix::io::Errno::NOENT) => return Ok(None),
+        Err(error) => return Err(fs_error(error.into())),
+    };
+    let owner = rustix::process::getuid().as_raw();
+    let metadata = file.metadata().map_err(fs_error)?;
+    if !metadata.is_file()
+        || metadata.uid() != owner
+        || root.metadata().map_err(fs_error)?.uid() != owner
+    {
+        return Err(AppError::Forbidden);
+    }
+    Ok(Some(file))
 }
 
 fn identity_matches(

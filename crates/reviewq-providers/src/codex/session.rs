@@ -26,6 +26,8 @@ pub(super) struct ThreadRead {
 pub(super) struct Thread {
     pub id: String,
     pub cwd: PathBuf,
+    parent_thread_id: Option<String>,
+    source: Option<serde_json::Value>,
     pub path: Option<PathBuf>,
     pub status: ThreadStatus,
     pub model: Option<String>,
@@ -51,6 +53,15 @@ impl NativeHost for Codex {
         Box::pin(async move {
             validate_native_id(&native_id)?;
             let thread = self.read_thread(&native_id).await?;
+            if thread.parent_thread_id.is_some()
+                || thread
+                    .source
+                    .as_ref()
+                    .and_then(|source| source.get("subAgent"))
+                    .is_some()
+            {
+                return Err(AppError::Conflict);
+            }
             self.proof(thread, native_id).await
         })
     }

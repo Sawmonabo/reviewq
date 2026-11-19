@@ -14,6 +14,7 @@ pub mod notifications;
 pub mod questions;
 pub mod queue;
 pub mod recovery;
+pub mod registration;
 pub mod reports;
 mod scalar;
 pub mod settings;
