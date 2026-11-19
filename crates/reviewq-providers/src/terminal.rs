@@ -8,9 +8,9 @@ use reviewq_app::access::{AppError, AppFuture};
 use reviewq_app::history::HistorySession;
 use reviewq_app::hosts::{NativeTerminal, TerminalHandoff, TerminalInstruction};
 use reviewq_domain::session::HostProvider;
-use serde::Deserialize;
-use tokio::io::AsyncReadExt;
 use tokio::process::Command;
+
+use crate::claude::jobs::{Job, JobKind, claude_job};
 
 pub struct Terminal {
     codex: Option<TerminalProvider>,
@@ -110,83 +110,6 @@ impl NativeTerminal for Terminal {
             Ok(TerminalHandoff::Command { command, opened })
         })
     }
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct Job {
-    session_id: Option<String>,
-    cwd: PathBuf,
-    kind: JobKind,
-    id: Option<String>,
-    pid: Option<u32>,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "lowercase")]
-enum JobKind {
-    Interactive,
-    Background,
-    #[serde(other)]
-    Unknown,
-}
-
-async fn claude_job(
-    executable: &Path,
-    profile: &Path,
-    cwd: &Path,
-    session_id: &str,
-) -> Result<Option<Job>, AppError> {
-    let mut child = Command::new(executable)
-        .args(["agents", "--json", "--all", "--cwd"])
-        .arg(cwd)
-        .current_dir(cwd)
-        .env("CLAUDE_CONFIG_DIR", profile)
-        .kill_on_drop(true)
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()
-        .map_err(|_| AppError::Unavailable)?;
-    let output = child.stdout.take().ok_or(AppError::Unavailable)?;
-    let rows = tokio::time::timeout(Duration::from_secs(4), async move {
-        let mut body = Vec::new();
-        output
-            .take(256 * 1024 + 1)
-            .read_to_end(&mut body)
-            .await
-            .map_err(|_| AppError::Unavailable)?;
-        if body.len() > 256 * 1024 {
-            return Err(AppError::PayloadTooLarge);
-        }
-        if !child.wait().await.is_ok_and(|value| value.success()) {
-            return Err(AppError::Unavailable);
-        }
-        serde_json::from_slice::<Vec<Job>>(&body).map_err(|_| AppError::Unavailable)
-    })
-    .await
-    .map_err(|_| AppError::Unavailable)??;
-    let mut matches = rows
-        .into_iter()
-        .filter(|job| job.session_id.as_deref() == Some(session_id));
-    let Some(job) = matches.next() else {
-        return Ok(None);
-    };
-    if matches.next().is_some()
-        || job.cwd != cwd
-        || job.id.as_ref().is_some_and(|id| {
-            id.is_empty() || id.len() > 64 || !id.bytes().all(|byte| byte.is_ascii_alphanumeric())
-        })
-    {
-        return Err(AppError::Conflict);
-    }
-    if matches!(job.kind, JobKind::Unknown | JobKind::Background)
-        && job.pid.is_some()
-        && job.id.is_none()
-    {
-        return Err(AppError::Unavailable);
-    }
-    Ok(Some(job))
 }
 
 async fn open_wsl(distro: &str, cwd: &str, argv: [&str; 5]) -> bool {
