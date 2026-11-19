@@ -35,6 +35,8 @@ struct Heartbeat {
     has_questions: bool,
     turn_id: Option<String>,
     latest_prompt_id: Option<String>,
+    latest_prompt_turn_id: Option<String>,
+    latest_prompt_manual: bool,
     model: Option<String>,
     effort: Option<String>,
 }
@@ -78,6 +80,12 @@ async fn heartbeat(
         activity,
         turn: command.turn_id.as_deref().map(parse).transpose()?,
         latest_prompt: command.latest_prompt_id.as_deref().map(parse).transpose()?,
+        latest_prompt_turn: command
+            .latest_prompt_turn_id
+            .as_deref()
+            .map(parse)
+            .transpose()?,
+        latest_prompt_manual: command.latest_prompt_manual,
         model: command.model,
         effort: command.effort,
     };
@@ -105,7 +113,7 @@ async fn heartbeat(
     )?))
 }
 
-async fn verified_context(
+pub(super) async fn verified_context(
     entry: &Entry,
     command: ClaudeCommand,
 ) -> Result<(LeadTarget, HistorySession), AppError> {

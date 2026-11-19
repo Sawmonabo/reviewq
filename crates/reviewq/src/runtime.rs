@@ -18,8 +18,8 @@ use reviewq_app::sources::{ReviewSourceReader, SourceRefreshStore};
 use reviewq_app::workspace::{WorkspaceConfig, WorkspaceStore};
 use reviewq_domain::session::{AbsolutePath, HostProvider};
 use reviewq_providers::{
-    Claude, Codex, FileHistory, GitLab, RegisteredReportFiles, SourceAccounts, SourceNetwork,
-    Terminal, TerminalProvider, Workflows,
+    Claude, ClaudeWorkflow, Codex, FileHistory, GitLab, RegisteredReportFiles, SourceAccounts,
+    SourceNetwork, Terminal, TerminalProvider, Workflows,
 };
 use reviewq_store::SqliteStore;
 use reviewq_transport::{ServiceEndpoint, ServiceIdentity, WorkflowIntegration};
@@ -201,9 +201,7 @@ pub(crate) async fn serve(profile: PathBuf, options: Serve) -> Result<(), Failur
         _ => None,
     };
     let host = codex.clone().map(|host| host as Arc<dyn NativeHost>);
-    let workflow = Arc::new(Workflows::new(codex));
     let report_files = Arc::new(RegisteredReportFiles);
-    let sends_allowed = !options.validation && host.is_some();
     let claude_home = match options.claude_home {
         Some(home) => Some(home),
         None if !options.validation => claude_home().ok().filter(|path| path.is_dir()),
@@ -213,7 +211,14 @@ pub(crate) async fn serve(profile: PathBuf, options: Serve) -> Result<(), Failur
         .clone()
         .map(Claude::new)
         .transpose()?
-        .map(|claude| Arc::new(claude) as Arc<dyn ClaudeCompanion>);
+        .map(Arc::new);
+    let claude_workflow = claude.as_ref().map(|native| {
+        Arc::new(ClaudeWorkflow::new(native.clone(), store.clone()))
+            as Arc<dyn reviewq_app::workflow::NativeWorkflowProof>
+    });
+    let workflow = Arc::new(Workflows::new(codex).with_claude(claude_workflow));
+    let sends_allowed = !options.validation && (host.is_some() || claude.is_some());
+    let claude = claude.map(|native| native as Arc<dyn ClaudeCompanion>);
     let claude_executable = options.claude_bin.or_else(|| {
         default_executable(
             "claude",

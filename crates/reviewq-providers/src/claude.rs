@@ -14,6 +14,9 @@ use tokio::sync::Semaphore;
 
 use crate::history::{Cancel, claude_anchor, claude_confirm_prompt, verified_claude_source};
 
+mod workflow;
+pub use workflow::ClaudeWorkflow;
+
 pub struct Claude {
     profile: AbsolutePath,
     reads: Arc<Semaphore>,

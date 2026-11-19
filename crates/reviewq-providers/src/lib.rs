@@ -12,7 +12,7 @@ mod settings;
 mod terminal;
 mod workflow;
 
-pub use claude::Claude;
+pub use claude::{Claude, ClaudeWorkflow};
 pub use codex::Codex;
 pub use desktop::LinuxDesktopNotifier;
 pub use gitlab::GitLab;

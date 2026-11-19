@@ -28,7 +28,7 @@ impl HistoryStore for SqliteStore {
     }
 }
 
-fn history_session(
+pub(crate) fn history_session(
     connection: &Connection,
     actor: &Actor,
     run: RunId,

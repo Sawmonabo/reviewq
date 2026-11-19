@@ -14,11 +14,20 @@ use crate::Codex;
 
 pub struct Workflows {
     codex: Option<Arc<Codex>>,
+    claude: Option<Arc<dyn NativeWorkflowProof>>,
 }
 
 impl Workflows {
     pub fn new(codex: Option<Arc<Codex>>) -> Self {
-        Self { codex }
+        Self {
+            codex,
+            claude: None,
+        }
+    }
+
+    pub fn with_claude(mut self, claude: Option<Arc<dyn NativeWorkflowProof>>) -> Self {
+        self.claude = claude;
+        self
     }
 
     fn reader(&self, lead: &LeadTarget) -> Result<&dyn NativeWorkflowProof, AppError> {
@@ -27,7 +36,7 @@ impl Workflows {
                 .codex
                 .as_deref()
                 .map(|codex| codex as &dyn NativeWorkflowProof),
-            HostProvider::Claude => None,
+            HostProvider::Claude => self.claude.as_deref(),
         }
         .ok_or(AppError::Unavailable)
     }

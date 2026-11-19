@@ -4,6 +4,16 @@ export function reviewqOrigin(origin) {
   return origin?.kind === "plugin" && origin.name === PLUGIN && origin.asUser === true;
 }
 
+function deliveryKey(state) {
+  return `delivery.${state.id}`;
+}
+
+async function remember($, state, attempt) {
+  if (attempt.outcome?.kind === "started") {
+    await $.store.set(deliveryKey(state), { offer: attempt.offer, outcome: attempt.outcome });
+  }
+}
+
 function canSend(state) {
   return state.linked && !state.working && state.phase === "idle" && !state.question
     && !state.draft && !state.pendingPrompt && !state.activeTurn;
@@ -15,11 +25,21 @@ async function postOutcome($, invoke, state, attempt) {
   const result = await invoke($, "hook", state.id, { offer, outcome });
   if (!result.error && state.delivery === attempt) {
     attempt.posted = outcome;
-    if (outcome.kind !== "uncertain") state.delivery = undefined;
+    if (outcome.kind !== "uncertain") {
+      state.delivery = undefined;
+      if (outcome.kind === "started") await $.store.delete(deliveryKey(state));
+    }
   }
 }
 
 export async function deliver($, invoke, state, offer) {
+  if (!state.readRecovery) {
+    const saved = await $.store.get(deliveryKey(state));
+    if (saved?.offer && saved.outcome?.kind === "started" && !state.delivery) {
+      state.delivery = saved;
+    }
+    state.readRecovery = true;
+  }
   if (state.delivery) {
     await postOutcome($, invoke, state, state.delivery);
     return;
@@ -103,6 +123,7 @@ export async function observeFirstStep($, state, event) {
     kind: "started", origin: PLUGIN, entryId: attempt.candidate, turnId: event.turnId,
   };
   attempt.outcome = attempt.observed;
+  await remember($, state, attempt);
 }
 
 export function finishTurn(state, turnId) {

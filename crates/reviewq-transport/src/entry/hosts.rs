@@ -101,9 +101,13 @@ pub(super) async fn claude_registration(
     if command.target.is_some() {
         return Err(AppError::InvalidRequest.into());
     }
-    let companion = entry.claude.as_deref().ok_or(AppError::Unavailable)?;
-    let registered = match companion.prove(command.context()?).await {
-        Ok(proof) => Some(entry.store.lookup_native_lead(proof.binding).await?),
+    let registered = match claude::verified_context(&entry, command).await {
+        Ok((lead, _)) => Some(
+            entry
+                .store
+                .lookup_native_lead(lead.binding().clone())
+                .await?,
+        ),
         Err(AppError::NotFound) => None,
         Err(error) => return Err(error.into()),
     };

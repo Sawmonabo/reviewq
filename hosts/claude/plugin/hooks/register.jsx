@@ -1,4 +1,5 @@
 import { deliver, finishTurn, observeFirstStep, observeInput, observeTurn, reviewqOrigin } from "./delivery.js";
+import { registerWorkflowTools, reportTurn, stageAction, stageReport } from "./workflow.js";
 
 const HEARTBEAT_MS = 5000;
 const OFFLINE_MS = 30000;
@@ -23,7 +24,7 @@ async function invoke($, action, id, value) {
       argv.push("claude-bridge", action, id);
       stdin = JSON.stringify(value);
     }
-    const result = await $.process.run(argv, { stdin, timeoutMs: 5000 });
+    const result = await $.process.run(argv, { stdin, timeoutMs: 5000, env: await $.process.hookEnv() });
     if (result.exitCode === 0 && !result.isStdoutTruncated) {
       return JSON.parse(result.stdout);
     }
@@ -69,7 +70,7 @@ async function refresh($, target) {
   return result;
 }
 
-async function heartbeat($, state) {
+async function heartbeat($, state, allowDelivery = true) {
   const result = await invoke($, "heartbeat", state.id, {
     generation: state.generation,
     sequence: ++state.sequence,
@@ -77,6 +78,8 @@ async function heartbeat($, state) {
     hasQuestions: !!state.question,
     turnId: state.turnId ?? null,
     latestPromptId: state.lastPrompt ?? null,
+    latestPromptTurnId: state.lastPromptTurn ?? null,
+    latestPromptManual: !!state.lastPromptTurn && !!state.lastPromptManual,
     model: state.model ?? null,
     effort: state.effort ?? null,
   });
@@ -84,7 +87,7 @@ async function heartbeat($, state) {
     if (result.data?.protocolVersion === 1) {
       state.lastSeen = Date.now();
       state.label = result.data.label;
-      await deliver($, invoke, state, result.data.offer);
+      if (allowDelivery) await deliver($, invoke, state, result.data.offer);
     }
     $.ui.invalidate("ui.render");
   }
@@ -115,6 +118,7 @@ function schedule($, delay = 0, registration = false) {
 
 export function register(on) {
   on("session.start", async ($, event, next) => {
+    await registerWorkflowTools($);
     await $.command.register({
       name: "reviewq",
       description: "Show ReviewQ status or link this session to a merge request",
@@ -140,7 +144,9 @@ export function register(on) {
       return await next(context ? { ...event, context: [...(event.context ?? []), context] } : event);
     } finally {
       state.pendingPrompt = false;
-      if (state === session) schedule($, 0, !state.linked);
+      if (state === session && (state.linked || event.origin?.kind === "composer" || event.origin?.kind === "bridge")) {
+        schedule($, 0, !state.linked);
+      }
     }
   });
 
@@ -149,28 +155,41 @@ export function register(on) {
     const state = await current($);
     state.turnId = event.turnId;
     state.activeTurn = event.turnId;
+    state.lastResponse = undefined;
     state.phase = "working";
     observeTurn(state, event.turnId);
     if (state.linked) schedule($);
     return next(event);
   });
 
-  on("turn.step", async ($, event, next) => {
+  on("turn.step", async function* ($, event, next) {
     if (!event.agentId && session?.turnId === event.turnId) {
       session.model = event.model;
       session.effort = typeof event.effort === "string" ? event.effort : undefined;
-      if (event.index === 0 && session.delivery) {
-        await observeFirstStep($, session, event);
-        schedule($);
+      if (event.index === 0) {
+        const state = session;
+        const prompt = state.lastPrompt;
+        const native = await $.session.messages({ last: 1 });
+        if (session === state && state.lastPrompt === prompt
+            && Array.isArray(native) && native.at(-1)?.uuid === prompt && native.at(-1)?.role === "user") {
+          state.lastPromptTurn = event.turnId;
+        }
+        if (state.delivery) await observeFirstStep($, state, event);
+        if (state.linked) schedule($);
       }
     }
-    return next(event);
+    return yield* next(event);
   });
 
   on("turn.complete", async ($, event, next) => {
     const result = await next(event);
     if (!event.agentId && session?.turnId === event.turnId) {
-      session.activeTurn = undefined;
+      const state = session;
+      if (state.linked) {
+        await heartbeat($, state, false);
+        await reportTurn($, invoke, state, event);
+      }
+      state.activeTurn = undefined;
       session.phase = event.reason === "error" ? "failed" : "idle";
       finishTurn(session, event.turnId);
       session.question = undefined;
@@ -184,10 +203,39 @@ export function register(on) {
     if (!event.agentId && result.uuid === event.uuid && session?.linked
       && !event.message.isMeta && event.message.role === "user") {
       session.lastPrompt = result.uuid;
+      session.lastPromptTurn = undefined;
+      session.lastPromptManual = event.origin?.kind === "composer" || event.origin?.kind === "bridge";
       session.inputRevision += 1;
       observeInput(session, event, result.uuid);
     }
     return result;
+  });
+
+  on("session.append", { door: "response" }, async ($, event, next) => {
+    const result = await next(event);
+    if (!event.agentId && result.uuid === event.uuid && session?.activeTurn
+        && event.message.role === "assistant" && event.message.content.some(block => block.type === "text")) {
+      session.lastResponse = result.uuid;
+    }
+    return result;
+  });
+
+  on("tool.call", { tool: "mcp__reviewq__report_handoff" }, async ($, event) => {
+    const state = await current($);
+    if (event.agentId || !state.linked || !state.activeTurn) {
+      return { result: "Link the active lead with /reviewq before handing off a report.", isError: true };
+    }
+    await heartbeat($, state, false);
+    return stageReport($, invoke, state, event);
+  });
+
+  on("tool.call", { tool: "mcp__reviewq__review_action" }, async ($, event) => {
+    const state = await current($);
+    if (event.agentId || !state.linked || !state.activeTurn) {
+      return { result: "A ReviewQ action requires the linked lead and current user turn.", isError: true };
+    }
+    await heartbeat($, state, false);
+    return stageAction($, invoke, state, event);
   });
 
   on("tool.call", { tool: "AskUserQuestion" }, async ($, event, next) => {

@@ -33,7 +33,7 @@ impl SqliteStore {
         self.write(|tx| {
             let recovered = tx.sql.execute(
                 "UPDATE outbox SET due_at_ms=min(due_at_ms, ?1), claim_kind=NULL
-                 WHERE claim_kind IS NOT NULL AND delivery_id NOT IN (SELECT delivery_id FROM claude_deliveries WHERE finished=0)",
+                 WHERE claim_kind IS NOT NULL AND delivery_id NOT IN (SELECT delivery_id FROM claude_deliveries WHERE finished_kind IS NULL)",
                 [now_ms()?],
             )?;
             tx.delivery_changed = recovered > 0;

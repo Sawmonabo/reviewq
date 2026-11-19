@@ -1,11 +1,13 @@
 //! Lifecycle observations from the exact registered Claude companion.
 
-use reviewq_domain::identity::{DeliveryFence, DeliveryId, NativeInputId, NativeTurnId};
+use reviewq_domain::identity::{
+    DeliveryFence, DeliveryId, NativeInputId, NativeTurnId, ReportHash,
+};
 use reviewq_domain::session::LeadTarget;
 
 use crate::access::{AppError, AppFuture};
 use crate::events::Snapshot;
-use crate::history::FilePosition;
+use crate::history::{FilePosition, HistorySession};
 use crate::workflow::ReadyWorkflow;
 
 use super::{DeliveryClaim, HostActivity, ObservedInput};
@@ -16,6 +18,8 @@ pub struct ClaudeHeartbeat {
     pub activity: Option<HostActivity>,
     pub turn: Option<NativeTurnId>,
     pub latest_prompt: Option<NativeInputId>,
+    pub latest_prompt_turn: Option<NativeTurnId>,
+    pub latest_prompt_manual: bool,
     pub model: Option<String>,
     pub effort: Option<String>,
 }
@@ -68,6 +72,32 @@ pub struct ClaudeSend {
     pub ready: Option<ReadyWorkflow>,
 }
 
+#[derive(Clone)]
+pub struct ClaudeTurnResult {
+    pub turn: NativeTurnId,
+    pub generation: String,
+    pub normal: bool,
+    pub response: Option<(NativeInputId, ReportHash)>,
+}
+
+pub struct ClaudeWorkflowContext {
+    pub session: HistorySession,
+    pub active_turn: Option<NativeTurnId>,
+    pub request: Option<NativeInputId>,
+    pub ready: Option<ReadyWorkflow>,
+    pub terminal: Option<ClaudeTurnResult>,
+}
+
+pub trait ClaudeWorkflowStore: Send + Sync {
+    fn claude_workflow_context(
+        &self,
+        lead: LeadTarget,
+        turn: Option<NativeTurnId>,
+    ) -> AppFuture<'_, ClaudeWorkflowContext>;
+
+    fn record_claude_turn(&self, lead: LeadTarget, result: ClaudeTurnResult) -> AppFuture<'_, ()>;
+}
+
 pub trait ClaudeStore: Send + Sync {
     fn offer_claude_delivery(
         &self,
@@ -85,6 +115,13 @@ pub trait ClaudeStore: Send + Sync {
         checked_workflow: Option<ReadyWorkflow>,
     ) -> AppFuture<'_, DeliveryClaim>;
 
+    fn replay_claude_delivery(
+        &self,
+        lead: LeadTarget,
+        offer: ClaudeOffer,
+        outcome: ClaudeDeliveryAck,
+    ) -> AppFuture<'_, bool>;
+
     fn finish_claude_delivery(
         &self,
         lead: LeadTarget,
@@ -97,6 +134,12 @@ pub trait ClaudeStore: Send + Sync {
         lead: LeadTarget,
         observation: ClaudeHeartbeat,
     ) -> AppFuture<'_, Snapshot<ClaudeHeartbeatResult>>;
+}
+
+pub enum ClaudeDeliveryAck {
+    Deferred,
+    Dropped,
+    Started(ObservedInput),
 }
 
 pub enum ClaudeDeliveryResult {

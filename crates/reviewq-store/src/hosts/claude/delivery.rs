@@ -1,7 +1,7 @@
 use reviewq_app::access::{Actor, AppError};
 use reviewq_app::history::FilePosition;
 use reviewq_app::hosts::{
-    ClaudeAnchor, ClaudeDeliveryResult, ClaudeOffer, ClaudeSend, DeliveryClaim,
+    ClaudeAnchor, ClaudeDeliveryAck, ClaudeDeliveryResult, ClaudeOffer, ClaudeSend, DeliveryClaim,
     DeliveryObservation, DeliveryWork, RecoverableDeliveryState,
 };
 use reviewq_app::workflow::ReadyWorkflow;
@@ -29,7 +29,7 @@ pub(super) fn offer(
                 o.due_at_ms<=?2,m.state
          FROM claude_deliveries c JOIN outbox o USING(delivery_id)
          JOIN messages m ON m.message_id=c.delivery_id
-         WHERE c.session_key=?1 AND c.finished=0",
+         WHERE c.session_key=?1 AND c.finished_kind IS NULL",
             params![key, now],
             |row| {
                 Ok((
@@ -91,11 +91,8 @@ pub(super) fn offer(
     };
     tx.sql.execute(
         "INSERT INTO claude_deliveries(delivery_id,session_key,fence,generation)
-         VALUES(?1,?2,?3,?4)
-         ON CONFLICT(delivery_id) DO UPDATE SET fence=excluded.fence,generation=excluded.generation,
-           authorized_at_ms=NULL,anchor_generation=NULL,anchor_offset=NULL,anchor_digest=NULL,finished=0
-         WHERE claude_deliveries.finished=1 AND claude_deliveries.session_key=excluded.session_key",
-        params![id,key,claim.fence.as_sqlite_integer(),generation],
+         VALUES(?1,?2,?3,?4)",
+        params![id, key, claim.fence.as_sqlite_integer(), generation],
     )?;
     Ok(Some(ClaudeOffer {
         id: claim.delivery_id,
@@ -117,7 +114,7 @@ pub(super) fn read(
     let anchor = db
         .query_row(
             "SELECT anchor_generation,anchor_offset,anchor_digest FROM claude_deliveries
-         WHERE delivery_id=?1 AND session_key=?2 AND fence=?3 AND generation=?4 AND finished=0",
+         WHERE delivery_id=?1 AND session_key=?2 AND fence=?3 AND generation=?4 AND finished_kind IS NULL",
             params![
                 offer.id.as_str(),
                 lead.session_key().as_str(),
@@ -182,7 +179,7 @@ pub(super) fn authorize(
     let changed = db.execute(
         "UPDATE claude_deliveries SET
             authorized_at_ms=?2,anchor_generation=?3,anchor_offset=?4,anchor_digest=?5
-         WHERE delivery_id=?1 AND authorized_at_ms IS NULL AND finished=0",
+         WHERE delivery_id=?1 AND fence=?6 AND authorized_at_ms IS NULL AND finished_kind IS NULL",
         params![
             offer.id.as_str(),
             now_ms()?,
@@ -204,12 +201,12 @@ pub(super) fn finish(
     result: ClaudeDeliveryResult,
 ) -> Result<(), StoreError> {
     let send = read(&tx.sql, lead, &offer)?;
-    let (observation, terminal) = match result {
+    let (observation, finished) = match result {
         ClaudeDeliveryResult::Deferred if send.anchor.is_none() => {
-            (DeliveryObservation::NotSubmitted, true)
+            (DeliveryObservation::NotSubmitted, Some("deferred"))
         }
         ClaudeDeliveryResult::Dropped if send.anchor.is_some() => {
-            (DeliveryObservation::NotSubmitted, true)
+            (DeliveryObservation::NotSubmitted, Some("dropped"))
         }
         ClaudeDeliveryResult::Started { anchor, input }
             if send.anchor.as_ref() == Some(&anchor) =>
@@ -219,11 +216,11 @@ pub(super) fn finish(
                     delivery_id: offer.id.clone(),
                     input,
                 },
-                true,
+                Some("started"),
             )
         }
         ClaudeDeliveryResult::Uncertain if send.anchor.is_some() => {
-            (DeliveryObservation::Uncertain, false)
+            (DeliveryObservation::Uncertain, None)
         }
         _ => return Err(AppError::Conflict.into()),
     };
@@ -234,7 +231,7 @@ pub(super) fn finish(
     )?;
     let mut claim = send.claim;
     if state == "uncertain" {
-        if !terminal {
+        if finished.is_none() {
             return Ok(());
         }
         if !matches!(observation, DeliveryObservation::Started { .. }) {
@@ -250,16 +247,52 @@ pub(super) fn finish(
         claim.work = DeliveryWork::Reconcile { cursor: None };
     }
     delivery::finish(tx, claim, observation)?;
-    if terminal {
+    if let Some(finished) = finished {
         tx.sql.execute(
-            "UPDATE claude_deliveries SET finished=1 WHERE delivery_id=?1",
-            [offer.id.as_str()],
+            "UPDATE claude_deliveries SET finished_kind=?3 WHERE delivery_id=?1 AND fence=?2",
+            params![offer.id.as_str(), offer.fence.as_sqlite_integer(), finished],
         )?;
     }
     Ok(())
 }
 
-fn fresh(
+pub(super) fn replay(
+    db: &Connection,
+    lead: LeadTarget,
+    offer: ClaudeOffer,
+    outcome: ClaudeDeliveryAck,
+) -> Result<bool, StoreError> {
+    allow_target(
+        db,
+        &Actor::native_session(lead.binding().identity().clone()),
+        &lead,
+    )?;
+    let previous = db.query_row(
+        "SELECT c.finished_kind,m.native_turn_id,m.native_input_id
+         FROM claude_deliveries c JOIN messages m ON m.message_id=c.delivery_id
+         WHERE c.delivery_id=?1 AND c.fence=?2 AND c.generation=?3 AND c.session_key=?4 AND m.run_id=?5",
+        params![offer.id.as_str(),offer.fence.as_sqlite_integer(),offer.generation,lead.session_key().as_str(),lead.run_id().as_str()],
+        |row| Ok((row.get::<_, Option<String>>(0)?,row.get::<_, Option<String>>(1)?,row.get::<_, Option<String>>(2)?)),
+    ).optional()?;
+    let Some((Some(kind), turn, input)) = previous else {
+        return Ok(false);
+    };
+    let same = match outcome {
+        ClaudeDeliveryAck::Deferred => kind == "deferred",
+        ClaudeDeliveryAck::Dropped => kind == "dropped",
+        ClaudeDeliveryAck::Started(value) => {
+            kind == "started"
+                && turn.as_deref() == Some(value.turn_id.as_str())
+                && input.as_deref() == Some(value.entry_id.as_str())
+        }
+    };
+    if !same {
+        return Err(AppError::Conflict.into());
+    }
+    Ok(true)
+}
+
+pub(super) fn fresh(
     db: &Connection,
     lead: &LeadTarget,
     generation: &str,
