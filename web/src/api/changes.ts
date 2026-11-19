@@ -1,25 +1,30 @@
 import { decodeUtf8, readBoundedBytes } from "./bounded-bytes";
 import { read, request } from "./client";
-import type { PatchFile } from "./generated/contracts";
+import type { PatchFile, PatchPath } from "./generated/contracts";
 import {
   isApprovalViewResponse,
   isPatchDiscussionsResponse,
   isPatchFileIndexResponse,
+  isPatchPathsResponse,
 } from "./generated/validators.mjs";
 
 export const PATCH_WINDOW_BYTES = 64 * 1024;
+export const PATCH_FILES_PER_PAGE = 10;
+export const PATH_MATCHES_PER_PAGE = 60;
 const MAX_RICH_BYTES = 2 * 1024 * 1024;
+const PATH_CACHE_BYTES = 768 * 1024;
 
 export async function readPatchFiles(
   reviewId: string,
   signal: AbortSignal,
-  position?: { readonly revision: string; readonly cursor: string },
+  position?: { readonly revision: string; readonly cursor?: string; readonly path?: PatchPath },
   preferredFileId?: string,
 ) {
-  const query = new URLSearchParams();
+  const query = new URLSearchParams({ limit: String(PATCH_FILES_PER_PAGE) });
   if (position) {
     query.set("revision", position.revision);
-    query.set("cursor", position.cursor);
+    if (position.cursor) query.set("cursor", position.cursor);
+    if (position.path) query.set("filePathHint", position.path.lookupKey);
   }
   if (preferredFileId) query.set("preferredFileId", preferredFileId);
   const result = await read(
@@ -35,6 +40,68 @@ export async function readPatchFiles(
     throw new Error("The selected patch index changed.");
   }
   return result;
+}
+
+export async function readPatchPathCatalog(
+  reviewId: string,
+  revision: string,
+  signal: AbortSignal,
+) {
+  let paths: PatchPath[] | undefined = [];
+  let bytes = 0;
+  const result = await scanPatchPaths(reviewId, revision, signal, (path) => {
+    if (!paths) return;
+    bytes += 128 + 2 * (path.oldPath.length + path.newPath.length + path.lookupKey.length);
+    if (bytes > PATH_CACHE_BYTES) paths = undefined;
+    else paths.push(path);
+  });
+  return { cursor: result.cursor, data: { ...result.data, paths } };
+}
+
+export async function readPatchPathMatches(
+  reviewId: string,
+  revision: string,
+  signal: AbortSignal,
+  text: string,
+  offset: number,
+) {
+  const paths: PatchPath[] = [];
+  let count = 0;
+  const result = await scanPatchPaths(reviewId, revision, signal, (path) => {
+    if (!matchesPatchPath(path, text)) return;
+    if (count >= offset && paths.length < PATH_MATCHES_PER_PAGE) paths.push(path);
+    count++;
+  });
+  return { cursor: result.cursor, data: { count, paths } };
+}
+
+export function matchesPatchPath(path: PatchPath, text: string) {
+  return path.oldPath.toLowerCase().includes(text) || path.newPath.toLowerCase().includes(text);
+}
+
+async function scanPatchPaths(
+  reviewId: string,
+  revision: string,
+  signal: AbortSignal,
+  visit: (path: PatchPath) => void,
+) {
+  const query = new URLSearchParams({ revision });
+  let count = 0;
+  for (let page = 0; page < 100; page++) {
+    const { cursor, data } = await read(
+      `${changesRoute(reviewId)}/paths?${query}`,
+      isPatchPathsResponse,
+      signal,
+    );
+    if (data.reviewId !== reviewId || data.revision !== revision) {
+      throw new Error("The selected file catalog changed.");
+    }
+    count += data.items.length;
+    data.items.forEach(visit);
+    if (!data.nextCursor) return { cursor, data: { count, partial: data.partial } };
+    query.set("cursor", data.nextCursor);
+  }
+  throw new Error("ReviewQ could not finish reading the file catalog.");
 }
 
 export async function readPatchDiscussions(

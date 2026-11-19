@@ -236,6 +236,10 @@ pre.patch-source {
   background: var(--raised);
   padding: 12px 14px;
 }
+.patch-file-title {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
 .patch-toolbar strong code {
   font-size: 11px;
   font-weight: 550;

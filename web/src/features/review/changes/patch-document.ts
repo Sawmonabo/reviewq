@@ -1,4 +1,5 @@
 const HUNK = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/;
+const FILE_LABELS = /^--- [^\n]*\n\+\+\+ [^\n]*\n(?=@@ )/;
 
 export type PatchDocument = {
   readonly host: HTMLDivElement;
@@ -15,7 +16,7 @@ export function mountPatchDocument(host: HTMLDivElement, text: string): PatchDoc
   let inHunk = false;
 
   // The original line-ending bytes stay in the selectable text nodes.
-  const physicalRows = text.matchAll(/[^\n]*\n|[^\n]+$/g);
+  const physicalRows = text.replace(FILE_LABELS, "").matchAll(/[^\n]*\n|[^\n]+$/g);
   for (const [physical] of physicalRows) {
     const prefix = physical[0];
     const hunk = HUNK.exec(physical);
