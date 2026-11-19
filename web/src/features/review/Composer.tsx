@@ -34,6 +34,7 @@ type Props = {
   readonly draftKey: string;
   readonly label: string;
   readonly targetLabel: string;
+  readonly targetTitle?: string;
   readonly draftLabel?: string;
   readonly send?: (text: string, submissionId: string) => Promise<DeliveryReceipt>;
   readonly onAccepted?: () => void;
@@ -46,6 +47,7 @@ export function Composer({
   draftKey,
   label,
   targetLabel,
+  targetTitle,
   draftLabel = label,
   send,
   onAccepted,
@@ -153,6 +155,7 @@ export function Composer({
   }
 
   const [failure, setFailure] = useState<string>();
+  const sendLabel = send ? "Send feedback" : "Send to review agent";
   function edit(value: string) {
     setFailure(undefined);
     const accepted = store.set(draftKey, draftLabel, value);
@@ -221,7 +224,7 @@ export function Composer({
           }}
         />
         <div className="composer-bottom">
-          <span className="composer-destination">
+          <span className="composer-destination" title={targetTitle}>
             {targetLabel}
             <span className="composer-shortcut"> · Enter to send · Shift+Enter for a new line</span>
             {chars > MAX_MESSAGE &&
@@ -230,8 +233,8 @@ export function Composer({
           <button
             type="submit"
             className="composer-send"
-            aria-label="Send"
-            title="Send"
+            aria-label={sendLabel}
+            title={busy ? "Submitting…" : sendLabel}
             aria-busy={busy}
             disabled={!available}
           >

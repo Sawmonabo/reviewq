@@ -42,12 +42,11 @@ export function EntryBody({
   function value(part: HistoryPart, key: string) {
     return (
       <div className="stack" key={key}>
-        {part.kind === "assistant_text" ? (
-          <Suspense fallback={<p className="message-copy">{part.text}</p>}>
-            <Markdown source={part.text} />
-          </Suspense>
-        ) : part.kind === "user_prompt" || part.kind === "assignment" || part.kind === "plan" ? (
-          <p className="message-copy">{part.text}</p>
+        {part.kind === "assistant_text" ||
+        part.kind === "user_prompt" ||
+        part.kind === "assignment" ||
+        part.kind === "plan" ? (
+          <TranscriptMarkdown source={part.text} />
         ) : (
           <pre className="tool-output-line">{part.text}</pre>
         )}
@@ -124,6 +123,14 @@ export function EntryBody({
         />
       )}
     </>
+  );
+}
+
+export function TranscriptMarkdown({ source }: { readonly source: string }) {
+  return (
+    <Suspense fallback={<p className="message-copy">{source}</p>}>
+      <Markdown source={source} />
+    </Suspense>
   );
 }
 
