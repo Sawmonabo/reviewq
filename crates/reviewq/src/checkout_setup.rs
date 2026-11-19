@@ -247,3 +247,32 @@ async fn clean_owned(profile: &Path, common: &Path) -> Result<(), Failure> {
     files::forget(profile, common)?;
     hooks
 }
+
+pub(crate) async fn remove_installation(
+    profile: &Path,
+    store: &reviewq_store::SqliteStore,
+) -> Result<(), Failure> {
+    store.retire_installed_grants().await?;
+    let mut after = None;
+    let mut conflict = None;
+    loop {
+        let directories = store.installed_checkout_paths(after).await?;
+        let Some(last) = directories.last() else {
+            return conflict.map_or(Ok(()), Err);
+        };
+        after = Some(last.clone());
+        for common in directories {
+            let common = common.as_path();
+            let cleanup = async {
+                if files::owned_setup_exists(profile, common)? {
+                    let _lock = files::hold(profile, common)?;
+                    clean_owned(profile, common).await?;
+                }
+                Ok::<_, Failure>(())
+            };
+            if let Err(error) = cleanup.await {
+                conflict.get_or_insert(error);
+            }
+        }
+    }
+}

@@ -3,7 +3,7 @@ Description=ReviewQ
 
 [Service]
 Type=exec
-ExecStart=:@executable@ serve
+ExecStart=:@executable@ serve --managed
 Environment=@home@
 Environment=@data@
 Environment=@config@

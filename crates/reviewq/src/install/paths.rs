@@ -108,10 +108,7 @@ pub(crate) fn ensure_dir(path: &Path, owner_only: bool) -> Result<(), Failure> {
                     Ok(()) => sync(parent(&current)?)?,
                     Err(error)
                         if error.kind() == ErrorKind::AlreadyExists
-                            && current.symlink_metadata().is_ok_and(|meta| meta.is_dir()) =>
-                    {
-                        ()
-                    }
+                            && current.symlink_metadata().is_ok_and(|meta| meta.is_dir()) => {}
                     Err(error) => return Err(error.into()),
                 }
             }

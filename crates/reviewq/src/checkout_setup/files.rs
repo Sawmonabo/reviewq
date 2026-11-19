@@ -76,6 +76,22 @@ pub(super) fn hook_inventory(profile: &Path, common: &Path) -> Result<PathBuf, F
     Ok(credential_path(profile, common)?.with_extension("hooks.json"))
 }
 
+pub(super) fn owned_setup_exists(profile: &Path, common: &Path) -> Result<bool, Failure> {
+    let key = credential_path(profile, common)?;
+    for path in [
+        key.with_extension("json"),
+        key.with_extension("hooks.json"),
+        key,
+    ] {
+        match path.symlink_metadata() {
+            Ok(_) => return Ok(true),
+            Err(error) if error.kind() == ErrorKind::NotFound => (),
+            Err(error) => return Err(error.into()),
+        }
+    }
+    Ok(false)
+}
+
 pub(super) fn credential(profile: &Path, common: &Path) -> Result<[u8; 32], Failure> {
     if let Some(key) = existing_credential(profile, common)? {
         return Ok(key);

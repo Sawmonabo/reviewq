@@ -31,7 +31,7 @@ use socket2::{Domain, Protocol, Socket, Type};
 use tokio::net::TcpListener;
 use tokio::sync::watch;
 
-use crate::{cli::Serve, runtime_settings};
+use crate::{cli::Serve, install, runtime_settings};
 
 mod desktop;
 mod http;
@@ -89,6 +89,19 @@ pub(crate) async fn serve(profile: PathBuf, options: Serve) -> Result<(), Failur
         return Err("validation requires a separate private runtime".into());
     }
     create_profile(&profile)?;
+    let build_digest = executable_digest()?;
+    let managed = if options.managed {
+        Some(install::Managed::verify(&profile, &build_digest).await?)
+    } else {
+        if self::profile(None)
+            .as_ref()
+            .is_ok_and(|installed| *installed == profile)
+            && install::installed(&install::paths::Paths::resolve()?)?.is_some()
+        {
+            return Err("Use reviewq start for the installed profile.".into());
+        }
+        None
+    };
     let v4 = TcpListener::bind((Ipv4Addr::LOCALHOST, browser_port)).await?;
     let v6 = match native_listener(native_port) {
         Ok(listener) => Some(listener),
@@ -108,7 +121,6 @@ pub(crate) async fn serve(profile: PathBuf, options: Serve) -> Result<(), Failur
         .map(TcpListener::local_addr)
         .transpose()?
         .unwrap_or(browser);
-    let build_digest = executable_digest()?;
     let store = Arc::new(
         SqliteStore::open(AbsolutePath::from_canonical(
             profile.join("reviewq.sqlite3"),
@@ -116,21 +128,21 @@ pub(crate) async fn serve(profile: PathBuf, options: Serve) -> Result<(), Failur
         .await?,
     );
     let identity = store.identity();
+    let store_id = identity.store_id.to_string();
+    if let Some(managed) = &managed {
+        managed.check_store(&store_id, identity.format)?;
+    }
     let endpoint = ServiceEndpoint::new(
         browser,
         native,
         ServiceIdentity {
             build_digest,
             profile_id: profile_id(&profile),
-            store_id: identity.store_id.to_string(),
+            store_id: store_id.clone(),
             store_application_id: identity.application_id,
             store_schema: identity.format,
         },
     )?;
-    store.recover_refresh(Actor::local_operator()).await?;
-    store.recover_delivery_claims().await?;
-    store.recover_launches().await?;
-
     let network = Arc::new(SourceNetwork::new()?);
     let settings_sources = Arc::new(SourceAccounts::new(
         network.clone(),
@@ -286,43 +298,17 @@ pub(crate) async fn serve(profile: PathBuf, options: Serve) -> Result<(), Failur
         terminal_provider(claude_executable, claude_home),
         distribution,
     ));
-    let delivery = host.as_ref().filter(|_| sends_allowed).map(|host| {
-        tokio::spawn(dispatch_deliveries(
-            store.clone(),
-            host.clone(),
-            store.subscribe_deliveries(),
-            source.clone(),
-        ))
-    });
-    let reports = if options.validation {
-        None
-    } else {
-        store.recover_report_claims().await?;
-        Some(tokio::spawn(capture_reports(
-            store.clone(),
-            workflow.clone(),
-            report_files.clone(),
-        )))
-    };
-    let desktop = if !options.validation && settings.desktop_notifications {
-        store.recover_desktop_claims().await?;
-        desktop::start(store.clone(), browser)
-    } else {
-        None
-    };
     let (shutdown, wait) = watch::channel(false);
-    let workflow_worker = (!options.validation).then(|| {
-        tokio::spawn(workflow::run(
-            store.clone(),
-            source.clone(),
-            workflow.clone(),
-            wait.clone(),
-        ))
-    });
+    let (activate, operational) = watch::channel(false);
+    let windows = managed
+        .as_ref()
+        .map(install::Managed::windows_sender)
+        .transpose()
+        .map(Option::flatten);
     let router = reviewq_transport::router(
         store.clone(),
-        source,
-        host,
+        source.clone(),
+        host.clone(),
         Arc::new(FileHistory::default()),
         reviewq_transport::ServiceRuntime {
             sends_allowed,
@@ -337,68 +323,106 @@ pub(crate) async fn serve(profile: PathBuf, options: Serve) -> Result<(), Failur
             claude_interrupt,
             terminal,
             workflow: WorkflowIntegration {
-                proof: workflow,
-                report_files,
+                proof: workflow.clone(),
+                report_files: report_files.clone(),
             },
             endpoint: endpoint.clone(),
             web: &web,
             retained_assets: retained_assets.as_deref(),
             commits: store.subscribe(),
             shutdown: wait.clone(),
+            operational,
         },
     );
     let mut terminate = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
+    if options.managed {
+        install::bridge::publish(&endpoint)?;
+    }
     publish(&profile, &endpoint)?;
-    let checkout_worker = (!options.validation).then(|| {
-        tokio::spawn(crate::checkout_setup::reconcile::run(
-            store.clone(),
-            profile.clone(),
-            native,
-            checkout_claude_profile,
-        ))
-    });
-    println!("ReviewQ http://{browser}/");
-
-    let listener_shutdown = wait.clone();
+    let stop_signal = shutdown.clone();
     let stop = tokio::spawn(async move {
         tokio::select! {
             _ = tokio::signal::ctrl_c() => {},
             _ = terminate.recv() => {},
         }
-        shutdown.send_replace(true);
+        stop_signal.send_replace(true);
     });
-    let serve_v4 = http::serve(v4, router.clone(), wait);
-    match v6 {
-        Some(v6) => {
-            let serve_v6 = http::serve(v6, router, listener_shutdown);
-            tokio::join!(serve_v4, serve_v6);
+    let mut listeners = tokio::task::JoinSet::new();
+    listeners.spawn(http::serve(v4, router.clone(), wait.clone()));
+    if let Some(v6) = v6 {
+        listeners.spawn(http::serve(v6, router, wait.clone()));
+    }
+    let desktop_enabled = !options.validation && settings.desktop_notifications;
+    let start = async {
+        if let Some(managed) = managed
+            && !managed.wait(&store_id, wait.clone()).await?
+        {
+            return Ok(false);
         }
-        None => serve_v4.await,
+        store.recover_refresh(Actor::local_operator()).await?;
+        store.recover_delivery_claims().await?;
+        store.recover_launches().await?;
+        if !options.validation {
+            store.recover_report_claims().await?;
+        }
+        if desktop_enabled {
+            store.recover_desktop_claims().await?;
+        }
+        Ok::<_, Failure>(!*wait.borrow())
     }
+    .await;
+    let mut workers = Vec::new();
+    if matches!(&start, Ok(true)) {
+        if let Some(host) = host.filter(|_| sends_allowed) {
+            workers.push(tokio::spawn(dispatch_deliveries(
+                store.clone(),
+                host,
+                store.subscribe_deliveries(),
+                source.clone(),
+            )));
+        }
+        if !options.validation {
+            workers.push(tokio::spawn(capture_reports(
+                store.clone(),
+                workflow.clone(),
+                report_files,
+            )));
+            workers.push(tokio::spawn(workflow::run(
+                store.clone(),
+                source,
+                workflow,
+                wait.clone(),
+            )));
+            workers.push(tokio::spawn(crate::checkout_setup::reconcile::run(
+                store.clone(),
+                profile.clone(),
+                native,
+                checkout_claude_profile,
+            )));
+        }
+        if desktop_enabled {
+            match windows {
+                Ok(windows) => workers.extend(desktop::start(store.clone(), browser, windows)),
+                Err(error) => eprintln!("ReviewQ desktop notifications unavailable ({error})."),
+            }
+        }
+        activate.send_replace(true);
+        println!("ReviewQ http://{browser}/");
+    } else {
+        shutdown.send_replace(true);
+    }
+    while listeners.join_next().await.is_some() {}
     stop.abort();
-    if let Some(delivery) = delivery {
-        delivery.abort();
-        let _ = delivery.await;
-    }
-    if let Some(reports) = reports {
-        reports.abort();
-        let _ = reports.await;
-    }
-    if let Some(desktop) = desktop {
-        desktop.abort();
-        let _ = desktop.await;
-    }
-    if let Some(worker) = workflow_worker {
-        worker.abort();
-        let _ = worker.await;
-    }
-    if let Some(worker) = checkout_worker {
+    for worker in workers {
         worker.abort();
         let _ = worker.await;
     }
     fs::remove_file(profile.join(RUNTIME))?;
     store.close(Duration::from_secs(10)).await?;
-    Ok(())
+    if options.managed {
+        install::bridge::clear(&endpoint)?;
+    }
+    start.map(|_| ())
 }
 
 async fn capture_reports(
@@ -608,6 +632,12 @@ pub(crate) fn read_endpoint(profile: &Path) -> Result<ServiceEndpoint, Failure> 
     read_endpoint_with_build(profile, &executable_digest()?)
 }
 
+pub(crate) fn read_native_endpoint(profile: &Path) -> Result<ServiceEndpoint, Failure> {
+    let endpoint = read_endpoint(profile)?;
+    install::bridge::verify(profile, &endpoint)?;
+    Ok(endpoint)
+}
+
 pub(crate) fn read_endpoint_with_build(
     profile: &Path,
     digest: &str,
@@ -630,7 +660,7 @@ pub(crate) fn read_endpoint_with_build(
     Ok(endpoint)
 }
 
-fn profile_id(path: &Path) -> String {
+pub(crate) fn profile_id(path: &Path) -> String {
     hex(&Sha256::digest(path.as_os_str().as_bytes()))
 }
 

@@ -1,4 +1,5 @@
 use std::io::Read;
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
@@ -89,20 +90,28 @@ pub(super) async fn validate(
     bundle: &Bundle,
     next: &Registration,
 ) -> Result<(), Failure> {
+    let config = tempfile::Builder::new()
+        .permissions(std::fs::Permissions::from_mode(0o700))
+        .tempdir_in(&paths.state)?;
+    let isolated = Registration {
+        home: config.path().to_owned(),
+        ..next.clone()
+    };
     let market = bundle.root.join("hosts/claude");
     for directory in [&market, &market.join("plugin")] {
-        next.call(
-            paths,
-            &[
-                "plugin",
-                "validate",
-                "--strict",
-                "--json",
-                string(directory)?,
-            ],
-            false,
-        )
-        .await?;
+        isolated
+            .call(
+                paths,
+                &[
+                    "plugin",
+                    "validate",
+                    "--strict",
+                    "--json",
+                    string(directory)?,
+                ],
+                false,
+            )
+            .await?;
     }
     Ok(())
 }

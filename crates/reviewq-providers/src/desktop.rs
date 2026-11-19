@@ -8,9 +8,12 @@ use reviewq_app::notifications::{DesktopClaim, DesktopNotifier, DesktopOutcome, 
 use tokio::process::Command;
 use url::Url;
 
+mod windows;
+pub use windows::{WindowsDesktop, WindowsDesktopNotifier, WindowsRegistration};
+
 /// Linux desktop delivery via the installed notification client.
 pub struct LinuxDesktopNotifier {
-    origin: Url,
+    browser: SocketAddr,
     executable: PathBuf,
 }
 
@@ -19,50 +22,22 @@ impl LinuxDesktopNotifier {
         if !browser.ip().is_loopback() || !executable.is_absolute() {
             return None;
         }
-        let origin = Url::parse(&format!("http://{browser}/")).ok()?;
-        Some(Self { origin, executable })
+        Some(Self {
+            browser,
+            executable,
+        })
     }
 }
 
 impl DesktopNotifier for LinuxDesktopNotifier {
     fn notify<'a>(&'a self, claim: &'a DesktopClaim) -> AppFuture<'a, DesktopOutcome> {
         Box::pin(async move {
-            let mut url = self.origin.clone();
-            let tab = match claim.kind {
-                Kind::Reply
-                | Kind::EditedReply
-                | Kind::Reopened
-                | Kind::Resolved
-                | Kind::NewHead => "changes",
-                Kind::ReportReady | Kind::ReportFailed | Kind::FollowupReady => "findings",
-                Kind::AgentFailure | Kind::AgentPermission | Kind::AgentQuestion | Kind::Quota => {
-                    "agent"
-                }
-                _ => "overview",
-            };
-            {
-                let mut query = url.query_pairs_mut();
-                query
-                    .append_pair("reviewId", claim.review.as_str())
-                    .append_pair("tab", tab);
-                if let Some(run) = &claim.run {
-                    query.append_pair("runId", run.as_str());
-                }
-            }
-            let label: String = claim
-                .label
-                .chars()
-                .filter(|ch| !ch.is_control())
-                .take(120)
-                .collect();
-            let mut body = escape(&label);
-            if claim.event_count > 1 {
-                body.push_str(&format!("\n{} updates", claim.event_count));
-            }
-            body.push_str(&format!(
-                "\n<a href=\"{}\">Open ReviewQ</a>",
-                escape(url.as_str())
-            ));
+            let message = Message::new(self.browser, claim);
+            let body = format!(
+                "{}\n<a href=\"{}\">Open ReviewQ</a>",
+                escape(&message.body),
+                escape(message.url.as_str())
+            );
             let spawned = Command::new(&self.executable)
                 .args([
                     "--app-name=ReviewQ",
@@ -90,6 +65,49 @@ impl DesktopNotifier for LinuxDesktopNotifier {
                 )),
             }
         })
+    }
+}
+
+struct Message {
+    url: Url,
+    body: String,
+}
+
+impl Message {
+    fn new(browser: SocketAddr, claim: &DesktopClaim) -> Self {
+        let mut url =
+            Url::parse(&format!("http://{browser}/")).expect("a loopback address is a valid URI");
+        let tab = match claim.kind {
+            Kind::Reply | Kind::EditedReply | Kind::Reopened | Kind::Resolved | Kind::NewHead => {
+                "changes"
+            }
+            Kind::ReportReady | Kind::ReportFailed | Kind::FollowupReady => "findings",
+            Kind::AgentFailure | Kind::AgentPermission | Kind::AgentQuestion | Kind::Quota => {
+                "agent"
+            }
+            _ => "overview",
+        };
+        {
+            let mut query = url.query_pairs_mut();
+            query
+                .append_pair("reviewId", claim.review.as_str())
+                .append_pair("tab", tab);
+            if let Some(run) = &claim.run {
+                query.append_pair("runId", run.as_str());
+            }
+        }
+        let label: String = claim
+            .label
+            .chars()
+            .filter(|ch| !ch.is_control())
+            .take(120)
+            .collect();
+        let body = if claim.event_count > 1 {
+            format!("{label}\n{} updates", claim.event_count)
+        } else {
+            label
+        };
+        Self { url, body }
     }
 }
 

@@ -6,12 +6,16 @@ use reviewq_store::SqliteStore;
 use serde::{Deserialize, Serialize};
 use sha2::Digest;
 
+pub(crate) mod bridge;
 mod bundle;
 mod claude;
 mod files;
+mod managed;
 pub(crate) mod paths;
+mod windows;
 use crate::{runtime_settings, service};
 use bundle::Bundle;
+pub(crate) use managed::Managed;
 use paths::Paths;
 
 pub(crate) type Failure = Box<dyn std::error::Error + Send + Sync>;
@@ -32,12 +36,26 @@ pub(crate) struct Release {
     skill: Option<PathBuf>,
     #[serde(default)]
     claude: Option<claude::Registration>,
+    #[serde(default)]
+    windows: Option<windows::Registration>,
+}
+
+impl Release {
+    pub(crate) fn windows_sender(
+        &self,
+    ) -> Result<Option<reviewq_providers::WindowsDesktop>, Failure> {
+        self.windows
+            .as_ref()
+            .map(windows::Registration::sender)
+            .transpose()
+    }
 }
 
 #[derive(Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 struct Activation {
     next: Release,
+    staging: String,
     was_enabled: bool,
     was_running: bool,
     store_id: Option<String>,
@@ -47,6 +65,7 @@ struct Activation {
 #[serde(default, deny_unknown_fields)]
 struct Inventory {
     active: Option<Release>,
+    store_id: Option<String>,
     pending: Option<Activation>,
     known: Vec<String>,
     removing: bool,
@@ -108,6 +127,17 @@ pub(crate) async fn install(bundle_path: &Path) -> Result<(), Failure> {
         unit: bundle::hex(&sha2::Sha256::digest(&unit)),
         skill,
         claude,
+        windows: windows::Registration::plan(
+            &bundle,
+            inventory
+                .pending
+                .as_ref()
+                .and_then(|operation| operation.next.windows.as_ref())
+                .or(inventory
+                    .active
+                    .as_ref()
+                    .and_then(|release| release.windows.as_ref())),
+        )?,
     };
     if let Some(host) = &next.claude {
         claude::validate(&paths, &bundle, host).await?;
@@ -120,6 +150,12 @@ pub(crate) async fn install(bundle_path: &Path) -> Result<(), Failure> {
         }
         None => {
             files::preflight(&paths, old, None)?;
+            bridge::check(&paths, old.is_some())?;
+            if let Some(windows) = &next.windows {
+                windows
+                    .preflight(old.and_then(|release| release.windows.as_ref()))
+                    .await?;
+            }
             files::check_new_skill(old, &next)?;
             claude::preflight(&paths, old, &next, false).await?;
             let (was_enabled, was_running) = service::state().await?;
@@ -133,12 +169,16 @@ pub(crate) async fn install(bundle_path: &Path) -> Result<(), Failure> {
             } else {
                 probe(&paths, next.store).await?
             };
+            if inventory.store_id.is_some() && inventory.store_id != store_id {
+                return Err("The installed profile's retained store is missing or changed.".into());
+            }
             paths.prepare()?;
             if !inventory.known.iter().any(|id| id == &next.id) {
                 inventory.known.push(next.id.clone());
             }
             inventory.pending = Some(Activation {
                 next: next.clone(),
+                staging: files::reserve_stage(&paths)?,
                 was_enabled,
                 was_running,
                 store_id,
@@ -153,8 +193,9 @@ pub(crate) async fn install(bundle_path: &Path) -> Result<(), Failure> {
     let expected_store = pending.store_id.clone();
     let old = inventory.active.as_ref();
     files::preflight(&paths, old, Some(&next))?;
+    bridge::check(&paths, true)?;
     claude::preflight(&paths, old, &next, true).await?;
-    files::stage(&paths, &bundle)?;
+    files::stage(&paths, &bundle, &pending.staging)?;
     let result = activate(&paths, old, &next, &unit, expected_store.as_deref()).await;
     let identity = match result {
         Ok(identity) => identity,
@@ -168,6 +209,7 @@ pub(crate) async fn install(bundle_path: &Path) -> Result<(), Failure> {
         }
     };
     inventory.active = Some(next.clone());
+    inventory.store_id = Some(identity.store_id.clone());
     inventory.pending = None;
     paths::write_json(&journal(&paths), &inventory)?;
     let endpoint =
@@ -208,6 +250,12 @@ async fn activate(
     }
     files::set(paths, old, next, unit)?;
     claude::activate(paths, old, next).await?;
+    if let Some(windows) = &next.windows {
+        let release = paths.profile.join("releases").join(&next.id);
+        windows
+            .set(&release, old.and_then(|release| release.windows.as_ref()))
+            .await?;
+    }
     service::reload().await?;
     service::unit_location(paths).await?;
     service::switch("enable").await?;
@@ -233,12 +281,25 @@ async fn rollback(paths: &Paths, previous: &Release, pending: &Activation) -> Re
     if service::state().await?.1 {
         service::switch("stop").await?;
     }
-    probe(paths, previous.store).await?;
+    let expected_store = pending
+        .store_id
+        .as_deref()
+        .ok_or("The previous installation has no verified store identity.")?;
+    if probe(paths, previous.store).await?.as_deref() != Some(expected_store) {
+        return Err("The previous installation's retained store is missing or changed.".into());
+    }
     files::set(paths, Some(&pending.next), previous, &unit)?;
     if previous.claude.is_some() {
         claude::activate(paths, Some(&pending.next), previous).await?;
     } else {
         claude::remove(paths, &pending.next).await?;
+    }
+    if let Some(windows) = &previous.windows {
+        windows
+            .set(&bundle.root, pending.next.windows.as_ref())
+            .await?;
+    } else if let Some(windows) = &pending.next.windows {
+        windows.remove().await?;
     }
     service::reload().await?;
     service::switch(if pending.was_enabled {
@@ -249,7 +310,10 @@ async fn rollback(paths: &Paths, previous: &Release, pending: &Activation) -> Re
     .await?;
     if pending.was_running {
         service::switch("start").await?;
-        service::ready(paths, &previous.binary, previous.store).await?;
+        let identity = service::ready(paths, &previous.binary, previous.store).await?;
+        if identity.store_id != expected_store {
+            return Err("The previous service opened a different store.".into());
+        }
     }
     Ok(())
 }
@@ -281,7 +345,26 @@ pub(crate) async fn uninstall() -> Result<(), Failure> {
     if service::state().await?.0 {
         service::switch("disable").await?;
     }
+    let expected = inventory
+        .store_id
+        .as_deref()
+        .ok_or("Missing installed store identity.")?;
+    if probe(&paths, active.store).await?.as_deref() != Some(expected) {
+        return Err("The installed profile's retained store is missing or changed.".into());
+    }
+    let database = AbsolutePath::from_canonical(paths.profile.join("reviewq.sqlite3"))?;
+    let store = SqliteStore::open(database).await?;
+    if store.identity().store_id.to_string() != expected {
+        return Err("ReviewQ opened a different store while uninstalling.".into());
+    }
+    let removed = crate::checkout_setup::remove_installation(&paths.profile, &store).await;
+    store.close(std::time::Duration::from_secs(10)).await?;
+    removed?;
     claude::remove(&paths, active).await?;
+    if let Some(windows) = &active.windows {
+        windows.remove().await?;
+    }
+    bridge::remove(&paths)?;
     let conflicts = files::remove(&paths, active, &inventory.known)?;
     service::reload().await?;
     if !conflicts.is_empty() {

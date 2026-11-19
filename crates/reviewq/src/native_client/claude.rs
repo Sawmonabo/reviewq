@@ -82,7 +82,7 @@ pub(crate) async fn claude_bridge(
             );
         }
     }
-    let endpoint = runtime::read_endpoint(profile)?;
+    let endpoint = runtime::read_native_endpoint(profile)?;
     let client = client()?;
     let status = signed(&client, &endpoint, "GET", "/api/v1/status", b"").await?;
     verify_ready(&endpoint, &status)?;
@@ -171,7 +171,7 @@ pub(crate) async fn claude_hook(profile: &Path) -> Result<(), Failure> {
         },
         "classic": event,
     }))?;
-    let endpoint = runtime::read_endpoint(profile)?;
+    let endpoint = runtime::read_native_endpoint(profile)?;
     let client = client()?;
     let status = signed(&client, &endpoint, "GET", "/api/v1/status", b"").await?;
     verify_ready(&endpoint, &status)?;

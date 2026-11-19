@@ -20,6 +20,48 @@ use crate::{SqliteStore, StoreError};
 
 mod grants;
 
+impl SqliteStore {
+    /// Retires local MCP authority without changing explicit checkout setup preferences.
+    /// The installed service must be stopped while its owner removes managed files.
+    pub async fn retire_installed_grants(&self) -> Result<(), StoreError> {
+        self.write(|tx| {
+            let grants = tx
+                .sql
+                .execute("UPDATE repo_grants SET active=0 WHERE active=1", [])?;
+            let projections = tx.sql.execute(
+                "UPDATE checkout_projections SET ready=0,generation=generation+1
+                 WHERE desired=1 AND suppressed=0 AND ready=1",
+                [],
+            )?;
+            if grants != 0 || projections != 0 {
+                tx.emit(&[ResourceKey::Settings])?;
+            }
+            Ok(())
+        })
+        .await
+    }
+
+    /// Returns a stable ordered cleanup page even after the current grants are retired.
+    pub async fn installed_checkout_paths(
+        &self,
+        after: Option<AbsolutePath>,
+    ) -> Result<Vec<AbsolutePath>, StoreError> {
+        self.read(move |db| {
+            let after = after
+                .as_ref()
+                .map(|path| path.as_path().as_os_str().as_bytes());
+            let mut stmt = db.prepare_cached(
+                "SELECT common_dir FROM checkout_projections WHERE (?1 IS NULL OR common_dir>?1)
+                 UNION SELECT common_dir FROM repo_grants WHERE (?1 IS NULL OR common_dir>?1)
+                 ORDER BY common_dir LIMIT 16",
+            )?;
+            let rows = stmt.query_map([after], |row| row.get(0))?;
+            rows.map(|bytes| crate::queue::path(bytes?)).collect()
+        })
+        .await
+    }
+}
+
 pub(crate) enum ReadScope {
     Local,
     Grant,

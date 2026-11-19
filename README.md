@@ -4,14 +4,14 @@ ReviewQ is a local workspace for reviewing GitLab merge requests alongside their
 
 ## Build and install
 
-On native Linux or WSL with a running systemd user manager, build from a clean checkout. Use GNU Make, Rust 1.100.0, Node.js 24.19.0 or newer, and pnpm 12.15.0.
+On native Linux or WSL with a running systemd user manager, build from a clean checkout. Use GNU Make, Rust 1.100.0, Node.js 24.19.0 or newer, pnpm 12.15.0 and `readelf` from GNU binutils. Build with a Linux runtime compatible with the target machine.
 
 ```sh
 make web-install
 make package
 ```
 
-The package target prints its directory and manifest digest. Use that directory in place of `/absolute/path/to/bundle`.
+The package target prints its directory, manifest digest and required platform loader. It validates the Claude plugin and marketplace with `~/.local/bin/claude` when present. Set `REVIEWQ_PACKAGE_CLAUDE` to select another executable. Use the printed package directory in place of `/absolute/path/to/bundle`.
 
 ```sh
 /absolute/path/to/bundle/bin/reviewq install --from /absolute/path/to/bundle
@@ -20,7 +20,7 @@ The package target prints its directory and manifest digest. Use that directory 
 
 The first command installs and starts the user service. The second opens the dashboard. Use `reviewq status` to check the running profile, `reviewq stop` and `reviewq start` to control it, and `reviewq logs` for the service journal. The CLI lives in `~/.local/bin`. Install a new verified bundle with the same command to update. `reviewq uninstall` removes the installed software and retains the local database and runtime settings.
 
-The installer prints the runtime configuration path and reports missing native providers by name. Configure exact native executables there with `codexCommand` and `claudeCommand` if they live outside `~/.local/bin`. In an open Claude Code session, use `/reload-plugins` after installation or an update. [Runtime configuration and recovery](docs/specs/operations.md)
+The installer prints the runtime configuration path and reports missing native providers by name. Configure exact native executables there with `codexCommand` and `claudeCommand` if they live outside `~/.local/bin`. In an open Claude Code session, use `/reload-plugins` after installation or an update. Run `reviewq notify-test` to check the local desktop notification service. [Runtime configuration and recovery](docs/specs/operations.md)
 
 ## Develop
 

@@ -61,7 +61,7 @@ mod terminal;
 mod tracking;
 mod workspace;
 
-pub use control::{ControlRequest, ServiceEndpoint, ServiceIdentity};
+pub use control::{BridgeDescriptor, ControlRequest, ServiceEndpoint, ServiceIdentity};
 
 use auth::Auth;
 use error::{ApiBytes, ApiError};
@@ -208,6 +208,7 @@ pub struct ServiceRuntime<'a> {
     pub terminal: Arc<dyn NativeTerminal>,
     pub commits: watch::Receiver<EventCursor>,
     pub shutdown: watch::Receiver<bool>,
+    pub operational: watch::Receiver<bool>,
 }
 
 /// Mounts production assets and the private versioned HTTP routes.
@@ -245,7 +246,11 @@ pub fn router(
     });
     let web = runtime.web;
     if let Some(interval) = runtime.source_poll_interval {
-        tokio::spawn(poll_source(entry.clone(), interval));
+        tokio::spawn(poll_source(
+            entry.clone(),
+            interval,
+            runtime.operational.clone(),
+        ));
     }
     let api = Router::new()
         .route("/status", get(status))
@@ -358,11 +363,43 @@ pub fn router(
             Duration::from_secs(30),
         ))
         .layer(middleware::from_fn_with_state(entry.clone(), guard))
+        .layer(middleware::from_fn_with_state(
+            runtime.operational,
+            activation_guard,
+        ))
         .with_state(entry)
 }
 
-async fn poll_source(entry: Arc<Entry>, interval: Duration) {
+async fn activation_guard(
+    State(operational): State<watch::Receiver<bool>>,
+    request: Request,
+    next: Next,
+) -> Response {
+    if !*operational.borrow()
+        && (request.method() != axum::http::Method::GET || request.uri().path() != "/api/v1/status")
+    {
+        return (
+            axum::http::StatusCode::SERVICE_UNAVAILABLE,
+            [(header::CACHE_CONTROL, "no-store")],
+            "ReviewQ is starting.",
+        )
+            .into_response();
+    }
+    next.run(request).await
+}
+
+async fn poll_source(
+    entry: Arc<Entry>,
+    interval: Duration,
+    mut operational: watch::Receiver<bool>,
+) {
     let mut shutdown = entry.shutdown.clone();
+    tokio::select! {
+        _ = shutdown.wait_for(|stop| *stop) => return,
+        result = operational.wait_for(|ready| *ready) => {
+            if result.is_err() { return; }
+        },
+    }
     while !*shutdown.borrow_and_update() {
         tokio::select! {
             _ = shutdown.changed() => break,

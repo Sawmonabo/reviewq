@@ -6,6 +6,7 @@ import {
   readdirSync, renameSync, rmSync, writeFileSync,
 } from "node:fs";
 import { join, resolve } from "node:path";
+import { homedir, tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { notices } from "./licenses.mjs";
 
@@ -68,6 +69,31 @@ async function hostVersion(hosts, version) {
   writeFileSync(marketPath, json(market));
 }
 
+function validateClaude(marketplace) {
+  const selected = process.env.REVIEWQ_PACKAGE_CLAUDE;
+  const executable = selected || join(homedir(), ".local/bin/claude");
+  if (!existsSync(executable)) {
+    if (selected) throw new Error("REVIEWQ_PACKAGE_CLAUDE does not exist");
+    console.log("Claude validation unavailable. Set REVIEWQ_PACKAGE_CLAUDE to select the host.");
+    return;
+  }
+  const config = mkdtempSync(join(tmpdir(), "reviewq-claude-validate."));
+  try {
+    const verify = (args) => execFileSync(resolve(executable), args, {
+      cwd: config, env: { HOME: config, CLAUDE_CONFIG_DIR: config, PATH: process.env.PATH },
+      encoding: "utf8", timeout: 25_000,
+    }).trim();
+    const version = verify(["--version"]);
+    for (const directory of [marketplace, join(marketplace, "plugin")]) {
+      const result = JSON.parse(verify(["plugin", "validate", "--strict", "--json", directory]));
+      if (result.success !== true) throw new Error("Claude strict validation failed");
+    }
+    console.log(`Claude strict marketplace and plugin validation passed (${version})`);
+  } finally {
+    rmSync(config, { recursive: true, force: true });
+  }
+}
+
 function checkWeb(web, inventory) {
   const index = readFileSync(join(web, "index.html"), "utf8");
   if (!/<script\b[^>]*type="module"/.test(index)) throw new Error("Missing production module entry");
@@ -112,6 +138,7 @@ async function main() {
     checkWeb(join(stage, "web"), new Set(files(join(stage, "web"))));
     copyTree(join(root, "hosts"), join(stage, "hosts"));
     await hostVersion(join(stage, "hosts"), application.version);
+    validateClaude(join(stage, "hosts/claude"));
     copyTree(join(root, "packaging"), join(stage, "packaging"));
     notices(metadata, application.id, root, join(stage, "licenses"), run);
     const inventory = await Promise.all(files(stage).sort().map(async (path) => {
@@ -126,6 +153,9 @@ async function main() {
     if (run(binary, ["--version"], stage) !== `reviewq ${application.version}`) throw new Error("Wrong staged binary version");
     run(binary, ["--help"], stage);
     run(binary, ["internal", "verify-bundle", stage], stage);
+    const elf = run("readelf", ["--wide", "--program-headers", binary], stage);
+    const loader = elf.match(/Requesting program interpreter: ([^\]]+)\]/)?.[1];
+    console.log(loader ? `Platform loader ${loader}` : "Static executable (no ELF interpreter)");
     if (existsSync(directory)) {
       if (lstatSync(directory).isSymbolicLink() ||
           readFileSync(join(directory, "manifest.json"), "utf8") !== manifest) {

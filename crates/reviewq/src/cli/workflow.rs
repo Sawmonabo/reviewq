@@ -63,7 +63,7 @@ impl Context {
             return Err("The isolated runtime root must be absolute.".into());
         }
         let profile = runtime::profile(scope.runtime_root.or(profile))?;
-        let endpoint = runtime::read_endpoint(&profile)?;
+        let endpoint = runtime::read_native_endpoint(&profile)?;
         if scope
             .port
             .is_some_and(|port| endpoint.browser().port() != port)

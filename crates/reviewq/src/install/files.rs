@@ -106,36 +106,59 @@ fn allowed_link(path: &Path, allowed: impl Iterator<Item = PathBuf>) -> Result<(
     Ok(())
 }
 
-pub(super) fn stage(paths: &Paths, bundle: &Bundle) -> Result<(), Failure> {
+pub(super) fn reserve_stage(paths: &Paths) -> Result<String, Failure> {
+    let mut random = [0; 16];
+    getrandom::fill(&mut random).map_err(|_| "Could not reserve release staging.")?;
+    let id = bundle::hex(&random);
+    let path = stage_path(paths, &id)?;
+    if paths::exists(&path)? {
+        return Err(paths::conflict(&path));
+    }
+    Ok(id)
+}
+
+fn stage_path(paths: &Paths, id: &str) -> Result<PathBuf, Failure> {
+    if id.len() != 32 || !id.bytes().all(|ch| ch.is_ascii_hexdigit()) {
+        return Err("Invalid release staging identity.".into());
+    }
+    Ok(paths.profile.join("releases").join(format!(".stage-{id}")))
+}
+
+pub(super) fn stage(paths: &Paths, bundle: &Bundle, id: &str) -> Result<(), Failure> {
     let releases = paths.profile.join("releases");
     let destination = releases.join(&bundle.id);
+    let stage = stage_path(paths, id)?;
+    if paths::exists(&stage)? {
+        paths::ensure_dir(&stage, true)?;
+        fs::remove_dir_all(&stage)?;
+        paths::sync(&releases)?;
+    }
+    paths::ensure_dir(&stage, true)?;
     if paths::exists(&destination)? {
         if Bundle::read(&destination)?.id != bundle.id {
             return Err(paths::conflict(&destination));
         }
     } else {
-        let stage = tempfile::Builder::new()
-            .prefix(".reviewq-release.")
-            .permissions(Permissions::from_mode(0o700))
-            .tempdir_in(&releases)?;
+        let staged_bundle = stage.join("bundle");
+        paths::ensure_dir(&staged_bundle, true)?;
         for entry in &bundle.manifest.files {
-            let path = stage.path().join(&entry.path);
+            let path = staged_bundle.join(&entry.path);
             paths::ensure_dir(paths::parent(&path)?, true)?;
             copy(&bundle.root.join(&entry.path), &path, entry.mode)?;
         }
         copy(
             &bundle.root.join("manifest.json"),
-            &stage.path().join("manifest.json"),
+            &staged_bundle.join("manifest.json"),
             0o600,
         )?;
-        let staged = Bundle::read(stage.path())?;
+        let staged = Bundle::read(&staged_bundle)?;
         if staged.id != bundle.id {
             return Err("The release changed while being staged.".into());
         }
-        paths::sync(stage.path())?;
+        paths::sync(&staged_bundle)?;
         rustix::fs::renameat_with(
             rustix::fs::CWD,
-            stage.path(),
+            &staged_bundle,
             rustix::fs::CWD,
             &destination,
             rustix::fs::RenameFlags::NOREPLACE,
@@ -148,21 +171,21 @@ pub(super) fn stage(paths: &Paths, bundle: &Bundle) -> Result<(), Failure> {
             verify(&path, entry)?;
         } else {
             paths::ensure_dir(paths::parent(&path)?, true)?;
-            let mut stage = tempfile::Builder::new()
-                .prefix(".reviewq-asset.")
-                .permissions(Permissions::from_mode(entry.mode))
-                .tempfile_in(paths::parent(&path)?)?;
-            io::copy(
-                &mut bundle::regular(&destination.join(&entry.path))?,
-                stage.as_file_mut(),
+            let staged_asset = stage.join("asset");
+            copy(&destination.join(&entry.path), &staged_asset, entry.mode)?;
+            verify(&staged_asset, entry)?;
+            rustix::fs::renameat_with(
+                rustix::fs::CWD,
+                &staged_asset,
+                rustix::fs::CWD,
+                &path,
+                rustix::fs::RenameFlags::NOREPLACE,
             )?;
-            stage.as_file().sync_all()?;
-            verify(stage.path(), entry)?;
-            stage.persist_noclobber(&path)?;
             paths::sync(paths::parent(&path)?)?;
         }
     }
-    Ok(())
+    fs::remove_dir(&stage)?;
+    paths::sync(&releases)
 }
 
 fn copy(from: &Path, to: &Path, mode: u32) -> Result<(), Failure> {
@@ -264,9 +287,12 @@ pub(super) fn remove(
         fs::remove_file(&paths.unit)?;
         paths::sync(paths::parent(&paths.unit)?)?;
     }
-    if remove_link(&current(paths), &release_target(release)).is_err() {
-        conflicts.push(current(paths));
-        return Ok(conflicts);
+    let pointer = current(paths);
+    if allowed_link(&pointer, std::iter::once(release_target(release))).is_err() {
+        conflicts.push(pointer.clone());
+    }
+    if allowed_link(&paths.launcher, std::iter::once(launcher_target(paths))).is_err() {
+        conflicts.push(paths.launcher.clone());
     }
     let mut owned_assets = BTreeMap::new();
     let mut owned_releases = Vec::new();
@@ -307,12 +333,11 @@ pub(super) fn remove(
     if !conflicts.is_empty() {
         return Ok(conflicts);
     }
+    remove_link(&pointer, &release_target(release))?;
     for directory in owned_releases {
         fs::remove_dir_all(&directory)?;
         paths::sync(paths::parent(&directory)?)?;
     }
-    if remove_link(&paths.launcher, &launcher_target(paths)).is_err() {
-        conflicts.push(paths.launcher.clone());
-    }
+    remove_link(&paths.launcher, &launcher_target(paths))?;
     Ok(conflicts)
 }

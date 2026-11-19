@@ -130,6 +130,8 @@ enum Checkout {
 
 #[derive(Args)]
 pub(crate) struct Serve {
+    #[arg(long, hide = true, conflicts_with_all = ["web", "port", "native_port", "validation"])]
+    pub(crate) managed: bool,
     #[arg(long, value_name = "DIR")]
     pub(crate) web: Option<PathBuf>,
     #[arg(long)]
@@ -210,6 +212,9 @@ async fn execute(options: CommandLine) -> Result<(), Failure> {
         Some(Command::Logs) => service::logs().await,
         Some(Command::NotifyTest) => service::notify().await,
         Some(Command::Serve(serve)) => {
+            if serve.managed && options.profile.is_some() {
+                return Err("The managed unit uses the installed XDG profile.".into());
+            }
             let profile = match (options.profile, serve.runtime_root.as_ref()) {
                 (Some(_), Some(_)) => return Err("use either --profile or --runtime-root".into()),
                 (None, Some(root)) => root.clone(),

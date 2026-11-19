@@ -193,6 +193,25 @@ pub(crate) async fn logs() -> Result<(), Failure> {
 }
 
 pub(crate) async fn notify() -> Result<(), Failure> {
+    let paths = Paths::resolve()?;
+    if let Some(release) = install::installed(&paths)?
+        && let Some(windows) = release.windows_sender()?
+    {
+        let identity = ready(&paths, &release.binary, release.store).await?;
+        let endpoint = runtime::read_endpoint_with_build(&paths.profile, &identity.build_digest)?;
+        match windows.test(endpoint.browser()).await {
+            reviewq_app::notifications::DesktopOutcome::Delivered => {
+                println!("The Windows desktop notification service accepted the test.");
+                return Ok(());
+            }
+            reviewq_app::notifications::DesktopOutcome::NotStarted(_) => {
+                return Err("The Windows desktop notification service is unavailable.".into());
+            }
+            reviewq_app::notifications::DesktopOutcome::Uncertain(_) => {
+                return Err("Windows could not confirm the desktop test notification.".into());
+            }
+        }
+    }
     let binary = runtime_settings::executable("notify-send")
         .ok_or("The Linux desktop notification client is unavailable.")?;
     capture(

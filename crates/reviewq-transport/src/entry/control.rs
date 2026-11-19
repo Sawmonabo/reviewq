@@ -32,6 +32,17 @@ pub struct ServiceEndpoint {
     cursor_key: [u8; 32],
 }
 
+/// Owner-private locator for installed native callbacks.
+#[derive(Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct BridgeDescriptor {
+    pub installation_id: String,
+    native_address: SocketAddr,
+    browser_url: String,
+    instance: String,
+    secret: String,
+}
+
 /// Identity established from the running executable, canonical profile and opened store.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -82,6 +93,16 @@ impl ServiceEndpoint {
     }
     pub fn identity(&self) -> &ServiceIdentity {
         &self.identity
+    }
+
+    pub fn bridge_descriptor(&self) -> BridgeDescriptor {
+        BridgeDescriptor {
+            installation_id: self.identity.profile_id.clone(),
+            native_address: self.native,
+            browser_url: format!("http://{}/", self.browser),
+            instance: self.instance.clone(),
+            secret: URL_SAFE_NO_PAD.encode(self.bridge_key),
+        }
     }
 
     pub fn bridge_headers(&self) -> Result<HeaderMap, AppError> {

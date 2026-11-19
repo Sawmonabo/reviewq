@@ -54,7 +54,7 @@ pub(crate) async fn link(profile: &Path, target: String) -> Result<(), Failure> 
         .ok()
         .and_then(|id| id.parse().ok())
         .ok_or("Run reviewq link from inside the Codex conversation you want to link.")?;
-    let endpoint = runtime::read_endpoint(profile)?;
+    let endpoint = runtime::read_native_endpoint(profile)?;
     let client = client()?;
     let status = signed(&client, &endpoint, "GET", "/api/v1/status", b"").await?;
     verify_ready(&endpoint, &status)?;
@@ -73,7 +73,7 @@ pub(crate) async fn claude(
     target: Option<String>,
 ) -> Result<(), Failure> {
     let native: NativeSessionId = session_id.parse()?;
-    let endpoint = runtime::read_endpoint(profile)?;
+    let endpoint = runtime::read_native_endpoint(profile)?;
     let client = client()?;
     let status = signed(&client, &endpoint, "GET", "/api/v1/status", b"").await?;
     verify_ready(&endpoint, &status)?;
