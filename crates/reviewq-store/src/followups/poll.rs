@@ -7,7 +7,7 @@ use reviewq_domain::identity::ReviewId;
 use rusqlite::{Connection, OptionalExtension, params};
 
 use super::{observations, revision};
-use crate::connection::WriteTx;
+use crate::connection::{WriteTx, read_head};
 use crate::events::now_ms;
 use crate::notifications::{gitlab, publish};
 use crate::queue::{identity_for_review, parse, save_observations, text};
@@ -75,6 +75,7 @@ fn list(
     limit: u16,
 ) -> Result<Vec<TrackedReview>, StoreError> {
     let settings = settings_revision(db)?;
+    let observed_before = read_head(db)?;
     let sql = format!(
         "SELECT r.review_id,
            CASE WHEN {ACTIVE} THEN m.run_id
@@ -110,6 +111,7 @@ fn list(
             review,
             identity,
             settings,
+            observed_before,
             monitor,
         });
     }
@@ -129,6 +131,7 @@ fn record(
     {
         return Err(AppError::StaleRevision.into());
     }
+    crate::queue::check_observation(db, tracked.observed_before, &observation.review)?;
     let local_updated: i64 = db.query_row(
         "SELECT updated_at_ms FROM reviews WHERE review_id=?1",
         [tracked.review.as_str()],

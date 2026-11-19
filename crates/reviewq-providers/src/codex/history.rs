@@ -30,8 +30,15 @@ pub(super) struct Turn {
     pub root_turn_id: Option<String>,
     pub status: String,
     started_at: Option<i64>,
-    completed_at: Option<i64>,
+    pub(super) completed_at: Option<i64>,
+    pub(super) error: Option<TurnError>,
     pub items: Vec<Item>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct TurnError {
+    pub(super) codex_error_info: Option<serde_json::Value>,
 }
 
 #[derive(Deserialize)]

@@ -102,6 +102,7 @@ async function heartbeat($, state, allowDelivery = true) {
     sequence: ++state.sequence,
     phase: state.question ? "blocked" : state.working || state.activeTurn || state.pendingPrompt ? "working" : state.phase ?? null,
     hasQuestions: !!state.question,
+    questionId: state.question ?? null,
     turnId: state.turnId ?? null,
     step: state.stepIndex ?? null,
     latestPromptId: state.lastPrompt ?? null,

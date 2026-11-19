@@ -53,6 +53,21 @@ pub(super) fn record(
                     "UPDATE sessions SET host_activity='blocked',host_questions=1 WHERE session_key=?1",
                     [key],
                 )?;
+                let occurrence = reviewq_app::notifications::NativeOccurrence {
+                    kind: reviewq_app::notifications::Kind::AgentPermission,
+                    native_ref: active,
+                    at_ms: Some(now_ms()?),
+                    desktop_episode: None,
+                };
+                let event = crate::notifications::native::insert(
+                    db,
+                    reviewq_domain::session::HostProvider::Claude,
+                    lead.target(),
+                    occurrence,
+                )?;
+                if let Some(event) = event {
+                    crate::notifications::publish(tx, &[event])?;
+                }
                 affected(tx, &lead)?;
             }
         }

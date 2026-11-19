@@ -2,6 +2,7 @@ use std::os::unix::ffi::OsStrExt;
 
 use reviewq_app::access::{Actor, AppError, AppFuture};
 use reviewq_app::events::{ResourceKey, Snapshot};
+use reviewq_app::hosts::HostPhase;
 use reviewq_app::hosts::{ClaudeHeartbeat, ClaudeHeartbeatResult, ClaudeStore};
 use reviewq_domain::session::{HostProvider, LeadTarget, SessionTarget};
 use rusqlite::params;
@@ -216,6 +217,7 @@ fn heartbeat(
     if recorded == 0 {
         return Err(AppError::StaleRevision.into());
     }
+    let mut attention = Vec::new();
     if let Some(activity) = observation.activity {
         let permission: bool = db.query_row(
             "SELECT coalesce(permission_turn_id=turn_id,0) FROM claude_companions WHERE session_key=?1",
@@ -226,6 +228,46 @@ fn heartbeat(
         } else {
             activity_columns(Some(activity))
         };
+        let kind = if activity.has_questions && observation.turn.is_some() {
+            observation.question_id.as_ref().map(|question| {
+                (
+                    reviewq_app::notifications::Kind::AgentQuestion,
+                    question.to_string(),
+                )
+            })
+        } else if activity.phase == HostPhase::Failed {
+            if let Some(turn) = &observation.turn {
+                let failed: bool = db.query_row(
+                    "SELECT EXISTS(SELECT 1 FROM claude_turns WHERE session_key=?1 AND turn_id=?2 AND companion_generation=?3 AND normal=0)",
+                    params![key,turn.as_str(),observation.generation], |row|row.get(0),
+                )?;
+                failed.then(|| {
+                    (
+                        reviewq_app::notifications::Kind::AgentFailure,
+                        turn.to_string(),
+                    )
+                })
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+        if let Some((kind, native_ref)) = kind
+            && let Some(id) = crate::notifications::native::insert(
+                db,
+                HostProvider::Claude,
+                lead.target(),
+                reviewq_app::notifications::NativeOccurrence {
+                    kind,
+                    native_ref,
+                    at_ms: Some(now),
+                    desktop_episode: None,
+                },
+            )?
+        {
+            attention.push(id);
+        }
         let changed = db.execute(
             "UPDATE sessions SET host_activity=?2, host_questions=?3
              WHERE session_key=?1 AND (host_activity,host_questions) IS DISTINCT FROM (?2,?3)",
@@ -241,6 +283,7 @@ fn heartbeat(
             ])?;
         }
     }
+    crate::notifications::publish(tx, &attention)?;
     let label = tx.sql.query_row(
         "SELECT project_path || ' · !' || iid FROM reviews WHERE review_id=?1",
         [lead.review_id().as_str()],
