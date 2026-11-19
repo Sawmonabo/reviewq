@@ -121,7 +121,103 @@ export interface ResultSummary {
   batchId: ResourceIdDto;
   checkedSha: GitShaDto | null;
   completedAt: UtcTimestampDto;
+  concernCount: SafeCountDto;
+  /**
+   * @maxItems 12
+   */
+  findingIds:
+    | []
+    | [ResourceIdDto]
+    | [ResourceIdDto, ResourceIdDto]
+    | [ResourceIdDto, ResourceIdDto, ResourceIdDto]
+    | [ResourceIdDto, ResourceIdDto, ResourceIdDto, ResourceIdDto]
+    | [
+        ResourceIdDto,
+        ResourceIdDto,
+        ResourceIdDto,
+        ResourceIdDto,
+        ResourceIdDto,
+      ]
+    | [
+        ResourceIdDto,
+        ResourceIdDto,
+        ResourceIdDto,
+        ResourceIdDto,
+        ResourceIdDto,
+        ResourceIdDto,
+      ]
+    | [
+        ResourceIdDto,
+        ResourceIdDto,
+        ResourceIdDto,
+        ResourceIdDto,
+        ResourceIdDto,
+        ResourceIdDto,
+        ResourceIdDto,
+      ]
+    | [
+        ResourceIdDto,
+        ResourceIdDto,
+        ResourceIdDto,
+        ResourceIdDto,
+        ResourceIdDto,
+        ResourceIdDto,
+        ResourceIdDto,
+        ResourceIdDto,
+      ]
+    | [
+        ResourceIdDto,
+        ResourceIdDto,
+        ResourceIdDto,
+        ResourceIdDto,
+        ResourceIdDto,
+        ResourceIdDto,
+        ResourceIdDto,
+        ResourceIdDto,
+        ResourceIdDto,
+      ]
+    | [
+        ResourceIdDto,
+        ResourceIdDto,
+        ResourceIdDto,
+        ResourceIdDto,
+        ResourceIdDto,
+        ResourceIdDto,
+        ResourceIdDto,
+        ResourceIdDto,
+        ResourceIdDto,
+        ResourceIdDto,
+      ]
+    | [
+        ResourceIdDto,
+        ResourceIdDto,
+        ResourceIdDto,
+        ResourceIdDto,
+        ResourceIdDto,
+        ResourceIdDto,
+        ResourceIdDto,
+        ResourceIdDto,
+        ResourceIdDto,
+        ResourceIdDto,
+        ResourceIdDto,
+      ]
+    | [
+        ResourceIdDto,
+        ResourceIdDto,
+        ResourceIdDto,
+        ResourceIdDto,
+        ResourceIdDto,
+        ResourceIdDto,
+        ResourceIdDto,
+        ResourceIdDto,
+        ResourceIdDto,
+        ResourceIdDto,
+        ResourceIdDto,
+        ResourceIdDto,
+      ];
   kind: ResultKind;
+  moreFindingIds: boolean;
+  reasonPreview: string | null;
   receiptId: ResourceIdDto | null;
   runId: RunIdDto;
   [k: string]: unknown;

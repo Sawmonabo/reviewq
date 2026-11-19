@@ -2,10 +2,10 @@
 import { func0 } from "../runtime.mjs";
 import { validate25 } from "./checkpoint-id-dto.mjs";
 import { validate319 } from "./kind.mjs";
-import { schema287 } from "../metadata-7.mjs";
+import { schema289 } from "../metadata-7.mjs";
 import { validate35 } from "./event-cursor-dto.mjs";
 import { validate322 } from "./cancel-recovery-response-state.mjs";
-function validate942(
+function validate948(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -29,7 +29,7 @@ function validate942(
         ((data.reason === undefined || !func0.call(data, "reason")) &&
           (missing0 = "reason"))
       ) {
-        validate942.errors = [
+        validate948.errors = [
           {
             instancePath,
             schemaPath: "#/required",
@@ -109,12 +109,12 @@ function validate942(
                 let data3 = data.reason;
                 const _errs4 = errors;
                 if (typeof data3 !== "string" && data3 !== null) {
-                  validate942.errors = [
+                  validate948.errors = [
                     {
                       instancePath: instancePath + "/reason",
                       schemaPath: "#/properties/reason/type",
                       keyword: "type",
-                      params: { type: schema287.properties.reason.type },
+                      params: { type: schema289.properties.reason.type },
                     },
                   ];
                   return false;
@@ -175,7 +175,7 @@ function validate942(
         }
       }
     } else {
-      validate942.errors = [
+      validate948.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -186,7 +186,7 @@ function validate942(
       return false;
     }
   }
-  validate942.errors = vErrors;
+  validate948.errors = vErrors;
   return errors === 0;
 }
-export { validate942 };
+export { validate948 };

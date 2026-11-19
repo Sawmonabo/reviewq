@@ -104,6 +104,11 @@ pub struct ResultSummary {
     pub kind: ResultKind,
     pub checked_sha: Option<GitShaDto>,
     pub completed_at: UtcTimestampDto,
+    pub concern_count: SafeCountDto,
+    #[cfg_attr(feature = "schema", schemars(length(max = 12)))]
+    pub finding_ids: Vec<ResourceIdDto>,
+    pub more_finding_ids: bool,
+    pub reason_preview: Option<String>,
 }
 
 #[derive(Debug, Serialize)]

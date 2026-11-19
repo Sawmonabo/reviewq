@@ -2,7 +2,7 @@
 import { func0 } from "../runtime.mjs";
 import { validate453 } from "./result-summary.mjs";
 import { validate48 } from "./history-cursor-dto.mjs";
-function validate495(
+function validate501(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -17,7 +17,7 @@ function validate495(
         ((data.nextCursor === undefined || !func0.call(data, "nextCursor")) &&
           (missing0 = "nextCursor"))
       ) {
-        validate495.errors = [
+        validate501.errors = [
           {
             instancePath,
             schemaPath: "#/required",
@@ -33,7 +33,7 @@ function validate495(
           if (errors === _errs1) {
             if (Array.isArray(data0)) {
               if (data0.length > 100) {
-                validate495.errors = [
+                validate501.errors = [
                   {
                     instancePath: instancePath + "/items",
                     schemaPath: "#/properties/items/maxItems",
@@ -68,7 +68,7 @@ function validate495(
                 }
               }
             } else {
-              validate495.errors = [
+              validate501.errors = [
                 {
                   instancePath: instancePath + "/items",
                   schemaPath: "#/properties/items/type",
@@ -138,7 +138,7 @@ function validate495(
                 vErrors.push(err1);
               }
               errors++;
-              validate495.errors = vErrors;
+              validate501.errors = vErrors;
               return false;
             } else {
               errors = _errs5;
@@ -157,7 +157,7 @@ function validate495(
         }
       }
     } else {
-      validate495.errors = [
+      validate501.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -168,7 +168,7 @@ function validate495(
       return false;
     }
   }
-  validate495.errors = vErrors;
+  validate501.errors = vErrors;
   return errors === 0;
 }
-export { validate495 };
+export { validate501 };

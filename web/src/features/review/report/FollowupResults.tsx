@@ -68,18 +68,25 @@ export function FollowupResults({
               className="quiet-button report-version"
               key={result.batchId}
               aria-pressed={batch?.batchId === result.batchId}
+              title={formatTime(result.completedAt)}
               onClick={() => {
                 setChoice(result);
                 onChoose(result);
               }}
             >
-              <span>
-                {result.kind === "unchanged" ? "Findings unchanged" : "Completed follow-up"}
-                {result.batchId === latest?.batchId && " · Latest check"}
+              <span className="report-check-summary">
+                <span>
+                  {result.concernCount} {result.concernCount === 1 ? "concern" : "concerns"} checked
+                  · {result.kind === "unchanged" ? "Findings unchanged" : "Findings updated"}
+                </span>
+                {result.concernCount > 0 && (
+                  <small className="meta">
+                    {result.findingIds.join(", ") || "Selected threads"}
+                    {result.moreFindingIds && ", …"}
+                    {result.reasonPreview && ` · ${result.reasonPreview}`}
+                  </small>
+                )}
               </span>
-              <time className="meta" dateTime={result.completedAt}>
-                {formatTime(result.completedAt)}
-              </time>
             </button>
           ))}
           <Pagination trail={trail} next={results.data?.nextCursor} onPage={setTrail} />

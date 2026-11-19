@@ -38,6 +38,12 @@
   padding: 6px 9px;
   font-size: 11px;
 }
+.report-check-summary {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
 .report-version {
   display: flex;
   width: 100%;

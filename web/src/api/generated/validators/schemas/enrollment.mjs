@@ -2,8 +2,8 @@
 import { func0 } from "../runtime.mjs";
 import { validate434 } from "./batch.mjs";
 import { validate453 } from "./result-summary.mjs";
-import { validate462 } from "./monitor.mjs";
-import { validate476 } from "./followup-enrollment-response-preferences.mjs";
+import { validate468 } from "./monitor.mjs";
+import { validate482 } from "./followup-enrollment-response-preferences.mjs";
 import { validate127 } from "./safe-count-dto.mjs";
 function validate433(
   data,
@@ -164,7 +164,7 @@ function validate433(
               let valid3 = false;
               const _errs11 = errors;
               if (
-                !validate462(data3, {
+                !validate468(data3, {
                   instancePath: instancePath + "/monitor",
                   parentData: data,
                   parentDataProperty: "monitor",
@@ -173,8 +173,8 @@ function validate433(
               ) {
                 vErrors =
                   vErrors === null
-                    ? validate462.errors
-                    : vErrors.concat(validate462.errors);
+                    ? validate468.errors
+                    : vErrors.concat(validate468.errors);
                 errors = vErrors.length;
               }
               var _valid1 = _errs11 === errors;
@@ -234,7 +234,7 @@ function validate433(
               ) {
                 const _errs14 = errors;
                 if (
-                  !validate476(data.preferences, {
+                  !validate482(data.preferences, {
                     instancePath: instancePath + "/preferences",
                     parentData: data,
                     parentDataProperty: "preferences",
@@ -243,8 +243,8 @@ function validate433(
                 ) {
                   vErrors =
                     vErrors === null
-                      ? validate476.errors
-                      : vErrors.concat(validate476.errors);
+                      ? validate482.errors
+                      : vErrors.concat(validate482.errors);
                   errors = vErrors.length;
                 }
                 var valid0 = _errs14 === errors;

@@ -7045,8 +7045,27 @@
         "completedAt": {
           "$ref": "#/definitions/UtcTimestampDto"
         },
+        "concernCount": {
+          "$ref": "#/definitions/SafeCountDto"
+        },
+        "findingIds": {
+          "items": {
+            "$ref": "#/definitions/ResourceIdDto"
+          },
+          "maxItems": 12,
+          "type": "array"
+        },
         "kind": {
           "$ref": "#/definitions/ResultKind"
+        },
+        "moreFindingIds": {
+          "type": "boolean"
+        },
+        "reasonPreview": {
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "receiptId": {
           "anyOf": [
@@ -7068,7 +7087,11 @@
         "receiptId",
         "kind",
         "checkedSha",
-        "completedAt"
+        "completedAt",
+        "concernCount",
+        "findingIds",
+        "moreFindingIds",
+        "reasonPreview"
       ],
       "type": "object"
     },

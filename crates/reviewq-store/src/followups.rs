@@ -224,16 +224,33 @@ fn results(
     after: Option<ResultPosition>,
     limit: u16,
 ) -> Result<ResultPage, StoreError> {
+    const PREVIEW_FINDINGS: usize = 12;
     let (time, id) = after.as_ref().map_or((None, ""), |p| {
         (Some(p.completed_at_ms), p.batch_id.as_str())
     });
     let mut statement = db.prepare_cached(
-        "SELECT batch_id, run_id, receipt_id, kind, checked_sha, completed_at_ms
-         FROM followup_results
-         WHERE review_id=?1 AND (?2 IS NULL OR (completed_at_ms, batch_id)<(?2, ?3))
-         ORDER BY completed_at_ms DESC, batch_id DESC LIMIT ?4",
+        "SELECT r.batch_id, r.run_id, r.receipt_id, r.kind, r.checked_sha, r.completed_at_ms,
+             (SELECT COUNT(*) FROM followup_assessments a
+              WHERE a.review_id=r.review_id AND a.batch_id=r.batch_id),
+             (SELECT json_group_array(f.finding_id) FROM (
+                 SELECT DISTINCT finding_id FROM followup_assessment_findings
+                 WHERE review_id=r.review_id AND batch_id=r.batch_id
+                 ORDER BY finding_id LIMIT ?5
+             ) f),
+             (SELECT substr(a.reason, 1, 150) FROM followup_assessments a
+              WHERE a.review_id=r.review_id AND a.batch_id=r.batch_id
+              ORDER BY a.discussion_id LIMIT 1)
+         FROM followup_results r
+         WHERE r.review_id=?1 AND (?2 IS NULL OR (r.completed_at_ms, r.batch_id)<(?2, ?3))
+         ORDER BY r.completed_at_ms DESC, r.batch_id DESC LIMIT ?4",
     )?;
-    let mut rows = statement.query(params![review.as_str(), time, id, limit + 1])?;
+    let mut rows = statement.query(params![
+        review.as_str(),
+        time,
+        id,
+        limit + 1,
+        PREVIEW_FINDINGS + 1,
+    ])?;
     let mut items = Vec::with_capacity(usize::from(limit));
     while let Some(row) = rows.next()? {
         if items.len() == usize::from(limit) {
@@ -242,6 +259,9 @@ fn results(
                 has_more: true,
             });
         }
+        let mut ids = finding_ids(row, 7)?;
+        let more_finding_ids = ids.len() > PREVIEW_FINDINGS;
+        ids.truncate(PREVIEW_FINDINGS);
         items.push(ResultSummary {
             batch_id: row.get(0)?,
             run: parse(text(row, 1)?)?,
@@ -249,6 +269,10 @@ fn results(
             kind: parse(text(row, 3)?)?,
             checked_sha: optional(row, 4)?,
             completed_at_ms: row.get(5)?,
+            concern_count: unsigned(row.get(6)?)?,
+            finding_ids: ids,
+            more_finding_ids,
+            reason_preview: row.get(8)?,
         });
     }
     Ok(ResultPage {

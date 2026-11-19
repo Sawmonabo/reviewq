@@ -138,35 +138,26 @@ const schema153 = {
   ],
   type: "string",
 };
-const schema155 = { enum: ["final", "unchanged"], type: "string" };
-const schema156 = {
+const schema155 = {
+  type: "object",
   properties: {
-    bindingVerified: { type: "boolean" },
-    generation: { $ref: "#/definitions/EventCursorDto" },
-    policyOverride: { type: ["boolean", "null"] },
-    reason: { type: ["string", "null"] },
-    runId: {
-      anyOf: [{ $ref: "#/definitions/CheckpointIdDto" }, { type: "null" }],
+    batchId: { $ref: "#/definitions/CheckpointIdDto" },
+    checkedSha: {
+      anyOf: [{ $ref: "#/definitions/GitShaDto" }, { type: "null" }],
     },
-    selections: {
-      items: { $ref: "#/definitions/SelectedThread" },
+    completedAt: { $ref: "#/definitions/UtcTimestampDto" },
+    concernCount: { $ref: "#/definitions/SafeCountDto" },
+    findingIds: {
+      items: { $ref: "#/definitions/CheckpointIdDto" },
+      maxItems: 12,
       type: "array",
     },
-    state: { $ref: "#/definitions/MonitorState" },
-    updatedAt: { $ref: "#/definitions/UtcTimestampDto" },
+    kind: { $ref: "#/definitions/ResultKind" },
+    moreFindingIds: { type: "boolean" },
+    reasonPreview: { type: ["string", "null"] },
   },
-  required: [
-    "runId",
-    "generation",
-    "state",
-    "policyOverride",
-    "bindingVerified",
-    "reason",
-    "updatedAt",
-    "selections",
-  ],
-  type: "object",
 };
+const schema156 = { enum: ["final", "unchanged"], type: "string" };
 export {
   schema118,
   schema124,

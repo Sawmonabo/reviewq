@@ -322,6 +322,14 @@ fn result(value: app::ResultSummary) -> Result<dto::ResultSummary, AppError> {
         },
         checked_sha: value.checked_sha.map(sha).transpose()?,
         completed_at: time(value.completed_at_ms)?,
+        concern_count: count(value.concern_count)?,
+        finding_ids: value
+            .finding_ids
+            .into_iter()
+            .map(resource)
+            .collect::<Result<_, _>>()?,
+        more_finding_ids: value.more_finding_ids,
+        reason_preview: value.reason_preview,
     })
 }
 
