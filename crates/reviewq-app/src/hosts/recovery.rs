@@ -30,6 +30,7 @@ pub struct Episode {
     pub kind: RecoveryKind,
     pub state: RecoveryState,
     pub reason: Option<String>,
+    pub due_at_ms: Option<i64>,
 }
 #[derive(Clone)]
 pub struct Candidate {

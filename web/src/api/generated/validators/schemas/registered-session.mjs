@@ -2,9 +2,9 @@
 import { func0 } from "../runtime.mjs";
 import { validate25 } from "./checkpoint-id-dto.mjs";
 import { validate71 } from "./host-provider-dto.mjs";
-import { schema298 } from "../metadata-7.mjs";
+import { schema299 } from "../metadata-7.mjs";
 import { validate114 } from "./review-id-dto.mjs";
-function validate980(
+function validate986(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -34,7 +34,7 @@ function validate980(
           !func0.call(data, "reportGuidance")) &&
           (missing0 = "reportGuidance"))
       ) {
-        validate980.errors = [
+        validate986.errors = [
           {
             instancePath,
             schemaPath: "#/required",
@@ -47,7 +47,7 @@ function validate980(
         if (data.cwd !== undefined && func0.call(data, "cwd")) {
           const _errs1 = errors;
           if (typeof data.cwd !== "string") {
-            validate980.errors = [
+            validate986.errors = [
               {
                 instancePath: instancePath + "/cwd",
                 schemaPath: "#/properties/cwd/type",
@@ -134,7 +134,7 @@ function validate980(
                 ) {
                   const _errs6 = errors;
                   if (typeof data.reportGuidance !== "string") {
-                    validate980.errors = [
+                    validate986.errors = [
                       {
                         instancePath: instancePath + "/reportGuidance",
                         schemaPath: "#/properties/reportGuidance/type",
@@ -156,13 +156,13 @@ function validate980(
                     let data5 = data.reviewCheckout;
                     const _errs8 = errors;
                     if (typeof data5 !== "string" && data5 !== null) {
-                      validate980.errors = [
+                      validate986.errors = [
                         {
                           instancePath: instancePath + "/reviewCheckout",
                           schemaPath: "#/properties/reviewCheckout/type",
                           keyword: "type",
                           params: {
-                            type: schema298.properties.reviewCheckout.type,
+                            type: schema299.properties.reviewCheckout.type,
                           },
                         },
                       ];
@@ -229,7 +229,7 @@ function validate980(
         }
       }
     } else {
-      validate980.errors = [
+      validate986.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -240,7 +240,7 @@ function validate980(
       return false;
     }
   }
-  validate980.errors = vErrors;
+  validate986.errors = vErrors;
   return errors === 0;
 }
-export { validate980 };
+export { validate986 };

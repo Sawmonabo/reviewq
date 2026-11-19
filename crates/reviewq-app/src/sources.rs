@@ -109,6 +109,7 @@ pub trait TicketSourceReader: Send + Sync {
         offset: u32,
         limit: u16,
         order: CommentOrder,
+        first_page: bool,
     ) -> AppFuture<'_, TicketDetail>;
     fn invalidate_issue_details(&self, key: Option<&TicketKey>);
     fn sprints(

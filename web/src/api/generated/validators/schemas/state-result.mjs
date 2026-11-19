@@ -2,7 +2,7 @@
 import { func0 } from "../runtime.mjs";
 import { validate25 } from "./checkpoint-id-dto.mjs";
 import { validate127 } from "./safe-count-dto.mjs";
-function validate748(
+function validate753(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -21,7 +21,7 @@ function validate748(
           !func0.call(data, "unreadMrCount")) &&
           (missing0 = "unreadMrCount"))
       ) {
-        validate748.errors = [
+        validate753.errors = [
           {
             instancePath,
             schemaPath: "#/required",
@@ -60,7 +60,7 @@ function validate748(
                 }
               }
             } else {
-              validate748.errors = [
+              validate753.errors = [
                 {
                   instancePath: instancePath + "/affectedIds",
                   schemaPath: "#/properties/affectedIds/type",
@@ -127,7 +127,7 @@ function validate748(
         }
       }
     } else {
-      validate748.errors = [
+      validate753.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -138,7 +138,7 @@ function validate748(
       return false;
     }
   }
-  validate748.errors = vErrors;
+  validate753.errors = vErrors;
   return errors === 0;
 }
-export { validate748 };
+export { validate753 };

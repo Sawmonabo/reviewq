@@ -6,7 +6,7 @@ import { validate296 } from "./run-stage.mjs";
 import { validate147 } from "./git-sha-dto.mjs";
 import { validate302 } from "./compact-ticket.mjs";
 import { validate127 } from "./safe-count-dto.mjs";
-function validate918(
+function validate923(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -46,7 +46,7 @@ function validate918(
               }
             }
           } else {
-            validate918.errors = [
+            validate923.errors = [
               {
                 instancePath: instancePath + "/registeredProviders",
                 schemaPath: "#/properties/registeredProviders/type",
@@ -137,7 +137,7 @@ function validate918(
                 vErrors.push(err1);
               }
               errors++;
-              validate918.errors = vErrors;
+              validate923.errors = vErrors;
               return false;
             } else {
               errors = _errs6;
@@ -204,7 +204,7 @@ function validate918(
                       }
                     }
                   } else {
-                    validate918.errors = [
+                    validate923.errors = [
                       {
                         instancePath: instancePath + "/tickets",
                         schemaPath: "#/properties/tickets/type",
@@ -223,7 +223,7 @@ function validate918(
                 if (data.title !== undefined && func0.call(data, "title")) {
                   const _errs14 = errors;
                   if (typeof data.title !== "string") {
-                    validate918.errors = [
+                    validate923.errors = [
                       {
                         instancePath: instancePath + "/title",
                         schemaPath: "#/properties/title/type",
@@ -293,7 +293,7 @@ function validate918(
         }
       }
     } else {
-      validate918.errors = [
+      validate923.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -304,7 +304,7 @@ function validate918(
       return false;
     }
   }
-  validate918.errors = vErrors;
+  validate923.errors = vErrors;
   return errors === 0;
 }
-export { validate918 };
+export { validate923 };

@@ -2,9 +2,10 @@
 import { func0 } from "../runtime.mjs";
 import { validate25 } from "./checkpoint-id-dto.mjs";
 import { validate319 } from "./kind.mjs";
+import { validate232 } from "./utc-timestamp-dto.mjs";
 import { schema113 } from "../metadata-2.mjs";
 import { validate35 } from "./event-cursor-dto.mjs";
-import { validate322 } from "./cancel-recovery-response-state.mjs";
+import { validate323 } from "./cancel-recovery-response-state.mjs";
 function validate316(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
@@ -105,68 +106,143 @@ function validate316(
               var valid0 = true;
             }
             if (valid0) {
-              if (data.reason !== undefined && func0.call(data, "reason")) {
-                let data3 = data.reason;
+              if (
+                data.nextAttemptAt !== undefined &&
+                func0.call(data, "nextAttemptAt")
+              ) {
+                let data3 = data.nextAttemptAt;
                 const _errs4 = errors;
-                if (typeof data3 !== "string" && data3 !== null) {
-                  validate316.errors = [
-                    {
-                      instancePath: instancePath + "/reason",
-                      schemaPath: "#/properties/reason/type",
+                const _errs5 = errors;
+                let valid1 = false;
+                const _errs6 = errors;
+                if (
+                  !validate232(data3, {
+                    instancePath: instancePath + "/nextAttemptAt",
+                    parentData: data,
+                    parentDataProperty: "nextAttemptAt",
+                    rootData,
+                  })
+                ) {
+                  vErrors =
+                    vErrors === null
+                      ? validate232.errors
+                      : vErrors.concat(validate232.errors);
+                  errors = vErrors.length;
+                }
+                var _valid0 = _errs6 === errors;
+                valid1 = valid1 || _valid0;
+                if (!valid1) {
+                  const _errs7 = errors;
+                  if (data3 !== null) {
+                    const err0 = {
+                      instancePath: instancePath + "/nextAttemptAt",
+                      schemaPath: "#/properties/nextAttemptAt/anyOf/1/type",
                       keyword: "type",
-                      params: { type: schema113.properties.reason.type },
-                    },
-                  ];
+                      params: { type: "null" },
+                    };
+                    if (vErrors === null) {
+                      vErrors = [err0];
+                    } else {
+                      vErrors.push(err0);
+                    }
+                    errors++;
+                  }
+                  var _valid0 = _errs7 === errors;
+                  valid1 = valid1 || _valid0;
+                }
+                if (!valid1) {
+                  const err1 = {
+                    instancePath: instancePath + "/nextAttemptAt",
+                    schemaPath: "#/properties/nextAttemptAt/anyOf",
+                    keyword: "anyOf",
+                    params: {},
+                  };
+                  if (vErrors === null) {
+                    vErrors = [err1];
+                  } else {
+                    vErrors.push(err1);
+                  }
+                  errors++;
+                  validate316.errors = vErrors;
                   return false;
+                } else {
+                  errors = _errs5;
+                  if (vErrors !== null) {
+                    if (_errs5) {
+                      vErrors.length = _errs5;
+                    } else {
+                      vErrors = null;
+                    }
+                  }
                 }
                 var valid0 = _errs4 === errors;
               } else {
                 var valid0 = true;
               }
               if (valid0) {
-                if (
-                  data.revision !== undefined &&
-                  func0.call(data, "revision")
-                ) {
-                  const _errs6 = errors;
-                  if (
-                    !validate35(data.revision, {
-                      instancePath: instancePath + "/revision",
-                      parentData: data,
-                      parentDataProperty: "revision",
-                      rootData,
-                    })
-                  ) {
-                    vErrors =
-                      vErrors === null
-                        ? validate35.errors
-                        : vErrors.concat(validate35.errors);
-                    errors = vErrors.length;
+                if (data.reason !== undefined && func0.call(data, "reason")) {
+                  let data4 = data.reason;
+                  const _errs9 = errors;
+                  if (typeof data4 !== "string" && data4 !== null) {
+                    validate316.errors = [
+                      {
+                        instancePath: instancePath + "/reason",
+                        schemaPath: "#/properties/reason/type",
+                        keyword: "type",
+                        params: { type: schema113.properties.reason.type },
+                      },
+                    ];
+                    return false;
                   }
-                  var valid0 = _errs6 === errors;
+                  var valid0 = _errs9 === errors;
                 } else {
                   var valid0 = true;
                 }
                 if (valid0) {
-                  if (data.state !== undefined && func0.call(data, "state")) {
-                    const _errs7 = errors;
+                  if (
+                    data.revision !== undefined &&
+                    func0.call(data, "revision")
+                  ) {
+                    const _errs11 = errors;
                     if (
-                      !validate322(data.state, {
-                        instancePath: instancePath + "/state",
+                      !validate35(data.revision, {
+                        instancePath: instancePath + "/revision",
                         parentData: data,
-                        parentDataProperty: "state",
+                        parentDataProperty: "revision",
                         rootData,
                       })
                     ) {
                       vErrors =
                         vErrors === null
-                          ? validate322.errors
-                          : vErrors.concat(validate322.errors);
+                          ? validate35.errors
+                          : vErrors.concat(validate35.errors);
                       errors = vErrors.length;
                     }
-                    var valid0 = _errs7 === errors;
+                    var valid0 = _errs11 === errors;
                   } else {
                     var valid0 = true;
+                  }
+                  if (valid0) {
+                    if (data.state !== undefined && func0.call(data, "state")) {
+                      const _errs12 = errors;
+                      if (
+                        !validate323(data.state, {
+                          instancePath: instancePath + "/state",
+                          parentData: data,
+                          parentDataProperty: "state",
+                          rootData,
+                        })
+                      ) {
+                        vErrors =
+                          vErrors === null
+                            ? validate323.errors
+                            : vErrors.concat(validate323.errors);
+                        errors = vErrors.length;
+                      }
+                      var valid0 = _errs12 === errors;
+                    } else {
+                      var valid0 = true;
+                    }
                   }
                 }
               }

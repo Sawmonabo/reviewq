@@ -124,8 +124,12 @@ impl RecoveryStore for SqliteStore {
                      params![candidate.episode.id,candidate.episode.revision.as_sqlite_integer(),
                         cancelled,reason,now_ms()?.saturating_add(30_000)],
                 )?;
-                if changed!=0 && (cancelled || candidate.episode.reason.as_deref()!=Some(reason)) {
-                    emit(tx,&candidate.lead)?;
+                if changed != 0 {
+                    if cancelled || candidate.episode.reason.as_deref() != Some(reason) {
+                        emit(tx, &candidate.lead)?;
+                    } else {
+                        tx.emit(&[ResourceKey::Session(Some(candidate.lead.session_key().clone()))])?;
+                    }
                 }
                 Ok(())
             }).await.map_err(StoreError::app)
@@ -419,11 +423,11 @@ pub(crate) fn cancel(db: &Connection, lead: &LeadTarget, reason: &str) -> Result
 
 fn latest(db: &Connection, lead: &LeadTarget) -> Result<Option<Episode>, StoreError> {
     let mut query=db.prepare_cached(
-        "SELECT episode_id,revision,failed_turn_id,kind,state,reason FROM recovery_episodes
+        "SELECT episode_id,revision,failed_turn_id,kind,state,reason,due_at_ms FROM recovery_episodes
          WHERE run_id=?1 AND lead_session_key=?2 ORDER BY observed_at_ms DESC,episode_id DESC LIMIT 1"
     )?;
     let mut rows = query.query(params![lead.run_id().as_str(), lead.session_key().as_str()])?;
-    rows.next()?.map(decode).transpose()
+    rows.next()?.map(|row| decode(row, 6)).transpose()
 }
 
 fn retire_obsolete(tx: &mut WriteTx<'_>) -> Result<(), StoreError> {
@@ -453,7 +457,7 @@ fn due(db: &Connection) -> Result<Vec<Candidate>, StoreError> {
             (SELECT p.capacity_hash FROM recovery_episodes p WHERE p.run_id=e.run_id
                AND p.lead_session_key=e.lead_session_key AND p.kind=e.kind AND p.attempted_count>0
                AND p.resumed_turn_id IS NOT NULL AND p.capacity_hash IS NOT NULL
-               ORDER BY p.observed_at_ms DESC,p.episode_id DESC LIMIT 1),e.model_provider
+               ORDER BY p.observed_at_ms DESC,p.episode_id DESC LIMIT 1),e.model_provider,e.due_at_ms
          FROM recovery_episodes e JOIN reviews r USING(review_id)
          WHERE e.state='waiting' AND e.due_at_ms<=?1 AND ({IN_SCOPE})
          ORDER BY e.due_at_ms,e.episode_id LIMIT 2"
@@ -470,7 +474,7 @@ fn due(db: &Connection) -> Result<Vec<Candidate>, StoreError> {
             continue;
         }
         output.push(Candidate {
-            episode: decode(row)?,
+            episode: decode(row, 13)?,
             identity: identity_for_review(db, lead.review_id())?,
             lead,
             head: parse(&row.get::<_, String>(8)?)?,
@@ -491,7 +495,7 @@ fn due(db: &Connection) -> Result<Vec<Candidate>, StoreError> {
     Ok(output)
 }
 
-fn decode(row: &Row<'_>) -> Result<Episode, StoreError> {
+fn decode(row: &Row<'_>, due_column: usize) -> Result<Episode, StoreError> {
     Ok(Episode {
         id: row.get(0)?,
         revision: revision_for(row.get(1)?)?,
@@ -499,6 +503,7 @@ fn decode(row: &Row<'_>) -> Result<Episode, StoreError> {
         kind: parse(&row.get::<_, String>(3)?)?,
         state: parse(&row.get::<_, String>(4)?)?,
         reason: row.get(5)?,
+        due_at_ms: row.get(due_column)?,
     })
 }
 

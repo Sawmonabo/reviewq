@@ -244,5 +244,15 @@ pub(in crate::entry) fn episode(value: app::Episode) -> Result<dto::Episode, App
             Status::Complete => dto::State::Complete,
         },
         reason: value.reason,
+        next_attempt_at: if matches!(
+            (value.kind, value.state),
+            (Kind::ModelCapacity, Status::Waiting)
+        ) {
+            value
+                .due_at_ms
+                .and_then(reviewq_protocol::UtcTimestampDto::from_unix_milliseconds)
+        } else {
+            None
+        },
     })
 }

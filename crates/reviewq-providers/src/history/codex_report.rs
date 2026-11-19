@@ -4,7 +4,7 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 
 use reviewq_app::access::AppError;
-use reviewq_app::history::FileContentRef;
+use reviewq_app::history::{FileContentRef, NativeTerminalFailure};
 use reviewq_app::workflow::{NativeCall, ReportContent, ReportFailureAddress};
 use reviewq_domain::identity::NativeInputId;
 use sha2::{Digest, Sha256};
@@ -97,6 +97,44 @@ pub(crate) async fn codex_earlier_report_failures(
     })
     .await
     .map_err(|_| AppError::Unavailable)?
+}
+
+/// Inspect the last lifecycle boundary in the verified Codex transcript. A
+/// more recent start, normal completion or abort supersedes an older failure.
+pub(super) fn latest_failure(
+    source: &locator::Source,
+    high_water: u64,
+    cancelled: &AtomicBool,
+) -> Option<NativeTerminalFailure> {
+    let mut remaining = 8 * 1024 * 1024;
+    let mut lines = file::Lines::new(&source.file, cancelled);
+    let mut end = high_water;
+    for _ in 0..256 {
+        if end == 0 {
+            break;
+        }
+        let start = lines.previous(end - 1, &mut remaining).ok()?;
+        let item = event(lines.input(start, end)).ok()?;
+        end = start;
+        if item
+            .thread
+            .as_deref()
+            .is_some_and(|thread| thread != source.native_id.as_str())
+        {
+            continue;
+        }
+        match item.kind.as_deref() {
+            Some("task_complete" | "turn_complete") => {
+                return item.typed_error.then_some(NativeTerminalFailure {
+                    turn: item.turn?.parse().ok()?,
+                    completed_at_ms: item.completed_at_ms?,
+                });
+            }
+            Some("task_started" | "turn_started" | "turn_aborted") => return None,
+            _ => {}
+        }
+    }
+    None
 }
 
 type FinalResponse = (FileContentRef, [u8; 32]);
@@ -215,6 +253,8 @@ struct Event {
     root: Option<String>,
     call: Option<String>,
     has_error: bool,
+    typed_error: bool,
+    completed_at_ms: Option<i64>,
     item: Item,
 }
 
@@ -239,7 +279,22 @@ fn event(input: impl Read) -> Result<Event, AppError> {
                 "turn_id" => string(reader, ID_BYTES).map(|value| result.turn = value),
                 "root_turn_id" => string(reader, ID_BYTES).map(|value| result.root = value),
                 "call_id" => string(reader, ID_BYTES).map(|value| result.call = value),
-                "error" => non_null(reader).map(|value| result.has_error = value),
+                "error" => {
+                    let kind = reader.peek().map_err(invalid)?;
+                    result.has_error = kind != ValueType::Null;
+                    result.typed_error = kind == ValueType::Object;
+                    reader.skip_value().map_err(invalid)
+                }
+                "completed_at" if reader.peek().map_err(invalid)? == ValueType::Number => {
+                    result.completed_at_ms = reader
+                        .next_number_as_string()
+                        .map_err(invalid)?
+                        .parse::<i64>()
+                        .ok()
+                        .filter(|time| *time > 0)
+                        .and_then(|time| time.checked_mul(1000));
+                    Ok(())
+                }
                 "item" if reader.peek().map_err(invalid)? == ValueType::Object => {
                     object(reader, |name, reader| match name {
                         "type" => string(reader, ID_BYTES).map(|value| result.item.kind = value),

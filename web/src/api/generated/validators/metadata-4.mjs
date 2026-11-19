@@ -90,10 +90,6 @@ const schema201 = {
   enum: ["pending", "in_progress", "completed"],
   type: "string",
 };
-const schema206 = {
-  enum: ["interrupted", "deferred", "rejected", "uncertain"],
-  type: "string",
-};
 export {
   schema157,
   schema158,
@@ -103,5 +99,4 @@ export {
   schema172,
   schema190,
   schema201,
-  schema206,
 };

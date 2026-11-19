@@ -3,9 +3,9 @@ import { func0 } from "../runtime.mjs";
 import { validate232 } from "./utc-timestamp-dto.mjs";
 import { validate127 } from "./safe-count-dto.mjs";
 import { validate25 } from "./checkpoint-id-dto.mjs";
-import { validate454 } from "./batch-state.mjs";
+import { validate455 } from "./batch-state.mjs";
 import { validate147 } from "./git-sha-dto.mjs";
-function validate450(
+function validate451(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -112,7 +112,7 @@ function validate450(
                 vErrors.push(err1);
               }
               errors++;
-              validate450.errors = vErrors;
+              validate451.errors = vErrors;
               return false;
             } else {
               errors = _errs4;
@@ -132,7 +132,7 @@ function validate450(
             if (data.state !== undefined && func0.call(data, "state")) {
               const _errs8 = errors;
               if (
-                !validate454(data.state, {
+                !validate455(data.state, {
                   instancePath: instancePath + "/state",
                   parentData: data,
                   parentDataProperty: "state",
@@ -141,8 +141,8 @@ function validate450(
               ) {
                 vErrors =
                   vErrors === null
-                    ? validate454.errors
-                    : vErrors.concat(validate454.errors);
+                    ? validate455.errors
+                    : vErrors.concat(validate455.errors);
                 errors = vErrors.length;
               }
               var valid0 = _errs8 === errors;
@@ -207,7 +207,7 @@ function validate450(
                     vErrors.push(err3);
                   }
                   errors++;
-                  validate450.errors = vErrors;
+                  validate451.errors = vErrors;
                   return false;
                 } else {
                   errors = _errs10;
@@ -281,7 +281,7 @@ function validate450(
                       vErrors.push(err5);
                     }
                     errors++;
-                    validate450.errors = vErrors;
+                    validate451.errors = vErrors;
                     return false;
                   } else {
                     errors = _errs15;
@@ -303,7 +303,7 @@ function validate450(
         }
       }
     } else {
-      validate450.errors = [
+      validate451.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -314,7 +314,7 @@ function validate450(
       return false;
     }
   }
-  validate450.errors = vErrors;
+  validate451.errors = vErrors;
   return errors === 0;
 }
-export { validate450 };
+export { validate451 };

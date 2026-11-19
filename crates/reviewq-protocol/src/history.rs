@@ -190,6 +190,17 @@ pub struct HistoryResult {
     pub generation: Option<HistoryGenerationDto>,
     pub availability: HistoryAvailability,
     pub entry: Option<HistoryEntry>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub failure: Option<ChildResultFailure>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct ChildResultFailure {
+    pub turn_id: HistoryTurnIdDto,
+    pub completed_at: UtcTimestampDto,
+    pub followed_by_lead_report: bool,
 }
 
 pub type HistoryResultResponse = Success<HistoryResult>;

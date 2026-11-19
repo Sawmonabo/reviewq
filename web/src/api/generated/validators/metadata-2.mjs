@@ -226,6 +226,9 @@ const schema113 = {
     episodeId: { $ref: "#/definitions/CheckpointIdDto" },
     failedTurnId: { $ref: "#/definitions/CheckpointIdDto" },
     kind: { $ref: "#/definitions/Kind" },
+    nextAttemptAt: {
+      anyOf: [{ $ref: "#/definitions/UtcTimestampDto" }, { type: "null" }],
+    },
     reason: { type: ["string", "null"] },
     revision: { $ref: "#/definitions/EventCursorDto" },
     state: { $ref: "#/definitions/CancelRecoveryResponseState" },

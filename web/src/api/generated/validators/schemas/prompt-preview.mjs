@@ -3,9 +3,9 @@ import { func0 } from "../runtime.mjs";
 import { validate25 } from "./checkpoint-id-dto.mjs";
 import { validate48 } from "./history-cursor-dto.mjs";
 import { validate127 } from "./safe-count-dto.mjs";
-import { validate526 } from "./history-text.mjs";
+import { validate527 } from "./history-text.mjs";
 import { validate232 } from "./utc-timestamp-dto.mjs";
-function validate543(
+function validate544(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -26,7 +26,7 @@ function validate543(
         ((data.locator === undefined || !func0.call(data, "locator")) &&
           (missing0 = "locator"))
       ) {
-        validate543.errors = [
+        validate544.errors = [
           {
             instancePath,
             schemaPath: "#/required",
@@ -102,7 +102,7 @@ function validate543(
               if (data.text !== undefined && func0.call(data, "text")) {
                 const _errs4 = errors;
                 if (
-                  !validate526(data.text, {
+                  !validate527(data.text, {
                     instancePath: instancePath + "/text",
                     parentData: data,
                     parentDataProperty: "text",
@@ -111,8 +111,8 @@ function validate543(
                 ) {
                   vErrors =
                     vErrors === null
-                      ? validate526.errors
-                      : vErrors.concat(validate526.errors);
+                      ? validate527.errors
+                      : vErrors.concat(validate527.errors);
                   errors = vErrors.length;
                 }
                 var valid0 = _errs4 === errors;
@@ -177,7 +177,7 @@ function validate543(
                       vErrors.push(err1);
                     }
                     errors++;
-                    validate543.errors = vErrors;
+                    validate544.errors = vErrors;
                     return false;
                   } else {
                     errors = _errs6;
@@ -199,7 +199,7 @@ function validate543(
         }
       }
     } else {
-      validate543.errors = [
+      validate544.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -210,7 +210,7 @@ function validate543(
       return false;
     }
   }
-  validate543.errors = vErrors;
+  validate544.errors = vErrors;
   return errors === 0;
 }
-export { validate543 };
+export { validate544 };

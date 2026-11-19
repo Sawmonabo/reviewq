@@ -7,6 +7,7 @@ import type {
   RevisionDto,
   RunIdDto,
   SessionKeyDto,
+  UtcTimestampDto,
 } from "./common.js";
 
 export type Kind = "usage_limit" | "model_capacity" | "access";
@@ -56,6 +57,7 @@ export interface CancelRecoveryResponseEpisode {
   episodeId: ResourceIdDto;
   failedTurnId: HistoryTurnIdDto;
   kind: Kind;
+  nextAttemptAt?: UtcTimestampDto | null;
   reason: string | null;
   revision: RevisionDto;
   state: CancelRecoveryResponseState;
@@ -109,6 +111,7 @@ export interface Episode {
   episodeId: ResourceIdDto;
   failedTurnId: HistoryTurnIdDto;
   kind: Kind;
+  nextAttemptAt?: UtcTimestampDto | null;
   reason: string | null;
   revision: RevisionDto;
   state: RecoveryStateResponseState;

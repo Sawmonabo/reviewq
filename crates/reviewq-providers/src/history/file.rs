@@ -177,7 +177,16 @@ pub(super) fn final_response(
     if entry.is_none() && offset != 0 {
         return Err(AppError::Unavailable);
     }
-    Ok(NativeFinalResponse { generation, entry })
+    let failure = if source.provider == HostProvider::Codex {
+        super::codex_report::latest_failure(source, complete, cancelled)
+    } else {
+        None
+    };
+    Ok(NativeFinalResponse {
+        generation,
+        entry,
+        failure,
+    })
 }
 
 pub(super) fn parts(
