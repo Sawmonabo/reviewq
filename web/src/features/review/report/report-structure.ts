@@ -31,6 +31,7 @@ const threadSections =
 const countLabel =
   "(?:P[0-3](?: findings?)?|(?:nonblocking|blocking)(?: findings?)?|(?:functional|quality|scale)(?: findings?)?)";
 const countToken = new RegExp(`(?:\\d+\\s+${countLabel}|${countLabel}\\s*:\\s*\\d+)`, "gi");
+const hiddenProvenance = /^(?:scope|reviewed (?:source|target)|checked at)\s*:/i;
 const coverMetadata =
   /^(?:scope|reviewed (?:source|target|sha|revision)|coverage|checked at|provenance)\s*:/i;
 const contextMetadata = /^(?:publication|disposition)\s*:/i;
@@ -139,22 +140,7 @@ export function reportStructure(
         output.push(styled(node, "report-identity"));
         continue;
       }
-      if (paragraph(node) && coverMetadata.test(reportText(node).trim())) {
-        const provenance = [node];
-        while (index + 1 < introEnd) {
-          const candidate = article[index + 1];
-          if (!paragraph(candidate) || !coverMetadata.test(reportText(candidate).trim())) break;
-          provenance.push(candidate);
-          index++;
-        }
-        output.push(
-          element("details", "report-provenance", [
-            element("summary", "", [literal("Scope and revision details")]),
-            ...provenance.map((entry) => styled(entry, "report-metadata")),
-          ]),
-        );
-        continue;
-      }
+      if (paragraph(node) && hiddenProvenance.test(reportText(node).trim())) continue;
       if (isMetadata(node)) {
         addSummary();
         output.push(styled(node, "report-metadata"));

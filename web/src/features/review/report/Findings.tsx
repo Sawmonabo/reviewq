@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { RunDetail } from "../../../api/generated/contracts";
 import type { ResultSummary } from "../../../api/generated/contracts/followups";
 import type { ReportSummary } from "../../../api/generated/contracts/reports";
-import { markReportViewed, reportDownload, reportHistory, reportView } from "../../../api/reports";
+import { markReportViewed, reportHistory, reportView } from "../../../api/reports";
 import { Empty, Loading, Notice } from "../../../components/PanelState";
 import { useResource } from "../../../hooks/useResource";
 import type { DraftStore } from "../../../lib/drafts";
@@ -221,7 +221,7 @@ export default function Findings({ run, drafts, reviewTitle, webUrl, followup, o
         </button>
       </div>
       {history && (
-        <section className="report-history-list stack" aria-label="Report versions">
+        <section className="report-history-list stack" aria-label="Report history">
           {versions.pending && <Loading label="Reading accepted report versions…" />}
           {versions.error && <Notice retry={versions.retry}>{versions.error}</Notice>}
           {!versions.data?.items.length && !versions.pending && (
@@ -241,8 +241,8 @@ export default function Findings({ run, drafts, reviewTitle, webUrl, followup, o
               <time dateTime={version.capturedAt} title={formatTime(version.capturedAt)}>
                 {formatActivityTime(version.capturedAt)}
               </time>
-              <span className="meta" title={version.sha256}>
-                {version.receiptId === latestId ? "Latest" : readable(version.verdict)}
+              <span className="meta" title={`${readable(version.verdict)} · ${version.sha256}`}>
+                {version.receiptId === latestId ? "Latest" : "Earlier findings"}
               </span>
             </button>
           ))}
@@ -301,43 +301,9 @@ export default function Findings({ run, drafts, reviewTitle, webUrl, followup, o
             reviewTitle={reviewTitle}
             webUrl={webUrl}
             onRendered={(id) => void acknowledge(id, undefined, true)}
+            onMarkViewed={() => void acknowledge(report.receiptId)}
+            markingViewed={busy}
           />
-          <details className="report-version-meta">
-            <summary>Report version details</summary>
-            <div className="stack">
-              <p className="meta">
-                {chosen === latestId ? "Current" : "Historical"} · {formatTime(report.capturedAt)} ·{" "}
-                {readable(report.coverage)}
-              </p>
-              <p className="meta">
-                Reviewed revision ·{" "}
-                <code title={report.reviewedSha ?? undefined}>
-                  {report.reviewedSha?.slice(0, 12) ?? "Unknown"}
-                </code>
-              </p>
-              {(report.findingCount !== null || report.changeCount !== null) && (
-                <p className="meta">
-                  {[
-                    report.findingCount !== null && `${report.findingCount} indexed findings`,
-                    report.changeCount !== null && `${report.changeCount} declared changes`,
-                  ]
-                    .filter(Boolean)
-                    .join(" · ")}
-                </p>
-              )}
-              {report.revisionReason && <p>{report.revisionReason}</p>}
-              <div className="actions">
-                <a href={reportDownload(run.runId, report.receiptId)}>Download Markdown</a>
-                <button
-                  type="button"
-                  disabled={busy}
-                  onClick={() => void acknowledge(report.receiptId)}
-                >
-                  Mark findings viewed
-                </button>
-              </div>
-            </div>
-          </details>
         </article>
       )}
     </div>

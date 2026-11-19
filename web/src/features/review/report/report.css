@@ -83,14 +83,11 @@
   padding: 4px 0;
   font-size: 11px;
 }
-.report-version-meta {
-  padding: 9px 0;
-  border-top: 1px solid var(--line);
+.report-source-tools > .menu-trigger {
+  margin-inline-start: auto;
   color: var(--muted);
-  font-size: 11px;
-}
-.report-version-meta[open] > .stack {
-  margin-top: 8px;
+  border-color: transparent;
+  background: transparent;
 }
 .report-blocks > div {
   min-width: 0;
@@ -367,13 +364,11 @@
 .report-previous-threads .report-thread-outcome:last-child {
   margin-top: 4px;
 }
-.report-provenance,
 .report-retired-finding {
   padding: 4px 0;
   color: var(--muted);
   font-size: 10px;
 }
-.report-provenance[open] > summary,
 .report-retired-finding[open] > summary {
   margin-bottom: 12px;
 }
@@ -532,13 +527,6 @@
   border-top: 1px solid var(--line);
   color: var(--muted);
   font-size: 11px;
-}
-.report-structured[open] > section {
-  margin-top: 12px;
-}
-.report-context button[aria-pressed="true"] {
-  border-color: var(--focus);
-  background: var(--selected);
 }
 .finding-card .badge {
   white-space: normal;
