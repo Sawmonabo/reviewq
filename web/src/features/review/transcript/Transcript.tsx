@@ -25,6 +25,7 @@ import { activityRows, openKey, toolCatalog, toolOnly } from "./tool-activity";
 import type { ReadPack, ReadTarget, ToolRun } from "./tool-activity";
 import { MarkdownContent } from "../../../components/markdown/MarkdownContent";
 import { useHistory } from "./useHistory";
+import { useInlineProse } from "./useInlineProse";
 
 type Position = {
   readonly id: string;
@@ -175,6 +176,27 @@ export function Transcript({ target, provider, child, messages, working }: Props
     rangeExtractor,
   });
 
+  const virtualRows = list.getVirtualItems();
+  const windowHeight = list.scrollRect?.height ?? 0;
+  const windowTop = following
+    ? Math.max(0, list.getTotalSize() - windowHeight)
+    : (list.scrollOffset ?? 0);
+  const nearby = windowHeight
+    ? virtualRows
+        .filter((item) => item.end > windowTop - 120 && item.start < windowTop + windowHeight + 120)
+        .flatMap((item) => {
+          const row = entries[item.index];
+          return row?.kind === "native" && row.entry ? [row.entry] : [];
+        })
+    : [];
+  const prose = useInlineProse(
+    target,
+    history.generation,
+    following ? nearby.reverse() : nearby,
+    selectedText || pinned.size > 0,
+    output?.reference,
+  );
+
   useLayoutEffect(() => {
     if (!entries.length) return;
     if (following || requestedLatest.current) {
@@ -210,7 +232,7 @@ export function Transcript({ target, provider, child, messages, working }: Props
       });
       anchor.current = undefined;
     }
-  }, [entries, following, list]);
+  }, [entries, following, list, prose]);
 
   useEffect(() => {
     const host = viewport.current;
@@ -487,7 +509,7 @@ export function Transcript({ target, provider, child, messages, working }: Props
           ))}
         {entries.length > 0 && (
           <div className="timeline-spacer" style={{ height: list.getTotalSize() }}>
-            {list.getVirtualItems().map((item) => {
+            {virtualRows.map((item) => {
               const row = entries[item.index];
               if (!row) return null;
               if (row.kind === "tool-run" || row.kind === "read-pack") {
@@ -582,6 +604,7 @@ export function Transcript({ target, provider, child, messages, working }: Props
                         entry={row.entry}
                         knownTools={knownTools}
                         expanded={expanded}
+                        prose={prose}
                         toggle={(key, open) => setExpanded((known) => toggleKey(known, key, open))}
                         reference={output?.entryId === row.id ? output.reference : undefined}
                         {...(extraParts?.generation === history.generation &&

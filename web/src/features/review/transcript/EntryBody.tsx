@@ -5,6 +5,7 @@ import { ToolHeading } from "./ToolActivity";
 import { groupParts, openKey } from "./tool-activity";
 import type { ToolCatalog } from "./tool-activity";
 import { MarkdownContent } from "../../../components/markdown/MarkdownContent";
+import { inlineProseReference } from "./useInlineProse";
 
 type Props = {
   readonly target: SessionAddress;
@@ -14,6 +15,7 @@ type Props = {
   readonly reference: string | undefined;
   readonly onReference: (reference: string | undefined) => void;
   readonly expanded: ReadonlySet<string>;
+  readonly prose: ReadonlyMap<string, string | null>;
   readonly toggle: (key: string, open: boolean) => void;
   readonly extra?: { readonly items: readonly HistoryPart[]; readonly next: string | null };
   readonly onMoreParts: (cursor: string) => void;
@@ -27,6 +29,7 @@ export function EntryBody({
   reference,
   onReference,
   expanded,
+  prose,
   toggle,
   extra,
   onMoreParts,
@@ -39,6 +42,9 @@ export function EntryBody({
       ? entry.contentRef
       : undefined;
   const entryFormat = parts.some((group) => group.kind === "prose") ? "markdown" : "text";
+  const singlePart = sourceParts.length === 1 ? sourceParts[0] : undefined;
+  const singleRef = singlePart && inlineProseReference(entry, singlePart);
+  const wholeIsInline = singleRef && !reference && prose.get(singleRef) != null;
 
   function disclosure(ref: string, format: "markdown" | "text", entire = false) {
     const open = reference === ref;
@@ -74,15 +80,19 @@ export function EntryBody({
 
   function value(part: HistoryPart, key: string) {
     const formatted = part.kind !== "tool_call" && part.kind !== "tool_result";
+    const inlineRef = inlineProseReference(entry, part);
+    const complete = inlineRef && !reference ? prose.get(inlineRef) : undefined;
     return (
       <div className="stack" key={key}>
         {(!part.contentRef || reference !== part.contentRef) &&
           (formatted ? (
-            <MarkdownContent source={part.text} />
+            <MarkdownContent source={complete ?? part.text} />
           ) : (
             <pre className="tool-output-line">{part.text}</pre>
           ))}
-        {part.contentRef && disclosure(part.contentRef, formatted ? "markdown" : "text")}
+        {part.contentRef &&
+          complete == null &&
+          disclosure(part.contentRef, formatted ? "markdown" : "text")}
       </div>
     );
   }
@@ -111,7 +121,7 @@ export function EntryBody({
           </details>
         );
       })}
-      {wholeEntry && disclosure(wholeEntry, entryFormat, true)}
+      {wholeEntry && !wholeIsInline && disclosure(wholeEntry, entryFormat, true)}
       {next && (
         <button className="quiet-button" type="button" onClick={() => onMoreParts(next)}>
           More parts
