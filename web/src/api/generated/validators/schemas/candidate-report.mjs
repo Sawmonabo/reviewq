@@ -77,6 +77,9 @@ function validate633(
         ((data.declarationSha256 === undefined ||
           !func0.call(data, "declarationSha256")) &&
           (missing0 = "declarationSha256")) ||
+        ((data.reconciledByBatchId === undefined ||
+          !func0.call(data, "reconciledByBatchId")) &&
+          (missing0 = "reconciledByBatchId")) ||
         ((data.reason === undefined || !func0.call(data, "reason")) &&
           (missing0 = "reason"))
       ) {

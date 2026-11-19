@@ -2,9 +2,9 @@
 import { func0 } from "../runtime.mjs";
 import { validate166 } from "./board-selection.mjs";
 import { schema271 } from "../metadata-6.mjs";
-import { validate886 } from "./default-skills.mjs";
+import { validate887 } from "./default-skills.mjs";
 import { validate76 } from "./merge-request-iid-dto.mjs";
-function validate884(
+function validate885(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -27,7 +27,7 @@ function validate884(
           !func0.call(data, "defaultSkills")) &&
           (missing0 = "defaultSkills"))
       ) {
-        validate884.errors = [
+        validate885.errors = [
           {
             instancePath,
             schemaPath: "#/required",
@@ -46,7 +46,7 @@ function validate884(
             key0 === "path" ||
             key0 === "projectId"
           )) {
-            validate884.errors = [
+            validate885.errors = [
               {
                 instancePath,
                 schemaPath: "#/additionalProperties",
@@ -87,7 +87,7 @@ function validate884(
               let data1 = data.checkout;
               const _errs3 = errors;
               if (typeof data1 !== "string" && data1 !== null) {
-                validate884.errors = [
+                validate885.errors = [
                   {
                     instancePath: instancePath + "/checkout",
                     schemaPath: "#/properties/checkout/type",
@@ -108,7 +108,7 @@ function validate884(
               ) {
                 const _errs5 = errors;
                 if (
-                  !validate886(data.defaultSkills, {
+                  !validate887(data.defaultSkills, {
                     instancePath: instancePath + "/defaultSkills",
                     parentData: data,
                     parentDataProperty: "defaultSkills",
@@ -117,8 +117,8 @@ function validate884(
                 ) {
                   vErrors =
                     vErrors === null
-                      ? validate886.errors
-                      : vErrors.concat(validate886.errors);
+                      ? validate887.errors
+                      : vErrors.concat(validate887.errors);
                   errors = vErrors.length;
                 }
                 var valid0 = _errs5 === errors;
@@ -129,7 +129,7 @@ function validate884(
                 if (data.path !== undefined && func0.call(data, "path")) {
                   const _errs6 = errors;
                   if (typeof data.path !== "string") {
-                    validate884.errors = [
+                    validate885.errors = [
                       {
                         instancePath: instancePath + "/path",
                         schemaPath: "#/properties/path/type",
@@ -174,7 +174,7 @@ function validate884(
         }
       }
     } else {
-      validate884.errors = [
+      validate885.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -185,7 +185,7 @@ function validate884(
       return false;
     }
   }
-  validate884.errors = vErrors;
+  validate885.errors = vErrors;
   return errors === 0;
 }
-export { validate884 };
+export { validate885 };

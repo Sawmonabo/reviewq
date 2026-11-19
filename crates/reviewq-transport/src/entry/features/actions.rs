@@ -32,7 +32,7 @@ pub(super) async fn current(
     )?))
 }
 
-fn project(value: app::Action) -> Result<dto::Action, AppError> {
+pub(in crate::entry) fn project(value: app::Action) -> Result<dto::Action, AppError> {
     let time = |value| UtcTimestampDto::from_unix_milliseconds(value).ok_or(AppError::Internal);
     let submission = |id: reviewq_domain::identity::SubmissionId| {
         SubmissionIdDto::new(id.as_str()).ok_or(AppError::Internal)

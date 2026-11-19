@@ -2,7 +2,7 @@
 
 use reviewq_domain::identity::{
     DeliveryFence, DeliveryId, NativeInputId, NativeSessionId, NativeTurnId, ReceiptId, ReportHash,
-    Revision, RunId, SessionKey, SubmissionId,
+    ReviewId, Revision, RunId, SessionKey, SubmissionId,
 };
 use reviewq_domain::session::{
     AbsolutePath, HostProvider, LeadTarget, NativeBinding, SessionTarget,
@@ -217,6 +217,36 @@ pub struct SubmitMessage {
     pub text: MessageBody,
     pub purpose: MessagePurpose,
     pub report_ref: Option<ReportRef>,
+}
+
+/// A retry may omit the session when its first submission selected a sole lead.
+pub struct MessageReplay {
+    pub review: ReviewId,
+    pub session: Option<SessionKey>,
+    pub submission: SubmissionId,
+    pub text: MessageBody,
+    pub report: Option<ReportRef>,
+}
+
+impl SubmitMessage {
+    pub fn user_input(
+        target: LeadTarget,
+        submission_id: SubmissionId,
+        text: MessageBody,
+        report_ref: Option<ReportRef>,
+    ) -> Self {
+        Self {
+            target,
+            submission_id,
+            text,
+            purpose: if report_ref.is_some() {
+                MessagePurpose::ReportFeedback
+            } else {
+                MessagePurpose::User
+            },
+            report_ref,
+        }
+    }
 }
 
 /// The original, bounded user message. Whitespace is preserved byte-for-byte.
@@ -441,6 +471,13 @@ pub trait LeadStore: Send + Sync {
         actor: Actor,
         input: SubmitMessage,
     ) -> AppFuture<'_, Snapshot<DeliveryReceipt>>;
+
+    /// Reads a prior submission before resolving a new recipient among current leads.
+    fn replay_message(
+        &self,
+        actor: Actor,
+        input: MessageReplay,
+    ) -> AppFuture<'_, Option<Snapshot<DeliveryReceipt>>>;
 
     /// Reads only the initiating actor's receipt at the original address.
     fn read_receipt(

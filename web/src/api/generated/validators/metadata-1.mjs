@@ -85,11 +85,7 @@ const schema36 = {
   title: "FollowupPreferencesRequest",
   type: "object",
 };
-const schema38 = {
-  enum: ["read", "unread", "dismiss"],
-  title: "NotificationStateRequestAction",
-  type: "string",
-};
+const schema38 = { enum: ["read", "unread", "dismiss"], type: "string" };
 const schema44 = { enum: ["unicode_codepoints"], type: "string" };
 const schema50 = {
   enum: ["reviewed", "waiting_author", "needs_review"],
@@ -231,6 +227,7 @@ const schema67 = {
   title: "SaveSettingsRepositoryBinding",
   type: "object",
 };
+const schema68 = { enum: ["selected", "any"], type: "string" };
 export {
   schema11,
   schema13,
@@ -254,4 +251,5 @@ export {
   schema64,
   schema66,
   schema67,
+  schema68,
 };

@@ -40,6 +40,7 @@ pub(super) fn page(
             verify_position(file, &witness, complete)?;
             witness.offset
         }
+        None if position.ascending => 0,
         None => complete,
     };
     let mut offset = initial;

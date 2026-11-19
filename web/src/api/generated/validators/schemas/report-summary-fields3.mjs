@@ -2,11 +2,11 @@
 import { func0 } from "../runtime.mjs";
 import { validate111 } from "./git-sha-dto.mjs";
 import { schema222 } from "../metadata-5.mjs";
-import { validate718 } from "./semantic-index.mjs";
+import { validate719 } from "./semantic-index.mjs";
 import { validate102 } from "./report-hash-dto.mjs";
 import { validate95 } from "./safe-count-dto.mjs";
-import { validate722 } from "./verdict.mjs";
-function validate716(
+import { validate723 } from "./verdict.mjs";
+function validate717(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -68,7 +68,7 @@ function validate716(
             vErrors.push(err1);
           }
           errors++;
-          validate716.errors = vErrors;
+          validate717.errors = vErrors;
           return false;
         } else {
           errors = _errs2;
@@ -92,7 +92,7 @@ function validate716(
           let data1 = data.revisionReason;
           const _errs6 = errors;
           if (typeof data1 !== "string" && data1 !== null) {
-            validate716.errors = [
+            validate717.errors = [
               {
                 instancePath: instancePath + "/revisionReason",
                 schemaPath: "#/properties/revisionReason/type",
@@ -113,7 +113,7 @@ function validate716(
           ) {
             const _errs8 = errors;
             if (
-              !validate718(data.semanticIndex, {
+              !validate719(data.semanticIndex, {
                 instancePath: instancePath + "/semanticIndex",
                 parentData: data,
                 parentDataProperty: "semanticIndex",
@@ -122,8 +122,8 @@ function validate716(
             ) {
               vErrors =
                 vErrors === null
-                  ? validate718.errors
-                  : vErrors.concat(validate718.errors);
+                  ? validate719.errors
+                  : vErrors.concat(validate719.errors);
               errors = vErrors.length;
             }
             var valid0 = _errs8 === errors;
@@ -179,7 +179,7 @@ function validate716(
                 if (data.verdict !== undefined && func0.call(data, "verdict")) {
                   const _errs11 = errors;
                   if (
-                    !validate722(data.verdict, {
+                    !validate723(data.verdict, {
                       instancePath: instancePath + "/verdict",
                       parentData: data,
                       parentDataProperty: "verdict",
@@ -188,8 +188,8 @@ function validate716(
                   ) {
                     vErrors =
                       vErrors === null
-                        ? validate722.errors
-                        : vErrors.concat(validate722.errors);
+                        ? validate723.errors
+                        : vErrors.concat(validate723.errors);
                     errors = vErrors.length;
                   }
                   var valid0 = _errs11 === errors;
@@ -202,7 +202,7 @@ function validate716(
         }
       }
     } else {
-      validate716.errors = [
+      validate717.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -213,7 +213,7 @@ function validate716(
       return false;
     }
   }
-  validate716.errors = vErrors;
+  validate717.errors = vErrors;
   return errors === 0;
 }
-export { validate716 };
+export { validate717 };

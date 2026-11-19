@@ -1,17 +1,21 @@
 use reviewq_app::access::{Actor, AppError};
-use reviewq_app::hosts::{MessageBody, send_message};
+use reviewq_app::events::Snapshot;
+use reviewq_app::hosts::{DeliveryReceipt, MessageBody, MessageReplay, SubmitMessage};
 use reviewq_app::queue::{ManagementFilter, RunSummary};
-use reviewq_domain::identity::{ReviewId, RunId, SessionKey};
+use reviewq_domain::identity::{ReviewId, RunId, SessionKey, SubmissionId};
 use reviewq_protocol::mcp::{
-    GetReview, ListReviews, ReadTranscript, ReviewFilter, SendReviewMessage, TranscriptRead,
+    GetReview, ListReviews, ReadTranscript, ReportRead, ReviewFilter, SendReviewMessage,
+    TranscriptRead,
 };
 use serde_json::{Value, json};
 
 use crate::entry::Entry;
+use crate::entry::features::{actions, followups, reports};
 use crate::entry::history::{ContentQuery, HistoryQuery, read, read_content};
 use crate::entry::launch;
 use crate::entry::messages;
 use crate::entry::pages::{parse, project_review, queue_sync};
+use crate::entry::{questions, targets};
 
 pub(super) use crate::entry::targets::{ResolvedReview, resolve};
 
@@ -45,20 +49,26 @@ pub(super) async fn list(
         }));
     }
     let sync = queue_sync(&entry.active_source().await?, page.sync);
-    Ok(json!({
-        "lastSyncAt": sync.last_success_at,
-        "lastSyncAttemptAt": sync.last_attempt_at,
-        "syncFailed": sync.error.is_some(),
-        "reviews": values, "total": page.total,
-        "nextOffset": next_offset(offset, values.len(), page.total),
-    }))
+    fit_page(&values, offset, page.total, |items, next| {
+        json!({
+            "lastSyncAt": sync.last_success_at,
+            "lastSyncAttemptAt": sync.last_attempt_at,
+            "syncFailed": sync.error.is_some(),
+            "reviews": items, "total": page.total,
+            "nextOffset": next,
+        })
+    })
 }
 
 pub(super) async fn get(entry: &Entry, actor: Actor, args: GetReview) -> Result<Value, AppError> {
-    let review = match resolve(entry, &actor, &args.target).await? {
-        ResolvedReview::Review(id) => id,
+    let (review, target_session) = match resolve(entry, &actor, &args.target).await? {
+        ResolvedReview::Review(id, session) => (id, session),
         ResolvedReview::Alternatives(urls) => return Ok(alternatives(urls)),
     };
+    let session = targets::session(
+        target_session,
+        args.session_key.as_ref().map(|key| key.as_str()),
+    )?;
     let limit = list_limit(args.limit)?;
     let offset = args.offset.unwrap_or(0);
     let launch = if let Some(id) = args.launch_submission_id {
@@ -77,15 +87,76 @@ pub(super) async fn get(entry: &Entry, actor: Actor, args: GetReview) -> Result<
     } else {
         None
     };
-    let selected = match args.session_key {
-        Some(session) => Some(
-            entry
+    let selected = match session {
+        Some(session) => {
+            let run = entry
                 .store
-                .run_for_session(actor.clone(), review.clone(), parse(session.as_str())?)
-                .await?,
-        ),
-        None => None,
+                .run_for_session(actor.clone(), review.clone(), session.clone())
+                .await?;
+            Some((run, session))
+        }
+        None => entry
+            .store
+            .resolve_selection(actor.clone(), review.clone(), None)
+            .await?
+            .value
+            .lead()
+            .map(|target| (target.run_id().clone(), target.session_key().clone())),
     };
+    let question_id = args.question_id.map(|id| id.as_str().to_owned());
+    let (report, questions, action, sessions) = if let Some((run, session)) = &selected {
+        let detail = entry
+            .store
+            .read_run(actor.clone(), run.clone(), None, 25)
+            .await?
+            .value;
+        let sessions: Vec<_> = detail
+            .sessions
+            .into_iter()
+            .map(|session| {
+                json!({
+                    "sessionKey":session.session_key.as_str(),
+                    "parentSessionKey":session.parent.as_ref().map(|key| key.as_str()),
+                    "provider":provider_label(session.provider),
+                })
+            })
+            .collect();
+        let report = read_report(entry, actor.clone(), run.clone(), args.report).await?;
+        let questions = questions::read(
+            entry,
+            actor.clone(),
+            run.clone(),
+            session.clone(),
+            question_id,
+        )
+        .await?
+        .data;
+        let action = entry
+            .store
+            .read_action(actor.clone(), run.clone())
+            .await?
+            .value
+            .map(actions::project)
+            .transpose()?;
+        (
+            report,
+            Some(questions),
+            action,
+            Some(json!({"items": sessions, "more": detail.next_session.is_some()})),
+        )
+    } else {
+        if args.report.is_some() || question_id.is_some() {
+            return Err(AppError::NotFound);
+        }
+        (Value::Null, None, None, None)
+    };
+    let followups = followups::project_enrollment(
+        entry
+            .store
+            .read_followups(actor.clone(), review.clone())
+            .await?
+            .value,
+    )?;
     let page = entry
         .store
         .management_runs(actor, review.clone(), offset, limit)
@@ -97,37 +168,113 @@ pub(super) async fn get(entry: &Entry, actor: Actor, args: GetReview) -> Result<
         .map(|run| run_summary(entry, &review, run))
         .collect();
     let sync = queue_sync(&entry.active_source().await?, page.sync);
-    Ok(json!({
-        "review": project_review(&page.item)?,
-        "runs":runs, "total":page.total,
-        "nextOffset": next_offset(offset, runs.len(), page.total),
-        "lastSyncAt":sync.last_success_at, "syncFailed":sync.error.is_some(),
-        "dashboard":dashboard(entry, &review, selected.as_ref()),
-        "launch": launch,
-    }))
+    let item = project_review(&page.item)?;
+    fit_page(&runs, offset, page.total, |runs, next| {
+        json!({
+            "review": item,
+            "runs":runs, "total":page.total,
+            "nextOffset": next,
+            "lastSyncAt":sync.last_success_at, "syncFailed":sync.error.is_some(),
+            "dashboard":dashboard(entry, &review, selected.as_ref().map(|(run, _)| run)),
+            "selectedSessionKey": selected.as_ref().map(|(_, key)| key.as_str()),
+            "launch": launch,
+            "questions": questions,
+            "report": report,
+            "followups": followups,
+            "action": action,
+            "sessions": sessions,
+        })
+    })
+}
+
+async fn read_report(
+    entry: &Entry,
+    actor: Actor,
+    run: RunId,
+    report: Option<ReportRead>,
+) -> Result<Value, AppError> {
+    match report.unwrap_or(ReportRead::Summary { receipt_id: None }) {
+        ReportRead::Summary { receipt_id } => {
+            let receipt = receipt_id.map(|id| parse(id.as_str())).transpose()?;
+            let stored = entry.store.read_report(actor, run, receipt, false).await?;
+            Ok(json!({"kind":"accepted_summary","value":reports::project_view(stored.value)?}))
+        }
+        ReportRead::Section {
+            receipt_id,
+            offset,
+            characters,
+        } => {
+            let receipt = receipt_id.map(|id| parse(id.as_str())).transpose()?;
+            let stored = entry
+                .store
+                .read_report_section(
+                    actor,
+                    run,
+                    receipt,
+                    offset.map_or(0, |size| size.get()),
+                    characters.unwrap_or(6000),
+                )
+                .await?;
+            Ok(json!({"kind":"accepted_section","value":reports::project_section(stored.value)?}))
+        }
+        ReportRead::Candidate {
+            receipt_id,
+            offset,
+            characters,
+        } => {
+            let stored = entry
+                .store
+                .read_report_candidate(
+                    actor,
+                    run,
+                    parse(receipt_id.as_str())?,
+                    offset.map_or(0, |size| size.get()),
+                    characters.unwrap_or(6000),
+                )
+                .await?;
+            Ok(json!({"kind":"candidate","value":reports::project_candidate(stored.value)?}))
+        }
+    }
 }
 
 pub(super) fn run_summary(entry: &Entry, review: &ReviewId, run: &RunSummary) -> Value {
-    let provider = match run.provider {
-        reviewq_domain::session::HostProvider::Codex => "codex",
-        reviewq_domain::session::HostProvider::Claude => "claude",
-    };
     json!({
         "runId":run.run_id.as_str(),
         "leadSessionKey":run.lead_session_key.as_str(),
-        "provider":provider,
+        "provider":provider_label(run.provider),
         "startedAt":reviewq_protocol::UtcTimestampDto::from_unix_milliseconds(run.started_at_ms),
         "dashboard":dashboard(entry, review, Some(&run.run_id)),
     })
+}
+
+fn provider_label(provider: reviewq_domain::session::HostProvider) -> &'static str {
+    match provider {
+        reviewq_domain::session::HostProvider::Codex => "codex",
+        reviewq_domain::session::HostProvider::Claude => "claude",
+    }
 }
 
 pub(super) fn alternatives(urls: Vec<String>) -> Value {
     json!({"state":"ambiguous", "choices": urls})
 }
 
-fn next_offset(offset: u32, size: usize, total: u64) -> Option<u32> {
-    let next = offset.checked_add(u32::try_from(size).ok()?)?;
-    (u64::from(next) < total).then_some(next)
+fn fit_page(
+    items: &[Value],
+    offset: u32,
+    total: u64,
+    project: impl Fn(&[Value], Option<u32>) -> Value,
+) -> Result<Value, AppError> {
+    let mut count = items.len();
+    loop {
+        let next = offset.checked_add(count as u32);
+        let next = next.filter(|position| u64::from(*position) < total);
+        let page = project(&items[..count], next);
+        match super::bounded_result(&page) {
+            Ok(_) => return Ok(page),
+            Err(AppError::PayloadTooLarge) if count > 1 => count /= 2,
+            Err(error) => return Err(error),
+        }
+    }
 }
 
 pub(super) async fn transcript(
@@ -135,19 +282,29 @@ pub(super) async fn transcript(
     actor: Actor,
     args: ReadTranscript,
 ) -> Result<Value, AppError> {
-    let review = match resolve(entry, &actor, &args.target).await? {
-        ResolvedReview::Review(id) => id,
+    let (review, target_session) = match resolve(entry, &actor, &args.target).await? {
+        ResolvedReview::Review(id, session) => (id, session),
         ResolvedReview::Alternatives(urls) => return Ok(alternatives(urls)),
     };
+    let session = targets::session(
+        target_session,
+        args.session_key.as_ref().map(|key| key.as_str()),
+    )?;
     let (run, session) = select(
         entry,
         &actor,
         review,
-        args.session_key.as_ref().map(|id| id.as_str()),
+        session.as_ref().map(|id| id.as_str()),
     )
     .await?;
     match args.read {
-        TranscriptRead::Page { cursor, limit } => {
+        TranscriptRead::Page {
+            cursor,
+            limit,
+            direction,
+            around_id,
+            locator,
+        } => {
             let budget = if limit.is_none() {
                 16 * 1024
             } else {
@@ -165,8 +322,9 @@ pub(super) async fn transcript(
                 HistoryQuery {
                     limit: Some(limit),
                     cursor,
-                    around_id: None,
-                    locator: None,
+                    around_id: around_id.map(|id| id.as_str().to_owned()),
+                    locator,
+                    direction,
                 },
                 budget,
             )
@@ -198,11 +356,44 @@ pub(super) async fn send(
     if !entry.sends_allowed {
         return Err(AppError::Forbidden);
     }
-    let review = match resolve(entry, &actor, &args.target).await? {
-        ResolvedReview::Review(id) => id,
+    let (review, target_session) = match resolve(entry, &actor, &args.target).await? {
+        ResolvedReview::Review(id, session) => (id, session),
         ResolvedReview::Alternatives(urls) => return Ok(alternatives(urls)),
     };
-    let (run, session) = if let Some(session) = &args.session_key {
+    let session = targets::session(
+        target_session,
+        args.session_key.as_ref().map(|key| key.as_str()),
+    )?;
+    let text = MessageBody::new(args.text.as_str())?;
+    let submission: SubmissionId = parse(args.submission_id.as_str())?;
+    let report = args
+        .finding
+        .map(|finding| {
+            reports::feedback_reference(
+                finding.receipt_id,
+                finding.report_hash,
+                &finding.quote,
+                finding.quote_ref,
+            )
+        })
+        .transpose()?;
+    if let Some(receipt) = entry
+        .store
+        .replay_message(
+            actor.clone(),
+            MessageReplay {
+                review: review.clone(),
+                session: session.clone(),
+                submission: submission.clone(),
+                text: text.clone(),
+                report: report.clone(),
+            },
+        )
+        .await?
+    {
+        return send_result(entry, actor, receipt).await;
+    }
+    let (run, session) = if let Some(session) = session {
         select(entry, &actor, review.clone(), Some(session.as_str())).await?
     } else {
         let choices = entry
@@ -224,19 +415,36 @@ pub(super) async fn send(
         let lead = choices.runs.into_iter().next().ok_or(AppError::NotFound)?;
         (lead.run_id, lead.lead_session_key)
     };
-    let message = MessageBody::new(args.text.as_str())?;
-    let receipt = send_message(
-        entry.store.as_ref(),
-        actor,
-        run.clone(),
-        session,
-        parse(args.submission_id.as_str())?,
-        message,
-    )
-    .await?;
+    let lead = entry
+        .store
+        .lookup_lead(actor.clone(), run, session)
+        .await?
+        .value;
+    let receipt = entry
+        .store
+        .admit_message(
+            actor.clone(),
+            SubmitMessage::user_input(lead, submission, text, report),
+        )
+        .await?;
+    send_result(entry, actor, receipt).await
+}
+
+async fn send_result(
+    entry: &Entry,
+    actor: Actor,
+    receipt: Snapshot<DeliveryReceipt>,
+) -> Result<Value, AppError> {
+    let target = receipt.value.target.clone();
+    let companion = entry
+        .store
+        .claude_companion_available(actor, target.clone())
+        .await?
+        .map(|available| json!({"available": available}));
     Ok(json!({
         "receipt":messages::project(receipt)?.data,
-        "dashboard":dashboard(entry, &review, Some(&run))
+        "dashboard":dashboard(entry, target.review_id(), Some(target.run_id())),
+        "companion":companion,
     }))
 }
 

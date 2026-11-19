@@ -54,7 +54,7 @@ const declarations = [
 
 const files = await Promise.all(
   [
-    ...(await declarationModules(types, GENERATED)),
+    ...(await declarationModules(types, GENERATED, schema["x-reviewq-features"])),
     ["validators.mjs", GENERATED + validatorIndex],
     ["validators.d.mts", declarations],
     ...validators.modules.map(([file, source]) => [file, GENERATED + source]),
@@ -93,6 +93,7 @@ function generatePredicates(schema, refs) {
   // Schemars carries the numeric range as ordinary minimum/maximum keywords.
   ajv.addFormat("uint8", true);
   ajv.addKeyword("x-reviewq-roots");
+  ajv.addKeyword("x-reviewq-features");
   ajv.addKeyword({
     keyword: "maxUtf8Bytes",
     type: "string",

@@ -3,6 +3,7 @@ mod mutations;
 
 pub(super) use handoff::{accepted, handoff, handoff_status};
 
+pub(in crate::entry) use mutations::feedback_reference;
 pub(super) use mutations::{feedback, set_disposition, viewed};
 
 use std::sync::Arc;
@@ -143,14 +144,15 @@ async fn view(
         .store
         .read_report(actor, run, receipt, matches!(view, View::Markdown))
         .await?;
-    Ok(Json(success(
-        dto::ReportView {
-            report: stored.value.report.map(summary).transpose()?,
-            delivery: stored.value.delivery.map(delivery).transpose()?,
-            markdown: stored.value.markdown,
-        },
-        stored.cursor,
-    )?))
+    Ok(Json(success(project_view(stored.value)?, stored.cursor)?))
+}
+
+pub(in crate::entry) fn project_view(value: app::ReportView) -> Result<dto::ReportView, AppError> {
+    Ok(dto::ReportView {
+        report: value.report.map(summary).transpose()?,
+        delivery: value.delivery.map(delivery).transpose()?,
+        markdown: value.markdown,
+    })
 }
 
 pub(super) async fn history(
@@ -336,23 +338,28 @@ pub(super) async fn candidate(
             query.characters.unwrap_or(6000),
         )
         .await?;
-    let candidate = stored.value;
     Ok(Json(success(
-        dto::CandidateReport {
-            accepted: false,
-            section: project_section(candidate.section)?,
-            stats: stats(candidate.stats)?,
-            turn_id: HistoryTurnIdDto::new(candidate.turn_id).ok_or(AppError::Internal)?,
-            call_id: ResourceIdDto::new(candidate.call_id).ok_or(AppError::Internal)?,
-            declaration_sha256: hash(candidate.declaration_sha256.as_str())?,
-            reason: candidate.reason,
-            reconciled_by_batch_id: candidate
-                .reconciled_by_batch_id
-                .map(|id| ResourceIdDto::new(id).ok_or(AppError::Internal))
-                .transpose()?,
-        },
+        project_candidate(stored.value)?,
         stored.cursor,
     )?))
+}
+
+pub(in crate::entry) fn project_candidate(
+    candidate: app::CandidateReport,
+) -> Result<dto::CandidateReport, AppError> {
+    Ok(dto::CandidateReport {
+        accepted: false,
+        section: project_section(candidate.section)?,
+        stats: stats(candidate.stats)?,
+        turn_id: HistoryTurnIdDto::new(candidate.turn_id).ok_or(AppError::Internal)?,
+        call_id: ResourceIdDto::new(candidate.call_id).ok_or(AppError::Internal)?,
+        declaration_sha256: hash(candidate.declaration_sha256.as_str())?,
+        reason: candidate.reason,
+        reconciled_by_batch_id: candidate
+            .reconciled_by_batch_id
+            .map(|id| ResourceIdDto::new(id).ok_or(AppError::Internal))
+            .transpose()?,
+    })
 }
 
 pub(super) async fn source(
@@ -501,7 +508,9 @@ fn stats(value: app::ArtifactStats) -> Result<dto::ArtifactStats, AppError> {
     })
 }
 
-fn project_section(value: app::ReportSection) -> Result<dto::ReportSection, AppError> {
+pub(in crate::entry) fn project_section(
+    value: app::ReportSection,
+) -> Result<dto::ReportSection, AppError> {
     Ok(dto::ReportSection {
         report: reference(value.report)?,
         complete: value.complete,

@@ -24,66 +24,93 @@ const DRAFT_07: &str = "http://json-schema.org/draft-07/schema#";
 #[derive(Default)]
 struct Registry {
     definitions: BTreeMap<String, Value>,
+    features: BTreeMap<&'static str, &'static str>,
     roots: BTreeMap<&'static str, BTreeMap<&'static str, String>>,
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
     let mut registry = Registry::default();
-    registry.request::<SendMessageRequest>("SendMessageRequest")?;
-    registry.request::<EventCursorDto>("EventReplayCursor")?;
-    registry.request::<reviewq_protocol::settings::TestConnection>("TestConnection")?;
-    registry.request::<reviewq_protocol::settings::CatalogRequest>("CatalogRequest")?;
-    registry.request::<reviewq_protocol::settings::Disconnect>("DisconnectSettings")?;
-    registry.response::<reviewq_protocol::settings::SettingsResponse>("SettingsResponse")?;
+    registry.request::<EventCursorDto>("common", "EventReplayCursor")?;
+    registry.response::<Failure>("common", "Failure")?;
+    registry.event::<InvalidateEvent>("common", "InvalidateEvent")?;
+    registry.event::<ResetEvent>("common", "ResetEvent")?;
+
+    registry.request::<reviewq_protocol::settings::TestConnection>("settings", "TestConnection")?;
+    registry.request::<reviewq_protocol::settings::CatalogRequest>("settings", "CatalogRequest")?;
+    registry.request::<reviewq_protocol::settings::Disconnect>("settings", "DisconnectSettings")?;
+    registry
+        .response::<reviewq_protocol::settings::SettingsResponse>("settings", "SettingsResponse")?;
     registry.response::<reviewq_protocol::settings::VerifiedConnectionResponse>(
+        "settings",
         "VerifiedConnectionResponse",
     )?;
-    registry.response::<reviewq_protocol::settings::CatalogResponse>("CatalogResponse")?;
-    registry.response::<QueuePageResponse>("QueuePageResponse")?;
-    registry.response::<ReviewOverviewResponse>("ReviewOverviewResponse")?;
-    registry.response::<ReviewSelectionResponse>("ReviewSelectionResponse")?;
-    registry.response::<RunDetailResponse>("RunDetailResponse")?;
-    registry.response::<reviewq_protocol::TerminalResponse>("TerminalResponse")?;
-    registry.response::<PatchFileIndexResponse>("PatchFileIndexResponse")?;
-    registry.response::<PatchDiscussionsResponse>("PatchDiscussionsResponse")?;
-    registry.response::<HistoryPageResponse>("HistoryPageResponse")?;
-    registry.response::<HistoryNavigationResponse>("HistoryNavigationResponse")?;
-    registry.response::<HistoryPlanResponse>("HistoryPlanResponse")?;
-    registry.response::<HistoryContentResponse>("HistoryContentResponse")?;
-    registry.response::<DeliveryReceiptResponse>("DeliveryReceiptResponse")?;
-    registry.response::<reviewq_protocol::queue::RefreshResponse>("RefreshResponse")?;
-    registry.response::<launch::CatalogResponse>("RunCatalogResponse")?;
-    registry.response::<launch::PreviewResponse>("RunPreviewResponse")?;
-    registry.response::<launch::ReceiptResponse>("LaunchReceiptResponse")?;
-    registry.response::<questions::FormsResponse>("QuestionFormsResponse")?;
-    registry.response::<questions::AnswerResponse>("QuestionAnswerResponse")?;
-    registry.response::<Success<decisions::DecisionResult>>("ReviewDecisionResponse")?;
-    registry.response::<Success<notifications::NotificationPage>>("NotificationPageResponse")?;
-    registry.response::<Success<notifications::StateResult>>("NotificationStateResponse")?;
-    registry.response::<Success<followups::Enrollment>>("FollowupEnrollmentResponse")?;
-    registry.response::<Success<followups::Preferences>>("FollowupPreferencesResponse")?;
-    registry.response::<Success<followups::MonitorReceipt>>("FollowupMonitorResponse")?;
-    registry.response::<Success<Option<actions::Action>>>("CurrentActionResponse")?;
-    registry.response::<Success<reports::ReportView>>("ReportViewResponse")?;
-    registry.response::<Success<reports::ReportHistory>>("ReportHistoryResponse")?;
-    registry.response::<Success<reports::ReportSection>>("ReportSectionResponse")?;
-    registry.response::<Success<reports::CandidateReport>>("ReportCandidateResponse")?;
-    registry.response::<Success<reports::ReportContext>>("ReportContextResponse")?;
-    registry.response::<Failure>("Failure")?;
-    registry.event::<InvalidateEvent>("InvalidateEvent")?;
-    registry.event::<ResetEvent>("ResetEvent")?;
-    registry.request::<settings::SaveSettings>("SaveSettings")?;
-    registry.request::<launch::CatalogRequest>("RunCatalogRequest")?;
-    registry.request::<launch::PrepareRequest>("RunPrepareRequest")?;
-    registry.request::<launch::StartRequest>("RunStartRequest")?;
-    registry.request::<questions::Answer>("QuestionAnswerRequest")?;
-    registry.request::<decisions::DecisionRequest>("ReviewDecisionRequest")?;
-    registry.request::<decisions::CheckpointRequest>("ReviewCheckpointRequest")?;
-    registry.request::<notifications::StateRequest>("NotificationStateRequest")?;
-    registry.request::<followups::PreferencesRequest>("FollowupPreferencesRequest")?;
-    registry.request::<followups::ConfigureRequest>("FollowupConfigureRequest")?;
-    registry.request::<followups::MonitorRequest>("FollowupMonitorRequest")?;
-    registry.request::<reports::FeedbackRequest>("ReportFeedbackRequest")?;
+    registry
+        .response::<reviewq_protocol::settings::CatalogResponse>("settings", "CatalogResponse")?;
+    registry.request::<settings::SaveSettings>("settings", "SaveSettings")?;
+
+    registry.response::<QueuePageResponse>("queue", "QueuePageResponse")?;
+    registry.response::<ReviewOverviewResponse>("queue", "ReviewOverviewResponse")?;
+    registry.response::<ReviewSelectionResponse>("queue", "ReviewSelectionResponse")?;
+    registry.response::<reviewq_protocol::queue::RefreshResponse>("queue", "RefreshResponse")?;
+
+    registry.response::<RunDetailResponse>("hosts", "RunDetailResponse")?;
+    registry.response::<reviewq_protocol::TerminalResponse>("hosts", "TerminalResponse")?;
+
+    registry.response::<PatchFileIndexResponse>("changes", "PatchFileIndexResponse")?;
+    registry.response::<PatchDiscussionsResponse>("changes", "PatchDiscussionsResponse")?;
+
+    registry.response::<HistoryPageResponse>("history", "HistoryPageResponse")?;
+    registry.response::<HistoryNavigationResponse>("history", "HistoryNavigationResponse")?;
+    registry.response::<HistoryPlanResponse>("history", "HistoryPlanResponse")?;
+    registry.response::<HistoryContentResponse>("history", "HistoryContentResponse")?;
+
+    registry.request::<SendMessageRequest>("delivery", "SendMessageRequest")?;
+    registry.response::<DeliveryReceiptResponse>("delivery", "DeliveryReceiptResponse")?;
+
+    registry.response::<launch::CatalogResponse>("launch", "RunCatalogResponse")?;
+    registry.response::<launch::PreviewResponse>("launch", "RunPreviewResponse")?;
+    registry.response::<launch::ReceiptResponse>("launch", "LaunchReceiptResponse")?;
+    registry.request::<launch::CatalogRequest>("launch", "RunCatalogRequest")?;
+    registry.request::<launch::PrepareRequest>("launch", "RunPrepareRequest")?;
+    registry.request::<launch::StartRequest>("launch", "RunStartRequest")?;
+
+    registry.response::<questions::FormsResponse>("questions", "QuestionFormsResponse")?;
+    registry.response::<questions::AnswerResponse>("questions", "QuestionAnswerResponse")?;
+    registry.request::<questions::Answer>("questions", "QuestionAnswerRequest")?;
+
+    registry
+        .response::<Success<decisions::DecisionResult>>("decisions", "ReviewDecisionResponse")?;
+    registry.request::<decisions::DecisionRequest>("decisions", "ReviewDecisionRequest")?;
+    registry.request::<decisions::CheckpointRequest>("decisions", "ReviewCheckpointRequest")?;
+
+    registry.response::<Success<notifications::NotificationPage>>(
+        "notifications",
+        "NotificationPageResponse",
+    )?;
+    registry.response::<Success<notifications::StateResult>>(
+        "notifications",
+        "NotificationStateResponse",
+    )?;
+    registry.request::<notifications::StateRequest>("notifications", "NotificationStateRequest")?;
+
+    registry
+        .response::<Success<followups::Enrollment>>("followups", "FollowupEnrollmentResponse")?;
+    registry
+        .response::<Success<followups::Preferences>>("followups", "FollowupPreferencesResponse")?;
+    registry
+        .response::<Success<followups::MonitorReceipt>>("followups", "FollowupMonitorResponse")?;
+    registry.request::<followups::PreferencesRequest>("followups", "FollowupPreferencesRequest")?;
+    registry.request::<followups::ConfigureRequest>("followups", "FollowupConfigureRequest")?;
+    registry.request::<followups::MonitorRequest>("followups", "FollowupMonitorRequest")?;
+
+    registry.response::<Success<Option<actions::Action>>>("actions", "CurrentActionResponse")?;
+
+    registry.response::<Success<reports::ReportView>>("reports", "ReportViewResponse")?;
+    registry.response::<Success<reports::ReportHistory>>("reports", "ReportHistoryResponse")?;
+    registry.response::<Success<reports::ReportSection>>("reports", "ReportSectionResponse")?;
+    registry.response::<Success<reports::CandidateReport>>("reports", "ReportCandidateResponse")?;
+    registry.response::<Success<reports::ReportContext>>("reports", "ReportContextResponse")?;
+    registry.request::<reports::FeedbackRequest>("reports", "ReportFeedbackRequest")?;
 
     let mut output = io::stdout().lock();
     serde_json::to_writer_pretty(
@@ -92,6 +119,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             "$schema": DRAFT_07,
             "definitions": registry.definitions,
             "x-reviewq-roots": registry.roots,
+            "x-reviewq-features": registry.features,
         }),
     )?;
     writeln!(output)?;
@@ -99,25 +127,49 @@ fn main() -> Result<(), Box<dyn Error>> {
 }
 
 impl Registry {
-    fn response<T: JsonSchema>(&mut self, name: &'static str) -> Result<(), Box<dyn Error>> {
-        self.register::<T>("responses", name, SchemaSettings::draft07().for_serialize())
+    fn response<T: JsonSchema>(
+        &mut self,
+        feature: &'static str,
+        name: &'static str,
+    ) -> Result<(), Box<dyn Error>> {
+        self.register::<T>(
+            "responses",
+            feature,
+            name,
+            SchemaSettings::draft07().for_serialize(),
+        )
     }
 
-    fn request<T: JsonSchema>(&mut self, name: &'static str) -> Result<(), Box<dyn Error>> {
+    fn request<T: JsonSchema>(
+        &mut self,
+        feature: &'static str,
+        name: &'static str,
+    ) -> Result<(), Box<dyn Error>> {
         self.register::<T>(
             "requests",
+            feature,
             name,
             SchemaSettings::draft07().for_deserialize(),
         )
     }
 
-    fn event<T: JsonSchema>(&mut self, name: &'static str) -> Result<(), Box<dyn Error>> {
-        self.register::<T>("events", name, SchemaSettings::draft07().for_serialize())
+    fn event<T: JsonSchema>(
+        &mut self,
+        feature: &'static str,
+        name: &'static str,
+    ) -> Result<(), Box<dyn Error>> {
+        self.register::<T>(
+            "events",
+            feature,
+            name,
+            SchemaSettings::draft07().for_serialize(),
+        )
     }
 
     fn register<T: JsonSchema>(
         &mut self,
         group: &'static str,
+        feature: &'static str,
         name: &'static str,
         settings: SchemaSettings,
     ) -> Result<(), Box<dyn Error>> {
@@ -125,6 +177,7 @@ impl Registry {
         if self.roots.values().any(|roots| roots.contains_key(name)) {
             return Err(format!("duplicate contract root {name}").into());
         }
+        self.features.insert(name, feature);
         self.roots
             .entry(group)
             .or_default()

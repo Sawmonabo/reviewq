@@ -193,15 +193,7 @@ impl ServerHandler for Server {
                 result.unwrap_or(Err(AppError::Busy))
             }
         };
-        let output = match result.and_then(|value| {
-            let text = serde_json::to_string(&value).map_err(|_| AppError::Internal)?;
-            let output = CallToolResult::success(vec![ContentBlock::text(text)]);
-            let encoded = serde_json::to_vec(&output).map_err(|_| AppError::Internal)?;
-            if encoded.len() > MAX_TOOL_RESPONSE {
-                return Err(AppError::PayloadTooLarge);
-            }
-            Ok(output)
-        }) {
+        let output = match result.and_then(|value| bounded_result(&value)) {
             Ok(output) => output,
             Err(error) => {
                 let (_status, failure) = super::error::failure(error);
@@ -212,6 +204,16 @@ impl ServerHandler for Server {
         };
         Ok(output.into())
     }
+}
+
+fn bounded_result(value: &Value) -> Result<CallToolResult, AppError> {
+    let text = serde_json::to_string(value).map_err(|_| AppError::Internal)?;
+    let result = CallToolResult::success(vec![ContentBlock::text(text)]);
+    let encoded = serde_json::to_vec(&result).map_err(|_| AppError::Internal)?;
+    if encoded.len() > MAX_TOOL_RESPONSE {
+        return Err(AppError::PayloadTooLarge);
+    }
+    Ok(result)
 }
 
 impl Server {

@@ -2,170 +2,12 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "definitions": {
     "Action": {
-      "properties": {
-        "actionId": {
-          "$ref": "#/definitions/ResourceIdDto"
-        },
-        "approval": {
-          "$ref": "#/definitions/Approval"
-        },
-        "approvalObservedAt": {
-          "anyOf": [
-            {
-              "$ref": "#/definitions/UtcTimestampDto"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "attempts": {
-          "format": "uint8",
-          "maximum": 255,
-          "minimum": 0,
-          "type": "integer"
-        },
-        "authorityVerified": {
-          "type": "boolean"
-        },
-        "callId": {
-          "anyOf": [
-            {
-              "$ref": "#/definitions/ResourceIdDto"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "checkedAt": {
-          "anyOf": [
-            {
-              "$ref": "#/definitions/UtcTimestampDto"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "intent": {
-          "$ref": "#/definitions/Intent"
-        },
-        "lastExecutedSubmissionId": {
-          "anyOf": [
-            {
-              "$ref": "#/definitions/SubmissionIdDto"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "lastExecutedTurnId": {
-          "anyOf": [
-            {
-              "$ref": "#/definitions/HistoryTurnIdDto"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "nextCheckAt": {
-          "anyOf": [
-            {
-              "$ref": "#/definitions/UtcTimestampDto"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "pendingSubmissionId": {
-          "anyOf": [
-            {
-              "$ref": "#/definitions/SubmissionIdDto"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "reason": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "requestEntryId": {
-          "anyOf": [
-            {
-              "$ref": "#/definitions/HistoryEntryIdDto"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "reviewedSha": {
-          "anyOf": [
-            {
-              "$ref": "#/definitions/GitShaDto"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "revision": {
-          "$ref": "#/definitions/RevisionDto"
-        },
-        "runId": {
-          "$ref": "#/definitions/RunIdDto"
-        },
-        "state": {
-          "$ref": "#/definitions/CurrentActionResponseState"
-        },
-        "targets": {
-          "items": {
-            "$ref": "#/definitions/Target"
-          },
-          "type": "array"
-        },
-        "turnId": {
-          "anyOf": [
-            {
-              "$ref": "#/definitions/HistoryTurnIdDto"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        }
-      },
-      "required": [
-        "actionId",
-        "runId",
-        "requestEntryId",
-        "turnId",
-        "callId",
-        "reviewedSha",
-        "authorityVerified",
-        "revision",
-        "intent",
-        "state",
-        "targets",
-        "approval",
-        "approvalObservedAt",
-        "checkedAt",
-        "attempts",
-        "pendingSubmissionId",
-        "lastExecutedSubmissionId",
-        "lastExecutedTurnId",
-        "nextCheckAt",
-        "reason"
+      "enum": [
+        "read",
+        "unread",
+        "dismiss"
       ],
-      "type": "object"
+      "type": "string"
     },
     "Approval": {
       "enum": [
@@ -477,6 +319,16 @@
         "receiptId": {
           "$ref": "#/definitions/ResourceIdDto"
         },
+        "reconciledByBatchId": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ResourceIdDto"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "sha256": {
           "$ref": "#/definitions/ReportHashDto"
         },
@@ -508,6 +360,7 @@
         "turnId",
         "callId",
         "declarationSha256",
+        "reconciledByBatchId",
         "reason"
       ],
       "type": "object"
@@ -853,7 +706,7 @@
         "data": {
           "anyOf": [
             {
-              "$ref": "#/definitions/Action"
+              "$ref": "#/definitions/CurrentActionResponseAction"
             },
             {
               "type": "null"
@@ -866,6 +719,173 @@
         "cursor"
       ],
       "title": "CurrentActionResponse",
+      "type": "object"
+    },
+    "CurrentActionResponseAction": {
+      "properties": {
+        "actionId": {
+          "$ref": "#/definitions/ResourceIdDto"
+        },
+        "approval": {
+          "$ref": "#/definitions/Approval"
+        },
+        "approvalObservedAt": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/UtcTimestampDto"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "attempts": {
+          "format": "uint8",
+          "maximum": 255,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "authorityVerified": {
+          "type": "boolean"
+        },
+        "callId": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ResourceIdDto"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "checkedAt": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/UtcTimestampDto"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "intent": {
+          "$ref": "#/definitions/Intent"
+        },
+        "lastExecutedSubmissionId": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SubmissionIdDto"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "lastExecutedTurnId": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/HistoryTurnIdDto"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "nextCheckAt": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/UtcTimestampDto"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "pendingSubmissionId": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SubmissionIdDto"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "reason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "requestEntryId": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/HistoryEntryIdDto"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "reviewedSha": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/GitShaDto"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "revision": {
+          "$ref": "#/definitions/RevisionDto"
+        },
+        "runId": {
+          "$ref": "#/definitions/RunIdDto"
+        },
+        "state": {
+          "$ref": "#/definitions/CurrentActionResponseState"
+        },
+        "targets": {
+          "items": {
+            "$ref": "#/definitions/Target"
+          },
+          "type": "array"
+        },
+        "turnId": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/HistoryTurnIdDto"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "actionId",
+        "runId",
+        "requestEntryId",
+        "turnId",
+        "callId",
+        "reviewedSha",
+        "authorityVerified",
+        "revision",
+        "intent",
+        "state",
+        "targets",
+        "approval",
+        "approvalObservedAt",
+        "checkedAt",
+        "attempts",
+        "pendingSubmissionId",
+        "lastExecutedSubmissionId",
+        "lastExecutedTurnId",
+        "nextCheckAt",
+        "reason"
+      ],
+      "title": "CurrentActionResponseAction",
       "type": "object"
     },
     "CurrentActionResponseState": {
@@ -2967,7 +2987,7 @@
       "additionalProperties": false,
       "properties": {
         "action": {
-          "$ref": "#/definitions/NotificationStateRequestAction"
+          "$ref": "#/definitions/Action"
         },
         "ids": {
           "items": {
@@ -2982,15 +3002,6 @@
       ],
       "title": "NotificationStateRequest",
       "type": "object"
-    },
-    "NotificationStateRequestAction": {
-      "enum": [
-        "read",
-        "unread",
-        "dismiss"
-      ],
-      "title": "NotificationStateRequestAction",
-      "type": "string"
     },
     "NotificationStateResponse": {
       "description": "The resource and event head from the same authorized snapshot.",
@@ -6219,6 +6230,61 @@
       "title": "VerifiedConnectionResponse",
       "type": "object"
     }
+  },
+  "x-reviewq-features": {
+    "CatalogRequest": "settings",
+    "CatalogResponse": "settings",
+    "CurrentActionResponse": "actions",
+    "DeliveryReceiptResponse": "delivery",
+    "DisconnectSettings": "settings",
+    "EventReplayCursor": "common",
+    "Failure": "common",
+    "FollowupConfigureRequest": "followups",
+    "FollowupEnrollmentResponse": "followups",
+    "FollowupMonitorRequest": "followups",
+    "FollowupMonitorResponse": "followups",
+    "FollowupPreferencesRequest": "followups",
+    "FollowupPreferencesResponse": "followups",
+    "HistoryContentResponse": "history",
+    "HistoryNavigationResponse": "history",
+    "HistoryPageResponse": "history",
+    "HistoryPlanResponse": "history",
+    "InvalidateEvent": "common",
+    "LaunchReceiptResponse": "launch",
+    "NotificationPageResponse": "notifications",
+    "NotificationStateRequest": "notifications",
+    "NotificationStateResponse": "notifications",
+    "PatchDiscussionsResponse": "changes",
+    "PatchFileIndexResponse": "changes",
+    "QuestionAnswerRequest": "questions",
+    "QuestionAnswerResponse": "questions",
+    "QuestionFormsResponse": "questions",
+    "QueuePageResponse": "queue",
+    "RefreshResponse": "queue",
+    "ReportCandidateResponse": "reports",
+    "ReportContextResponse": "reports",
+    "ReportFeedbackRequest": "reports",
+    "ReportHistoryResponse": "reports",
+    "ReportSectionResponse": "reports",
+    "ReportViewResponse": "reports",
+    "ResetEvent": "common",
+    "ReviewCheckpointRequest": "decisions",
+    "ReviewDecisionRequest": "decisions",
+    "ReviewDecisionResponse": "decisions",
+    "ReviewOverviewResponse": "queue",
+    "ReviewSelectionResponse": "queue",
+    "RunCatalogRequest": "launch",
+    "RunCatalogResponse": "launch",
+    "RunDetailResponse": "hosts",
+    "RunPrepareRequest": "launch",
+    "RunPreviewResponse": "launch",
+    "RunStartRequest": "launch",
+    "SaveSettings": "settings",
+    "SendMessageRequest": "delivery",
+    "SettingsResponse": "settings",
+    "TerminalResponse": "hosts",
+    "TestConnection": "settings",
+    "VerifiedConnectionResponse": "settings"
   },
   "x-reviewq-roots": {
     "events": {

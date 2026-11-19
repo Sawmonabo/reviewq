@@ -67,7 +67,7 @@ async fn decide(
         return decisions::project_result(previous);
     }
     let review = match targets::resolve(entry, &actor, &body.target).await? {
-        ResolvedReview::Review(id) => id,
+        ResolvedReview::Review(id, _) => id,
         ResolvedReview::Alternatives(_) => return Err(AppError::Conflict),
     };
     let snapshot = entry

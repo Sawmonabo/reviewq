@@ -3,7 +3,7 @@
 use reviewq_domain::identity::{
     GitSha, MrIdentity, ReviewId, Revision, RunId, SessionKey, TicketKey,
 };
-use reviewq_domain::session::{HostProvider, LeadTarget};
+use reviewq_domain::session::{HostProvider, LeadTarget, SessionTarget};
 
 use crate::access::{Actor, AppError, AppFuture};
 use crate::decisions::{Decision, Frontier};
@@ -59,6 +59,12 @@ impl SelectedLead {
 /// Direct lookup used by review bookmarks and the selected-run browser path.
 pub trait ReviewLookup: Send + Sync {
     fn review_by_mr(&self, actor: Actor, mr: MrIdentity) -> AppFuture<'_, ReviewId>;
+
+    fn registered_session(
+        &self,
+        actor: Actor,
+        session: SessionKey,
+    ) -> AppFuture<'_, Option<SessionTarget>>;
 
     fn run_for_session(
         &self,

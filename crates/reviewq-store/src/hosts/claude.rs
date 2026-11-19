@@ -4,7 +4,7 @@ use reviewq_app::access::{Actor, AppError, AppFuture};
 use reviewq_app::events::{ResourceKey, Snapshot};
 use reviewq_app::hosts::HostPhase;
 use reviewq_app::hosts::{ClaudeHeartbeat, ClaudeHeartbeatResult, ClaudeStore};
-use reviewq_domain::session::{HostProvider, LeadTarget};
+use reviewq_domain::session::{HostProvider, LeadTarget, SessionTarget};
 use rusqlite::params;
 
 use super::{activity_columns, allow_target};
@@ -22,6 +22,34 @@ mod delivery;
 mod workflow;
 
 impl ClaudeStore for SqliteStore {
+    fn claude_companion_available(
+        &self,
+        actor: Actor,
+        target: SessionTarget,
+    ) -> AppFuture<'_, Option<bool>> {
+        Box::pin(async move {
+            self.read(move |db| {
+                let lead = lead_for_run(db, target.run_id())?.ok_or(AppError::NotFound)?;
+                if lead.target() != &target {
+                    return Err(AppError::NotFound.into());
+                }
+                allow_target(db, &actor, &lead)?;
+                if lead.binding().identity().provider() != HostProvider::Claude {
+                    return Ok(None);
+                }
+                let fresh = db.prepare_cached(
+                    "SELECT EXISTS(SELECT 1 FROM claude_companions WHERE session_key=?1 AND seen_at_ms>?2)",
+                )?.query_row(
+                    params![target.session_key().as_str(),now_ms()?.saturating_sub(COMPANION_FRESH_MS)],
+                    |row| row.get(0),
+                )?;
+                Ok(Some(fresh))
+            })
+            .await
+            .map_err(StoreError::app)
+        })
+    }
+
     fn pending_claude_launch(
         &self,
         context: reviewq_app::hosts::ClaudeContext,

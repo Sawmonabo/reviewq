@@ -8,8 +8,8 @@ use reviewq_app::access::{Actor, ActorScope, AppError};
 use reviewq_app::events::{ResourceKey, Snapshot};
 use reviewq_app::hosts::{
     DeliveryClaim, DeliveryObservation, DeliveryOutcome, DeliveryReceipt, DeliveryRecoveryCursor,
-    DeliveryReport, DeliveryWork, MessageBody, MessagePurpose, ObservedInput, RecoverableDelivery,
-    RecoverableDeliveryState, ReportQuote, ReportRef, SubmitMessage,
+    DeliveryReport, DeliveryWork, MessageBody, MessagePurpose, MessageReplay, ObservedInput,
+    RecoverableDelivery, RecoverableDeliveryState, ReportQuote, ReportRef, SubmitMessage,
 };
 use reviewq_domain::identity::{DeliveryFence, DeliveryId, NativeTurnId, Revision, SubmissionId};
 use reviewq_domain::session::{HostProvider, LeadTarget, SessionTarget};
@@ -200,6 +200,37 @@ fn insert_intent(
     )?;
     tx.delivery_changed = true;
     Ok((delivery_id, time))
+}
+
+pub(super) fn replay(
+    db: &Connection,
+    actor: Actor,
+    input: MessageReplay,
+) -> Result<Option<Snapshot<DeliveryReceipt>>, StoreError> {
+    let Some((id, stored_digest)) =
+        find_receipt(db, &actor_key(&actor), OPERATION, &input.submission)?
+    else {
+        return Ok(None);
+    };
+    let receipt = by_id(db, &id)?.ok_or(AppError::Internal)?.receipt;
+    let lead = validate_target(db, &actor, &receipt.target)?;
+    if lead.review_id() != &input.review
+        || input
+            .session
+            .as_ref()
+            .is_some_and(|key| key != lead.session_key())
+        || request_digest(&SubmitMessage::user_input(
+            lead,
+            input.submission,
+            input.text,
+            input.report,
+        ))
+        .as_slice()
+            != stored_digest
+    {
+        return Err(AppError::IdempotencyConflict.into());
+    }
+    snapshot(db, receipt).map(Some)
 }
 
 pub(super) fn read_receipt(

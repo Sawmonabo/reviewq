@@ -68,21 +68,26 @@ pub(super) async fn enrollment(
 ) -> Result<Json<Success<dto::Enrollment>>, ApiError> {
     let actor = entry.auth.browser_actor(&headers, false)?;
     let stored = entry.store.read_followups(actor, parse(&review)?).await?;
-    let value = stored.value;
     Ok(Json(success(
-        dto::Enrollment {
-            preferences: project_preferences(value.preferences)?,
-            monitor: value.monitor.map(monitor).transpose()?,
-            batches: value
-                .batches
-                .into_iter()
-                .map(batch)
-                .collect::<Result<_, _>>()?,
-            latest_completed_result: value.latest.map(result).transpose()?,
-            unviewed_batch_count: count(value.unviewed_batches)?,
-        },
+        project_enrollment(stored.value)?,
         stored.cursor,
     )?))
+}
+
+pub(in crate::entry) fn project_enrollment(
+    value: app::Enrollment,
+) -> Result<dto::Enrollment, AppError> {
+    Ok(dto::Enrollment {
+        preferences: project_preferences(value.preferences)?,
+        monitor: value.monitor.map(monitor).transpose()?,
+        batches: value
+            .batches
+            .into_iter()
+            .map(batch)
+            .collect::<Result<_, _>>()?,
+        latest_completed_result: value.latest.map(result).transpose()?,
+        unviewed_batch_count: count(value.unviewed_batches)?,
+    })
 }
 
 pub(super) async fn results(
