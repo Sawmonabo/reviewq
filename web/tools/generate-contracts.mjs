@@ -92,6 +92,7 @@ function generatePredicates(schema, refs) {
   ajv.addFormat("date-time", isUtcTimestamp);
   // Schemars carries the numeric range as ordinary minimum/maximum keywords.
   ajv.addFormat("uint8", true);
+  ajv.addFormat("double", true);
   ajv.addKeyword("x-reviewq-roots");
   ajv.addKeyword("x-reviewq-features");
   ajv.addKeyword({

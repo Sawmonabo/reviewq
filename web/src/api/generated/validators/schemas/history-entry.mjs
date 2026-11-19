@@ -2,10 +2,10 @@
 import { func0 } from "../runtime.mjs";
 import { validate44 } from "./history-cursor-dto.mjs";
 import { validate25 } from "./checkpoint-id-dto.mjs";
-import { validate388 } from "./history-part.mjs";
+import { validate391 } from "./history-part.mjs";
 import { validate95 } from "./safe-count-dto.mjs";
-import { validate207 } from "./utc-timestamp-dto.mjs";
-function validate385(
+import { validate209 } from "./utc-timestamp-dto.mjs";
+function validate388(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -24,7 +24,7 @@ function validate385(
         ((data.parts === undefined || !func0.call(data, "parts")) &&
           (missing0 = "parts"))
       ) {
-        validate385.errors = [
+        validate388.errors = [
           {
             instancePath,
             schemaPath: "#/required",
@@ -86,7 +86,7 @@ function validate385(
                   for (let i0 = 0; i0 < len0; i0++) {
                     const _errs5 = errors;
                     if (
-                      !validate388(data2[i0], {
+                      !validate391(data2[i0], {
                         instancePath: instancePath + "/parts/" + i0,
                         parentData: data2,
                         parentDataProperty: i0,
@@ -95,8 +95,8 @@ function validate385(
                     ) {
                       vErrors =
                         vErrors === null
-                          ? validate388.errors
-                          : vErrors.concat(validate388.errors);
+                          ? validate391.errors
+                          : vErrors.concat(validate391.errors);
                       errors = vErrors.length;
                     }
                     var valid1 = _errs5 === errors;
@@ -105,7 +105,7 @@ function validate385(
                     }
                   }
                 } else {
-                  validate385.errors = [
+                  validate388.errors = [
                     {
                       instancePath: instancePath + "/parts",
                       schemaPath: "#/properties/parts/type",
@@ -155,7 +155,7 @@ function validate385(
                   let valid2 = false;
                   const _errs9 = errors;
                   if (
-                    !validate207(data5, {
+                    !validate209(data5, {
                       instancePath: instancePath + "/timestamp",
                       parentData: data,
                       parentDataProperty: "timestamp",
@@ -164,8 +164,8 @@ function validate385(
                   ) {
                     vErrors =
                       vErrors === null
-                        ? validate207.errors
-                        : vErrors.concat(validate207.errors);
+                        ? validate209.errors
+                        : vErrors.concat(validate209.errors);
                     errors = vErrors.length;
                   }
                   var _valid0 = _errs9 === errors;
@@ -202,7 +202,7 @@ function validate385(
                       vErrors.push(err1);
                     }
                     errors++;
-                    validate385.errors = vErrors;
+                    validate388.errors = vErrors;
                     return false;
                   } else {
                     errors = _errs8;
@@ -273,7 +273,7 @@ function validate385(
                         vErrors.push(err3);
                       }
                       errors++;
-                      validate385.errors = vErrors;
+                      validate388.errors = vErrors;
                       return false;
                     } else {
                       errors = _errs13;
@@ -296,7 +296,7 @@ function validate385(
         }
       }
     } else {
-      validate385.errors = [
+      validate388.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -307,7 +307,7 @@ function validate385(
       return false;
     }
   }
-  validate385.errors = vErrors;
+  validate388.errors = vErrors;
   return errors === 0;
 }
-export { validate385 };
+export { validate388 };

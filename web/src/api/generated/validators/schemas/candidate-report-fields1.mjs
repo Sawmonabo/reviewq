@@ -4,7 +4,7 @@ import { validate25 } from "./checkpoint-id-dto.mjs";
 import { validate102 } from "./report-hash-dto.mjs";
 import { validate95 } from "./safe-count-dto.mjs";
 import { validate98 } from "./offset-unit.mjs";
-function validate634(
+function validate640(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -15,7 +15,7 @@ function validate634(
       if (data.accepted !== undefined && func0.call(data, "accepted")) {
         const _errs1 = errors;
         if (typeof data.accepted !== "boolean") {
-          validate634.errors = [
+          validate640.errors = [
             {
               instancePath: instancePath + "/accepted",
               schemaPath: "#/properties/accepted/type",
@@ -54,7 +54,7 @@ function validate634(
           if (data.complete !== undefined && func0.call(data, "complete")) {
             const _errs4 = errors;
             if (typeof data.complete !== "boolean") {
-              validate634.errors = [
+              validate640.errors = [
                 {
                   instancePath: instancePath + "/complete",
                   schemaPath: "#/properties/complete/type",
@@ -150,7 +150,7 @@ function validate634(
                     vErrors.push(err1);
                   }
                   errors++;
-                  validate634.errors = vErrors;
+                  validate640.errors = vErrors;
                   return false;
                 } else {
                   errors = _errs8;
@@ -270,7 +270,7 @@ function validate634(
                           vErrors.push(err3);
                         }
                         errors++;
-                        validate634.errors = vErrors;
+                        validate640.errors = vErrors;
                         return false;
                       } else {
                         errors = _errs15;
@@ -294,7 +294,7 @@ function validate634(
         }
       }
     } else {
-      validate634.errors = [
+      validate640.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -305,7 +305,7 @@ function validate634(
       return false;
     }
   }
-  validate634.errors = vErrors;
+  validate640.errors = vErrors;
   return errors === 0;
 }
-export { validate634 };
+export { validate640 };

@@ -240,6 +240,7 @@ pub fn router(
         .route("/events", get(events::feed))
         .route("/session", get(session).post(start_session))
         .route("/queue", get(pages::queue))
+        .route("/queue/sync", get(refresh::sync))
         .route("/queue/refresh", post(refresh::start))
         .route("/queue/refresh/{refresh_id}", get(refresh::status))
         .route("/tracking", post(tracking::track))

@@ -15,6 +15,7 @@ import type {
   RunIdDto,
   SafeCountDto,
   SessionKeyDto,
+  TicketKeyDto,
   UpstreamIdDto,
   UtcTimestampDto,
 } from "./common.js";
@@ -38,8 +39,6 @@ export type QueueStatus =
 
 export type RunStage = "needs_input" | "working" | "waiting" | "archived";
 
-export type TicketKeyDto = string;
-
 export type QueueSyncMode = "setup" | "connected" | "disconnected";
 
 export type RefreshState = "running" | "succeeded" | "failed" | "superseded";
@@ -57,6 +56,11 @@ export type ReviewSelection =
       runId: null;
       [k: string]: unknown;
     };
+
+export interface TrackReviewRequest {
+  expectedRevision: RevisionDto;
+  url: string;
+}
 
 export interface QueuePageResponse {
   cursor: EventCursorDto;
@@ -150,6 +154,12 @@ export interface QueueSync {
   [k: string]: unknown;
 }
 
+export interface QueueSyncResponse {
+  cursor: EventCursorDto;
+  data: QueueSync;
+  [k: string]: unknown;
+}
+
 export interface RefreshResponse {
   cursor: EventCursorDto;
   data: RefreshReceipt;
@@ -240,5 +250,19 @@ export interface RunSummary {
 export interface ReviewSelectionResponse {
   cursor: EventCursorDto;
   data: ReviewSelection;
+  [k: string]: unknown;
+}
+
+export interface TrackReviewResponse {
+  cursor: EventCursorDto;
+  data: TrackedReview;
+  [k: string]: unknown;
+}
+
+export interface TrackedReview {
+  iid: MergeRequestIidDto;
+  projectId: ProjectIdDto;
+  reviewId: ReviewIdDto;
+  sourceSha: GitShaDto;
   [k: string]: unknown;
 }

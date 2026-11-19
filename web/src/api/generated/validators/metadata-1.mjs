@@ -2,6 +2,7 @@
 const schema11 = {
   enum: [
     "queue",
+    "queue_sync",
     "review",
     "run",
     "session",

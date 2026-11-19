@@ -136,6 +136,7 @@ fn key(item: &ResourceKey) -> ResourceKeyDto {
     }
     let (kind, id) = match item {
         ResourceKey::Queue => (ResourceKindDto::Queue, None),
+        ResourceKey::QueueSync => (ResourceKindDto::QueueSync, None),
         ResourceKey::Review(value) => (ResourceKindDto::Review, id(value)),
         ResourceKey::Run(value) => (ResourceKindDto::Run, id(value)),
         ResourceKey::Session(value) => (ResourceKindDto::Session, id(value)),

@@ -67,6 +67,16 @@ import type {
   SendMessageRequest,
 } from "./delivery.js";
 
+import type {
+  QueuePageResponse,
+  QueueSyncResponse,
+  RefreshResponse,
+  ReviewOverviewResponse,
+  ReviewSelectionResponse,
+  TrackReviewRequest,
+  TrackReviewResponse,
+} from "./queue.js";
+
 import type { CurrentActionResponse } from "./actions.js";
 
 import type {
@@ -81,14 +91,9 @@ import type {
   PatchFileIndexResponse,
 } from "./changes.js";
 
-import type {
-  QueuePageResponse,
-  RefreshResponse,
-  ReviewOverviewResponse,
-  ReviewSelectionResponse,
-} from "./queue.js";
-
 import type { RunDetailResponse, TerminalResponse } from "./hosts.js";
+
+import type { TicketDetailResponse } from "./tickets.js";
 
 export interface Contracts {
   InvalidateEvent: InvalidateEvent;
@@ -110,6 +115,7 @@ export interface Contracts {
   SaveSettings: SaveSettings;
   SendMessageRequest: SendMessageRequest;
   TestConnection: TestConnection;
+  TrackReviewRequest: TrackReviewRequest;
   CatalogResponse: CatalogResponse;
   CurrentActionResponse: CurrentActionResponse;
   DeliveryReceiptResponse: DeliveryReceiptResponse;
@@ -129,6 +135,7 @@ export interface Contracts {
   QuestionAnswerResponse: QuestionAnswerResponse;
   QuestionFormsResponse: QuestionFormsResponse;
   QueuePageResponse: QueuePageResponse;
+  QueueSyncResponse: QueueSyncResponse;
   RefreshResponse: RefreshResponse;
   ReportCandidateResponse: ReportCandidateResponse;
   ReportContextResponse: ReportContextResponse;
@@ -143,5 +150,7 @@ export interface Contracts {
   RunPreviewResponse: RunPreviewResponse;
   SettingsResponse: SettingsResponse;
   TerminalResponse: TerminalResponse;
+  TicketDetailResponse: TicketDetailResponse;
+  TrackReviewResponse: TrackReviewResponse;
   VerifiedConnectionResponse: VerifiedConnectionResponse;
 }

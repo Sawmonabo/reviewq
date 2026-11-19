@@ -19,6 +19,7 @@ function validate27(
   }
   if (!(
     data === "queue" ||
+    data === "queue_sync" ||
     data === "review" ||
     data === "run" ||
     data === "session" ||

@@ -2,8 +2,8 @@
 import { func0 } from "../runtime.mjs";
 import { validate25 } from "./checkpoint-id-dto.mjs";
 import { validate125 } from "./review-id-dto.mjs";
-import { validate826 } from "./session-summary-page.mjs";
-function validate822(
+import { validate832 } from "./session-summary-page.mjs";
+function validate828(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -23,7 +23,7 @@ function validate822(
         ((data.sessions === undefined || !func0.call(data, "sessions")) &&
           (missing0 = "sessions"))
       ) {
-        validate822.errors = [
+        validate828.errors = [
           {
             instancePath,
             schemaPath: "#/required",
@@ -102,7 +102,7 @@ function validate822(
               if (data.sessions !== undefined && func0.call(data, "sessions")) {
                 const _errs4 = errors;
                 if (
-                  !validate826(data.sessions, {
+                  !validate832(data.sessions, {
                     instancePath: instancePath + "/sessions",
                     parentData: data,
                     parentDataProperty: "sessions",
@@ -111,8 +111,8 @@ function validate822(
                 ) {
                   vErrors =
                     vErrors === null
-                      ? validate826.errors
-                      : vErrors.concat(validate826.errors);
+                      ? validate832.errors
+                      : vErrors.concat(validate832.errors);
                   errors = vErrors.length;
                 }
                 var valid0 = _errs4 === errors;
@@ -124,7 +124,7 @@ function validate822(
         }
       }
     } else {
-      validate822.errors = [
+      validate828.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -135,7 +135,7 @@ function validate822(
       return false;
     }
   }
-  validate822.errors = vErrors;
+  validate828.errors = vErrors;
   return errors === 0;
 }
-export { validate822 };
+export { validate828 };

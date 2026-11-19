@@ -26,6 +26,7 @@ struct StoredInvalidation {
 #[serde(rename_all = "snake_case", tag = "kind", content = "id")]
 enum StoredKey {
     Queue,
+    QueueSync,
     Review(Option<String>),
     Run(Option<String>),
     Session(Option<String>),
@@ -44,6 +45,7 @@ impl From<&ResourceKey> for StoredKey {
     fn from(value: &ResourceKey) -> Self {
         match value {
             ResourceKey::Queue => Self::Queue,
+            ResourceKey::QueueSync => Self::QueueSync,
             ResourceKey::Review(id) => Self::Review(id.as_ref().map(ToString::to_string)),
             ResourceKey::Run(id) => Self::Run(id.as_ref().map(ToString::to_string)),
             ResourceKey::Session(id) => Self::Session(id.as_ref().map(ToString::to_string)),
@@ -73,6 +75,7 @@ impl TryFrom<StoredKey> for ResourceKey {
         }
         Ok(match value {
             StoredKey::Queue => Self::Queue,
+            StoredKey::QueueSync => Self::QueueSync,
             StoredKey::Review(id) => Self::Review(key(id)?),
             StoredKey::Run(id) => Self::Run(key(id)?),
             StoredKey::Session(id) => Self::Session(key(id)?),

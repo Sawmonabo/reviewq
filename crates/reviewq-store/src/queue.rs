@@ -745,7 +745,7 @@ pub(crate) fn identity(row: &Row<'_>, offset: usize) -> Result<MrIdentity, Store
     Ok(MrIdentity::new(origin, project, iid))
 }
 
-fn state_label(state: MergeRequestState) -> &'static str {
+pub(crate) fn state_label(state: MergeRequestState) -> &'static str {
     match state {
         MergeRequestState::Open => "open",
         MergeRequestState::Closed => "closed",

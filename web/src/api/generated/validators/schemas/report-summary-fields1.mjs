@@ -2,10 +2,10 @@
 import { func0 } from "../runtime.mjs";
 import { validate25 } from "./checkpoint-id-dto.mjs";
 import { validate95 } from "./safe-count-dto.mjs";
-import { validate207 } from "./utc-timestamp-dto.mjs";
-import { validate703 } from "./coverage.mjs";
+import { validate209 } from "./utc-timestamp-dto.mjs";
+import { validate709 } from "./coverage.mjs";
 import { validate111 } from "./git-sha-dto.mjs";
-function validate698(
+function validate704(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -61,7 +61,7 @@ function validate698(
           if (data.capturedAt !== undefined && func0.call(data, "capturedAt")) {
             const _errs3 = errors;
             if (
-              !validate207(data.capturedAt, {
+              !validate209(data.capturedAt, {
                 instancePath: instancePath + "/capturedAt",
                 parentData: data,
                 parentDataProperty: "capturedAt",
@@ -70,8 +70,8 @@ function validate698(
             ) {
               vErrors =
                 vErrors === null
-                  ? validate207.errors
-                  : vErrors.concat(validate207.errors);
+                  ? validate209.errors
+                  : vErrors.concat(validate209.errors);
               errors = vErrors.length;
             }
             var valid0 = _errs3 === errors;
@@ -136,7 +136,7 @@ function validate698(
                   vErrors.push(err1);
                 }
                 errors++;
-                validate698.errors = vErrors;
+                validate704.errors = vErrors;
                 return false;
               } else {
                 errors = _errs5;
@@ -156,7 +156,7 @@ function validate698(
               if (data.complete !== undefined && func0.call(data, "complete")) {
                 const _errs9 = errors;
                 if (typeof data.complete !== "boolean") {
-                  validate698.errors = [
+                  validate704.errors = [
                     {
                       instancePath: instancePath + "/complete",
                       schemaPath: "#/properties/complete/type",
@@ -177,7 +177,7 @@ function validate698(
                 ) {
                   const _errs11 = errors;
                   if (
-                    !validate703(data.coverage, {
+                    !validate709(data.coverage, {
                       instancePath: instancePath + "/coverage",
                       parentData: data,
                       parentDataProperty: "coverage",
@@ -186,8 +186,8 @@ function validate698(
                   ) {
                     vErrors =
                       vErrors === null
-                        ? validate703.errors
-                        : vErrors.concat(validate703.errors);
+                        ? validate709.errors
+                        : vErrors.concat(validate709.errors);
                     errors = vErrors.length;
                   }
                   var valid0 = _errs11 === errors;
@@ -253,7 +253,7 @@ function validate698(
                         vErrors.push(err3);
                       }
                       errors++;
-                      validate698.errors = vErrors;
+                      validate704.errors = vErrors;
                       return false;
                     } else {
                       errors = _errs13;
@@ -328,7 +328,7 @@ function validate698(
                           vErrors.push(err5);
                         }
                         errors++;
-                        validate698.errors = vErrors;
+                        validate704.errors = vErrors;
                         return false;
                       } else {
                         errors = _errs18;
@@ -352,7 +352,7 @@ function validate698(
         }
       }
     } else {
-      validate698.errors = [
+      validate704.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -363,7 +363,7 @@ function validate698(
       return false;
     }
   }
-  validate698.errors = vErrors;
+  validate704.errors = vErrors;
   return errors === 0;
 }
-export { validate698 };
+export { validate704 };

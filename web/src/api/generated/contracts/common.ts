@@ -4,6 +4,7 @@ export type ResourceIdDto = string;
 
 export type ResourceKindDto =
   | "queue"
+  | "queue_sync"
   | "review"
   | "run"
   | "session"
@@ -74,6 +75,8 @@ export type ErrorCode =
   | "busy"
   | "unavailable"
   | "internal";
+
+export type TicketKeyDto = string;
 
 export interface InvalidateEvent {
   /**

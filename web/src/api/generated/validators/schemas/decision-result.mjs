@@ -4,9 +4,9 @@ import { validate25 } from "./checkpoint-id-dto.mjs";
 import { validate46 } from "./event-cursor-dto.mjs";
 import { validate116 } from "./disposition.mjs";
 import { validate125 } from "./review-id-dto.mjs";
-import { validate207 } from "./utc-timestamp-dto.mjs";
+import { validate209 } from "./utc-timestamp-dto.mjs";
 import { validate111 } from "./git-sha-dto.mjs";
-function validate752(
+function validate758(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -31,7 +31,7 @@ function validate752(
           !func0.call(data, "checkpointId")) &&
           (missing0 = "checkpointId"))
       ) {
-        validate752.errors = [
+        validate758.errors = [
           {
             instancePath,
             schemaPath: "#/required",
@@ -98,7 +98,7 @@ function validate752(
               vErrors.push(err1);
             }
             errors++;
-            validate752.errors = vErrors;
+            validate758.errors = vErrors;
             return false;
           } else {
             errors = _errs2;
@@ -196,7 +196,7 @@ function validate752(
                   vErrors.push(err3);
                 }
                 errors++;
-                validate752.errors = vErrors;
+                validate758.errors = vErrors;
                 return false;
               } else {
                 errors = _errs8;
@@ -244,7 +244,7 @@ function validate752(
                   let valid3 = false;
                   const _errs15 = errors;
                   if (
-                    !validate207(data4, {
+                    !validate209(data4, {
                       instancePath: instancePath + "/reviewedAt",
                       parentData: data,
                       parentDataProperty: "reviewedAt",
@@ -253,8 +253,8 @@ function validate752(
                   ) {
                     vErrors =
                       vErrors === null
-                        ? validate207.errors
-                        : vErrors.concat(validate207.errors);
+                        ? validate209.errors
+                        : vErrors.concat(validate209.errors);
                     errors = vErrors.length;
                   }
                   var _valid2 = _errs15 === errors;
@@ -291,7 +291,7 @@ function validate752(
                       vErrors.push(err5);
                     }
                     errors++;
-                    validate752.errors = vErrors;
+                    validate758.errors = vErrors;
                     return false;
                   } else {
                     errors = _errs14;
@@ -365,7 +365,7 @@ function validate752(
                         vErrors.push(err7);
                       }
                       errors++;
-                      validate752.errors = vErrors;
+                      validate758.errors = vErrors;
                       return false;
                     } else {
                       errors = _errs19;
@@ -388,7 +388,7 @@ function validate752(
         }
       }
     } else {
-      validate752.errors = [
+      validate758.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -399,7 +399,7 @@ function validate752(
       return false;
     }
   }
-  validate752.errors = vErrors;
+  validate758.errors = vErrors;
   return errors === 0;
 }
-export { validate752 };
+export { validate758 };

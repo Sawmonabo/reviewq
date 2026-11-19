@@ -1942,6 +1942,9 @@
               "const": "overview",
               "type": "string"
             },
+            "nextWindowCursor": {
+              "$ref": "#/definitions/HistoryCursorDto"
+            },
             "total": {
               "$ref": "#/definitions/SafeCountDto"
             }
@@ -3869,6 +3872,23 @@
       ],
       "type": "string"
     },
+    "QueueSyncResponse": {
+      "description": "The resource and event head from the same authorized snapshot.",
+      "properties": {
+        "cursor": {
+          "$ref": "#/definitions/EventCursorDto"
+        },
+        "data": {
+          "$ref": "#/definitions/QueueSync"
+        }
+      },
+      "required": [
+        "data",
+        "cursor"
+      ],
+      "title": "QueueSyncResponse",
+      "type": "object"
+    },
     "QuoteRef": {
       "additionalProperties": false,
       "properties": {
@@ -4653,6 +4673,7 @@
     "ResourceKindDto": {
       "enum": [
         "queue",
+        "queue_sync",
         "review",
         "run",
         "session",
@@ -6065,6 +6086,157 @@
       "title": "TestConnection",
       "type": "object"
     },
+    "TicketComment": {
+      "properties": {
+        "author": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "authorId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "body": {
+          "type": "string"
+        },
+        "createdAt": {
+          "$ref": "#/definitions/UtcTimestampDto"
+        },
+        "id": {
+          "$ref": "#/definitions/UpstreamIdDto"
+        },
+        "updatedAt": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/UtcTimestampDto"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "author",
+        "authorId",
+        "body",
+        "createdAt",
+        "updatedAt"
+      ],
+      "type": "object"
+    },
+    "TicketDetail": {
+      "description": "A bounded compact list with a required nullable keyset continuation.",
+      "properties": {
+        "assignee": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "assigneeId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "description": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "estimate": {
+          "format": "double",
+          "minimum": 0,
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "items": {
+          "items": {
+            "$ref": "#/definitions/TicketComment"
+          },
+          "maxItems": 100,
+          "type": "array"
+        },
+        "key": {
+          "$ref": "#/definitions/TicketKeyDto"
+        },
+        "nextCursor": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/PageCursorDto"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "priority": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "status": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "title": {
+          "type": "string"
+        },
+        "url": {
+          "type": "string"
+        },
+        "warnings": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "key",
+        "title",
+        "url",
+        "status",
+        "priority",
+        "assignee",
+        "assigneeId",
+        "description",
+        "estimate",
+        "warnings",
+        "items",
+        "nextCursor"
+      ],
+      "type": "object"
+    },
+    "TicketDetailResponse": {
+      "description": "The resource and event head from the same authorized snapshot.",
+      "properties": {
+        "cursor": {
+          "$ref": "#/definitions/EventCursorDto"
+        },
+        "data": {
+          "$ref": "#/definitions/TicketDetail"
+        }
+      },
+      "required": [
+        "data",
+        "cursor"
+      ],
+      "title": "TicketDetailResponse",
+      "type": "object"
+    },
     "TicketKeyDto": {
       "description": "A Jira issue key.",
       "maxUtf8Bytes": 512,
@@ -6129,6 +6301,63 @@
         "unscoped"
       ],
       "type": "string"
+    },
+    "TrackReviewRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "expectedRevision": {
+          "$ref": "#/definitions/RevisionDto"
+        },
+        "url": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "expectedRevision",
+        "url"
+      ],
+      "title": "TrackReviewRequest",
+      "type": "object"
+    },
+    "TrackReviewResponse": {
+      "description": "The resource and event head from the same authorized snapshot.",
+      "properties": {
+        "cursor": {
+          "$ref": "#/definitions/EventCursorDto"
+        },
+        "data": {
+          "$ref": "#/definitions/TrackedReview"
+        }
+      },
+      "required": [
+        "data",
+        "cursor"
+      ],
+      "title": "TrackReviewResponse",
+      "type": "object"
+    },
+    "TrackedReview": {
+      "properties": {
+        "iid": {
+          "$ref": "#/definitions/MergeRequestIidDto"
+        },
+        "projectId": {
+          "$ref": "#/definitions/ProjectIdDto"
+        },
+        "reviewId": {
+          "$ref": "#/definitions/ReviewIdDto"
+        },
+        "sourceSha": {
+          "$ref": "#/definitions/GitShaDto"
+        }
+      },
+      "required": [
+        "reviewId",
+        "projectId",
+        "iid",
+        "sourceSha"
+      ],
+      "type": "object"
     },
     "UnmatchedTicket": {
       "properties": {
@@ -6260,6 +6489,7 @@
     "QuestionAnswerResponse": "questions",
     "QuestionFormsResponse": "questions",
     "QueuePageResponse": "queue",
+    "QueueSyncResponse": "queue",
     "RefreshResponse": "queue",
     "ReportCandidateResponse": "reports",
     "ReportContextResponse": "reports",
@@ -6284,6 +6514,9 @@
     "SettingsResponse": "settings",
     "TerminalResponse": "hosts",
     "TestConnection": "settings",
+    "TicketDetailResponse": "tickets",
+    "TrackReviewRequest": "queue",
+    "TrackReviewResponse": "queue",
     "VerifiedConnectionResponse": "settings"
   },
   "x-reviewq-roots": {
@@ -6308,7 +6541,8 @@
       "RunStartRequest": "#/definitions/RunStartRequest",
       "SaveSettings": "#/definitions/SaveSettings",
       "SendMessageRequest": "#/definitions/SendMessageRequest",
-      "TestConnection": "#/definitions/TestConnection"
+      "TestConnection": "#/definitions/TestConnection",
+      "TrackReviewRequest": "#/definitions/TrackReviewRequest"
     },
     "responses": {
       "CatalogResponse": "#/definitions/CatalogResponse",
@@ -6330,6 +6564,7 @@
       "QuestionAnswerResponse": "#/definitions/QuestionAnswerResponse",
       "QuestionFormsResponse": "#/definitions/QuestionFormsResponse",
       "QueuePageResponse": "#/definitions/QueuePageResponse",
+      "QueueSyncResponse": "#/definitions/QueueSyncResponse",
       "RefreshResponse": "#/definitions/RefreshResponse",
       "ReportCandidateResponse": "#/definitions/ReportCandidateResponse",
       "ReportContextResponse": "#/definitions/ReportContextResponse",
@@ -6344,6 +6579,8 @@
       "RunPreviewResponse": "#/definitions/RunPreviewResponse",
       "SettingsResponse": "#/definitions/SettingsResponse",
       "TerminalResponse": "#/definitions/TerminalResponse",
+      "TicketDetailResponse": "#/definitions/TicketDetailResponse",
+      "TrackReviewResponse": "#/definitions/TrackReviewResponse",
       "VerifiedConnectionResponse": "#/definitions/VerifiedConnectionResponse"
     }
   }

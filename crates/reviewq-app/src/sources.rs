@@ -142,6 +142,9 @@ pub enum SourceFailure {
 }
 
 pub trait SourceRefreshStore: Send + Sync {
+    fn refresh_sync(&self, actor: Actor, settings: Revision)
+    -> AppFuture<'_, Snapshot<SourceSync>>;
+
     /// Starts a refresh under the current settings revision, or reports an active attempt.
     fn begin_refresh(&self, actor: Actor, revision: Revision) -> AppFuture<'_, RefreshAdmission>;
 

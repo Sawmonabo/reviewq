@@ -2,7 +2,7 @@
 import { func0 } from "../runtime.mjs";
 import { validate44 } from "./history-cursor-dto.mjs";
 import { validate95 } from "./safe-count-dto.mjs";
-function validate356(
+function validate358(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -19,7 +19,7 @@ function validate356(
         ((data.cursor === undefined || !func0.call(data, "cursor")) &&
           (missing0 = "cursor"))
       ) {
-        validate356.errors = [
+        validate358.errors = [
           {
             instancePath,
             schemaPath: "#/required",
@@ -95,7 +95,7 @@ function validate356(
         }
       }
     } else {
-      validate356.errors = [
+      validate358.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -106,7 +106,7 @@ function validate356(
       return false;
     }
   }
-  validate356.errors = vErrors;
+  validate358.errors = vErrors;
   return errors === 0;
 }
-export { validate356 };
+export { validate358 };
