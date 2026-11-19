@@ -11,6 +11,8 @@ use reviewq_app::settings::{
 use reviewq_domain::settings::{Connection, VerifiedAccount};
 use url::{Host, Url};
 
+mod scope;
+
 use crate::jira::Jira;
 use crate::{GitLab, SourceNetwork};
 
@@ -41,6 +43,14 @@ impl SourceAccounts {
 }
 
 impl ConnectionSources for SourceAccounts {
+    fn verify_scope<'a>(
+        &'a self,
+        gitlab: &'a reviewq_app::settings::SavedConnection,
+        jira: &'a reviewq_app::settings::SavedConnection,
+        draft: reviewq_domain::settings::WorkspaceDraft,
+    ) -> AppFuture<'a, reviewq_domain::settings::WorkspaceScope> {
+        Box::pin(self.validate_workspace(gitlab, jira, draft))
+    }
     fn review_source(
         &self,
         saved: &reviewq_app::settings::SavedConnection,
@@ -51,6 +61,27 @@ impl ConnectionSources for SourceAccounts {
         };
         let token = saved.token.as_ref().ok_or(AppError::Unauthorized)?;
         Ok(Arc::new(self.gitlab(origin, token)?.with_lease(lease)))
+    }
+
+    fn ticket_source(
+        &self,
+        saved: &reviewq_app::settings::SavedConnection,
+        lease: reviewq_app::settings::SourceLease,
+    ) -> Result<Arc<dyn reviewq_app::sources::TicketSourceReader>, AppError> {
+        let token = saved.token.as_ref().ok_or(AppError::Unauthorized)?;
+        let cloud = saved
+            .account
+            .cloud_id
+            .as_deref()
+            .ok_or(AppError::Conflict)?;
+        Ok(Arc::new(Jira::for_bound(
+            self.network.clone(),
+            &saved.account.connection,
+            token,
+            cloud,
+            self.fixture,
+            Some(lease),
+        )?))
     }
 
     fn normalize(&self, draft: Connection) -> Result<Connection, AppError> {

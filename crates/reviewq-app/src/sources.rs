@@ -1,4 +1,5 @@
-use reviewq_domain::identity::{EventCursor, MrIdentity, Revision};
+use reviewq_domain::identity::{EventCursor, MrIdentity, Revision, TicketKey};
+use reviewq_domain::settings::BoardScope;
 
 use crate::access::{Actor, AppError, AppFuture};
 use crate::changes::ChangeSource;
@@ -29,6 +30,34 @@ pub trait ReviewSourceReader: ChangeSource {
 pub enum ReviewResolution {
     Found(ReviewSource),
     Ambiguous(Vec<String>),
+}
+
+/// A board-filtered Jira issue with provider-verified fields.
+pub struct ScopedTicket {
+    pub key: TicketKey,
+    pub title: String,
+    pub project: String,
+    pub status_id: u64,
+    pub status: String,
+    pub assignee: Option<String>,
+    pub priority: Option<String>,
+    pub estimate: Option<f64>,
+    pub estimate_warning: Option<&'static str>,
+}
+
+pub struct TicketPage {
+    pub items: Vec<ScopedTicket>,
+    pub continuation: Option<String>,
+}
+
+pub trait TicketSourceReader: Send + Sync {
+    fn issues(
+        &self,
+        board: BoardScope,
+        sprint: Option<u64>,
+        continuation: Option<String>,
+        limit: u16,
+    ) -> AppFuture<'_, TicketPage>;
 }
 
 /// Total compact records accepted in one atomic source publication.

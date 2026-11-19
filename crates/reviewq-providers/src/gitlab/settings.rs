@@ -15,6 +15,9 @@ struct User {
 }
 
 impl GitLab {
+    pub(crate) async fn verify_project(&self, id: ProjectId) -> Result<String, AppError> {
+        Ok(self.project(id).await?.path_with_namespace)
+    }
     pub(crate) async fn current_user(&self) -> Result<Identity, AppError> {
         let (_, body) = self.get(self.url("api/v4/user")?, METADATA_LIMIT).await?;
         let user: User = serde_json::from_slice(&body).map_err(|_| AppError::Unavailable)?;

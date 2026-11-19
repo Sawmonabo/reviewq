@@ -4,11 +4,13 @@ use std::fmt;
 use std::sync::Arc;
 
 use reviewq_domain::identity::Revision;
-use reviewq_domain::settings::{Connection, Provider, VerifiedAccount};
+use reviewq_domain::settings::{
+    Connection, Provider, VerifiedAccount, WorkspaceDraft, WorkspaceScope,
+};
 
 use crate::access::{Actor, AppError, AppFuture};
 use crate::events::Snapshot;
-use crate::sources::ReviewSourceReader;
+use crate::sources::{ReviewSourceReader, TicketSourceReader};
 
 mod runtime;
 
@@ -115,6 +117,19 @@ pub trait ConnectionSources: Send + Sync {
         saved: &SavedConnection,
         lease: SourceLease,
     ) -> Result<Arc<dyn ReviewSourceReader>, AppError>;
+
+    fn ticket_source(
+        &self,
+        saved: &SavedConnection,
+        lease: SourceLease,
+    ) -> Result<Arc<dyn TicketSourceReader>, AppError>;
+
+    fn verify_scope<'a>(
+        &'a self,
+        gitlab: &'a SavedConnection,
+        jira: &'a SavedConnection,
+        draft: WorkspaceDraft,
+    ) -> AppFuture<'a, WorkspaceScope>;
 }
 
 pub struct SavedCredentials {
@@ -122,6 +137,7 @@ pub struct SavedCredentials {
     pub pinned: bool,
     pub gitlab: Option<SavedConnection>,
     pub jira: Option<SavedConnection>,
+    pub scope: WorkspaceScope,
 }
 
 impl SavedCredentials {
@@ -146,6 +162,7 @@ pub trait SettingsStore: Send + Sync {
         expected: Revision,
         gitlab: SavedConnection,
         jira: SavedConnection,
+        scope: WorkspaceScope,
     ) -> AppFuture<'_, Snapshot<Connections>>;
 
     fn disconnect(
@@ -160,6 +177,8 @@ pub struct Connections {
     pub revision: Revision,
     pub gitlab: Option<ConnectionSummary>,
     pub jira: Option<ConnectionSummary>,
+    pub scope: WorkspaceScope,
+    pub chat_setup_pending: bool,
 }
 
 pub struct ConnectionSummary {

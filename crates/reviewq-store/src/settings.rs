@@ -6,13 +6,17 @@ use reviewq_app::settings::{
     ConnectionSummary, Connections, SavedConnection, SavedCredentials, SecretToken, SettingsStore,
 };
 use reviewq_domain::identity::Revision;
-use reviewq_domain::settings::{Connection, Identity, JiraTokenType, Provider, VerifiedAccount};
+use reviewq_domain::settings::{
+    Connection, Identity, JiraTokenType, Provider, VerifiedAccount, WorkspaceScope,
+};
 use rusqlite::{Connection as Database, OptionalExtension, params};
 
 use crate::connection::WriteTx;
 use crate::events::snapshot;
 use crate::workspace::{advance_queue, operator, settings_revision};
 use crate::{SqliteStore, StoreError};
+
+mod scope;
 
 impl SettingsStore for SqliteStore {
     fn preference_revision(&self) -> AppFuture<'_, Revision> {
@@ -34,6 +38,7 @@ impl SettingsStore for SqliteStore {
                         pinned: pinned(db)?,
                         gitlab: saved(db, Provider::GitLab)?,
                         jira: saved(db, Provider::Jira)?,
+                        scope: scope::read(db)?,
                     },
                 )
             })
@@ -57,6 +62,7 @@ impl SettingsStore for SqliteStore {
         expected: Revision,
         gitlab: SavedConnection,
         jira: SavedConnection,
+        scope: WorkspaceScope,
     ) -> AppFuture<'_, Snapshot<Connections>> {
         Box::pin(async move {
             operator(&actor).map_err(StoreError::app)?;
@@ -67,6 +73,7 @@ impl SettingsStore for SqliteStore {
                 {
                     return Err(AppError::InvalidRequest.into());
                 }
+                let origin = gitlab.account.connection.origin().to_owned();
                 let pinned = pinned(&tx.sql)?;
                 for connection in [gitlab, jira] {
                     if pinned
@@ -77,6 +84,7 @@ impl SettingsStore for SqliteStore {
                     }
                     save(&tx.sql, connection)?;
                 }
+                scope::replace(&tx.sql, &origin, scope)?;
                 advance(tx, expected)
             })
             .await
@@ -175,6 +183,8 @@ fn view(db: &Database) -> Result<Connections, StoreError> {
         revision: settings_revision(db)?,
         gitlab: summary(db, Provider::GitLab)?,
         jira: summary(db, Provider::Jira)?,
+        scope: scope::read(db)?,
+        chat_setup_pending: scope::pending(db)?,
     })
 }
 

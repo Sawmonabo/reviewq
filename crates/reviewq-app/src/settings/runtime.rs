@@ -1,10 +1,11 @@
 use std::sync::Arc;
 
 use reviewq_domain::identity::Revision;
+use reviewq_domain::settings::WorkspaceScope;
 use tokio::sync::Mutex;
 
 use crate::access::{Actor, AppError};
-use crate::sources::ReviewSourceReader;
+use crate::sources::{ReviewSourceReader, TicketSourceReader};
 
 use super::{ConnectionSources, SettingsStore};
 
@@ -12,6 +13,8 @@ use super::{ConnectionSources, SettingsStore};
 pub struct ActiveSource {
     pub revision: Revision,
     pub reader: Option<Arc<dyn ReviewSourceReader>>,
+    pub tickets: Option<Arc<dyn TicketSourceReader>>,
+    pub scope: Arc<WorkspaceScope>,
     pub collection_enabled: bool,
 }
 
@@ -66,21 +69,29 @@ impl RuntimeSources {
             .read_credentials(Actor::local_operator())
             .await?
             .value;
-        let (reader, collection_enabled) = match saved.gitlab {
-            Some(gitlab) if gitlab.token.is_some() => {
-                let jira = saved.jira.is_some_and(|jira| jira.token.is_some());
-                let lease = SourceLease {
-                    store: self.store.clone(),
-                    revision: saved.revision,
-                };
-                (Some(self.sources.review_source(&gitlab, lease)?), jira)
+        let lease = SourceLease {
+            store: self.store.clone(),
+            revision: saved.revision,
+        };
+        let tickets = match saved.jira {
+            Some(jira) if jira.token.is_some() => {
+                Some(self.sources.ticket_source(&jira, lease.clone())?)
             }
+            _ => None,
+        };
+        let (reader, collection_enabled) = match saved.gitlab {
+            Some(gitlab) if gitlab.token.is_some() => (
+                Some(self.sources.review_source(&gitlab, lease)?),
+                tickets.is_some(),
+            ),
             Some(_) => (None, false),
             None => (self.validation.clone(), self.validation.is_some()),
         };
         let active = ActiveSource {
             revision: saved.revision,
             reader,
+            tickets,
+            scope: Arc::new(saved.scope),
             collection_enabled,
         };
         *guard = Some(active.clone());

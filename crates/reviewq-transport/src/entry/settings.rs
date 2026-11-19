@@ -16,6 +16,8 @@ use super::error::ApiBytes;
 use super::pages::{parse, success};
 use super::{ApiError, Entry};
 
+mod scope;
+
 pub(super) async fn read(
     State(entry): State<Arc<Entry>>,
     headers: HeaderMap,
@@ -126,11 +128,17 @@ pub(super) async fn save(
     let request: dto::SaveSettings = decode(&bytes)?;
     let expected = revision(request.expected_revision)?;
     let saved = entry.store.read_credentials(actor.clone()).await?;
-    if !request.draft.boards.is_empty()
-        || !request.draft.repositories.is_empty()
-        || !request.draft.additional_reviewer_ids.is_empty()
+    let workspace = scope::draft(
+        request.draft.boards,
+        request.draft.repositories,
+        request.draft.additional_reviewer_ids,
+    )?;
+    if workspace
+        .repositories
+        .iter()
+        .any(|repo| repo.default_skills.codex.is_some() || repo.default_skills.claude.is_some())
     {
-        return Err(AppError::InvalidRequest.into());
+        return Err(AppError::Unavailable.into());
     }
     let (gitlab, jira) = tokio::try_join!(
         app::verify_connection(
@@ -154,9 +162,13 @@ pub(super) async fn save(
             )?
         ),
     )?;
+    let verified = entry
+        .settings_sources
+        .verify_scope(&gitlab, &jira, workspace)
+        .await?;
     let stored = entry
         .store
-        .activate_connections(actor, expected, gitlab, jira)
+        .activate_connections(actor, expected, gitlab, jira, verified)
         .await?;
     entry.refresh_wakeup.notify_one();
     Ok(Json(view(stored)?))
@@ -262,6 +274,8 @@ fn view(snapshot: Snapshot<app::Connections>) -> Result<dto::SettingsResponse, A
         revision,
         gitlab,
         jira,
+        scope,
+        chat_setup_pending,
     } = snapshot.value;
     let mode = if gitlab.is_none() && jira.is_none() {
         dto::Mode::Setup
@@ -314,11 +328,23 @@ fn view(snapshot: Snapshot<app::Connections>) -> Result<dto::SettingsResponse, A
             settings_revision: RevisionDto::new(revision.get()).ok_or(AppError::Internal)?,
             mode,
             connections: dto::Connections { gitlab, jira },
-            boards: Vec::new(),
-            repositories: Vec::new(),
-            additional_reviewer_ids: Vec::new(),
+            boards: scope
+                .boards
+                .into_iter()
+                .map(scope::board)
+                .collect::<Result<_, _>>()?,
+            repositories: scope
+                .repositories
+                .into_iter()
+                .map(scope::repo)
+                .collect::<Result<_, _>>()?,
+            additional_reviewer_ids: scope::number_dtos(scope.additional_reviewers)?,
             chat_setup: dto::ChatSetup {
-                state: dto::ChatSetupState::Ready,
+                state: if chat_setup_pending {
+                    dto::ChatSetupState::Pending
+                } else {
+                    dto::ChatSetupState::Ready
+                },
                 issues: Vec::new(),
             },
         },

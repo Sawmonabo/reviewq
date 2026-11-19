@@ -15,6 +15,9 @@ use url::Url;
 use crate::http::SourceNetwork;
 use crate::settings::{origin, safe_label};
 
+mod issues;
+pub(crate) use issues::valid_project;
+
 const METADATA_LIMIT: usize = 1024 * 1024;
 const PAGE_LIMIT: usize = 100;
 
@@ -23,6 +26,7 @@ pub(crate) struct Jira {
     cloud_id: String,
     api: Url,
     headers: HeaderMap,
+    lease: Option<reviewq_app::settings::SourceLease>,
 }
 
 #[derive(Deserialize)]
@@ -47,12 +51,7 @@ impl Jira {
         expected_cloud: Option<&str>,
         fixture: bool,
     ) -> Result<Self, AppError> {
-        let Connection::Jira {
-            site,
-            email,
-            token_type,
-        } = connection
-        else {
+        let Connection::Jira { site, .. } = connection else {
             return Err(AppError::InvalidRequest);
         };
         let site = origin(site, fixture)?;
@@ -70,6 +69,27 @@ impl Jira {
         if expected_cloud.is_some_and(|expected| expected != tenant.cloud_id) {
             return Err(AppError::Conflict);
         }
+        Self::for_bound(network, connection, token, &tenant.cloud_id, fixture, None)
+    }
+
+    pub(crate) fn for_bound(
+        network: Arc<SourceNetwork>,
+        connection: &Connection,
+        token: &SecretToken,
+        cloud: &str,
+        fixture: bool,
+        lease: Option<reviewq_app::settings::SourceLease>,
+    ) -> Result<Self, AppError> {
+        let Connection::Jira {
+            site,
+            email,
+            token_type,
+        } = connection
+        else {
+            return Err(AppError::InvalidRequest);
+        };
+        let site = origin(site, fixture)?;
+        let id = uuid::Uuid::parse_str(cloud).map_err(|_| AppError::InvalidRequest)?;
         let api = match token_type {
             JiraTokenType::Unscoped => site,
             JiraTokenType::Scoped if fixture => site
@@ -88,9 +108,10 @@ impl Jira {
         headers.insert(header::AUTHORIZATION, auth);
         Ok(Self {
             network,
-            cloud_id: tenant.cloud_id,
+            cloud_id: cloud.to_owned(),
             api,
             headers,
+            lease,
         })
     }
 
@@ -281,6 +302,14 @@ impl Jira {
         Ok(result)
     }
 
+    pub(crate) async fn status_ids(&self) -> Result<HashSet<String>, AppError> {
+        let rows: Vec<Value> = self.read("rest/api/2/status", &[], METADATA_LIMIT).await?;
+        Ok(unique_items(rows.iter(), None)?
+            .into_iter()
+            .map(|item| item.id)
+            .collect())
+    }
+
     async fn catalog_page(
         &self,
         path: &str,
@@ -326,7 +355,7 @@ impl Jira {
         }
         let (_, body) = self
             .network
-            .bounded_response(url, self.headers.clone(), limit, None)
+            .bounded_response(url, self.headers.clone(), limit, self.lease.as_ref())
             .await?;
         serde_json::from_slice(&body).map_err(|_| AppError::Unavailable)
     }

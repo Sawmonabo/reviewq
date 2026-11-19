@@ -1,5 +1,6 @@
 //! External source and native integrations.
 
+mod checkout;
 mod claude;
 mod codex;
 mod desktop;
@@ -12,6 +13,7 @@ mod settings;
 mod terminal;
 mod workflow;
 
+pub use checkout::git_output;
 pub use claude::Claude;
 pub use codex::Codex;
 pub use desktop::LinuxDesktopNotifier;
