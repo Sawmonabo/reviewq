@@ -234,6 +234,9 @@
   font-size: 12px;
   background: transparent;
 }
+.question-option:disabled {
+  opacity: 1;
+}
 .question-option[aria-checked="true"] {
   background: var(--selected);
   border-color: var(--focus);

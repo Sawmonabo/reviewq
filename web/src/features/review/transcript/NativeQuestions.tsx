@@ -95,8 +95,13 @@ function QuestionForm({
   const answered = status === "answered";
   const reviewable = answered ? form.questions.filter((question) => !question.isSecret) : [];
   const includesSecret = form.questions.some((question) => question.isSecret);
-  const supported = form.questions.length > 0 && (form.mode === "native" || !includesSecret);
-  const open = status === "pending" && form.answerable;
+  const open =
+    status === "pending" &&
+    form.questions.length > 0 &&
+    form.answerable &&
+    (!includesSecret || (form.mode === "native" && form.blocking));
+  const readOnly =
+    status === "pending" && !open && form.questions.some((question) => !question.isSecret);
   const draftName = `Question · ${label}`;
   const prefix = [target.runId, target.sessionKey, form.requestId, form.turnId, form.itemId];
   const title = {
@@ -237,7 +242,7 @@ function QuestionForm({
             ))}
           </details>
         )}
-        {status === "pending" && !open && (
+        {status === "pending" && !open && !readOnly && (
           <div className="actions">
             <p className="meta">
               {form.mode === "async" && includesSecret
@@ -249,25 +254,31 @@ function QuestionForm({
             </button>
           </div>
         )}
-        {supported &&
-          form.questions.map((question) =>
-            question.isSecret ? (
-              open && <SecretQuestion key={question.id} question={question} />
-            ) : (
-              <QuestionField
-                key={question.id}
-                question={question}
-                store={store}
-                draftKey={answerKey(prefix, question.id)}
-                draftName={draftName}
-                open={open}
-              />
-            ),
-          )}
-        {open && (
+        {form.questions.map((question) =>
+          question.isSecret ? (
+            open && <SecretQuestion key={question.id} question={question} />
+          ) : (
+            <QuestionField
+              key={question.id}
+              question={question}
+              store={store}
+              draftKey={answerKey(prefix, question.id)}
+              draftName={draftName}
+              open={open}
+              readOnly={readOnly}
+            />
+          ),
+        )}
+        {(open || readOnly) && (
           <div className="question-actions">
-            <small>Enter in an answer sends · Esc minimizes</small>
-            <button type="submit" className="primary">
+            {open ? (
+              <small>Enter in an answer sends · Esc minimizes</small>
+            ) : (
+              <button type="button" onClick={onTerminal}>
+                Open in terminal
+              </button>
+            )}
+            <button type="submit" className="primary" disabled={!open}>
               {form.questions.length === 1 ? "Send answer" : "Send answers"}
             </button>
           </div>
@@ -405,12 +416,14 @@ function QuestionField({
   draftKey,
   draftName,
   open,
+  readOnly,
 }: {
   readonly question: Question;
   readonly store: DraftStore;
   readonly draftKey: string;
   readonly draftName: string;
   readonly open: boolean;
+  readonly readOnly: boolean;
 }) {
   const draft = useDraft(store, draftKey);
   const [limited, setLimited] = useState(false);
@@ -426,12 +439,12 @@ function QuestionField({
   function edit(value: string) {
     setLimited(!store.set(draftKey, draftName, value));
   }
-  if (!open && !draft) return null;
+  if (!open && !readOnly && !draft) return null;
   return (
     <fieldset data-question={question.id} className="stack">
       <legend id={legend}>{question.header || question.question}</legend>
       {question.header && <p>{question.question}</p>}
-      {open ? (
+      {(open || readOnly) && (
         <>
           {choices.length > 0 && (
             <div
@@ -469,6 +482,7 @@ function QuestionField({
                     className="question-option"
                     key={custom ? "free-answer" : `option:${option.label}`}
                     aria-checked={checked}
+                    disabled={!open}
                     tabIndex={focused === index ? 0 : -1}
                     onFocus={() => setFocused(index)}
                     onClick={() => {
@@ -491,7 +505,7 @@ function QuestionField({
               })}
             </div>
           )}
-          {(question.options.length === 0 || draft.startsWith("text:")) && (
+          {open && (question.options.length === 0 || draft.startsWith("text:")) && (
             <label className="field">
               {question.options.length ? "Other answer" : "Your answer"}
               <textarea
@@ -503,11 +517,12 @@ function QuestionField({
               />
             </label>
           )}
-          {limited && <Notice>Draft storage full. Free space before adding more text.</Notice>}
+          {open && limited && (
+            <Notice>Draft storage full. Free space before adding more text.</Notice>
+          )}
         </>
-      ) : (
-        <RetainedAnswer draft={draft} onDiscard={() => edit("")} />
       )}
+      {!open && draft && <RetainedAnswer draft={draft} onDiscard={() => edit("")} />}
     </fieldset>
   );
 }
