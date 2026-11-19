@@ -6,6 +6,7 @@ import type {
   MergeRequestRow,
   ReviewOverview,
   RunDetail,
+  SessionSummary,
 } from "../../api/generated/contracts";
 import type { Tab } from "../../api/generated/contracts/notifications";
 import {
@@ -23,6 +24,7 @@ import { useResource } from "../../hooks/useResource";
 import type { DraftStore } from "../../lib/drafts";
 import { describeError, formatTime, readable, safeUrl } from "../../lib/presentation";
 import { ReportedPlan } from "./ReportedPlan";
+import { ReviewAttention } from "./ReviewAttention";
 import "./review.css";
 
 const AgentPanel = lazy(() => import("./AgentPanel"));
@@ -39,7 +41,9 @@ const tabs = [
 type Props = {
   readonly overview: ReviewOverview;
   readonly run: RunDetail | undefined;
-  readonly selectedSession: string | undefined;
+  readonly session: SessionSummary | undefined;
+  readonly requestedSession: string | undefined;
+  readonly onDefaultRun: () => void;
   readonly selectionError: string | undefined;
   readonly selectionPending: boolean;
   readonly tab: Tab;
@@ -59,7 +63,9 @@ export default function ReviewDrawer({
   overview,
   run,
   tab,
-  selectedSession,
+  session,
+  requestedSession,
+  onDefaultRun,
   selectionError,
   selectionPending,
   drafts,
@@ -79,13 +85,20 @@ export default function ReviewDrawer({
   const mutation = useRef(false);
   const [outcome, setOutcome] = useState<{ key: string; message: string; terminal?: string }>();
   const buttonRefs = useRef<Array<HTMLButtonElement | null>>([]);
-  const session = run
-    ? run.sessions.items.find(
-        (entry) => entry.sessionKey === (selectedSession ?? run.leadSessionKey),
-      )
-    : undefined;
+  const [acknowledgement, setAcknowledgement] = useState<AttentionSnapshot>();
   const child = session && session.sessionKey !== run?.leadSessionKey ? session : undefined;
-  const unavailableChild = Boolean(selectedSession && run && !session);
+  const unavailableSession = Boolean(run && !session && !selectionPending && !selectionError);
+  const selected = !selectionPending && !selectionError && !unavailableSession;
+  const canMutate = selected && review.mrState === "open";
+  const snapshot = captureAttention(overview);
+  const changedSinceCapture =
+    !canMutate ||
+    !snapshot ||
+    !acknowledgement ||
+    snapshot.checkpointId !== acknowledgement.checkpointId ||
+    snapshot.expectedRevision !== acknowledgement.expectedRevision ||
+    snapshot.expectedSettingsRevision !== acknowledgement.expectedSettingsRevision ||
+    snapshot.sourceSha !== acknowledgement.sourceSha;
   const source = safeUrl(overview.webUrl);
   const scope = [review.reviewId, run?.runId, session?.sessionKey].join("/");
   const outcomeMessage = outcome?.key === scope ? outcome.message : undefined;
@@ -127,7 +140,7 @@ export default function ReviewDrawer({
   const activeTab = child && tab !== "findings" ? "agent" : tab;
 
   async function commandFor(action: "open" | "copy") {
-    if (!run || !session || mutation.current) return;
+    if (!selected || !run || !session || mutation.current) return;
     mutation.current = true;
     setBusy(true);
     try {
@@ -163,40 +176,26 @@ export default function ReviewDrawer({
     }
   }
 
-  async function decide(choice: Disposition | "handled") {
-    if (
-      mutation.current ||
-      review.mrState !== "open" ||
-      (choice === "handled" && !overview.checkpointId)
-    )
-      return;
+  async function decide(disposition: Disposition) {
+    if (mutation.current || !canMutate) return;
     mutation.current = true;
     setBusy(true);
-    const body = {
-      submissionId: crypto.randomUUID(),
-      expectedRevision: overview.decisionRevision,
-      expectedSettingsRevision: overview.settingsRevision,
-      sourceSha: review.sourceSha,
-    };
     try {
-      const result =
-        choice === "handled" && overview.checkpointId
-          ? await saveDecision(review.reviewId, { ...body, checkpointId: overview.checkpointId })
-          : await saveDecision(review.reviewId, {
-              ...body,
-              disposition: choice as Disposition,
-              checkpointId: overview.checkpointId,
-            });
+      const result = await saveDecision(review.reviewId, {
+        submissionId: crypto.randomUUID(),
+        expectedRevision: overview.decisionRevision,
+        expectedSettingsRevision: overview.settingsRevision,
+        sourceSha: review.sourceSha,
+        disposition,
+      });
       setOutcome({
         key: scope,
         message:
-          choice === "handled"
-            ? "Follow-up checkpoint saved."
-            : result.disposition === "reviewed"
-              ? "Review marked complete."
-              : result.disposition === "waiting_author"
-                ? "Waiting on author."
-                : "Local review record cleared.",
+          result.disposition === "reviewed"
+            ? "Review marked complete."
+            : result.disposition === "waiting_author"
+              ? "Waiting on author."
+              : "Local review record cleared.",
       });
       onReload();
     } catch (error) {
@@ -207,9 +206,35 @@ export default function ReviewDrawer({
     }
   }
 
+  async function confirmAttention() {
+    if (!acknowledgement || changedSinceCapture || mutation.current) return;
+    const { checkpointId, expectedRevision, expectedSettingsRevision, sourceSha } = acknowledgement;
+    mutation.current = true;
+    setBusy(true);
+    try {
+      await saveDecision(review.reviewId, {
+        submissionId: crypto.randomUUID(),
+        checkpointId,
+        expectedRevision,
+        expectedSettingsRevision,
+        sourceSha,
+      });
+      setAcknowledgement(undefined);
+      setOutcome({ key: scope, message: "Follow-up checkpoint saved." });
+      onReload();
+    } catch (error) {
+      setAcknowledgement(undefined);
+      setOutcome({ key: scope, message: describeError(error) });
+      onReload();
+    } finally {
+      mutation.current = false;
+      setBusy(false);
+    }
+  }
+
   async function stopRecovery() {
     const episode = recovery.data;
-    if (!run || !session || !episode || mutation.current) return;
+    if (!selected || !run || !session || !episode || mutation.current) return;
     mutation.current = true;
     setBusy(true);
     try {
@@ -284,12 +309,12 @@ export default function ReviewDrawer({
                 {
                   label: "Open in terminal",
                   run: () => void commandFor("open"),
-                  disabled: !session || busy,
+                  disabled: !selected || !session || busy,
                 },
                 {
                   label: "Copy terminal command",
                   run: () => void commandFor("copy"),
-                  disabled: !session || busy,
+                  disabled: !selected || !session || busy,
                 },
                 {
                   label: "Open MR in GitLab",
@@ -302,7 +327,10 @@ export default function ReviewDrawer({
                   label: "Cancel auto-resume",
                   run: () => void stopRecovery(),
                   disabled:
-                    !recovery.data || !["waiting", "queued"].includes(recovery.data.state) || busy,
+                    !selected ||
+                    !recovery.data ||
+                    !["waiting", "queued"].includes(recovery.data.state) ||
+                    busy,
                 },
                 {
                   label:
@@ -310,32 +338,34 @@ export default function ReviewDrawer({
                       ? "Edit monitored discussions"
                       : "Configure auto-review",
                   run: () => onMonitor([review], false),
-                  disabled: review.mrState !== "open",
+                  disabled: !canMutate || busy,
                 },
                 {
                   label: "Pause auto-review",
                   run: () => onMonitor([review], true),
-                  disabled: follows.data?.monitor?.state !== "enabled",
+                  disabled: !canMutate || follows.data?.monitor?.state !== "enabled" || busy,
                 },
                 {
-                  label: "Follow-up handled",
-                  run: () => void decide("handled"),
-                  disabled: !overview.checkpointId || review.mrState !== "open" || busy,
+                  label: "Review follow-up evidence",
+                  run: () => {
+                    if (snapshot) setAcknowledgement(snapshot);
+                  },
+                  disabled: !canMutate || !snapshot || busy,
                 },
                 {
                   label: "Review complete",
                   run: () => void decide("reviewed"),
-                  disabled: review.mrState !== "open" || busy,
+                  disabled: !canMutate || busy,
                 },
                 {
                   label: "Waiting on author",
                   run: () => void decide("waiting_author"),
-                  disabled: review.mrState !== "open" || busy,
+                  disabled: !canMutate || busy,
                 },
                 {
                   label: "Clear local review record",
                   run: () => void decide("needs_review"),
-                  disabled: review.mrState !== "open" || busy,
+                  disabled: !canMutate || busy,
                 },
               ]}
             />
@@ -425,15 +455,20 @@ export default function ReviewDrawer({
         )}
         {selectionError && (
           <Notice retry={onReload}>
-            The requested run is unavailable. {selectionError} Choose another run above.
+            The requested selection is unavailable. {selectionError}{" "}
+            <button type="button" onClick={onDefaultRun}>
+              Open default run
+            </button>
           </Notice>
         )}
-        {unavailableChild && (
+        {unavailableSession && (
           <Notice>
-            Child session unavailable.{" "}
-            <button type="button" onClick={() => onSession(undefined)}>
-              Return to lead
-            </button>
+            {requestedSession ? "Child session unavailable." : "Lead session unavailable."}{" "}
+            {requestedSession && (
+              <button type="button" onClick={() => onSession(undefined)}>
+                Return to lead
+              </button>
+            )}
           </Notice>
         )}
         <PanelBoundary key={activeTab}>
@@ -447,13 +482,14 @@ export default function ReviewDrawer({
                 onLaunch={onLaunch}
                 onSettings={onSettings}
                 pending={selectionPending}
+                selected={selected}
               />
             )}
             {activeTab === "changes" && (
               <Changes key={review.reviewId} reviewId={review.reviewId} webUrl={overview.webUrl} />
             )}
             {activeTab === "agent" &&
-              (run && session && !unavailableChild ? (
+              (selected && run && session ? (
                 <AgentPanel
                   key={scope}
                   run={run}
@@ -470,7 +506,7 @@ export default function ReviewDrawer({
                 <Empty title="No confirmed conversation" />
               ))}
             {activeTab === "findings" &&
-              (child && run ? (
+              (selected && child && run ? (
                 <AgentPanel
                   key={`${scope}:result`}
                   run={run}
@@ -482,7 +518,7 @@ export default function ReviewDrawer({
                   onTerminal={() => void commandFor("open")}
                   resultOnly
                 />
-              ) : run && session ? (
+              ) : selected && run && session ? (
                 <Findings
                   key={run.runId}
                   run={run}
@@ -495,11 +531,26 @@ export default function ReviewDrawer({
               ) : selectionPending ? (
                 <Loading label="Resolving selected run…" />
               ) : (
-                <Empty title="No registered review report" />
+                <Empty
+                  title={
+                    selected ? "No registered review report" : "Review run selection unavailable"
+                  }
+                />
               ))}
           </Suspense>
         </PanelBoundary>
       </div>
+      {acknowledgement && (
+        <ReviewAttention
+          attention={acknowledgement.attention}
+          stale={changedSinceCapture}
+          busy={busy}
+          source={source}
+          onClose={() => setAcknowledgement(undefined)}
+          onConfirm={() => void confirmAttention()}
+          onRefresh={() => setAcknowledgement(snapshot)}
+        />
+      )}
     </aside>
   );
 }
@@ -512,6 +563,7 @@ function Overview({
   onLaunch,
   onSettings,
   pending,
+  selected,
 }: {
   readonly overview: ReviewOverview;
   readonly run: RunDetail | undefined;
@@ -520,6 +572,7 @@ function Overview({
   readonly onLaunch: Props["onLaunch"];
   readonly onSettings: () => void;
   readonly pending: boolean;
+  readonly selected: boolean;
 }) {
   const { review } = overview;
   const source = safeUrl(overview.webUrl);
@@ -626,7 +679,7 @@ function Overview({
           <ReportedPlan runId={run.runId} sessionKey={run.leadSessionKey} />
         </section>
       ) : (
-        !pending && (
+        selected && (
           <Empty title="No registered run">
             <div className="actions">
               {review.mrState === "open" && (
@@ -650,4 +703,29 @@ function Overview({
       )}
     </div>
   );
+}
+
+type AttentionSnapshot = {
+  readonly checkpointId: string;
+  readonly expectedRevision: string;
+  readonly expectedSettingsRevision: string;
+  readonly sourceSha: string;
+  readonly attention: NonNullable<ReviewOverview["attention"]>;
+};
+
+function captureAttention(overview: ReviewOverview): AttentionSnapshot | undefined {
+  const { attention, checkpointId, decisionRevision, settingsRevision, review } = overview;
+  if (
+    !checkpointId ||
+    !attention ||
+    (!attention.source.length && !attention.sessions.length && !attention.reports.length)
+  )
+    return;
+  return {
+    checkpointId,
+    expectedRevision: decisionRevision,
+    expectedSettingsRevision: settingsRevision,
+    sourceSha: review.sourceSha,
+    attention,
+  };
 }

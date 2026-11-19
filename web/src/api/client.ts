@@ -2,7 +2,9 @@ import { decodeUtf8, readBoundedBytes } from "./bounded-bytes";
 import type {
   ReviewOverviewResponse,
   ReviewSelectionResponse,
+  RunDetail,
   RunDetailResponse,
+  SessionSummary,
 } from "./generated/contracts";
 import {
   isFailure,
@@ -46,12 +48,40 @@ export async function readRun(
   reviewId: string,
   runId: string,
   signal: AbortSignal,
+  cursor?: string,
 ): Promise<RunDetailResponse> {
-  const result = await read(`/runs/${encodeURIComponent(runId)}`, isRunDetailResponse, signal);
+  const result = await read(
+    `/runs/${encodeURIComponent(runId)}${queryString({ cursor })}`,
+    isRunDetailResponse,
+    signal,
+  );
   if (result.data.reviewId !== reviewId || result.data.runId !== runId) {
     throw new Error("The selected run is unavailable.");
   }
   return result;
+}
+
+export async function findRunSession(
+  run: RunDetail,
+  sessionKey: string,
+  signal: AbortSignal,
+): Promise<SessionSummary | null> {
+  let page = run.sessions;
+  const cursors = new Set<string>();
+  for (;;) {
+    signal.throwIfAborted();
+    const found = page.items.find((session) => session.sessionKey === sessionKey);
+    if (found) return found;
+    const cursor = page.nextCursor;
+    if (!cursor) return null;
+    if (cursors.has(cursor)) throw new Error("ReviewQ repeated a session page.");
+    cursors.add(cursor);
+    const result = await readRun(run.reviewId, run.runId, signal, cursor);
+    if (result.data.leadSessionKey !== run.leadSessionKey) {
+      throw new Error("The selected lead changed while opening this session.");
+    }
+    page = result.data.sessions;
+  }
 }
 
 export async function read<T>(

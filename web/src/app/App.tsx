@@ -1,8 +1,8 @@
 import { lazy, Suspense, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import type { CSSProperties } from "react";
-import { readOverview, readRun, resolveReview } from "../api/client";
+import { findRunSession, readOverview, readRun, resolveReview } from "../api/client";
 import { startWorkspaceEvents } from "../api/events";
-import type { Notification } from "../api/generated/contracts";
+import type { Notification, RunDetail, SessionSummary } from "../api/generated/contracts";
 import type { Tab } from "../api/generated/contracts/notifications";
 import { readNotifications } from "../api/workspace";
 import { ActionMenu } from "../components/ActionMenu";
@@ -16,7 +16,7 @@ import { DraftStore } from "../lib/drafts";
 import { describeError } from "../lib/presentation";
 import { savedValue, saveValue } from "../lib/view-preferences";
 import { readRoute, writeRoute } from "./selection";
-import type { Route, View } from "./selection";
+import type { Route } from "./selection";
 import { clampSplit, Splitter } from "./Splitter";
 import { AttentionView } from "./views/AttentionView";
 import { QueueView } from "./views/QueueView";
@@ -77,7 +77,7 @@ export function App() {
       reviewId ? readOverview(reviewId, signal) : Promise.resolve({ data: null, cursor: "" }),
     reviewId ? [{ kind: "review", id: reviewId }, { kind: "run" }, { kind: "action" }] : [],
   );
-  const selected = useResource(
+  const selected = useResource<RunDetail | null>(
     JSON.stringify([reviewId, runId]),
     async (signal) => {
       if (!reviewId) return { data: null, cursor: "" };
@@ -85,15 +85,26 @@ export function App() {
         runId ??
         (resolvedRun.current?.reviewId === reviewId ? resolvedRun.current.runId : undefined);
       const selection = await resolveReview(reviewId, exact, signal);
-      if (selection.data.runId === null)
-        return { data: { run: undefined }, cursor: selection.cursor };
+      if (selection.data.runId === null) return { data: null, cursor: selection.cursor };
       const result = await readRun(reviewId, selection.data.runId, signal);
-      if (result.data.leadSessionKey !== selection.data.leadSessionKey)
+      if (result.data.leadSessionKey !== selection.data.leadSessionKey) {
         throw new Error("The selected lead changed.");
+      }
       if (!signal.aborted && !runId) resolvedRun.current = { reviewId, runId: result.data.runId };
-      return { data: { run: result.data }, cursor: result.cursor };
+      return result;
     },
     reviewId ? [{ kind: "run" }, { kind: "session" }] : [],
+  );
+  const selectedRun = selected.data ?? undefined;
+  const desiredSession = sessionKey ?? selectedRun?.leadSessionKey;
+  const activeSession = useResource<SessionSummary | null>(
+    JSON.stringify([selectedRun?.runId, desiredSession]),
+    async (signal) => {
+      if (!selectedRun || !desiredSession) return { data: null, cursor: "" };
+      const data = await findRunSession(selectedRun, desiredSession, signal);
+      return { data, cursor: "" };
+    },
+    desiredSession ? [{ kind: "session", id: desiredSession }] : [],
   );
   const unread = useResource(
     "rail-unread",
@@ -103,11 +114,11 @@ export function App() {
 
   useEffect(startWorkspaceEvents, []);
   useEffect(() => {
-    const confirmed = selected.data?.run;
+    const confirmed = selectedRun;
     if (confirmed && !route.runId && route.reviewId === confirmed.reviewId) {
       writeRoute({ ...route, runId: confirmed.runId }, true);
     }
-  }, [route, selected.data]);
+  }, [route, selectedRun]);
   useEffect(() => {
     function restore() {
       resolvedRun.current = undefined;
@@ -171,7 +182,7 @@ export function App() {
     }
     if (next.reviewId !== reviewId || next.runId !== runId || next.ticket !== ticket)
       setOverlay(undefined);
-    const active = selected.data?.run;
+    const active = selectedRun;
     const canonical =
       !next.runId && next.reviewId === reviewId && active ? { ...next, runId: active.runId } : next;
     writeRoute(canonical);
@@ -393,19 +404,24 @@ export function App() {
                   {overview.data && reviewId ? (
                     <ReviewDrawer
                       overview={overview.data}
-                      run={selected.data?.run}
-                      selectedSession={sessionKey}
-                      selectionError={selected.error}
-                      selectionPending={selected.pending}
+                      run={selectedRun}
+                      session={activeSession.data ?? undefined}
+                      requestedSession={sessionKey}
+                      selectionError={selected.error ?? activeSession.error}
+                      selectionPending={
+                        selected.pending || Boolean(selectedRun && activeSession.pending)
+                      }
+                      onDefaultRun={() => openReview(reviewId)}
                       tab={route.tab}
                       drafts={drafts}
                       onReload={() => {
                         overview.retry();
                         selected.retry();
+                        activeSession.retry();
                       }}
                       onTab={(tab) => move({ ...route, tab })}
                       onSession={(session) => {
-                        const exactRun = selected.data?.run?.runId;
+                        const exactRun = selectedRun?.runId;
                         if (exactRun) openReview(reviewId, exactRun, "agent", session);
                       }}
                       onRun={(id) => openReview(reviewId, id, route.tab)}
