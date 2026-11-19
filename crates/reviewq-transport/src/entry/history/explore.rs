@@ -6,7 +6,8 @@ use axum::http::{HeaderMap, header};
 use axum::response::{IntoResponse, Response};
 use reviewq_app::access::AppError;
 use reviewq_app::history::{
-    HistoryBookmark, HistorySession, NativeNavigation, NavigationQuery, PromptPosition,
+    HistoryBookmark, HistorySession, NativeNavigation, NavigationQuery, PromptOverviewCheckpoint,
+    PromptPosition,
 };
 use reviewq_domain::identity::{NativeInputId, RunId, SessionKey};
 use reviewq_protocol::history::{
@@ -102,11 +103,71 @@ async fn native_navigation(
     source: &HistorySession,
     query: NavigationQuery,
 ) -> Result<NativeNavigation, AppError> {
+    let use_checkpoint = matches!(
+        query,
+        NavigationQuery::Overview {
+            groups: 32,
+            start: None
+        }
+    );
+    let _build = if use_checkpoint {
+        Some(entry.history_watches.claim_overview(source).await?)
+    } else {
+        None
+    };
+    let prior = if use_checkpoint {
+        entry
+            .store
+            .prompt_overview_checkpoint(source.clone())
+            .await?
+    } else {
+        None
+    };
+    if let Some(prior) = prior.as_ref()
+        && let Some(head) = entry
+            .file_history
+            .head(source.clone(), Some(prior.anchor.clone()))
+            .await?
+        && !head.reset
+        && head.anchor == prior.anchor
+    {
+        return Ok(PromptOverviewCheckpoint {
+            anchor: prior.anchor.clone(),
+            total: prior.total,
+            groups: prior.groups.clone(),
+            next: prior.next.clone(),
+        }
+        .navigation());
+    }
     if let Some(result) = entry
         .file_history
         .navigation(source.clone(), query.clone())
         .await?
     {
+        if use_checkpoint
+            && let NativeNavigation::Overview {
+                source: Some(anchor),
+                total,
+                groups,
+                next,
+                ..
+            } = &result
+        {
+            let expected = prior.map(|prior| prior.anchor);
+            entry
+                .store
+                .remember_prompt_overview(
+                    source.clone(),
+                    expected,
+                    PromptOverviewCheckpoint {
+                        anchor: anchor.clone(),
+                        total: *total,
+                        groups: groups.clone(),
+                        next: next.clone(),
+                    },
+                )
+                .await?;
+        }
         return Ok(result);
     }
     entry
@@ -256,6 +317,7 @@ pub(in crate::entry) async fn navigation(
             complete,
             groups: windows,
             next,
+            ..
         } => {
             let next_window_cursor = next
                 .map(|position| {

@@ -2,7 +2,9 @@ use std::collections::BTreeMap;
 
 use reviewq_app::access::{Actor, ActorScope, AppError, AppFuture};
 use reviewq_app::events::Snapshot;
-use reviewq_app::history::{HistoryParent, HistorySession, HistoryStore};
+use reviewq_app::history::{
+    HistoryParent, HistorySession, HistoryStore, PromptOverviewCheckpoint, SourceAnchor,
+};
 use reviewq_domain::identity::{NativeInputId, NativeTurnId, RunId, SessionKey};
 use reviewq_domain::session::{NativeBinding, NativeIdentity, SessionTarget};
 use rusqlite::{Connection, params};
@@ -12,7 +14,33 @@ use crate::queue::{identity_for_review, parse, path, provider, text};
 use crate::workspace::{allow_review, scope};
 use crate::{SqliteStore, StoreError};
 
+mod index;
+
 impl HistoryStore for SqliteStore {
+    fn prompt_overview_checkpoint(
+        &self,
+        source: HistorySession,
+    ) -> AppFuture<'_, Option<PromptOverviewCheckpoint>> {
+        Box::pin(async move {
+            self.read(move |db| index::read(db, &source))
+                .await
+                .map_err(StoreError::app)
+        })
+    }
+
+    fn remember_prompt_overview(
+        &self,
+        source: HistorySession,
+        expected: Option<SourceAnchor>,
+        checkpoint: PromptOverviewCheckpoint,
+    ) -> AppFuture<'_, ()> {
+        Box::pin(async move {
+            self.write(move |tx| index::remember(&tx.sql, &source, expected, checkpoint))
+                .await
+                .map_err(StoreError::app)
+        })
+    }
+
     fn verified_history_turns(
         &self,
         actor: Actor,

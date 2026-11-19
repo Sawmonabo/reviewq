@@ -234,8 +234,13 @@ fn overview(
             first = last + 1;
         }
     }
+    let anchor = SourceAnchor {
+        generation: generation.clone(),
+        file: file::file_position(&source.file, end, end)?,
+    };
     Ok(NativeNavigation::Overview {
         generation,
+        source: Some(anchor),
         total: cursor,
         complete: offset == end,
         groups: output,
