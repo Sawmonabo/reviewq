@@ -166,15 +166,20 @@ export default function ReviewDrawer({
     try {
       const result = await terminal(run.runId, session.sessionKey, action === "open");
       if (result.state === "command") {
-        if (action === "copy") await navigator.clipboard.writeText(result.command);
+        let message = result.opened
+          ? "Opened native terminal."
+          : "Run this command in the terminal.";
+        if (action === "copy") {
+          try {
+            await navigator.clipboard.writeText(result.command);
+            message = "Terminal command copied.";
+          } catch {
+            message = "Copy failed. Copy the exact session command below.";
+          }
+        }
         setOutcome({
           key: scope,
-          message:
-            action === "copy"
-              ? "Terminal command copied."
-              : result.opened
-                ? "Opened native terminal."
-                : "Run this command in the terminal.",
+          message,
           terminal: result.command,
         });
       } else {
@@ -562,9 +567,22 @@ export default function ReviewDrawer({
         aria-labelledby={`review-tab-${activeTab}`}
         className={activeTab === "agent" ? "drawer-body agent-body" : "drawer-body"}
       >
-        {outcomeMessage && (
+        {outcomeMessage && <Notice>{outcomeMessage}</Notice>}
+        {command && (
+          <label className="field copy-session-command">
+            Exact session command
+            <textarea
+              value={command}
+              readOnly
+              rows={2}
+              onFocus={(event) => event.currentTarget.select()}
+            />
+          </label>
+        )}
+        {activeTab === "agent" && recoveryActive && recovery.data && (
           <Notice>
-            {outcomeMessage} {command && <code>{command}</code>}
+            Auto-resume {readable(recovery.data.state).toLowerCase()}
+            {recovery.data.reason && ` · ${readable(recovery.data.reason)}`}
           </Notice>
         )}
         {selectionError && (

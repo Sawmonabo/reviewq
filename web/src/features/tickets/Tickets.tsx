@@ -200,6 +200,15 @@ function TicketDetail({ ticketKey }: { readonly ticketKey: string }) {
           </div>
         )}
       </section>
+      <p className="ticket-freshness meta">
+        {ticket.updatedAt && (
+          <>
+            Updated <time dateTime={ticket.updatedAt}>{formatActivityTime(ticket.updatedAt)}</time>{" "}
+            ·{" "}
+          </>
+        )}
+        Loaded <time dateTime={ticket.fetchedAt}>{formatActivityTime(ticket.fetchedAt)}</time>
+      </p>
     </>
   );
 }

@@ -209,6 +209,10 @@
 .ticket-comment .prose pre {
   background: var(--canvas);
 }
+.ticket-freshness {
+  font-size: 10px;
+  margin-top: 20px;
+}
 .prose-source {
   white-space: pre-wrap;
   overflow-wrap: anywhere;

@@ -253,14 +253,6 @@
 .answered-question ul {
   padding-inline-start: 22px;
 }
-.session-result {
-  gap: 16px;
-  font-size: 13px;
-  line-height: 1.75;
-}
-.session-result h3 {
-  font-size: 13px;
-}
 .message-copy {
   white-space: pre-wrap;
   overflow-wrap: anywhere;

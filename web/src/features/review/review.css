@@ -219,6 +219,30 @@
   display: flow-root;
   min-width: 0;
 }
+.session-result.stack,
+.session-result .output-reader {
+  grid-template-columns: minmax(0, 1fr);
+  min-width: 0;
+}
+.session-result {
+  gap: 16px;
+  font-size: 13px;
+  line-height: 1.75;
+}
+.session-result h3 {
+  font-size: 13px;
+}
+.copy-session-command {
+  margin: 8px 0;
+  flex: 0 0 auto;
+}
+.agent-body .copy-session-command {
+  margin-inline: 22px;
+}
+.copy-session-command textarea {
+  font-family: var(--mono);
+  font-size: 11px;
+}
 .overview {
   gap: 22px;
 }
