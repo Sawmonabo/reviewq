@@ -48,9 +48,10 @@ export function reportContext(
   collection: "findings" | "changes" | "sections" | "dispositions",
   cursor: string | undefined,
   signal: AbortSignal,
+  limit?: number,
 ) {
   return read(
-    `${path(runId)}/context${queryString({ receiptId, collection, cursor })}`,
+    `${path(runId)}/context${queryString({ receiptId, collection, cursor, limit })}`,
     isReportContextResponse,
     signal,
     64 * 1024,

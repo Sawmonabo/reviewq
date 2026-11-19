@@ -1,7 +1,7 @@
 import { useMemo, useRef, useState } from "react";
 import type { RunDetail } from "../../../api/generated/contracts";
 import type { QuoteRef, ReportSummary } from "../../../api/generated/contracts/reports";
-import { reportFeedback, reportView } from "../../../api/reports";
+import { reportContext, reportFeedback, reportView } from "../../../api/reports";
 import { Empty, Loading, Notice } from "../../../components/PanelState";
 import { parseMarkdown } from "../../../components/markdown/parse-markdown";
 import { useDraft } from "../../../hooks/useDraft";
@@ -12,6 +12,7 @@ import { Composer } from "../Composer";
 import { ReportDetails } from "./ReportDetails";
 import { ReportSource } from "./ReportSource";
 import { RichReport } from "./RichReport";
+import type { AcceptedFindingChange } from "./report-structure";
 
 type Quote = { readonly text: string; readonly reference: QuoteRef | null };
 type Props = {
@@ -52,6 +53,11 @@ export default function ReportDocument({
   const body = useResource(`report-body:${run.runId}:${report.receiptId}:${admitted}`, (signal) =>
     admitted
       ? reportView(run.runId, signal, report.receiptId, "markdown")
+      : Promise.resolve({ data: null, cursor: "" }),
+  );
+  const changes = useResource(`report-outcomes:${run.runId}:${report.receiptId}`, (signal) =>
+    admitted && report.changeCount
+      ? acceptedChanges(run.runId, report, signal)
       : Promise.resolve({ data: null, cursor: "" }),
   );
   const markdown = body.data?.report?.sha256 === report.sha256 ? body.data?.markdown : undefined;
@@ -125,6 +131,9 @@ export default function ReportDocument({
     <>
       <div className="report-reader" ref={reader}>
         {notice && <Notice>{notice}</Notice>}
+        {!sourceMode && changes.error && (
+          <Notice retry={changes.retry}>Accepted finding outcomes are unavailable.</Notice>
+        )}
         {sourceMode ? (
           <ReportSource
             runId={run.runId}
@@ -143,12 +152,14 @@ export default function ReportDocument({
             }
             onQuote={capture}
           />
-        ) : body.pending ? (
+        ) : body.pending || changes.pending ? (
           <Loading label="Loading accepted report…" />
         ) : tree && typeof markdown === "string" ? (
           <RichReport
             tree={tree}
             source={markdown}
+            report={report}
+            changes={changes.data}
             bookmark={`findings.position.${run.runId}.${report.receiptId}.${report.sha256}`}
             onQuote={capture}
             onSource={(offset) => {
@@ -338,4 +349,37 @@ function readQuote(value: string): Quote | undefined {
   } catch {
     // A discarded or malformed memory-only draft has no valid quote.
   }
+}
+
+async function acceptedChanges(runId: string, report: ReportSummary, signal: AbortSignal) {
+  const changes = new Map<string, AcceptedFindingChange>();
+  let next: string | undefined;
+  let cursor: string;
+  do {
+    const result = await reportContext(runId, report.receiptId, "changes", next, signal, 20);
+    if (
+      result.data.baseReport?.receiptId !== report.receiptId ||
+      result.data.baseReport.sha256 !== report.sha256
+    ) {
+      throw new Error("The displayed report outcomes changed.");
+    }
+    for (const item of result.data.items) {
+      if (item.kind !== "change" || changes.has(item.findingId))
+        throw new Error("The accepted finding outcomes are inconsistent.");
+      changes.set(item.findingId, item);
+    }
+    cursor = result.cursor;
+    const continuation = result.data.nextCursor;
+    if (
+      continuation &&
+      (!result.data.items.length ||
+        continuation === next ||
+        changes.size >= (report.changeCount ?? 0))
+    )
+      throw new Error("The accepted finding outcome count changed.");
+    next = continuation ?? undefined;
+  } while (next);
+  if (changes.size !== report.changeCount)
+    throw new Error("The accepted finding outcomes are incomplete.");
+  return { data: changes, cursor };
 }

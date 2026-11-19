@@ -156,12 +156,14 @@ pub async fn run_due_recoveries(
         if candidate.settings != active_settings {
             continue;
         }
-        let live = source.workflow_snapshot(candidate.identity.clone()).await;
+        let live = source
+            .authenticated_review_head(candidate.identity.clone())
+            .await;
         let result = match live {
             Ok(live)
-                if live.review.identity != candidate.identity
-                    || live.review.head_sha != candidate.head
-                    || live.review.state != crate::queue::MergeRequestState::Open =>
+                if live.identity != candidate.identity
+                    || live.head_sha != candidate.head
+                    || live.state != crate::queue::MergeRequestState::Open =>
             {
                 store
                     .defer_recovery(candidate, "recovery_source_changed", true)

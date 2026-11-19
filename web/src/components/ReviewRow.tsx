@@ -207,7 +207,7 @@ function ReviewEvidenceBadges({ review }: { readonly review: MergeRequestRow }) 
         </span>
       )}
       {review.unreadNonReplyCount > 0 && (
-        <span className="row-tag" data-review-kind="discussion_update">
+        <span className="row-tag">
           {review.unreadNonReplyCount} {review.unreadReplies > 0 ? "other updates" : "unread"}
         </span>
       )}

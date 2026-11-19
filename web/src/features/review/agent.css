@@ -248,6 +248,9 @@
   overflow-anchor: none;
   scrollbar-gutter: stable;
   scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
+}
+.timeline-viewport:is(:hover, :focus-within) {
   scrollbar-color: var(--strong-line) transparent;
 }
 .timeline-spacer {
@@ -349,6 +352,7 @@
 }
 .message-body .prose table {
   min-width: 0;
+  width: fit-content;
   font-size: 11px;
 }
 .message-body .prose :is(th, td) {

@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { ResponseSizeLimit } from "../../../api/bounded-bytes";
 import { ApiResponseError } from "../../../api/client";
@@ -361,11 +361,6 @@ function SelectedPatch({
   const [window, setWindow] = useState<Window>({ offset: 0 });
   const [back, setBack] = useState<readonly Window[]>([]);
   const bookmark = `patch.scroll.${file.reviewId}.${file.revision}.${file.fileId}`;
-  const restoreScroll = useCallback(() => {
-    const saved = savedValue(bookmark);
-    return typeof saved === "number" && saved >= 0 && Number.isFinite(saved) ? saved : 0;
-  }, [bookmark]);
-  const saveScroll = useCallback((scroll: number) => saveValue(bookmark, scroll), [bookmark]);
   const patch = useResource(
     JSON.stringify([file.revision, file.fileId, sourceMode, window]),
     async (signal) => {
@@ -510,12 +505,7 @@ function SelectedPatch({
                 </pre>
               </>
             ) : (
-              <PatchDocumentView
-                text={body.text}
-                discussions={threads}
-                restoreScroll={restoreScroll}
-                rememberScroll={saveScroll}
-              />
+              <PatchDocumentView text={body.text} discussions={threads} bookmark={bookmark} />
             ))}
         </>
       )}

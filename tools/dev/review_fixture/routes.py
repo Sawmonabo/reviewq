@@ -193,6 +193,35 @@ def jira_search(issues, query):
     return [value for key, value in issues.items() if not match or key == match[1].upper()]
 
 
+def board_issues(saved, board_id, sprint_id, query):
+    if not any(str(board["id"]) == board_id for board in saved["boards"]):
+        raise ReplayError(404, "Fixture Jira board was not found.")
+    jql = query.get("jql", [""])[-1]
+    rows = jira_search(saved["issues"], query)
+    selectors = {
+        "key": lambda issue: issue["key"],
+        "status": lambda issue: str(issue["fields"]["status"]["id"]),
+        "project": lambda issue: issue["fields"]["project"]["key"],
+    }
+    for field, value in selectors.items():
+        clause = re.search(rf"\b{field}\s+IN\s*\(([^)]*)\)", jql, re.IGNORECASE)
+        if clause:
+            allowed = {part.strip().strip('"').upper() for part in clause[1].split(",")}
+            rows = [row for row in rows if value(row).upper() in allowed]
+    if sprint_id is not None:
+        rows = [row for row in rows
+                if str((row["fields"].get("sprint") or {}).get("id")) == sprint_id]
+    if re.search(r"\bsprint\s+IS\s+EMPTY\b", jql, re.IGNORECASE):
+        rows = [row for row in rows if not row["fields"].get("sprint")]
+    start = query_number(query, "nextPageToken", 0)
+    size = query_number(query, "maxResults", 50, minimum=1, maximum=100)
+    end = start + size
+    page = {"issues": rows[start:end], "isLast": end >= len(rows)}
+    if end < len(rows):
+        page["nextPageToken"] = str(end)
+    return json_response(page)
+
+
 def jira_get(replay, path, query, origin):
     saved = replay.jira
     if path == "/_edge/tenant_info":
@@ -208,6 +237,9 @@ def jira_get(replay, path, query, origin):
         return json_response({"id": "44", "name": "Fixture parser work", "jql": "project = RQ"})
     if path == "/rest/api/2/status":
         return json_response([{"id": "3", "name": "In Progress"}])
+    board = re.fullmatch(r"/rest/software/1.0/board/([0-9]+)(?:/sprint/([0-9]+))?/issue", path)
+    if board:
+        return board_issues(saved, board[1], board[2], query)
     if path == "/rest/agile/1.0/board":
         return json_response(jira_page(saved["boards"], query, "values", agile=True))
     if path == "/rest/agile/1.0/board/31":

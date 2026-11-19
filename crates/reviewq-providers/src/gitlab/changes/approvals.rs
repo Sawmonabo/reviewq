@@ -101,6 +101,10 @@ impl GitLab {
         if let Some(account) = self.account {
             return Ok(account);
         }
+        self.observe_authenticated_actor().await
+    }
+
+    pub(in crate::gitlab) async fn observe_authenticated_actor(&self) -> Result<u64, AppError> {
         let (_, body) = self.get(self.url("api/v4/user")?, 32 * 1024).await?;
         let user: User = serde_json::from_slice(&body).map_err(|_| AppError::Unavailable)?;
         checked_id(user.id)

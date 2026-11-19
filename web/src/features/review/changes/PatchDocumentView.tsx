@@ -3,31 +3,31 @@ import type { ClipboardEvent } from "react";
 import { createPortal } from "react-dom";
 import type { PatchDiscussion } from "../../../api/generated/contracts";
 import { DiscussionThread } from "../DiscussionThread";
+import { bindPatchPosition } from "./patch-position";
 import { mountPatchDocument } from "./patch-document";
 import type { PatchDocument } from "./patch-document";
 
 type Props = {
   readonly text: string;
   readonly discussions: readonly PatchDiscussion[];
-  readonly restoreScroll: () => number;
-  readonly rememberScroll: (scroll: number) => void;
+  readonly bookmark: string;
 };
 
-export function PatchDocumentView({ text, discussions, restoreScroll, rememberScroll }: Props) {
+export function PatchDocumentView({ text, discussions, bookmark }: Props) {
   const [patch, setPatch] = useState<PatchDocument>();
   const mount = useCallback(
     (host: HTMLDivElement | null) => {
       if (!host) return;
       const rendered = mountPatchDocument(host, text);
-      const scroller = host.closest(".drawer-body");
-      if (scroller) scroller.scrollTop = restoreScroll();
+      const scroller = host.closest<HTMLElement>(".drawer-body");
+      const release = scroller && bindPatchPosition(rendered, scroller, bookmark);
       setPatch(rendered);
       return () => {
-        if (scroller) rememberScroll(scroller.scrollTop);
+        release?.();
         host.replaceChildren();
       };
     },
-    [text, restoreScroll, rememberScroll],
+    [text, bookmark],
   );
   return (
     <>
