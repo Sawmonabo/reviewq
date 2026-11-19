@@ -8,12 +8,13 @@ import type {
 import type { Catalog, Preview, Receipt } from "../../api/generated/contracts/launch";
 import { prepareRun, registerRun, runCatalog, startRun } from "../../api/launch";
 import { readQueue, trackReview } from "../../api/workspace";
-import { Icon } from "../../components/Icon";
 import { Modal } from "../../components/Modal";
 import { Empty, Loading, Notice } from "../../components/PanelState";
 import { useResource } from "../../hooks/useResource";
 import { describeError, readable } from "../../lib/presentation";
 import { LaunchReceiptCard, LaunchReceipts } from "./LaunchReceipts";
+import { LaunchTargetPicker } from "./LaunchTargetPicker";
+import { RegistrationGuide } from "./RegistrationGuide";
 import type { PendingLaunch } from "./pending-launches";
 import {
   pendingLaunches,
@@ -23,6 +24,7 @@ import {
   watchPendingLaunches,
 } from "./pending-launches";
 import type { LaunchMode, LaunchTarget } from "./types";
+import "./launch.css";
 
 type Attempt = {
   readonly request: RunStartRequest;
@@ -54,7 +56,9 @@ function LaunchEditor({
   onOpen,
 }: Props) {
   const [targets, setTargets] = useState(initialTargets);
-  const [provider, setProvider] = useState<HostProviderDto>("codex");
+  const [provider, setProvider] = useState<HostProviderDto>(
+    mode === "register" ? "claude" : "codex",
+  );
   const [skill, setSkill] = useState("");
   const [invocation, setInvocation] = useState<"skill" | "custom">("skill");
   const [args, setArgs] = useState("");
@@ -64,7 +68,7 @@ function LaunchEditor({
   const [effort, setEffort] = useState("");
   const [search, setSearch] = useState("");
   const [url, setUrl] = useState("");
-  const [showTrack, setShowTrack] = useState(false);
+  const [choosing, setChoosing] = useState(mode === "pick" && initialTargets.length === 0);
   const [advanced, setAdvanced] = useState(false);
   const [nativeId, setNativeId] = useState("");
   const [preview, setPreview] = useState<{ revision: number; items: readonly Preview[] }>();
@@ -92,6 +96,14 @@ function LaunchEditor({
   const request = useRef<AbortController | undefined>(undefined);
   const register = mode === "register";
   const active = targets[0];
+  const pickMode = choosing || register;
+  const registration = useResource(
+    `registration-target:${register ? (active?.reviewId ?? "") : ""}`,
+    (signal) =>
+      register && active
+        ? readOverview(active.reviewId, signal)
+        : Promise.resolve({ data: null, cursor: "" }),
+  );
   const pick = useResource(
     `launch-picker:${settingsRevision}:${search}`,
     (signal) =>
@@ -102,9 +114,9 @@ function LaunchEditor({
     [{ kind: "queue" }, { kind: "settings" }],
   );
   const catalogs = useResource(
-    `catalog:${settingsRevision}:${provider}:${JSON.stringify(targets.map((target) => target.reviewId))}:${register}`,
+    `catalog:${settingsRevision}:${provider}:${JSON.stringify(targets.map((target) => target.reviewId))}:${pickMode}`,
     async (signal) => {
-      if (!targets.length || register) return { data: [], cursor: "" };
+      if (!targets.length || pickMode) return { data: [], cursor: "" };
       const results = await Promise.all(
         targets.map((target) => runCatalog({ reviewId: target.reviewId, provider }, signal)),
       );
@@ -158,7 +170,6 @@ function LaunchEditor({
       const overview = await readOverview(tracked.data.reviewId, controller.signal);
       if (controller.signal.aborted) return;
       selectTarget(overview.data.review);
-      setShowTrack(false);
       setUrl("");
       pick.retry();
     } catch (error) {
@@ -276,57 +287,88 @@ function LaunchEditor({
 
   return (
     <Modal
-      title={register ? "Register run" : targets.length > 1 ? "Prepare reviews" : "Review MR"}
+      className="launch-pane"
+      nonmodal
+      title={
+        register
+          ? "Register review work"
+          : choosing
+            ? "New review run"
+            : targets.length > 1
+              ? `Launch ${targets.length} reviews`
+              : "Launch MR session"
+      }
       onClose={onClose}
       busy={busy}
       footer={
-        <>
-          <button type="button" disabled={busy} onClick={onClose}>
-            {attempts.length ? "Done" : "Cancel"}
-          </button>
-          {register ? (
-            <button
-              type="button"
-              className="primary"
-              disabled={busy || !active || !nativeId.trim() || !advanced}
-              onClick={() => void registerSelected()}
-            >
-              Register this run
+        !choosing && (
+          <>
+            <button type="button" disabled={busy} onClick={onClose}>
+              {attempts.length ? "Done" : "Back"}
             </button>
-          ) : (
-            !attempts.length &&
-            (currentPreview ? (
-              <button
-                type="button"
-                className="primary"
-                disabled={busy || blocked}
-                onClick={() => void start()}
-              >
-                {earlier.length > 0
-                  ? "Retry the prepared submission"
-                  : `Start ${targets.length === 1 ? "review" : `${targets.length} reviews`}`}
-              </button>
-            ) : (
-              <button
-                type="button"
-                className="primary"
-                disabled={
-                  busy ||
-                  blocked ||
-                  !active ||
-                  !catalogs.data?.length ||
-                  (invocation === "skill" ? !selectedSkill : !prompt.trim())
-                }
-                onClick={() => void prepare()}
-              >
-                Preview {targets.length === 1 ? "review" : "reviews"}
-              </button>
-            ))
-          )}
-        </>
+            {register
+              ? advanced &&
+                nativeId.trim() && (
+                  <button
+                    type="button"
+                    className="primary"
+                    disabled={busy || !active || !nativeId.trim() || !advanced}
+                    onClick={() => void registerSelected()}
+                  >
+                    Register session
+                  </button>
+                )
+              : !attempts.length &&
+                (currentPreview ? (
+                  <button
+                    type="button"
+                    className="primary"
+                    disabled={busy || blocked}
+                    onClick={() => void start()}
+                  >
+                    {earlier.length > 0
+                      ? "Retry the prepared submission"
+                      : `Start ${targets.length === 1 ? "review" : `${targets.length} reviews`}`}
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    className="primary"
+                    disabled={
+                      busy ||
+                      blocked ||
+                      !active ||
+                      !catalogs.data?.length ||
+                      (invocation === "skill" ? !selectedSkill : !prompt.trim())
+                    }
+                    onClick={() => void prepare()}
+                  >
+                    Preview {targets.length === 1 ? "review" : "reviews"}
+                  </button>
+                ))}
+          </>
+        )
       }
     >
-      <div className="stack">
+      <div className="launch-body stack">
+        <div className="launch-heading">
+          <h3>
+            {register
+              ? "Connect your review session."
+              : choosing
+                ? "Choose a merge request"
+                : targets.length > 1
+                  ? "Review selected MRs"
+                  : "Use your existing workflow."}
+          </h3>
+          <p className="meta">
+            {register
+              ? "Run the command in the conversation working on this MR."
+              : choosing
+                ? "Then choose your agent, skill and review context."
+                : targets.map((item) => item.tickets[0]?.key ?? `!${item.iid}`).join(" · ")}
+          </p>
+        </div>
         {notice && <Notice>{notice}</Notice>}
         {!register &&
           earlier.map((item) => (
@@ -336,6 +378,9 @@ function LaunchEditor({
               onOpen={onOpen}
               onNoReceipt={() => setNoReceipt((known) => new Set([...known, item.submissionId]))}
               onReceipt={(receipt) => {
+                setNoReceipt(
+                  (values) => new Set([...values].filter((id) => id !== item.submissionId)),
+                );
                 if (
                   receipt.state === "rejected" ||
                   (receipt.state === "confirmed" && receipt.runId)
@@ -354,142 +399,89 @@ function LaunchEditor({
               initialReceipt={receipt}
             />
           ))}
-        {register && (
-          <div className="surface-card stack">
-            <h3>Link from the native session</h3>
-            <p>
-              In Claude, use <code>/reviewq {active?.tickets[0]?.key ?? "<ticket or MR URL>"}</code>
-              . In Codex, use{" "}
-              <code>$reviewq {active?.tickets[0]?.key ?? "<ticket or MR URL>"}</code>.
-            </p>
-            <button type="button" onClick={() => setAdvanced(!advanced)} aria-expanded={advanced}>
-              Advanced exact-session registration
-            </button>
-          </div>
+        {pickMode && (
+          <LaunchTargetPicker
+            choices={(pick.data?.items ?? []).flatMap((item) =>
+              item.kind === "mr" && item.mrState === "open" ? [item] : [],
+            )}
+            active={active}
+            search={search}
+            pending={pick.pending}
+            error={pick.error}
+            retry={pick.retry}
+            disabled={busy}
+            url={url}
+            onSearch={setSearch}
+            onSelect={selectTarget}
+            {...(choosing ? { onPrepare: () => setChoosing(false) } : {})}
+            onUrl={setUrl}
+            onTrack={() => void track()}
+          />
         )}
-        {(!register || advanced) && (
-          <>
-            {targets.length ? (
-              <div className="surface-card stack">
-                <div className="spread">
-                  <h3>{targets.length === 1 ? "Target merge request" : "Target merge requests"}</h3>
-                  {mode !== "prepare" && !attempts.length && (
-                    <button
-                      type="button"
-                      disabled={busy}
-                      onClick={() => {
-                        setTargets([]);
-                        clearPreview();
-                      }}
-                    >
-                      Choose another MR
-                    </button>
-                  )}
-                </div>
-                {targets.map((target) => (
-                  <div key={target.reviewId}>
-                    <span className="ticket-key">{target.tickets[0]?.key}</span>{" "}
-                    <code>
-                      {target.projectPath}!{target.iid} · {target.sourceSha.slice(0, 12)}
-                    </code>
-                    <div>{target.title}</div>
-                  </div>
-                ))}
+        {!choosing && active && (
+          <label className="field">
+            Agent provider
+            <select
+              value={provider}
+              disabled={busy || attempts.length > 0}
+              onChange={(event) => {
+                setProvider(event.currentTarget.value === "claude" ? "claude" : "codex");
+                setSkill("");
+                setModel("");
+                setEffort("");
+                clearPreview();
+              }}
+            >
+              <option value="codex">Codex</option>
+              <option value="claude">Claude Code</option>
+            </select>
+          </label>
+        )}
+        {register && registration.error && (
+          <Notice retry={registration.retry}>{registration.error}</Notice>
+        )}
+        {register && (
+          <RegistrationGuide
+            provider={provider}
+            webUrl={registration.data?.webUrl}
+            advanced={advanced}
+            nativeId={nativeId}
+            onAdvanced={setAdvanced}
+            onNativeId={setNativeId}
+            disabled={busy}
+          />
+        )}
+        {!pickMode && targets.length > 0 && !attempts.length && (
+          <div className="launch-target stack">
+            {targets.map((target) => (
+              <div key={target.reviewId}>
+                <span className="ticket-key">{target.tickets[0]?.key}</span>
+                <strong>{target.tickets[0]?.title ?? target.title}</strong>
+                <small>
+                  {catalogs.data?.find((catalog) => catalog.reviewId === target.reviewId)
+                    ?.checkout ?? target.projectPath}{" "}
+                  · {target.sourceSha.slice(0, 12)}
+                </small>
               </div>
-            ) : (
-              <>
-                <label className="search-field">
-                  <Icon name="search" />
-                  <input
-                    aria-label="Find a merge request"
-                    placeholder="Search merge requests"
-                    value={search}
-                    maxLength={200}
-                    onChange={(event) => setSearch(event.currentTarget.value)}
-                  />
-                </label>
-                {pick.pending && <Loading label="Finding merge requests…" />}
-                {pick.error && <Notice retry={pick.retry}>{pick.error}</Notice>}
-                <div className="stack">
-                  {pick.data?.items.map(
-                    (item) =>
-                      item.kind === "mr" &&
-                      item.mrState === "open" && (
-                        <button
-                          type="button"
-                          key={item.reviewId}
-                          onClick={() => selectTarget(item)}
-                        >
-                          <strong>
-                            {item.tickets[0]?.key ?? item.projectPath} · !{item.iid}
-                          </strong>{" "}
-                          {item.title}
-                        </button>
-                      ),
-                  )}
-                </div>
+            ))}
+            {mode === "pick" && (
+              <div className="actions">
                 <button
                   type="button"
+                  className="quiet-button"
                   disabled={busy}
-                  onClick={() => setShowTrack(!showTrack)}
-                  aria-expanded={showTrack}
-                >
-                  Track MR by URL
-                </button>
-                {showTrack && (
-                  <form
-                    className="actions"
-                    onSubmit={(event) => {
-                      event.preventDefault();
-                      void track();
-                    }}
-                  >
-                    <input
-                      aria-label="GitLab merge request URL"
-                      placeholder="https://gitlab.example.com/team/repo/-/merge_requests/42"
-                      type="url"
-                      value={url}
-                      onChange={(event) => setUrl(event.currentTarget.value)}
-                    />
-                    <button type="submit" disabled={busy || !pick.data || !url.trim()}>
-                      Track merge request
-                    </button>
-                  </form>
-                )}
-              </>
-            )}
-            {active && (
-              <label className="field">
-                Provider
-                <select
-                  value={provider}
-                  disabled={busy || attempts.length > 0}
-                  onChange={(event) => {
-                    setProvider(event.currentTarget.value === "claude" ? "claude" : "codex");
-                    setSkill("");
-                    setModel("");
-                    setEffort("");
+                  onClick={() => {
+                    setChoosing(true);
                     clearPreview();
                   }}
                 >
-                  <option value="codex">Codex</option>
-                  <option value="claude">Claude</option>
-                </select>
-              </label>
+                  Choose another MR
+                </button>
+              </div>
             )}
-          </>
+          </div>
         )}
-        {register && advanced && active && (
-          <label className="field">
-            Exact native session ID
-            <input
-              value={nativeId}
-              maxLength={200}
-              onChange={(event) => setNativeId(event.currentTarget.value)}
-            />
-          </label>
-        )}
-        {!register && active && !attempts.length && (
+        {!pickMode && active && !attempts.length && (
           <>
             {catalogs.pending && (
               <Loading label="Reading the configured checkout and provider catalog…" />
@@ -503,55 +495,29 @@ function LaunchEditor({
               </Notice>
             )}
             {Boolean(catalogs.data?.length) && (
-              <fieldset className="stack" disabled={busy}>
-                <legend>Review instructions</legend>
-                <div className="fields">
-                  <label className="field">
-                    Invocation
-                    <select
-                      value={invocation}
-                      onChange={(event) => {
-                        setInvocation(event.currentTarget.value === "custom" ? "custom" : "skill");
-                        clearPreview();
-                      }}
-                    >
-                      <option value="skill">Skill</option>
-                      <option value="custom">Custom prompt</option>
-                    </select>
-                  </label>
-                  <label className="field">
-                    Model
-                    <select
-                      value={model}
-                      onChange={(event) => {
-                        setModel(event.currentTarget.value);
-                        setEffort("");
-                        clearPreview();
-                      }}
-                    >
-                      <option value="">Provider default</option>
-                      {models.map((item) => (
-                        <option key={item.id} value={item.id}>
-                          {item.label}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <label className="field">
-                    Effort
-                    <select
-                      value={effort}
-                      onChange={(event) => {
-                        setEffort(event.currentTarget.value);
-                        clearPreview();
-                      }}
-                    >
-                      <option value="">Provider default</option>
-                      {efforts.map((value) => (
-                        <option key={value}>{value}</option>
-                      ))}
-                    </select>
-                  </label>
+              <fieldset className="launch-instructions stack" disabled={busy}>
+                <legend className="sr-only">Review instructions</legend>
+                <div className="launch-modes" role="group" aria-label="Launch type">
+                  <button
+                    type="button"
+                    aria-pressed={invocation === "skill"}
+                    onClick={() => {
+                      setInvocation("skill");
+                      clearPreview();
+                    }}
+                  >
+                    Existing skill
+                  </button>
+                  <button
+                    type="button"
+                    aria-pressed={invocation === "custom"}
+                    onClick={() => {
+                      setInvocation("custom");
+                      clearPreview();
+                    }}
+                  >
+                    Custom prompt
+                  </button>
                 </div>
                 {invocation === "skill" ? (
                   <>
@@ -598,9 +564,10 @@ function LaunchEditor({
                   </>
                 ) : (
                   <label className="field">
-                    Prompt
+                    Your prompt
                     <textarea
-                      rows={5}
+                      rows={6}
+                      placeholder="Describe the work you want this agent to do…"
                       value={prompt}
                       onChange={(event) => {
                         setPrompt(event.currentTarget.value);
@@ -612,7 +579,8 @@ function LaunchEditor({
                 <label className="field">
                   Additional context
                   <textarea
-                    rows={3}
+                    rows={5}
+                    placeholder="Add background, a specific concern, or instructions for this invocation…"
                     value={context}
                     onChange={(event) => {
                       setContext(event.currentTarget.value);
@@ -620,6 +588,41 @@ function LaunchEditor({
                     }}
                   />
                 </label>
+                <div className="launch-models fields">
+                  <label className="field">
+                    Lead model
+                    <select
+                      value={model}
+                      onChange={(event) => {
+                        setModel(event.currentTarget.value);
+                        setEffort("");
+                        clearPreview();
+                      }}
+                    >
+                      <option value="">Use CLI default</option>
+                      {models.map((item) => (
+                        <option key={item.id} value={item.id}>
+                          {item.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="field">
+                    Lead effort
+                    <select
+                      value={effort}
+                      onChange={(event) => {
+                        setEffort(event.currentTarget.value);
+                        clearPreview();
+                      }}
+                    >
+                      <option value="">Use CLI default</option>
+                      {efforts.map((value) => (
+                        <option key={value}>{value}</option>
+                      ))}
+                    </select>
+                  </label>
+                </div>{" "}
               </fieldset>
             )}
           </>
@@ -628,7 +631,7 @@ function LaunchEditor({
           <Notice>Settings changed. Prepare a new preview before starting.</Notice>
         )}
         {currentPreview?.map((item) => (
-          <details className="surface-card" open key={item.reviewId}>
+          <details className="launch-preview-panel" open key={item.reviewId}>
             <summary>
               <strong>{targets.find((target) => target.reviewId === item.reviewId)?.title}</strong>{" "}
               · {item.sourceSha.slice(0, 12)}
