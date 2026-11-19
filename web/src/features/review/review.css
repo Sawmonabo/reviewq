@@ -144,10 +144,10 @@
   flex: 1 1 auto;
   min-width: 0;
   gap: 25px;
-  scrollbar-width: thin;
-  scrollbar-color: var(--scroll-thumb) transparent;
+  scrollbar-width: none;
 }
 .drawer-surface .drawer-tabs button {
+  flex: none;
   min-height: 40px;
   height: 40px;
   padding: 10px 0;

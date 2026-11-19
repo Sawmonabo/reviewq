@@ -286,6 +286,8 @@
   background: var(--surface);
 }
 .timeline-entry .message-body {
+  min-width: 0;
+  color: var(--transcript-text);
   overflow-wrap: anywhere;
   font-size: 13px;
   line-height: 1.75;
@@ -325,9 +327,16 @@
   padding: 12px 15px;
   border: 1px solid color-mix(in srgb, var(--link) 24%, var(--line));
   border-radius: 16px 16px 4px 16px;
-  background: color-mix(in srgb, var(--link) 10%, var(--canvas));
-  color: var(--text);
+  background: var(--user-message-bg);
+  color: var(--user-message-text);
   line-height: 1.7;
+}
+.message-body .stack {
+  grid-template-columns: minmax(0, 1fr);
+}
+.message-body .prose {
+  min-width: 0;
+  color: inherit;
 }
 .message-body .prose table {
   min-width: 0;

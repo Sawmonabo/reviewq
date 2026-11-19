@@ -14,7 +14,7 @@ import { PromptNavigator } from "./PromptNavigator";
 import { FileReadPack, ToolRunHeader } from "./ToolActivity";
 import { activityRows, openKey, toolCatalog, toolOnly } from "./tool-activity";
 import type { ReadPack, ReadTarget, ToolRun } from "./tool-activity";
-import { TranscriptMarkdown } from "./TranscriptMarkdown";
+import { MarkdownContent } from "../../../components/markdown/MarkdownContent";
 import { useHistory } from "./useHistory";
 
 type Position = {
@@ -598,7 +598,7 @@ export function Transcript({
                       <p className="message-copy">{row.provisional}</p>
                     )}
                     {row.delivery && !row.entry && (
-                      <TranscriptMarkdown source={row.delivery.text} />
+                      <MarkdownContent source={row.delivery.text} />
                     )}
                     {row.entry && history.generation && (
                       <EntryBody

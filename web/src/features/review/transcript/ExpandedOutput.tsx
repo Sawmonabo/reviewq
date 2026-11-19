@@ -3,7 +3,7 @@ import { historyContent } from "../../../api/history";
 import type { SessionAddress } from "../../../api/history";
 import { Loading, Notice } from "../../../components/PanelState";
 import { useResource } from "../../../hooks/useResource";
-import { TranscriptMarkdown } from "./TranscriptMarkdown";
+import { MarkdownContent } from "../../../components/markdown/MarkdownContent";
 
 type Position = { readonly offset: number; readonly cursor?: string };
 const start: Position = { offset: 0 };
@@ -74,7 +74,7 @@ export function ExpandedOutput({
         {range.error && <Notice retry={range.retry}>{range.error}</Notice>}
         {range.data &&
           (format === "markdown" ? (
-            <TranscriptMarkdown source={range.data.text} />
+            <MarkdownContent source={range.data.text} />
           ) : (
             <pre className="tool-output-line" aria-label="Native output text">
               {range.data.text}

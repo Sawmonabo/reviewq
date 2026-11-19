@@ -567,12 +567,7 @@
   .rail nav {
     flex-direction: row;
     gap: 5px;
-    scrollbar-width: thin;
-    scrollbar-color: transparent transparent;
-    padding-bottom: 4px;
-  }
-  .rail nav:focus-within {
-    scrollbar-color: var(--scroll-thumb) transparent;
+    scrollbar-width: none;
   }
   .rail-item,
   .rail-small .rail-item {

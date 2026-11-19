@@ -1,4 +1,5 @@
-import { lazy, Suspense, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
+import { MarkdownContent } from "../../components/markdown/MarkdownContent";
 import { readTicket } from "../../api/tickets";
 import type { TicketCommentOrder } from "../../api/tickets";
 import type { TicketComment } from "../../api/generated/contracts";
@@ -8,12 +9,6 @@ import { formatTime, safeUrl } from "../../lib/presentation";
 import { savedValue, saveValue } from "../../lib/view-preferences";
 import { jiraWiki } from "./wiki";
 import "./tickets.css";
-
-const Markdown = lazy(() =>
-  import("../../components/markdown/MarkdownContent").then((module) => ({
-    default: module.MarkdownContent,
-  })),
-);
 
 export default function Tickets({ keys }: { readonly keys: readonly string[] }) {
   const bookmark = `ticket.${keys.join(".")}`;
@@ -216,11 +211,7 @@ function TicketMarkdown({
   readonly base?: string | undefined;
 }) {
   const markdown = useMemo(() => jiraWiki(body), [body]);
-  return (
-    <Suspense fallback={<p className="prose-source">{body}</p>}>
-      <Markdown source={markdown} base={base} />
-    </Suspense>
-  );
+  return <MarkdownContent source={markdown} base={base} />;
 }
 
 function CommentCard({

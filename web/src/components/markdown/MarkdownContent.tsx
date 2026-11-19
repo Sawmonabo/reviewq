@@ -1,12 +1,11 @@
-import { lazy, Suspense, useMemo } from "react";
+import { useMemo } from "react";
 import type { ReactNode } from "react";
 import { Fragment, jsx, jsxs } from "react/jsx-runtime";
 import { toJsxRuntime } from "hast-util-to-jsx-runtime";
 import type { Element, Root } from "hast";
+import MermaidDiagram from "./MermaidDiagram";
 import { parseMarkdown } from "./parse-markdown";
 import "./markdown.css";
-
-const MermaidDiagram = lazy(() => import("./MermaidDiagram"));
 
 export function MarkdownContent({
   source,
@@ -63,11 +62,7 @@ function CodeBlock({
     child.properties.className.includes("language-mermaid")
   ) {
     const source = child.children.map((item) => (item.type === "text" ? item.value : "")).join("");
-    return (
-      <Suspense fallback={<pre>{source}</pre>}>
-        <MermaidDiagram source={source} />
-      </Suspense>
-    );
+    return <MermaidDiagram source={source} />;
   }
   return <pre>{children}</pre>;
 }

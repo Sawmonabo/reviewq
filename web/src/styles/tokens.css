@@ -69,6 +69,9 @@
   --avatar-text: #b0b0bd;
   --dim-text: #80808e;
   --ticket-text: #b0bdda;
+  --transcript-text: #d2d2dc;
+  --user-message-bg: #1a1e2b;
+  --user-message-text: #e0e4ef;
 }
 :root[data-theme="light"] {
   color-scheme: light;
@@ -92,6 +95,9 @@
   --avatar-text: #575364;
   --dim-text: #646073;
   --ticket-text: #324d98;
+  --transcript-text: #343441;
+  --user-message-bg: #eaeafb;
+  --user-message-text: #292c45;
   --workspace-bg: #faf9fc;
   --rail-line: #dcd9e6;
   --rail-active: #eae8f2;
