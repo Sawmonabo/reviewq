@@ -141,6 +141,24 @@ export function parentElement(node: Node) {
   return node instanceof Element ? node : node.parentElement;
 }
 
+export function reportParagraphQuote(paragraph: HTMLElement, source: string, block: ReportBlock) {
+  const start = Number(paragraph.dataset.reportParagraphStart);
+  const end = Number(paragraph.dataset.reportParagraphEnd);
+  if (
+    !Number.isSafeInteger(start) ||
+    !Number.isSafeInteger(end) ||
+    start < 0 ||
+    start < block.offset ||
+    start >= end ||
+    end > block.end ||
+    end > source.length
+  )
+    return;
+  const exact = source.slice(start, end);
+  const text = exact.trim();
+  return text ? { text, offset: start + exact.indexOf(text) } : undefined;
+}
+
 function authoredFinding(
   nodes: readonly RootContent[],
   source: string,
@@ -264,7 +282,21 @@ function annotate(nodes: readonly RootContent[]) {
 function annotateNode(node: RootContent): RootContent {
   if (node.type === "element") {
     if (node.tagName === "pre" || node.tagName === "svg") return node;
-    return { ...node, children: node.children.map(annotateNode) as Element["children"] };
+    const start = node.position?.start.offset;
+    const end = node.position?.end.offset;
+    return {
+      ...node,
+      ...(node.tagName === "p" && start !== undefined && end !== undefined
+        ? {
+            properties: {
+              ...node.properties,
+              dataReportParagraphStart: start,
+              dataReportParagraphEnd: end,
+            },
+          }
+        : {}),
+      children: node.children.map(annotateNode) as Element["children"],
+    };
   }
   const start = node.position?.start.offset;
   const end = node.position?.end.offset;

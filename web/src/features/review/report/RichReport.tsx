@@ -4,14 +4,23 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useState } from "reac
 import type { ReportSummary } from "../../../api/generated/contracts/reports";
 import { MarkdownTree } from "../../../components/markdown/MarkdownContent";
 import { savedValue, saveValue } from "../../../lib/view-preferences";
-import { parentElement, reportBlocks, selectionSource } from "./report-presentation";
+import {
+  parentElement,
+  reportBlocks,
+  reportParagraphQuote,
+  selectionSource,
+} from "./report-presentation";
 import type { ReportBlock } from "./report-presentation";
 import { isRetired, outcomeLabels } from "./report-structure";
 import type { AcceptedFindingChange } from "./report-structure";
 
 type Bookmark = { readonly top: number; readonly offset?: number; readonly inset?: number };
 type Quote = { readonly text: string; readonly offset: number };
-type Selection = { readonly quote?: Quote; readonly fallback: number };
+type Selection = {
+  readonly quote?: Quote;
+  readonly fallback: number;
+  readonly paragraph?: true;
+};
 
 export function RichReport({
   tree,
@@ -149,7 +158,7 @@ export function RichReport({
       const active = getSelection();
       if (!active || active.isCollapsed || !active.rangeCount) {
         if (!document.activeElement?.closest(".report-selection-action")) {
-          setSelection(undefined);
+          setSelection((current) => (current?.paragraph ? current : undefined));
           setPinned([]);
         }
         return;
@@ -286,6 +295,25 @@ export function RichReport({
       <div
         className="report-blocks"
         ref={setRoot}
+        onPointerDown={() => {
+          setSelection((current) => (current?.paragraph ? undefined : current));
+        }}
+        onClick={(event) => {
+          const target = event.target;
+          if (
+            !(target instanceof HTMLElement) ||
+            target.closest("a, button, input, textarea, select, summary, [contenteditable]") ||
+            getSelection()?.isCollapsed === false
+          )
+            return;
+          const paragraph = target.closest<HTMLElement>("p[data-report-paragraph-start]");
+          const block = paragraph ? blocks[blockIndex(paragraph)] : undefined;
+          if (!paragraph || !block) return;
+          const quote = reportParagraphQuote(paragraph, source, block);
+          if (!quote) return;
+          setSelection({ quote, fallback: quote.offset, paragraph: true });
+          if (usesVirtual) setPinned([blockIndex(paragraph)]);
+        }}
         style={usesVirtual ? { height: virtual.getTotalSize(), position: "relative" } : undefined}
       >
         {usesVirtual
