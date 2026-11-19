@@ -1,8 +1,5 @@
 //! Review reports, immutable source reads and finding projections.
 
-use std::fmt::{self, Display};
-use std::str::FromStr;
-
 use reviewq_domain::identity::{GitSha, ReceiptId, ReportHash, Revision, RunId};
 
 use crate::access::{Actor, AppError, AppFuture};
@@ -11,29 +8,7 @@ use crate::events::Snapshot;
 pub const MAX_REPORT_PAGE: u16 = 50;
 pub const MAX_SECTION_SCALARS: u32 = 12_000;
 
-macro_rules! labels {
-    ($name:ident { $($variant:ident => $label:literal),+ $(,)? }) => {
-        #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-        pub enum $name { $($variant),+ }
-
-        impl Display for $name {
-            fn fmt(&self, output: &mut fmt::Formatter<'_>) -> fmt::Result {
-                output.write_str(match self { $(Self::$variant => $label),+ })
-            }
-        }
-
-        impl FromStr for $name {
-            type Err = AppError;
-
-            fn from_str(label: &str) -> Result<Self, AppError> {
-                match label {
-                    $($label => Ok(Self::$variant),)+
-                    _ => Err(AppError::InvalidRequest),
-                }
-            }
-        }
-    };
-}
+use crate::labels::labels;
 
 labels!(Verdict {
     Approve => "approve",
@@ -142,6 +117,8 @@ pub struct ReportHistory {
 
 pub struct ReportSection {
     pub report: ReportReference,
+    pub complete: bool,
+    pub original_sha256: Option<ReportHash>,
     pub text: String,
     pub offset: u64,
     pub next_offset: Option<u64>,

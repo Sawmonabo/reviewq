@@ -90,7 +90,7 @@ struct ContextCursor {
     key: CursorKey,
 }
 
-#[derive(Deserialize, Serialize)]
+#[derive(Clone, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
 enum CursorKey {
     Identity(String),
@@ -151,7 +151,7 @@ pub(super) async fn history(
     headers: HeaderMap,
     Path(run): Path<String>,
     Query(query): Query<HistoryQuery>,
-) -> Result<Json<Success<dto::ReportHistory>>, ApiError> {
+) -> Result<Response, ApiError> {
     let actor = entry.auth.browser_actor(&headers, false)?;
     let limit = page_limit(query.limit)?;
     let scope = format!("browser-report-history:{limit}:{run}");
@@ -177,34 +177,26 @@ pub(super) async fn history(
         .map(|id| resource(id.as_str()))
         .transpose()?;
     let delivery = data.delivery.map(delivery).transpose()?;
-    let mut budget = PAGE_BYTES - 4096;
-    let mut items = Vec::with_capacity(data.items.len());
-    let mut last = None;
-    let mut has_more = data.next.is_some();
-    for item in data.items {
-        let position = HistoryCursor(item.captured_at_ms, item.reference.receipt_id.to_string());
-        let item = summary(item)?;
-        if !charge(&mut budget, &item)? {
-            has_more = true;
-            break;
-        }
-        items.push(item);
-        last = Some(position);
-    }
-    let next_cursor = has_more
-        .then(|| {
-            let last = last.ok_or(AppError::PayloadTooLarge)?;
-            cursor(endpoint.encode_cursor(scope.as_bytes(), &last)?)
+    let items = data
+        .items
+        .into_iter()
+        .map(|item| {
+            let position =
+                HistoryCursor(item.captured_at_ms, item.reference.receipt_id.to_string());
+            Ok::<_, AppError>((summary(item)?, position))
         })
-        .transpose()?;
-    Ok(Json(success(
-        dto::ReportHistory {
-            page: Page::new(items, next_cursor).ok_or(AppError::Internal)?,
-            current_receipt_id,
-            delivery,
-        },
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(encode_page(
+        &items,
+        data.next.is_some(),
         stored.cursor,
-    )?))
+        |position| cursor(endpoint.encode_cursor(scope.as_bytes(), position)?),
+        |page| dto::ReportHistory {
+            page,
+            current_receipt_id: current_receipt_id.clone(),
+            delivery: delivery.clone(),
+        },
+    )?)
 }
 
 pub(super) async fn context(
@@ -212,7 +204,7 @@ pub(super) async fn context(
     headers: HeaderMap,
     Path(run): Path<String>,
     Query(query): Query<ContextQuery>,
-) -> Result<Json<Success<dto::ReportContext>>, ApiError> {
+) -> Result<Response, ApiError> {
     let actor = entry.auth.browser_actor(&headers, false)?;
     let limit = page_limit(query.limit)?;
     let collection = match query.collection {
@@ -257,45 +249,40 @@ pub(super) async fn context(
         )
         .await?;
     let data = stored.value;
-    let mut budget = PAGE_BYTES - 4096;
-    let mut items = Vec::with_capacity(data.items.len());
-    let mut last = None;
-    let mut has_more = data.next.is_some();
-    for item in data.items {
-        let key = item.key();
-        let item = descriptor(item)?;
-        if !charge(&mut budget, &item)? {
-            has_more = true;
-            break;
-        }
-        items.push(item);
-        last = Some(key);
-    }
-    let next_cursor = has_more
-        .then(|| {
-            let report = data.report.as_ref().ok_or(AppError::Internal)?;
-            let key = match last.ok_or(AppError::PayloadTooLarge)? {
+    let items = data
+        .items
+        .into_iter()
+        .map(|item| {
+            let key = match item.key() {
                 ContextKey::Identity(value) => CursorKey::Identity(value),
                 ContextKey::Offset(value) => CursorKey::Offset(value),
             };
-            let page = ContextCursor {
+            Ok::<_, AppError>((descriptor(item)?, key))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let base_report = data.report.as_ref().cloned().map(reference).transpose()?;
+    let user_disposition_version =
+        RevisionDto::new(data.disposition_version.get()).ok_or(AppError::Internal)?;
+    Ok(encode_page(
+        &items,
+        data.next.is_some(),
+        stored.cursor,
+        |key| {
+            let report = data.report.as_ref().ok_or(AppError::Internal)?;
+            let position = ContextCursor {
                 receipt: report.receipt_id.to_string(),
                 hash: report.hash.to_string(),
                 revision: data.disposition_version.get(),
-                key,
+                key: key.clone(),
             };
-            cursor(endpoint.encode_cursor(scope.as_bytes(), &page)?)
-        })
-        .transpose()?;
-    Ok(Json(success(
-        dto::ReportContext {
-            base_report: data.report.map(reference).transpose()?,
-            user_disposition_version: RevisionDto::new(data.disposition_version.get())
-                .ok_or(AppError::Internal)?,
-            page: Page::new(items, next_cursor).ok_or(AppError::Internal)?,
+            cursor(endpoint.encode_cursor(scope.as_bytes(), &position)?)
         },
-        stored.cursor,
-    )?))
+        |page| dto::ReportContext {
+            page,
+            base_report: base_report.clone(),
+            user_disposition_version,
+        },
+    )?)
 }
 
 pub(super) async fn section(
@@ -382,6 +369,8 @@ pub(super) async fn source(
         return Err(AppError::PreconditionFailed.into());
     }
     let len = report.stats.byte_length;
+    let complete = report.stats.complete;
+    let original_hash = report.original_sha256;
     let reference = report.reference;
     let receipt_value = reference.receipt_id.to_string();
     let body = Body::from_stream(try_unfold((0_u64, len), move |(ordinal, remaining)| {
@@ -402,18 +391,28 @@ pub(super) async fn source(
             Ok::<_, AppError>(Some((chunk, (ordinal + 1, next))))
         }
     }));
-    Response::builder()
+    let mut response = Response::builder()
         .header(header::CONTENT_TYPE, "text/markdown; charset=utf-8")
         .header(
             header::CONTENT_DISPOSITION,
-            "attachment; filename=review-report.md",
+            if complete {
+                "attachment; filename=review-report.md"
+            } else {
+                "attachment; filename=review-report-retained.md"
+            },
         )
         .header(header::X_CONTENT_TYPE_OPTIONS, "nosniff")
         .header(header::CONTENT_LENGTH, len)
         .header(header::ETAG, etag)
         .header("x-reviewq-report-receipt", receipt_value)
-        .body(body)
-        .map_err(|_| AppError::Internal.into())
+        .header(
+            "x-reviewq-report-complete",
+            if complete { "true" } else { "false" },
+        );
+    if let Some(original_hash) = original_hash {
+        response = response.header("x-reviewq-original-sha256", original_hash.as_str());
+    }
+    response.body(body).map_err(|_| AppError::Internal.into())
 }
 
 fn page_limit(limit: Option<u16>) -> Result<u16, AppError> {
@@ -424,16 +423,37 @@ fn page_limit(limit: Option<u16>) -> Result<u16, AppError> {
         .ok_or(AppError::InvalidRequest)
 }
 
-fn charge(budget: &mut usize, value: &impl Serialize) -> Result<bool, AppError> {
-    let bytes = serde_json::to_vec(value)
-        .map_err(|_| AppError::Internal)?
-        .len()
-        + 1;
-    if let Some(left) = budget.checked_sub(bytes) {
-        *budget = left;
-        Ok(true)
-    } else {
-        Ok(false)
+fn encode_page<'a, T, K, D: Serialize>(
+    items: &'a [(T, K)],
+    has_more: bool,
+    watermark: reviewq_domain::identity::EventCursor,
+    encode_cursor: impl Fn(&K) -> Result<PageCursorDto, AppError>,
+    project: impl Fn(Page<&'a T>) -> D,
+) -> Result<Response, AppError> {
+    let mut length = items.len();
+    loop {
+        let prefix = &items[..length];
+        let next = if has_more || length < items.len() {
+            Some(encode_cursor(
+                &prefix.last().ok_or(AppError::PayloadTooLarge)?.1,
+            )?)
+        } else {
+            None
+        };
+        let projection =
+            Page::new(prefix.iter().map(|row| &row.0).collect(), next).ok_or(AppError::Internal)?;
+        let body = serde_json::to_vec(&success(project(projection), watermark)?)
+            .map_err(|_| AppError::Internal)?;
+        if body.len() <= PAGE_BYTES {
+            return Response::builder()
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(body))
+                .map_err(|_| AppError::Internal);
+        }
+        if length <= 1 {
+            return Err(AppError::PayloadTooLarge);
+        }
+        length /= 2;
     }
 }
 
@@ -473,6 +493,12 @@ fn stats(value: app::ArtifactStats) -> Result<dto::ArtifactStats, AppError> {
 fn project_section(value: app::ReportSection) -> Result<dto::ReportSection, AppError> {
     Ok(dto::ReportSection {
         report: reference(value.report)?,
+        complete: value.complete,
+        original_sha256: value
+            .original_sha256
+            .as_ref()
+            .map(|value| hash(value.as_str()))
+            .transpose()?,
         text: value.text,
         offset: count(value.offset)?,
         next_offset: value.next_offset.map(count).transpose()?,

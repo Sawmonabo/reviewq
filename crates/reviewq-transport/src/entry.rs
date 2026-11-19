@@ -11,6 +11,7 @@ use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use reviewq_app::access::{Actor, AppError};
 use reviewq_app::events::EventLog;
 use reviewq_app::hosts::{LeadStore, MessageHistoryStore, NativeHost};
+use reviewq_app::notifications::InboxStore;
 use reviewq_app::queue::{QueueStore, ReviewLookup};
 use reviewq_app::reports::ReportStore;
 use reviewq_app::sources::{ReviewSourceReader, SourceRefreshStore, refresh_queue};
@@ -38,10 +39,10 @@ use error::{ApiBytes, ApiError};
 
 /// Shared application ports for one ReviewQ listener pair.
 pub trait Store:
-    WorkspaceStore + QueueStore + ReviewLookup + EventLog + LeadStore + SourceRefreshStore + ReportStore + MessageHistoryStore
+    WorkspaceStore + QueueStore + ReviewLookup + EventLog + LeadStore + SourceRefreshStore + ReportStore + MessageHistoryStore + InboxStore
 {
 }
-impl<S: WorkspaceStore + QueueStore + ReviewLookup + EventLog + LeadStore + SourceRefreshStore + ReportStore + MessageHistoryStore>
+impl<S: WorkspaceStore + QueueStore + ReviewLookup + EventLog + LeadStore + SourceRefreshStore + ReportStore + MessageHistoryStore + InboxStore>
     Store for S
 {
 }

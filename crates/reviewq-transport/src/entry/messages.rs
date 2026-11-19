@@ -210,6 +210,11 @@ fn project_message(
             State::Rejected => RecordedState::Rejected,
             State::Uncertain => RecordedState::Uncertain,
         },
+        outcome_detail: value.outcome_detail,
+        followup_batch_id: value
+            .followup_batch_id
+            .map(|id| ResourceIdDto::new(id).ok_or(AppError::Internal))
+            .transpose()?,
         text: value.text,
         attachment,
         native_turn_id: value

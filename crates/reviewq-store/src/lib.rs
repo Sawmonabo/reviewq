@@ -4,6 +4,7 @@ mod connection;
 mod error;
 mod events;
 mod hosts;
+mod notifications;
 mod queue;
 mod refresh;
 mod reports;

@@ -9,7 +9,7 @@ use reviewq_app::reports::{
     ReportContext, ReportDelivery, ReportHistory, ReportPosition, ReportReference, ReportSection,
     ReportStore, ReportSummary, ReportView,
 };
-use reviewq_domain::identity::{ReceiptId, RunId};
+use reviewq_domain::identity::{ReceiptId, ReportHash, RunId};
 use rusqlite::{Connection, OptionalExtension, Row, params};
 
 use crate::events::snapshot;
@@ -20,6 +20,13 @@ use crate::{SqliteStore, StoreError};
 struct Version {
     summary: ReportSummary,
     artifact_id: String,
+}
+
+struct SectionSource<'a> {
+    artifact_id: &'a str,
+    reference: ReportReference,
+    original_sha256: Option<ReportHash>,
+    stats: &'a ArtifactStats,
 }
 
 const VERSION_SELECT: &str = "
@@ -156,9 +163,12 @@ impl ReportStore for SqliteStore {
                 let version = version(tx, &run, &selected)?;
                 let value = section(
                     tx,
-                    version.summary.reference,
-                    version.summary.stats.total_code_points,
-                    &version.artifact_id,
+                    SectionSource {
+                        artifact_id: &version.artifact_id,
+                        reference: version.summary.reference,
+                        original_sha256: version.summary.original_sha256,
+                        stats: &version.summary.stats,
+                    },
                     offset,
                     characters,
                 )?;
@@ -180,17 +190,17 @@ impl ReportStore for SqliteStore {
             let ordinal = i64::try_from(ordinal).map_err(|_| AppError::InvalidRequest)?;
             self.read(move |tx| {
                 authorize_run(tx, &actor, &run)?;
-                let version = version(tx, &run, &report.receipt_id)?;
-                if version.summary.reference != report {
+                let (hash, chunk): (String, Option<Vec<u8>>) = tx.query_row(
+                    "SELECT a.sha256, c.raw FROM report_versions v JOIN artifacts a USING(artifact_id)
+                     LEFT JOIN artifact_chunks c ON c.artifact_id=a.artifact_id AND c.ordinal=?3
+                     WHERE v.run_id=?1 AND v.receipt_id=?2 AND a.sealed=1",
+                    params![run.as_str(), report.receipt_id.as_str(), ordinal],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                ).optional()?.ok_or(AppError::NotFound)?;
+                if hash != report.hash.as_str() {
                     return Err(AppError::PreconditionFailed.into());
                 }
-                Ok(tx
-                    .query_row(
-                        "SELECT raw FROM artifact_chunks WHERE artifact_id=?1 AND ordinal=?2",
-                        params![version.artifact_id, ordinal],
-                        |row| row.get(0),
-                    )
-                    .optional()?)
+                Ok(chunk)
             })
             .await
             .map_err(StoreError::app)
@@ -213,7 +223,7 @@ impl ReportStore for SqliteStore {
                 authorize_run(tx, &actor, &run)?;
                 let mut statement = tx.prepare_cached(
                     "SELECT h.artifact_id, a.sha256, h.turn_id, h.call_id, h.declaration_sha256,
-                       h.reason, a.byte_length, a.total_code_points, a.line_count, a.max_line_bytes, a.complete
+                       h.reason, a.byte_length, a.total_code_points, a.line_count, a.max_line_bytes, a.complete, a.original_sha256
                      FROM report_handoffs h JOIN artifacts a USING(artifact_id)
                      WHERE h.run_id=?1 AND h.receipt_id=?2 AND h.state='failed' AND a.sealed=1"
                 )?;
@@ -222,8 +232,12 @@ impl ReportStore for SqliteStore {
                 let reference = ReportReference { receipt_id: receipt, hash: parse(text(row, 1)?)? };
                 let stats = decode_stats(row, 6)?;
                 let candidate = CandidateReport {
-                    section: section(tx, reference.clone(), stats.total_code_points, text(row, 0)?,
-                        offset, characters)?,
+                    section: section(tx, SectionSource {
+                        artifact_id: text(row, 0)?,
+                        reference: reference.clone(),
+                        original_sha256: optional(row, 11)?,
+                        stats: &stats,
+                    }, offset, characters)?,
                     reference,
                     stats,
                     turn_id: row.get(2)?,
@@ -243,19 +257,29 @@ pub(crate) fn authorize_run(
     run: &RunId,
 ) -> Result<(), StoreError> {
     let access = scope(connection, actor)?;
-    let lead = lead_for_run(connection, run)?.ok_or(AppError::NotFound)?;
+    let review = if let ActorScope::NativeSession(identity) = actor.scope() {
+        let lead = lead_for_run(connection, run)?.ok_or(AppError::NotFound)?;
+        if identity != lead.binding().identity() {
+            return Err(AppError::NotFound.into());
+        }
+        lead.review_id().clone()
+    } else {
+        let review = connection
+            .query_row(
+                "SELECT review_id FROM runs WHERE run_id=?1",
+                [run.as_str()],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()?
+            .ok_or(AppError::NotFound)?;
+        parse(&review)?
+    };
     allow_review(
         connection,
         access,
-        lead.review_id(),
-        &identity_for_review(connection, lead.review_id())?,
-    )?;
-    if let ActorScope::NativeSession(identity) = actor.scope()
-        && identity != lead.binding().identity()
-    {
-        return Err(AppError::NotFound.into());
-    }
-    Ok(())
+        &review,
+        &identity_for_review(connection, &review)?,
+    )
 }
 
 fn current_receipt(connection: &Connection, run: &RunId) -> Result<Option<ReceiptId>, StoreError> {
@@ -390,12 +414,30 @@ fn read_markdown(connection: &Connection, version: &Version) -> Result<String, S
 
 fn section(
     connection: &Connection,
-    report: ReportReference,
-    total: u64,
-    artifact: &str,
+    source: SectionSource<'_>,
     offset: u64,
     characters: u32,
 ) -> Result<ReportSection, StoreError> {
+    let total = source.stats.total_code_points;
+    let (text, end) = section_text(connection, source.artifact_id, total, offset, characters)?;
+    Ok(ReportSection {
+        report: source.reference,
+        complete: source.stats.complete,
+        original_sha256: source.original_sha256,
+        text,
+        offset,
+        next_offset: (end < total).then_some(end),
+        total_code_points: total,
+    })
+}
+
+fn section_text(
+    connection: &Connection,
+    artifact: &str,
+    total: u64,
+    offset: u64,
+    characters: u32,
+) -> Result<(String, u64), StoreError> {
     if offset > total {
         return Err(AppError::RangeNotSatisfiable.into());
     }
@@ -427,13 +469,7 @@ fn section(
             return Err(AppError::Internal.into());
         }
     }
-    Ok(ReportSection {
-        report,
-        text,
-        offset,
-        next_offset: (end < total).then_some(end),
-        total_code_points: total,
-    })
+    Ok((text, end))
 }
 
 fn raw<'row>(row: &'row Row<'_>, column: usize) -> Result<&'row [u8], StoreError> {
@@ -453,15 +489,14 @@ pub(crate) fn authorize_feedback(
         return Err(AppError::PreconditionFailed.into());
     }
     if let Some(quote) = &reference.quote {
-        let slice = section(
+        let (slice, _) = section_text(
             connection,
-            stored.summary.reference,
-            stored.summary.stats.total_code_points,
             &stored.artifact_id,
+            stored.summary.stats.total_code_points,
             quote.offset(),
             quote.length() as u32,
         )?;
-        if slice.text != quote.text().as_str() {
+        if slice != quote.text().as_str() {
             return Err(AppError::PreconditionFailed.into());
         }
     }

@@ -111,14 +111,19 @@ fn query(collection: Collection) -> &'static str {
              FROM report_sections WHERE run_id=?1 AND receipt_id=?2 AND scalar_offset>?3
              ORDER BY scalar_offset LIMIT ?5",
         Collection::Dispositions =>
-            "SELECT f.finding_id, d.blocking, d.publication, d.reason
-             FROM report_findings f JOIN finding_dispositions d
-               ON d.run_id=f.run_id AND d.finding_id=f.finding_id AND d.disposition_version=(
+            "WITH available(finding_id) AS (
+                 SELECT finding_id FROM report_findings WHERE run_id=?1 AND receipt_id=?2 AND finding_id>?3
+                 UNION
+                 SELECT finding_id FROM finding_dispositions
+                 WHERE run_id=?1 AND receipt_id=?2 AND finding_id>?3 AND disposition_version<=?4
+             )
+             SELECT a.finding_id, d.blocking, d.publication, d.reason
+             FROM available a JOIN finding_dispositions d ON d.run_id=?1
+               AND d.finding_id=a.finding_id AND d.disposition_version=(
                  SELECT MAX(h.disposition_version) FROM finding_dispositions h
-                 WHERE h.run_id=f.run_id AND h.finding_id=f.finding_id AND h.disposition_version<=?4
+                 WHERE h.run_id=?1 AND h.finding_id=a.finding_id AND h.disposition_version<=?4
                )
-             WHERE f.run_id=?1 AND f.receipt_id=?2 AND f.finding_id>?3 AND d.removed=0
-             ORDER BY f.finding_id LIMIT ?5",
+             WHERE d.removed=0 ORDER BY a.finding_id LIMIT ?5",
     }
 }
 

@@ -4,6 +4,7 @@ pub mod changes;
 mod common;
 pub mod events;
 pub mod history;
+pub mod notifications;
 mod hosts;
 pub mod queue;
 pub mod reports;
