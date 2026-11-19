@@ -1,0 +1,70 @@
+.queue-scope-popup {
+  min-width: 150px;
+  max-width: min(320px, calc(100vw - 32px));
+  max-height: min(540px, 65dvh);
+  padding: 4px;
+}
+.queue-scope-popup.queue-sprints {
+  width: 235px;
+}
+.queue-scope-actions {
+  display: flex;
+  justify-content: space-between;
+  gap: 4px;
+  margin-bottom: 5px;
+}
+.queue-scope-actions button,
+.queue-scope-group > button {
+  color: var(--link);
+  font-size: 11px;
+}
+.queue-scope-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  border-radius: 4px;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+  cursor: pointer;
+}
+.queue-scope-option:hover,
+.queue-scope-option:focus-within {
+  background: var(--popup-hover);
+}
+.queue-scope-option input {
+  width: 15px;
+  height: 15px;
+  flex: none;
+  margin: 0;
+}
+.queue-scope-option small {
+  display: block;
+  color: var(--muted);
+  font-size: 10px;
+}
+.queue-scope-group {
+  min-width: 0;
+  border: 0;
+  margin: 8px 0 0;
+  padding: 0;
+}
+.queue-scope-group:first-child {
+  margin: 0;
+}
+.queue-scope-group > legend {
+  padding: 5px 10px 2px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 550;
+}
+.queue-scope-popup > input {
+  width: calc(100% - 12px);
+  margin: 8px 6px 4px;
+  font-size: 11px;
+}
+.queue-scope-error {
+  padding: 8px;
+  color: var(--red);
+  font-size: 11px;
+}

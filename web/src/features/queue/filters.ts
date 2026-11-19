@@ -21,9 +21,10 @@ export const sorts = {
 } as const;
 
 export type QueueFilters = {
-  readonly boardId: string;
-  readonly projectId: string;
-  readonly sprint: string;
+  readonly boardIds: readonly string[] | null;
+  readonly projectIds: readonly string[] | null;
+  readonly sprint: "active" | "any" | "none" | "selected";
+  readonly sprintPairs: readonly string[];
   readonly ownership: keyof typeof ownerships;
   readonly authorId: string;
   readonly state: keyof typeof states;
@@ -34,9 +35,10 @@ export type QueueFilters = {
 };
 
 const defaultFilters: QueueFilters = {
-  boardId: "",
-  projectId: "",
-  sprint: "",
+  boardIds: null,
+  projectIds: null,
+  sprint: "active",
+  sprintPairs: [],
   ownership: "others",
   authorId: "",
   state: "needs_review",
@@ -55,14 +57,18 @@ export function readFilters(raw: unknown): QueueFilters {
   if (!raw || typeof raw !== "object") return defaultFilters;
   const input = raw as Record<string, unknown>;
   const { state, ownership, sort, hideInProgress, hideReviewed } = input;
+  const sprintPairs = selection(input.sprintPairs, /^[1-9]\d{0,18}:[1-9]\d{0,18}$/, 32) ?? [];
   return {
-    boardId: numeric(input.boardId),
-    projectId: numeric(input.projectId),
+    boardIds: selection(input.boardIds, /^[1-9]\d{0,18}$/, 128),
+    projectIds: selection(input.projectIds, /^[1-9]\d{0,18}$/, 128),
     authorId: numeric(input.authorId),
     sprint:
-      typeof input.sprint === "string" && /^(any|active|none|\d+:\d+)$/.test(input.sprint)
+      input.sprint === "any" ||
+      input.sprint === "none" ||
+      (input.sprint === "selected" && sprintPairs.length > 0)
         ? input.sprint
-        : "",
+        : "active",
+    sprintPairs,
     q: typeof input.q === "string" ? input.q.slice(0, 200) : "",
     state:
       typeof state === "string" && Object.hasOwn(states, state)
@@ -82,22 +88,44 @@ export function readFilters(raw: unknown): QueueFilters {
 }
 
 export function queueParams(filters: QueueFilters, cursor: string | undefined) {
-  const { sprint, boardId, projectId, authorId, ...rest } = filters;
-  const pair = sprint.includes(":");
+  const { sprint, boardIds, projectIds, sprintPairs, authorId, ...rest } = filters;
   return {
     ...rest,
     cursor,
-    boardId: boardId || undefined,
-    projectId: projectId || undefined,
+    boardId: boardIds,
+    projectId: projectIds,
+    scope: boardIds?.length === 0 || projectIds?.length === 0 ? "none" : undefined,
     authorId: authorId || undefined,
-    sprint: (pair ? "selected" : sprint) || undefined,
-    sprintPair: pair ? sprint : undefined,
+    sprint,
+    sprintPair: sprint === "selected" ? sprintPairs : undefined,
   };
 }
 
 export function parseSprint(value: string): SprintPair | undefined {
   const [boardId, sprintId] = value.split(":");
   if (boardId && sprintId) return { boardId, sprintId };
+}
+
+export function filtersActive(filters: QueueFilters) {
+  return (
+    filters.boardIds !== null ||
+    filters.projectIds !== null ||
+    filters.sprint !== "active" ||
+    filters.ownership !== clearedFilters.ownership ||
+    filters.authorId !== "" ||
+    filters.state !== clearedFilters.state ||
+    filters.sort !== clearedFilters.sort ||
+    filters.q !== "" ||
+    filters.hideInProgress ||
+    filters.hideReviewed
+  );
+}
+
+function selection(value: unknown, pattern: RegExp, limit: number): readonly string[] | null {
+  if (!Array.isArray(value)) return null;
+  return [
+    ...new Set(value.filter((id): id is string => typeof id === "string" && pattern.test(id))),
+  ].slice(0, limit);
 }
 
 function numeric(value: unknown): string {

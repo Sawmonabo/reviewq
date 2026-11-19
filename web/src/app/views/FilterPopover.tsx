@@ -1,17 +1,24 @@
 import { useId, useRef, useState } from "react";
 import type { ReactNode } from "react";
-import { Icon } from "../../../components/Icon";
-import "./archive.css";
+import { Icon } from "../../components/Icon";
 
-export function ArchivePopover({
-  kind,
+export function FilterPopover({
   label,
   value,
+  triggerLabel,
+  popupLabel,
+  popupClass,
+  disabled,
+  icon,
   children,
 }: {
-  readonly kind: "date" | "sprint";
   readonly label: string;
   readonly value: string;
+  readonly triggerLabel: string;
+  readonly popupLabel: string;
+  readonly popupClass: string;
+  readonly disabled?: boolean;
+  readonly icon?: ReactNode;
   readonly children: (close: () => void) => ReactNode;
 }) {
   const id = useId();
@@ -27,15 +34,18 @@ export function ArchivePopover({
       <button
         ref={trigger}
         type="button"
-        className="filter-control archive-trigger"
-        aria-label={kind === "date" ? "Filter by review date" : "Filter by sprint"}
+        className="filter-control"
+        disabled={disabled}
+        aria-label={triggerLabel}
         aria-haspopup="dialog"
         aria-expanded={open}
         popoverTarget={id}
       >
-        <Icon name={kind === "date" ? "calendar" : "refresh"} size={15} />
+        {icon}
         <span className="filter-label">{label}</span>
-        <span className="filter-value">{value}</span>
+        <span className="filter-value" title={value}>
+          {value}
+        </span>
         <Icon name="chevron" size={12} />
       </button>
       <section
@@ -43,8 +53,8 @@ export function ArchivePopover({
         ref={popup}
         popover="auto"
         role="dialog"
-        aria-label={kind === "date" ? "Review date range" : "Choose sprints"}
-        className={`archive-popover archive-${kind}-popover`}
+        aria-label={popupLabel}
+        className={`filter-popup ${popupClass}`}
         onToggle={(event) => setOpen(event.newState === "open")}
       >
         {open && children(close)}

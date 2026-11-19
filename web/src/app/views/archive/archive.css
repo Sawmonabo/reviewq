@@ -1,35 +1,14 @@
-.archive-trigger {
+.archive-controls > .filter-control[aria-haspopup="dialog"] {
   padding-inline: 11px;
   gap: 9px;
 }
-.archive-trigger > svg:first-child {
+.archive-controls > .filter-control[aria-haspopup="dialog"] > svg:first-child {
   color: var(--muted);
 }
-.archive-popover {
-  position: fixed;
-  inset: auto;
+.filter-popup:is(.archive-date-popover, .archive-sprint-popover) {
   margin: 8px 0;
-  position-area: block-end span-inline-end;
-  position-try-fallbacks:
-    flip-inline,
-    flip-block,
-    flip-inline flip-block;
-  justify-self: start;
-  max-width: calc(100vw - 32px);
-  max-height: calc(100dvh - 32px);
-  padding: 0;
-  overflow: auto;
-  color: var(--text);
-  background: var(--popup-bg);
-  border: 1px solid var(--popup-border);
   border-radius: 9px;
   box-shadow: 0 16px 54px #0009;
-}
-@supports not (position-area: block-end span-inline-end) {
-  .archive-popover {
-    inset: 20% 0 auto;
-    margin-inline: auto;
-  }
 }
 .archive-date-popover {
   width: 490px;

@@ -6,7 +6,9 @@ import {
   presets,
 } from "../../../features/queue/archive-filters";
 import type { DatePreset } from "../../../features/queue/archive-filters";
-import { ArchivePopover } from "./ArchivePopover";
+import { Icon } from "../../../components/Icon";
+import { FilterPopover } from "../FilterPopover";
+import "./archive.css";
 
 const ArchiveCalendar = lazy(() => import("./ArchiveCalendar"));
 const displayDate = new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric" });
@@ -31,9 +33,16 @@ export function ArchiveDateFilter({
       ? `${displayDate.format(start)} – ${displayDate.format(end)}`
       : presets[value.preset];
   return (
-    <ArchivePopover kind="date" label="Review date" value={label}>
+    <FilterPopover
+      label="Review date"
+      value={label}
+      triggerLabel="Filter by review date"
+      popupLabel="Review date range"
+      popupClass="archive-date-popover"
+      icon={<Icon name="calendar" size={15} />}
+    >
       {(close) => <DateRange value={value} onChange={onChange} close={close} />}
-    </ArchivePopover>
+    </FilterPopover>
   );
 }
 

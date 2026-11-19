@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
+import { readSettings } from "../../api/settings";
 import { loadSprints, readQueue, readQueueSync, refreshQueue } from "../../api/workspace";
 import { FilterSelect } from "../../components/FilterSelect";
 import { Icon } from "../../components/Icon";
@@ -11,6 +12,7 @@ import { describeError, formatActivityTime, formatTime } from "../../lib/present
 import { savedValue, saveValue } from "../../lib/view-preferences";
 import {
   clearedFilters,
+  filtersActive,
   ownerships,
   parseSprint,
   queueParams,
@@ -19,12 +21,12 @@ import {
   states,
 } from "../../features/queue/filters";
 import type { QueueFilters } from "../../features/queue/filters";
+import { resolveQueueScope } from "../../features/queue/scope";
 import type { Launch, LaunchTarget, OpenReview } from "../../features/queue/types";
 import type { QueueFacets, QueueRow } from "../../api/generated/contracts";
 import { SelectionActions } from "../SelectionActions";
 import { QueueExclusions } from "./QueueExclusions";
-
-const filterKeys = Object.keys(clearedFilters) as (keyof QueueFilters)[];
+import { ScopeFilters } from "./queue-scope/ScopeFilters";
 
 type QueueProps = {
   readonly renderHeader: (selection?: ReactNode) => ReactNode;
@@ -54,6 +56,7 @@ export function QueueView({
   onMonitor,
 }: QueueProps) {
   const [filters, setFilters] = useState(() => readFilters(savedValue("queue")));
+  const latestFilters = useRef(filters);
   const [query, setQuery] = useState(filters.q);
   const [trail, setTrail] = useState<readonly string[]>([]);
   const [checked, setChecked] = useState<readonly string[]>([]);
@@ -63,7 +66,13 @@ export function QueueView({
   const search = useRef<HTMLInputElement>(null);
   const sprintRequest = useRef(0);
   const [lastFacets, setLastFacets] = useState<QueueFacets>();
-  const params = queueParams({ ...filters, q: query }, trail.at(-1));
+  const settingsRead = useResource(`queue-settings:${revision}`, readSettings, [
+    { kind: "settings" },
+  ]);
+  const settings = settingsRead.data;
+  const scope = settings ? resolveQueueScope(filters, settings) : undefined;
+  const currentFilters = scope?.filters ?? filters;
+  const params = queueParams({ ...currentFilters, q: query }, trail.at(-1));
   const list = useResource(
     `queue:${revision}:${JSON.stringify(params)}`,
     async (signal) => {
@@ -86,24 +95,29 @@ export function QueueView({
       row.kind === "mr" && row.mrState === "open" && row.queueState !== "archive",
   );
   const captured = eligible.filter((row) => checked.includes(row.reviewId));
-  const scopedSprints =
-    facets?.sprints.filter((entry) => !filters.boardId || entry.boardId === filters.boardId) ?? [];
 
   function update(next: QueueFilters) {
+    latestFilters.current = next;
     setFilters(next);
     saveValue("queue", next);
     setChecked([]);
     setTrail([]);
   }
 
-  async function chooseSprint(value: string) {
+  async function chooseSprint(sprint: QueueFilters["sprint"], sprintPairs: readonly string[]) {
     const request = ++sprintRequest.current;
-    const pair = parseSprint(value);
-    if (pair && page) {
+    const [firstPair, ...remainingPairs] = sprintPairs
+      .filter(
+        (pair) =>
+          currentFilters.sprint !== "selected" || !currentFilters.sprintPairs.includes(pair),
+      )
+      .flatMap((pair) => parseSprint(pair) ?? []);
+    const expectedRevision = settings?.settingsRevision;
+    if (firstPair && expectedRevision) {
       setLoadingSprint(true);
       setNotice(undefined);
       try {
-        await loadSprints({ expectedRevision: page.settingsRevision, pairs: [pair] });
+        await loadSprints({ expectedRevision, pairs: [firstPair, ...remainingPairs] });
       } catch (error) {
         if (request === sprintRequest.current) setNotice(describeError(error));
         return;
@@ -111,7 +125,8 @@ export function QueueView({
         if (request === sprintRequest.current) setLoadingSprint(false);
       }
     }
-    if (request === sprintRequest.current) update({ ...filters, sprint: value });
+    if (request === sprintRequest.current)
+      update({ ...latestFilters.current, sprint, sprintPairs });
   }
 
   async function refresh() {
@@ -131,6 +146,8 @@ export function QueueView({
   }
 
   function clear() {
+    sprintRequest.current++;
+    setLoadingSprint(false);
     update(clearedFilters);
     setQuery("");
     search.current?.focus();
@@ -152,47 +169,26 @@ export function QueueView({
         ) : undefined,
       )}
       <div className="queue-filters" aria-label="Review filters">
-        <FilterSelect
-          label="Board"
-          scope
-          value={filters.boardId}
-          options={[
-            { value: "", label: "All team boards" },
-            ...(facets?.boards ?? []).map(({ id, label }) => ({ value: id, label })),
-          ]}
-          onChange={(boardId) => {
+        <ScopeFilters
+          scope={scope}
+          settings={settings}
+          facets={facets}
+          loadingSprint={loadingSprint}
+          onChange={(fields) => {
             sprintRequest.current++;
             setLoadingSprint(false);
-            update({ ...filters, boardId, sprint: "" });
+            if (!settings) return;
+            const next = { ...latestFilters.current, ...fields };
+            const normalized = resolveQueueScope(next, settings).filters;
+            update({
+              ...normalized,
+              sprint:
+                next.sprint === "selected" && !normalized.sprintPairs.length
+                  ? "active"
+                  : next.sprint,
+            });
           }}
-        />
-        <FilterSelect
-          label="Sprint"
-          scope
-          value={filters.sprint === "active" ? "" : filters.sprint}
-          disabled={loadingSprint}
-          options={[
-            { value: "", label: "Active sprints" },
-            { value: "any", label: "Any sprint" },
-            { value: "none", label: "No sprint" },
-            ...scopedSprints.map((sprint) => ({
-              value: `${sprint.boardId}:${sprint.id}`,
-              label: filters.boardId
-                ? sprint.label
-                : `${sprint.label} · ${facets?.boards.find((board) => board.id === sprint.boardId)?.label ?? sprint.boardId}`,
-            })),
-          ]}
-          onChange={(value) => void chooseSprint(value)}
-        />
-        <FilterSelect
-          label="Repo"
-          scope
-          value={filters.projectId}
-          options={[
-            { value: "", label: "All repositories" },
-            ...(facets?.projects ?? []).map(({ id, label }) => ({ value: id, label })),
-          ]}
-          onChange={(projectId) => update({ ...filters, projectId })}
+          onSprint={(mode, pairs) => void chooseSprint(mode, pairs)}
         />
         <FilterSelect
           label="Ownership"
@@ -233,7 +229,7 @@ export function QueueView({
           options={Object.entries(sorts).map(([value, label]) => ({ value, label }))}
           onChange={(value) => update({ ...filters, sort: value as QueueFilters["sort"] })}
         />
-        {filterKeys.some((key) => filters[key] !== clearedFilters[key]) && (
+        {filtersActive(filters) && (
           <button
             type="button"
             className="filter-control clear-filters"
@@ -262,6 +258,7 @@ export function QueueView({
         </p>
       )}
       {notice && <Notice>{notice}</Notice>}
+      {settingsRead.error && <Notice retry={settingsRead.retry}>{settingsRead.error}</Notice>}
       {currentSync?.error && (
         <Notice>
           {currentSync.error.message}
