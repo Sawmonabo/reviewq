@@ -2,7 +2,7 @@ use reviewq_domain::identity::{NativeTurnId, SessionKey};
 
 use crate::access::{AppError, AppFuture};
 use crate::history::HistorySession;
-use crate::hosts::HostActivity;
+use crate::hosts::{HostActivity, HostProof, NativeSessionMetadata};
 use crate::workflow::NativeWorkflowProof;
 
 use super::Kind;
@@ -10,10 +10,23 @@ use super::Kind;
 pub struct TrackedNative {
     pub session: HistorySession,
     pub known_failure: Option<NativeTurnId>,
+    pub child_cursor: Option<NativeChildCursor>,
+}
+
+pub struct NativeChildCursor {
+    pub cursor: String,
+    pub archived: bool,
+}
+
+pub struct DiscoveredChildren {
+    pub children: Vec<HostProof>,
+    pub next: Option<NativeChildCursor>,
 }
 
 pub struct NativeAttention {
-    pub activity: HostActivity,
+    pub activity: Option<HostActivity>,
+    pub metadata: NativeSessionMetadata,
+    pub children: Option<DiscoveredChildren>,
     pub terminal_failure: Option<NativeTurnId>,
     pub recoverable: Option<crate::hosts::recovery::NativeFailure>,
     pub events: Vec<NativeOccurrence>,

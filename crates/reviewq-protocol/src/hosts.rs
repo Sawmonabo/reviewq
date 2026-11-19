@@ -108,6 +108,7 @@ pub struct RunDetail {
     pub lead_session_key: SessionKeyDto,
     pub lead_native_id: crate::ResourceIdDto,
     pub lead_cwd: String,
+    pub lead_metadata: NativeSessionMetadata,
     pub sessions: Page<SessionSummary>,
     pub launch: Option<crate::launch::RunLaunchDetails>,
 }
@@ -123,6 +124,18 @@ pub struct SessionSummary {
     pub provider: HostProviderDto,
     pub native_id: crate::ResourceIdDto,
     pub cwd: String,
+    pub metadata: NativeSessionMetadata,
+}
+
+#[derive(Clone, Debug, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct NativeSessionMetadata {
+    pub name: Option<String>,
+    pub status: Option<String>,
+    pub started_at: Option<crate::UtcTimestampDto>,
+    pub model: Option<String>,
+    pub effort: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize)]

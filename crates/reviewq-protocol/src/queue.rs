@@ -98,6 +98,7 @@ pub struct MergeRequestRow {
     pub focused_run_id: Option<RunIdDto>,
     pub focus_session_key: Option<SessionKeyDto>,
     pub focused_provider: Option<HostProviderDto>,
+    pub focused_lead_name: Option<String>,
     pub focused_activity: Option<FocusedActivity>,
     pub registered_providers: Vec<HostProviderDto>,
     pub unread_non_reply_count: SafeCountDto,
@@ -251,6 +252,7 @@ pub struct RunSummary {
     pub run_id: RunIdDto,
     pub lead_session_key: SessionKeyDto,
     pub provider: HostProviderDto,
+    pub lead_name: Option<String>,
     pub started_at: Option<UtcTimestampDto>,
 }
 

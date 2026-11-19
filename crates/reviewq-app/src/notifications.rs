@@ -4,7 +4,8 @@ mod desktop;
 mod native;
 pub use desktop::{DesktopClaim, DesktopNotifier, DesktopOutcome, DesktopStore, dispatch_desktop};
 pub use native::{
-    NativeAttention, NativeAttentionStore, NativeOccurrence, TrackedNative, poll_native_attention,
+    DiscoveredChildren, NativeAttention, NativeAttentionStore, NativeChildCursor, NativeOccurrence,
+    TrackedNative, poll_native_attention,
 };
 
 use reviewq_domain::identity::{

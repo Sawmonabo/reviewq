@@ -155,9 +155,35 @@ const schema102 = {
   ],
   type: "object",
 };
+const schema103 = {
+  type: "object",
+  properties: {
+    focusedLeadName: { type: ["string", "null"] },
+    focusedProvider: {
+      anyOf: [{ $ref: "#/definitions/HostProviderDto" }, { type: "null" }],
+    },
+    focusedReportReviewedSha: {
+      anyOf: [{ $ref: "#/definitions/GitShaDto" }, { type: "null" }],
+    },
+    focusedRunId: {
+      anyOf: [{ $ref: "#/definitions/CheckpointIdDto" }, { type: "null" }],
+    },
+    fullMrReviewedSha: {
+      anyOf: [{ $ref: "#/definitions/GitShaDto" }, { type: "null" }],
+    },
+    hasAgentQuestions: { type: "boolean" },
+    iid: { $ref: "#/definitions/MergeRequestIidDto" },
+    lastActivityAt: {
+      anyOf: [{ $ref: "#/definitions/UtcTimestampDto" }, { type: "null" }],
+    },
+  },
+};
 const schema104 = {
   type: "object",
   properties: {
+    latestMatchingReviewAt: {
+      anyOf: [{ $ref: "#/definitions/UtcTimestampDto" }, { type: "null" }],
+    },
     membership: { $ref: "#/definitions/ArchiveMembership" },
     mrState: { $ref: "#/definitions/MergeRequestStatus" },
     ourComments: { $ref: "#/definitions/SafeCountDto" },
@@ -165,18 +191,14 @@ const schema104 = {
     personalApproval: { type: ["boolean", "null"] },
     projectId: { $ref: "#/definitions/MergeRequestIidDto" },
     projectPath: { type: "string" },
-    queueState: { $ref: "#/definitions/QueueStatus" },
   },
 };
 const schema105 = { enum: ["verified", "partial", "unknown"], type: "string" };
 const schema106 = { enum: ["open", "closed", "merged"], type: "string" };
 const schema107 = {
-  enum: ["needs_review", "waiting_author", "followup", "reviewed", "archive"],
-  type: "string",
-};
-const schema108 = {
   type: "object",
   properties: {
+    queueState: { $ref: "#/definitions/QueueStatus" },
     reasonKind: { type: ["string", "null"] },
     registeredLeadCount: { $ref: "#/definitions/SafeCountDto" },
     registeredProviders: {
@@ -187,8 +209,11 @@ const schema108 = {
     runIds: { items: { $ref: "#/definitions/CheckpointIdDto" }, type: "array" },
     runStage: { anyOf: [{ $ref: "#/definitions/RunStage" }, { type: "null" }] },
     sourceSha: { $ref: "#/definitions/GitShaDto" },
-    sprintPairs: { items: { $ref: "#/definitions/SprintPair" }, type: "array" },
   },
+};
+const schema108 = {
+  enum: ["needs_review", "waiting_author", "followup", "reviewed", "archive"],
+  type: "string",
 };
 const schema109 = {
   enum: ["needs_input", "working", "waiting", "archived"],
@@ -246,6 +271,7 @@ export {
   schema100,
   schema101,
   schema102,
+  schema103,
   schema104,
   schema105,
   schema106,

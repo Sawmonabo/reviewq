@@ -4,7 +4,7 @@ import { validate800 } from "./queue-facets.mjs";
 import { validate811 } from "./queue-row.mjs";
 import { validate48 } from "./history-cursor-dto.mjs";
 import { validate35 } from "./event-cursor-dto.mjs";
-import { validate857 } from "./queue-sync.mjs";
+import { validate859 } from "./queue-sync.mjs";
 import { validate127 } from "./safe-count-dto.mjs";
 function validate799(
   data,
@@ -221,7 +221,7 @@ function validate799(
                 if (data.sync !== undefined && func0.call(data, "sync")) {
                   const _errs11 = errors;
                   if (
-                    !validate857(data.sync, {
+                    !validate859(data.sync, {
                       instancePath: instancePath + "/sync",
                       parentData: data,
                       parentDataProperty: "sync",
@@ -230,8 +230,8 @@ function validate799(
                   ) {
                     vErrors =
                       vErrors === null
-                        ? validate857.errors
-                        : vErrors.concat(validate857.errors);
+                        ? validate859.errors
+                        : vErrors.concat(validate859.errors);
                     errors = vErrors.length;
                   }
                   var valid0 = _errs11 === errors;

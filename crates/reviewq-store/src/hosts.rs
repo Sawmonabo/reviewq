@@ -22,10 +22,12 @@ use crate::queue::{identity_for_review, lead_for_run, parse, save_review};
 use crate::workspace::{advance_queue, allow_review, configured, provider_label, scope};
 use crate::{SqliteStore, StoreError};
 
+pub(crate) mod children;
 mod claude;
 mod delivery;
 pub(crate) use delivery::{admit_workflow, unresolved_workflow_input};
 mod messages;
+pub(crate) mod metadata;
 mod questions;
 pub(crate) mod recovery;
 
@@ -247,6 +249,14 @@ pub(crate) fn register(
                 params![target.session_key().as_str(), bytes(source)],
             )?;
         }
+        let metadata_changed =
+            metadata::record(&tx.sql, target.session_key().as_str(), &input.metadata)?;
+        if metadata_changed {
+            tx.emit(&[
+                ResourceKey::Queue,
+                ResourceKey::Run(Some(target.run_id().clone())),
+            ])?;
+        }
         if let Some(activity) = input.activity {
             let (phase, questions) = activity_columns(Some(activity));
             let changed = tx.sql.execute(
@@ -298,6 +308,7 @@ pub(crate) fn register(
             input.native_source.as_ref().map(bytes), phase, questions
         ],
     )?;
+    metadata::record(&tx.sql, input.session_key.as_str(), &input.metadata)?;
     advance_queue(&tx.sql)?;
     tx.emit(&[
         ResourceKey::Queue,
@@ -355,7 +366,7 @@ fn allow_target(
     Ok(())
 }
 
-fn activity_columns(activity: Option<HostActivity>) -> (Option<&'static str>, bool) {
+pub(crate) fn activity_columns(activity: Option<HostActivity>) -> (Option<&'static str>, bool) {
     let Some(value) = activity else {
         return (None, false);
     };

@@ -6,7 +6,7 @@ import { validate152 } from "./disposition.mjs";
 import { validate25 } from "./checkpoint-id-dto.mjs";
 import { validate266 } from "./focused-activity.mjs";
 import { validate268 } from "./focused-launch.mjs";
-import { validate71 } from "./host-provider-dto.mjs";
+import { schema256 } from "../metadata-6.mjs";
 function validate814(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
@@ -472,74 +472,23 @@ function validate814(
                   }
                   if (valid0) {
                     if (
-                      data.focusedProvider !== undefined &&
-                      func0.call(data, "focusedProvider")
+                      data.focusedLeadName !== undefined &&
+                      func0.call(data, "focusedLeadName")
                     ) {
-                      let data7 = data.focusedProvider;
+                      let data7 = data.focusedLeadName;
                       const _errs33 = errors;
-                      const _errs34 = errors;
-                      let valid7 = false;
-                      const _errs35 = errors;
-                      if (
-                        !validate71(data7, {
-                          instancePath: instancePath + "/focusedProvider",
-                          parentData: data,
-                          parentDataProperty: "focusedProvider",
-                          rootData,
-                        })
-                      ) {
-                        vErrors =
-                          vErrors === null
-                            ? validate71.errors
-                            : vErrors.concat(validate71.errors);
-                        errors = vErrors.length;
-                      }
-                      var _valid6 = _errs35 === errors;
-                      valid7 = valid7 || _valid6;
-                      if (!valid7) {
-                        const _errs36 = errors;
-                        if (data7 !== null) {
-                          const err12 = {
-                            instancePath: instancePath + "/focusedProvider",
-                            schemaPath:
-                              "#/properties/focusedProvider/anyOf/1/type",
+                      if (typeof data7 !== "string" && data7 !== null) {
+                        validate814.errors = [
+                          {
+                            instancePath: instancePath + "/focusedLeadName",
+                            schemaPath: "#/properties/focusedLeadName/type",
                             keyword: "type",
-                            params: { type: "null" },
-                          };
-                          if (vErrors === null) {
-                            vErrors = [err12];
-                          } else {
-                            vErrors.push(err12);
-                          }
-                          errors++;
-                        }
-                        var _valid6 = _errs36 === errors;
-                        valid7 = valid7 || _valid6;
-                      }
-                      if (!valid7) {
-                        const err13 = {
-                          instancePath: instancePath + "/focusedProvider",
-                          schemaPath: "#/properties/focusedProvider/anyOf",
-                          keyword: "anyOf",
-                          params: {},
-                        };
-                        if (vErrors === null) {
-                          vErrors = [err13];
-                        } else {
-                          vErrors.push(err13);
-                        }
-                        errors++;
-                        validate814.errors = vErrors;
+                            params: {
+                              type: schema256.properties.focusedLeadName.type,
+                            },
+                          },
+                        ];
                         return false;
-                      } else {
-                        errors = _errs34;
-                        if (vErrors !== null) {
-                          if (_errs34) {
-                            vErrors.length = _errs34;
-                          } else {
-                            vErrors = null;
-                          }
-                        }
                       }
                       var valid0 = _errs33 === errors;
                     } else {

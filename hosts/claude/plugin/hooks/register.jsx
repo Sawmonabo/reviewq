@@ -1,7 +1,7 @@
 import { invoke } from "./bridge.js";
 import { deliver, finishTurn, observeFirstStep, observeInput, observeTurn, reviewqOrigin } from "./delivery.js";
 import { registerWorkflowTools, reportTurn, stageAction, stageReport } from "./workflow.js";
-import { childrenChanged, reconcileChildren } from "./children.js";
+import { reconcileChildren } from "./children.js";
 import { currentSettings } from "./settings.js";
 
 const HEARTBEAT_MS = 5000;
@@ -43,7 +43,6 @@ async function refresh($, target) {
   const state = await current($);
   const result = await invoke($, "registration", state.id, target);
   if (state === session && await $.session.id() === state.id && !result.error) {
-    if (result.linked && !state.linked) childrenChanged(state);
     state.linked = !!result.linked;
     if (result.pendingLaunch && !state.pendingUntil) {
       state.pendingUntil = Date.now() + REGISTRATION_DEADLINE_MS;
@@ -160,7 +159,6 @@ export function register(on) {
   on("turn.start", async ($, event, next) => {
     if (event.agentId) {
       if (session?.linked) {
-        childrenChanged(session);
         schedule($);
       }
       return next(event);
@@ -199,7 +197,6 @@ export function register(on) {
   on("turn.complete", async ($, event, next) => {
     const result = await next(event);
     if (event.agentId && session?.linked) {
-      childrenChanged(session);
       schedule($);
     }
     if (!event.agentId && session?.turnId === event.turnId) {
@@ -220,7 +217,6 @@ export function register(on) {
   on("agent.spawn", async ($, event, next) => {
     const result = await next(event);
     if (result.agentId && session?.linked) {
-      childrenChanged(session);
       schedule($);
     }
     return result;

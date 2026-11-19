@@ -127,7 +127,8 @@ impl ClaudeCompanion for Claude {
                 binding,
                 parent: child.parent,
                 source,
-                working: child.working,
+                activity: child.activity,
+                metadata: child.metadata,
             })
         })
     }
@@ -175,6 +176,7 @@ impl ClaudeCompanion for Claude {
                     binding,
                     source: Some(source),
                     activity: None,
+                    metadata: Default::default(),
                 })
             })
             .await

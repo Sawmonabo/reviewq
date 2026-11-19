@@ -84,8 +84,18 @@ export default function AgentPanel({
     }
   }
 
-  const model = lead ? (run.launch?.observedModel ?? run.launch?.requestedModel) : null;
-  const effort = lead ? (run.launch?.observedEffort ?? run.launch?.requestedEffort) : null;
+  const model =
+    session.metadata.model ??
+    (lead
+      ? (run.launch?.observedModel ??
+        (run.launch?.requestedModel && `Requested: ${run.launch.requestedModel}`))
+      : null);
+  const effort =
+    session.metadata.effort ??
+    (lead
+      ? (run.launch?.observedEffort ??
+        (run.launch?.requestedEffort && `Requested: ${run.launch.requestedEffort}`))
+      : null);
   return (
     <div className={`agent-panel ${resultOnly ? "result-panel" : ""}`}>
       <header className="agent-heading">
@@ -193,7 +203,7 @@ export default function AgentPanel({
         working={lead && state === "working"}
         onObservedTurn={setTurn}
       />
-      {!resultOnly && (
+      {!resultOnly && session.provider === "codex" && (
         <NativeQuestions
           target={target}
           store={drafts}
@@ -236,16 +246,22 @@ function SessionPicker({
   const [open, setOpen] = useState(false);
   const control = useRef<HTMLDetailsElement>(null);
   const cursor = trail.at(-1);
-  const page = useResource(`session-page:${run.runId}:${cursor ?? ""}`, async (signal) => {
-    if (!cursor) return { data: null, cursor: "" };
-    const result = await readRun(run.reviewId, run.runId, signal, cursor);
-    if (result.data.leadSessionKey !== run.leadSessionKey)
-      throw new Error("The lead session changed.");
-    return { data: result.data.sessions, cursor: result.cursor };
-  });
+  const page = useResource(
+    `session-page:${run.runId}:${cursor ?? ""}`,
+    async (signal) => {
+      if (!cursor) return { data: null, cursor: "" };
+      const result = await readRun(run.reviewId, run.runId, signal, cursor);
+      if (result.data.leadSessionKey !== run.leadSessionKey)
+        throw new Error("The lead session changed.");
+      return { data: result.data.sessions, cursor: result.cursor };
+    },
+    open && cursor ? [{ kind: "run", id: run.runId }] : [],
+  );
   const visible = cursor ? page.data : run.sessions;
   const agents = (visible?.items ?? []).filter((item) => item.sessionKey !== run.leadSessionKey);
   const isLead = selected.sessionKey === run.leadSessionKey;
+  const leadStatus = state ?? run.leadMetadata.status;
+  const leadStarted = run.leadMetadata.startedAt ?? startedAt;
   const count =
     trail.length || visible?.nextCursor
       ? `${agents.length} shown`
@@ -285,7 +301,9 @@ function SessionPicker({
     >
       <summary className="button-label">
         <Icon name="terminal" size={11} />
-        {isLead ? "Lead agent" : "Subagent"}
+        <span className="agent-session-selection" title={selected.metadata.name ?? undefined}>
+          {isLead ? "Lead agent" : (selected.metadata.name ?? "Subagent")}
+        </span>
         <Icon name="chevron" size={11} />
       </summary>
       {open && (
@@ -297,15 +315,15 @@ function SessionPicker({
             onClick={() => choose(undefined)}
           >
             <span className="session-menu-name">
-              <strong>Lead review</strong>
+              <strong>{run.leadMetadata.name ?? "Lead review"}</strong>
               <small>
                 {reviewIdentity}
-                {startedAt && ` · ${formatTime(startedAt)}`}
+                {leadStarted && ` · ${formatTime(leadStarted)}`}
               </small>
             </span>
-            {state && (
-              <small className={`session-menu-status ${state}`}>
-                {state === "needs_input" ? "Awaiting input" : readable(state)}
+            {leadStatus && (
+              <small className={`session-menu-status ${leadStatus}`}>
+                {leadStatus === "needs_input" ? "Awaiting input" : readable(leadStatus)}
               </small>
             )}
           </button>
@@ -322,9 +340,21 @@ function SessionPicker({
               onClick={() => choose(item.sessionKey)}
             >
               <span className="session-menu-name">
-                <strong>{readable(item.provider)} subagent</strong>
-                <small title={item.nativeId}>{item.nativeId.slice(0, 24)}</small>
+                <strong>{item.metadata.name ?? `${readable(item.provider)} subagent`}</strong>
+                <small title={item.nativeId}>
+                  {item.metadata.startedAt
+                    ? formatTime(item.metadata.startedAt)
+                    : item.nativeId.slice(0, 24)}
+                </small>
               </span>
+              {item.metadata.status && (
+                <small
+                  className={`session-menu-status ${item.metadata.status}`}
+                  title="Last reported native status"
+                >
+                  {readable(item.metadata.status)}
+                </small>
+              )}
             </button>
           ))}
           {trail.length > 0 && (

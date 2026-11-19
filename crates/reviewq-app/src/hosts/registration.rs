@@ -56,6 +56,7 @@ pub async fn register_proven(
                 cwd: proof.binding.cwd().clone(),
                 native_source: proof.source,
                 activity: proof.activity,
+                metadata: proof.metadata,
             },
         )
         .await

@@ -22,9 +22,10 @@ pub mod settings;
 pub use common::{ErrorCode, ErrorDto, Failure, Page, Success, UtcTimestampDto};
 pub use hosts::{
     DeliveryReceipt, DeliveryReceiptResponse, DeliveryReportRef, DeliveryState, HostProviderDto,
-    MessageAttachment, MessageHistoryItem, MessageHistoryPage, MessageTextDto, ObservedInputDto,
-    RecordedPurpose, RecordedState, RunDetail, RunDetailResponse, SendMessageRequest,
-    SessionSummary, TerminalHandoff, TerminalResponse, TerminalResult,
+    MessageAttachment, MessageHistoryItem, MessageHistoryPage, MessageTextDto,
+    NativeSessionMetadata, ObservedInputDto, RecordedPurpose, RecordedState, RunDetail,
+    RunDetailResponse, SendMessageRequest, SessionSummary, TerminalHandoff, TerminalResponse,
+    TerminalResult,
 };
 pub use scalar::{
     CheckpointIdDto, EventCursorDto, FileIdDto, GitShaDto, HistoryCursorDto, HistoryEntryIdDto,

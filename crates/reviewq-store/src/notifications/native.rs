@@ -1,10 +1,9 @@
 use reviewq_app::access::{Actor, AppError, AppFuture};
 use reviewq_app::events::ResourceKey;
 use reviewq_app::history::HistorySession;
-use reviewq_app::hosts::HostPhase;
 use reviewq_app::notifications::{
-    Kind, NativeAttention, NativeAttentionStore, NativeOccurrence, Observation, Source,
-    TrackedNative,
+    Kind, NativeAttention, NativeAttentionStore, NativeChildCursor, NativeOccurrence, Observation,
+    Source, TrackedNative,
 };
 use reviewq_domain::identity::{NotificationId, ReportHash, SessionKey};
 use reviewq_domain::session::{HostProvider, SessionTarget};
@@ -43,7 +42,7 @@ impl NativeAttentionStore for SqliteStore {
 
 fn tracked(db: &Connection, after: Option<SessionKey>) -> Result<Vec<TrackedNative>, StoreError> {
     let mut statement = db.prepare_cached(
-        "SELECT s.run_id,s.session_key,f.native_turn_id FROM sessions s JOIN runs x USING(run_id)
+        "SELECT s.run_id,s.session_key,f.native_turn_id,s.child_scan_cursor,s.child_scan_archived FROM sessions s JOIN runs x USING(run_id)
          JOIN reviews r USING(review_id) LEFT JOIN notification_native_failures f USING(session_key)
          WHERE s.provider='codex' AND r.state='open' AND s.session_key>?1
            AND EXISTS(SELECT 1 FROM configured_projects p WHERE p.origin=r.origin AND p.project_id=r.project_id)
@@ -54,14 +53,20 @@ fn tracked(db: &Connection, after: Option<SessionKey>) -> Result<Vec<TrackedNati
             row.get::<_, String>(0)?,
             row.get::<_, String>(1)?,
             row.get::<_, Option<String>>(2)?,
+            row.get::<_, Option<String>>(3)?,
+            row.get::<_, Option<bool>>(4)?,
         ))
     })?;
     let mut output = Vec::new();
     for row in rows {
-        let (run, session, failure) = row?;
+        let (run, session, failure, cursor, archived) = row?;
         output.push(TrackedNative {
             session: history_session(db, &Actor::local_operator(), parse(&run)?, parse(&session)?)?,
             known_failure: failure.as_deref().map(parse).transpose()?,
+            child_cursor: cursor.map(|cursor| NativeChildCursor {
+                cursor,
+                archived: archived.unwrap_or(false),
+            }),
         });
     }
     Ok(output)
@@ -92,21 +97,18 @@ fn record(
     if !configured {
         return Err(AppError::StaleRevision.into());
     }
-    let phase = match observed.activity.phase {
-        HostPhase::Idle => "idle",
-        HostPhase::Working => "working",
-        HostPhase::Blocked => "blocked",
-        HostPhase::Failed => "failed",
-    };
+    let (phase, questions) = crate::hosts::activity_columns(observed.activity);
     let changed = db.execute(
         "UPDATE sessions SET host_activity=?2,host_questions=?3 WHERE session_key=?1
            AND (host_activity,host_questions) IS DISTINCT FROM (?2,?3)",
-        params![
-            target.session_key().as_str(),
-            phase,
-            observed.activity.has_questions
-        ],
-    )?;
+        params![target.session_key().as_str(), phase, questions],
+    )? != 0;
+    let metadata =
+        crate::hosts::metadata::record(db, target.session_key().as_str(), &observed.metadata)?;
+    let children = match observed.children {
+        Some(page) => crate::hosts::children::record(db, &session, page)?,
+        None => Vec::new(),
+    };
     if let Some(failure) = observed.terminal_failure {
         db.execute(
             "INSERT INTO notification_native_failures VALUES(?1,?2)
@@ -131,16 +133,22 @@ fn record(
             ids.push(id);
         }
     }
-    if changed != 0 {
-        if ids.is_empty() {
-            advance_queue(&tx.sql)?;
-        }
-        tx.emit(&[
+    if (changed || !children.is_empty()) && ids.is_empty() {
+        advance_queue(&tx.sql)?;
+    }
+    if changed || metadata || !children.is_empty() {
+        let mut keys = vec![
             ResourceKey::Queue,
             ResourceKey::Review(Some(target.review_id().clone())),
             ResourceKey::Run(Some(target.run_id().clone())),
             ResourceKey::Session(Some(target.session_key().clone())),
-        ])?;
+        ];
+        keys.extend(
+            children
+                .into_iter()
+                .map(|child| ResourceKey::Session(Some(child))),
+        );
+        tx.emit(&keys)?;
     }
     if let Some(failure) = observed.recoverable {
         crate::hosts::recovery::observe_failure(tx, &session, failure)?;

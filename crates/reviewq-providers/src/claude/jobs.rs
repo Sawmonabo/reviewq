@@ -15,6 +15,8 @@ pub(crate) struct Job {
     pub(crate) kind: JobKind,
     pub(crate) id: Option<String>,
     pub(crate) pid: Option<u32>,
+    pub(super) name: Option<String>,
+    pub(super) started_at: Option<i64>,
     pub(super) state: Option<String>,
     pub(super) status: Option<String>,
 }

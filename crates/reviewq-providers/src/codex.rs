@@ -6,6 +6,7 @@ use reviewq_domain::session::AbsolutePath;
 
 mod attention;
 mod catalog;
+mod children;
 mod connection;
 mod delivery;
 mod history;

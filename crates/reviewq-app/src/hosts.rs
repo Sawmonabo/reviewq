@@ -50,6 +50,17 @@ pub struct HostProof {
     pub binding: NativeBinding,
     pub source: Option<AbsolutePath>,
     pub activity: Option<HostActivity>,
+    pub metadata: NativeSessionMetadata,
+}
+
+/// Bounded presentation facts observed from the exact native session.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct NativeSessionMetadata {
+    pub name: Option<String>,
+    pub status: Option<String>,
+    pub started_at_ms: Option<i64>,
+    pub model: Option<String>,
+    pub effort: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -248,6 +259,7 @@ pub struct RegisterLead {
     pub cwd: AbsolutePath,
     pub native_source: Option<AbsolutePath>,
     pub activity: Option<HostActivity>,
+    pub metadata: NativeSessionMetadata,
 }
 
 /// A user message admitted to the native outbox.

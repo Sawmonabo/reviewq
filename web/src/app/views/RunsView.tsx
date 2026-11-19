@@ -479,6 +479,7 @@ function RunRow({
           : undefined;
   const launch = row.focusedLaunch;
   const metadata = [
+    row.focusedLeadName,
     row.focusedProvider && providerLabel(row.focusedProvider),
     launch?.observedModel ||
       (launch?.requestedModel && `Requested model: ${launch.requestedModel}`),

@@ -52,6 +52,12 @@
   font-size: 10px;
   color: var(--text);
 }
+.agent-session-selection {
+  max-width: min(200px, 27vw);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .agent-session-menu > summary::-webkit-details-marker {
   display: none;
 }
@@ -107,6 +113,9 @@
 .session-menu-status {
   flex: 0 0 auto;
   color: var(--muted);
+}
+.session-menu-status.running {
+  color: var(--green);
 }
 .session-menu-status.needs_input {
   color: var(--rose);

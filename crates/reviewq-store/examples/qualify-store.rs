@@ -105,6 +105,7 @@ async fn setup(
                 session_key: "fixture-active".parse()?,
                 cwd: absolute(&root.join("alpha")),
                 native_source: None,
+                metadata: Default::default(),
                 activity: None,
             },
         )

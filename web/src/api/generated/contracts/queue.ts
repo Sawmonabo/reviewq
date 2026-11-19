@@ -129,6 +129,7 @@ export interface MergeRequestRow {
   focusSessionKey: SessionKeyDto | null;
   focusedActivity: FocusedActivity | null;
   focusedLaunch: FocusedLaunch | null;
+  focusedLeadName: string | null;
   focusedProvider: HostProviderDto | null;
   focusedReportReviewedSha: GitShaDto | null;
   focusedRunId: RunIdDto | null;
@@ -263,6 +264,7 @@ export interface RunSummaryPage {
 }
 
 export interface RunSummary {
+  leadName: string | null;
   leadSessionKey: SessionKeyDto;
   provider: HostProviderDto;
   runId: RunIdDto;
@@ -301,6 +303,7 @@ export interface RunCard {
   focusSessionKey: SessionKeyDto | null;
   focusedActivity: FocusedActivity | null;
   focusedLaunch: FocusedLaunch | null;
+  focusedLeadName: string | null;
   focusedProvider: HostProviderDto | null;
   focusedReportReviewedSha: GitShaDto | null;
   focusedRunId: RunIdDto | null;

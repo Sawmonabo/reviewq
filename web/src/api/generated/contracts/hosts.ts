@@ -11,6 +11,7 @@ import type {
   RunIdDto,
   SessionKeyDto,
   State,
+  UtcTimestampDto,
 } from "./common.js";
 
 export type TerminalResult = {
@@ -78,6 +79,7 @@ export interface RunDetailResponse {
 export interface RunDetail {
   launch: RunLaunchDetails | null;
   leadCwd: string;
+  leadMetadata: NativeSessionMetadata;
   leadNativeId: ResourceIdDto;
   leadSessionKey: SessionKeyDto;
   reviewId: ReviewIdDto;
@@ -98,6 +100,15 @@ export interface RunLaunchDetails {
   [k: string]: unknown;
 }
 
+export interface NativeSessionMetadata {
+  effort: string | null;
+  model: string | null;
+  name: string | null;
+  startedAt: UtcTimestampDto | null;
+  status: string | null;
+  [k: string]: unknown;
+}
+
 export interface SessionSummaryPage {
   /**
    * @maxItems 100
@@ -109,6 +120,7 @@ export interface SessionSummaryPage {
 
 export interface SessionSummary {
   cwd: string;
+  metadata: NativeSessionMetadata;
   nativeId: ResourceIdDto;
   parentSessionKey: SessionKeyDto | null;
   provider: HostProviderDto;

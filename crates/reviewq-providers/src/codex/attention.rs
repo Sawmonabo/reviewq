@@ -5,7 +5,7 @@ use reviewq_app::notifications::{Kind, NativeAttention, NativeOccurrence, Tracke
 use reviewq_domain::session::HostProvider;
 
 use super::Codex;
-use super::session::{ThreadStatus, canonical_cwd};
+use super::session::{ThreadStatus, retained_cwd};
 
 impl Codex {
     pub(crate) async fn attention(
@@ -18,16 +18,24 @@ impl Codex {
             return Err(AppError::NotFound);
         }
         let thread = self.read_thread(identity.native_id()).await?;
-        if canonical_cwd(thread.cwd).await? != *binding.cwd() {
+        if !retained_cwd(&thread, binding.cwd()).await?
+            || thread.parent_thread_id.as_deref()
+                != target
+                    .session
+                    .parent
+                    .as_ref()
+                    .map(|parent| parent.native_id.as_str())
+        {
             return Err(AppError::Conflict);
         }
-        let Some(mut activity) = thread.status.activity() else {
-            return Ok(None);
-        };
+        let mut activity = thread.status.activity();
+        let mut metadata = thread.metadata();
         let mut events = Vec::new();
         let mut terminal_failure = None;
         let mut recoverable = None;
-        if let ThreadStatus::Active { active_flags } = &thread.status {
+        if let (Some(activity), ThreadStatus::Active { active_flags }) =
+            (&mut activity, &thread.status)
+        {
             for form in self.connection.questions(&thread.id, None)? {
                 if form.state == QuestionStatus::Pending {
                     activity.has_questions = true;
@@ -40,7 +48,7 @@ impl Codex {
                     events.push(occurrence(Kind::AgentPermission, turn.id.clone(), None));
                 }
             }
-        } else {
+        } else if let Some(activity) = &mut activity {
             let page = self.turns(&thread.id, None, false, 1, false).await?;
             if let Some(turn) = page.data.first().filter(|turn| turn.status == "failed") {
                 let id = turn.id.parse().map_err(|_| AppError::Unavailable)?;
@@ -78,11 +86,18 @@ impl Codex {
                     events.push(event);
                 }
                 activity.phase = HostPhase::Failed;
+                metadata.status = Some("failed".to_owned());
                 terminal_failure = Some(id);
             }
         }
+        let children = self
+            .children(&target.session, target.child_cursor.as_ref())
+            .await
+            .ok();
         Ok(Some(NativeAttention {
             activity,
+            metadata,
+            children,
             terminal_failure,
             recoverable,
             events,

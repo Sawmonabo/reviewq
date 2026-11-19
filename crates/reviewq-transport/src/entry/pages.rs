@@ -155,6 +155,7 @@ pub(super) async fn overview(
                     .ok_or(AppError::Internal)?,
                 provider: provider(row.provider),
                 started_at: UtcTimestampDto::from_unix_milliseconds(row.started_at_ms),
+                lead_name: row.lead_name.clone(),
             })
         })
         .collect::<Result<Vec<_>, AppError>>()?;
@@ -239,6 +240,7 @@ pub(super) async fn read_run(
                 provider: provider(row.provider),
                 native_id: ResourceIdDto::new(row.native_id.as_str()).ok_or(AppError::Internal)?,
                 cwd: row.cwd.as_path().display().to_string(),
+                metadata: session_metadata(&row.metadata),
             })
         })
         .collect::<Result<Vec<_>, AppError>>()?;
@@ -260,6 +262,7 @@ pub(super) async fn read_run(
         lead_native_id: ResourceIdDto::new(value.lead.binding().identity().native_id().as_str())
             .ok_or(AppError::Internal)?,
         lead_cwd: value.lead.binding().cwd().as_path().display().to_string(),
+        lead_metadata: session_metadata(&value.lead_metadata),
         sessions: Page::new(sessions, next).ok_or(AppError::Internal)?,
         launch: value
             .launch
@@ -267,6 +270,20 @@ pub(super) async fn read_run(
             .transpose()?,
     };
     success(data, cursor)
+}
+
+fn session_metadata(
+    value: &reviewq_app::hosts::NativeSessionMetadata,
+) -> reviewq_protocol::NativeSessionMetadata {
+    reviewq_protocol::NativeSessionMetadata {
+        name: value.name.clone(),
+        status: value.status.clone(),
+        started_at: value
+            .started_at_ms
+            .and_then(UtcTimestampDto::from_unix_milliseconds),
+        model: value.model.clone(),
+        effort: value.effort.clone(),
+    }
 }
 
 pub(super) async fn resolve(
@@ -408,6 +425,7 @@ pub(super) fn project_review(item: &QueueItem) -> Result<MergeRequestRow, AppErr
             .disposition
             .filter(|_| item.decision.reviewed_sha.as_ref() == Some(&source.head_sha))
             .map(super::features::decisions::project_disposition),
+        focused_lead_name: signals.focused_lead_name.clone(),
         focused_launch: signals.focused_launch.as_ref().map(|launch| FocusedLaunch {
             observed_model: launch.observed_model.clone(),
             observed_effort: launch.observed_effort.clone(),

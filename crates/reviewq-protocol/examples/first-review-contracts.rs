@@ -109,6 +109,7 @@ fn emit_resources(output: &Path) -> Result<(), Box<dyn Error>> {
                     run_id: RunIdDto::new(RUN).unwrap(),
                     lead_session_key: SessionKeyDto::new(LEAD).unwrap(),
                     provider: HostProviderDto::Codex,
+                    lead_name: None,
                     started_at: Some(stamp()),
                 }],
                 None,
@@ -142,9 +143,11 @@ fn emit_resources(output: &Path) -> Result<(), Box<dyn Error>> {
             run_id: RunIdDto::new(RUN).unwrap(),
             lead_session_key: SessionKeyDto::new(LEAD).unwrap(),
             lead_native_id: ResourceIdDto::new("019beeee-eeee-7eee-8eee-eeeeeeeeeeee").unwrap(),
+            lead_metadata: Default::default(),
             lead_cwd: "/home/fixture/review".into(),
             sessions: Page::new(
                 vec![SessionSummary {
+                    metadata: Default::default(),
                     session_key: SessionKeyDto::new(LEAD).unwrap(),
                     parent_session_key: None,
                     provider: HostProviderDto::Codex,
@@ -337,6 +340,7 @@ fn review() -> MergeRequestRow {
         has_agent_questions: false,
         focused_run_id: Some(RunIdDto::new(RUN).unwrap()),
         focus_session_key: Some(SessionKeyDto::new(LEAD).unwrap()),
+        focused_lead_name: None,
         focused_provider: Some(HostProviderDto::Codex),
         focused_activity: Some(reviewq_protocol::queue::FocusedActivity::Blocked),
         registered_providers: vec![HostProviderDto::Codex],

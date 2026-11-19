@@ -77,7 +77,15 @@ impl NativeLauncher for ClaudeCli {
                 {
                     Ok(Some(job)) if matches!(job.kind, JobKind::Background) => {
                         if let Some(id) = job.id {
-                            observed_job = Some(id);
+                            let metadata = reviewq_app::hosts::NativeSessionMetadata {
+                                name: job
+                                    .name
+                                    .as_deref()
+                                    .and_then(|value| crate::settings::safe_label(value, 512).ok()),
+                                started_at_ms: job.started_at.filter(|time| *time > 0),
+                                ..Default::default()
+                            };
+                            observed_job = Some((id, metadata));
                             break;
                         }
                     }
@@ -85,7 +93,7 @@ impl NativeLauncher for ClaudeCli {
                     _ => {}
                 }
             }
-            let Some(job) = observed_job else {
+            let Some((job, metadata)) = observed_job else {
                 return NativeLaunchResult::Uncertain;
             };
             let acknowledged = acknowledgement.is_some_and(|receipt| {
@@ -107,6 +115,7 @@ impl NativeLauncher for ClaudeCli {
                 binding,
                 source,
                 activity: None,
+                metadata,
             };
             if progress
                 .record_observed_native(proof.clone(), Some(job))

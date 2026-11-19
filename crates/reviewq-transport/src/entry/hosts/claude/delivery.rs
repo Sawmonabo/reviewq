@@ -183,7 +183,44 @@ struct ChildHook {
     sequence: u64,
     parent_id: Option<String>,
     child_cwd: std::path::PathBuf,
-    working: bool,
+    status: ChildStatus,
+    name: Option<String>,
+    started_at_ms: Option<i64>,
+    model: Option<String>,
+    effort: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum ChildStatus {
+    Pending,
+    Running,
+    Waiting,
+    Idle,
+    Completed,
+    Failed,
+    Killed,
+}
+
+impl ChildStatus {
+    fn facts(self) -> (&'static str, reviewq_app::hosts::HostPhase) {
+        use reviewq_app::hosts::HostPhase;
+        match self {
+            Self::Pending => ("pending", HostPhase::Working),
+            Self::Running => ("running", HostPhase::Working),
+            Self::Waiting => ("waiting", HostPhase::Blocked),
+            Self::Idle => ("idle", HostPhase::Idle),
+            Self::Completed => ("completed", HostPhase::Idle),
+            Self::Failed => ("failed", HostPhase::Failed),
+            Self::Killed => ("killed", HostPhase::Idle),
+        }
+    }
+}
+
+fn child_label(value: Option<String>, max: usize) -> Option<String> {
+    let value = value?;
+    (value.len() <= max && !value.trim().is_empty() && !value.chars().any(char::is_control))
+        .then_some(value)
 }
 
 #[derive(Deserialize)]
@@ -273,6 +310,7 @@ pub(super) async fn hook(
         Hook::Child(child) => {
             let (root, history) = verified_context(&entry, child.context).await?;
             let companion = entry.claude.as_ref().ok_or(AppError::Unavailable)?;
+            let (status, phase) = child.status.facts();
             let proof = companion
                 .prove_child(
                     history,
@@ -283,7 +321,17 @@ pub(super) async fn hook(
                         parent: child.parent_id.as_deref().map(parse).transpose()?,
                         cwd: AbsolutePath::from_canonical(child.child_cwd)
                             .map_err(|_| AppError::InvalidRequest)?,
-                        working: child.working,
+                        activity: reviewq_app::hosts::HostActivity {
+                            phase,
+                            has_questions: false,
+                        },
+                        metadata: reviewq_app::hosts::NativeSessionMetadata {
+                            name: child_label(child.name, 512),
+                            status: Some(status.to_owned()),
+                            started_at_ms: child.started_at_ms.filter(|time| *time > 0),
+                            model: child_label(child.model, 256),
+                            effort: child_label(child.effort, 64),
+                        },
                     },
                 )
                 .await?;

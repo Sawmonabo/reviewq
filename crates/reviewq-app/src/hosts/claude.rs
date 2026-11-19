@@ -107,7 +107,8 @@ pub struct ClaudeChild {
     pub id: NativeSessionId,
     pub parent: Option<NativeSessionId>,
     pub cwd: AbsolutePath,
-    pub working: bool,
+    pub activity: super::HostActivity,
+    pub metadata: super::NativeSessionMetadata,
 }
 
 pub struct ProvenClaudeChild {
@@ -116,7 +117,8 @@ pub struct ProvenClaudeChild {
     pub binding: NativeBinding,
     pub parent: Option<NativeSessionId>,
     pub source: AbsolutePath,
-    pub working: bool,
+    pub activity: super::HostActivity,
+    pub metadata: super::NativeSessionMetadata,
 }
 
 pub enum ClaudeClassicEvent {

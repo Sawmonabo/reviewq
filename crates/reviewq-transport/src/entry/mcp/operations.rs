@@ -291,6 +291,7 @@ pub(super) fn run_summary(entry: &Entry, review: &ReviewId, run: &RunSummary) ->
         "runId":run.run_id.as_str(),
         "leadSessionKey":run.lead_session_key.as_str(),
         "provider":provider_label(run.provider),
+        "leadName":run.lead_name,
         "startedAt":reviewq_protocol::UtcTimestampDto::from_unix_milliseconds(run.started_at_ms),
         "dashboard":dashboard(entry, review, Some(&run.run_id)),
     })

@@ -16,8 +16,12 @@ CREATE TABLE review_discovery_due (
 
 CREATE VIEW review_active_sessions AS
     SELECT s.*, c.seen_at_ms AS companion_at_ms FROM sessions s
-    LEFT JOIN claude_companions c USING (session_key)
-    WHERE s.provider <> 'claude' OR c.seen_at_ms > unixepoch('subsec') * 1000 - 30000;
+    JOIN runs r ON r.run_id=s.run_id
+    LEFT JOIN claude_companions c ON c.session_key=r.lead_session_key
+    LEFT JOIN claude_children child ON child.session_key=s.session_key
+    WHERE s.provider <> 'claude'
+       OR (c.seen_at_ms > unixepoch('subsec') * 1000 - 30000 AND
+           (s.parent_session_key IS NULL OR child.companion_generation=c.generation));
 
 CREATE VIEW review_activity_evidence AS
     SELECT r.review_id, r.state='open' AS is_open,

@@ -287,7 +287,7 @@ fn overview(
         (position.started_at_ms, position.run_id.as_str())
     });
     let mut statement = connection.prepare_cached(
-        "SELECT r.run_id, r.started_at_ms, r.lead_session_key, s.provider
+        "SELECT r.run_id, r.started_at_ms, r.lead_session_key, s.provider, s.native_name
          FROM runs r JOIN sessions s ON s.run_id=r.run_id AND s.session_key=r.lead_session_key
          WHERE r.review_id=?1 AND (r.started_at_ms, r.run_id) < (?2, ?3)
          ORDER BY r.started_at_ms DESC, r.run_id DESC LIMIT ?4",
@@ -300,6 +300,7 @@ fn overview(
             run_id: parse(text(row, 0)?)?,
             lead_session_key: parse(text(row, 2)?)?,
             provider: provider(text(row, 3)?)?,
+            lead_name: row.get(4)?,
         });
     }
     let next_run = if runs.len() > usize::from(limit) {
@@ -342,9 +343,13 @@ fn run_detail(
     if after.as_ref().is_some_and(|row| row.run_id != run_id) {
         return Err(AppError::CursorExpired.into());
     }
+    let lead_metadata = crate::hosts::metadata::read(connection, lead.session_key().as_str())?;
     let mut statement = connection.prepare_cached(
-        "SELECT session_key, parent_session_key, provider,native_id,cwd FROM sessions
-         WHERE run_id=?1 AND session_key>?2 ORDER BY session_key LIMIT ?3",
+        "SELECT s.session_key, s.parent_session_key, s.provider, s.native_id, s.cwd,
+                s.native_name, coalesce(s.native_status, s.host_activity), s.native_started_at_ms,
+                coalesce(s.native_model, c.model), coalesce(s.native_effort, c.effort)
+         FROM sessions s LEFT JOIN claude_companions c USING(session_key)
+         WHERE s.run_id=?1 AND s.session_key>?2 ORDER BY s.session_key LIMIT ?3",
     )?;
     let mut rows = statement.query(params![
         run_id.as_str(),
@@ -363,6 +368,7 @@ fn run_detail(
             provider: provider(text(row, 2)?)?,
             native_id: parse(text(row, 3)?)?,
             cwd: path(row.get(4)?)?,
+            metadata: crate::hosts::metadata::from_row(row, 5)?,
         });
     }
     let next_session = if sessions.len() > usize::from(limit) {
@@ -377,6 +383,7 @@ fn run_detail(
     };
     Ok(RunDetail {
         lead,
+        lead_metadata,
         sessions,
         next_session,
         launch: crate::launches::run_launch_details(connection, &run_id)?,
@@ -588,6 +595,7 @@ fn queue_item(row: &Row<'_>) -> Result<QueueItem, StoreError> {
                 .map(parse)
                 .transpose()?,
             focused_provider: None,
+            focused_lead_name: None,
             focused_activity: None,
             registered_providers: Vec::new(),
             unread_non_reply_count: 0,

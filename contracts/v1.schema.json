@@ -293,6 +293,12 @@
             }
           ]
         },
+        "focusedLeadName": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "focusedProvider": {
           "anyOf": [
             {
@@ -472,6 +478,7 @@
         "focusedRunId",
         "focusSessionKey",
         "focusedProvider",
+        "focusedLeadName",
         "focusedActivity",
         "registeredProviders",
         "unreadNonReplyCount",
@@ -3791,6 +3798,12 @@
             }
           ]
         },
+        "focusedLeadName": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "focusedProvider": {
           "anyOf": [
             {
@@ -3945,6 +3958,7 @@
         "focusedRunId",
         "focusSessionKey",
         "focusedProvider",
+        "focusedLeadName",
         "focusedActivity",
         "registeredProviders",
         "unreadNonReplyCount",
@@ -4312,6 +4326,52 @@
       "required": [
         "id",
         "label"
+      ],
+      "type": "object"
+    },
+    "NativeSessionMetadata": {
+      "properties": {
+        "effort": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "model": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "name": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "startedAt": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/UtcTimestampDto"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "status": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "name",
+        "status",
+        "startedAt",
+        "model",
+        "effort"
       ],
       "type": "object"
     },
@@ -6987,6 +7047,12 @@
             }
           ]
         },
+        "focusedLeadName": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "focusedProvider": {
           "anyOf": [
             {
@@ -7147,6 +7213,7 @@
         "focusedRunId",
         "focusSessionKey",
         "focusedProvider",
+        "focusedLeadName",
         "focusedActivity",
         "registeredProviders",
         "unreadNonReplyCount",
@@ -7262,6 +7329,9 @@
         "leadCwd": {
           "type": "string"
         },
+        "leadMetadata": {
+          "$ref": "#/definitions/NativeSessionMetadata"
+        },
         "leadNativeId": {
           "$ref": "#/definitions/ResourceIdDto"
         },
@@ -7284,6 +7354,7 @@
         "leadSessionKey",
         "leadNativeId",
         "leadCwd",
+        "leadMetadata",
         "sessions",
         "launch"
       ],
@@ -7592,6 +7663,12 @@
     },
     "RunSummary": {
       "properties": {
+        "leadName": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "leadSessionKey": {
           "$ref": "#/definitions/SessionKeyDto"
         },
@@ -7616,6 +7693,7 @@
         "runId",
         "leadSessionKey",
         "provider",
+        "leadName",
         "startedAt"
       ],
       "type": "object"
@@ -7966,6 +8044,9 @@
         "cwd": {
           "type": "string"
         },
+        "metadata": {
+          "$ref": "#/definitions/NativeSessionMetadata"
+        },
         "nativeId": {
           "$ref": "#/definitions/ResourceIdDto"
         },
@@ -7991,7 +8072,8 @@
         "parentSessionKey",
         "provider",
         "nativeId",
-        "cwd"
+        "cwd",
+        "metadata"
       ],
       "type": "object"
     },

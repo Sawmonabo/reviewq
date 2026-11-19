@@ -29,10 +29,11 @@ pub(super) struct Source {
 pub(crate) async fn verified_codex_source(
     binding: NativeBinding,
     path: PathBuf,
+    parent: Option<HistoryParent>,
 ) -> Result<Option<AbsolutePath>, AppError> {
     tokio::task::spawn_blocking(move || {
         let cancelled = AtomicBool::new(false);
-        if verify(&binding, None, &path, &cancelled)?.is_none() {
+        if verify(&binding, parent.as_ref(), &path, &cancelled)?.is_none() {
             return Ok(None);
         }
         AbsolutePath::from_canonical(path)
@@ -177,6 +178,7 @@ pub(crate) fn inspect_claude_lead(
                 binding,
                 source: Some(source),
                 activity: None,
+                metadata: Default::default(),
             });
             break;
         }
@@ -405,6 +407,10 @@ fn identity_matches(
                 record.sidechain
                     && record.agent.as_deref() == Some(id)
                     && record.session.as_deref() == Some(claude_root(parent).as_str())
+                    && record.cwd.as_deref().is_some_and(|path| {
+                        path == binding.cwd().as_path()
+                            || path.canonicalize().ok().as_deref() == Some(binding.cwd().as_path())
+                    })
             }
             None => {
                 !record.sidechain

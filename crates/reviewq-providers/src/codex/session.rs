@@ -4,7 +4,7 @@ use reviewq_app::access::{AppError, AppFuture};
 use reviewq_app::history::{HistorySession, NativeHistoryPage, NativePosition};
 use reviewq_app::hosts::{
     DeliveryObservation, DispatchGuard, HostActivity, HostPhase, HostProof, MessageBody,
-    NativeHost, ReportRef,
+    NativeHost, NativeSessionMetadata, ReportRef,
 };
 use reviewq_domain::identity::{DeliveryId, NativeSessionId};
 use reviewq_domain::session::{
@@ -33,6 +33,10 @@ pub(super) struct Thread {
     pub model: Option<String>,
     pub model_provider: Option<String>,
     pub reasoning_effort: Option<String>,
+    name: Option<String>,
+    agent_nickname: Option<String>,
+    agent_role: Option<String>,
+    created_at: Option<i64>,
 }
 
 #[derive(Deserialize)]
@@ -173,10 +177,23 @@ impl Codex {
         thread: Thread,
         native_id: NativeSessionId,
     ) -> Result<HostProof, AppError> {
+        self.prove_thread(thread, native_id, None).await
+    }
+
+    pub(super) async fn prove_thread(
+        &self,
+        thread: Thread,
+        native_id: NativeSessionId,
+        parent: Option<reviewq_app::history::HistoryParent>,
+    ) -> Result<HostProof, AppError> {
         validate_native_id(&native_id)?;
-        if thread.id != native_id.as_str() {
+        if thread.id != native_id.as_str()
+            || thread.parent_thread_id.as_deref()
+                != parent.as_ref().map(|owner| owner.native_id.as_str())
+        {
             return Err(AppError::Conflict);
         }
+        let metadata = thread.metadata();
         let cwd = tokio::fs::canonicalize(&thread.cwd)
             .await
             .unwrap_or(thread.cwd);
@@ -186,13 +203,16 @@ impl Codex {
             cwd,
         );
         let source = match thread.path {
-            Some(path) => crate::history::verified_codex_source(binding.clone(), path).await?,
+            Some(path) => {
+                crate::history::verified_codex_source(binding.clone(), path, parent).await?
+            }
             None => None,
         };
         Ok(HostProof {
             binding,
             source,
             activity: thread.status.activity(),
+            metadata,
         })
     }
 
@@ -270,7 +290,41 @@ fn validate_native_id(id: &NativeSessionId) -> Result<(), AppError> {
     Ok(())
 }
 
+impl Thread {
+    pub(super) fn metadata(&self) -> NativeSessionMetadata {
+        use crate::settings::safe_label;
+        NativeSessionMetadata {
+            name: [&self.name, &self.agent_nickname, &self.agent_role]
+                .into_iter()
+                .find_map(|value| safe_label(value.as_deref()?, 512).ok()),
+            status: Some(self.status.label().to_owned()),
+            started_at_ms: self
+                .created_at
+                .filter(|time| *time > 0)
+                .and_then(|time| time.checked_mul(1000)),
+            model: self
+                .model
+                .as_deref()
+                .and_then(|value| safe_label(value, 256).ok()),
+            effort: self
+                .reasoning_effort
+                .as_deref()
+                .and_then(|value| safe_label(value, 64).ok()),
+        }
+    }
+}
+
 impl ThreadStatus {
+    fn label(&self) -> &'static str {
+        match self {
+            Self::Idle => "idle",
+            Self::NotLoaded => "not_loaded",
+            Self::SystemError => "system_error",
+            Self::Active { active_flags } if active_flags.is_empty() => "running",
+            Self::Active { .. } => "waiting",
+        }
+    }
+
     pub(super) fn activity(&self) -> Option<HostActivity> {
         let (phase, has_questions) = match self {
             Self::Idle => (HostPhase::Idle, false),

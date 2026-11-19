@@ -73,7 +73,7 @@ pub(super) fn runs(
     drop(found);
     super::focus::hydrate(tx, std::iter::once(&mut item))?;
     let mut statement = tx.prepare_cached(
-        "SELECT r.run_id,r.started_at_ms,r.lead_session_key,s.provider
+        "SELECT r.run_id,r.started_at_ms,r.lead_session_key,s.provider,s.native_name
         FROM runs r JOIN sessions s ON s.run_id=r.run_id AND s.session_key=r.lead_session_key
         WHERE r.review_id=?1 ORDER BY r.started_at_ms DESC,r.run_id DESC LIMIT ?2 OFFSET ?3",
     )?;
@@ -98,5 +98,6 @@ fn run(row: &Row<'_>) -> Result<RunSummary, StoreError> {
         started_at_ms: row.get(1)?,
         lead_session_key: parse(text(row, 2)?)?,
         provider: provider(text(row, 3)?)?,
+        lead_name: row.get(4)?,
     })
 }

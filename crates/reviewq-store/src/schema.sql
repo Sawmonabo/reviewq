@@ -112,9 +112,17 @@ CREATE TABLE sessions (
     source_path BLOB,
     host_activity TEXT CHECK (host_activity IS NULL OR host_activity IN ('idle','working','blocked','failed')),
     host_questions INTEGER NOT NULL DEFAULT 0 CHECK (host_questions IN (0,1)),
+    native_name TEXT CHECK (length(CAST(native_name AS BLOB)) BETWEEN 1 AND 512),
+    native_status TEXT CHECK (length(CAST(native_status AS BLOB)) BETWEEN 1 AND 32),
+    native_started_at_ms INTEGER,
+    native_model TEXT CHECK (length(CAST(native_model AS BLOB)) BETWEEN 1 AND 256),
+    native_effort TEXT CHECK (length(CAST(native_effort AS BLOB)) BETWEEN 1 AND 64),
+    child_scan_cursor TEXT CHECK (length(CAST(child_scan_cursor AS BLOB)) BETWEEN 1 AND 4096),
+    child_scan_archived INTEGER CHECK (child_scan_archived IN (0,1)),
     parent_session_key TEXT CHECK (parent_session_key <> session_key),
     UNIQUE (run_id, session_key),
     UNIQUE (provider, profile, native_id),
+    CHECK ((child_scan_cursor IS NULL) = (child_scan_archived IS NULL)),
     FOREIGN KEY (run_id, parent_session_key) REFERENCES sessions(run_id, session_key)
 ) STRICT;
 

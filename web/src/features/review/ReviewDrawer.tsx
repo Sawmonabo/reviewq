@@ -91,6 +91,9 @@ export default function ReviewDrawer({
   const buttonRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const [acknowledgement, setAcknowledgement] = useState<AttentionSnapshot>();
   const child = session && session.sessionKey !== run?.leadSessionKey ? session : undefined;
+  const title = child
+    ? (child.metadata.name ?? "Subagent")
+    : (review.tickets[0]?.title ?? review.title);
   const unavailableSession = Boolean(run && !session && !selectionPending && !selectionError);
   const selected = !selectionPending && !selectionError && !unavailableSession;
   const canMutate = selected && review.mrState === "open";
@@ -343,10 +346,10 @@ export default function ReviewDrawer({
               <>
                 <span aria-hidden="true">›</span>
                 <button type="button" className="quiet-button" onClick={() => onSession(undefined)}>
-                  Lead review
+                  {run?.leadMetadata.name ?? "Lead review"}
                 </button>
                 <span aria-hidden="true">›</span>
-                <span>Subagent</span>
+                <span>{title}</span>
               </>
             )}
           </div>
@@ -451,13 +454,10 @@ export default function ReviewDrawer({
           </div>
         </div>
         <div className="drawer-heading">
-          <h2
-            id="review-title"
-            title={child ? "Subagent" : (review.tickets[0]?.title ?? review.title)}
-          >
-            {child ? "Subagent" : (review.tickets[0]?.title ?? review.title)}
+          <h2 id="review-title" title={title}>
+            {title}
           </h2>
-          <DrawerSummary review={review} run={run} child={Boolean(child)} />
+          <DrawerSummary review={review} run={run} session={session} child={Boolean(child)} />
         </div>
         {(Boolean(runs?.nextCursor) || runTrail.length > 0) && (
           <div className="actions run-pages">
@@ -537,7 +537,13 @@ export default function ReviewDrawer({
                     : []),
                   ...(runs?.items ?? []).map((item) => ({
                     value: item.runId,
-                    label: `${providerLabel(item.provider)} · ${item.startedAt ? formatActivityTime(item.startedAt) : item.runId}`,
+                    label: [
+                      item.leadName,
+                      providerLabel(item.provider),
+                      item.startedAt ? formatActivityTime(item.startedAt) : item.runId,
+                    ]
+                      .filter(Boolean)
+                      .join(" · "),
                   })),
                 ]}
                 onChange={onRun}
@@ -609,7 +615,7 @@ export default function ReviewDrawer({
                   reviewTitle={review.title}
                   reviewIdentity={reviewIdentity}
                   {...(startedAt ? { startedAt } : {})}
-                  state={review.focusedRunId === run.runId ? review.runStage : null}
+                  state={review.focusSessionKey === run.leadSessionKey ? review.runStage : null}
                   drafts={drafts}
                   onSession={onSession}
                   onTerminal={() => void commandFor("open")}
@@ -628,7 +634,7 @@ export default function ReviewDrawer({
                   reviewTitle={review.title}
                   reviewIdentity={reviewIdentity}
                   {...(startedAt ? { startedAt } : {})}
-                  state={review.focusedRunId === run.runId ? review.runStage : null}
+                  state={review.focusSessionKey === run.leadSessionKey ? review.runStage : null}
                   drafts={drafts}
                   onSession={onSession}
                   onTerminal={() => void commandFor("open")}
@@ -687,14 +693,21 @@ export default function ReviewDrawer({
 function DrawerSummary({
   review,
   run,
+  session,
   child,
 }: {
   readonly review: MergeRequestRow;
   readonly run: RunDetail | undefined;
+  readonly session: SessionSummary | undefined;
   readonly child: boolean;
 }) {
-  if (child) return <p className="drawer-meta">Native subagent conversation and result</p>;
-  const reason = run && review.focusedRunId === run.runId ? review.reasonKind : null;
+  const reason =
+    !child &&
+    run &&
+    review.focusedRunId === run.runId &&
+    review.focusSessionKey === session?.sessionKey
+      ? review.reasonKind
+      : null;
   const known: Readonly<Record<string, readonly [string, string]>> = {
     agent_input: ["Agent needs input", "rose"],
     permission_required: ["Agent needs input", "rose"],
@@ -706,10 +719,46 @@ function DrawerSummary({
     discussion_update: ["Follow-up ready", "blue"],
     decision_required: ["Review ready", "blue"],
   };
+  const native = session?.metadata;
   const state = reason ? (known[reason] ?? [readable(reason), ""]) : undefined;
+  const nativeState = !state && native?.status;
+  if (child) {
+    return (
+      <div className="drawer-meta">
+        {nativeState && (
+          <span className="drawer-state badge" title="Last reported native status">
+            {readable(nativeState)}
+          </span>
+        )}
+        <span>
+          {[session?.provider && providerLabel(session.provider), native?.model, native?.effort]
+            .filter(Boolean)
+            .join(" · ")}
+        </span>
+        {native?.startedAt && (
+          <time dateTime={native.startedAt}>{formatActivityTime(native.startedAt)}</time>
+        )}
+      </div>
+    );
+  }
   return (
     <div className="drawer-meta">
       {state && <span className={`drawer-state badge ${state[1]}`}>{state[0]}</span>}
+      {nativeState && (
+        <span className="drawer-state badge" title="Last reported native status">
+          {readable(nativeState)}
+        </span>
+      )}
+      {!state && session && (
+        <span>
+          {[providerLabel(session.provider), native?.model, native?.effort]
+            .filter(Boolean)
+            .join(" · ")}
+        </span>
+      )}
+      {!state && native?.startedAt && (
+        <time dateTime={native.startedAt}>{formatActivityTime(native.startedAt)}</time>
+      )}
       <span>
         {[review.author?.label, review.projectPath.split("/").at(-1)].filter(Boolean).join(" · ")}
       </span>

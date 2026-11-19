@@ -63,6 +63,7 @@ export interface ArchiveItem {
   focusSessionKey: SessionKeyDto | null;
   focusedActivity: FocusedActivity | null;
   focusedLaunch: FocusedLaunch | null;
+  focusedLeadName: string | null;
   focusedProvider: HostProviderDto | null;
   focusedReportReviewedSha: GitShaDto | null;
   focusedRunId: RunIdDto | null;

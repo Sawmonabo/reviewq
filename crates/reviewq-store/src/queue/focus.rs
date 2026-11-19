@@ -40,10 +40,11 @@ pub(super) fn hydrate<'a>(
                 )),
                 (SELECT count(*) FROM notifications n WHERE n.review_id=(p.value->>1)
                     AND n.read_at_ms IS NULL AND n.dismissed_at_ms IS NULL
-                    AND NOT (n.source='gitlab' AND n.kind IN ('reply','edited_reply')))
+                    AND NOT (n.source='gitlab' AND n.kind IN ('reply','edited_reply'))), lead.native_name
          FROM json_each(?1) p
          LEFT JOIN runs r ON r.run_id=(p.value->>2) AND r.review_id=(p.value->>1)
          LEFT JOIN sessions s ON s.session_key=(p.value->>3) AND s.run_id=r.run_id
+         LEFT JOIN sessions lead ON lead.session_key=r.lead_session_key AND lead.run_id=r.run_id
          LEFT JOIN launch_attempts l
            ON l.run_id=r.run_id AND l.review_id=r.review_id AND l.session_key=r.lead_session_key
          LEFT JOIN report_heads h ON h.run_id=r.run_id
@@ -86,6 +87,7 @@ pub(super) fn hydrate<'a>(
             .iter()
             .map(|value| provider(value))
             .collect::<Result<_, _>>()?;
+        signals.focused_lead_name = row.get(11)?;
         signals.unread_non_reply_count = row
             .get::<_, i64>(10)?
             .try_into()

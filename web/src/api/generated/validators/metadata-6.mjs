@@ -10,9 +10,33 @@ const schema246 = {
   ],
   type: "string",
 };
+const schema256 = {
+  type: "object",
+  properties: {
+    author: {
+      anyOf: [{ $ref: "#/definitions/NamedUpstreamId" }, { type: "null" }],
+    },
+    coverage: { anyOf: [{ $ref: "#/definitions/Coverage" }, { type: "null" }] },
+    currentDisposition: {
+      anyOf: [{ $ref: "#/definitions/Disposition" }, { type: "null" }],
+    },
+    draft: { type: "boolean" },
+    focusSessionKey: {
+      anyOf: [{ $ref: "#/definitions/CheckpointIdDto" }, { type: "null" }],
+    },
+    focusedActivity: {
+      anyOf: [{ $ref: "#/definitions/FocusedActivity" }, { type: "null" }],
+    },
+    focusedLaunch: {
+      anyOf: [{ $ref: "#/definitions/FocusedLaunch" }, { type: "null" }],
+    },
+    focusedLeadName: { type: ["string", "null"] },
+  },
+};
 const schema258 = {
   type: "object",
   properties: {
+    ourComments: { $ref: "#/definitions/SafeCountDto" },
     own: { type: "boolean" },
     personalApproval: { type: ["boolean", "null"] },
     projectId: { $ref: "#/definitions/MergeRequestIidDto" },
@@ -20,13 +44,9 @@ const schema258 = {
     queueState: { $ref: "#/definitions/QueueStatus" },
     reasonKind: { type: ["string", "null"] },
     registeredLeadCount: { $ref: "#/definitions/SafeCountDto" },
-    registeredProviders: {
-      items: { $ref: "#/definitions/HostProviderDto" },
-      type: "array",
-    },
   },
 };
-const schema261 = {
+const schema262 = {
   properties: {
     assignee: { type: ["string", "null"] },
     key: { $ref: "#/definitions/CheckpointIdDto" },
@@ -37,11 +57,11 @@ const schema261 = {
   required: ["key", "title", "status", "priority", "assignee"],
   type: "object",
 };
-const schema263 = {
+const schema264 = {
   enum: ["setup", "connected", "disconnected"],
   type: "string",
 };
-const schema268 = {
+const schema269 = {
   properties: {
     episodeId: { $ref: "#/definitions/CheckpointIdDto" },
     failedTurnId: { $ref: "#/definitions/CheckpointIdDto" },
@@ -60,11 +80,11 @@ const schema268 = {
   ],
   type: "object",
 };
-const schema271 = {
+const schema272 = {
   enum: ["running", "succeeded", "failed", "superseded"],
   type: "string",
 };
-const schema273 = {
+const schema274 = {
   properties: {
     cwd: { type: "string" },
     leadSessionKey: { $ref: "#/definitions/CheckpointIdDto" },
@@ -89,10 +109,11 @@ const schema273 = {
 };
 export {
   schema246,
+  schema256,
   schema258,
-  schema261,
-  schema263,
-  schema268,
-  schema271,
-  schema273,
+  schema262,
+  schema264,
+  schema269,
+  schema272,
+  schema274,
 };

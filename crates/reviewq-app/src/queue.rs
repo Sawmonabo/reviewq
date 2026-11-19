@@ -234,6 +234,7 @@ pub struct ReviewSignals {
     pub run: Option<RunId>,
     pub focus: Option<SessionKey>,
     pub focused_provider: Option<HostProvider>,
+    pub focused_lead_name: Option<String>,
     pub focused_activity: Option<HostPhase>,
     pub registered_providers: Vec<HostProvider>,
     pub unread_non_reply_count: u64,
@@ -278,6 +279,7 @@ pub struct RunSummary {
     pub started_at_ms: i64,
     pub lead_session_key: SessionKey,
     pub provider: HostProvider,
+    pub lead_name: Option<String>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -296,6 +298,7 @@ pub struct SessionSummary {
     pub provider: HostProvider,
     pub native_id: reviewq_domain::identity::NativeSessionId,
     pub cwd: reviewq_domain::session::AbsolutePath,
+    pub metadata: crate::hosts::NativeSessionMetadata,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -308,6 +311,7 @@ pub struct SessionPosition {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RunDetail {
     pub lead: LeadTarget,
+    pub lead_metadata: crate::hosts::NativeSessionMetadata,
     pub sessions: Vec<SessionSummary>,
     pub next_session: Option<SessionPosition>,
     pub launch: Option<crate::launch::LaunchDetails>,

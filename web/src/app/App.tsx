@@ -98,14 +98,21 @@ export function App() {
   );
   const selectedRun = selected.data ?? undefined;
   const desiredSession = sessionKey ?? selectedRun?.leadSessionKey;
+  const firstPageSession = selectedRun?.sessions.items.find(
+    (item) => item.sessionKey === desiredSession,
+  );
   const activeSession = useResource<SessionSummary | null>(
-    JSON.stringify([selectedRun?.runId, desiredSession]),
+    JSON.stringify([
+      selectedRun?.runId,
+      desiredSession,
+      firstPageSession ? null : selectedRun?.sessions.nextCursor,
+    ]),
     async (signal) => {
-      if (!selectedRun || !desiredSession) return { data: null, cursor: "" };
+      if (!selectedRun || !desiredSession || firstPageSession) return { data: null, cursor: "" };
       const data = await findRunSession(selectedRun, desiredSession, signal);
       return { data, cursor: "" };
     },
-    desiredSession ? [{ kind: "session", id: desiredSession }] : [],
+    desiredSession && !firstPageSession ? [{ kind: "session", id: desiredSession }] : [],
   );
   const unread = useResource(
     "rail-unread",
@@ -439,11 +446,14 @@ export function App() {
                     <ReviewDrawer
                       overview={overview.data}
                       run={selectedRun}
-                      session={activeSession.data ?? undefined}
+                      session={firstPageSession ?? activeSession.data ?? undefined}
                       requestedSession={sessionKey}
-                      selectionError={selected.error ?? activeSession.error}
+                      selectionError={
+                        selected.error ?? (firstPageSession ? undefined : activeSession.error)
+                      }
                       selectionPending={
-                        selected.pending || Boolean(selectedRun && activeSession.pending)
+                        selected.pending ||
+                        Boolean(selectedRun && !firstPageSession && activeSession.pending)
                       }
                       onDefaultRun={() => openReview(reviewId)}
                       tab={route.tab}

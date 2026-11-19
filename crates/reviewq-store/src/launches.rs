@@ -240,6 +240,7 @@ impl LaunchStore for SqliteStore {
                     cwd: proof.binding.cwd().clone(),
                     native_source: proof.source,
                     activity: proof.activity,
+                    metadata: proof.metadata,
                 })?.value;
                 if registered.review_id() != &bound.review {
                     return Err(AppError::Conflict.into());
