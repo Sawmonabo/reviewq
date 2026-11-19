@@ -2,6 +2,7 @@
 import { func0 } from "../runtime.mjs";
 import { validate114 } from "./review-id-dto.mjs";
 import { validate25 } from "./checkpoint-id-dto.mjs";
+import { validate35 } from "./event-cursor-dto.mjs";
 function validate383(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
@@ -67,6 +68,81 @@ function validate383(
             var valid0 = _errs2 === errors;
           } else {
             var valid0 = true;
+          }
+          if (valid0) {
+            if (
+              data.settingsRevision !== undefined &&
+              func0.call(data, "settingsRevision")
+            ) {
+              let data2 = data.settingsRevision;
+              const _errs3 = errors;
+              const _errs4 = errors;
+              let valid1 = false;
+              const _errs5 = errors;
+              if (
+                !validate35(data2, {
+                  instancePath: instancePath + "/settingsRevision",
+                  parentData: data,
+                  parentDataProperty: "settingsRevision",
+                  rootData,
+                })
+              ) {
+                vErrors =
+                  vErrors === null
+                    ? validate35.errors
+                    : vErrors.concat(validate35.errors);
+                errors = vErrors.length;
+              }
+              var _valid0 = _errs5 === errors;
+              valid1 = valid1 || _valid0;
+              if (!valid1) {
+                const _errs6 = errors;
+                if (data2 !== null) {
+                  const err0 = {
+                    instancePath: instancePath + "/settingsRevision",
+                    schemaPath: "#/properties/settingsRevision/anyOf/1/type",
+                    keyword: "type",
+                    params: { type: "null" },
+                  };
+                  if (vErrors === null) {
+                    vErrors = [err0];
+                  } else {
+                    vErrors.push(err0);
+                  }
+                  errors++;
+                }
+                var _valid0 = _errs6 === errors;
+                valid1 = valid1 || _valid0;
+              }
+              if (!valid1) {
+                const err1 = {
+                  instancePath: instancePath + "/settingsRevision",
+                  schemaPath: "#/properties/settingsRevision/anyOf",
+                  keyword: "anyOf",
+                  params: {},
+                };
+                if (vErrors === null) {
+                  vErrors = [err1];
+                } else {
+                  vErrors.push(err1);
+                }
+                errors++;
+                validate383.errors = vErrors;
+                return false;
+              } else {
+                errors = _errs4;
+                if (vErrors !== null) {
+                  if (_errs4) {
+                    vErrors.length = _errs4;
+                  } else {
+                    vErrors = null;
+                  }
+                }
+              }
+              var valid0 = _errs3 === errors;
+            } else {
+              var valid0 = true;
+            }
           }
         }
       }

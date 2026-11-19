@@ -2,9 +2,9 @@
 import { func0 } from "../runtime.mjs";
 import { validate147 } from "./git-sha-dto.mjs";
 import { validate127 } from "./safe-count-dto.mjs";
-import { validate762 } from "./discussion-position.mjs";
-import { validate764 } from "./patch-discussion-range.mjs";
-function validate757(
+import { validate763 } from "./discussion-position.mjs";
+import { validate765 } from "./patch-discussion-range.mjs";
+function validate758(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -108,7 +108,7 @@ function validate757(
                 vErrors.push(err1);
               }
               errors++;
-              validate757.errors = vErrors;
+              validate758.errors = vErrors;
               return false;
             } else {
               errors = _errs4;
@@ -128,7 +128,7 @@ function validate757(
             if (data.newPath !== undefined && func0.call(data, "newPath")) {
               const _errs8 = errors;
               if (typeof data.newPath !== "string") {
-                validate757.errors = [
+                validate758.errors = [
                   {
                     instancePath: instancePath + "/newPath",
                     schemaPath: "#/properties/newPath/type",
@@ -197,7 +197,7 @@ function validate757(
                     vErrors.push(err3);
                   }
                   errors++;
-                  validate757.errors = vErrors;
+                  validate758.errors = vErrors;
                   return false;
                 } else {
                   errors = _errs11;
@@ -217,7 +217,7 @@ function validate757(
                 if (data.oldPath !== undefined && func0.call(data, "oldPath")) {
                   const _errs15 = errors;
                   if (typeof data.oldPath !== "string") {
-                    validate757.errors = [
+                    validate758.errors = [
                       {
                         instancePath: instancePath + "/oldPath",
                         schemaPath: "#/properties/oldPath/type",
@@ -238,7 +238,7 @@ function validate757(
                   ) {
                     const _errs17 = errors;
                     if (
-                      !validate762(data.positionType, {
+                      !validate763(data.positionType, {
                         instancePath: instancePath + "/positionType",
                         parentData: data,
                         parentDataProperty: "positionType",
@@ -247,8 +247,8 @@ function validate757(
                     ) {
                       vErrors =
                         vErrors === null
-                          ? validate762.errors
-                          : vErrors.concat(validate762.errors);
+                          ? validate763.errors
+                          : vErrors.concat(validate763.errors);
                       errors = vErrors.length;
                     }
                     var valid0 = _errs17 === errors;
@@ -263,7 +263,7 @@ function validate757(
                       let valid3 = false;
                       const _errs20 = errors;
                       if (
-                        !validate764(data7, {
+                        !validate765(data7, {
                           instancePath: instancePath + "/range",
                           parentData: data,
                           parentDataProperty: "range",
@@ -272,8 +272,8 @@ function validate757(
                       ) {
                         vErrors =
                           vErrors === null
-                            ? validate764.errors
-                            : vErrors.concat(validate764.errors);
+                            ? validate765.errors
+                            : vErrors.concat(validate765.errors);
                         errors = vErrors.length;
                       }
                       var _valid2 = _errs20 === errors;
@@ -310,7 +310,7 @@ function validate757(
                           vErrors.push(err5);
                         }
                         errors++;
-                        validate757.errors = vErrors;
+                        validate758.errors = vErrors;
                         return false;
                       } else {
                         errors = _errs19;
@@ -334,7 +334,7 @@ function validate757(
         }
       }
     } else {
-      validate757.errors = [
+      validate758.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -345,7 +345,7 @@ function validate757(
       return false;
     }
   }
-  validate757.errors = vErrors;
+  validate758.errors = vErrors;
   return errors === 0;
 }
-export { validate757 };
+export { validate758 };

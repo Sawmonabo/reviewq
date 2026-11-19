@@ -8,6 +8,7 @@ import {
   PATCH_FILES_PER_PAGE,
   PATCH_WINDOW_BYTES,
   PatchFormattingLimit,
+  readInitialPatchFiles,
   readPatch,
   readPatchDiscussions,
   readPatchFiles,
@@ -68,12 +69,10 @@ export default function Changes({
   const indexKey = JSON.stringify([reviewId, epoch, position]);
   const index = useResource(indexKey, async (signal) => {
     try {
-      const result = await readPatchFiles(
-        reviewId,
-        signal,
-        position,
-        position || epoch > 0 ? undefined : storedFile(reviewId),
-      );
+      const result =
+        position || epoch > 0
+          ? await readPatchFiles(reviewId, signal, position)
+          : await readInitialPatchFiles(reviewId, signal, storedFile(reviewId));
       if (position && !signal.aborted) {
         if ("path" in position) {
           const path = position.path;
@@ -233,11 +232,8 @@ export default function Changes({
       {children}
       {shown && (
         <div className="diff-revision">
-          <span>
-            Source <code>{shown.headSha.slice(0, 12)}</code>
-          </span>
-          <span>
-            Base <code>{shown.baseSha.slice(0, 12)}</code>
+          <span title={`Base ${shown.baseSha}`}>
+            Source <code title={shown.headSha}>{shown.headSha.slice(0, 12)}</code>
           </span>
         </div>
       )}
@@ -379,20 +375,14 @@ export default function Changes({
       {threads.error && <Notice retry={threads.retry}>{threads.error}</Notice>}
       {threads.pending && <Loading label="Loading discussions…" />}
       <section className="discussion-list stack" aria-label="Review discussions">
-        <h3>
-          {tab === "files"
-            ? "Other discussions"
-            : tab === "general"
-              ? "General comments"
-              : "All conversations"}
-        </h3>
+        {tab === "files" && visible.length > 0 && <h3>Other discussions</h3>}
         {threads.data && (
-          <p className="meta">
+          <p role="status" className="sr-only">
             {visible.length} {visible.length === 1 ? "discussion" : "discussions"} on this page
             {tab === "files" && anchors.length > 0 ? ` · ${anchors.length} on this file` : ""}
           </p>
         )}
-        {threads.data && !visible.length && (
+        {tab !== "files" && threads.data && !visible.length && (
           <div className="changes-conversation-empty">
             <div role="status">
               <Icon name="inbox" size={28} />
@@ -474,15 +464,22 @@ function SelectedPatch({
           <div className="actions patch-links">
             <span className="meta">
               <FileKind file={file} />
-              {file.lineCount !== null && ` · ${file.lineCount} rows`}
             </span>
             <DiffCount file={file} />
             {file.availability === "complete" && (
-              <a href={downloadPatchUrl(file)}>Download patch</a>
+              <a href={downloadPatchUrl(file)} aria-label="Download patch" title="Download patch">
+                <Icon name="download" size={14} />
+              </a>
             )}
             {source && (
-              <a href={`${source}/diffs`} target="_blank" rel="noreferrer">
-                GitLab changes ↗
+              <a
+                href={`${source}/diffs`}
+                target="_blank"
+                rel="noreferrer"
+                aria-label="Open changes in GitLab"
+                title="Open changes in GitLab"
+              >
+                <Icon name="external" size={13} />
               </a>
             )}
           </div>
@@ -496,7 +493,7 @@ function SelectedPatch({
           >
             ‹
           </button>
-          <small>{total === undefined ? `File ${position}` : `${position} / ${total}`}</small>
+          <small>{total === undefined ? `File ${position}` : `${position}/${total}`}</small>
           <button
             type="button"
             aria-label="Next file"

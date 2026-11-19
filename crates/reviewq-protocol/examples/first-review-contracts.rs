@@ -363,6 +363,7 @@ fn review() -> MergeRequestRow {
 fn patch_index(revision: &str, head: &str, etag: Option<&str>) -> PatchFileIndex {
     PatchFileIndex {
         revision: PatchRevisionDto::new(revision).unwrap(),
+        settings_revision: Some(RevisionDto::new(7).unwrap()),
         base_sha: GitShaDto::new("0000000000000000000000000000000000000001").unwrap(),
         start_sha: GitShaDto::new("0000000000000000000000000000000000000002").unwrap(),
         head_sha: GitShaDto::new(head).unwrap(),

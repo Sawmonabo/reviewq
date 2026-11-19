@@ -3,7 +3,7 @@ import { func0 } from "../runtime.mjs";
 import { schema227 } from "../metadata-5.mjs";
 import { validate25 } from "./checkpoint-id-dto.mjs";
 import { validate232 } from "./utc-timestamp-dto.mjs";
-function validate715(
+function validate716(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -18,7 +18,7 @@ function validate715(
         let data0 = data.desktopReason;
         const _errs1 = errors;
         if (typeof data0 !== "string" && data0 !== null) {
-          validate715.errors = [
+          validate716.errors = [
             {
               instancePath: instancePath + "/desktopReason",
               schemaPath: "#/properties/desktopReason/type",
@@ -40,7 +40,7 @@ function validate715(
           let data1 = data.desktopStatus;
           const _errs3 = errors;
           if (typeof data1 !== "string" && data1 !== null) {
-            validate715.errors = [
+            validate716.errors = [
               {
                 instancePath: instancePath + "/desktopStatus",
                 schemaPath: "#/properties/desktopStatus/type",
@@ -109,7 +109,7 @@ function validate715(
                 vErrors.push(err1);
               }
               errors++;
-              validate715.errors = vErrors;
+              validate716.errors = vErrors;
               return false;
             } else {
               errors = _errs6;
@@ -150,7 +150,7 @@ function validate715(
               if (data.kind !== undefined && func0.call(data, "kind")) {
                 const _errs11 = errors;
                 if (typeof data.kind !== "string") {
-                  validate715.errors = [
+                  validate716.errors = [
                     {
                       instancePath: instancePath + "/kind",
                       schemaPath: "#/properties/kind/type",
@@ -168,7 +168,7 @@ function validate715(
                 if (data.label !== undefined && func0.call(data, "label")) {
                   const _errs13 = errors;
                   if (typeof data.label !== "string") {
-                    validate715.errors = [
+                    validate716.errors = [
                       {
                         instancePath: instancePath + "/label",
                         schemaPath: "#/properties/label/type",
@@ -240,7 +240,7 @@ function validate715(
                         vErrors.push(err3);
                       }
                       errors++;
-                      validate715.errors = vErrors;
+                      validate716.errors = vErrors;
                       return false;
                     } else {
                       errors = _errs16;
@@ -288,7 +288,7 @@ function validate715(
         }
       }
     } else {
-      validate715.errors = [
+      validate716.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -299,7 +299,7 @@ function validate715(
       return false;
     }
   }
-  validate715.errors = vErrors;
+  validate716.errors = vErrors;
   return errors === 0;
 }
-export { validate715 };
+export { validate716 };

@@ -1749,6 +1749,16 @@
         },
         "revision": {
           "$ref": "#/definitions/PatchRevisionDto"
+        },
+        "settingsRevision": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/RevisionDto"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "required": [
@@ -5329,6 +5339,16 @@
         },
         "revision": {
           "$ref": "#/definitions/PatchRevisionDto"
+        },
+        "settingsRevision": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/RevisionDto"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "startSha": {
           "$ref": "#/definitions/GitShaDto"

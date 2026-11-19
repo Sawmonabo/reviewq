@@ -4,9 +4,9 @@ import { validate25 } from "./checkpoint-id-dto.mjs";
 import { validate147 } from "./git-sha-dto.mjs";
 import { validate232 } from "./utc-timestamp-dto.mjs";
 import { validate127 } from "./safe-count-dto.mjs";
-import { validate466 } from "./result-kind.mjs";
+import { validate467 } from "./result-kind.mjs";
 import { schema157 } from "../metadata-4.mjs";
-function validate460(
+function validate461(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -89,7 +89,7 @@ function validate460(
               vErrors.push(err1);
             }
             errors++;
-            validate460.errors = vErrors;
+            validate461.errors = vErrors;
             return false;
           } else {
             errors = _errs3;
@@ -163,7 +163,7 @@ function validate460(
                 if (errors === _errs9) {
                   if (Array.isArray(data4)) {
                     if (data4.length > 12) {
-                      validate460.errors = [
+                      validate461.errors = [
                         {
                           instancePath: instancePath + "/findingIds",
                           schemaPath: "#/properties/findingIds/maxItems",
@@ -198,7 +198,7 @@ function validate460(
                       }
                     }
                   } else {
-                    validate460.errors = [
+                    validate461.errors = [
                       {
                         instancePath: instancePath + "/findingIds",
                         schemaPath: "#/properties/findingIds/type",
@@ -217,7 +217,7 @@ function validate460(
                 if (data.kind !== undefined && func0.call(data, "kind")) {
                   const _errs12 = errors;
                   if (
-                    !validate466(data.kind, {
+                    !validate467(data.kind, {
                       instancePath: instancePath + "/kind",
                       parentData: data,
                       parentDataProperty: "kind",
@@ -226,8 +226,8 @@ function validate460(
                   ) {
                     vErrors =
                       vErrors === null
-                        ? validate466.errors
-                        : vErrors.concat(validate466.errors);
+                        ? validate467.errors
+                        : vErrors.concat(validate467.errors);
                     errors = vErrors.length;
                   }
                   var valid0 = _errs12 === errors;
@@ -241,7 +241,7 @@ function validate460(
                   ) {
                     const _errs13 = errors;
                     if (typeof data.moreFindingIds !== "boolean") {
-                      validate460.errors = [
+                      validate461.errors = [
                         {
                           instancePath: instancePath + "/moreFindingIds",
                           schemaPath: "#/properties/moreFindingIds/type",
@@ -263,7 +263,7 @@ function validate460(
                       let data8 = data.reasonPreview;
                       const _errs15 = errors;
                       if (typeof data8 !== "string" && data8 !== null) {
-                        validate460.errors = [
+                        validate461.errors = [
                           {
                             instancePath: instancePath + "/reasonPreview",
                             schemaPath: "#/properties/reasonPreview/type",
@@ -287,7 +287,7 @@ function validate460(
         }
       }
     } else {
-      validate460.errors = [
+      validate461.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -298,7 +298,7 @@ function validate460(
       return false;
     }
   }
-  validate460.errors = vErrors;
+  validate461.errors = vErrors;
   return errors === 0;
 }
-export { validate460 };
+export { validate461 };

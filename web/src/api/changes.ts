@@ -1,6 +1,6 @@
 import { decodeUtf8, readBoundedBytes } from "./bounded-bytes";
 import { read, request } from "./client";
-import type { PatchFile, PatchPath } from "./generated/contracts";
+import type { PatchFile, PatchFileIndexResponse, PatchPath } from "./generated/contracts";
 import {
   isApprovalViewResponse,
   isCurrentPatchRevisionResponse,
@@ -14,6 +14,17 @@ export const PATCH_FILES_PER_PAGE = 10;
 export const PATH_MATCHES_PER_PAGE = 60;
 const MAX_RICH_BYTES = 2 * 1024 * 1024;
 const PATH_CACHE_BYTES = 768 * 1024;
+const RETAINED_PATCH_BYTES = 128 * 1024;
+let retainedIndex:
+  { readonly reviewId: string; readonly result: PatchFileIndexResponse } | undefined;
+let retainedCatalog:
+  | {
+      readonly reviewId: string;
+      readonly revision: string;
+      readonly result: Awaited<ReturnType<typeof loadPatchPathCatalog>>;
+    }
+  | undefined;
+let retainedPatch: { readonly identity: string; readonly result: PatchWindow } | undefined;
 
 export async function readPatchFiles(
   reviewId: string,
@@ -40,7 +51,37 @@ export async function readPatchFiles(
   ) {
     throw new Error("The selected patch index changed.");
   }
+  signal.throwIfAborted();
+  retainedIndex = { reviewId, result };
   return result;
+}
+
+export async function readInitialPatchFiles(
+  reviewId: string,
+  signal: AbortSignal,
+  preferredFileId: string | undefined,
+): Promise<PatchFileIndexResponse> {
+  const previous = retainedIndex?.reviewId === reviewId ? retainedIndex.result : undefined;
+  if (
+    previous &&
+    previous.data.settingsRevision != null &&
+    (preferredFileId
+      ? previous.data.items.some((file) => file.fileId === preferredFileId)
+      : previous.data.pageNumber === 1)
+  ) {
+    try {
+      const current = await readPatchRevision(reviewId, signal);
+      if (
+        current.data.revision === previous.data.revision &&
+        current.data.settingsRevision === previous.data.settingsRevision
+      ) {
+        return { cursor: current.cursor, data: previous.data };
+      }
+    } catch {
+      signal.throwIfAborted();
+    }
+  }
+  return readPatchFiles(reviewId, signal, undefined, preferredFileId);
 }
 
 export async function readPatchPathCatalog(
@@ -48,6 +89,17 @@ export async function readPatchPathCatalog(
   revision: string,
   signal: AbortSignal,
 ) {
+  if (retainedCatalog?.reviewId === reviewId && retainedCatalog.revision === revision) {
+    signal.throwIfAborted();
+    return retainedCatalog.result;
+  }
+  const result = await loadPatchPathCatalog(reviewId, revision, signal);
+  signal.throwIfAborted();
+  retainedCatalog = { reviewId, revision, result };
+  return result;
+}
+
+async function loadPatchPathCatalog(reviewId: string, revision: string, signal: AbortSignal) {
   let paths: PatchPath[] | undefined = [];
   let bytes = 0;
   const result = await scanPatchPaths(reviewId, revision, signal, (path) => {
@@ -167,6 +219,11 @@ export async function readPatch(
 ): Promise<PatchWindow> {
   const headers = new Headers();
   const pinned = file.patchETag ?? window?.etag;
+  const identity = JSON.stringify([file.reviewId, file.revision, file.fileId, pinned]);
+  if (!window && pinned && retainedPatch?.identity === identity) {
+    signal.throwIfAborted();
+    return retainedPatch.result;
+  }
   if (pinned) headers.set("If-Match", pinned);
   const offset = window?.offset ?? 0;
   const bounded = window === undefined ? MAX_RICH_BYTES : PATCH_WINDOW_BYTES;
@@ -194,7 +251,16 @@ export async function readPatch(
     const bytes = await readBoundedBytes(response, bounded);
     if (bytes.length !== file.byteLength) throw new Error("The selected patch length changed.");
     enforcePatchRows(bytes);
-    return { text: decodeUtf8(bytes), first: 0, next: bytes.length, total: bytes.length, etag };
+    signal.throwIfAborted();
+    const result = {
+      text: decodeUtf8(bytes),
+      first: 0,
+      next: bytes.length,
+      total: bytes.length,
+      etag,
+    };
+    retainedPatch = bytes.length <= RETAINED_PATCH_BYTES ? { identity, result } : undefined;
+    return result;
   }
   const [first, end, total] = contentRange(response);
   if (

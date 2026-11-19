@@ -2,7 +2,7 @@
 import { func0 } from "../runtime.mjs";
 import { validate25 } from "./checkpoint-id-dto.mjs";
 import { validate134 } from "./report-hash-dto.mjs";
-function validate405(
+function validate406(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -20,7 +20,7 @@ function validate405(
           !func0.call(data, "currentReceiptId")) &&
           (missing0 = "currentReceiptId"))
       ) {
-        validate405.errors = [
+        validate406.errors = [
           {
             instancePath,
             schemaPath: "#/required",
@@ -87,7 +87,7 @@ function validate405(
               vErrors.push(err1);
             }
             errors++;
-            validate405.errors = vErrors;
+            validate406.errors = vErrors;
             return false;
           } else {
             errors = _errs2;
@@ -152,7 +152,7 @@ function validate405(
         }
       }
     } else {
-      validate405.errors = [
+      validate406.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -163,7 +163,7 @@ function validate405(
       return false;
     }
   }
-  validate405.errors = vErrors;
+  validate406.errors = vErrors;
   return errors === 0;
 }
-export { validate405 };
+export { validate406 };

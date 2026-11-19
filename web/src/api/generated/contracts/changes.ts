@@ -5,6 +5,7 @@ import type {
   GitShaDto,
   PageCursorDto,
   ReviewIdDto,
+  RevisionDto,
   SafeCountDto,
   UpstreamIdDto,
   UtcTimestampDto,
@@ -77,6 +78,7 @@ export interface CurrentPatchRevisionResponse {
 export interface CurrentPatchRevision {
   reviewId: ReviewIdDto;
   revision: PatchRevisionDto;
+  settingsRevision?: RevisionDto | null;
   [k: string]: unknown;
 }
 
@@ -164,6 +166,7 @@ export interface PatchFileIndex {
   pageNumber: SafeCountDto;
   previousCursor: PageCursorDto | null;
   revision: PatchRevisionDto;
+  settingsRevision?: RevisionDto | null;
   startSha: GitShaDto;
   [k: string]: unknown;
 }

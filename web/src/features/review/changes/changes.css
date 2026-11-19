@@ -251,6 +251,18 @@ pre.patch-source {
 .patch-toolbar .patch-links .meta {
   font-size: inherit;
 }
+.patch-links > a {
+  display: inline-grid;
+  place-items: center;
+  min-width: 24px;
+  min-height: 24px;
+}
+@media (pointer: coarse) {
+  .patch-links > a {
+    min-width: 44px;
+    min-height: 44px;
+  }
+}
 .patch-arrows {
   flex: 0 0 auto;
   color: var(--muted);

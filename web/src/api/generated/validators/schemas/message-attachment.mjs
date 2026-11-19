@@ -4,7 +4,7 @@ import { validate25 } from "./checkpoint-id-dto.mjs";
 import { schema220 } from "../metadata-5.mjs";
 import { validate127 } from "./safe-count-dto.mjs";
 import { validate134 } from "./report-hash-dto.mjs";
-function validate688(
+function validate689(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -26,7 +26,7 @@ function validate688(
         ((data.quoteOffset === undefined || !func0.call(data, "quoteOffset")) &&
           (missing0 = "quoteOffset"))
       ) {
-        validate688.errors = [
+        validate689.errors = [
           {
             instancePath,
             schemaPath: "#/required",
@@ -93,7 +93,7 @@ function validate688(
               vErrors.push(err1);
             }
             errors++;
-            validate688.errors = vErrors;
+            validate689.errors = vErrors;
             return false;
           } else {
             errors = _errs2;
@@ -114,7 +114,7 @@ function validate688(
             let data1 = data.quote;
             const _errs6 = errors;
             if (typeof data1 !== "string" && data1 !== null) {
-              validate688.errors = [
+              validate689.errors = [
                 {
                   instancePath: instancePath + "/quote",
                   schemaPath: "#/properties/quote/type",
@@ -186,7 +186,7 @@ function validate688(
                   vErrors.push(err3);
                 }
                 errors++;
-                validate688.errors = vErrors;
+                validate689.errors = vErrors;
                 return false;
               } else {
                 errors = _errs9;
@@ -260,7 +260,7 @@ function validate688(
                     vErrors.push(err5);
                   }
                   errors++;
-                  validate688.errors = vErrors;
+                  validate689.errors = vErrors;
                   return false;
                 } else {
                   errors = _errs14;
@@ -334,7 +334,7 @@ function validate688(
                       vErrors.push(err7);
                     }
                     errors++;
-                    validate688.errors = vErrors;
+                    validate689.errors = vErrors;
                     return false;
                   } else {
                     errors = _errs19;
@@ -356,7 +356,7 @@ function validate688(
         }
       }
     } else {
-      validate688.errors = [
+      validate689.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -367,7 +367,7 @@ function validate688(
       return false;
     }
   }
-  validate688.errors = vErrors;
+  validate689.errors = vErrors;
   return errors === 0;
 }
-export { validate688 };
+export { validate689 };

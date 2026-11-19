@@ -20,16 +20,16 @@ const schema247 = {
   enum: ["open", "resolved", "comment", "unknown"],
   type: "string",
 };
-const schema252 = {
+const schema253 = {
   enum: ["complete", "incomplete", "binary", "provider_limited", "missing"],
   type: "string",
 };
-const schema261 = {
+const schema263 = {
   enum: ["native", "async"],
   title: "QuestionAnswerResponseMode",
   type: "string",
 };
-const schema265 = {
+const schema267 = {
   enum: [
     "pending",
     "submitting",
@@ -40,7 +40,7 @@ const schema265 = {
   ],
   type: "string",
 };
-const schema278 = {
+const schema280 = {
   type: "object",
   properties: {
     author: {
@@ -63,25 +63,4 @@ const schema278 = {
     focusedLeadName: { type: ["string", "null"] },
   },
 };
-const schema280 = {
-  type: "object",
-  properties: {
-    ourComments: { $ref: "#/definitions/SafeCountDto" },
-    own: { type: "boolean" },
-    personalApproval: { type: ["boolean", "null"] },
-    projectId: { $ref: "#/definitions/MergeRequestIidDto" },
-    projectPath: { type: "string" },
-    queueState: { $ref: "#/definitions/QueueStatus" },
-    reasonKind: { type: ["string", "null"] },
-    registeredLeadCount: { $ref: "#/definitions/SafeCountDto" },
-  },
-};
-export {
-  schema245,
-  schema247,
-  schema252,
-  schema261,
-  schema265,
-  schema278,
-  schema280,
-};
+export { schema245, schema247, schema253, schema263, schema267, schema280 };

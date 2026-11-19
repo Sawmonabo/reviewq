@@ -8,7 +8,8 @@ pub use approvals::{
 };
 
 use crate::scalar::{
-    FileIdDto, GitShaDto, PageCursorDto, PatchETagDto, PatchRevisionDto, ReviewIdDto, SafeCountDto,
+    FileIdDto, GitShaDto, PageCursorDto, PatchETagDto, PatchRevisionDto, ReviewIdDto, RevisionDto,
+    SafeCountDto,
 };
 use crate::{Page, Success, UtcTimestampDto};
 
@@ -17,6 +18,8 @@ use crate::{Page, Success, UtcTimestampDto};
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct PatchFileIndex {
     pub revision: PatchRevisionDto,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub settings_revision: Option<RevisionDto>,
     pub base_sha: GitShaDto,
     pub start_sha: GitShaDto,
     pub head_sha: GitShaDto,
@@ -34,6 +37,8 @@ pub type PatchFileIndexResponse = Success<PatchFileIndex>;
 pub struct CurrentPatchRevision {
     pub review_id: ReviewIdDto,
     pub revision: PatchRevisionDto,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub settings_revision: Option<RevisionDto>,
 }
 
 pub type CurrentPatchRevisionResponse = Success<CurrentPatchRevision>;

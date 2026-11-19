@@ -5,7 +5,7 @@ import { validate147 } from "./git-sha-dto.mjs";
 import { validate232 } from "./utc-timestamp-dto.mjs";
 import { validate35 } from "./event-cursor-dto.mjs";
 import { schema153 } from "../metadata-3.mjs";
-function validate441(
+function validate442(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -19,7 +19,7 @@ function validate441(
       ) {
         const _errs1 = errors;
         if (typeof data.authorityVerified !== "boolean") {
-          validate441.errors = [
+          validate442.errors = [
             {
               instancePath: instancePath + "/authorityVerified",
               schemaPath: "#/properties/authorityVerified/type",
@@ -109,7 +109,7 @@ function validate441(
                 vErrors.push(err1);
               }
               errors++;
-              validate441.errors = vErrors;
+              validate442.errors = vErrors;
               return false;
             } else {
               errors = _errs5;
@@ -183,7 +183,7 @@ function validate441(
                   vErrors.push(err3);
                 }
                 errors++;
-                validate441.errors = vErrors;
+                validate442.errors = vErrors;
                 return false;
               } else {
                 errors = _errs10;
@@ -254,7 +254,7 @@ function validate441(
                     vErrors.push(err5);
                   }
                   errors++;
-                  validate441.errors = vErrors;
+                  validate442.errors = vErrors;
                   return false;
                 } else {
                   errors = _errs15;
@@ -326,7 +326,7 @@ function validate441(
                       let data7 = data.holdReason;
                       const _errs21 = errors;
                       if (typeof data7 !== "string" && data7 !== null) {
-                        validate441.errors = [
+                        validate442.errors = [
                           {
                             instancePath: instancePath + "/holdReason",
                             schemaPath: "#/properties/holdReason/type",
@@ -350,7 +350,7 @@ function validate441(
         }
       }
     } else {
-      validate441.errors = [
+      validate442.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -361,7 +361,7 @@ function validate441(
       return false;
     }
   }
-  validate441.errors = vErrors;
+  validate442.errors = vErrors;
   return errors === 0;
 }
-export { validate441 };
+export { validate442 };

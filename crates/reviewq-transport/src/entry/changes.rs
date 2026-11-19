@@ -14,7 +14,7 @@ use reviewq_domain::identity::ReviewId;
 use reviewq_protocol::changes as dto;
 use reviewq_protocol::{
     EventCursorDto, FileIdDto, GitShaDto, Page, PageCursorDto, PatchETagDto, PatchRevisionDto,
-    ReviewIdDto, SafeCountDto, Success, UtcTimestampDto,
+    ReviewIdDto, RevisionDto, SafeCountDto, Success, UtcTimestampDto,
 };
 use serde::{Deserialize, Serialize};
 
@@ -70,6 +70,9 @@ pub(super) async fn revision(
         data: dto::CurrentPatchRevision {
             review_id: ReviewIdDto::new(review).ok_or(AppError::Internal)?,
             revision: patch_revision(&current.id)?,
+            settings_revision: Some(
+                RevisionDto::new(source.context.revision.get()).ok_or(AppError::Internal)?,
+            ),
         },
     }))
 }
@@ -150,6 +153,9 @@ pub(super) async fn files(
         cursor: EventCursorDto::new(source.cursor.get()).ok_or(AppError::Internal)?,
         data: dto::PatchFileIndex {
             revision,
+            settings_revision: Some(
+                RevisionDto::new(source.context.revision.get()).ok_or(AppError::Internal)?,
+            ),
             base_sha: GitShaDto::new(response.revision.base.as_str()).ok_or(AppError::Internal)?,
             start_sha: GitShaDto::new(response.revision.start.as_str())
                 .ok_or(AppError::Internal)?,
