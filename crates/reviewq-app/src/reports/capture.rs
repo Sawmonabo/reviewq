@@ -198,6 +198,8 @@ pub trait ReportCaptureStore: Send + Sync {
         source_settings: Option<Revision>,
     ) -> AppFuture<'_, Snapshot<HandoffReceipt>>;
 
+    fn reserve_report_correction(&self, call: NativeCall) -> AppFuture<'_, bool>;
+
     fn report_handoff_status(
         &self,
         call: NativeCall,

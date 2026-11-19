@@ -132,6 +132,8 @@ impl Context {
 impl ReplyError {
     pub(super) fn report(self, operation: &str, session: &SessionKeyDto) -> Failure {
         match self {
+            Self::Rejected(status) if status == reqwest::StatusCode::UNPROCESSABLE_ENTITY =>
+                reviewq_app::access::REPORT_CORRECTION_MESSAGE.into(),
             Self::Rejected(status) => format!("ReviewQ {operation} for lead {} returned HTTP {}.", session.as_str(), status.as_u16()).into(),
             Self::ReplyLost => format!("ReviewQ could not confirm {operation} for lead {}. Read the saved state before retrying.", session.as_str()).into(),
         }

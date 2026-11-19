@@ -25,6 +25,18 @@ CREATE TABLE artifact_chunks (
     UNIQUE (artifact_id, scalar_start)
 ) STRICT, WITHOUT ROWID;
 
+CREATE TABLE report_correction_requests (
+    run_id TEXT NOT NULL,
+    lead_session_key TEXT NOT NULL,
+    turn_id TEXT NOT NULL,
+    call_id TEXT NOT NULL,
+    source_generation TEXT NOT NULL,
+    source_position INTEGER NOT NULL CHECK (source_position >= 0),
+    requested_at_ms INTEGER NOT NULL,
+    PRIMARY KEY (run_id, lead_session_key, turn_id),
+    FOREIGN KEY (run_id, lead_session_key) REFERENCES runs(run_id, lead_session_key)
+) STRICT, WITHOUT ROWID;
+
 CREATE TABLE report_handoffs (
     receipt_id TEXT PRIMARY KEY,
     run_id TEXT NOT NULL REFERENCES runs(run_id),

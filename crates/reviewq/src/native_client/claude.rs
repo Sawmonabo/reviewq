@@ -89,6 +89,18 @@ pub(crate) async fn claude_bridge(
     let result = bridge(&client, &endpoint, path, serde_json::to_vec(&payload)?).await?;
     let status = result.status();
     let body = bounded(result, 256 * 1024).await?;
+    if status == reqwest::StatusCode::UNPROCESSABLE_ENTITY
+        && matches!(operation, ClaudeBridgeOperation::Report)
+    {
+        println!(
+            "{}",
+            serde_json::json!({
+                "error":reviewq_app::access::REPORT_CORRECTION_MESSAGE,
+                "correctionRequested":true,
+            })
+        );
+        return Ok(());
+    }
     if !status.is_success() {
         let detail = match status.as_u16() {
             404 => "This Claude session has no verified ReviewQ binding.",
