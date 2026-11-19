@@ -3,8 +3,8 @@
 mod commands;
 mod work;
 pub use work::{
-    CheckMember, FollowupWorkerStore, MAX_FROZEN_OBSERVATIONS, PendingCheck, PreparedCheck,
-    run_due_followups,
+    CheckMember, ExecutingCheck, FollowupWorkerStore, MAX_FROZEN_OBSERVATIONS, PendingCheck,
+    PreparedCheck, run_due_followups,
 };
 
 pub use commands::{

@@ -1,6 +1,6 @@
 use std::collections::BTreeSet;
 
-use reviewq_domain::identity::{GitSha, Revision};
+use reviewq_domain::identity::{GitSha, NativeTurnId, Revision};
 use reviewq_domain::session::LeadTarget;
 
 use crate::access::{AppError, AppFuture};
@@ -42,7 +42,15 @@ pub struct PreparedCheck {
     pub prompt: MessageBody,
 }
 
+pub struct ExecutingCheck {
+    pub batch_id: String,
+    pub lead: LeadTarget,
+    pub turn: NativeTurnId,
+}
+
 pub trait FollowupWorkerStore: Send + Sync {
+    fn checks_awaiting_idle(&self) -> AppFuture<'_, Vec<ExecutingCheck>>;
+    fn observe_check_idle(&self, check: ExecutingCheck) -> AppFuture<'_, ()>;
     fn due_checks(&self, limit: u16) -> AppFuture<'_, Vec<PendingCheck>>;
     fn hold_check(&self, check: PendingCheck, reason: &'static str) -> AppFuture<'_, ()>;
     fn reserve_check(&self, check: PreparedCheck) -> AppFuture<'_, ()>;
@@ -53,6 +61,17 @@ pub async fn run_due_followups(
     source: &dyn ReviewSourceReader,
     native: &dyn NativeWorkflowProof,
 ) -> Result<(), AppError> {
+    for check in store.checks_awaiting_idle().await? {
+        if native
+            .ended_and_idle(check.lead.clone(), check.turn.clone())
+            .await
+            == Ok(true)
+            && let Err(error) = store.observe_check_idle(check).await
+            && !matches!(error, AppError::StaleRevision | AppError::Conflict)
+        {
+            return Err(error);
+        }
+    }
     for pending in store.due_checks(4).await? {
         match prepare(&pending, source, native).await {
             Ok((checked_head, ready, prompt)) => {

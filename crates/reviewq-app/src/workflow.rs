@@ -205,6 +205,11 @@ pub trait NativeWorkflowProof: Send + Sync {
     }
 
     /// Resolve and verify an actual active lead tool from the selected native source.
+    /// Reads current idle state and proves this exact turn has ended.
+    fn ended_and_idle(&self, _lead: LeadTarget, _turn: NativeTurnId) -> AppFuture<'_, bool> {
+        Box::pin(async { Ok(false) })
+    }
+
     fn verify_active_call(
         &self,
         lead: LeadTarget,

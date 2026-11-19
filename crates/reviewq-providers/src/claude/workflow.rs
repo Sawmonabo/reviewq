@@ -38,6 +38,13 @@ impl NativeWorkflowProof for ClaudeWorkflow {
         })
     }
 
+    fn ended_and_idle(&self, lead: LeadTarget, turn: NativeTurnId) -> AppFuture<'_, bool> {
+        Box::pin(async move {
+            let current = self.state.claude_workflow_context(lead, Some(turn)).await?;
+            Ok(current.idle && current.terminal.is_some())
+        })
+    }
+
     fn verify_active_call(
         &self,
         lead: LeadTarget,

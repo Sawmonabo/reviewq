@@ -40,6 +40,25 @@ impl NativeWorkflowProof for Codex {
         })
     }
 
+    fn ended_and_idle(&self, lead: LeadTarget, turn: NativeTurnId) -> AppFuture<'_, bool> {
+        Box::pin(async move {
+            let thread = self.verified_thread(&lead).await?;
+            if !matches!(thread.status, ThreadStatus::Idle) {
+                return Ok(false);
+            }
+            let Some(exact) = self.workflow_turn(&thread, &turn).await? else {
+                return Ok(false);
+            };
+            Ok(matches!(
+                exact.status.as_str(),
+                "completed" | "interrupted" | "failed"
+            ) && matches!(
+                self.verified_thread(&lead).await?.status,
+                ThreadStatus::Idle
+            ))
+        })
+    }
+
     fn verify_active_call(
         &self,
         lead: LeadTarget,

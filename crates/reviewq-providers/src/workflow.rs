@@ -55,6 +55,10 @@ impl NativeWorkflowProof for Workflows {
         })
     }
 
+    fn ended_and_idle(&self, lead: LeadTarget, turn: NativeTurnId) -> AppFuture<'_, bool> {
+        Box::pin(async move { self.reader(&lead)?.ended_and_idle(lead, turn).await })
+    }
+
     fn verify_active_call(
         &self,
         lead: LeadTarget,

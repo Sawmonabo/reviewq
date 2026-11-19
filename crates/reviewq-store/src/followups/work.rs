@@ -1,8 +1,8 @@
 use reviewq_app::access::{AppError, AppFuture};
 use reviewq_app::events::ResourceKey;
 use reviewq_app::followups::{
-    CheckMember, FollowupWorkerStore, MAX_FROZEN_OBSERVATIONS, MonitoredReview, PendingCheck,
-    PreparedCheck,
+    CheckMember, ExecutingCheck, FollowupWorkerStore, MAX_FROZEN_OBSERVATIONS, MonitoredReview,
+    PendingCheck, PreparedCheck,
 };
 use reviewq_app::reports::ReportReference;
 use reviewq_app::workflow::{SelectedNote, WorkflowAdmission, WorkflowBinding};
@@ -18,6 +18,8 @@ use crate::hosts::admit_workflow;
 use crate::queue::{identity_for_review, lead_for_run, parse, text};
 use crate::workspace::{advance_queue, settings_revision};
 use crate::{SqliteStore, StoreError};
+
+mod idle;
 
 const ELIGIBLE: &str = "
   b.state='pending' AND b.authority_verified=1 AND m.binding_verified=1
@@ -65,6 +67,22 @@ pub(crate) struct FrozenOriginal {
 }
 
 impl FollowupWorkerStore for SqliteStore {
+    fn checks_awaiting_idle(&self) -> AppFuture<'_, Vec<ExecutingCheck>> {
+        Box::pin(async move {
+            self.read(|db| idle::checks(db))
+                .await
+                .map_err(StoreError::app)
+        })
+    }
+
+    fn observe_check_idle(&self, check: ExecutingCheck) -> AppFuture<'_, ()> {
+        Box::pin(async move {
+            self.write(move |tx| idle::observe(tx, check))
+                .await
+                .map_err(StoreError::app)
+        })
+    }
+
     fn due_checks(&self, limit: u16) -> AppFuture<'_, Vec<PendingCheck>> {
         Box::pin(async move {
             if !(1..=16).contains(&limit) {
