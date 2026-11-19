@@ -17,7 +17,16 @@ import type { SessionAddress } from "../../../api/history";
 import { Empty, Loading, Notice } from "../../../components/PanelState";
 import { describeError, formatTime, readable } from "../../../lib/presentation";
 import { EntryBody } from "./EntryBody";
-import { entriesIn, readBookmark, rememberBookmark, type TimelineBookmark } from "./history-window";
+import {
+  entriesIn,
+  historyBookmark,
+  readBookmark,
+  rememberBookmark,
+  sameBookmark,
+  visibleAnchor,
+  type ReadingAnchor,
+  type TimelineBookmark,
+} from "./history-window";
 import { ProviderMark } from "./ProviderMark";
 import { PromptNavigator } from "./PromptNavigator";
 import { HistoryTimestamp } from "./HistoryTimestamp";
@@ -28,13 +37,7 @@ import { MarkdownContent } from "../../../components/markdown/MarkdownContent";
 import { useHistory } from "./useHistory";
 import { useInlineProse } from "./useInlineProse";
 
-type Position = {
-  readonly id: string;
-  readonly offset: number;
-  readonly toolEntry?: boolean;
-  readonly callId?: string;
-  readonly reopenPages?: number;
-};
+type Position = ReadingAnchor & { readonly reopenPages?: number };
 const SCROLL_IDLE_MS = 160;
 const MAX_REOPEN_PAGES = 4;
 type ExtraParts = {
@@ -97,7 +100,8 @@ export function Transcript({ target, provider, child, messages, working }: Props
       : undefined,
   );
   const selectionState = useRef({ hasText: false, ids: new Set<string>() });
-  const scrollIntent = useRef(false);
+  const scrollIntent = useRef<"head" | "tail" | "scrollbar" | undefined>(undefined);
+  const touchY = useRef<number | undefined>(undefined);
   const readingPosition = useRef<TimelineBookmark | undefined>(undefined);
   const written = useRef(saved);
   const requestedLatest = useRef(false);
@@ -330,6 +334,7 @@ export function Transcript({ target, provider, child, messages, working }: Props
     function flush() {
       window.clearTimeout(timer);
       timer = undefined;
+      scrollIntent.current = undefined;
       savePosition(host);
     }
     function settle() {
@@ -357,19 +362,30 @@ export function Transcript({ target, provider, child, messages, working }: Props
     const host = viewport.current;
     if (!host) return;
     const nearEnd = host.scrollHeight - host.clientHeight - host.scrollTop < 42;
-    if (scrollIntent.current) {
-      setFollowing(nearEnd);
-      scrollIntent.current = false;
+    const intent = scrollIntent.current;
+    let nextFollowing = following;
+    if (intent) {
+      nextFollowing = intent !== "head" && nearEnd && !history.newer;
+      if (intent !== "head" && nearEnd && history.newer && !history.loading) {
+        void history.load("newer");
+      }
+      setFollowing(nextFollowing);
     }
-    const position = historyBookmark(host, history.generation, nearEnd);
+    const position = historyBookmark(host, history.generation, nextFollowing);
     if (position) readingPosition.current = position;
   }
 
   function gesture(up: boolean) {
     leaveReopen();
-    scrollIntent.current = true;
     const host = viewport.current;
-    if (!host || history.loading) return;
+    if (!host) return;
+    scrollIntent.current = up ? "head" : "tail";
+    if (up && host.scrollTop > 0 && (following || requestedLatest.current)) {
+      requestedLatest.current = false;
+      list.cancelScroll();
+      setFollowing(false);
+    }
+    if (history.loading) return;
     if (up && host.scrollTop < 160 && history.older) {
       setFollowing(false);
       void history.load("older");
@@ -541,21 +557,40 @@ export function Transcript({ target, provider, child, messages, working }: Props
         tabIndex={0}
         onScroll={recordScroll}
         onWheel={(event) => {
-          if (event.deltaY) gesture(event.deltaY < 0);
+          if (event.deltaY && !event.ctrlKey) gesture(event.deltaY < 0);
         }}
-        onTouchMove={() => {
-          leaveReopen();
-          scrollIntent.current = true;
+        onTouchStart={(event) => {
+          touchY.current = event.touches.length === 1 ? event.touches[0]?.clientY : undefined;
+        }}
+        onTouchMove={(event) => {
+          const previous = touchY.current;
+          const current = event.touches.length === 1 ? event.touches[0]?.clientY : undefined;
+          touchY.current = current;
+          if (previous !== undefined && current !== undefined && current !== previous)
+            gesture(current > previous);
         }}
         onPointerDown={(event) => {
           const box = event.currentTarget.getBoundingClientRect();
           if (event.target === event.currentTarget && box.right - event.clientX < 17) {
             leaveReopen();
-            scrollIntent.current = true;
+            scrollIntent.current = "scrollbar";
           }
         }}
         onKeyDown={(event) => {
-          if (["PageUp", "ArrowUp", "Home"].includes(event.key)) gesture(true);
+          if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey) return;
+          if (event.key === "End" && !event.shiftKey && event.target === event.currentTarget) {
+            event.preventDefault();
+            scrollIntent.current = undefined;
+            latest();
+            return;
+          }
+          if (event.shiftKey && event.key !== " ") return;
+          if (event.key === " " && event.target !== event.currentTarget) return;
+          if (
+            ["PageUp", "ArrowUp", "Home"].includes(event.key) ||
+            (event.key === " " && event.shiftKey)
+          )
+            gesture(true);
           else if (["PageDown", "ArrowDown", "End", " "].includes(event.key)) gesture(false);
         }}
       >
@@ -714,65 +749,6 @@ export function Transcript({ target, provider, child, messages, working }: Props
       )}
     </section>
   );
-}
-
-function historyBookmark(
-  host: HTMLDivElement | null,
-  generation: string | undefined,
-  following: boolean,
-): TimelineBookmark | undefined {
-  const current = visibleAnchor(host);
-  if (!current || !generation) return;
-  return {
-    entryId: current.id,
-    offset: current.offset,
-    following,
-    generation,
-    toolEntry: current.toolEntry ?? false,
-    ...(current.callId ? { callId: current.callId } : {}),
-  };
-}
-
-function sameBookmark(left: TimelineBookmark, right: TimelineBookmark | undefined) {
-  return (
-    right &&
-    left.entryId === right.entryId &&
-    left.offset === right.offset &&
-    left.following === right.following &&
-    left.generation === right.generation &&
-    left.toolEntry === right.toolEntry &&
-    left.callId === right.callId
-  );
-}
-
-function visibleAnchor(host: HTMLDivElement | null): Position | undefined {
-  if (!host) return;
-  const frame = host.getBoundingClientRect();
-  const active = document.activeElement?.closest<HTMLElement>("[data-tool-call]");
-  const focused = active?.closest<HTMLElement>("[data-native-entry]");
-  if (focused && host.contains(focused) && focused.dataset.nativeEntry) {
-    const bounds = focused.getBoundingClientRect();
-    if (bounds.bottom > frame.top && bounds.top < frame.bottom)
-      return {
-        id: focused.dataset.nativeEntry,
-        offset: bounds.top - frame.top,
-        toolEntry: true,
-        ...(active?.dataset.toolCall ? { callId: active.dataset.toolCall } : {}),
-      };
-  }
-  for (const node of host.querySelectorAll<HTMLElement>("[data-native-entry]")) {
-    const item = node.getBoundingClientRect();
-    if (item.bottom > frame.top && item.top < frame.bottom && node.dataset.nativeEntry) {
-      const tool = node.querySelector<HTMLElement>("details[open] > [data-tool-call]");
-      return {
-        id: node.dataset.nativeEntry,
-        offset: item.top - frame.top,
-        toolEntry:
-          node.classList.contains("tool-entry") && node.dataset.entry === node.dataset.nativeEntry,
-        ...(tool?.dataset.toolCall ? { callId: tool.dataset.toolCall } : {}),
-      };
-    }
-  }
 }
 
 function historyId(row: Visible) {

@@ -25,7 +25,7 @@ export default function MermaidDiagram({ source }: { readonly source: string }) 
     const target = canvas.current;
     if (!eligible || !host || !target) return;
     let active = true;
-    const observer = new IntersectionObserver((entries) => {
+    const renderNearby = (entries: IntersectionObserverEntry[]) => {
       if (!entries.some((entry) => entry.isIntersecting)) return;
       observer.disconnect();
       const theme = document.documentElement.dataset.theme ?? "";
@@ -85,7 +85,8 @@ export default function MermaidDiagram({ source }: { readonly source: string }) 
         .catch(() => {
           if (active) setResult({ source, size: null });
         });
-    });
+    };
+    const observer = new IntersectionObserver(renderNearby, { scrollMargin: "120px 0px" });
     observer.observe(host);
     return () => {
       active = false;
