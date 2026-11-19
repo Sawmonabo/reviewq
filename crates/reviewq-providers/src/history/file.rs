@@ -190,7 +190,11 @@ fn readable_prefix(raw: &[u8]) -> Result<&str, AppError> {
     }
 }
 
-fn file_position(file: &File, offset: u64, high_water: u64) -> Result<FilePosition, AppError> {
+pub(super) fn file_position(
+    file: &File,
+    offset: u64,
+    high_water: u64,
+) -> Result<FilePosition, AppError> {
     if offset > high_water {
         return Err(AppError::CursorExpired);
     }
@@ -213,7 +217,11 @@ fn file_position(file: &File, offset: u64, high_water: u64) -> Result<FilePositi
     })
 }
 
-fn verify_position(file: &File, position: &FilePosition, complete: u64) -> Result<(), AppError> {
+pub(super) fn verify_position(
+    file: &File,
+    position: &FilePosition,
+    complete: u64,
+) -> Result<(), AppError> {
     if position.high_water > complete
         || !boundary(file, position.offset)?
         || file_position(file, position.offset, position.high_water)? != *position

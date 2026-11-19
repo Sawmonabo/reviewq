@@ -19,7 +19,10 @@ mod claude;
 mod messages;
 mod work;
 
-pub use claude::{ClaudeHeartbeat, ClaudeHeartbeatResult, ClaudeStore};
+pub use claude::{
+    ClaudeAnchor, ClaudeDeliveryResult, ClaudeHeartbeat, ClaudeHeartbeatResult, ClaudeOffer,
+    ClaudeSend, ClaudeStore,
+};
 pub use messages::{
     MAX_MESSAGE_HISTORY_PAGE, MessageAttachment, MessageHistory, MessageHistoryStore,
     MessagePosition, RecordedMessage, RecordedPurpose,
@@ -81,6 +84,14 @@ pub trait NativeHost: Send + Sync {
 /// Resolves the companion's identity against the service-selected Claude profile.
 pub trait ClaudeCompanion: Send + Sync {
     fn prove(&self, context: ClaudeContext) -> AppFuture<'_, HostProof>;
+    fn anchor(&self, session: HistorySession) -> AppFuture<'_, ClaudeAnchor>;
+    fn confirm_prompt(
+        &self,
+        session: HistorySession,
+        anchor: ClaudeAnchor,
+        entry: NativeInputId,
+        text: MessageBody,
+    ) -> AppFuture<'_, ()>;
 }
 
 pub struct ClaudeContext {
