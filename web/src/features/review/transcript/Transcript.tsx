@@ -1,0 +1,253 @@
+import { defaultRangeExtractor, useVirtualizer } from "@tanstack/react-virtual";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import type { HistoryEntry } from "../../../api/generated/contracts";
+import type { MessageHistoryItem } from "../../../api/generated/contracts/delivery";
+import type { SessionAddress } from "../../../api/history";
+import { Icon } from "../../../components/Icon";
+import { Empty, Loading, Notice } from "../../../components/PanelState";
+import { describeError, formatTime, readable } from "../../../lib/presentation";
+import { EntryBody } from "./EntryBody";
+import { entriesIn, readBookmark, rememberBookmark } from "./history-window";
+import { PromptNavigator } from "./PromptNavigator";
+import { useHistory } from "./useHistory";
+
+type Position = { readonly id: string; readonly offset: number };
+type OutputSelection = { readonly entryId: string; readonly reference: string };
+type Visible = { readonly id: string; readonly entry?: HistoryEntry; readonly delivery?: MessageHistoryItem; readonly provisional?: string };
+type Props = {
+  readonly target: SessionAddress;
+  readonly messages: readonly MessageHistoryItem[];
+  readonly resultOnly: boolean;
+  readonly onObservedTurn: (turn: string | undefined) => void;
+};
+
+export function Transcript({ target, messages, resultOnly, onObservedTurn }: Props) {
+  const bookmark = `history.${target.runId}.${target.sessionKey}`;
+  const [saved] = useState(() => readBookmark(bookmark));
+  const [following, setFollowing] = useState(saved?.following ?? true);
+  const [pinned, setPinned] = useState<ReadonlySet<string>>(() => new Set());
+  const [selectedText, setSelectedText] = useState(false);
+  const [actionNotice, setActionNotice] = useState<string>();
+  const [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set());
+  const [output, setOutput] = useState<OutputSelection>();
+  const viewport = useRef<HTMLDivElement>(null);
+  const anchor = useRef<Position | undefined>(saved ? { id: saved.entryId, offset: saved.offset } : undefined);
+  const selectionState = useRef({ hasText: false, ids: new Set<string>() });
+  const scrollIntent = useRef(false);
+  const requestedLatest = useRef(false);
+
+  const history = useHistory(target, bookmark, following, pinned, (position, wanted) => {
+    if (position === "around" && wanted) {
+      anchor.current = { id: wanted.entryId, offset: anchor.current?.id === wanted.entryId ? anchor.current.offset : 0 };
+    } else if (position !== "latest") {
+      anchor.current = visibleAnchor(viewport.current);
+    }
+  });
+  const historyEntries = useMemo(() => entriesIn(history.pages), [history.pages]);
+  const canonical = useMemo(() => new Set(historyEntries.map((item) => item.entryId)), [historyEntries]);
+  const inProgress = history.live?.entryId && !canonical.has(history.live.entryId) ? history.live : undefined;
+  const entries = useMemo<Visible[]>(() => {
+    if (resultOnly) {
+      const result = historyEntries.findLast((entry) => entry.parts.some((part) => part.kind === "assistant_text"));
+      return result ? [{ id: result.entryId, entry: result }] : [];
+    }
+    const rows: Visible[] = historyEntries.map((entry) => ({ id: entry.entryId, entry }));
+    if (following && inProgress) rows.push({ id: inProgress.entryId, provisional: inProgress.text });
+    for (const delivery of messages.slice().reverse()) {
+      if (delivery.nativeEntryId && canonical.has(delivery.nativeEntryId)) continue;
+      rows.push({ id: `delivery:${delivery.messageId}`, delivery });
+    }
+    return rows;
+  }, [canonical, following, historyEntries, inProgress, messages, resultOnly]);
+
+  const rangeExtractor = useCallback((range: Parameters<typeof defaultRangeExtractor>[0]) => {
+    const indexes = new Set(defaultRangeExtractor(range));
+    if (pinned.size) entries.forEach((entry, index) => { if (pinned.has(entry.id)) indexes.add(index); });
+    return [...indexes].sort((left, right) => left - right);
+  }, [entries, pinned]);
+
+  const list = useVirtualizer({
+    count: entries.length,
+    getScrollElement: () => viewport.current,
+    getItemKey: (index) => entries[index]?.id ?? index,
+    estimateSize: () => 95,
+    overscan: 7,
+    rangeExtractor,
+  });
+
+  useLayoutEffect(() => {
+    if (!entries.length) return;
+    if (following || requestedLatest.current) {
+      list.scrollToIndex(entries.length - 1, { align: "end" });
+      requestedLatest.current = false;
+      anchor.current = undefined;
+    } else if (anchor.current) {
+      const saved = anchor.current;
+      const index = entries.findIndex((entry) => entry.id === saved.id);
+      if (index < 0) return;
+      const container = viewport.current;
+      list.scrollToIndex(index, { align: "start" });
+      requestAnimationFrame(() => {
+        if (!container?.isConnected) return;
+        const row = [...container.querySelectorAll<HTMLElement>("[data-entry]")].find((item) => item.dataset.entry === saved.id);
+        if (row) container.scrollTop += row.getBoundingClientRect().top - container.getBoundingClientRect().top - saved.offset;
+      });
+      anchor.current = undefined;
+    }
+  }, [entries, following, list]);
+
+  useEffect(() => { onObservedTurn(history.live?.turnId); }, [history.live?.turnId, onObservedTurn]);
+  useEffect(() => {
+    const host = viewport.current;
+    if (!host) return;
+    function updatePins() {
+      if (!host) return;
+      const selected = getSelection();
+      const ids = new Set<string>();
+      let hasText = false;
+      if (selected && !selected.isCollapsed && selected.rangeCount) {
+        const range = selected.getRangeAt(0);
+        hasText = range.intersectsNode(host);
+        if (hasText) for (const node of host.querySelectorAll<HTMLElement>("[data-entry]")) {
+          if (node.dataset.entry && range.intersectsNode(node)) ids.add(node.dataset.entry);
+        }
+      }
+      const focused = document.activeElement?.closest<HTMLElement>("[data-entry]");
+      if (focused?.dataset.entry && host.contains(focused)) ids.add(focused.dataset.entry);
+      const previous = selectionState.current;
+      if (previous.hasText !== hasText || previous.ids.size !== ids.size || [...ids].some((id) => !previous.ids.has(id))) {
+        selectionState.current = { hasText, ids };
+        setPinned(ids);
+        setSelectedText(hasText);
+      }
+    }
+    document.addEventListener("selectionchange", updatePins);
+    host.addEventListener("focusin", updatePins);
+    host.addEventListener("focusout", updatePins);
+    return () => {
+      document.removeEventListener("selectionchange", updatePins);
+      host.removeEventListener("focusin", updatePins);
+      host.removeEventListener("focusout", updatePins);
+    };
+  }, []);
+
+  useEffect(() => {
+    const host = viewport.current;
+    function save() {
+      const current = visibleAnchor(host);
+      if (current && history.generation) rememberBookmark(bookmark, {
+        entryId: current.id, offset: current.offset, following, generation: history.generation,
+      });
+    }
+    window.addEventListener("pagehide", save);
+    return () => { save(); window.removeEventListener("pagehide", save); };
+  }, [bookmark, following, history.generation]);
+
+  function recordScroll() {
+    const host = viewport.current;
+    if (!host) return;
+    const nearEnd = host.scrollHeight - host.clientHeight - host.scrollTop < 42;
+    if (scrollIntent.current) {
+      setFollowing(nearEnd);
+      scrollIntent.current = false;
+    }
+    const current = visibleAnchor(host);
+    if (current && history.generation) rememberBookmark(bookmark, {
+      entryId: current.id, offset: current.offset, following: nearEnd, generation: history.generation,
+    });
+  }
+
+  function gesture(up: boolean) {
+    scrollIntent.current = true;
+    const host = viewport.current;
+    if (!host || history.loading) return;
+    if (up && host.scrollTop < 2 && history.older) {
+      setFollowing(false);
+      void history.load("older");
+    } else if (!up && host.scrollHeight - host.clientHeight - host.scrollTop < 2 && history.newer) {
+      void history.load("newer");
+    }
+  }
+
+  function clear() {
+    if (selectedText) getSelection()?.removeAllRanges();
+    setSelectedText(false);
+    setPinned(new Set());
+    selectionState.current = { hasText: false, ids: new Set() };
+  }
+
+  function latest() {
+    clear(); setFollowing(true);
+    requestedLatest.current = true;
+    if (!selectedText && !pinned.size) void history.load("latest");
+  }
+
+  return <section className="transcript-shell" aria-label={resultOnly ? "Latest child output" : "Native conversation"}>
+    {!resultOnly && <div className="timeline-controls">
+      <button type="button" disabled={!history.older || history.loading} onClick={() => { setFollowing(false); void history.load("older"); }}>Earlier</button>
+      <button type="button" disabled={!history.newer || history.loading} onClick={() => void history.load("newer")}>Later</button>
+      {!following || history.waiting ? <button type="button" onClick={latest}>{history.waiting ? "New messages available" : "Jump to latest"}</button> : null}
+      {selectedText && <>
+        <button type="button" onClick={() => {
+          const value = getSelection()?.toString();
+          if (value) void navigator.clipboard.writeText(value).catch((failure: unknown) => setActionNotice(describeError(failure)));
+        }}>Copy selection</button>
+        <button type="button" onClick={clear}>Clear selection</button>
+      </>}
+      <PromptNavigator target={target} generation={history.generation} onJump={(id, locator) => {
+        setFollowing(false);
+        void history.load("around", { entryId: id, locator });
+      }} />
+    </div>}
+    {actionNotice && <Notice>{actionNotice}</Notice>}
+    {history.error && <Notice retry={() => void history.load("latest")}>{history.error}{history.updated && ` · Last confirmed ${formatTime(history.updated)}`}</Notice>}
+    {!history.online && <Notice>Live updates paused{history.updated ? ` · Last confirmed ${formatTime(history.updated)}` : ""}.</Notice>}
+    {history.availability && history.availability !== "available" && <Notice>{history.availability === "partial" ? "Only part of this conversation is available." : `Native history · ${readable(history.availability)}`}</Notice>}
+    {resultOnly && <p className="timeline-live meta">Latest assistant output from this child session</p>}
+    <div className="timeline-viewport" ref={viewport} tabIndex={0} onScroll={recordScroll}
+      onWheel={(event) => gesture(event.deltaY < 0)} onPointerDown={() => { scrollIntent.current = true; }}
+      onKeyDown={(event) => {
+        if (["PageUp", "ArrowUp", "Home"].includes(event.key)) gesture(true);
+        else if (["PageDown", "ArrowDown", "End", " "].includes(event.key)) gesture(false);
+      }}>
+      {!entries.length && (history.loading ? <Loading label="Reading native conversation…" /> :
+        !history.error && <Empty title={resultOnly ? "No assistant output recorded" : "No conversation entries"} />)}
+      {entries.length > 0 && <div className="timeline-spacer" style={{ height: list.getTotalSize() }}>
+        {list.getVirtualItems().map((item) => {
+          const row = entries[item.index];
+          if (!row) return null;
+          const user = row.entry?.parts.some((part) => part.kind === "user_prompt") || Boolean(row.delivery);
+          return <article ref={list.measureElement} data-index={item.index} data-entry={row.id} key={row.id} className={`timeline-entry ${user ? "user-entry" : ""}`}
+            style={{ transform: `translateY(${item.start}px)` }}>
+            <span className="timeline-symbol"><Icon name={user ? "send" : "terminal"} size={13} /></span>
+            <div className="message-body stack">
+              <div className="spread meta"><strong>{user ? "You" : "Agent"}</strong>
+                {row.entry?.timestamp && <time dateTime={row.entry.timestamp}>{formatTime(row.entry.timestamp)}</time>}
+                {row.delivery && <span className="badge">{readable(row.delivery.state)}</span>}
+                {row.provisional !== undefined && <span className="badge green">Working</span>}</div>
+              {row.provisional !== undefined && <p className="message-copy">{row.provisional}</p>}
+              {row.delivery && <p className="message-copy">{row.delivery.text}</p>}
+              {row.entry && history.generation && <EntryBody target={target} generation={history.generation} entry={row.entry}
+                expanded={expanded} toggle={(key, open) => setExpanded((known) => {
+                  const next = new Set(known);
+                  if (open) next.add(key); else next.delete(key);
+                  return next.size > 160 ? new Set([...next].slice(-160)) : next;
+                })}
+                reference={output?.entryId === row.id ? output.reference : undefined}
+                onReference={(reference) => setOutput(reference ? { entryId: row.id, reference } : undefined)} />}
+            </div>
+          </article>;
+        })}
+      </div>}
+    </div>
+  </section>;
+}
+
+function visibleAnchor(host: HTMLDivElement | null): Position | undefined {
+  if (!host) return;
+  const boundary = host.getBoundingClientRect().top;
+  for (const node of host.querySelectorAll<HTMLElement>("[data-entry]")) {
+    const item = node.getBoundingClientRect();
+    if (item.bottom > boundary && node.dataset.entry && !node.dataset.entry.startsWith("delivery:")) return { id: node.dataset.entry, offset: item.top - boundary };
+  }
+}

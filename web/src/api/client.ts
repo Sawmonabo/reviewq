@@ -57,8 +57,9 @@ export async function read<T>(
   path: string,
   accepts: (data: unknown) => data is T,
   signal: AbortSignal,
+  limit?: number,
 ): Promise<T> {
-  return decode(await request(path, { signal }), accepts);
+  return decode(await request(path, { signal }), accepts, limit);
 }
 
 export async function write<T>(
@@ -101,8 +102,8 @@ export function queryString(values: Readonly<Record<string, string | number | bo
   return params.size ? `?${params}` : "";
 }
 
-async function decode<T>(response: Response, accepts: (data: unknown) => data is T): Promise<T> {
-  const payload: unknown = JSON.parse(decodeUtf8(await readBoundedBytes(response, 12 * 1024 * 1024)));
+async function decode<T>(response: Response, accepts: (data: unknown) => data is T, limit = 12 * 1024 * 1024): Promise<T> {
+  const payload: unknown = JSON.parse(decodeUtf8(await readBoundedBytes(response, limit)));
   if (!accepts(payload)) throw new Error("ReviewQ returned an invalid response.");
   return payload;
 }
