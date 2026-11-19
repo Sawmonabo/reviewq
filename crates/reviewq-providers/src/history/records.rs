@@ -24,6 +24,7 @@ pub(super) struct Record {
     pub argument_field: Option<String>,
     pub result_field: Option<String>,
     pub text_blocks: Vec<u16>,
+    pub next_part: Option<u16>,
 }
 
 pub(super) struct Part {
@@ -52,6 +53,7 @@ pub(super) enum BodyField {
 struct BodySink<'a> {
     field: BodyField,
     target: Option<&'a mut dyn Write>,
+    parts_from: u16,
 }
 
 impl BodySink<'_> {
@@ -95,6 +97,7 @@ struct Message {
     argument_field: Option<String>,
     result_field: Option<String>,
     text_blocks: Vec<u16>,
+    next_part: Option<u16>,
 }
 
 #[derive(Default)]
@@ -142,6 +145,7 @@ pub(super) fn project_window(
         &mut BodySink {
             field: BodyField::Text,
             target: None,
+            parts_from: 0,
         },
     )
 }
@@ -167,6 +171,32 @@ pub(super) fn stream_body(
         &mut BodySink {
             field,
             target: Some(output),
+            parts_from: 0,
+        },
+    )
+}
+
+pub(super) fn project_parts(
+    provider: HostProvider,
+    input: impl Read,
+    native: &NativeSessionId,
+    root_session: Option<&NativeSessionId>,
+    first: u16,
+) -> Option<Record> {
+    project_to(
+        provider,
+        input,
+        native,
+        root_session,
+        Window {
+            start: 0,
+            limit: 256,
+            part: None,
+        },
+        &mut BodySink {
+            field: BodyField::Text,
+            target: None,
+            parts_from: first,
         },
     )
 }
@@ -187,13 +217,15 @@ fn project_to(
     let (mut item, kind, at_ms, turn) = result.ok()??;
     reader.consume_trailing_whitespace().ok()?;
     let id = item.id?.parse().ok()?;
-    if item.text.bytes == 0 && item.parts.is_empty() {
+    if item.text.bytes == 0 && item.parts.is_empty() && item.next_part.is_none() {
         return None;
     }
-    if item
-        .parts
-        .iter()
-        .all(|part| matches!(part.kind, VisiblePartKind::Text(_)))
+    if output.parts_from == 0
+        && item.next_part.is_none()
+        && item
+            .parts
+            .iter()
+            .all(|part| matches!(part.kind, VisiblePartKind::Text(_)))
     {
         item.parts.clear();
     } else {
@@ -216,6 +248,7 @@ fn project_to(
         argument_field: item.argument_field,
         result_field: item.result_field,
         text_blocks: item.text_blocks,
+        next_part: item.next_part,
     })
 }
 
@@ -474,7 +507,10 @@ fn block<R: Read>(
     let mut error = false;
     let mut plain = Text::default();
     let mut body = Text::default();
-    let retained = index < MAX_NATIVE_PARTS;
+    let retained = (output.parts_from..output.parts_from.saturating_add(MAX_NATIVE_PARTS))
+        .contains(&index)
+        || window.part == Some(index)
+        || matches!(output.field,BodyField::TextBlock(at)|BodyField::InputBlock(at)|BodyField::ResultBlock(at) if index==at);
     let preview_window = tools::part_window(window, index);
     object(reader, |field, reader| match field {
         "type" => string(reader, ID_BYTES).map(|value| kind = value),
@@ -513,6 +549,16 @@ fn block<R: Read>(
         .map(|value| body = value),
         _ => reader.skip_value().map_err(invalid),
     })?;
+    if !retained
+        && index >= output.parts_from
+        && item.next_part.is_none()
+        && matches!(
+            kind.as_deref(),
+            Some("Text" | "text" | "input_text" | "output_text" | "tool_use" | "tool_result")
+        )
+    {
+        item.next_part = Some(index);
+    }
     let part = match kind.as_deref() {
         Some("Text" | "text" | "input_text" | "output_text") => {
             if plain.bytes > 0 {

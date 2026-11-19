@@ -29,7 +29,6 @@ pub(super) struct Turn {
     pub id: String,
     pub root_turn_id: Option<String>,
     pub status: String,
-    started_at: Option<i64>,
     pub(super) completed_at: Option<i64>,
     pub(super) error: Option<TurnError>,
     pub items: Vec<Item>,
@@ -137,6 +136,9 @@ impl Codex {
             return Err(AppError::NotFound);
         }
         let thread = self.read_thread(identity.native_id()).await?;
+        if super::session::canonical_cwd(thread.cwd.clone()).await? != *target.binding.cwd() {
+            return Err(AppError::Conflict);
+        }
         if position.file.is_some() {
             return Err(AppError::CursorExpired);
         }
@@ -148,7 +150,7 @@ impl Codex {
                 position.cursor.as_deref(),
                 position.ascending,
                 1,
-                true,
+                false,
             )
             .await?;
         if let Some(skip) = position.skip_turn.take() {
@@ -164,7 +166,7 @@ impl Codex {
                     position.cursor.as_deref(),
                     position.ascending,
                     1,
-                    true,
+                    false,
                 )
                 .await?;
         }
@@ -179,45 +181,59 @@ impl Codex {
         };
         let id: NativeTurnId = turn.id.parse().map_err(|_| AppError::Unavailable)?;
         let (mut older, mut newer) = turn_neighbors(&position, &id, turns, from_tail);
-        let started = turn
-            .started_at
-            .and_then(|seconds| seconds.checked_mul(1000));
-        let completed = turn
-            .completed_at
-            .and_then(|seconds| seconds.checked_mul(1000));
-        let entries = turn
-            .items
-            .into_iter()
-            .filter_map(|item| visible(item, &id, started, completed))
-            .collect::<Result<Vec<_>, AppError>>()?;
-        let count = usize::from(limit);
-        let (start, end) = match position.within.take() {
-            Some(within) if within.turn == id && within.index <= entries.len() => {
-                if within.forward {
-                    (
-                        within.index,
-                        within.index.saturating_add(count).min(entries.len()),
-                    )
-                } else {
-                    (within.index.saturating_sub(count), within.index)
-                }
-            }
-            Some(_) => return Err(AppError::CursorExpired),
-            None if position.ascending => (0, count.min(entries.len())),
-            None => (entries.len().saturating_sub(count), entries.len()),
-        };
-        if start > 0 {
-            older = Some(within(&position, &id, start, false));
+        let in_turn = position.within.take();
+        if in_turn.as_ref().is_some_and(|window| window.turn != id) {
+            return Err(AppError::CursorExpired);
         }
-        if end < entries.len() {
-            newer = Some(within(&position, &id, end, true));
+        let forward = in_turn
+            .as_ref()
+            .map_or(position.ascending, |window| window.forward);
+        let mut items = self
+            .item_page(
+                &thread.id,
+                &id,
+                forward,
+                in_turn
+                    .as_ref()
+                    .and_then(|window| window.item_cursor.as_deref()),
+                in_turn
+                    .as_ref()
+                    .and_then(|window| window.item_anchor.as_ref()),
+                limit.min(32),
+            )
+            .await?;
+        let mut entries = items
+            .data
+            .into_iter()
+            .filter_map(|item| {
+                visible(item.item, &id, item.started_at_ms, item.completed_at_ms).map(|entry| {
+                    entry.map(|entry| super::history_reads::preview(entry, &generation))
+                })
+            })
+            .collect::<Result<Vec<_>, AppError>>()?;
+        if !forward {
+            entries.reverse();
+        }
+        let next = items
+            .next_cursor
+            .take()
+            .map(|cursor| within(&position, &id, cursor, forward));
+        let backwards = in_turn
+            .and_then(|_| items.backwards_cursor.take())
+            .map(|cursor| within(&position, &id, cursor, !forward));
+        if forward {
+            newer = next.or(newer);
+            older = backwards.or(older);
+        } else {
+            older = next.or(older);
+            newer = backwards.or(newer);
         }
         Ok(NativeHistoryPage {
             generation,
-            entries: entries.into_iter().skip(start).take(end - start).collect(),
+            entries,
             older,
             newer,
-            within: Some((position, id, start)),
+            within: Some((position, id)),
         })
     }
 
@@ -281,19 +297,20 @@ fn turn_neighbors(
 fn within(
     position: &NativePosition,
     turn: &NativeTurnId,
-    index: usize,
+    item_cursor: String,
     forward: bool,
 ) -> NativePosition {
     let mut result = position.clone();
     result.within = Some(TurnWindow {
         turn: turn.clone(),
-        index,
         forward,
+        item_cursor: Some(item_cursor),
+        item_anchor: None,
     });
     result
 }
 
-fn visible(
+pub(super) fn visible(
     item: Item,
     turn: &NativeTurnId,
     started: Option<i64>,
@@ -313,9 +330,9 @@ fn visible(
             (id, text, VisibleKind::User, started)
         }
         Item::AgentMessage { id, text, .. } => (id, text, VisibleKind::Assistant, completed),
-        Item::Plan { id, mut text } => {
-            text.truncate(text.floor_char_boundary(text.len().min(16 * 1024)));
+        Item::Plan { id, text } => {
             parts.push(VisiblePart {
+                native_index: 0,
                 kind: VisiblePartKind::Plan,
                 text,
                 content: None,
@@ -369,6 +386,7 @@ fn visible(
                 content: None,
                 text_bytes: None,
                 parts,
+                next_part: None,
             })
             .map_err(|_| AppError::Unavailable),
     )
@@ -378,13 +396,13 @@ fn rpc_tool(
     id: &str,
     name: &str,
     status: String,
-    mut argument: String,
+    argument: String,
     result: Option<String>,
 ) -> Option<Vec<VisiblePart>> {
     let call: reviewq_domain::identity::NativeInputId = id.parse().ok()?;
     let state = crate::history::tools::state(Some(&status));
-    argument.truncate(argument.floor_char_boundary(argument.len().min(2048)));
     let mut parts = vec![VisiblePart {
+        native_index: 0,
         kind: VisiblePartKind::ToolCall {
             call: call.clone(),
             name: name.to_owned(),
@@ -394,9 +412,9 @@ fn rpc_tool(
         text: argument,
         content: None,
     }];
-    if let Some(mut text) = result.filter(|value| !value.is_empty()) {
-        text.truncate(text.floor_char_boundary(text.len().min(4096)));
+    if let Some(text) = result.filter(|value| !value.is_empty()) {
         parts.push(VisiblePart {
+            native_index: 1,
             kind: VisiblePartKind::ToolResult { call, state },
             text,
             content: None,

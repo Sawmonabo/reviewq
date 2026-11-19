@@ -63,6 +63,39 @@ impl NativeHost for Codex {
         Box::pin(self.read_history(target, position, limit))
     }
 
+    fn history_content(
+        &self,
+        target: HistorySession,
+        reference: reviewq_app::history::RpcContentRef,
+        offset: u64,
+        limit: u32,
+    ) -> AppFuture<'_, reviewq_app::history::NativeContent> {
+        Box::pin(self.read_item_content(target, reference, offset, limit))
+    }
+
+    fn history_stamp(
+        &self,
+        target: HistorySession,
+    ) -> AppFuture<'_, reviewq_app::history::NativeRpcStamp> {
+        Box::pin(self.read_history_stamp(target))
+    }
+
+    fn history_plan(
+        &self,
+        target: HistorySession,
+    ) -> AppFuture<'_, reviewq_app::history::NativePlan> {
+        Box::pin(self.read_current_plan(target))
+    }
+
+    fn history_around(
+        &self,
+        target: HistorySession,
+        id: reviewq_domain::identity::NativeInputId,
+        limit: u16,
+    ) -> AppFuture<'_, NativeHistoryPage> {
+        Box::pin(self.read_around_item(target, id, limit))
+    }
+
     fn dispatch(
         &self,
         target: LeadTarget,

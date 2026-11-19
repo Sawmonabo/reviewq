@@ -69,6 +69,36 @@ pub trait NativeHost: QuestionsPort + Send + Sync {
         position: NativePosition,
         limit: u16,
     ) -> AppFuture<'_, NativeHistoryPage>;
+    fn history_content(
+        &self,
+        _target: HistorySession,
+        _reference: crate::history::RpcContentRef,
+        _offset: u64,
+        _limit: u32,
+    ) -> AppFuture<'_, crate::history::NativeContent> {
+        Box::pin(async { Err(AppError::Unavailable) })
+    }
+
+    fn history_stamp(
+        &self,
+        _target: HistorySession,
+    ) -> AppFuture<'_, crate::history::NativeRpcStamp> {
+        Box::pin(async { Err(AppError::Unavailable) })
+    }
+
+    fn history_plan(&self, _target: HistorySession) -> AppFuture<'_, crate::history::NativePlan> {
+        Box::pin(async { Err(AppError::Unavailable) })
+    }
+
+    fn history_around(
+        &self,
+        _target: HistorySession,
+        _id: NativeInputId,
+        _limit: u16,
+    ) -> AppFuture<'_, NativeHistoryPage> {
+        Box::pin(async { Err(AppError::Unavailable) })
+    }
+
     fn dispatch(
         &self,
         target: LeadTarget,

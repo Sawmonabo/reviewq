@@ -73,6 +73,27 @@ pub struct HistoryPlan {
     pub generation: HistoryGenerationDto,
     pub availability: HistoryAvailability,
     pub plan: Option<PlanEntry>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "schema", schemars(with = "Vec<PlanTask>"))]
+    pub tasks: Option<Vec<PlanTask>>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct PlanTask {
+    pub id: String,
+    pub title: String,
+    pub status: PlanTaskStatus,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub enum PlanTaskStatus {
+    Pending,
+    InProgress,
+    Completed,
 }
 
 #[derive(Serialize)]

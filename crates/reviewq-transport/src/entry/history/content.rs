@@ -4,7 +4,7 @@ use axum::Json;
 use axum::extract::State;
 use axum::http::HeaderMap;
 use reviewq_app::access::{Actor, AppError};
-use reviewq_app::history::{FileContentRef, NativePosition};
+use reviewq_app::history::{ContentReference, FileContentRef, NativePosition, RpcContentRef};
 use reviewq_domain::identity::{RunId, SessionKey};
 use reviewq_protocol::history::{
     HistoryAvailability, HistoryContent, HistoryContentResponse, HistoryText,
@@ -36,8 +36,15 @@ struct Locator {
     generation: String,
     item: String,
     part: Option<u16>,
-    position: Point,
+    position: Position,
     offset: u64,
+}
+
+#[derive(Clone, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+enum Position {
+    File { point: Point },
+    Rpc { turn: String, hash: String },
 }
 
 pub(in crate::entry) async fn content(
@@ -90,24 +97,49 @@ pub(in crate::entry) async fn read_content(
         .store
         .history_session(actor.clone(), run.clone(), session.clone())
         .await?;
-    let proven = FileContentRef {
-        generation: reference.generation.clone(),
-        entry: parse(&reference.item)?,
-        part: reference.part,
-        position: reference.position.clone().into(),
+    let result = match &reference.position {
+        Position::File { point } => {
+            entry
+                .file_history
+                .content(
+                    source.value.clone(),
+                    FileContentRef {
+                        generation: reference.generation.clone(),
+                        entry: parse(&reference.item)?,
+                        part: reference.part,
+                        position: point.clone().into(),
+                    },
+                    offset,
+                    limit,
+                )
+                .await
+        }
+        Position::Rpc { turn, hash } => {
+            entry
+                .host
+                .as_ref()
+                .ok_or(AppError::Unavailable)?
+                .history_content(
+                    source.value.clone(),
+                    RpcContentRef {
+                        generation: reference.generation.clone(),
+                        entry: parse(&reference.item)?,
+                        part: reference.part,
+                        turn: parse(turn)?,
+                        hash: parse(hash)?,
+                    },
+                    offset,
+                    limit,
+                )
+                .await
+        }
     };
-    let (generation, text, next, reset) = match entry
-        .file_history
-        .content(source.value.clone(), proven, offset, limit)
-        .await
-    {
+    let (generation, text, next, reset) = match result {
         Ok(result) => (result.generation, result.text, result.next_offset, false),
         Err(AppError::CursorExpired) => {
-            let snapshot = entry
-                .file_history
-                .page(source.value.clone(), NativePosition::default(), 1)
-                .await?;
-            let current = snapshot.ok_or(AppError::NotFound)?;
+            let current =
+                super::native_page(entry, source.value.clone(), NativePosition::default(), 1)
+                    .await?;
             (current.generation, String::new(), None, true)
         }
         Err(error) => return Err(error),
@@ -149,17 +181,36 @@ pub(super) fn reference(
     endpoint: &ServiceEndpoint,
     run: &RunId,
     session: &SessionKey,
-    source: &FileContentRef,
+    source: &ContentReference,
 ) -> Result<HistoryCursorDto, AppError> {
+    let (generation, item, part, position) = match source {
+        ContentReference::File(source) => (
+            &source.generation,
+            &source.entry,
+            source.part,
+            Position::File {
+                point: source.position.clone().into(),
+            },
+        ),
+        ContentReference::Rpc(source) => (
+            &source.generation,
+            &source.entry,
+            source.part,
+            Position::Rpc {
+                turn: source.turn.to_string(),
+                hash: source.hash.to_string(),
+            },
+        ),
+    };
     encode(
         endpoint,
         &Locator {
             run: run.to_string(),
             session: session.to_string(),
-            generation: source.generation.clone(),
-            item: source.entry.to_string(),
-            part: source.part,
-            position: source.position.clone().into(),
+            generation: generation.clone(),
+            item: item.to_string(),
+            part,
+            position,
             offset: 0,
         },
     )
