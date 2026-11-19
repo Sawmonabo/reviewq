@@ -6,7 +6,7 @@ use reviewq_app::queue::{
 use rusqlite::{Connection, ToSql, named_params};
 
 use super::workspace::{MR_SEARCH, read_scope};
-use super::{ITEM_COLUMNS, SCOPE_PREDICATE, page_context, parse, queue_item, text};
+use super::{ITEM_COLUMNS, SCOPE_PREDICATE, cached, make_context, parse, queue_item, text};
 use crate::StoreError;
 use crate::workspace::{scope, settings_revision};
 
@@ -26,7 +26,14 @@ pub(super) fn queue(
     }
     let access = scope(db, &actor)?;
     let (scope_code, scope_id) = read_scope(&access);
-    let context = page_context(db, &actor, limit, after.as_ref().map(|row| &row.context))?;
+    let projection = cached::projection(db)?;
+    let context = make_context(
+        db,
+        &actor,
+        limit,
+        after.as_ref().map(|row| &row.context),
+        Some(projection),
+    )?;
     let boards = serde_json::to_string(&filter.boards).map_err(|_| AppError::Internal)?;
     let projects = serde_json::to_string(&filter.projects).map_err(|_| AppError::Internal)?;
     let sprint_pairs = filter
@@ -127,7 +134,7 @@ pub(super) fn queue(
                 i.title,i.status,i.assignee,i.priority
          FROM page p LEFT JOIN reviews r ON p.kind=0 AND r.review_id=p.id
          LEFT JOIN review_decisions d ON d.review_id=r.review_id
-         LEFT JOIN review_activity f ON f.review_id=r.review_id
+         LEFT JOIN queue_projection f ON f.review_id=r.review_id
          LEFT JOIN scoped_issues i ON p.kind=1 AND (i.board_id,i.ticket_key)=(p.board_id,p.id)
          ORDER BY p.sort_group,p.sort_time,p.sort_label,p.sort_digits,p.sort_number,p.id"
     ))?;

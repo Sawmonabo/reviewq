@@ -190,8 +190,8 @@ fn project_message(
     value: reviewq_app::hosts::RecordedMessage,
 ) -> Result<reviewq_protocol::MessageHistoryItem, AppError> {
     use super::pages::count;
-    use reviewq_app::hosts::{DeliveryState as State, RecordedPurpose as Purpose};
-    use reviewq_protocol::{MessageAttachment, MessageHistoryItem, RecordedPurpose, RecordedState};
+    use reviewq_app::hosts::RecordedPurpose as Purpose;
+    use reviewq_protocol::{MessageAttachment, MessageHistoryItem, RecordedPurpose};
     use reviewq_protocol::{ResourceIdDto, reports::ReportHashDto};
 
     let resource = |value: reviewq_domain::identity::ReceiptId| {
@@ -224,13 +224,7 @@ fn project_message(
             Purpose::ThreadFollowup => RecordedPurpose::ThreadFollowup,
             Purpose::Publication => RecordedPurpose::Publication,
         },
-        state: match value.state {
-            State::Queued => RecordedState::Queued,
-            State::Dispatching => RecordedState::Dispatching,
-            State::Started => RecordedState::Started,
-            State::Rejected => RecordedState::Rejected,
-            State::Uncertain => RecordedState::Uncertain,
-        },
+        state: recorded_state(value.state),
         outcome_detail: value.outcome_detail,
         followup_batch_id: value
             .followup_batch_id
@@ -252,4 +246,18 @@ fn project_message(
         updated_at: UtcTimestampDto::from_unix_milliseconds(value.updated_at_ms)
             .ok_or(AppError::Internal)?,
     })
+}
+
+pub(in crate::entry) fn recorded_state(
+    value: reviewq_app::hosts::DeliveryState,
+) -> reviewq_protocol::RecordedState {
+    use reviewq_app::hosts::DeliveryState as State;
+    use reviewq_protocol::RecordedState;
+    match value {
+        State::Queued => RecordedState::Queued,
+        State::Dispatching => RecordedState::Dispatching,
+        State::Started => RecordedState::Started,
+        State::Rejected => RecordedState::Rejected,
+        State::Uncertain => RecordedState::Uncertain,
+    }
 }

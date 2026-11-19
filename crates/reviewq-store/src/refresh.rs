@@ -144,6 +144,28 @@ impl SourceRefreshStore for SqliteStore {
         })
     }
 
+    fn loaded_sprint_catalog(
+        &self,
+        attempt: RefreshAttempt,
+    ) -> AppFuture<'_, Vec<reviewq_app::sources::ScopedSprint>> {
+        Box::pin(async move {
+            self.read(move |db|{
+                if settings_revision(db)?!=attempt.settings_revision { return Err(AppError::StaleRevision.into()); }
+                let mut query=db.prepare_cached("SELECT board_id,sprint_id,label FROM loaded_sprints ORDER BY board_id,sprint_id")?;
+                let mut rows=query.query([])?;
+                let mut sprints=Vec::new();
+                while let Some(row)=rows.next()? {
+                    sprints.push(reviewq_app::sources::ScopedSprint {
+                        board:row.get::<_,i64>(0)?.try_into().map_err(|_|AppError::Internal)?,
+                        id:row.get::<_,i64>(1)?.try_into().map_err(|_|AppError::Internal)?,
+                        label:row.get(2)?,active:false,
+                    });
+                }
+                Ok(sprints)
+            }).await.map_err(StoreError::app)
+        })
+    }
+
     fn recover_refresh(&self, actor: Actor) -> AppFuture<'_, ()> {
         Box::pin(async move {
             self.write(move |tx| {

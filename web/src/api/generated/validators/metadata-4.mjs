@@ -4,7 +4,7 @@ const schema163 = {
   type: "string",
 };
 const schema166 = {
-  enum: ["interrupted", "rejected", "uncertain"],
+  enum: ["interrupted", "deferred", "rejected", "uncertain"],
   type: "string",
 };
 const schema170 = {

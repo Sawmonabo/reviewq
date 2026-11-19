@@ -67,17 +67,21 @@ impl InboxStore for SqliteStore {
                 if approved != ids.len() as i64 {
                     return Err(AppError::NotFound.into());
                 }
-                let affected = assign(&tx.sql, action, ids, &selection)?;
+                let (affected,queue_changed) = assign(&tx.sql, action, ids, &selection)?;
                 if !affected.is_empty() {
                     tx.sql.execute(
                         "UPDATE service_state SET inbox_revision=inbox_revision+1 WHERE singleton=1", [],
                     )?;
-                    let keys = if affected.len() <= 31 {
+                    let mut keys = if affected.len() <= 31 {
                         affected.iter().map(|id| ResourceKey::Notification(Some(id.clone())))
                             .collect::<Vec<_>>()
                     } else {
                         vec![ResourceKey::Notification(None)]
                     };
+                    if queue_changed {
+                        crate::workspace::advance_queue(&tx.sql)?;
+                        keys.push(ResourceKey::Queue);
+                    }
                     tx.emit(&keys)?;
                 }
                 let counts = counts(&tx.sql, scope_code, &scope_id, i64::MAX)?;
@@ -99,7 +103,7 @@ fn assign(
     action: NotificationAction,
     ids: Vec<NotificationId>,
     selection: &str,
-) -> Result<Vec<NotificationId>, StoreError> {
+) -> Result<(Vec<NotificationId>, bool), StoreError> {
     let (field, only_if) = match action {
         NotificationAction::Read => ("read_at_ms=?2", "AND read_at_ms IS NULL"),
         NotificationAction::Unread => ("read_at_ms=NULL", "AND read_at_ms IS NOT NULL"),
@@ -107,7 +111,8 @@ fn assign(
     };
     let sql = format!(
         "UPDATE notifications SET {field} WHERE dismissed_at_ms IS NULL {only_if}
-         AND notification_id IN (SELECT value FROM json_each(?1)) RETURNING notification_id"
+         AND notification_id IN (SELECT value FROM json_each(?1))
+         RETURNING notification_id, source='gitlab' AND kind IN ('reply','edited_reply')"
     );
     let mut statement = db.prepare_cached(&sql)?;
     let mut rows = match action {
@@ -115,10 +120,15 @@ fn assign(
         _ => statement.query(params![selection, now_ms()?])?,
     };
     let mut updates = HashSet::<NotificationId>::new();
+    let mut queue_changed = false;
     while let Some(row) = rows.next()? {
         updates.insert(parse(text(row, 0)?)?);
+        queue_changed |= row.get::<_, bool>(1)?;
     }
-    Ok(ids.into_iter().filter(|id| updates.contains(id)).collect())
+    Ok((
+        ids.into_iter().filter(|id| updates.contains(id)).collect(),
+        queue_changed,
+    ))
 }
 
 fn define_scope(scope: ReadScope) -> (i64, String) {

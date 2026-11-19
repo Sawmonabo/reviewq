@@ -18,7 +18,8 @@ export type CancelRecoveryResponseState =
   | "cancelled"
   | "complete";
 
-export type InterruptState = "interrupted" | "rejected" | "uncertain";
+export type InterruptState =
+  "interrupted" | "deferred" | "rejected" | "uncertain";
 
 export type RecoveryStateResponseState =
   | "disabled"
@@ -30,6 +31,7 @@ export type RecoveryStateResponseState =
   | "complete";
 
 export interface CancelRecoveryRequest {
+  episodeId: ResourceIdDto;
   expectedRevision: RevisionDto;
 }
 

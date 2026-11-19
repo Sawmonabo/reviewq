@@ -2,7 +2,7 @@
 import { func0 } from "../runtime.mjs";
 import { schema219 } from "../metadata-5.mjs";
 import { validate25 } from "./checkpoint-id-dto.mjs";
-function validate683(
+function validate684(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -23,7 +23,7 @@ function validate683(
         ((data.assignee === undefined || !func0.call(data, "assignee")) &&
           (missing0 = "assignee"))
       ) {
-        validate683.errors = [
+        validate684.errors = [
           {
             instancePath,
             schemaPath: "#/required",
@@ -37,7 +37,7 @@ function validate683(
           let data0 = data.assignee;
           const _errs1 = errors;
           if (typeof data0 !== "string" && data0 !== null) {
-            validate683.errors = [
+            validate684.errors = [
               {
                 instancePath: instancePath + "/assignee",
                 schemaPath: "#/properties/assignee/type",
@@ -77,7 +77,7 @@ function validate683(
               let data2 = data.priority;
               const _errs4 = errors;
               if (typeof data2 !== "string" && data2 !== null) {
-                validate683.errors = [
+                validate684.errors = [
                   {
                     instancePath: instancePath + "/priority",
                     schemaPath: "#/properties/priority/type",
@@ -95,7 +95,7 @@ function validate683(
               if (data.status !== undefined && func0.call(data, "status")) {
                 const _errs6 = errors;
                 if (typeof data.status !== "string") {
-                  validate683.errors = [
+                  validate684.errors = [
                     {
                       instancePath: instancePath + "/status",
                       schemaPath: "#/properties/status/type",
@@ -113,7 +113,7 @@ function validate683(
                 if (data.title !== undefined && func0.call(data, "title")) {
                   const _errs8 = errors;
                   if (typeof data.title !== "string") {
-                    validate683.errors = [
+                    validate684.errors = [
                       {
                         instancePath: instancePath + "/title",
                         schemaPath: "#/properties/title/type",
@@ -133,7 +133,7 @@ function validate683(
         }
       }
     } else {
-      validate683.errors = [
+      validate684.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -144,7 +144,7 @@ function validate683(
       return false;
     }
   }
-  validate683.errors = vErrors;
+  validate684.errors = vErrors;
   return errors === 0;
 }
-export { validate683 };
+export { validate684 };

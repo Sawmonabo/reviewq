@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, BTreeSet, HashSet};
+use std::collections::{BTreeMap, BTreeSet};
 
 use reviewq_domain::identity::{Revision, TicketKey};
 use reviewq_domain::settings::{BoardType, WorkspaceScope};
@@ -60,32 +60,12 @@ pub async fn collect_sprint_pairs(
                 if !ids.remove(&sprint.id) {
                     continue;
                 }
-                let mut keys = BTreeSet::new();
-                let mut seen = HashSet::new();
-                let mut next = None;
-                for _ in 0..2000 {
-                    let page = source
-                        .issues(binding.clone(), Some(sprint.id), next, 100)
-                        .await?;
-                    for issue in page.items {
-                        if !keys.insert(issue.key) {
-                            return Err(AppError::Conflict);
-                        }
-                        total += 1;
-                        if total > 16_384 {
-                            return Err(AppError::PayloadTooLarge);
-                        }
-                    }
-                    let Some(token) = page.continuation else {
-                        next = None;
-                        break;
-                    };
-                    if !seen.insert(token.clone()) {
-                        return Err(AppError::Conflict);
-                    }
-                    next = Some(token);
-                }
-                if next.is_some() {
+                let keys = crate::sources::scoped_issues(source, binding, Some(sprint.id))
+                    .await?
+                    .into_keys()
+                    .collect::<BTreeSet<_>>();
+                total += keys.len();
+                if total > 16_384 {
                     return Err(AppError::PayloadTooLarge);
                 }
                 loaded.push(LoadedSprint {

@@ -158,7 +158,7 @@ fn project(value: app::Preferences) -> Result<dto::Preferences, AppError> {
         auto_resume_codex_reviews: value.automatic,
     })
 }
-fn episode(value: app::Episode) -> Result<dto::Episode, AppError> {
+pub(in crate::entry) fn episode(value: app::Episode) -> Result<dto::Episode, AppError> {
     use app::RecoveryKind as Kind;
     use app::RecoveryState as Status;
     Ok(dto::Episode {

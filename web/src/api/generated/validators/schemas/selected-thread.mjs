@@ -2,7 +2,7 @@
 import { func0 } from "../runtime.mjs";
 import { validate25 } from "./checkpoint-id-dto.mjs";
 import { schema125 } from "../metadata-3.mjs";
-function validate352(
+function validate353(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -29,7 +29,7 @@ function validate352(
         ((data.findingIds === undefined || !func0.call(data, "findingIds")) &&
           (missing0 = "findingIds"))
       ) {
-        validate352.errors = [
+        validate353.errors = [
           {
             instancePath,
             schemaPath: "#/required",
@@ -96,7 +96,7 @@ function validate352(
               vErrors.push(err1);
             }
             errors++;
-            validate352.errors = vErrors;
+            validate353.errors = vErrors;
             return false;
           } else {
             errors = _errs2;
@@ -142,7 +142,7 @@ function validate352(
                   }
                 }
               } else {
-                validate352.errors = [
+                validate353.errors = [
                   {
                     instancePath: instancePath + "/findingIds",
                     schemaPath: "#/properties/findingIds/type",
@@ -186,7 +186,7 @@ function validate352(
                 let data4 = data.resolved;
                 const _errs10 = errors;
                 if (typeof data4 !== "boolean" && data4 !== null) {
-                  validate352.errors = [
+                  validate353.errors = [
                     {
                       instancePath: instancePath + "/resolved",
                       schemaPath: "#/properties/resolved/type",
@@ -258,7 +258,7 @@ function validate352(
                       vErrors.push(err3);
                     }
                     errors++;
-                    validate352.errors = vErrors;
+                    validate353.errors = vErrors;
                     return false;
                   } else {
                     errors = _errs13;
@@ -281,7 +281,7 @@ function validate352(
                   ) {
                     const _errs17 = errors;
                     if (typeof data.selected !== "boolean") {
-                      validate352.errors = [
+                      validate353.errors = [
                         {
                           instancePath: instancePath + "/selected",
                           schemaPath: "#/properties/selected/type",
@@ -353,7 +353,7 @@ function validate352(
                           vErrors.push(err5);
                         }
                         errors++;
-                        validate352.errors = vErrors;
+                        validate353.errors = vErrors;
                         return false;
                       } else {
                         errors = _errs20;
@@ -377,7 +377,7 @@ function validate352(
         }
       }
     } else {
-      validate352.errors = [
+      validate353.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -388,7 +388,7 @@ function validate352(
       return false;
     }
   }
-  validate352.errors = vErrors;
+  validate353.errors = vErrors;
   return errors === 0;
 }
-export { validate352 };
+export { validate353 };

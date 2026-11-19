@@ -197,7 +197,7 @@ pub(super) async fn ticket(
             warnings: result.warning.into_iter().collect(),
             comments: Page::new(comments, next).ok_or(AppError::Internal)?,
         },
-        current.cursor,
+        allowed.cursor,
     )?))
 }
 

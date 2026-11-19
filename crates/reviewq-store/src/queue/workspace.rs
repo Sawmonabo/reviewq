@@ -7,7 +7,8 @@ use reviewq_domain::review_stage::RunStage;
 use rusqlite::{Connection, params};
 
 use super::{
-    ITEM_COLUMNS, ITEM_FROM, SCOPE_PREDICATE, check_limit, page_context, parse, queue_item, text,
+    CACHED_ITEM_FROM, ITEM_COLUMNS, SCOPE_PREDICATE, cached, check_limit, make_context, parse,
+    queue_item, text,
 };
 use crate::events::snapshot;
 use crate::workspace::{ReadScope, scope};
@@ -60,17 +61,19 @@ fn cards(
     }
     let access = scope(db, &actor)?;
     let (code, owner) = read_scope(&access);
-    let context = page_context(
+    let generation = cached::projection(db)?;
+    let context = make_context(
         db,
         &actor,
         limit,
         after.as_ref().map(|position| &position.context),
+        Some(generation),
     )?;
     let search = filter.search.to_lowercase();
     let source = format!("({SCOPE_PREDICATE}) AND f.run_id IS NOT NULL AND {MR_SEARCH}");
     let mut summary = db.prepare_cached(&format!(
         "SELECT substr(f.stage_reason,1,instr(f.stage_reason,'/')-1),count(*)
-         {ITEM_FROM} WHERE {source} GROUP BY 1"
+         {CACHED_ITEM_FROM} WHERE {source} GROUP BY 1"
     ))?;
     let mut rows = summary.query(params![code, owner, search])?;
     let mut counts = StageCounts::default();
@@ -91,7 +94,9 @@ fn cards(
         AND (?6 IS NULL OR f.has_questions=?6)"
     );
     let total: i64 = db
-        .prepare_cached(&format!("SELECT count(*) {ITEM_FROM} WHERE {narrowed}"))?
+        .prepare_cached(&format!(
+            "SELECT count(*) {CACHED_ITEM_FROM} WHERE {narrowed}"
+        ))?
         .query_row(
             params![
                 code,
@@ -107,7 +112,7 @@ fn cards(
         (position.activity, position.review.as_str())
     });
     let mut statement = db.prepare_cached(&format!(
-        "SELECT {ITEM_COLUMNS},{RUN_IDS} {ITEM_FROM} WHERE {narrowed}
+        "SELECT {ITEM_COLUMNS},{RUN_IDS} {CACHED_ITEM_FROM} WHERE {narrowed}
            AND (f.last_activity<?7 OR (f.last_activity=?7 AND r.review_id>?8))
          ORDER BY f.last_activity DESC,r.review_id LIMIT ?9"
     ))?;

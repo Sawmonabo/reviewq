@@ -32,8 +32,8 @@ use super::{ApiError, Entry, ServiceEndpoint};
 #[derive(Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(super) struct PageQuery {
-    limit: Option<u16>,
-    cursor: Option<String>,
+    pub(super) limit: Option<u16>,
+    pub(super) cursor: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -64,6 +64,7 @@ pub(super) struct Context {
     generation: u64,
     authority: [u8; 32],
     limit: u16,
+    projection: Option<i64>,
 }
 
 pub(super) fn source_failure(failure: SourceFailure) -> ErrorDto {
@@ -197,7 +198,15 @@ pub(super) async fn run(
     Query(query): Query<PageQuery>,
 ) -> Result<Json<RunDetailResponse>, ApiError> {
     let actor = entry.auth.browser_actor(&headers, false)?;
-    let id: RunId = parse(&run_id)?;
+    Ok(Json(read_run(&entry, actor, parse(&run_id)?, query).await?))
+}
+
+pub(super) async fn read_run(
+    entry: &Entry,
+    actor: reviewq_app::access::Actor,
+    id: RunId,
+    query: PageQuery,
+) -> Result<RunDetailResponse, AppError> {
     let limit = query.limit()?;
     let endpoint = &entry.auth.endpoint;
     let after = match query.position(endpoint)? {
@@ -246,7 +255,7 @@ pub(super) async fn run(
             .ok_or(AppError::Internal)?,
         sessions: Page::new(sessions, next).ok_or(AppError::Internal)?,
     };
-    Ok(Json(success(data, cursor)?))
+    success(data, cursor)
 }
 
 pub(super) async fn resolve(
@@ -436,6 +445,7 @@ impl From<PageContext> for Context {
             generation: context.generation.get(),
             authority: context.authority,
             limit: context.limit,
+            projection: context.projection,
         }
     }
 }
@@ -451,6 +461,7 @@ impl TryFrom<Context> for PageContext {
                 .map_err(|_| AppError::CursorExpired)?,
             authority: context.authority,
             limit: context.limit,
+            projection: context.projection,
         })
     }
 }

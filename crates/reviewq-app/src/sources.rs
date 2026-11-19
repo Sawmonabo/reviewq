@@ -10,6 +10,7 @@ use crate::workspace::{ConfiguredProject, WorkspaceStore};
 
 mod scope;
 mod tickets;
+pub(crate) use scope::issues as scoped_issues;
 pub use scope::{MatchedReview, ScopedIssue, ScopedMatch, ScopedSprint, SourceObservation};
 pub use tickets::{TicketComment, TicketDetail, TicketIdentity, UnverifiedTrack};
 
@@ -167,6 +168,7 @@ pub trait SourceRefreshStore: Send + Sync {
     ) -> AppFuture<'_, ()>;
 
     fn retained_reviews(&self, attempt: RefreshAttempt) -> AppFuture<'_, Vec<MrIdentity>>;
+    fn loaded_sprint_catalog(&self, attempt: RefreshAttempt) -> AppFuture<'_, Vec<ScopedSprint>>;
 
     /// Marks an unfinished attempt after the previous service process has exited.
     fn recover_refresh(&self, actor: Actor) -> AppFuture<'_, ()>;
