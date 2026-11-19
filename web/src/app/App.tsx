@@ -29,7 +29,6 @@ import "./views/lists.css";
 const SettingsPane = lazy(() => import("../features/settings/SettingsPane"));
 const BulkLaunch = lazy(() => import("../features/queue/BulkLaunch"));
 const MonitorPane = lazy(() => import("../features/review/followups/MonitorPane"));
-const Tickets = lazy(() => import("../features/tickets/Tickets"));
 
 const views = [
   { view: "queue", label: "Review queue" },
@@ -84,6 +83,12 @@ export function App() {
     cursor: "",
   }));
   const ReviewDrawer = drawerModule.data;
+  const ticketVisible = Boolean(ticket || (reviewId && route.tab === "overview"));
+  const ticketModule = useResource(`ticket-reader-module:${ticketVisible}`, async () => ({
+    data: ticketVisible ? (await import("../features/tickets/Tickets")).default : null,
+    cursor: "",
+  }));
+  const Tickets = ticketModule.data;
   const overview = useResource(
     reviewId ?? "",
     (signal) =>
@@ -154,11 +159,16 @@ export function App() {
     function network() {
       setOffline(!navigator.onLine);
     }
+    function restoreCachedPage(event: PageTransitionEvent) {
+      if (event.persisted) restore();
+    }
     window.addEventListener("popstate", restore);
+    window.addEventListener("pageshow", restoreCachedPage);
     window.addEventListener("online", network);
     window.addEventListener("offline", network);
     return () => {
       window.removeEventListener("popstate", restore);
+      window.removeEventListener("pageshow", restoreCachedPage);
       window.removeEventListener("online", network);
       window.removeEventListener("offline", network);
     };
@@ -267,6 +277,14 @@ export function App() {
     writeRoute(canonical);
     setRoute(canonical);
   }
+
+  function renderTickets(keys: readonly string[]) {
+    if (!keys.length) return null;
+    if (Tickets) return <Tickets keys={keys} />;
+    if (ticketModule.error) return <Notice retry={ticketModule.retry}>{ticketModule.error}</Notice>;
+    return <Loading label="Loading ticket…" />;
+  }
+
   function openReview(id: string, exactRun?: string, tab: Tab = "overview", child?: string) {
     rememberOpener();
     move({
@@ -571,11 +589,7 @@ export function App() {
                     onClose={closeDrawer}
                     onLaunch={menuLaunch}
                     onMonitor={monitor}
-                    ticket={
-                      <Suspense fallback={<Loading label="Loading ticket…" />}>
-                        <Tickets keys={overview.data.review.tickets.map((entry) => entry.key)} />
-                      </Suspense>
-                    }
+                    ticket={renderTickets(overview.data.review.tickets.map((entry) => entry.key))}
                   />
                 ) : reviewId ? (
                   <>
@@ -614,9 +628,7 @@ export function App() {
                           <Icon name="back" />
                         </button>
                       </header>
-                      <div className="drawer-body">
-                        <Tickets keys={[ticket]} />
-                      </div>
+                      <div className="drawer-body">{renderTickets([ticket])}</div>
                     </div>
                   )
                 )}
