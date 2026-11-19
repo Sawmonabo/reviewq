@@ -1,3 +1,5 @@
+use std::collections::BTreeSet;
+use std::fs::File;
 use std::path::{Path, PathBuf};
 
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
@@ -34,39 +36,103 @@ pub(crate) async fn install(
             .cloned()
             .ok_or("The service did not return a settings revision.")?,
     )?;
-    let _lock = files::hold(profile, &checkout.common)?;
-    let key = files::credential(profile, &checkout.common)?;
-    let bearer = URL_SAFE_NO_PAD.encode(key);
-    let verifier = URL_SAFE_NO_PAD.encode(Sha256::digest(key));
     let url = format!("http://{}/mcp", endpoint.native());
-
-    let mut changes = projection::checkout(&checkout, &url, &bearer, claude_home.as_deref())?;
+    let claude = projection::claude_config(claude_home.as_deref())?;
+    let mut changes = prepare(profile, checkout, &url, claude).await?;
     let address = json!({
         "settingsRevision":revision, "projectId":project.to_string(),
-        "checkout":checkout.primary, "commonDir":checkout.common, "verifier":verifier,
+        "checkout":changes.checkout.primary, "commonDir":changes.checkout.common,
+        "verifier":URL_SAFE_NO_PAD.encode(changes.verifier),
     });
     let request = serde_json::to_vec(&json!({"action":"issue","address":address}))?;
     let confirm = serde_json::to_vec(&json!({"action":"status","address":address}))?;
     let issued = native_client::signed(&client, &endpoint, "POST", GRANT, &request).await;
     if let Ok(bytes) = issued {
-        verify_binding(&bytes, &checkout, project, revision)?;
+        verify_binding(&bytes, &changes.checkout, project, revision)?;
     }
     let bytes=native_client::signed(&client,&endpoint,"POST",GRANT,&confirm).await
         .map_err(|_|"ReviewQ could not confirm management access for this exact checkout and settings revision.")?;
-    verify_binding(&bytes, &checkout, project, revision)?;
-    changes.apply()?;
+    verify_binding(&bytes, &changes.checkout, project, revision)?;
+    changes.apply().await?;
     match native_client::signed(&client, &endpoint, "POST", GRANT, &confirm)
         .await
-        .and_then(|bytes| verify_binding(&bytes, &checkout, project, revision))
+        .and_then(|bytes| verify_binding(&bytes, &changes.checkout, project, revision))
     {
         Ok(()) => (),
         Err(_) => {
-            changes.rollback()?;
+            changes.plan.rollback()?;
             return Err("Checkout authority changed during setup.".into());
         }
     }
+    changes.finish()?;
     println!("ReviewQ management access is ready for this checkout.");
     Ok(())
+}
+
+struct Prepared {
+    checkout: git::Checkout,
+    claude: Option<PathBuf>,
+    inventory: PathBuf,
+    plan: projection::Plan,
+    verifier: [u8; 32],
+    _lock: File,
+    _client_locks: Vec<File>,
+}
+
+impl Prepared {
+    async fn apply(&mut self) -> Result<(), Failure> {
+        self.plan
+            .apply(&self.inventory, &self.checkout, self.claude.as_deref())
+            .await
+    }
+
+    fn finish(self) -> Result<(), Failure> {
+        self.plan.finish(&self.inventory)
+    }
+}
+
+async fn prepare(
+    profile: &Path,
+    checkout: git::Checkout,
+    url: &str,
+    claude: Option<PathBuf>,
+) -> Result<Prepared, Failure> {
+    let lock = files::hold(profile, &checkout.common)?;
+    projection::require_untracked(&checkout, claude.as_deref()).await?;
+    let key = files::credential(profile, &checkout.common)?;
+    let inventory = files::inventory(profile, &checkout.common)?;
+    let previous = projection::Inventory::load(&inventory)?;
+    let client_locks = lock_clients(profile, &previous, claude.as_deref())?;
+    let plan = projection::Plan::new(
+        &checkout,
+        url,
+        &URL_SAFE_NO_PAD.encode(key),
+        claude.as_deref(),
+        previous,
+    )?;
+    Ok(Prepared {
+        checkout,
+        claude,
+        inventory,
+        plan,
+        verifier: Sha256::digest(key).into(),
+        _lock: lock,
+        _client_locks: client_locks,
+    })
+}
+
+fn lock_clients(
+    profile: &Path,
+    previous: &projection::Inventory,
+    claude: Option<&Path>,
+) -> Result<Vec<File>, Failure> {
+    previous
+        .claude_files()
+        .chain(claude)
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .map(|path| files::hold_client(profile, path))
+        .collect()
 }
 
 fn verify_binding(
@@ -113,7 +179,20 @@ pub(crate) async fn revoke(profile: &Path, directory: Option<PathBuf>) -> Result
     let _lock = files::hold(profile, &common)?;
     let body = serde_json::to_vec(&json!({"action":"revoke","commonDir":common}))?;
     native_client::signed(&client, &endpoint, "POST", GRANT, &body).await?;
-    files::forget(profile, &common)?;
+    clean_owned(profile, &common)?;
     println!("ReviewQ management access was revoked for this repository.");
+    Ok(())
+}
+
+fn clean_owned(profile: &Path, common: &Path) -> Result<(), Failure> {
+    let inventory = files::inventory(profile, common)?;
+    let previous = projection::Inventory::load(&inventory)?;
+    let _client_locks = lock_clients(profile, &previous, None)?;
+    let key = files::existing_credential(profile, common)?;
+    previous.cleanup(
+        &inventory,
+        &key.map_or_else(String::new, |key| URL_SAFE_NO_PAD.encode(key)),
+    )?;
+    files::forget(profile, &common)?;
     Ok(())
 }

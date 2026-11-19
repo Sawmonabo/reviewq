@@ -152,6 +152,7 @@ pub(super) async fn get(entry: &Entry, actor: Actor, args: GetReview) -> Result<
             last.map_or(Value::Null, |value| json!({
                 "submissionId":value.submission_id.as_str(),
                 "state": messages::recorded_state(value.state),
+                "serviceAdmitted":value.service_admitted,
                 "updatedAt":reviewq_protocol::UtcTimestampDto::from_unix_milliseconds(value.updated_at_ms),
                 "outcomeDetail":value.outcome_detail,
             }))

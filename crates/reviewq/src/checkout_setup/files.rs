@@ -15,13 +15,13 @@ const FILE_LIMIT: u64 = 4 * 1024 * 1024;
 #[derive(Clone)]
 pub(super) struct Existing {
     pub bytes: Vec<u8>,
-    mode: u32,
+    pub mode: u32,
 }
 
 pub(super) struct Edit {
     path: PathBuf,
     before: Option<Existing>,
-    after: Vec<u8>,
+    after: Option<Vec<u8>>,
     mode: u32,
 }
 
@@ -63,17 +63,19 @@ pub(super) fn hold(profile: &Path, common: &Path) -> Result<File, Failure> {
     Ok(file)
 }
 
+pub(super) fn hold_client(profile: &Path, path: &Path) -> Result<File, Failure> {
+    hold(profile, path)
+}
+
+pub(super) fn inventory(profile: &Path, common: &Path) -> Result<PathBuf, Failure> {
+    Ok(credential_path(profile, common)?.with_extension("json"))
+}
+
 pub(super) fn credential(profile: &Path, common: &Path) -> Result<[u8; 32], Failure> {
-    let path = credential_path(profile, common)?;
-    if let Some(saved) = read(&path)? {
-        if saved.mode != 0o600 {
-            return Err("Checkout credential mode is not owner-only.".into());
-        }
-        return saved
-            .bytes
-            .try_into()
-            .map_err(|_| "Invalid checkout credential.".into());
+    if let Some(key) = existing_credential(profile, common)? {
+        return Ok(key);
     }
+    let path = credential_path(profile, common)?;
     let mut key = [0; 32];
     getrandom::fill(&mut key).map_err(|_| "Could not generate checkout credentials.")?;
     let mut stage =
@@ -87,6 +89,23 @@ pub(super) fn credential(profile: &Path, common: &Path) -> Result<[u8; 32], Fail
         .persist_noclobber(path)
         .map_err(|_| "Could not publish the private checkout credential.")?;
     Ok(key)
+}
+
+pub(super) fn existing_credential(
+    profile: &Path,
+    common: &Path,
+) -> Result<Option<[u8; 32]>, Failure> {
+    read(&credential_path(profile, common)?)?
+        .map(|saved| {
+            if saved.mode != 0o600 {
+                return Err("Checkout credential mode is not owner-only.".into());
+            }
+            saved
+                .bytes
+                .try_into()
+                .map_err(|_| "Invalid checkout credential.".into())
+        })
+        .transpose()
 }
 
 pub(super) fn forget(profile: &Path, common: &Path) -> Result<(), Failure> {
@@ -141,24 +160,63 @@ impl Edit {
         Self {
             path,
             before,
-            after,
+            after: Some(after),
             mode,
         }
     }
 
-    fn apply(&self) -> Result<(), Failure> {
-        write(
-            &self.path,
-            &self.after,
-            self.mode,
-            self.before.as_ref().map(|item| item.bytes.as_slice()),
-        )
+    pub(super) fn remove(path: PathBuf, before: Existing) -> Self {
+        Self {
+            path,
+            before: Some(before),
+            after: None,
+            mode: 0,
+        }
+    }
+
+    pub(super) fn apply(&self) -> Result<(), Failure> {
+        if self.unchanged() {
+            return Ok(());
+        }
+        let expected = self.before.as_ref().map(|item| item.bytes.as_slice());
+        self.replace(expected)?;
+        self.sync()
+    }
+
+    fn replace(&self, expected: Option<&[u8]>) -> Result<(), Failure> {
+        match &self.after {
+            Some(bytes) => write(&self.path, bytes, self.mode, expected),
+            None => {
+                same(&self.path, expected)?;
+                fs::remove_file(&self.path).map_err(Into::into)
+            }
+        }
+    }
+
+    fn sync(&self) -> Result<(), Failure> {
+        let dir = self
+            .path
+            .parent()
+            .ok_or("Missing checkout destination directory.")?;
+        Ok(File::open(dir)?.sync_all()?)
+    }
+
+    fn unchanged(&self) -> bool {
+        self.before.as_ref().is_some_and(|before| {
+            Some((before.mode, before.bytes.as_slice()))
+                == self.after.as_deref().map(|after| (self.mode, after))
+        })
     }
 
     fn rollback(&self) -> Result<(), Failure> {
-        same(&self.path, Some(&self.after))?;
+        same(&self.path, self.after.as_deref())?;
         match &self.before {
-            Some(before) => write(&self.path, &before.bytes, before.mode, Some(&self.after)),
+            Some(before) => write(
+                &self.path,
+                &before.bytes,
+                before.mode,
+                self.after.as_deref(),
+            ),
             None => fs::remove_file(&self.path).map_err(Into::into),
         }
     }
@@ -166,11 +224,7 @@ impl Edit {
 
 impl Changes {
     pub(super) fn new(mut edits: Vec<Edit>) -> Self {
-        edits.retain(|edit| {
-            edit.before.as_ref().is_none_or(|before| {
-                (before.mode, before.bytes.as_slice()) != (edit.mode, edit.after.as_slice())
-            })
-        });
+        edits.retain(|edit| !edit.unchanged());
         Self {
             edits,
             committed: 0,
@@ -179,9 +233,9 @@ impl Changes {
 
     pub(super) fn apply(&mut self) -> Result<(), Failure> {
         let forward = self.edits.iter().try_for_each(|edit| {
-            edit.apply()?;
+            edit.replace(edit.before.as_ref().map(|file| file.bytes.as_slice()))?;
             self.committed += 1;
-            Ok::<_, Failure>(())
+            edit.sync()
         });
         if forward.is_err() {
             self.rollback()?;
@@ -221,9 +275,12 @@ fn write(path: &Path, bytes: &[u8], mode: u32, expected: Option<&[u8]>) -> Resul
     staged.write_all(bytes)?;
     staged.as_file().sync_all()?;
     same(path, expected)?;
-    staged
-        .persist(path)
-        .map_err(|_| "Could not replace checkout configuration.")?;
+    if expected.is_none() {
+        staged.persist_noclobber(path)
+    } else {
+        staged.persist(path)
+    }
+    .map_err(|_| "Could not publish checkout configuration.")?;
     Ok(())
 }
 

@@ -42,6 +42,30 @@ export type TerminalResult1 =
       [k: string]: unknown;
     };
 
+export interface RegisterSessionRequest {
+  nativeId: ResourceIdDto;
+  provider: HostProviderDto;
+  reviewId: ReviewIdDto;
+}
+
+export interface RegisteredSessionResponse {
+  cursor: EventCursorDto;
+  data: RegisteredSession;
+  [k: string]: unknown;
+}
+
+export interface RegisteredSession {
+  cwd: string;
+  leadSessionKey: SessionKeyDto;
+  nativeId: ResourceIdDto;
+  provider: HostProviderDto;
+  reportGuidance: string;
+  reviewCheckout: string | null;
+  reviewId: ReviewIdDto;
+  runId: RunIdDto;
+  [k: string]: unknown;
+}
+
 export interface RunDetailResponse {
   cursor: EventCursorDto;
   data: RunDetail;

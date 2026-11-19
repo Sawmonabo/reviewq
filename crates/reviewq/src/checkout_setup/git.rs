@@ -1,141 +1,136 @@
 use std::ffi::OsStr;
+use std::io::ErrorKind;
 use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
-use std::process::Stdio;
-use std::time::Duration;
 
-use tokio::io::AsyncReadExt;
-use tokio::process::Command;
+use reviewq_providers::git_output;
 
 use super::Failure;
 
-const GIT_OUTPUT: u64 = 64 * 1024;
+const MAX_WORKTREES: usize = 64;
 
 pub(super) struct Checkout {
-    pub worktree: PathBuf,
     pub common: PathBuf,
     pub primary: PathBuf,
+    pub worktrees: Vec<PathBuf>,
 }
 
 pub(super) async fn discover(directory: Option<&Path>) -> Result<Checkout, Failure> {
-    let directory = directory
-        .map(Path::to_owned)
-        .unwrap_or(std::env::current_dir()?)
-        .canonicalize()?;
-    let worktree = path(
-        &git(
-            &directory,
-            &["rev-parse", "--path-format=absolute", "--show-toplevel"],
-        )
-        .await?,
-    )?;
-    let common = path(
-        &git(
-            &worktree,
-            &["rev-parse", "--path-format=absolute", "--git-common-dir"],
-        )
-        .await?,
-    )?;
-    let locations = git(&worktree, &["worktree", "list", "--porcelain", "-z"]).await?;
-    let primary = locations
+    let directory = selected(directory)?;
+    let worktree = repo_path(&directory, "--show-toplevel").await?;
+    let common = repo_path(&worktree, "--git-common-dir").await?;
+    let locations = git_output(&worktree, &["worktree", "list", "--porcelain", "-z"]).await?;
+    let mut entries = locations
         .split(|byte| *byte == 0)
-        .next()
-        .and_then(|line| line.strip_prefix(b"worktree "))
-        .ok_or("Could not verify the main Git worktree.")?;
-    let primary = path(primary)?;
-    let source = git(
-        &worktree,
-        &["config", "--local", "--get", "remote.origin.url"],
-    )
-    .await?;
-    let remote = std::str::from_utf8(&source)?.trim_end_matches('\n');
-    if remote.len() > 4096
-        || remote.chars().any(char::is_control)
-        || remote.contains('?')
-        || remote.contains('#')
-        || reqwest::Url::parse(remote).ok().is_some_and(|url| {
-            url.password().is_some()
-                || (matches!(url.scheme(), "https" | "http") && !url.username().is_empty())
-        })
-    {
-        return Err("The Git origin must identify the repository without credentials.".into());
+        .filter_map(|line| line.strip_prefix(b"worktree "));
+    let primary = path(entries.next().ok_or("Missing main Git worktree.")?)?;
+    let mut worktrees = vec![primary.clone()];
+    for value in entries {
+        let location = raw_path(value)?;
+        match location.try_exists() {
+            Ok(true) => worktrees.push(path(value)?),
+            Ok(false) => continue,
+            Err(error) => return Err(error.into()),
+        }
+        if worktrees.len() > MAX_WORKTREES {
+            return Err("The repository exceeds the supported number of linked worktrees.".into());
+        }
     }
-    let managed = [
-        ".codex/config.toml",
-        ".agents/skills/reviewq-manage/SKILL.md",
-        ".claude/skills/reviewq-manage/SKILL.md",
-    ];
-    let mut args = vec!["ls-files", "-z", "--"];
-    args.extend(managed);
-    if !git(&worktree, &args).await?.is_empty()
-        || (primary != worktree && !git(&primary, &args).await?.is_empty())
-    {
-        return Err("Checkout setup would touch a tracked ReviewQ destination.".into());
+    if !worktrees.contains(&worktree) {
+        return Err("The active checkout does not belong to the recorded Git worktrees.".into());
+    }
+    for root in &worktrees {
+        if repo_path(root, "--git-common-dir").await? != common
+            || repo_path(root, "--show-toplevel").await? != *root
+        {
+            return Err("A linked worktree does not match this Git repository.".into());
+        }
     }
     Ok(Checkout {
-        worktree,
         common,
         primary,
+        worktrees,
     })
 }
 
 pub(super) async fn common_directory(directory: Option<&Path>) -> Result<PathBuf, Failure> {
-    let directory = directory
-        .map(Path::to_owned)
-        .unwrap_or(std::env::current_dir()?)
-        .canonicalize()?;
-    path(
-        &git(
-            &directory,
-            &["rev-parse", "--path-format=absolute", "--git-common-dir"],
-        )
-        .await?,
-    )
+    repo_path(&selected(directory)?, "--git-common-dir").await
 }
 
-fn path(value: &[u8]) -> Result<PathBuf, Failure> {
-    let path = Path::new(OsStr::from_bytes(
-        value.strip_suffix(b"\n").unwrap_or(value),
-    ));
+pub(super) async fn require_untracked(root: &Path, paths: &[&str]) -> Result<(), Failure> {
+    let mut args = vec!["--literal-pathspecs", "ls-files", "-z", "--"];
+    args.extend(paths);
+    if !git_output(root, &args).await?.is_empty() {
+        return Err(format!(
+            "Checkout setup would touch a tracked destination under {}.",
+            root.display()
+        )
+        .into());
+    }
+    Ok(())
+}
+
+pub(super) async fn require_ignored(root: &Path, paths: &[&str]) -> Result<(), Failure> {
+    let mut args = vec!["check-ignore", "--no-index", "-z", "--"];
+    args.extend(paths);
+    let output = git_output(root, &args).await.unwrap_or_default();
+    let ignored: Vec<_> = output.split(|byte| *byte == 0).collect();
+    for path in paths {
+        if !ignored.contains(&path.as_bytes()) {
+            return Err(format!(
+                "Checkout setup requires Git to ignore {}.",
+                root.join(path).display()
+            )
+            .into());
+        }
+    }
+    Ok(())
+}
+
+pub(super) async fn private_config(file: &Path) -> Result<(), Failure> {
+    let parent = file.parent().ok_or("Missing Claude profile directory.")?;
+    for ancestor in parent.ancestors() {
+        match ancestor.join(".git").symlink_metadata() {
+            Ok(_) => {
+                let root = repo_path(ancestor, "--show-toplevel").await?;
+                let relative = file
+                    .strip_prefix(&root)?
+                    .to_str()
+                    .ok_or("Expected a UTF-8 Claude profile path.")?;
+                require_untracked(&root, &[relative]).await?;
+                return require_ignored(&root, &[relative]).await;
+            }
+            Err(error) if error.kind() == ErrorKind::NotFound => continue,
+            Err(error) => return Err(error.into()),
+        }
+    }
+    Ok(())
+}
+
+fn selected(directory: Option<&Path>) -> Result<PathBuf, Failure> {
+    Ok(directory
+        .map(Path::to_owned)
+        .unwrap_or(std::env::current_dir()?)
+        .canonicalize()?)
+}
+
+async fn repo_path(directory: &Path, name: &str) -> Result<PathBuf, Failure> {
+    let output = git_output(directory, &["rev-parse", "--path-format=absolute", name]).await?;
+    path(output.strip_suffix(b"\n").unwrap_or(&output))
+}
+
+fn raw_path(value: &[u8]) -> Result<&Path, Failure> {
+    let path = Path::new(OsStr::from_bytes(value));
     if !path.is_absolute() || path.to_str().is_none() {
         return Err("ReviewQ needs an absolute UTF-8 Git directory.".into());
-    }
-    let path = path.canonicalize()?;
-    if !path.is_dir() {
-        return Err("Git did not return a directory.".into());
     }
     Ok(path)
 }
 
-async fn git(directory: &Path, args: &[&str]) -> Result<Vec<u8>, Failure> {
-    tokio::time::timeout(Duration::from_secs(4), async {
-        let mut child = Command::new("git")
-            .arg("-C")
-            .arg(directory)
-            .args(args)
-            .env_remove("GIT_DIR")
-            .env_remove("GIT_WORK_TREE")
-            .env_remove("GIT_COMMON_DIR")
-            .env_remove("GIT_CONFIG_COUNT")
-            .env_remove("GIT_CONFIG_PARAMETERS")
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::null())
-            .kill_on_drop(true)
-            .spawn()?;
-        let mut output = Vec::new();
-        child
-            .stdout
-            .take()
-            .ok_or("Git returned no output stream.")?
-            .take(GIT_OUTPUT + 1)
-            .read_to_end(&mut output)
-            .await?;
-        if output.len() as u64 > GIT_OUTPUT || !child.wait().await?.success() {
-            return Err("Could not verify the selected Git checkout.".into());
-        }
-        Ok(output)
-    })
-    .await
-    .map_err(|_| "Git checkout discovery timed out.")?
+fn path(value: &[u8]) -> Result<PathBuf, Failure> {
+    let path = raw_path(value)?.canonicalize()?;
+    if !path.is_dir() {
+        return Err("Git did not return a directory.".into());
+    }
+    Ok(path)
 }

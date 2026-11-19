@@ -37,6 +37,7 @@ CREATE TEMP TABLE IF NOT EXISTS refresh_review_issues (
 
 CREATE TEMP TABLE IF NOT EXISTS refresh_loaded_sprints (
     board_id INTEGER NOT NULL, sprint_id INTEGER NOT NULL,
+    retired INTEGER NOT NULL,
     PRIMARY KEY (board_id,sprint_id)
 ) STRICT, WITHOUT ROWID;
 

@@ -54,6 +54,7 @@ pub struct SourceObservation {
     pub issues: Vec<ScopedIssue>,
     pub sprints: Vec<ScopedSprint>,
     pub loaded_sprints: Vec<LoadedSprint>,
+    pub retired_sprints: Vec<(u64, u64)>,
 }
 
 impl SourceObservation {
@@ -169,15 +170,15 @@ pub(super) async fn collect(
     }
     let mut loaded_count = 0;
     for sprint in store.loaded_sprint_catalog(attempt).await? {
-        let board = scope
-            .boards
-            .iter()
-            .find(|board| {
-                board.selection.enabled
-                    && board.board_type == BoardType::Scrum
-                    && board.selection.board_id == sprint.board
-            })
-            .ok_or(AppError::StaleRevision)?;
+        let board = scope.boards.iter().find(|board| {
+            board.selection.enabled
+                && board.board_type == BoardType::Scrum
+                && board.selection.board_id == sprint.board
+        });
+        let Some(board) = board else {
+            observation.retired_sprints.push((sprint.board, sprint.id));
+            continue;
+        };
         let tickets = if observation
             .sprints
             .iter()
@@ -192,10 +193,15 @@ pub(super) async fn collect(
                 .map(|issue| issue.ticket.key.clone())
                 .collect::<std::collections::BTreeSet<_>>()
         } else {
-            issues(jira, board, Some(sprint.id))
-                .await?
-                .into_keys()
-                .collect()
+            match issues(jira, board, Some(sprint.id)).await {
+                Ok(issues) => issues.into_keys().collect(),
+                Err(AppError::NotFound) => {
+                    observation.retired_sprints.push((sprint.board, sprint.id));
+                    continue;
+                }
+                Err(error @ AppError::StaleRevision) => return Err(error),
+                Err(_) => continue,
+            }
         };
         loaded_count += tickets.len();
         if loaded_count > MAX_ASSOCIATIONS {

@@ -62,6 +62,13 @@ import type {
 } from "./questions.js";
 
 import type {
+  RegisterSessionRequest,
+  RegisteredSessionResponse,
+  RunDetailResponse,
+  TerminalResponse,
+} from "./hosts.js";
+
+import type {
   ReportCandidateResponse,
   ReportContextResponse,
   ReportFeedbackRequest,
@@ -108,8 +115,6 @@ import type {
   HistoryPlanResponse,
 } from "./history.js";
 
-import type { RunDetailResponse, TerminalResponse } from "./hosts.js";
-
 import type { TicketDetailResponse } from "./tickets.js";
 
 export interface Contracts {
@@ -126,6 +131,7 @@ export interface Contracts {
   LoadSprintsRequest: LoadSprintsRequest;
   NotificationStateRequest: NotificationStateRequest;
   QuestionAnswerRequest: QuestionAnswerRequest;
+  RegisterSessionRequest: RegisterSessionRequest;
   ReportFeedbackRequest: ReportFeedbackRequest;
   ReviewCheckpointRequest: ReviewCheckpointRequest;
   ReviewDecisionRequest: ReviewDecisionRequest;
@@ -166,6 +172,7 @@ export interface Contracts {
   RecoveryPreferencesResponse: RecoveryPreferencesResponse;
   RecoveryStateResponse: RecoveryStateResponse;
   RefreshResponse: RefreshResponse;
+  RegisteredSessionResponse: RegisteredSessionResponse;
   ReportCandidateResponse: ReportCandidateResponse;
   ReportContextResponse: ReportContextResponse;
   ReportHistoryResponse: ReportHistoryResponse;

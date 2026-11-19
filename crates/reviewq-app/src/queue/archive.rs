@@ -22,9 +22,10 @@ pub struct ArchiveTarget {
     pub review: ReviewId,
     pub project: ProjectId,
     pub keys: BTreeSet<TicketKey>,
+    pub complete: bool,
 }
 
-#[derive(Clone, Default)]
+#[derive(Clone, Default, Eq, PartialEq)]
 pub struct ArchiveMembership {
     pub pairs: BTreeSet<SprintPair>,
     pub complete: bool,
@@ -111,7 +112,7 @@ pub async fn read_archive_metadata(
                 .await
             {
                 Ok(found) => Some(found.into_iter().collect::<BTreeMap<_, _>>()),
-                Err(error @ (AppError::StaleRevision | AppError::Busy)) => return Err(error),
+                Err(AppError::StaleRevision) => return Err(AppError::StaleRevision),
                 Err(_) => None,
             },
             Some(_) => Some(BTreeMap::new()),
@@ -124,11 +125,14 @@ pub async fn read_archive_metadata(
         });
         for target in reviews {
             let (membership, seen, partial) = accumulated.entry(target.review.clone()).or_default();
+            *partial |= !target.complete;
             if let Some(observed) = &observed {
-                for item in target.keys.iter().filter_map(|key| observed.get(key)) {
-                    *seen = true;
-                    *partial |= !item.complete;
-                    membership.pairs.extend(item.pairs.iter().copied());
+                for key in &target.keys {
+                    if let Some(item) = observed.get(key) {
+                        *seen = true;
+                        *partial |= !item.complete;
+                        membership.pairs.extend(item.pairs.iter().copied());
+                    }
                 }
             } else {
                 *partial = true;

@@ -74,6 +74,14 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     registry.response::<RunDetailResponse>("hosts", "RunDetailResponse")?;
     registry.response::<reviewq_protocol::TerminalResponse>("hosts", "TerminalResponse")?;
+    registry.request::<reviewq_protocol::registration::RegisterSessionRequest>(
+        "hosts",
+        "RegisterSessionRequest",
+    )?;
+    registry.response::<reviewq_protocol::registration::RegisteredSessionResponse>(
+        "hosts",
+        "RegisteredSessionResponse",
+    )?;
 
     registry.response::<PatchFileIndexResponse>("changes", "PatchFileIndexResponse")?;
     registry.response::<PatchDiscussionsResponse>("changes", "PatchDiscussionsResponse")?;

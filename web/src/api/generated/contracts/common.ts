@@ -34,6 +34,10 @@ export type UpstreamIdDto = string;
 
 export type HistoryTurnIdDto = string;
 
+export type HostProviderDto = "codex" | "claude";
+
+export type ReviewIdDto = string;
+
 export type SafeCountDto = number;
 
 export type ReportHashDto = string;
@@ -45,10 +49,6 @@ export type CheckpointIdDto = string;
 export type GitShaDto = string;
 
 export type Disposition = "reviewed" | "waiting_author" | "needs_review";
-
-export type HostProviderDto = "codex" | "claude";
-
-export type ReviewIdDto = string;
 
 export type ProjectIdDto = string;
 

@@ -37,7 +37,7 @@ impl Jira {
         let id = board.selection.board_id;
         let (_, kind) = self.board_kind(id).await?;
         if (kind == "scrum") != (board.board_type == BoardType::Scrum) {
-            return Err(AppError::StaleRevision);
+            return Err(AppError::Unavailable);
         }
         let known = if board.board_type == BoardType::Scrum {
             self.archive_sprints(id).await?
