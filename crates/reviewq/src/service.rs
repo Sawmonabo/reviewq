@@ -92,17 +92,20 @@ pub(crate) async fn ready(
     schema: i64,
 ) -> Result<ServiceIdentity, Failure> {
     let deadline = tokio::time::Instant::now() + Duration::from_secs(15);
+    let executable = paths.profile.join("current/bin/reviewq").canonicalize()?;
+    let client = native_client::client()?;
     loop {
-        if let Ok(endpoint) = runtime::read_endpoint_with_build(&paths.profile, digest) {
-            let body = native_client::signed(
-                &native_client::client()?,
-                &endpoint,
-                "GET",
-                "/api/v1/status",
-                b"",
-            )
-            .await;
-            if let Ok(bytes) = body {
+        let (found, pid) =
+            systemctl(&["show", UNIT, "--property=MainPID", "--value"], true).await?;
+        if found
+            && let Ok(pid) = pid.parse::<u32>()
+            && pid != 0
+            && std::fs::read_link(format!("/proc/{pid}/exe"))
+                .is_ok_and(|running| running == executable)
+            && let Ok(endpoint) = runtime::read_endpoint_with_build(&paths.profile, digest)
+        {
+            let status = native_client::signed(&client, &endpoint, "GET", "/api/v1/status", b"");
+            if let Ok(Ok(bytes)) = tokio::time::timeout_at(deadline, status).await {
                 native_client::verify_ready(&endpoint, &bytes)?;
                 let identity = endpoint.identity().clone();
                 if identity.store_schema != schema || identity.store_application_id != 0x5256_5132 {
@@ -127,14 +130,21 @@ pub(crate) async fn operate(start: bool) -> Result<(), Failure> {
     manager().await?;
     unit_location(&paths).await?;
     if start {
-        runtime_settings::Settings::load(&paths.profile, false)?;
-        switch("start").await?;
-        ready(&paths, &record.binary, record.store).await?;
+        ensure_running(&paths, &record).await?;
         println!("ReviewQ is running.");
     } else {
         switch("stop").await?;
         println!("ReviewQ is stopped.");
     }
+    Ok(())
+}
+
+async fn ensure_running(paths: &Paths, record: &install::Release) -> Result<(), Failure> {
+    runtime_settings::Settings::load(&paths.profile, false)?;
+    if !state().await?.1 {
+        switch("start").await?;
+    }
+    ready(paths, &record.binary, record.store).await?;
     Ok(())
 }
 
@@ -144,8 +154,18 @@ pub(crate) async fn open(
 ) -> Result<(), Failure> {
     let installed_lookup = profile.is_none();
     let profile = runtime::profile(profile)?;
-    if installed_lookup && !runtime::has_descriptor(&profile)? {
-        operate(true).await?;
+    if installed_lookup {
+        let paths = Paths::resolve()?;
+        if let Some(record) = install::installed(&paths)? {
+            let _lock = paths.lock()?;
+            let current = install::active(&paths)?;
+            if current != record {
+                return Err("The active installation changed. Retry opening ReviewQ.".into());
+            }
+            manager().await?;
+            unit_location(&paths).await?;
+            ensure_running(&paths, &current).await?;
+        }
     }
     native_client::open(&profile, options).await
 }

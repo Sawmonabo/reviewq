@@ -40,6 +40,14 @@ pub(super) fn unit_digest(path: &Path) -> Result<Option<String>, Failure> {
     Ok(Some(bundle::digest_file(file)?))
 }
 
+pub(super) fn verify_current(paths: &Paths, release: &Release) -> Result<(), Failure> {
+    let pointer = current(paths);
+    if fs::read_link(&pointer).ok().as_ref() != Some(&release_target(release)) {
+        return Err(paths::conflict(&pointer));
+    }
+    Ok(())
+}
+
 pub(super) fn preflight(
     paths: &Paths,
     old: Option<&Release>,
@@ -261,6 +269,7 @@ pub(super) fn remove(
         return Ok(conflicts);
     }
     let mut owned_assets = BTreeMap::new();
+    let mut owned_releases = Vec::new();
     for id in known {
         let directory = paths.profile.join("releases").join(id);
         if !paths::exists(&directory)? {
@@ -280,8 +289,7 @@ pub(super) fn remove(
                 owned_assets.insert(copy, (entry.size, entry.sha256.clone()));
             }
         }
-        fs::remove_dir_all(&directory)?;
-        paths::sync(paths::parent(&directory)?)?;
+        owned_releases.push(directory);
     }
     for (path, (size, digest)) in owned_assets {
         let valid = (|| -> Result<bool, Failure> {
@@ -295,6 +303,13 @@ pub(super) fn remove(
         } else {
             conflicts.push(path);
         }
+    }
+    if !conflicts.is_empty() {
+        return Ok(conflicts);
+    }
+    for directory in owned_releases {
+        fs::remove_dir_all(&directory)?;
+        paths::sync(paths::parent(&directory)?)?;
     }
     if remove_link(&paths.launcher, &launcher_target(paths)).is_err() {
         conflicts.push(paths.launcher.clone());

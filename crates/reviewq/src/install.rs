@@ -60,15 +60,17 @@ fn load(paths: &Paths) -> Result<Inventory, Failure> {
     Ok(paths::read_json(&journal(paths))?.unwrap_or_default())
 }
 
-pub(crate) fn active(paths: &Paths) -> Result<Release, Failure> {
+pub(crate) fn installed(paths: &Paths) -> Result<Option<Release>, Failure> {
     let inventory = load(paths)?;
     if inventory.pending.is_some() || inventory.removing {
         return Err("Complete the interrupted ReviewQ installation or removal first.".into());
     }
-    let active = inventory
-        .active
-        .ok_or("ReviewQ is not installed for this profile.")?;
-    files::preflight(paths, Some(&active), Some(&active))?;
+    Ok(inventory.active)
+}
+
+pub(crate) fn active(paths: &Paths) -> Result<Release, Failure> {
+    let active = installed(paths)?.ok_or("ReviewQ is not installed for this profile.")?;
+    files::verify_current(paths, &active)?;
     if files::unit_digest(&paths.unit)?.as_deref() != Some(&active.unit) {
         return Err(paths::conflict(&paths.unit));
     }

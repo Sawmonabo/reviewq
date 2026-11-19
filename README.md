@@ -1,12 +1,30 @@
 # ReviewQ
 
-ReviewQ is a local workspace for reviewing GitLab merge requests alongside their Jira tickets and native Codex or Claude conversations. A reviewer can start in a terminal, read the selected file and its discussions in the browser, and send feedback to the same review run. The product design gives the browser, CLI and Model Context Protocol (MCP) clients one Rust service backed by SQLite. Native hosts retain their transcripts.
+ReviewQ is a local workspace for reviewing GitLab merge requests alongside their Jira tickets and native Codex or Claude conversations. Start in a terminal, read the selected file and its discussions in the browser, and send feedback to the same review run. The browser, CLI and Model Context Protocol (MCP) clients share one Rust service backed by SQLite. Native hosts retain their transcripts.
 
-**This checkout is a development scaffold.** The Rust CLI prints its version, and the React entry renders the ReviewQ heading. The first product milestone connects a real Codex terminal, an ordinary MCP chat and a populated browser review. [First working review](docs/plans/01-foundation/first-review.md)
+## Build and install
 
-## Run the scaffold
+On native Linux or WSL with a running systemd user manager, build from a clean checkout. Use GNU Make, Rust 1.100.0, Node.js 24.19.0 or newer, and pnpm 12.15.0.
 
-Use GNU Make, Rust 1.100.0 with rustfmt and Clippy, cargo-nextest, Node.js 24.19.0 or newer, and pnpm 12.15.0. The browser test requires the Chromium build that matches the locked Playwright version. Install the locked web dependencies, print the CLI version and open the dev server from the repository root.
+```sh
+make web-install
+make package
+```
+
+The package target prints its directory and manifest digest. Use that directory in place of `/absolute/path/to/bundle`.
+
+```sh
+/absolute/path/to/bundle/bin/reviewq install --from /absolute/path/to/bundle
+~/.local/bin/reviewq
+```
+
+The first command installs and starts the user service. The second opens the dashboard. Use `reviewq status` to check the running profile, `reviewq stop` and `reviewq start` to control it, and `reviewq logs` for the service journal. The CLI lives in `~/.local/bin`. Install a new verified bundle with the same command to update. `reviewq uninstall` removes the installed software and retains the local database and runtime settings.
+
+The installer prints the runtime configuration path and reports missing native providers by name. Configure exact native executables there with `codexCommand` and `claudeCommand` if they live outside `~/.local/bin`. In an open Claude Code session, use `/reload-plugins` after installation or an update. [Runtime configuration and recovery](docs/specs/operations.md)
+
+## Develop
+
+Use cargo-nextest, rustfmt and Clippy for checks. The browser suite uses the Chromium build that matches the locked Playwright version. Install the locked web dependencies and run the web development server from the repository root.
 
 ```sh
 make web-install
