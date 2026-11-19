@@ -92,8 +92,8 @@ impl RepositoryChatProjectionStore for SqliteStore {
                 check(&tx.sql, &job)?;
                 let common = bytes(&job.checkout.common_dir);
                 let changed = match outcome {
-                    ProjectionOutcome::Applied(verifier) if job.desired => {
-                        applied(tx, &job, &verifier)?
+                    ProjectionOutcome::Applied { verifier, topology } if job.desired => {
+                        applied(tx, &job, &verifier, &topology)?
                     }
                     ProjectionOutcome::Removed if !job.desired => tx.sql.execute(
                         "DELETE FROM checkout_projections WHERE common_dir=?1 AND desired=0",
@@ -130,7 +130,7 @@ pub(super) fn set_desired(db: &Connection) -> Result<(), StoreError> {
          SELECT r.common_dir,p.origin,r.project_id,r.checkout,1,0,0
          FROM settings_repositories r JOIN configured_projects p ON p.project_id=r.project_id WHERE r.common_dir IS NOT NULL
          ON CONFLICT(common_dir) DO UPDATE SET origin=excluded.origin,project_id=excluded.project_id,
-            checkout=excluded.checkout,desired=1,suppressed=0,ready=0,issue=NULL
+            checkout=excluded.checkout,desired=1,suppressed=0,ready=0,issue=NULL,requested_topology=NULL
          WHERE (origin,project_id,checkout,desired) IS DISTINCT FROM
            (excluded.origin,excluded.project_id,excluded.checkout,excluded.desired);",
     )?;
@@ -197,28 +197,39 @@ pub(crate) fn request(
     tx: &mut WriteTx<'_>,
     settings: Revision,
     common: AbsolutePath,
+    topology: Option<[u8; 32]>,
 ) -> Result<Snapshot<bool>, StoreError> {
     if settings_revision(&tx.sql)? != settings {
         return Err(AppError::StaleRevision.into());
     }
-    let scheduled = tx.sql.execute(
-        "UPDATE checkout_projections AS p SET ready=0,issue=NULL,generation=generation+1
+    let allowed = tx.sql.query_row(
+        "SELECT EXISTS(SELECT 1 FROM checkout_projections AS p
          WHERE p.common_dir=?1 AND p.desired=1 AND p.suppressed=0 AND EXISTS (
            SELECT 1 FROM repo_grants g WHERE g.active=1 AND g.verifier IS NOT NULL
-           AND (g.common_dir,g.origin,g.project_id,g.checkout)=(p.common_dir,p.origin,p.project_id,p.checkout))",
-        [bytes(&common)]
+           AND (g.common_dir,g.origin,g.project_id,g.checkout)=(p.common_dir,p.origin,p.project_id,p.checkout)))",
+        [bytes(&common)], |row| row.get::<_,bool>(0),
+    )?;
+    if !allowed {
+        return crate::events::snapshot(&tx.sql, false);
+    }
+    let scheduled = tx.sql.execute(
+        "UPDATE checkout_projections SET ready=0,issue=NULL,generation=generation+1,
+           requested_topology=coalesce(?2,requested_topology)
+         WHERE common_dir=?1 AND (?2 IS NULL OR requested_topology IS DISTINCT FROM ?2)",
+        params![bytes(&common), topology.as_ref().map(<[u8; 32]>::as_slice)],
     )? != 0;
     if scheduled {
         tx.projection_changed = true;
         tx.emit(&[ResourceKey::Settings])?;
     }
-    crate::events::snapshot(&tx.sql, scheduled)
+    crate::events::snapshot(&tx.sql, true)
 }
 
 fn applied(
     tx: &mut WriteTx<'_>,
     job: &CheckoutProjection,
     verifier: &[u8; 32],
+    topology: &[u8; 32],
 ) -> Result<usize, StoreError> {
     let db = &tx.sql;
     let common = bytes(&job.checkout.common_dir);
@@ -238,8 +249,9 @@ fn applied(
         return Err(AppError::StaleRevision.into());
     }
     Ok(db.execute(
-        "UPDATE checkout_projections SET issue=NULL,ready=1 WHERE common_dir=?1 AND ready=0",
-        [common],
+        "UPDATE checkout_projections SET issue=NULL,ready=1,requested_topology=?2
+         WHERE common_dir=?1 AND (ready=0 OR requested_topology IS DISTINCT FROM ?2)",
+        params![common, topology.as_slice()],
     )?)
 }
 

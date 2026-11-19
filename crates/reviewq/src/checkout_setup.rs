@@ -39,8 +39,9 @@ pub(crate) async fn worktree(
     let endpoint = runtime::read_endpoint(profile)?;
     let client = native_client::client()?;
     let settings_revision = settings_revision(&client, &endpoint).await?;
+    let fingerprint = observe::Topology::read(&common)?.fingerprint;
     let body = serde_json::to_vec(&json!({ "action":"projectWorktree", "commonDir":common,
-        "settingsRevision":settings_revision }))?;
+        "settingsRevision":settings_revision, "topology":URL_SAFE_NO_PAD.encode(fingerprint) }))?;
     native_client::signed(&client, &endpoint, "POST", GRANT, &body).await?;
     Ok(())
 }
@@ -117,12 +118,12 @@ struct Prepared {
 }
 
 impl Prepared {
-    async fn apply(&mut self) -> Result<bool, Failure> {
+    async fn apply(&mut self) -> Result<(), Failure> {
         self.plan
             .apply(&self.inventory, &self.checkout, self.claude.as_deref())
             .await?;
         match hooks::reconcile(&self.profile, &self.checkout).await {
-            Ok(observe) => Ok(observe),
+            Ok(()) => Ok(()),
             Err(error) => {
                 self.plan.rollback()?;
                 Err(error)

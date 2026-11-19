@@ -12,16 +12,15 @@ use super::git::Checkout;
 
 const POST_CHECKOUT: &str = "hooks/post-checkout";
 
-/// Returns whether the service should observe the checkout's worktree metadata.
-pub(super) async fn reconcile(profile: &Path, checkout: &Checkout) -> Result<bool, Failure> {
+pub(super) async fn reconcile(profile: &Path, checkout: &Checkout) -> Result<(), Failure> {
     let Some(launcher) = installed_launcher() else {
-        return Ok(true);
+        return Ok(());
     };
     // Git applies includes and per-worktree overrides in their native scope.
     for root in &checkout.worktrees {
         match git_output(root, &["config", "--get", "core.hooksPath"]).await {
             Err(AppError::NotFound) => (),
-            _ => return Ok(true),
+            _ => return Ok(()),
         }
     }
     let hook = checkout.common.join(POST_CHECKOUT);
@@ -30,7 +29,7 @@ pub(super) async fn reconcile(profile: &Path, checkout: &Checkout) -> Result<boo
     let previous = match hook.symlink_metadata() {
         Ok(_) => match owned_file(&hook, &owned) {
             Ok(file) => file,
-            Err(_) => return Ok(true),
+            Err(_) => return Ok(()),
         },
         Err(error) if error.kind() == ErrorKind::NotFound => None,
         Err(error) => return Err(error.into()),
@@ -51,7 +50,7 @@ pub(super) async fn reconcile(profile: &Path, checkout: &Checkout) -> Result<boo
     save(&inventory, &owned)?;
     Edit::executable(hook, previous, script.into_bytes()).apply()?;
     save(&inventory, &BTreeSet::from([digest]))?;
-    Ok(false)
+    Ok(())
 }
 
 pub(super) fn cleanup(profile: &Path, common: &Path) -> Result<(), Failure> {

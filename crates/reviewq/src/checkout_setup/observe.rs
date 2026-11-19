@@ -2,7 +2,6 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::ffi::OsString;
 use std::fs::{self, Metadata};
 use std::io::ErrorKind;
-use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -10,67 +9,61 @@ use notify::{Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use reviewq_app::access::Actor;
 use reviewq_app::workspace::WorkspaceStore;
 use reviewq_domain::session::AbsolutePath;
+use sha2::{Digest, Sha256};
 use tokio::sync::Notify;
 
-use super::{Failure, git};
+use super::{Failure, files, git};
 
 const MAX_WATCH_PATHS: usize = 1024;
 
-#[derive(Default)]
 pub(super) struct Topology {
     directories: Vec<PathBuf>,
-    materialized: BTreeMap<OsString, Locator>,
-}
-
-#[derive(Eq, PartialEq)]
-struct Locator {
-    device: u64,
-    inode: u64,
-    seconds: i64,
-    nanos: i64,
-    bytes: u64,
+    pub fingerprint: [u8; 32],
 }
 
 impl Topology {
     pub(super) fn read(common: &Path) -> Result<Self, Failure> {
-        let mut topology = Self::default();
-        if metadata(common)?.filter(Metadata::is_dir).is_none() {
-            return Ok(topology);
-        }
-        topology.directories.push(common.to_owned());
-        let registrations = common.join("worktrees");
-        if metadata(&registrations)?.filter(Metadata::is_dir).is_none() {
-            return Ok(topology);
-        }
-        topology.directories.push(registrations.clone());
-        for (number, entry) in fs::read_dir(registrations)?.enumerate() {
-            if number >= git::MAX_WORKTREES {
-                return Err("The repository exceeds the linked worktree observation limit.".into());
-            }
-            let entry = entry?;
-            if !entry.file_type()?.is_dir() {
-                continue;
-            }
-            let path = entry.path();
-            topology.directories.push(path.clone());
-            if metadata(&path.join("index"))?
-                .filter(Metadata::is_file)
-                .is_some()
-                && let Some(locator) = metadata(&path.join("gitdir"))?.filter(Metadata::is_file)
-            {
-                topology.materialized.insert(
-                    entry.file_name(),
-                    Locator {
-                        device: locator.dev(),
-                        inode: locator.ino(),
-                        seconds: locator.mtime(),
-                        nanos: locator.mtime_nsec(),
-                        bytes: locator.len(),
-                    },
-                );
+        let mut directories = Vec::new();
+        let mut materialized = BTreeMap::<OsString, [u8; 32]>::new();
+        if metadata(common)?.filter(Metadata::is_dir).is_some() {
+            directories.push(common.to_owned());
+            let registrations = common.join("worktrees");
+            if metadata(&registrations)?.filter(Metadata::is_dir).is_some() {
+                directories.push(registrations.clone());
+                for (number, entry) in fs::read_dir(registrations)?.enumerate() {
+                    if number >= git::MAX_WORKTREES {
+                        return Err(
+                            "The repository exceeds the linked worktree observation limit.".into(),
+                        );
+                    }
+                    let entry = entry?;
+                    if !entry.file_type()?.is_dir() {
+                        continue;
+                    }
+                    let path = entry.path();
+                    directories.push(path.clone());
+                    if metadata(&path.join("index"))?
+                        .filter(Metadata::is_file)
+                        .is_some()
+                        && let Some(locator) = files::read_limited(&path.join("gitdir"), 4096)?
+                    {
+                        materialized
+                            .insert(entry.file_name(), Sha256::digest(locator.bytes).into());
+                    }
+                }
             }
         }
-        Ok(topology)
+        let mut hash = Sha256::new();
+        for (name, digest) in materialized {
+            let name = name.as_encoded_bytes();
+            hash.update((name.len() as u64).to_le_bytes());
+            hash.update(name);
+            hash.update(digest);
+        }
+        Ok(Self {
+            directories,
+            fingerprint: hash.finalize().into(),
+        })
     }
 }
 
@@ -122,8 +115,8 @@ impl Observers {
         for (root, previous) in &mut self.roots {
             if let Ok(next) = Topology::read(root.as_path()) {
                 previous.directories = next.directories;
-                if previous.materialized != next.materialized {
-                    changed.push((root.clone(), next.materialized));
+                if previous.fingerprint != next.fingerprint {
+                    changed.push((root.clone(), next.fingerprint));
                 }
             }
         }
@@ -137,12 +130,17 @@ impl Observers {
         };
         for (root, topology) in changed {
             match store
-                .request_checkout_projection(actor.clone(), current.value.revision, root.clone())
+                .request_checkout_projection(
+                    actor.clone(),
+                    current.value.revision,
+                    root.clone(),
+                    topology,
+                )
                 .await
             {
                 Ok(result) if result.value => {
                     if let Some(previous) = self.roots.get_mut(&root) {
-                        previous.materialized = topology;
+                        previous.fingerprint = topology;
                     }
                 }
                 Ok(_) => {

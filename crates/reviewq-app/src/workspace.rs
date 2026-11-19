@@ -64,7 +64,10 @@ pub struct CheckoutProjection {
 }
 
 pub enum ProjectionOutcome {
-    Applied([u8; 32]),
+    Applied {
+        verifier: [u8; 32],
+        topology: [u8; 32],
+    },
     Removed,
     Deferred(String),
 }
@@ -109,6 +112,7 @@ pub trait WorkspaceStore: Send + Sync {
         actor: Actor,
         settings: Revision,
         common_dir: AbsolutePath,
+        topology: [u8; 32],
     ) -> AppFuture<'_, Snapshot<bool>>;
 
     /// Replaces active memberships and checkout authority under one settings revision.

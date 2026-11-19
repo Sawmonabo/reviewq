@@ -213,6 +213,7 @@ impl WorkspaceStore for SqliteStore {
                     tx,
                     settings,
                     result.value.common_dir.clone(),
+                    None,
                 )?;
                 snapshot(&tx.sql, result.value)
             })
@@ -256,12 +257,15 @@ impl WorkspaceStore for SqliteStore {
         actor: Actor,
         settings: Revision,
         common_dir: AbsolutePath,
+        topology: [u8; 32],
     ) -> AppFuture<'_, Snapshot<bool>> {
         Box::pin(async move {
             operator(&actor).map_err(StoreError::app)?;
-            self.write(move |tx| crate::settings::projection::request(tx, settings, common_dir))
-                .await
-                .map_err(StoreError::app)
+            self.write(move |tx| {
+                crate::settings::projection::request(tx, settings, common_dir, Some(topology))
+            })
+            .await
+            .map_err(StoreError::app)
         })
     }
 
