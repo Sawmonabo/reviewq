@@ -31,7 +31,6 @@ export function SprintOptions({
   const [failure, setFailure] = useState<string>();
   const request = useRef<AbortController | undefined>(undefined);
   useEffect(() => () => request.current?.abort(), []);
-  const retained = Object.values(earlier).reduce((size, page) => size + page.choices.length, 0);
   const jira = settings?.connections.jira;
   const query = search.trim().toLocaleLowerCase();
 
@@ -57,15 +56,17 @@ export function SprintOptions({
         controller.signal,
       );
       if (controller.signal.aborted) return;
-      const choices = data.items
-        .filter((item) => item.boardId === boardId)
-        .map(({ id, label, state }) => ({ id, label, state }));
+      const choices = new Map(
+        (page?.choices ?? [])
+          .filter(({ id }) => pairs.includes(`${boardId}:${id}`))
+          .map((choice) => [choice.id, choice]),
+      );
+      for (const { id, label, state } of data.items.filter((item) => item.boardId === boardId)) {
+        choices.set(id, { id, label, state });
+      }
       setEarlier({
         ...earlier,
-        [boardId]: {
-          choices: [...(page?.choices ?? []), ...choices.slice(0, 400 - retained)],
-          next: data.nextCursor,
-        },
+        [boardId]: { choices: [...choices.values()], next: data.nextCursor },
       });
     } catch (error) {
       if (!controller.signal.aborted) setFailure(describeError(error));
@@ -92,44 +93,75 @@ export function SprintOptions({
       </fieldset>
       <input
         aria-label="Search sprints"
-        placeholder="Find a sprint…"
+        placeholder="Find a loaded sprint…"
         maxLength={200}
         value={search}
         onChange={(event) => setSearch(event.currentTarget.value)}
       />
+      {mode === "selected" && (
+        <div className="queue-sprint-selected" aria-label="Selected sprints">
+          {pairs.map((key) => {
+            const [boardId, sprintId] = key.split(":");
+            const label =
+              known.find((entry) => entry.boardId === boardId && entry.id === sprintId)?.label ??
+              earlier[boardId ?? ""]?.choices.find((entry) => entry.id === sprintId)?.label ??
+              `Sprint ${sprintId ?? ""}`;
+            const board = boards.find((entry) => entry.boardId === boardId)?.name;
+            return (
+              <button
+                key={key}
+                type="button"
+                aria-label={`Remove ${label}${board ? ` from ${board}` : ""}`}
+                className="quiet-button"
+                disabled={busy}
+                onClick={() => {
+                  const next = pairs.filter((item) => item !== key);
+                  onChange(next.length ? "selected" : "active", next);
+                }}
+              >
+                {label} ×
+              </button>
+            );
+          })}
+        </div>
+      )}
       {boards.map((board) => {
         const page = earlier[board.boardId];
         const items = new Map((page?.choices ?? []).map((choice) => [choice.id, choice]));
         for (const { id, label } of known.filter((choice) => choice.boardId === board.boardId)) {
           if (!items.has(id)) items.set(id, { id, label, state: null });
         }
+        const matching = [...items.values()].filter(({ label }) =>
+          label.toLocaleLowerCase().includes(query),
+        );
         return (
           <fieldset key={board.boardId} className="queue-scope-group">
             <legend>{board.name}</legend>
-            {[...items.values()]
-              .filter(({ label }) => label.toLocaleLowerCase().includes(query))
-              .map((choice) => {
-                const id = `${board.boardId}:${choice.id}`;
-                const checked = mode === "selected" && pairs.includes(id);
-                return (
-                  <label className="queue-scope-option" key={choice.id}>
-                    <input
-                      type="checkbox"
-                      checked={checked}
-                      disabled={busy || (!checked && pairs.length >= 32)}
-                      onChange={() => {
-                        const next = checked ? pairs.filter((item) => item !== id) : [...pairs, id];
-                        onChange(next.length ? "selected" : "active", next);
-                      }}
-                    />
-                    <span>
-                      {choice.label}
-                      {choice.state && <small>{choice.state}</small>}
-                    </span>
-                  </label>
-                );
-              })}
-            {page?.next !== null && jira?.configured && retained < 400 && (
+            {matching.map((choice) => {
+              const id = `${board.boardId}:${choice.id}`;
+              const checked = mode === "selected" && pairs.includes(id);
+              return (
+                <label className="queue-scope-option" key={choice.id}>
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    disabled={busy || (!checked && pairs.length >= 32)}
+                    onChange={() => {
+                      const next = checked ? pairs.filter((item) => item !== id) : [...pairs, id];
+                      onChange(next.length ? "selected" : "active", next);
+                    }}
+                  />
+                  <span>
+                    {choice.label}
+                    {choice.state && <small>{choice.state}</small>}
+                  </span>
+                </label>
+              );
+            })}
+            {!matching.length && query && (
+              <p className="queue-scope-no-results">No loaded sprints match</p>
+            )}
+            {page?.next !== null && jira?.configured && (
               <button
                 className="quiet-button"
                 type="button"

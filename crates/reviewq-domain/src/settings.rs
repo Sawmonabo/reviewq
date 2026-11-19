@@ -3,6 +3,9 @@
 use crate::identity::ProjectId;
 use crate::session::AbsolutePath;
 
+pub const MAX_CONFIGURED_BOARDS: usize = 128;
+pub const MAX_CONFIGURED_REPOSITORIES: usize = 256;
+
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum Provider {
     GitLab,

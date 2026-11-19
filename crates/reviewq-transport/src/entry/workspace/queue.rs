@@ -9,6 +9,7 @@ use reviewq_app::queue::{
     MAX_QUEUE_PAGE, QueueFacet, QueueFilter, QueueListItem, QueueOrder, QueueOwnership, QueuePhase,
     QueuePosition, QueueSortKey, SprintFilter, SprintPair,
 };
+use reviewq_domain::settings::{MAX_CONFIGURED_BOARDS, MAX_CONFIGURED_REPOSITORIES};
 use reviewq_protocol::queue as dto;
 use reviewq_protocol::{Page, PageCursorDto, RevisionDto, TicketKeyDto, UpstreamIdDto};
 use serde::{Deserialize, Serialize};
@@ -166,7 +167,8 @@ fn upstream(value: u64) -> Result<UpstreamIdDto, AppError> {
 }
 
 fn parse_query(raw: &str) -> Result<(QueueFilter, u16, Option<String>), AppError> {
-    if raw.len() > 16 * 1024 {
+    // Permit every configured ID, the encoded search and a full-length page cursor together.
+    if raw.len() > 24 * 1024 {
         return Err(AppError::InvalidRequest);
     }
     let mut filter = QueueFilter::default();
@@ -181,8 +183,12 @@ fn parse_query(raw: &str) -> Result<(QueueFilter, u16, Option<String>), AppError
             return Err(AppError::InvalidRequest);
         }
         match field.as_ref() {
-            "boardId" if filter.boards.len() < 128 => filter.boards.push(number(value)?),
-            "projectId" if filter.projects.len() < 128 => filter.projects.push(number(value)?),
+            "boardId" if filter.boards.len() < MAX_CONFIGURED_BOARDS => {
+                filter.boards.push(number(value)?)
+            }
+            "projectId" if filter.projects.len() < MAX_CONFIGURED_REPOSITORIES => {
+                filter.projects.push(number(value)?)
+            }
             "sprintPair" if filter.pairs.len() < 32 => filter.pairs.push(pair(value)?),
             "scope" if value == "none" => filter.empty_scope = true,
             "sprint" => {
