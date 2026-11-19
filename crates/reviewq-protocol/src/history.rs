@@ -184,6 +184,19 @@ pub struct HistoryEntry {
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct HistoryResult {
+    pub run_id: RunIdDto,
+    pub session_key: SessionKeyDto,
+    pub generation: Option<HistoryGenerationDto>,
+    pub availability: HistoryAvailability,
+    pub entry: Option<HistoryEntry>,
+}
+
+pub type HistoryResultResponse = Success<HistoryResult>;
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct HistoryPartPage {
     pub entry_id: HistoryEntryIdDto,
     pub parts: Vec<HistoryPart>,

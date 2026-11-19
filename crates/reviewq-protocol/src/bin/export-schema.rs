@@ -8,6 +8,7 @@ use reviewq_protocol::changes::{PatchDiscussionsResponse, PatchFileIndexResponse
 use reviewq_protocol::events::{InvalidateEvent, ResetEvent};
 use reviewq_protocol::history::{
     HistoryContentResponse, HistoryNavigationResponse, HistoryPageResponse, HistoryPlanResponse,
+    HistoryResultResponse,
 };
 use reviewq_protocol::queue::{QueuePageResponse, ReviewOverviewResponse, ReviewSelectionResponse};
 use reviewq_protocol::{
@@ -95,6 +96,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     registry.response::<HistoryPageResponse>("history", "HistoryPageResponse")?;
     registry.response::<HistoryNavigationResponse>("history", "HistoryNavigationResponse")?;
     registry.response::<HistoryPlanResponse>("history", "HistoryPlanResponse")?;
+    registry.response::<HistoryResultResponse>("history", "HistoryResultResponse")?;
     registry.response::<reviewq_protocol::history::HistoryPartPageResponse>(
         "history",
         "HistoryPartPageResponse",

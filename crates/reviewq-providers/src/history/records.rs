@@ -16,6 +16,7 @@ pub(super) struct Record {
     pub turn: Option<NativeTurnId>,
     pub at_ms: Option<i64>,
     pub kind: VisibleKind,
+    pub final_response: bool,
     pub text: Vec<u8>,
     pub bytes: u64,
     pub parts: Vec<Part>,
@@ -92,6 +93,9 @@ struct Message {
     result: Text,
     tool: Option<String>,
     status: Option<String>,
+    phase: Option<String>,
+    restricted: bool,
+    final_response: bool,
     claude_tool_parent: Option<NativeInputId>,
     tool_calls: Vec<(NativeInputId, String)>,
     argument_field: Option<String>,
@@ -240,6 +244,7 @@ fn project_to(
         turn: turn.and_then(|value| value.parse().ok()),
         at_ms,
         kind,
+        final_response: item.final_response,
         text: item.text.picked,
         bytes: item.text.bytes,
         parts: item.parts,
@@ -288,7 +293,11 @@ fn codex<R: Read>(
     }
     let kind = match event.item.kind.as_deref() {
         Some("UserMessage") => VisibleKind::User,
-        Some("AgentMessage") => VisibleKind::Assistant,
+        Some("AgentMessage") => {
+            event.item.final_response =
+                event.item.phase.as_deref() == Some("final_answer") && !event.item.restricted;
+            VisibleKind::Assistant
+        }
         Some("Plan" | "plan") => {
             event.item.parts.push(Part {
                 index: 0,
@@ -363,6 +372,7 @@ fn claude<R: Read>(
     let mut id = None;
     let mut record_type = None;
     let mut message_role = None;
+    let mut stop_reason = None;
     let mut stamp = None;
     let mut hidden = false;
     let mut sidechain = false;
@@ -400,6 +410,7 @@ fn claude<R: Read>(
         "message" if reader.peek().map_err(invalid)? == ValueType::Object => {
             object(reader, |name, reader| match name {
                 "role" => string(reader, ID_BYTES).map(|value| message_role = value),
+                "stop_reason" => string(reader, ID_BYTES).map(|value| stop_reason = value),
                 "content" => contents(reader, window, &mut item, output),
                 _ => reader.skip_value().map_err(invalid),
             })
@@ -414,6 +425,8 @@ fn claude<R: Read>(
         }
         None => !sidechain && session.as_deref() == Some(native.as_str()),
     };
+    item.final_response =
+        record_type.as_deref() == Some("assistant") && stop_reason.as_deref() == Some("end_turn");
     if hidden || !matched {
         return Ok(None);
     }
@@ -446,6 +459,11 @@ fn codex_item<R: Read>(
             .map(|value| item.text = value),
         "tool" | "name" => string(reader, 128).map(|value| item.tool = value),
         "status" => string(reader, 32).map(|value| item.status = value),
+        "phase" => string(reader, 32).map(|value| item.phase = value),
+        "moderation" | "delivery" => {
+            item.restricted |= reader.peek().map_err(invalid)? != ValueType::Null;
+            reader.skip_value().map_err(invalid)
+        }
         "command" | "arguments" | "query" | "changes" | "prompt" => {
             item.argument_field = Some(name.to_owned());
             tools::body(

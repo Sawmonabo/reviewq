@@ -6,8 +6,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use reviewq_app::access::AppError;
 use reviewq_app::history::{
-    ContentReference, FileContentRef, FilePosition, NativeHistoryPage, NativePosition,
-    VisibleEntry, VisiblePart, VisiblePartKind,
+    ContentReference, FileContentRef, FilePosition, NativeFinalResponse, NativeHistoryPage,
+    NativePosition, VisibleEntry, VisiblePart, VisiblePartKind,
 };
 use reviewq_domain::identity::NativeInputId;
 use reviewq_domain::session::HostProvider;
@@ -126,6 +126,58 @@ pub(super) fn page(
             .transpose()?,
         within: None,
     })
+}
+
+pub(super) fn final_response(
+    source: &Source,
+    cancelled: &AtomicBool,
+) -> Result<NativeFinalResponse, AppError> {
+    let mut budget = READ_BUDGET;
+    let length = source.file.metadata().map_err(io_error)?.len();
+    let complete = end_of_line(&source.file, length, &mut budget, cancelled)?;
+    let generation = generation(source)?;
+    let mut lines = Lines::new(&source.file, cancelled);
+    let mut offset = complete;
+    let mut entry = None;
+    for _ in 0..MAX_RECORDS {
+        if offset == 0 {
+            break;
+        }
+        let start = lines.previous(offset - 1, &mut budget)?;
+        let record = records::project(
+            source.provider,
+            lines.input(start, offset),
+            &source.native_id,
+            source.root_session.as_ref(),
+            0,
+            2_052,
+        );
+        offset = start;
+        if let Some(record) = record.filter(|record| record.final_response && record.bytes > 0) {
+            let position = file_position(&source.file, start, complete)?;
+            entry = Some(VisibleEntry {
+                id: record.id.clone(),
+                turn: record.turn,
+                at_ms: record.at_ms,
+                kind: record.kind,
+                text: readable_prefix(&record.text)?.chars().take(512).collect(),
+                text_bytes: Some(record.bytes),
+                parts: Vec::new(),
+                next_part: None,
+                content: Some(ContentReference::File(FileContentRef {
+                    generation: generation.clone(),
+                    entry: record.id,
+                    part: None,
+                    position,
+                })),
+            });
+            break;
+        }
+    }
+    if entry.is_none() && offset != 0 {
+        return Err(AppError::Unavailable);
+    }
+    Ok(NativeFinalResponse { generation, entry })
 }
 
 pub(super) fn parts(
@@ -531,5 +583,67 @@ fn io_error(error: io::Error) -> AppError {
         io::ErrorKind::PermissionDenied => AppError::Forbidden,
         io::ErrorKind::UnexpectedEof => AppError::CursorExpired,
         _ => AppError::Unavailable,
+    }
+}
+
+#[cfg(test)]
+mod result_tests {
+    use std::io::Write;
+    use std::sync::atomic::AtomicBool;
+
+    use reviewq_domain::session::HostProvider;
+
+    use super::{Source, final_response};
+
+    #[test]
+    fn selects_only_the_last_proven_native_final_response() {
+        let mut source = Source {
+            file: tempfile::tempfile().unwrap(),
+            provider: HostProvider::Codex,
+            native_id: "target".parse().unwrap(),
+            fingerprint: [0; 32],
+            root_session: None,
+            path: "unused".into(),
+        };
+        let write = |file: &mut std::fs::File, item: serde_json::Value, thread: &str| {
+            writeln!(
+                file,
+                "{}",
+                serde_json::json!({"type":"event_msg","payload":{
+                    "type":"item_completed","turn_id":"turn","thread_id":thread,"item":item,
+                }})
+            )
+            .unwrap();
+        };
+        write(
+            &mut source.file,
+            serde_json::json!({"type":"AgentMessage","id":"earlier","text":"preview","phase":"commentary"}),
+            "target",
+        );
+        let cancel = AtomicBool::new(false);
+        assert!(final_response(&source, &cancel).unwrap().entry.is_none());
+        write(
+            &mut source.file,
+            serde_json::json!({"type":"AgentMessage","id":"response","text":"final result","phase":"final_answer"}),
+            "target",
+        );
+        write(
+            &mut source.file,
+            serde_json::json!({"type":"AgentMessage","id":"later","text":"preview","phase":"commentary"}),
+            "target",
+        );
+        write(
+            &mut source.file,
+            serde_json::json!({"type":"AgentMessage","id":"async","text":"question","phase":"final_answer","delivery":"async"}),
+            "target",
+        );
+        write(
+            &mut source.file,
+            serde_json::json!({"type":"AgentMessage","id":"other","text":"wrong session","phase":"final_answer"}),
+            "other",
+        );
+        let result = final_response(&source, &cancel).unwrap().entry.unwrap();
+        assert_eq!(result.id.as_str(), "response");
+        assert_eq!(result.text, "final result");
     }
 }
