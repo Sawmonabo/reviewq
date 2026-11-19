@@ -3,16 +3,16 @@
 use reviewq_app::access::{Actor, ActorScope, AppError, AppFuture};
 use reviewq_app::decisions::{
     Decision, DecisionRequest, DecisionResult, DecisionStore, Disposition, Frontier,
-    ObservedAttention, ReportFrontier, SessionFrontier,
+    ObservedAttention, ReportFrontier, SessionFrontier, TerminalDecision,
 };
 use reviewq_app::events::{ResourceKey, Snapshot};
-use reviewq_app::queue::RunSummary;
+use reviewq_app::queue::{MergeRequestState, ReviewSource, RunSummary};
 use reviewq_domain::identity::{MrIdentity, ReviewId, Revision, SubmissionId};
 use rusqlite::{Connection, OptionalExtension, Row, params};
 use sha2::{Digest, Sha256};
 
 use crate::events::{now_ms, snapshot};
-use crate::queue::{identity_for_review, parse, text};
+use crate::queue::{identity_for_review, parse, save_observations, source_for_review, text};
 use crate::workspace::{
     actor_key, advance_queue, allow_review, configured, hash_field, scope, settings_revision,
 };
@@ -20,8 +20,31 @@ use crate::{SqliteStore, StoreError};
 
 const DECISION: &str = "review_decision";
 const CHECKPOINT: &str = "review_checkpoint";
+const TERMINAL: &str = "terminal_review_decision";
 
 impl DecisionStore for SqliteStore {
+    fn terminal_decision_replay(
+        &self,
+        actor: Actor,
+        input: TerminalDecision,
+    ) -> AppFuture<'_, Option<Snapshot<DecisionResult>>> {
+        Box::pin(async move {
+            crate::workspace::operator(&actor).map_err(StoreError::app)?;
+            self.read(move |db| {
+                let key = actor_key(&actor);
+                let digest = terminal_digest(&input.target, &input.source_sha, input.disposition);
+                if !verify_replay(db, &key, TERMINAL, &input.submission, &digest)? {
+                    return Ok(None);
+                }
+                let result = read_receipt(db, &key, TERMINAL, &input.submission)?;
+                authorized(db, &actor, &result.review)?;
+                Ok(Some(snapshot(db, result)?))
+            })
+            .await
+            .map_err(StoreError::app)
+        })
+    }
+
     fn read_decision_replay(
         &self,
         actor: Actor,
@@ -39,14 +62,14 @@ impl DecisionStore for SqliteStore {
         })
     }
 
-    fn decision_source(&self, actor: Actor, review: ReviewId) -> AppFuture<'_, MrIdentity> {
+    fn decision_source(&self, actor: Actor, review: ReviewId) -> AppFuture<'_, ReviewSource> {
         Box::pin(async move {
             self.read(move |db| {
                 let identity = authorized(db, &actor, &review)?;
                 if !configured(db, &identity)? {
                     return Err(AppError::Unavailable.into());
                 }
-                Ok(identity)
+                source_for_review(db, &review)
             })
             .await
             .map_err(StoreError::app)
@@ -57,7 +80,8 @@ impl DecisionStore for SqliteStore {
         &self,
         actor: Actor,
         input: DecisionRequest,
-        identity: MrIdentity,
+        prior: ReviewSource,
+        observed: ReviewSource,
         checkpoint: Option<Frontier>,
     ) -> AppFuture<'_, Snapshot<DecisionResult>> {
         Box::pin(async move {
@@ -67,29 +91,37 @@ impl DecisionStore for SqliteStore {
                 if let Some(previous) = replay(db, &actor, &input)? {
                     return snapshot(db, previous);
                 }
-                if current_identity != identity
-                    || !configured(db, &identity)?
+                if current_identity != prior.identity
+                    || current_identity != observed.identity
+                    || !configured(db, &current_identity)?
                     || settings_revision(db)? != input.expected_settings
                 {
                     return Err(AppError::StaleRevision.into());
                 }
                 if input.checkpoint_id.is_some() != checkpoint.is_some()
                     || (checkpoint.is_none() && input.disposition.is_none())
+                    || (input.terminal_target.is_some()
+                        && (checkpoint.is_some()
+                            || input.disposition.is_none()
+                            || !matches!(actor.scope(), ActorScope::LocalOperator)))
                 {
                     return Err(AppError::InvalidRequest.into());
                 }
-                let (head, state): (String, String) = db.query_row(
-                    "SELECT head_sha, state FROM reviews WHERE review_id=?1",
-                    [input.review.as_str()],
-                    |row| Ok((row.get(0)?, row.get(1)?)),
-                )?;
-                if head != input.source_sha.as_str() || state != "open" {
+                let source = source_for_review(db, &input.review)?;
+                if observed.head_sha != input.source_sha
+                    || observed.state != MergeRequestState::Open
+                    || (source != prior && source != observed)
+                    || (observed.updated_at_ms < source.updated_at_ms
+                        && observed.head_sha != source.head_sha)
+                {
                     return Err(AppError::StaleRevision.into());
                 }
                 let mut outcome = current(db, &input.review)?;
                 if outcome.revision != input.expected_revision {
                     return Err(AppError::StaleRevision.into());
                 }
+                save_observations(tx, std::slice::from_ref(&observed))?;
+                let db = &tx.sql;
                 outcome.revision = outcome.revision.checked_add(1).ok_or(AppError::Internal)?;
                 if let Some(disposition) = input.disposition {
                     outcome.disposition = Some(disposition);
@@ -132,7 +164,9 @@ fn authorized(db: &Connection, actor: &Actor, review: &ReviewId) -> Result<MrIde
 }
 
 fn operation(input: &DecisionRequest) -> &'static str {
-    if input.disposition.is_some() {
+    if input.terminal_target.is_some() {
+        TERMINAL
+    } else if input.disposition.is_some() {
         DECISION
     } else {
         CHECKPOINT
@@ -140,6 +174,9 @@ fn operation(input: &DecisionRequest) -> &'static str {
 }
 
 fn digest(input: &DecisionRequest) -> [u8; 32] {
+    if let (Some(target), Some(disposition)) = (&input.terminal_target, input.disposition) {
+        return terminal_digest(target, &input.source_sha, disposition);
+    }
     let mut digest = Sha256::new();
     hash_field(&mut digest, input.review.as_str().as_bytes());
     hash_field(&mut digest, input.source_sha.as_str().as_bytes());
@@ -153,6 +190,18 @@ fn digest(input: &DecisionRequest) -> [u8; 32] {
     }
     digest.update(input.expected_revision.get().to_be_bytes());
     digest.update(input.expected_settings.get().to_be_bytes());
+    digest.finalize().into()
+}
+
+fn terminal_digest(
+    target: &str,
+    sha: &reviewq_domain::identity::GitSha,
+    disposition: Disposition,
+) -> [u8; 32] {
+    let mut digest = Sha256::new();
+    hash_field(&mut digest, target.as_bytes());
+    hash_field(&mut digest, sha.as_str().as_bytes());
+    hash_field(&mut digest, disposition.to_string().as_bytes());
     digest.finalize().into()
 }
 
@@ -171,21 +220,31 @@ fn replay(
     )? {
         return Ok(None);
     }
+    Ok(Some(read_receipt(
+        db,
+        &key,
+        operation(input),
+        &input.submission,
+    )?))
+}
+
+fn read_receipt(
+    db: &Connection,
+    key: &[u8; 32],
+    operation: &str,
+    submission: &SubmissionId,
+) -> Result<DecisionResult, StoreError> {
     let mut statement = db.prepare_cached(
         "SELECT review_id, revision, disposition, reviewed_sha, reviewed_at_ms, checkpoint_id
          FROM review_decision_receipts WHERE actor_key=?1 AND operation=?2 AND submission_id=?3",
     )?;
-    let mut rows = statement.query(params![
-        key.as_slice(),
-        operation(input),
-        input.submission.as_str()
-    ])?;
+    let mut rows = statement.query(params![key.as_slice(), operation, submission.as_str()])?;
     let row = rows.next()?.ok_or(AppError::Internal)?;
-    Ok(Some(DecisionResult {
+    Ok(DecisionResult {
         review: parse(text(row, 0)?)?,
         decision: decode(row, 1)?,
         checkpoint_id: row.get(5)?,
-    }))
+    })
 }
 
 fn record(

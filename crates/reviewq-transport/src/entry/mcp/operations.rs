@@ -1,7 +1,6 @@
 use reviewq_app::access::{Actor, AppError};
 use reviewq_app::hosts::{MessageBody, send_message};
 use reviewq_app::queue::{ManagementFilter, RunSummary};
-use reviewq_app::sources::ReviewResolution;
 use reviewq_domain::identity::{ReviewId, RunId, SessionKey};
 use reviewq_protocol::mcp::{
     GetReview, ListReviews, ReadTranscript, ReviewFilter, SendReviewMessage, TranscriptRead,
@@ -14,10 +13,7 @@ use crate::entry::launch;
 use crate::entry::messages;
 use crate::entry::pages::{parse, project_review, queue_sync};
 
-pub(super) enum ResolvedReview {
-    Review(ReviewId),
-    Alternatives(Vec<String>),
-}
+pub(super) use crate::entry::targets::{ResolvedReview, resolve};
 
 pub(super) async fn list(
     entry: &Entry,
@@ -265,41 +261,6 @@ async fn select(
         .value;
     let lead = selected.lead().ok_or(AppError::NotFound)?;
     Ok((lead.run_id().clone(), lead.session_key().clone()))
-}
-
-pub(super) async fn resolve(
-    entry: &Entry,
-    actor: &Actor,
-    target: &str,
-) -> Result<ResolvedReview, AppError> {
-    if let Ok(id) = parse::<ReviewId>(target) {
-        match entry
-            .store
-            .resolve_selection(actor.clone(), id.clone(), None)
-            .await
-        {
-            Ok(_) => return Ok(ResolvedReview::Review(id)),
-            Err(AppError::NotFound) => {}
-            Err(error) => return Err(error),
-        }
-    }
-    let source = entry
-        .active_source()
-        .await?
-        .reader
-        .ok_or(AppError::NotFound)?;
-    let workspace = entry.store.workspace_context(actor.clone()).await?.value;
-    match source
-        .resolve(workspace.projects, target.to_owned())
-        .await?
-    {
-        ReviewResolution::Ambiguous(urls) => Ok(ResolvedReview::Alternatives(urls)),
-        ReviewResolution::Found(found) => entry
-            .store
-            .review_by_mr(actor.clone(), found.identity)
-            .await
-            .map(ResolvedReview::Review),
-    }
 }
 
 pub(super) fn dashboard(entry: &Entry, review: &ReviewId, run: Option<&RunId>) -> String {

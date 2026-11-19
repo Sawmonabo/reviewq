@@ -1422,6 +1422,7 @@ dependencies = [
  "tempfile",
  "tokio",
  "toml_edit",
+ "uuid",
 ]
 
 [[package]]

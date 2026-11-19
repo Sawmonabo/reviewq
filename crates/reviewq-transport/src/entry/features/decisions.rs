@@ -4,7 +4,10 @@ use axum::Json;
 use axum::extract::State;
 use axum::http::HeaderMap;
 use reviewq_app::access::{Actor, AppError};
-use reviewq_app::decisions::{Decision, DecisionRequest, Disposition, execute_decision};
+use reviewq_app::decisions::{
+    Decision, DecisionRequest, DecisionResult, Disposition, execute_decision,
+};
+use reviewq_app::events::Snapshot;
 use reviewq_domain::identity::Revision;
 use reviewq_protocol::decisions as dto;
 use reviewq_protocol::{
@@ -24,11 +27,7 @@ pub(super) async fn save(
     let actor = entry.auth.browser_actor(&headers, true)?;
     let request: dto::DecisionRequest =
         serde_json::from_slice(&bytes).map_err(|_| AppError::InvalidRequest)?;
-    let disposition = match request.disposition {
-        dto::Disposition::Reviewed => Disposition::Reviewed,
-        dto::Disposition::WaitingAuthor => Disposition::WaitingAuthor,
-        dto::Disposition::NeedsReview => Disposition::NeedsReview,
-    };
+    let disposition = domain_disposition(request.disposition);
     respond(
         &entry,
         actor,
@@ -40,6 +39,7 @@ pub(super) async fn save(
             source_sha: parse(request.source_sha.as_str())?,
             checkpoint_id: request.checkpoint_id.map(|id| id.as_str().to_owned()),
             disposition: Some(disposition),
+            terminal_target: None,
         },
     )
     .await
@@ -65,6 +65,7 @@ pub(super) async fn checkpoint(
             source_sha: parse(request.source_sha.as_str())?,
             checkpoint_id: Some(request.checkpoint_id.as_str().to_owned()),
             disposition: None,
+            terminal_target: None,
         },
     )
     .await
@@ -75,15 +76,28 @@ async fn respond(
     actor: Actor,
     request: DecisionRequest,
 ) -> Result<Json<Success<dto::DecisionResult>>, ApiError> {
+    Ok(Json(project_result(execute(entry, actor, request).await?)?))
+}
+
+pub(in crate::entry) async fn execute(
+    entry: &Entry,
+    actor: Actor,
+    request: DecisionRequest,
+) -> Result<Snapshot<DecisionResult>, AppError> {
     let source = entry.active_source().await?.reader;
-    let stored = execute_decision(
+    execute_decision(
         entry.store.as_ref(),
         source.as_deref(),
         &entry.checkpoints,
         actor,
         request,
     )
-    .await?;
+    .await
+}
+
+pub(in crate::entry) fn project_result(
+    stored: Snapshot<DecisionResult>,
+) -> Result<Success<dto::DecisionResult>, AppError> {
     let result = stored.value;
     let data = dto::DecisionResult {
         review_id: ReviewIdDto::new(result.review.as_str()).ok_or(AppError::Internal)?,
@@ -95,7 +109,15 @@ async fn respond(
             .map(|value| CheckpointIdDto::new(value).ok_or(AppError::Internal))
             .transpose()?,
     };
-    Ok(Json(success(data, stored.cursor)?))
+    success(data, stored.cursor)
+}
+
+pub(in crate::entry) fn domain_disposition(value: dto::Disposition) -> Disposition {
+    match value {
+        dto::Disposition::Reviewed => Disposition::Reviewed,
+        dto::Disposition::WaitingAuthor => Disposition::WaitingAuthor,
+        dto::Disposition::NeedsReview => Disposition::NeedsReview,
+    }
 }
 
 pub(in crate::entry) fn project(value: &Decision) -> Result<dto::DecisionView, AppError> {

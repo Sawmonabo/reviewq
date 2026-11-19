@@ -5,15 +5,14 @@ use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use reviewq_domain::identity::{
-    GitSha, MrIdentity, NotificationId, ReceiptId, ReviewId, Revision, RunId, SessionKey,
-    SubmissionId,
+    GitSha, NotificationId, ReceiptId, ReviewId, Revision, RunId, SessionKey, SubmissionId,
 };
 
 use crate::access::{Actor, AppError, AppFuture};
 use crate::events::Snapshot;
 use crate::labels::labels;
 use crate::notifications::Kind;
-use crate::queue::MergeRequestState;
+use crate::queue::{MergeRequestState, ReviewSource};
 use crate::sources::ReviewSourceReader;
 
 labels!(Disposition {
@@ -68,6 +67,14 @@ pub struct DecisionRequest {
     pub source_sha: GitSha,
     pub checkpoint_id: Option<String>,
     pub disposition: Option<Disposition>,
+    pub terminal_target: Option<String>,
+}
+
+pub struct TerminalDecision {
+    pub target: String,
+    pub submission: SubmissionId,
+    pub source_sha: GitSha,
+    pub disposition: Disposition,
 }
 
 pub struct DecisionResult {
@@ -77,17 +84,24 @@ pub struct DecisionResult {
 }
 
 pub trait DecisionStore: Send + Sync {
+    fn terminal_decision_replay(
+        &self,
+        actor: Actor,
+        input: TerminalDecision,
+    ) -> AppFuture<'_, Option<Snapshot<DecisionResult>>>;
+
     fn read_decision_replay(
         &self,
         actor: Actor,
         input: DecisionRequest,
     ) -> AppFuture<'_, Option<Snapshot<DecisionResult>>>;
-    fn decision_source(&self, actor: Actor, review: ReviewId) -> AppFuture<'_, MrIdentity>;
+    fn decision_source(&self, actor: Actor, review: ReviewId) -> AppFuture<'_, ReviewSource>;
     fn commit_decision(
         &self,
         actor: Actor,
         input: DecisionRequest,
-        identity: MrIdentity,
+        prior: ReviewSource,
+        observed: ReviewSource,
         checkpoint: Option<Frontier>,
     ) -> AppFuture<'_, Snapshot<DecisionResult>>;
 }
@@ -181,20 +195,20 @@ pub async fn execute_decision(
         .as_deref()
         .map(|id| checkpoints.resolve(id, &actor, &input))
         .transpose()?;
-    let identity = store
+    let prior = store
         .decision_source(actor.clone(), input.review.clone())
         .await?;
     let current = source
         .ok_or(AppError::Unavailable)?
-        .review(identity.clone())
+        .review(prior.identity.clone())
         .await?;
-    if current.identity != identity || current.head_sha != input.source_sha {
+    if current.identity != prior.identity || current.head_sha != input.source_sha {
         return Err(AppError::StaleRevision);
     }
     if current.state != MergeRequestState::Open {
         return Err(AppError::Conflict);
     }
     store
-        .commit_decision(actor, input, identity, checkpoint)
+        .commit_decision(actor, input, prior, current, checkpoint)
         .await
 }

@@ -1,13 +1,14 @@
 use std::path::PathBuf;
 
 use clap::{Args, Parser, Subcommand};
-use reviewq_domain::identity::ProjectId;
+use reviewq_domain::identity::{GitSha, NotificationId, ProjectId, SubmissionId};
 
 use crate::{checkout_setup, native_client, runtime};
 
 mod action;
 mod report;
 mod workflow;
+mod workspace;
 
 type Failure = Box<dyn std::error::Error + Send + Sync>;
 
@@ -35,6 +36,21 @@ enum Command {
     Refresh,
     /// Link the current Codex terminal to an exact review without opening a browser.
     Link { target: String },
+    /// Record a local decision at the exact listed merge-request head.
+    Review {
+        target: String,
+        sha: GitSha,
+        #[arg(value_enum)]
+        disposition: workspace::Disposition,
+        /// Reuse this ID to recover an earlier decision response.
+        #[arg(long)]
+        submission_id: Option<SubmissionId>,
+    },
+    /// Mark only the named notification receipts as read.
+    Ack {
+        #[arg(required = true, num_args = 1..=2000)]
+        ids: Vec<NotificationId>,
+    },
     /// Deliver a report from the current registered Codex tool call.
     Report {
         #[command(flatten)]
@@ -160,6 +176,24 @@ async fn execute(options: CommandLine) -> Result<(), Failure> {
         Some(Command::Refresh) => native_client::refresh(&runtime::profile(options.profile)?).await,
         Some(Command::Link { target }) => {
             native_client::link(&runtime::profile(options.profile)?, target).await
+        }
+        Some(Command::Review {
+            target,
+            sha,
+            disposition,
+            submission_id,
+        }) => {
+            workspace::review(
+                &runtime::profile(options.profile)?,
+                target,
+                sha,
+                disposition,
+                submission_id,
+            )
+            .await
+        }
+        Some(Command::Ack { ids }) => {
+            workspace::ack(&runtime::profile(options.profile)?, ids).await
         }
         Some(Command::Report { scope, command }) => {
             report::execute(options.profile, scope, command).await

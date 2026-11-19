@@ -7,14 +7,14 @@ use reviewq_app::launch::{
     Invocation, LaunchClaim, LaunchInput, LaunchReceipt, LaunchState, LaunchStore,
     NativeLaunchResult, ObservedLaunchSettings,
 };
-use reviewq_app::queue::{MergeRequestState, ReviewSource};
+use reviewq_app::queue::MergeRequestState;
 use reviewq_domain::identity::{DeliveryId, ReviewId, Revision, SubmissionId};
 use reviewq_domain::session::{AbsolutePath, HostProvider, LeadTarget};
 use rusqlite::{Connection, Row, params};
 use uuid::Uuid;
 
 use crate::events::{now_ms, snapshot};
-use crate::queue::{identity_for_review, parse, save_observations, text};
+use crate::queue::{identity_for_review, parse, save_observations, source_for_review, text};
 use crate::workspace::{
     actor_key, allow_review, configured, provider_label, scope, settings_revision,
 };
@@ -64,7 +64,7 @@ impl LaunchStore for SqliteStore {
                 {
                     return Err(AppError::StaleRevision.into());
                 }
-                let current = source(db, &input.review)?;
+                let current = source_for_review(db, &input.review)?;
                 if current != input.source && current != input.prior_source {
                     return Err(AppError::StaleRevision.into());
                 }
@@ -204,7 +204,7 @@ impl LaunchStore for SqliteStore {
                         .filter(|target| target.binding() == &proof.binding)
                         .ok_or_else(|| AppError::Conflict.into());
                 }
-                let source = source(&tx.sql, &bound.review)?;
+                let source = source_for_review(&tx.sql, &bound.review)?;
                 let session_key = match native.provider() {
                     HostProvider::Codex => parse(native.native_id().as_str())?,
                     HostProvider::Claude => parse(&format!("claude:{}", native.native_id()))?,
@@ -376,35 +376,6 @@ fn receipt(row: &Row<'_>) -> Result<LaunchReceipt, StoreError> {
         },
         created_at_ms: row.get(6)?,
         updated_at_ms: row.get(7)?,
-    })
-}
-
-fn source(db: &Connection, review: &ReviewId) -> Result<ReviewSource, StoreError> {
-    let (project_path, title, sha, updated_at_ms, state) = db.query_row(
-        "SELECT project_path,title,head_sha,updated_at_ms,state FROM reviews WHERE review_id=?1",
-        [review.as_str()],
-        |row| {
-            Ok((
-                row.get(0)?,
-                row.get(1)?,
-                row.get::<_, String>(2)?,
-                row.get(3)?,
-                row.get::<_, String>(4)?,
-            ))
-        },
-    )?;
-    Ok(ReviewSource {
-        identity: identity_for_review(db, review)?,
-        project_path,
-        title,
-        head_sha: parse(&sha)?,
-        state: match state.as_str() {
-            "open" => MergeRequestState::Open,
-            "closed" => MergeRequestState::Closed,
-            "merged" => MergeRequestState::Merged,
-            _ => return Err(AppError::Internal.into()),
-        },
-        updated_at_ms,
     })
 }
 

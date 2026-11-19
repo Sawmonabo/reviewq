@@ -3,7 +3,7 @@
 mod actions;
 pub(super) mod decisions;
 pub(super) mod followups;
-mod notifications;
+pub(super) mod notifications;
 mod reports;
 
 use std::sync::Arc;

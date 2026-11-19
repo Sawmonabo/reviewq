@@ -15,6 +15,15 @@ pub enum Disposition {
     NeedsReview,
 }
 
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct TerminalDecision {
+    pub target: String,
+    pub submission_id: SubmissionIdDto,
+    pub source_sha: GitShaDto,
+    pub disposition: Disposition,
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
