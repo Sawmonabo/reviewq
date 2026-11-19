@@ -12,6 +12,7 @@ export class DraftStore {
   #snapshot: Snapshot = { entries: [], full: false };
 
   getSnapshot = () => this.#snapshot;
+  isFull = () => this.#snapshot.full;
 
   subscribe = (listener: () => void) => {
     this.#listeners.add(listener);

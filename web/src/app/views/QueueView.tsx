@@ -34,13 +34,14 @@ export function QueueView({ selectedReview, revision, selecting, onSelect, onRev
   const [loadingSprint, setLoadingSprint] = useState(false);
   const search = useRef<HTMLInputElement>(null);
   const sprintRequest = useRef(0);
+  const [lastFacets, setLastFacets] = useState<import("../../api/generated/contracts").QueueFacets>();
   const params = queueParams({ ...filters, q: query }, trail.at(-1));
-  const list = useResource(`queue:${revision}:${JSON.stringify(params)}`, (signal) => readQueue(params, signal), [{ kind: "queue" }, { kind: "settings" }]);
+  const list = useResource(`queue:${revision}:${JSON.stringify(params)}`, async (signal) => {
+    const result = await readQueue(params, signal);
+    if (!signal.aborted) setLastFacets(result.data.facets);
+    return result;
+  }, [{ kind: "queue" }, { kind: "settings" }]);
   const sync = useResource(`sync:${revision}`, readQueueSync, [{ kind: "queue_sync" }]);
-  const [lastFacets, setLastFacets] = useState(list.data?.facets);
-  useEffect(() => {
-    if (list.data) setLastFacets(list.data.facets);
-  }, [list.data]);
   useEffect(() => {
     const timer = window.setTimeout(() => setQuery(filters.q), 180);
     return () => window.clearTimeout(timer);

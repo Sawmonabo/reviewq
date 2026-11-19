@@ -57,7 +57,7 @@ export function App() {
   const [selecting, setSelecting] = useState(false);
   const [offline, setOffline] = useState(!navigator.onLine);
   const [drafts] = useState(() => new DraftStore());
-  const draftSnapshot = useSyncExternalStore(drafts.subscribe, drafts.getSnapshot);
+  const draftsFull = useSyncExternalStore(drafts.subscribe, drafts.isFull);
   const panes = useRef<HTMLDivElement>(null);
   const workspace = useRef<HTMLElement>(null);
   const drawer = useRef<HTMLDivElement>(null);
@@ -190,7 +190,7 @@ export function App() {
         {view === "notifications" && Boolean(unread.data?.unreadMrCount) && <span className="rail-count" aria-label={`${unread.data?.unreadMrCount} unread reviews`}>{unread.data?.unreadMrCount}</span>}
       </button>)}</nav>
       <div className="rail-footer">
-        {draftSnapshot.full && <button type="button" className="rail-item" onClick={() => setOverlay({ kind: "drafts" })} title="Draft storage full"><Icon name="inbox" /><span className="rail-label">Draft storage full</span></button>}
+        {draftsFull && <button type="button" className="rail-item" onClick={() => setOverlay({ kind: "drafts" })} title="Draft storage full"><Icon name="inbox" /><span className="rail-label">Draft storage full</span></button>}
         <button type="button" className="rail-item" title="Settings" aria-label="Settings" onClick={() => setSettings(true)}><Icon name="settings" /><span className="rail-label">Settings</span></button>
         <button type="button" className="rail-item rail-theme" title={theme === "dark" ? "Switch to light theme" : "Switch to dark theme"} onClick={toggleTheme}><Icon name="sun" /><span className="rail-label">{theme === "dark" ? "Light theme" : "Dark theme"}</span></button>
         <button type="button" className="rail-item rail-collapse" title={railSmall ? "Expand sidebar" : "Collapse sidebar"} onClick={toggleRail}><Icon name="collapse" /><span className="rail-label">Collapse sidebar</span></button>
@@ -259,26 +259,50 @@ export function App() {
         {settings && <SettingsPane onClose={() => setSettings(false)} onSave={() => { setRevision((value) => value + 1); overview.retry(); }} />}
       </Suspense>
     </PanelBoundary>
-    {overlay?.kind === "drafts" && <Modal title="Unsent drafts" onClose={() => setOverlay(undefined)}>
-      <div className="stack"><p className="meta">Drafts stay in this tab until they’re sent, discarded, or the page reloads.</p>
-        {draftSnapshot.full && <Notice>Draft storage full. Shorten or discard a draft to make room.</Notice>}
-        {!draftSnapshot.entries.length && <p>No unsent drafts.</p>}
-        {draftSnapshot.entries.map((draft) => <div className="surface-card stack" key={draft.key}>
-          <strong>{draft.label}</strong><p className="meta truncate">{draft.text}</p>
+    {overlay?.kind === "drafts" && <DraftDialog drafts={drafts} onClose={() => setOverlay(undefined)}
+      onOpen={(review, run, tab) => { setOverlay(undefined); openReview(review, run, tab); }} />}
+
+  </main>;
+}
+
+function DraftDialog({ drafts, onClose, onOpen }: {
+  readonly drafts: DraftStore;
+  readonly onClose: () => void;
+  readonly onOpen: (review: string, run: string, tab: Tab) => void;
+}) {
+  const state = useSyncExternalStore(drafts.subscribe, drafts.getSnapshot);
+  const [notice, setNotice] = useState<string>();
+  return <Modal title="Unsent drafts" onClose={onClose}>
+    <div className="stack"><p className="meta">Drafts stay in this tab until they’re sent, discarded, or the page reloads.</p>
+      {state.full && <Notice>Draft storage full. Shorten or discard a draft to make room.</Notice>}
+      {notice && <Notice>{notice}</Notice>}
+      {!state.entries.length && <p>No unsent drafts.</p>}
+      {state.entries.map((draft) => {
+        const target = draftRoute(draft.key);
+        const text = draftContent(draft.key, draft.text);
+        return <div className="surface-card stack" key={draft.key}>
+          <strong>{draft.label}</strong><p className="meta truncate">{text}</p>
           <div className="actions">
-            {draftRoute(draft.key) && <button type="button" onClick={() => {
-              const target = draftRoute(draft.key);
-              if (target) { setOverlay(undefined); openReview(target.review, target.run, target.tab); }
-            }}>Open draft target</button>}
-            <button type="button" onClick={() => { void navigator.clipboard.writeText(draft.text).catch((error: unknown) => window.alert(describeError(error))); }}>Copy</button>
+            {target && <button type="button" onClick={() => onOpen(target.review, target.run, target.tab)}>Open draft target</button>}
+            <button type="button" onClick={() => { void navigator.clipboard.writeText(text).catch((error: unknown) => setNotice(describeError(error))); }}>Copy</button>
             <button type="button" onClick={() => {
               if (window.confirm(`Discard unsent draft for ${draft.label}?`)) drafts.set(draft.key, draft.label, "");
             }}>Discard</button>
           </div>
-        </div>)}
-      </div>
-    </Modal>}
-  </main>;
+        </div>;
+      })}
+    </div>
+  </Modal>;
+}
+
+function draftContent(key: string, text: string) {
+  if (key.startsWith('["question",')) return text.slice(text.indexOf(":") + 1);
+  if (!key.startsWith('["quote",')) return text;
+  try {
+    const value: unknown = JSON.parse(text);
+    if (value && typeof value === "object" && "text" in value && typeof value.text === "string") return value.text;
+  } catch { /* Preserve the charged draft string. */ }
+  return text;
 }
 
 function draftRoute(key: string): { review: string; run: string; tab: Tab } | undefined {
