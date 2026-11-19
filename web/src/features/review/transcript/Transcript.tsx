@@ -597,9 +597,7 @@ export function Transcript({
                     {row.provisional !== undefined && (
                       <p className="message-copy">{row.provisional}</p>
                     )}
-                    {row.delivery && !row.entry && (
-                      <MarkdownContent source={row.delivery.text} />
-                    )}
+                    {row.delivery && !row.entry && <MarkdownContent source={row.delivery.text} />}
                     {row.entry && history.generation && (
                       <EntryBody
                         key={history.generation}
