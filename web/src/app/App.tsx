@@ -32,9 +32,9 @@ const MonitorPane = lazy(() => import("../features/review/followups/MonitorPane"
 const Tickets = lazy(() => import("../features/tickets/Tickets"));
 
 const views = [
-  { view: "queue", label: "Review queue", icon: "queue" },
-  { view: "runs", label: "Review runs", icon: "runs" },
-  { view: "notifications", label: "Notifications", icon: "inbox" },
+  { view: "queue", label: "Review queue" },
+  { view: "runs", label: "Review runs" },
+  { view: "notifications", label: "Notifications" },
 ] as const;
 
 type Overlay =
@@ -233,37 +233,69 @@ export function App() {
         Skip to workspace
       </a>
       <aside className="rail" aria-label="Workspace navigation">
-        <div className="rail-brand">
-          <span className="brand-mark">
-            <Icon name="branch" size={18} />
-          </span>
-          <span className="rail-label">ReviewQ</span>
+        <div className="rail-heading">
+          <div className="rail-brand" aria-label="ReviewQ">
+            {railSmall ? (
+              <img className="brand-monogram" src="/icon.svg" width={32} height={32} alt="" />
+            ) : (
+              <>
+                <div className="brand-wordmark">
+                  <span>Review</span>
+                  <svg className="brand-q" viewBox="7 3 20 26" aria-hidden="true">
+                    <use href="/icon.svg#reviewq-glyph" />
+                  </svg>
+                </div>
+                <small>Agentic Code reviews</small>
+              </>
+            )}
+          </div>
         </div>
-        <nav>
-          {views.map(({ view, label, icon }) => (
+        <button
+          type="button"
+          className="rail-collapse"
+          aria-label={railSmall ? "Expand sidebar" : "Collapse sidebar"}
+          aria-expanded={!railSmall}
+          onClick={toggleRail}
+        >
+          <span aria-hidden="true">
+            <svg viewBox="0 0 24 24">
+              <path d="m14 7-5 5 5 5" />
+            </svg>
+          </span>
+        </button>
+        <nav aria-label="Workspace">
+          {views.map(({ view, label }) => (
             <button
               type="button"
               key={view}
-              className="rail-item"
-              title={label}
+              className={`rail-item ${view === "notifications" ? "rail-notifications" : ""}`}
+              title={railSmall ? label : undefined}
               aria-label={label}
               aria-current={view === route.view ? "page" : undefined}
               onClick={() => move({ view, tab: "overview" })}
             >
-              <Icon name={icon} />
+              <NavIcon view={view} />
               <span className="rail-label">{label}</span>
-              {view === "notifications" && Boolean(unread.data?.unreadMrCount) && (
+              {view === "notifications" && (
                 <span
                   className="rail-count"
-                  aria-label={`${unread.data?.unreadMrCount} unread reviews`}
+                  aria-label={`${unread.data?.unreadMrCount ?? 0} unread reviews`}
                 >
-                  {unread.data?.unreadMrCount}
+                  {unread.data?.unreadMrCount ?? 0}
                 </span>
               )}
             </button>
           ))}
-        </nav>
-        <div className="rail-footer">
+          <button
+            type="button"
+            className="rail-item rail-settings"
+            title={railSmall ? "Settings" : undefined}
+            aria-label="Settings"
+            onClick={() => setSettings(true)}
+          >
+            <NavIcon view="settings" />
+            <span className="rail-label">Settings</span>
+          </button>
           {draftsFull && (
             <button
               type="button"
@@ -275,35 +307,7 @@ export function App() {
               <span className="rail-label">Draft storage full</span>
             </button>
           )}
-          <button
-            type="button"
-            className="rail-item"
-            title="Settings"
-            aria-label="Settings"
-            onClick={() => setSettings(true)}
-          >
-            <Icon name="settings" />
-            <span className="rail-label">Settings</span>
-          </button>
-          <button
-            type="button"
-            className="rail-item rail-theme"
-            title={theme === "dark" ? "Switch to light theme" : "Switch to dark theme"}
-            onClick={toggleTheme}
-          >
-            <Icon name="sun" />
-            <span className="rail-label">{theme === "dark" ? "Light theme" : "Dark theme"}</span>
-          </button>
-          <button
-            type="button"
-            className="rail-item rail-collapse"
-            title={railSmall ? "Expand sidebar" : "Collapse sidebar"}
-            onClick={toggleRail}
-          >
-            <Icon name="collapse" />
-            <span className="rail-label">Collapse sidebar</span>
-          </button>
-        </div>
+        </nav>
       </aside>
       <div
         className={`workspace-panes ${opened ? "has-detail" : ""}`}
@@ -313,6 +317,7 @@ export function App() {
         <section ref={workspace} className="workspace-view" aria-labelledby="view-title">
           <div className="workspace-inner">
             <header className="workspace-title">
+              <p>Your workspace</p>
               <h1 id="view-title" tabIndex={-1}>
                 {heading}
               </h1>
@@ -322,8 +327,7 @@ export function App() {
                     label="New review"
                     trigger={
                       <span className="button-label">
-                        <Icon name="plus" />
-                        New review <Icon name="chevron" size={13} />
+                        New review <Icon name="chevron" size={12} />
                       </span>
                     }
                     items={[
@@ -504,6 +508,43 @@ export function App() {
         />
       )}
     </main>
+  );
+}
+
+function NavIcon({ view }: { readonly view: View | "settings" }) {
+  return (
+    <svg
+      className="rail-symbol"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      aria-hidden="true"
+    >
+      {view === "queue" ? (
+        <>
+          <rect x="4" y="4" width="6" height="6" rx="1" />
+          <rect x="14" y="4" width="6" height="6" rx="1" />
+          <rect x="4" y="14" width="6" height="6" rx="1" />
+          <rect x="14" y="14" width="6" height="6" rx="1" />
+        </>
+      ) : view === "runs" ? (
+        <>
+          <rect x="3" y="4" width="18" height="16" rx="3" />
+          <path d="m10 8 6 4-6 4Z" />
+        </>
+      ) : view === "notifications" ? (
+        <>
+          <path d="M6 9a6 6 0 0 1 12 0v5l2 3H4l2-3Z" />
+          <path d="M10 21h4" />
+        </>
+      ) : (
+        <>
+          <circle cx="12" cy="12" r="3" />
+          <path d="m9 3-1 3-3 1-2 3 2 2-1 3 3 2 3-1 2 2 3-2 1-3 3-1-1-4-3-1-1-3Z" />
+        </>
+      )}
+    </svg>
   );
 }
 
