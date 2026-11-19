@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { ApiResponseError } from "../../api/client";
 import type { Notification } from "../../api/generated/contracts";
 import type { Action, ReviewContext } from "../../api/generated/contracts/notifications";
 import { assignNotifications, readNotifications } from "../../api/workspace";
@@ -8,12 +9,15 @@ import { useResource } from "../../hooks/useResource";
 import { describeError, formatActivityTime, readable } from "../../lib/presentation";
 import "./attention.css";
 
-const historyLimit = 450;
-
-const emptyHistory: {
+type InboxHistory = {
+  readonly headCursor: string;
+  readonly nextCursor: string | null;
   readonly items: readonly Notification[];
   readonly contexts: ReadonlyMap<string, ReviewContext>;
-} = { items: [], contexts: new Map() };
+};
+
+const historyLimit = 450;
+const historyChanged = "The inbox changed. Load older updates again to continue.";
 
 export function AttentionView({
   onOpen,
@@ -23,38 +27,46 @@ export function AttentionView({
   readonly onChange: () => void;
 }) {
   const [mode, setMode] = useState<"unread" | "all">("unread");
-  const [older, setOlder] = useState(emptyHistory);
-  const [next, setNext] = useState<string | null>();
+  const [older, setOlder] = useState<InboxHistory>();
+  const [revision, setRevision] = useState(0);
   const [frozen, setFrozen] = useState<readonly string[]>();
   const [eligible, setEligible] = useState<readonly string[]>([]);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string>();
   const request = useRef<AbortController | undefined>(undefined);
   useEffect(() => () => request.current?.abort(), []);
-  const page = useResource(`inbox:${mode}`, (signal) => readNotifications({ view: mode }, signal), [
-    { kind: "notification" },
-    { kind: "review" },
-    { kind: "queue" },
-  ]);
+  const page = useResource(
+    `inbox:${mode}:${revision}`,
+    (signal) => readNotifications({ view: mode }, signal),
+    [{ kind: "notification" }, { kind: "review" }, { kind: "queue" }],
+  );
+  const headCursor = page.data?.nextCursor;
+  // A new head cursor can change the revision, watermark or access scope of every older page.
+  const history = older?.headCursor === headCursor ? older : undefined;
   const byId = new Map((page.data?.items ?? []).map((item) => [item.id, item]));
-  for (const item of older.items) if (!byId.has(item.id)) byId.set(item.id, item);
-  const contexts = new Map(older.contexts);
+  for (const item of history?.items ?? []) if (!byId.has(item.id)) byId.set(item.id, item);
+  const contexts = new Map(history?.contexts);
   for (const context of page.data?.reviewContexts ?? []) contexts.set(context.reviewId, context);
   const groups = group([...byId.values()]);
-  const cursor = next === undefined ? page.data?.nextCursor : next;
+  const cursor = history ? history.nextCursor : headCursor;
 
   function changeMode(nextMode: "unread" | "all") {
+    if (nextMode === mode) return;
     request.current?.abort();
     setMode(nextMode);
-    setOlder(emptyHistory);
-    setNext(undefined);
+    setOlder(undefined);
     setFrozen(undefined);
     setEligible([]);
     setNotice(undefined);
   }
 
+  function refreshHistory() {
+    setOlder(undefined);
+    setRevision((previous) => previous + 1);
+  }
+
   async function more() {
-    if (!cursor) return;
+    if (!cursor || !headCursor || busy) return;
     request.current?.abort();
     const controller = new AbortController();
     request.current = controller;
@@ -64,17 +76,27 @@ export function AttentionView({
       const result = await readNotifications({ view: mode, cursor }, controller.signal);
       if (controller.signal.aborted) return;
       setOlder((previous) => {
-        const items = [...previous.items, ...result.data.items].slice(0, historyLimit);
+        const retained = previous?.headCursor === headCursor ? previous : undefined;
+        const byId = new Map(retained?.items.map((item) => [item.id, item]));
+        for (const item of result.data.items) {
+          if (!byId.has(item.id)) byId.set(item.id, item);
+        }
+        const items = [...byId.values()].slice(0, historyLimit);
         const shown = new Set(items.map((item) => item.reviewId));
-        const contexts = new Map([...previous.contexts].filter(([id]) => shown.has(id)));
+        const contexts = new Map(retained?.contexts);
         for (const context of result.data.reviewContexts) {
           if (shown.has(context.reviewId)) contexts.set(context.reviewId, context);
         }
-        return { items, contexts };
+        return { headCursor, nextCursor: result.data.nextCursor, items, contexts };
       });
-      setNext(result.data.nextCursor);
     } catch (error) {
-      if (!controller.signal.aborted) setNotice(describeError(error));
+      if (controller.signal.aborted) return;
+      if (error instanceof ApiResponseError && error.code === "cursor_expired") {
+        refreshHistory();
+        setNotice(historyChanged);
+      } else {
+        setNotice(describeError(error));
+      }
     } finally {
       if (request.current === controller) setBusy(false);
     }
@@ -87,20 +109,13 @@ export function AttentionView({
     try {
       const { data } = await assignNotifications({ action, ids: [...ids] });
       const affected = new Set(data.affectedIds);
-      setOlder((previous) => ({
-        ...previous,
-        items: previous.items.flatMap((item) => {
-          if (!affected.has(item.id)) return [item];
-          if (action === "dismiss" || (action === "read" && mode === "unread")) return [];
-          return [{ ...item, readAt: action === "unread" ? null : new Date().toISOString() }];
-        }),
-      }));
       setFrozen((selection) => selection?.filter((id) => !affected.has(id)));
       setEligible((ids) => ids.filter((id) => !affected.has(id)));
-      page.retry();
+      if (affected.size) refreshHistory();
+      else page.retry();
       onChange();
       setNotice(
-        `${data.affectedIds.length} ${data.affectedIds.length === 1 ? "update" : "updates"} ${action === "dismiss" ? "dismissed" : `marked ${action}`}.`,
+        `${affected.size} ${affected.size === 1 ? "update" : "updates"} ${action === "dismiss" ? "dismissed" : `marked ${action}`}.${affected.size && history ? ` ${historyChanged}` : ""}`,
       );
     } catch (error) {
       setNotice(describeError(error));
@@ -191,6 +206,7 @@ export function AttentionView({
         </div>
       </div>
       {notice && <Notice>{notice}</Notice>}
+      {older && !history && page.data && <Notice>{historyChanged}</Notice>}
       {page.error && <Notice retry={page.retry}>{page.error}</Notice>}
       {page.pending && <Loading label="Loading inbox…" />}
       {page.data && !groups.length && (
@@ -335,7 +351,7 @@ export function AttentionView({
           );
         })}
       </ul>
-      {cursor && older.items.length < historyLimit && (
+      {cursor && (history?.items.length ?? 0) < historyLimit && (
         <div className="pagination">
           <button type="button" disabled={busy} onClick={() => void more()}>
             Load older updates
