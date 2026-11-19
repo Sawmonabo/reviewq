@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use reviewq_app::access::AppError;
 use reviewq_app::events::ResourceKey;
-use reviewq_app::reports::{Assessment, Declaration, ReportWork};
+use reviewq_app::reports::{Assessment, Declaration, ReportEdits, ReportWork};
 use reviewq_app::workflow::NativeCall;
 use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
@@ -163,113 +163,10 @@ pub(super) fn complete(
     Ok(())
 }
 
-type Range = (u64, u64, String);
-type Findings = BTreeMap<String, Option<Range>>;
-
-pub(super) struct SourceCheck {
-    previous: Option<(String, Findings)>,
-    candidate: String,
-    findings: Findings,
-    declared: BTreeMap<String, bool>,
-}
-
-pub(super) fn finding_ranges(index: &[reviewq_app::reports::Descriptor]) -> Findings {
-    use reviewq_app::reports::Descriptor;
-    index
-        .iter()
-        .filter_map(|item| match item {
-            Descriptor::Finding { id, source, .. } => Some((
-                id.clone(),
-                source
-                    .as_ref()
-                    .map(|range| (range.offset, range.length, range.hash.to_string())),
-            )),
-            _ => None,
-        })
-        .collect()
-}
-
-pub(super) fn source_check(
+pub(super) fn read_semantic_body(
     db: &Connection,
-    work: &ReportWork,
-    candidate: Option<Findings>,
-) -> Result<Option<SourceCheck>, StoreError> {
-    let Some(candidate_findings) = candidate else {
-        return Ok(None);
-    };
-    let Some(scope) = manifest(db, work)? else {
-        return Ok(None);
-    };
-    let Some(artifact) = super::ensure_claim(db, work)? else {
-        return Ok(None);
-    };
-    let Some(candidate) = read_semantic_body(db, &artifact)? else {
-        return Ok(None);
-    };
-    let run = work.call.lead.run_id().as_str();
-    let mut declared = BTreeMap::<String, bool>::new();
-    for assessment in work.declaration.assessments() {
-        use reviewq_app::reports::FindingConclusion;
-        let permits_removal = matches!(
-            assessment.conclusion,
-            FindingConclusion::Fixed
-                | FindingConclusion::ClarifiedWithdrawn
-                | FindingConclusion::Superseded
-        );
-        for id in &assessment.finding_ids {
-            declared
-                .entry(id.clone())
-                .and_modify(|all| *all &= permits_removal)
-                .or_insert(permits_removal);
-        }
-    }
-    let previous =
-        if let Some(receipt) = scope.report_receipt_id {
-            let artifact=db.query_row(
-            "SELECT a.artifact_id FROM report_versions v JOIN artifacts a USING(artifact_id)
-             WHERE run_id=?1 AND receipt_id=?2 AND a.sealed=1 AND a.complete=1
-               AND v.semantic_index='ready' AND a.sha256=?3",
-            params![run,receipt,scope.report_hash],|row|row.get::<_,String>(0),
-        ).optional()?;
-            let Some(artifact) = artifact else {
-                return Ok(None);
-            };
-            let Some(previous) = read_semantic_body(db, &artifact)? else {
-                return Ok(None);
-            };
-            let mut statement = db.prepare_cached(
-                "SELECT finding_id,scalar_offset,scalar_length,evidence_sha256 FROM report_findings
-             WHERE run_id=?1 AND receipt_id=?2 ORDER BY finding_id",
-            )?;
-            let mut rows = statement.query(params![run, receipt])?;
-            let mut findings = Findings::new();
-            while let Some(row) = rows.next()? {
-                let id = row.get(0)?;
-                let start: Option<i64> = row.get(1)?;
-                let range = if let Some(start) = start {
-                    Some((
-                        u64::try_from(start).map_err(|_| AppError::Internal)?,
-                        u64::try_from(row.get::<_, i64>(2)?).map_err(|_| AppError::Internal)?,
-                        row.get(3)?,
-                    ))
-                } else {
-                    None
-                };
-                findings.insert(id, range);
-            }
-            Some((previous, findings))
-        } else {
-            None
-        };
-    Ok(Some(SourceCheck {
-        previous,
-        candidate,
-        findings: candidate_findings,
-        declared,
-    }))
-}
-
-fn read_semantic_body(db: &Connection, artifact: &str) -> Result<Option<String>, StoreError> {
+    artifact: &str,
+) -> Result<Option<String>, StoreError> {
     const LIMIT: i64 = 4 * 1024 * 1024;
     let length: i64 = db.query_row(
         "SELECT byte_length FROM artifacts WHERE artifact_id=?1",
@@ -298,55 +195,7 @@ fn read_semantic_body(db: &Connection, artifact: &str) -> Result<Option<String>,
         .map_err(|_| AppError::Internal.into())
 }
 
-pub(super) fn source_preserved(input: Option<SourceCheck>) -> bool {
-    let Some(input) = input else { return false };
-    let Some((old, older)) = input.previous else {
-        return input
-            .findings
-            .keys()
-            .all(|id| input.declared.contains_key(id));
-    };
-    let mut old_ranges = Vec::new();
-    let mut new_ranges = Vec::new();
-    for (id, range) in &older {
-        if let Some(may_remove) = input.declared.get(id) {
-            let Some((start, length, _)) = range else {
-                return false;
-            };
-            old_ranges.push((*start, *length));
-            if !may_remove && !input.findings.contains_key(id) {
-                return false;
-            }
-        } else if input
-            .findings
-            .get(id)
-            .and_then(|value| value.as_ref().map(|value| &value.2))
-            != range.as_ref().map(|value| &value.2)
-            || !input.findings.contains_key(id)
-        {
-            return false;
-        }
-    }
-    for (id, range) in &input.findings {
-        if input.declared.contains_key(id) {
-            let Some((start, length, _)) = range else {
-                return false;
-            };
-            new_ranges.push((*start, *length));
-        } else if !older.contains_key(id) {
-            return false;
-        }
-    }
-    match (
-        unaffected(&old, old_ranges),
-        unaffected(&input.candidate, new_ranges),
-    ) {
-        (Some(old), Some(new)) => old == new,
-        _ => false,
-    }
-}
-
-fn unaffected(source: &str, mut ranges: Vec<(u64, u64)>) -> Option<Vec<u8>> {
+pub(super) fn unaffected(source: &str, mut ranges: Vec<(u64, u64)>) -> Option<Vec<u8>> {
     ranges.sort_unstable();
     let mut output = Vec::new();
     let mut cursor = source
@@ -385,41 +234,50 @@ fn unaffected(source: &str, mut ranges: Vec<(u64, u64)>) -> Option<Vec<u8>> {
     Some(output)
 }
 
-pub(super) fn write_changes(
+pub(super) fn edits_match(
     db: &Connection,
     run: &str,
-    receipt: &str,
     manifest: &FrozenManifest,
+    edits: &ReportEdits,
     assessments: &[Assessment],
-) -> Result<(), StoreError> {
-    let mut changes = BTreeMap::new();
-    for assessment in assessments {
-        for finding in &assessment.finding_ids {
-            changes.entry(finding).or_insert(assessment);
+) -> Result<bool, StoreError> {
+    let originals: BTreeSet<&str> = manifest
+        .observations
+        .iter()
+        .map(|member| member.discussion_id.as_str())
+        .collect();
+    if edits.sections.iter().any(|section| {
+        section
+            .discussion_ids
+            .iter()
+            .any(|id| !originals.contains(id.as_str()))
+    }) {
+        return Ok(false);
+    }
+    let mut existing = db.prepare_cached(
+        "SELECT EXISTS(SELECT 1 FROM report_findings WHERE run_id=?1 AND receipt_id=?2 AND finding_id=?3)",
+    )?;
+    for edit in &edits.findings {
+        let known: bool = existing.query_row(
+            params![run, manifest.report_receipt_id, edit.finding_id],
+            |row| row.get(0),
+        )?;
+        if edit.discussion_ids.iter().any(|id| {
+            !originals.contains(id.as_str())
+                || (known
+                    && !manifest.observations.iter().any(|observation| {
+                        &observation.discussion_id == id
+                            && observation.finding_ids.contains(&edit.finding_id)
+                    }))
+                || !assessments.iter().any(|assessment| {
+                    &assessment.discussion_id == id
+                        && assessment.finding_ids.contains(&edit.finding_id)
+                        && (!edit.conclusion.retires_finding()
+                            || assessment.conclusion.retires_finding())
+                })
+        }) {
+            return Ok(false);
         }
     }
-    for (finding, assessment) in changes {
-        db.prepare_cached(
-            "INSERT INTO report_changes(run_id,receipt_id,finding_id,conclusion,reason,checked_sha)
-             VALUES(?1,?2,?3,?4,?5,?6)",
-        )?
-        .execute(params![
-            run,
-            receipt,
-            finding,
-            assessment.conclusion.to_string(),
-            assessment.reason,
-            manifest.source_sha
-        ])?;
-    }
-    for assessment in assessments {
-        for finding in &assessment.finding_ids {
-            db.prepare_cached(
-                "INSERT INTO report_change_discussions(run_id,receipt_id,finding_id,discussion_id)
-                 VALUES(?1,?2,?3,?4) ON CONFLICT DO NOTHING",
-            )?
-            .execute(params![run, receipt, finding, assessment.discussion_id])?;
-        }
-    }
-    Ok(())
+    Ok(true)
 }

@@ -2,13 +2,13 @@ use reviewq_app::access::AppError;
 use reviewq_app::events::ResourceKey;
 use reviewq_app::notifications::{Kind, Observation, Source};
 use reviewq_app::reports::{
-    CapturedArtifact, Declaration, Descriptor, ReportReference, ReportWork, RevisionEvidence,
-    Source as ReportSource, Verdict,
+    CapturedArtifact, CorrectionKind, Declaration, Descriptor, ReportEdits, ReportReference,
+    ReportWork, RevisionEvidence, Source as ReportSource, Verdict,
 };
 use reviewq_domain::identity::NativeInputId;
 use rusqlite::{Connection, OptionalExtension, params};
 
-use super::{batch, db_int, ensure_claim};
+use super::{batch, db_int, edits, ensure_claim};
 use crate::StoreError;
 use crate::connection::WriteTx;
 use crate::events::now_ms;
@@ -21,7 +21,7 @@ pub(super) fn complete(
     work: ReportWork,
     result: NativeInputId,
     artifact: Option<CapturedArtifact>,
-    scoped_preserved: bool,
+    continuity_verified: bool,
 ) -> Result<(), StoreError> {
     let db = &tx.sql;
     let stage = ensure_claim(db, &work)?;
@@ -121,6 +121,7 @@ pub(super) fn complete(
             revision,
             verdict,
             amends,
+            edits,
             ..
         } => {
             let captured = artifact.as_ref().ok_or(AppError::Internal)?;
@@ -135,8 +136,10 @@ pub(super) fn complete(
                 );
             }
             if let Some(scope) = &scoped {
-                if !scoped_preserved
+                if !continuity_verified
                     || amends.is_some()
+                    || edits.correction.is_some()
+                    || !batch::edits_match(db, run, scope, edits, work.declaration.assessments())?
                     || !matches!(revision,RevisionEvidence::Exact(sha) if sha.as_str()==scope.source_sha)
                 {
                     return reject(
@@ -150,6 +153,8 @@ pub(super) fn complete(
             }
             if let Some(reference) = amends {
                 if !current.complete
+                    || !current.semantic_ready
+                    || captured.index.is_none()
                     || !current.matches(reference)
                     || current
                         .original_hash
@@ -168,6 +173,42 @@ pub(super) fn complete(
                     );
                 }
             }
+            if let Some(correction) = &edits.correction
+                && (!continuity_verified
+                    || !current.matches(&correction.base)
+                    || !current.matches_revision(revision)
+                    || current.verdict.as_deref() != Some(verdict.to_string().as_str()))
+            {
+                return reject(
+                    tx,
+                    &work,
+                    Some(captured),
+                    "report_correction_continuity_unproved",
+                    Some(&result),
+                );
+            }
+            if (scoped.is_some() || edits.correction.is_some())
+                && edits::overrides_user_blocking(
+                    db,
+                    run,
+                    current.disposition_version,
+                    edits,
+                    captured,
+                )?
+            {
+                return reject(
+                    tx,
+                    &work,
+                    Some(captured),
+                    "report_user_disposition_conflict",
+                    Some(&result),
+                );
+            }
+            let preserve_attention = amends.is_some()
+                || edits
+                    .correction
+                    .as_ref()
+                    .is_some_and(|correction| correction.kind == CorrectionKind::Presentation);
             seal(db, artifact_id, captured)?;
             promote(
                 db,
@@ -178,15 +219,15 @@ pub(super) fn complete(
                 revision,
                 *verdict,
                 amends.is_some(),
+                preserve_attention,
+                edits,
                 captured,
                 time,
                 scoped
                     .as_ref()
                     .map(|manifest| (manifest, work.declaration.assessments())),
             )?;
-            amends
-                .is_none()
-                .then_some((Kind::ReportReady, "Report ready"))
+            (!preserve_attention).then_some((Kind::ReportReady, "Report ready"))
         }
         Declaration::Unchanged {
             accepted, source, ..
@@ -203,14 +244,31 @@ pub(super) fn complete(
                             .is_some_and(|captured| accepted.hash == captured.hash)
                 }
             };
-            if !current.matches(accepted) || !original {
+            if !current.complete
+                || current
+                    .original_hash
+                    .as_ref()
+                    .is_some_and(|hash| Some(hash) != current.hash.as_ref())
+                || !current.matches(accepted)
+                || !original
+            {
                 return reject(
                     tx,
                     &work,
-                    None,
+                    artifact.as_ref(),
                     "report_unchanged_evidence_mismatch",
                     Some(&result),
                 );
+            }
+            if let Some(staged) = stage {
+                db.execute(
+                    "UPDATE report_handoffs SET artifact_id=NULL WHERE receipt_id=?1",
+                    [receipt],
+                )?;
+                db.execute(
+                    "DELETE FROM artifacts WHERE artifact_id=?1 AND sealed=0",
+                    [staged],
+                )?;
             }
             scoped
                 .is_some()
@@ -291,6 +349,9 @@ struct Head {
     source_kind: Option<String>,
     source_path: Option<Vec<u8>>,
     complete: bool,
+    semantic_ready: bool,
+    change_count: Option<i64>,
+    finding_count: Option<i64>,
     original_hash: Option<String>,
     coverage_source: Option<String>,
     coverage_target: Option<String>,
@@ -313,7 +374,7 @@ impl Head {
 fn head(db: &Connection, run: &str) -> Result<Head, StoreError> {
     Ok(db.query_row(
         "SELECT h.receipt_id, h.disposition_version, a.sha256, v.attention_receipt_id, v.reviewed_sha,
-                v.revision_reason, v.full_mr_reviewed_sha, v.verdict, v.coverage, c.source_kind, c.source_path, a.complete, a.original_sha256, v.coverage_source_sha, v.coverage_target_sha
+                v.revision_reason, v.full_mr_reviewed_sha, v.verdict, v.coverage, c.source_kind, c.source_path, a.complete, a.original_sha256, v.coverage_source_sha, v.coverage_target_sha, v.semantic_index='ready', v.change_count, v.finding_count
          FROM report_heads h JOIN report_versions v USING(run_id, receipt_id)
          JOIN artifacts a USING(artifact_id)
          LEFT JOIN report_handoffs c ON c.run_id=v.run_id AND c.receipt_id=v.handoff_receipt_id
@@ -321,11 +382,11 @@ fn head(db: &Connection, run: &str) -> Result<Head, StoreError> {
         [run], |row| Ok(Head {
             receipt: row.get(0)?, disposition_version: row.get(1)?, hash: row.get(2)?,
             attention: row.get(3)?, reviewed_sha: row.get(4)?, revision_reason: row.get(5)?,
-            full_sha: row.get(6)?, verdict: row.get(7)?, coverage: row.get(8)?, source_kind: row.get(9)?, source_path: row.get(10)?, complete: row.get(11)?, original_hash: row.get(12)?, coverage_source: row.get(13)?, coverage_target: row.get(14)?,
+            full_sha: row.get(6)?, verdict: row.get(7)?, coverage: row.get(8)?, source_kind: row.get(9)?, source_path: row.get(10)?, complete: row.get(11)?, original_hash: row.get(12)?, coverage_source: row.get(13)?, coverage_target: row.get(14)?, semantic_ready: row.get(15)?, change_count: row.get(16)?, finding_count: row.get(17)?,
         }),
     ).optional()?.unwrap_or(Head {
         receipt: None, disposition_version: 0, hash: None, attention: None,
-        reviewed_sha: None, revision_reason: None, full_sha: None, verdict: None, coverage: None, source_kind: None, source_path: None, complete: false, original_hash: None, coverage_source: None, coverage_target: None,
+        reviewed_sha: None, revision_reason: None, full_sha: None, verdict: None, coverage: None, source_kind: None, source_path: None, complete: false, semantic_ready: false, change_count: None, finding_count: None, original_hash: None, coverage_source: None, coverage_target: None,
     }))
 }
 
@@ -359,6 +420,8 @@ fn promote(
     revision: &RevisionEvidence,
     verdict: Verdict,
     amendment: bool,
+    preserve_attention: bool,
+    edits: &ReportEdits,
     captured: &CapturedArtifact,
     time: i64,
     scoped: Option<(
@@ -370,38 +433,39 @@ fn promote(
         RevisionEvidence::Exact(sha) => (Some(sha.as_str()), None),
         RevisionEvidence::Unknown(reason) => (None, Some(reason.as_str())),
     };
-    let known_full = if amendment || scoped.is_some() {
+    let keeps_coverage = amendment || edits.correction.is_some();
+    let known_full = if keeps_coverage || scoped.is_some() {
         previous.full_sha.as_deref()
     } else {
         reviewed.or(previous.full_sha.as_deref())
     };
-    let attention = if amendment {
+    let attention = if preserve_attention {
         previous.attention.as_deref().ok_or(AppError::Internal)?
     } else {
         receipt
     };
-    let coverage = if amendment {
+    let coverage = if keeps_coverage {
         previous.coverage.as_deref().ok_or(AppError::Internal)?
     } else if scoped.is_some() {
         "selected_threads"
     } else {
         "full_mr"
     };
-    let changes = scoped
-        .map(|(_, assessments)| {
-            assessments
+    let changes = if preserve_attention {
+        previous.change_count.unwrap_or(0)
+    } else {
+        edits.findings.len() as i64
+    };
+    let count = if amendment {
+        previous.finding_count
+    } else {
+        captured.index.as_ref().map(|items| {
+            items
                 .iter()
-                .flat_map(|a| a.finding_ids.iter())
-                .collect::<std::collections::HashSet<_>>()
-                .len() as i64
+                .filter(|item| matches!(item, Descriptor::Finding { .. }))
+                .count() as i64
         })
-        .unwrap_or(0);
-    let count = captured.index.as_ref().map(|items| {
-        items
-            .iter()
-            .filter(|item| matches!(item, Descriptor::Finding { .. }))
-            .count() as i64
-    });
+    };
     let semantic = if count.is_some() {
         "ready"
     } else {
@@ -423,14 +487,40 @@ fn promote(
         params![run, receipt, artifact, previous.receipt, attention, reviewed, reason, known_full,
             coverage, verdict.to_string(), semantic, count, count.map(|_| changes), time,
             previous.disposition_version,
-            if amendment { previous.coverage_source.as_deref() } else { reviewed },
-            if amendment { previous.coverage_target.as_deref() } else { scoped.and_then(|(manifest,_)| manifest.target_sha.as_deref()) }],
+            if keeps_coverage { previous.coverage_source.as_deref() } else { reviewed },
+            if keeps_coverage { previous.coverage_target.as_deref() } else { scoped.and_then(|(manifest,_)| manifest.target_sha.as_deref()) }],
     )?;
-    if let Some(items) = &captured.index {
+    if amendment {
+        let parent = previous.receipt.as_deref().ok_or(AppError::Internal)?;
+        db.execute(
+            "INSERT INTO report_findings
+             SELECT run_id,?3,finding_id,title,severity,blocking,scalar_offset,scalar_length,evidence_sha256
+             FROM report_findings WHERE run_id=?1 AND receipt_id=?2",
+            params![run,parent,receipt],
+        )?;
+        db.execute(
+            "INSERT INTO report_sections
+             SELECT run_id,?3,scalar_offset,scalar_length,title,evidence_sha256
+             FROM report_sections WHERE run_id=?1 AND receipt_id=?2",
+            params![run, parent, receipt],
+        )?;
+    } else if let Some(items) = &captured.index {
         write_index(db, run, receipt, items)?;
     }
-    if let Some((manifest, assessment)) = scoped {
-        super::batch::write_changes(db, run, receipt, manifest, assessment)?;
+    if preserve_attention {
+        let parent = previous.receipt.as_deref().ok_or(AppError::Internal)?;
+        db.execute(
+            "INSERT INTO report_changes
+             SELECT run_id,?3,finding_id,conclusion,reason,checked_sha FROM report_changes WHERE run_id=?1 AND receipt_id=?2",
+            params![run,parent,receipt],
+        )?;
+        db.execute(
+            "INSERT INTO report_change_discussions
+             SELECT run_id,?3,finding_id,discussion_id FROM report_change_discussions WHERE run_id=?1 AND receipt_id=?2",
+            params![run,parent,receipt],
+        )?;
+    } else {
+        edits::write_changes(db, run, receipt, &edits.findings)?;
     }
     db.execute(
         "INSERT INTO report_heads(run_id, receipt_id, disposition_version) VALUES(?1, ?2, ?3)

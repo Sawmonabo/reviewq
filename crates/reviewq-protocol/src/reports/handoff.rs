@@ -48,6 +48,20 @@ pub enum Handoff {
         verdict: ReportVerdict,
         #[serde(rename = "amendsReport", skip_serializing_if = "Option::is_none")]
         amends: Option<AcceptedReference>,
+        #[serde(rename = "correctsReport", skip_serializing_if = "Option::is_none")]
+        corrects: Option<Correction>,
+        #[serde(
+            rename = "findingChanges",
+            default,
+            skip_serializing_if = "Vec::is_empty"
+        )]
+        finding_changes: Vec<FindingEdit>,
+        #[serde(
+            rename = "sectionChanges",
+            default,
+            skip_serializing_if = "Vec::is_empty"
+        )]
+        section_changes: Vec<SectionEdit>,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         assessments: Vec<Assessment>,
     },
@@ -70,6 +84,68 @@ pub struct Assessment {
     pub reason: String,
     pub finding_ids: Vec<ResourceIdDto>,
     pub next_action: crate::followups::NextAction,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct Correction {
+    pub receipt_id: ResourceIdDto,
+    pub sha256: ReportHashDto,
+    pub kind: CorrectionKind,
+    pub reason: String,
+    pub finding_ids: Vec<ResourceIdDto>,
+    pub evidence: Vec<EvidenceReference>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CorrectionKind {
+    Presentation,
+    Evidence,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(untagged)]
+pub enum EvidenceReference {
+    Finding(FindingEvidence),
+    Section(SectionEvidence),
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct FindingEvidence {
+    pub finding_id: ResourceIdDto,
+    pub sha256: ReportHashDto,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct SectionEvidence {
+    pub section_title: String,
+    pub sha256: ReportHashDto,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct FindingEdit {
+    pub finding_id: ResourceIdDto,
+    pub conclusion: super::FindingConclusion,
+    pub reason: String,
+    pub checked_sha: GitShaDto,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub discussion_ids: Vec<ResourceIdDto>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct SectionEdit {
+    pub baseline_title: String,
+    pub baseline_sha256: ReportHashDto,
+    pub replacement_title: Option<String>,
+    pub conclusion: super::FindingConclusion,
+    pub reason: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub discussion_ids: Vec<ResourceIdDto>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
