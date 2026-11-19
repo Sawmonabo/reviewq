@@ -1,7 +1,7 @@
 import { queryString, read, write } from "./client";
 import type { CancelRecoveryRequest, FollowupConfigureRequest, FollowupMonitorRequest, InterruptRequest, ReviewCheckpointRequest, ReviewDecisionRequest } from "./generated/contracts";
 import {
-  isCancelRecoveryResponse, isFollowupEnrollmentResponse, isFollowupMonitorResponse, isHistoryPlanResponse, isInterruptResponse,
+  isCancelRecoveryResponse, isFollowupAssessmentsResponse, isFollowupEnrollmentResponse, isFollowupMonitorResponse, isFollowupResultsResponse, isHistoryPlanResponse, isInterruptResponse,
   isRecoveryStateResponse, isReviewDecisionResponse, isTerminalResponse,
 } from "./generated/validators.mjs";
 
@@ -27,6 +27,18 @@ export async function saveDecision(reviewId: string, body: ReviewDecisionRequest
 
 export function followupEnrollment(reviewId: string, signal: AbortSignal) {
   return read(`/reviews/${encodeURIComponent(reviewId)}/followups`, isFollowupEnrollmentResponse, signal);
+}
+
+export function readFollowupResults(reviewId: string, cursor: string | undefined, signal: AbortSignal) {
+  return read(`/reviews/${encodeURIComponent(reviewId)}/followups/results${queryString({ cursor })}`,
+    isFollowupResultsResponse, signal, 256 * 1024);
+}
+
+export async function readFollowupAssessments(reviewId: string, throughBatchId: string, cursor: string | undefined, signal: AbortSignal) {
+  const result = await read(`/reviews/${encodeURIComponent(reviewId)}/followups/assessments${queryString({ throughBatchId, cursor })}`,
+    isFollowupAssessmentsResponse, signal, 512 * 1024);
+  if (result.data.throughBatchId !== throughBatchId) throw new Error("The follow-up assessment boundary changed.");
+  return result;
 }
 
 export async function changeFollowup(reviewId: string, action: "configure" | "pause" | "resume" | "review-now", body: FollowupConfigureRequest | FollowupMonitorRequest) {

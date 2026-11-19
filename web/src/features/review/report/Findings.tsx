@@ -8,6 +8,7 @@ import { useResource } from "../../../hooks/useResource";
 import type { DraftStore } from "../../../lib/drafts";
 import { describeError, formatTime, readable } from "../../../lib/presentation";
 import { savedValue, saveValue } from "../../../lib/view-preferences";
+import { FollowupResults } from "./FollowupResults";
 import "./report.css";
 
 const ReportDocument = lazy(() => import("./ReportDocument"));
@@ -18,9 +19,10 @@ type Props = {
   readonly reviewTitle: string;
   readonly webUrl: string;
   readonly followup: ResultSummary | null | undefined;
+  readonly onRun: (run: string) => void;
 };
 
-export default function Findings({ run, drafts, reviewTitle, webUrl, followup }: Props) {
+export default function Findings({ run, drafts, reviewTitle, webUrl, followup, onRun }: Props) {
   const bookmark = `report.receipt.${run.runId}`;
   const [receipt, setReceipt] = useState<string | undefined>(() => {
     const value = savedValue(bookmark);
@@ -56,12 +58,13 @@ export default function Findings({ run, drafts, reviewTitle, webUrl, followup }:
     setReceipt(id); setNotice(undefined); saveValue(bookmark, id ?? null);
   }
   async function acknowledge(renderedBatchId?: string) {
-    if (!report || busy) return;
+    if (!report || busy) return false;
     setBusy(true); setNotice(undefined);
     try {
       await markReportViewed(run.runId, { receiptId: report.receiptId, submissionId: crypto.randomUUID(), ...(renderedBatchId ? { renderedBatchId } : {}) });
       setNotice(renderedBatchId ? "Follow-up result marked viewed." : "This findings version was marked viewed.");
-    } catch (error) { setNotice(describeError(error)); }
+      return true;
+    } catch (error) { setNotice(describeError(error)); return false; }
     finally { setBusy(false); }
   }
 
@@ -81,11 +84,9 @@ export default function Findings({ run, drafts, reviewTitle, webUrl, followup }:
       <div className="actions">{cursor && <button type="button" onClick={() => setCursor(undefined)}>Latest versions</button>}
         {versions.data?.nextCursor && <button type="button" onClick={() => setCursor(versions.data?.nextCursor ?? undefined)}>Older versions</button>}</div>
     </section>}
-    {followup?.runId === run.runId && <section className="surface-card stack" aria-label="Latest follow-up result">
-      <div className="spread"><h3>{followup.kind === "unchanged" ? "Follow-up complete · Findings unchanged" : "Follow-up complete"}</h3><span className="meta">{formatTime(followup.completedAt)}</span></div>
-      {followup.checkedSha && <p className="meta">Checked revision · <code>{followup.checkedSha}</code></p>}
-      {report && followup.receiptId === report.receiptId && <button type="button" disabled={busy} onClick={() => void acknowledge(followup.batchId)}>Mark follow-up result viewed</button>}
-    </section>}
+    <FollowupResults run={run} latest={followup} receipt={report?.receiptId} disabled={busy} onOpenReceipt={choose} onOpenRun={onRun}
+      onAcknowledge={(batch) => batch.runId === run.runId && batch.receiptId === report?.receiptId
+        ? acknowledge(batch.batchId) : Promise.resolve(false)} />
     {!report && ((current.pending || (chosen && chosen !== latestId && historical.pending))
       ? <Loading label="Loading accepted findings…" />
       : current.data && !chosen && <Empty title="No accepted findings yet" />)}

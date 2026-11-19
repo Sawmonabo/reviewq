@@ -35,16 +35,17 @@ function TicketDetail({ ticketKey }: { readonly ticketKey: string }) {
   const page = trail.length ? comments.data : ticket;
   return <>
     <header className="stack">
-      <div className="actions"><span className="ticket-key">{ticket.key}</span>{ticket.status && <span className="badge blue">{ticket.status}</span>}
+      <div className="actions"><span className="ticket-key">{ticket.key}</span>{ticket.status && <span className="badge blue">{ticket.status}</span>}{ticket.issueType && <span className="badge">{ticket.issueType}</span>}
         {url && <a href={url} target="_blank" rel="noreferrer">Open in Jira ↗</a>}</div>
       <h3>{ticket.title}</h3>
       <dl className="detail-facts">
         <div><dt>Priority</dt><dd>{ticket.priority ?? "Unknown"}</dd></div>
         <div><dt>Story Points</dt><dd>{ticket.estimate === null ? "Unestimated" : ticket.estimate}</dd></div>
         <div><dt>Assignee</dt><dd>{ticket.assignee ?? "Unassigned"}</dd></div>
-        {typeof ticket.reporter === "string" && <div><dt>Reporter</dt><dd>{ticket.reporter}</dd></div>}
-        {typeof ticket.issueType === "string" && <div><dt>Type</dt><dd>{ticket.issueType}</dd></div>}
+        <div><dt>Reporter</dt><dd>{ticket.reporter ?? "Unknown"}</dd></div>
       </dl>
+      {ticket.labels.length > 0 && <div className="actions"><span className="meta">Labels</span>{ticket.labels.map((label) => <span className="badge" key={label}>{label}</span>)}</div>}
+      {ticket.components.length > 0 && <div className="actions"><span className="meta">Components</span>{ticket.components.map((component) => <span className="badge" key={component}>{component}</span>)}</div>}
     </header>
     {primary.error && <Notice retry={primary.retry}>{primary.error}</Notice>}
     {ticket.warnings.map((warning) => <Notice key={warning}>{warning}</Notice>)}

@@ -193,7 +193,7 @@ export default function ReviewDrawer({
             ? <Loading label="Resolving selected run…" /> : <Empty title="No confirmed conversation" />)}
           {activeTab === "findings" && (child && run ? <AgentPanel key={`${scope}:result`} run={run} session={child} reviewTitle={review.title}
             state={review.focusedRunId === run.runId ? review.runStage : null} drafts={drafts} onSession={onSession} onTerminal={() => void commandFor("open")} resultOnly />
-            : run && session ? <Findings key={run.runId} run={run} drafts={drafts} reviewTitle={review.title} webUrl={overview.webUrl} followup={follows.data?.latestCompletedResult} />
+            : run && session ? <Findings key={run.runId} run={run} drafts={drafts} reviewTitle={review.title} webUrl={overview.webUrl} followup={follows.data?.latestCompletedResult} onRun={onRun} />
               : selectionPending ? <Loading label="Resolving selected run…" /> : <Empty title="No registered review report" />)}
         </Suspense>
       </PanelBoundary>
