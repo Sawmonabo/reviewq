@@ -30,6 +30,8 @@ pub(super) use raw::patch;
 
 const FILE_CURSOR: &[u8] = b"reviewq-changes-files-v1";
 const DISCUSSION_CURSOR: &[u8] = b"reviewq-changes-discussions-v1";
+const DISCUSSION_LIMIT: u16 = 40;
+const DISCUSSION_SMALL_LIMIT: u16 = 20;
 
 #[derive(Default, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -179,12 +181,13 @@ pub(super) async fn discussions(
     let actor = entry.auth.browser_actor(&headers, false)?;
     let review_id = parse_review(&review)?;
     let source = read_source(&entry, &actor, &review_id).await?;
-    let (limit, page, revision) = query.position(
+    let adaptive = query.limit.is_none();
+    let (mut limit, page, revision) = query.position(
         &entry.auth.endpoint,
         DISCUSSION_CURSOR,
         &review_id,
         source.context.revision.get(),
-        20,
+        DISCUSSION_LIMIT,
     )?;
     let revision = revision.ok_or(AppError::InvalidRequest)?;
     let provider = source
@@ -192,9 +195,26 @@ pub(super) async fn discussions(
         .reader
         .as_ref()
         .ok_or(AppError::Unavailable)?;
-    let response = provider
-        .discussions(source.value.identity.clone(), revision, page, limit)
-        .await?;
+    let identity = &source.value.identity;
+    let response = match provider
+        .discussions(identity.clone(), revision.clone(), page, limit)
+        .await
+    {
+        Err(AppError::PayloadTooLarge) if adaptive && limit == DISCUSSION_LIMIT => {
+            // Both limits divide the same upstream offset, including after a cursor.
+            let factor = u32::from(DISCUSSION_LIMIT / DISCUSSION_SMALL_LIMIT);
+            let small_page = page
+                .checked_sub(1)
+                .and_then(|offset| offset.checked_mul(factor))
+                .and_then(|offset| offset.checked_add(1))
+                .ok_or(AppError::InvalidRequest)?;
+            limit = DISCUSSION_SMALL_LIMIT;
+            provider
+                .discussions(identity.clone(), revision, small_page, limit)
+                .await?
+        }
+        response => response?,
+    };
     check_source(&entry, &actor, &review_id, &source).await?;
     let position = response.next_page.map(|page| Position {
         review: review.clone(),
@@ -256,14 +276,18 @@ impl ChangeQuery {
             return Ok((limit, 1, self.revision));
         };
         let position: Position = endpoint.decode_cursor(scope, cursor)?;
+        let adaptive_discussion = scope == DISCUSSION_CURSOR
+            && self.limit.is_none()
+            && matches!(position.limit, DISCUSSION_LIMIT | DISCUSSION_SMALL_LIMIT);
         if position.review != review.as_str()
             || position.settings != settings
-            || position.limit != limit
+            || !(1..=max_limit).contains(&position.limit)
+            || (!adaptive_discussion && position.limit != limit)
             || self.revision.as_deref() != Some(&position.revision)
         {
             return Err(AppError::CursorExpired);
         }
-        Ok((limit, position.page, Some(position.revision)))
+        Ok((position.limit, position.page, Some(position.revision)))
     }
 }
 
