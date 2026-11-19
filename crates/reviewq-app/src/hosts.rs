@@ -15,7 +15,13 @@ use crate::queue::ReviewSource;
 use crate::sources::{ReviewResolution, ReviewSourceReader};
 use crate::workspace::WorkspaceStore;
 
+mod messages;
 mod work;
+
+pub use messages::{
+    MAX_MESSAGE_HISTORY_PAGE, MessageAttachment, MessageHistory, MessageHistoryStore,
+    MessagePosition, RecordedMessage, RecordedPurpose,
+};
 pub use work::{DispatchGuard, receipt, recover_delivery, send_message};
 
 const MAX_MESSAGE_CHARACTERS: usize = 12_000;
@@ -203,10 +209,10 @@ pub enum RecoverableDeliveryState {
     Uncertain,
 }
 
-/// Stable ascending key of one outbox row, independent of state changes.
+/// Exclusive position within one bounded pass over currently due intents.
 #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub struct DeliveryRecoveryCursor {
-    pub created_at_ms: i64,
+    pub due_at_ms: i64,
     pub delivery_id: DeliveryId,
 }
 
@@ -313,7 +319,7 @@ pub trait LeadStore: Send + Sync {
         submission_id: SubmissionId,
     ) -> AppFuture<'_, Snapshot<DeliveryReceipt>>;
 
-    /// Scans recoverable rows after an exclusive key in ascending creation/ID order.
+    /// Scans due dispatch and reconciliation rows in ascending due time and ID order.
     ///
     /// Accepts 1 through `MAX_RECOVERY_LIMIT`. Start at None on startup or a new
     /// reconciliation pass. The last row's cursor continues the current pass.
@@ -323,6 +329,9 @@ pub trait LeadStore: Send + Sync {
         after: Option<DeliveryRecoveryCursor>,
         limit: u16,
     ) -> AppFuture<'_, Vec<RecoverableDelivery>>;
+
+    /// Earliest durable due time, including work whose backoff has not elapsed.
+    fn next_delivery_due(&self) -> AppFuture<'_, Option<i64>>;
 
     /// Claims the service delivery ID in the exact expected recoverable state.
     fn claim_delivery(

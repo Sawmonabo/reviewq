@@ -18,16 +18,18 @@ use crate::StoreError;
 use crate::connection::WriteTx;
 use crate::events::{now_ms, snapshot};
 use crate::queue::{lead_for_run, parse, text};
+use crate::reports::authorize_feedback;
 use crate::workspace::{actor_key, hash_field};
 
 const OPERATION: &str = "message";
 const RECEIPT_COLUMNS: &str =
-    "d.delivery_id, d.submission_id, r.review_id, d.run_id, d.session_key, d.state,
-     d.created_at_ms, d.updated_at_ms, d.native_turn_id, d.native_input_id, d.fence,
-     d.purpose, d.claim_kind, m.grant_id, m.grant_epoch";
+    "d.message_id, d.submission_id, r.review_id, d.run_id, d.session_key, d.state,
+     d.created_at_ms, d.updated_at_ms, d.native_turn_id, d.native_input_id, coalesce(o.fence, 0),
+     d.purpose, o.claim_kind, m.grant_id, m.grant_epoch, o.due_at_ms, coalesce(o.retry_count, 0)";
 const RECEIPT_JOIN: &str =
-    "outbox d JOIN runs r ON r.run_id=d.run_id
-     JOIN mutation_receipts m ON m.actor_key=d.actor_key AND m.operation=d.operation AND m.submission_id=d.submission_id";
+    "messages d JOIN runs r ON r.run_id=d.run_id
+     JOIN mutation_receipts m ON m.actor_key=d.actor_key AND m.operation=d.operation AND m.submission_id=d.submission_id
+     LEFT JOIN outbox o ON o.delivery_id=d.message_id";
 
 struct Delivery {
     receipt: DeliveryReceipt,
@@ -35,6 +37,8 @@ struct Delivery {
     purpose: MessagePurpose,
     claim: Option<ClaimKind>,
     grant: Option<(String, Revision)>,
+    due_at_ms: Option<i64>,
+    retry_count: u8,
 }
 
 #[derive(Clone, Copy, Eq, PartialEq)]
@@ -84,6 +88,12 @@ pub(super) fn admit(
                 .receipt,
         );
     }
+    let current_report = input
+        .report_ref
+        .as_ref()
+        .map(|report| authorize_feedback(&tx.sql, input.target.run_id(), report))
+        .transpose()?
+        .flatten();
     let delivery_id: DeliveryId = parse(&Uuid::new_v4().to_string())?;
     let grant = match actor.scope() {
         ActorScope::CheckoutGrant(grant) => Some(grant.as_str()),
@@ -105,17 +115,21 @@ pub(super) fn admit(
         .map_err(|_| AppError::Internal)?;
     let time = now_ms()?;
     tx.sql.execute(
-        "INSERT INTO outbox(delivery_id, actor_key, operation, submission_id, run_id, session_key, purpose,
-                            body, receipt_id, report_hash, quoted_text, quoted_offset, state,
-                            created_at_ms, updated_at_ms)
-         VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, 'queued', ?13, ?13)",
+        "INSERT INTO messages(message_id, actor_key, operation, submission_id, run_id, session_key, purpose,
+                             body, receipt_id, report_hash, current_receipt_id, quoted_text, quoted_offset,
+                             state, created_at_ms, updated_at_ms)
+         VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, 'queued', ?14, ?14)",
         params![
             delivery_id.as_str(), key.as_slice(), OPERATION, input.submission_id.as_str(),
             input.target.run_id().as_str(), input.target.session_key().as_str(), purpose_label(input.purpose),
             input.text.as_str(), input.report_ref.as_ref().map(|r| r.receipt_id.as_str()),
             input.report_ref.as_ref().map(|r| r.report_hash.as_str()),
-            quote.map(|q| q.text().as_str()), offset, time,
+            current_report.as_ref().map(|receipt| receipt.as_str()), quote.map(|q| q.text().as_str()), offset, time,
         ],
+    )?;
+    tx.sql.execute(
+        "INSERT INTO outbox(delivery_id, due_at_ms) VALUES(?1, ?2)",
+        params![delivery_id.as_str(), time],
     )?;
     emit_delivery(tx, input.target.target())?;
     snapshot(
@@ -166,8 +180,8 @@ fn find_receipt(
     submission: &SubmissionId,
 ) -> Result<Option<(DeliveryId, Vec<u8>)>, StoreError> {
     let row = connection.query_row(
-        "SELECT d.delivery_id, m.request_digest FROM mutation_receipts m
-         JOIN outbox d ON d.actor_key=m.actor_key AND d.operation=m.operation AND d.submission_id=m.submission_id
+        "SELECT d.message_id, m.request_digest FROM mutation_receipts m
+         JOIN messages d ON d.actor_key=m.actor_key AND d.operation=m.operation AND d.submission_id=m.submission_id
          WHERE m.actor_key=?1 AND m.operation=?2 AND m.submission_id=?3",
         params![key.as_slice(), OPERATION, submission.as_str()],
         |row| Ok((row.get::<_, String>(0)?, row.get::<_, Vec<u8>>(1)?)),
@@ -201,20 +215,20 @@ pub(super) fn recoverable(
     after: Option<DeliveryRecoveryCursor>,
     limit: u16,
 ) -> Result<Vec<RecoverableDelivery>, StoreError> {
-    let (time, id) = after.as_ref().map_or((i64::MIN, ""), |v| {
-        (v.created_at_ms, v.delivery_id.as_str())
-    });
+    let (time, id) = after
+        .as_ref()
+        .map_or((i64::MIN, ""), |v| (v.due_at_ms, v.delivery_id.as_str()));
     let mut select = connection.prepare_cached(
-        "SELECT created_at_ms, delivery_id, state FROM outbox
-         WHERE state IN ('queued', 'dispatching', 'uncertain') AND (created_at_ms, delivery_id) > (?1, ?2)
-         ORDER BY created_at_ms, delivery_id LIMIT ?3"
+        "SELECT o.due_at_ms, o.delivery_id, m.state FROM outbox o JOIN messages m ON m.message_id=o.delivery_id
+         WHERE (o.due_at_ms, o.delivery_id) > (?1, ?2) AND o.due_at_ms<=?3
+         ORDER BY o.due_at_ms, o.delivery_id LIMIT ?4"
     )?;
-    let mut rows = select.query(params![time, id, limit])?;
+    let mut rows = select.query(params![time, id, now_ms()?, limit])?;
     let mut values = Vec::new();
     while let Some(row) = rows.next()? {
         values.push(RecoverableDelivery {
             cursor: DeliveryRecoveryCursor {
-                created_at_ms: row.get(0)?,
+                due_at_ms: row.get(0)?,
                 delivery_id: parse(text(row, 1)?)?,
             },
             state: match text(row, 2)? {
@@ -228,6 +242,16 @@ pub(super) fn recoverable(
     Ok(values)
 }
 
+pub(super) fn next_due(connection: &Connection) -> Result<Option<i64>, StoreError> {
+    Ok(connection
+        .query_row(
+            "SELECT due_at_ms FROM outbox ORDER BY due_at_ms, delivery_id LIMIT 1",
+            [],
+            |row| row.get(0),
+        )
+        .optional()?)
+}
+
 pub(super) fn claim(
     tx: &mut WriteTx<'_>,
     delivery_id: DeliveryId,
@@ -237,7 +261,10 @@ pub(super) fn claim(
         return Ok(None);
     };
     let prior = recoverable_label(expected);
-    if outcome_label(&delivery.receipt.outcome) != prior {
+    let time = now_ms()?;
+    if outcome_label(&delivery.receipt.outcome) != prior
+        || delivery.due_at_ms.is_none_or(|due| due > time)
+    {
         return Ok(None);
     }
     let target = registered_lead(&tx.sql, &delivery)?;
@@ -245,9 +272,13 @@ pub(super) fn claim(
         RecoverableDeliveryState::Queued => {
             if !grant_current(&tx.sql, &delivery)? {
                 tx.sql.execute(
-                    "UPDATE outbox SET state='rejected', updated_at_ms=max(updated_at_ms, ?2)
-                     WHERE delivery_id=?1 AND state='queued'",
-                    params![delivery_id.as_str(), now_ms()?],
+                    "UPDATE messages SET state='rejected', updated_at_ms=max(updated_at_ms, ?2)
+                     WHERE message_id=?1 AND state='queued'",
+                    params![delivery_id.as_str(), time],
+                )?;
+                tx.sql.execute(
+                    "DELETE FROM outbox WHERE delivery_id=?1",
+                    [delivery_id.as_str()],
                 )?;
                 emit_delivery(tx, target.target())?;
                 return Ok(None);
@@ -264,23 +295,23 @@ pub(super) fn claim(
     };
     let fence = delivery.fence.checked_add(1).ok_or(AppError::Internal)?;
     let changed = tx.sql.execute(
-        "UPDATE outbox SET fence=?3, claim_kind=?4, state=?5,
-             updated_at_ms=CASE WHEN state=?5 THEN updated_at_ms ELSE max(updated_at_ms, ?6) END
-         WHERE delivery_id=?1 AND state=?2 AND fence=?7",
+        "UPDATE outbox SET fence=?3, claim_kind=?4
+         WHERE delivery_id=?1 AND fence=?2",
         params![
             delivery_id.as_str(),
-            prior,
+            delivery.fence.as_sqlite_integer(),
             fence.as_sqlite_integer(),
-            kind.label(),
-            state,
-            now_ms()?,
-            delivery.fence.as_sqlite_integer()
+            kind.label()
         ],
     )?;
     if changed != 1 {
         return Err(AppError::Conflict.into());
     }
     if state != prior {
+        tx.sql.execute(
+            "UPDATE messages SET state=?2, updated_at_ms=max(updated_at_ms, ?3) WHERE message_id=?1",
+            params![delivery_id.as_str(), state, time],
+        )?;
         emit_delivery(tx, target.target())?;
     }
     Ok(Some(DeliveryClaim {
@@ -353,30 +384,51 @@ pub(super) fn finish(
     };
     let state = outcome_label(&outcome);
     let prior = outcome_label(&stored.receipt.outcome);
-    let timestamp = now_ms()?.max(stored.receipt.updated_at_ms);
-    let (turn, item) = match &outcome {
-        DeliveryOutcome::Started(input) => {
-            (Some(input.turn_id.as_str()), Some(input.entry_id.as_str()))
-        }
-        _ => (None, None),
+    let now = now_ms()?;
+    let receipt_changed = stored.receipt.outcome != outcome;
+    let timestamp = if receipt_changed {
+        now.max(stored.receipt.updated_at_ms)
+    } else {
+        stored.receipt.updated_at_ms
     };
-    let changed = tx.sql.execute(
-        "UPDATE outbox SET state=?4, claim_kind=NULL, updated_at_ms=?5, native_turn_id=?6, native_input_id=?7
-         WHERE delivery_id=?1 AND fence=?2 AND claim_kind=?3 AND state=?8",
-        params![claim.delivery_id.as_str(), claim.fence.as_sqlite_integer(),
-                ClaimKind::from_work(&claim.work).label(), state, timestamp, turn, item, prior],
-    ).map_err(|error| {
-        if error.sqlite_error_code() == Some(ErrorCode::ConstraintViolation) {
-            StoreError::from(AppError::Conflict)
-        } else {
-            error.into()
+    if receipt_changed {
+        let (turn, item) = match &outcome {
+            DeliveryOutcome::Started(input) => {
+                (Some(input.turn_id.as_str()), Some(input.entry_id.as_str()))
+            }
+            _ => (None, None),
+        };
+        let changed = tx.sql.execute(
+            "UPDATE messages SET state=?2, updated_at_ms=?3, native_turn_id=?4, native_input_id=?5
+             WHERE message_id=?1 AND state=?6",
+            params![claim.delivery_id.as_str(), state, timestamp, turn, item, prior],
+        ).map_err(|error| {
+            if error.sqlite_error_code() == Some(ErrorCode::ConstraintViolation) {
+                StoreError::from(AppError::Conflict)
+            } else {
+                error.into()
+            }
+        })?;
+        if changed != 1 {
+            return Err(AppError::Conflict.into());
         }
-    })?;
-    if changed != 1 {
-        return Err(AppError::Conflict.into());
-    }
-    if state != prior || timestamp != stored.receipt.updated_at_ms {
         emit_delivery(tx, &stored.receipt.target)?;
+    }
+    match outcome {
+        DeliveryOutcome::Started(_) | DeliveryOutcome::Rejected => {
+            tx.sql.execute(
+                "DELETE FROM outbox WHERE delivery_id=?1",
+                [claim.delivery_id.as_str()],
+            )?;
+        }
+        _ => {
+            let retry_count = stored.retry_count.saturating_add(1).min(7);
+            let due_at_ms = now.saturating_add(1_000_i64 << (retry_count - 1));
+            tx.sql.execute(
+                "UPDATE outbox SET claim_kind=NULL, due_at_ms=?2, retry_count=?3 WHERE delivery_id=?1",
+                params![claim.delivery_id.as_str(), due_at_ms, retry_count],
+            )?;
+        }
     }
     stored.receipt.outcome = outcome;
     stored.receipt.updated_at_ms = timestamp;
@@ -397,7 +449,7 @@ fn matching_claim(connection: &Connection, claim: &DeliveryClaim) -> Result<Deli
 }
 
 fn by_id(connection: &Connection, delivery: &DeliveryId) -> Result<Option<Delivery>, StoreError> {
-    let query = format!("SELECT {RECEIPT_COLUMNS} FROM {RECEIPT_JOIN} WHERE d.delivery_id=?1");
+    let query = format!("SELECT {RECEIPT_COLUMNS} FROM {RECEIPT_JOIN} WHERE d.message_id=?1");
     let mut statement = connection.prepare_cached(&query)?;
     let mut rows = statement.query([delivery.as_str()])?;
     rows.next()?.map(delivery_row).transpose()
@@ -451,12 +503,14 @@ fn delivery_row(row: &Row<'_>) -> Result<Delivery, StoreError> {
         purpose,
         claim,
         grant,
+        due_at_ms: row.get(15)?,
+        retry_count: row.get(16)?,
     })
 }
 
 fn dispatch_work(connection: &Connection, id: &DeliveryId) -> Result<DeliveryWork, StoreError> {
     let mut statement = connection.prepare_cached(
-        "SELECT body, receipt_id, report_hash, quoted_text, quoted_offset FROM outbox WHERE delivery_id=?1"
+        "SELECT body, receipt_id, report_hash, quoted_text, quoted_offset FROM messages WHERE message_id=?1"
     )?;
     let mut rows = statement.query([id.as_str()])?;
     let row = rows.next()?.ok_or(AppError::Internal)?;
@@ -497,6 +551,7 @@ fn emit_delivery(tx: &mut WriteTx<'_>, target: &SessionTarget) -> Result<(), Sto
     tx.emit(&[
         ResourceKey::Run(Some(target.run_id().clone())),
         ResourceKey::Session(Some(target.session_key().clone())),
+        ResourceKey::History(Some(target.session_key().clone())),
     ])?;
     Ok(())
 }

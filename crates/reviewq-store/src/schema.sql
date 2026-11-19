@@ -102,45 +102,63 @@ CREATE TABLE mutation_receipts (
 
 CREATE INDEX mutation_grant_idx ON mutation_receipts(grant_id);
 
-CREATE TABLE outbox (
-    delivery_id TEXT PRIMARY KEY,
-    actor_key BLOB NOT NULL,
-    operation TEXT NOT NULL,
+CREATE TABLE messages (
+    message_id TEXT PRIMARY KEY,
+    actor_key BLOB,
+    operation TEXT,
     submission_id TEXT NOT NULL,
     run_id TEXT NOT NULL,
     session_key TEXT NOT NULL,
-    purpose TEXT NOT NULL CHECK (purpose IN ('user', 'report_feedback')),
+    purpose TEXT NOT NULL CHECK (purpose IN ('user', 'report_feedback', 'codex_recovery', 'thread_followup', 'publication')),
     body TEXT NOT NULL CHECK (length(CAST(body AS BLOB)) BETWEEN 1 AND 48000),
     receipt_id TEXT,
-    report_hash TEXT,
-    quoted_text TEXT,
-    quoted_offset INTEGER,
-    fence INTEGER NOT NULL DEFAULT 0 CHECK (fence >= 0),
-    claim_kind TEXT CHECK (claim_kind IN ('dispatch', 'reconcile')),
+    report_hash TEXT CHECK (length(report_hash) = 64),
+    current_receipt_id TEXT,
+    quoted_text TEXT CHECK (length(CAST(quoted_text AS BLOB)) BETWEEN 1 AND 48000),
+    quoted_offset INTEGER CHECK (quoted_offset >= 0),
     state TEXT NOT NULL CHECK (state IN ('queued', 'dispatching', 'started', 'rejected', 'uncertain')),
     created_at_ms INTEGER NOT NULL,
     updated_at_ms INTEGER NOT NULL CHECK (updated_at_ms >= created_at_ms),
     native_turn_id TEXT,
     native_input_id TEXT,
-    CHECK ((purpose = 'report_feedback') = (receipt_id IS NOT NULL)),
-    CHECK ((receipt_id IS NULL) = (report_hash IS NULL)),
-    CHECK ((quoted_text IS NULL) = (quoted_offset IS NULL)),
-    CHECK (quoted_text IS NULL OR (receipt_id IS NOT NULL AND quoted_offset >= 0)),
-    CHECK ((state = 'started') = (native_turn_id IS NOT NULL)),
-    CHECK ((native_turn_id IS NULL) = (native_input_id IS NULL)),
-    CHECK (claim_kind IS NULL OR state IN ('dispatching', 'uncertain')),
+    CHECK ((actor_key IS NULL) = (operation IS NULL)),
+    CHECK (actor_key IS NULL OR (length(actor_key) = 32 AND length(message_id) = 36)),
+    CHECK (quoted_offset IS NULL OR quoted_text IS NOT NULL),
+    CHECK (actor_key IS NULL OR (
+        ((purpose = 'report_feedback') = (receipt_id IS NOT NULL)) AND
+        ((receipt_id IS NULL) = (report_hash IS NULL)) AND
+        ((quoted_text IS NULL) = (quoted_offset IS NULL)) AND
+        (quoted_text IS NULL OR receipt_id IS NOT NULL) AND
+        ((state = 'started') = (native_turn_id IS NOT NULL)) AND
+        ((native_turn_id IS NULL) = (native_input_id IS NULL)))),
     UNIQUE (actor_key, operation, submission_id),
     FOREIGN KEY (actor_key, operation, submission_id)
         REFERENCES mutation_receipts(actor_key, operation, submission_id),
     FOREIGN KEY (run_id, session_key) REFERENCES sessions(run_id, session_key)
 ) STRICT;
 
-CREATE INDEX outbox_run_session ON outbox(run_id, session_key);
-CREATE INDEX outbox_recipient_queue ON outbox(session_key, state, created_at_ms, delivery_id);
-CREATE INDEX outbox_recovery ON outbox(created_at_ms, delivery_id)
-    WHERE state IN ('queued', 'dispatching', 'uncertain');
-CREATE UNIQUE INDEX outbox_observed_input ON outbox(session_key, native_turn_id, native_input_id)
-    WHERE native_input_id IS NOT NULL;
+CREATE INDEX messages_session_history ON messages(run_id, session_key, created_at_ms DESC, message_id DESC);
+CREATE UNIQUE INDEX messages_observed_input ON messages(session_key, native_turn_id, native_input_id)
+    WHERE actor_key IS NOT NULL AND native_input_id IS NOT NULL;
+
+CREATE TABLE outbox (
+    delivery_id TEXT PRIMARY KEY REFERENCES messages(message_id),
+    fence INTEGER NOT NULL DEFAULT 0 CHECK (fence >= 0),
+    claim_kind TEXT CHECK (claim_kind IN ('dispatch', 'reconcile')),
+    due_at_ms INTEGER NOT NULL,
+    retry_count INTEGER NOT NULL DEFAULT 0 CHECK (retry_count BETWEEN 0 AND 7)
+) STRICT, WITHOUT ROWID;
+
+CREATE INDEX outbox_due ON outbox(due_at_ms, delivery_id);
+
+CREATE TRIGGER outbox_requires_authority BEFORE INSERT ON outbox
+WHEN NOT EXISTS (
+    SELECT 1 FROM messages WHERE message_id=NEW.delivery_id AND actor_key IS NOT NULL
+       AND state IN ('queued', 'dispatching', 'uncertain')
+)
+BEGIN
+    SELECT RAISE(ABORT, 'dispatch requires an admitted message');
+END;
 
 CREATE UNIQUE INDEX runs_review_identity ON runs(review_id, run_id);
 

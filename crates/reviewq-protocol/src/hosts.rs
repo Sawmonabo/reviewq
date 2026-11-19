@@ -124,3 +124,8 @@ fn message_text_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
         "pattern": format!(r"^[^\ud800-\udfff]{{1,{MAX_MESSAGE_CHARACTERS}}}$"),
     })
 }
+
+mod messages;
+pub use messages::{
+    MessageAttachment, MessageHistoryItem, MessageHistoryPage, RecordedPurpose, RecordedState,
+};
