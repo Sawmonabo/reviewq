@@ -316,7 +316,8 @@ function reportTable(
     rows.length === 1 &&
     headings?.length === 2 &&
     headings[0] === "before" &&
-    headings[1] === "after"
+    headings[1] === "after" &&
+    twoColumnBody(node)
   )
     return styled(node, "report-before-after");
   if (!previousThreads) return node;
@@ -326,6 +327,10 @@ function reportTable(
       : [],
   );
   const findingColumn = headings?.findIndex((label) => /^(?:finding|id)$/.test(label)) ?? -1;
+  const outcomeColumn =
+    headings?.findIndex((label) =>
+      /^(?:assessment|conclusion|outcome(?: and verification)?)$/.test(label),
+    ) ?? -1;
   const table = styled(node, "report-previous-threads");
   if (!statusColumns?.length && findingColumn < 0) return table;
   return {
@@ -342,6 +347,7 @@ function reportTable(
                       row.children,
                       statusColumns ?? [],
                       findingColumn,
+                      outcomeColumn,
                       changes,
                     ),
                   }
@@ -353,37 +359,60 @@ function reportTable(
   };
 }
 
+function twoColumnBody(table: Element) {
+  const body = table.children.find(
+    (child) => child.type === "element" && child.tagName === "tbody",
+  );
+  if (body?.type !== "element") return false;
+  const rows = body.children.filter((child) => child.type === "element");
+  return (
+    rows.length > 0 &&
+    rows.every((row) => {
+      const cells = row.children.filter((child) => child.type === "element");
+      return (
+        row.tagName === "tr" &&
+        cells.length === 2 &&
+        cells.every(
+          (cell) =>
+            cell.tagName === "td" &&
+            Number(cell.properties.colSpan ?? 1) === 1 &&
+            Number(cell.properties.rowSpan ?? 1) === 1,
+        )
+      );
+    })
+  );
+}
+
 function styleStatuses(
   cells: ElementContent[],
   columns: number[],
   findingColumn: number,
+  outcomeColumn: number,
   changes: ReadonlyMap<string, AcceptedFindingChange> | null | undefined,
 ) {
+  const identity = cells.filter((cell) => cell.type === "element" && cell.tagName === "td")[
+    findingColumn
+  ];
+  const id = identity && /^(F-\d+)\b/.exec(reportText(identity).trim())?.[1];
+  const accepted = id ? changes?.get(id) : undefined;
   let column = 0;
   return cells.map((cell) => {
     if (cell.type !== "element" || cell.tagName !== "td") return cell;
     const index = column++;
     const label = reportText(cell).trim();
-    if (index === findingColumn) {
-      const id = /^(F-\d+)\b/.exec(label)?.[1];
-      const accepted = id ? changes?.get(id) : undefined;
-      if (accepted)
-        return {
-          ...cell,
-          children: [
-            ...cell.children,
-            {
-              ...element("span", "report-thread-outcome", [
-                literal(outcomeLabels[accepted.conclusion]),
-              ]),
-              properties: {
-                className: ["report-thread-outcome"],
-                title: accepted.reason,
-                dataReportThreadStatus: isRetired(accepted) ? "confirmed" : "attention",
-              },
-            },
-          ],
-        };
+    if (accepted && index === (outcomeColumn >= 0 ? outcomeColumn : findingColumn)) {
+      const badge = {
+        ...element("span", "report-thread-outcome", [literal(outcomeLabels[accepted.conclusion])]),
+        properties: {
+          className: ["report-thread-outcome"],
+          title: accepted.reason,
+          dataReportThreadStatus: isRetired(accepted) ? "confirmed" : "attention",
+        },
+      };
+      return {
+        ...cell,
+        children: outcomeColumn >= 0 ? [badge, ...cell.children] : [...cell.children, badge],
+      };
     }
     if (!columns.includes(index)) return cell;
     const tone =
