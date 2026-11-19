@@ -3,9 +3,10 @@ use std::sync::Arc;
 use axum::Json;
 use axum::extract::State;
 use axum::http::HeaderMap;
-use reviewq_app::access::AppError;
+use reviewq_app::access::{Actor, AppError};
+use reviewq_app::events::Snapshot;
 use reviewq_app::followups::{
-    MonitorCommand, MonitorRequest, MonitorState, Selection, UpdatePreferences,
+    MonitorCommand, MonitorReceipt, MonitorRequest, MonitorState, Selection, UpdatePreferences,
     execute_monitor_command,
 };
 use reviewq_domain::identity::Revision;
@@ -57,23 +58,7 @@ pub(in crate::entry::features) async fn configure(
         dto::EnrollmentState::Enabled => MonitorState::Enabled,
         dto::EnrollmentState::Paused => MonitorState::Paused,
     };
-    let selections = input
-        .threads
-        .into_iter()
-        .map(|thread| Selection {
-            discussion_id: thread.discussion_id.as_str().to_owned(),
-            original_note_ids: thread
-                .original_note_ids
-                .into_iter()
-                .map(|id| id.get())
-                .collect(),
-            finding_ids: thread
-                .finding_ids
-                .into_iter()
-                .map(|id| id.as_str().to_owned())
-                .collect(),
-        })
-        .collect();
+    let selections = input.threads.into_iter().map(selection).collect();
     respond(
         &entry,
         &headers,
@@ -148,10 +133,8 @@ async fn respond(
     command: MonitorCommand,
 ) -> Result<Receipt, ApiError> {
     let actor = entry.auth.browser_actor(headers, true)?;
-    let source = entry.active_source().await?.reader;
-    let stored = execute_monitor_command(
-        entry.store.as_ref(),
-        source.as_deref(),
+    let stored = execute(
+        entry,
         actor,
         MonitorRequest {
             review: parse(review)?,
@@ -161,22 +144,51 @@ async fn respond(
         },
     )
     .await?;
-    let saved = stored.value;
     Ok(Json(success(
-        dto::MonitorReceipt {
-            review_id: ReviewIdDto::new(saved.review.as_str()).ok_or(AppError::Internal)?,
-            submission_id: SubmissionIdDto::new(saved.submission.as_str())
-                .ok_or(AppError::Internal)?,
-            generation: revision(saved.generation)?,
-            state: match saved.state {
-                MonitorState::Enabled => dto::MonitorState::Enabled,
-                MonitorState::Paused => dto::MonitorState::Paused,
-                MonitorState::Archived => dto::MonitorState::Archived,
-            },
-            batch_id: saved.batch_id.map(resource).transpose()?,
-        },
+        project_receipt(stored.value)?,
         stored.cursor,
     )?))
+}
+
+pub(in crate::entry) async fn execute(
+    entry: &Entry,
+    actor: Actor,
+    input: MonitorRequest,
+) -> Result<Snapshot<MonitorReceipt>, AppError> {
+    let source = entry.active_source().await?.reader;
+    execute_monitor_command(entry.store.as_ref(), source.as_deref(), actor, input).await
+}
+
+pub(in crate::entry) fn selection(thread: dto::Selection) -> Selection {
+    Selection {
+        discussion_id: thread.discussion_id.as_str().to_owned(),
+        original_note_ids: thread
+            .original_note_ids
+            .into_iter()
+            .map(|id| id.get())
+            .collect(),
+        finding_ids: thread
+            .finding_ids
+            .into_iter()
+            .map(|id| id.as_str().to_owned())
+            .collect(),
+    }
+}
+
+pub(in crate::entry) fn project_receipt(
+    saved: MonitorReceipt,
+) -> Result<dto::MonitorReceipt, AppError> {
+    Ok(dto::MonitorReceipt {
+        review_id: ReviewIdDto::new(saved.review.as_str()).ok_or(AppError::Internal)?,
+        submission_id: SubmissionIdDto::new(saved.submission.as_str()).ok_or(AppError::Internal)?,
+        generation: revision(saved.generation)?,
+        state: match saved.state {
+            MonitorState::Enabled => dto::MonitorState::Enabled,
+            MonitorState::Paused => dto::MonitorState::Paused,
+            MonitorState::Archived => dto::MonitorState::Archived,
+        },
+        batch_id: saved.batch_id.map(resource).transpose()?,
+    })
 }
 
 fn input_revision(value: RevisionDto) -> Result<Revision, AppError> {

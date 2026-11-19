@@ -2,7 +2,7 @@
 
 mod actions;
 pub(super) mod decisions;
-mod followups;
+pub(super) mod followups;
 mod notifications;
 mod reports;
 

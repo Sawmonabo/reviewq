@@ -8,7 +8,9 @@ use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use reviewq_app::access::{Actor, AppError};
-use reviewq_protocol::mcp::{GetReview, ListReviews, ReadTranscript, SendReviewMessage};
+use reviewq_protocol::mcp::{
+    ConfigureFollowups, GetReview, ListReviews, ReadTranscript, SendReviewMessage, StartReview,
+};
 use rmcp::model::{
     CallToolRequestParams, CallToolResponse, CallToolResult, ContentBlock, Implementation,
     JsonObject, ListToolsResult, PaginatedRequestParams, ServerCapabilities, ServerConfig, Tool,
@@ -26,9 +28,10 @@ use super::{ApiError, Entry};
 
 mod gates;
 mod operations;
+mod workflow;
 use gates::Gates;
 
-const MAX_TOOL_RESPONSE: usize = 64 * 1024;
+const MAX_TOOL_RESPONSE: usize = 512 * 1024;
 
 #[derive(Clone)]
 struct Server {
@@ -59,6 +62,11 @@ pub(super) fn mount(entry: Arc<Entry>) -> Router<Arc<Entry>> {
             tool::<SendReviewMessage>(
                 "SendReviewMessage",
                 "Queue an explicit message for the selected lead.",
+            ),
+            tool::<StartReview>("StartReview", "Start an explicitly selected native review."),
+            tool::<ConfigureFollowups>(
+                "ConfigureFollowups",
+                "Configure review follow-ups for an exact registered lead.",
             ),
         ]
         .into(),
@@ -165,7 +173,10 @@ impl ServerHandler for Server {
             .and_then(|parts| parts.extensions.get::<Actor>())
             .cloned()
             .ok_or_else(|| ErrorData::invalid_request("checkout authorization required", None))?;
-        let deadline = if request.name == "SendReviewMessage" {
+        let deadline = if matches!(
+            request.name.as_ref(),
+            "SendReviewMessage" | "StartReview" | "ConfigureFollowups"
+        ) {
             60
         } else {
             30
@@ -179,12 +190,14 @@ impl ServerHandler for Server {
         };
         let output = match result.and_then(|value| {
             let text = serde_json::to_string(&value).map_err(|_| AppError::Internal)?;
-            if text.len() > MAX_TOOL_RESPONSE {
+            let output = CallToolResult::success(vec![ContentBlock::text(text)]);
+            let encoded = serde_json::to_vec(&output).map_err(|_| AppError::Internal)?;
+            if encoded.len() > MAX_TOOL_RESPONSE {
                 return Err(AppError::PayloadTooLarge);
             }
-            Ok(text)
+            Ok(output)
         }) {
-            Ok(text) => CallToolResult::success(vec![ContentBlock::text(text)]),
+            Ok(output) => output,
             Err(error) => {
                 let (_status, failure) = super::error::failure(error);
                 let text = serde_json::to_string(&failure.error)
@@ -205,6 +218,10 @@ impl Server {
             "GetReview" => operations::get(&self.entry, actor, arguments(input)?).await,
             "ReadTranscript" => operations::transcript(&self.entry, actor, arguments(input)?).await,
             "SendReviewMessage" => operations::send(&self.entry, actor, arguments(input)?).await,
+            "StartReview" => workflow::start(&self.entry, actor, arguments(input)?).await,
+            "ConfigureFollowups" => {
+                workflow::followups(&self.entry, actor, arguments(input)?).await
+            }
             _ => Err(AppError::NotFound),
         }
     }

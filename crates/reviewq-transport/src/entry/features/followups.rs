@@ -1,4 +1,5 @@
 mod commands;
+pub(in crate::entry) use commands::{execute, project_receipt, selection};
 
 pub(super) use commands::{configure, pause, resume, review_now, save_preferences};
 

@@ -13,7 +13,7 @@ use crate::entry::history::{ContentQuery, HistoryQuery, read, read_content};
 use crate::entry::messages;
 use crate::entry::pages::{parse, project_review, queue_sync};
 
-enum ResolvedReview {
+pub(super) enum ResolvedReview {
     Review(ReviewId),
     Alternatives(Vec<String>),
 }
@@ -93,7 +93,7 @@ pub(super) async fn get(entry: &Entry, actor: Actor, args: GetReview) -> Result<
     }))
 }
 
-fn run_summary(entry: &Entry, review: &ReviewId, run: &RunSummary) -> Value {
+pub(super) fn run_summary(entry: &Entry, review: &ReviewId, run: &RunSummary) -> Value {
     let provider = match run.provider {
         reviewq_domain::session::HostProvider::Codex => "codex",
         reviewq_domain::session::HostProvider::Claude => "claude",
@@ -107,7 +107,7 @@ fn run_summary(entry: &Entry, review: &ReviewId, run: &RunSummary) -> Value {
     })
 }
 
-fn alternatives(urls: Vec<String>) -> Value {
+pub(super) fn alternatives(urls: Vec<String>) -> Value {
     json!({"state":"ambiguous", "choices": urls})
 }
 
@@ -247,7 +247,11 @@ async fn select(
     Ok((lead.run_id().clone(), lead.session_key().clone()))
 }
 
-async fn resolve(entry: &Entry, actor: &Actor, target: &str) -> Result<ResolvedReview, AppError> {
+pub(super) async fn resolve(
+    entry: &Entry,
+    actor: &Actor,
+    target: &str,
+) -> Result<ResolvedReview, AppError> {
     if let Ok(id) = parse::<ReviewId>(target) {
         match entry
             .store
@@ -278,7 +282,7 @@ async fn resolve(entry: &Entry, actor: &Actor, target: &str) -> Result<ResolvedR
     }
 }
 
-fn dashboard(entry: &Entry, review: &ReviewId, run: Option<&RunId>) -> String {
+pub(super) fn dashboard(entry: &Entry, review: &ReviewId, run: Option<&RunId>) -> String {
     let root = entry.auth.endpoint.browser();
     let mut query = url::form_urlencoded::Serializer::new(String::new());
     query.append_pair("view", if run.is_some() { "runs" } else { "queue" });

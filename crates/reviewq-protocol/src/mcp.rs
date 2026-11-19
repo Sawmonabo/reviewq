@@ -1,8 +1,10 @@
 //! Shared input schema for ordinary Claude and Codex management tools.
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
-use crate::{MessageTextDto, SessionKeyDto, SubmissionIdDto};
+use crate::{
+    HostProviderDto, MessageTextDto, RevisionDto, RunIdDto, SessionKeyDto, SubmissionIdDto,
+};
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -68,4 +70,41 @@ pub struct SendReviewMessage {
     pub session_key: Option<SessionKeyDto>,
     pub submission_id: SubmissionIdDto,
     pub text: MessageTextDto,
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct StartReview {
+    pub target: String,
+    pub provider: HostProviderDto,
+    pub submission_id: SubmissionIdDto,
+    pub invocation: Option<crate::launch::Invocation>,
+    pub context: Option<String>,
+    pub model: Option<String>,
+    pub effort: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct ConfigureFollowups {
+    pub target: String,
+    pub session_key: Option<SessionKeyDto>,
+    pub run_id: Option<RunIdDto>,
+    pub action: FollowupAction,
+    pub submission_id: SubmissionIdDto,
+    pub expected_generation: Option<RevisionDto>,
+    pub threads: Option<Vec<crate::followups::Selection>>,
+    pub state: Option<crate::followups::EnrollmentState>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub enum FollowupAction {
+    Configure,
+    Pause,
+    Resume,
+    ReviewNow,
 }
