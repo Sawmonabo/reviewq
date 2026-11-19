@@ -567,7 +567,6 @@ export function App() {
                     onClose={closeDrawer}
                     onLaunch={menuLaunch}
                     onMonitor={monitor}
-                    onSettings={() => setSettings(true)}
                     ticket={
                       <Tickets keys={overview.data.review.tickets.map((entry) => entry.key)} />
                     }

@@ -61,7 +61,6 @@ type Props = {
   readonly onReload: () => void;
   readonly onLaunch: (mode: "prepare" | "register", targets: readonly MergeRequestRow[]) => void;
   readonly onMonitor: (targets: readonly MergeRequestRow[], pause: boolean) => void;
-  readonly onSettings: () => void;
 };
 
 export default function ReviewDrawer({
@@ -82,7 +81,6 @@ export default function ReviewDrawer({
   onReload,
   onLaunch,
   onMonitor,
-  onSettings,
 }: Props) {
   const { review } = overview;
   const [runTrail, setRunTrail] = useState<readonly string[]>([]);
@@ -611,9 +609,7 @@ export default function ReviewDrawer({
                   overview={overview}
                   run={run}
                   ticket={ticket}
-                  monitor={follows.data?.monitor?.state}
                   onLaunch={onLaunch}
-                  onSettings={onSettings}
                   pending={selectionPending}
                   selected={selected}
                 />
@@ -736,7 +732,14 @@ function DrawerSummary({
     decision_required: ["Review ready", "blue"],
   };
   const native = session?.metadata;
-  const state = reason ? (known[reason] ?? [readable(reason), ""]) : undefined;
+  const archived = reason === "closed_mr" || reason === "archive";
+  const state = archived
+    ? review.focusedReportReviewedSha
+      ? known.report_ready
+      : undefined
+    : reason
+      ? (known[reason] ?? [readable(reason), ""])
+      : undefined;
   const nativeState = !state && native?.status;
   if (child) {
     return (

@@ -167,8 +167,8 @@ function TicketDetail({ ticketKey }: { readonly ticketKey: string }) {
         </header>
         {detail.error && <Notice retry={() => selectPage([])}>{detail.error}</Notice>}
         {switching && !detail.error && (
-          <p role="status" className="meta">
-            Loading comments. Showing the previous page.
+          <p role="status" className="sr-only">
+            Loading comments.
           </p>
         )}
         {!ticket.items.length && <p className="meta">No comments yet.</p>}
