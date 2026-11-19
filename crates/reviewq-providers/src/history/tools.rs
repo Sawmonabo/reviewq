@@ -97,11 +97,31 @@ pub(crate) fn label(name: &str) -> &'static str {
         "interrupt_agent" => "AgentInterrupt",
         "resume_agent" => "AgentResume",
         "close_agent" => "AgentClose",
-        "TodoWrite" | "TaskCreate" | "TaskUpdate" | "ExitPlanMode" => "Plan",
+        "TodoWrite" | "ExitPlanMode" => "Plan",
+        "TaskCreate" | "TaskUpdate" => "Task",
         "AskUserQuestion" => "UserQuestion",
         _ if name.starts_with("mcp__") => "MCP",
         _ => "Tool",
     }
+}
+
+pub(super) fn visible_claude_result(name: &str) -> bool {
+    matches!(
+        label(name),
+        "Assignment"
+            | "Plan"
+            | "AgentSpawn"
+            | "AgentMessage"
+            | "CommandExecution"
+            | "FileRead"
+            | "FileSearch"
+            | "TextSearch"
+            | "FileEdit"
+            | "WebSearch"
+            | "WebFetch"
+            | "WebFind"
+            | "ImageView"
+    )
 }
 
 pub(crate) fn state(value: Option<&str>) -> ToolState {

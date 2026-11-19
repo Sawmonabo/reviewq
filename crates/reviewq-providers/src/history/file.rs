@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::fs::File;
 use std::io::{self, Read};
 use std::os::unix::fs::{FileExt, MetadataExt};
@@ -6,8 +7,10 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use reviewq_app::access::AppError;
 use reviewq_app::history::{
     FileContentRef, FilePosition, NativeContent, NativeHistoryPage, NativePosition, VisibleEntry,
-    VisiblePart,
+    VisiblePart, VisiblePartKind,
 };
+use reviewq_domain::identity::NativeInputId;
+use reviewq_domain::session::HostProvider;
 use sha2::{Digest, Sha256};
 
 use super::locator::Source;
@@ -41,6 +44,7 @@ pub(super) fn page(
     };
     let mut offset = initial;
     let mut entries = Vec::with_capacity(usize::from(limit));
+    let mut tool_proof = ToolProof::new();
     for _ in 0..MAX_RECORDS {
         if cancelled.load(Ordering::Relaxed) {
             return Err(AppError::Unavailable);
@@ -62,7 +66,7 @@ pub(super) fn page(
         if end == start {
             break;
         }
-        if let Some(record) = records::project(
+        if let Some(mut record) = records::project(
             source.provider,
             input(file, start, end, cancelled),
             &source.native_id,
@@ -70,6 +74,7 @@ pub(super) fn page(
             0,
             2_052,
         ) {
+            tool_proof.redact(source, start, &mut record, cancelled);
             let text = readable_prefix(&record.text)?
                 .chars()
                 .take(512)
@@ -170,7 +175,7 @@ pub(super) fn content(
         return Err(AppError::CursorExpired);
     }
     let limit = usize::try_from(limit).map_err(|_| AppError::InvalidRequest)?;
-    let record = records::project_window(
+    let mut record = records::project_window(
         source.provider,
         input(file, start, end, cancelled),
         &source.native_id,
@@ -183,6 +188,7 @@ pub(super) fn content(
     )
     .filter(|entry| entry.id == reference.entry)
     .ok_or(AppError::CursorExpired)?;
+    ToolProof::new().redact(&source, start, &mut record, cancelled);
     let (bytes, raw) = match reference.part {
         Some(index) => {
             let part = record
@@ -213,6 +219,83 @@ pub(super) fn content(
         text,
         next_offset: (next < bytes).then_some(next),
     })
+}
+
+struct ToolProof {
+    parents: HashMap<NativeInputId, Vec<(NativeInputId, String)>>,
+    budget: u64,
+}
+
+impl ToolProof {
+    fn new() -> Self {
+        Self {
+            parents: HashMap::new(),
+            budget: 4 * 1024 * 1024,
+        }
+    }
+
+    fn redact(
+        &mut self,
+        source: &Source,
+        start: u64,
+        record: &mut records::Record,
+        cancel: &AtomicBool,
+    ) {
+        if source.provider != HostProvider::Claude
+            || !record
+                .parts
+                .iter()
+                .any(|part| matches!(part.kind, VisiblePartKind::ToolResult { .. }))
+        {
+            return;
+        }
+        let calls = record.claude_tool_parent.as_ref().map(|parent| {
+            self.parents.entry(parent.clone()).or_insert_with(|| {
+                tool_parent(source, start, parent, &mut self.budget, cancel).unwrap_or_default()
+            })
+        });
+        record.parts.retain(|part| {
+            let VisiblePartKind::ToolResult { call, .. } = &part.kind else {
+                return true;
+            };
+            calls.as_ref().is_some_and(|calls| {
+                let mut matching = calls.iter().filter(|(id, _)| id == call);
+                matching
+                    .next()
+                    .is_some_and(|(_, name)| super::tools::visible_claude_result(name))
+                    && matching.next().is_none()
+            })
+        });
+    }
+}
+
+fn tool_parent(
+    source: &Source,
+    mut end: u64,
+    parent: &NativeInputId,
+    budget: &mut u64,
+    cancel: &AtomicBool,
+) -> Option<Vec<(NativeInputId, String)>> {
+    for _ in 0..128 {
+        if end == 0 || *budget == 0 {
+            break;
+        }
+        let start = end_of_line(&source.file, end - 1, budget, cancel).ok()?;
+        if let Some(candidate) = records::project(
+            HostProvider::Claude,
+            input(&source.file, start, end, cancel),
+            &source.native_id,
+            source.root_session.as_ref(),
+            0,
+            0,
+        ) && &candidate.id == parent
+            && candidate.kind == reviewq_app::history::VisibleKind::Assistant
+        {
+            return Some(candidate.claude_tool_calls);
+        }
+        end = start;
+    }
+    None
 }
 
 pub(super) fn readable_prefix(raw: &[u8]) -> Result<&str, AppError> {
