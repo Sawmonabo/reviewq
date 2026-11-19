@@ -1,5 +1,13 @@
 import { defaultRangeExtractor, useVirtualizer } from "@tanstack/react-virtual";
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useDeferredValue,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import type { HistoryEntry, HistoryPart } from "../../../api/generated/contracts";
 import type { HostProviderDto } from "../../../api/generated/contracts/common";
 import type { MessageHistoryItem } from "../../../api/generated/contracts/delivery";
@@ -107,8 +115,11 @@ export function Transcript({
     () => new Set(historyEntries.map((item) => item.entryId)),
     [historyEntries],
   );
+  const streamed = useDeferredValue(history.live);
   const inProgress =
-    history.live?.entryId && !canonical.has(history.live.entryId) ? history.live : undefined;
+    streamed && streamed.entryId === history.live?.entryId && !canonical.has(streamed.entryId)
+      ? streamed
+      : undefined;
   const clippedStart = Boolean(history.older);
   const clippedEnd = Boolean(history.newer || inProgress);
   const entries = useMemo<Visible[]>(() => {
@@ -594,9 +605,7 @@ export function Transcript({
                     </header>
                   )}
                   <div className="message-body stack">
-                    {row.provisional !== undefined && (
-                      <p className="message-copy">{row.provisional}</p>
-                    )}
+                    {row.provisional !== undefined && <MarkdownContent source={row.provisional} />}
                     {row.delivery && !row.entry && <MarkdownContent source={row.delivery.text} />}
                     {row.entry && history.generation && (
                       <EntryBody
