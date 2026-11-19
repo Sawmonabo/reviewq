@@ -249,7 +249,7 @@ fn results(
         time,
         id,
         limit + 1,
-        PREVIEW_FINDINGS + 1,
+        PREVIEW_FINDINGS as i64 + 1,
     ])?;
     let mut items = Vec::with_capacity(usize::from(limit));
     while let Some(row) = rows.next()? {
