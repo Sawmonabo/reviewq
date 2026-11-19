@@ -20,8 +20,9 @@ mod messages;
 mod work;
 
 pub use claude::{
-    ClaudeAnchor, ClaudeDeliveryResult, ClaudeHeartbeat, ClaudeHeartbeatResult, ClaudeOffer,
-    ClaudeSend, ClaudeStore,
+    ClaudeAnchor, ClaudeDeliveryAck, ClaudeDeliveryResult, ClaudeHeartbeat, ClaudeHeartbeatResult,
+    ClaudeOffer, ClaudeSend, ClaudeStore, ClaudeTurnResult, ClaudeWorkflowContext,
+    ClaudeWorkflowStore,
 };
 pub use messages::{
     MAX_MESSAGE_HISTORY_PAGE, MessageAttachment, MessageHistory, MessageHistoryStore,

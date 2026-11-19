@@ -53,9 +53,7 @@ pub(crate) fn claude_confirm_prompt(
         .metadata()
         .map_err(|_| AppError::Unavailable)?
         .len();
-    if file::generation(&source)? != anchor.source_generation
-        || length.saturating_sub(anchor.file.offset) > OBSERVATION_BYTES
-    {
+    if file::generation(&source)? != anchor.source_generation {
         return Err(AppError::Conflict);
     }
     let mut budget = OBSERVATION_BYTES;

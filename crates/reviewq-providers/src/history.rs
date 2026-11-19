@@ -11,6 +11,7 @@ use reviewq_app::history::{
 use tokio::sync::Semaphore;
 
 mod claude;
+mod claude_workflow;
 mod file;
 mod identity;
 mod locator;
@@ -20,6 +21,7 @@ mod records;
 mod turn_metadata;
 
 pub(crate) use claude::{claude_anchor, claude_confirm_prompt};
+pub(crate) use claude_workflow::{claude_workflow_opening, claude_workflow_result};
 pub(crate) use locator::{verified_claude_source, verified_codex_source};
 pub(crate) use proof::codex_opening;
 pub(crate) use turn_metadata::{codex_turn_settings, codex_turn_started};

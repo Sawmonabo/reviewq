@@ -4,7 +4,9 @@ use axum::Json;
 use axum::extract::State;
 use axum::http::HeaderMap;
 use reviewq_app::access::AppError;
-use reviewq_app::hosts::{ClaudeDeliveryResult, DeliveryWork, ObservedInput};
+use reviewq_app::hosts::{
+    ClaudeDeliveryAck, ClaudeDeliveryResult, ClaudeTurnResult, DeliveryWork, ObservedInput,
+};
 use reviewq_protocol::Success;
 use serde::{Deserialize, Serialize};
 
@@ -134,10 +136,34 @@ pub(super) async fn check(
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct Hook {
+struct DeliveryHook {
     context: ClaudeCommand,
     offer: Offer,
     outcome: Outcome,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct TurnHook {
+    context: ClaudeCommand,
+    generation: String,
+    turn_id: String,
+    normal: bool,
+    response: Option<FinalResponse>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct FinalResponse {
+    entry_id: String,
+    sha256: String,
+}
+
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum Hook {
+    Delivery(DeliveryHook),
+    Turn(TurnHook),
 }
 
 #[derive(Deserialize)]
@@ -164,8 +190,53 @@ pub(super) async fn hook(
     if !entry.sends_allowed {
         return Err(AppError::Unavailable.into());
     }
+    let command = match command {
+        Hook::Delivery(delivery) => delivery,
+        Hook::Turn(turn) => {
+            let (lead, _) = verified_context(&entry, turn.context).await?;
+            let response = turn
+                .response
+                .map(|value| Ok::<_, AppError>((parse(&value.entry_id)?, parse(&value.sha256)?)))
+                .transpose()?;
+            entry
+                .store
+                .record_claude_turn(
+                    lead,
+                    ClaudeTurnResult {
+                        turn: parse(&turn.turn_id)?,
+                        generation: turn.generation,
+                        normal: turn.normal,
+                        response,
+                    },
+                )
+                .await?;
+            return Ok(Json(success((), *entry.commits.borrow())?));
+        }
+    };
     let (lead, session) = verified_context(&entry, command.context).await?;
     let offer = command.offer.checked()?;
+    let replay = match &command.outcome {
+        Outcome::Deferred => Some(ClaudeDeliveryAck::Deferred),
+        Outcome::Dropped => Some(ClaudeDeliveryAck::Dropped),
+        Outcome::Uncertain => None,
+        Outcome::Started {
+            origin,
+            entry_id,
+            turn_id,
+        } if origin == "reviewq" => Some(ClaudeDeliveryAck::Started(ObservedInput {
+            entry_id: parse(entry_id)?,
+            turn_id: parse(turn_id)?,
+        })),
+        Outcome::Started { .. } => return Err(AppError::Forbidden.into()),
+    };
+    if let Some(replay) = replay
+        && entry
+            .store
+            .replay_claude_delivery(lead.clone(), offer.clone(), replay)
+            .await?
+    {
+        return Ok(Json(success((), *entry.commits.borrow())?));
+    }
     let result = match command.outcome {
         Outcome::Deferred => ClaudeDeliveryResult::Deferred,
         Outcome::Dropped => ClaudeDeliveryResult::Dropped,
