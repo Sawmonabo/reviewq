@@ -1,9 +1,9 @@
 import type { SprintPair } from "../../api/generated/contracts";
 
 export const ownerships = {
-  others: "Other authors",
+  others: "Others’ MRs",
   mine: "My MRs",
-  all: "All ownership",
+  all: "All MRs",
 } as const;
 export const states = {
   needs_review: "Needs review",
@@ -14,10 +14,10 @@ export const states = {
   archive: "Archive",
 } as const;
 export const sorts = {
-  recent: "Most recent",
-  oldest: "Oldest update",
-  author: "Author",
-  ticket: "Ticket key",
+  recent: "Recently updated",
+  oldest: "Oldest updated",
+  author: "Author A–Z",
+  ticket: "Ticket number",
 } as const;
 
 export type QueueFilters = {

@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 import { loadSprints, readQueue, readQueueSync, refreshQueue } from "../../api/workspace";
+import { FilterSelect } from "../../components/FilterSelect";
 import { Icon } from "../../components/Icon";
 import { Pagination } from "../../components/Pagination";
 import { Empty, Loading, Notice } from "../../components/PanelState";
-import { ReviewRow } from "../../components/ReviewRow";
+import { ReviewRow, UnmatchedReviewRow } from "../../components/ReviewRow";
 import { useResource } from "../../hooks/useResource";
 import { describeError, formatTime } from "../../lib/presentation";
 import { savedValue, saveValue } from "../../lib/view-preferences";
@@ -22,6 +23,7 @@ import type { QueueRow } from "../../api/generated/contracts";
 
 type QueueProps = {
   readonly selectedReview?: string | undefined;
+  readonly selectedTicket?: string | undefined;
   readonly revision: number;
   readonly selecting: boolean;
   readonly onSelect: (next: boolean) => void;
@@ -34,6 +36,7 @@ type QueueProps = {
 
 export function QueueView({
   selectedReview,
+  selectedTicket,
   revision,
   selecting,
   onSelect,
@@ -129,210 +132,141 @@ export function QueueView({
 
   return (
     <>
-      <div className="filter-stack">
-        <div className="filter-bar" aria-label="Review scope">
-          <label>
-            Board
-            <select
-              value={filters.boardId}
-              onChange={(event) => {
-                sprintRequest.current++;
-                setLoadingSprint(false);
-                update({ ...filters, boardId: event.currentTarget.value, sprint: "" });
-              }}
-            >
-              <option value="">All boards</option>
-              {facets?.boards.map((board) => (
-                <option key={board.id} value={board.id}>
-                  {board.label}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label>
-            Sprint
-            <select
-              value={filters.sprint}
-              disabled={loadingSprint}
-              onChange={(event) => void chooseSprint(event.currentTarget.value)}
-            >
-              <option value="">Default sprint scope</option>
-              <option value="active">Active sprints</option>
-              <option value="any">Any sprint</option>
-              <option value="none">No sprint</option>
-              {scopedSprints.map((sprint) => (
-                <option
-                  key={`${sprint.boardId}:${sprint.id}`}
-                  value={`${sprint.boardId}:${sprint.id}`}
-                >
-                  {sprint.label}
-                  {!filters.boardId
-                    ? ` · ${facets?.boards.find((board) => board.id === sprint.boardId)?.label ?? sprint.boardId}`
-                    : ""}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label>
-            Repo
-            <select
-              value={filters.projectId}
-              onChange={(event) => update({ ...filters, projectId: event.currentTarget.value })}
-            >
-              <option value="">All repositories</option>
-              {facets?.projects.map((project) => (
-                <option key={project.id} value={project.id}>
-                  {project.label}
-                </option>
-              ))}
-            </select>
-          </label>
-        </div>
-        <div className="filter-bar">
-          <label>
-            Ownership
-            <select
-              value={filters.ownership}
-              onChange={(event) =>
-                update({
-                  ...filters,
-                  ownership: event.currentTarget.value as QueueFilters["ownership"],
-                })
-              }
-            >
-              {Object.entries(ownerships).map(([value, label]) => (
-                <option key={value} value={value}>
-                  {label}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label>
-            Author
-            <select
-              value={filters.authorId}
-              onChange={(event) => update({ ...filters, authorId: event.currentTarget.value })}
-            >
-              <option value="">Anyone</option>
-              {facets?.authors.map((author) => (
-                <option key={author.id} value={author.id}>
-                  {author.label}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label>
-            State
-            <select
-              value={filters.state}
-              onChange={(event) =>
-                update({ ...filters, state: event.currentTarget.value as QueueFilters["state"] })
-              }
-            >
-              {Object.entries(states).map(([value, label]) => (
-                <option key={value} value={value}>
-                  {label}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label>
-            Sort
-            <select
-              value={filters.sort}
-              onChange={(event) =>
-                update({ ...filters, sort: event.currentTarget.value as QueueFilters["sort"] })
-              }
-            >
-              {Object.entries(sorts).map(([value, label]) => (
-                <option key={value} value={value}>
-                  {label}
-                </option>
-              ))}
-            </select>
-          </label>
-          <details className="filter-popover">
-            <summary>
-              Hide <Icon name="chevron" size={12} />
-            </summary>
-            <div>
-              <label>
-                <input
-                  type="checkbox"
-                  checked={filters.hideReviewed}
-                  onChange={(event) =>
-                    update({ ...filters, hideReviewed: event.currentTarget.checked })
-                  }
-                />{" "}
-                Reviewed ({facets?.hideReviewed ?? 0})
-              </label>
-              <label>
-                <input
-                  type="checkbox"
-                  checked={filters.hideInProgress}
-                  onChange={(event) =>
-                    update({ ...filters, hideInProgress: event.currentTarget.checked })
-                  }
-                />{" "}
-                Being reviewed ({facets?.hideInProgress ?? 0})
-              </label>
-            </div>
-          </details>
-          <button type="button" className="quiet-button" onClick={clear}>
-            Clear filters
-          </button>
-        </div>
-        <label className="search-field">
-          <Icon name="search" />
-          <input
-            ref={search}
-            value={filters.q}
-            maxLength={200}
-            placeholder="Search reviews or tickets"
-            aria-label="Search reviews or tickets"
-            onChange={(event) => update({ ...filters, q: event.currentTarget.value })}
-          />
-        </label>
-      </div>
-      <div className="list-heading spread">
-        <span>
-          {page ? (
-            <>
-              <strong>{page.totalRows}</strong> {page.totalRows === 1 ? "result" : "results"}{" "}
-              <span className="muted">· {page.totalMrs} MRs</span>
-            </>
-          ) : (
-            "Queue results"
-          )}
-        </span>
-        <div className="actions">
-          {currentSync?.lastSuccessAt && (
-            <span className="meta" title={formatTime(currentSync.lastSuccessAt)}>
-              {currentSync.stale ? "Last successful sync" : "Synced"} ·{" "}
-              {formatTime(currentSync.lastSuccessAt)}
-            </span>
-          )}
+      <div className="queue-filters" aria-label="Review filters">
+        <FilterSelect
+          label="Board"
+          value={filters.boardId}
+          options={[
+            { value: "", label: "All team boards" },
+            ...(facets?.boards ?? []).map(({ id, label }) => ({ value: id, label })),
+          ]}
+          onChange={(boardId) => {
+            sprintRequest.current++;
+            setLoadingSprint(false);
+            update({ ...filters, boardId, sprint: "" });
+          }}
+        />
+        <FilterSelect
+          label="Sprint"
+          value={filters.sprint === "active" ? "" : filters.sprint}
+          disabled={loadingSprint}
+          options={[
+            { value: "", label: "Active sprints" },
+            { value: "any", label: "Any sprint" },
+            { value: "none", label: "No sprint" },
+            ...scopedSprints.map((sprint) => ({
+              value: `${sprint.boardId}:${sprint.id}`,
+              label: filters.boardId
+                ? sprint.label
+                : `${sprint.label} · ${facets?.boards.find((board) => board.id === sprint.boardId)?.label ?? sprint.boardId}`,
+            })),
+          ]}
+          onChange={(value) => void chooseSprint(value)}
+        />
+        <FilterSelect
+          label="Repo"
+          value={filters.projectId}
+          options={[
+            { value: "", label: "All repositories" },
+            ...(facets?.projects ?? []).map(({ id, label }) => ({ value: id, label })),
+          ]}
+          onChange={(projectId) => update({ ...filters, projectId })}
+        />
+        <FilterSelect
+          label="Ownership"
+          value={filters.ownership}
+          options={Object.entries(ownerships).map(([value, label]) => ({ value, label }))}
+          onChange={(value) =>
+            update({ ...filters, ownership: value as QueueFilters["ownership"] })
+          }
+        />
+        <FilterSelect
+          label="Author"
+          value={filters.authorId}
+          options={[
+            { value: "", label: "Anyone" },
+            ...(facets?.authors ?? []).map(({ id, label }) => ({ value: id, label })),
+          ]}
+          onChange={(authorId) => update({ ...filters, authorId })}
+        />
+        <FilterSelect
+          label="State"
+          accessibleLabel="Review state"
+          value={filters.state}
+          options={Object.entries(states).map(([value, label]) => ({ value, label }))}
+          onChange={(value) => update({ ...filters, state: value as QueueFilters["state"] })}
+        />
+        <details className="filter-popover queue-hide">
+          <summary className="filter-control">
+            Hide
+            {(filters.hideReviewed || filters.hideInProgress) && (
+              <span className="hide-count">
+                {Number(filters.hideReviewed) + Number(filters.hideInProgress)}
+              </span>
+            )}
+            <Icon name="chevron" size={12} />
+          </summary>
+          <div>
+            <label>
+              <input
+                type="checkbox"
+                checked={filters.hideReviewed}
+                onChange={(event) =>
+                  update({ ...filters, hideReviewed: event.currentTarget.checked })
+                }
+              />
+              Reviewed ({facets?.hideReviewed ?? 0})
+            </label>
+            <label>
+              <input
+                type="checkbox"
+                checked={filters.hideInProgress}
+                onChange={(event) =>
+                  update({ ...filters, hideInProgress: event.currentTarget.checked })
+                }
+              />
+              Being reviewed ({facets?.hideInProgress ?? 0})
+            </label>
+          </div>
+        </details>
+        <FilterSelect
+          label="Sort"
+          accessibleLabel="Sort reviews"
+          value={filters.sort}
+          options={Object.entries(sorts).map(([value, label]) => ({ value, label }))}
+          onChange={(value) => update({ ...filters, sort: value as QueueFilters["sort"] })}
+        />
+        {JSON.stringify(filters) !== JSON.stringify(clearedFilters) && (
           <button
-            className="icon-button"
             type="button"
-            aria-label="Refresh queue"
-            disabled={refreshing || currentSync?.active || currentSync?.mode !== "connected"}
-            onClick={() => void refresh()}
+            className="filter-control clear-filters"
+            aria-label="Clear filters"
+            title="Clear filters"
+            onClick={clear}
           >
-            <Icon name="refresh" />
+            <Icon name="clearFilters" size={17} />
           </button>
-        </div>
+        )}
       </div>
+      <div className="queue-search-row">
+        <input
+          className="queue-search"
+          ref={search}
+          value={filters.q}
+          maxLength={200}
+          placeholder="Search ticket or title…"
+          aria-label="Search reviews or tickets"
+          onChange={(event) => update({ ...filters, q: event.currentTarget.value })}
+        />
+      </div>
+      {loadingSprint && (
+        <p className="meta" role="status">
+          Loading selected sprint…
+        </p>
+      )}
       {selecting && (
         <div className="selection-bar actions" aria-label="Selected merge requests">
           <strong>{captured.length} selected</strong>
-          <button
-            type="button"
-            disabled={!eligible.length}
-            onClick={() => setChecked(eligible.map((row) => row.reviewId))}
-          >
-            Select all shown
-          </button>
           <button
             type="button"
             className="primary"
@@ -414,51 +348,74 @@ export function QueueView({
           </Empty>
         ))}
       {page && page.items.length > 0 && (
-        <ul className="review-list">
-          {page.items.map((row) =>
-            row.kind === "mr" ? (
-              <li key={row.reviewId}>
-                <ReviewRow
-                  row={row}
-                  selected={selectedReview === row.reviewId}
-                  onOpen={() => onReview(row.reviewId)}
-                  {...(selecting && eligible.includes(row)
-                    ? {
-                        selection: {
-                          checked: checked.includes(row.reviewId),
-                          onToggle: () =>
-                            setChecked((existing) =>
-                              existing.includes(row.reviewId)
-                                ? existing.filter((id) => id !== row.reviewId)
-                                : [...existing, row.reviewId],
-                            ),
-                        },
-                      }
-                    : {})}
-                />
-              </li>
+        <section className="review-list" aria-label="Reviews">
+          <div className="review-list-head">
+            {selecting ? (
+              <button
+                type="button"
+                className="select-all-reviews"
+                role="checkbox"
+                aria-checked={
+                  eligible.length > 0 && captured.length === eligible.length
+                    ? true
+                    : captured.length
+                      ? "mixed"
+                      : false
+                }
+                disabled={!eligible.length}
+                onClick={() =>
+                  setChecked(
+                    captured.length === eligible.length ? [] : eligible.map((row) => row.reviewId),
+                  )
+                }
+              >
+                <span className="row-checkbox" aria-hidden="true">
+                  {captured.length ? (captured.length === eligible.length ? "✓" : "−") : ""}
+                </span>
+                Select all shown
+              </button>
             ) : (
-              <li key={row.key}>
-                <button type="button" className="review-row" onClick={() => onTicket(row.key)}>
-                  <div className="row-top">
-                    <span className="ticket-key">{row.key}</span>
-                    <span className="badge">No matching MR</span>
-                  </div>
-                  <strong className="row-title">{row.title}</strong>
-                  <span className="row-foot">
-                    <span>
-                      {row.assignee ?? "Unassigned"} <span className="muted">Assignee</span>
-                    </span>
-                    <span className="muted">
-                      {row.status}
-                      {row.priority && ` · ${row.priority}`}
-                    </span>
-                  </span>
-                </button>
-              </li>
-            ),
-          )}
-        </ul>
+              <span>Review</span>
+            )}
+            <span>Details</span>
+          </div>
+          <ul className="review-items">
+            {page.items.map((row) =>
+              row.kind === "mr" ? (
+                <li key={row.reviewId}>
+                  <ReviewRow
+                    row={row}
+                    selected={selectedReview === row.reviewId}
+                    onOpen={() => onReview(row.reviewId)}
+                    disabled={selecting && !eligible.includes(row)}
+                    {...(selecting && eligible.includes(row)
+                      ? {
+                          selection: {
+                            checked: checked.includes(row.reviewId),
+                            onToggle: () =>
+                              setChecked((existing) =>
+                                existing.includes(row.reviewId)
+                                  ? existing.filter((id) => id !== row.reviewId)
+                                  : [...existing, row.reviewId],
+                              ),
+                          },
+                        }
+                      : {})}
+                  />
+                </li>
+              ) : (
+                <li key={row.key}>
+                  <UnmatchedReviewRow
+                    row={row}
+                    selected={selectedTicket === row.key}
+                    disabled={selecting}
+                    onOpen={() => onTicket(row.key)}
+                  />
+                </li>
+              ),
+            )}
+          </ul>
+        </section>
       )}
       <Pagination
         trail={trail}
@@ -468,6 +425,24 @@ export function QueueView({
           setTrail(next);
         }}
       />
+      {currentSync?.lastSuccessAt && (
+        <footer className="workspace-sync">
+          <span title={formatTime(currentSync.lastSuccessAt)}>
+            {currentSync.stale ? "Last successful sync" : "Last updated"}:{" "}
+            {formatTime(currentSync.lastSuccessAt)}
+          </span>
+          <button
+            className="icon-button quiet-button"
+            type="button"
+            aria-label="Refresh queue"
+            title="Refresh queue"
+            disabled={refreshing || currentSync.active || currentSync.mode !== "connected"}
+            onClick={() => void refresh()}
+          >
+            <Icon name="refresh" size={13} />
+          </button>
+        </footer>
+      )}
     </>
   );
 }

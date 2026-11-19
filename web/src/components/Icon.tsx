@@ -17,6 +17,8 @@ const paths = {
   chevron: "m6 9 6 6 6-6",
   external: "M13 4h7v7m0-7-9 9 M10 5H5v14h14v-5",
   check: "m5 12 4 4L19 6",
+  clearFilters: "M3 4h18l-7 7v1M10 11 3 4m7 7v8l4-2m2-3 5 5m0-5-5 5",
+  warning: "m12 3 10 17H2zm0 6v5m0 3h.01",
   send: "M12 20V4m-6 6 6-6 6 6",
   terminal: "M4 5h16v14H4z m3 4 3 3-3 3m5 0h4",
 } as const;

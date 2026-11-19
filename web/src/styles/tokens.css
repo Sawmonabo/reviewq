@@ -49,11 +49,23 @@
   --mono: ui-monospace, SFMono-Regular, Consolas, monospace;
   --sidebar-width: 198px;
   --gutter: 30px;
-  --row-padding: 15px;
+  --row-padding: 17px;
+  --row-line: #222228;
+  --row-selected: #19191f;
+  --avatar-bg: #25252c;
+  --avatar-text: #b0b0bd;
+  --dim-text: #80808e;
+  --ticket-text: #b0bdda;
 }
 :root[data-theme="light"] {
   color-scheme: light;
   --canvas: #faf9fc;
+  --row-line: #dcd9e6;
+  --row-selected: #eae8f2;
+  --avatar-bg: #eae8f2;
+  --avatar-text: #575364;
+  --dim-text: #646073;
+  --ticket-text: #324d98;
   --workspace-bg: #faf9fc;
   --rail-line: #dcd9e6;
   --rail-active: #eae8f2;
