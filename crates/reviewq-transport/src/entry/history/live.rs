@@ -92,10 +92,15 @@ async fn run(
     let mut last_availability = None;
     let mut sequence = 0_u64;
     let mut delay = Duration::from_secs(1);
+    let mut events = None;
     loop {
         let check = reader.head(session.clone(), previous.clone()).await;
         let (current, availability, reset) = match check {
             Ok(Some(stamp)) => (Some(stamp.anchor), "available", stamp.reset),
+            Err(AppError::Busy) => {
+                tokio::time::sleep(Duration::from_millis(250)).await;
+                continue;
+            }
             Ok(None) | Err(AppError::NotFound) => (None, "missing", false),
             Err(AppError::Forbidden | AppError::Unauthorized) => (None, "denied", false),
             Err(AppError::InvalidRequest) => (None, "unsupported", false),
@@ -139,7 +144,20 @@ async fn run(
         } else {
             (delay * 2).min(Duration::from_secs(30))
         };
-        tokio::time::sleep(delay).await;
+        if availability == "available" && events.is_none() {
+            events = reader.watch(session.clone()).await.ok().flatten();
+        }
+        if let Some(watch) = events.as_mut() {
+            tokio::select! {
+                result = watch.changed() => {
+                    if result != Ok(true) { events = None; }
+                    tokio::time::sleep(Duration::from_millis(75)).await;
+                }
+                () = tokio::time::sleep(delay) => {}
+            }
+        } else {
+            tokio::time::sleep(delay).await;
+        }
     }
 }
 

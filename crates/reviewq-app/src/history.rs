@@ -64,6 +64,13 @@ pub trait NativeHistoryReader: Send + Sync {
 
     fn plan(&self, session: HistorySession) -> AppFuture<'_, Option<NativePlan>>;
 
+    fn watch(
+        &self,
+        _session: HistorySession,
+    ) -> AppFuture<'_, Option<Box<dyn NativeHistoryWatch>>> {
+        Box::pin(async { Ok(None) })
+    }
+
     fn head(
         &self,
         session: HistorySession,
@@ -77,6 +84,10 @@ pub trait NativeHistoryReader: Send + Sync {
         offset: u64,
         limit: u32,
     ) -> AppFuture<'_, NativeContent>;
+}
+
+pub trait NativeHistoryWatch: Send {
+    fn changed(&mut self) -> AppFuture<'_, bool>;
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -117,6 +128,7 @@ pub struct PromptPosition {
 pub enum NavigationQuery {
     Overview {
         groups: u16,
+        start: Option<(PromptPosition, String)>,
     },
     Previews {
         start: PromptPosition,
@@ -147,6 +159,7 @@ pub enum NativeNavigation {
         total: u64,
         complete: bool,
         groups: Vec<PromptGroup>,
+        next: Option<PromptPosition>,
     },
     Previews {
         generation: String,

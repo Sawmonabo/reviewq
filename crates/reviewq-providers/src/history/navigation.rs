@@ -8,7 +8,7 @@ use reviewq_app::history::{
 };
 use reviewq_domain::identity::NativeInputId;
 
-use super::file::{self, MAX_RECORDS, READ_BUDGET};
+use super::file::{self, Lines, MAX_RECORDS, READ_BUDGET};
 use super::{locator::Source, records};
 
 const MAX_CHECKPOINTS: usize = 4096;
@@ -128,7 +128,21 @@ pub(super) fn read(
     let anchor = head(source, None, cancel)?.anchor;
     let complete = anchor.file.high_water;
     match query {
-        NavigationQuery::Overview { groups } => overview(source, anchor, groups, cancel),
+        NavigationQuery::Overview { groups, start } => {
+            let start = if let Some((start, generation)) = start {
+                if generation != anchor.generation {
+                    return Err(AppError::CursorExpired);
+                }
+                file::verify_position(&source.file, &start.file, complete)?;
+                start
+            } else {
+                PromptPosition {
+                    next_ordinal: 1,
+                    file: file::file_position(&source.file, 0, complete)?,
+                }
+            };
+            overview(source, anchor.generation, groups, start, cancel)
+        }
         NavigationQuery::Previews {
             start,
             first,
@@ -149,44 +163,50 @@ pub(super) fn read(
 
 fn overview(
     source: &Source,
-    anchor: SourceAnchor,
+    generation: String,
     groups: u16,
+    start: PromptPosition,
     cancel: &AtomicBool,
 ) -> Result<NativeNavigation, AppError> {
     if !(1..=64).contains(&groups) {
         return Err(AppError::InvalidRequest);
     }
-    let end = anchor.file.high_water;
-    let mut offset = 0;
-    let mut cursor = 0_u64;
+    let end = start.file.high_water;
+    let mut offset = start.file.offset;
+    let previous = start
+        .next_ordinal
+        .checked_sub(1)
+        .ok_or(AppError::CursorExpired)?;
+    let mut cursor = previous;
     let mut stride = 1_u64;
     let mut checkpoints = Vec::<(u64, u64)>::new();
     let mut budget = READ_BUDGET;
+    let mut lines = Lines::new(&source.file, cancel);
     for _ in 0..MAX_RECORDS {
         if offset >= end || budget == 0 {
             break;
         }
-        let next = file::next_line(&source.file, offset, end, &mut budget, cancel)?;
-        if record(source, offset, next, 0, cancel)
+        let next = lines.next(offset, end, &mut budget)?;
+        if project(source, lines.input(offset, next), 0)
             .is_some_and(|record| record.kind == VisibleKind::User)
         {
             cursor += 1;
-            if (cursor - 1) % stride == 0 {
+            if (cursor - 1 - previous) % stride == 0 {
                 checkpoints.push((cursor, offset));
                 if checkpoints.len() >= MAX_CHECKPOINTS {
                     stride *= 2;
-                    checkpoints.retain(|(ordinal, _)| (ordinal - 1) % stride == 0);
+                    checkpoints.retain(|(ordinal, _)| (ordinal - 1 - previous) % stride == 0);
                 }
             }
         }
         offset = next;
     }
     let mut output = Vec::new();
-    if cursor != 0 {
-        let width = cursor.div_ceil(u64::from(groups));
+    if cursor > previous {
+        let width = (cursor - previous).div_ceil(u64::from(groups));
         let mut points = checkpoints.into_iter().peekable();
         let mut sample = points.next().ok_or(AppError::Internal)?;
-        let mut first = 1;
+        let mut first = start.next_ordinal;
         while first <= cursor {
             while points.peek().is_some_and(|(ordinal, _)| *ordinal <= first) {
                 sample = points.next().ok_or(AppError::Internal)?;
@@ -204,10 +224,18 @@ fn overview(
         }
     }
     Ok(NativeNavigation::Overview {
-        generation: anchor.generation,
+        generation,
         total: cursor,
         complete: offset == end,
         groups: output,
+        next: (offset < end)
+            .then(|| {
+                Ok::<_, AppError>(PromptPosition {
+                    next_ordinal: cursor + 1,
+                    file: file::file_position(&source.file, offset, end)?,
+                })
+            })
+            .transpose()?,
     })
 }
 
@@ -224,17 +252,16 @@ fn previews(
     let mut ordinal = start.next_ordinal;
     let mut items = Vec::with_capacity(usize::from(limit));
     let mut budget = READ_BUDGET;
+    let mut lines = Lines::new(&source.file, cancel);
     for _ in 0..MAX_RECORDS {
         if offset >= end || budget == 0 || items.len() == usize::from(limit) {
             break;
         }
-        let next = file::next_line(&source.file, offset, end, &mut budget, cancel)?;
-        if let Some(record) = record(
+        let next = lines.next(offset, end, &mut budget)?;
+        if let Some(record) = project(
             source,
-            offset,
-            next,
+            lines.input(offset, next),
             if ordinal >= first { 644 } else { 0 },
-            cancel,
         ) && record.kind == VisibleKind::User
         {
             if ordinal >= first {
@@ -328,9 +355,13 @@ fn record(
     limit: usize,
     cancel: &AtomicBool,
 ) -> Option<records::Record> {
+    project(source, file::input(&source.file, start, end, cancel), limit)
+}
+
+fn project(source: &Source, input: impl std::io::Read, limit: usize) -> Option<records::Record> {
     records::project(
         source.provider,
-        file::input(&source.file, start, end, cancel),
+        input,
         &source.native_id,
         source.root_session.as_ref(),
         0,
