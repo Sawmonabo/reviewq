@@ -30,14 +30,15 @@ export function readRoute(): Route {
   };
 }
 
-export function writeRoute(route: Route) {
+export function writeRoute(route: Route, replace = false) {
   const url = new URL(location.href);
   for (const key of ["view", "tab", "reviewId", "runId", "sessionKey", "ticket"] as const) {
     const value = route[key];
     if (value) url.searchParams.set(key, value);
     else url.searchParams.delete(key);
   }
-  history.pushState(null, "", url);
+  if (replace) history.replaceState(history.state, "", url);
+  else history.pushState(null, "", url);
   saveValue("view", route.view);
 }
 

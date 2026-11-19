@@ -12,10 +12,10 @@ export function CheckoutSkill({ body, selected, onSelect }: {
   const [state, setState] = useState<{ skills?: readonly Skill[]; error?: string }>();
   const [pending, setPending] = useState(false);
   const request = useRef<AbortController | undefined>(undefined);
-  useEffect(() => () => request.state?.abort(), []);
+  useEffect(() => () => request.current?.abort(), []);
 
   async function browse() {
-    request.state?.abort();
+    request.current?.abort();
     const controller = new AbortController();
     request.current = controller;
     setPending(true);
@@ -35,7 +35,7 @@ export function CheckoutSkill({ body, selected, onSelect }: {
         {state.skills.map((skill) => <option value={skill.path} key={skill.path}>{skill.name} · {skill.path}</option>)}
       </select>
     </label> : <p className="meta">{readable(body.provider)} default skill · {selected?.name ?? "No default selected"}</p>}
-    {state?.error && <Notice>{current.error}</Notice>}
+    {state?.error && <Notice>{state.error}</Notice>}
     <button type="button" disabled={pending} onClick={() => void browse()}>{pending ? "Reading checkout…" : `Browse ${readable(body.provider)} skills`}</button>
     {selected && !state?.skills && <button type="button" onClick={() => onSelect(null)}>Clear default skill</button>}
   </div>;

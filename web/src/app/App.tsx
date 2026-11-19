@@ -44,7 +44,10 @@ type Overlay =
 
 export function App() {
   const [route, setRoute] = useState(readRoute);
-  const [split, setSplit] = useState<number>(() => typeof savedValue("split") === "number" ? Number(savedValue("split")) : 50);
+  const [split, setSplit] = useState(() => {
+    const saved = savedValue("split");
+    return typeof saved === "number" && Number.isFinite(saved) ? saved : 50;
+  });
   const [railSmall, setRailSmall] = useState(savedValue("rail") === true);
   const [theme, setTheme] = useState(savedValue("theme") === "light" ? "light" : "dark");
   const [compact, setCompact] = useState(savedValue("compact") === true);
@@ -59,6 +62,7 @@ export function App() {
   const workspace = useRef<HTMLElement>(null);
   const drawer = useRef<HTMLDivElement>(null);
   const opener = useRef<HTMLElement | undefined>(undefined);
+  const resolvedRun = useRef<{ reviewId: string; runId: string } | undefined>(undefined);
   const { reviewId, runId, sessionKey, ticket } = route;
   const opened = Boolean(reviewId || ticket);
   const heading = views.find((item) => item.view === route.view)?.label ?? "Review queue";
@@ -68,17 +72,25 @@ export function App() {
     : Promise.resolve({ data: null, cursor: "" }), reviewId ? [{ kind: "review", id: reviewId }, { kind: "run" }, { kind: "action" }] : []);
   const selected = useResource(JSON.stringify([reviewId, runId]), async (signal) => {
     if (!reviewId) return { data: null, cursor: "" };
-    const selection = await resolveReview(reviewId, runId, signal);
+    const exact = runId ?? (resolvedRun.current?.reviewId === reviewId ? resolvedRun.current.runId : undefined);
+    const selection = await resolveReview(reviewId, exact, signal);
     if (selection.data.runId === null) return { data: { run: undefined }, cursor: selection.cursor };
     const result = await readRun(reviewId, selection.data.runId, signal);
     if (result.data.leadSessionKey !== selection.data.leadSessionKey) throw new Error("The selected lead changed.");
+    if (!signal.aborted && !runId) resolvedRun.current = { reviewId, runId: result.data.runId };
     return { data: { run: result.data }, cursor: result.cursor };
   }, reviewId ? [{ kind: "run" }, { kind: "session" }] : []);
   const unread = useResource("rail-unread", (signal) => readNotifications({ view: "unread", limit: 1 }, signal), [{ kind: "notification" }]);
 
   useEffect(startWorkspaceEvents, []);
   useEffect(() => {
-    function restore() { setRoute(readRoute()); setOverlay(undefined); }
+    const confirmed = selected.data?.run;
+    if (confirmed && !route.runId && route.reviewId === confirmed.reviewId) {
+      writeRoute({ ...route, runId: confirmed.runId }, true);
+    }
+  }, [route, selected.data]);
+  useEffect(() => {
+    function restore() { resolvedRun.current = undefined; setRoute(readRoute()); setOverlay(undefined); }
     function network() { setOffline(!navigator.onLine); }
     window.addEventListener("popstate", restore);
     window.addEventListener("online", network);
@@ -126,10 +138,15 @@ export function App() {
       if (workspace.current) saveValue(`scroll.${route.view}`, workspace.current.scrollTop);
       setSelecting(false);
     }
-    if (next.reviewId && next.reviewId !== reviewId && (reviewId || ticket)) resize(50);
+    if (next.reviewId !== reviewId) {
+      resolvedRun.current = undefined;
+      if (next.reviewId) resize(50);
+    }
     if (next.reviewId !== reviewId || next.runId !== runId || next.ticket !== ticket) setOverlay(undefined);
-    writeRoute(next);
-    setRoute(next);
+    const active = selected.data?.run;
+    const canonical = !next.runId && next.reviewId === reviewId && active ? { ...next, runId: active.runId } : next;
+    writeRoute(canonical);
+    setRoute(canonical);
   }
   function openReview(id: string, exactRun?: string, tab: Tab = "overview", child?: string) {
     if (!opened && document.activeElement instanceof HTMLElement) opener.current = document.activeElement;
@@ -249,6 +266,10 @@ export function App() {
         {draftSnapshot.entries.map((draft) => <div className="surface-card stack" key={draft.key}>
           <strong>{draft.label}</strong><p className="meta truncate">{draft.text}</p>
           <div className="actions">
+            {draftRoute(draft.key) && <button type="button" onClick={() => {
+              const target = draftRoute(draft.key);
+              if (target) { setOverlay(undefined); openReview(target.review, target.run, target.tab); }
+            }}>Open draft target</button>}
             <button type="button" onClick={() => { void navigator.clipboard.writeText(draft.text).catch((error: unknown) => window.alert(describeError(error))); }}>Copy</button>
             <button type="button" onClick={() => {
               if (window.confirm(`Discard unsent draft for ${draft.label}?`)) drafts.set(draft.key, draft.label, "");
@@ -258,4 +279,14 @@ export function App() {
       </div>
     </Modal>}
   </main>;
+}
+
+function draftRoute(key: string): { review: string; run: string; tab: Tab } | undefined {
+  try {
+    const value: unknown = JSON.parse(key);
+    if (Array.isArray(value) && (value[0] === "message" || value[0] === "feedback" || value[0] === "disposition" || value[0] === "quote")
+      && typeof value[1] === "string" && typeof value[2] === "string") {
+      return { review: value[1], run: value[2], tab: value[0] === "message" ? "agent" : "findings" };
+    }
+  } catch { /* Draft keys are local to this tab. */ }
 }

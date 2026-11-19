@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { Notification } from "../../api/generated/contracts";
 import type { Action } from "../../api/generated/contracts/notifications";
 import { assignNotifications, readNotifications } from "../../api/workspace";
@@ -14,9 +14,11 @@ export function AttentionView({ onOpen, onChange }: {
   const [older, setOlder] = useState<readonly Notification[]>([]);
   const [next, setNext] = useState<string | null>();
   const [frozen, setFrozen] = useState<readonly string[]>();
+  const [eligible, setEligible] = useState<readonly string[]>([]);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string>();
   const request = useRef<AbortController | undefined>(undefined);
+  useEffect(() => () => request.current?.abort(), []);
   const page = useResource(`inbox:${mode}`, (signal) => readNotifications({ view: mode }, signal), [{ kind: "notification" }]);
   const byId = new Map((page.data?.items ?? []).map((item) => [item.id, item]));
   for (const item of older) if (!byId.has(item.id)) byId.set(item.id, item);
@@ -25,7 +27,7 @@ export function AttentionView({ onOpen, onChange }: {
 
   function changeMode(nextMode: "unread" | "all") {
     request.current?.abort();
-    setMode(nextMode); setOlder([]); setNext(undefined); setFrozen(undefined); setNotice(undefined);
+    setMode(nextMode); setOlder([]); setNext(undefined); setFrozen(undefined); setEligible([]); setNotice(undefined);
   }
 
   async function more() {
@@ -58,6 +60,7 @@ export function AttentionView({ onOpen, onChange }: {
         return [{ ...item, readAt: action === "unread" ? null : new Date().toISOString() }];
       }));
       setFrozen((selection) => selection?.filter((id) => !affected.has(id)));
+      setEligible((ids) => ids.filter((id) => !affected.has(id)));
       page.retry();
       onChange();
       setNotice(`${data.affectedIds.length} ${data.affectedIds.length === 1 ? "update" : "updates"} ${action === "dismiss" ? "dismissed" : `marked ${action}`}.`);
@@ -86,8 +89,8 @@ export function AttentionView({ onOpen, onChange }: {
         <button type="button" disabled={busy || !frozen.length} onClick={() => void assign("read", frozen)}>Mark read</button>
         <button type="button" disabled={busy || !frozen.length} onClick={() => void assign("unread", frozen)}>Mark unread</button>
         <button type="button" disabled={busy || !frozen.length} onClick={() => void assign("dismiss", frozen)}>Dismiss</button>
-        <button type="button" disabled={busy} onClick={() => setFrozen(undefined)}>Cancel</button>
-      </> : <button type="button" onClick={() => setFrozen([...byId.keys()])}>Select displayed updates</button>}
+        <button type="button" disabled={busy} onClick={() => { setFrozen(undefined); setEligible([]); }}>Cancel</button>
+      </> : <button type="button" onClick={() => { const displayed = [...byId.keys()]; setEligible(displayed); setFrozen(displayed); }}>Select displayed updates</button>}
     </div>}
     <ul className="inbox-list">{groups.map(([reviewId, items]) => {
       const latest = items[0];
@@ -100,8 +103,8 @@ export function AttentionView({ onOpen, onChange }: {
         </summary>
         <ul className="inbox-events">{items.map((item) => <li key={item.id}>
           <div className="actions">
-            {frozen && <input type="checkbox" aria-label={`Select ${item.label}`} disabled={busy || !frozen.includes(item.id)}
-              checked={frozen.includes(item.id)} onChange={() => setFrozen(frozen.filter((id) => id !== item.id))} />}
+            {frozen && <input type="checkbox" aria-label={`Select ${item.label}`} disabled={busy || !eligible.includes(item.id)}
+              checked={frozen.includes(item.id)} onChange={(event) => setFrozen(event.currentTarget.checked ? [...frozen, item.id] : frozen.filter((id) => id !== item.id))} />}
             <button type="button" className="quiet-button" onClick={() => onOpen(item)}>{item.label}</button>
             <span className="badge">{readable(item.source)}</span>
           </div>

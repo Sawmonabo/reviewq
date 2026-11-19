@@ -12,6 +12,7 @@ import {
 } from "./generated/validators.mjs";
 
 let session: Promise<string> | undefined;
+let openingTicket: string | undefined;
 
 export async function readOverview(
   reviewId: string,
@@ -118,14 +119,16 @@ function requireSession(): Promise<string> {
 
 async function bootstrapSession(): Promise<string> {
   const url = new URL(window.location.href);
-  const ticket = new URLSearchParams(url.hash.slice(1)).get("ticket");
-  if (ticket !== null) {
+  const fragment = new URLSearchParams(url.hash.slice(1)).get("ticket");
+  if (fragment !== null) {
+    openingTicket = fragment;
     url.hash = "";
     window.history.replaceState(window.history.state, "", url);
   }
+  const ticket = openingTicket;
   const response = await fetch(
     "/api/v1/session",
-    ticket === null
+    ticket === undefined
       ? undefined
       : {
           method: "POST",
@@ -133,9 +136,12 @@ async function bootstrapSession(): Promise<string> {
           body: JSON.stringify({ mode: "redeem", ticket }),
         },
   );
-  if (response.status === 401)
+  if (response.status === 401) {
+    openingTicket = undefined;
     throw new Error("Open ReviewQ with the launcher to start a session.");
+  }
   if (!response.ok) throw await apiError(response);
+  openingTicket = undefined;
   const payload: unknown = await response.json();
   if (
     typeof payload === "object" &&

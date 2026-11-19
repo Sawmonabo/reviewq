@@ -51,7 +51,7 @@ export default function ReviewDrawer({
   const mutation = useRef(false);
   const [outcome, setOutcome] = useState<{ key: string; message: string; terminal?: string }>();
   const buttonRefs = useRef<Array<HTMLButtonElement | null>>([]);
-  const session = run?.sessions.items.find((entry) => entry.sessionKey === (selectedSession ?? run.leadSessionKey));
+  const session = run ? run.sessions.items.find((entry) => entry.sessionKey === (selectedSession ?? run.leadSessionKey)) : undefined;
   const child = session && session.sessionKey !== run?.leadSessionKey ? session : undefined;
   const unavailableChild = Boolean(selectedSession && run && !session);
   const source = safeUrl(overview.webUrl);
