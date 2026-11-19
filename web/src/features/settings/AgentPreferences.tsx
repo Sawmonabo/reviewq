@@ -65,7 +65,11 @@ export function AgentPreferences() {
   }
 
   return (
-    <section className="settings-section agent-preferences" aria-labelledby="settings-agents">
+    <section
+      className="settings-section agent-preferences"
+      aria-labelledby="settings-agents"
+      aria-busy={recovery.pending || followups.pending}
+    >
       <h3 id="settings-agents">Agents</h3>
       {notice && <Notice>{notice}</Notice>}
       {recovery.error && <Notice retry={recovery.retry}>{recovery.error}</Notice>}

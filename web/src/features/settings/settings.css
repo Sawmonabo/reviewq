@@ -1,4 +1,10 @@
 .modal.settings-pane {
+  --settings-input: #111114;
+  --settings-focus: #8b9fe7;
+  --settings-summary: #b8b8c2;
+  --settings-quiet: #a4aecb;
+  --settings-quiet-hover: #d8e0f8;
+  --settings-primary-hover: #dce2f3;
   position: fixed;
   inset: 0 0 0 auto;
   width: min(900px, 100vw);
@@ -10,6 +16,14 @@
   border-left: 1px solid var(--strong-line);
   border-radius: 0;
   box-shadow: -20px 0 70px #0008;
+}
+:root[data-theme="light"] .modal.settings-pane {
+  --settings-input: var(--control);
+  --settings-focus: var(--focus);
+  --settings-summary: var(--muted);
+  --settings-quiet: var(--link);
+  --settings-quiet-hover: var(--text);
+  --settings-primary-hover: color-mix(in srgb, var(--primary), var(--link) 18%);
 }
 .settings-pane::backdrop {
   background: #0009;
@@ -55,7 +69,38 @@
 }
 .settings-pane .modal-frame > footer button {
   padding: 7px 12px;
-  min-height: 34px;
+  min-height: 35px;
+  font-size: 11px;
+}
+.settings-pane
+  :is(.modal-frame > footer, .connection-fields, .settings-concurrency, .settings-search)
+  button:not(.primary, .quiet-button, .icon-button) {
+  border-color: var(--control-line);
+  background: var(--workspace-secondary);
+  color: var(--workspace-secondary-text);
+  font-size: 11px;
+}
+.settings-pane
+  :is(.modal-frame > footer, .connection-fields, .settings-concurrency, .settings-search)
+  button:not(.primary, .quiet-button, .icon-button):hover:not(:disabled) {
+  border-color: var(--control-hover-line);
+  background: var(--workspace-secondary-hover);
+}
+.settings-pane button.primary:hover:not(:disabled) {
+  background: var(--settings-primary-hover);
+}
+.settings-pane .quiet-button {
+  border: 0;
+  border-radius: 0;
+  color: var(--settings-quiet);
+  font-size: 10px;
+}
+.settings-pane .quiet-button:hover:not(:disabled) {
+  color: var(--settings-quiet-hover);
+  background: transparent;
+}
+.settings-pane :is(input, select, button, summary):focus-visible {
+  outline-color: var(--settings-focus);
 }
 .settings-body form {
   display: block;
@@ -80,14 +125,22 @@
   gap: 7px;
 }
 .settings-section input:not([type="checkbox"], [type="radio"]),
-.settings-section select {
+.settings-section select,
+.settings-reviewers input:not([type]) {
   width: 100%;
   min-width: 0;
   height: 40px;
   padding: 9px 12px;
-  background: var(--surface);
+  background: var(--settings-input);
   border-color: var(--strong-line);
   font-size: 13px;
+}
+.settings-section select:enabled {
+  cursor: pointer;
+}
+.settings-section select:hover:enabled {
+  background: var(--control-hover);
+  border-color: var(--control-hover-line);
 }
 .connection-grid {
   display: grid;
@@ -151,6 +204,7 @@
   height: 15px;
   margin: 0;
   accent-color: var(--link);
+  cursor: inherit;
 }
 .settings-concurrency {
   margin-top: 18px;
@@ -297,8 +351,16 @@
 .settings-advanced > summary {
   padding: 8px 0;
   cursor: pointer;
-  color: var(--muted);
+  color: var(--settings-summary);
   font-size: 12px;
+}
+.settings-provider-skill {
+  align-content: start;
+  gap: 7px;
+}
+.settings-provider-skill .quiet-button {
+  min-height: 0;
+  padding: 6px 0;
 }
 .settings-advanced[open] > summary {
   margin-bottom: 9px;

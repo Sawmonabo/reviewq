@@ -84,6 +84,8 @@ export default function MonitorPane({
   return (
     <Modal
       title={pause ? "Pause auto-review" : "Auto-review updates"}
+      className="work-pane monitor-pane"
+      nonmodal
       busy={busy}
       onClose={onClose}
       footer={

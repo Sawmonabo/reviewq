@@ -197,6 +197,7 @@
 }
 .run-card-footer {
   display: flex;
+  flex-wrap: wrap;
   align-items: start;
   justify-content: space-between;
   gap: 10px;
@@ -213,6 +214,7 @@
 }
 .run-card-footer > span:last-child {
   flex-shrink: 0;
+  max-width: 100%;
 }
 .run-card-footer time {
   white-space: nowrap;
@@ -262,14 +264,6 @@
   color: var(--muted);
   font-size: 12px;
 }
-@media (max-width: 900px) {
-  .run-card-footer {
-    flex-wrap: wrap;
-  }
-  .run-card-footer > span:last-child {
-    max-width: 100%;
-  }
-}
 @media (max-width: 700px) {
   .run-stage-tabs {
     gap: 16px;
@@ -279,9 +273,6 @@
   }
   .run-reason-filter {
     right: 15px;
-  }
-  .run-card-footer {
-    flex-wrap: wrap;
   }
   .archive-controls .run-search {
     width: 100%;

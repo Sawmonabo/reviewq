@@ -4,7 +4,7 @@ import { submits } from "../../lib/submit-key";
 
 export function RegistrationGuide({
   provider,
-  webUrl,
+  target,
   selected,
   advanced,
   nativeId,
@@ -14,7 +14,7 @@ export function RegistrationGuide({
   disabled,
 }: {
   readonly provider: HostProviderDto;
-  readonly webUrl: string | undefined;
+  readonly target: string | undefined;
   readonly selected: boolean;
   readonly advanced: boolean;
   readonly nativeId: string;
@@ -25,7 +25,7 @@ export function RegistrationGuide({
 }) {
   const [copy, setCopy] = useState<"copied" | "manual">();
   const agent = provider === "claude" ? "Claude Code" : "Codex";
-  const command = webUrl ? `${provider === "claude" ? "/reviewq" : "$reviewq"} ${webUrl}` : "";
+  const command = target ? `${provider === "claude" ? "/reviewq" : "$reviewq"} ${target}` : "";
 
   async function copyCommand() {
     try {

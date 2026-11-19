@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import type { LaunchTarget } from "./types";
 import { Loading, Notice } from "../../components/PanelState";
 
@@ -32,6 +32,8 @@ export function LaunchTargetPicker({
   readonly onTrack: () => void;
 }) {
   const [searchOpen, setSearchOpen] = useState(false);
+  const searchField = useRef<HTMLInputElement>(null);
+  const canTrack = !disabled && isMergeRequestUrl(url);
   const options =
     active && !choices.some((choice) => choice.reviewId === active.reviewId)
       ? [active, ...choices]
@@ -48,6 +50,7 @@ export function LaunchTargetPicker({
           onClick={() => {
             if (searchOpen && search) onSearch("");
             setSearchOpen(!searchOpen);
+            if (!searchOpen) requestAnimationFrame(() => searchField.current?.focus());
           }}
         >
           {searchOpen ? "Close search" : "Search"}
@@ -57,6 +60,7 @@ export function LaunchTargetPicker({
         <label className="field">
           <span className="sr-only">Search open merge requests</span>
           <input
+            ref={searchField}
             type="search"
             maxLength={200}
             value={search}
@@ -111,7 +115,7 @@ export function LaunchTargetPicker({
           className="stack"
           onSubmit={(event) => {
             event.preventDefault();
-            onTrack();
+            if (canTrack) onTrack();
           }}
         >
           <label className="field">
@@ -126,7 +130,7 @@ export function LaunchTargetPicker({
             />
           </label>
           <div className="actions">
-            <button type="submit" disabled={disabled || !url.trim()}>
+            <button type="submit" disabled={!canTrack}>
               Add to my tracked reviews
             </button>
           </div>
@@ -134,4 +138,18 @@ export function LaunchTargetPicker({
       </details>
     </div>
   );
+}
+
+export function isMergeRequestUrl(value: string) {
+  try {
+    const url = new URL(value.trim());
+    return (
+      (url.protocol === "https:" || url.protocol === "http:") &&
+      !url.username &&
+      !url.password &&
+      /^\/[^/]+(?:\/[^/]+)+\/-\/merge_requests\/[1-9]\d*$/.test(url.pathname)
+    );
+  } catch {
+    return false;
+  }
 }

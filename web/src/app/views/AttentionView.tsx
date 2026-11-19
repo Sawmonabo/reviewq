@@ -44,20 +44,20 @@ export function AttentionView({
     savedValue("inbox.mode") === "all" ? "all" : "unread",
   );
   const [older, setOlder] = useState<InboxHistory>();
-  const [revision, setRevision] = useState(0);
   const [frozen, setFrozen] = useState<readonly string[]>();
   const [eligible, setEligible] = useState<readonly string[]>([]);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string>();
   const request = useRef<AbortController | undefined>(undefined);
+  const filterGroup = useRef<HTMLDivElement>(null);
   const selectionTrigger = useRef<HTMLButtonElement>(null);
   const selectShown = useRef<HTMLButtonElement>(null);
   useEffect(() => () => request.current?.abort(), []);
-  const page = useResource(
-    `inbox:${mode}:${revision}`,
-    (signal) => readNotifications({ view: mode }, signal),
-    [{ kind: "notification" }, { kind: "review" }, { kind: "queue" }],
-  );
+  const page = useResource(`inbox:${mode}`, (signal) => readNotifications({ view: mode }, signal), [
+    { kind: "notification" },
+    { kind: "review" },
+    { kind: "queue" },
+  ]);
   const headCursor = page.data?.nextCursor;
   // A new head cursor can change the revision, watermark or access scope of every older page.
   const history = older?.headCursor === headCursor ? older : undefined;
@@ -94,7 +94,7 @@ export function AttentionView({
 
   function refreshHistory() {
     setOlder(undefined);
-    setRevision((previous) => previous + 1);
+    page.retry();
   }
 
   async function more() {
@@ -136,6 +136,8 @@ export function AttentionView({
 
   async function assign(action: Action, ids: readonly string[]) {
     if (!ids.length || busy) return;
+    const invoker = document.activeElement;
+    const group = invoker?.closest(".inbox-items");
     setBusy(true);
     setNotice(undefined);
     try {
@@ -143,8 +145,7 @@ export function AttentionView({
       const affected = new Set(data.affectedIds);
       setFrozen((selection) => selection?.filter((id) => !affected.has(id)));
       setEligible((ids) => ids.filter((id) => !affected.has(id)));
-      if (affected.size) refreshHistory();
-      else page.retry();
+      page.retry();
       onChange();
       setNotice(
         `${affected.size} ${affected.size === 1 ? "update" : "updates"} ${action === "dismiss" ? "dismissed" : `marked ${action}`}.${affected.size && history ? ` ${historyChanged}` : ""}`,
@@ -153,13 +154,28 @@ export function AttentionView({
       setNotice(describeError(error));
     } finally {
       setBusy(false);
+      requestAnimationFrame(() => {
+        if (document.activeElement !== document.body) return;
+        const activeFilter = filterGroup.current?.querySelector("button[aria-pressed='true']");
+        const focus = invoker?.isConnected
+          ? invoker
+          : group?.isConnected
+            ? group.querySelector("summary")
+            : activeFilter;
+        if (focus instanceof HTMLElement) focus.focus({ preventScroll: true });
+      });
     }
   }
 
   return (
     <>
       <div className="inbox-summary">
-        <div className="inbox-filters" role="group" aria-label="Filter notifications">
+        <div
+          ref={filterGroup}
+          className="inbox-filters"
+          role="group"
+          aria-label="Filter notifications"
+        >
           <button
             type="button"
             aria-pressed={mode === "unread"}

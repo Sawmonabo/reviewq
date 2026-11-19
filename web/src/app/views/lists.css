@@ -78,6 +78,15 @@
   padding: 0;
   opacity: 0;
   cursor: pointer;
+  background: #0c0c10;
+}
+.select-filter > select:hover:enabled {
+  color: #fafafa;
+  background: var(--control-hover);
+}
+:root[data-theme="light"] .select-filter > select {
+  color: var(--text);
+  background: var(--control);
 }
 .select-filter:has(select:disabled) {
   opacity: 0.55;

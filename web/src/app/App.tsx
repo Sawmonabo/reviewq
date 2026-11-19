@@ -59,6 +59,8 @@ export function App() {
   const [settings, setSettings] = useState(savedValue("settings.open") === true);
   const [revision, setRevision] = useState(0);
   const [overlay, setOverlay] = useState<Overlay>();
+  const overlayHost = useRef<HTMLDivElement>(null);
+  const formOpener = useRef<HTMLElement | null>(null);
   const [selecting, setSelecting] = useState(false);
   const [offline, setOffline] = useState(!navigator.onLine);
   const [drafts] = useState(() => new DraftStore());
@@ -71,6 +73,9 @@ export function App() {
   const resolvedRun = useRef<{ reviewId: string; runId: string } | undefined>(undefined);
   const { reviewId, runId, sessionKey, ticket } = route;
   const opened = Boolean(reviewId || ticket);
+  const form =
+    overlay?.kind === "monitor" || (overlay?.kind === "launch" && overlay.mode !== "receipts");
+  const paneOpen = opened || form;
   const title = views.find((item) => item.view === route.view)?.label ?? "Review queue";
 
   const overview = useResource(
@@ -169,17 +174,18 @@ export function App() {
     const saved = savedValue(`scroll.${route.view}`);
     const position = typeof saved === "number" && Number.isFinite(saved) ? saved : 0;
     let restoring = position > 0;
-    let restoreTimer: number | undefined;
     const observer = new ResizeObserver(restoreScroll);
+    const contentChanges = new MutationObserver(restoreScroll);
     function stopRestoring() {
       restoring = false;
       observer.disconnect();
-      window.clearTimeout(restoreTimer);
+      contentChanges.disconnect();
     }
     function restoreScroll() {
-      if (!restoring || !target) return;
-      if (target.scrollHeight - target.clientHeight >= position) {
-        target.scrollTop = position;
+      if (!restoring || !target?.clientHeight || !content) return;
+      const limit = Math.max(0, target.scrollHeight - target.clientHeight);
+      if (limit >= position || !content.querySelector(".panel-loading")) {
+        target.scrollTop = Math.min(position, limit);
         stopRestoring();
       }
     }
@@ -187,10 +193,8 @@ export function App() {
     restoreScroll();
     if (restoring) {
       observer.observe(content);
-      restoreTimer = window.setTimeout(() => {
-        target.scrollTop = position;
-        stopRestoring();
-      }, 3500);
+      observer.observe(target);
+      contentChanges.observe(content, { childList: true, subtree: true });
     }
     let scrollbar: number | undefined;
     function showScrollbar() {
@@ -224,7 +228,10 @@ export function App() {
   }, [opened]);
 
   function move(next: Route) {
-    if (JSON.stringify(next) === JSON.stringify(route)) return;
+    if (JSON.stringify(next) === JSON.stringify(route)) {
+      if (form) setOverlay(undefined);
+      return;
+    }
     if (next.view !== route.view) {
       if (workspace.current) saveValue(`scroll.${route.view}`, workspace.current.scrollTop);
       setSelecting(false);
@@ -233,7 +240,12 @@ export function App() {
       resolvedRun.current = undefined;
       if (next.reviewId) resize(50);
     }
-    if (next.reviewId !== reviewId || next.runId !== runId || next.ticket !== ticket)
+    if (
+      next.view !== route.view ||
+      next.reviewId !== reviewId ||
+      next.runId !== runId ||
+      next.ticket !== ticket
+    )
       setOverlay(undefined);
     const active = selectedRun;
     const canonical =
@@ -271,10 +283,28 @@ export function App() {
     openReview(item.reviewId, item.runId ?? undefined, item.tab, item.sessionKey ?? undefined);
   }
   function menuLaunch(mode: LaunchMode, targets: readonly LaunchTarget[] = []) {
+    if (!paneOpen && mode !== "receipts") resize(50);
+    rememberFormOpener();
     setOverlay({ kind: "launch", mode, targets });
   }
   function monitor(targets: readonly LaunchTarget[], pause: boolean) {
+    if (!paneOpen) resize(50);
+    rememberFormOpener();
     setOverlay({ kind: "monitor", targets, pause });
+  }
+  function rememberFormOpener() {
+    const active = document.activeElement;
+    if (!(active instanceof HTMLElement)) return;
+    const trigger = active.closest("[role='menu']")?.getAttribute("aria-labelledby");
+    formOpener.current = trigger ? document.getElementById(trigger) : active;
+  }
+  function closeForm() {
+    setOverlay(undefined);
+    const trigger = formOpener.current;
+    formOpener.current = null;
+    requestAnimationFrame(() => {
+      if (trigger?.isConnected) trigger.focus({ preventScroll: true });
+    });
   }
   function resize(next: number) {
     setSplit(next);
@@ -341,20 +371,26 @@ export function App() {
 
   return (
     <main
-      className={`workspace ${railSmall ? "rail-small" : ""} ${opened ? "has-detail" : ""}`}
+      className={`workspace ${railSmall ? "rail-small" : ""} ${paneOpen ? "has-detail" : ""}`}
       onKeyDown={(event) => {
         if (
           event.key !== "Escape" ||
           event.defaultPrevented ||
-          !opened ||
-          overlay ||
           settings ||
+          (!paneOpen && !overlay) ||
           document.querySelector(":popover-open, [role='menu'][data-state='open']") ||
           (event.target instanceof Element && event.target.closest("select"))
         )
           return;
-        event.preventDefault();
-        closeDrawer();
+        if (form) {
+          if (!overlayHost.current?.querySelector("dialog[aria-busy='true']")) {
+            event.preventDefault();
+            closeForm();
+          }
+        } else if (!overlay && opened) {
+          event.preventDefault();
+          closeDrawer();
+        }
       }}
     >
       <a className="skip-link" href="#view-title">
@@ -438,7 +474,7 @@ export function App() {
         </nav>
       </aside>
       <div
-        className={`workspace-panes ${opened ? "has-detail" : ""}`}
+        className={`workspace-panes ${paneOpen ? "has-detail" : ""} ${form ? "has-form" : ""}`}
         ref={panes}
         style={{ "--split": `${split}%` } as CSSProperties}
       >
@@ -480,97 +516,130 @@ export function App() {
             </PanelBoundary>
           </div>
         </section>
+        {paneOpen && <Splitter host={panes} value={split} onChange={resize} />}
         {opened && (
-          <>
-            <Splitter host={panes} value={split} onChange={resize} />
-            <div
-              className="drawer-host"
-              ref={drawer}
-              tabIndex={-1}
-              aria-label={ticket ? "Ticket details" : "Review details"}
-            >
-              <PanelBoundary key={reviewId ?? ticket}>
-                <Suspense fallback={<Loading label="Opening detail panel…" />}>
-                  {overview.data && reviewId ? (
-                    <ReviewDrawer
-                      overview={overview.data}
-                      run={selectedRun}
-                      session={firstPageSession ?? activeSession.data ?? undefined}
-                      requestedSession={sessionKey}
-                      selectionError={
-                        selected.error ?? (firstPageSession ? undefined : activeSession.error)
-                      }
-                      selectionPending={
-                        selected.pending ||
-                        Boolean(selectedRun && !firstPageSession && activeSession.pending)
-                      }
-                      onDefaultRun={() => openReview(reviewId)}
-                      tab={route.tab}
-                      drafts={drafts}
-                      onReload={() => {
-                        overview.retry();
-                        selected.retry();
-                        activeSession.retry();
-                      }}
-                      onTab={(tab) => move({ ...route, tab })}
-                      onSession={(session, tab) => {
-                        const exactRun = selectedRun?.runId;
-                        if (exactRun) openReview(reviewId, exactRun, tab ?? "agent", session);
-                      }}
-                      onRun={(id) => openReview(reviewId, id, route.tab)}
-                      onClose={closeDrawer}
-                      onLaunch={menuLaunch}
-                      onMonitor={monitor}
-                      onSettings={() => setSettings(true)}
-                      ticket={
-                        <Tickets keys={overview.data.review.tickets.map((entry) => entry.key)} />
-                      }
-                    />
-                  ) : reviewId ? (
-                    <>
-                      <div className="drawer-header spread">
-                        <h2>Review details</h2>
-                        <button type="button" aria-label="Close review" onClick={closeDrawer}>
-                          <Icon name="close" />
-                        </button>
-                      </div>
-                      {overview.error ? (
-                        <Notice retry={overview.retry}>
-                          {overview.error} <code>{reviewId}</code>
-                        </Notice>
-                      ) : (
-                        <Loading label="Opening review…" />
-                      )}
-                    </>
-                  ) : (
-                    ticket && (
-                      <div className="drawer-surface">
-                        <header className="drawer-header spread">
+          <div
+            className="drawer-host"
+            hidden={form}
+            ref={drawer}
+            tabIndex={-1}
+            aria-label={ticket ? "Ticket details" : "Review details"}
+          >
+            <PanelBoundary key={reviewId ?? ticket}>
+              <Suspense fallback={<Loading label="Opening detail panel…" />}>
+                {overview.data && reviewId ? (
+                  <ReviewDrawer
+                    overview={overview.data}
+                    run={selectedRun}
+                    session={firstPageSession ?? activeSession.data ?? undefined}
+                    requestedSession={sessionKey}
+                    selectionError={
+                      selected.error ?? (firstPageSession ? undefined : activeSession.error)
+                    }
+                    selectionPending={
+                      selected.pending ||
+                      Boolean(selectedRun && !firstPageSession && activeSession.pending)
+                    }
+                    onDefaultRun={() => openReview(reviewId)}
+                    tab={route.tab}
+                    drafts={drafts}
+                    onReload={() => {
+                      overview.retry();
+                      selected.retry();
+                      activeSession.retry();
+                    }}
+                    onTab={(tab) => move({ ...route, tab })}
+                    onSession={(session, tab) => {
+                      const exactRun = selectedRun?.runId;
+                      if (exactRun) openReview(reviewId, exactRun, tab ?? "agent", session);
+                    }}
+                    onRun={(id) => openReview(reviewId, id, route.tab)}
+                    onClose={closeDrawer}
+                    onLaunch={menuLaunch}
+                    onMonitor={monitor}
+                    onSettings={() => setSettings(true)}
+                    ticket={
+                      <Tickets keys={overview.data.review.tickets.map((entry) => entry.key)} />
+                    }
+                  />
+                ) : reviewId ? (
+                  <>
+                    <div className="drawer-header spread">
+                      <h2>Review details</h2>
+                      <button type="button" aria-label="Close review" onClick={closeDrawer}>
+                        <Icon name="close" />
+                      </button>
+                    </div>
+                    {overview.error ? (
+                      <Notice retry={overview.retry}>
+                        {overview.error} <code>{reviewId}</code>
+                      </Notice>
+                    ) : (
+                      <Loading label="Opening review…" />
+                    )}
+                  </>
+                ) : (
+                  ticket && (
+                    <div className="drawer-surface">
+                      <header className="drawer-header spread">
+                        <div>
                           <h2>{ticket}</h2>
-                          <button
-                            type="button"
-                            className="icon-button"
-                            aria-label="Return to workspace"
-                            onClick={closeDrawer}
-                          >
-                            <Icon name="back" />
-                          </button>
-                        </header>
-                        <div className="drawer-body">
-                          <Tickets keys={[ticket]} />
+                          <span className="row-tag" data-review-kind="thread_reply">
+                            No matching MR
+                          </span>
                         </div>
+                        <button
+                          type="button"
+                          className="icon-button"
+                          aria-label="Return to workspace"
+                          onClick={closeDrawer}
+                        >
+                          <Icon name="back" />
+                        </button>
+                      </header>
+                      <div className="drawer-body">
+                        <Tickets keys={[ticket]} />
                       </div>
-                    )
-                  )}
-                </Suspense>
-              </PanelBoundary>
-            </div>
-          </>
+                    </div>
+                  )
+                )}
+              </Suspense>
+            </PanelBoundary>
+          </div>
+        )}
+        {form && (
+          <div className="overlay-host" ref={overlayHost}>
+            <PanelBoundary>
+              <Suspense fallback={<Loading label="Opening form…" />}>
+                {overlay.kind === "launch" ? (
+                  <BulkLaunch
+                    mode={overlay.mode}
+                    targets={overlay.targets}
+                    openOverview={overview.data}
+                    settingsRevision={revision}
+                    onSettings={() => setSettings(true)}
+                    onClose={closeForm}
+                    onOpen={(id, run) => {
+                      setOverlay(undefined);
+                      setSelecting(false);
+                      openReview(id, run, "agent");
+                    }}
+                  />
+                ) : (
+                  <MonitorPane
+                    targets={overlay.targets}
+                    pause={overlay.pause}
+                    onClose={closeForm}
+                  />
+                )}
+              </Suspense>
+            </PanelBoundary>
+          </div>
         )}
       </div>
       <PanelBoundary>
         <Suspense fallback={null}>
-          {overlay?.kind === "launch" && (
+          {overlay?.kind === "launch" && overlay.mode === "receipts" && (
             <BulkLaunch
               mode={overlay.mode}
               targets={overlay.targets}
@@ -583,13 +652,6 @@ export function App() {
                 setSelecting(false);
                 openReview(id, run, "agent");
               }}
-            />
-          )}
-          {overlay?.kind === "monitor" && (
-            <MonitorPane
-              targets={overlay.targets}
-              pause={overlay.pause}
-              onClose={() => setOverlay(undefined)}
             />
           )}
           {settings && (
