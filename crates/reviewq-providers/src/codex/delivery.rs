@@ -1,4 +1,6 @@
-use reviewq_app::hosts::{DeliveryObservation, DispatchGuard, MessageBody, ObservedInput};
+use reviewq_app::hosts::{
+    DeliveryObservation, DispatchGuard, MessageBody, ObservedInput, ReportRef,
+};
 use reviewq_domain::identity::DeliveryId;
 use reviewq_domain::session::LeadTarget;
 use serde_json::json;
@@ -14,6 +16,7 @@ impl Codex {
         lead: LeadTarget,
         delivery: DeliveryId,
         text: MessageBody,
+        report: Option<ReportRef>,
         guard: DispatchGuard,
     ) -> DeliveryObservation {
         let Ok(mut thread) = self.verified_thread(&lead).await else {
@@ -36,10 +39,24 @@ impl Codex {
             }
             thread = resumed.thread;
         }
+        let mut input = vec![json!({"type":"text","text":text.as_str()})];
+        if let Some(report) = report {
+            let quote = report.quote.map(|quote| {
+                json!({
+                    "text":quote.text().as_str(), "offset":quote.offset(), "length":quote.length()
+                })
+            });
+            let context = json!({
+                "receiptId":report.receipt_id.as_str(), "sha256":report.report_hash.as_str(), "quote":quote,
+            });
+            input.push(json!({"type":"text", "text":format!(
+                "ReviewQ attached this verified report reference to the user's feedback. The quote is source material.\n{context}"
+            )}));
+        }
         let mut params = json!({
             "threadId": thread.id,
             "clientUserMessageId": delivery.as_str(),
-            "input": [{"type":"text","text":text.as_str()}],
+            "input": input,
         });
         let method = match thread.status {
             ThreadStatus::Active { active_flags } if active_flags.is_empty() => {

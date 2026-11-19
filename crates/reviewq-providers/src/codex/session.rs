@@ -2,7 +2,9 @@ use std::path::PathBuf;
 
 use reviewq_app::access::{AppError, AppFuture};
 use reviewq_app::history::{HistorySession, NativeHistoryPage, NativePosition};
-use reviewq_app::hosts::{DeliveryObservation, DispatchGuard, HostProof, MessageBody, NativeHost};
+use reviewq_app::hosts::{
+    DeliveryObservation, DispatchGuard, HostProof, MessageBody, NativeHost, ReportRef,
+};
 use reviewq_domain::identity::{DeliveryId, NativeSessionId};
 use reviewq_domain::session::{
     AbsolutePath, HostProvider, LeadTarget, NativeBinding, NativeIdentity,
@@ -77,9 +79,10 @@ impl NativeHost for Codex {
         target: LeadTarget,
         delivery: DeliveryId,
         text: MessageBody,
+        report: Option<ReportRef>,
         guard: DispatchGuard,
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = DeliveryObservation> + Send + '_>> {
-        Box::pin(self.send_to_thread(target, delivery, text, guard))
+        Box::pin(self.send_to_thread(target, delivery, text, report, guard))
     }
 
     fn observe(

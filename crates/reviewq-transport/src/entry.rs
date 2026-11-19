@@ -16,16 +16,18 @@ use reviewq_app::queue::{QueueStore, ReviewLookup};
 use reviewq_app::reports::ReportStore;
 use reviewq_app::sources::{ReviewSourceReader, SourceRefreshStore, refresh_queue};
 use reviewq_app::workspace::WorkspaceStore;
+use reviewq_domain::identity::EventCursor;
 use reviewq_protocol::queue::QueueSync;
 use reviewq_protocol::{EventCursorDto, Success};
 use serde::{Deserialize, Serialize};
-use tokio::sync::{Mutex, watch};
+use tokio::sync::{Mutex, Semaphore, watch};
 use tower_http::services::{ServeDir, ServeFile};
 
 mod auth;
 mod changes;
 mod control;
 mod error;
+mod events;
 mod features;
 mod history;
 mod hosts;
@@ -73,6 +75,9 @@ pub(super) struct Entry {
     host: Option<Arc<dyn NativeHost>>,
     file_history: Arc<dyn NativeHistoryReader>,
     sends_allowed: bool,
+    commits: watch::Receiver<EventCursor>,
+    shutdown: watch::Receiver<bool>,
+    event_slots: Arc<Semaphore>,
     auth: Auth,
     refresh: Mutex<Option<watch::Receiver<RefreshResult>>>,
 }
@@ -105,27 +110,39 @@ struct SessionResult {
     csrf_token: String,
 }
 
+/// Runtime-owned listener identity and commit/shutdown signals.
+pub struct ServiceRuntime<'a> {
+    pub endpoint: ServiceEndpoint,
+    pub web: &'a Path,
+    pub sends_allowed: bool,
+    pub commits: watch::Receiver<EventCursor>,
+    pub shutdown: watch::Receiver<bool>,
+}
+
 /// Mounts production assets and the private versioned HTTP routes.
 pub fn router(
     store: Arc<dyn Store>,
     source: Option<Arc<dyn ReviewSourceReader>>,
     host: Option<Arc<dyn NativeHost>>,
     file_history: Arc<dyn NativeHistoryReader>,
-    sends_allowed: bool,
-    endpoint: ServiceEndpoint,
-    web: &Path,
+    runtime: ServiceRuntime<'_>,
 ) -> Router {
     let entry = Arc::new(Entry {
         store,
         source,
         host,
         file_history,
-        sends_allowed,
-        auth: Auth::new(endpoint),
+        sends_allowed: runtime.sends_allowed,
+        commits: runtime.commits,
+        shutdown: runtime.shutdown,
+        event_slots: Arc::new(Semaphore::new(32)),
+        auth: Auth::new(runtime.endpoint),
         refresh: Mutex::new(None),
     });
+    let web = runtime.web;
     let api = Router::new()
         .route("/status", get(status))
+        .route("/events", get(events::feed))
         .route("/session", get(session).post(start_session))
         .route("/queue", get(pages::queue))
         .route("/queue/refresh", post(refresh))

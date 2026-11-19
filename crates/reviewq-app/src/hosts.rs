@@ -49,6 +49,7 @@ pub trait NativeHost: Send + Sync {
         target: LeadTarget,
         delivery: DeliveryId,
         text: MessageBody,
+        report: Option<ReportRef>,
         guard: DispatchGuard,
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = DeliveryObservation> + Send + '_>>;
     fn observe(

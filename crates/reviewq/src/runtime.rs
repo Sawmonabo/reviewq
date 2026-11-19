@@ -6,12 +6,13 @@ use std::os::unix::ffi::OsStrExt;
 use std::os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt};
 use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use reviewq_app::access::Actor;
 use reviewq_app::hosts::{LeadStore, NativeHost, recover_delivery};
 use reviewq_app::sources::{ReviewSourceReader, SourceRefreshStore};
 use reviewq_app::workspace::{WorkspaceConfig, WorkspaceStore};
+use reviewq_domain::identity::EventCursor;
 use reviewq_domain::session::AbsolutePath;
 use reviewq_providers::{Codex, FileHistory, GitLab};
 use reviewq_store::SqliteStore;
@@ -150,23 +151,30 @@ pub(crate) async fn serve(profile: PathBuf, options: Serve) -> Result<(), Failur
         _ => None,
     };
     let sends_allowed = !options.validation && host.is_some();
-    let delivery = host
-        .as_ref()
-        .filter(|_| sends_allowed)
-        .map(|host| tokio::spawn(dispatch_deliveries(store.clone(), host.clone())));
+    let delivery = host.as_ref().filter(|_| sends_allowed).map(|host| {
+        tokio::spawn(dispatch_deliveries(
+            store.clone(),
+            host.clone(),
+            store.subscribe(),
+        ))
+    });
+    let (shutdown, wait) = watch::channel(false);
     let router = reviewq_transport::router(
         store.clone(),
         source,
         host,
         Arc::new(FileHistory::default()),
-        sends_allowed,
-        endpoint.clone(),
-        &web,
+        reviewq_transport::ServiceRuntime {
+            sends_allowed,
+            endpoint: endpoint.clone(),
+            web: &web,
+            commits: store.subscribe(),
+            shutdown: wait.clone(),
+        },
     );
     publish(&profile, &endpoint)?;
     println!("ReviewQ http://{browser}/");
 
-    let (shutdown, wait) = watch::channel(false);
     let listener_shutdown = wait.clone();
     let stop = tokio::spawn(async move {
         let _ = tokio::signal::ctrl_c().await;
@@ -192,16 +200,58 @@ pub(crate) async fn serve(profile: PathBuf, options: Serve) -> Result<(), Failur
     Ok(())
 }
 
-async fn dispatch_deliveries(store: Arc<dyn LeadStore>, host: Arc<dyn NativeHost>) {
+async fn dispatch_deliveries(
+    store: Arc<dyn LeadStore>,
+    host: Arc<dyn NativeHost>,
+    mut commits: watch::Receiver<EventCursor>,
+) {
     let mut after = None;
     loop {
-        tokio::time::sleep(Duration::from_millis(750)).await;
-        let Ok(batch) = store.recoverable_deliveries(after.take(), 8).await else {
-            continue;
+        commits.borrow_and_update();
+        let batch = match store.recoverable_deliveries(after.take(), 16).await {
+            Ok(batch) => batch,
+            Err(_) => {
+                tokio::time::sleep(Duration::from_secs(1)).await;
+                continue;
+            }
         };
+        let mut failed = false;
         for candidate in batch {
             after = Some(candidate.cursor.clone());
-            let _ = recover_delivery(store.clone(), host.as_ref(), candidate).await;
+            failed |= recover_delivery(store.clone(), host.as_ref(), candidate)
+                .await
+                .is_err();
+        }
+        if failed {
+            tokio::time::sleep(Duration::from_secs(1)).await;
+        }
+        if after.is_some() {
+            continue;
+        }
+        let due = match store.next_delivery_due().await {
+            Ok(due) => due,
+            Err(_) => {
+                tokio::time::sleep(Duration::from_secs(1)).await;
+                continue;
+            }
+        };
+        let wait_due = async {
+            match due {
+                Some(due) => {
+                    let now = SystemTime::now()
+                        .duration_since(UNIX_EPOCH)
+                        .ok()
+                        .and_then(|value| i64::try_from(value.as_millis()).ok())
+                        .unwrap_or(due);
+                    let delay = due.saturating_sub(now).max(20) as u64;
+                    tokio::time::sleep(Duration::from_millis(delay)).await;
+                }
+                None => std::future::pending::<()>().await,
+            }
+        };
+        tokio::select! {
+            result = commits.changed() => if result.is_err() { break; },
+            () = wait_due => {}
         }
     }
 }
