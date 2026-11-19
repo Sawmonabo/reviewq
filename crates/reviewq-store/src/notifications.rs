@@ -225,7 +225,7 @@ fn page(
         items.push(decode(row)?);
     }
     drop(rows);
-    let review_contexts = review_contexts(db, &items)?;
+    let review_contexts = review_contexts(db, &items, watermark)?;
     Ok(InboxPage {
         items,
         review_contexts,
@@ -237,6 +237,7 @@ fn page(
 fn review_contexts(
     db: &Connection,
     items: &[Notification],
+    watermark: i64,
 ) -> Result<Vec<ReviewContext>, StoreError> {
     if items.is_empty() {
         return Ok(Vec::new());
@@ -254,12 +255,16 @@ fn review_contexts(
                    (SELECT ticket_key FROM scoped_review_issues WHERE review_id=r.review_id
                     UNION SELECT ticket_key FROM retained_review_tickets WHERE review_id=r.review_id
                     ORDER BY ticket_key LIMIT 16)),
-                e.our_comments,e.unread_replies,e.personal_approval
+                e.our_comments,
+                (SELECT count(*) FROM notifications n WHERE n.review_id=r.review_id
+                    AND n.ordinal<=?2 AND n.source='gitlab' AND n.kind IN ('reply','edited_reply')
+                    AND n.read_at_ms IS NULL AND n.dismissed_at_ms IS NULL),
+                e.personal_approval
          FROM json_each(?1) p JOIN reviews r ON r.review_id=p.value
          JOIN review_activity_evidence e ON e.review_id=r.review_id
          ORDER BY p.key",
     )?;
-    let mut rows = statement.query([selected])?;
+    let mut rows = statement.query(params![selected, watermark])?;
     let mut contexts = Vec::with_capacity(reviews.len());
     while let Some(row) = rows.next()? {
         let ticket_keys = serde_json::from_str::<Vec<String>>(text(row, 4)?)
