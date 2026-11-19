@@ -41,22 +41,40 @@ function positionAt(patch: PatchDocument, scroller: HTMLElement): Position {
 export function bindPatchPosition(patch: PatchDocument, scroller: HTMLElement, key: string) {
   const saved = readPosition(key);
   const row = saved.line ? patch.line(saved.line) : undefined;
-  const bounds = () => scroller.getBoundingClientRect().top;
   const inset = saved.inset ?? 0;
-  const align = () => {
-    if (!row) return;
-    const distance = row.getBoundingClientRect().top - bounds() - inset;
-    if (Math.abs(distance) > 0.5) scroller.scrollTop += distance;
-  };
-  scroller.scrollTop = saved.top;
-  align();
-
-  // Portals above the reading position can finish after the patch text mounts.
+  let contentTop: number | undefined;
+  let restoring = Boolean(row);
   const observer = new ResizeObserver(align);
   const events = new AbortController();
   const options = { signal: events.signal, passive: true } as const;
-  const release = () => observer.disconnect();
+  function release() {
+    restoring = false;
+    observer.disconnect();
+  }
+
+  function align() {
+    if (!restoring || !row) return;
+    const rowInset = row.getBoundingClientRect().top - scroller.getBoundingClientRect().top;
+    const nextTop = scroller.scrollTop + rowInset;
+    const distance = rowInset - inset;
+    // Find and focus can scroll without pointer or key events in this pane.
+    // A stationary row in the document means the reader moved independently.
+    if (
+      contentTop !== undefined &&
+      Math.abs(contentTop - nextTop) <= 0.5 &&
+      Math.abs(distance) > 1
+    ) {
+      release();
+      return;
+    }
+    contentTop = nextTop;
+    if (Math.abs(distance) > 0.5) scroller.scrollTop += distance;
+  }
+
+  scroller.scrollTop = saved.top;
+  align();
   if (row) {
+    // Portals above the reading position can finish after the patch text mounts.
     observer.observe(patch.host);
     const panel = patch.host.closest(".selected-patch");
     if (panel) observer.observe(panel);
@@ -67,7 +85,9 @@ export function bindPatchPosition(patch: PatchDocument, scroller: HTMLElement, k
 
   let last = saved;
   const capture = () => {
-    if (patch.host.isConnected && scroller.clientHeight > 0) last = positionAt(patch, scroller);
+    if (!patch.host.isConnected || scroller.clientHeight === 0) return;
+    align();
+    last = positionAt(patch, scroller);
   };
   const persist = () => saveValue(key, last);
   scroller.addEventListener("scroll", capture, options);

@@ -354,7 +354,7 @@ function readQuote(value: string): Quote | undefined {
 async function acceptedChanges(runId: string, report: ReportSummary, signal: AbortSignal) {
   const changes = new Map<string, AcceptedFindingChange>();
   let next: string | undefined;
-  let cursor = "";
+  let cursor: string;
   do {
     const result = await reportContext(runId, report.receiptId, "changes", next, signal, 20);
     if (
