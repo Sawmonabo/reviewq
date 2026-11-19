@@ -81,6 +81,16 @@ impl NativeHost for Codex {
         Box::pin(self.read_history_stamp(target))
     }
 
+    fn history_signals(
+        &self,
+        target: HistorySession,
+    ) -> AppFuture<
+        '_,
+        Option<tokio::sync::broadcast::Receiver<reviewq_app::history::NativeLiveSignal>>,
+    > {
+        Box::pin(self.open_history_signals(target))
+    }
+
     fn history_plan(
         &self,
         target: HistorySession,

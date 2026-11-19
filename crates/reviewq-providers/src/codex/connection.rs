@@ -20,6 +20,7 @@ use tokio::time::{Instant, sleep_until, timeout};
 use tokio_tungstenite::tungstenite::{Message, protocol::WebSocketConfig};
 use tokio_tungstenite::{WebSocketStream, client_async_with_config};
 
+use super::live::Live;
 use super::questions::{AnswerProof, Questions};
 
 const REQUEST_LIMIT: usize = 8;
@@ -33,6 +34,7 @@ type Socket = WebSocketStream<UnixStream>;
 pub(super) struct Connection {
     sender: mpsc::Sender<CommandRequest>,
     questions: Arc<Mutex<Questions>>,
+    pub(super) live: Arc<Live>,
 }
 
 enum CommandRequest {
@@ -113,8 +115,13 @@ impl Connection {
             owner,
         };
         let questions = Arc::new(Mutex::new(Questions::default()));
-        tokio::spawn(daemon.run(commands, questions.clone()));
-        Self { sender, questions }
+        let live = Arc::new(Live::default());
+        tokio::spawn(daemon.run(commands, questions.clone(), live.clone()));
+        Self {
+            sender,
+            questions,
+            live,
+        }
     }
 
     pub(super) fn questions(
@@ -235,6 +242,7 @@ impl Daemon {
         self,
         mut commands: mpsc::Receiver<CommandRequest>,
         questions: Arc<Mutex<Questions>>,
+        live: Arc<Live>,
     ) {
         let mut id = 1_u64;
         while let Some(first) = commands.recv().await {
@@ -259,7 +267,17 @@ impl Daemon {
                     .send(Err(CallError::BeforeSend(AppError::Unavailable)));
                 continue;
             };
-            multiplex(&mut socket, request, &mut commands, &questions, &mut id).await;
+            multiplex(
+                &mut socket,
+                request,
+                &mut commands,
+                &questions,
+                &live,
+                &mut id,
+            )
+            .await;
+            live.disconnect();
+
             if let Ok(mut cache) = questions.lock() {
                 cache.disconnect();
             }
@@ -391,6 +409,7 @@ async fn multiplex(
     first: Rpc,
     commands: &mut mpsc::Receiver<CommandRequest>,
     questions: &Mutex<Questions>,
+    live: &Live,
     id: &mut u64,
 ) {
     let mut pending = HashMap::new();
@@ -451,6 +470,7 @@ async fn multiplex(
                 match event {
                     Ok(Some(frame)) if frame.get("method").is_some() => {
                         if let Ok(mut cache) = questions.lock() { cache.frames(&frame); }
+                        live.frame(&frame);
                     }
                     Ok(Some(frame)) => {
                         if let Some(id) = frame.get("id").and_then(Value::as_u64)
@@ -465,7 +485,10 @@ async fn multiplex(
             () = sleep_until(wake) => {
                 let now = Instant::now();
                 pending.retain(|_, item| !item.reply.is_closed() && item.deadline > now);
-                if pending.is_empty() && !question_active && now >= last_activity + IDLE_TIME { break; }
+                if pending.is_empty() && !question_active && now >= last_activity + IDLE_TIME {
+                    if !live.active() { break; }
+                    last_activity = now;
+                }
             }
         }
     }

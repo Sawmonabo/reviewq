@@ -8,11 +8,13 @@ use axum::http::HeaderMap;
 use axum::response::sse::{Event, KeepAlive, Sse};
 use futures_util::{Stream, stream};
 use reviewq_app::access::AppError;
-use reviewq_app::history::{HistorySession, NativeHistoryReader, NativeRpcStamp, SourceAnchor};
+use reviewq_app::history::{
+    HistorySession, NativeHistoryReader, NativeLiveSignal, NativeRpcStamp, SourceAnchor,
+};
 use reviewq_app::hosts::NativeHost;
-use reviewq_domain::identity::{RunId, SessionKey};
+use reviewq_domain::identity::{NativeInputId, NativeTurnId, RunId, SessionKey};
 use serde::Serialize;
-use tokio::sync::{Mutex as AsyncMutex, OwnedMutexGuard, OwnedSemaphorePermit, watch};
+use tokio::sync::{Mutex as AsyncMutex, OwnedMutexGuard, OwnedSemaphorePermit, broadcast, watch};
 use tokio::task::JoinHandle;
 
 use crate::entry::error::ApiPath as Path;
@@ -31,6 +33,7 @@ struct SharedWatch {
     source: HistorySession,
     updates: watch::Receiver<Option<Update>>,
     observer: JoinHandle<()>,
+    fragments: broadcast::Sender<Arc<Fragment>>,
 }
 
 impl Drop for SharedWatch {
@@ -45,6 +48,29 @@ struct Update {
     kind: &'static str,
     generation: Option<String>,
     availability: &'static str,
+    epoch: u64,
+}
+
+struct Fragment {
+    epoch: u64,
+    turn: NativeTurnId,
+    entry: NativeInputId,
+    offset: u64,
+    text: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct Delta<'a> {
+    run_id: &'a str,
+    session_key: &'a str,
+    generation: &'a str,
+    turn_id: &'a str,
+    entry_id: &'a str,
+    block: u16,
+    offset: u64,
+    text: &'a str,
+    provisional: bool,
 }
 
 #[derive(Serialize)]
@@ -97,11 +123,19 @@ impl Watchers {
             return Ok(watch);
         }
         let (notices, updates) = watch::channel(None);
-        let observer = tokio::spawn(run(reader, host, source.clone(), notices));
+        let fragments = broadcast::channel(4).0;
+        let observer = tokio::spawn(run(
+            reader,
+            host,
+            source.clone(),
+            notices,
+            fragments.clone(),
+        ));
         let result = Arc::new(SharedWatch {
             source,
             updates,
             observer,
+            fragments,
         });
         active.insert(key, Arc::downgrade(&result));
         Ok(result)
@@ -113,11 +147,16 @@ async fn run(
     host: Option<Arc<dyn NativeHost>>,
     session: HistorySession,
     publish: watch::Sender<Option<Update>>,
+    fragments: broadcast::Sender<Arc<Fragment>>,
 ) {
     let mut previous: Option<SourceAnchor> = None;
     let mut last_rpc: Option<NativeRpcStamp> = None;
     let mut last_availability = None;
     let mut sequence = 0_u64;
+    let mut epoch = 0_u64;
+    let mut reset_live = false;
+    let mut live = None;
+    let mut retry_live = tokio::time::Instant::now();
     let mut delay = Duration::from_secs(1);
     let mut events = None;
     loop {
@@ -166,6 +205,7 @@ async fn run(
             Err(AppError::InvalidRequest) => (None, "unsupported", false),
             Err(_) => (None, "disconnected", false),
         };
+        let reset = reset || std::mem::take(&mut reset_live);
         let changed = current
             .as_ref()
             .is_some_and(|value| previous.as_ref() != Some(value))
@@ -175,6 +215,9 @@ async fn run(
         let changed_availability = last_availability != Some(availability);
         if changed || changed_availability || reset {
             sequence = sequence.saturating_add(1);
+            if reset || changed_availability {
+                epoch = sequence;
+            }
             let kind = if reset {
                 "reset"
             } else if changed_availability {
@@ -197,6 +240,7 @@ async fn run(
                     kind,
                     generation,
                     availability,
+                    epoch,
                 }))
                 .is_err()
             {
@@ -221,16 +265,59 @@ async fn run(
         if file_available && events.is_none() {
             events = reader.watch(session.clone()).await.ok().flatten();
         }
-        if let Some(watch) = events.as_mut() {
+        if availability == "available"
+            && live.is_none()
+            && let Some(host) = host.as_ref()
+            && session.binding.identity().provider() == reviewq_domain::session::HostProvider::Codex
+            && tokio::time::Instant::now() >= retry_live
+        {
+            // Keep the host connection read-only. Starting or resuming a thread is an effect.
+            live = host.history_signals(session.clone()).await.ok().flatten();
+            retry_live = tokio::time::Instant::now() + Duration::from_secs(10);
+        }
+        let poll = tokio::time::sleep(delay);
+        tokio::pin!(poll);
+        loop {
             tokio::select! {
-                result = watch.changed() => {
+                result = async {
+                    match events.as_mut() {
+                        Some(watch) => watch.changed().await,
+                        None => std::future::pending().await,
+                    }
+                } => {
                     if result != Ok(true) { events = None; }
                     tokio::time::sleep(Duration::from_millis(75)).await;
+                    break;
                 }
-                () = tokio::time::sleep(delay) => {}
+                signal = async {
+                    match live.as_mut() {
+                        Some(watch) => watch.recv().await,
+                        None => std::future::pending().await,
+                    }
+                } => match signal {
+                    Ok(NativeLiveSignal::AssistantDelta { turn, entry, offset, text })
+                        if availability == "available" => {
+                            let _ = fragments.send(Arc::new(Fragment { epoch, turn, entry, offset, text }));
+                    }
+                    Ok(NativeLiveSignal::AssistantDelta { .. }) => {}
+                    Ok(NativeLiveSignal::Completed) => break,
+                    Ok(NativeLiveSignal::Reset) => {
+                        reset_live = true;
+                        break;
+                    }
+                    Err(broadcast::error::RecvError::Lagged(_)) => {
+                        live = live.as_ref().map(broadcast::Receiver::resubscribe);
+                        reset_live = true;
+                        break;
+                    }
+                    Err(broadcast::error::RecvError::Closed) => {
+                        live = None;
+                        reset_live = true;
+                        break;
+                    }
+                },
+                () = &mut poll => break,
             }
-        } else {
-            tokio::time::sleep(delay).await;
         }
     }
 }
@@ -260,6 +347,9 @@ pub(in crate::entry) async fn live(
     let feed = Feed {
         entry: entry.clone(),
         updates: lease.updates.clone(),
+        fragments: lease.fragments.subscribe(),
+        pending_fragment: None,
+        missed_fragments: false,
         shutdown: entry.shutdown.clone(),
         headers,
         sequence: 0,
@@ -274,6 +364,9 @@ pub(in crate::entry) async fn live(
 struct Feed {
     entry: Arc<Entry>,
     updates: watch::Receiver<Option<Update>>,
+    fragments: broadcast::Receiver<Arc<Fragment>>,
+    pending_fragment: Option<Arc<Fragment>>,
+    missed_fragments: bool,
     shutdown: watch::Receiver<bool>,
     lease: Arc<SharedWatch>,
     headers: HeaderMap,
@@ -308,27 +401,58 @@ impl Feed {
                 return Some((Ok(event), self));
             }
             let message = self.updates.borrow_and_update().clone();
-            if let Some(message) = message.filter(|value| value.sequence > self.sequence) {
-                let kind =
-                    if self.sequence != 0 && message.sequence > self.sequence.saturating_add(1) {
-                        "reset"
-                    } else {
-                        message.kind
-                    };
-                self.sequence = message.sequence;
+            if let Some(message) = message {
                 let notice = Notice {
                     run_id: target.run_id().as_str(),
                     session_key: target.session_key().as_str(),
                     generation: message.generation.as_deref(),
                     availability: message.availability,
                 };
-                let event = Event::default().event(kind).json_data(&notice).ok()?;
-                return Some((Ok(event), self));
+                if self.missed_fragments || message.sequence > self.sequence {
+                    let kind = if std::mem::take(&mut self.missed_fragments)
+                        || (self.sequence != 0
+                            && message.sequence > self.sequence.saturating_add(1))
+                    {
+                        "reset"
+                    } else {
+                        message.kind
+                    };
+                    self.sequence = message.sequence;
+                    let event = Event::default().event(kind).json_data(&notice).ok()?;
+                    return Some((Ok(event), self));
+                }
+                if let Some(fragment) = self.pending_fragment.take()
+                    && message.availability == "available"
+                    && fragment.epoch == message.epoch
+                    && let Some(generation) = message.generation.as_deref()
+                {
+                    let delta = Delta {
+                        run_id: notice.run_id,
+                        session_key: notice.session_key,
+                        generation,
+                        turn_id: fragment.turn.as_str(),
+                        entry_id: fragment.entry.as_str(),
+                        block: 0,
+                        offset: fragment.offset,
+                        text: &fragment.text,
+                        provisional: true,
+                    };
+                    let event = Event::default().event("delta").json_data(&delta).ok()?;
+                    return Some((Ok(event), self));
+                }
             }
             tokio::select! {
-                result=self.updates.changed()=>if result.is_err(){return None;},
-                _=self.shutdown.changed()=>return None,
-                _=tokio::time::sleep(Duration::from_secs(15))=>{},
+                result = self.updates.changed() => if result.is_err() { return None; },
+                _ = self.shutdown.changed() => return None,
+                result = self.fragments.recv() => match result {
+                    Ok(fragment) => self.pending_fragment = Some(fragment),
+                    Err(broadcast::error::RecvError::Lagged(_)) => {
+                        self.missed_fragments = true;
+                        self.fragments = self.fragments.resubscribe();
+                    }
+                    Err(broadcast::error::RecvError::Closed) => return None,
+                },
+                _ = tokio::time::sleep(Duration::from_secs(15)) => {},
             }
         }
     }

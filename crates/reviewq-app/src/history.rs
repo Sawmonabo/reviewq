@@ -104,6 +104,19 @@ pub trait NativeHistoryReader: Send + Sync {
     ) -> AppFuture<'_, NativeContent>;
 }
 
+/// Read-only live evidence for a selected native source. Durable pages remain authoritative.
+#[derive(Clone)]
+pub enum NativeLiveSignal {
+    AssistantDelta {
+        turn: NativeTurnId,
+        entry: NativeInputId,
+        offset: u64,
+        text: String,
+    },
+    Completed,
+    Reset,
+}
+
 pub trait NativeHistoryWatch: Send {
     fn changed(&mut self) -> AppFuture<'_, bool>;
 }
