@@ -1,4 +1,6 @@
 import type { Element, Root, RootContent } from "hast";
+import type { ReportSummary } from "../../../api/generated/contracts/reports";
+import { reportStructure, reportText as text } from "./report-structure";
 
 type Field = { readonly label: string; readonly nodes: readonly RootContent[] };
 type AuthoredFinding = {
@@ -19,12 +21,15 @@ export type ReportBlock = {
 const fieldName =
   /^(Issue|Why it matters|Confirmed|Proposed comment|Location|Evidence|Suggested fix)(?=\s*(?:[:.—]|$))/i;
 
-export function reportBlocks(tree: Root, source: string): ReportBlock[] {
+export function reportBlocks(tree: Root, source: string, report: ReportSummary): ReportBlock[] {
   const blocks: { offset: number; nodes: RootContent[]; name?: string }[] = [];
   let current = blocks.at(-1);
-  for (const node of tree.children) {
+  let hasSection = false;
+  for (const node of reportStructure(tree.children, source, report)) {
     const heading =
-      node.type === "element" && /^h[1-3]$/.test(node.tagName) ? text(node).trim() : "";
+      node.type === "element" && (hasSection ? /^h[1-3]$/ : /^h[2-3]$/).test(node.tagName)
+        ? text(node).trim()
+        : "";
     if (
       !current ||
       heading ||
@@ -37,6 +42,7 @@ export function reportBlocks(tree: Root, source: string): ReportBlock[] {
       };
       blocks.push(current);
     }
+    if (heading) hasSection = true;
     current.nodes.push(node);
   }
   return blocks.map((block, index) => {
@@ -230,9 +236,4 @@ function annotateNode(node: RootContent): RootContent {
     properties: { dataReportTextStart: start, dataReportTextEnd: end },
     children: [node],
   };
-}
-
-function text(node: RootContent): string {
-  if (node.type === "text") return node.value;
-  return "children" in node ? node.children.map(text).join("") : "";
 }

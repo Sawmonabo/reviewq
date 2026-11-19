@@ -108,6 +108,136 @@
 .rich-report .report-authored p {
   margin-block: 0 13px;
 }
+.rich-report .report-authored .report-identity {
+  margin-bottom: 5px;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 650;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+.rich-report .report-authored .report-lede {
+  margin-bottom: 19px;
+  color: var(--text);
+}
+.report-verdict {
+  --verdict-ink: var(--muted);
+  margin: 18px 0 19px;
+  padding: 9px 12px;
+  border: 1px solid color-mix(in srgb, var(--verdict-ink) 31%, var(--line));
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--verdict-ink) 6%, var(--canvas));
+}
+.report-verdict[data-report-verdict="approve"] {
+  --verdict-ink: var(--green);
+}
+.report-verdict[data-report-verdict="request_changes"] {
+  --verdict-ink: var(--rose);
+}
+.report-verdict[data-report-verdict="blocked"] {
+  --verdict-ink: var(--amber);
+}
+.report-verdict-label {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 7px;
+  color: var(--verdict-ink);
+  font-size: 13px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+.report-verdict-label::before {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+  content: "";
+}
+.report-verdict-caption {
+  font-size: 10px;
+  font-weight: 500;
+  opacity: 0.8;
+}
+.rich-report .report-authored .report-verdict-reason,
+.rich-report .report-authored .report-verdict-recorded {
+  margin: 4px 0 0;
+  color: var(--text);
+  font-size: 11px;
+  line-height: 1.7;
+}
+.rich-report .report-authored .report-verdict-recorded {
+  color: var(--muted);
+}
+.rich-report .report-authored .report-counts {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 7px;
+  margin: 0 0 8px;
+  color: var(--muted);
+  font-size: 11px;
+}
+.report-count {
+  white-space: nowrap;
+}
+.report-count-separator {
+  color: var(--muted);
+}
+.report-count-amount {
+  color: var(--text);
+  font-size: 16px;
+  font-variant-numeric: tabular-nums;
+}
+.report-count:is(
+    [data-report-count="p0"],
+    [data-report-count="p1"],
+    [data-report-count="p2"],
+    [data-report-count="blocking"]
+  )
+  .report-count-amount {
+  color: var(--rose);
+}
+.report-count[data-report-count="p3"] .report-count-amount {
+  color: var(--amber);
+}
+.report-count[data-report-count="nonblocking"] .report-count-amount {
+  color: var(--link);
+}
+.rich-report .report-authored .report-metadata {
+  margin-bottom: 11px;
+  color: var(--muted);
+  font-size: 12px;
+}
+.report-metadata strong {
+  color: var(--text);
+}
+.report-authored .prose .report-before-after {
+  width: 100%;
+  table-layout: fixed;
+}
+.report-before-after :is(th, td) {
+  width: 50%;
+  padding: 9px 12px;
+  vertical-align: top;
+}
+.report-before-after th:first-child {
+  color: var(--rose);
+}
+.report-before-after th:last-child {
+  color: var(--green);
+}
+.report-authored .prose .report-previous-threads th {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 650;
+}
+.report-previous-threads [data-report-thread-status="confirmed"] {
+  color: var(--green);
+}
+.report-previous-threads [data-report-thread-status="attention"] {
+  color: var(--amber);
+}
 .rich-report .report-authored blockquote {
   padding: 0 0 0 12px;
   border: 0;
@@ -120,13 +250,13 @@
   display: flex;
   flex-wrap: wrap;
   gap: 7px 16px;
-  margin: 15px 0 14px;
+  margin: 18px 0 12px;
 }
 .report-section-nav > button {
   min-height: 22px;
   padding: 0;
-  color: var(--muted);
-  font-size: 11px;
+  color: var(--link);
+  font-size: 10px;
   line-height: 1.7;
 }
 .report-section-nav > button:hover {

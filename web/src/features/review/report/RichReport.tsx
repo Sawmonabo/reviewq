@@ -1,6 +1,7 @@
 import { defaultRangeExtractor, useVirtualizer } from "@tanstack/react-virtual";
 import type { Root } from "hast";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useState } from "react";
+import type { ReportSummary } from "../../../api/generated/contracts/reports";
 import { MarkdownTree } from "../../../components/markdown/MarkdownContent";
 import { savedValue, saveValue } from "../../../lib/view-preferences";
 import { parentElement, reportBlocks, selectionSource } from "./report-presentation";
@@ -13,12 +14,14 @@ type Selection = { readonly quote?: Quote; readonly fallback: number };
 export function RichReport({
   tree,
   source,
+  report,
   bookmark,
   onQuote,
   onSource,
 }: {
   readonly tree: Root;
   readonly source: string;
+  readonly report: ReportSummary;
   readonly bookmark: string;
   readonly onQuote: (text: string, offset: number) => void;
   readonly onSource: (offset: number) => void;
@@ -30,7 +33,11 @@ export function RichReport({
   const [selection, setSelection] = useState<Selection>();
   const [saved] = useState(() => readBookmark(bookmark));
   const [restored, setRestored] = useState(!saved);
-  const blocks = useMemo(() => reportBlocks(tree, source), [tree, source]);
+  const blocks = useMemo(() => reportBlocks(tree, source, report), [tree, source, report]);
+  const navigationAfter = Math.max(0, blocks.findIndex((block) => block.name || block.finding) - 1);
+  const sections = blocks.flatMap((block, index) =>
+    block.name && !block.finding ? [{ index, label: block.name }] : [],
+  );
   const usesVirtual = blocks.length > 17;
   const restoreIndex =
     !restored && saved?.offset !== undefined
@@ -220,20 +227,18 @@ export function RichReport({
             <MarkdownTree tree={{ type: "root", children: [...block.nodes] }} />
           </div>
         )}
-        {index === 0 && blocks.slice(1).some((part) => part.name && !part.finding) && (
+        {index === navigationAfter && sections.length > 0 && (
           <nav className="report-section-nav" aria-label="Report sections">
-            {blocks.map((part, position) =>
-              position > 0 && part.name && !part.finding ? (
-                <button
-                  type="button"
-                  className="quiet-button"
-                  key={part.offset}
-                  onClick={() => jump(position)}
-                >
-                  {part.name}
-                </button>
-              ) : null,
-            )}
+            {sections.map(({ index: target, label }) => (
+              <button
+                type="button"
+                className="quiet-button"
+                key={target}
+                onClick={() => jump(target)}
+              >
+                {label}
+              </button>
+            ))}
           </nav>
         )}
       </>

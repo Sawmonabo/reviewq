@@ -149,6 +149,7 @@ export default function ReportDocument({
           <RichReport
             tree={tree}
             source={markdown}
+            report={report}
             bookmark={`findings.position.${run.runId}.${report.receiptId}.${report.sha256}`}
             onQuote={capture}
             onSource={(offset) => {
