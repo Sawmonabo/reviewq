@@ -5013,6 +5013,86 @@
       ],
       "type": "string"
     },
+    "RegisterSessionRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "nativeId": {
+          "$ref": "#/definitions/ResourceIdDto"
+        },
+        "provider": {
+          "$ref": "#/definitions/HostProviderDto"
+        },
+        "reviewId": {
+          "$ref": "#/definitions/ReviewIdDto"
+        }
+      },
+      "required": [
+        "reviewId",
+        "provider",
+        "nativeId"
+      ],
+      "title": "RegisterSessionRequest",
+      "type": "object"
+    },
+    "RegisteredSession": {
+      "properties": {
+        "cwd": {
+          "type": "string"
+        },
+        "leadSessionKey": {
+          "$ref": "#/definitions/SessionKeyDto"
+        },
+        "nativeId": {
+          "$ref": "#/definitions/ResourceIdDto"
+        },
+        "provider": {
+          "$ref": "#/definitions/HostProviderDto"
+        },
+        "reportGuidance": {
+          "type": "string"
+        },
+        "reviewCheckout": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "reviewId": {
+          "$ref": "#/definitions/ReviewIdDto"
+        },
+        "runId": {
+          "$ref": "#/definitions/RunIdDto"
+        }
+      },
+      "required": [
+        "reviewId",
+        "runId",
+        "leadSessionKey",
+        "provider",
+        "nativeId",
+        "cwd",
+        "reviewCheckout",
+        "reportGuidance"
+      ],
+      "type": "object"
+    },
+    "RegisteredSessionResponse": {
+      "description": "The resource and event head from the same authorized snapshot.",
+      "properties": {
+        "cursor": {
+          "$ref": "#/definitions/EventCursorDto"
+        },
+        "data": {
+          "$ref": "#/definitions/RegisteredSession"
+        }
+      },
+      "required": [
+        "data",
+        "cursor"
+      ],
+      "title": "RegisteredSessionResponse",
+      "type": "object"
+    },
     "ReportAttention": {
       "properties": {
         "attentionReceiptId": {
@@ -7720,6 +7800,8 @@
     "RecoveryPreferencesResponse": "recovery",
     "RecoveryStateResponse": "recovery",
     "RefreshResponse": "queue",
+    "RegisterSessionRequest": "hosts",
+    "RegisteredSessionResponse": "hosts",
     "ReportCandidateResponse": "reports",
     "ReportContextResponse": "reports",
     "ReportFeedbackRequest": "reports",
@@ -7767,6 +7849,7 @@
       "LoadSprintsRequest": "#/definitions/LoadSprintsRequest",
       "NotificationStateRequest": "#/definitions/NotificationStateRequest",
       "QuestionAnswerRequest": "#/definitions/QuestionAnswerRequest",
+      "RegisterSessionRequest": "#/definitions/RegisterSessionRequest",
       "ReportFeedbackRequest": "#/definitions/ReportFeedbackRequest",
       "ReviewCheckpointRequest": "#/definitions/ReviewCheckpointRequest",
       "ReviewDecisionRequest": "#/definitions/ReviewDecisionRequest",
@@ -7809,6 +7892,7 @@
       "RecoveryPreferencesResponse": "#/definitions/RecoveryPreferencesResponse",
       "RecoveryStateResponse": "#/definitions/RecoveryStateResponse",
       "RefreshResponse": "#/definitions/RefreshResponse",
+      "RegisteredSessionResponse": "#/definitions/RegisteredSessionResponse",
       "ReportCandidateResponse": "#/definitions/ReportCandidateResponse",
       "ReportContextResponse": "#/definitions/ReportContextResponse",
       "ReportHistoryResponse": "#/definitions/ReportHistoryResponse",

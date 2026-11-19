@@ -14,6 +14,7 @@ import type {
   LoadSprintsRequest,
   NotificationStateRequest,
   QuestionAnswerRequest,
+  RegisterSessionRequest,
   ReportFeedbackRequest,
   ReviewCheckpointRequest,
   ReviewDecisionRequest,
@@ -54,6 +55,7 @@ import type {
   RecoveryPreferencesResponse,
   RecoveryStateResponse,
   RefreshResponse,
+  RegisteredSessionResponse,
   ReportCandidateResponse,
   ReportContextResponse,
   ReportHistoryResponse,
@@ -102,6 +104,9 @@ export function isNotificationStateRequest(
 export function isQuestionAnswerRequest(
   value: unknown,
 ): value is QuestionAnswerRequest;
+export function isRegisterSessionRequest(
+  value: unknown,
+): value is RegisterSessionRequest;
 export function isReportFeedbackRequest(
   value: unknown,
 ): value is ReportFeedbackRequest;
@@ -200,6 +205,9 @@ export function isRecoveryStateResponse(
   value: unknown,
 ): value is RecoveryStateResponse;
 export function isRefreshResponse(value: unknown): value is RefreshResponse;
+export function isRegisteredSessionResponse(
+  value: unknown,
+): value is RegisteredSessionResponse;
 export function isReportCandidateResponse(
   value: unknown,
 ): value is ReportCandidateResponse;

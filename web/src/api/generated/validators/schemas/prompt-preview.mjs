@@ -2,10 +2,10 @@
 import { func0 } from "../runtime.mjs";
 import { validate25 } from "./checkpoint-id-dto.mjs";
 import { validate48 } from "./history-cursor-dto.mjs";
-import { validate106 } from "./safe-count-dto.mjs";
-import { validate448 } from "./history-text.mjs";
-import { validate209 } from "./utc-timestamp-dto.mjs";
-function validate465(
+import { validate112 } from "./safe-count-dto.mjs";
+import { validate452 } from "./history-text.mjs";
+import { validate213 } from "./utc-timestamp-dto.mjs";
+function validate469(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -26,7 +26,7 @@ function validate465(
         ((data.locator === undefined || !func0.call(data, "locator")) &&
           (missing0 = "locator"))
       ) {
-        validate465.errors = [
+        validate469.errors = [
           {
             instancePath,
             schemaPath: "#/required",
@@ -81,7 +81,7 @@ function validate465(
             if (data.ordinal !== undefined && func0.call(data, "ordinal")) {
               const _errs3 = errors;
               if (
-                !validate106(data.ordinal, {
+                !validate112(data.ordinal, {
                   instancePath: instancePath + "/ordinal",
                   parentData: data,
                   parentDataProperty: "ordinal",
@@ -90,8 +90,8 @@ function validate465(
               ) {
                 vErrors =
                   vErrors === null
-                    ? validate106.errors
-                    : vErrors.concat(validate106.errors);
+                    ? validate112.errors
+                    : vErrors.concat(validate112.errors);
                 errors = vErrors.length;
               }
               var valid0 = _errs3 === errors;
@@ -102,7 +102,7 @@ function validate465(
               if (data.text !== undefined && func0.call(data, "text")) {
                 const _errs4 = errors;
                 if (
-                  !validate448(data.text, {
+                  !validate452(data.text, {
                     instancePath: instancePath + "/text",
                     parentData: data,
                     parentDataProperty: "text",
@@ -111,8 +111,8 @@ function validate465(
                 ) {
                   vErrors =
                     vErrors === null
-                      ? validate448.errors
-                      : vErrors.concat(validate448.errors);
+                      ? validate452.errors
+                      : vErrors.concat(validate452.errors);
                   errors = vErrors.length;
                 }
                 var valid0 = _errs4 === errors;
@@ -130,7 +130,7 @@ function validate465(
                   let valid1 = false;
                   const _errs7 = errors;
                   if (
-                    !validate209(data4, {
+                    !validate213(data4, {
                       instancePath: instancePath + "/timestamp",
                       parentData: data,
                       parentDataProperty: "timestamp",
@@ -139,8 +139,8 @@ function validate465(
                   ) {
                     vErrors =
                       vErrors === null
-                        ? validate209.errors
-                        : vErrors.concat(validate209.errors);
+                        ? validate213.errors
+                        : vErrors.concat(validate213.errors);
                     errors = vErrors.length;
                   }
                   var _valid0 = _errs7 === errors;
@@ -177,7 +177,7 @@ function validate465(
                       vErrors.push(err1);
                     }
                     errors++;
-                    validate465.errors = vErrors;
+                    validate469.errors = vErrors;
                     return false;
                   } else {
                     errors = _errs6;
@@ -199,7 +199,7 @@ function validate465(
         }
       }
     } else {
-      validate465.errors = [
+      validate469.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -210,7 +210,7 @@ function validate465(
       return false;
     }
   }
-  validate465.errors = vErrors;
+  validate469.errors = vErrors;
   return errors === 0;
 }
-export { validate465 };
+export { validate469 };
