@@ -3,6 +3,7 @@
 use std::collections::HashSet;
 mod desktop;
 pub(crate) mod gitlab;
+pub(crate) mod native;
 
 use reviewq_app::access::{Actor, AppError, AppFuture};
 use reviewq_app::events::{ResourceKey, Snapshot};
@@ -273,6 +274,7 @@ pub(crate) fn publish(
     if ids.is_empty() {
         return Ok(());
     }
+    tx.desktop_changed = true;
     crate::workspace::advance_queue(&tx.sql)?;
     let mut keys = vec![ResourceKey::Queue];
     if ids.len() < reviewq_app::events::MAX_INVALIDATION_KEYS {

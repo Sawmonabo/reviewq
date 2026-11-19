@@ -1,7 +1,11 @@
 //! Private inbox occurrences and independent desktop delivery receipts.
 
 mod desktop;
+mod native;
 pub use desktop::{DesktopClaim, DesktopNotifier, DesktopOutcome, DesktopStore, dispatch_desktop};
+pub use native::{
+    NativeAttention, NativeAttentionStore, NativeOccurrence, TrackedNative, poll_native_attention,
+};
 
 use reviewq_domain::identity::{NotificationId, ReviewId, Revision, RunId, SessionKey};
 

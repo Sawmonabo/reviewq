@@ -163,6 +163,7 @@ pub struct TrackedReview {
     pub review: ReviewId,
     pub identity: reviewq_domain::identity::MrIdentity,
     pub settings: Revision,
+    pub observed_before: reviewq_domain::identity::EventCursor,
     pub monitor: Option<MonitoredReview>,
 }
 

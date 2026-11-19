@@ -3,6 +3,7 @@ use std::time::Duration;
 
 use reviewq_app::actions::run_due_publications;
 use reviewq_app::followups::{poll_monitored_reviews, run_due_followups};
+use reviewq_app::notifications::poll_native_attention;
 use reviewq_app::settings::RuntimeSources;
 use reviewq_app::workflow::NativeWorkflowProof;
 use reviewq_store::SqliteStore;
@@ -16,10 +17,18 @@ pub(super) async fn run(
 ) {
     let mut cursor = None;
     let mut revision = None;
+    let mut native_cursor = None;
     while !*shutdown.borrow_and_update() {
         tokio::select! {
             _ = shutdown.changed() => break,
             () = tokio::time::sleep(Duration::from_secs(10)) => {},
+        }
+        let attention = tokio::select! {
+            _ = shutdown.changed() => break,
+            observed = poll_native_attention(store.as_ref(),native.as_ref(),native_cursor.clone()) => observed,
+        };
+        if let Ok(next) = attention {
+            native_cursor = next;
         }
         let Ok(context) = sources.current().await else {
             continue;

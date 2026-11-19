@@ -100,3 +100,8 @@ CREATE TABLE notification_gitlab_evidence (
 ) STRICT, WITHOUT ROWID;
 
 CREATE INDEX notification_gitlab_source_link ON notification_gitlab_evidence(review_id,discussion_id,note_id,sha256);
+
+CREATE TABLE notification_native_failures (
+    session_key TEXT PRIMARY KEY REFERENCES sessions(session_key),
+    native_turn_id TEXT NOT NULL
+) STRICT, WITHOUT ROWID;

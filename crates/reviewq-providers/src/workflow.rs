@@ -43,6 +43,24 @@ impl Workflows {
 }
 
 impl NativeWorkflowProof for Workflows {
+    fn observe_attention(
+        &self,
+        target: reviewq_app::notifications::TrackedNative,
+    ) -> AppFuture<'_, Option<reviewq_app::notifications::NativeAttention>> {
+        Box::pin(async move {
+            match target.session.binding.identity().provider() {
+                HostProvider::Codex => {
+                    self.codex
+                        .as_ref()
+                        .ok_or(AppError::Unavailable)?
+                        .attention(target)
+                        .await
+                }
+                HostProvider::Claude => Ok(None),
+            }
+        })
+    }
+
     fn dispatch_readiness(&self, lead: LeadTarget) -> AppFuture<'_, WorkflowReadiness> {
         Box::pin(async move {
             match self.reader(&lead) {

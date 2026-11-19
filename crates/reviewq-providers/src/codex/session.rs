@@ -167,7 +167,7 @@ fn validate_native_id(id: &NativeSessionId) -> Result<(), AppError> {
 }
 
 impl ThreadStatus {
-    fn activity(&self) -> Option<HostActivity> {
+    pub(super) fn activity(&self) -> Option<HostActivity> {
         let (phase, has_questions) = match self {
             Self::Idle => (HostPhase::Idle, false),
             Self::SystemError => (HostPhase::Failed, false),

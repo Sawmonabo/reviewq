@@ -200,6 +200,13 @@ impl WorkflowRequirements {
 }
 
 pub trait NativeWorkflowProof: Send + Sync {
+    fn observe_attention(
+        &self,
+        _target: crate::notifications::TrackedNative,
+    ) -> AppFuture<'_, Option<crate::notifications::NativeAttention>> {
+        Box::pin(async { Ok(None) })
+    }
+
     /// Proves current idle eligibility and exact effective settings without starting or resuming a turn.
     fn dispatch_readiness(&self, _lead: LeadTarget) -> AppFuture<'_, WorkflowReadiness> {
         Box::pin(async { Ok(WorkflowReadiness::Held(WorkflowHold::ProviderUnavailable)) })

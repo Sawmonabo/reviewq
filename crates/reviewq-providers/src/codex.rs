@@ -4,6 +4,7 @@ use std::path::PathBuf;
 use reviewq_app::access::AppError;
 use reviewq_domain::session::AbsolutePath;
 
+mod attention;
 mod catalog;
 mod connection;
 mod delivery;

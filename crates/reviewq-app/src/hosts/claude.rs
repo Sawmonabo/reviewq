@@ -18,6 +18,7 @@ pub struct ClaudeHeartbeat {
     pub activity: Option<HostActivity>,
     pub turn: Option<NativeTurnId>,
     pub step: Option<u64>,
+    pub question_id: Option<NativeInputId>,
     pub latest_prompt: Option<NativeInputId>,
     pub latest_prompt_turn: Option<NativeTurnId>,
     pub latest_prompt_manual: bool,
