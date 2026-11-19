@@ -1,4 +1,4 @@
-use std::io::Read;
+use std::io::{Read, Write};
 
 use reviewq_app::access::AppError;
 use reviewq_app::history::{ToolState, VisibleKind, VisiblePartKind};
@@ -21,6 +21,9 @@ pub(super) struct Record {
     pub parts: Vec<Part>,
     pub claude_tool_parent: Option<NativeInputId>,
     pub claude_tool_calls: Vec<(NativeInputId, String)>,
+    pub argument_field: Option<String>,
+    pub result_field: Option<String>,
+    pub text_blocks: Vec<u16>,
 }
 
 pub(super) struct Part {
@@ -34,6 +37,41 @@ pub(super) struct Window {
     pub start: u64,
     pub limit: usize,
     pub part: Option<u16>,
+}
+
+#[derive(Clone, Eq, PartialEq)]
+pub(super) enum BodyField {
+    Text,
+    CombinedText(Vec<u16>),
+    TextBlock(u16),
+    InputBlock(u16),
+    ResultBlock(u16),
+    CodexField(String),
+}
+
+struct BodySink<'a> {
+    field: BodyField,
+    target: Option<&'a mut dyn Write>,
+}
+
+impl BodySink<'_> {
+    fn for_field(&mut self, field: BodyField) -> Option<&mut dyn Write> {
+        let selected = self.field == field
+            || match (&self.field, &field) {
+                (BodyField::CombinedText(blocks), BodyField::TextBlock(index)) => {
+                    blocks.binary_search(index).is_ok()
+                }
+                (BodyField::CombinedText(blocks), BodyField::Text) => blocks.is_empty(),
+                _ => false,
+            };
+        if !selected {
+            return None;
+        }
+        match self.target.as_mut() {
+            Some(sink) => Some(&mut **sink),
+            None => None,
+        }
+    }
 }
 
 #[derive(Default)]
@@ -54,6 +92,9 @@ struct Message {
     status: Option<String>,
     claude_tool_parent: Option<NativeInputId>,
     tool_calls: Vec<(NativeInputId, String)>,
+    argument_field: Option<String>,
+    result_field: Option<String>,
+    text_blocks: Vec<u16>,
 }
 
 #[derive(Default)]
@@ -92,10 +133,56 @@ pub(super) fn project_window(
     root_session: Option<&NativeSessionId>,
     window: Window,
 ) -> Option<Record> {
+    project_to(
+        provider,
+        input,
+        native,
+        root_session,
+        window,
+        &mut BodySink {
+            field: BodyField::Text,
+            target: None,
+        },
+    )
+}
+
+pub(super) fn stream_body(
+    provider: HostProvider,
+    input: impl Read,
+    native: &NativeSessionId,
+    root_session: Option<&NativeSessionId>,
+    field: BodyField,
+    output: &mut dyn Write,
+) -> Option<Record> {
+    project_to(
+        provider,
+        input,
+        native,
+        root_session,
+        Window {
+            start: 0,
+            limit: 0,
+            part: None,
+        },
+        &mut BodySink {
+            field,
+            target: Some(output),
+        },
+    )
+}
+
+fn project_to(
+    provider: HostProvider,
+    input: impl Read,
+    native: &NativeSessionId,
+    root_session: Option<&NativeSessionId>,
+    window: Window,
+    output: &mut BodySink<'_>,
+) -> Option<Record> {
     let mut reader = JsonStreamReader::new(NameBudget::new(input));
     let result = match provider {
-        HostProvider::Codex => codex(&mut reader, native, window),
-        HostProvider::Claude => claude(&mut reader, native, root_session, window),
+        HostProvider::Codex => codex(&mut reader, native, window, output),
+        HostProvider::Claude => claude(&mut reader, native, root_session, window, output),
     };
     let (mut item, kind, at_ms, turn) = result.ok()??;
     reader.consume_trailing_whitespace().ok()?;
@@ -126,6 +213,9 @@ pub(super) fn project_window(
         parts: item.parts,
         claude_tool_parent: item.claude_tool_parent,
         claude_tool_calls: item.tool_calls,
+        argument_field: item.argument_field,
+        result_field: item.result_field,
+        text_blocks: item.text_blocks,
     })
 }
 
@@ -135,6 +225,7 @@ fn codex<R: Read>(
     reader: &mut JsonStreamReader<R>,
     native: &NativeSessionId,
     window: Window,
+    output: &mut BodySink<'_>,
 ) -> Result<Projection, AppError> {
     let mut event = Event::default();
     let mut record_type = None;
@@ -148,7 +239,7 @@ fn codex<R: Read>(
                 "thread_id" => string(reader, ID_BYTES).map(|value| event.thread = value),
                 "turn_id" => string(reader, ID_BYTES).map(|value| event.turn = value),
                 "item" if reader.peek().map_err(invalid)? == ValueType::Object => {
-                    message(reader, window).map(|value| event.item = value)
+                    message(reader, window, output).map(|value| event.item = value)
                 }
                 _ => reader.skip_value().map_err(invalid),
             })
@@ -233,6 +324,7 @@ fn claude<R: Read>(
     native: &NativeSessionId,
     root: Option<&NativeSessionId>,
     window: Window,
+    output: &mut BodySink<'_>,
 ) -> Result<Projection, AppError> {
     let mut item = Message::default();
     let mut id = None;
@@ -272,7 +364,7 @@ fn claude<R: Read>(
             })
         }
         "message" if reader.peek().map_err(invalid)? == ValueType::Object => {
-            message(reader, window).map(|value| item = value)
+            message(reader, window, output).map(|value| item = value)
         }
         _ => reader.skip_value().map_err(invalid),
     })?;
@@ -302,20 +394,37 @@ fn claude<R: Read>(
     Ok(Some((item, kind, stamp, None)))
 }
 
-fn message<R: Read>(reader: &mut JsonStreamReader<R>, window: Window) -> Result<Message, AppError> {
+fn message<R: Read>(
+    reader: &mut JsonStreamReader<R>,
+    window: Window,
+    output: &mut BodySink<'_>,
+) -> Result<Message, AppError> {
     let mut item = Message::default();
     object(reader, |name, reader| match name {
         "type" | "role" => string(reader, ID_BYTES).map(|value| item.kind = value),
         "id" => string(reader, ID_BYTES).map(|value| item.id = value),
-        "content" => contents(reader, window, &mut item),
-        "text" => tools::body(reader, window).map(|value| item.text = value),
+        "content" => contents(reader, window, &mut item, output),
+        "text" => tools::body(reader, window, output.for_field(BodyField::Text))
+            .map(|value| item.text = value),
         "tool" | "name" => string(reader, 128).map(|value| item.tool = value),
         "status" => string(reader, 32).map(|value| item.status = value),
         "command" | "arguments" | "query" | "changes" | "prompt" => {
-            tools::body(reader, tools::part_window(window, 0)).map(|value| item.argument = value)
+            item.argument_field = Some(name.to_owned());
+            tools::body(
+                reader,
+                tools::part_window(window, 0),
+                output.for_field(BodyField::CodexField(name.to_owned())),
+            )
+            .map(|value| item.argument = value)
         }
         "aggregated_output" | "aggregatedOutput" | "result" | "output" => {
-            tools::body(reader, tools::part_window(window, 1)).map(|value| item.result = value)
+            item.result_field = Some(name.to_owned());
+            tools::body(
+                reader,
+                tools::part_window(window, 1),
+                output.for_field(BodyField::CodexField(name.to_owned())),
+            )
+            .map(|value| item.result = value)
         }
         _ => reader.skip_value().map_err(invalid),
     })?;
@@ -326,17 +435,21 @@ fn contents<R: Read>(
     reader: &mut JsonStreamReader<R>,
     window: Window,
     item: &mut Message,
+    output: &mut BodySink<'_>,
 ) -> Result<(), AppError> {
     match reader.peek().map_err(invalid)? {
         ValueType::String => {
-            item.text = capture(reader, window, 0)?;
+            item.text = capture(reader, window, 0, output.for_field(BodyField::Text))?;
             Ok(())
         }
         ValueType::Array => {
             reader.begin_array().map_err(invalid)?;
             let mut index = 0_u16;
             while reader.has_next().map_err(invalid)? {
-                block(reader, window, index, item)?;
+                if index >= 16_384 {
+                    return Err(AppError::PayloadTooLarge);
+                }
+                block(reader, window, index, item, output)?;
                 index = index.saturating_add(1);
             }
             reader.end_array().map_err(invalid)
@@ -350,6 +463,7 @@ fn block<R: Read>(
     window: Window,
     index: u16,
     item: &mut Message,
+    output: &mut BodySink<'_>,
 ) -> Result<(), AppError> {
     if reader.peek().map_err(invalid)? != ValueType::Object {
         return reader.skip_value().map_err(invalid);
@@ -382,15 +496,28 @@ fn block<R: Read>(
             } else {
                 item.text.bytes
             },
+            output.for_field(BodyField::TextBlock(index)),
         )
         .map(|value| plain = value),
-        "input" | "content" if retained => {
-            tools::body(reader, preview_window).map(|value| body = value)
-        }
+        "input" if retained => tools::body(
+            reader,
+            preview_window,
+            output.for_field(BodyField::InputBlock(index)),
+        )
+        .map(|value| body = value),
+        "content" if retained => tools::body(
+            reader,
+            preview_window,
+            output.for_field(BodyField::ResultBlock(index)),
+        )
+        .map(|value| body = value),
         _ => reader.skip_value().map_err(invalid),
     })?;
     let part = match kind.as_deref() {
         Some("Text" | "text" | "input_text" | "output_text") => {
+            if plain.bytes > 0 {
+                item.text_blocks.push(index);
+            }
             item.text.bytes = item
                 .text
                 .bytes
@@ -460,6 +587,7 @@ pub(super) fn capture<R: Read>(
     reader: &mut JsonStreamReader<R>,
     window: Window,
     origin: u64,
+    mut output: Option<&mut dyn Write>,
 ) -> Result<Text, AppError> {
     let mut stream = reader.next_string_reader().map_err(invalid)?;
     let mut result = Text::default();
@@ -472,6 +600,9 @@ pub(super) fn capture<R: Read>(
         let size = stream.read(&mut buffer).map_err(invalid)?;
         if size == 0 {
             return Ok(result);
+        }
+        if let Some(output) = output.as_mut() {
+            output.write_all(&buffer[..size]).map_err(invalid)?;
         }
         let first = origin
             .checked_add(result.bytes)
@@ -517,8 +648,12 @@ pub(super) fn object<R: Read>(
 ) -> Result<(), AppError> {
     reader.begin_object().map_err(invalid)?;
     let mut count = 0;
+    let mut seen = std::collections::HashSet::new();
     while reader.has_next().map_err(invalid)? {
         let name = reader.next_name_owned().map_err(invalid)?;
+        if !seen.insert(name.clone()) {
+            return Err(AppError::Unavailable);
+        }
         count += 1;
         if name.len() > 256 || count > 256 {
             return Err(AppError::Unavailable);

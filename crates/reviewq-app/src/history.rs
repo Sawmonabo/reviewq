@@ -100,7 +100,7 @@ pub struct NativePosition {
     pub file: Option<FilePosition>,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct FilePosition {
     pub offset: u64,
     pub high_water: u64,
@@ -174,7 +174,7 @@ pub struct NativePlan {
     pub entry: Option<(NativeInputId, VisiblePart)>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct FileContentRef {
     pub generation: String,
     pub entry: NativeInputId,
@@ -182,7 +182,7 @@ pub struct FileContentRef {
     pub position: FilePosition,
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct NativeContent {
     pub generation: String,
     pub text: String,

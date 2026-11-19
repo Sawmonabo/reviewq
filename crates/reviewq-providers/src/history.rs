@@ -14,6 +14,7 @@ use tokio::sync::Semaphore;
 
 mod claude;
 mod claude_workflow;
+mod content;
 mod file;
 mod identity;
 mod locator;
@@ -33,12 +34,14 @@ pub(crate) use turn_metadata::{codex_turn_settings, codex_turn_started};
 
 pub struct FileHistory {
     reads: Arc<Semaphore>,
+    streams: content::Streams,
 }
 
 impl Default for FileHistory {
     fn default() -> Self {
         Self {
             reads: Arc::new(Semaphore::new(4)),
+            streams: content::Streams::default(),
         }
     }
 }
@@ -162,20 +165,18 @@ impl NativeHistoryReader for FileHistory {
             if !(4..=65_536).contains(&limit) {
                 return Err(AppError::InvalidRequest);
             }
-            let permit = self
-                .reads
-                .clone()
-                .try_acquire_owned()
-                .map_err(|_| AppError::Busy)?;
-            let cancel = Cancel(Arc::new(AtomicBool::new(false)));
-            let stopped = cancel.0.clone();
-            tokio::task::spawn_blocking(move || {
-                let _permit = permit;
-                let source = locator::locate(&session, &stopped)?.ok_or(AppError::NotFound)?;
-                file::content(source, reference, offset, limit, &stopped)
-            })
-            .await
-            .map_err(|_| AppError::Unavailable)?
+            let selected = reference.clone();
+            let key = session.target.session_key().clone();
+            let source = self
+                .inspect(session, move |source, _| {
+                    file::verify_content(&source, &selected)?;
+                    Ok(source)
+                })
+                .await?
+                .ok_or(AppError::NotFound)?;
+            self.streams
+                .read(key, reference, source, offset, limit as usize)
+                .await
         })
     }
 }
