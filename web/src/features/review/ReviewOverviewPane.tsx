@@ -4,6 +4,7 @@ import { MarkdownContent } from "../../components/markdown/MarkdownContent";
 import { Empty, Loading } from "../../components/PanelState";
 import { readable } from "../../lib/presentation";
 import { InterruptSession } from "./InterruptSession";
+import { NativeReviewInput } from "./NativeReviewInput";
 import { OverviewPlan } from "./ReportedPlan";
 
 const queueLabels: Readonly<Record<string, string>> = {
@@ -32,6 +33,8 @@ export function ReviewOverviewPane({
   const { review, ourDiscussions: discussions } = overview;
   const reviewed = overview.decision?.reviewedSha ?? review.fullMrReviewedSha;
   const launch = run?.launch;
+  const evidence = run?.requestEvidence;
+  const requestSettings = launch ?? evidence;
   return (
     <div className="overview stack">
       {ticket}
@@ -105,11 +108,19 @@ export function ReviewOverviewPane({
               </div>
               <div>
                 <dt>Requested model</dt>
-                <dd>{launch ? (launch.requestedModel ?? "CLI default") : "Not recorded"}</dd>
+                <dd>
+                  {requestSettings
+                    ? (requestSettings.requestedModel ?? "CLI default")
+                    : "Not recorded"}
+                </dd>
               </div>
               <div>
                 <dt>Requested effort</dt>
-                <dd>{launch ? (launch.requestedEffort ?? "CLI default") : "Not recorded"}</dd>
+                <dd>
+                  {requestSettings
+                    ? (requestSettings.requestedEffort ?? "CLI default")
+                    : "Not recorded"}
+                </dd>
               </div>
               <div>
                 <dt>Reported model</dt>
@@ -126,7 +137,7 @@ export function ReviewOverviewPane({
                     ? launch.invocation.name
                     : launch
                       ? "Custom prompt"
-                      : "Not recorded"}
+                      : (evidence?.skillName ?? "Not recorded")}
                 </dd>
               </div>
               {launch && launch.sourceSha !== review.sourceSha && (
@@ -138,7 +149,16 @@ export function ReviewOverviewPane({
                 </div>
               )}
             </dl>
-            {launch && <ReviewRequest launch={launch} />}
+            {launch ? (
+              <ReviewRequest launch={launch} />
+            ) : (
+              evidence?.input && (
+                <NativeReviewInput
+                  target={{ runId: run.runId, sessionKey: run.leadSessionKey }}
+                  input={evidence.input}
+                />
+              )
+            )}
             <OverviewPlan runId={run.runId} sessionKey={run.leadSessionKey} />
             {selected && launch && launch.state !== "rejected" && (
               <InterruptSession
@@ -179,12 +199,15 @@ function ReviewRequest({ launch }: { readonly launch: NonNullable<RunDetail["lau
   const args = launch.invocation.kind === "skill";
   const request =
     launch.invocation.kind === "skill" ? launch.invocation.args : launch.invocation.prompt;
-  const context = launch.context?.trim() !== request?.trim() ? launch.context : undefined;
+  const sharesRequest = Boolean(
+    launch.context?.trim() && launch.context.trim() === request?.trim(),
+  );
+  const context = sharesRequest ? undefined : launch.context;
   return (
     <>
       {request?.trim() && (
         <section className="review-request">
-          <h3>{args ? "Skill arguments" : "Review request"}</h3>
+          <h3>{args && !sharesRequest ? "Skill arguments" : "Review request"}</h3>
           <MarkdownContent source={request} />
         </section>
       )}

@@ -25,7 +25,7 @@ type ReadAddress = { readonly runId: string; readonly sessionKey: string };
 
 export async function historyPage(
   target: SessionAddress,
-  params: { cursor?: string; aroundId?: string; locator?: string },
+  params: { cursor?: string; aroundId?: string; locator?: string; limit?: number },
   signal: AbortSignal,
 ) {
   const result = await read(
