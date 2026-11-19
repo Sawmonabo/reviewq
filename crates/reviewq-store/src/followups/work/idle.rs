@@ -11,9 +11,10 @@ use crate::queue::{lead_for_run, parse};
 const AWAITING_IDLE: &str = "
     b.state='executing' AND b.authority_verified=1 AND b.native_turn_id IS NOT NULL
     AND (r.state='open' AND b.holds_slot=1 AND b.hold_reason='followup_native_input_required'
-         OR r.state IN ('closed','merged') AND NOT EXISTS (
-             SELECT 1 FROM report_handoffs h WHERE h.batch_id=b.batch_id AND h.state='pending_completion'
-         ))";
+         OR (r.state IN ('closed','merged') OR b.hold_reason='followup_reconciliation_pending')
+             AND NOT EXISTS (
+                SELECT 1 FROM report_handoffs h WHERE h.batch_id=b.batch_id AND h.state='pending_completion'
+             ))";
 
 pub(super) fn checks(db: &Connection) -> Result<Vec<ExecutingCheck>, StoreError> {
     let sql = format!(
@@ -55,8 +56,11 @@ pub(super) fn observe(tx: &mut WriteTx<'_>, check: ExecutingCheck) -> Result<(),
     }
     let sql = format!(
         "UPDATE followup_batches AS x SET holds_slot=0,
-            state=CASE WHEN r.state IN ('closed','merged') THEN 'cancelled' ELSE x.state END,
-            hold_reason=CASE WHEN r.state IN ('closed','merged') THEN 'merge_request_closed' ELSE x.hold_reason END,
+            state=CASE WHEN r.state IN ('closed','merged') THEN 'cancelled'
+                       WHEN b.hold_reason='followup_reconciliation_pending' THEN 'reconciliation' ELSE x.state END,
+            hold_reason=CASE WHEN r.state IN ('closed','merged') THEN 'merge_request_closed'
+                             WHEN b.hold_reason='followup_reconciliation_pending' THEN 'followup_candidate_retained'
+                             ELSE x.hold_reason END,
             completed_at_ms=CASE WHEN r.state IN ('closed','merged') THEN ?5 ELSE x.completed_at_ms END
          FROM followup_batches b JOIN reviews r USING(review_id)
          WHERE x.batch_id=b.batch_id AND b.batch_id=?1 AND b.run_id=?2 AND b.lead_session_key=?3
@@ -73,6 +77,12 @@ pub(super) fn observe(tx: &mut WriteTx<'_>, check: ExecutingCheck) -> Result<(),
         ],
     )?;
     if updated != 0 {
+        crate::followups::observations::retry_batch(
+            &tx.sql,
+            lead.review_id(),
+            &check.batch_id,
+            now_ms()?,
+        )?;
         emit(tx, lead.review_id(), lead.run_id())?;
     }
     Ok(())

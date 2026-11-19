@@ -191,6 +191,7 @@ pub(super) fn complete(
     if changed != 1 {
         return Err(AppError::Conflict.into());
     }
+    super::reconciliation::accept(db, review, &manifest.batch_id)?;
     tx.emit(&[ResourceKey::Followup(Some(
         work.call.lead.review_id().clone(),
     ))])?;

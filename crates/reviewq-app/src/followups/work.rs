@@ -21,7 +21,7 @@ pub struct CheckMember {
     pub discussion_version: String,
     pub originals: Vec<SelectedNote>,
     pub finding_ids: Vec<String>,
-    pub prior_batch_id: Option<String>,
+    pub prior_batches: Vec<String>,
 }
 
 pub struct PendingCheck {
@@ -179,6 +179,12 @@ async fn prepare(
             member.discussion_version,
             member.finding_ids.join(", ")
         ));
+        if !member.prior_batches.is_empty() {
+            prompt.push_str(&format!(
+                " Reconciles earlier batches {}.",
+                member.prior_batches.join(", ")
+            ));
+        }
     }
     let prompt = MessageBody::new(&prompt).map_err(|_| "followup_prompt_too_large")?;
     Ok((source.review.head_sha, ready, prompt))

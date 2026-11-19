@@ -329,6 +329,17 @@ pub(super) fn reject(
             result_entry_id=coalesce(?4,result_entry_id) WHERE receipt_id=?1",
         params![work.acknowledgement.receipt_id.as_str(), reason, time, native_result.map(|id| id.as_str())],
     )?;
+    let held = db.execute(
+        "UPDATE followup_batches SET hold_reason='followup_reconciliation_pending' WHERE state='executing'
+         AND batch_id=(SELECT batch_id FROM report_handoffs WHERE receipt_id=?1)
+         AND coalesce(continuation_turn_id,native_turn_id)=?2",
+        params![work.acknowledgement.receipt_id.as_str(),work.call.turn_id.as_str()],
+    )?;
+    if held == 1 {
+        tx.emit(&[ResourceKey::Followup(Some(
+            work.call.lead.review_id().clone(),
+        ))])?;
+    }
     emit(
         tx,
         work,

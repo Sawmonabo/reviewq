@@ -57,6 +57,7 @@ CREATE TABLE report_handoffs (
     created_at_ms INTEGER NOT NULL,
     updated_at_ms INTEGER NOT NULL CHECK (updated_at_ms >= created_at_ms),
     batch_id TEXT REFERENCES followup_batches(batch_id),
+    reconciled_by_batch_id TEXT REFERENCES followup_batches(batch_id),
     assessments TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(assessments) AND length(CAST(assessments AS BLOB)) <= 131072),
     edits TEXT CHECK (json_valid(edits) AND length(CAST(edits AS BLOB)) <= 131072),
     settings_revision INTEGER NOT NULL CHECK (settings_revision >= 0),
@@ -64,6 +65,7 @@ CREATE TABLE report_handoffs (
     CHECK ((source_kind='file') = (source_path IS NOT NULL)),
     CHECK ((form='final') = (verdict IS NOT NULL)),
     CHECK (state<>'recorded' OR result_entry_id IS NOT NULL),
+    CHECK (reconciled_by_batch_id IS NULL OR (state='failed' AND batch_id IS NOT NULL AND artifact_id IS NOT NULL)),
     FOREIGN KEY (run_id, lead_session_key) REFERENCES runs(run_id, lead_session_key),
     UNIQUE (run_id, receipt_id),
     UNIQUE (run_id, lead_session_key, turn_id, call_id)

@@ -351,6 +351,14 @@ pub(super) fn advance(
                     params![batch,submission.as_str(),turn],
                 )?
             };
+            if rejected && changed != 0 {
+                crate::followups::observations::retry_batch(
+                    &tx.sql,
+                    target.review_id(),
+                    batch,
+                    timestamp,
+                )?;
+            }
             (changed != 0).then_some(ResourceKey::Followup(Some(target.review_id().clone())))
         }
         WorkflowBinding::Action(action) => {

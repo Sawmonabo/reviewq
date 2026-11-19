@@ -229,6 +229,7 @@ pub struct CandidateReport {
     pub turn_id: String,
     pub call_id: String,
     pub declaration_sha256: ReportHash,
+    pub reconciled_by_batch_id: Option<String>,
     pub reason: String,
     pub section: ReportSection,
 }

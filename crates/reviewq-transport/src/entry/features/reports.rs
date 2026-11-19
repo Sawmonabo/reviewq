@@ -346,6 +346,10 @@ pub(super) async fn candidate(
             call_id: ResourceIdDto::new(candidate.call_id).ok_or(AppError::Internal)?,
             declaration_sha256: hash(candidate.declaration_sha256.as_str())?,
             reason: candidate.reason,
+            reconciled_by_batch_id: candidate
+                .reconciled_by_batch_id
+                .map(|id| ResourceIdDto::new(id).ok_or(AppError::Internal))
+                .transpose()?,
         },
         stored.cursor,
     )?))

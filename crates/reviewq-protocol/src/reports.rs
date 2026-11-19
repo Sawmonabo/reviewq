@@ -200,6 +200,7 @@ pub struct CandidateReport {
     pub turn_id: HistoryTurnIdDto,
     pub call_id: ResourceIdDto,
     pub declaration_sha256: ReportHashDto,
+    pub reconciled_by_batch_id: Option<ResourceIdDto>,
     pub reason: String,
 }
 

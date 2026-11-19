@@ -24,6 +24,7 @@ use crate::{SqliteStore, StoreError};
 mod accept;
 mod batch;
 mod edits;
+mod reconciliation;
 
 const CLAIM_MS: i64 = 60_000;
 const RECHECK_MS: i64 = 2_000;
