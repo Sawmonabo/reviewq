@@ -1,11 +1,19 @@
 import { useEffect, useRef, useState } from "react";
 import type { Notification } from "../../api/generated/contracts";
-import type { Action } from "../../api/generated/contracts/notifications";
+import type { Action, ReviewContext } from "../../api/generated/contracts/notifications";
 import { assignNotifications, readNotifications } from "../../api/workspace";
 import { Empty, Loading, Notice } from "../../components/PanelState";
+import { ReviewBadges } from "../../components/ReviewRow";
 import { useResource } from "../../hooks/useResource";
 import { describeError, formatActivityTime, readable } from "../../lib/presentation";
 import "./attention.css";
+
+const historyLimit = 450;
+
+const emptyHistory: {
+  readonly items: readonly Notification[];
+  readonly contexts: ReadonlyMap<string, ReviewContext>;
+} = { items: [], contexts: new Map() };
 
 export function AttentionView({
   onOpen,
@@ -15,7 +23,7 @@ export function AttentionView({
   readonly onChange: () => void;
 }) {
   const [mode, setMode] = useState<"unread" | "all">("unread");
-  const [older, setOlder] = useState<readonly Notification[]>([]);
+  const [older, setOlder] = useState(emptyHistory);
   const [next, setNext] = useState<string | null>();
   const [frozen, setFrozen] = useState<readonly string[]>();
   const [eligible, setEligible] = useState<readonly string[]>([]);
@@ -25,16 +33,20 @@ export function AttentionView({
   useEffect(() => () => request.current?.abort(), []);
   const page = useResource(`inbox:${mode}`, (signal) => readNotifications({ view: mode }, signal), [
     { kind: "notification" },
+    { kind: "review" },
+    { kind: "queue" },
   ]);
   const byId = new Map((page.data?.items ?? []).map((item) => [item.id, item]));
-  for (const item of older) if (!byId.has(item.id)) byId.set(item.id, item);
+  for (const item of older.items) if (!byId.has(item.id)) byId.set(item.id, item);
+  const contexts = new Map(older.contexts);
+  for (const context of page.data?.reviewContexts ?? []) contexts.set(context.reviewId, context);
   const groups = group([...byId.values()]);
   const cursor = next === undefined ? page.data?.nextCursor : next;
 
   function changeMode(nextMode: "unread" | "all") {
     request.current?.abort();
     setMode(nextMode);
-    setOlder([]);
+    setOlder(emptyHistory);
     setNext(undefined);
     setFrozen(undefined);
     setEligible([]);
@@ -51,7 +63,15 @@ export function AttentionView({
     try {
       const result = await readNotifications({ view: mode, cursor }, controller.signal);
       if (controller.signal.aborted) return;
-      setOlder((previous) => [...previous, ...result.data.items].slice(0, 450));
+      setOlder((previous) => {
+        const items = [...previous.items, ...result.data.items].slice(0, historyLimit);
+        const shown = new Set(items.map((item) => item.reviewId));
+        const contexts = new Map([...previous.contexts].filter(([id]) => shown.has(id)));
+        for (const context of result.data.reviewContexts) {
+          if (shown.has(context.reviewId)) contexts.set(context.reviewId, context);
+        }
+        return { items, contexts };
+      });
       setNext(result.data.nextCursor);
     } catch (error) {
       if (!controller.signal.aborted) setNotice(describeError(error));
@@ -67,13 +87,14 @@ export function AttentionView({
     try {
       const { data } = await assignNotifications({ action, ids: [...ids] });
       const affected = new Set(data.affectedIds);
-      setOlder((items) =>
-        items.flatMap((item) => {
+      setOlder((previous) => ({
+        ...previous,
+        items: previous.items.flatMap((item) => {
           if (!affected.has(item.id)) return [item];
           if (action === "dismiss" || (action === "read" && mode === "unread")) return [];
           return [{ ...item, readAt: action === "unread" ? null : new Date().toISOString() }];
         }),
-      );
+      }));
       setFrozen((selection) => selection?.filter((id) => !affected.has(id)));
       setEligible((ids) => ids.filter((id) => !affected.has(id)));
       page.retry();
@@ -179,6 +200,7 @@ export function AttentionView({
         {groups.map(([reviewId, items]) => {
           const latest = items[0];
           if (!latest) return null;
+          const context = contexts.get(reviewId);
           const unread = items.filter((item) => !item.readAt).length;
           const mrUpdates = items.filter((item) => item.source === "gitlab").length;
           const agentUpdates = items.length - mrUpdates;
@@ -228,12 +250,25 @@ export function AttentionView({
               )}
               <button type="button" className="inbox-open" onClick={() => onOpen(latest)}>
                 <div className="inbox-meta">
-                  <span className="inbox-source">{readable(latest.source)}</span>
+                  {context ? (
+                    <span className="inbox-identity">
+                      {context.ticketKeys.length > 0 && (
+                        <span className="ticket-key">{context.ticketKeys.join(" · ")}</span>
+                      )}
+                      <span className="mr-id" title={context.projectPath}>
+                        {context.projectPath.split("/").at(-1)} !{context.iid}
+                      </span>
+                      <ReviewBadges review={context} />
+                    </span>
+                  ) : (
+                    <span className="inbox-source">{notificationSource(latest.source)}</span>
+                  )}
                   <span className={unread ? "inbox-unread" : "inbox-source"}>
                     {unread ? `${unread} unread` : "Read"}
                   </span>
                 </div>
-                <strong>{latest.label}</strong>
+                <strong>{context?.title ?? latest.label}</strong>
+                {context && <span className="inbox-preview">{latest.label}</span>}
                 <div className="inbox-meta inbox-caption">
                   <span>{updates}</span>
                   <time dateTime={latest.occurredAt}>{formatActivityTime(latest.occurredAt)}</time>
@@ -267,7 +302,7 @@ export function AttentionView({
                         onClick={() => onOpen(item)}
                       >
                         <span>
-                          {readable(item.source)} · {readable(item.kind)}
+                          {notificationSource(item.source)} · {readable(item.kind)}
                         </span>
                         <strong>{item.label}</strong>
                         <time dateTime={item.occurredAt}>
@@ -300,7 +335,7 @@ export function AttentionView({
           );
         })}
       </ul>
-      {cursor && older.length < 450 && (
+      {cursor && older.items.length < historyLimit && (
         <div className="pagination">
           <button type="button" disabled={busy} onClick={() => void more()}>
             Load older updates
@@ -309,6 +344,12 @@ export function AttentionView({
       )}
     </>
   );
+}
+
+function notificationSource(source: string): string {
+  if (source === "gitlab") return "GitLab";
+  if (source === "native") return "Agent";
+  return readable(source);
 }
 
 function group(items: readonly Notification[]) {

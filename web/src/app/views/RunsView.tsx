@@ -11,7 +11,7 @@ import { localDateRange, presets } from "../../features/queue/archive-filters";
 import type { DatePreset } from "../../features/queue/archive-filters";
 import type { Launch, LaunchTarget, OpenReview } from "../../features/queue/types";
 import { useResource } from "../../hooks/useResource";
-import { formatActivityTime, readable } from "../../lib/presentation";
+import { formatActivityTime, providerLabel, reviewReasonLabel } from "../../lib/presentation";
 import { savedValue, saveValue } from "../../lib/view-preferences";
 import "./runs.css";
 
@@ -131,7 +131,7 @@ export function RunsView({
                   setTrail([]);
                 }}
               >
-                Clear reason · {readable(reason)}
+                Clear reason · {reviewReasonLabel(reason)}
               </button>
             )}
           </div>
@@ -497,8 +497,16 @@ function RunRow({
   readonly archiveDetails?: ReactNode;
 }) {
   const reason = row.reasonKind ?? row.runStage;
-  const label =
-    reason === "needs_input" ? "Agent needs input" : reason ? readable(reason) : undefined;
+  const label = reason ? reviewReasonLabel(reason) : undefined;
+  const launch = row.focusedLaunch;
+  const metadata = [
+    row.focusedProvider && providerLabel(row.focusedProvider),
+    launch?.observedModel ||
+      (launch?.requestedModel && `Requested model: ${launch.requestedModel}`),
+    launch?.observedEffort ||
+      (launch?.requestedEffort && `Requested effort: ${launch.requestedEffort}`),
+    row.focusedReportReviewedSha && `Report reviewed ${row.focusedReportReviewedSha.slice(0, 8)}`,
+  ].filter(Boolean);
   return (
     <article className="run-card">
       <button
@@ -536,12 +544,14 @@ function RunRow({
             </span>
           )}
         </div>
-        <h3>{row.title}</h3>
-        <p className="run-card-project">{row.projectPath}</p>
+        <h3>{row.tickets[0]?.title || row.title}</h3>
+        <p className="run-card-project">
+          {row.tickets[0]?.title && row.tickets[0].title !== row.title
+            ? row.title
+            : `${row.projectPath} !${row.iid}`}
+        </p>
         <div className="run-card-footer">
-          <span>
-            {row.fullMrReviewedSha && `Last full review ${row.fullMrReviewedSha.slice(0, 8)}`}
-          </span>
+          <span>{metadata.join(" · ")}</span>
           <span>
             {archiveDetails ??
               (row.lastActivityAt && (
