@@ -1,0 +1,11 @@
+.drawer-actions { flex-wrap: nowrap; align-items: start; }
+.run-picker { width: min(135px, 18vw); text-overflow: ellipsis; }
+.run-pages { margin-bottom: 4px; }
+.run-pages button { min-height: 25px; font-size: 12px; }
+.overview { gap: 17px; }
+.overview > .surface-card { padding: 13px; }
+.review-request { white-space: pre-wrap; overflow-wrap: anywhere; padding: 8px; border: 1px solid var(--line); background: var(--raised); border-radius: 4px; }
+.detail-facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(130px, 100%), 1fr)); gap: 6px 12px; }
+.detail-facts dt { color: var(--muted); font-size: 12px; }
+.detail-facts dd { overflow-wrap: anywhere; }
+@media (max-width: 700px) { .run-picker { max-width: 22vw; width: auto; } }
