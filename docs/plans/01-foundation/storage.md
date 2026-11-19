@@ -6,7 +6,7 @@
 
 | Files | Work and handoff |
 | --- | --- |
-| `crates/reviewq-store/src/connection.rs`, `crates/reviewq-store/src/schema.sql` | Create a new private store from one embedded schema, probe and reopen a matching store, and produce coherent backups. Own the read/write workers and shutdown. |
+| `crates/reviewq-store/src/connection.rs`, `crates/reviewq-store/src/schema.sql` and `crates/reviewq-store/src/schema/` | Create a new private store from one embedded schema, probe and reopen a matching store, and produce coherent backups. Own the read/write workers and shutdown. |
 | `crates/reviewq-store/src/{events,notifications}.rs` | Durable event head, floor, ascending journal range, postcommit wake-up. `insert_notification(tx, observation) -> Result<NotificationId, StoreError>` is crate-private, transaction-local and deduplicates by occurrence; queue owns later inbox reads and desktop receipt behavior. Introduce the notification insert and its schema with the first accepted operation that records an occurrence. Later inbox and desktop reads reuse it. |
 | `crates/reviewq-app/src/hosts.rs`, `crates/reviewq-store/src/hosts.rs` | Foundation declarations/implementation for exact registration, small lead lookup and conditional outbox admission/claim/outcome/read. Transfer file ownership to SLICE then HOST when these checks pass. Feature code uses the shared commit primitives directly inside this crate. |
 | `crates/reviewq-store/src/queue.rs`, `crates/reviewq-app/src/queue.rs` | First scoped review projection, run summaries and minimal settings context accessor used by the real slice. Transfer the minimal queue read to SLICE then QUEUE. Retain SSR/browser/CLI independent use-case inputs. |
