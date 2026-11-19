@@ -4,7 +4,8 @@ use std::sync::Arc;
 use reqwest::header::HeaderMap;
 use reviewq_app::access::{AppError, AppFuture};
 use reviewq_app::changes::{
-    ApprovalView, ChangeSource, Discussion, PatchBytes, PatchFile, PatchRevision, SourcePage,
+    ApprovalView, ChangeSource, Discussion, PatchBytes, PatchFile, PatchFileSelection,
+    PatchPathCursor, PatchPathPage, PatchRevision, SourcePage,
 };
 use reviewq_domain::identity::{GitSha, MrIdentity};
 use serde::Deserialize;
@@ -16,6 +17,7 @@ use super::GitLab;
 mod approvals;
 mod discussions;
 mod lease;
+mod paths;
 mod wire;
 
 pub(super) use lease::Leases;
@@ -46,13 +48,13 @@ impl ChangeSource for GitLab {
         revision: Option<String>,
         page: u32,
         limit: u16,
-        selected_file: Option<String>,
+        selected_file: Option<PatchFileSelection>,
     ) -> AppFuture<'_, SourcePage<PatchFile>> {
         Box::pin(async move {
             if !(1..=10).contains(&limit) {
                 return Err(AppError::InvalidRequest);
             }
-            let selected = selected_file.as_deref();
+            let selected = selected_file.as_ref().map(PatchFileSelection::key);
             let first_choice = selected
                 .map(|id| ordinal(id).ok_or(AppError::InvalidRequest))
                 .transpose()?;
@@ -73,13 +75,30 @@ impl ChangeSource for GitLab {
                 .await?;
             let indexed = slot
                 .get_or_try_init(|| async {
-                    let (scan, next) = self
+                    let (mut scan, mut next) = self
                         .scan_diffs(&source, page, limit, selected, page == 1)
                         .await?;
+                    let mut page = page;
                     if selected.is_some_and(|file| {
                         !scan.files.iter().any(|candidate| candidate.id == file)
                     }) {
-                        return Err(AppError::NotFound);
+                        let Some(PatchFileSelection::PathHint(hint)) = &selected_file else {
+                            return Err(AppError::NotFound);
+                        };
+                        // Catalog order can differ from REST order. Only a REST file ID may
+                        // address patch bytes or determine the selected file's position.
+                        let (located_page, file) = self
+                            .find_diff_file(&source, page, limit, hint, &scan.files)
+                            .await?;
+                        if located_page != page {
+                            page = located_page;
+                            (scan, next) = self
+                                .scan_diffs(&source, page, limit, Some(&file), false)
+                                .await?;
+                            if !scan.files.iter().any(|candidate| candidate.id == file) {
+                                return Err(AppError::NotFound);
+                            }
+                        }
                     }
                     self.patch_revision(&source, Some(&current.id)).await?;
                     if let Some((file, body)) = scan.selected
@@ -112,6 +131,16 @@ impl ChangeSource for GitLab {
                 .await?;
             Ok(indexed.clone())
         })
+    }
+
+    fn paths(
+        &self,
+        source: MrIdentity,
+        project_path: String,
+        revision: String,
+        cursor: Option<PatchPathCursor>,
+    ) -> AppFuture<'_, PatchPathPage> {
+        Box::pin(self.path_page(source, project_path, revision, cursor))
     }
 
     fn patch(
@@ -180,29 +209,7 @@ impl GitLab {
             .await?;
         let source_head = row.head_sha()?;
         let refs = row.diff_refs.ok_or(AppError::Unavailable)?;
-        let base = git_sha(&refs.base_sha)?;
-        let start = git_sha(&refs.start_sha)?;
-        let head = git_sha(&refs.head_sha)?;
-        if head != source_head {
-            return Err(AppError::Unavailable);
-        }
-        let id = fingerprint(&[
-            source.origin().as_str(),
-            &source.project_id().to_string(),
-            &source.iid().to_string(),
-            base.as_str(),
-            start.as_str(),
-            head.as_str(),
-        ]);
-        if expected.is_some_and(|value| value != id) {
-            return Err(AppError::StaleRevision);
-        }
-        Ok(PatchRevision {
-            id,
-            base,
-            start,
-            head,
-        })
+        revision_from_refs(source, refs, source_head, expected)
     }
 
     async fn read_diff_rows<T: DeserializeOwned>(
@@ -230,25 +237,8 @@ impl GitLab {
         preferred: Option<&str>,
         default: bool,
     ) -> Result<(wire::DiffPage, Option<u32>), AppError> {
-        let first = page
-            .checked_sub(1)
-            .and_then(|page| page.checked_mul(u32::from(limit)))
-            .and_then(|offset| offset.checked_add(1))
-            .filter(|first| first <= &MAX_PATCH_FILES)
-            .ok_or(AppError::PayloadTooLarge)?;
-        let url = self.page_url(source, "diffs", page, limit)?;
-        let (body, next) = {
-            let response = self
-                .http
-                .get(url, self.headers.clone(), self.lease.as_ref())
-                .await?;
-            let next = next_page(response.headers(), page)?;
-            let body = wire::receive(response, &self.patches.profile).await?;
-            if let Some(lease) = &self.lease {
-                lease.check().await?;
-            }
-            (body, next)
-        };
+        let first = first_ordinal(page, limit)?;
+        let (body, next) = self.receive_diff_page(source, page, limit).await?;
         let profile = self.patches.profile.clone();
         let preferred = preferred.map(str::to_owned);
         let scanned = tokio::task::spawn_blocking(move || {
@@ -257,6 +247,25 @@ impl GitLab {
         .await
         .map_err(|_| AppError::Unavailable)??;
         Ok((scanned, next))
+    }
+
+    async fn receive_diff_page(
+        &self,
+        source: &MrIdentity,
+        page: u32,
+        limit: u16,
+    ) -> Result<(wire::Wire, Option<u32>), AppError> {
+        let url = self.page_url(source, "diffs", page, limit)?;
+        let response = self
+            .http
+            .get(url, self.headers.clone(), self.lease.as_ref())
+            .await?;
+        let next = next_page(response.headers(), page)?;
+        let body = wire::receive(response, &self.patches.profile).await?;
+        if let Some(lease) = &self.lease {
+            lease.check().await?;
+        }
+        Ok((body, next))
     }
 
     fn page_url(
@@ -281,6 +290,14 @@ impl GitLab {
     }
 }
 
+fn first_ordinal(page: u32, limit: u16) -> Result<u32, AppError> {
+    page.checked_sub(1)
+        .and_then(|page| page.checked_mul(u32::from(limit)))
+        .and_then(|offset| offset.checked_add(1))
+        .filter(|first| *first <= MAX_PATCH_FILES)
+        .ok_or(AppError::PayloadTooLarge)
+}
+
 fn next_page(headers: &HeaderMap, page: u32) -> Result<Option<u32>, AppError> {
     let Some(value) = headers.get("x-next-page").filter(|value| !value.is_empty()) else {
         return Ok(None);
@@ -296,6 +313,37 @@ fn next_page(headers: &HeaderMap, page: u32) -> Result<Option<u32>, AppError> {
     Ok(Some(next))
 }
 
+fn revision_from_refs(
+    source: &MrIdentity,
+    refs: DiffRefs,
+    source_head: GitSha,
+    expected: Option<&str>,
+) -> Result<PatchRevision, AppError> {
+    let base = git_sha(&refs.base_sha)?;
+    let start = git_sha(&refs.start_sha)?;
+    let head = git_sha(&refs.head_sha)?;
+    if head != source_head {
+        return Err(AppError::Unavailable);
+    }
+    let id = fingerprint(&[
+        source.origin().as_str(),
+        &source.project_id().to_string(),
+        &source.iid().to_string(),
+        base.as_str(),
+        start.as_str(),
+        head.as_str(),
+    ]);
+    if expected.is_some_and(|value| value != id) {
+        return Err(AppError::StaleRevision);
+    }
+    Ok(PatchRevision {
+        id,
+        base,
+        start,
+        head,
+    })
+}
+
 fn ordinal(file: &str) -> Option<u32> {
     let (raw, hash) = file.split_once('-')?;
     let index = raw.parse().ok()?;
@@ -304,6 +352,10 @@ fn ordinal(file: &str) -> Option<u32> {
             .bytes()
             .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase());
     (canonical && (1..=MAX_PATCH_FILES).contains(&index)).then_some(index)
+}
+
+fn file_lookup_key(ordinal: u32, old_path: &str, new_path: &str) -> String {
+    format!("{ordinal}-{}", fingerprint(&[old_path, new_path]))
 }
 
 fn safe_path(path: &str) -> bool {

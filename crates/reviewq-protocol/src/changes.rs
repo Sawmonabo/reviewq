@@ -28,6 +28,29 @@ pub struct PatchFileIndex {
 
 pub type PatchFileIndexResponse = Success<PatchFileIndex>;
 
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct PatchPaths {
+    pub review_id: ReviewIdDto,
+    pub revision: PatchRevisionDto,
+    pub partial: bool,
+    #[serde(flatten)]
+    pub page: Page<PatchPath>,
+}
+
+pub type PatchPathsResponse = Success<PatchPaths>;
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct PatchPath {
+    pub old_path: String,
+    pub new_path: String,
+    /// A lookup hint accepted by the checked patch index, not a verified patch address.
+    pub lookup_key: FileIdDto,
+}
+
 /// One immutable address even when another revision serves identical bytes.
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]

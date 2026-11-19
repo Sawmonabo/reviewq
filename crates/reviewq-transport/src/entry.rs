@@ -287,6 +287,7 @@ pub fn router(
         .route("/reviews/resolve", get(pages::resolve))
         .route("/reviews/{review_id}", get(pages::overview))
         .route("/reviews/{review_id}/changes/files", get(changes::files))
+        .route("/reviews/{review_id}/changes/paths", get(changes::paths))
         .route("/reviews/{review_id}/changes/patch", get(changes::patch))
         .route(
             "/reviews/{review_id}/changes/discussions",

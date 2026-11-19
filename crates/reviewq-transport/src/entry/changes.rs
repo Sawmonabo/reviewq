@@ -6,7 +6,7 @@ use axum::http::HeaderMap;
 use reviewq_app::access::{Actor, AppError};
 use reviewq_app::changes::{
     Discussion, DiscussionAnchor, DiscussionLine, DiscussionPosition, DiscussionResolution,
-    PatchAvailability, PatchFile,
+    PatchAvailability, PatchFile, PatchFileSelection,
 };
 use reviewq_app::queue::ReviewSource;
 use reviewq_app::settings::ActiveSource;
@@ -22,8 +22,10 @@ use super::error::{ApiPath as Path, ApiQuery as Query};
 use super::{ApiError, Entry, ServiceEndpoint};
 
 mod approval;
+mod paths;
 mod raw;
 pub(super) use approval::approvals;
+pub(super) use paths::paths;
 pub(super) use raw::patch;
 
 const FILE_CURSOR: &[u8] = b"reviewq-changes-files-v1";
@@ -36,6 +38,7 @@ pub(super) struct ChangeQuery {
     limit: Option<u16>,
     cursor: Option<String>,
     preferred_file_id: Option<String>,
+    file_path_hint: Option<String>,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -56,10 +59,24 @@ pub(super) async fn files(
     let actor = entry.auth.browser_actor(&headers, false)?;
     let review_id = parse_review(&review)?;
     let source = read_source(&entry, &actor, &review_id).await?;
-    let selected = query.preferred_file_id.clone();
+    if query.file_path_hint.is_some()
+        && (query.preferred_file_id.is_some() || query.cursor.is_some() || query.revision.is_none())
+    {
+        return Err(AppError::InvalidRequest.into());
+    }
+    let selected = query
+        .file_path_hint
+        .clone()
+        .map(PatchFileSelection::PathHint)
+        .or_else(|| {
+            query
+                .preferred_file_id
+                .clone()
+                .map(PatchFileSelection::Exact)
+        });
     if selected
-        .as_deref()
-        .is_some_and(|id| id.is_empty() || id.len() > 80)
+        .as_ref()
+        .is_some_and(|file| file.key().is_empty() || file.key().len() > 80)
     {
         return Err(AppError::InvalidRequest.into());
     }
@@ -126,7 +143,7 @@ pub(super) async fn discussions(
     Path(review): Path<String>,
     Query(query): Query<ChangeQuery>,
 ) -> Result<Json<dto::PatchDiscussionsResponse>, ApiError> {
-    if query.preferred_file_id.is_some() {
+    if query.preferred_file_id.is_some() || query.file_path_hint.is_some() {
         return Err(AppError::InvalidRequest.into());
     }
     let actor = entry.auth.browser_actor(&headers, false)?;
