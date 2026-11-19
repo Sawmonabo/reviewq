@@ -7,7 +7,7 @@ use reviewq_providers::git_output;
 
 use super::Failure;
 
-const MAX_WORKTREES: usize = 64;
+pub(super) const MAX_WORKTREES: usize = 64;
 
 pub(super) struct Checkout {
     pub root: PathBuf,

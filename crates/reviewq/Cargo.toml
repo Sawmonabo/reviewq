@@ -12,6 +12,7 @@ clap = { version = "4.6", features = ["derive"] }
 getrandom = "0.4.3"
 hyper = { version = "=1.12.0", features = ["server", "http1"] }
 hyper-util = { version = "=0.1.21", features = ["service", "tokio"] }
+notify = { version = "=8.2.2", default-features = false }
 reqwest = { version = "=0.13.5", default-features = false }
 reviewq-app = { path = "../reviewq-app" }
 reviewq-domain = { path = "../reviewq-domain" }

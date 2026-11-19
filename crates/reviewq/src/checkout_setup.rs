@@ -14,6 +14,7 @@ use crate::{native_client, runtime};
 mod files;
 mod git;
 mod hooks;
+mod observe;
 mod projection;
 pub(crate) mod reconcile;
 
@@ -116,15 +117,17 @@ struct Prepared {
 }
 
 impl Prepared {
-    async fn apply(&mut self) -> Result<(), Failure> {
+    async fn apply(&mut self) -> Result<bool, Failure> {
         self.plan
             .apply(&self.inventory, &self.checkout, self.claude.as_deref())
             .await?;
-        if let Err(error) = hooks::reconcile(&self.profile, &self.checkout).await {
-            self.plan.rollback()?;
-            return Err(error);
+        match hooks::reconcile(&self.profile, &self.checkout).await {
+            Ok(observe) => Ok(observe),
+            Err(error) => {
+                self.plan.rollback()?;
+                Err(error)
+            }
         }
-        Ok(())
     }
 
     fn finish(self) -> Result<(), Failure> {

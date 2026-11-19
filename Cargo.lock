@@ -1409,6 +1409,7 @@ dependencies = [
  "getrandom 0.4.3",
  "hyper",
  "hyper-util",
+ "notify",
  "reqwest",
  "reviewq-app",
  "reviewq-domain",

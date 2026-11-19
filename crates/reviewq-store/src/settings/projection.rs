@@ -20,18 +20,17 @@ use crate::{SqliteStore, StoreError};
 impl RepositoryChatProjectionStore for SqliteStore {
     fn checkout_projections(
         &self,
-        include_applied: bool,
         after: Option<AbsolutePath>,
     ) -> AppFuture<'_, Vec<CheckoutProjection>> {
         Box::pin(async move {
             self.read(move |db| {
                 let settings = settings_revision(db)?;
                 let mut rows = db.prepare_cached(
-                    "SELECT common_dir,origin,project_id,checkout,desired,generation FROM checkout_projections
-                     WHERE suppressed=0 AND (?1 OR ready=0) AND (?2 IS NULL OR common_dir>?2)
+                    "SELECT common_dir,origin,project_id,checkout,desired,generation,ready FROM checkout_projections
+                     WHERE suppressed=0 AND (?1 IS NULL OR common_dir>?1)
                      ORDER BY common_dir LIMIT 16",
                 )?;
-                let mut rows = rows.query(params![include_applied, after.as_ref().map(bytes)])?;
+                let mut rows = rows.query(params![after.as_ref().map(bytes)])?;
                 let mut entries = Vec::new();
                 while let Some(row) = rows.next()? {
                     let origin = row.get::<_, String>(1)?;
@@ -49,6 +48,7 @@ impl RepositoryChatProjectionStore for SqliteStore {
                             common_dir: path(row.get(0)?)?,
                         },
                         desired: row.get(4)?,
+                        ready: row.get(6)?,
                     });
                 }
                 Ok(entries)

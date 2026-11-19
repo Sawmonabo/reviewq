@@ -60,6 +60,7 @@ pub struct CheckoutProjection {
     pub project: ConfiguredProject,
     pub checkout: CheckoutBinding,
     pub desired: bool,
+    pub ready: bool,
 }
 
 pub enum ProjectionOutcome {
@@ -71,7 +72,6 @@ pub enum ProjectionOutcome {
 pub trait RepositoryChatProjectionStore: Send + Sync {
     fn checkout_projections(
         &self,
-        include_applied: bool,
         after: Option<AbsolutePath>,
     ) -> AppFuture<'_, Vec<CheckoutProjection>>;
     fn check_checkout_projection(&self, job: CheckoutProjection) -> AppFuture<'_, ()>;
