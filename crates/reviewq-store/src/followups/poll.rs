@@ -187,7 +187,7 @@ fn record_discovery(
             crate::queue::stage::count_discussions(
                 threads
                     .into_iter()
-                    .map(|thread| (thread.resolution, thread.authors)),
+                    .map(|thread| (thread.resolution, thread.notes)),
                 &reviewers,
             )
         });

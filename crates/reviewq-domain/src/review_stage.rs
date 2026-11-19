@@ -84,6 +84,9 @@ pub fn classify_review(evidence: &WorkspaceEvidence<'_>) -> Option<Stage> {
             (Waiting, "followup_pending")
         }
         e if e.followup_state == Some("executing") => (Working, "followup_working"),
+        e if e.followup_state == Some("ready") && e.personal_approval != Some(true) => {
+            (NeedsInput, "followup_ready")
+        }
         e if e.pending_source && e.personal_approval != Some(true) => {
             (NeedsInput, "discussion_update")
         }

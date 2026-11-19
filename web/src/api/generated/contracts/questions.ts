@@ -10,6 +10,8 @@ import type {
   SubmissionIdDto,
 } from "./common.js";
 
+export type QuestionAnswerResponseMode = "native" | "async";
+
 export type Status =
   | "pending"
   | "submitting"
@@ -17,6 +19,8 @@ export type Status =
   | "closed"
   | "unavailable"
   | "uncertain";
+
+export type QuestionFormsResponseMode = "native" | "async";
 
 export interface QuestionAnswerRequest {
   answers: {
@@ -31,13 +35,15 @@ export interface Values {
 
 export interface QuestionAnswerResponse {
   cursor: EventCursorDto;
-  data: Form;
+  data: QuestionAnswerResponseForm;
   [k: string]: unknown;
 }
 
-export interface Form {
+export interface QuestionAnswerResponseForm {
+  answerable: boolean;
   blocking: boolean;
   itemId: HistoryEntryIdDto;
+  mode: QuestionAnswerResponseMode;
   questions: Question[];
   requestId: ResourceIdDto;
   runId: RunIdDto;
@@ -74,5 +80,19 @@ export interface Forms {
   items: Form[];
   runId: RunIdDto;
   sessionKey: SessionKeyDto;
+  [k: string]: unknown;
+}
+
+export interface Form {
+  answerable: boolean;
+  blocking: boolean;
+  itemId: HistoryEntryIdDto;
+  mode: QuestionFormsResponseMode;
+  questions: Question[];
+  requestId: ResourceIdDto;
+  runId: RunIdDto;
+  sessionKey: SessionKeyDto;
+  status: Status;
+  turnId: HistoryTurnIdDto;
   [k: string]: unknown;
 }

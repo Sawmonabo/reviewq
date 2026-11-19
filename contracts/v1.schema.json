@@ -2732,11 +2732,17 @@
     },
     "Form": {
       "properties": {
+        "answerable": {
+          "type": "boolean"
+        },
         "blocking": {
           "type": "boolean"
         },
         "itemId": {
           "$ref": "#/definitions/HistoryEntryIdDto"
+        },
+        "mode": {
+          "$ref": "#/definitions/QuestionFormsResponseMode"
         },
         "questions": {
           "items": {
@@ -2767,6 +2773,8 @@
         "turnId",
         "itemId",
         "blocking",
+        "mode",
+        "answerable",
         "status",
         "questions"
       ],
@@ -5534,7 +5542,7 @@
           "$ref": "#/definitions/EventCursorDto"
         },
         "data": {
-          "$ref": "#/definitions/Form"
+          "$ref": "#/definitions/QuestionAnswerResponseForm"
         }
       },
       "required": [
@@ -5543,6 +5551,65 @@
       ],
       "title": "QuestionAnswerResponse",
       "type": "object"
+    },
+    "QuestionAnswerResponseForm": {
+      "properties": {
+        "answerable": {
+          "type": "boolean"
+        },
+        "blocking": {
+          "type": "boolean"
+        },
+        "itemId": {
+          "$ref": "#/definitions/HistoryEntryIdDto"
+        },
+        "mode": {
+          "$ref": "#/definitions/QuestionAnswerResponseMode"
+        },
+        "questions": {
+          "items": {
+            "$ref": "#/definitions/Question"
+          },
+          "type": "array"
+        },
+        "requestId": {
+          "$ref": "#/definitions/ResourceIdDto"
+        },
+        "runId": {
+          "$ref": "#/definitions/RunIdDto"
+        },
+        "sessionKey": {
+          "$ref": "#/definitions/SessionKeyDto"
+        },
+        "status": {
+          "$ref": "#/definitions/Status"
+        },
+        "turnId": {
+          "$ref": "#/definitions/HistoryTurnIdDto"
+        }
+      },
+      "required": [
+        "runId",
+        "sessionKey",
+        "requestId",
+        "turnId",
+        "itemId",
+        "blocking",
+        "mode",
+        "answerable",
+        "status",
+        "questions"
+      ],
+      "title": "QuestionAnswerResponseForm",
+      "type": "object"
+    },
+    "QuestionAnswerResponseMode": {
+      "enum": [
+        "native",
+        "async"
+      ],
+      "title": "QuestionAnswerResponseMode",
+      "type": "string"
     },
     "QuestionFormsResponse": {
       "description": "The resource and event head from the same authorized snapshot.",
@@ -5560,6 +5627,14 @@
       ],
       "title": "QuestionFormsResponse",
       "type": "object"
+    },
+    "QuestionFormsResponseMode": {
+      "enum": [
+        "native",
+        "async"
+      ],
+      "title": "QuestionFormsResponseMode",
+      "type": "string"
     },
     "QueueFacets": {
       "properties": {
@@ -6237,7 +6312,14 @@
           ]
         },
         "receiptId": {
-          "$ref": "#/definitions/ResourceIdDto"
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ResourceIdDto"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "state": {
           "$ref": "#/definitions/DeliveryState"

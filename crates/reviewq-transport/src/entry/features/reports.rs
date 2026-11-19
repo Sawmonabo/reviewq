@@ -570,7 +570,11 @@ fn summary(value: app::ReportSummary) -> Result<dto::ReportSummary, AppError> {
 
 fn delivery(value: app::ReportDelivery) -> Result<dto::ReportDelivery, AppError> {
     Ok(dto::ReportDelivery {
-        receipt_id: resource(value.receipt_id.as_str())?,
+        receipt_id: value
+            .receipt_id
+            .as_ref()
+            .map(|id| resource(id.as_str()))
+            .transpose()?,
         state: match value.state {
             app::ReportDeliveryState::Preparing => dto::DeliveryState::Preparing,
             app::ReportDeliveryState::Saving => dto::DeliveryState::Saving,

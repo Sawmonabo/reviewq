@@ -1,26 +1,24 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use reviewq_app::access::{AppError, AppFuture};
 use reviewq_app::history::HistorySession;
 use reviewq_app::hosts::{
-    Question, QuestionAccess, QuestionAdmission, QuestionAnswer, QuestionForm, QuestionKey,
-    QuestionOption, QuestionReceipt, QuestionStatus, QuestionsPort,
+    QuestionAccess, QuestionAdmission, QuestionAnswer, QuestionForm, QuestionKey, QuestionMode,
+    QuestionReceipt, QuestionStatus, QuestionsPort,
 };
-use reviewq_domain::identity::ReportHash;
 use reviewq_domain::session::HostProvider;
 use serde::Deserialize;
 use serde_json::{Value, json};
-use sha2::{Digest, Sha256};
+
+use crate::question_wire::{NativeQuestion, project_questions, request_id, visible};
 
 use super::Codex;
 use super::connection::AnswerError;
 use super::session::{Thread, ThreadStatus, canonical_cwd};
 
 const MAX_FORMS: usize = 64;
-const MAX_QUESTIONS: usize = 16;
-const MAX_OPTIONS: usize = 32;
 const MAX_RESULT_SECONDS: u64 = 8;
 const FRAME_BUDGET: usize = 48 * 1024;
 const CACHE_LIFETIME: Duration = Duration::from_secs(30 * 60);
@@ -48,25 +46,6 @@ struct NativeForm {
     item_id: String,
     is_blocking: bool,
     questions: Vec<NativeQuestion>,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct NativeQuestion {
-    id: String,
-    header: String,
-    question: String,
-    options: Option<Vec<NativeOption>>,
-    #[serde(default)]
-    is_other: bool,
-    #[serde(default)]
-    is_secret: bool,
-}
-
-#[derive(Deserialize)]
-struct NativeOption {
-    label: String,
-    description: String,
 }
 
 impl QuestionsPort for Codex {
@@ -389,8 +368,6 @@ impl Questions {
         self.prune();
         if self.0.len() >= MAX_FORMS
             || !visible(&native.thread_id, 256, false)
-            || native.questions.is_empty()
-            || native.questions.len() > MAX_QUESTIONS
             || self.0.values().any(|live| {
                 live.thread == native.thread_id
                     && live.native_id == native_id
@@ -402,49 +379,10 @@ impl Questions {
         let (Ok(turn), Ok(item)) = (native.turn_id.parse(), native.item_id.parse()) else {
             return;
         };
-        let mut seen = HashSet::new();
-        let mut questions = Vec::with_capacity(native.questions.len());
-        for question in native.questions {
-            if !visible(&question.id, 256, false)
-                || !seen.insert(question.id.clone())
-                || !visible(&question.header, 1024, false)
-                || !visible(&question.question, 8192, true)
-            {
-                return;
-            }
-            let options = question.options.unwrap_or_default();
-            if options.len() > MAX_OPTIONS {
-                return;
-            }
-            let mut seen = HashSet::new();
-            let mut projected = Vec::with_capacity(options.len());
-            for option in options {
-                if !visible(&option.label, 1024, false)
-                    || !seen.insert(option.label.clone())
-                    || option.description.len() > 4096
-                {
-                    return;
-                }
-                projected.push(QuestionOption {
-                    label: option.label,
-                    description: option.description,
-                });
-            }
-            questions.push(Question {
-                id: question.id,
-                header: question.header,
-                prompt: question.question,
-                options: projected,
-                allows_other: question.is_other,
-                secret: question.is_secret,
-            });
-        }
-        let mut digest = Sha256::new();
-        for field in [&native.thread_id, &native.turn_id, &native.item_id] {
-            digest.update((field.len() as u64).to_be_bytes());
-            digest.update(field.as_bytes());
-        }
-        let request = ReportHash::from_sha256(digest.finalize().into()).to_string();
+        let Some(questions) = project_questions(native.questions) else {
+            return;
+        };
+        let request = request_id(&native.thread_id, &native.turn_id, &native.item_id);
         if self.0.get(&request).is_some_and(|prior| {
             prior.form.state != QuestionStatus::Unavailable || prior.submission.is_some()
         }) {
@@ -462,6 +400,7 @@ impl Questions {
                     turn,
                     item,
                     blocking: native.is_blocking,
+                    mode: QuestionMode::Native,
                     state: QuestionStatus::Pending,
                     questions,
                 },
@@ -570,12 +509,4 @@ impl Questions {
 
 fn valid_native_id(value: &Value) -> bool {
     value.as_i64().is_some() || value.as_str().is_some_and(|id| visible(id, 256, false))
-}
-
-fn visible(text: &str, limit: usize, multiline: bool) -> bool {
-    !text.is_empty()
-        && text.len() <= limit
-        && !text
-            .chars()
-            .any(|ch| ch.is_control() && !(multiline && matches!(ch, '\n' | '\r' | '\t')))
 }

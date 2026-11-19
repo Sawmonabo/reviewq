@@ -286,7 +286,21 @@ pub struct DiscoveryEvidence {
 
 pub struct DiscoveryDiscussion {
     pub resolution: crate::changes::DiscussionResolution,
-    pub authors: Vec<u64>,
+    pub notes: Vec<DiscussionNoteTime>,
+}
+
+pub struct DiscussionNoteTime {
+    pub author: u64,
+    pub created_at_ms: i64,
+}
+
+impl From<&WorkflowNote> for DiscussionNoteTime {
+    fn from(note: &WorkflowNote) -> Self {
+        Self {
+            author: note.author,
+            created_at_ms: note.created_at_ms,
+        }
+    }
 }
 
 impl WorkflowSnapshot {

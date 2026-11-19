@@ -7,7 +7,7 @@ import { validate296 } from "./run-stage.mjs";
 import { validate147 } from "./git-sha-dto.mjs";
 import { validate302 } from "./compact-ticket.mjs";
 import { validate127 } from "./safe-count-dto.mjs";
-function validate1164(
+function validate1183(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -47,7 +47,7 @@ function validate1164(
               }
             }
           } else {
-            validate1164.errors = [
+            validate1183.errors = [
               {
                 instancePath: instancePath + "/registeredProviders",
                 schemaPath: "#/properties/registeredProviders/type",
@@ -113,7 +113,7 @@ function validate1164(
                   }
                 }
               } else {
-                validate1164.errors = [
+                validate1183.errors = [
                   {
                     instancePath: instancePath + "/runIds",
                     schemaPath: "#/properties/runIds/type",
@@ -183,7 +183,7 @@ function validate1164(
                   vErrors.push(err1);
                 }
                 errors++;
-                validate1164.errors = vErrors;
+                validate1183.errors = vErrors;
                 return false;
               } else {
                 errors = _errs9;
@@ -253,7 +253,7 @@ function validate1164(
                         }
                       }
                     } else {
-                      validate1164.errors = [
+                      validate1183.errors = [
                         {
                           instancePath: instancePath + "/tickets",
                           schemaPath: "#/properties/tickets/type",
@@ -272,7 +272,7 @@ function validate1164(
                   if (data.title !== undefined && func0.call(data, "title")) {
                     const _errs17 = errors;
                     if (typeof data.title !== "string") {
-                      validate1164.errors = [
+                      validate1183.errors = [
                         {
                           instancePath: instancePath + "/title",
                           schemaPath: "#/properties/title/type",
@@ -318,7 +318,7 @@ function validate1164(
         }
       }
     } else {
-      validate1164.errors = [
+      validate1183.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -329,7 +329,7 @@ function validate1164(
       return false;
     }
   }
-  validate1164.errors = vErrors;
+  validate1183.errors = vErrors;
   return errors === 0;
 }
-export { validate1164 };
+export { validate1183 };

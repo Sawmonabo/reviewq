@@ -37,6 +37,14 @@ pub enum Status {
 }
 
 #[derive(Serialize)]
+#[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub enum Mode {
+    Native,
+    Async,
+}
+
+#[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct Form {
@@ -46,6 +54,8 @@ pub struct Form {
     pub turn_id: HistoryTurnIdDto,
     pub item_id: HistoryEntryIdDto,
     pub blocking: bool,
+    pub mode: Mode,
+    pub answerable: bool,
     pub status: Status,
     pub questions: Vec<Question>,
 }

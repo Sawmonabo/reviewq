@@ -33,9 +33,9 @@ pub use messages::{
     MessagePosition, RecordedMessage, RecordedPurpose,
 };
 pub use questions::{
-    Question, QuestionAccess, QuestionAdmission, QuestionAnchor, QuestionAnswer, QuestionForm,
-    QuestionKey, QuestionOption, QuestionReceipt, QuestionStatus, QuestionStore, QuestionsPort,
-    answer_digest,
+    ObservedAsyncQuestion, Question, QuestionAccess, QuestionAdmission, QuestionAnchor,
+    QuestionAnswer, QuestionForm, QuestionKey, QuestionMode, QuestionOption, QuestionReceipt,
+    QuestionStatus, QuestionStore, QuestionsPort, answer_digest,
 };
 pub use work::{DispatchGuard, receipt, recover_delivery, send_message};
 

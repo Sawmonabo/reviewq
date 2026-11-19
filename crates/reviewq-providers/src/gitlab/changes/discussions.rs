@@ -4,7 +4,8 @@ use reviewq_app::changes::{
     DiscussionRange, DiscussionResolution, PatchRevision, SourcePage,
 };
 use reviewq_app::sources::{
-    DiscoveryEvidence, ReviewSourceReader, WorkflowDiscussion, WorkflowNote, WorkflowSnapshot,
+    DiscoveryEvidence, DiscussionNoteTime, ReviewSourceReader, WorkflowDiscussion, WorkflowNote,
+    WorkflowSnapshot,
 };
 use reviewq_domain::identity::{MrIdentity, ReportHash};
 use serde::Deserialize;
@@ -241,7 +242,7 @@ impl GitLab {
                     .into_iter()
                     .map(|thread| reviewq_app::sources::DiscoveryDiscussion {
                         resolution: thread.resolution,
-                        authors: thread.notes.into_iter().map(|note| note.author).collect(),
+                        notes: thread.notes.iter().map(DiscussionNoteTime::from).collect(),
                     })
                     .collect(),
             ),

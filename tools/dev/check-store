@@ -47,7 +47,7 @@ def database(root, name):
 
 def verify_backup(backup):
     with closing(sqlite3.connect(f"{backup.as_uri()}?mode=ro&immutable=1", uri=True)) as connection:
-        for pragma, expected in (("application_id", 1381388594), ("user_version", 1), ("integrity_check", "ok")):
+        for pragma, expected in (("application_id", 1381388594), ("user_version", 2), ("integrity_check", "ok")):
             assert connection.execute(f"PRAGMA {pragma}").fetchone() == (expected,)
         assert connection.execute("PRAGMA foreign_key_check").fetchall() == []
         assert connection.execute("SELECT count(*) FROM outbox").fetchone() == (2,)

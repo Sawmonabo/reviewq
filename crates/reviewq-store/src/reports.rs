@@ -313,16 +313,27 @@ fn read_delivery(
     run: &RunId,
 ) -> Result<Option<ReportDelivery>, StoreError> {
     let mut statement = connection.prepare_cached(
-        "SELECT receipt_id, CASE state
-             WHEN 'pending_completion' THEN CASE WHEN artifact_id IS NULL THEN 'preparing' ELSE 'saving' END
-             WHEN 'recorded' THEN 'saved' ELSE 'failed' END, reason
-         FROM report_handoffs WHERE run_id=?1 ORDER BY created_at_ms DESC, receipt_id DESC LIMIT 1",
+        "WITH latest AS (
+            SELECT receipt_id, CASE state
+              WHEN 'pending_completion' THEN CASE WHEN artifact_id IS NULL THEN 'preparing' ELSE 'saving' END
+              WHEN 'recorded' THEN 'saved' ELSE 'failed' END AS delivery, reason,
+              CASE WHEN state='pending_completion' THEN 0 ELSE 2 END AS priority
+            FROM report_handoffs WHERE run_id=?1 AND reconciled_by_batch_id IS NULL
+            ORDER BY created_at_ms DESC, receipt_id DESC LIMIT 1
+         ), failure AS (
+            SELECT NULL AS receipt_id, 'failed' AS delivery, reason, 1 AS priority
+            FROM report_delivery_failures WHERE run_id=?1 AND resolved_by_receipt_id IS NULL
+            ORDER BY occurred_at_ms DESC, notification_id DESC LIMIT 1
+         )
+         SELECT receipt_id, delivery, reason, priority FROM latest
+         UNION ALL SELECT receipt_id, delivery, reason, priority FROM failure
+         ORDER BY priority LIMIT 1",
     )?;
     let mut rows = statement.query([run.as_str()])?;
     rows.next()?
         .map(|row| {
             Ok(ReportDelivery {
-                receipt_id: parse(text(row, 0)?)?,
+                receipt_id: optional(row, 0)?,
                 state: parse(text(row, 1)?)?,
                 reason: row.get(2)?,
             })
