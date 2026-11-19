@@ -217,3 +217,18 @@
     min-height: 44px;
   }
 }
+.drawer-surface .overview-facts > div {
+  display: grid;
+  grid-template-columns: 115px minmax(0, 1fr);
+  align-items: start;
+}
+.drawer-surface .overview-facts :is(dt, dd) {
+  min-width: 0;
+}
+.drawer-surface .overview-facts dd {
+  font-size: 11px;
+}
+.drawer-surface .drawer-actions button {
+  border: 0;
+  background: transparent;
+}

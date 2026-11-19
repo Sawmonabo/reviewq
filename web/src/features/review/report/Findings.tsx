@@ -17,12 +17,21 @@ type Props = {
   readonly run: RunDetail;
   readonly drafts: DraftStore;
   readonly reviewTitle: string;
+  readonly identity: string;
   readonly webUrl: string;
   readonly followup: ResultSummary | null | undefined;
   readonly onRun: (run: string) => void;
 };
 
-export default function Findings({ run, drafts, reviewTitle, webUrl, followup, onRun }: Props) {
+export default function Findings({
+  run,
+  drafts,
+  reviewTitle,
+  identity,
+  webUrl,
+  followup,
+  onRun,
+}: Props) {
   const bookmark = `report.receipt.${run.runId}`;
   const [receipt, setReceipt] = useState<string | undefined>(() => {
     const value = savedValue(bookmark);
@@ -106,12 +115,6 @@ export default function Findings({ run, drafts, reviewTitle, webUrl, followup, o
 
   return (
     <div className="findings stack">
-      <div className="spread">
-        <h3>Findings</h3>
-        <button type="button" aria-expanded={history} onClick={() => setHistory(!history)}>
-          Report history
-        </button>
-      </div>
       {delivery && delivery.state !== "saved" && (
         <Notice>
           {delivery.state === "failed" ? "Report handoff failed" : "Report completion pending"}
@@ -138,6 +141,29 @@ export default function Findings({ run, drafts, reviewTitle, webUrl, followup, o
         </Notice>
       )}
       {notice && <Notice>{notice}</Notice>}
+      <div className="report-tools">
+        <FollowupResults
+          run={run}
+          latest={followup}
+          receipt={report?.receiptId}
+          disabled={busy}
+          onOpenReceipt={choose}
+          onOpenRun={onRun}
+          onAcknowledge={(batch) =>
+            batch.runId === run.runId && batch.receiptId === report?.receiptId
+              ? acknowledge(batch.batchId)
+              : Promise.resolve(false)
+          }
+        />
+        <button
+          type="button"
+          className="quiet-button"
+          aria-expanded={history}
+          onClick={() => setHistory(!history)}
+        >
+          Report history
+        </button>
+      </div>
       {history && (
         <section className="surface-card stack" aria-label="Report versions">
           {versions.pending && <Loading label="Reading accepted report versions…" />}
@@ -176,19 +202,6 @@ export default function Findings({ run, drafts, reviewTitle, webUrl, followup, o
           </div>
         </section>
       )}
-      <FollowupResults
-        run={run}
-        latest={followup}
-        receipt={report?.receiptId}
-        disabled={busy}
-        onOpenReceipt={choose}
-        onOpenRun={onRun}
-        onAcknowledge={(batch) =>
-          batch.runId === run.runId && batch.receiptId === report?.receiptId
-            ? acknowledge(batch.batchId)
-            : Promise.resolve(false)
-        }
-      />
       {!report &&
         (current.pending || (chosen && chosen !== latestId && historical.pending) ? (
           <Loading label="Loading accepted findings…" />
@@ -197,29 +210,6 @@ export default function Findings({ run, drafts, reviewTitle, webUrl, followup, o
         ))}
       {report && (
         <article className="stack" aria-label="Accepted findings">
-          <section className="surface-card report-heading stack">
-            <div className="spread">
-              <h3>{readable(report.verdict)}</h3>
-              <span
-                className={`badge ${report.verdict === "approve" ? "green" : report.verdict === "request_changes" || report.verdict === "blocked" ? "rose" : ""}`}
-              >
-                {chosen === latestId ? "Current" : "Historical"}
-              </span>
-            </div>
-            <p className="meta">
-              {formatTime(report.capturedAt)} · {readable(report.coverage)}
-            </p>
-            <p className="meta">
-              Reviewed SHA · <code>{report.reviewedSha ?? "Unknown"}</code>
-            </p>
-            {report.revisionReason && <p>{report.revisionReason}</p>}
-            <div className="actions">
-              <a href={reportDownload(run.runId, report.receiptId)}>Download Markdown</a>
-              <button type="button" disabled={busy} onClick={() => void acknowledge()}>
-                Mark findings viewed
-              </button>
-            </div>
-          </section>
           <Suspense fallback={<Loading label="Loading report reader…" />}>
             <ReportDocument
               key={report.receiptId}
@@ -228,9 +218,32 @@ export default function Findings({ run, drafts, reviewTitle, webUrl, followup, o
               current={chosen === latestId}
               drafts={drafts}
               reviewTitle={reviewTitle}
+              identity={identity}
               webUrl={webUrl}
             />
           </Suspense>
+          <details className="report-version-meta">
+            <summary>Report version details</summary>
+            <div className="stack">
+              <p className="meta">
+                {chosen === latestId ? "Current" : "Historical"} · {formatTime(report.capturedAt)} ·{" "}
+                {readable(report.coverage)}
+              </p>
+              <p className="meta">
+                Reviewed revision ·{" "}
+                <code title={report.reviewedSha ?? undefined}>
+                  {report.reviewedSha?.slice(0, 12) ?? "Unknown"}
+                </code>
+              </p>
+              {report.revisionReason && <p>{report.revisionReason}</p>}
+              <div className="actions">
+                <a href={reportDownload(run.runId, report.receiptId)}>Download Markdown</a>
+                <button type="button" disabled={busy} onClick={() => void acknowledge()}>
+                  Mark findings viewed
+                </button>
+              </div>
+            </div>
+          </details>
         </article>
       )}
     </div>

@@ -204,3 +204,9 @@
     padding-inline: 16px;
   }
 }
+@media (min-width: 701px) {
+  .modal.settings-pane {
+    inset-inline-end: 10px;
+    width: min(900px, calc(100vw - 10px));
+  }
+}

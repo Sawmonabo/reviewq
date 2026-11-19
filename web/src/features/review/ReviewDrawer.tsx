@@ -569,6 +569,13 @@ export default function ReviewDrawer({
                   run={run}
                   drafts={drafts}
                   reviewTitle={review.title}
+                  identity={[
+                    review.projectPath.split("/").at(-1)?.replaceAll("-", " "),
+                    `MR !${review.iid}`,
+                    review.tickets[0]?.key,
+                  ]
+                    .filter(Boolean)
+                    .join(" · ")}
                   webUrl={overview.webUrl}
                   followup={follows.data?.latestCompletedResult}
                   onRun={onRun}
@@ -706,13 +713,16 @@ function Overview({
           <div>
             <dt>Source revision</dt>
             <dd>
-              <code>{review.sourceSha}</code>
+              <code title={review.sourceSha}>{review.sourceSha.slice(0, 12)}</code>
             </dd>
           </div>
           <div>
             <dt>Reviewed revision</dt>
             <dd>
-              <code>{overview.decision?.reviewedSha ?? review.fullMrReviewedSha ?? "Unknown"}</code>
+              <code title={overview.decision?.reviewedSha ?? review.fullMrReviewedSha ?? undefined}>
+                {(overview.decision?.reviewedSha ?? review.fullMrReviewedSha)?.slice(0, 12) ??
+                  "Not recorded"}
+              </code>
             </dd>
           </div>
           <div>
@@ -760,7 +770,7 @@ function Overview({
               <div>
                 <dt>Starting revision</dt>
                 <dd>
-                  <code>{run.launch.sourceSha}</code>
+                  <code title={run.launch.sourceSha}>{run.launch.sourceSha.slice(0, 12)}</code>
                 </dd>
               </div>
             )}

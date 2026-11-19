@@ -1,6 +1,8 @@
 import { defaultRangeExtractor, useVirtualizer } from "@tanstack/react-virtual";
 import type { Root, RootContent } from "hast";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { ReportSummary } from "../../../api/generated/contracts/reports";
+import { readable } from "../../../lib/presentation";
 import { MarkdownTree } from "../../../components/markdown/MarkdownContent";
 import { Notice } from "../../../components/PanelState";
 
@@ -14,11 +16,15 @@ type Block = {
 export function RichReport({
   tree,
   source,
+  identity,
+  report,
   onQuote,
   onSource,
 }: {
   readonly tree: Root;
   readonly source: string;
+  readonly identity: string;
+  readonly report: ReportSummary;
   readonly onQuote: (text: string, offset: number) => void;
   readonly onSource: (offset: number) => void;
 }) {
@@ -100,7 +106,14 @@ export function RichReport({
       return;
     }
     const exact = selected.toString();
-    const container = root.current.querySelector(`[data-report-block="${start}"]`);
+    const container = root.current.querySelector(`[data-report-block="${start}"] .report-authored`);
+    if (
+      !container?.contains(selected.startContainer) ||
+      !container.contains(selected.endContainer)
+    ) {
+      setError("Select authored report text to quote.");
+      return;
+    }
     const preceding = document.createRange();
     setError(undefined);
     if (end === start && container && exact.trim()) {
@@ -116,38 +129,77 @@ export function RichReport({
     onSource([...source.slice(0, block.offset)].length);
   }
 
-  return (
-    <section className="rich-report stack" aria-label="Formatted accepted report">
-      <div className="actions">
-        <label>
-          Jump to section{" "}
-          <select
-            defaultValue=""
-            onChange={(event) => {
-              const index = Number(event.currentTarget.value);
-              if (usesVirtual) virtual.scrollToIndex(index, { align: "start" });
-              else
-                root.current
-                  ?.querySelector(`[data-report-block="${index}"]`)
-                  ?.scrollIntoView({ block: "start" });
-            }}
-          >
-            <option value="" disabled>
-              Choose heading
-            </option>
-            {blocks.map((block, index) =>
-              block.name ? (
-                <option key={index} value={index}>
-                  {block.name}
-                </option>
-              ) : null,
-            )}
-          </select>
-        </label>
-        <button type="button" onClick={quote}>
+  const verdictBlock = blocks.findIndex((block) => /^verdict$/i.test(block.name ?? ""));
+  function jump(index: number) {
+    if (usesVirtual) virtual.scrollToIndex(index, { align: "start" });
+    else
+      root.current
+        ?.querySelector(`[data-report-block="${index}"]`)
+        ?.scrollIntoView({ block: "start" });
+  }
+
+  function sectionLinks() {
+    return (
+      <nav className="report-section-nav" aria-label="Report sections">
+        {blocks.map((block, index) =>
+          index > 0 && index !== verdictBlock && block.name ? (
+            <button type="button" className="quiet-button" key={index} onClick={() => jump(index)}>
+              {block.name}
+            </button>
+          ) : null,
+        )}
+        <button type="button" className="quiet-button" onClick={quote}>
           Quote selection
         </button>
-      </div>
+      </nav>
+    );
+  }
+
+  function evidence(block: Block, index: number) {
+    const authoredVerdict = index === verdictBlock;
+    const header = index === 0;
+    const toolsFollow = authoredVerdict || (header && verdictBlock < 0);
+    const nodes = authoredVerdict ? block.children.slice(1) : block.children;
+    return (
+      <>
+        {header && identity && <p className="report-identity">{identity}</p>}
+        <div className={authoredVerdict ? `report-verdict ${report.verdict}` : undefined}>
+          {authoredVerdict && (
+            <strong className="report-verdict-label">{readable(report.verdict)}</strong>
+          )}
+          <div className="report-authored">
+            <MarkdownTree tree={{ type: "root", children: nodes }} />
+          </div>
+        </div>
+        {header && verdictBlock < 0 && report.verdict !== "not_specified" && (
+          <div className={`report-verdict ${report.verdict}`}>
+            <strong className="report-verdict-label">{readable(report.verdict)}</strong>
+          </div>
+        )}
+        {toolsFollow && (
+          <>
+            <div className="report-counts">
+              {report.findingCount !== null && (
+                <span>
+                  <strong>{report.findingCount}</strong>{" "}
+                  {report.findingCount === 1 ? "finding" : "findings"}
+                </span>
+              )}
+              {report.changeCount ? (
+                <span>
+                  <strong>{report.changeCount}</strong> recorded changes
+                </span>
+              ) : null}
+            </div>
+            {sectionLinks()}
+          </>
+        )}
+      </>
+    );
+  }
+
+  return (
+    <section className="rich-report stack" aria-label="Formatted accepted report">
       {error && <Notice>{error}</Notice>}
       <div
         className="report-blocks"
@@ -172,13 +224,13 @@ export function RichReport({
                     transform: `translateY(${item.start - margin}px)`,
                   }}
                 >
-                  <MarkdownTree tree={{ type: "root", children: block.children }} />
+                  {evidence(block, item.index)}
                 </div>
               );
             })
           : blocks.map((block, index) => (
               <div key={index} data-report-block={index}>
-                <MarkdownTree tree={{ type: "root", children: block.children }} />
+                {evidence(block, index)}
               </div>
             ))}
       </div>

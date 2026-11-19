@@ -44,7 +44,7 @@ export function FollowupResults({
   return (
     <details className="surface-card stack" onToggle={(event) => setOpen(event.currentTarget.open)}>
       <summary>
-        <strong>Follow-up results</strong>
+        Earlier evidence
         {batch?.kind === "unchanged" ? " · Findings unchanged" : ""}
       </summary>
       {open && (

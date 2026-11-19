@@ -20,6 +20,7 @@ type Props = {
   readonly current: boolean;
   readonly drafts: DraftStore;
   readonly reviewTitle: string;
+  readonly identity: string;
   readonly webUrl: string;
 };
 
@@ -29,6 +30,7 @@ export default function ReportDocument({
   current,
   drafts,
   reviewTitle,
+  identity,
   webUrl,
 }: Props) {
   const [source, setSource] = useState(false);
@@ -92,24 +94,6 @@ export default function ReportDocument({
 
   return (
     <>
-      <div className="spread">
-        <div className="actions">
-          {admitted && (
-            <button type="button" onClick={() => (source ? setSource(false) : openSource())}>
-              {source ? "Read formatted report" : "Read original source"}
-            </button>
-          )}
-          {report.findingCount !== null && (
-            <span className="meta">{report.findingCount} findings</span>
-          )}
-          {report.changeCount !== null && (
-            <span className="meta">{report.changeCount} recorded changes</span>
-          )}
-        </div>
-        <span className="meta" title={report.sha256}>
-          SHA-256 <code>{report.sha256.slice(0, 12)}</code>
-        </span>
-      </div>
       {notice && <Notice>{notice}</Notice>}
       {sourceMode ? (
         <ReportSource
@@ -135,6 +119,8 @@ export default function ReportDocument({
         <RichReport
           tree={tree}
           source={markdown}
+          identity={identity}
+          report={report}
           onQuote={capture}
           onSource={(offset) => {
             openSource(offset);
@@ -148,6 +134,20 @@ export default function ReportDocument({
           </button>
         </Empty>
       )}
+      <div className="report-source-tools spread">
+        {admitted && (
+          <button
+            type="button"
+            className="quiet-button"
+            onClick={() => (source ? setSource(false) : openSource())}
+          >
+            {source ? "Read formatted report" : "Read original source"}
+          </button>
+        )}
+        <span className="meta" title={report.sha256}>
+          SHA-256 <code>{report.sha256.slice(0, 12)}</code>
+        </span>
+      </div>
       {report.semanticIndex === "ready" && (
         <section className="stack" aria-label="Structured review context">
           <div className="actions report-context">
