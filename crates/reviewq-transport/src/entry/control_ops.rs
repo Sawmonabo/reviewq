@@ -32,7 +32,7 @@ pub(super) async fn review(
 ) -> Result<Response, ApiError> {
     let proof = authenticate(&entry, &uri, &headers, &bytes)?;
     let result = decide(&entry, &bytes).await;
-    signed(&entry, &proof, result)
+    signed(&entry, &proof, StatusCode::OK, result)
 }
 
 async fn decide(
@@ -113,7 +113,7 @@ pub(super) async fn ack(
         notifications::project_change(changed)
     }
     .await;
-    signed(&entry, &proof, result)
+    signed(&entry, &proof, StatusCode::OK, result)
 }
 
 fn authenticate<'a>(
@@ -129,13 +129,14 @@ fn authenticate<'a>(
     entry.auth.control("POST", target, headers, bytes)
 }
 
-fn signed(
+pub(super) fn signed(
     entry: &Entry,
     proof: &ControlRequest<'_>,
+    success_status: StatusCode,
     result: Result<impl Serialize, AppError>,
 ) -> Result<Response, ApiError> {
     let (status, body) = match result {
-        Ok(value) => (StatusCode::OK, serde_json::to_vec(&value)),
+        Ok(value) => (success_status, serde_json::to_vec(&value)),
         Err(error) => {
             let (status, failure) = super::error::failure(error);
             (status, serde_json::to_vec(&failure))

@@ -7,7 +7,7 @@ use crate::scalar::{
     CheckpointIdDto, GitShaDto, MergeRequestIidDto, ProjectIdDto, ReviewIdDto, RevisionDto,
     RunIdDto, SafeCountDto, SessionKeyDto, TicketKeyDto, UpstreamIdDto,
 };
-use crate::{ErrorDto, Page, Success, UtcTimestampDto};
+use crate::{ErrorDto, EventCursorDto, Page, Success, UtcTimestampDto};
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -23,6 +23,30 @@ pub struct QueuePage {
 }
 
 pub type QueuePageResponse = Success<QueuePage>;
+
+#[derive(Serialize)]
+#[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub enum RefreshState {
+    Running,
+    Succeeded,
+    Failed,
+    Superseded,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct RefreshReceipt {
+    pub refresh_id: EventCursorDto,
+    pub settings_revision: RevisionDto,
+    pub state: RefreshState,
+    pub finished_at: Option<UtcTimestampDto>,
+    pub total_rows: Option<SafeCountDto>,
+    pub error: Option<ErrorDto>,
+}
+
+pub type RefreshResponse = Success<RefreshReceipt>;
 
 #[derive(Debug, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]

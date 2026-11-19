@@ -13,7 +13,7 @@ use reviewq_app::queue::{
     SelectedLead, SessionPosition, SessionSummary,
 };
 use reviewq_domain::identity::{
-    GitLabOrigin, MergeRequestIid, MrIdentity, ProjectId, ReviewId, RunId,
+    EventCursor, GitLabOrigin, MergeRequestIid, MrIdentity, ProjectId, ReviewId, RunId,
 };
 use reviewq_domain::session::{
     AbsolutePath, HostProvider, LeadTarget, NativeBinding, NativeIdentity, SessionTarget,
@@ -600,7 +600,8 @@ pub(crate) fn save_review(
     if let Some(review_id) = id {
         let changed = if refresh {
             connection.execute(
-                "UPDATE reviews SET project_path=?2, title=?3, head_sha=?4, state=?5, updated_at_ms=?6
+                "UPDATE reviews SET project_path=?2, title=?3, head_sha=?4, state=?5, updated_at_ms=?6,
+                 observation_cursor=(SELECT event_head+1 FROM service_state WHERE singleton=1)
                  WHERE review_id=?1 AND updated_at_ms<=?6
                    AND (project_path, title, head_sha, state, updated_at_ms) IS DISTINCT FROM (?2, ?3, ?4, ?5, ?6)",
                 params![review_id.as_str(), source.project_path, source.title, source.head_sha.as_str(),
@@ -613,13 +614,46 @@ pub(crate) fn save_review(
     }
     let review_id: ReviewId = parse(&Uuid::new_v4().to_string())?;
     connection.execute(
-        "INSERT INTO reviews(review_id, origin, project_id, iid, project_path, title, head_sha, state, updated_at_ms)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+        "INSERT INTO reviews(review_id, origin, project_id, iid, project_path, title, head_sha, state,
+          updated_at_ms, observation_cursor)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9,
+           (SELECT event_head+1 FROM service_state WHERE singleton=1))",
         params![review_id.as_str(), source.identity.origin().as_str(), source.identity.project_id().as_sqlite_integer(),
                 source.identity.iid().as_sqlite_integer(), source.project_path, source.title, source.head_sha.as_str(),
                 state_label(source.state), source.updated_at_ms],
     )?;
     Ok((review_id, true))
+}
+
+pub(crate) fn check_observation(
+    db: &Connection,
+    before: EventCursor,
+    item: &ReviewSource,
+) -> Result<(), StoreError> {
+    let newer = db
+        .prepare_cached(
+            "SELECT EXISTS(SELECT 1 FROM reviews r WHERE origin=?1 AND project_id=?2 AND iid=?3
+          AND observation_cursor>?4
+          AND (project_path,title,head_sha,state,updated_at_ms) IS DISTINCT FROM (?5,?6,?7,?8,?9))",
+        )?
+        .query_row(
+            params![
+                item.identity.origin().as_str(),
+                item.identity.project_id().as_sqlite_integer(),
+                item.identity.iid().as_sqlite_integer(),
+                before.as_sqlite_integer(),
+                item.project_path,
+                item.title,
+                item.head_sha.as_str(),
+                state_label(item.state),
+                item.updated_at_ms,
+            ],
+            |row| row.get::<_, bool>(0),
+        )?;
+    if newer {
+        return Err(AppError::StaleRevision.into());
+    }
+    Ok(())
 }
 
 fn queue_item(row: &Row<'_>) -> Result<QueueItem, StoreError> {

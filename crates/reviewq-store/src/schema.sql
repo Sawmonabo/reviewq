@@ -55,6 +55,7 @@ CREATE TABLE reviews (
     head_sha TEXT NOT NULL CHECK (length(head_sha) IN (40, 64)),
     state TEXT NOT NULL CHECK (state IN ('open', 'closed', 'merged')),
     updated_at_ms INTEGER NOT NULL,
+    observation_cursor INTEGER NOT NULL DEFAULT 0 CHECK (observation_cursor >= 0),
     UNIQUE (origin, project_id, iid)
 ) STRICT;
 

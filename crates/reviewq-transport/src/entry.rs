@@ -26,14 +26,14 @@ use reviewq_app::reports::{
     ReportCaptureStore, ReportFileSource, ReportMutationStore, ReportStore,
 };
 use reviewq_app::settings::{ConnectionSources, NativeSkills, RuntimeSources, SettingsStore};
-use reviewq_app::sources::{SourceRefreshStore, refresh_queue};
+use reviewq_app::sources::SourceRefreshStore;
 use reviewq_app::workflow::NativeWorkflowProof;
 use reviewq_app::workspace::WorkspaceStore;
-use reviewq_domain::identity::{EventCursor, Revision};
+use reviewq_domain::identity::EventCursor;
 use reviewq_protocol::queue::QueueSync;
 use reviewq_protocol::{EventCursorDto, Success};
 use serde::{Deserialize, Serialize};
-use tokio::sync::{Mutex, Notify, Semaphore, watch};
+use tokio::sync::{Notify, Semaphore, watch};
 use tower_http::services::{ServeDir, ServeFile};
 
 mod auth;
@@ -51,6 +51,7 @@ mod mcp;
 mod messages;
 mod pages;
 mod questions;
+mod refresh;
 mod settings;
 mod sources;
 mod targets;
@@ -112,8 +113,6 @@ impl<
 {
 }
 
-type RefreshResult = Option<Result<usize, AppError>>;
-
 /// Native proof and guarded artifact reads for the workflow routes.
 pub struct WorkflowIntegration {
     pub proof: Arc<dyn NativeWorkflowProof>,
@@ -140,7 +139,6 @@ pub(super) struct Entry {
     shutdown: watch::Receiver<bool>,
     event_slots: Arc<Semaphore>,
     auth: Auth,
-    refresh: Mutex<Option<(Revision, watch::Receiver<RefreshResult>)>>,
     checkpoints: Checkpoints,
 }
 
@@ -218,7 +216,6 @@ pub fn router(
         shutdown: runtime.shutdown,
         event_slots: Arc::new(Semaphore::new(32)),
         auth: Auth::new(runtime.endpoint),
-        refresh: Mutex::new(None),
         checkpoints: Checkpoints::default(),
     });
     let web = runtime.web;
@@ -240,7 +237,8 @@ pub fn router(
         .route("/events", get(events::feed))
         .route("/session", get(session).post(start_session))
         .route("/queue", get(pages::queue))
-        .route("/queue/refresh", post(refresh))
+        .route("/queue/refresh", post(refresh::start))
+        .route("/queue/refresh/{refresh_id}", get(refresh::status))
         .route("/reviews/resolve", get(pages::resolve))
         .route("/reviews/{review_id}", get(pages::overview))
         .route("/reviews/{review_id}/changes/files", get(changes::files))
@@ -327,7 +325,7 @@ async fn poll_source(entry: Arc<Entry>, interval: Duration) {
         }
         tokio::select! {
             _ = shutdown.changed() => break,
-            _ = entry.refresh() => {},
+            _ = refresh::enqueue(&entry) => {},
         }
     }
 }
@@ -379,10 +377,7 @@ async fn status(
             ready: true,
             configured_projects: workspace.value.projects.len(),
             total_mrs: queue.value.total_mrs,
-            sync: pages::queue_sync(
-                entry.active_source().await?.collection_enabled,
-                queue.value.sync,
-            ),
+            sync: pages::queue_sync(&entry.active_source().await?, queue.value.sync),
         },
         cursor: EventCursorDto::new(queue.cursor.get()).ok_or(AppError::Internal)?,
     };
@@ -456,97 +451,7 @@ async fn start_session(
     }
 }
 
-async fn refresh(
-    State(entry): State<Arc<Entry>>,
-    OriginalUri(uri): OriginalUri,
-    headers: HeaderMap,
-) -> Result<Response, ApiError> {
-    let proof = if headers.contains_key("x-reviewq-control") {
-        Some(
-            entry.auth.control(
-                "POST",
-                uri.path_and_query()
-                    .ok_or(AppError::InvalidRequest)?
-                    .as_str(),
-                &headers,
-                b"",
-            )?,
-        )
-    } else {
-        entry.auth.browser_actor(&headers, true)?;
-        None
-    };
-    let result = entry.refresh().await;
-    let (status, body) = match result {
-        Ok(count) => (
-            200,
-            serde_json::to_vec(&Success {
-                data: serde_json::json!({"totalRows": count}),
-                cursor: entry.head().await?,
-            })
-            .map_err(|_| AppError::Internal)?,
-        ),
-        Err(error) => {
-            let (status, failure) = error::failure(error);
-            (
-                status.as_u16(),
-                serde_json::to_vec(&failure).map_err(|_| AppError::Internal)?,
-            )
-        }
-    };
-    let mut response_headers = HeaderMap::new();
-    response_headers.insert(header::CONTENT_TYPE, "application/json".parse().unwrap());
-    if let Some(proof) = proof {
-        entry
-            .auth
-            .endpoint
-            .response_proof(&proof, status, &mut response_headers, &body)?;
-    }
-    Ok((
-        axum::http::StatusCode::from_u16(status).map_err(|_| AppError::Internal)?,
-        response_headers,
-        body,
-    )
-        .into_response())
-}
-
 impl Entry {
-    async fn refresh(self: &Arc<Self>) -> Result<usize, AppError> {
-        let context = self.active_source().await?;
-        if !context.collection_enabled {
-            return Err(AppError::Unavailable);
-        }
-        if context.reader.is_none() {
-            return Err(AppError::Unavailable);
-        }
-        let revision = context.revision;
-        let mut receiver = {
-            let mut active = self.refresh.lock().await;
-            if let Some((_, receiver)) = active
-                .as_ref()
-                .filter(|(scope, receiver)| *scope == revision && receiver.borrow().is_none())
-            {
-                receiver.clone()
-            } else {
-                let (send, receive) = watch::channel(None);
-                let store = self.store.clone();
-                tokio::spawn(async move {
-                    let result =
-                        refresh_queue(store.as_ref(), context, Actor::local_operator()).await;
-                    send.send_replace(Some(result));
-                });
-                *active = Some((revision, receive.clone()));
-                receive
-            }
-        };
-        loop {
-            if let Some(result) = *receiver.borrow_and_update() {
-                return result;
-            }
-            receiver.changed().await.map_err(|_| AppError::Internal)?;
-        }
-    }
-
     async fn head(&self) -> Result<EventCursorDto, AppError> {
         let snapshot = self
             .store

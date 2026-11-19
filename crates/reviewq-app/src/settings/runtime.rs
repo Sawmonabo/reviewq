@@ -16,6 +16,7 @@ pub struct ActiveSource {
     pub tickets: Option<Arc<dyn TicketSourceReader>>,
     pub scope: Arc<WorkspaceScope>,
     pub collection_enabled: bool,
+    pub configured: bool,
 }
 
 /// The revision of the actual verified credentials used for remote I/O.
@@ -73,6 +74,8 @@ impl RuntimeSources {
             store: self.store.clone(),
             revision: saved.revision,
         };
+        let configured =
+            saved.gitlab.is_some() || saved.jira.is_some() || self.validation.is_some();
         let tickets = match saved.jira {
             Some(jira) if jira.token.is_some() => {
                 Some(self.sources.ticket_source(&jira, lease.clone())?)
@@ -93,6 +96,7 @@ impl RuntimeSources {
             tickets,
             scope: Arc::new(saved.scope),
             collection_enabled,
+            configured,
         };
         *guard = Some(active.clone());
         Ok(active)

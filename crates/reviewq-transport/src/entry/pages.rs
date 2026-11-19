@@ -11,6 +11,7 @@ use reviewq_app::queue::{
     MAX_QUEUE_PAGE, MergeRequestState, PageContext, QueueItem, QueueKey, QueueListItem,
     QueuePosition, RunPosition, SessionPosition,
 };
+use reviewq_app::settings::ActiveSource;
 use reviewq_app::sources::{SourceFailure, SourceSync};
 use reviewq_domain::identity::{EventCursor, ReviewId, RunId};
 use reviewq_domain::session::HostProvider;
@@ -153,7 +154,7 @@ pub(super) async fn queue(
                 hide_reviewed: self::count(0)?,
                 hide_in_progress: self::count(0)?,
             },
-            sync: queue_sync(entry.active_source().await?.collection_enabled, value.sync),
+            sync: queue_sync(&entry.active_source().await?, value.sync),
             settings_revision: RevisionDto::new(value.settings_revision.get())
                 .ok_or(AppError::Internal)?,
         },
@@ -161,41 +162,44 @@ pub(super) async fn queue(
     )?))
 }
 
-pub(super) fn queue_sync(configured: bool, sync: SourceSync) -> QueueSync {
-    let error = sync.error.map(|failure| {
-        let (code, message, retryable) = match failure {
-            SourceFailure::Unavailable => (
-                ErrorCode::Unavailable,
-                "Could not reach the configured review source.",
-                true,
-            ),
-            SourceFailure::TooLarge => (
-                ErrorCode::PayloadTooLarge,
-                "The review source exceeded the refresh limit.",
-                false,
-            ),
-            SourceFailure::Interrupted => (
-                ErrorCode::Unavailable,
-                "The previous refresh was interrupted.",
-                true,
-            ),
-        };
-        ErrorDto {
-            code,
-            message: message.into(),
-            retryable,
-        }
-    });
+pub(super) fn source_failure(failure: SourceFailure) -> ErrorDto {
+    let (code, message, retryable) = match failure {
+        SourceFailure::Unavailable => (
+            ErrorCode::Unavailable,
+            "Could not reach the configured review source.",
+            true,
+        ),
+        SourceFailure::TooLarge => (
+            ErrorCode::PayloadTooLarge,
+            "The review source exceeded the refresh limit.",
+            false,
+        ),
+        SourceFailure::Interrupted => (
+            ErrorCode::Unavailable,
+            "The previous refresh was interrupted.",
+            true,
+        ),
+    };
+    ErrorDto {
+        code,
+        message: message.into(),
+        retryable,
+    }
+}
+
+pub(super) fn queue_sync(active: &ActiveSource, sync: SourceSync) -> QueueSync {
+    let error = sync.error.map(source_failure);
     QueueSync {
-        mode: if error.is_some() {
-            QueueSyncMode::Disconnected
-        } else if configured {
+        mode: if active.collection_enabled {
             QueueSyncMode::Connected
+        } else if active.configured {
+            QueueSyncMode::Disconnected
         } else {
             QueueSyncMode::Setup
         },
         active: sync.active,
-        stale: configured && (sync.last_success_at_ms.is_none() || error.is_some()),
+        stale: active.configured
+            && (!active.collection_enabled || sync.last_success_at_ms.is_none() || error.is_some()),
         last_attempt_at: sync
             .last_attempt_at_ms
             .and_then(UtcTimestampDto::from_unix_milliseconds),

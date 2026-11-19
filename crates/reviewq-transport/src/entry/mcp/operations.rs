@@ -44,7 +44,7 @@ pub(super) async fn list(
             "dashboard": dashboard(entry, &item.review_id, None),
         }));
     }
-    let sync = queue_sync(entry.active_source().await?.collection_enabled, page.sync);
+    let sync = queue_sync(&entry.active_source().await?, page.sync);
     Ok(json!({
         "lastSyncAt": sync.last_success_at,
         "lastSyncAttemptAt": sync.last_attempt_at,
@@ -96,7 +96,7 @@ pub(super) async fn get(entry: &Entry, actor: Actor, args: GetReview) -> Result<
         .iter()
         .map(|run| run_summary(entry, &review, run))
         .collect();
-    let sync = queue_sync(entry.active_source().await?.collection_enabled, page.sync);
+    let sync = queue_sync(&entry.active_source().await?, page.sync);
     Ok(json!({
         "review": project_review(&page.item)?,
         "runs":runs, "total":page.total,
