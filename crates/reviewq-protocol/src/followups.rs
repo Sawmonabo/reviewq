@@ -13,6 +13,7 @@ use crate::{
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct Preferences {
     pub automatic: bool,
+    #[cfg_attr(feature = "schema", schemars(range(min = 1, max = 8)))]
     pub auto_review_concurrency: u8,
     pub revision: RevisionDto,
 }
@@ -154,6 +155,7 @@ pub struct PreferencesRequest {
     pub submission_id: SubmissionIdDto,
     pub expected_revision: RevisionDto,
     pub automatic: Option<bool>,
+    #[cfg_attr(feature = "schema", schemars(range(min = 1, max = 8)))]
     pub auto_review_concurrency: Option<u8>,
 }
 

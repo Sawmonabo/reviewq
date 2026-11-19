@@ -6,19 +6,51 @@ import type {
   CatalogRequest,
   DisconnectSettings,
   EventReplayCursor,
+  FollowupConfigureRequest,
+  FollowupMonitorRequest,
+  FollowupPreferencesRequest,
+  NotificationStateRequest,
+  QuestionAnswerRequest,
+  ReportFeedbackRequest,
+  ReviewCheckpointRequest,
+  ReviewDecisionRequest,
+  RunCatalogRequest,
+  RunPrepareRequest,
+  RunStartRequest,
+  SaveSettings,
   SendMessageRequest,
   TestConnection,
   CatalogResponse,
+  CurrentActionResponse,
   DeliveryReceiptResponse,
   Failure,
+  FollowupEnrollmentResponse,
+  FollowupMonitorResponse,
+  FollowupPreferencesResponse,
   HistoryContentResponse,
+  HistoryNavigationResponse,
   HistoryPageResponse,
+  HistoryPlanResponse,
+  LaunchReceiptResponse,
+  NotificationPageResponse,
+  NotificationStateResponse,
   PatchDiscussionsResponse,
   PatchFileIndexResponse,
+  QuestionAnswerResponse,
+  QuestionFormsResponse,
   QueuePageResponse,
+  RefreshResponse,
+  ReportCandidateResponse,
+  ReportContextResponse,
+  ReportHistoryResponse,
+  ReportSectionResponse,
+  ReportViewResponse,
+  ReviewDecisionResponse,
   ReviewOverviewResponse,
   ReviewSelectionResponse,
+  RunCatalogResponse,
   RunDetailResponse,
+  RunPreviewResponse,
   SettingsResponse,
   TerminalResponse,
   VerifiedConnectionResponse,
@@ -31,35 +63,121 @@ export function isDisconnectSettings(
   value: unknown,
 ): value is DisconnectSettings;
 export function isEventReplayCursor(value: unknown): value is EventReplayCursor;
+export function isFollowupConfigureRequest(
+  value: unknown,
+): value is FollowupConfigureRequest;
+export function isFollowupMonitorRequest(
+  value: unknown,
+): value is FollowupMonitorRequest;
+export function isFollowupPreferencesRequest(
+  value: unknown,
+): value is FollowupPreferencesRequest;
+export function isNotificationStateRequest(
+  value: unknown,
+): value is NotificationStateRequest;
+export function isQuestionAnswerRequest(
+  value: unknown,
+): value is QuestionAnswerRequest;
+export function isReportFeedbackRequest(
+  value: unknown,
+): value is ReportFeedbackRequest;
+export function isReviewCheckpointRequest(
+  value: unknown,
+): value is ReviewCheckpointRequest;
+export function isReviewDecisionRequest(
+  value: unknown,
+): value is ReviewDecisionRequest;
+export function isRunCatalogRequest(value: unknown): value is RunCatalogRequest;
+export function isRunPrepareRequest(value: unknown): value is RunPrepareRequest;
+export function isRunStartRequest(value: unknown): value is RunStartRequest;
+export function isSaveSettings(value: unknown): value is SaveSettings;
 export function isSendMessageRequest(
   value: unknown,
 ): value is SendMessageRequest;
 export function isTestConnection(value: unknown): value is TestConnection;
 export function isCatalogResponse(value: unknown): value is CatalogResponse;
+export function isCurrentActionResponse(
+  value: unknown,
+): value is CurrentActionResponse;
 export function isDeliveryReceiptResponse(
   value: unknown,
 ): value is DeliveryReceiptResponse;
 export function isFailure(value: unknown): value is Failure;
+export function isFollowupEnrollmentResponse(
+  value: unknown,
+): value is FollowupEnrollmentResponse;
+export function isFollowupMonitorResponse(
+  value: unknown,
+): value is FollowupMonitorResponse;
+export function isFollowupPreferencesResponse(
+  value: unknown,
+): value is FollowupPreferencesResponse;
 export function isHistoryContentResponse(
   value: unknown,
 ): value is HistoryContentResponse;
+export function isHistoryNavigationResponse(
+  value: unknown,
+): value is HistoryNavigationResponse;
 export function isHistoryPageResponse(
   value: unknown,
 ): value is HistoryPageResponse;
+export function isHistoryPlanResponse(
+  value: unknown,
+): value is HistoryPlanResponse;
+export function isLaunchReceiptResponse(
+  value: unknown,
+): value is LaunchReceiptResponse;
+export function isNotificationPageResponse(
+  value: unknown,
+): value is NotificationPageResponse;
+export function isNotificationStateResponse(
+  value: unknown,
+): value is NotificationStateResponse;
 export function isPatchDiscussionsResponse(
   value: unknown,
 ): value is PatchDiscussionsResponse;
 export function isPatchFileIndexResponse(
   value: unknown,
 ): value is PatchFileIndexResponse;
+export function isQuestionAnswerResponse(
+  value: unknown,
+): value is QuestionAnswerResponse;
+export function isQuestionFormsResponse(
+  value: unknown,
+): value is QuestionFormsResponse;
 export function isQueuePageResponse(value: unknown): value is QueuePageResponse;
+export function isRefreshResponse(value: unknown): value is RefreshResponse;
+export function isReportCandidateResponse(
+  value: unknown,
+): value is ReportCandidateResponse;
+export function isReportContextResponse(
+  value: unknown,
+): value is ReportContextResponse;
+export function isReportHistoryResponse(
+  value: unknown,
+): value is ReportHistoryResponse;
+export function isReportSectionResponse(
+  value: unknown,
+): value is ReportSectionResponse;
+export function isReportViewResponse(
+  value: unknown,
+): value is ReportViewResponse;
+export function isReviewDecisionResponse(
+  value: unknown,
+): value is ReviewDecisionResponse;
 export function isReviewOverviewResponse(
   value: unknown,
 ): value is ReviewOverviewResponse;
 export function isReviewSelectionResponse(
   value: unknown,
 ): value is ReviewSelectionResponse;
+export function isRunCatalogResponse(
+  value: unknown,
+): value is RunCatalogResponse;
 export function isRunDetailResponse(value: unknown): value is RunDetailResponse;
+export function isRunPreviewResponse(
+  value: unknown,
+): value is RunPreviewResponse;
 export function isSettingsResponse(value: unknown): value is SettingsResponse;
 export function isTerminalResponse(value: unknown): value is TerminalResponse;
 export function isVerifiedConnectionResponse(

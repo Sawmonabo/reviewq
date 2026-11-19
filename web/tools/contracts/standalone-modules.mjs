@@ -1,18 +1,21 @@
 import { relative, dirname } from "node:path/posix";
 import standaloneCode from "ajv/dist/standalone/index.js";
+import { format } from "prettier";
 import ts from "typescript";
 
 const SCHEMA_ID = "https://reviewq.invalid/contracts/v1.schema.json";
 const RUNTIME_FILE = "validators/runtime.mjs";
+const METADATA_LINES = 650;
 
 // Ajv builds one scope for the entire registry and shares its schema references.
 // Split the scope on its top-level declarations, preserving its dependency graph.
-export function standaloneModules(ajv, schema, roots) {
+export async function standaloneModules(ajv, schema, roots) {
   const aliases = equivalentRefs(schema.definitions);
   const canonicalRef = (ref) => aliases.get(ref) ?? ref;
   const validationSchema = JSON.parse(
     JSON.stringify(schema, (key, value) => (key === "$ref" ? canonicalRef(value) : value)),
   );
+  splitObjectChecks(validationSchema.definitions);
   ajv.addSchema(validationSchema, SCHEMA_ID);
 
   const definitions = Object.fromEntries(
@@ -28,17 +31,30 @@ export function standaloneModules(ajv, schema, roots) {
       .toLowerCase()}.mjs`;
   const validatorNames = new Map();
   for (const ref of Object.values(definitions)) registerFunction(ajv.getSchema(ref));
+  const standalone = await format(standaloneCode(ajv, definitions), { filepath: "standalone.mjs" });
   const source = ts.createSourceFile(
     "standalone.mjs",
-    standaloneCode(ajv, definitions),
+    standalone,
     ts.ScriptTarget.ESNext,
     true,
     ts.ScriptKind.JS,
   );
   const declarations = readDeclarations(source);
   const referenced = new Set();
+  let metadataGroup = 1;
+  let metadataLines = 0;
   for (const [name, declaration] of declarations) {
-    declaration.file = validatorNames.get(name) ?? RUNTIME_FILE;
+    let file = validatorNames.get(name) ?? RUNTIME_FILE;
+    if (/^schema[0-9]+$/.test(name)) {
+      const lines = declaration.statement.getText(source).split("\n").length + 1;
+      if (metadataLines !== 0 && metadataLines + lines > METADATA_LINES) {
+        metadataGroup++;
+        metadataLines = 0;
+      }
+      file = "validators/metadata-" + metadataGroup + ".mjs";
+      metadataLines += lines;
+    }
+    declaration.file = file;
     declaration.dependencies = references(declaration.statement, declarations);
     declaration.dependencies.delete(name);
   }
@@ -66,17 +82,31 @@ export function standaloneModules(ajv, schema, roots) {
       file.imports.set(owner, imported);
     }
   }
-  const modules = Array.from(files, ([file, parts]) => [
-    file,
-    [
-      ...Array.from(parts.imports, ([path, names]) => {
-        const localPath = relative(dirname(file), path);
-        return `import { ${names.join(", ")} } from "${localPath.startsWith(".") ? localPath : `./${localPath}`}";`;
+  const modules = Array.from(files, ([file, parts]) => {
+    const runtime = new Map();
+    const bodies = parts.declarations.map((body) =>
+      body.replace(/require\("ajv\/dist\/runtime\/([a-zA-Z0-9_]+)"\)\.default/g, (_, name) => {
+        const alias = "ajv_" + name;
+        runtime.set(name, alias);
+        return "(" + alias + ".default ?? " + alias + ")";
       }),
-      ...parts.declarations,
-      `export { ${parts.exports.join(", ")} };`,
-    ].join("\n"),
-  ]);
+    );
+    return [
+      file,
+      [
+        ...Array.from(
+          runtime,
+          ([name, alias]) => "import " + alias + ' from "ajv/dist/runtime/' + name + '.js";',
+        ),
+        ...Array.from(parts.imports, ([path, names]) => {
+          const localPath = relative(dirname(file), path);
+          return `import { ${names.join(", ")} } from "${localPath.startsWith(".") ? localPath : `./${localPath}`}";`;
+        }),
+        ...bodies,
+        `export { ${parts.exports.join(", ")} };`,
+      ].join("\n"),
+    ];
+  });
   return { exports, modules };
 
   function registerFunction(validate) {
@@ -93,6 +123,54 @@ export function standaloneModules(ajv, schema, roots) {
     if (referenced.has(name)) return;
     referenced.add(name);
     for (const dependency of declarations.get(name).dependencies) retain(dependency);
+  }
+}
+
+// Split property checks while retaining required fields and object membership
+// on the original schema. The public schema and type declarations stay intact.
+function splitObjectChecks(definitions) {
+  const maxProperties = 8;
+  for (const [owner, definition] of Object.entries(definitions)) {
+    let part = 0;
+    visit(definition);
+
+    function reference(schema, label) {
+      const name = owner + label + ++part;
+      if (Object.hasOwn(definitions, name)) {
+        throw new Error("Duplicate generated validator schema " + name);
+      }
+      definitions[name] = schema;
+      return { $ref: "#/definitions/" + name };
+    }
+
+    function visit(node) {
+      if (node === null || typeof node !== "object") return;
+      for (const child of Object.values(node)) visit(child);
+      for (const kind of ["anyOf", "oneOf"]) {
+        if (node[kind]) {
+          node[kind] = node[kind].map((variant) =>
+            variant.properties ? reference(variant, "Variant") : variant,
+          );
+        }
+      }
+      if (node.type !== "object" || !node.properties) return;
+      const fields = Object.entries(node.properties);
+      if (fields.length <= maxProperties) return;
+      node.properties = Object.fromEntries(fields.map(([name]) => [name, true]));
+      const checks = [...(node.allOf ?? [])];
+      for (let start = 0; start < fields.length; start += maxProperties) {
+        checks.push(
+          reference(
+            {
+              type: "object",
+              properties: Object.fromEntries(fields.slice(start, start + maxProperties)),
+            },
+            "Fields",
+          ),
+        );
+      }
+      node.allOf = checks;
+    }
   }
 }
 
