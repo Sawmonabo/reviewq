@@ -1,21 +1,109 @@
 .ticket-pane {
   min-width: 0;
-}
-.ticket-pane header > h3 {
-  font-size: 17px;
   overflow-wrap: anywhere;
 }
-.detail-facts {
-  display: grid;
-  gap: 8px 14px;
-  grid-template-columns: repeat(auto-fit, minmax(min(130px, 100%), 1fr));
+.ticket-pane > .field {
+  margin-bottom: 16px;
 }
-.detail-facts dt {
+.ticket-heading {
+  display: grid;
+  gap: 12px;
+}
+.ticket-summary {
+  margin-block: 0 2px;
+  font-size: 17px;
+}
+.overview .ticket-pane[data-single="true"] .ticket-summary {
+  display: none;
+}
+.ticket-status-line {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
   color: var(--muted);
+  font-size: 11px;
+}
+.ticket-jira-link {
+  margin-left: auto;
+  color: var(--link);
+  white-space: nowrap;
+}
+.ticket-status-line .ticket-status {
+  height: 26px;
+  padding: 0 9px;
+  border: 1px solid color-mix(in srgb, var(--green), var(--canvas) 75%);
+  border-radius: 5px;
+  font-size: 11px;
+  font-weight: 450;
+}
+.ticket-facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px 32px;
+  margin: 9px 0 22px;
+}
+.ticket-facts dt {
+  margin-bottom: 5px;
+  color: var(--muted);
+  font-size: 10px;
+}
+.ticket-facts dd {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 23px;
   font-size: 12px;
 }
-.detail-facts dd {
-  overflow-wrap: anywhere;
+.ticket-avatar {
+  display: inline-grid;
+  flex: 0 0 auto;
+  place-items: center;
+  width: 23px;
+  height: 23px;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--selected), var(--surface) 20%);
+  color: var(--link);
+  font-size: 8px;
+}
+.ticket-points {
+  margin-inline: auto;
+  font-size: 11px;
+  font-weight: 600;
+}
+.ticket-priority {
+  width: 12px;
+  color: var(--amber);
+  font-size: 20px;
+  line-height: 1;
+  transform: rotate(-90deg);
+}
+.ticket-priority:is([data-priority="low"], [data-priority="lowest"]) {
+  transform: rotate(90deg);
+}
+.ticket-description,
+.ticket-comments {
+  border-top: 1px solid var(--line);
+  padding: 24px 0 26px;
+}
+.ticket-description h3,
+.ticket-comments h3 {
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 15px;
+}
+.ticket-comments h3 .badge {
+  margin-inline-start: 7px;
+}
+.ticket-description .prose {
+  color: color-mix(in srgb, var(--text), var(--muted) 40%);
+  line-height: 1.8;
+}
+.ticket-description .prose p {
+  margin-bottom: 15px;
+}
+.ticket-description .prose li {
+  margin: 5px 0;
 }
 .ticket-comment {
   display: grid;

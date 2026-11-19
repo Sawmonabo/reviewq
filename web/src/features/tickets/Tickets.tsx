@@ -19,7 +19,11 @@ export default function Tickets({ keys }: { readonly keys: readonly string[] }) 
   const current = typeof preferred === "string" && keys.includes(preferred) ? preferred : keys[0];
   if (!current) return <Empty title="No linked Jira ticket" />;
   return (
-    <section className="ticket-pane stack" aria-label="Linked Jira ticket">
+    <section
+      className="ticket-pane"
+      data-single={keys.length === 1}
+      aria-label="Linked Jira ticket"
+    >
       {keys.length > 1 && (
         <label className="field">
           Linked ticket
@@ -69,34 +73,55 @@ function TicketDetail({ ticketKey }: { readonly ticketKey: string }) {
   const page = trail.length ? comments.data : ticket;
   return (
     <>
-      <header className="stack">
-        <div className="actions">
-          <span className="ticket-key">{ticket.key}</span>
-          {ticket.status && <span className="badge blue">{ticket.status}</span>}
-          {ticket.issueType && <span className="badge">{ticket.issueType}</span>}
+      <header className="ticket-heading">
+        <div className="ticket-status-line">
+          {ticket.status && <span className="badge ticket-status green">{ticket.status}</span>}
+          {ticket.issueType && <span>{ticket.issueType}</span>}
           {url && (
-            <a href={url} target="_blank" rel="noreferrer">
+            <a className="ticket-jira-link" href={url} target="_blank" rel="noreferrer">
               Open in Jira ↗
             </a>
           )}
         </div>
-        <h3>{ticket.title}</h3>
-        <dl className="detail-facts">
+        <h3 className="ticket-summary">{ticket.title}</h3>
+        <dl className="ticket-facts">
           <div>
             <dt>Priority</dt>
-            <dd>{ticket.priority ?? "Unknown"}</dd>
+            <dd>
+              {ticket.priority && (
+                <span
+                  className="ticket-priority"
+                  data-priority={ticket.priority.toLowerCase()}
+                  aria-hidden="true"
+                >
+                  »
+                </span>
+              )}
+              {ticket.priority ?? "Unknown"}
+            </dd>
           </div>
           <div>
             <dt>Story Points</dt>
-            <dd>{ticket.estimate === null ? "Unestimated" : ticket.estimate}</dd>
+            <dd>
+              <span
+                className="ticket-avatar ticket-points"
+                title={ticket.estimate === null ? "Unestimated" : `${ticket.estimate} story points`}
+              >
+                {ticket.estimate ?? "—"}
+              </span>
+            </dd>
           </div>
           <div>
             <dt>Assignee</dt>
-            <dd>{ticket.assignee ?? "Unassigned"}</dd>
+            <dd>
+              <TicketPerson name={ticket.assignee} fallback="Unassigned" />
+            </dd>
           </div>
           <div>
             <dt>Reporter</dt>
-            <dd>{ticket.reporter ?? "Unknown"}</dd>
+            <dd>
+              <TicketPerson name={ticket.reporter} fallback="Unknown" />
+            </dd>
           </div>
         </dl>
         {ticket.labels.length > 0 && (
@@ -125,15 +150,17 @@ function TicketDetail({ ticketKey }: { readonly ticketKey: string }) {
         <Notice key={warning}>{warning}</Notice>
       ))}
       {ticket.description && (
-        <section className="surface-card stack" aria-label="Description">
-          <h3>Description</h3>
+        <section className="ticket-description" aria-label="Description and scope">
+          <h3>Description &amp; scope</h3>
           <Suspense fallback={<pre className="prose-source">{ticket.description}</pre>}>
             <Markdown source={jiraWiki(ticket.description)} base={url} />
           </Suspense>
         </section>
       )}
-      <section className="stack" aria-label="Jira comments">
-        <h3>Comments</h3>
+      <section className="ticket-comments stack" aria-label="Jira comments">
+        <h3>
+          Comments{page?.items.length ? <span className="badge">{page.items.length}</span> : null}
+        </h3>
         {comments.error && <Notice retry={comments.retry}>{comments.error}</Notice>}
         {trail.length > 0 && comments.pending && <Loading label="Loading Jira comments…" />}
         {!page?.items.length && !trail.length && <p className="meta">No comments.</p>}
@@ -187,6 +214,31 @@ function TicketDetail({ ticketKey }: { readonly ticketKey: string }) {
           )}
         </div>
       </section>
+    </>
+  );
+}
+
+function TicketPerson({
+  name,
+  fallback,
+}: {
+  readonly name: string | null;
+  readonly fallback: string;
+}) {
+  if (!name) return <span className="meta">{fallback}</span>;
+  const initials = name
+    .trim()
+    .split(/\s+/)
+    .slice(0, 2)
+    .map((part) => part.charAt(0))
+    .join("")
+    .toUpperCase();
+  return (
+    <>
+      <span className="ticket-avatar" aria-hidden="true">
+        {initials}
+      </span>
+      <span>{name}</span>
     </>
   );
 }
