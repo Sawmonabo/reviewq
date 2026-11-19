@@ -56,6 +56,7 @@ pub struct GrantAddress {
 #[derive(Clone)]
 pub struct CheckoutProjection {
     pub settings: Revision,
+    pub generation: Revision,
     pub project: ConfiguredProject,
     pub checkout: CheckoutBinding,
     pub desired: bool,

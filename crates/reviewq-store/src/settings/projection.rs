@@ -27,7 +27,7 @@ impl RepositoryChatProjectionStore for SqliteStore {
             self.read(move |db| {
                 let settings = settings_revision(db)?;
                 let mut rows = db.prepare_cached(
-                    "SELECT common_dir,origin,project_id,checkout,desired FROM checkout_projections
+                    "SELECT common_dir,origin,project_id,checkout,desired,generation FROM checkout_projections
                      WHERE suppressed=0 AND (?1 OR ready=0) AND (?2 IS NULL OR common_dir>?2)
                      ORDER BY common_dir LIMIT 16",
                 )?;
@@ -37,6 +37,7 @@ impl RepositoryChatProjectionStore for SqliteStore {
                     let origin = row.get::<_, String>(1)?;
                     entries.push(CheckoutProjection {
                         settings,
+                        generation: Revision::try_from(row.get::<_,i64>(5)?).map_err(|_| AppError::Internal)?,
                         project: ConfiguredProject {
                             origin: GitLabOrigin::from_canonical(&origin)
                                 .map_err(|_| AppError::Internal)?,
@@ -201,7 +202,7 @@ pub(crate) fn request(
         return Err(AppError::StaleRevision.into());
     }
     let scheduled = tx.sql.execute(
-        "UPDATE checkout_projections AS p SET ready=0,issue=NULL
+        "UPDATE checkout_projections AS p SET ready=0,issue=NULL,generation=generation+1
          WHERE p.common_dir=?1 AND p.desired=1 AND p.suppressed=0 AND EXISTS (
            SELECT 1 FROM repo_grants g WHERE g.active=1 AND g.verifier IS NOT NULL
            AND (g.common_dir,g.origin,g.project_id,g.checkout)=(p.common_dir,p.origin,p.project_id,p.checkout))",
@@ -212,25 +213,6 @@ pub(crate) fn request(
         tx.emit(&[ResourceKey::Settings])?;
     }
     crate::events::snapshot(&tx.sql, scheduled)
-}
-
-pub(crate) fn applied_address(
-    tx: &mut WriteTx<'_>,
-    job: CheckoutProjection,
-    verifier: [u8; 32],
-) -> Result<(), StoreError> {
-    let current: bool = tx.sql.query_row(
-        "SELECT EXISTS(SELECT 1 FROM checkout_projections WHERE common_dir=?1 AND desired=1)",
-        [bytes(&job.checkout.common_dir)],
-        |row| row.get(0),
-    )?;
-    if current {
-        check(&tx.sql, &job)?;
-        if applied(tx, &job, &verifier)? != 0 {
-            tx.emit(&[ResourceKey::Settings])?;
-        }
-    }
-    Ok(())
 }
 
 fn applied(
@@ -265,13 +247,14 @@ fn check(db: &Connection, job: &CheckoutProjection) -> Result<(), StoreError> {
     if settings_revision(db)? != job.settings
         || !db.query_row(
             "SELECT EXISTS(SELECT 1 FROM checkout_projections WHERE
-          (common_dir,origin,project_id,checkout,desired,suppressed)=(?1,?2,?3,?4,?5,0))",
+          (common_dir,origin,project_id,checkout,desired,suppressed,generation)=(?1,?2,?3,?4,?5,0,?6))",
             params![
                 bytes(&job.checkout.common_dir),
                 job.project.origin.as_str(),
                 job.project.project_id.as_sqlite_integer(),
                 bytes(&job.checkout.root),
-                job.desired
+                job.desired,
+                job.generation.as_sqlite_integer()
             ],
             |row| row.get::<_, bool>(0),
         )?

@@ -71,6 +71,10 @@ pub(super) async fn common_directory(directory: Option<&Path>) -> Result<PathBuf
     repo_path(&selected(directory)?, "--git-common-dir").await
 }
 
+pub(super) async fn current_worktree() -> Result<PathBuf, Failure> {
+    repo_path(&selected(None)?, "--show-toplevel").await
+}
+
 pub(super) async fn require_untracked(root: &Path, paths: &[&str]) -> Result<(), Failure> {
     let mut args = vec!["--literal-pathspecs", "ls-files", "-z", "--"];
     args.extend(paths);
@@ -85,12 +89,11 @@ pub(super) async fn require_untracked(root: &Path, paths: &[&str]) -> Result<(),
 }
 
 pub(super) async fn require_ignored(root: &Path, paths: &[&str]) -> Result<(), Failure> {
-    let mut args = vec!["check-ignore", "--no-index", "-z", "--"];
-    args.extend(paths);
-    let output = git_output(root, &args).await.unwrap_or_default();
-    let ignored: Vec<_> = output.split(|byte| *byte == 0).collect();
     for path in paths {
-        if !ignored.contains(&path.as_bytes()) {
+        if git_output(root, &["check-ignore", "--no-index", "--quiet", "--", path])
+            .await
+            .is_err()
+        {
             return Err(format!(
                 "Checkout setup requires Git to ignore {}.",
                 root.join(path).display()

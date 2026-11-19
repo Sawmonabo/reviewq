@@ -30,6 +30,11 @@ pub(crate) async fn worktree(
     {
         return Err("The Git checkout does not match the registered ReviewQ setup.".into());
     }
+    let worktree = git::current_worktree().await?;
+    let inventory = projection::Inventory::load(&files::inventory(profile, &common)?)?;
+    if inventory.has_worktree(&worktree).await? {
+        return Ok(());
+    }
     let endpoint = runtime::read_endpoint(profile)?;
     let client = native_client::client()?;
     let settings_revision = settings_revision(&client, &endpoint).await?;
@@ -223,7 +228,7 @@ pub(crate) async fn revoke(profile: &Path, directory: Option<PathBuf>) -> Result
 }
 
 async fn clean_owned(profile: &Path, common: &Path) -> Result<(), Failure> {
-    hooks::cleanup(profile, common)?;
+    let hooks = hooks::cleanup(profile, common);
     let inventory = files::inventory(profile, common)?;
     let previous = projection::Inventory::load(&inventory)?;
     let _client_locks = lock_clients(profile, &previous, None)?;
@@ -235,6 +240,6 @@ async fn clean_owned(profile: &Path, common: &Path) -> Result<(), Failure> {
             &key.map_or_else(String::new, |key| URL_SAFE_NO_PAD.encode(key)),
         )
         .await?;
-    files::forget(profile, &common)?;
-    Ok(())
+    files::forget(profile, common)?;
+    hooks
 }
