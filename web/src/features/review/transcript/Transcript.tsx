@@ -542,13 +542,15 @@ export function Transcript({
               const followup = user && row.delivery?.purpose === "thread_followup";
               const automatic = followup || (user && row.delivery?.purpose === "codex_recovery");
               const role = assignment
-                ? "Parent agent"
+                ? "Assignment"
                 : user
                   ? automatic
                     ? followup
                       ? "ReviewQ follow-up"
                       : "ReviewQ"
-                    : "You"
+                    : child
+                      ? "Incoming message"
+                      : "You"
                   : providerName;
               const timestamp = row.entry?.timestamp ?? row.delivery?.createdAt;
               return (
@@ -578,7 +580,6 @@ export function Transcript({
                         )}
                       </span>
                       <strong>{role}</strong>
-                      {assignment && <span className="timeline-entry-label">Assignment</span>}
                       {timestamp && (
                         <time dateTime={timestamp} title={formatTime(timestamp)}>
                           {formatClockTime(timestamp)}

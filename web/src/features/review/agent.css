@@ -156,6 +156,12 @@
   color: var(--muted);
   font-size: 12px;
 }
+.answered-question[open] > section {
+  margin-block-start: 10px;
+}
+.answered-question ul {
+  padding-inline-start: 22px;
+}
 .message-copy {
   white-space: pre-wrap;
   overflow-wrap: anywhere;

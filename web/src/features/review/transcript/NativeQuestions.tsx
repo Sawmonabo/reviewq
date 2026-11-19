@@ -81,6 +81,8 @@ function QuestionForm({
   const busy = useRef(false);
   const element = useRef<HTMLFormElement>(null);
   const status = outcome?.original === form.status ? outcome.state : form.status;
+  const answered = status === "answered";
+  const reviewable = answered ? form.questions.filter((question) => !question.isSecret) : [];
   const includesSecret = form.questions.some((question) => question.isSecret);
   const supported = form.questions.length > 0 && (!includesSecret || form.blocking);
   const open = status === "pending" && supported;
@@ -162,11 +164,34 @@ function QuestionForm({
       }}
     >
       <div className="spread">
-        <h3>{form.blocking ? "Native input required" : "Native question"}</h3>
-        <span className="badge rose">{readable(status)}</span>
+        <h3>
+          {form.blocking && status === "pending" ? "Native input required" : "Native question"}
+        </h3>
+        <span className={answered ? "badge" : "badge rose"}>{readable(status)}</span>
       </div>
       {notice && <Notice>{notice}</Notice>}
-      {!supported && (
+      {reviewable.length > 0 && (
+        <details className="answered-question">
+          <summary>{reviewable.length === 1 ? "View question" : "View questions"}</summary>
+          {reviewable.map((question) => (
+            <section key={question.id} className="stack">
+              <strong>{question.header}</strong>
+              <p>{question.question}</p>
+              {question.options.length > 0 && (
+                <ul>
+                  {question.options.map((option) => (
+                    <li key={option.label}>
+                      {option.label}
+                      {option.description && ` · ${option.description}`}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </section>
+          ))}
+        </details>
+      )}
+      {!supported && !answered && (
         <div className="actions">
           <p className="meta">
             {includesSecret
@@ -197,6 +222,14 @@ function QuestionForm({
         <button type="submit" className="primary">
           Send answers
         </button>
+      )}
+      {supported && status === "unavailable" && (
+        <div className="actions">
+          <p className="meta">This native request is no longer available in ReviewQ.</p>
+          <button type="button" onClick={onTerminal}>
+            Open in terminal
+          </button>
+        </div>
       )}
       {status === "uncertain" && (
         <div className="actions">

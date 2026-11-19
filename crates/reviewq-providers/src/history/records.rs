@@ -590,7 +590,6 @@ fn block<R: Read>(
             let label = tools::label(&name);
             let kind = match label {
                 "Plan" => VisiblePartKind::Plan,
-                "AgentSpawn" => VisiblePartKind::Assignment,
                 _ => VisiblePartKind::ToolCall {
                     call,
                     name,
