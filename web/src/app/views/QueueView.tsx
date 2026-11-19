@@ -174,14 +174,17 @@ export function QueueView({
           settings={settings}
           facets={facets}
           loadingSprint={loadingSprint}
-          onChange={(fields) => {
+          onChange={(field, ids) => {
             sprintRequest.current++;
             setLoadingSprint(false);
             if (!settings) return;
-            const next = { ...latestFilters.current, ...fields };
+            const next = { ...latestFilters.current, [field]: ids };
             const normalized = resolveQueueScope(next, settings).filters;
+            const missingAllProjects =
+              (next.projectIds?.length ?? 0) > 0 && normalized.projectIds?.length === 0;
             update({
               ...normalized,
+              projectIds: field === "boardIds" && missingAllProjects ? null : normalized.projectIds,
               sprint:
                 next.sprint === "selected" && !normalized.sprintPairs.length
                   ? "active"

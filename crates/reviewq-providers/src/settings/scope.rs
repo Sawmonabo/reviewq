@@ -4,7 +4,8 @@ use reviewq_app::access::AppError;
 use reviewq_app::settings::SavedConnection;
 use reviewq_app::sources::ReviewSourceReader;
 use reviewq_domain::settings::{
-    BoardScope, BoardType, Connection, RepositoryBinding, WorkspaceDraft, WorkspaceScope,
+    BoardScope, BoardType, Connection, MAX_CONFIGURED_BOARDS, MAX_CONFIGURED_REPOSITORIES,
+    RepositoryBinding, WorkspaceDraft, WorkspaceScope,
 };
 
 use crate::checkout;
@@ -24,8 +25,8 @@ impl SourceAccounts {
             repositories,
             additional_reviewers,
         } = draft;
-        if repositories.len() > 256
-            || boards.len() > 128
+        if repositories.len() > MAX_CONFIGURED_REPOSITORIES
+            || boards.len() > MAX_CONFIGURED_BOARDS
             || additional_reviewers.len() > 256
             || additional_reviewers.iter().any(|id| !valid_id(*id))
             || !unique(additional_reviewers.iter().copied())

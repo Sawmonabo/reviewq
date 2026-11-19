@@ -3,6 +3,7 @@ use reviewq_app::queue::{
     CompactTicket, QueueFacet, QueueFacets, QueueFilter, QueueListItem, QueueOrder, QueueOwnership,
     QueuePage, QueuePhase, QueuePosition, QueueSortKey, SprintFilter, SprintPair, UnmatchedTicket,
 };
+use reviewq_domain::settings::{MAX_CONFIGURED_BOARDS, MAX_CONFIGURED_REPOSITORIES};
 use rusqlite::{Connection, ToSql, named_params};
 
 use super::workspace::{MR_SEARCH, read_scope};
@@ -17,8 +18,8 @@ pub(super) fn queue(
     after: Option<QueuePosition>,
     limit: u16,
 ) -> Result<QueuePage, StoreError> {
-    if filter.boards.len() > 128
-        || filter.projects.len() > 128
+    if filter.boards.len() > MAX_CONFIGURED_BOARDS
+        || filter.projects.len() > MAX_CONFIGURED_REPOSITORIES
         || filter.pairs.len() > 32
         || filter.search.chars().count() > 200
     {

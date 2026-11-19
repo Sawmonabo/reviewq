@@ -60,7 +60,7 @@ export function readFilters(raw: unknown): QueueFilters {
   const sprintPairs = selection(input.sprintPairs, /^[1-9]\d{0,18}:[1-9]\d{0,18}$/, 32) ?? [];
   return {
     boardIds: selection(input.boardIds, /^[1-9]\d{0,18}$/, 128),
-    projectIds: selection(input.projectIds, /^[1-9]\d{0,18}$/, 128),
+    projectIds: selection(input.projectIds, /^[1-9]\d{0,18}$/, 256),
     authorId: numeric(input.authorId),
     sprint:
       input.sprint === "any" ||

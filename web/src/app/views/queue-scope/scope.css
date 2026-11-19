@@ -68,3 +68,22 @@
   color: var(--red);
   font-size: 11px;
 }
+.queue-sprint-selected {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin: 6px;
+}
+.queue-sprint-selected button {
+  max-width: 100%;
+  min-height: 27px;
+  color: var(--link);
+  background: var(--selected);
+  font-size: 10px;
+  overflow-wrap: anywhere;
+}
+.queue-scope-no-results {
+  padding: 5px 10px;
+  color: var(--muted);
+  font-size: 11px;
+}

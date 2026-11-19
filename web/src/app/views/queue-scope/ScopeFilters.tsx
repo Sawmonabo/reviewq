@@ -21,7 +21,7 @@ export function ScopeFilters({
   readonly settings: SettingsView | undefined;
   readonly facets: QueueFacets | undefined;
   readonly loadingSprint: boolean;
-  readonly onChange: (fields: Pick<QueueFilters, "boardIds" | "projectIds">) => void;
+  readonly onChange: (field: "boardIds" | "projectIds", ids: readonly string[] | null) => void;
   readonly onSprint: (mode: QueueFilters["sprint"], pairs: readonly string[]) => void;
 }) {
   const {
@@ -44,7 +44,7 @@ export function ScopeFilters({
         options={boards}
         selected={boardIds}
         disabled={disabled || !boards.length}
-        onChange={(ids) => onChange({ boardIds: ids, projectIds })}
+        onChange={(ids) => onChange("boardIds", ids)}
       />
       <FilterPopover
         label="Sprint"
@@ -73,7 +73,7 @@ export function ScopeFilters({
         options={repositories}
         selected={projectIds}
         disabled={disabled || !repositories.length}
-        onChange={(ids) => onChange({ boardIds, projectIds: ids })}
+        onChange={(ids) => onChange("projectIds", ids)}
       />
     </>
   );

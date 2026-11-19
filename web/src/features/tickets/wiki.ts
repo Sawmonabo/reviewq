@@ -3,6 +3,7 @@ import { unified } from "unified";
 
 const markdown = unified().use(remarkParse);
 const wikiMacro = /\{(code|noformat)(?::([^}\r\n]*))?\}([\s\S]*?)\{\1\}/g;
+const wikiProseMarker = /(?:^h[1-6]\.[ \t]|^\|\||\{\{[^}\r\n]+\}\}|\[[^\]\n]+\|https?:)/m;
 
 type SourceRange = { start: number; end: number; replacement?: string };
 type MarkdownNode = {
@@ -44,14 +45,23 @@ export function jiraWiki(source: string): string {
     });
   }
   let position = 0;
-  let converted = "";
+  const chunks: { text: string; kind: "prose" | "code" | "wiki-code" }[] = [];
   for (const range of ranges.sort((a, b) => a.start - b.start)) {
     if (range.start < position) continue;
-    converted += wikiProse(source.slice(position, range.start));
-    converted += range.replacement ?? source.slice(range.start, range.end);
+    chunks.push({ text: source.slice(position, range.start), kind: "prose" });
+    chunks.push({
+      text: range.replacement ?? source.slice(range.start, range.end),
+      kind: range.replacement === undefined ? "code" : "wiki-code",
+    });
     position = range.end;
   }
-  return converted + wikiProse(source.slice(position));
+  chunks.push({ text: source.slice(position), kind: "prose" });
+  const jiraLists = chunks.some(
+    ({ kind, text }) => kind === "wiki-code" || (kind === "prose" && wikiProseMarker.test(text)),
+  );
+  return chunks
+    .map(({ kind, text }) => (kind === "prose" ? wikiProse(text, jiraLists) : text))
+    .join("");
 }
 
 function wikiCode(body: string, options: string | undefined) {
@@ -63,21 +73,18 @@ function wikiCode(body: string, options: string | undefined) {
   return `\n\n${fence}${/^[\w+-]+$/.test(language) ? language : ""}\n${text}\n${fence}\n\n`;
 }
 
-function wikiProse(source: string) {
-  return (
-    source
-      // A hash-only marker may be a Markdown heading. Preserve that spelling.
-      .replace(
-        /^((?=[*#]*\*)[*#]+)[ \t]+/gm,
-        (_match, prefix: string) =>
-          `${"  ".repeat(prefix.length - 1)}${prefix.endsWith("#") ? "1." : "-"} `,
-      )
-      .replace(/^h([1-6])\.[ \t]+/gm, (_match, level: string) => `${"#".repeat(Number(level))} `)
-      .replace(/\[([^|\]\r\n]+)\|(https?:[^\]\r\n]+)\]/g, "[$1]($2)")
-      .replace(/\{\{([^}\r\n]+)\}\}/g, "`$1`")
-      .replace(/^\|\|([^\r\n]*)\|\|$/gm, (_match, cells: string) => {
-        const values = cells.split("||");
-        return `| ${values.join(" | ")} |\n| ${values.map(() => "---").join(" | ")} |`;
-      })
-  );
+function wikiProse(source: string, jiraLists: boolean) {
+  return source
+    .replace(/^([*#]+)[ \t]+/gm, (match: string, prefix: string) => {
+      if (!jiraLists && !prefix.includes("*")) return match;
+      const indent = [...prefix.slice(0, -1)].map((type) => (type === "#" ? "   " : "  ")).join("");
+      return `${indent}${prefix.endsWith("#") ? "1." : "-"} `;
+    })
+    .replace(/^h([1-6])\.[ \t]+/gm, (_match, level: string) => `${"#".repeat(Number(level))} `)
+    .replace(/\[([^|\]\r\n]+)\|(https?:[^\]\r\n]+)\]/g, "[$1]($2)")
+    .replace(/\{\{([^}\r\n]+)\}\}/g, "`$1`")
+    .replace(/^\|\|([^\r\n]*)\|\|$/gm, (_match, cells: string) => {
+      const values = cells.split("||");
+      return `| ${values.join(" | ")} |\n| ${values.map(() => "---").join(" | ")} |`;
+    });
 }
