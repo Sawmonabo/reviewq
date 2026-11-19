@@ -180,7 +180,13 @@ pub struct Connections {
     pub gitlab: Option<ConnectionSummary>,
     pub jira: Option<ConnectionSummary>,
     pub scope: WorkspaceScope,
-    pub chat_setup_pending: bool,
+    pub chat_setup: ChatSetup,
+}
+
+pub struct ChatSetup {
+    pub pending: bool,
+    pub cleanup_conflict: bool,
+    pub issues: Vec<String>,
 }
 
 pub struct ConnectionSummary {

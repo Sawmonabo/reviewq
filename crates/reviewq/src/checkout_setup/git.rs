@@ -10,6 +10,7 @@ use super::Failure;
 const MAX_WORKTREES: usize = 64;
 
 pub(super) struct Checkout {
+    pub root: PathBuf,
     pub common: PathBuf,
     pub primary: PathBuf,
     pub worktrees: Vec<PathBuf>,
@@ -46,10 +47,23 @@ pub(super) async fn discover(directory: Option<&Path>) -> Result<Checkout, Failu
             return Err("A linked worktree does not match this Git repository.".into());
         }
     }
+    let mut materialized = Vec::with_capacity(worktrees.len());
+    for root in worktrees {
+        let index = git_output(
+            &root,
+            &["rev-parse", "--path-format=absolute", "--git-path", "index"],
+        )
+        .await?;
+        let index = raw_path(index.strip_suffix(b"\n").unwrap_or(&index))?;
+        if index.try_exists()? {
+            materialized.push(root);
+        }
+    }
     Ok(Checkout {
+        root: worktree,
         common,
         primary,
-        worktrees,
+        worktrees: materialized,
     })
 }
 
@@ -87,7 +101,7 @@ pub(super) async fn require_ignored(root: &Path, paths: &[&str]) -> Result<(), F
     Ok(())
 }
 
-pub(super) async fn private_config(file: &Path) -> Result<(), Failure> {
+pub(super) async fn private_config(file: &Path, needs_ignore: bool) -> Result<(), Failure> {
     let parent = file.parent().ok_or("Missing Claude profile directory.")?;
     for ancestor in parent.ancestors() {
         match ancestor.join(".git").symlink_metadata() {
@@ -98,13 +112,35 @@ pub(super) async fn private_config(file: &Path) -> Result<(), Failure> {
                     .to_str()
                     .ok_or("Expected a UTF-8 Claude profile path.")?;
                 require_untracked(&root, &[relative]).await?;
-                return require_ignored(&root, &[relative]).await;
+                if needs_ignore {
+                    return require_ignored(&root, &[relative]).await;
+                }
+                return Ok(());
             }
             Err(error) if error.kind() == ErrorKind::NotFound => continue,
             Err(error) => return Err(error.into()),
         }
     }
     Ok(())
+}
+
+pub(super) async fn verify_removal(
+    file: &Path,
+    common: &Path,
+    relative: &str,
+) -> Result<(), Failure> {
+    let count = Path::new(relative).components().count();
+    let worktree = file
+        .ancestors()
+        .nth(count)
+        .ok_or("Invalid owned file address.")?;
+    if worktree.join(relative) != file
+        || repo_path(worktree, "--git-common-dir").await? != common
+        || repo_path(worktree, "--show-toplevel").await? != worktree
+    {
+        return Err("The owned destination no longer belongs to the configured checkout.".into());
+    }
+    require_untracked(worktree, &[relative]).await
 }
 
 fn selected(directory: Option<&Path>) -> Result<PathBuf, Failure> {

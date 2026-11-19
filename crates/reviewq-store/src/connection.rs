@@ -40,6 +40,7 @@ pub struct SqliteStore {
     delivery_wakeup: watch::Sender<()>,
     report_wakeup: watch::Sender<()>,
     desktop_wakeup: watch::Sender<()>,
+    projection_wakeup: watch::Sender<()>,
 }
 
 pub(crate) struct WriteTx<'connection> {
@@ -48,6 +49,7 @@ pub(crate) struct WriteTx<'connection> {
     pub(crate) delivery_changed: bool,
     pub(crate) report_changed: bool,
     pub(crate) desktop_changed: bool,
+    pub(crate) projection_changed: bool,
 }
 
 impl SqliteStore {
@@ -60,6 +62,7 @@ impl SqliteStore {
             let (delivery_wakeup, _) = watch::channel(());
             let (report_wakeup, _) = watch::channel(());
             let (desktop_wakeup, _) = watch::channel(());
+            let (projection_wakeup, _) = watch::channel(());
             let profile = Arc::new(profile);
             let reader = Worker::start(reader, profile.clone(), false)?;
             let writer = Worker::start(writer, profile, true)?;
@@ -70,6 +73,7 @@ impl SqliteStore {
                 delivery_wakeup,
                 report_wakeup,
                 desktop_wakeup,
+                projection_wakeup,
             })
         })
         .await
@@ -104,6 +108,10 @@ impl SqliteStore {
 
     pub fn subscribe_desktop(&self) -> watch::Receiver<()> {
         self.desktop_wakeup.subscribe()
+    }
+
+    pub fn subscribe_checkout_projections(&self) -> watch::Receiver<()> {
+        self.projection_wakeup.subscribe()
     }
 
     /// Creates a verified recovery copy at a new private destination.
@@ -176,6 +184,7 @@ impl SqliteStore {
         let delivery_wakeup = self.delivery_wakeup.clone();
         let report_wakeup = self.report_wakeup.clone();
         let desktop_wakeup = self.desktop_wakeup.clone();
+        let projection_wakeup = self.projection_wakeup.clone();
         self.submit(true, move |connection, _| {
             let prepared = prepare(connection)?;
             let sql = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
@@ -185,6 +194,7 @@ impl SqliteStore {
                 delivery_changed: false,
                 report_changed: false,
                 desktop_changed: false,
+                projection_changed: false,
             };
             let result = f(&mut tx, prepared)?;
             tx.sql.commit()?;
@@ -199,6 +209,9 @@ impl SqliteStore {
             }
             if tx.desktop_changed {
                 desktop_wakeup.send_replace(());
+            }
+            if tx.projection_changed {
+                projection_wakeup.send_replace(());
             }
             Ok(result)
         })

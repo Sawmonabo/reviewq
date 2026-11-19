@@ -25,6 +25,7 @@ use super::{ApiError, Entry, control_ops};
     deny_unknown_fields
 )]
 enum Command {
+    Applied { address: Address },
     Issue { address: Address },
     Revoke { common_dir: PathBuf },
     Status { address: Address },
@@ -116,6 +117,7 @@ async fn apply(entry: &Entry, input: Command) -> Result<Success<GrantResponse>, 
                         checkout: address.checkout,
                         common_dir: address.common_dir,
                         verifier: address.verifier,
+                        operator_requested: true,
                     },
                 )
                 .await?;
@@ -125,6 +127,12 @@ async fn apply(entry: &Entry, input: Command) -> Result<Success<GrantResponse>, 
             let address = read_address(address).await?;
             let settings = address.settings;
             let stored = entry.store.granted(actor, address).await?;
+            success(project(stored.value, settings)?, stored.cursor)
+        }
+        Command::Applied { address } => {
+            let address = read_address(address).await?;
+            let settings = address.settings;
+            let stored = entry.store.confirm_grant_projection(actor, address).await?;
             success(project(stored.value, settings)?, stored.cursor)
         }
         Command::Revoke { common_dir } => {

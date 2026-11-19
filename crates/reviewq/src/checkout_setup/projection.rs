@@ -73,14 +73,37 @@ impl Inventory {
         })
     }
 
-    pub(super) fn cleanup(&self, path: &Path, bearer: &str) -> Result<(), Failure> {
+    pub(super) async fn cleanup(
+        &self,
+        path: &Path,
+        common: &Path,
+        bearer: &str,
+    ) -> Result<(), Failure> {
         let mut unresolved = Self {
             urls: self.urls.clone(),
             ..Self::default()
         };
         for owned in &self.entries {
+            if matches!(owned, Owned::Exclusion { .. }) {
+                let dependencies = self
+                    .entries
+                    .iter()
+                    .filter(|entry| {
+                        matches!(entry,
+                            Owned::Codex { file } if file.try_exists().unwrap_or(true)
+                        )
+                    })
+                    .cloned()
+                    .collect::<Vec<_>>();
+                if !dependencies.is_empty() {
+                    unresolved.entries.extend(dependencies);
+                    unresolved.entries.insert(owned.clone());
+                    continue;
+                }
+            }
             let result = self
-                .removal(owned, bearer)
+                .removal(owned, common, bearer)
+                .await
                 .and_then(|edit| edit.map_or(Ok(()), |edit| edit.apply()));
             if result.is_err() {
                 unresolved.entries.insert(owned.clone());
@@ -101,11 +124,34 @@ impl Inventory {
         Err(format!("Cleanup was deferred for {}.", paths.join(", ")).into())
     }
 
-    fn removal(&self, owned: &Owned, bearer: &str) -> Result<Option<Edit>, Failure> {
+    async fn removal(
+        &self,
+        owned: &Owned,
+        common: &Path,
+        bearer: &str,
+    ) -> Result<Option<Edit>, Failure> {
         let file = owned.file();
         let Some(before) = read(file)? else {
             return Ok(None);
         };
+        match owned {
+            Owned::Codex { .. } => git::verify_removal(file, common, CODEX[0]).await?,
+            Owned::Claude { .. } => git::private_config(file, false).await?,
+            Owned::Skill { .. } => {
+                let relative = if file
+                    .as_os_str()
+                    .as_encoded_bytes()
+                    .ends_with(CODEX[1].as_bytes())
+                {
+                    CODEX[1]
+                } else {
+                    CLAUDE[0]
+                };
+                git::verify_removal(file, common, relative).await?;
+            }
+            Owned::Exclusion { .. } if file == common.join("info/exclude") => (),
+            Owned::Exclusion { .. } => return Err(conflict(file)),
+        }
         let updated = match owned {
             Owned::Exclusion { separator, .. } => {
                 let Some(position) = find(&before.bytes, EXCLUSIONS.as_bytes()) else {
@@ -147,6 +193,9 @@ impl Inventory {
         if updated == before.bytes {
             return Ok(None);
         }
+        if matches!(owned, Owned::Codex { .. }) && updated.iter().all(u8::is_ascii_whitespace) {
+            return Ok(Some(Edit::remove(file.to_owned(), before)));
+        }
         Ok(Some(Edit::new(
             file.to_owned(),
             Some(before),
@@ -175,12 +224,15 @@ pub(super) async fn require_untracked(
     checkout: &Checkout,
     claude: Option<&Path>,
 ) -> Result<(), Failure> {
+    if !checkout.worktrees.contains(&checkout.primary) {
+        return Err("Check out a branch in the main worktree before running ReviewQ setup.".into());
+    }
     for root in &checkout.worktrees {
         git::require_untracked(root, CODEX).await?;
     }
     if let Some(file) = claude {
         git::require_untracked(&checkout.primary, CLAUDE).await?;
-        git::private_config(file).await?;
+        git::private_config(file, true).await?;
     }
     Ok(())
 }
@@ -207,7 +259,7 @@ pub(super) fn claude_config(explicit: Option<&Path>) -> Result<Option<PathBuf>, 
 }
 
 impl Plan {
-    pub(super) fn new(
+    pub(super) async fn new(
         checkout: &Checkout,
         url: &str,
         bearer: &str,
@@ -274,7 +326,8 @@ impl Plan {
             })
         {
             if let Some(edit) = previous
-                .removal(owned, bearer)
+                .removal(owned, &checkout.common, bearer)
+                .await
                 .map_err(|_| conflict(owned.file()))?
             {
                 edits.push(edit);
@@ -309,13 +362,13 @@ impl Plan {
             }
             if let Some(file) = claude {
                 git::require_ignored(&checkout.primary, CLAUDE).await?;
-                git::private_config(file).await?;
+                git::private_config(file, true).await?;
             }
             require_untracked(checkout, claude).await?;
             self.clients.apply()
         }
         .await;
-        if result.is_err() {
+        if result.is_err() && !self.clients.rollback_conflict {
             self.exclusions.rollback()?;
         }
         result
@@ -326,9 +379,8 @@ impl Plan {
     }
 
     pub(super) fn rollback(&mut self) -> Result<(), Failure> {
-        let clients = self.clients.rollback();
-        let exclusions = self.exclusions.rollback();
-        clients.and(exclusions)
+        self.clients.rollback()?;
+        self.exclusions.rollback()
     }
 }
 
@@ -469,6 +521,13 @@ fn codex(
         servers.insert("reviewq", Item::Table(server));
     } else {
         servers.remove("reviewq");
+        if configuration
+            .get("mcp_servers")
+            .and_then(Item::as_table)
+            .is_some_and(|table| table.is_implicit() && table.is_empty())
+        {
+            configuration.remove("mcp_servers");
+        }
     }
     Ok(Some(document.to_string().into_bytes()))
 }

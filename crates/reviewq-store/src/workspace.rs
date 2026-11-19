@@ -6,7 +6,8 @@ use std::os::unix::ffi::OsStrExt;
 use reviewq_app::access::{Actor, ActorScope, AppError, AppFuture};
 use reviewq_app::events::{ResourceKey, Snapshot};
 use reviewq_app::workspace::{
-    ConfiguredProject, GrantBinding, IssueGrant, WorkspaceConfig, WorkspaceContext, WorkspaceStore,
+    ConfiguredProject, GrantAddress, GrantBinding, IssueGrant, WorkspaceConfig, WorkspaceContext,
+    WorkspaceStore,
 };
 use reviewq_domain::identity::{GitLabOrigin, MrIdentity, ProjectId, ReviewId, Revision};
 use reviewq_domain::session::{AbsolutePath, HostProvider, NativeIdentity};
@@ -198,6 +199,37 @@ impl WorkspaceStore for SqliteStore {
                 .map_err(StoreError::app)
         })
     }
+    fn confirm_grant_projection(
+        &self,
+        actor: Actor,
+        expected: GrantAddress,
+    ) -> AppFuture<'_, Snapshot<GrantBinding>> {
+        Box::pin(async move {
+            operator(&actor).map_err(StoreError::app)?;
+            self.write(move |tx| {
+                let settings = expected.settings;
+                let verifier = expected.verifier;
+                let result = grants::exact(&tx.sql, expected)?;
+                crate::settings::projection::applied_address(
+                    tx,
+                    reviewq_app::workspace::CheckoutProjection {
+                        settings,
+                        desired: true,
+                        project: result.value.issuing_project.clone(),
+                        checkout: reviewq_domain::settings::CheckoutBinding {
+                            root: result.value.checkout.clone(),
+                            common_dir: result.value.common_dir.clone(),
+                        },
+                    },
+                    verifier,
+                )?;
+                snapshot(&tx.sql, result.value)
+            })
+            .await
+            .map_err(StoreError::app)
+        })
+    }
+
     fn issue_grant(
         &self,
         actor: Actor,

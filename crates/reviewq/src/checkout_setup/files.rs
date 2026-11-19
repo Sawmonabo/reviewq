@@ -28,6 +28,7 @@ pub(super) struct Edit {
 pub(super) struct Changes {
     edits: Vec<Edit>,
     committed: usize,
+    pub rollback_conflict: bool,
 }
 
 fn credential_path(profile: &Path, common: &Path) -> Result<PathBuf, Failure> {
@@ -228,6 +229,7 @@ impl Changes {
         Self {
             edits,
             committed: 0,
+            rollback_conflict: false,
         }
     }
 
@@ -249,6 +251,7 @@ impl Changes {
             failed |= edit.rollback().is_err();
         }
         self.committed = 0;
+        self.rollback_conflict |= failed;
         if failed {
             return Err("Checkout changed during setup. Divergent files were preserved.".into());
         }

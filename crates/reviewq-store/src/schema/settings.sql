@@ -35,6 +35,18 @@ CREATE TABLE settings_repositories (
 CREATE UNIQUE INDEX settings_repositories_checkout
     ON settings_repositories(common_dir) WHERE common_dir IS NOT NULL;
 
+CREATE TABLE checkout_projections (
+    common_dir BLOB PRIMARY KEY,
+    origin TEXT NOT NULL,
+    project_id INTEGER NOT NULL CHECK (project_id > 0),
+    checkout BLOB NOT NULL,
+    desired INTEGER NOT NULL CHECK (desired IN (0, 1)),
+    suppressed INTEGER NOT NULL CHECK (suppressed IN (0, 1)),
+    ready INTEGER NOT NULL CHECK (ready IN (0, 1)),
+    issue TEXT CHECK (length(CAST(issue AS BLOB)) <= 1024),
+    CHECK (ready=0 OR (desired=1 AND suppressed=0 AND issue IS NULL))
+) STRICT, WITHOUT ROWID;
+
 CREATE TABLE settings_boards (
     scope_id TEXT PRIMARY KEY,
     board_id INTEGER NOT NULL UNIQUE CHECK (board_id > 0),
