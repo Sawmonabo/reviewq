@@ -254,7 +254,7 @@
 .report-previous-threads [data-report-thread-status="attention"] {
   color: var(--amber);
 }
-.report-previous-threads :is(th, td) {
+.report-authored .prose .report-previous-threads :is(th, td) {
   border-inline: 0;
 }
 .report-previous-threads .report-thread-outcome {

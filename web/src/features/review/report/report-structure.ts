@@ -91,21 +91,36 @@ export function reportStructure(
     if (index < introEnd) {
       const recognized = authoredVerdict(node);
       if (recognized) {
-        const { tone, label, inline } = recognized;
-        const supplied = tone ?? summary.verdict;
-        const preceding = inline.length > 0;
+        const explicit =
+          next?.type === "element" && !recognized.tone && recognized.inline.length === 0
+            ? authoredVerdict(next)
+            : undefined;
+        const consumesLabel = explicit?.tone !== undefined;
+        const { tone, label, inline } = consumesLabel ? explicit : recognized;
+        if (consumesLabel) index++;
+        const afterLabel = article[index + 1];
         const following =
-          !preceding &&
-          paragraph(next) &&
-          !isMetadata(next) &&
-          !isCounts(reportText(next)) &&
-          !authoredVerdict(next);
-        const rationale = preceding ? [element("p", "", inline)] : following ? [next] : [];
+          inline.length === 0 &&
+          paragraph(afterLabel) &&
+          !isMetadata(afterLabel) &&
+          !isCounts(reportText(afterLabel)) &&
+          !authoredVerdict(afterLabel);
+        const rationale = inline.length
+          ? [element("p", "", inline)]
+          : following
+            ? [afterLabel]
+            : [];
         const recorded =
           tone && tone !== summary.verdict && summary.verdict !== "not_specified"
             ? summary.verdict
             : undefined;
-        output.push(verdict(supplied, label, rationale, recorded));
+        const card = verdict(tone ?? summary.verdict, label, rationale, recorded);
+        const labelContainer = card.children[0];
+        if (consumesLabel && labelContainer?.type === "element") {
+          labelContainer.children.unshift(styled(recognized.label, "report-verdict-caption"));
+        }
+        if (node.position) card.position = node.position;
+        output.push(card);
         if (following) index++;
         continue;
       }

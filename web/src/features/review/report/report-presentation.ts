@@ -23,6 +23,7 @@ export type ReportBlock = {
   readonly finding?: AuthoredFinding;
 };
 
+const findingHeading = /^(F-\d{1,16})(?=$|[\s:.–—-])\s*(?:[·:.–—-]\s*)?(?:(P[0-3])\s*[·–—-]\s*)?/;
 const fieldName =
   /^(Issue|Why it matters|Confirmed|Proposed comment|Location|Evidence|Suggested fix)(?=\s*(?:[:.—]|$))/i;
 
@@ -32,7 +33,12 @@ export function reportBlocks(
   report: ReportSummary,
   changes: ReadonlyMap<string, AcceptedFindingChange> | null | undefined,
 ): ReportBlock[] {
-  const blocks: { offset: number; nodes: RootContent[]; name?: string }[] = [];
+  const blocks: {
+    offset: number;
+    nodes: RootContent[];
+    name?: string;
+    findingGroup: boolean;
+  }[] = [];
   let current = blocks.at(-1);
   let hasSection = false;
   for (const node of reportStructure(tree.children, source, report, changes)) {
@@ -43,10 +49,16 @@ export function reportBlocks(
     if (
       !current ||
       heading ||
-      (current.nodes.length >= 24 && node.position?.start.offset != null)
+      (!current.findingGroup && current.nodes.length >= 24 && node.position?.start.offset != null)
     ) {
       current = {
         offset: node.position?.start.offset ?? -1,
+        findingGroup: Boolean(
+          heading &&
+          node.type === "element" &&
+          node.tagName === "h3" &&
+          findingHeading.test(heading),
+        ),
         nodes: [],
         ...(heading && node.type === "element" && node.tagName === "h2" ? { name: heading } : {}),
       };
@@ -167,9 +179,7 @@ function authoredFinding(
   const [heading, ...rest] = nodes;
   if (heading?.type !== "element" || heading.tagName !== "h3") return;
   const name = text(heading).trim();
-  const match = /^(F-\d{1,16})(?=$|[\s:.–—-])\s*(?:[·:.–—-]\s*)?(?:(P[0-3])\s*[·–—-]\s*)?/.exec(
-    name,
-  );
+  const match = findingHeading.exec(name);
   const id = match?.[1];
   if (!id || !match) return;
   const title = name.slice(match[0].length).trim();
