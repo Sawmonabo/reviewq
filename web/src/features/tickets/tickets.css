@@ -1,0 +1,7 @@
+.ticket-pane { min-width: 0; }
+.ticket-pane header > h3 { font-size: 17px; overflow-wrap: anywhere; }
+.detail-facts { display: grid; gap: 8px 14px; grid-template-columns: repeat(auto-fit, minmax(min(130px, 100%), 1fr)); }
+.detail-facts dt { color: var(--muted); font-size: 12px; }
+.detail-facts dd { overflow-wrap: anywhere; }
+.ticket-comment { display: grid; gap: 6px; }
+.prose-source { white-space: pre-wrap; overflow-wrap: anywhere; }

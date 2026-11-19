@@ -1,0 +1,33 @@
+import { lazy, Suspense, useMemo } from "react";
+import { Fragment, jsx, jsxs } from "react/jsx-runtime";
+import { toJsxRuntime } from "hast-util-to-jsx-runtime";
+import type { Root } from "hast";
+import { parseMarkdown } from "./parse-markdown";
+import "./markdown.css";
+
+const MermaidDiagram = lazy(() => import("./MermaidDiagram"));
+
+export function MarkdownContent({ source, base }: { readonly source: string; readonly base?: string | undefined }) {
+  const tree = useMemo(() => parseMarkdown(source, base), [source, base]);
+  return tree ? <MarkdownTree tree={tree} /> : <details className="surface-card">
+    <summary>Markdown source · formatting limit</summary><pre className="prose-source">{source.slice(0, 65_536)}</pre>
+    {source.length > 65_536 && <p className="meta">Source preview ends here.</p>}
+  </details>;
+}
+
+export function MarkdownTree({ tree }: { readonly tree: Root }) {
+  return <div className="prose">{toJsxRuntime(tree, {
+    Fragment, jsx, jsxs, passNode: true,
+    components: {
+      pre: ({ node, children }) => {
+        const child = node?.children[0];
+        if (child?.type === "element" && child.tagName === "code" && Array.isArray(child.properties.className) && child.properties.className.includes("language-mermaid")) {
+          const source = child.children.map((item) => item.type === "text" ? item.value : "").join("");
+          return <Suspense fallback={<pre>{source}</pre>}><MermaidDiagram source={source} /></Suspense>;
+        }
+        return <pre>{children}</pre>;
+      },
+      table: ({ children }) => <div className="table-scroll" tabIndex={0}><table>{children}</table></div>,
+    },
+  })}</div>;
+}
