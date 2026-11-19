@@ -95,15 +95,7 @@ function LaunchEditor({
 
   const request = useRef<AbortController | undefined>(undefined);
   const register = mode === "register";
-  const active = targets[0];
   const pickMode = choosing || register;
-  const registration = useResource(
-    `registration-target:${register ? (active?.reviewId ?? "") : ""}`,
-    (signal) =>
-      register && active
-        ? readOverview(active.reviewId, signal)
-        : Promise.resolve({ data: null, cursor: "" }),
-  );
   const pick = useResource(
     `launch-picker:${settingsRevision}:${search}`,
     (signal) =>
@@ -112,6 +104,17 @@ function LaunchEditor({
         signal,
       ),
     [{ kind: "queue" }, { kind: "settings" }],
+  );
+  const choices = (pick.data?.items ?? []).flatMap((item) =>
+    item.kind === "mr" && item.mrState === "open" ? [item] : [],
+  );
+  const active = targets[0] ?? (pickMode ? choices[0] : undefined);
+  const registration = useResource(
+    `registration-target:${register ? (active?.reviewId ?? "") : ""}`,
+    (signal) =>
+      register && active
+        ? readOverview(active.reviewId, signal)
+        : Promise.resolve({ data: null, cursor: "" }),
   );
   const catalogs = useResource(
     `catalog:${settingsRevision}:${provider}:${JSON.stringify(targets.map((target) => target.reviewId))}:${pickMode}`,
@@ -401,9 +404,7 @@ function LaunchEditor({
           ))}
         {pickMode && (
           <LaunchTargetPicker
-            choices={(pick.data?.items ?? []).flatMap((item) =>
-              item.kind === "mr" && item.mrState === "open" ? [item] : [],
-            )}
+            choices={choices}
             active={active}
             search={search}
             pending={pick.pending}
@@ -413,12 +414,20 @@ function LaunchEditor({
             url={url}
             onSearch={setSearch}
             onSelect={selectTarget}
-            {...(choosing ? { onPrepare: () => setChoosing(false) } : {})}
+            {...(choosing
+              ? {
+                  onPrepare: () => {
+                    if (!active) return;
+                    setTargets([active]);
+                    setChoosing(false);
+                  },
+                }
+              : {})}
             onUrl={setUrl}
             onTrack={() => void track()}
           />
         )}
-        {!choosing && active && (
+        {!choosing && (register || active) && (
           <label className="field">
             Agent provider
             <select
