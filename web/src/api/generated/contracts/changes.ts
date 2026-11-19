@@ -116,7 +116,8 @@ export interface PatchDiscussionNote {
   createdAt: UtcTimestampDto | null;
   noteId: string;
   ours: boolean;
-  resolved: boolean;
+  resolvable: boolean | null;
+  resolved: boolean | null;
   resolvedBy: UpstreamIdDto | null;
   [k: string]: unknown;
 }

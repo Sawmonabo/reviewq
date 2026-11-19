@@ -1,6 +1,7 @@
 import { lazy, Suspense, useState } from "react";
 import type { PatchDiscussion } from "../../api/generated/contracts";
 import { formatTime, safeUrl } from "../../lib/presentation";
+import { discussionStatus } from "./discussion-status";
 
 const Markdown = lazy(() =>
   import("../../components/markdown/MarkdownContent").then((module) => ({
@@ -8,17 +9,26 @@ const Markdown = lazy(() =>
   })),
 );
 
-export function DiscussionThread({ thread }: { readonly thread: PatchDiscussion }) {
+export function DiscussionThread({
+  thread,
+  outside = false,
+}: {
+  readonly thread: PatchDiscussion;
+  readonly outside?: boolean;
+}) {
   const [open, setOpen] = useState(false);
   const first = thread.notes[0];
   const source = safeUrl(thread.webUrl);
   const line = thread.anchor?.newLine ?? thread.anchor?.oldLine;
   if (!first) return null;
+  const status = { open: "Open", resolved: "Resolved", comment: "Comment", unknown: "Discussion" }[
+    discussionStatus(thread)
+  ];
   return (
     <details className="patch-discussion" onToggle={(event) => setOpen(event.currentTarget.open)}>
       <summary>
-        <strong>{first.author}</strong> ·{" "}
-        {thread.outdated ? "Earlier revision" : first.resolved ? "Resolved" : "Discussion"}
+        <strong>{first.author}</strong> · {thread.outdated ? "Earlier revision" : status}
+        {outside && " · Outside the displayed diff"}
         {thread.notes.length > 1 && ` · ${thread.notes.length} notes`}
       </summary>
       {source && (

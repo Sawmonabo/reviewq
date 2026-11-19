@@ -16,7 +16,7 @@ pub use project_history::{
 };
 pub(crate) use scope::issues as scoped_issues;
 pub use scope::{MatchedReview, ScopedIssue, ScopedMatch, ScopedSprint, SourceObservation};
-pub use tickets::{TicketComment, TicketDetail, TicketIdentity, UnverifiedTrack};
+pub use tickets::{CommentOrder, TicketComment, TicketDetail, TicketIdentity, UnverifiedTrack};
 
 /// Reads verified provider metadata outside the store transaction.
 pub trait ReviewSourceReader: ChangeSource {
@@ -104,6 +104,7 @@ pub trait TicketSourceReader: Send + Sync {
         estimate_fields: Vec<String>,
         offset: u32,
         limit: u16,
+        order: CommentOrder,
     ) -> AppFuture<'_, TicketDetail>;
     fn sprints(
         &self,

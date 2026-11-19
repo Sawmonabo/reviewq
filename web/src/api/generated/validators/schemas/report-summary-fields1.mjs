@@ -5,7 +5,7 @@ import { validate127 } from "./safe-count-dto.mjs";
 import { validate232 } from "./utc-timestamp-dto.mjs";
 import { validate260 } from "./coverage.mjs";
 import { validate147 } from "./git-sha-dto.mjs";
-function validate961(
+function validate965(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -136,7 +136,7 @@ function validate961(
                   vErrors.push(err1);
                 }
                 errors++;
-                validate961.errors = vErrors;
+                validate965.errors = vErrors;
                 return false;
               } else {
                 errors = _errs5;
@@ -156,7 +156,7 @@ function validate961(
               if (data.complete !== undefined && func0.call(data, "complete")) {
                 const _errs9 = errors;
                 if (typeof data.complete !== "boolean") {
-                  validate961.errors = [
+                  validate965.errors = [
                     {
                       instancePath: instancePath + "/complete",
                       schemaPath: "#/properties/complete/type",
@@ -253,7 +253,7 @@ function validate961(
                         vErrors.push(err3);
                       }
                       errors++;
-                      validate961.errors = vErrors;
+                      validate965.errors = vErrors;
                       return false;
                     } else {
                       errors = _errs13;
@@ -328,7 +328,7 @@ function validate961(
                           vErrors.push(err5);
                         }
                         errors++;
-                        validate961.errors = vErrors;
+                        validate965.errors = vErrors;
                         return false;
                       } else {
                         errors = _errs18;
@@ -352,7 +352,7 @@ function validate961(
         }
       }
     } else {
-      validate961.errors = [
+      validate965.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -363,7 +363,7 @@ function validate961(
       return false;
     }
   }
-  validate961.errors = vErrors;
+  validate965.errors = vErrors;
   return errors === 0;
 }
-export { validate961 };
+export { validate965 };

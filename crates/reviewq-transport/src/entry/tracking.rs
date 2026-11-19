@@ -24,6 +24,16 @@ const COMMENTS: &[u8] = b"reviewq-jira-comments-v1";
 pub(super) struct Comments {
     limit: Option<u16>,
     cursor: Option<String>,
+    #[serde(default)]
+    order: CommentOrder,
+}
+
+#[derive(Clone, Copy, Default, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+enum CommentOrder {
+    #[default]
+    Newest,
+    Oldest,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -34,6 +44,7 @@ struct CommentPosition {
     issue: u64,
     offset: u32,
     previous: (i64, u64),
+    order: CommentOrder,
 }
 
 pub(super) async fn track(
@@ -121,6 +132,7 @@ pub(super) async fn ticket(
         item.settings != active.revision.get()
             || item.key != key.as_str()
             || item.limit != limit
+            || item.order != query.order
             || item.offset == 0
     }) {
         return Err(AppError::CursorExpired.into());
@@ -135,6 +147,10 @@ pub(super) async fn ticket(
             allowed.value.estimate_fields.clone(),
             offset,
             page_limit,
+            match query.order {
+                CommentOrder::Newest => reviewq_app::sources::CommentOrder::Newest,
+                CommentOrder::Oldest => reviewq_app::sources::CommentOrder::Oldest,
+            },
         )
         .await?;
     if let Some(position) = position {
@@ -160,6 +176,7 @@ pub(super) async fn ticket(
                     issue: result.id,
                     offset,
                     previous: (previous.created_at_ms, previous.id),
+                    order: query.order,
                 },
             )?;
             PageCursorDto::new(cursor).ok_or(AppError::Internal)
@@ -175,6 +192,10 @@ pub(super) async fn ticket(
         .map(|comment| {
             Ok(dto::TicketComment {
                 id: UpstreamIdDto::new(comment.id).ok_or(AppError::Unavailable)?,
+                url: format!(
+                    "{}?focusedCommentId={}#comment-{}",
+                    result.url, comment.id, comment.id
+                ),
                 author: comment.author,
                 author_id: comment.author_id,
                 body: comment.body,
@@ -200,6 +221,7 @@ pub(super) async fn ticket(
             description: result.description,
             estimate: result.estimate,
             warnings: result.warning.into_iter().collect(),
+            comment_count: super::pages::count(u64::from(result.comment_count))?,
             comments: Page::new(comments, next).ok_or(AppError::Internal)?,
         },
         allowed.cursor,

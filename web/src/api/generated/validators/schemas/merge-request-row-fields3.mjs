@@ -2,12 +2,12 @@
 import { func0 } from "../runtime.mjs";
 import { validate69 } from "./merge-request-iid-dto.mjs";
 import { validate284 } from "./queue-status.mjs";
-import { schema254 } from "../metadata-6.mjs";
+import { schema256 } from "../metadata-6.mjs";
 import { validate127 } from "./safe-count-dto.mjs";
 import { validate114 } from "./review-id-dto.mjs";
 import { validate291 } from "./run-stage.mjs";
 import { validate147 } from "./git-sha-dto.mjs";
-function validate819(
+function validate823(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -39,7 +39,7 @@ function validate819(
         if (data.projectPath !== undefined && func0.call(data, "projectPath")) {
           const _errs2 = errors;
           if (typeof data.projectPath !== "string") {
-            validate819.errors = [
+            validate823.errors = [
               {
                 instancePath: instancePath + "/projectPath",
                 schemaPath: "#/properties/projectPath/type",
@@ -82,12 +82,12 @@ function validate819(
               let data3 = data.reasonKind;
               const _errs5 = errors;
               if (typeof data3 !== "string" && data3 !== null) {
-                validate819.errors = [
+                validate823.errors = [
                   {
                     instancePath: instancePath + "/reasonKind",
                     schemaPath: "#/properties/reasonKind/type",
                     keyword: "type",
-                    params: { type: schema254.properties.reasonKind.type },
+                    params: { type: schema256.properties.reasonKind.type },
                   },
                 ];
                 return false;
@@ -202,7 +202,7 @@ function validate819(
                         vErrors.push(err1);
                       }
                       errors++;
-                      validate819.errors = vErrors;
+                      validate823.errors = vErrors;
                       return false;
                     } else {
                       errors = _errs10;
@@ -250,7 +250,7 @@ function validate819(
         }
       }
     } else {
-      validate819.errors = [
+      validate823.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -261,7 +261,7 @@ function validate819(
       return false;
     }
   }
-  validate819.errors = vErrors;
+  validate823.errors = vErrors;
   return errors === 0;
 }
-export { validate819 };
+export { validate823 };

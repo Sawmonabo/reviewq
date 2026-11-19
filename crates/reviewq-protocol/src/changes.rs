@@ -118,6 +118,7 @@ pub struct PatchDiscussionNote {
     pub ours: bool,
     pub body: String,
     pub created_at: Option<UtcTimestampDto>,
-    pub resolved: bool,
+    pub resolvable: Option<bool>,
+    pub resolved: Option<bool>,
     pub resolved_by: Option<crate::UpstreamIdDto>,
 }

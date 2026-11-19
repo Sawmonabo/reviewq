@@ -348,6 +348,7 @@ fn discussion(
             created_at: row
                 .created_at_ms
                 .and_then(UtcTimestampDto::from_unix_milliseconds),
+            resolvable: row.resolvable,
             resolved: row.resolved,
             resolved_by: row
                 .resolved_by

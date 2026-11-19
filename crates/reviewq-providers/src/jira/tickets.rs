@@ -1,5 +1,7 @@
+use std::collections::HashSet;
+
 use reviewq_app::access::AppError;
-use reviewq_app::sources::{TicketComment, TicketDetail, TicketIdentity};
+use reviewq_app::sources::{CommentOrder, TicketComment, TicketDetail, TicketIdentity};
 use reviewq_domain::identity::TicketKey;
 use serde::Deserialize;
 use serde_json::Value;
@@ -28,6 +30,12 @@ struct Comment {
     updated: Option<String>,
 }
 
+struct CommentPage {
+    comments: Vec<TicketComment>,
+    total: u32,
+    next_offset: Option<u32>,
+}
+
 impl Jira {
     pub(super) async fn ticket_identity(&self, key: TicketKey) -> Result<TicketIdentity, AppError> {
         let (identity, _, _) = self.ticket(key, "summary,project".into()).await?;
@@ -40,6 +48,7 @@ impl Jira {
         estimate_fields: Vec<String>,
         offset: u32,
         limit: u16,
+        order: CommentOrder,
     ) -> Result<TicketDetail, AppError> {
         if !(1..=COMMENTS_PAGE).contains(&limit)
             || estimate_fields
@@ -62,7 +71,7 @@ impl Jira {
             _ => return Err(AppError::Unavailable),
         };
         let (estimate, warning) = estimate(&fields, &estimate_fields);
-        let (comments, next_offset) = self.ticket_comments(id, offset, limit).await?;
+        let page = self.ticket_comments(id, offset, limit, order).await?;
         let url = self
             .site
             .join(&format!("browse/{}", identity.key))
@@ -83,8 +92,9 @@ impl Jira {
             description,
             estimate,
             warning,
-            comments,
-            next_offset,
+            comments: page.comments,
+            comment_count: page.total,
+            next_offset: page.next_offset,
         })
     }
 
@@ -123,12 +133,17 @@ impl Jira {
         issue: u64,
         offset: u32,
         limit: u16,
-    ) -> Result<(Vec<TicketComment>, Option<u32>), AppError> {
+        order: CommentOrder,
+    ) -> Result<CommentPage, AppError> {
+        let ordering = match order {
+            CommentOrder::Newest => "-created",
+            CommentOrder::Oldest => "created",
+        };
         let page: Comments = self
             .read(
                 &format!("rest/api/2/issue/{issue}/comment"),
                 &[
-                    ("orderBy", "created".into()),
+                    ("orderBy", ordering.into()),
                     ("startAt", offset.to_string()),
                     ("maxResults", limit.to_string()),
                 ],
@@ -146,12 +161,18 @@ impl Jira {
             return Err(AppError::CursorExpired);
         }
         let mut comments = Vec::with_capacity(page.comments.len());
+        let mut ids = HashSet::with_capacity(page.comments.len());
         for item in page.comments {
             let id = numeric_id(&item.id).ok_or(AppError::Unavailable)?;
             let created_at_ms = time(&item.created)?;
-            if comments.last().is_some_and(|previous: &TicketComment| {
-                (previous.created_at_ms, previous.id) >= (created_at_ms, id)
-            }) {
+            if !ids.insert(id)
+                || comments
+                    .last()
+                    .is_some_and(|previous: &TicketComment| match order {
+                        CommentOrder::Newest => previous.created_at_ms < created_at_ms,
+                        CommentOrder::Oldest => previous.created_at_ms > created_at_ms,
+                    })
+            {
                 return Err(AppError::Unavailable);
             }
             if item.body.len() > COMMENT_LIMIT {
@@ -171,7 +192,11 @@ impl Jira {
                 updated_at_ms: item.updated.as_deref().map(time).transpose()?,
             });
         }
-        Ok((comments, (end < page.total).then_some(end)))
+        Ok(CommentPage {
+            comments,
+            total: page.total,
+            next_offset: (end < page.total).then_some(end),
+        })
     }
 }
 

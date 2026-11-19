@@ -53,7 +53,7 @@ function ThreadPortal({
   readonly patch: PatchDocument;
   readonly thread: PatchDiscussion;
 }) {
-  const [slot, setSlot] = useState<HTMLElement>();
+  const [slot, setSlot] = useState<HTMLElement | null>();
   const attach = useCallback(
     (Marker: HTMLSpanElement | null) => {
       if (!Marker) return;
@@ -64,7 +64,7 @@ function ThreadPortal({
       const target =
         (endNew != null ? patch.anchor(`new:${endNew}`) : undefined) ??
         (endOld != null ? patch.anchor(`old:${endOld}`) : undefined);
-      setSlot(target);
+      setSlot(target ?? null);
     },
     [patch, thread.anchor],
   );
@@ -72,6 +72,7 @@ function ThreadPortal({
     <>
       <span ref={attach} hidden />
       {slot && createPortal(<DiscussionThread thread={thread} />, slot)}
+      {slot === null && <DiscussionThread thread={thread} outside />}
     </>
   );
 }

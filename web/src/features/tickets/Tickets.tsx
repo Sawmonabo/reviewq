@@ -1,5 +1,6 @@
 import { lazy, Suspense, useState } from "react";
 import { readTicket } from "../../api/tickets";
+import type { TicketCommentOrder } from "../../api/tickets";
 import { Empty, Loading, Notice } from "../../components/PanelState";
 import { useResource } from "../../hooks/useResource";
 import { formatTime, safeUrl } from "../../lib/presentation";
@@ -46,31 +47,22 @@ export default function Tickets({ keys }: { readonly keys: readonly string[] }) 
 }
 
 function TicketDetail({ ticketKey }: { readonly ticketKey: string }) {
+  const [order, setOrder] = useState<TicketCommentOrder>("newest");
   const [trail, setTrail] = useState<readonly string[]>([]);
-  const primary = useResource(
-    `ticket:${ticketKey}`,
-    (signal) => readTicket(ticketKey, undefined, signal),
+  const cursor = trail.at(-1);
+  const detail = useResource(
+    JSON.stringify(["ticket", ticketKey, order, cursor]),
+    (signal) => readTicket(ticketKey, order, cursor, signal),
     [{ kind: "ticket", id: ticketKey }],
   );
-  const comments = useResource(
-    `ticket-comments:${ticketKey}:${trail.at(-1) ?? ""}`,
-    (signal) => {
-      const cursor = trail.at(-1);
-      return cursor
-        ? readTicket(ticketKey, cursor, signal)
-        : Promise.resolve({ data: null, cursor: "" });
-    },
-    [{ kind: "ticket", id: ticketKey }],
-  );
-  const ticket = primary.data;
+  const ticket = detail.data;
   if (!ticket)
-    return primary.error ? (
-      <Notice retry={primary.retry}>{primary.error}</Notice>
+    return detail.error ? (
+      <Notice retry={trail.length ? () => setTrail([]) : detail.retry}>{detail.error}</Notice>
     ) : (
       <Loading label={`Loading ${ticketKey}…`} />
     );
   const url = safeUrl(ticket.url);
-  const page = trail.length ? comments.data : ticket;
   return (
     <>
       <header className="ticket-heading">
@@ -145,7 +137,7 @@ function TicketDetail({ ticketKey }: { readonly ticketKey: string }) {
           </div>
         )}
       </header>
-      {primary.error && <Notice retry={primary.retry}>{primary.error}</Notice>}
+      {detail.error && <Notice retry={detail.retry}>{detail.error}</Notice>}
       {ticket.warnings.map((warning) => (
         <Notice key={warning}>{warning}</Notice>
       ))}
@@ -158,13 +150,28 @@ function TicketDetail({ ticketKey }: { readonly ticketKey: string }) {
         </section>
       )}
       <section className="ticket-comments stack" aria-label="Jira comments">
-        <h3>
-          Comments{page?.items.length ? <span className="badge">{page.items.length}</span> : null}
-        </h3>
-        {comments.error && <Notice retry={comments.retry}>{comments.error}</Notice>}
-        {trail.length > 0 && comments.pending && <Loading label="Loading Jira comments…" />}
-        {!page?.items.length && !trail.length && <p className="meta">No comments.</p>}
-        {page?.items.map((comment) => (
+        <div className="spread">
+          <h3>
+            Comments <span className="badge">{ticket.commentCount}</span>
+          </h3>
+          <label>
+            Sort{" "}
+            <select
+              aria-label="Sort ticket comments"
+              value={order}
+              disabled={ticket.commentCount < 2}
+              onChange={(event) => {
+                setOrder(event.currentTarget.value === "oldest" ? "oldest" : "newest");
+                setTrail([]);
+              }}
+            >
+              <option value="newest">Newest first</option>
+              <option value="oldest">Oldest first</option>
+            </select>
+          </label>
+        </div>
+        {!ticket.items.length && <p className="meta">No comments.</p>}
+        {ticket.items.map((comment) => (
           <article className="surface-card ticket-comment" key={comment.id}>
             <div className="spread">
               <strong>{comment.author ?? "Unknown author"}</strong>
@@ -184,13 +191,8 @@ function TicketDetail({ ticketKey }: { readonly ticketKey: string }) {
                 <Markdown source={jiraWiki(comment.body)} base={url} />
               </Suspense>
             )}
-            {url && (
-              <a
-                className="meta"
-                href={`${url}#comment-${encodeURIComponent(comment.id)}`}
-                target="_blank"
-                rel="noreferrer"
-              >
+            {safeUrl(comment.url) && (
+              <a className="meta" href={safeUrl(comment.url)} target="_blank" rel="noreferrer">
                 Comment permalink ↗
               </a>
             )}
@@ -202,11 +204,11 @@ function TicketDetail({ ticketKey }: { readonly ticketKey: string }) {
               Previous comments
             </button>
           )}
-          {page?.nextCursor && (
+          {ticket.nextCursor && (
             <button
               type="button"
               onClick={() => {
-                if (page.nextCursor) setTrail([...trail, page.nextCursor]);
+                if (ticket.nextCursor) setTrail([...trail, ticket.nextCursor]);
               }}
             >
               More comments

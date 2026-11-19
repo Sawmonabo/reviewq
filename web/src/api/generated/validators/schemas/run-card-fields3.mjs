@@ -2,12 +2,12 @@
 import { func0 } from "../runtime.mjs";
 import { validate69 } from "./merge-request-iid-dto.mjs";
 import { validate284 } from "./queue-status.mjs";
-import { schema324 } from "../metadata-8.mjs";
+import { schema326 } from "../metadata-8.mjs";
 import { validate127 } from "./safe-count-dto.mjs";
 import { validate114 } from "./review-id-dto.mjs";
 import { validate25 } from "./checkpoint-id-dto.mjs";
 import { validate291 } from "./run-stage.mjs";
-function validate1098(
+function validate1102(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -39,7 +39,7 @@ function validate1098(
         if (data.projectPath !== undefined && func0.call(data, "projectPath")) {
           const _errs2 = errors;
           if (typeof data.projectPath !== "string") {
-            validate1098.errors = [
+            validate1102.errors = [
               {
                 instancePath: instancePath + "/projectPath",
                 schemaPath: "#/properties/projectPath/type",
@@ -82,12 +82,12 @@ function validate1098(
               let data3 = data.reasonKind;
               const _errs5 = errors;
               if (typeof data3 !== "string" && data3 !== null) {
-                validate1098.errors = [
+                validate1102.errors = [
                   {
                     instancePath: instancePath + "/reasonKind",
                     schemaPath: "#/properties/reasonKind/type",
                     keyword: "type",
-                    params: { type: schema324.properties.reasonKind.type },
+                    params: { type: schema326.properties.reasonKind.type },
                   },
                 ];
                 return false;
@@ -174,7 +174,7 @@ function validate1098(
                           }
                         }
                       } else {
-                        validate1098.errors = [
+                        validate1102.errors = [
                           {
                             instancePath: instancePath + "/runIds",
                             schemaPath: "#/properties/runIds/type",
@@ -247,7 +247,7 @@ function validate1098(
                           vErrors.push(err1);
                         }
                         errors++;
-                        validate1098.errors = vErrors;
+                        validate1102.errors = vErrors;
                         return false;
                       } else {
                         errors = _errs13;
@@ -271,7 +271,7 @@ function validate1098(
         }
       }
     } else {
-      validate1098.errors = [
+      validate1102.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -282,7 +282,7 @@ function validate1098(
       return false;
     }
   }
-  validate1098.errors = vErrors;
+  validate1102.errors = vErrors;
   return errors === 0;
 }
-export { validate1098 };
+export { validate1102 };
