@@ -9,37 +9,34 @@ export function CheckoutSkill({ body, selected, onSelect }: {
   readonly selected: Skill | null;
   readonly onSelect: (skill: Skill | null) => void;
 }) {
-  const [state, setState] = useState<{ body: CheckoutSkillsRequest; skills?: readonly Skill[]; error?: string }>();
+  const [state, setState] = useState<{ skills?: readonly Skill[]; error?: string }>();
   const [pending, setPending] = useState(false);
   const request = useRef<AbortController | undefined>(undefined);
-  const token = body.token.action === "replace" ? body.token.value : undefined;
-  useEffect(() => () => request.current?.abort(), [token]);
-  const previousToken = state?.body.token.action === "replace" ? state.body.token.value : undefined;
-  const current = token === previousToken && state?.body.checkout === body.checkout ? state : undefined;
+  useEffect(() => () => request.state?.abort(), []);
 
   async function browse() {
-    request.current?.abort();
+    request.state?.abort();
     const controller = new AbortController();
     request.current = controller;
     setPending(true);
     try {
       const { data } = await checkoutSkills(body, controller.signal);
-      if (!controller.signal.aborted) setState({ body, skills: data.skills });
+      if (!controller.signal.aborted) setState({ skills: data.skills });
     } catch (error) {
-      if (!controller.signal.aborted) setState({ body, error: describeError(error) });
+      if (!controller.signal.aborted) setState({ error: describeError(error) });
     } finally { if (request.current === controller) setPending(false); }
   }
 
   return <div className="stack">
-    {current?.skills ? <label className="field">{readable(body.provider)} default skill
-      <select value={selected?.path ?? ""} onChange={(event) => onSelect(current.skills?.find((skill) => skill.path === event.currentTarget.value) ?? null)}>
+    {state?.skills ? <label className="field">{readable(body.provider)} default skill
+      <select value={selected?.path ?? ""} onChange={(event) => onSelect(state.skills?.find((skill) => skill.path === event.currentTarget.value) ?? null)}>
         <option value="">No default skill</option>
-        {selected && !current.skills.some((skill) => skill.path === selected.path) && <option value={selected.path}>{selected.name} · Unavailable</option>}
-        {current.skills.map((skill) => <option value={skill.path} key={skill.path}>{skill.name} · {skill.path}</option>)}
+        {selected && !state.skills.some((skill) => skill.path === selected.path) && <option value={selected.path}>{selected.name} · Unavailable</option>}
+        {state.skills.map((skill) => <option value={skill.path} key={skill.path}>{skill.name} · {skill.path}</option>)}
       </select>
     </label> : <p className="meta">{readable(body.provider)} default skill · {selected?.name ?? "No default selected"}</p>}
-    {current?.error && <Notice>{current.error}</Notice>}
+    {state?.error && <Notice>{current.error}</Notice>}
     <button type="button" disabled={pending} onClick={() => void browse()}>{pending ? "Reading checkout…" : `Browse ${readable(body.provider)} skills`}</button>
-    {selected && !current?.skills && <button type="button" onClick={() => onSelect(null)}>Clear default skill</button>}
+    {selected && !state?.skills && <button type="button" onClick={() => onSelect(null)}>Clear default skill</button>}
   </div>;
 }

@@ -1,6 +1,7 @@
 import { lazy, Suspense, useState } from "react";
 import type { RunDetail } from "../../../api/generated/contracts";
 import type { ResultSummary } from "../../../api/generated/contracts/followups";
+import type { ReportSummary } from "../../../api/generated/contracts/reports";
 import { markReportViewed, reportDownload, reportHistory, reportView } from "../../../api/reports";
 import { Empty, Loading, Notice } from "../../../components/PanelState";
 import { useResource } from "../../../hooks/useResource";
@@ -25,18 +26,19 @@ export default function Findings({ run, drafts, reviewTitle, webUrl, followup }:
     const value = savedValue(bookmark);
     return typeof value === "string" && value.length <= 256 ? value : undefined;
   });
-  const [first, setFirst] = useState<string>();
+  const [first, setFirst] = useState<ReportSummary>();
+  const [frozen, setFrozen] = useState<ReportSummary>();
   const [history, setHistory] = useState(false);
   const [cursor, setCursor] = useState<string>();
   const [notice, setNotice] = useState<string>();
   const [busy, setBusy] = useState(false);
   const current = useResource(`latest-report:${run.runId}`, async (signal) => {
     const result = await reportView(run.runId, signal);
-    const id = result.data.report?.receiptId;
-    if (id && !signal.aborted) setFirst((value) => value ?? id);
+    const latest = result.data.report;
+    if (latest && !signal.aborted) setFirst((value) => value ?? latest);
     return result;
   }, [{ kind: "report", id: run.runId }]);
-  const chosen = receipt ?? first;
+  const chosen = receipt ?? first?.receiptId;
   const latestId = current.data?.report?.receiptId;
   const historical = useResource(`report-version:${run.runId}:${chosen ?? ""}:${latestId ?? ""}`, (signal) =>
     chosen && chosen !== latestId ? reportView(run.runId, signal, chosen) : Promise.resolve({ data: null, cursor: "" }),
@@ -44,10 +46,15 @@ export default function Findings({ run, drafts, reviewTitle, webUrl, followup }:
   const versions = useResource(`report-history:${run.runId}:${history}:${cursor ?? ""}`, (signal) =>
     history ? reportHistory(run.runId, cursor, signal) : Promise.resolve({ data: null, cursor: "" }),
   [{ kind: "report", id: run.runId }]);
-  const report = chosen === latestId ? current.data?.report : historical.data?.report;
+  const report = chosen === latestId ? current.data?.report
+    : historical.data?.report ?? (frozen?.receiptId === chosen ? frozen : undefined) ?? (first?.receiptId === chosen ? first : undefined);
   const delivery = current.data?.delivery;
 
-  function choose(id: string | undefined) { setReceipt(id); setNotice(undefined); saveValue(bookmark, id ?? null); }
+  function choose(id: string | undefined) {
+    const shown = current.data?.report?.receiptId === id ? current.data?.report : versions.data?.items.find((version) => version.receiptId === id);
+    setFrozen(shown ?? undefined);
+    setReceipt(id); setNotice(undefined); saveValue(bookmark, id ?? null);
+  }
   async function acknowledge(renderedBatchId?: string) {
     if (!report || busy) return;
     setBusy(true); setNotice(undefined);

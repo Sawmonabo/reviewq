@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useEffectEvent, useRef, useState } from "react";
 import { browseCatalog } from "../../api/settings";
 import type { CatalogItem, CatalogKind, CatalogRequest, ProjectView } from "../../api/generated/contracts/settings";
 import { Empty, Loading, Notice } from "../../components/PanelState";
@@ -8,22 +8,24 @@ type Props = {
   readonly label: string;
   readonly scope: Omit<CatalogRequest, "kind" | "cursor" | "q" | "view">;
   readonly kind: CatalogKind;
+  readonly connectionEpoch: number;
   readonly unavailable: readonly string[];
   readonly onAdd: (item: CatalogItem) => void;
 };
 
-export function CatalogPicker({ label, scope, kind, unavailable, onAdd }: Props) {
+export function CatalogPicker({ label, scope, kind, unavailable, onAdd, connectionEpoch }: Props) {
   const [open, setOpen] = useState(false);
   const [q, setQuery] = useState("");
   const [view, setView] = useState<ProjectView>("member");
   const [forced, setForced] = useState(0);
-  const [page, setPage] = useState<{ scope: string; query: string; items: readonly CatalogItem[]; next: string | null }>();
+  const [page, setPage] = useState<{ query: string; items: readonly CatalogItem[]; next: string | null }>();
   const [error, setError] = useState<{ query: string; message: string }>();
   const [busy, setBusy] = useState(false);
   const current = useRef<AbortController | undefined>(undefined);
   const search = useRef<HTMLInputElement>(null);
   const first = useRef<HTMLButtonElement>(null);
-  const scopeKey = JSON.stringify(scope);
+  const scopeKey = JSON.stringify([scope.expectedRevision, scope.provider, scope.boardId, connectionEpoch]);
+  const lookup = useEffectEvent((signal: AbortSignal) => browseCatalog({ ...scope, kind, q, ...(kind === "projects" ? { view } : {}) }, signal));
   const query = JSON.stringify([scopeKey, q, view]);
   const bound = page?.query === query ? page : undefined;
   const visible = bound?.items.filter((item) => !unavailable.includes(item.id));
@@ -35,10 +37,9 @@ export function CatalogPicker({ label, scope, kind, unavailable, onAdd }: Props)
     current.current = controller;
     const timer = window.setTimeout(() => {
       setBusy(true);
-      const body = JSON.parse(scopeKey) as typeof scope;
-      void browseCatalog({ ...body, kind, q, ...(kind === "projects" ? { view } : {}) }, controller.signal).then(
+      void lookup(controller.signal).then(
         ({ data }) => {
-          if (!controller.signal.aborted) { setPage({ scope: scopeKey, query, items: data.items, next: data.nextCursor }); setError(undefined); setBusy(false); }
+          if (!controller.signal.aborted) { setPage({ query, items: data.items, next: data.nextCursor }); setError(undefined); setBusy(false); }
         },
         (failure: unknown) => {
           if (!controller.signal.aborted) { setError({ query, message: describeError(failure) }); setBusy(false); }
@@ -56,7 +57,7 @@ export function CatalogPicker({ label, scope, kind, unavailable, onAdd }: Props)
     setBusy(true);
     try {
       const { data } = await browseCatalog({ ...scope, kind, q, cursor: bound.next, ...(kind === "projects" ? { view } : {}) }, controller.signal);
-      if (!controller.signal.aborted) setPage({ scope: scopeKey, query, items: [...bound.items, ...data.items].slice(0, 400), next: data.nextCursor });
+      if (!controller.signal.aborted) setPage({ query, items: [...bound.items, ...data.items].slice(0, 400), next: data.nextCursor });
     } catch (failure) {
       if (!controller.signal.aborted) setError({ query, message: describeError(failure) });
     } finally { if (!controller.signal.aborted) setBusy(false); }

@@ -1,4 +1,4 @@
-import { useEffect, useEffectEvent, useState } from "react";
+import { useEffect, useEffectEvent, useRef, useState } from "react";
 import { observeSnapshot, watchResources } from "../api/events";
 import type { ResourceKeyDto } from "../api/generated/contracts";
 
@@ -19,14 +19,39 @@ export function useResource<T>(
   const [epoch, setEpoch] = useState(0);
   const readCurrent = useEffectEvent(read);
   const keys = JSON.stringify(resources);
+  const lease = useRef<ReturnType<typeof watchResources> | undefined>(undefined);
+
+  useEffect(() => {
+    const entries = JSON.parse(keys) as ResourceKeyDto[];
+    if (!entries.length) return;
+    let timer: number | undefined;
+    const registered = watchResources(entries, () => {
+      if (timer === undefined) {
+        timer = window.setTimeout(() => {
+          timer = undefined;
+          setEpoch((value) => value + 1);
+        }, 85);
+      }
+    });
+    lease.current = registered;
+    return () => {
+      registered.close();
+      if (lease.current === registered) lease.current = undefined;
+      if (timer !== undefined) window.clearTimeout(timer);
+    };
+  }, [key, keys]);
 
   useEffect(() => {
     const controller = new AbortController();
+    const registered = lease.current;
+    const hide = () => controller.abort();
+    window.addEventListener("pagehide", hide);
     void readCurrent(controller.signal).then(
       ({ data, cursor }) => {
         if (controller.signal.aborted) return;
         setResult({ key, data, confirmedAt: Date.now() });
-        observeSnapshot(cursor);
+        if (registered) registered.snapshot(cursor);
+        else observeSnapshot(cursor);
       },
       (error: unknown) => {
         if (!controller.signal.aborted) {
@@ -38,26 +63,11 @@ export function useResource<T>(
         }
       },
     );
-    return () => controller.abort();
-  }, [key, epoch]);
-
-  useEffect(() => {
-    const entries = JSON.parse(keys) as ResourceKeyDto[];
-    if (!entries.length) return;
-    let timer: number | undefined;
-    const unsubscribe = watchResources(entries, () => {
-      if (timer === undefined) {
-        timer = window.setTimeout(() => {
-          timer = undefined;
-          setEpoch((value) => value + 1);
-        }, 85);
-      }
-    });
     return () => {
-      unsubscribe();
-      if (timer !== undefined) window.clearTimeout(timer);
+      controller.abort();
+      window.removeEventListener("pagehide", hide);
     };
-  }, [keys]);
+  }, [key, keys, epoch]);
 
   const current = result?.key === key ? result : undefined;
   return { ...current, pending: current === undefined, retry: () => setEpoch((value) => value + 1) };

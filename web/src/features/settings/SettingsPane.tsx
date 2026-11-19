@@ -16,7 +16,7 @@ type Editor = {
   readonly draft: SettingsDraft;
   readonly tokens: Record<Provider, string>;
 };
-type Verified = { readonly identity: string; readonly configuration: object; readonly token: string };
+type Verified = { readonly identity: string };
 
 export default function SettingsPane({ onClose, onSave }: { readonly onClose: () => void; readonly onSave: () => void }) {
   const read = useResource("settings", readSettings);
@@ -34,6 +34,7 @@ function SettingsEditor({ initial, onClose, onSave }: { readonly initial: Settin
   const [verified, setVerified] = useState<Partial<Record<Provider, Verified>>>({});
   const [errors, setErrors] = useState<Partial<Record<Provider, string>>>({});
   const [notice, setNotice] = useState<string>();
+  const [credentialEpoch, setCredentialEpoch] = useState<Record<Provider, number>>({ gitlab: 0, jira: 0 });
   const [conflict, setConflict] = useState<SettingsView>();
   const [saved, setSaved] = useState(false);
   const [reviewers, setReviewers] = useState(initial.additionalReviewerIds.join(", "));
@@ -44,6 +45,7 @@ function SettingsEditor({ initial, onClose, onSave }: { readonly initial: Settin
 
   function edit(next: SettingsDraft) { setEditor((previous) => ({ ...previous, draft: next })); setSaved(false); }
   function connectionChanged(provider: Provider) {
+    setCredentialEpoch((previous) => ({ ...previous, [provider]: previous[provider] + 1 }));
     tests.current[provider]?.abort();
     setTesting((value) => value === provider ? undefined : value);
     setVerified((previous) => ({ ...previous, [provider]: undefined }) as Partial<Record<Provider, Verified>>);
@@ -67,7 +69,7 @@ function SettingsEditor({ initial, onClose, onSave }: { readonly initial: Settin
     try {
       const { data } = await testConnection(body, controller.signal);
       if (!controller.signal.aborted && data.provider === provider) {
-        setVerified((previous) => ({ ...previous, [provider]: { identity: data.identity.label, configuration: draft[provider], token: tokens[provider] } }));
+        setVerified((previous) => ({ ...previous, [provider]: { identity: data.identity.label } }));
         setErrors((previous) => ({ ...previous, [provider]: undefined }) as Partial<Record<Provider, string>>);
       }
     } catch (error) {
@@ -138,7 +140,7 @@ function SettingsEditor({ initial, onClose, onSave }: { readonly initial: Settin
           <div className="connection-grid">{(["gitlab", "jira"] as const).map((provider) => {
             const connection = snapshot.connections[provider];
             const confirmationResult = verified[provider];
-            const verifiedLabel = confirmationResult?.configuration === draft[provider] && confirmationResult.token === tokens[provider] ? confirmationResult.identity : undefined;
+            const verifiedLabel = confirmationResult?.identity;
             return <fieldset className="surface-card stack" key={provider} disabled={busy}>
               <legend>{provider === "gitlab" ? "GitLab" : "Jira Cloud"}</legend>
               {provider === "gitlab" ? <label className="field">Origin<input type="url" value={draft.gitlab.origin} onChange={(event) => { connectionChanged(provider); edit({ ...draft, gitlab: { origin: event.currentTarget.value } }); }} placeholder="https://gitlab.example.com" /></label>
@@ -163,7 +165,7 @@ function SettingsEditor({ initial, onClose, onSave }: { readonly initial: Settin
           </div>}
         </section>
         <section className="settings-section stack" aria-labelledby="team-boards"><h3 id="team-boards">Team boards</h3>
-          <CatalogPicker scope={scoped("jira")} kind="boards" label="Browse Jira boards" unavailable={draft.boards.map((board) => board.boardId)} onAdd={addBoard} />
+          <CatalogPicker connectionEpoch={credentialEpoch.jira} scope={scoped("jira")} kind="boards" label="Browse Jira boards" unavailable={draft.boards.map((board) => board.boardId)} onAdd={addBoard} />
           {draft.boards.map((board) => <details className="surface-card stack" key={board.scopeId}>
             <summary><strong>{board.name}</strong> · <span className="meta">{readable(board.type)} · {board.enabled ? "Enabled" : "Paused"}</span></summary>
             <div className="stack settings-editor">
@@ -173,8 +175,8 @@ function SettingsEditor({ initial, onClose, onSave }: { readonly initial: Settin
                 <label className="field">Estimate field<input value={board.storyPointsField ?? ""} onChange={(event) => patchBoard({ ...board, storyPointsField: event.currentTarget.value || null })} /></label>
                 <label className="field">Saved filter ID<input value={board.teamFilterId ?? ""} onChange={(event) => patchBoard({ ...board, teamFilterId: event.currentTarget.value || null })} /></label>
               </div>
-              <CatalogPicker scope={scoped("jira")} kind="filters" label="Browse saved filters" unavailable={board.teamFilterId ? [board.teamFilterId] : []} onAdd={(item) => patchBoard({ ...board, teamFilterId: item.id })} />
-              <CatalogPicker scope={{ ...scoped("jira"), boardId: board.boardId }} kind="statuses" label="Browse review statuses" unavailable={board.reviewStatusIds} onAdd={(item) => patchBoard({ ...board, reviewStatusIds: [...board.reviewStatusIds, item.id] })} />
+              <CatalogPicker connectionEpoch={credentialEpoch.jira} scope={scoped("jira")} kind="filters" label="Browse saved filters" unavailable={board.teamFilterId ? [board.teamFilterId] : []} onAdd={(item) => patchBoard({ ...board, teamFilterId: item.id })} />
+              <CatalogPicker connectionEpoch={credentialEpoch.jira} scope={{ ...scoped("jira"), boardId: board.boardId }} kind="statuses" label="Browse review statuses" unavailable={board.reviewStatusIds} onAdd={(item) => patchBoard({ ...board, reviewStatusIds: [...board.reviewStatusIds, item.id] })} />
               <div className="actions">{board.reviewStatusIds.map((id) => <button type="button" key={id} aria-label={`Remove status ${id}`} onClick={() => patchBoard({ ...board, reviewStatusIds: board.reviewStatusIds.filter((item) => item !== id) })}>Status {id} ×</button>)}</div>
               <div className="stack"><strong>Repositories in this board</strong>{draft.repositories.map((repo) => <label key={repo.projectId}>
                 <input type="checkbox" checked={board.projectIds.includes(repo.projectId)} onChange={(event) => patchBoard({ ...board, projectIds: event.currentTarget.checked ? [...board.projectIds, repo.projectId] : board.projectIds.filter((id) => id !== repo.projectId) })} /> {repo.path}
@@ -184,7 +186,7 @@ function SettingsEditor({ initial, onClose, onSave }: { readonly initial: Settin
           </details>)}
         </section>
         <section className="settings-section stack" aria-labelledby="settings-repositories"><h3 id="settings-repositories">Repositories &amp; agents</h3>
-          <CatalogPicker scope={scoped("gitlab")} kind="projects" label="Browse repositories" unavailable={draft.repositories.map((repo) => repo.projectId)} onAdd={addRepo} />
+          <CatalogPicker connectionEpoch={credentialEpoch.gitlab} scope={scoped("gitlab")} kind="projects" label="Browse repositories" unavailable={draft.repositories.map((repo) => repo.projectId)} onAdd={addRepo} />
           {draft.repositories.map((repo) => <div className="surface-card stack" key={repo.projectId}>
             <div className="spread"><strong>{repo.path}</strong><button type="button" onClick={() => edit({ ...draft, repositories: draft.repositories.filter((item) => item.projectId !== repo.projectId),
               boards: draft.boards.map((board) => ({ ...board, projectIds: board.projectIds.filter((id) => id !== repo.projectId) })) })}>Remove repository</button></div>
@@ -193,7 +195,7 @@ function SettingsEditor({ initial, onClose, onSave }: { readonly initial: Settin
               <label className="field">Board access<select value={repo.boardSelection} onChange={(event) => patchRepo({ ...repo, boardSelection: event.currentTarget.value === "any" ? "any" : "selected" })}><option value="selected">Selected boards</option><option value="any">Any tracked board</option></select></label>
             </div>
             {repo.checkout && <div className="fields">{(["codex", "claude"] as const).map((provider) =>
-              <CheckoutSkill key={JSON.stringify([provider, repo.projectId, repo.checkout, draft.gitlab.origin, snapshot.settingsRevision])}
+              <CheckoutSkill key={JSON.stringify([provider, repo.projectId, repo.checkout, draft.gitlab.origin, snapshot.settingsRevision, credentialEpoch.gitlab])}
                 body={{ expectedRevision: snapshot.settingsRevision, projectId: repo.projectId, checkout: repo.checkout ?? "", gitlab: draft.gitlab, token: tokenInput(tokens.gitlab), provider }}
                 selected={repo.defaultSkills[provider] ?? null}
                 onSelect={(skill) => patchRepo({ ...repo, defaultSkills: { ...repo.defaultSkills, [provider]: skill } })} />)}</div>}

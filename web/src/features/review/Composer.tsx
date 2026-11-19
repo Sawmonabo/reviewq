@@ -10,7 +10,7 @@ import type { DraftStore } from "../../lib/drafts";
 import { describeError } from "../../lib/presentation";
 import { submits } from "../../lib/submit-key";
 
-type Attempt = { readonly submissionId: string; readonly dispatch: () => Promise<DeliveryReceipt>; readonly accepted?: () => void; readonly receipt?: DeliveryReceipt; readonly error?: string };
+type Attempt = { readonly submissionId: string; readonly dispatch?: () => Promise<DeliveryReceipt>; readonly accepted?: () => void; readonly receipt?: DeliveryReceipt; readonly error?: string };
 const attempts = new WeakMap<DraftStore, Map<string, Attempt>>();
 const labels = {
   queued: "Queued", dispatching: "Delivering", started: "Delivered", uncertain: "Delivery uncertain", rejected: "Rejected",
@@ -55,7 +55,7 @@ export function Composer({ store, target, draftKey, label, targetLabel, draftLab
   }
 
   function finish(attempt: Attempt, receipt: DeliveryReceipt) {
-    remember({ ...attempt, receipt });
+    remember({ submissionId: attempt.submissionId, receipt });
     const accepted = receipt.state !== "rejected";
     if (accepted && !attempt.receipt) {
       store.finish(draftKey, true);
@@ -70,7 +70,7 @@ export function Composer({ store, target, draftKey, label, targetLabel, draftLab
       const result = await readReceipt(target, attempt.submissionId, AbortSignal.timeout(10_000));
       finish(attempt, result);
     } catch (error) {
-      if (retry && error instanceof ApiResponseError && error.code === "not_found") {
+      if (retry && attempt.dispatch && error instanceof ApiResponseError && error.code === "not_found") {
         try {
           const receipt = await attempt.dispatch();
           finish(attempt, receipt);
@@ -84,15 +84,16 @@ export function Composer({ store, target, draftKey, label, targetLabel, draftLab
     const captured = store.freeze(draftKey);
     if (!captured) return;
     const submissionId = crypto.randomUUID();
+    const dispatch = () => send?.(captured.text, submissionId) ?? sendMessage(target, { text: captured.text, submissionId });
     const attempt: Attempt = {
       submissionId,
-      dispatch: () => send?.(captured.text, submissionId) ?? sendMessage(target, { text: captured.text, submissionId }),
+      dispatch,
       ...(onAccepted ? { accepted: onAccepted } : {}),
     };
     remember(attempt);
     setBusy(true);
     try {
-      const receipt = await attempt.dispatch();
+      const receipt = await dispatch();
       finish(attempt, receipt);
     } catch (error) {
       if (error instanceof ApiResponseError && !error.retryable) {
@@ -121,7 +122,7 @@ export function Composer({ store, target, draftKey, label, targetLabel, draftLab
     {current && <div className="spread composer-status" role="status">
       <span>{current.receipt ? labels[current.receipt.state] : busy ? "Submitting…" : "Delivery unconfirmed"}{current.error && ` · ${current.error}`}</span>
       {unconfirmed && <button type="button" disabled={busy} onClick={() => void reconcile(current, false)}>Check delivery</button>}
-      {!current.receipt && current.error && !disabled && <button type="button" disabled={busy} onClick={() => void reconcile(current, true)}>Retry same submission</button>}
+      {!current.receipt && current.error && current.dispatch && !disabled && <button type="button" disabled={busy} onClick={() => void reconcile(current, true)}>Retry same submission</button>}
     </div>}
     {failure && <Notice>{failure}</Notice>}
     {rejectedEdit && <Notice>Draft storage full. Shorten an existing draft or free space before inserting more text.</Notice>}
