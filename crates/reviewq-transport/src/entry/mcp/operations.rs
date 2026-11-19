@@ -169,6 +169,8 @@ pub(super) async fn transcript(
                 HistoryQuery {
                     limit: Some(limit),
                     cursor,
+                    around_id: None,
+                    locator: None,
                 },
                 budget,
             )
