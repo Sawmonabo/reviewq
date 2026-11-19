@@ -7,17 +7,19 @@ pub struct UnverifiedTrack {
     pub candidate_tickets: Vec<TicketKey>,
 }
 
+#[derive(Clone)]
 pub struct TicketIdentity {
     pub key: TicketKey,
     pub title: String,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Eq, PartialEq)]
 pub enum CommentOrder {
     Newest,
     Oldest,
 }
 
+#[derive(Clone)]
 pub struct TicketDetail {
     pub identity: TicketIdentity,
     pub id: u64,
@@ -41,6 +43,7 @@ pub struct TicketDetail {
     pub next_offset: Option<u32>,
 }
 
+#[derive(Clone)]
 pub struct TicketComment {
     pub id: u64,
     pub author: Option<String>,

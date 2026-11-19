@@ -210,6 +210,7 @@ impl Codex {
             (method, guard)
         };
 
+        let answers_question = guard.async_question().is_some();
         match self
             .connection
             .submit(method, params, guard, question_source)
@@ -218,6 +219,9 @@ impl Codex {
             Err(CallError::BeforeSend(_)) => DeliveryObservation::NotSubmitted,
             Err(CallError::Denied(AppError::Busy | AppError::Unavailable)) => {
                 DeliveryObservation::NotSubmitted
+            }
+            Err(CallError::Denied(AppError::PreconditionFailed)) if answers_question => {
+                DeliveryObservation::QuestionAlreadyAnswered
             }
             Err(CallError::Denied(_)) => DeliveryObservation::Rejected,
             // A reply, missing reply or exact remote error alone does not prove native input.

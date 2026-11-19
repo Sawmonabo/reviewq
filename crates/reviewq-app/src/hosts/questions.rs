@@ -127,6 +127,21 @@ pub struct ObservedAsyncQuestion {
     pub state: QuestionStatus,
 }
 
+impl ObservedAsyncQuestion {
+    /// An addressable state projection when its body cannot be recovered.
+    pub fn form(&self, state: QuestionStatus) -> QuestionForm {
+        QuestionForm {
+            request: self.key.request.clone(),
+            turn: self.key.turn.clone(),
+            item: self.key.item.clone(),
+            blocking: false,
+            mode: QuestionMode::Async,
+            state,
+            questions: Vec::new(),
+        }
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct AsyncQuestionDispatch {
     pub session: HistorySession,

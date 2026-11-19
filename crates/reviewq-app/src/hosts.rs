@@ -498,6 +498,8 @@ pub enum DeliveryObservation {
     },
     /// The host rejected the input definitively.
     Rejected,
+    /// A separately observed native answer made the unsent reply obsolete.
+    QuestionAlreadyAnswered,
     /// The call might have taken effect, requiring reconciliation before retry.
     Uncertain,
     /// Exact readback can continue at an older native page. No dispatch is authorized.

@@ -89,6 +89,9 @@ pub(super) async fn enqueue(entry: &Arc<Entry>) -> Result<Snapshot<RefreshReceip
         let actor = Actor::local_operator();
         let admission = store.begin_refresh(actor.clone(), context.revision).await?;
         if admission.started {
+            if let Some(tickets) = &context.tickets {
+                tickets.invalidate_issue_details(None);
+            }
             let attempt = admission.receipt.value.attempt;
             tokio::spawn(async move {
                 let _ = refresh_queue(store.as_ref(), context, actor, attempt).await;

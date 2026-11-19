@@ -31,6 +31,7 @@ pub(crate) struct Jira {
     api: Url,
     headers: HeaderMap,
     lease: Option<reviewq_app::settings::SourceLease>,
+    ticket_cache: tickets::Cache,
 }
 
 #[derive(Deserialize)]
@@ -117,6 +118,7 @@ impl Jira {
             api,
             headers,
             lease,
+            ticket_cache: tickets::Cache::default(),
         })
     }
 

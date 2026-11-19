@@ -202,6 +202,7 @@ pub(super) fn claim(
                         target.target(),
                         &delivery_id,
                         &DeliveryOutcome::Rejected,
+                        false,
                     )?;
                 }
                 emit_delivery(tx, target.target())?;
@@ -459,6 +460,7 @@ fn finish_with(
     if let DeliveryObservation::RecoveryAllowanceChanged(ref allowance) = observation {
         crate::hosts::recovery::refresh_allowance(&tx.sql, &claim, allowance)?;
     }
+    let terminal_answer = matches!(observation, DeliveryObservation::QuestionAlreadyAnswered);
     let outcome = match observation {
         DeliveryObservation::NotSubmitted
             if matches!(authority, CompletionAuthority::ClaudeDrop) =>
@@ -485,6 +487,13 @@ fn finish_with(
             DeliveryOutcome::Started(input)
         }
         DeliveryObservation::Rejected => DeliveryOutcome::Rejected,
+        DeliveryObservation::QuestionAlreadyAnswered
+            if stored.operation == async_answers::OPERATION
+                && ClaimKind::from_work(&claim.work) == ClaimKind::Dispatch =>
+        {
+            DeliveryOutcome::Rejected
+        }
+        DeliveryObservation::QuestionAlreadyAnswered => return Err(AppError::Conflict.into()),
         DeliveryObservation::Uncertain
         | DeliveryObservation::ReconcileFrom(_)
         | DeliveryObservation::UncertainInput { .. } => DeliveryOutcome::Uncertain,
@@ -571,7 +580,13 @@ fn finish_with(
         )?;
     }
     if stored.operation == async_answers::OPERATION {
-        async_answers::advance(tx, claim.target.target(), &claim.delivery_id, &outcome)?;
+        async_answers::advance(
+            tx,
+            claim.target.target(),
+            &claim.delivery_id,
+            &outcome,
+            terminal_answer,
+        )?;
     }
     tx.delivery_changed = true;
     stored.receipt.outcome = outcome;

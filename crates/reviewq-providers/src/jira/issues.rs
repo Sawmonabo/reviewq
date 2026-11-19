@@ -55,6 +55,13 @@ impl TicketSourceReader for Jira {
         Box::pin(self.ticket_detail(key, estimate_fields, offset, limit, order))
     }
 
+    fn invalidate_issue_details(&self, key: Option<&TicketKey>) {
+        match key {
+            Some(key) => self.ticket_cache.remove(key),
+            None => self.ticket_cache.clear(),
+        }
+    }
+
     fn sprints(&self, board: u64, offset: u32, include_closed: bool) -> AppFuture<'_, SprintPage> {
         Box::pin(async move {
             let mut parameters = vec![

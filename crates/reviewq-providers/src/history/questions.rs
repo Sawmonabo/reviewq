@@ -89,9 +89,11 @@ pub(super) fn read(
     let mut lines = file::Lines::new(&source.file, cancel);
     let mut forms = Vec::with_capacity(known.len());
     for evidence in known {
-        if let Some((_, form)) = exact(source, &mut lines, &generation, complete, evidence)? {
-            forms.push(form);
-        }
+        let form = exact(source, &mut lines, &generation, complete, evidence)?.map_or_else(
+            || evidence.form(QuestionStatus::Unavailable),
+            |(_, form)| form,
+        );
+        forms.push(form);
     }
     if forms.len() < MAX_FORMS && (request.is_none() || forms.is_empty()) {
         let new = recent(source, cancel, &generation, complete)?;
