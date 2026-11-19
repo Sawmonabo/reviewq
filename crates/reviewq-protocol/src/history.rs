@@ -185,13 +185,57 @@ pub struct HistoryContent {
 
 pub type HistoryContentResponse = Success<HistoryContent>;
 
-/// Ordered visible content for the first Codex reader.
+/// Ordered visible blocks from the selected native conversation.
 #[derive(Debug, Serialize)]
-#[serde(tag = "kind", rename_all = "snake_case")]
+#[serde(
+    tag = "kind",
+    rename_all = "snake_case",
+    rename_all_fields = "camelCase"
+)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub enum HistoryPart {
-    UserPrompt { text: HistoryText },
-    AssistantText { text: HistoryText },
+    UserPrompt {
+        text: HistoryText,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        content_ref: Option<HistoryCursorDto>,
+    },
+    AssistantText {
+        text: HistoryText,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        content_ref: Option<HistoryCursorDto>,
+    },
+    ToolCall {
+        call_id: HistoryEntryIdDto,
+        name: String,
+        label: &'static str,
+        state: HistoryToolState,
+        text: HistoryText,
+        content_ref: Option<HistoryCursorDto>,
+    },
+    ToolResult {
+        call_id: HistoryEntryIdDto,
+        state: HistoryToolState,
+        text: HistoryText,
+        content_ref: Option<HistoryCursorDto>,
+    },
+    Plan {
+        text: HistoryText,
+        content_ref: Option<HistoryCursorDto>,
+    },
+    Assignment {
+        text: HistoryText,
+        content_ref: Option<HistoryCursorDto>,
+    },
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub enum HistoryToolState {
+    Running,
+    Completed,
+    Failed,
+    Unknown,
 }
 
 /// Visible text bounded by its exact decoded UTF-8 byte length.

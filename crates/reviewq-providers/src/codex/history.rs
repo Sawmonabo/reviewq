@@ -4,6 +4,7 @@ use std::os::unix::fs::MetadataExt;
 use reviewq_app::access::AppError;
 use reviewq_app::history::{
     HistorySession, NativeHistoryPage, NativePosition, TurnWindow, VisibleEntry, VisibleKind,
+    VisiblePart, VisiblePartKind,
 };
 use reviewq_domain::identity::NativeTurnId;
 use reviewq_domain::session::HostProvider;
@@ -57,6 +58,18 @@ pub(super) enum Item {
         status: String,
         exit_code: Option<i32>,
         aggregated_output: Option<String>,
+    },
+    Plan {
+        id: String,
+        text: String,
+    },
+    McpToolCall {
+        id: String,
+        server: String,
+        tool: String,
+        status: String,
+        arguments: Option<serde_json::Value>,
+        result: Option<serde_json::Value>,
     },
     #[serde(other)]
     Other,
@@ -278,6 +291,7 @@ fn visible(
     started: Option<i64>,
     completed: Option<i64>,
 ) -> Option<Result<VisibleEntry, AppError>> {
+    let mut parts = Vec::new();
     let (id, text, kind, at_ms) = match item {
         Item::UserMessage { id, content, .. } => {
             let text = content
@@ -291,7 +305,50 @@ fn visible(
             (id, text, VisibleKind::User, started)
         }
         Item::AgentMessage { id, text, .. } => (id, text, VisibleKind::Assistant, completed),
-        Item::Other | Item::CommandExecution { .. } => return None,
+        Item::Plan { id, mut text } => {
+            text.truncate(text.floor_char_boundary(text.len().min(16 * 1024)));
+            parts.push(VisiblePart {
+                kind: VisiblePartKind::Plan,
+                text,
+                content: None,
+            });
+            (id, String::new(), VisibleKind::Assistant, completed)
+        }
+        Item::CommandExecution {
+            id,
+            command,
+            status,
+            aggregated_output,
+            ..
+        } => {
+            parts = rpc_tool(&id, "CommandExecution", status, command, aggregated_output)?;
+            (id, String::new(), VisibleKind::Assistant, completed)
+        }
+        Item::McpToolCall {
+            id,
+            server,
+            tool,
+            status,
+            arguments,
+            result,
+        } => {
+            if server.len() + tool.len() > 128
+                || server.chars().chain(tool.chars()).any(char::is_control)
+            {
+                return None;
+            }
+            let name = format!("mcp__{server}__{tool}");
+            let arguments = arguments.map(|value| value.to_string()).unwrap_or_default();
+            parts = rpc_tool(
+                &id,
+                &name,
+                status,
+                arguments,
+                result.map(|value| value.to_string()),
+            )?;
+            (id, String::new(), VisibleKind::Assistant, completed)
+        }
+        Item::Other => return None,
     };
     Some(
         id.parse()
@@ -303,7 +360,39 @@ fn visible(
                 text,
                 content: None,
                 text_bytes: None,
+                parts,
             })
             .map_err(|_| AppError::Unavailable),
     )
+}
+
+fn rpc_tool(
+    id: &str,
+    name: &str,
+    status: String,
+    mut argument: String,
+    result: Option<String>,
+) -> Option<Vec<VisiblePart>> {
+    let call: reviewq_domain::identity::NativeInputId = id.parse().ok()?;
+    let state = crate::history::tools::state(Some(&status));
+    argument.truncate(argument.floor_char_boundary(argument.len().min(2048)));
+    let mut parts = vec![VisiblePart {
+        kind: VisiblePartKind::ToolCall {
+            call: call.clone(),
+            name: name.to_owned(),
+            label: crate::history::tools::label(name),
+            state,
+        },
+        text: argument,
+        content: None,
+    }];
+    if let Some(mut text) = result.filter(|value| !value.is_empty()) {
+        text.truncate(text.floor_char_boundary(text.len().min(4096)));
+        parts.push(VisiblePart {
+            kind: VisiblePartKind::ToolResult { call, state },
+            text,
+            content: None,
+        });
+    }
+    Some(parts)
 }

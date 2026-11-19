@@ -5,13 +5,13 @@ use axum::http::{HeaderMap, header};
 use axum::response::{IntoResponse, Response};
 use reviewq_app::access::{Actor, AppError};
 use reviewq_app::history::{
-    FilePosition, HistorySession, NativeHistoryPage, NativePosition, TurnWindow, VisibleEntry,
-    VisibleKind,
+    FilePosition, HistorySession, NativeHistoryPage, NativePosition, ToolState, TurnWindow,
+    VisibleEntry, VisibleKind, VisiblePart, VisiblePartKind,
 };
 use reviewq_domain::identity::{EventCursor, RunId, SessionKey};
 use reviewq_protocol::history::{
     HistoryAvailability, HistoryEntry, HistoryPage, HistoryPageEncodeError, HistoryPageResponse,
-    HistoryPart, HistoryText, HistoryWindow,
+    HistoryPart, HistoryText, HistoryToolState, HistoryWindow,
 };
 use reviewq_protocol::{
     EventCursorDto, HistoryCursorDto, HistoryEntryIdDto, HistoryGenerationDto, HistoryTurnIdDto,
@@ -261,8 +261,14 @@ fn encode_entry(
         .map_or(entry.text.len(), |(offset, _)| offset);
     let text = HistoryText::new(&entry.text[..end]).ok_or(AppError::Internal)?;
     let part = match entry.kind {
-        VisibleKind::User => HistoryPart::UserPrompt { text },
-        VisibleKind::Assistant => HistoryPart::AssistantText { text },
+        VisibleKind::User => HistoryPart::UserPrompt {
+            text,
+            content_ref: None,
+        },
+        VisibleKind::Assistant => HistoryPart::AssistantText {
+            text,
+            content_ref: None,
+        },
     };
     Ok(HistoryEntry {
         entry_id: HistoryEntryIdDto::new(entry.id.as_str()).ok_or(AppError::Internal)?,
@@ -274,7 +280,15 @@ fn encode_entry(
         timestamp: entry
             .at_ms
             .and_then(UtcTimestampDto::from_unix_milliseconds),
-        parts: vec![part],
+        parts: if entry.parts.is_empty() {
+            vec![part]
+        } else {
+            entry
+                .parts
+                .iter()
+                .map(|part| visible_part(endpoint, run, session, part))
+                .collect::<Result<_, _>>()?
+        },
         content_ref: entry
             .content
             .as_ref()
@@ -282,6 +296,53 @@ fn encode_entry(
             .map(|source| content::reference(endpoint, run, session, source))
             .transpose()?,
         text_bytes: entry.text_bytes.and_then(SafeCountDto::new),
+    })
+}
+
+fn visible_part(
+    endpoint: &ServiceEndpoint,
+    run: &RunId,
+    session: &SessionKey,
+    part: &VisiblePart,
+) -> Result<HistoryPart, AppError> {
+    let text = HistoryText::new(part.text.as_str()).ok_or(AppError::Internal)?;
+    let content_ref = part
+        .content
+        .as_ref()
+        .map(|source| content::reference(endpoint, run, session, source))
+        .transpose()?;
+    let tool_state = |value| match value {
+        ToolState::Running => HistoryToolState::Running,
+        ToolState::Completed => HistoryToolState::Completed,
+        ToolState::Failed => HistoryToolState::Failed,
+        ToolState::Unknown => HistoryToolState::Unknown,
+    };
+    Ok(match &part.kind {
+        VisiblePartKind::Text(VisibleKind::User) => HistoryPart::UserPrompt { text, content_ref },
+        VisiblePartKind::Text(VisibleKind::Assistant) => {
+            HistoryPart::AssistantText { text, content_ref }
+        }
+        VisiblePartKind::ToolCall {
+            call,
+            name,
+            label,
+            state,
+        } => HistoryPart::ToolCall {
+            call_id: HistoryEntryIdDto::new(call.as_str()).ok_or(AppError::Internal)?,
+            name: name.clone(),
+            label,
+            state: tool_state(*state),
+            text,
+            content_ref,
+        },
+        VisiblePartKind::ToolResult { call, state } => HistoryPart::ToolResult {
+            call_id: HistoryEntryIdDto::new(call.as_str()).ok_or(AppError::Internal)?,
+            state: tool_state(*state),
+            text,
+            content_ref,
+        },
+        VisiblePartKind::Plan => HistoryPart::Plan { text, content_ref },
+        VisiblePartKind::Assignment => HistoryPart::Assignment { text, content_ref },
     })
 }
 
