@@ -253,6 +253,7 @@ pub fn router(
         .route("/settings", get(settings::read).put(settings::save))
         .route("/settings/test", post(settings::test))
         .route("/settings/catalog", post(settings::catalog))
+        .route("/settings/checkout/skills", post(settings::checkout_skills))
         .route("/settings/disconnect", post(settings::disconnect))
         .route("/checkout/grant", post(checkout::grant))
         .route("/events", get(events::feed))

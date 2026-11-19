@@ -340,7 +340,7 @@ fn run_detail(
         return Err(AppError::CursorExpired.into());
     }
     let mut statement = connection.prepare_cached(
-        "SELECT session_key, parent_session_key, provider FROM sessions
+        "SELECT session_key, parent_session_key, provider,native_id,cwd FROM sessions
          WHERE run_id=?1 AND session_key>?2 ORDER BY session_key LIMIT ?3",
     )?;
     let mut rows = statement.query(params![
@@ -358,13 +358,15 @@ fn run_detail(
             session_key: parse(text(row, 0)?)?,
             parent,
             provider: provider(text(row, 2)?)?,
+            native_id: parse(text(row, 3)?)?,
+            cwd: path(row.get(4)?)?,
         });
     }
     let next_session = if sessions.len() > usize::from(limit) {
         sessions.pop();
         sessions.last().map(|session| SessionPosition {
             context,
-            run_id,
+            run_id: run_id.clone(),
             session_key: session.session_key.clone(),
         })
     } else {
@@ -374,6 +376,7 @@ fn run_detail(
         lead,
         sessions,
         next_session,
+        launch: crate::launches::run_launch_details(connection, &run_id)?,
     })
 }
 

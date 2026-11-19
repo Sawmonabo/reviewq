@@ -98,6 +98,7 @@ fn emit_resources(output: &Path) -> Result<(), Box<dyn Error>> {
         "overview",
         &snapshot(ReviewOverview {
             review: review(),
+            web_url: "https://gitlab.example/forge/alpha/-/merge_requests/41".into(),
             decision_revision: RevisionDto::new(0).unwrap(),
             decision: None,
             attention: None,
@@ -140,15 +141,20 @@ fn emit_resources(output: &Path) -> Result<(), Box<dyn Error>> {
             review_id: ReviewIdDto::new(REVIEW).unwrap(),
             run_id: RunIdDto::new(RUN).unwrap(),
             lead_session_key: SessionKeyDto::new(LEAD).unwrap(),
+            lead_native_id: ResourceIdDto::new("019beeee-eeee-7eee-8eee-eeeeeeeeeeee").unwrap(),
+            lead_cwd: "/home/fixture/review".into(),
             sessions: Page::new(
                 vec![SessionSummary {
                     session_key: SessionKeyDto::new(LEAD).unwrap(),
                     parent_session_key: None,
                     provider: HostProviderDto::Codex,
+                    native_id: ResourceIdDto::new("019beeee-eeee-7eee-8eee-eeeeeeeeeeee").unwrap(),
+                    cwd: "/home/fixture/review".into(),
                 }],
                 None,
             )
             .unwrap(),
+            launch: None,
         }),
     )?;
     emit(

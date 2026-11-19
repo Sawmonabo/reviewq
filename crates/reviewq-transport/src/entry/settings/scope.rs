@@ -60,7 +60,7 @@ fn repo_draft(value: dto::RepositoryBinding) -> Result<domain::RepositoryDraft, 
     })
 }
 
-fn path(value: String) -> Result<AbsolutePath, AppError> {
+pub(super) fn path(value: String) -> Result<AbsolutePath, AppError> {
     if value.len() > 4096 || value.contains('\0') {
         return Err(AppError::InvalidRequest);
     }
@@ -133,7 +133,7 @@ pub(super) fn repo(value: domain::RepositoryBinding) -> Result<dto::RepositoryBi
     })
 }
 
-fn skill(value: domain::NativeSkill) -> Result<dto::Skill, AppError> {
+pub(super) fn skill(value: domain::NativeSkill) -> Result<dto::Skill, AppError> {
     Ok(dto::Skill {
         name: value.name,
         path: path_text(&value.path)?,

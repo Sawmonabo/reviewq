@@ -74,7 +74,7 @@ impl GitLab {
                     self.match_ticket(project, &metadata.path_with_namespace, &key, &mut found)
                         .await?;
                 }
-                found.resolve(self)
+                found.resolve()
             }
             Target::Web(url) => {
                 let (path, iid) = self.web_address(&url)?;
@@ -172,15 +172,6 @@ impl GitLab {
             .map_err(|_| AppError::InvalidRequest)?;
         Ok((path, iid.parse().map_err(|_| AppError::InvalidRequest)?))
     }
-
-    fn review_url(&self, row: &ReviewSource) -> Result<String, AppError> {
-        let mut url = self.origin.clone();
-        url.path_segments_mut()
-            .map_err(|_| AppError::Internal)?
-            .extend(row.project_path.split('/'))
-            .extend(["-", "merge_requests", &row.identity.iid().to_string()]);
-        Ok(url.into())
-    }
 }
 
 impl Matches {
@@ -197,7 +188,7 @@ impl Matches {
         }
     }
 
-    fn resolve(self, gitlab: &GitLab) -> Result<ReviewResolution, AppError> {
+    fn resolve(self) -> Result<ReviewResolution, AppError> {
         let mut candidates = if self.open.is_empty() {
             self.historical
         } else {
@@ -214,7 +205,7 @@ impl Matches {
         }
         let urls = candidates
             .iter()
-            .map(|row| gitlab.review_url(row))
+            .map(ReviewSource::web_url)
             .collect::<Result<Vec<_>, _>>()?;
         Ok(ReviewResolution::Ambiguous(urls))
     }

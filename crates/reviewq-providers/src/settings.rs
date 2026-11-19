@@ -43,6 +43,21 @@ impl SourceAccounts {
 }
 
 impl ConnectionSources for SourceAccounts {
+    fn verify_draft_checkout<'a>(
+        &'a self,
+        gitlab: &'a reviewq_app::settings::SavedConnection,
+        project: reviewq_domain::identity::ProjectId,
+        checkout: reviewq_domain::session::AbsolutePath,
+    ) -> AppFuture<'a, reviewq_domain::settings::CheckoutBinding> {
+        Box::pin(async move {
+            let Connection::GitLab { origin } = &gitlab.account.connection else {
+                return Err(AppError::InvalidRequest);
+            };
+            let source =
+                self.gitlab(origin, gitlab.token.as_ref().ok_or(AppError::Unauthorized)?)?;
+            scope::checked_checkout(&source, project, &checkout).await
+        })
+    }
     fn verify_scope<'a>(
         &'a self,
         gitlab: &'a reviewq_app::settings::SavedConnection,

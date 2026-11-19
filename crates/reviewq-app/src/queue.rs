@@ -42,6 +42,18 @@ pub struct ReviewSource {
     pub draft: bool,
 }
 
+impl ReviewSource {
+    pub fn web_url(&self) -> Result<String, AppError> {
+        let mut url =
+            url::Url::parse(self.identity.origin().as_str()).map_err(|_| AppError::Internal)?;
+        url.path_segments_mut()
+            .map_err(|_| AppError::Internal)?
+            .extend(self.project_path.split('/'))
+            .extend(["-", "merge_requests", &self.identity.iid().to_string()]);
+        Ok(url.into())
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ReviewAuthor {
     pub id: u64,
@@ -91,7 +103,7 @@ pub trait ReviewLookup: Send + Sync {
         &self,
         actor: Actor,
         review: ReviewId,
-    ) -> AppFuture<'_, Snapshot<(Revision, MrIdentity)>>;
+    ) -> AppFuture<'_, Snapshot<(Revision, ReviewSource)>>;
 
     fn registered_session(
         &self,
@@ -266,6 +278,8 @@ pub struct SessionSummary {
     pub session_key: SessionKey,
     pub parent: Option<SessionKey>,
     pub provider: HostProvider,
+    pub native_id: reviewq_domain::identity::NativeSessionId,
+    pub cwd: reviewq_domain::session::AbsolutePath,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -280,6 +294,7 @@ pub struct RunDetail {
     pub lead: LeadTarget,
     pub sessions: Vec<SessionSummary>,
     pub next_session: Option<SessionPosition>,
+    pub launch: Option<crate::launch::LaunchDetails>,
 }
 
 pub trait QueueStore: Send + Sync {

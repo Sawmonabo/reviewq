@@ -24,6 +24,10 @@ export type RevisionDto = string;
 
 export type PageCursorDto = string;
 
+export type ProjectIdDto = string;
+
+export type HostProviderDto = "codex" | "claude";
+
 export type EventReplayCursor = string;
 
 export type RunIdDto = string;
@@ -33,8 +37,6 @@ export type SubmissionIdDto = string;
 export type UpstreamIdDto = string;
 
 export type HistoryTurnIdDto = string;
-
-export type HostProviderDto = "codex" | "claude";
 
 export type ReviewIdDto = string;
 
@@ -49,8 +51,6 @@ export type CheckpointIdDto = string;
 export type GitShaDto = string;
 
 export type Disposition = "reviewed" | "waiting_author" | "needs_review";
-
-export type ProjectIdDto = string;
 
 export type EventCursorDto = string;
 
@@ -89,6 +89,20 @@ export type ErrorCode =
   | "busy"
   | "unavailable"
   | "internal";
+
+export type State = "pending" | "confirmed" | "rejected" | "uncertain";
+
+export type Invocation =
+  | {
+      args: string | null;
+      kind: "skill";
+      name: string;
+      path: string | null;
+    }
+  | {
+      kind: "custom";
+      prompt: string;
+    };
 
 export interface InvalidateEvent {
   /**

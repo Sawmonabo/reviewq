@@ -107,6 +107,13 @@ pub trait ConnectionSources: Send + Sync {
 
     fn verify(&self, authority: ConnectionAuthority) -> AppFuture<'_, VerifiedAccount>;
 
+    fn verify_draft_checkout<'a>(
+        &'a self,
+        gitlab: &'a SavedConnection,
+        project: reviewq_domain::identity::ProjectId,
+        checkout: reviewq_domain::session::AbsolutePath,
+    ) -> AppFuture<'a, reviewq_domain::settings::CheckoutBinding>;
+
     fn catalog(
         &self,
         authority: ConnectionAuthority,

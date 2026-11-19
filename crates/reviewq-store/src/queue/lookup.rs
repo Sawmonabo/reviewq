@@ -63,12 +63,12 @@ impl ReviewLookup for SqliteStore {
         &self,
         actor: Actor,
         review: ReviewId,
-    ) -> AppFuture<'_, Snapshot<(Revision, MrIdentity)>> {
+    ) -> AppFuture<'_, Snapshot<(Revision, reviewq_app::queue::ReviewSource)>> {
         Box::pin(async move {
             self.read(move |db| {
-                let identity = identity_for_review(db, &review)?;
-                allow_review(db, scope(db, &actor)?, &review, &identity)?;
-                snapshot(db, (settings_revision(db)?, identity))
+                let source = super::source_for_review(db, &review)?;
+                allow_review(db, scope(db, &actor)?, &review, &source.identity)?;
+                snapshot(db, (settings_revision(db)?, source))
             })
             .await
             .map_err(StoreError::app)

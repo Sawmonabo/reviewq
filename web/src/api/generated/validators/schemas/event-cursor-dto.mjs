@@ -37,7 +37,7 @@ function validate35(
   validate35.errors = vErrors;
   return errors === 0;
 }
-function validate69(
+function validate77(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -46,7 +46,7 @@ function validate69(
   if (errors === 0) {
     if (typeof data === "string") {
       if (!pattern1.test(data)) {
-        validate69.errors = [
+        validate77.errors = [
           {
             instancePath,
             schemaPath: "#/pattern",
@@ -60,7 +60,7 @@ function validate69(
         return false;
       }
     } else {
-      validate69.errors = [
+      validate77.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -71,7 +71,7 @@ function validate69(
       return false;
     }
   }
-  validate69.errors = vErrors;
+  validate77.errors = vErrors;
   return errors === 0;
 }
-export { validate35, validate69 };
+export { validate35, validate77 };

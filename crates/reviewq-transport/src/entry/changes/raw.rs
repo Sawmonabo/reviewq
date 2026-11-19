@@ -44,7 +44,7 @@ pub(in crate::entry) async fn patch(
         .as_ref()
         .ok_or(AppError::Unavailable)?;
     let patch = provider
-        .patch(source.value.clone(), query.revision, query.file_id)
+        .patch(source.value.identity.clone(), query.revision, query.file_id)
         .await?;
     check_source(&entry, &actor, &review_id, &source).await?;
     if patch.file.availability != PatchAvailability::Complete {

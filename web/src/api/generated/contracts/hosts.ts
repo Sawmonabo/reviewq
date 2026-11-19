@@ -2,12 +2,15 @@
 
 import type {
   EventCursorDto,
+  GitShaDto,
   HostProviderDto,
+  Invocation,
   PageCursorDto,
   ResourceIdDto,
   ReviewIdDto,
   RunIdDto,
   SessionKeyDto,
+  State,
 } from "./common.js";
 
 export type TerminalResult = {
@@ -73,10 +76,25 @@ export interface RunDetailResponse {
 }
 
 export interface RunDetail {
+  launch: RunLaunchDetails | null;
+  leadCwd: string;
+  leadNativeId: ResourceIdDto;
   leadSessionKey: SessionKeyDto;
   reviewId: ReviewIdDto;
   runId: RunIdDto;
   sessions: SessionSummaryPage;
+  [k: string]: unknown;
+}
+
+export interface RunLaunchDetails {
+  context: string | null;
+  invocation: Invocation;
+  observedEffort: string | null;
+  observedModel: string | null;
+  requestedEffort: string | null;
+  requestedModel: string | null;
+  sourceSha: GitShaDto;
+  state: State;
   [k: string]: unknown;
 }
 
@@ -90,6 +108,8 @@ export interface SessionSummaryPage {
 }
 
 export interface SessionSummary {
+  cwd: string;
+  nativeId: ResourceIdDto;
   parentSessionKey: SessionKeyDto | null;
   provider: HostProviderDto;
   sessionKey: SessionKeyDto;

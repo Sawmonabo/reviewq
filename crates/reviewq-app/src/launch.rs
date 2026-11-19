@@ -61,7 +61,7 @@ pub enum InvocationDraft {
     },
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum Invocation {
     Skill {
         skill: NativeSkill,
@@ -70,6 +70,18 @@ pub enum Invocation {
     Custom {
         prompt: String,
     },
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct LaunchDetails {
+    pub source: reviewq_domain::identity::GitSha,
+    pub state: LaunchState,
+    pub invocation: Invocation,
+    pub context: Option<String>,
+    pub requested_model: Option<String>,
+    pub requested_effort: Option<String>,
+    pub observed_model: Option<String>,
+    pub observed_effort: Option<String>,
 }
 
 #[derive(Clone)]

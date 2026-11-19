@@ -4,13 +4,14 @@ use reviewq_app::access::{Actor, ActorScope, AppError, AppFuture};
 use reviewq_app::events::{ResourceKey, Snapshot};
 use reviewq_app::hosts::{HostProof, ObservedInput, RegisterLead};
 use reviewq_app::launch::{
-    Invocation, LaunchClaim, LaunchInput, LaunchReceipt, LaunchState, LaunchStore,
+    Invocation, LaunchClaim, LaunchDetails, LaunchInput, LaunchReceipt, LaunchState, LaunchStore,
     NativeLaunchResult, ObservedLaunchSettings,
 };
 use reviewq_app::queue::MergeRequestState;
-use reviewq_domain::identity::{DeliveryId, ReviewId, Revision, SubmissionId};
+use reviewq_domain::identity::{DeliveryId, ReviewId, Revision, RunId, SubmissionId};
 use reviewq_domain::session::{AbsolutePath, HostProvider, LeadTarget};
 use rusqlite::{Connection, Row, params};
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::events::{now_ms, snapshot};
@@ -23,6 +24,26 @@ use crate::{SqliteStore, StoreError};
 const RECEIPT: &str =
     "review_id, submission_id, state, run_id, session_key, native_id, created_at_ms, updated_at_ms,
      id, provider, native_job_id, native_turn_id, native_entry_id";
+
+#[derive(Deserialize, Serialize)]
+struct StoredSelection {
+    #[serde(flatten)]
+    invocation: StoredInvocation,
+    context: Option<String>,
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+enum StoredInvocation {
+    Custom {
+        prompt: String,
+    },
+    Skill {
+        name: String,
+        path: std::path::PathBuf,
+        args: Option<String>,
+    },
+}
 
 impl LaunchStore for SqliteStore {
     fn launch_receipt(
@@ -384,17 +405,65 @@ fn bytes(path: &AbsolutePath) -> &[u8] {
 }
 
 fn invocation(input: &LaunchInput) -> Result<String, StoreError> {
-    let value = match &input.invocation {
-        Invocation::Custom { prompt } => {
-            serde_json::json!({"kind":"custom","prompt":prompt,"context":input.context})
-        }
-        Invocation::Skill { skill, args } => serde_json::json!({
-            "kind":"skill","path":skill.path.as_path(),"name":skill.name,"args":args,"context":input.context,
-        }),
+    let invocation = match &input.invocation {
+        Invocation::Custom { prompt } => StoredInvocation::Custom {
+            prompt: prompt.clone(),
+        },
+        Invocation::Skill { skill, args } => StoredInvocation::Skill {
+            path: skill.path.as_path().to_owned(),
+            name: skill.name.clone(),
+            args: args.clone(),
+        },
     };
-    let encoded = serde_json::to_string(&value).map_err(|_| AppError::Internal)?;
+    let encoded = serde_json::to_string(&StoredSelection {
+        invocation,
+        context: input.context.clone(),
+    })
+    .map_err(|_| AppError::Internal)?;
     if encoded.len() > 153600 {
         return Err(AppError::PayloadTooLarge.into());
     }
     Ok(encoded)
+}
+
+pub(crate) fn run_launch_details(
+    db: &Connection,
+    run: &RunId,
+) -> Result<Option<LaunchDetails>, StoreError> {
+    let mut statement = db.prepare_cached(
+        "SELECT source_sha,state,invocation,requested_model,requested_effort,observed_model,observed_effort
+         FROM launch_attempts WHERE run_id=?1"
+    )?;
+    let mut rows = statement.query([run.as_str()])?;
+    let Some(row) = rows.next()? else {
+        return Ok(None);
+    };
+    let selection: StoredSelection =
+        serde_json::from_str(text(row, 2)?).map_err(|_| AppError::Internal)?;
+    let value = LaunchDetails {
+        source: parse(text(row, 0)?)?,
+        state: match text(row, 1)? {
+            "pending" => LaunchState::Pending,
+            "confirmed" => LaunchState::Confirmed,
+            "rejected" => LaunchState::Rejected,
+            "uncertain" => LaunchState::Uncertain,
+            _ => return Err(AppError::Internal.into()),
+        },
+        invocation: match selection.invocation {
+            StoredInvocation::Custom { prompt } => Invocation::Custom { prompt },
+            StoredInvocation::Skill { path, name, args } => Invocation::Skill {
+                skill: reviewq_domain::settings::NativeSkill {
+                    name,
+                    path: AbsolutePath::from_canonical(path).map_err(|_| AppError::Internal)?,
+                },
+                args,
+            },
+        },
+        context: selection.context,
+        requested_model: row.get(3)?,
+        requested_effort: row.get(4)?,
+        observed_model: row.get(5)?,
+        observed_effort: row.get(6)?,
+    };
+    Ok(Some(value))
 }

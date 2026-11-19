@@ -20,6 +20,8 @@ import type {
 import type {
   CatalogRequest,
   CatalogResponse,
+  CheckoutSkillsRequest,
+  CheckoutSkillsResponse,
   DisconnectSettings,
   SaveSettings,
   SettingsResponse,
@@ -71,10 +73,14 @@ import type {
 import type {
   ReportCandidateResponse,
   ReportContextResponse,
+  ReportDispositionRequest,
+  ReportDispositionResponse,
   ReportFeedbackRequest,
   ReportHistoryResponse,
   ReportSectionResponse,
   ReportViewResponse,
+  ReportViewedRequest,
+  ReportViewedResponse,
 } from "./reports.js";
 
 import type {
@@ -94,6 +100,7 @@ import type {
 
 import type {
   DeliveryReceiptResponse,
+  MessageHistoryPageResponse,
   SendMessageRequest,
 } from "./delivery.js";
 
@@ -122,6 +129,7 @@ export interface Contracts {
   ResetEvent: ResetEvent;
   CancelRecoveryRequest: CancelRecoveryRequest;
   CatalogRequest: CatalogRequest;
+  CheckoutSkillsRequest: CheckoutSkillsRequest;
   DisconnectSettings: DisconnectSettings;
   EventReplayCursor: EventReplayCursor;
   FollowupConfigureRequest: FollowupConfigureRequest;
@@ -132,7 +140,9 @@ export interface Contracts {
   NotificationStateRequest: NotificationStateRequest;
   QuestionAnswerRequest: QuestionAnswerRequest;
   RegisterSessionRequest: RegisterSessionRequest;
+  ReportDispositionRequest: ReportDispositionRequest;
   ReportFeedbackRequest: ReportFeedbackRequest;
+  ReportViewedRequest: ReportViewedRequest;
   ReviewCheckpointRequest: ReviewCheckpointRequest;
   ReviewDecisionRequest: ReviewDecisionRequest;
   RunCatalogRequest: RunCatalogRequest;
@@ -147,6 +157,7 @@ export interface Contracts {
   ArchivePageResponse: ArchivePageResponse;
   CancelRecoveryResponse: CancelRecoveryResponse;
   CatalogResponse: CatalogResponse;
+  CheckoutSkillsResponse: CheckoutSkillsResponse;
   CurrentActionResponse: CurrentActionResponse;
   DeliveryReceiptResponse: DeliveryReceiptResponse;
   Failure: Failure;
@@ -161,6 +172,7 @@ export interface Contracts {
   InterruptResponse: InterruptResponse;
   LaunchReceiptResponse: LaunchReceiptResponse;
   LoadSprintsResponse: LoadSprintsResponse;
+  MessageHistoryPageResponse: MessageHistoryPageResponse;
   NotificationPageResponse: NotificationPageResponse;
   NotificationStateResponse: NotificationStateResponse;
   PatchDiscussionsResponse: PatchDiscussionsResponse;
@@ -175,9 +187,11 @@ export interface Contracts {
   RegisteredSessionResponse: RegisteredSessionResponse;
   ReportCandidateResponse: ReportCandidateResponse;
   ReportContextResponse: ReportContextResponse;
+  ReportDispositionResponse: ReportDispositionResponse;
   ReportHistoryResponse: ReportHistoryResponse;
   ReportSectionResponse: ReportSectionResponse;
   ReportViewResponse: ReportViewResponse;
+  ReportViewedResponse: ReportViewedResponse;
   ReviewDecisionResponse: ReviewDecisionResponse;
   ReviewOverviewResponse: ReviewOverviewResponse;
   ReviewSelectionResponse: ReviewSelectionResponse;

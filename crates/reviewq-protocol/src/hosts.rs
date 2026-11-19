@@ -106,7 +106,10 @@ pub struct RunDetail {
     pub review_id: ReviewIdDto,
     pub run_id: RunIdDto,
     pub lead_session_key: SessionKeyDto,
+    pub lead_native_id: crate::ResourceIdDto,
+    pub lead_cwd: String,
     pub sessions: Page<SessionSummary>,
+    pub launch: Option<crate::launch::RunLaunchDetails>,
 }
 
 pub type RunDetailResponse = Success<RunDetail>;
@@ -118,6 +121,8 @@ pub struct SessionSummary {
     pub session_key: SessionKeyDto,
     pub parent_session_key: Option<SessionKeyDto>,
     pub provider: HostProviderDto,
+    pub native_id: crate::ResourceIdDto,
+    pub cwd: String,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize)]

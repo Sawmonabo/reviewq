@@ -5,6 +5,7 @@ import type {
   ResetEvent,
   CancelRecoveryRequest,
   CatalogRequest,
+  CheckoutSkillsRequest,
   DisconnectSettings,
   EventReplayCursor,
   FollowupConfigureRequest,
@@ -15,7 +16,9 @@ import type {
   NotificationStateRequest,
   QuestionAnswerRequest,
   RegisterSessionRequest,
+  ReportDispositionRequest,
   ReportFeedbackRequest,
+  ReportViewedRequest,
   ReviewCheckpointRequest,
   ReviewDecisionRequest,
   RunCatalogRequest,
@@ -30,6 +33,7 @@ import type {
   ArchivePageResponse,
   CancelRecoveryResponse,
   CatalogResponse,
+  CheckoutSkillsResponse,
   CurrentActionResponse,
   DeliveryReceiptResponse,
   Failure,
@@ -44,6 +48,7 @@ import type {
   InterruptResponse,
   LaunchReceiptResponse,
   LoadSprintsResponse,
+  MessageHistoryPageResponse,
   NotificationPageResponse,
   NotificationStateResponse,
   PatchDiscussionsResponse,
@@ -58,9 +63,11 @@ import type {
   RegisteredSessionResponse,
   ReportCandidateResponse,
   ReportContextResponse,
+  ReportDispositionResponse,
   ReportHistoryResponse,
   ReportSectionResponse,
   ReportViewResponse,
+  ReportViewedResponse,
   ReviewDecisionResponse,
   ReviewOverviewResponse,
   ReviewSelectionResponse,
@@ -81,6 +88,9 @@ export function isCancelRecoveryRequest(
   value: unknown,
 ): value is CancelRecoveryRequest;
 export function isCatalogRequest(value: unknown): value is CatalogRequest;
+export function isCheckoutSkillsRequest(
+  value: unknown,
+): value is CheckoutSkillsRequest;
 export function isDisconnectSettings(
   value: unknown,
 ): value is DisconnectSettings;
@@ -107,9 +117,15 @@ export function isQuestionAnswerRequest(
 export function isRegisterSessionRequest(
   value: unknown,
 ): value is RegisterSessionRequest;
+export function isReportDispositionRequest(
+  value: unknown,
+): value is ReportDispositionRequest;
 export function isReportFeedbackRequest(
   value: unknown,
 ): value is ReportFeedbackRequest;
+export function isReportViewedRequest(
+  value: unknown,
+): value is ReportViewedRequest;
 export function isReviewCheckpointRequest(
   value: unknown,
 ): value is ReviewCheckpointRequest;
@@ -140,6 +156,9 @@ export function isCancelRecoveryResponse(
   value: unknown,
 ): value is CancelRecoveryResponse;
 export function isCatalogResponse(value: unknown): value is CatalogResponse;
+export function isCheckoutSkillsResponse(
+  value: unknown,
+): value is CheckoutSkillsResponse;
 export function isCurrentActionResponse(
   value: unknown,
 ): value is CurrentActionResponse;
@@ -178,6 +197,9 @@ export function isLaunchReceiptResponse(
 export function isLoadSprintsResponse(
   value: unknown,
 ): value is LoadSprintsResponse;
+export function isMessageHistoryPageResponse(
+  value: unknown,
+): value is MessageHistoryPageResponse;
 export function isNotificationPageResponse(
   value: unknown,
 ): value is NotificationPageResponse;
@@ -214,6 +236,9 @@ export function isReportCandidateResponse(
 export function isReportContextResponse(
   value: unknown,
 ): value is ReportContextResponse;
+export function isReportDispositionResponse(
+  value: unknown,
+): value is ReportDispositionResponse;
 export function isReportHistoryResponse(
   value: unknown,
 ): value is ReportHistoryResponse;
@@ -223,6 +248,9 @@ export function isReportSectionResponse(
 export function isReportViewResponse(
   value: unknown,
 ): value is ReportViewResponse;
+export function isReportViewedResponse(
+  value: unknown,
+): value is ReportViewedResponse;
 export function isReviewDecisionResponse(
   value: unknown,
 ): value is ReviewDecisionResponse;

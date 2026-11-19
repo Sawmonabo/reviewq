@@ -82,7 +82,9 @@ export interface PatchDiscussion {
   anchor: PatchDiscussionAnchor | null;
   discussionId: string;
   notes: PatchDiscussionNote[];
+  ourParticipation: boolean;
   outdated: boolean;
+  webUrl: string;
   [k: string]: unknown;
 }
 
@@ -91,15 +93,31 @@ export interface PatchDiscussionAnchor {
   newPath: string;
   oldLine: SafeCountDto | null;
   oldPath: string;
+  range: PatchDiscussionRange | null;
+  [k: string]: unknown;
+}
+
+export interface PatchDiscussionRange {
+  end: PatchDiscussionLine;
+  start: PatchDiscussionLine;
+  [k: string]: unknown;
+}
+
+export interface PatchDiscussionLine {
+  newLine: SafeCountDto | null;
+  oldLine: SafeCountDto | null;
   [k: string]: unknown;
 }
 
 export interface PatchDiscussionNote {
   author: string;
+  authorId: UpstreamIdDto | null;
   body: string;
   createdAt: UtcTimestampDto | null;
   noteId: string;
+  ours: boolean;
   resolved: boolean;
+  resolvedBy: UpstreamIdDto | null;
   [k: string]: unknown;
 }
 

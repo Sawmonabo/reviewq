@@ -37,3 +37,4 @@ CREATE TABLE launch_attempts (
 CREATE UNIQUE INDEX launch_attempts_native
     ON launch_attempts(provider, profile, native_id) WHERE native_id IS NOT NULL;
 CREATE INDEX launch_attempts_pending ON launch_attempts(id) WHERE state='pending';
+CREATE UNIQUE INDEX launch_attempts_run ON launch_attempts(run_id) WHERE run_id IS NOT NULL;
