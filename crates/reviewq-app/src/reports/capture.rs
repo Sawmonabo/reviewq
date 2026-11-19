@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use reviewq_domain::identity::{GitSha, ReceiptId, ReportHash, SessionKey};
+use reviewq_domain::identity::{GitSha, MrIdentity, ReceiptId, ReportHash, Revision, SessionKey};
 use reviewq_domain::session::{AbsolutePath, LeadTarget};
 use sha2::{Digest, Sha256};
 
@@ -13,7 +13,7 @@ use crate::workflow::{
 };
 
 use super::index;
-use super::{ArtifactStats, Descriptor, FindingConclusion, ReportReference, Verdict};
+use super::{ArtifactStats, Descriptor, FindingConclusion, ReportEdits, ReportReference, Verdict};
 
 pub const CHUNK_BYTES: usize = 64 * 1024;
 const SEMANTIC_BYTES: u64 = 4 * 1024 * 1024;
@@ -50,6 +50,7 @@ pub enum Declaration {
         revision: RevisionEvidence,
         verdict: Verdict,
         amends: Option<ReportReference>,
+        edits: ReportEdits,
         assessments: Vec<Assessment>,
     },
     Unchanged {
@@ -63,6 +64,16 @@ pub enum Declaration {
 }
 
 impl Declaration {
+    pub fn requires_review_refresh(&self) -> bool {
+        matches!(
+            self,
+            Self::Final {
+                amends: Some(_),
+                ..
+            } | Self::Unchanged { .. }
+        )
+    }
+
     pub fn assessments(&self) -> &[Assessment] {
         match self {
             Self::Final { assessments, .. } | Self::Unchanged { assessments, .. } => assessments,
@@ -82,6 +93,16 @@ impl Declaration {
             }
         ) {
             return Err(AppError::InvalidRequest);
+        }
+        if let Self::Final {
+            amends,
+            edits,
+            revision,
+            assessments,
+            ..
+        } = self
+        {
+            edits.validate(amends.as_ref(), revision, !assessments.is_empty())?;
         }
         let mut discussions = std::collections::HashSet::new();
         if self.assessments().len() > 10
@@ -162,6 +183,8 @@ pub trait ReportFileSource: Send + Sync {
 pub trait ReportCaptureStore: Send + Sync {
     fn report_lead(&self, session: SessionKey) -> AppFuture<'_, LeadTarget>;
 
+    fn report_source(&self, lead: LeadTarget) -> AppFuture<'_, (MrIdentity, Revision)>;
+
     fn accepted_report(&self, lead: LeadTarget) -> AppFuture<'_, Snapshot<Option<AcceptedReport>>>;
 
     fn stage_report(
@@ -170,6 +193,7 @@ pub trait ReportCaptureStore: Send + Sync {
         declaration: Declaration,
         request_sha256: ReportHash,
         declaration_sha256: ReportHash,
+        source_settings: Option<Revision>,
     ) -> AppFuture<'_, Snapshot<HandoffReceipt>>;
 
     fn report_handoff_status(

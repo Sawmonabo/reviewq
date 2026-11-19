@@ -2,6 +2,12 @@
 
 mod capture;
 mod index;
+mod revision;
+
+pub use revision::{
+    Correction, CorrectionKind, EvidenceReference, EvidenceTarget, FindingEdit, ReportEdits,
+    SectionEdit,
+};
 
 pub use capture::{
     AcceptedReport, ArtifactChunk, Assessment, CHUNK_BYTES, CapturedArtifact, Declaration,
@@ -164,12 +170,14 @@ pub struct ContextRequest {
     pub limit: u16,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SourceRange {
     pub offset: u64,
     pub length: u64,
     pub hash: ReportHash,
 }
 
+#[derive(Clone)]
 pub enum Descriptor {
     Finding {
         id: String,

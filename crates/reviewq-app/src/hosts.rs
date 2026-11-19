@@ -15,9 +15,11 @@ use crate::queue::ReviewSource;
 use crate::sources::{ReviewResolution, ReviewSourceReader};
 use crate::workspace::WorkspaceStore;
 
+mod claude;
 mod messages;
 mod work;
 
+pub use claude::{ClaudeHeartbeat, ClaudeHeartbeatResult, ClaudeStore};
 pub use messages::{
     MAX_MESSAGE_HISTORY_PAGE, MessageAttachment, MessageHistory, MessageHistoryStore,
     MessagePosition, RecordedMessage, RecordedPurpose,

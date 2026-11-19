@@ -57,6 +57,7 @@ CREATE TABLE report_handoffs (
     updated_at_ms INTEGER NOT NULL CHECK (updated_at_ms >= created_at_ms),
     batch_id TEXT REFERENCES followup_batches(batch_id),
     assessments TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(assessments) AND length(CAST(assessments AS BLOB)) <= 131072),
+    edits TEXT CHECK (json_valid(edits) AND length(CAST(edits AS BLOB)) <= 131072),
     settings_revision INTEGER NOT NULL CHECK (settings_revision >= 0),
     CHECK ((expected_receipt_id IS NULL) = (expected_sha256 IS NULL)),
     CHECK ((source_kind='file') = (source_path IS NOT NULL)),

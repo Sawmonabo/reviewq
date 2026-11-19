@@ -33,6 +33,8 @@ const SCHEMA: &str = concat!(
     include_str!("../schema/workflow_receipts.sql"),
     "\n",
     include_str!("../schema/settings.sql"),
+    "\n",
+    include_str!("../schema/claude.sql"),
 );
 pub(super) const APPLICATION_ID: i64 = 0x5256_5132;
 pub(super) const FORMAT_ID: i64 = 1;

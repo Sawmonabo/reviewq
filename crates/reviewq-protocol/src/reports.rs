@@ -289,6 +289,7 @@ pub struct FeedbackRequest {
 
 mod handoff;
 pub use handoff::{
-    AcceptedReport, Assessment, Handoff, HandoffCommand, HandoffReceipt, HandoffState,
-    NativeContext, NativeReportAddress, ReportRevision, ReportSource, ReportVerdict,
+    AcceptedReport, Assessment, Correction, CorrectionKind, EvidenceReference, FindingEdit,
+    Handoff, HandoffCommand, HandoffReceipt, HandoffState, NativeContext, NativeReportAddress,
+    ReportRevision, ReportSource, ReportVerdict, SectionEdit,
 };

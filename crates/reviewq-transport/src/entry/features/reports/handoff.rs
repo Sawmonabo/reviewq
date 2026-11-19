@@ -148,26 +148,43 @@ async fn receive(
                 let hash_value =
                     app::hash_report_file(workflow.report_files.as_ref(), verified.clone(), path)
                         .await?;
-                let current = proof
-                    .verify_active_call(
-                        lead,
-                        turn,
-                        call_id.as_str().to_owned(),
-                        WorkflowTool::Report,
-                    )
-                    .await?;
-                if current != verified {
-                    return Err(AppError::Conflict.into());
-                }
                 *sha256 = Some(hash(hash_value.as_str())?);
             }
             let bound = serde_json::to_vec(&handoff).map_err(|_| AppError::Internal)?;
             let declaration_sha256 = ReportHash::from_sha256(Sha256::digest(bound).into());
             let declaration = declaration(handoff, expected)?;
             declaration.validate()?;
+            let settings = if declaration.requires_review_refresh() {
+                let source = entry.source_reader().await?;
+                let (identity, settings) = entry.store.report_source(lead.clone()).await?;
+                if source.review(identity.clone()).await?.identity != identity {
+                    return Err(AppError::Conflict.into());
+                }
+                Some(settings)
+            } else {
+                None
+            };
+            let current = proof
+                .verify_active_call(
+                    lead,
+                    turn,
+                    call_id.as_str().to_owned(),
+                    WorkflowTool::Report,
+                )
+                .await?;
+            if current != verified {
+                return Err(AppError::Conflict.into());
+            }
+
             entry
                 .store
-                .stage_report(verified, declaration, request_sha256, declaration_sha256)
+                .stage_report(
+                    verified,
+                    declaration,
+                    request_sha256,
+                    declaration_sha256,
+                    settings,
+                )
                 .await?
         }
         Err(error) => return Err(error.into()),
@@ -205,6 +222,9 @@ fn declaration(input: dto::Handoff, provider: HostProvider) -> Result<Declaratio
             revision,
             verdict,
             amends,
+            corrects,
+            finding_changes,
+            section_changes,
             assessments,
         } => Declaration::Final {
             source: project_source(source, provider)?,
@@ -220,6 +240,7 @@ fn declaration(input: dto::Handoff, provider: HostProvider) -> Result<Declaratio
                 dto::ReportVerdict::NotSpecified => Verdict::NotSpecified,
             },
             assessments: project_assessments(assessments)?,
+            edits: project_edits(corrects, finding_changes, section_changes)?,
             amends: amends
                 .map(|base| -> Result<_, AppError> {
                     Ok(ReportReference {
@@ -250,18 +271,9 @@ fn project_assessments(values: Vec<dto::Assessment>) -> Result<Vec<app::Assessme
         .into_iter()
         .map(|value| {
             use reviewq_app::followups::NextAction;
-            use reviewq_app::reports::FindingConclusion;
-            let conclusion = match value.conclusion {
-                dto::FindingConclusion::Fixed => FindingConclusion::Fixed,
-                dto::FindingConclusion::ClarifiedWithdrawn => FindingConclusion::ClarifiedWithdrawn,
-                dto::FindingConclusion::Superseded => FindingConclusion::Superseded,
-                dto::FindingConclusion::PartlyAddressed => FindingConclusion::PartlyAddressed,
-                dto::FindingConclusion::StillPresent => FindingConclusion::StillPresent,
-                dto::FindingConclusion::Unverified => FindingConclusion::Unverified,
-            };
             Ok(app::Assessment {
                 discussion_id: value.discussion_id.as_str().to_owned(),
-                conclusion,
+                conclusion: project_conclusion(value.conclusion),
                 reason: value.reason,
                 finding_ids: value
                     .finding_ids
@@ -277,6 +289,96 @@ fn project_assessments(values: Vec<dto::Assessment>) -> Result<Vec<app::Assessme
             })
         })
         .collect()
+}
+
+fn project_conclusion(value: dto::FindingConclusion) -> app::FindingConclusion {
+    use app::FindingConclusion;
+    match value {
+        dto::FindingConclusion::Fixed => FindingConclusion::Fixed,
+        dto::FindingConclusion::ClarifiedWithdrawn => FindingConclusion::ClarifiedWithdrawn,
+        dto::FindingConclusion::Superseded => FindingConclusion::Superseded,
+        dto::FindingConclusion::PartlyAddressed => FindingConclusion::PartlyAddressed,
+        dto::FindingConclusion::StillPresent => FindingConclusion::StillPresent,
+        dto::FindingConclusion::Unverified => FindingConclusion::Unverified,
+    }
+}
+
+fn project_edits(
+    correction: Option<dto::Correction>,
+    findings: Vec<dto::FindingEdit>,
+    sections: Vec<dto::SectionEdit>,
+) -> Result<app::ReportEdits, AppError> {
+    let ids = |values: Vec<reviewq_protocol::ResourceIdDto>| {
+        values
+            .into_iter()
+            .map(|value| value.as_str().to_owned())
+            .collect()
+    };
+    Ok(app::ReportEdits {
+        correction: correction
+            .map(|value| {
+                Ok::<_, AppError>(app::Correction {
+                    base: ReportReference {
+                        receipt_id: parse(value.receipt_id.as_str())?,
+                        hash: parse(value.sha256.as_str())?,
+                    },
+                    kind: match value.kind {
+                        dto::CorrectionKind::Presentation => app::CorrectionKind::Presentation,
+                        dto::CorrectionKind::Evidence => app::CorrectionKind::Evidence,
+                    },
+                    reason: value.reason,
+                    finding_ids: ids(value.finding_ids),
+                    evidence: value
+                        .evidence
+                        .into_iter()
+                        .map(|reference| {
+                            let (target, hash) = match reference {
+                                dto::EvidenceReference::Finding(value) => (
+                                    app::EvidenceTarget::Finding(
+                                        value.finding_id.as_str().to_owned(),
+                                    ),
+                                    value.sha256,
+                                ),
+                                dto::EvidenceReference::Section(value) => (
+                                    app::EvidenceTarget::Section(value.section_title),
+                                    value.sha256,
+                                ),
+                            };
+                            Ok(app::EvidenceReference {
+                                target,
+                                hash: parse(hash.as_str())?,
+                            })
+                        })
+                        .collect::<Result<_, AppError>>()?,
+                })
+            })
+            .transpose()?,
+        findings: findings
+            .into_iter()
+            .map(|value| {
+                Ok(app::FindingEdit {
+                    finding_id: value.finding_id.as_str().to_owned(),
+                    conclusion: project_conclusion(value.conclusion),
+                    reason: value.reason,
+                    checked_sha: parse(value.checked_sha.as_str())?,
+                    discussion_ids: ids(value.discussion_ids),
+                })
+            })
+            .collect::<Result<_, AppError>>()?,
+        sections: sections
+            .into_iter()
+            .map(|value| {
+                Ok(app::SectionEdit {
+                    baseline_title: value.baseline_title,
+                    baseline_hash: parse(value.baseline_sha256.as_str())?,
+                    replacement_title: value.replacement_title,
+                    conclusion: project_conclusion(value.conclusion),
+                    reason: value.reason,
+                    discussion_ids: ids(value.discussion_ids),
+                })
+            })
+            .collect::<Result<_, AppError>>()?,
+    })
 }
 
 fn source_mut(handoff: &mut dto::Handoff) -> Option<&mut dto::ReportSource> {
