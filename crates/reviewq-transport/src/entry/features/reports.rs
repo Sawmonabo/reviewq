@@ -1,3 +1,7 @@
+mod mutations;
+
+pub(super) use mutations::{feedback, set_disposition, viewed};
+
 use std::sync::Arc;
 
 use axum::Json;

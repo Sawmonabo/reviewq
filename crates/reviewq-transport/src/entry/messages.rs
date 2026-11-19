@@ -57,7 +57,7 @@ pub(super) async fn get(
     Ok(Json(project(result)?))
 }
 
-pub(super) fn project(
+pub(in crate::entry) fn project(
     stored: Snapshot<DeliveryReceipt>,
 ) -> Result<DeliveryReceiptResponse, AppError> {
     let row = stored.value;
@@ -74,6 +74,26 @@ pub(super) fn project(
         DeliveryOutcome::Rejected => DeliveryState::Rejected { observed_input: () },
         DeliveryOutcome::Uncertain => DeliveryState::Uncertain { observed_input: () },
     };
+    let report_ref = row
+        .report_ref
+        .map(|reference| {
+            let resource = |id: &reviewq_domain::identity::ReceiptId| {
+                reviewq_protocol::ResourceIdDto::new(id.as_str()).ok_or(AppError::Internal)
+            };
+            Ok::<_, AppError>(reviewq_protocol::DeliveryReportRef {
+                receipt_id: resource(&reference.receipt_id)?,
+                report_hash: reviewq_protocol::reports::ReportHashDto::new(
+                    reference.report_hash.as_str(),
+                )
+                .ok_or(AppError::Internal)?,
+                current_receipt_id: reference
+                    .current_receipt_id
+                    .as_ref()
+                    .map(resource)
+                    .transpose()?,
+            })
+        })
+        .transpose()?;
     Ok(Success {
         cursor: EventCursorDto::new(stored.cursor.get()).ok_or(AppError::Internal)?,
         data: ReceiptDto {
@@ -83,6 +103,7 @@ pub(super) fn project(
             session_key: SessionKeyDto::new(row.target.session_key().as_str())
                 .ok_or(AppError::Internal)?,
             state,
+            report_ref,
             created_at: UtcTimestampDto::from_unix_milliseconds(row.created_at_ms)
                 .ok_or(AppError::Internal)?,
             updated_at: UtcTimestampDto::from_unix_milliseconds(row.updated_at_ms)

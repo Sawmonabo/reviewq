@@ -2,22 +2,23 @@
 
 pub mod actions;
 pub mod changes;
-pub mod decisions;
 mod common;
+pub mod decisions;
 pub mod events;
 pub mod followups;
 pub mod history;
-pub mod notifications;
 mod hosts;
+pub mod notifications;
 pub mod queue;
 pub mod reports;
 mod scalar;
 
 pub use common::{ErrorCode, ErrorDto, Failure, Page, Success, UtcTimestampDto};
 pub use hosts::{
-    DeliveryReceipt, DeliveryReceiptResponse, DeliveryState, HostProviderDto, MessageAttachment,
-    MessageHistoryItem, MessageHistoryPage, MessageTextDto, ObservedInputDto, RecordedPurpose,
-    RecordedState, RunDetail, RunDetailResponse, SendMessageRequest, SessionSummary,
+    DeliveryReceipt, DeliveryReceiptResponse, DeliveryReportRef, DeliveryState, HostProviderDto,
+    MessageAttachment, MessageHistoryItem, MessageHistoryPage, MessageTextDto, ObservedInputDto,
+    RecordedPurpose, RecordedState, RunDetail, RunDetailResponse, SendMessageRequest,
+    SessionSummary,
 };
 pub use scalar::{
     CheckpointIdDto, EventCursorDto, FileIdDto, GitShaDto, HistoryCursorDto, HistoryEntryIdDto,

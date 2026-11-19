@@ -675,3 +675,28 @@ CREATE TABLE followup_result_reads (
 ) STRICT, WITHOUT ROWID;
 
 CREATE INDEX followup_result_read_owner ON followup_result_reads(review_id, batch_id);
+
+CREATE TABLE report_mutation_receipts (
+    actor_key BLOB NOT NULL,
+    operation TEXT NOT NULL CHECK (operation IN ('report_disposition', 'report_viewed')),
+    submission_id TEXT NOT NULL,
+    run_id TEXT NOT NULL,
+    receipt_id TEXT NOT NULL,
+    disposition_version INTEGER,
+    finding_id TEXT,
+    previous_receipt_id TEXT,
+    rendered_batch_id TEXT,
+    PRIMARY KEY (actor_key, operation, submission_id),
+    FOREIGN KEY (actor_key, operation, submission_id)
+        REFERENCES mutation_receipts(actor_key, operation, submission_id),
+    FOREIGN KEY (run_id, receipt_id) REFERENCES report_versions(run_id, receipt_id),
+    FOREIGN KEY (run_id, previous_receipt_id) REFERENCES report_versions(run_id, receipt_id),
+    FOREIGN KEY (run_id, disposition_version, finding_id)
+        REFERENCES finding_dispositions(run_id, disposition_version, finding_id),
+    CHECK ((operation='report_disposition') = (disposition_version IS NOT NULL AND finding_id IS NOT NULL))
+) STRICT, WITHOUT ROWID;
+
+CREATE INDEX report_mutation_version ON report_mutation_receipts(run_id, receipt_id);
+CREATE INDEX report_mutation_previous ON report_mutation_receipts(run_id, previous_receipt_id);
+CREATE INDEX report_mutation_disposition
+    ON report_mutation_receipts(run_id, disposition_version, finding_id);

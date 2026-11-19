@@ -206,6 +206,13 @@ pub struct SafeCountDto(
     #[cfg_attr(feature = "schema", schemars(schema_with = "count_schema"))] u64,
 );
 
+impl<'de> Deserialize<'de> for SafeCountDto {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        Self::new(u64::deserialize(deserializer)?)
+            .ok_or_else(|| de::Error::custom("expected a nonnegative safe integer"))
+    }
+}
+
 impl SafeCountDto {
     pub fn new(value: u64) -> Option<Self> {
         (value <= MAX_JSON_INTEGER).then_some(Self(value))

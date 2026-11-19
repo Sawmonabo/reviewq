@@ -57,6 +57,17 @@ pub struct DeliveryReceipt {
     pub state: DeliveryState,
     pub created_at: UtcTimestampDto,
     pub updated_at: UtcTimestampDto,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub report_ref: Option<DeliveryReportRef>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct DeliveryReportRef {
+    pub receipt_id: crate::ResourceIdDto,
+    pub report_hash: crate::reports::ReportHashDto,
+    pub current_receipt_id: Option<crate::ResourceIdDto>,
 }
 
 /// The snapshot returned by message send and receipt lookup.

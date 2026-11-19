@@ -223,6 +223,14 @@ pub struct RecoverableDelivery {
     pub state: RecoverableDeliveryState,
 }
 
+/// Exact immutable report identity pinned by one feedback admission.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DeliveryReport {
+    pub receipt_id: ReceiptId,
+    pub report_hash: ReportHash,
+    pub current_receipt_id: Option<ReceiptId>,
+}
+
 /// The stored receipt. The internal delivery ID is never the client retry key.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct DeliveryReceipt {
@@ -230,6 +238,7 @@ pub struct DeliveryReceipt {
     pub submission_id: SubmissionId,
     pub target: SessionTarget,
     pub outcome: DeliveryOutcome,
+    pub report_ref: Option<DeliveryReport>,
     pub created_at_ms: i64,
     pub updated_at_ms: i64,
 }

@@ -1,6 +1,7 @@
 //! Scoped reads over accepted report versions and their immutable bytes.
 
 mod context;
+mod mutations;
 
 use reviewq_app::access::{Actor, ActorScope, AppError, AppFuture};
 use reviewq_app::events::Snapshot;

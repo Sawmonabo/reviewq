@@ -4,7 +4,7 @@ use reviewq_app::access::{Actor, ActorScope, AppError};
 use reviewq_app::events::{ResourceKey, Snapshot};
 use reviewq_app::hosts::{
     DeliveryClaim, DeliveryObservation, DeliveryOutcome, DeliveryReceipt, DeliveryRecoveryCursor,
-    DeliveryWork, MessageBody, MessagePurpose, ObservedInput, RecoverableDelivery,
+    DeliveryReport, DeliveryWork, MessageBody, MessagePurpose, ObservedInput, RecoverableDelivery,
     RecoverableDeliveryState, ReportQuote, ReportRef, SubmitMessage,
 };
 use reviewq_domain::identity::{DeliveryFence, DeliveryId, Revision, SubmissionId};
@@ -25,7 +25,8 @@ const OPERATION: &str = "message";
 const RECEIPT_COLUMNS: &str =
     "d.message_id, d.submission_id, r.review_id, d.run_id, d.session_key, d.state,
      d.created_at_ms, d.updated_at_ms, d.native_turn_id, d.native_input_id, coalesce(o.fence, 0),
-     d.purpose, o.claim_kind, m.grant_id, m.grant_epoch, o.due_at_ms, coalesce(o.retry_count, 0)";
+     d.purpose, o.claim_kind, m.grant_id, m.grant_epoch, o.due_at_ms, coalesce(o.retry_count, 0),
+     d.receipt_id, d.report_hash, d.current_receipt_id";
 const RECEIPT_JOIN: &str =
     "messages d JOIN runs r ON r.run_id=d.run_id
      JOIN mutation_receipts m ON m.actor_key=d.actor_key AND m.operation=d.operation AND m.submission_id=d.submission_id
@@ -139,6 +140,11 @@ pub(super) fn admit(
             submission_id: input.submission_id,
             target: input.target.target().clone(),
             outcome: DeliveryOutcome::Queued,
+            report_ref: input.report_ref.map(|reference| DeliveryReport {
+                receipt_id: reference.receipt_id,
+                report_hash: reference.report_hash,
+                current_receipt_id: current_report,
+            }),
             created_at_ms: time,
             updated_at_ms: time,
         },
@@ -484,6 +490,20 @@ fn delivery_row(row: &Row<'_>) -> Result<Delivery, StoreError> {
         .map(|(id, epoch)| Revision::try_from(epoch).map(|epoch| (id, epoch)))
         .transpose()
         .map_err(|_| AppError::Internal)?;
+    let report_ref = row
+        .get::<_, Option<String>>(17)?
+        .map(|receipt| {
+            Ok::<_, StoreError>(DeliveryReport {
+                receipt_id: parse(&receipt)?,
+                report_hash: parse(text(row, 18)?)?,
+                current_receipt_id: row
+                    .get::<_, Option<String>>(19)?
+                    .as_deref()
+                    .map(parse)
+                    .transpose()?,
+            })
+        })
+        .transpose()?;
     let receipt = DeliveryReceipt {
         delivery_id: parse(text(row, 0)?)?,
         submission_id: parse(text(row, 1)?)?,
@@ -493,6 +513,7 @@ fn delivery_row(row: &Row<'_>) -> Result<Delivery, StoreError> {
             parse(text(row, 4)?)?,
         ),
         outcome,
+        report_ref,
         created_at_ms: row.get(6)?,
         updated_at_ms: row.get(7)?,
     };

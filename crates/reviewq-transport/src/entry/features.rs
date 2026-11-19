@@ -39,6 +39,18 @@ pub(super) fn routes() -> Router<Arc<Entry>> {
             "/notifications/state",
             axum::routing::post(notifications::update).layer(DefaultBodyLimit::max(2_100_000)),
         )
+        .route(
+            "/runs/{run_id}/report/dispositions",
+            axum::routing::put(reports::set_disposition),
+        )
+        .route(
+            "/runs/{run_id}/report/viewed",
+            axum::routing::post(reports::viewed),
+        )
+        .route(
+            "/runs/{run_id}/report/feedback",
+            axum::routing::post(reports::feedback).layer(DefaultBodyLimit::max(160 * 1024)),
+        )
         .route("/runs/{run_id}/report", get(reports::current))
         .route("/runs/{run_id}/report/history", get(reports::history))
         .route("/runs/{run_id}/report/context", get(reports::context))

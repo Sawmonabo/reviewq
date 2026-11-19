@@ -16,7 +16,7 @@ use reviewq_app::followups::FollowupStore;
 use reviewq_app::hosts::{LeadStore, MessageHistoryStore, NativeHost};
 use reviewq_app::notifications::InboxStore;
 use reviewq_app::queue::{QueueStore, ReviewLookup};
-use reviewq_app::reports::ReportStore;
+use reviewq_app::reports::{ReportMutationStore, ReportStore};
 use reviewq_app::sources::{ReviewSourceReader, SourceRefreshStore, refresh_queue};
 use reviewq_app::workspace::WorkspaceStore;
 use reviewq_protocol::queue::QueueSync;
@@ -42,10 +42,10 @@ use error::{ApiBytes, ApiError};
 
 /// Shared application ports for one ReviewQ listener pair.
 pub trait Store:
-    WorkspaceStore + QueueStore + ReviewLookup + EventLog + LeadStore + SourceRefreshStore + ReportStore + MessageHistoryStore + InboxStore + DecisionStore + ActionStore + FollowupStore
+    WorkspaceStore + QueueStore + ReviewLookup + EventLog + LeadStore + SourceRefreshStore + ReportStore + ReportMutationStore + MessageHistoryStore + InboxStore + DecisionStore + ActionStore + FollowupStore
 {
 }
-impl<S: WorkspaceStore + QueueStore + ReviewLookup + EventLog + LeadStore + SourceRefreshStore + ReportStore + MessageHistoryStore + InboxStore + DecisionStore + ActionStore + FollowupStore>
+impl<S: WorkspaceStore + QueueStore + ReviewLookup + EventLog + LeadStore + SourceRefreshStore + ReportStore + ReportMutationStore + MessageHistoryStore + InboxStore + DecisionStore + ActionStore + FollowupStore>
     Store for S
 {
 }

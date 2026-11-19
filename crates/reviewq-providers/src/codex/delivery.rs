@@ -36,10 +36,25 @@ impl Codex {
             }
             thread = resumed.thread;
         }
+        let mut input = Vec::new();
+        if let Some(reference) = guard.report_ref() {
+            input.push(json!({"type":"text", "text": format!(
+                "Feedback on ReviewQ report {} (SHA-256 {}).",
+                reference.receipt_id, reference.report_hash
+            )}));
+            if let Some(quote) = &reference.quote {
+                input.push(json!({"type":"text", "text": format!(
+                    "Selected report excerpt at Unicode scalar offset {} and length {}.
+                {}",
+                    quote.offset(), quote.length(), quote.text().as_str()
+                )}));
+            }
+        }
+        input.push(json!({"type":"text","text":text.as_str()}));
         let mut params = json!({
             "threadId": thread.id,
             "clientUserMessageId": delivery.as_str(),
-            "input": [{"type":"text","text":text.as_str()}],
+            "input": input,
         });
         let method = match thread.status {
             ThreadStatus::Active { active_flags } if active_flags.is_empty() => {

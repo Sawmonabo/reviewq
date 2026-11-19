@@ -6,8 +6,8 @@ use crate::access::{Actor, AppError};
 use crate::events::Snapshot;
 
 use super::{
-    DeliveryClaim, DeliveryObservation, DeliveryReceipt, DeliveryWork, LeadStore, MessageBody,
-    MessagePurpose, NativeHost, RecoverableDelivery, SubmitMessage,
+    DeliveryClaim, DeliveryReceipt, DeliveryWork, LeadStore, MessageBody, MessagePurpose,
+    NativeHost, RecoverableDelivery, ReportRef, SubmitMessage,
 };
 
 /// The dispatch adapter must call this after preparing the exact native request.
@@ -17,6 +17,13 @@ pub struct DispatchGuard {
 }
 
 impl DispatchGuard {
+    pub fn report_ref(&self) -> Option<&ReportRef> {
+        match &self.claim.work {
+            DeliveryWork::Dispatch { report_ref, .. } => report_ref.as_ref(),
+            DeliveryWork::Reconcile => None,
+        }
+    }
+
     pub async fn check(self) -> Result<(), AppError> {
         self.store.authorize_dispatch(self.claim).await
     }
@@ -57,10 +64,7 @@ pub async fn recover_delivery(
         return Ok(());
     };
     let result = match &claim.work {
-        DeliveryWork::Dispatch {
-            text,
-            report_ref: None,
-        } => {
+        DeliveryWork::Dispatch { text, .. } => {
             host.dispatch(
                 claim.target.clone(),
                 claim.delivery_id.clone(),
@@ -72,10 +76,6 @@ pub async fn recover_delivery(
             )
             .await
         }
-        DeliveryWork::Dispatch {
-            report_ref: Some(_),
-            ..
-        } => DeliveryObservation::Rejected,
         DeliveryWork::Reconcile => {
             host.observe(claim.target.clone(), claim.delivery_id.clone())
                 .await
