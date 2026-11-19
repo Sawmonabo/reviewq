@@ -146,8 +146,17 @@
   overflow-wrap: anywhere;
 }
 .run-card-project {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
   color: var(--avatar-text);
   font-size: 12px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+.run-card-project + .actions {
+  margin-top: 10px;
 }
 .run-reason {
   margin-left: auto;

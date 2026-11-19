@@ -172,17 +172,7 @@ pub(super) fn claim(
     let (kind, state, work) = match expected {
         RecoverableDeliveryState::Queued => {
             let guard = workflow::read_guard(&tx.sql, &delivery_id)?;
-            let needs_guard = matches!(
-                delivery.purpose,
-                MessagePurpose::ThreadFollowup | MessagePurpose::Publication
-            );
-            let authorized = match guard.as_ref() {
-                Some(guard) if needs_guard => {
-                    workflow::current(&tx.sql, &target, &delivery.receipt.submission_id, guard)?
-                }
-                None if !needs_guard => true,
-                _ => false,
-            };
+            let authorized = workflow_authorized(&tx.sql, &target, &delivery, guard.as_ref())?;
             if !grant_current(&tx.sql, &delivery)? || !authorized {
                 tx.sql.execute(
                     "UPDATE messages SET state='rejected', updated_at_ms=max(updated_at_ms, ?2)
@@ -304,9 +294,9 @@ pub(super) fn authorize_dispatch(
     connection: &Connection,
     claim: DeliveryClaim,
 ) -> Result<(), StoreError> {
-    if ClaimKind::from_work(&claim.work) != ClaimKind::Dispatch {
+    let DeliveryWork::Dispatch { workflow, .. } = &claim.work else {
         return Err(AppError::Forbidden.into());
-    }
+    };
     let stored = matching_claim(connection, &claim)?;
     let now = now_ms()?;
     if stored.due_at_ms.is_none_or(|deadline| deadline <= now) {
@@ -318,20 +308,25 @@ pub(super) fn authorize_dispatch(
     if claim.work != dispatch_work(connection, &claim.delivery_id)? {
         return Err(AppError::Conflict.into());
     }
-    if let DeliveryWork::Dispatch {
-        workflow: Some(guard),
-        ..
-    } = &claim.work
-        && !workflow::current(
-            connection,
-            &claim.target,
-            &stored.receipt.submission_id,
-            guard,
-        )?
-    {
+    if !workflow_authorized(connection, &claim.target, &stored, workflow.as_deref())? {
         return Err(AppError::Forbidden.into());
     }
     Ok(())
+}
+
+fn workflow_authorized(
+    db: &Connection,
+    target: &LeadTarget,
+    delivery: &Delivery,
+    guard: Option<&reviewq_app::workflow::WorkflowGuard>,
+) -> Result<bool, StoreError> {
+    match guard {
+        Some(guard) if guard.binding.message_purpose() == delivery.purpose => {
+            workflow::current(db, target, &delivery.receipt.submission_id, guard)
+        }
+        Some(_) => Ok(false),
+        None => Ok(!delivery.purpose.requires_new_turn()),
+    }
 }
 
 pub(super) fn workflow_requirements(

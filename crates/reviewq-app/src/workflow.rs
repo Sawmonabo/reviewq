@@ -9,7 +9,7 @@ use reviewq_domain::identity::{
 use reviewq_domain::session::LeadTarget;
 
 use crate::access::AppFuture;
-use crate::hosts::MessageBody;
+use crate::hosts::{MessageBody, MessagePurpose};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum WorkflowTool {
@@ -97,6 +97,16 @@ pub enum WorkflowBinding {
     Action(ActionId),
     Followup(String),
     Recovery(crate::hosts::recovery::RecoveryAuthorization),
+}
+
+impl WorkflowBinding {
+    pub fn message_purpose(&self) -> MessagePurpose {
+        match self {
+            Self::Action(_) => MessagePurpose::Publication,
+            Self::Followup(_) => MessagePurpose::ThreadFollowup,
+            Self::Recovery(_) => MessagePurpose::CodexRecovery,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

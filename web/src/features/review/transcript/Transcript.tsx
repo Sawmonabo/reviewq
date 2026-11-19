@@ -1,5 +1,13 @@
 import { defaultRangeExtractor, useVirtualizer } from "@tanstack/react-virtual";
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useDeferredValue,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import type { HistoryEntry, HistoryPart } from "../../../api/generated/contracts";
 import type { HostProviderDto } from "../../../api/generated/contracts/common";
 import type { MessageHistoryItem } from "../../../api/generated/contracts/delivery";
@@ -14,7 +22,7 @@ import { PromptNavigator } from "./PromptNavigator";
 import { FileReadPack, ToolRunHeader } from "./ToolActivity";
 import { activityRows, openKey, toolCatalog, toolOnly } from "./tool-activity";
 import type { ReadPack, ReadTarget, ToolRun } from "./tool-activity";
-import { TranscriptMarkdown } from "./TranscriptMarkdown";
+import { MarkdownContent } from "../../../components/markdown/MarkdownContent";
 import { useHistory } from "./useHistory";
 
 type Position = {
@@ -107,8 +115,11 @@ export function Transcript({
     () => new Set(historyEntries.map((item) => item.entryId)),
     [historyEntries],
   );
+  const streamed = useDeferredValue(history.live);
   const inProgress =
-    history.live?.entryId && !canonical.has(history.live.entryId) ? history.live : undefined;
+    streamed && streamed.entryId === history.live?.entryId && !canonical.has(streamed.entryId)
+      ? streamed
+      : undefined;
   const clippedStart = Boolean(history.older);
   const clippedEnd = Boolean(history.newer || inProgress);
   const entries = useMemo<Visible[]>(() => {
@@ -594,12 +605,8 @@ export function Transcript({
                     </header>
                   )}
                   <div className="message-body stack">
-                    {row.provisional !== undefined && (
-                      <p className="message-copy">{row.provisional}</p>
-                    )}
-                    {row.delivery && !row.entry && (
-                      <TranscriptMarkdown source={row.delivery.text} />
-                    )}
+                    {row.provisional !== undefined && <MarkdownContent source={row.provisional} />}
+                    {row.delivery && !row.entry && <MarkdownContent source={row.delivery.text} />}
                     {row.entry && history.generation && (
                       <EntryBody
                         key={history.generation}

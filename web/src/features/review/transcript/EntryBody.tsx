@@ -4,7 +4,7 @@ import { ExpandedOutput } from "./ExpandedOutput";
 import { ToolHeading } from "./ToolActivity";
 import { groupParts, openKey } from "./tool-activity";
 import type { ToolCatalog } from "./tool-activity";
-import { TranscriptMarkdown } from "./TranscriptMarkdown";
+import { MarkdownContent } from "../../../components/markdown/MarkdownContent";
 
 type Props = {
   readonly target: SessionAddress;
@@ -78,7 +78,7 @@ export function EntryBody({
       <div className="stack" key={key}>
         {(!part.contentRef || reference !== part.contentRef) &&
           (formatted ? (
-            <TranscriptMarkdown source={part.text} />
+            <MarkdownContent source={part.text} />
           ) : (
             <pre className="tool-output-line">{part.text}</pre>
           ))}

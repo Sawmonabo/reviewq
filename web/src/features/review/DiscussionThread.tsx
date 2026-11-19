@@ -1,12 +1,7 @@
-import { lazy, Suspense, useState } from "react";
+import { useState } from "react";
+import { MarkdownContent } from "../../components/markdown/MarkdownContent";
 import type { PatchDiscussion } from "../../api/generated/contracts";
 import { formatTime, safeUrl } from "../../lib/presentation";
-
-const Markdown = lazy(() =>
-  import("../../components/markdown/MarkdownContent").then((module) => ({
-    default: module.MarkdownContent,
-  })),
-);
 
 export function DiscussionThread({
   thread,
@@ -76,41 +71,39 @@ export function DiscussionThread({
               )}
             </div>
           )}
-          <Suspense fallback={<p>{first.body}</p>}>
-            {thread.notes.map((note) => {
-              const href = safeUrl(note.webUrl);
-              const stamp = note.createdAt ? (
-                <time dateTime={note.createdAt}>{formatTime(note.createdAt)}</time>
-              ) : (
-                "Open note in GitLab"
-              );
-              return (
-                <article className="discussion-note stack" key={note.noteId}>
-                  <header className="discussion-note-meta">
-                    <span className="avatar" aria-hidden="true">
-                      {note.author.slice(0, 2).toUpperCase()}
-                    </span>
-                    <strong>{note.author}</strong>
-                    {note.ours && <span className="meta">Configured reviewer</span>}
-                    {href ? (
-                      <a
-                        className="meta"
-                        target="_blank"
-                        rel="noreferrer"
-                        href={href}
-                        title="Open note in GitLab"
-                      >
-                        {stamp} ↗
-                      </a>
-                    ) : (
-                      note.createdAt && <span className="meta">{stamp}</span>
-                    )}
-                  </header>
-                  <Markdown source={note.body} base={source} />
-                </article>
-              );
-            })}
-          </Suspense>
+          {thread.notes.map((note) => {
+            const href = safeUrl(note.webUrl);
+            const stamp = note.createdAt ? (
+              <time dateTime={note.createdAt}>{formatTime(note.createdAt)}</time>
+            ) : (
+              "Open note in GitLab"
+            );
+            return (
+              <article className="discussion-note stack" key={note.noteId}>
+                <header className="discussion-note-meta">
+                  <span className="avatar" aria-hidden="true">
+                    {note.author.slice(0, 2).toUpperCase()}
+                  </span>
+                  <strong>{note.author}</strong>
+                  {note.ours && <span className="meta">Configured reviewer</span>}
+                  {href ? (
+                    <a
+                      className="meta"
+                      target="_blank"
+                      rel="noreferrer"
+                      href={href}
+                      title="Open note in GitLab"
+                    >
+                      {stamp} ↗
+                    </a>
+                  ) : (
+                    note.createdAt && <span className="meta">{stamp}</span>
+                  )}
+                </header>
+                <MarkdownContent source={note.body} base={source} />
+              </article>
+            );
+          })}
         </>
       )}
     </details>

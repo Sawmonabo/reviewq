@@ -31,6 +31,10 @@ export function PatchDocumentView({ text, discussions, restoreScroll, rememberSc
   );
   return (
     <>
+      {patch &&
+        discussions.map((thread) => (
+          <ThreadPortal key={thread.discussionId} patch={patch} thread={thread} />
+        ))}
       <div
         ref={mount}
         className="patch-source patch-rich"
@@ -38,10 +42,6 @@ export function PatchDocumentView({ text, discussions, restoreScroll, rememberSc
         aria-label="Selectable unified patch"
         onCopy={copyRows}
       />
-      {patch &&
-        discussions.map((thread) => (
-          <ThreadPortal key={thread.discussionId} patch={patch} thread={thread} />
-        ))}
     </>
   );
 }
