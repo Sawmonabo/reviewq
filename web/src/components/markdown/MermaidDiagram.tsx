@@ -1,10 +1,12 @@
 import type Mermaid from "mermaid";
-import { useEffect, useId, useState } from "react";
+import { useContext, useEffect, useId, useState } from "react";
+import { DiagramCacheContext, reusableDiagram } from "./diagram-cache";
 import { useDiagramViewport } from "./useDiagramViewport";
 
 let engine: Promise<typeof Mermaid> | undefined;
 
 export default function MermaidDiagram({ source }: { readonly source: string }) {
+  const cache = useContext(DiagramCacheContext);
   const id = useId().replace(/[^a-zA-Z0-9_-]/g, "");
   const [result, setResult] = useState<{
     source: string;
@@ -26,37 +28,44 @@ export default function MermaidDiagram({ source }: { readonly source: string }) 
     const observer = new IntersectionObserver((entries) => {
       if (!entries.some((entry) => entry.isIntersecting)) return;
       observer.disconnect();
-      engine ??= import("mermaid").then(({ default: mermaid }) => {
-        mermaid.initialize({
-          startOnLoad: false,
-          securityLevel: "strict",
-          htmlLabels: false,
-          suppressErrorRendering: true,
-          maxTextSize: 30_000,
-          maxEdges: 500,
-          theme: "base",
-          look: "classic",
-          themeVariables: {
-            darkMode: true,
-            background: "#0b0c10",
-            primaryColor: "#1c2330",
-            primaryTextColor: "#e0e5ef",
-            primaryBorderColor: "#657894",
-            lineColor: "#8c9db7",
-            secondaryColor: "#23222d",
-            tertiaryColor: "#141820",
-            noteBkgColor: "#242735",
-            noteTextColor: "#e0e5ef",
-            noteBorderColor: "#657894",
-            fontFamily: "Inter, Segoe UI, sans-serif",
-            fontSize: "14px",
-          },
+      const theme = document.documentElement.dataset.theme ?? "";
+      const renderId = `reviewq-diagram-${crypto.randomUUID()}`;
+      const saved = cache?.diagram;
+      const hit = saved?.source === source && saved.theme === theme ? saved : undefined;
+      const render = async () => {
+        if (hit) return hit.svg.replaceAll(hit.id, renderId);
+        engine ??= import("mermaid").then(({ default: mermaid }) => {
+          mermaid.initialize({
+            startOnLoad: false,
+            securityLevel: "strict",
+            htmlLabels: false,
+            suppressErrorRendering: true,
+            maxTextSize: 30_000,
+            maxEdges: 500,
+            theme: "base",
+            look: "classic",
+            themeVariables: {
+              darkMode: true,
+              background: "#0b0c10",
+              primaryColor: "#1c2330",
+              primaryTextColor: "#e0e5ef",
+              primaryBorderColor: "#657894",
+              lineColor: "#8c9db7",
+              secondaryColor: "#23222d",
+              tertiaryColor: "#141820",
+              noteBkgColor: "#242735",
+              noteTextColor: "#e0e5ef",
+              noteBorderColor: "#657894",
+              fontFamily: "Inter, Segoe UI, sans-serif",
+              fontSize: "14px",
+            },
+          });
+          return mermaid;
         });
-        return mermaid;
-      });
-      void engine
-        .then((mermaid) => mermaid.render(`reviewq-diagram-${id}`, source))
-        .then(({ svg }) => {
+        return (await (await engine).render(renderId, source)).svg;
+      };
+      void render()
+        .then((svg) => {
           if (!active) return;
           const parsed = new DOMParser().parseFromString(svg, "image/svg+xml");
           const root = parsed.documentElement;
@@ -66,6 +75,10 @@ export default function MermaidDiagram({ source }: { readonly source: string }) 
             throw new Error("Invalid diagram size");
           for (const unsafe of parsed.querySelectorAll("script, foreignObject, image, a"))
             unsafe.remove();
+          if (cache && !hit) {
+            const svg = reusableDiagram(root, renderId);
+            if (svg) cache.diagram = { source, theme, id: renderId, svg };
+          }
           target.replaceChildren(document.importNode(root, true));
           setResult({ source, size: { width, height } });
         })
@@ -79,7 +92,7 @@ export default function MermaidDiagram({ source }: { readonly source: string }) 
       observer.disconnect();
       target.replaceChildren();
     };
-  }, [eligible, id, source, frame, canvas]);
+  }, [eligible, source, frame, canvas, cache]);
 
   const idle = eligible && size === undefined;
   const failed = !eligible || size === null;
