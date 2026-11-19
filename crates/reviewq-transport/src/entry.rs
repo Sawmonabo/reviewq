@@ -40,6 +40,7 @@ mod auth;
 mod changes;
 mod checkout;
 mod control;
+mod control_ops;
 mod error;
 mod events;
 mod features;
@@ -52,6 +53,7 @@ mod pages;
 mod questions;
 mod settings;
 mod sources;
+mod targets;
 mod terminal;
 
 pub use control::{ControlRequest, ServiceEndpoint, ServiceIdentity};
@@ -225,6 +227,11 @@ pub fn router(
     }
     let api = Router::new()
         .route("/status", get(status))
+        .route("/control/review", post(control_ops::review))
+        .route(
+            "/control/ack",
+            post(control_ops::ack).layer(DefaultBodyLimit::max(160 * 1024)),
+        )
         .route("/settings", get(settings::read).put(settings::save))
         .route("/settings/test", post(settings::test))
         .route("/settings/catalog", post(settings::catalog))

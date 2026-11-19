@@ -10,7 +10,7 @@ CREATE TABLE review_decisions (
 
 CREATE TABLE review_decision_receipts (
     actor_key BLOB NOT NULL,
-    operation TEXT NOT NULL CHECK (operation IN ('review_decision', 'review_checkpoint')),
+    operation TEXT NOT NULL CHECK (operation IN ('review_decision', 'review_checkpoint', 'terminal_review_decision')),
     submission_id TEXT NOT NULL,
     review_id TEXT NOT NULL REFERENCES reviews(review_id),
     revision INTEGER NOT NULL CHECK (revision > 0),

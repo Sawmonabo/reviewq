@@ -4,6 +4,7 @@ use axum::Json;
 use axum::extract::State;
 use axum::http::HeaderMap;
 use reviewq_app::access::AppError;
+use reviewq_app::events::Snapshot;
 use reviewq_app::notifications::{
     self as app, InboxPosition, InboxView, Kind, MAX_INBOX_PAGE, NotificationAction,
 };
@@ -128,19 +129,25 @@ pub(super) async fn update(
         .map(|id| parse(id.as_str()))
         .collect::<Result<Vec<_>, _>>()?;
     let stored = entry.store.assign_notifications(actor, action, ids).await?;
+    Ok(Json(project_change(stored)?))
+}
+
+pub(in crate::entry) fn project_change(
+    stored: Snapshot<app::InboxChange>,
+) -> Result<Success<dto::StateResult>, AppError> {
     let affected_ids = stored
         .value
         .affected
         .iter()
         .map(|id| ResourceIdDto::new(id.as_str()).ok_or(AppError::Internal))
         .collect::<Result<Vec<_>, _>>()?;
-    Ok(Json(success(
+    success(
         dto::StateResult {
             affected_ids,
             counts: counts(stored.value.counts)?,
         },
         stored.cursor,
-    )?))
+    )
 }
 
 fn app_view(view: dto::InboxView) -> InboxView {

@@ -260,6 +260,17 @@ pub(crate) async fn signed(
     target: &str,
     body: &[u8],
 ) -> Result<Vec<u8>, Failure> {
+    signed_limit(client, endpoint, method, target, body, 8192).await
+}
+
+pub(crate) async fn signed_limit(
+    client: &Client,
+    endpoint: &ServiceEndpoint,
+    method: &str,
+    target: &str,
+    body: &[u8],
+    limit: usize,
+) -> Result<Vec<u8>, Failure> {
     let proof = endpoint.sign(method, target, body)?;
     let mut request = client
         .request(
@@ -275,10 +286,21 @@ pub(crate) async fn signed(
     let response = request.send().await?;
     let status = response.status();
     let headers = response.headers().clone();
-    let bytes = bounded(response, 8192).await?;
+    let bytes = bounded(response, limit).await?;
     endpoint.verify_response(&proof, status.as_u16(), &headers, &bytes)?;
     if !status.is_success() {
-        return Err("service rejected the operation".into());
+        if let Ok(failure) = serde_json::from_slice::<serde_json::Value>(&bytes)
+            && let Some(code) = failure
+                .pointer("/error/code")
+                .and_then(serde_json::Value::as_str)
+            && code.len() <= 64
+            && code
+                .bytes()
+                .all(|byte| byte.is_ascii_lowercase() || byte == b'_')
+        {
+            return Err(format!("ReviewQ returned {code}").into());
+        }
+        return Err("ReviewQ rejected the operation".into());
     }
     Ok(bytes)
 }

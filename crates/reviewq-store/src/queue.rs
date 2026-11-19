@@ -535,6 +535,38 @@ pub(crate) fn identity_for_review(
     identity(rows.next()?.ok_or(AppError::NotFound)?, 0)
 }
 
+pub(crate) fn source_for_review(
+    db: &Connection,
+    review: &ReviewId,
+) -> Result<ReviewSource, StoreError> {
+    let (project_path, title, sha, updated_at_ms, state) = db.query_row(
+        "SELECT project_path,title,head_sha,updated_at_ms,state FROM reviews WHERE review_id=?1",
+        [review.as_str()],
+        |row| {
+            Ok((
+                row.get(0)?,
+                row.get(1)?,
+                row.get::<_, String>(2)?,
+                row.get(3)?,
+                row.get::<_, String>(4)?,
+            ))
+        },
+    )?;
+    Ok(ReviewSource {
+        identity: identity_for_review(db, review)?,
+        project_path,
+        title,
+        head_sha: parse(&sha)?,
+        state: match state.as_str() {
+            "open" => MergeRequestState::Open,
+            "closed" => MergeRequestState::Closed,
+            "merged" => MergeRequestState::Merged,
+            _ => return Err(AppError::Internal.into()),
+        },
+        updated_at_ms,
+    })
+}
+
 pub(crate) fn find_review_id(
     connection: &Connection,
     source: &MrIdentity,
