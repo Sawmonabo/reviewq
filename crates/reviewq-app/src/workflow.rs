@@ -129,12 +129,19 @@ pub enum WorkflowRequirement {
     },
     Followup {
         discussions: Vec<SelectedDiscussion>,
+        configured_reviewers: std::collections::BTreeSet<u64>,
     },
 }
 
 pub struct SelectedDiscussion {
     pub discussion_id: String,
-    pub original_note_ids: Vec<u64>,
+    pub originals: Vec<SelectedNote>,
+}
+
+#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
+pub struct SelectedNote {
+    pub note_id: u64,
+    pub reviewer_id: u64,
 }
 
 impl WorkflowRequirements {
@@ -165,15 +172,20 @@ impl WorkflowRequirements {
                     return Err(AppError::Conflict);
                 }
             }
-            WorkflowRequirement::Followup { discussions } => {
-                if source.personal_approval != Some(false)
+            WorkflowRequirement::Followup {
+                discussions,
+                configured_reviewers,
+            } => {
+                if source.reviewer_approval(configured_reviewers) != Some(false)
                     || discussions.iter().any(|expected| {
                         !source.discussions.iter().any(|actual| {
                             actual.id == expected.discussion_id
-                                && expected.original_note_ids.iter().all(|id| {
-                                    actual.notes.iter().any(|note| {
-                                        note.id == *id && note.author == self.reviewer_id
-                                    })
+                                && expected.originals.iter().all(|original| {
+                                    configured_reviewers.contains(&original.reviewer_id)
+                                        && actual.notes.iter().any(|note| {
+                                            note.id == original.note_id
+                                                && note.author == original.reviewer_id
+                                        })
                                 })
                         })
                     })

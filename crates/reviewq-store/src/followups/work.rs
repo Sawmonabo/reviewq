@@ -5,7 +5,7 @@ use reviewq_app::followups::{
     PreparedCheck,
 };
 use reviewq_app::reports::ReportReference;
-use reviewq_app::workflow::{WorkflowAdmission, WorkflowBinding};
+use reviewq_app::workflow::{SelectedNote, WorkflowAdmission, WorkflowBinding};
 use reviewq_domain::identity::{ReviewId, RunId, SubmissionId};
 use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
@@ -52,9 +52,16 @@ pub(crate) struct FrozenMember {
     pub(crate) id: String,
     pub(crate) discussion_id: String,
     pub(crate) discussion_version: String,
-    pub(crate) original_note_ids: Vec<String>,
+    pub(crate) originals: Vec<FrozenOriginal>,
     pub(crate) finding_ids: Vec<String>,
     pub(crate) prior_batch_id: Option<String>,
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct FrozenOriginal {
+    pub(crate) note_id: u64,
+    pub(crate) reviewer_id: u64,
 }
 
 impl FollowupWorkerStore for SqliteStore {
@@ -105,7 +112,7 @@ fn due(db: &Connection, limit: u16) -> Result<Vec<PendingCheck>, StoreError> {
         return Ok(Vec::new());
     }
     let sql = format!(
-        "SELECT b.batch_id,b.review_id,b.run_id,b.generation,b.lead_session_key
+        "SELECT b.batch_id,b.review_id,b.run_id,b.generation,b.lead_session_key,m.reviewer_id
          FROM followup_batches b JOIN followup_monitors m USING(review_id) JOIN reviews r USING(review_id)
          WHERE b.due_at_ms<=?1 AND {ELIGIBLE}
          ORDER BY b.due_at_ms,b.batch_id LIMIT ?2");
@@ -126,9 +133,15 @@ fn due(db: &Connection, limit: u16) -> Result<Vec<PendingCheck>, StoreError> {
         if members.is_empty() {
             continue;
         }
+        let authenticated_reviewer = text(row, 5)?.parse().map_err(|_| AppError::Internal)?;
         result.push(PendingCheck {
             batch_id,
             lead,
+            authenticated_reviewer,
+            configured_reviewers: super::observations::monitored_reviewers(
+                db,
+                authenticated_reviewer,
+            )?,
             monitor: MonitoredReview {
                 identity: identity_for_review(db, &review)?,
                 review,
@@ -180,10 +193,9 @@ fn members(
                      SELECT original_note_id FROM followup_observation_origins l
                       WHERE l.review_id=o.review_id AND l.observation_id=o.observation_id))
              ORDER BY finding_id) f),
-          (SELECT json_group_array(l.original_note_id) FROM (
-             SELECT original_note_id FROM followup_observation_origins
-             WHERE review_id=o.review_id AND observation_id=o.observation_id ORDER BY original_note_id
-          ) l)
+          (SELECT json_group_array(json_array(l.original_note_id,t.reviewer_id)) FROM followup_threads t
+             JOIN followup_observation_origins l USING(review_id,generation,original_note_id)
+             WHERE l.review_id=o.review_id AND l.observation_id=o.observation_id)
          FROM followup_members m JOIN followup_observations o USING(review_id,observation_id)
          WHERE m.review_id=?1 AND m.batch_id=?2
          ORDER BY o.observed_at_ms,o.observation_id LIMIT ?3",
@@ -195,14 +207,23 @@ fn members(
             observation_id: row.get(0)?,
             discussion_id: row.get(1)?,
             discussion_version: row.get(2)?,
-            original_note_ids: {
-                let originals: Vec<String> =
+            originals: {
+                let raw: Vec<(String, String)> =
                     serde_json::from_str(text(row, 6)?).map_err(|_| AppError::Internal)?;
-                if originals.is_empty() {
-                    vec![row.get(3)?]
-                } else {
-                    originals
+                let mut values = raw
+                    .into_iter()
+                    .map(|(note, reviewer)| {
+                        Ok(SelectedNote {
+                            note_id: note.parse().map_err(|_| AppError::Internal)?,
+                            reviewer_id: reviewer.parse().map_err(|_| AppError::Internal)?,
+                        })
+                    })
+                    .collect::<Result<Vec<_>, StoreError>>()?;
+                values.sort_unstable();
+                if values.is_empty() {
+                    return Err(AppError::Conflict.into());
                 }
+                values
             },
             prior_batch_id: row.get(4)?,
             finding_ids: serde_json::from_str(text(row, 5)?).map_err(|_| AppError::Internal)?,
@@ -276,7 +297,14 @@ fn reserve(tx: &mut WriteTx<'_>, check: PreparedCheck) -> Result<(), StoreError>
                 id: member.observation_id,
                 discussion_id: member.discussion_id,
                 discussion_version: member.discussion_version,
-                original_note_ids: member.original_note_ids,
+                originals: member
+                    .originals
+                    .into_iter()
+                    .map(|original| FrozenOriginal {
+                        note_id: original.note_id,
+                        reviewer_id: original.reviewer_id,
+                    })
+                    .collect(),
                 finding_ids: member.finding_ids,
                 prior_batch_id: member.prior_batch_id,
             })

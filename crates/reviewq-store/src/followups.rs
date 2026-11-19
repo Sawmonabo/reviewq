@@ -1,7 +1,7 @@
 //! Scoped enrollment, exact retained batch outcomes and unread assessment pages.
 
 mod commands;
-mod observations;
+pub(crate) mod observations;
 mod poll;
 pub(crate) mod work;
 

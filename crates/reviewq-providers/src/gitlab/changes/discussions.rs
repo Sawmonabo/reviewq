@@ -289,7 +289,7 @@ impl GitLab {
             identity.project_id(),
             identity.iid()
         ))?;
-        let personal_approval = match self.get(url, MAX_DISCUSSION_BYTES).await {
+        let approved_reviewers = match self.get(url, MAX_DISCUSSION_BYTES).await {
             Ok((_, approvals)) => {
                 let approvals: ApprovalState =
                     serde_json::from_slice(&approvals).map_err(|_| AppError::Unavailable)?;
@@ -304,8 +304,9 @@ impl GitLab {
                 Some(
                     approvals
                         .approved_by
-                        .iter()
-                        .any(|actor| actor.user.id == user.id),
+                        .into_iter()
+                        .map(|actor| actor.user.id)
+                        .collect::<Vec<_>>(),
                 )
             }
             Err(AppError::Unavailable | AppError::NotFound | AppError::Forbidden) => None,
@@ -318,7 +319,10 @@ impl GitLab {
         Ok(WorkflowSnapshot {
             review: after,
             authenticated_actor: user.id,
-            personal_approval,
+            personal_approval: approved_reviewers
+                .as_ref()
+                .map(|actors| actors.contains(&user.id)),
+            approved_reviewers,
             observed_at_ms: jiff::Timestamp::now().as_millisecond(),
             discussions,
         })

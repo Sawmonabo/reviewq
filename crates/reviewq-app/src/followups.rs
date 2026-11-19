@@ -164,6 +164,7 @@ pub trait FollowupObservationStore: Send + Sync {
         after: Option<ReviewId>,
         limit: u16,
     ) -> AppFuture<'_, Vec<MonitoredReview>>;
+    fn record_monitor_unavailable(&self, target: MonitoredReview) -> AppFuture<'_, ()>;
     fn record_monitor_observation(
         &self,
         target: MonitoredReview,
@@ -182,16 +183,17 @@ pub async fn poll_monitored_reviews(
         .then(|| rows.last().map(|row| row.review.clone()))
         .flatten();
     for row in rows {
-        if let Ok(observation) = source.workflow_snapshot(row.identity.clone()).await {
-            let committed = store.record_monitor_observation(row, observation).await;
-            if let Err(error) = committed
-                && !matches!(
-                    error,
-                    crate::access::AppError::StaleRevision | crate::access::AppError::Conflict
-                )
-            {
-                return Err(error);
-            }
+        let committed = match source.workflow_snapshot(row.identity.clone()).await {
+            Ok(observation) => store.record_monitor_observation(row, observation).await,
+            Err(_) => store.record_monitor_unavailable(row).await,
+        };
+        if let Err(error) = committed
+            && !matches!(
+                error,
+                crate::access::AppError::StaleRevision | crate::access::AppError::Conflict
+            )
+        {
+            return Err(error);
         }
     }
     Ok(next)

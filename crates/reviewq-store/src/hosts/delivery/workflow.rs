@@ -283,31 +283,37 @@ pub(super) fn requirements(
             )?;
             let manifest: FrozenManifest =
                 serde_json::from_str(&manifest).map_err(|_| AppError::Internal)?;
-            let mut matched: BTreeMap<String, BTreeSet<u64>> = BTreeMap::new();
+            let mut matched: BTreeMap<String, BTreeSet<reviewq_app::workflow::SelectedNote>> =
+                BTreeMap::new();
             for observation in manifest.observations {
                 let values = matched.entry(observation.discussion_id).or_default();
-                for note in observation.original_note_ids {
-                    values.insert(note.parse().map_err(|_| AppError::Internal)?);
-                }
+                values.extend(observation.originals.into_iter().map(|note| {
+                    reviewq_app::workflow::SelectedNote {
+                        note_id: note.note_id,
+                        reviewer_id: note.reviewer_id,
+                    }
+                }));
             }
             let discussions = matched
                 .into_iter()
-                .map(|(discussion_id, original_note_ids)| SelectedDiscussion {
+                .map(|(discussion_id, originals)| SelectedDiscussion {
                     discussion_id,
-                    original_note_ids: original_note_ids.into_iter().collect(),
+                    originals: originals.into_iter().collect(),
                 })
                 .collect::<Vec<_>>();
-            if discussions.is_empty()
-                || discussions
-                    .iter()
-                    .any(|item| item.original_note_ids.is_empty())
-            {
+            if discussions.is_empty() || discussions.iter().any(|item| item.originals.is_empty()) {
                 return Err(AppError::Conflict.into());
             }
+            let reviewer_id = reviewer.parse().map_err(|_| AppError::Internal)?;
+            let configured_reviewers =
+                crate::followups::observations::monitored_reviewers(db, reviewer_id)?;
             Ok(WorkflowRequirements {
                 identity,
-                reviewer_id: reviewer.parse().map_err(|_| AppError::Internal)?,
-                requirement: WorkflowRequirement::Followup { discussions },
+                reviewer_id,
+                requirement: WorkflowRequirement::Followup {
+                    discussions,
+                    configured_reviewers,
+                },
             })
         }
     }

@@ -1,8 +1,8 @@
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use reviewq_app::access::AppError;
 use reviewq_app::followups::Selection;
-use reviewq_app::sources::{WorkflowDiscussion, WorkflowSnapshot};
+use reviewq_app::sources::{WorkflowDiscussion, WorkflowNote, WorkflowSnapshot};
 use reviewq_domain::identity::{ReportHash, ReviewId, Revision, RunId};
 use rusqlite::{Connection, OptionalExtension, params};
 use sha2::{Digest, Sha256};
@@ -13,7 +13,7 @@ use crate::queue::lead_for_run;
 use crate::workspace::hash_field;
 
 pub(super) struct VerifiedThread<'a> {
-    original: u64,
+    note: &'a WorkflowNote,
     discussion: &'a WorkflowDiscussion,
     finding_ids: &'a [String],
 }
@@ -21,6 +21,7 @@ pub(super) struct VerifiedThread<'a> {
 pub(super) fn verified_threads<'a>(
     snapshot: &'a WorkflowSnapshot,
     selections: &'a [Selection],
+    reviewers: &BTreeSet<u64>,
 ) -> Result<Vec<VerifiedThread<'a>>, StoreError> {
     let mut output = Vec::new();
     for selection in selections {
@@ -30,15 +31,13 @@ pub(super) fn verified_threads<'a>(
             .find(|row| row.id == selection.discussion_id)
             .ok_or(AppError::Conflict)?;
         for original in &selection.original_note_ids {
-            let owned = discussion
+            let note = discussion
                 .notes
                 .iter()
-                .any(|note| note.id == *original && note.author == snapshot.authenticated_actor);
-            if !owned {
-                return Err(AppError::Conflict.into());
-            }
+                .find(|note| note.id == *original && reviewers.contains(&note.author))
+                .ok_or(AppError::Conflict)?;
             output.push(VerifiedThread {
-                original: *original,
+                note,
                 discussion,
                 finding_ids: &selection.finding_ids,
             });
@@ -47,37 +46,139 @@ pub(super) fn verified_threads<'a>(
     Ok(output)
 }
 
+pub(crate) fn monitored_reviewers(
+    db: &Connection,
+    authenticated: u64,
+) -> Result<BTreeSet<u64>, StoreError> {
+    let mut statement = db.prepare_cached("SELECT reviewer_id FROM settings_reviewers")?;
+    let reviewers = statement.query_map([], |row| row.get::<_, i64>(0))?;
+    let mut output = reviewers
+        .map(|value| u64::try_from(value?).map_err(|_| AppError::Internal.into()))
+        .collect::<Result<BTreeSet<_>, StoreError>>()?;
+    output.insert(authenticated);
+    Ok(output)
+}
+
+fn reviewer_threads<'a>(
+    snapshot: &'a WorkflowSnapshot,
+    reviewers: &'a BTreeSet<u64>,
+) -> impl Iterator<Item = VerifiedThread<'a>> {
+    snapshot.discussions.iter().filter_map(|discussion| {
+        let root = discussion.root_note_id?;
+        let note = discussion
+            .notes
+            .iter()
+            .find(|note| note.id == root && reviewers.contains(&note.author))?;
+        Some(VerifiedThread {
+            note,
+            discussion,
+            finding_ids: &[],
+        })
+    })
+}
+
 pub(super) fn save_selection(
     db: &Connection,
     review: &ReviewId,
     generation: Revision,
-    reviewer: u64,
     threads: Vec<VerifiedThread<'_>>,
 ) -> Result<(), StoreError> {
-    for thread in threads {
-        let original = thread.original.to_string();
-        let fingerprint = fingerprint(thread.discussion);
+    for thread in &threads {
+        save_thread(db, review, generation, thread, true, None)?;
+    }
+    Ok(())
+}
+
+/// Bounded auto selection never replaces an explicit choice for an original note.
+pub(super) fn add_reviewer_threads(
+    db: &Connection,
+    review: &ReviewId,
+    generation: Revision,
+    snapshot: &WorkflowSnapshot,
+    reviewers: &BTreeSet<u64>,
+    previous_complete_at: Option<i64>,
+    selected: bool,
+) -> Result<bool, StoreError> {
+    let threads: Vec<_> = reviewer_threads(snapshot, reviewers).collect();
+    let mut count: i64 = db.query_row(
+        "SELECT count(*) FROM followup_threads WHERE review_id=?1 AND generation=?2",
+        params![review.as_str(), generation.as_sqlite_integer()],
+        |row| row.get(0),
+    )?;
+    let mut changed = false;
+    for thread in &threads {
+        let exists: bool = db.query_row(
+            "SELECT EXISTS(SELECT 1 FROM followup_threads WHERE review_id=?1 AND generation=?2 AND original_note_id=?3)",
+            params![review.as_str(), generation.as_sqlite_integer(), thread.note.id.to_string()],
+            |row| row.get(0),
+        )?;
+        if exists {
+            continue;
+        }
+        count += 1;
+        if count > i64::from(reviewq_app::followups::MAX_SELECTED_NOTES) {
+            return Err(AppError::PayloadTooLarge.into());
+        }
+        save_thread(
+            db,
+            review,
+            generation,
+            thread,
+            selected,
+            previous_complete_at,
+        )?;
+        changed = true;
+    }
+    Ok(changed)
+}
+
+fn save_thread(
+    db: &Connection,
+    review: &ReviewId,
+    generation: Revision,
+    thread: &VerifiedThread<'_>,
+    selected: bool,
+    previous_complete_at: Option<i64>,
+) -> Result<(), StoreError> {
+    let original = thread.note.id.to_string();
+    let through = previous_complete_at.map(|previous| previous.max(thread.note.created_at_ms));
+    let fingerprint = through.is_none().then(|| fingerprint(thread.discussion));
+    db.prepare_cached(
+        "INSERT INTO followup_threads(review_id, generation, original_note_id, discussion_id,
+            reviewer_id, selected, discussion_version, baseline_sha256, resolved)
+         VALUES(?1,?2,?3,?4,?5,?6,'1',?7,?8)",
+    )?
+    .execute(params![
+        review.as_str(),
+        generation.as_sqlite_integer(),
+        original,
+        thread.discussion.id,
+        thread.note.author.to_string(),
+        selected,
+        fingerprint.as_ref().map(ReportHash::as_str),
+        thread.discussion.resolved
+    ])?;
+    for finding in thread.finding_ids {
         db.prepare_cached(
-            "INSERT INTO followup_threads(review_id, generation, original_note_id, discussion_id,
-                reviewer_id, selected, discussion_version, baseline_sha256, resolved)
-             VALUES(?1,?2,?3,?4,?5,1,'1',?6,?7)",
+            "INSERT INTO followup_thread_findings(review_id,generation,original_note_id,finding_id)
+             VALUES(?1,?2,?3,?4) ON CONFLICT DO NOTHING",
         )?
         .execute(params![
             review.as_str(),
             generation.as_sqlite_integer(),
             original,
-            thread.discussion.id,
-            reviewer.to_string(),
-            fingerprint.as_str(),
-            thread.discussion.resolved,
+            finding
         ])?;
-        for finding in thread.finding_ids {
-            db.prepare_cached(
-                "INSERT INTO followup_thread_findings(review_id,generation,original_note_id,finding_id)
-                 VALUES(?1,?2,?3,?4) ON CONFLICT DO NOTHING",
-            )?.execute(params![review.as_str(), generation.as_sqlite_integer(), original, finding])?;
-        }
-        save_notes(db, review, generation, &original, thread.discussion)?;
+    }
+    if selected {
+        save_notes(
+            db,
+            review,
+            generation,
+            &original,
+            thread.discussion,
+            through,
+        )?;
     }
     Ok(())
 }
@@ -88,6 +189,7 @@ fn save_notes(
     generation: Revision,
     original: &str,
     discussion: &WorkflowDiscussion,
+    through_ms: Option<i64>,
 ) -> Result<(), StoreError> {
     let mut insert = db.prepare_cached(
         "INSERT INTO followup_note_baselines(review_id,generation,original_note_id,note_id,reviewer_id,body_sha256)
@@ -95,7 +197,11 @@ fn save_notes(
          ON CONFLICT(review_id,generation,original_note_id,note_id)
          DO UPDATE SET reviewer_id=excluded.reviewer_id, body_sha256=excluded.body_sha256",
     )?;
-    for note in &discussion.notes {
+    for note in discussion
+        .notes
+        .iter()
+        .filter(|note| through_ms.is_none_or(|end| note.created_at_ms <= end))
+    {
         insert.execute(params![
             review.as_str(),
             generation.as_sqlite_integer(),
@@ -166,9 +272,6 @@ fn exact_discussion<'a>(
         .reviewer
         .parse::<u64>()
         .map_err(|_| AppError::Internal)?;
-    if reviewer != snapshot.authenticated_actor {
-        return Err(AppError::Conflict.into());
-    }
     snapshot
         .discussions
         .iter()
@@ -186,8 +289,16 @@ pub(super) fn require_known_threads(
     review: &ReviewId,
     generation: Revision,
     snapshot: &WorkflowSnapshot,
+    reviewers: &BTreeSet<u64>,
 ) -> Result<(), StoreError> {
     for row in selected(db, review, generation)? {
+        if !row
+            .reviewer
+            .parse::<u64>()
+            .is_ok_and(|actor| reviewers.contains(&actor))
+        {
+            return Err(AppError::Conflict.into());
+        }
         exact_discussion(&row, snapshot)?;
     }
     Ok(())
@@ -322,7 +433,7 @@ pub(super) fn same_enrollment(
             findings.sort();
             findings.dedup();
             (
-                item.original.to_string(),
+                item.note.id.to_string(),
                 (Some(item.discussion.id.clone()), findings),
             )
         })
@@ -417,6 +528,7 @@ pub(super) fn adopt_remote(
     db: &Connection,
     target: &reviewq_app::followups::MonitoredReview,
     snapshot: &WorkflowSnapshot,
+    reviewers: &BTreeSet<u64>,
     time: i64,
 ) -> Result<Vec<reviewq_domain::identity::NotificationId>, StoreError> {
     use reviewq_app::notifications::{Kind, Observation, Source};
@@ -450,7 +562,9 @@ pub(super) fn adopt_remote(
         let mut observed = Vec::new();
         if let Some(prior) = previous.1
             && prior != discussion.resolved
-            && discussion.resolved_by != Some(snapshot.authenticated_actor)
+            && !discussion
+                .resolved_by
+                .is_some_and(|actor| reviewers.contains(&actor))
         {
             observed.push(if discussion.resolved {
                 ("resolved", Kind::Resolved, None, discussion.resolved_by)
@@ -463,7 +577,7 @@ pub(super) fn adopt_remote(
              AND original_note_id=?3 AND note_id=?4",
         )?;
         for note in &discussion.notes {
-            if note.author == snapshot.authenticated_actor {
+            if reviewers.contains(&note.author) {
                 continue;
             }
             let prior = stored
@@ -491,6 +605,7 @@ pub(super) fn adopt_remote(
             target.generation,
             &row.original,
             discussion,
+            None,
         )?;
         db.execute(
             "UPDATE followup_threads SET discussion_id=?4,discussion_version=?5,baseline_sha256=?6,resolved=?7

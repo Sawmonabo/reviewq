@@ -19,6 +19,8 @@ pub(super) struct Record {
     pub text: Vec<u8>,
     pub bytes: u64,
     pub parts: Vec<Part>,
+    pub claude_tool_parent: Option<NativeInputId>,
+    pub claude_tool_calls: Vec<(NativeInputId, String)>,
 }
 
 pub(super) struct Part {
@@ -50,6 +52,8 @@ struct Message {
     result: Text,
     tool: Option<String>,
     status: Option<String>,
+    claude_tool_parent: Option<NativeInputId>,
+    tool_calls: Vec<(NativeInputId, String)>,
 }
 
 #[derive(Default)]
@@ -120,6 +124,8 @@ pub(super) fn project_window(
         text: item.text.picked,
         bytes: item.text.bytes,
         parts: item.parts,
+        claude_tool_parent: item.claude_tool_parent,
+        claude_tool_calls: item.tool_calls,
     })
 }
 
@@ -237,9 +243,13 @@ fn claude<R: Read>(
     let mut session = None;
     let mut agent = None;
     let mut secret_answer = false;
+    let mut parent = None;
+    let mut tool_parent = None;
     object(reader, |name, reader| match name {
         "type" => string(reader, ID_BYTES).map(|value| role = value),
         "uuid" => string(reader, ID_BYTES).map(|value| id = value),
+        "parentUuid" => string(reader, ID_BYTES).map(|value| parent = value),
+        "sourceToolAssistantUUID" => string(reader, ID_BYTES).map(|value| tool_parent = value),
         "timestamp" => string(reader, ID_BYTES).map(|value| stamp = date(value)),
         "sessionId" => string(reader, ID_BYTES).map(|value| session = value),
         "agentId" => string(reader, ID_BYTES).map(|value| agent = value),
@@ -288,6 +298,7 @@ fn claude<R: Read>(
         _ => return Ok(None),
     };
     item.id = id;
+    item.claude_tool_parent = tool_parent.or(parent).and_then(|value| value.parse().ok());
     Ok(Some((item, kind, stamp, None)))
 }
 
@@ -396,12 +407,13 @@ fn block<R: Read>(
             }
         }
         Some("tool_use") => {
-            let Some(call) = call.and_then(|id| id.parse().ok()) else {
+            let Some(call): Option<NativeInputId> = call.and_then(|id| id.parse().ok()) else {
                 return Ok(());
             };
             let Some(name) = name.filter(|value| display_id(value)) else {
                 return Ok(());
             };
+            item.tool_calls.push((call.clone(), name.clone()));
             let label = tools::label(&name);
             let kind = match label {
                 "Plan" => VisiblePartKind::Plan,
@@ -416,7 +428,7 @@ fn block<R: Read>(
             Part { index, kind, body }
         }
         Some("tool_result") => {
-            let Some(call) = call.and_then(|id| id.parse().ok()) else {
+            let Some(call): Option<NativeInputId> = call.and_then(|id| id.parse().ok()) else {
                 return Ok(());
             };
             Part {
