@@ -23,8 +23,8 @@ use reviewq_app::queue::{QueueStore, ReviewLookup};
 use reviewq_app::reports::{
     ReportCaptureStore, ReportFileSource, ReportMutationStore, ReportStore,
 };
-use reviewq_app::settings::{ConnectionSources, SettingsStore};
-use reviewq_app::sources::{ReviewSourceReader, SourceRefreshStore, refresh_queue};
+use reviewq_app::settings::{ConnectionSources, RuntimeSources, SettingsStore};
+use reviewq_app::sources::{SourceRefreshStore, refresh_queue};
 use reviewq_app::workflow::NativeWorkflowProof;
 use reviewq_app::workspace::WorkspaceStore;
 use reviewq_domain::identity::{EventCursor, Revision};
@@ -110,8 +110,7 @@ pub struct WorkflowIntegration {
 
 pub(super) struct Entry {
     store: Arc<dyn Store>,
-    configured_source: Option<Arc<dyn ReviewSourceReader>>,
-    source: Mutex<Option<sources::ActiveSource>>,
+    source: Arc<RuntimeSources>,
     settings_sources: Arc<dyn ConnectionSources>,
     refresh_wakeup: Notify,
     host: Option<Arc<dyn NativeHost>>,
@@ -173,15 +172,14 @@ pub struct ServiceRuntime<'a> {
 /// Mounts production assets and the private versioned HTTP routes.
 pub fn router(
     store: Arc<dyn Store>,
-    source: Option<Arc<dyn ReviewSourceReader>>,
+    source: Arc<RuntimeSources>,
     host: Option<Arc<dyn NativeHost>>,
     file_history: Arc<dyn NativeHistoryReader>,
     runtime: ServiceRuntime<'_>,
 ) -> Router {
     let entry = Arc::new(Entry {
         store,
-        configured_source: source,
-        source: Mutex::new(None),
+        source,
         settings_sources: runtime.settings_sources,
         refresh_wakeup: Notify::new(),
         host,

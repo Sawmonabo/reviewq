@@ -44,12 +44,13 @@ impl ConnectionSources for SourceAccounts {
     fn review_source(
         &self,
         saved: &reviewq_app::settings::SavedConnection,
+        lease: reviewq_app::settings::SourceLease,
     ) -> Result<Arc<dyn reviewq_app::sources::ReviewSourceReader>, AppError> {
         let Connection::GitLab { origin } = &saved.account.connection else {
             return Err(AppError::InvalidRequest);
         };
         let token = saved.token.as_ref().ok_or(AppError::Unauthorized)?;
-        Ok(Arc::new(self.gitlab(origin, token)?))
+        Ok(Arc::new(self.gitlab(origin, token)?.with_lease(lease)))
     }
 
     fn normalize(&self, draft: Connection) -> Result<Connection, AppError> {

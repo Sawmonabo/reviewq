@@ -10,6 +10,10 @@ use crate::access::{Actor, AppError, AppFuture};
 use crate::events::Snapshot;
 use crate::sources::ReviewSourceReader;
 
+mod runtime;
+
+pub use runtime::{ActiveSource, RuntimeSources, SourceLease};
+
 #[derive(Clone)]
 pub struct SecretToken(Box<str>);
 
@@ -109,6 +113,7 @@ pub trait ConnectionSources: Send + Sync {
     fn review_source(
         &self,
         saved: &SavedConnection,
+        lease: SourceLease,
     ) -> Result<Arc<dyn ReviewSourceReader>, AppError>;
 }
 

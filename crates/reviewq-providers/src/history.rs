@@ -16,9 +16,11 @@ mod locator;
 mod proof;
 mod reader;
 mod records;
+mod turn_metadata;
 
 pub(crate) use locator::{verified_claude_source, verified_codex_source};
 pub(crate) use proof::codex_opening;
+pub(crate) use turn_metadata::{codex_turn_settings, codex_turn_started};
 
 pub struct FileHistory {
     reads: Arc<Semaphore>,

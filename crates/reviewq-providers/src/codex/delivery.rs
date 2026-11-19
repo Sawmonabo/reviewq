@@ -89,7 +89,7 @@ impl Codex {
             Err(CallError::BeforeSend(_)) => DeliveryObservation::NotSubmitted,
             Err(CallError::Denied(_)) => DeliveryObservation::Rejected,
             // A reply, missing reply or exact remote error alone does not prove native input.
-            _ => self.find_input(lead, delivery, None).await,
+            _ => self.find_input(lead, delivery, None, false).await,
         }
     }
 
@@ -98,6 +98,7 @@ impl Codex {
         lead: LeadTarget,
         delivery: DeliveryId,
         mut cursor: Option<String>,
+        require_new_turn: bool,
     ) -> DeliveryObservation {
         let identity = lead.binding().identity();
         if identity.provider() != HostProvider::Codex || identity.profile() != &self.profile {
@@ -124,6 +125,24 @@ impl Codex {
                         && client_id.as_deref() == Some(delivery.as_str())
                         && let (Ok(turn_id), Ok(entry_id)) = (turn.id.parse(), id.parse())
                     {
+                        if require_new_turn {
+                            let Some(path) = thread.path.clone() else {
+                                return DeliveryObservation::Uncertain;
+                            };
+                            let marker = format!("reviewq:{}", delivery.as_str());
+                            if !matches!(
+                                crate::history::codex_turn_started(
+                                    lead.binding().clone(),
+                                    path,
+                                    turn.id,
+                                    marker
+                                )
+                                .await,
+                                Ok(Some(true))
+                            ) {
+                                return DeliveryObservation::Uncertain;
+                            }
+                        }
                         return DeliveryObservation::Started {
                             delivery_id: delivery,
                             input: ObservedInput { turn_id, entry_id },

@@ -103,6 +103,7 @@ pub async fn recover_delivery(
                 claim.target.clone(),
                 claim.delivery_id.clone(),
                 cursor.clone(),
+                claim.purpose.requires_new_turn(),
             )
             .await
         }

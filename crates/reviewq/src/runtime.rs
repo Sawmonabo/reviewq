@@ -13,6 +13,7 @@ use reviewq_app::access::Actor;
 use reviewq_app::hosts::{ClaudeCompanion, LeadStore, NativeHost, recover_delivery};
 use reviewq_app::notifications::DesktopStore;
 use reviewq_app::reports::reconcile_reports;
+use reviewq_app::settings::RuntimeSources;
 use reviewq_app::sources::{ReviewSourceReader, SourceRefreshStore};
 use reviewq_app::workspace::{WorkspaceConfig, WorkspaceStore};
 use reviewq_domain::session::{AbsolutePath, HostProvider};
@@ -125,7 +126,7 @@ pub(crate) async fn serve(profile: PathBuf, options: Serve) -> Result<(), Failur
         options.validation,
     ));
     let source = match options.gitlab.as_ref() {
-        Some(origin) if options.validation => {
+        Some(origin) => {
             let url = reqwest::Url::parse(origin)?;
             if !url
                 .host_str()
@@ -139,15 +140,6 @@ pub(crate) async fn serve(profile: PathBuf, options: Serve) -> Result<(), Failur
                 return Err("validation sources must be loopback".into());
             }
             Some(GitLab::new(origin, None, profile.clone(), network.clone())?)
-        }
-        Some(origin) => {
-            let token = std::env::var("REVIEWQ_GITLAB_TOKEN").ok();
-            Some(GitLab::new(
-                origin,
-                token.as_deref(),
-                profile.clone(),
-                network.clone(),
-            )?)
         }
         None => None,
     };
@@ -174,7 +166,12 @@ pub(crate) async fn serve(profile: PathBuf, options: Serve) -> Result<(), Failur
                 .await?;
         }
     }
-    let source = source.map(|source| Arc::new(source) as Arc<dyn ReviewSourceReader>);
+    let validation_source = source.map(|source| Arc::new(source) as Arc<dyn ReviewSourceReader>);
+    let source = Arc::new(RuntimeSources::new(
+        store.clone(),
+        settings_sources.clone(),
+        validation_source,
+    ));
     let codex_executable = options.codex_bin.or_else(|| {
         default_executable(
             "codex",

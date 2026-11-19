@@ -72,7 +72,7 @@ pub(crate) struct Serve {
     pub(crate) port: Option<u16>,
     #[arg(long)]
     pub(crate) native_port: Option<u16>,
-    #[arg(long)]
+    #[arg(long, requires = "validation")]
     pub(crate) gitlab: Option<String>,
     #[arg(long = "project", requires = "gitlab")]
     pub(crate) projects: Vec<ProjectId>,

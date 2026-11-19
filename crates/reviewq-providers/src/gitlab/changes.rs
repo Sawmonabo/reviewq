@@ -226,9 +226,16 @@ impl GitLab {
             .ok_or(AppError::PayloadTooLarge)?;
         let url = self.page_url(source, "diffs", page, limit)?;
         let (body, next) = {
-            let response = self.http.get(url, self.headers.clone()).await?;
+            let response = self
+                .http
+                .get(url, self.headers.clone(), self.lease.as_ref())
+                .await?;
             let next = next_page(response.headers(), page)?;
-            (wire::receive(response, &self.patches.profile).await?, next)
+            let body = wire::receive(response, &self.patches.profile).await?;
+            if let Some(lease) = &self.lease {
+                lease.check().await?;
+            }
+            (body, next)
         };
         let profile = self.patches.profile.clone();
         let preferred = preferred.map(str::to_owned);

@@ -3,6 +3,7 @@ use std::sync::Arc;
 use reqwest::header;
 use reviewq_app::access::{AppError, AppFuture};
 use reviewq_app::queue::{MergeRequestState, ReviewSource};
+use reviewq_app::settings::SourceLease;
 use reviewq_app::sources::{ReviewResolution, ReviewSourceReader, WorkflowSnapshot};
 use reviewq_app::workspace::ConfiguredProject;
 use reviewq_domain::identity::{GitLabOrigin, MrIdentity, ProjectId};
@@ -26,6 +27,7 @@ pub struct GitLab {
     http: Arc<SourceNetwork>,
     headers: header::HeaderMap,
     patches: changes::Leases,
+    lease: Option<SourceLease>,
 }
 
 impl ReviewSourceReader for GitLab {
@@ -138,6 +140,7 @@ impl GitLab {
             http,
             headers,
             patches: changes::Leases::new(profile),
+            lease: None,
         })
     }
 
@@ -146,6 +149,11 @@ impl GitLab {
             origin: self.identity.clone(),
             project_id,
         }
+    }
+
+    pub(crate) fn with_lease(mut self, lease: SourceLease) -> Self {
+        self.lease = Some(lease);
+        self
     }
 
     /// Reads verified metadata for the configured project before store observation.
@@ -258,7 +266,7 @@ impl GitLab {
             return Err(AppError::Forbidden);
         }
         self.http
-            .bounded_response(url, self.headers.clone(), max)
+            .bounded_response(url, self.headers.clone(), max, self.lease.as_ref())
             .await
     }
 }

@@ -2,7 +2,7 @@
 
 use reviewq_domain::identity::{
     DeliveryFence, DeliveryId, NativeInputId, NativeSessionId, NativeTurnId, ReceiptId, ReportHash,
-    RunId, SessionKey, SubmissionId,
+    Revision, RunId, SessionKey, SubmissionId,
 };
 use reviewq_domain::session::{
     AbsolutePath, HostProvider, LeadTarget, NativeBinding, SessionTarget,
@@ -72,6 +72,7 @@ pub trait NativeHost: Send + Sync {
         target: LeadTarget,
         delivery: DeliveryId,
         cursor: Option<String>,
+        require_new_turn: bool,
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = DeliveryObservation> + Send + '_>>;
 }
 
@@ -155,6 +156,7 @@ pub async fn link_proven(
         .register_lead(
             Actor::native_session(identity.clone()),
             RegisterLead {
+                expected_settings: workspace.revision,
                 review,
                 provider: identity.provider(),
                 profile: identity.profile().clone(),
@@ -172,6 +174,7 @@ pub async fn link_proven(
 /// The provider-verified review and lead to register in one transaction.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RegisterLead {
+    pub expected_settings: Revision,
     pub review: ReviewSource,
     pub provider: HostProvider,
     pub profile: AbsolutePath,
@@ -224,6 +227,12 @@ pub enum MessagePurpose {
     ReportFeedback,
     Publication,
     ThreadFollowup,
+}
+
+impl MessagePurpose {
+    pub fn requires_new_turn(self) -> bool {
+        matches!(self, Self::Publication | Self::ThreadFollowup)
+    }
 }
 
 /// The displayed immutable report referenced by a message.

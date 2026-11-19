@@ -4,6 +4,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use reqwest::{Client, StatusCode, Url, header};
 use reviewq_app::access::AppError;
+use reviewq_app::settings::SourceLease;
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use tokio::time::{Instant, sleep_until, timeout_at};
 
@@ -35,8 +36,9 @@ impl SourceNetwork {
         url: Url,
         headers: header::HeaderMap,
         max: usize,
+        lease: Option<&SourceLease>,
     ) -> Result<(header::HeaderMap, Vec<u8>), AppError> {
-        let mut response = self.get(url, headers).await?;
+        let mut response = self.get(url, headers, lease).await?;
         let max = max.min(BODY_LIMIT);
         if response
             .inner
@@ -53,6 +55,9 @@ impl SourceNetwork {
             }
             bytes.extend_from_slice(&chunk);
         }
+        if let Some(lease) = lease {
+            lease.check().await?;
+        }
         Ok((metadata, bytes))
     }
 
@@ -60,6 +65,7 @@ impl SourceNetwork {
         &self,
         url: Url,
         headers: header::HeaderMap,
+        lease: Option<&SourceLease>,
     ) -> Result<Response, AppError> {
         let origin = url.origin().ascii_serialization();
         let local = match url.host() {
@@ -71,6 +77,11 @@ impl SourceNetwork {
         let deadline = Instant::now() + DEADLINE;
         for retry in 0..=MAX_RETRIES {
             let permit = self.permit(&origin, deadline).await?;
+            if let Some(lease) = lease {
+                timeout_at(deadline, lease.check())
+                    .await
+                    .map_err(|_| AppError::Busy)??;
+            }
             let remaining = deadline.saturating_duration_since(Instant::now());
             if remaining.is_zero() {
                 return Err(AppError::Unavailable);

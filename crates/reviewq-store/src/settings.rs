@@ -216,7 +216,8 @@ fn recheck(db: &Database, expected: Revision) -> Result<(), StoreError> {
 
 fn pinned(db: &Database) -> Result<bool, StoreError> {
     Ok(db.query_row(
-        "SELECT EXISTS(SELECT 1 FROM runs) OR EXISTS(SELECT 1 FROM review_decisions)",
+        "SELECT EXISTS(SELECT 1 FROM runs) OR EXISTS(SELECT 1 FROM review_decisions)
+             OR EXISTS(SELECT 1 FROM notifications)",
         [],
         |row| row.get(0),
     )?)

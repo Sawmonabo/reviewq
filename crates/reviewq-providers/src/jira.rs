@@ -60,7 +60,7 @@ impl Jira {
             .join("_edge/tenant_info")
             .map_err(|_| AppError::Internal)?;
         let (_, body) = network
-            .bounded_response(tenant, HeaderMap::new(), 16 * 1024)
+            .bounded_response(tenant, HeaderMap::new(), 16 * 1024, None)
             .await?;
         let tenant: Tenant = serde_json::from_slice(&body).map_err(|_| AppError::Unavailable)?;
         let id = uuid::Uuid::parse_str(&tenant.cloud_id).map_err(|_| AppError::Unavailable)?;
@@ -148,17 +148,26 @@ impl Jira {
                 )
                 .await
             }
-            CatalogKind::Statuses if query.offset == 0 => {
+            CatalogKind::Statuses => {
                 let rows: Vec<Value> = self.read("rest/api/2/status", &[], METADATA_LIMIT).await?;
                 let mut items = unique_items(rows.iter(), None)?;
                 if let Some(text) = searchable {
                     let query = text.to_lowercase();
                     items.retain(|item| item.label.to_lowercase().contains(&query));
                 }
-                if items.len() > PAGE_LIMIT {
-                    return Err(AppError::PayloadTooLarge);
-                }
-                Ok(CatalogPage { items, next: None })
+                items.sort_unstable_by(|left, right| {
+                    left.id
+                        .len()
+                        .cmp(&right.id.len())
+                        .then_with(|| left.id.cmp(&right.id))
+                });
+                let start = query.offset as usize;
+                let end = start.saturating_add(PAGE_LIMIT);
+                let next = (end < items.len()).then_some(end as u32);
+                Ok(CatalogPage {
+                    items: items.into_iter().skip(start).take(PAGE_LIMIT).collect(),
+                    next,
+                })
             }
             CatalogKind::Board(board) if query.offset == 0 && searchable.is_none() => {
                 Ok(CatalogPage {
@@ -317,7 +326,7 @@ impl Jira {
         }
         let (_, body) = self
             .network
-            .bounded_response(url, self.headers.clone(), limit)
+            .bounded_response(url, self.headers.clone(), limit, None)
             .await?;
         serde_json::from_slice(&body).map_err(|_| AppError::Unavailable)
     }
