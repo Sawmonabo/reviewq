@@ -1,7 +1,7 @@
 import type { Element, Root, RootContent } from "hast";
 
 type Field = { readonly label: string; readonly nodes: readonly RootContent[] };
-export type AuthoredFinding = {
+type AuthoredFinding = {
   readonly id: string;
   readonly severity?: string;
   readonly blocking?: boolean;

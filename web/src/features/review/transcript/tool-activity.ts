@@ -53,7 +53,7 @@ export type ReadPack = {
   readonly summary: ToolSummary;
 };
 
-export type NativeRow = {
+type NativeRow = {
   readonly kind: "native";
   readonly id: string;
   readonly entry: HistoryEntry;
@@ -62,7 +62,7 @@ export type NativeRow = {
 
 export type ActivityRow = NativeRow | ToolRun | ReadPack;
 
-export type PartGroup =
+type PartGroup =
   | { readonly kind: "prose"; readonly part: HistoryPart }
   | {
       readonly kind: "tool";
