@@ -148,6 +148,8 @@ CREATE TABLE messages (
 ) STRICT;
 
 CREATE INDEX messages_session_history ON messages(run_id, session_key, created_at_ms DESC, message_id DESC);
+CREATE INDEX messages_session_pending ON messages(run_id, session_key, created_at_ms)
+    WHERE state IN ('queued', 'dispatching', 'uncertain');
 CREATE UNIQUE INDEX messages_observed_input ON messages(session_key, native_turn_id, native_input_id)
     WHERE actor_key IS NOT NULL AND native_input_id IS NOT NULL;
 

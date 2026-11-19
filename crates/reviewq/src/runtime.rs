@@ -12,8 +12,7 @@ use reviewq_app::access::Actor;
 use reviewq_app::hosts::{ClaudeCompanion, LeadStore, NativeHost, recover_delivery};
 use reviewq_app::sources::{ReviewSourceReader, SourceRefreshStore};
 use reviewq_app::workspace::{WorkspaceConfig, WorkspaceStore};
-use reviewq_domain::identity::EventCursor;
-use reviewq_domain::session::AbsolutePath;
+use reviewq_domain::session::{AbsolutePath, HostProvider};
 use reviewq_providers::{Claude, Codex, FileHistory, GitLab};
 use reviewq_store::SqliteStore;
 use reviewq_transport::{ServiceEndpoint, ServiceIdentity};
@@ -99,6 +98,7 @@ pub(crate) async fn serve(profile: PathBuf, options: Serve) -> Result<(), Failur
         },
     )?;
     store.recover_refresh(Actor::local_operator()).await?;
+    store.recover_delivery_claims().await?;
 
     let source = match options.gitlab.as_ref() {
         Some(origin) if options.validation => {
@@ -170,7 +170,7 @@ pub(crate) async fn serve(profile: PathBuf, options: Serve) -> Result<(), Failur
         tokio::spawn(dispatch_deliveries(
             store.clone(),
             host.clone(),
-            store.subscribe(),
+            store.subscribe_deliveries(),
         ))
     });
     let (shutdown, wait) = watch::channel(false);
@@ -231,12 +231,15 @@ pub(crate) fn claude_home() -> Result<PathBuf, Failure> {
 async fn dispatch_deliveries(
     store: Arc<dyn LeadStore>,
     host: Arc<dyn NativeHost>,
-    mut commits: watch::Receiver<EventCursor>,
+    mut commits: watch::Receiver<()>,
 ) {
     let mut after = None;
     loop {
         commits.borrow_and_update();
-        let batch = match store.recoverable_deliveries(after.take(), 16).await {
+        let batch = match store
+            .recoverable_deliveries(HostProvider::Codex, after.take(), 16)
+            .await
+        {
             Ok(batch) => batch,
             Err(_) => {
                 tokio::time::sleep(Duration::from_secs(1)).await;
@@ -244,11 +247,27 @@ async fn dispatch_deliveries(
             }
         };
         let mut failed = false;
+        let mut running = tokio::task::JoinSet::new();
         for candidate in batch {
             after = Some(candidate.cursor.clone());
-            failed |= recover_delivery(store.clone(), host.as_ref(), candidate)
-                .await
-                .is_err();
+            if running.len() == 4 {
+                failed |= !matches!(running.join_next().await, Some(Ok(true)));
+            }
+            let store = store.clone();
+            let host = host.clone();
+            running.spawn(async move {
+                matches!(
+                    tokio::time::timeout(
+                        Duration::from_secs(60),
+                        recover_delivery(store, host.as_ref(), candidate)
+                    )
+                    .await,
+                    Ok(Ok(()))
+                )
+            });
+        }
+        while let Some(result) = running.join_next().await {
+            failed |= !matches!(result, Ok(true));
         }
         if failed {
             tokio::time::sleep(Duration::from_secs(1)).await;
@@ -256,7 +275,7 @@ async fn dispatch_deliveries(
         if after.is_some() {
             continue;
         }
-        let due = match store.next_delivery_due().await {
+        let due = match store.next_delivery_due(HostProvider::Codex).await {
             Ok(due) => due,
             Err(_) => {
                 tokio::time::sleep(Duration::from_secs(1)).await;

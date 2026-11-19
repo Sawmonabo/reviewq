@@ -10,7 +10,9 @@ use reviewq_app::hosts::{
     RegisterLead, SubmitMessage,
 };
 use reviewq_domain::identity::{DeliveryId, RunId, SessionKey, SubmissionId};
-use reviewq_domain::session::{LeadTarget, NativeBinding, NativeIdentity, SessionTarget};
+use reviewq_domain::session::{
+    HostProvider, LeadTarget, NativeBinding, NativeIdentity, SessionTarget,
+};
 use rusqlite::{Connection, OptionalExtension, params};
 use uuid::Uuid;
 
@@ -22,6 +24,22 @@ use crate::{SqliteStore, StoreError};
 
 mod delivery;
 mod messages;
+
+impl SqliteStore {
+    /// Reopens claims left by the previous exclusive profile owner for read-only reconciliation.
+    pub async fn recover_delivery_claims(&self) -> Result<(), StoreError> {
+        self.write(|tx| {
+            let recovered = tx.sql.execute(
+                "UPDATE outbox SET due_at_ms=min(due_at_ms, ?1), claim_kind=NULL
+                 WHERE claim_kind IS NOT NULL",
+                [now_ms()?],
+            )?;
+            tx.delivery_changed = recovered > 0;
+            Ok(())
+        })
+        .await
+    }
+}
 
 impl LeadStore for SqliteStore {
     fn register_lead(
@@ -107,6 +125,7 @@ impl LeadStore for SqliteStore {
 
     fn recoverable_deliveries(
         &self,
+        provider: HostProvider,
         after: Option<DeliveryRecoveryCursor>,
         limit: u16,
     ) -> AppFuture<'_, Vec<RecoverableDelivery>> {
@@ -114,15 +133,15 @@ impl LeadStore for SqliteStore {
             if !(1..=MAX_RECOVERY_LIMIT).contains(&limit) {
                 return Err(AppError::InvalidRequest);
             }
-            self.read(move |tx| delivery::recoverable(tx, after, limit))
+            self.read(move |tx| delivery::recoverable(tx, provider, after, limit))
                 .await
                 .map_err(StoreError::app)
         })
     }
 
-    fn next_delivery_due(&self) -> AppFuture<'_, Option<i64>> {
+    fn next_delivery_due(&self, provider: HostProvider) -> AppFuture<'_, Option<i64>> {
         Box::pin(async move {
-            self.read(|tx| delivery::next_due(tx))
+            self.read(move |tx| delivery::next_due(tx, provider))
                 .await
                 .map_err(StoreError::app)
         })

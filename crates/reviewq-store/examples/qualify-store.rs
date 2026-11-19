@@ -193,7 +193,9 @@ async fn leave_wal(db: &Path, inputs: &Path) -> Result<(), Box<dyn Error>> {
 async fn check_wal(db: &Path) -> Result<(), Box<dyn Error>> {
     let identity = SqliteStore::probe(absolute(db)).await?;
     let store = SqliteStore::open(absolute(db)).await?;
-    let recoverable = store.recoverable_deliveries(None, 1).await?;
+    let recoverable = store
+        .recoverable_deliveries(HostProvider::Codex, None, 1)
+        .await?;
     assert_eq!(store.identity(), &identity);
     assert_eq!(recoverable[0].state, RecoverableDeliveryState::Dispatching);
     store.close(WAIT).await?;

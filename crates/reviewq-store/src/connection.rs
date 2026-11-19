@@ -37,11 +37,13 @@ pub struct SqliteStore {
     identity: StoreIdentity,
     workers: Mutex<Workers>,
     wakeup: watch::Sender<EventCursor>,
+    delivery_wakeup: watch::Sender<()>,
 }
 
 pub(crate) struct WriteTx<'connection> {
     pub(crate) sql: Transaction<'connection>,
     pub(crate) wakeup: Option<EventCursor>,
+    pub(crate) delivery_changed: bool,
 }
 
 impl SqliteStore {
@@ -51,6 +53,7 @@ impl SqliteStore {
             let (profile, identity, reader, writer) = database::open_profile(&path)?;
             let head = read_head(&reader)?;
             let (wakeup, _) = watch::channel(head);
+            let (delivery_wakeup, _) = watch::channel(());
             let profile = Arc::new(profile);
             let reader = Worker::start(reader, profile.clone(), false)?;
             let writer = Worker::start(writer, profile, true)?;
@@ -58,6 +61,7 @@ impl SqliteStore {
                 identity,
                 workers: Mutex::new(Workers { reader, writer }),
                 wakeup,
+                delivery_wakeup,
             })
         })
         .await
@@ -78,6 +82,11 @@ impl SqliteStore {
     /// Latest commit hint. Consumers recover missed events from the durable journal.
     pub fn subscribe(&self) -> watch::Receiver<EventCursor> {
         self.wakeup.subscribe()
+    }
+
+    /// Wake the delivery dispatcher only after a committed outbox change.
+    pub fn subscribe_deliveries(&self) -> watch::Receiver<()> {
+        self.delivery_wakeup.subscribe()
     }
 
     /// Creates a verified recovery copy at a new private destination.
@@ -137,13 +146,21 @@ impl SqliteStore {
         F: FnOnce(&mut WriteTx<'_>) -> Result<T, StoreError> + Send + 'static,
     {
         let wakeup = self.wakeup.clone();
+        let delivery_wakeup = self.delivery_wakeup.clone();
         self.submit(true, move |connection, _| {
             let sql = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
-            let mut tx = WriteTx { sql, wakeup: None };
+            let mut tx = WriteTx {
+                sql,
+                wakeup: None,
+                delivery_changed: false,
+            };
             let result = f(&mut tx)?;
             tx.sql.commit()?;
             if let Some(cursor) = tx.wakeup {
                 wakeup.send_replace(cursor);
+            }
+            if tx.delivery_changed {
+                delivery_wakeup.send_replace(());
             }
             Ok(result)
         })

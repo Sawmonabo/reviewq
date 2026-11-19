@@ -385,12 +385,13 @@ pub trait LeadStore: Send + Sync {
     /// State is a hint; dispatch must first confirm queued state and acquire a fence.
     fn recoverable_deliveries(
         &self,
+        provider: HostProvider,
         after: Option<DeliveryRecoveryCursor>,
         limit: u16,
     ) -> AppFuture<'_, Vec<RecoverableDelivery>>;
 
     /// Earliest durable due time, including work whose backoff has not elapsed.
-    fn next_delivery_due(&self) -> AppFuture<'_, Option<i64>>;
+    fn next_delivery_due(&self, provider: HostProvider) -> AppFuture<'_, Option<i64>>;
 
     /// Claims the service delivery ID in the exact expected recoverable state.
     fn claim_delivery(
