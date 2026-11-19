@@ -668,10 +668,18 @@ pub(super) fn adopt_remote(
             None,
         )?;
         db.execute(
-            "UPDATE followup_threads SET discussion_id=?4,discussion_version=?5,baseline_sha256=?6,resolved=?7
+            "UPDATE followup_threads SET discussion_id=?4,discussion_version=?5,baseline_sha256=?6,
+                 resolved=coalesce(?7,resolved)
              WHERE review_id=?1 AND generation=?2 AND original_note_id=?3",
-            params![target.review.as_str(),target.generation.as_sqlite_integer(),row.original,
-                discussion.id,version.to_string(),current_hash.as_str(),discussion.resolved],
+            params![
+                target.review.as_str(),
+                target.generation.as_sqlite_integer(),
+                row.original,
+                discussion.id,
+                version.to_string(),
+                current_hash.as_str(),
+                discussion.resolved
+            ],
         )?;
         for (kind, inbox_kind, note, actor) in observed {
             let key = (&discussion.id, kind, note);
