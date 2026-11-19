@@ -34,6 +34,8 @@ const SCHEMA: &str = concat!(
     "\n",
     include_str!("../schema/settings.sql"),
     "\n",
+    include_str!("../schema/sources.sql"),
+    "\n",
     include_str!("../schema/claude.sql"),
 );
 pub(super) const APPLICATION_ID: i64 = 0x5256_5132;

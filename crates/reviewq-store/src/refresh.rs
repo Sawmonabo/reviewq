@@ -1,17 +1,19 @@
 use reviewq_app::access::{Actor, AppError, AppFuture};
 use reviewq_app::events::ResourceKey;
-use reviewq_app::queue::ReviewSource;
 use reviewq_app::sources::{
-    MAX_PUBLICATION_REVIEWS, RefreshAttempt, SourceFailure, SourceRefreshStore, SourceSync,
+    MAX_PUBLICATION_REVIEWS, RefreshAttempt, SourceFailure, SourceObservation, SourceRefreshStore,
+    SourceSync,
 };
-use reviewq_domain::identity::Revision;
+use reviewq_domain::identity::{MrIdentity, Revision};
 use rusqlite::{Connection, OptionalExtension, params};
 
 use crate::connection::WriteTx;
 use crate::events::now_ms;
-use crate::queue::{mark_discovered, save_observations};
+use crate::queue::{identity, mark_discovered, save_observations};
 use crate::workspace::{advance_queue, configured, operator, settings_revision};
 use crate::{SqliteStore, StoreError};
+
+mod scope;
 
 impl SourceRefreshStore for SqliteStore {
     fn begin_refresh(&self, actor: Actor, revision: Revision) -> AppFuture<'_, RefreshAttempt> {
@@ -47,12 +49,42 @@ impl SourceRefreshStore for SqliteStore {
     fn finish_refresh(
         &self,
         attempt: RefreshAttempt,
-        result: Result<Vec<ReviewSource>, SourceFailure>,
+        result: Result<SourceObservation, SourceFailure>,
     ) -> AppFuture<'_, ()> {
         Box::pin(async move {
             self.write(move |tx| finish(tx, attempt, result))
                 .await
                 .map_err(StoreError::app)
+        })
+    }
+
+    fn retained_reviews(&self, attempt: RefreshAttempt) -> AppFuture<'_, Vec<MrIdentity>> {
+        Box::pin(async move {
+            self.read(move |db| {
+                if settings_revision(db)? != attempt.settings_revision {
+                    return Err(AppError::StaleRevision.into());
+                }
+                let mut query = db.prepare_cached(
+                    "SELECT origin,project_id,iid FROM reviews AS r
+                     WHERE r.origin=(SELECT origin FROM settings WHERE provider='gitlab')
+                     AND r.state<>'merged' AND (
+                         EXISTS (SELECT 1 FROM runs WHERE review_id=r.review_id)
+                         OR EXISTS (SELECT 1 FROM review_decisions WHERE review_id=r.review_id)
+                         OR EXISTS (SELECT 1 FROM notifications WHERE review_id=r.review_id))
+                     ORDER BY r.review_id LIMIT ?1",
+                )?;
+                let mut rows = query.query([MAX_PUBLICATION_REVIEWS as i64 + 1])?;
+                let mut retained = Vec::new();
+                while let Some(row) = rows.next()? {
+                    if retained.len() >= MAX_PUBLICATION_REVIEWS {
+                        return Err(AppError::PayloadTooLarge.into());
+                    }
+                    retained.push(identity(row, 0)?);
+                }
+                Ok(retained)
+            })
+            .await
+            .map_err(StoreError::app)
         })
     }
 
@@ -78,7 +110,7 @@ impl SourceRefreshStore for SqliteStore {
 fn finish(
     tx: &mut WriteTx<'_>,
     attempt: RefreshAttempt,
-    result: Result<Vec<ReviewSource>, SourceFailure>,
+    result: Result<SourceObservation, SourceFailure>,
 ) -> Result<(), StoreError> {
     if settings_revision(&tx.sql)? != attempt.settings_revision {
         return Err(AppError::StaleRevision.into());
@@ -99,18 +131,33 @@ fn finish(
         return Err(AppError::StaleRevision.into());
     }
     if let Ok(source) = result {
-        if source.len() > MAX_PUBLICATION_REVIEWS {
+        let SourceObservation {
+            reviews,
+            owned,
+            issues,
+            sprints,
+        } = source;
+        if reviews.len() > MAX_PUBLICATION_REVIEWS || owned.len() > MAX_PUBLICATION_REVIEWS {
             return Err(AppError::PayloadTooLarge.into());
         }
-        for item in &source {
+        let (rows, matches): (Vec<_>, Vec<_>) = reviews.into_values().unzip();
+        for item in &rows {
             if !configured(&tx.sql, &item.identity)? {
                 return Err(AppError::NotFound.into());
             }
         }
-        let discovered = save_observations(tx, &source)?;
+        let discovered = save_observations(tx, &rows)?;
+        save_observations(tx, &owned)?;
         tx.sql.execute("DELETE FROM review_discoveries", [])?;
         mark_discovered(&tx.sql, &discovered)?;
+        scope::replace(
+            &tx.sql,
+            issues,
+            sprints,
+            discovered.into_iter().zip(matches),
+        )?;
         advance_queue(&tx.sql)?;
+        tx.emit(&[ResourceKey::Ticket(None)])?;
     }
     tx.emit(&[ResourceKey::Queue])?;
     Ok(())

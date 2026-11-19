@@ -186,6 +186,32 @@ pub(super) fn pending(db: &Connection) -> Result<bool, StoreError> {
     )?)
 }
 
+pub(super) fn discovery_changed(
+    db: &Connection,
+    next: &WorkspaceScope,
+) -> Result<bool, StoreError> {
+    let previous = read(db)?;
+    Ok(discovery(&previous) != discovery(next))
+}
+
+fn discovery(scope: &WorkspaceScope) -> Vec<(BoardSelectionDraft, BoardType)> {
+    let mut selection: Vec<_> = scope
+        .boards
+        .iter()
+        .filter(|board| board.selection.enabled)
+        .map(|board| {
+            let mut terms = board.selection.clone();
+            terms.projects = scope.projects_for(board).collect();
+            terms.projects.sort_unstable();
+            terms.statuses.sort_unstable();
+            terms.jira_projects.sort_unstable();
+            (terms, board.board_type)
+        })
+        .collect();
+    selection.sort_unstable_by_key(|item| item.0.board_id);
+    selection
+}
+
 fn read_skill(row: &Row<'_>, col: usize) -> Result<Option<NativeSkill>, StoreError> {
     match (row.get(col)?, row.get(col + 1)?) {
         (Some(name), Some(bytes)) => Ok(Some(NativeSkill {

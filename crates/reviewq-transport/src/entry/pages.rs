@@ -8,22 +8,22 @@ use reviewq_app::access::AppError;
 use reviewq_app::decisions::Disposition;
 use reviewq_app::events::Snapshot;
 use reviewq_app::queue::{
-    MAX_QUEUE_PAGE, MergeRequestState, PageContext, QueueItem, QueuePosition, RunPosition,
-    SessionPosition,
+    MAX_QUEUE_PAGE, MergeRequestState, PageContext, QueueItem, QueueKey, QueueListItem,
+    QueuePosition, RunPosition, SessionPosition,
 };
 use reviewq_app::sources::{SourceFailure, SourceSync};
 use reviewq_domain::identity::{EventCursor, ReviewId, RunId};
 use reviewq_domain::session::HostProvider;
 use reviewq_protocol::queue::{
-    MergeRequestRow, MergeRequestStatus, QueueFacets, QueuePage, QueuePageResponse, QueueRow,
-    QueueStatus, QueueSync, QueueSyncMode, ReviewOverview, ReviewOverviewResponse, ReviewSelection,
-    ReviewSelectionResponse, RunStage, RunSummary,
+    CompactTicket, MergeRequestRow, MergeRequestStatus, QueueFacets, QueuePage, QueuePageResponse,
+    QueueRow, QueueStatus, QueueSync, QueueSyncMode, ReviewOverview, ReviewOverviewResponse,
+    ReviewSelection, ReviewSelectionResponse, RunStage, RunSummary, UnmatchedTicket,
 };
 use reviewq_protocol::{
     CheckpointIdDto, ErrorCode, ErrorDto, EventCursorDto, GitShaDto, HostProviderDto,
     MergeRequestIidDto, Page, PageCursorDto, ProjectIdDto, ReviewIdDto, RevisionDto, RunDetail,
     RunDetailResponse, RunIdDto, SafeCountDto, SessionKeyDto, SessionSummary, Success,
-    UtcTimestampDto,
+    TicketKeyDto, UtcTimestampDto,
 };
 use serde::{Deserialize, Serialize};
 
@@ -51,6 +51,10 @@ enum PagePosition {
         context: Context,
         updated_at_ms: i64,
         review_id: String,
+    },
+    QueueTicket {
+        context: Context,
+        key: String,
     },
     Review {
         context: Context,
@@ -88,8 +92,14 @@ pub(super) async fn queue(
             review_id,
         }) => Some(QueuePosition {
             context: context.try_into()?,
-            updated_at_ms,
-            review_id: parse(&review_id)?,
+            key: QueueKey::Review {
+                updated_at_ms,
+                review_id: parse(&review_id)?,
+            },
+        }),
+        Some(PagePosition::QueueTicket { context, key }) => Some(QueuePosition {
+            context: context.try_into()?,
+            key: QueueKey::Ticket(parse(&key)?),
         }),
         _ => return Err(AppError::CursorExpired.into()),
     };
@@ -98,15 +108,35 @@ pub(super) async fn queue(
     let rows = value
         .items
         .iter()
-        .map(|item| project_review(item).map(|row| QueueRow::Mr(Box::new(row))))
+        .map(|item| match item {
+            QueueListItem::Review(item) => {
+                project_review(item).map(|row| QueueRow::Mr(Box::new(row)))
+            }
+            QueueListItem::Unmatched(item) => Ok(QueueRow::UnmatchedTicket(UnmatchedTicket {
+                key: TicketKeyDto::new(item.ticket.key.as_str()).ok_or(AppError::Internal)?,
+                title: item.ticket.title.clone(),
+                status: item.status.clone(),
+                assignee: item.assignee.clone(),
+                priority: item.priority.clone(),
+            })),
+        })
         .collect::<Result<Vec<_>, _>>()?;
     let next = value
         .next
         .map(|pos| {
-            endpoint.encode_page(PagePosition::Queue {
-                context: pos.context.into(),
-                updated_at_ms: pos.updated_at_ms,
-                review_id: pos.review_id.to_string(),
+            endpoint.encode_page(match pos.key {
+                QueueKey::Review {
+                    updated_at_ms,
+                    review_id,
+                } => PagePosition::Queue {
+                    context: pos.context.into(),
+                    updated_at_ms,
+                    review_id: review_id.to_string(),
+                },
+                QueueKey::Ticket(key) => PagePosition::QueueTicket {
+                    context: pos.context.into(),
+                    key: key.to_string(),
+                },
             })
         })
         .transpose()?;
@@ -114,7 +144,7 @@ pub(super) async fn queue(
         QueuePage {
             page: Page::new(rows, next).ok_or(AppError::Internal)?,
             total_rows: count,
-            total_mrs: count,
+            total_mrs: self::count(value.total_mrs)?,
             facets: QueueFacets {
                 boards: Vec::new(),
                 projects: Vec::new(),
@@ -375,7 +405,16 @@ pub(super) fn project_review(item: &QueueItem) -> Result<MergeRequestRow, AppErr
         project_path: source.project_path.clone(),
         iid: MergeRequestIidDto::new(source.identity.iid().get()).ok_or(AppError::Internal)?,
         title: source.title.clone(),
-        tickets: Vec::new(),
+        tickets: item
+            .tickets
+            .iter()
+            .map(|ticket| {
+                Ok(CompactTicket {
+                    key: TicketKeyDto::new(ticket.key.as_str()).ok_or(AppError::Internal)?,
+                    title: ticket.title.clone(),
+                })
+            })
+            .collect::<Result<_, AppError>>()?,
         author: None,
         source_sha: GitShaDto::new(source.head_sha.as_str()).ok_or(AppError::Internal)?,
         mr_state,

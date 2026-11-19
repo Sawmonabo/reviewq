@@ -13,7 +13,7 @@ use reviewq_app::access::Actor;
 use reviewq_app::hosts::{ClaudeCompanion, LeadStore, NativeHost, recover_delivery};
 use reviewq_app::notifications::DesktopStore;
 use reviewq_app::reports::reconcile_reports;
-use reviewq_app::settings::RuntimeSources;
+use reviewq_app::settings::{NativeSkillReader, NativeSkills, RuntimeSources};
 use reviewq_app::sources::{ReviewSourceReader, SourceRefreshStore};
 use reviewq_app::workspace::{WorkspaceConfig, WorkspaceStore};
 use reviewq_domain::session::{AbsolutePath, HostProvider};
@@ -202,6 +202,10 @@ pub(crate) async fn serve(profile: PathBuf, options: Serve) -> Result<(), Failur
         _ => None,
     };
     let host = codex.clone().map(|host| host as Arc<dyn NativeHost>);
+    let skills = NativeSkills {
+        codex: codex.clone().map(|host| host as Arc<dyn NativeSkillReader>),
+        claude: None,
+    };
     let workflow = Arc::new(Workflows::new(codex));
     let report_files = Arc::new(RegisteredReportFiles);
     let sends_allowed = !options.validation && host.is_some();
@@ -287,6 +291,7 @@ pub(crate) async fn serve(profile: PathBuf, options: Serve) -> Result<(), Failur
             source_poll_interval: (!options.validation)
                 .then_some(Duration::from_secs(settings.poll_seconds)),
             settings_sources,
+            skills,
             claude,
             terminal,
             workflow: WorkflowIntegration {

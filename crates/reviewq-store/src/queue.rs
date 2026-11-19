@@ -7,10 +7,10 @@ use std::str::FromStr;
 use reviewq_app::access::{Actor, AppError, AppFuture};
 use reviewq_app::events::{ResourceKey, Snapshot};
 use reviewq_app::queue::{
-    MAX_QUEUE_PAGE, ManagementFilter, ManagementReviews, ManagementRuns, MergeRequestState,
-    PageContext, QueueItem, QueuePage, QueuePosition, QueueStore, ReviewLookup, ReviewOverview,
-    ReviewSource, RunDetail, RunPosition, RunSummary, SelectedLead, SessionPosition,
-    SessionSummary,
+    CompactTicket, MAX_QUEUE_PAGE, ManagementFilter, ManagementReviews, ManagementRuns,
+    MergeRequestState, PageContext, QueueItem, QueueKey, QueueListItem, QueuePage, QueuePosition,
+    QueueStore, ReviewLookup, ReviewOverview, ReviewSource, RunDetail, RunPosition, RunSummary,
+    SelectedLead, SessionPosition, SessionSummary,
 };
 use reviewq_domain::identity::{
     GitLabOrigin, MergeRequestIid, MrIdentity, ProjectId, ReviewId, RunId,
@@ -30,6 +30,7 @@ use crate::workspace::{
 };
 use crate::{SqliteStore, StoreError};
 
+mod discovery;
 mod management;
 
 const ITEM_COLUMNS: &str =
@@ -49,7 +50,11 @@ const ITEM_COLUMNS: &str =
              WHERE run.review_id=r.review_id AND NOT EXISTS (
                SELECT 1 FROM review_handled_reports handled WHERE handled.review_id=r.review_id
                  AND handled.run_id=run.run_id AND handled.attention_receipt_id=v.attention_receipt_id
-             ))";
+             )),
+     (SELECT json_group_array(json_array(ticket_key,title)) FROM (
+         SELECT i.ticket_key,min(i.title) AS title FROM scoped_review_issues si
+         JOIN scoped_issues i USING(board_id,ticket_key)
+         WHERE si.review_id=r.review_id GROUP BY i.ticket_key ORDER BY i.ticket_key))";
 const SCOPE_PREDICATE: &str =
     "(((?1 = 0 OR ?1 = 1)
        AND EXISTS (SELECT 1 FROM configured_projects c WHERE c.origin=r.origin AND c.project_id=r.project_id)
@@ -311,29 +316,53 @@ fn queue(
         ReadScope::Grant => (1, None),
         ReadScope::Review(review) => (2, Some(review.as_str())),
     };
-    let (key_time, key_id) = after.as_ref().map_or((i64::MAX, "~"), |position| {
-        (position.updated_at_ms, position.review_id.as_str())
-    });
     let total_sql = format!("SELECT count(*) FROM reviews AS r WHERE {SCOPE_PREDICATE}");
-    let page_sql = format!(
-        "SELECT {ITEM_COLUMNS} FROM reviews AS r LEFT JOIN review_decisions AS d USING (review_id) WHERE {SCOPE_PREDICATE}
-         AND (r.updated_at_ms, r.review_id) < (?3, ?4) ORDER BY r.updated_at_ms DESC, r.review_id DESC LIMIT ?5"
-    );
     let total: i64 =
         connection.query_row(&total_sql, params![scope_code, scope_id], |row| row.get(0))?;
-    let total = u64::try_from(total).map_err(|_| AppError::Internal)?;
-    let mut statement = connection.prepare_cached(&page_sql)?;
-    let mut rows = statement.query(params![scope_code, scope_id, key_time, key_id, limit + 1])?;
+    let total_mrs = u64::try_from(total).map_err(|_| AppError::Internal)?;
     let mut items = Vec::new();
-    while let Some(row) = rows.next()? {
-        items.push(queue_item(row)?);
+    let after = after.as_ref().map(|position| &position.key);
+    let wanted = limit + 1;
+    let after_ticket = match after {
+        Some(QueueKey::Ticket(key)) => Some(key.as_str()),
+        _ => None,
+    };
+    if after_ticket.is_none() {
+        let (key_time, key_id) = match after {
+            Some(QueueKey::Review {
+                updated_at_ms,
+                review_id,
+            }) => (*updated_at_ms, review_id.as_str()),
+            _ => (i64::MAX, "~"),
+        };
+        let page_sql = format!(
+            "SELECT {ITEM_COLUMNS} FROM reviews AS r LEFT JOIN review_decisions AS d USING (review_id) WHERE {SCOPE_PREDICATE}
+             AND (r.updated_at_ms, r.review_id) < (?3, ?4) ORDER BY r.updated_at_ms DESC, r.review_id DESC LIMIT ?5"
+        );
+        let mut statement = connection.prepare_cached(&page_sql)?;
+        let mut rows = statement.query(params![scope_code, scope_id, key_time, key_id, wanted])?;
+        while let Some(row) = rows.next()? {
+            items.push(QueueListItem::Review(Box::new(queue_item(row)?)));
+        }
     }
+    let total_tickets = if matches!(access, ReadScope::Local) {
+        if items.len() < usize::from(wanted) {
+            let remaining = wanted - items.len() as u16;
+            items.extend(
+                discovery::unmatched(connection, after_ticket, remaining)?
+                    .into_iter()
+                    .map(QueueListItem::Unmatched),
+            );
+        }
+        discovery::unmatched_total(connection)?
+    } else {
+        0
+    };
     let next = if items.len() > usize::from(limit) {
         items.pop();
         items.last().map(|item| QueuePosition {
             context,
-            updated_at_ms: item.source.updated_at_ms,
-            review_id: item.review_id.clone(),
+            key: item.key(),
         })
     } else {
         None
@@ -342,7 +371,8 @@ fn queue(
     Ok(QueuePage {
         items,
         next,
-        total,
+        total: total_mrs + total_tickets,
+        total_mrs,
         settings_revision,
         sync: crate::refresh::read_sync(connection, settings_revision)?,
     })
@@ -561,6 +591,16 @@ pub(crate) fn save_review(
 }
 
 fn queue_item(row: &Row<'_>) -> Result<QueueItem, StoreError> {
+    let tickets = serde_json::from_str::<Vec<(String, String)>>(text(row, 17)?)
+        .map_err(|_| AppError::Internal)?
+        .into_iter()
+        .map(|(key, title)| {
+            Ok(CompactTicket {
+                key: parse(&key)?,
+                title,
+            })
+        })
+        .collect::<Result<Vec<_>, StoreError>>()?;
     Ok(QueueItem {
         review_id: parse(text(row, 0)?)?,
         source: ReviewSource {
@@ -576,6 +616,7 @@ fn queue_item(row: &Row<'_>) -> Result<QueueItem, StoreError> {
             },
             updated_at_ms: row.get(8)?,
         },
+        tickets,
         registered_lead_count: u64::try_from(row.get::<_, i64>(9)?)
             .map_err(|_| AppError::Internal)?,
         decision: decisions::decode(row, 10)?,
@@ -585,7 +626,7 @@ fn queue_item(row: &Row<'_>) -> Result<QueueItem, StoreError> {
     })
 }
 
-fn identity(row: &Row<'_>, offset: usize) -> Result<MrIdentity, StoreError> {
+pub(crate) fn identity(row: &Row<'_>, offset: usize) -> Result<MrIdentity, StoreError> {
     let origin =
         GitLabOrigin::from_canonical(text(row, offset)?).map_err(|_| AppError::Internal)?;
     let project =

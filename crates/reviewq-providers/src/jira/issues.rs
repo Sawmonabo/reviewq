@@ -1,7 +1,9 @@
 use std::collections::HashSet;
 
 use reviewq_app::access::{AppError, AppFuture};
-use reviewq_app::sources::{ScopedTicket, TicketPage, TicketSourceReader};
+use reviewq_app::sources::{
+    ScopedSprint, ScopedTicket, SprintPage, TicketPage, TicketSourceReader,
+};
 use reviewq_domain::settings::{BoardScope, BoardType};
 use serde::Deserialize;
 use serde_json::Value;
@@ -23,6 +25,39 @@ struct Issue {
 }
 
 impl TicketSourceReader for Jira {
+    fn sprints(&self, board: u64, offset: u32) -> AppFuture<'_, SprintPage> {
+        Box::pin(async move {
+            let page = self
+                .catalog_page(
+                    &format!("rest/agile/1.0/board/{board}/sprint"),
+                    "values",
+                    &[
+                        ("startAt", offset.to_string()),
+                        ("maxResults", "100".into()),
+                        ("state", "active,future".into()),
+                    ],
+                    offset,
+                    Some(board),
+                )
+                .await?;
+            let mut items = Vec::with_capacity(page.items.len());
+            for item in page.items {
+                if !matches!(item.state.as_deref(), Some("active" | "future")) {
+                    return Err(AppError::Conflict);
+                }
+                items.push(ScopedSprint {
+                    board,
+                    id: item.id.parse().map_err(|_| AppError::Unavailable)?,
+                    label: item.label,
+                });
+            }
+            Ok(SprintPage {
+                items,
+                next: page.next,
+            })
+        })
+    }
+
     fn issues(
         &self,
         board: BoardScope,
@@ -109,10 +144,6 @@ impl Jira {
         let mut keys = HashSet::new();
         let mut items = Vec::with_capacity(result.issues.len());
         for issue in result.issues {
-            let key = issue.key.parse().map_err(|_| AppError::Unavailable)?;
-            if !keys.insert(issue.key) {
-                return Err(AppError::Unavailable);
-            }
             let fields = issue.fields;
             let project = safe_label(
                 fields["project"]["key"]
@@ -120,6 +151,20 @@ impl Jira {
                     .ok_or(AppError::Unavailable)?,
                 100,
             )?;
+            let (prefix, number) = issue.key.rsplit_once('-').ok_or(AppError::Unavailable)?;
+            if prefix != project
+                || !valid_project(prefix)
+                || number.is_empty()
+                || number.len() > 19
+                || number.starts_with('0')
+                || !number.bytes().all(|byte| byte.is_ascii_digit())
+            {
+                return Err(AppError::Conflict);
+            }
+            let key = issue.key.parse().map_err(|_| AppError::Unavailable)?;
+            if !keys.insert(issue.key) {
+                return Err(AppError::Unavailable);
+            }
             let status_id = numeric_id(&fields["status"]["id"]).ok_or(AppError::Unavailable)?;
             if !spec.statuses.contains(&status_id)
                 || (!spec.jira_projects.is_empty() && !spec.jira_projects.contains(&project))
@@ -134,7 +179,7 @@ impl Jira {
                         .filter(|value| value.is_finite() && *value >= 0.0)
                     {
                         Some(value) => (Some(value), None),
-                        None => (None, Some("jira_estimate_invalid")),
+                        None => (None, Some("jira_estimate_invalid".to_owned())),
                     },
                 };
             items.push(ScopedTicket {

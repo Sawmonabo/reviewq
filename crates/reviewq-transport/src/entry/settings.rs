@@ -133,13 +133,6 @@ pub(super) async fn save(
         request.draft.repositories,
         request.draft.additional_reviewer_ids,
     )?;
-    if workspace
-        .repositories
-        .iter()
-        .any(|repo| repo.default_skills.codex.is_some() || repo.default_skills.claude.is_some())
-    {
-        return Err(AppError::Unavailable.into());
-    }
     let (gitlab, jira) = tokio::try_join!(
         app::verify_connection(
             entry.settings_sources.as_ref(),
@@ -166,6 +159,7 @@ pub(super) async fn save(
         .settings_sources
         .verify_scope(&gitlab, &jira, workspace)
         .await?;
+    entry.skills.verify(&verified).await?;
     let stored = entry
         .store
         .activate_connections(actor, expected, gitlab, jira, verified)

@@ -1,6 +1,8 @@
 //! Verified review observations and scoped selection reads.
 
-use reviewq_domain::identity::{GitSha, MrIdentity, ReviewId, Revision, RunId, SessionKey};
+use reviewq_domain::identity::{
+    GitSha, MrIdentity, ReviewId, Revision, RunId, SessionKey, TicketKey,
+};
 use reviewq_domain::session::{HostProvider, LeadTarget};
 
 use crate::access::{Actor, AppError, AppFuture};
@@ -129,14 +131,55 @@ pub struct PageContext {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct QueuePosition {
     pub context: PageContext,
-    pub updated_at_ms: i64,
-    pub review_id: ReviewId,
+    pub key: QueueKey,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum QueueKey {
+    Review {
+        updated_at_ms: i64,
+        review_id: ReviewId,
+    },
+    Ticket(TicketKey),
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CompactTicket {
+    pub key: TicketKey,
+    pub title: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct UnmatchedTicket {
+    pub ticket: CompactTicket,
+    pub status: String,
+    pub assignee: Option<String>,
+    pub priority: Option<String>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum QueueListItem {
+    Review(Box<QueueItem>),
+    Unmatched(UnmatchedTicket),
+}
+
+impl QueueListItem {
+    pub fn key(&self) -> QueueKey {
+        match self {
+            Self::Review(item) => QueueKey::Review {
+                updated_at_ms: item.source.updated_at_ms,
+                review_id: item.review_id.clone(),
+            },
+            Self::Unmatched(item) => QueueKey::Ticket(item.ticket.key.clone()),
+        }
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct QueueItem {
     pub review_id: ReviewId,
     pub source: ReviewSource,
+    pub tickets: Vec<CompactTicket>,
     pub registered_lead_count: u64,
     pub decision: Decision,
     pub pending_source_updates: bool,
@@ -146,9 +189,10 @@ pub struct QueueItem {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct QueuePage {
-    pub items: Vec<QueueItem>,
+    pub items: Vec<QueueListItem>,
     pub next: Option<QueuePosition>,
     pub total: u64,
+    pub total_mrs: u64,
     pub settings_revision: Revision,
     pub sync: SourceSync,
 }

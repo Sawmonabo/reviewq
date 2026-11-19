@@ -69,7 +69,7 @@ impl GitLab {
         found: &mut Matches,
     ) -> Result<(), AppError> {
         for page in 1..=MAX_PROVIDER_PAGES {
-            let (rows, more) = self.merge_requests(project, page).await?;
+            let (rows, more) = self.merge_requests(project, page, "all").await?;
             for row in rows {
                 if contains_key(&row.title, key) || contains_key(&row.source_branch, key) {
                     found.add(self.review(project, path, row)?);
@@ -228,15 +228,16 @@ fn contains_key(value: &str, key: &str) -> bool {
     value
         .to_ascii_uppercase()
         .match_indices(key)
-        .any(|(offset, _)| {
-            let end = offset + key.len();
-            !value[..offset]
-                .chars()
-                .next_back()
-                .is_some_and(char::is_alphanumeric)
-                && !value[end..]
-                    .chars()
-                    .next()
-                    .is_some_and(char::is_alphanumeric)
-        })
+        .any(|(offset, _)| key_boundaries(value, offset, offset + key.len()))
+}
+
+pub(super) fn key_boundaries(value: &str, start: usize, end: usize) -> bool {
+    !value[..start]
+        .chars()
+        .next_back()
+        .is_some_and(char::is_alphanumeric)
+        && !value[end..]
+            .chars()
+            .next()
+            .is_some_and(char::is_alphanumeric)
 }

@@ -4,9 +4,9 @@ use reqwest::header;
 use reviewq_app::access::{AppError, AppFuture};
 use reviewq_app::queue::{MergeRequestState, ReviewSource};
 use reviewq_app::settings::SourceLease;
-use reviewq_app::sources::{ReviewResolution, ReviewSourceReader, WorkflowSnapshot};
+use reviewq_app::sources::{MatchedReview, ReviewResolution, ReviewSourceReader, WorkflowSnapshot};
 use reviewq_app::workspace::ConfiguredProject;
-use reviewq_domain::identity::{GitLabOrigin, MrIdentity, ProjectId};
+use reviewq_domain::identity::{GitLabOrigin, MrIdentity, ProjectId, TicketKey};
 use serde::Deserialize;
 use url::{Host, Url};
 
@@ -16,6 +16,7 @@ mod changes;
 mod checkout;
 mod lookup;
 mod settings;
+mod tickets;
 
 const METADATA_LIMIT: usize = 1024 * 1024;
 const MAX_PROVIDER_PAGES: u32 = 40;
@@ -62,6 +63,15 @@ impl ReviewSourceReader for GitLab {
             }
             self.list_reviews(project.project_id).await
         })
+    }
+
+    fn ticket_reviews(
+        &self,
+        project: ConfiguredProject,
+        keys: Vec<TicketKey>,
+        open: bool,
+    ) -> AppFuture<'_, Vec<MatchedReview>> {
+        Box::pin(self.match_ticket_page_set(project, keys, open))
     }
 
     fn resolve(
@@ -161,7 +171,7 @@ impl GitLab {
         let project = self.project(project_id).await?;
         let mut reviews = Vec::new();
         for page in 1..=MAX_PROVIDER_PAGES {
-            let (rows, more) = self.merge_requests(project_id, page).await?;
+            let (rows, more) = self.merge_requests(project_id, page, "all").await?;
             for row in rows {
                 reviews.push(self.review(project_id, &project.path_with_namespace, row)?);
             }
@@ -176,11 +186,14 @@ impl GitLab {
         &self,
         project: ProjectId,
         page: u32,
+        state: &str,
     ) -> Result<(Vec<MergeRequest>, bool), AppError> {
         let mut url = self.url(&format!("api/v4/projects/{project}/merge_requests"))?;
         url.query_pairs_mut()
             .append_pair("page", &page.to_string())
-            .append_pair("per_page", "100");
+            .append_pair("per_page", "100")
+            .append_pair("scope", "all")
+            .append_pair("state", state);
         let (metadata, bytes) = self.get(url, METADATA_LIMIT).await?;
         let rows: Vec<MergeRequest> =
             serde_json::from_slice(&bytes).map_err(|_| AppError::Unavailable)?;
@@ -197,6 +210,9 @@ impl GitLab {
                 true
             }
         };
+        if more && rows.is_empty() {
+            return Err(AppError::Unavailable);
+        }
         Ok((rows, more))
     }
 

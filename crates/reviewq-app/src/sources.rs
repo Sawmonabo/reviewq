@@ -4,7 +4,11 @@ use reviewq_domain::settings::BoardScope;
 use crate::access::{Actor, AppError, AppFuture};
 use crate::changes::ChangeSource;
 use crate::queue::ReviewSource;
+use crate::settings::ActiveSource;
 use crate::workspace::{ConfiguredProject, WorkspaceStore};
+
+mod scope;
+pub use scope::{MatchedReview, ScopedIssue, ScopedMatch, ScopedSprint, SourceObservation};
 
 /// Reads verified provider metadata outside the store transaction.
 pub trait ReviewSourceReader: ChangeSource {
@@ -18,6 +22,12 @@ pub trait ReviewSourceReader: ChangeSource {
     fn workflow_snapshot(&self, identity: MrIdentity) -> AppFuture<'_, WorkflowSnapshot>;
 
     fn reviews(&self, project: ConfiguredProject) -> AppFuture<'_, Vec<ReviewSource>>;
+    fn ticket_reviews(
+        &self,
+        project: ConfiguredProject,
+        keys: Vec<TicketKey>,
+        open: bool,
+    ) -> AppFuture<'_, Vec<MatchedReview>>;
 
     /// Resolves a user-supplied URL, project/IID or unique ticket in configured projects.
     fn resolve(
@@ -33,6 +43,7 @@ pub enum ReviewResolution {
 }
 
 /// A board-filtered Jira issue with provider-verified fields.
+#[derive(Debug)]
 pub struct ScopedTicket {
     pub key: TicketKey,
     pub title: String,
@@ -42,7 +53,7 @@ pub struct ScopedTicket {
     pub assignee: Option<String>,
     pub priority: Option<String>,
     pub estimate: Option<f64>,
-    pub estimate_warning: Option<&'static str>,
+    pub estimate_warning: Option<String>,
 }
 
 pub struct TicketPage {
@@ -51,6 +62,7 @@ pub struct TicketPage {
 }
 
 pub trait TicketSourceReader: Send + Sync {
+    fn sprints(&self, board: u64, offset: u32) -> AppFuture<'_, scope::SprintPage>;
     fn issues(
         &self,
         board: BoardScope,
@@ -59,6 +71,8 @@ pub trait TicketSourceReader: Send + Sync {
         limit: u16,
     ) -> AppFuture<'_, TicketPage>;
 }
+
+pub use scope::SprintPage;
 
 /// Total compact records accepted in one atomic source publication.
 pub const MAX_PUBLICATION_REVIEWS: usize = 4096;
@@ -92,8 +106,10 @@ pub trait SourceRefreshStore: Send + Sync {
     fn finish_refresh(
         &self,
         attempt: RefreshAttempt,
-        result: Result<Vec<ReviewSource>, SourceFailure>,
+        result: Result<SourceObservation, SourceFailure>,
     ) -> AppFuture<'_, ()>;
+
+    fn retained_reviews(&self, attempt: RefreshAttempt) -> AppFuture<'_, Vec<MrIdentity>>;
 
     /// Marks an unfinished attempt after the previous service process has exited.
     fn recover_refresh(&self, actor: Actor) -> AppFuture<'_, ()>;
@@ -102,17 +118,35 @@ pub trait SourceRefreshStore: Send + Sync {
 /// Refreshes the compact queue from the currently configured projects.
 pub async fn refresh_queue(
     store: &(impl WorkspaceStore + SourceRefreshStore + ?Sized),
-    source: &dyn ReviewSourceReader,
+    context: ActiveSource,
     actor: Actor,
-    expected: Revision,
 ) -> Result<usize, AppError> {
     let workspace = store.workspace_context(actor.clone()).await?.value;
-    if workspace.revision != expected {
+    if workspace.revision != context.revision {
         return Err(AppError::StaleRevision);
     }
+    let reader = context.reader.as_deref().ok_or(AppError::Unavailable)?;
     let attempt = store.begin_refresh(actor, workspace.revision).await?;
-    let result = scan(source, workspace.projects).await;
-    let count = result.as_ref().map(Vec::len).map_err(|error| *error);
+    let result = match context.tickets {
+        Some(jira) => {
+            scope::collect(
+                store,
+                reader,
+                jira.as_ref(),
+                &context.scope,
+                workspace.projects,
+                attempt,
+            )
+            .await
+        }
+        None => scan(reader, workspace.projects)
+            .await
+            .map(SourceObservation::validation),
+    };
+    let count = result
+        .as_ref()
+        .map(|result| result.reviews.len())
+        .map_err(|error| *error);
     let observation = result.map_err(|error| match error {
         AppError::PayloadTooLarge => SourceFailure::TooLarge,
         _ => SourceFailure::Unavailable,

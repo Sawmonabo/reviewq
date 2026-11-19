@@ -13,8 +13,10 @@ use crate::events::Snapshot;
 use crate::sources::{ReviewSourceReader, TicketSourceReader};
 
 mod runtime;
+mod skills;
 
 pub use runtime::{ActiveSource, RuntimeSources, SourceLease};
+pub use skills::{NativeSkillReader, NativeSkills};
 
 #[derive(Clone)]
 pub struct SecretToken(Box<str>);

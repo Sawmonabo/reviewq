@@ -23,7 +23,7 @@ use reviewq_app::queue::{QueueStore, ReviewLookup};
 use reviewq_app::reports::{
     ReportCaptureStore, ReportFileSource, ReportMutationStore, ReportStore,
 };
-use reviewq_app::settings::{ConnectionSources, RuntimeSources, SettingsStore};
+use reviewq_app::settings::{ConnectionSources, NativeSkills, RuntimeSources, SettingsStore};
 use reviewq_app::sources::{SourceRefreshStore, refresh_queue};
 use reviewq_app::workflow::NativeWorkflowProof;
 use reviewq_app::workspace::WorkspaceStore;
@@ -114,6 +114,7 @@ pub(super) struct Entry {
     store: Arc<dyn Store>,
     source: Arc<RuntimeSources>,
     settings_sources: Arc<dyn ConnectionSources>,
+    skills: NativeSkills,
     refresh_wakeup: Notify,
     host: Option<Arc<dyn NativeHost>>,
     claude: Option<Arc<dyn ClaudeCompanion>>,
@@ -164,6 +165,7 @@ pub struct ServiceRuntime<'a> {
     pub sends_allowed: bool,
     pub source_poll_interval: Option<Duration>,
     pub settings_sources: Arc<dyn ConnectionSources>,
+    pub skills: NativeSkills,
     pub claude: Option<Arc<dyn ClaudeCompanion>>,
     pub workflow: WorkflowIntegration,
     pub terminal: Arc<dyn NativeTerminal>,
@@ -183,6 +185,7 @@ pub fn router(
         store,
         source,
         settings_sources: runtime.settings_sources,
+        skills: runtime.skills,
         refresh_wakeup: Notify::new(),
         host,
         claude: runtime.claude,
@@ -326,7 +329,7 @@ async fn status(
             identity: endpoint.identity(),
             ready: true,
             configured_projects: workspace.value.projects.len(),
-            total_mrs: queue.value.total,
+            total_mrs: queue.value.total_mrs,
             sync: pages::queue_sync(
                 entry.active_source().await?.collection_enabled,
                 queue.value.sync,
@@ -464,7 +467,9 @@ impl Entry {
         if !context.collection_enabled {
             return Err(AppError::Unavailable);
         }
-        let source = context.reader.ok_or(AppError::Unavailable)?;
+        if context.reader.is_none() {
+            return Err(AppError::Unavailable);
+        }
         let revision = context.revision;
         let mut receiver = {
             let mut active = self.refresh.lock().await;
@@ -477,13 +482,8 @@ impl Entry {
                 let (send, receive) = watch::channel(None);
                 let store = self.store.clone();
                 tokio::spawn(async move {
-                    let result = refresh_queue(
-                        store.as_ref(),
-                        source.as_ref(),
-                        Actor::local_operator(),
-                        revision,
-                    )
-                    .await;
+                    let result =
+                        refresh_queue(store.as_ref(), context, Actor::local_operator()).await;
                     send.send_replace(Some(result));
                 });
                 *active = Some((revision, receive.clone()));

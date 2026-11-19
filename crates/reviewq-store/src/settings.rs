@@ -75,14 +75,25 @@ impl SettingsStore for SqliteStore {
                 }
                 let origin = gitlab.account.connection.origin().to_owned();
                 let pinned = pinned(&tx.sql)?;
+                let mut changed = scope::discovery_changed(&tx.sql, &scope)?;
                 for connection in [gitlab, jira] {
-                    if pinned
-                        && account(&tx.sql, connection.account.connection.provider())?
-                            .is_some_and(|prior| !prior.same_authority(&connection.account))
-                    {
+                    let prior = account(&tx.sql, connection.account.connection.provider())?;
+                    let same = prior
+                        .as_ref()
+                        .is_some_and(|prior| prior.same_authority(&connection.account));
+                    if pinned && prior.is_some() && !same {
                         return Err(AppError::Conflict.into());
                     }
+                    changed |= !same;
                     save(&tx.sql, connection)?;
+                }
+                if changed {
+                    tx.sql.execute_batch(
+                        "DELETE FROM review_discoveries;
+                         DELETE FROM scoped_issues;
+                         DELETE FROM scoped_sprints;",
+                    )?;
+                    tx.emit(&[ResourceKey::Ticket(None)])?;
                 }
                 scope::replace(&tx.sql, &origin, scope)?;
                 advance(tx, expected)
