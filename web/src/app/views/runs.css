@@ -119,7 +119,7 @@
   background: var(--row-selected);
 }
 .run-card-open[aria-current="true"],
-.run-card-open[aria-pressed="true"] {
+.run-card-open[aria-checked="true"] {
   border-color: var(--strong-line);
   background: var(--row-selected);
   box-shadow: inset 2px 0 var(--focus);

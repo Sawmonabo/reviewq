@@ -13,6 +13,7 @@ import type { Launch, LaunchTarget, OpenReview } from "../../features/queue/type
 import { useResource } from "../../hooks/useResource";
 import { formatActivityTime, readable, reviewReasonLabel } from "../../lib/presentation";
 import { savedValue, saveValue } from "../../lib/view-preferences";
+import { SelectionActions } from "../SelectionActions";
 import "./runs.css";
 
 const stages = [
@@ -23,6 +24,7 @@ const stages = [
 ] as const;
 
 export function RunsView({
+  renderHeader,
   selectedReview,
   selecting,
   onSelect,
@@ -30,6 +32,7 @@ export function RunsView({
   onLaunch,
   onMonitor,
 }: {
+  readonly renderHeader: (selection?: ReactNode) => ReactNode;
   readonly selectedReview?: string | undefined;
   readonly selecting: boolean;
   readonly onSelect: (next: boolean) => void;
@@ -71,6 +74,19 @@ export function RunsView({
 
   return (
     <>
+      {renderHeader(
+        selecting ? (
+          <SelectionActions
+            targets={captured}
+            onLaunch={onLaunch}
+            onMonitor={onMonitor}
+            onCancel={() => {
+              setChecked([]);
+              onSelect(false);
+            }}
+          />
+        ) : undefined,
+      )}
       <div className="run-stage-tabs" aria-label="Filter review runs">
         {stages.map(([id, label, field]) => (
           <button
@@ -137,47 +153,29 @@ export function RunsView({
             )}
           </div>
           {selecting && (
-            <div className="selection-bar actions">
-              <strong>{captured.length} selected</strong>
-              <button
-                type="button"
-                disabled={!eligible.length}
-                onClick={() => setChecked(eligible.map((row) => row.reviewId))}
-              >
-                Select all shown
-              </button>
-              <button
-                type="button"
-                className="primary"
-                disabled={!captured.length}
-                onClick={() => onLaunch("prepare", captured)}
-              >
-                Prepare reviews
-              </button>
-              <button
-                type="button"
-                disabled={!captured.length}
-                onClick={() => onMonitor(captured, false)}
-              >
-                Auto-review updates
-              </button>
-              <button
-                type="button"
-                disabled={!captured.length}
-                onClick={() => onMonitor(captured, true)}
-              >
-                Pause auto-review
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setChecked([]);
-                  onSelect(false);
-                }}
-              >
-                Cancel
-              </button>
-            </div>
+            <button
+              type="button"
+              className="select-all-reviews"
+              role="checkbox"
+              aria-checked={
+                eligible.length > 0 && captured.length === eligible.length
+                  ? true
+                  : captured.length
+                    ? "mixed"
+                    : false
+              }
+              disabled={!eligible.length}
+              onClick={() =>
+                setChecked(
+                  captured.length === eligible.length ? [] : eligible.map((row) => row.reviewId),
+                )
+              }
+            >
+              <span className="row-checkbox" aria-hidden="true">
+                {captured.length ? (captured.length === eligible.length ? "✓" : "−") : ""}
+              </span>
+              Select all shown
+            </button>
           )}
           {runs.error && (
             <Notice retry={runs.retry}>
@@ -522,8 +520,14 @@ function RunRow({
         type="button"
         className="run-card-open"
         disabled={disabled}
-        aria-current={selected || undefined}
-        aria-pressed={selection?.checked}
+        aria-current={(!selection && selected) || undefined}
+        role={selection ? "checkbox" : undefined}
+        aria-checked={selection?.checked}
+        aria-label={
+          selection
+            ? `Select ${row.tickets.map((ticket) => ticket.key).join(" · ") || row.projectPath} · !${row.iid}`
+            : undefined
+        }
         onClick={selection?.onToggle ?? onOpen}
       >
         <div className="run-card-head">

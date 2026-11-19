@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import type { ReactNode } from "react";
 import { loadSprints, readQueue, readQueueSync, refreshQueue } from "../../api/workspace";
 import { FilterSelect } from "../../components/FilterSelect";
 import { Icon } from "../../components/Icon";
@@ -20,10 +21,12 @@ import {
 import type { QueueFilters } from "../../features/queue/filters";
 import type { Launch, LaunchTarget, OpenReview } from "../../features/queue/types";
 import type { QueueFacets, QueueRow } from "../../api/generated/contracts";
+import { SelectionActions } from "../SelectionActions";
 
 const filterKeys = Object.keys(clearedFilters) as (keyof QueueFilters)[];
 
 type QueueProps = {
+  readonly renderHeader: (selection?: ReactNode) => ReactNode;
   readonly selectedReview?: string | undefined;
   readonly selectedTicket?: string | undefined;
   readonly revision: number;
@@ -37,6 +40,7 @@ type QueueProps = {
 };
 
 export function QueueView({
+  renderHeader,
   selectedReview,
   selectedTicket,
   revision,
@@ -133,6 +137,19 @@ export function QueueView({
 
   return (
     <>
+      {renderHeader(
+        selecting ? (
+          <SelectionActions
+            targets={captured}
+            onLaunch={onLaunch}
+            onMonitor={onMonitor}
+            onCancel={() => {
+              setChecked([]);
+              onSelect(false);
+            }}
+          />
+        ) : undefined,
+      )}
       <div className="queue-filters" aria-label="Review filters">
         <FilterSelect
           label="Board"
@@ -267,42 +284,6 @@ export function QueueView({
         <p className="meta" role="status">
           Loading selected sprint…
         </p>
-      )}
-      {selecting && (
-        <div className="selection-bar actions" aria-label="Selected merge requests">
-          <strong>{captured.length} selected</strong>
-          <button
-            type="button"
-            className="primary"
-            disabled={!captured.length}
-            onClick={() => onLaunch("prepare", captured)}
-          >
-            Prepare reviews
-          </button>
-          <button
-            type="button"
-            disabled={!captured.length}
-            onClick={() => onMonitor(captured, false)}
-          >
-            Auto-review updates
-          </button>
-          <button
-            type="button"
-            disabled={!captured.length}
-            onClick={() => onMonitor(captured, true)}
-          >
-            Pause auto-review
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              setChecked([]);
-              onSelect(false);
-            }}
-          >
-            Cancel
-          </button>
-        </div>
       )}
       {notice && <Notice>{notice}</Notice>}
       {currentSync?.error && (

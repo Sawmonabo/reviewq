@@ -52,6 +52,9 @@
   --row-padding: 17px;
   --row-line: #222228;
   --row-selected: #19191f;
+  --row-checked: #171820;
+  --row-focus: #8295cf;
+  --checkbox-line: #666678;
   --avatar-bg: #25252c;
   --avatar-text: #b0b0bd;
   --dim-text: #80808e;
@@ -62,6 +65,9 @@
   --canvas: #faf9fc;
   --row-line: #dcd9e6;
   --row-selected: #eae8f2;
+  --row-checked: #eaeafb;
+  --row-focus: #415caf;
+  --checkbox-line: #756c89;
   --avatar-bg: #eae8f2;
   --avatar-text: #575364;
   --dim-text: #646073;

@@ -471,12 +471,20 @@
 .list-heading.spread {
   justify-content: space-between;
 }
-.selection-bar {
-  margin: 8px 0;
-  padding: 8px 9px;
-  border: 1px solid var(--strong-line);
-  background: var(--selected);
-  border-radius: 5px;
+.workspace-selection {
+  justify-content: flex-end;
+  font-size: 11px;
+}
+.workspace-selection button {
+  min-height: 35px;
+  padding: 8px 12px;
+}
+.workspace-selection .quiet-button {
+  color: var(--muted);
+}
+.selection-count {
+  color: var(--muted);
+  white-space: nowrap;
 }
 @media (min-width: 1001px) and (max-width: 1150px) {
   .workspace-inner {
