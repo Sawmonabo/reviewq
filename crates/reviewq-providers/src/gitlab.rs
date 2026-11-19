@@ -39,6 +39,21 @@ impl ReviewSourceReader for GitLab {
     ) -> AppFuture<'_, ConfiguredProject> {
         Box::pin(self.verify_checkout_remote(project, remote))
     }
+
+    fn verify_launch_checkout(
+        &self,
+        project: ConfiguredProject,
+        checkout: reviewq_domain::settings::CheckoutBinding,
+    ) -> AppFuture<'_, ()> {
+        Box::pin(async move {
+            let (observed, remote) = crate::checkout::verify_checkout(&checkout.root).await?;
+            if observed != checkout {
+                return Err(AppError::Conflict);
+            }
+            self.verify_checkout_remote(project, remote).await?;
+            Ok(())
+        })
+    }
     fn review(&self, identity: MrIdentity) -> AppFuture<'_, ReviewSource> {
         Box::pin(async move {
             if identity.origin() != &self.identity {

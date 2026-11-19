@@ -9,6 +9,7 @@ pub mod followups;
 pub mod history;
 pub mod hosts;
 mod labels;
+pub mod launch;
 pub mod notifications;
 pub mod queue;
 pub mod reports;

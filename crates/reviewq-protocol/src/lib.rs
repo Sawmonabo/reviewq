@@ -8,6 +8,7 @@ pub mod events;
 pub mod followups;
 pub mod history;
 mod hosts;
+pub mod launch;
 pub mod mcp;
 pub mod notifications;
 pub mod queue;

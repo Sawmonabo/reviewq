@@ -1,5 +1,5 @@
 use reviewq_domain::identity::{EventCursor, MrIdentity, Revision, TicketKey};
-use reviewq_domain::settings::BoardScope;
+use reviewq_domain::settings::{BoardScope, CheckoutBinding};
 
 use crate::access::{Actor, AppError, AppFuture};
 use crate::changes::ChangeSource;
@@ -17,6 +17,12 @@ pub trait ReviewSourceReader: ChangeSource {
         project: ConfiguredProject,
         remote: String,
     ) -> AppFuture<'_, ConfiguredProject>;
+
+    fn verify_launch_checkout(
+        &self,
+        project: ConfiguredProject,
+        checkout: CheckoutBinding,
+    ) -> AppFuture<'_, ()>;
 
     fn review(&self, identity: MrIdentity) -> AppFuture<'_, ReviewSource>;
     fn workflow_snapshot(&self, identity: MrIdentity) -> AppFuture<'_, WorkflowSnapshot>;

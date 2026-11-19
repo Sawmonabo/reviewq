@@ -18,6 +18,7 @@ use reviewq_app::history::{HistoryStore, NativeHistoryReader};
 use reviewq_app::hosts::{
     ClaudeCompanion, ClaudeStore, LeadStore, MessageHistoryStore, NativeHost, NativeTerminal,
 };
+use reviewq_app::launch::NativeModels;
 use reviewq_app::notifications::InboxStore;
 use reviewq_app::queue::{QueueStore, ReviewLookup};
 use reviewq_app::reports::{
@@ -43,6 +44,7 @@ mod events;
 mod features;
 mod history;
 mod hosts;
+mod launch;
 mod mcp;
 mod messages;
 mod pages;
@@ -115,6 +117,7 @@ pub(super) struct Entry {
     source: Arc<RuntimeSources>,
     settings_sources: Arc<dyn ConnectionSources>,
     skills: NativeSkills,
+    models: NativeModels,
     refresh_wakeup: Notify,
     host: Option<Arc<dyn NativeHost>>,
     claude: Option<Arc<dyn ClaudeCompanion>>,
@@ -166,6 +169,7 @@ pub struct ServiceRuntime<'a> {
     pub source_poll_interval: Option<Duration>,
     pub settings_sources: Arc<dyn ConnectionSources>,
     pub skills: NativeSkills,
+    pub models: NativeModels,
     pub claude: Option<Arc<dyn ClaudeCompanion>>,
     pub workflow: WorkflowIntegration,
     pub terminal: Arc<dyn NativeTerminal>,
@@ -186,6 +190,7 @@ pub fn router(
         source,
         settings_sources: runtime.settings_sources,
         skills: runtime.skills,
+        models: runtime.models,
         refresh_wakeup: Notify::new(),
         host,
         claude: runtime.claude,
@@ -224,6 +229,8 @@ pub fn router(
             get(changes::discussions),
         )
         .route("/runs/{run_id}", get(pages::run))
+        .route("/runs/catalog", post(launch::catalog))
+        .route("/runs/prepare", post(launch::prepare))
         .route(
             "/runs/{run_id}/sessions/{session_key}/terminal",
             get(terminal::read),

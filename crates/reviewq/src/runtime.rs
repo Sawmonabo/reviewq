@@ -11,6 +11,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use reviewq_app::access::Actor;
 use reviewq_app::hosts::{ClaudeCompanion, LeadStore, NativeHost, recover_delivery};
+use reviewq_app::launch::{NativeModelReader, NativeModels};
 use reviewq_app::notifications::DesktopStore;
 use reviewq_app::reports::reconcile_reports;
 use reviewq_app::settings::{NativeSkillReader, NativeSkills, RuntimeSources};
@@ -206,6 +207,10 @@ pub(crate) async fn serve(profile: PathBuf, options: Serve) -> Result<(), Failur
         codex: codex.clone().map(|host| host as Arc<dyn NativeSkillReader>),
         claude: None,
     };
+    let models = NativeModels {
+        codex: codex.clone().map(|host| host as Arc<dyn NativeModelReader>),
+        claude: None,
+    };
     let workflow = Arc::new(Workflows::new(codex));
     let report_files = Arc::new(RegisteredReportFiles);
     let claude_home = match options.claude_home {
@@ -292,6 +297,7 @@ pub(crate) async fn serve(profile: PathBuf, options: Serve) -> Result<(), Failur
                 .then_some(Duration::from_secs(settings.poll_seconds)),
             settings_sources,
             skills,
+            models,
             claude,
             terminal,
             workflow: WorkflowIntegration {
