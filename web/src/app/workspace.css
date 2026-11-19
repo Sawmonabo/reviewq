@@ -261,6 +261,21 @@
 .workspace-title .menu-trigger[aria-expanded="true"] {
   outline: 2px solid var(--focus);
   outline-offset: -2px;
+  border-color: var(--focus);
+  background: var(--control-hover);
+}
+.workspace-action-menu {
+  min-width: var(--radix-dropdown-menu-trigger-width);
+  background: var(--popup-bg);
+  border-color: var(--popup-border);
+}
+.workspace-action-menu [role="menuitem"] {
+  min-height: 32px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.workspace-action-menu [data-highlighted] {
+  background: var(--popup-hover);
 }
 .workspace-title h1 {
   overflow-wrap: anywhere;

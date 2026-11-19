@@ -22,6 +22,7 @@ import type { QueueFilters } from "../../features/queue/filters";
 import type { Launch, LaunchTarget, OpenReview } from "../../features/queue/types";
 import type { QueueFacets, QueueRow } from "../../api/generated/contracts";
 import { SelectionActions } from "../SelectionActions";
+import { QueueExclusions } from "./QueueExclusions";
 
 const filterKeys = Object.keys(clearedFilters) as (keyof QueueFilters)[];
 
@@ -217,39 +218,14 @@ export function QueueView({
           options={Object.entries(states).map(([value, label]) => ({ value, label }))}
           onChange={(value) => update({ ...filters, state: value as QueueFilters["state"] })}
         />
-        <details className="filter-popover queue-hide">
-          <summary className="filter-control">
-            Hide
-            {(filters.hideReviewed || filters.hideInProgress) && (
-              <span className="hide-count">
-                {Number(filters.hideReviewed) + Number(filters.hideInProgress)}
-              </span>
-            )}
-            <Icon name="chevron" size={12} />
-          </summary>
-          <div>
-            <label>
-              <input
-                type="checkbox"
-                checked={filters.hideReviewed}
-                onChange={(event) =>
-                  update({ ...filters, hideReviewed: event.currentTarget.checked })
-                }
-              />
-              Reviewed ({facets?.hideReviewed ?? 0})
-            </label>
-            <label>
-              <input
-                type="checkbox"
-                checked={filters.hideInProgress}
-                onChange={(event) =>
-                  update({ ...filters, hideInProgress: event.currentTarget.checked })
-                }
-              />
-              Being reviewed ({facets?.hideInProgress ?? 0})
-            </label>
-          </div>
-        </details>
+        <QueueExclusions
+          reviewed={filters.hideReviewed}
+          inProgress={filters.hideInProgress}
+          reviewedCount={facets?.hideReviewed}
+          inProgressCount={facets?.hideInProgress}
+          onReviewed={(hideReviewed) => update({ ...filters, hideReviewed })}
+          onInProgress={(hideInProgress) => update({ ...filters, hideInProgress })}
+        />
         <FilterSelect
           label="Sort"
           accessibleLabel="Sort reviews"

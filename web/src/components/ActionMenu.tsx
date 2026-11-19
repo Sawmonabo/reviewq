@@ -7,10 +7,12 @@ export function ActionMenu({
   label,
   trigger,
   items,
+  contentClassName,
 }: {
   readonly label: string;
   readonly trigger: ReactNode;
   readonly items: readonly Item[];
+  readonly contentClassName?: string;
 }) {
   return (
     <Menu.Root>
@@ -20,7 +22,12 @@ export function ActionMenu({
         </button>
       </Menu.Trigger>
       <Menu.Portal>
-        <Menu.Content className="action-menu" align="end" sideOffset={6} collisionPadding={12}>
+        <Menu.Content
+          className={contentClassName ? `action-menu ${contentClassName}` : "action-menu"}
+          align="end"
+          sideOffset={6}
+          collisionPadding={12}
+        >
           {items.map((item) => (
             <Menu.Item key={item.label} disabled={item.disabled ?? false} onSelect={item.run}>
               {item.label}

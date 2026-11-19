@@ -263,6 +263,7 @@ export function App() {
               {selection ?? (
                 <ActionMenu
                   label="New review"
+                  contentClassName="workspace-action-menu"
                   trigger={
                     <span className="button-label">
                       New review <Icon name="chevron" size={12} />

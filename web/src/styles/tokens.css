@@ -55,6 +55,9 @@
   --row-checked: #171820;
   --row-focus: #8295cf;
   --checkbox-line: #666678;
+  --popup-bg: #131317;
+  --popup-border: #393943;
+  --popup-hover: #2a2a33;
   --avatar-bg: #25252c;
   --avatar-text: #b0b0bd;
   --dim-text: #80808e;
@@ -68,6 +71,9 @@
   --row-checked: #eaeafb;
   --row-focus: #415caf;
   --checkbox-line: #756c89;
+  --popup-bg: #fff;
+  --popup-border: #c6c0d1;
+  --popup-hover: #eae8f2;
   --avatar-bg: #eae8f2;
   --avatar-text: #575364;
   --dim-text: #646073;
