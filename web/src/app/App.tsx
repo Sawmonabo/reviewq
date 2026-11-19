@@ -26,7 +26,6 @@ import "../styles/base.css";
 import "./workspace.css";
 import "./views/lists.css";
 
-const ReviewDrawer = lazy(() => import("../features/review/ReviewDrawer"));
 const SettingsPane = lazy(() => import("../features/settings/SettingsPane"));
 const BulkLaunch = lazy(() => import("../features/queue/BulkLaunch"));
 const MonitorPane = lazy(() => import("../features/review/followups/MonitorPane"));
@@ -80,6 +79,11 @@ export function App() {
   const paneOpen = opened || form;
   const title = views.find((item) => item.view === route.view)?.label ?? "Review queue";
 
+  const drawerModule = useResource(`review-drawer-module:${Boolean(reviewId)}`, async () => ({
+    data: reviewId ? (await import("../features/review/ReviewDrawer")).default : null,
+    cursor: "",
+  }));
+  const ReviewDrawer = drawerModule.data;
   const overview = useResource(
     reviewId ?? "",
     (signal) =>
@@ -537,7 +541,7 @@ export function App() {
           >
             <PanelBoundary key={reviewId ?? ticket}>
               <Suspense fallback={<Loading label="Opening detail panel…" />}>
-                {overview.data && reviewId ? (
+                {overview.data && reviewId && ReviewDrawer ? (
                   <ReviewDrawer
                     overview={overview.data}
                     run={selectedRun}
@@ -568,7 +572,9 @@ export function App() {
                     onLaunch={menuLaunch}
                     onMonitor={monitor}
                     ticket={
-                      <Tickets keys={overview.data.review.tickets.map((entry) => entry.key)} />
+                      <Suspense fallback={<Loading label="Loading ticket…" />}>
+                        <Tickets keys={overview.data.review.tickets.map((entry) => entry.key)} />
+                      </Suspense>
                     }
                   />
                 ) : reviewId ? (
@@ -583,6 +589,8 @@ export function App() {
                       <Notice retry={overview.retry}>
                         {overview.error} <code>{reviewId}</code>
                       </Notice>
+                    ) : drawerModule.error ? (
+                      <Notice retry={drawerModule.retry}>{drawerModule.error}</Notice>
                     ) : (
                       <Loading label="Opening review…" />
                     )}
