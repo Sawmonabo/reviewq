@@ -688,9 +688,6 @@
   .drawer-host {
     height: 100%;
   }
-  .workspace-panes.has-form {
-    padding-inline-end: 0;
-  }
   .overlay-host {
     height: 100%;
   }

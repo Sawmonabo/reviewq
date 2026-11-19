@@ -33,7 +33,9 @@ export function ScopeFilters({
   const disabled = settings?.mode !== "connected";
   const boards = scope?.boards.map((board) => ({ id: board.boardId, label: board.name })) ?? [];
   const repositories =
-    scope?.repositories.map((repo) => ({ id: repo.projectId, label: repo.path })) ?? [];
+    scope?.repositories
+      .map((repo) => ({ id: repo.projectId, label: repo.path }))
+      .sort((left, right) => left.label.localeCompare(right.label)) ?? [];
   const sprintLabel =
     sprint === "selected" ? `${sprintPairs.length} selected` : sprintModes[sprint];
   return (

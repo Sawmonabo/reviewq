@@ -93,7 +93,7 @@ export function SprintOptions({
       </fieldset>
       <input
         aria-label="Search sprints"
-        placeholder="Find a loaded sprint…"
+        placeholder="Find a sprint…"
         maxLength={200}
         value={search}
         onChange={(event) => setSearch(event.currentTarget.value)}
@@ -131,9 +131,11 @@ export function SprintOptions({
         for (const { id, label } of known.filter((choice) => choice.boardId === board.boardId)) {
           if (!items.has(id)) items.set(id, { id, label, state: null });
         }
-        const matching = [...items.values()].filter(({ label }) =>
-          label.toLocaleLowerCase().includes(query),
-        );
+        const matching = [...items.values()]
+          .filter(({ label }) => label.toLocaleLowerCase().includes(query))
+          .sort((left, right) =>
+            left.label.localeCompare(right.label, undefined, { numeric: true }),
+          );
         return (
           <fieldset key={board.boardId} className="queue-scope-group">
             <legend>{board.name}</legend>

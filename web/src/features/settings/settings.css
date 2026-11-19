@@ -72,6 +72,9 @@
   min-height: 35px;
   font-size: 11px;
 }
+.settings-pane .modal-frame > footer .primary {
+  padding-inline: 11px;
+}
 .settings-pane
   :is(.modal-frame > footer, .connection-fields, .settings-concurrency, .settings-search)
   button:not(.primary, .quiet-button, .icon-button) {
