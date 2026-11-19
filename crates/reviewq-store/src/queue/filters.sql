@@ -29,7 +29,8 @@ tickets AS (
                WHERE (m.board_id,m.ticket_key)=(i.board_id,i.ticket_key)
                UNION ALL
                SELECT 1 FROM loaded_sprint_issues m JOIN requested_sprints s ON (s.board,s.sprint)=(m.board_id,m.sprint_id)
-               WHERE (m.board_id,m.ticket_key)=(i.board_id,i.ticket_key)))
+               WHERE (m.board_id,m.ticket_key)=(i.board_id,i.ticket_key)
+                 AND NOT EXISTS (SELECT 1 FROM scoped_sprints x WHERE (x.board_id,x.sprint_id)=(m.board_id,m.sprint_id))))
        ))
 ),
 matched AS (

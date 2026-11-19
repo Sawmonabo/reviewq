@@ -26,6 +26,7 @@ import type {
   TestConnection,
   TrackReviewRequest,
   ApprovalViewResponse,
+  ArchivePageResponse,
   CancelRecoveryResponse,
   CatalogResponse,
   CurrentActionResponse,
@@ -127,6 +128,9 @@ export function isTrackReviewRequest(
 export function isApprovalViewResponse(
   value: unknown,
 ): value is ApprovalViewResponse;
+export function isArchivePageResponse(
+  value: unknown,
+): value is ArchivePageResponse;
 export function isCancelRecoveryResponse(
   value: unknown,
 ): value is CancelRecoveryResponse;

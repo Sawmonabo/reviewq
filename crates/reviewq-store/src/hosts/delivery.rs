@@ -475,6 +475,13 @@ pub(super) fn finish(
             return Err(AppError::Conflict.into());
         }
         emit_delivery(tx, &stored.receipt.target)?;
+        if (state == "uncertain") != (prior == "uncertain") {
+            crate::workspace::advance_queue(&tx.sql)?;
+            tx.emit(&[
+                ResourceKey::Queue,
+                ResourceKey::Review(Some(stored.receipt.target.review_id().clone())),
+            ])?;
+        }
     }
     match outcome {
         DeliveryOutcome::Started(_) | DeliveryOutcome::Rejected => {

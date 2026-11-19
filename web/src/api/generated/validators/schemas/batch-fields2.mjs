@@ -3,9 +3,9 @@ import { func0 } from "../runtime.mjs";
 import { validate209 } from "./utc-timestamp-dto.mjs";
 import { validate106 } from "./safe-count-dto.mjs";
 import { validate25 } from "./checkpoint-id-dto.mjs";
-import { validate335 } from "./batch-state.mjs";
+import { validate388 } from "./batch-state.mjs";
 import { validate122 } from "./git-sha-dto.mjs";
-function validate331(
+function validate384(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -112,7 +112,7 @@ function validate331(
                 vErrors.push(err1);
               }
               errors++;
-              validate331.errors = vErrors;
+              validate384.errors = vErrors;
               return false;
             } else {
               errors = _errs4;
@@ -132,7 +132,7 @@ function validate331(
             if (data.state !== undefined && func0.call(data, "state")) {
               const _errs8 = errors;
               if (
-                !validate335(data.state, {
+                !validate388(data.state, {
                   instancePath: instancePath + "/state",
                   parentData: data,
                   parentDataProperty: "state",
@@ -141,8 +141,8 @@ function validate331(
               ) {
                 vErrors =
                   vErrors === null
-                    ? validate335.errors
-                    : vErrors.concat(validate335.errors);
+                    ? validate388.errors
+                    : vErrors.concat(validate388.errors);
                 errors = vErrors.length;
               }
               var valid0 = _errs8 === errors;
@@ -207,7 +207,7 @@ function validate331(
                     vErrors.push(err3);
                   }
                   errors++;
-                  validate331.errors = vErrors;
+                  validate384.errors = vErrors;
                   return false;
                 } else {
                   errors = _errs10;
@@ -281,7 +281,7 @@ function validate331(
                       vErrors.push(err5);
                     }
                     errors++;
-                    validate331.errors = vErrors;
+                    validate384.errors = vErrors;
                     return false;
                   } else {
                     errors = _errs15;
@@ -303,7 +303,7 @@ function validate331(
         }
       }
     } else {
-      validate331.errors = [
+      validate384.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -314,7 +314,7 @@ function validate331(
       return false;
     }
   }
-  validate331.errors = vErrors;
+  validate384.errors = vErrors;
   return errors === 0;
 }
-export { validate331 };
+export { validate384 };

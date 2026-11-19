@@ -120,7 +120,49 @@ const schema86 = {
   enum: ["approvals_unavailable", "rules_unavailable"],
   type: "string",
 };
-const schema88 = {
+const schema93 = { enum: ["full_mr", "selected_threads"], type: "string" };
+const schema94 = { enum: ["decision", "report", "followup"], type: "string" };
+const schema95 = {
+  type: "object",
+  properties: {
+    iid: { $ref: "#/definitions/MergeRequestIidDto" },
+    lastActivityAt: {
+      anyOf: [{ $ref: "#/definitions/UtcTimestampDto" }, { type: "null" }],
+    },
+    latestMatchingReviewAt: {
+      anyOf: [{ $ref: "#/definitions/UtcTimestampDto" }, { type: "null" }],
+    },
+    membership: { $ref: "#/definitions/ArchiveMembership" },
+    mrState: { $ref: "#/definitions/MergeRequestStatus" },
+    ourComments: { $ref: "#/definitions/SafeCountDto" },
+    own: { type: "boolean" },
+    personalApproval: { type: ["boolean", "null"] },
+  },
+};
+const schema96 = { enum: ["verified", "partial", "unknown"], type: "string" };
+const schema97 = { enum: ["open", "closed", "merged"], type: "string" };
+const schema98 = {
+  type: "object",
+  properties: {
+    projectId: { $ref: "#/definitions/MergeRequestIidDto" },
+    projectPath: { type: "string" },
+    queueState: { $ref: "#/definitions/QueueStatus" },
+    reasonKind: { type: ["string", "null"] },
+    registeredLeadCount: { $ref: "#/definitions/SafeCountDto" },
+    reviewId: { $ref: "#/definitions/ReviewIdDto" },
+    runIds: { items: { $ref: "#/definitions/CheckpointIdDto" }, type: "array" },
+    runStage: { anyOf: [{ $ref: "#/definitions/RunStage" }, { type: "null" }] },
+  },
+};
+const schema99 = {
+  enum: ["needs_review", "waiting_author", "followup", "reviewed", "archive"],
+  type: "string",
+};
+const schema100 = {
+  enum: ["needs_input", "working", "waiting", "archived"],
+  type: "string",
+};
+const schema104 = {
   properties: {
     episodeId: { $ref: "#/definitions/CheckpointIdDto" },
     failedTurnId: { $ref: "#/definitions/CheckpointIdDto" },
@@ -140,11 +182,11 @@ const schema88 = {
   title: "CancelRecoveryResponseEpisode",
   type: "object",
 };
-const schema89 = {
+const schema105 = {
   enum: ["usage_limit", "model_capacity", "access"],
   type: "string",
 };
-const schema90 = {
+const schema106 = {
   enum: [
     "disabled",
     "waiting",
@@ -157,7 +199,7 @@ const schema90 = {
   title: "CancelRecoveryResponseState",
   type: "string",
 };
-const schema93 = {
+const schema109 = {
   properties: {
     boardId: {
       anyOf: [{ $ref: "#/definitions/CheckpointIdDto" }, { type: "null" }],
@@ -187,52 +229,6 @@ const schema93 = {
   ],
   type: "object",
 };
-const schema97 = {
-  enum: ["not_requested", "unknown", "absent", "confirmed"],
-  type: "string",
-};
-const schema98 = {
-  enum: ["comments", "approval", "both", "cancel"],
-  type: "string",
-};
-const schema99 = {
-  type: "object",
-  properties: {
-    lastExecutedSubmissionId: {
-      anyOf: [{ $ref: "#/definitions/CheckpointIdDto" }, { type: "null" }],
-    },
-    lastExecutedTurnId: {
-      anyOf: [{ $ref: "#/definitions/CheckpointIdDto" }, { type: "null" }],
-    },
-    nextCheckAt: {
-      anyOf: [{ $ref: "#/definitions/UtcTimestampDto" }, { type: "null" }],
-    },
-    pendingSubmissionId: {
-      anyOf: [{ $ref: "#/definitions/CheckpointIdDto" }, { type: "null" }],
-    },
-    reason: { type: ["string", "null"] },
-    requestEntryId: {
-      anyOf: [{ $ref: "#/definitions/CheckpointIdDto" }, { type: "null" }],
-    },
-    reviewedSha: {
-      anyOf: [{ $ref: "#/definitions/GitShaDto" }, { type: "null" }],
-    },
-    revision: { $ref: "#/definitions/EventCursorDto" },
-  },
-};
-const schema101 = {
-  enum: [
-    "working",
-    "checking",
-    "completed",
-    "retry_wait",
-    "needs_input",
-    "cancelled",
-  ],
-  title: "CurrentActionResponseState",
-  type: "string",
-};
-const schema103 = { enum: ["unknown", "absent", "confirmed"], type: "string" };
 export {
   schema68,
   schema69,
@@ -243,13 +239,16 @@ export {
   schema82,
   schema83,
   schema86,
-  schema88,
-  schema89,
-  schema90,
   schema93,
+  schema94,
+  schema95,
+  schema96,
   schema97,
   schema98,
   schema99,
-  schema101,
-  schema103,
+  schema100,
+  schema104,
+  schema105,
+  schema106,
+  schema109,
 };

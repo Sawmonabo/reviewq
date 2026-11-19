@@ -77,6 +77,11 @@ pub struct TicketPage {
 }
 
 pub trait TicketSourceReader: Send + Sync {
+    fn archive_memberships(
+        &self,
+        board: BoardScope,
+        keys: Vec<TicketKey>,
+    ) -> AppFuture<'_, Vec<(TicketKey, crate::queue::ArchiveMembership)>>;
     fn issue_identity(&self, key: TicketKey) -> AppFuture<'_, Option<TicketIdentity>>;
     fn issue_detail(
         &self,

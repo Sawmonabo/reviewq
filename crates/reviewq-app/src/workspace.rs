@@ -36,7 +36,16 @@ pub struct WorkspaceContext {
 
 #[derive(Clone, Debug)]
 pub struct IssueGrant {
+    pub settings: Revision,
     pub project: ConfiguredProject,
+    pub checkout: AbsolutePath,
+    pub common_dir: AbsolutePath,
+    pub verifier: [u8; 32],
+}
+
+pub struct GrantAddress {
+    pub settings: Revision,
+    pub project: ProjectId,
     pub checkout: AbsolutePath,
     pub common_dir: AbsolutePath,
     pub verifier: [u8; 32],
@@ -45,6 +54,11 @@ pub struct IssueGrant {
 pub trait WorkspaceStore: Send + Sync {
     fn workspace_context(&self, actor: Actor) -> AppFuture<'_, Snapshot<WorkspaceContext>>;
     fn authenticate_grant(&self, verifier: [u8; 32]) -> AppFuture<'_, Actor>;
+    fn granted(
+        &self,
+        actor: Actor,
+        expected: GrantAddress,
+    ) -> AppFuture<'_, Snapshot<GrantBinding>>;
     fn issue_grant(&self, actor: Actor, input: IssueGrant)
     -> AppFuture<'_, Snapshot<GrantBinding>>;
     fn revoke_grant(&self, actor: Actor, common_dir: AbsolutePath)

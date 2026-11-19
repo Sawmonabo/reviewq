@@ -21,7 +21,9 @@ use reviewq_app::hosts::{
 };
 use reviewq_app::launch::{LaunchStore, NativeLaunchers, NativeModels};
 use reviewq_app::notifications::InboxStore;
-use reviewq_app::queue::{QueueStore, ReviewLookup, SprintStore, TrackingStore, WorkspaceQueue};
+use reviewq_app::queue::{
+    ArchiveStore, QueueStore, ReviewLookup, SprintStore, TrackingStore, WorkspaceQueue,
+};
 use reviewq_app::reports::{
     ReportCaptureStore, ReportFileSource, ReportMutationStore, ReportStore,
 };
@@ -68,6 +70,7 @@ use error::{ApiBytes, ApiError};
 pub trait Store:
     WorkspaceStore
     + QueueStore
+    + ArchiveStore
     + SprintStore
     + WorkspaceQueue
     + TrackingStore
@@ -96,6 +99,7 @@ pub trait Store:
 impl<
     S: WorkspaceStore
         + QueueStore
+        + ArchiveStore
         + SprintStore
         + WorkspaceQueue
         + TrackingStore
@@ -139,6 +143,7 @@ pub(super) struct Entry {
     launch_slots: Arc<Semaphore>,
     refresh_wakeup: Notify,
     sprint_load: tokio::sync::Mutex<()>,
+    archive_metadata: workspace::ArchiveCache,
     host: Option<Arc<dyn NativeHost>>,
     claude: Option<Arc<dyn ClaudeCompanion>>,
     file_history: Arc<dyn NativeHistoryReader>,
@@ -170,6 +175,7 @@ struct Status<'a> {
     #[serde(flatten)]
     identity: &'a ServiceIdentity,
     ready: bool,
+    settings_revision: reviewq_protocol::RevisionDto,
     configured_projects: usize,
     total_mrs: u64,
     sync: QueueSync,
@@ -217,6 +223,7 @@ pub fn router(
         launch_slots: Arc::new(Semaphore::new(if runtime.launches_allowed { 4 } else { 0 })),
         refresh_wakeup: Notify::new(),
         sprint_load: tokio::sync::Mutex::new(()),
+        archive_metadata: workspace::ArchiveCache::default(),
         host,
         claude: runtime.claude,
         file_history,
@@ -269,6 +276,7 @@ pub fn router(
         )
         .route("/runs/{run_id}", get(pages::run))
         .route("/runs", get(workspace::runs))
+        .route("/archive", get(workspace::archive))
         .route("/runs/catalog", post(launch::catalog))
         .route("/runs/prepare", post(launch::prepare))
         .route(
@@ -399,6 +407,8 @@ async fn status(
             native: endpoint.native().to_string(),
             identity: endpoint.identity(),
             ready: true,
+            settings_revision: reviewq_protocol::RevisionDto::new(queue.value.settings.get())
+                .ok_or(AppError::Internal)?,
             configured_projects: queue.value.projects,
             total_mrs: queue.value.total_mrs,
             sync: pages::queue_sync(&active, queue.value.sync),

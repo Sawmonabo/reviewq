@@ -29,6 +29,7 @@ use crate::workspace::{
 };
 use crate::{SqliteStore, StoreError};
 
+mod archive;
 mod cached;
 mod filters;
 mod lookup;

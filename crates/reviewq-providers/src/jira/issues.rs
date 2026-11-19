@@ -27,6 +27,13 @@ struct Issue {
 }
 
 impl TicketSourceReader for Jira {
+    fn archive_memberships(
+        &self,
+        board: BoardScope,
+        keys: Vec<TicketKey>,
+    ) -> AppFuture<'_, Vec<(TicketKey, reviewq_app::queue::ArchiveMembership)>> {
+        Box::pin(self.archive_board(board, keys))
+    }
     fn issue_identity(&self, key: TicketKey) -> AppFuture<'_, Option<TicketIdentity>> {
         Box::pin(async move {
             match self.ticket_identity(key).await {
@@ -267,7 +274,7 @@ fn join_ids(ids: &[u64]) -> Result<String, AppError> {
     Ok(ids.iter().map(u64::to_string).collect::<Vec<_>>().join(","))
 }
 
-fn validate_token(token: &str) -> Result<(), AppError> {
+pub(super) fn validate_token(token: &str) -> Result<(), AppError> {
     if token.is_empty() || token.len() > 4096 || token.chars().any(char::is_control) {
         return Err(AppError::Unavailable);
     }

@@ -494,9 +494,11 @@ fn stage(
     {
         tx.emit(&[ResourceKey::Followup(Some(call.lead.review_id().clone()))])?;
     }
+    crate::workspace::advance_queue(&tx.sql)?;
     tx.emit(&[
         ResourceKey::Report(Some(run.clone())),
         ResourceKey::Run(Some(run.clone())),
+        ResourceKey::Queue,
     ])?;
     tx.report_changed = true;
     snapshot(

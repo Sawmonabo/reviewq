@@ -2,20 +2,27 @@
 
 import type {
   CheckpointIdDto,
+  CompactTicket,
   Coverage,
   Disposition,
   ErrorDto,
   EventCursorDto,
   GitShaDto,
   HostProviderDto,
+  MergeRequestIidDto,
+  MergeRequestStatus,
+  NamedUpstreamId,
   PageCursorDto,
   ProjectIdDto,
+  QueueStatus,
   ResourceIdDto,
   ReviewIdDto,
   RevisionDto,
   RunIdDto,
+  RunStage,
   SafeCountDto,
   SessionKeyDto,
+  SprintPair,
   TicketKeyDto,
   UpstreamIdDto,
   UtcTimestampDto,
@@ -30,15 +37,6 @@ export type QueueRow =
       kind: "unmatched_ticket";
       [k: string]: unknown;
     });
-
-export type MergeRequestIidDto = string;
-
-export type MergeRequestStatus = "open" | "closed" | "merged";
-
-export type QueueStatus =
-  "needs_review" | "waiting_author" | "followup" | "reviewed" | "archive";
-
-export type RunStage = "needs_input" | "working" | "waiting" | "archived";
 
 export type QueueSyncMode = "setup" | "connected" | "disconnected";
 
@@ -65,11 +63,6 @@ export interface LoadSprintsRequest {
    * @maxItems 32
    */
   pairs: [SprintPair, ...SprintPair[]];
-}
-
-export interface SprintPair {
-  boardId: UpstreamIdDto;
-  sprintId: UpstreamIdDto;
 }
 
 export interface TrackReviewRequest {
@@ -119,12 +112,6 @@ export interface QueueFacets {
   [k: string]: unknown;
 }
 
-export interface NamedUpstreamId {
-  id: UpstreamIdDto;
-  label: string;
-  [k: string]: unknown;
-}
-
 export interface SprintFacet {
   boardId: UpstreamIdDto;
   id: UpstreamIdDto;
@@ -158,12 +145,6 @@ export interface MergeRequestRow {
   title: string;
   unreadReplies: SafeCountDto;
   updatedAt: UtcTimestampDto;
-  [k: string]: unknown;
-}
-
-export interface CompactTicket {
-  key: TicketKeyDto;
-  title: string;
   [k: string]: unknown;
 }
 

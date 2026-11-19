@@ -147,24 +147,30 @@ impl Edit {
     }
 
     fn apply(&self) -> Result<(), Failure> {
-        same(
+        write(
             &self.path,
+            &self.after,
+            self.mode,
             self.before.as_ref().map(|item| item.bytes.as_slice()),
-        )?;
-        write(&self.path, &self.after, self.mode)
+        )
     }
 
     fn rollback(&self) -> Result<(), Failure> {
         same(&self.path, Some(&self.after))?;
         match &self.before {
-            Some(before) => write(&self.path, &before.bytes, before.mode),
+            Some(before) => write(&self.path, &before.bytes, before.mode, Some(&self.after)),
             None => fs::remove_file(&self.path).map_err(Into::into),
         }
     }
 }
 
 impl Changes {
-    pub(super) fn new(edits: Vec<Edit>) -> Self {
+    pub(super) fn new(mut edits: Vec<Edit>) -> Self {
+        edits.retain(|edit| {
+            edit.before.as_ref().is_none_or(|before| {
+                (before.mode, before.bytes.as_slice()) != (edit.mode, edit.after.as_slice())
+            })
+        });
         Self {
             edits,
             committed: 0,
@@ -203,7 +209,7 @@ fn same(path: &Path, expected: Option<&[u8]>) -> Result<(), Failure> {
     Ok(())
 }
 
-fn write(path: &Path, bytes: &[u8], mode: u32) -> Result<(), Failure> {
+fn write(path: &Path, bytes: &[u8], mode: u32, expected: Option<&[u8]>) -> Result<(), Failure> {
     let directory = path
         .parent()
         .ok_or("Missing checkout destination directory.")?;
@@ -214,6 +220,7 @@ fn write(path: &Path, bytes: &[u8], mode: u32) -> Result<(), Failure> {
         .set_permissions(fs::Permissions::from_mode(mode))?;
     staged.write_all(bytes)?;
     staged.as_file().sync_all()?;
+    same(path, expected)?;
     staged
         .persist(path)
         .map_err(|_| "Could not replace checkout configuration.")?;
