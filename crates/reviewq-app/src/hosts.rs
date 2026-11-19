@@ -100,6 +100,10 @@ pub trait NativeHost: QuestionsPort + Send + Sync {
         Box::pin(async { Err(AppError::Unavailable) })
     }
 
+    fn observe_interrupt(&self, _target: LeadTarget, _turn: NativeTurnId) -> AppFuture<'_, bool> {
+        Box::pin(async { Ok(false) })
+    }
+
     fn interrupt_managed(
         &self,
         _target: LeadTarget,
@@ -467,6 +471,8 @@ pub enum DeliveryWork {
 pub enum DeliveryObservation {
     /// The host proved no native input occurred and the same delivery can retry.
     NotSubmitted,
+    /// New capacity evidence was acquired before a recovery was sent.
+    RecoveryAllowanceChanged(ReportHash),
     /// The input is observable, but starting an independent turn is unproved.
     UncertainInput {
         delivery_id: DeliveryId,

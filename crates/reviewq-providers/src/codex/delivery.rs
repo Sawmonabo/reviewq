@@ -96,6 +96,16 @@ impl Codex {
                     .await
                 {
                     Ok((fresh, ready)) if &fresh == recovery => ready,
+                    Ok((fresh, ready))
+                        if guard.workflow().is_some_and(|guard| guard.ready == ready) =>
+                    {
+                        let mut previous = recovery.clone();
+                        previous.capacity = fresh.capacity.clone();
+                        if previous == fresh {
+                            return DeliveryObservation::RecoveryAllowanceChanged(fresh.capacity);
+                        }
+                        return DeliveryObservation::Rejected;
+                    }
                     Err(AppError::Conflict | AppError::StaleRevision) => {
                         return DeliveryObservation::Rejected;
                     }

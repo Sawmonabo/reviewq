@@ -128,6 +128,19 @@ impl Codex {
         ))
     }
 
+    pub(super) async fn observe_exact_interrupt(
+        &self,
+        lead: LeadTarget,
+        id: NativeTurnId,
+    ) -> Result<bool, AppError> {
+        let thread = self.verified_thread(&lead).await?;
+        let page = self.turns(&thread.id, None, false, 8, false).await?;
+        Ok(page
+            .data
+            .iter()
+            .any(|turn| turn.id == id.as_str() && turn.status == "interrupted"))
+    }
+
     pub(super) async fn stop_exact_turn(
         &self,
         lead: LeadTarget,

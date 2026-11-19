@@ -20,6 +20,7 @@ pub struct Preferences {
     pub revision: Revision,
     pub automatic: bool,
 }
+#[derive(Clone)]
 pub struct Episode {
     pub id: String,
     pub revision: Revision,
@@ -28,6 +29,7 @@ pub struct Episode {
     pub state: RecoveryState,
     pub reason: Option<String>,
 }
+#[derive(Clone)]
 pub struct Candidate {
     pub episode: Episode,
     pub lead: LeadTarget,
@@ -133,14 +135,26 @@ pub async fn run_due_recoveries(
             }
             Ok(live) => match native.prepare_recovery(&candidate).await {
                 Ok((authorization, ready)) => {
-                    store
+                    let reserved = store
                         .reserve_recovery(PreparedRecovery {
-                            candidate,
+                            candidate: candidate.clone(),
                             authorization,
                             ready,
                             reviewer: live.authenticated_actor,
                         })
-                        .await
+                        .await;
+                    match reserved {
+                        Err(AppError::StaleRevision | AppError::Conflict | AppError::Busy) => {
+                            store
+                                .defer_recovery(
+                                    candidate,
+                                    "recovery_waiting_for_local_eligibility",
+                                    false,
+                                )
+                                .await
+                        }
+                        result => result,
+                    }
                 }
                 Err(AppError::StaleRevision | AppError::Conflict) => {
                     store

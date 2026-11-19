@@ -66,6 +66,12 @@ pub(super) fn bound(db: &Connection, call: &NativeCall) -> Result<Option<String>
            AND b.authority_verified=1 AND b.native_turn_id=m.native_turn_id AND m.state='started'
            AND (
                b.native_turn_id=?4 AND b.continuation_turn_id IS NULL OR
+               b.continuation_turn_id=?4 AND b.native_turn_id=?5 AND EXISTS(
+                 SELECT 1 FROM recovery_episodes e JOIN messages resumed ON resumed.message_id=e.delivery_id
+                 WHERE e.run_id=b.run_id AND e.lead_session_key=b.lead_session_key
+                   AND e.root_turn_id=?5 AND e.resumed_turn_id=?4 AND e.state='started'
+                   AND resumed.state='started' AND resumed.native_turn_id=?4
+               ) OR
                b.native_turn_id=?5 AND EXISTS(
                    SELECT 1 FROM followup_monitors active WHERE active.review_id=b.review_id
                      AND active.run_id=b.run_id AND active.generation=b.generation

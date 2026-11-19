@@ -17,7 +17,7 @@ use crate::workspace::{advance_queue, settings_revision};
 use crate::{SqliteStore, StoreError};
 
 mod dispatch;
-pub(crate) use dispatch::{advance, current, read_authorization, requirements};
+pub(crate) use dispatch::{advance, current, read_authorization, refresh_allowance, requirements};
 
 impl RecoveryStore for SqliteStore {
     fn recovery_preferences(&self, actor: Actor) -> AppFuture<'_, Snapshot<Preferences>> {
@@ -145,7 +145,7 @@ impl RecoveryStore for SqliteStore {
                     "SELECT state FROM managed_interrupts WHERE run_id=?1 AND lead_session_key=?2 AND native_turn_id=?3",
                     params![run.as_str(),session.as_str(),turn.as_str()],|row|row.get(0),
                 )?;
-                cancel(db,&lead,"recovery_cancelled_by_interrupt")?;
+                cancel_interrupted(db,&lead,&turn)?;
                 if acquired {emit(tx,&lead)?;}
                 Ok(InterruptClaim {target:lead,turn,state:parse(&state)?,acquired,cursor:crate::connection::read_head(&tx.sql)?})
             }).await.map_err(StoreError::app)
@@ -159,12 +159,12 @@ impl RecoveryStore for SqliteStore {
     ) -> AppFuture<'_, Snapshot<InterruptState>> {
         Box::pin(async move {
             self.write(move |tx| {
-                if !claim.acquired || state == InterruptState::Reserved {
+                if state==InterruptState::Reserved || !claim.acquired && state!=InterruptState::Interrupted {
                     return Err(AppError::Conflict.into());
                 }
                 let changed = tx.sql.execute(
                     "UPDATE managed_interrupts SET state=?4,updated_at_ms=?5 WHERE run_id=?1
-                     AND lead_session_key=?2 AND native_turn_id=?3 AND state='reserved'",
+                     AND lead_session_key=?2 AND native_turn_id=?3 AND state IN ('reserved','uncertain')",
                     params![
                         claim.target.run_id().as_str(),
                         claim.target.session_key().as_str(),
@@ -173,10 +173,15 @@ impl RecoveryStore for SqliteStore {
                         now_ms()?
                     ],
                 )?;
-                if changed != 1 {
-                    return Err(AppError::Conflict.into());
+                if changed!=1 {
+                    let current:String=tx.sql.query_row(
+                        "SELECT state FROM managed_interrupts WHERE run_id=?1 AND lead_session_key=?2 AND native_turn_id=?3",
+                        params![claim.target.run_id().as_str(),claim.target.session_key().as_str(),claim.turn.as_str()],|row|row.get(0),
+                    )?;
+                    if current!=state.to_string() {return Err(AppError::Conflict.into());}
+                } else {
+                    emit(tx,&claim.target)?;
                 }
-                emit(tx, &claim.target)?;
                 snapshot(&tx.sql, state)
             })
             .await
@@ -299,6 +304,13 @@ pub(crate) fn observe_failure(
     if !active {
         return Ok(());
     }
+    let stopped:bool=db.query_row(
+        "SELECT EXISTS(SELECT 1 FROM recovery_episodes e LEFT JOIN outbox o ON o.delivery_id=e.delivery_id
+           WHERE e.run_id=?1 AND e.lead_session_key=?2 AND e.state='cancelled'
+             AND e.reason IN ('recovery_cancelled_by_operator','recovery_cancelled_by_interrupt','recovery_superseded_by_user_message')
+             AND (e.resumed_turn_id=?3 OR o.uncertain_turn_id=?3))",
+         params![lead.run_id().as_str(),lead.session_key().as_str(),failure.turn.as_str()],|row|row.get(0),
+    )?;
     db.execute(
         "UPDATE recovery_episodes SET state=CASE WHEN resumed_turn_id=?3 THEN 'complete' ELSE 'cancelled' END,
             reason=CASE WHEN resumed_turn_id=?3 THEN 'recovery_resumed_turn_failed' ELSE 'recovery_native_turn_changed' END,
@@ -328,9 +340,9 @@ pub(crate) fn observe_failure(
          revision,head_sha,settings_revision,attempted_count,observed_at_ms,due_at_ms,reason,account_hash,model_provider)
          VALUES(?1,?2,?3,?4,?5,?6,?7,1,?8,?9,?10,?11,?12,?13,?14,?15)",
         params![Uuid::new_v4().to_string(),lead.review_id().as_str(),lead.run_id().as_str(),lead.session_key().as_str(),
-            failure.turn.as_str(),failure.kind.to_string(),if automatic {"waiting"} else {"disabled"},
-            head,settings_revision(db)?.as_sqlite_integer(),attempts,observed,automatic.then_some(observed.saturating_add(wait)),
-            if automatic {None} else {Some("recovery_disabled")},failure.account.as_ref().map(|hash|hash.as_str()),failure.model_provider],
+            failure.turn.as_str(),failure.kind.to_string(),if stopped {"cancelled"} else if automatic {"waiting"} else {"disabled"},
+            head,settings_revision(db)?.as_sqlite_integer(),attempts,observed,(automatic && !stopped).then_some(observed.saturating_add(wait)),
+            if stopped {Some("prior_recovery_cancelled")} else if automatic {None} else {Some("recovery_disabled")},failure.account.as_ref().map(|hash|hash.as_str()),failure.model_provider],
     )?;
     emit(tx, &lead)?;
     Ok(())
@@ -353,10 +365,24 @@ pub(crate) fn complete_turn(
     Ok(())
 }
 
+fn cancel_interrupted(
+    db: &Connection,
+    lead: &LeadTarget,
+    turn: &NativeTurnId,
+) -> Result<(), StoreError> {
+    db.execute(
+        "UPDATE recovery_episodes SET state='cancelled',reason='recovery_cancelled_by_interrupt',due_at_ms=NULL,revision=revision+1
+         WHERE run_id=?1 AND lead_session_key=?2 AND (failed_turn_id=?3 OR resumed_turn_id=?3)
+           AND state IN ('waiting','disabled','queued','started')",
+        params![lead.run_id().as_str(),lead.session_key().as_str(),turn.as_str()],
+    )?;
+    Ok(())
+}
+
 pub(crate) fn cancel(db: &Connection, lead: &LeadTarget, reason: &str) -> Result<(), StoreError> {
     db.execute(
         "UPDATE recovery_episodes SET state='cancelled',reason=?3,due_at_ms=NULL,revision=revision+1
-         WHERE run_id=?1 AND lead_session_key=?2 AND state IN ('waiting','disabled','queued')",
+         WHERE run_id=?1 AND lead_session_key=?2 AND state IN ('waiting','disabled','queued','started','uncertain')",
         params![lead.run_id().as_str(),lead.session_key().as_str(),reason],
     )?;
     Ok(())
