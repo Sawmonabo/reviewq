@@ -65,7 +65,7 @@ export async function registerWorkflowTools($) {
 export async function stageReport($, invoke, state, event) {
   const context = { turnId: state.activeTurn, callId: event.tool_use_id, handoff: event.handoff };
   let result = await invoke($, "report", state.id, context);
-  if (result.error) result = await invoke($, "report-status", state.id, context);
+  if (result.error && !result.correctionRequested) result = await invoke($, "report-status", state.id, context);
   return stringifyResult(result);
 }
 

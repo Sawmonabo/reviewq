@@ -8,11 +8,11 @@ use reviewq_app::access::AppError;
 use reviewq_app::reports::{
     self as app, Declaration, ReportReference, RevisionEvidence, Source, Verdict,
 };
-use reviewq_app::workflow::WorkflowTool;
-use reviewq_domain::identity::ReportHash;
+use reviewq_app::workflow::{NativeCall, WorkflowTool};
+use reviewq_domain::identity::{NativeTurnId, ReportHash};
 use reviewq_domain::session::{AbsolutePath, HostProvider};
-use reviewq_protocol::Success;
 use reviewq_protocol::reports as dto;
+use reviewq_protocol::{ResourceIdDto, SessionKeyDto, Success};
 use sha2::{Digest, Sha256};
 
 use super::{hash, resource};
@@ -89,8 +89,11 @@ async fn receive(
     authenticate(entry, headers)?;
     let workflow = &entry.workflow;
     let proof = workflow.proof.as_ref();
-    let command: dto::HandoffCommand =
-        serde_json::from_slice(bytes).map_err(|_| AppError::InvalidRequest)?;
+    let command = match serde_json::from_slice::<dto::HandoffCommand>(bytes) {
+        Ok(command) => command,
+        Err(_) if !lookup => return Err(malformed_handoff(entry, bytes).await.into()),
+        Err(_) => return Err(AppError::InvalidRequest.into()),
+    };
     let (session, turn, call_id, expected, mut handoff) = match command {
         dto::HandoffCommand::Codex(value) => (
             value.session_key,
@@ -112,25 +115,8 @@ async fn receive(
         return Err(AppError::PayloadTooLarge.into());
     }
     let request_sha256 = ReportHash::from_sha256(Sha256::digest(canonical).into());
-    let lead = entry.store.report_lead(parse(session.as_str())?).await?;
-    if lead.binding().identity().provider() != expected {
-        return Err(AppError::NotFound.into());
-    }
-    let verified = proof
-        .verify_active_call(
-            lead.clone(),
-            turn.clone(),
-            call_id.as_str().to_owned(),
-            WorkflowTool::Report,
-        )
-        .await?;
-    if verified.lead != lead
-        || verified.call_id != call_id.as_str()
-        || turn.as_ref().is_some_and(|turn| &verified.turn_id != turn)
-        || verified.tool != WorkflowTool::Report
-    {
-        return Err(AppError::NotFound.into());
-    }
+    let verified = verify_call(entry, &session, turn.clone(), &call_id, expected).await?;
+    let lead = verified.lead.clone();
     let existing = entry
         .store
         .report_handoff_status(verified.clone(), request_sha256.clone())
@@ -142,9 +128,15 @@ async fn receive(
                 && sha256.is_none()
             {
                 if expected != HostProvider::Claude {
-                    return Err(AppError::InvalidRequest.into());
+                    return Err(request_correction(entry, &verified).await.into());
                 }
-                let path = absolute_path(path)?;
+                let path = match absolute_path(path) {
+                    Ok(path) => path,
+                    Err(AppError::InvalidRequest) => {
+                        return Err(request_correction(entry, &verified).await.into());
+                    }
+                    Err(error) => return Err(error.into()),
+                };
                 let hash_value =
                     app::hash_report_file(workflow.report_files.as_ref(), verified.clone(), path)
                         .await?;
@@ -152,8 +144,16 @@ async fn receive(
             }
             let bound = serde_json::to_vec(&handoff).map_err(|_| AppError::Internal)?;
             let declaration_sha256 = ReportHash::from_sha256(Sha256::digest(bound).into());
-            let declaration = declaration(handoff, expected)?;
-            declaration.validate()?;
+            let declaration = match declaration(handoff, expected).and_then(|declaration| {
+                declaration.validate()?;
+                Ok(declaration)
+            }) {
+                Ok(declaration) => declaration,
+                Err(AppError::InvalidRequest) => {
+                    return Err(request_correction(entry, &verified).await.into());
+                }
+                Err(error) => return Err(error.into()),
+            };
             let settings = if declaration.requires_review_refresh() {
                 let source = entry.source_reader().await?;
                 let (identity, settings) = entry.store.report_source(lead.clone()).await?;
@@ -201,6 +201,117 @@ async fn receive(
         },
         stored.cursor,
     )?))
+}
+
+async fn verify_call(
+    entry: &Entry,
+    session: &SessionKeyDto,
+    turn: Option<NativeTurnId>,
+    call_id: &ResourceIdDto,
+    expected: HostProvider,
+) -> Result<NativeCall, AppError> {
+    let lead = entry.store.report_lead(parse(session.as_str())?).await?;
+    if lead.binding().identity().provider() != expected {
+        return Err(AppError::NotFound);
+    }
+    let call = entry
+        .workflow
+        .proof
+        .verify_active_call(
+            lead.clone(),
+            turn.clone(),
+            call_id.as_str().to_owned(),
+            WorkflowTool::Report,
+        )
+        .await?;
+    if call.lead != lead
+        || call.call_id != call_id.as_str()
+        || call.tool != WorkflowTool::Report
+        || turn.as_ref().is_some_and(|turn| &call.turn_id != turn)
+    {
+        return Err(AppError::NotFound);
+    }
+    Ok(call)
+}
+
+#[derive(serde::Deserialize)]
+#[serde(untagged)]
+enum CorrectionAddress {
+    Codex(CodexAddress),
+    Claude(ClaudeAddress),
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct CodexAddress {
+    session_key: SessionKeyDto,
+    call_id: ResourceIdDto,
+    #[serde(default, rename = "handoff")]
+    _handoff: Option<serde::de::IgnoredAny>,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ClaudeAddress {
+    context: dto::NativeContext,
+    #[serde(default, rename = "handoff")]
+    _handoff: Option<serde::de::IgnoredAny>,
+}
+
+async fn malformed_handoff(entry: &Entry, bytes: &[u8]) -> AppError {
+    let verified = match serde_json::from_slice::<CorrectionAddress>(bytes) {
+        Ok(CorrectionAddress::Codex(address)) => {
+            verify_call(
+                entry,
+                &address.session_key,
+                None,
+                &address.call_id,
+                HostProvider::Codex,
+            )
+            .await
+        }
+        Ok(CorrectionAddress::Claude(address)) => {
+            let Ok(turn) = parse(address.context.turn_id.as_str()) else {
+                return AppError::InvalidRequest;
+            };
+            verify_call(
+                entry,
+                &address.context.session_key,
+                Some(turn),
+                &address.context.call_id,
+                HostProvider::Claude,
+            )
+            .await
+        }
+        Err(_) => return AppError::InvalidRequest,
+    };
+    match verified {
+        Ok(call) => request_correction(entry, &call).await,
+        Err(error) => error,
+    }
+}
+
+async fn request_correction(entry: &Entry, call: &NativeCall) -> AppError {
+    let current = entry
+        .workflow
+        .proof
+        .verify_active_call(
+            call.lead.clone(),
+            Some(call.turn_id.clone()),
+            call.call_id.clone(),
+            WorkflowTool::Report,
+        )
+        .await;
+    match current {
+        Ok(current) if &current == call => {}
+        Ok(_) => return AppError::Conflict,
+        Err(error) => return error,
+    }
+    match entry.store.reserve_report_correction(call.clone()).await {
+        Ok(true) => AppError::ReportCorrectionRequired,
+        Ok(false) => AppError::InvalidRequest,
+        Err(error) => error,
+    }
 }
 
 fn authenticate(entry: &Entry, headers: &HeaderMap) -> Result<(), AppError> {

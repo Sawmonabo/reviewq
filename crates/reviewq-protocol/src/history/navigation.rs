@@ -32,6 +32,9 @@ pub enum NavigationPage {
     Overview {
         total: SafeCountDto,
         groups: Vec<PromptGroup>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        #[cfg_attr(feature = "schema", schemars(with = "HistoryCursorDto"))]
+        next_window_cursor: Option<HistoryCursorDto>,
     },
     Previews {
         items: Vec<PromptPreview>,

@@ -23,6 +23,7 @@ mod reader;
 mod records;
 pub(crate) mod tools;
 mod turn_metadata;
+mod watch;
 
 pub(crate) use claude::{claude_anchor, claude_confirm_prompt};
 pub(crate) use claude_workflow::{claude_workflow_opening, claude_workflow_result};
@@ -103,6 +104,13 @@ impl NativeHistoryReader for FileHistory {
         self.inspect(session, move |source, cancel| {
             navigation::plan(&source, cancel)
         })
+    }
+
+    fn watch(
+        &self,
+        session: HistorySession,
+    ) -> AppFuture<'_, Option<Box<dyn reviewq_app::history::NativeHistoryWatch>>> {
+        self.inspect(session, move |source, _| watch::watch(source))
     }
 
     fn head(

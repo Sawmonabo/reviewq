@@ -22,7 +22,7 @@ pub(super) struct Source {
     pub native_id: NativeSessionId,
     pub fingerprint: [u8; 32],
     pub root_session: Option<NativeSessionId>,
-    path: PathBuf,
+    pub(super) path: PathBuf,
 }
 
 pub(crate) async fn verified_codex_source(

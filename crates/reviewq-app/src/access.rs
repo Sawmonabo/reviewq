@@ -63,6 +63,7 @@ impl Actor {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum AppError {
     InvalidRequest,
+    ReportCorrectionRequired,
     Unauthorized,
     Forbidden,
     NotFound,
@@ -78,10 +79,14 @@ pub enum AppError {
     Internal,
 }
 
+pub const REPORT_CORRECTION_MESSAGE: &str =
+    "Correct the report handoff metadata in this active turn, then submit it again.";
+
 impl Display for AppError {
     fn fmt(&self, output: &mut Formatter<'_>) -> fmt::Result {
         let message = match self {
             Self::InvalidRequest => "invalid request",
+            Self::ReportCorrectionRequired => REPORT_CORRECTION_MESSAGE,
             Self::Unauthorized => "authentication required",
             Self::Forbidden => "forbidden",
             Self::NotFound => "resource not found",

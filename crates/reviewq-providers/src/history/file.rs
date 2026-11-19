@@ -16,6 +16,9 @@ use sha2::{Digest, Sha256};
 use super::locator::Source;
 use super::records;
 
+mod lines;
+pub(super) use lines::Lines;
+
 const BLOCK: usize = 32 * 1024;
 pub(super) const MAX_RECORDS: usize = 100_000;
 pub(super) const READ_BUDGET: u64 = 512 * 1024 * 1024;
@@ -46,6 +49,7 @@ pub(super) fn page(
     let mut offset = initial;
     let mut entries = Vec::with_capacity(usize::from(limit));
     let mut tool_proof = ToolProof::new();
+    let mut lines = Lines::new(file, cancelled);
     for _ in 0..MAX_RECORDS {
         if cancelled.load(Ordering::Relaxed) {
             return Err(AppError::Unavailable);
@@ -54,22 +58,16 @@ pub(super) fn page(
             break;
         }
         let (start, end) = if position.ascending {
-            (
-                offset,
-                next_line(file, offset, complete, &mut budget, cancelled)?,
-            )
+            (offset, lines.next(offset, complete, &mut budget)?)
         } else {
-            (
-                end_of_line(file, offset - 1, &mut budget, cancelled)?,
-                offset,
-            )
+            (lines.previous(offset - 1, &mut budget)?, offset)
         };
         if end == start {
             break;
         }
         if let Some(mut record) = records::project(
             source.provider,
-            input(file, start, end, cancelled),
+            lines.input(start, end),
             &source.native_id,
             source.root_session.as_ref(),
             0,

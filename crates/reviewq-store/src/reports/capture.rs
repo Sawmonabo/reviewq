@@ -114,6 +114,28 @@ impl ReportCaptureStore for SqliteStore {
         })
     }
 
+    fn reserve_report_correction(&self, call: NativeCall) -> AppFuture<'_, bool> {
+        Box::pin(async move {
+            self.write(move |tx| {
+                let db=&tx.sql;
+                check_call(db,&call)?;
+                if !configured(db,&crate::queue::identity_for_review(db,call.lead.review_id())?)? {
+                    return Err(AppError::Unavailable.into());
+                }
+                let inserted=db.execute(
+                    "INSERT INTO report_correction_requests(run_id,lead_session_key,turn_id,call_id,source_generation,source_position,requested_at_ms)
+                     VALUES(?1,?2,?3,?4,?5,?6,?7) ON CONFLICT DO NOTHING",
+                    params![call.lead.run_id().as_str(),call.lead.session_key().as_str(),call.turn_id.as_str(),
+                        call.call_id,call.source_generation,db_int(call.source_position)?,now_ms()?],
+                )?;
+                if inserted == 1 {
+                    tx.emit(&[ResourceKey::Report(Some(call.lead.run_id().clone()))])?;
+                }
+                Ok(inserted==1)
+            }).await.map_err(StoreError::app)
+        })
+    }
+
     fn report_handoff_status(
         &self,
         call: NativeCall,

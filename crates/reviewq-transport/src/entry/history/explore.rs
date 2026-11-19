@@ -21,6 +21,7 @@ use super::{Entry, Point, ServiceEndpoint, visible_part};
 use crate::entry::error::{ApiError, ApiPath as Path, ApiQuery as Query};
 use crate::entry::pages::{parse, success};
 
+const OVERVIEW: &[u8] = b"reviewq-native-prompt-window-v1";
 const PREVIEWS: &[u8] = b"reviewq-native-prompt-page-v1";
 const AROUND: &[u8] = b"reviewq-native-prompt-anchor-v1";
 const MAX_ENVELOPE: usize = 64 * 1024;
@@ -29,8 +30,19 @@ const MAX_ENVELOPE: usize = 64 * 1024;
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(in crate::entry) struct NavRequest {
     cursor: Option<String>,
+    overview_cursor: Option<String>,
     max_groups: Option<u16>,
     limit: Option<u16>,
+}
+
+#[derive(Serialize, Deserialize)]
+struct OverviewCursor {
+    run: String,
+    session: String,
+    generation: String,
+    groups: u16,
+    next_ordinal: u64,
+    point: Point,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -86,8 +98,30 @@ pub(in crate::entry) async fn navigation(
         .history_session(actor.clone(), run.clone(), session.clone())
         .await?;
     let endpoint = &entry.auth.endpoint;
-    let groups = query.max_groups.unwrap_or(32);
-    let nav = if let Some(token) = query.cursor {
+    let mut groups = query.max_groups.unwrap_or(32);
+    let nav = if let Some(token) = query.overview_cursor {
+        if query.cursor.is_some() || query.max_groups.is_some() || query.limit.is_some() {
+            return Err(AppError::InvalidRequest.into());
+        }
+        let cursor: OverviewCursor = endpoint.decode_cursor(OVERVIEW, &token)?;
+        if cursor.run != run.as_str()
+            || cursor.session != session.as_str()
+            || !(1..=64).contains(&cursor.groups)
+        {
+            return Err(AppError::CursorExpired.into());
+        }
+        groups = cursor.groups;
+        NavigationQuery::Overview {
+            groups,
+            start: Some((
+                PromptPosition {
+                    next_ordinal: cursor.next_ordinal,
+                    file: cursor.point.into(),
+                },
+                cursor.generation,
+            )),
+        }
+    } else if let Some(token) = query.cursor {
         if query.max_groups.is_some() || !(1..=50).contains(&query.limit.unwrap_or(30)) {
             return Err(AppError::InvalidRequest.into());
         }
@@ -108,7 +142,10 @@ pub(in crate::entry) async fn navigation(
         if query.limit.is_some() || !(1..=64).contains(&groups) {
             return Err(AppError::InvalidRequest.into());
         }
-        NavigationQuery::Overview { groups }
+        NavigationQuery::Overview {
+            groups,
+            start: None,
+        }
     };
     let (result, reset) = match entry
         .file_history
@@ -119,17 +156,28 @@ pub(in crate::entry) async fn navigation(
         Err(AppError::CursorExpired) => (
             entry
                 .file_history
-                .navigation(source.value, NavigationQuery::Overview { groups })
+                .navigation(
+                    source.value.clone(),
+                    NavigationQuery::Overview {
+                        groups,
+                        start: None,
+                    },
+                )
                 .await?,
             true,
         ),
         Err(error) => return Err(error.into()),
     };
     let result = result.ok_or(AppError::Unavailable)?;
-    entry
+    if entry
         .store
         .history_session(actor, run.clone(), session.clone())
-        .await?;
+        .await?
+        .value
+        != source.value
+    {
+        return Err(AppError::CursorExpired.into());
+    }
     let make_cursor = |generation: &str, wanted, position: &PromptPosition| {
         let value = PromptCursor {
             run: run.to_string(),
@@ -162,9 +210,24 @@ pub(in crate::entry) async fn navigation(
             generation,
             total,
             complete,
-            groups,
+            groups: windows,
+            next,
         } => {
-            let groups = groups
+            let next_window_cursor = next
+                .map(|position| {
+                    let cursor = OverviewCursor {
+                        run: run.to_string(),
+                        session: session.to_string(),
+                        generation: generation.clone(),
+                        groups,
+                        next_ordinal: position.next_ordinal,
+                        point: position.file.into(),
+                    };
+                    HistoryCursorDto::new(endpoint.encode_cursor(OVERVIEW, &cursor)?)
+                        .ok_or(AppError::Internal)
+                })
+                .transpose()?;
+            let groups = windows
                 .into_iter()
                 .map(|group| {
                     Ok(PromptGroup {
@@ -180,6 +243,7 @@ pub(in crate::entry) async fn navigation(
                 NavigationPage::Overview {
                     total: valid_count(total)?,
                     groups,
+                    next_window_cursor,
                 },
             )?
         }
