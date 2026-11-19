@@ -2,9 +2,9 @@ use std::sync::atomic::AtomicBool;
 
 use reviewq_app::access::AppError;
 use reviewq_app::history::{
-    FileContentRef, NativeHead, NativeHistoryPage, NativeNavigation, NativePlan, NativePosition,
-    NavigationQuery, PromptGroup, PromptPosition, PromptPreview, SourceAnchor, VisibleKind,
-    VisiblePart, VisiblePartKind,
+    ContentReference, FileContentRef, NativeHead, NativeHistoryPage, NativeNavigation, NativePlan,
+    NativePosition, NavigationQuery, PromptGroup, PromptPosition, PromptPreview, SourceAnchor,
+    VisibleKind, VisiblePart, VisiblePartKind,
 };
 use reviewq_domain::identity::NativeInputId;
 
@@ -319,17 +319,21 @@ pub(super) fn plan(source: &Source, cancel: &AtomicBool) -> Result<NativePlan, A
         {
             let position = file::file_position(&source.file, start, complete)?;
             let text = file::readable_prefix(&part.body.picked)?.to_owned();
-            let content = (part.body.bytes > text.len() as u64).then(|| FileContentRef {
-                entry: record.id.clone(),
-                part: Some(part.index),
-                generation: anchor.generation.clone(),
-                position,
+            let content = (part.body.bytes > text.len() as u64).then(|| {
+                ContentReference::File(FileContentRef {
+                    entry: record.id.clone(),
+                    part: Some(part.index),
+                    generation: anchor.generation.clone(),
+                    position,
+                })
             });
             return Ok(NativePlan {
                 generation: anchor.generation,
+                tasks: None,
                 entry: Some((
                     record.id,
                     VisiblePart {
+                        native_index: part.index,
                         kind: part.kind,
                         text,
                         content,
@@ -345,6 +349,7 @@ pub(super) fn plan(source: &Source, cancel: &AtomicBool) -> Result<NativePlan, A
     Ok(NativePlan {
         generation: anchor.generation,
         entry: None,
+        tasks: None,
     })
 }
 

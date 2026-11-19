@@ -172,11 +172,25 @@ pub struct HistoryEntry {
     pub parts: Vec<HistoryPart>,
     #[serde(skip_serializing_if = "Option::is_none")]
     #[cfg_attr(feature = "schema", schemars(with = "HistoryCursorDto"))]
+    pub parts_cursor: Option<HistoryCursorDto>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "schema", schemars(with = "HistoryCursorDto"))]
     pub content_ref: Option<HistoryCursorDto>,
     #[serde(skip_serializing_if = "Option::is_none")]
     #[cfg_attr(feature = "schema", schemars(with = "SafeCountDto"))]
     pub text_bytes: Option<SafeCountDto>,
 }
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct HistoryPartPage {
+    pub entry_id: HistoryEntryIdDto,
+    pub parts: Vec<HistoryPart>,
+    pub next_cursor: Option<HistoryCursorDto>,
+}
+
+pub type HistoryPartPageResponse = Success<HistoryPartPage>;
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]

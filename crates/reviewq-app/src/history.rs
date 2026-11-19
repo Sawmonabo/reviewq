@@ -77,6 +77,13 @@ pub trait NativeHistoryReader: Send + Sync {
         previous: Option<SourceAnchor>,
     ) -> AppFuture<'_, Option<NativeHead>>;
 
+    fn parts(
+        &self,
+        session: HistorySession,
+        reference: FileContentRef,
+        first: u16,
+    ) -> AppFuture<'_, NativeParts>;
+
     fn content(
         &self,
         session: HistorySession,
@@ -172,6 +179,25 @@ pub enum NativeNavigation {
 pub struct NativePlan {
     pub generation: String,
     pub entry: Option<(NativeInputId, VisiblePart)>,
+    pub tasks: Option<Vec<NativeTask>>,
+}
+
+pub struct NativeTask {
+    pub id: String,
+    pub title: String,
+    pub status: TaskStatus,
+}
+
+pub enum TaskStatus {
+    Pending,
+    InProgress,
+    Completed,
+}
+
+#[derive(Clone, Eq, PartialEq)]
+pub struct NativeRpcStamp {
+    pub generation: String,
+    pub tail: Option<String>,
 }
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
@@ -180,6 +206,30 @@ pub struct FileContentRef {
     pub entry: NativeInputId,
     pub part: Option<u16>,
     pub position: FilePosition,
+}
+
+#[derive(Clone, Debug)]
+pub enum ContentReference {
+    File(FileContentRef),
+    Rpc(RpcContentRef),
+}
+
+#[derive(Clone, Debug)]
+pub struct RpcContentRef {
+    pub generation: String,
+    pub turn: NativeTurnId,
+    pub entry: NativeInputId,
+    pub part: Option<u16>,
+    pub hash: reviewq_domain::identity::ReportHash,
+}
+
+impl ContentReference {
+    pub fn file(&self) -> Option<&FileContentRef> {
+        match self {
+            Self::File(reference) => Some(reference),
+            Self::Rpc(_) => None,
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -192,8 +242,9 @@ pub struct NativeContent {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct TurnWindow {
     pub turn: NativeTurnId,
-    pub index: usize,
     pub forward: bool,
+    pub item_cursor: Option<String>,
+    pub item_anchor: Option<NativeInputId>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -227,11 +278,17 @@ pub enum VisiblePartKind {
     Assignment,
 }
 
+pub struct NativeParts {
+    pub parts: Vec<VisiblePart>,
+    pub next: Option<u16>,
+}
+
 #[derive(Clone, Debug)]
 pub struct VisiblePart {
+    pub native_index: u16,
     pub kind: VisiblePartKind,
     pub text: String,
-    pub content: Option<FileContentRef>,
+    pub content: Option<ContentReference>,
 }
 
 #[derive(Clone, Debug)]
@@ -241,9 +298,10 @@ pub struct VisibleEntry {
     pub at_ms: Option<i64>,
     pub kind: VisibleKind,
     pub text: String,
-    pub content: Option<FileContentRef>,
+    pub content: Option<ContentReference>,
     pub text_bytes: Option<u64>,
     pub parts: Vec<VisiblePart>,
+    pub next_part: Option<u16>,
 }
 
 #[derive(Debug)]
@@ -252,7 +310,7 @@ pub struct NativeHistoryPage {
     pub entries: Vec<VisibleEntry>,
     pub older: Option<NativePosition>,
     pub newer: Option<NativePosition>,
-    pub within: Option<(NativePosition, NativeTurnId, usize)>,
+    pub within: Option<(NativePosition, NativeTurnId)>,
 }
 
 impl NativeHistoryPage {
@@ -264,6 +322,7 @@ impl NativeHistoryPage {
             .entries
             .get(end)
             .and_then(|entry| entry.content.as_ref())
+            .and_then(ContentReference::file)
         {
             return Some(NativePosition {
                 file: Some(record.position.clone()),
@@ -271,12 +330,14 @@ impl NativeHistoryPage {
                 ..NativePosition::default()
             });
         }
-        let (position, turn, start) = self.within.as_ref()?;
+        let (position, turn) = self.within.as_ref()?;
+        let anchor = self.entries.get(end.checked_sub(1)?)?.id.clone();
         let mut position = position.clone();
         position.within = Some(TurnWindow {
             turn: turn.clone(),
-            index: start + end,
             forward: true,
+            item_cursor: None,
+            item_anchor: Some(anchor),
         });
         Some(position)
     }
@@ -289,18 +350,21 @@ impl NativeHistoryPage {
             .entries
             .get(count)
             .and_then(|entry| entry.content.as_ref())
+            .and_then(ContentReference::file)
         {
             return Some(NativePosition {
                 file: Some(record.position.clone()),
                 ..NativePosition::default()
             });
         }
-        let (position, turn, start) = self.within.as_ref()?;
+        let (position, turn) = self.within.as_ref()?;
+        let anchor = self.entries.get(count)?.id.clone();
         let mut position = position.clone();
         position.within = Some(TurnWindow {
             turn: turn.clone(),
-            index: start + count,
             forward: false,
+            item_cursor: None,
+            item_anchor: Some(anchor),
         });
         Some(position)
     }

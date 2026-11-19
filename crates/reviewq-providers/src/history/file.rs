@@ -6,8 +6,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use reviewq_app::access::AppError;
 use reviewq_app::history::{
-    FileContentRef, FilePosition, NativeHistoryPage, NativePosition, VisibleEntry, VisiblePart,
-    VisiblePartKind,
+    ContentReference, FileContentRef, FilePosition, NativeHistoryPage, NativePosition,
+    VisibleEntry, VisiblePart, VisiblePartKind,
 };
 use reviewq_domain::identity::NativeInputId;
 use reviewq_domain::session::HostProvider;
@@ -79,24 +79,7 @@ pub(super) fn page(
                 .take(512)
                 .collect::<String>();
             let pointer = file_position(file, start, complete)?;
-            let parts = record
-                .parts
-                .into_iter()
-                .map(|part| {
-                    let text = readable_prefix(&part.body.picked)?.to_owned();
-                    let content = (part.body.bytes > text.len() as u64).then(|| FileContentRef {
-                        generation: generation.clone(),
-                        entry: record.id.clone(),
-                        part: Some(part.index),
-                        position: pointer.clone(),
-                    });
-                    Ok::<_, AppError>(VisiblePart {
-                        kind: part.kind,
-                        text,
-                        content,
-                    })
-                })
-                .collect::<Result<_, _>>()?;
+            let parts = visible_parts(record.parts, &generation, &record.id, &pointer)?;
             entries.push(VisibleEntry {
                 id: record.id.clone(),
                 turn: record.turn,
@@ -105,12 +88,13 @@ pub(super) fn page(
                 text,
                 text_bytes: Some(record.bytes),
                 parts,
-                content: Some(FileContentRef {
+                next_part: record.next_part,
+                content: Some(ContentReference::File(FileContentRef {
                     generation: generation.clone(),
                     entry: record.id,
                     part: None,
                     position: pointer,
-                }),
+                })),
             });
         }
 
@@ -142,6 +126,76 @@ pub(super) fn page(
             .transpose()?,
         within: None,
     })
+}
+
+pub(super) fn parts(
+    source: &Source,
+    reference: FileContentRef,
+    first: u16,
+    cancelled: &AtomicBool,
+) -> Result<reviewq_app::history::NativeParts, AppError> {
+    verify_content(source, &reference)?;
+    let start = reference.position.offset;
+    let mut budget = READ_BUDGET;
+    let end = next_line(
+        &source.file,
+        start,
+        reference.position.high_water,
+        &mut budget,
+        cancelled,
+    )?;
+    if end == start || !boundary(&source.file, end)? {
+        return Err(AppError::CursorExpired);
+    }
+    let mut record = records::project_parts(
+        source.provider,
+        input(&source.file, start, end, cancelled),
+        &source.native_id,
+        source.root_session.as_ref(),
+        first,
+    )
+    .filter(|record| record.id == reference.entry)
+    .ok_or(AppError::CursorExpired)?;
+    ToolProof::new().redact(source, start, &mut record, cancelled);
+    let parts = visible_parts(
+        record.parts,
+        &reference.generation,
+        &record.id,
+        &reference.position,
+    )?;
+    verify_content(source, &reference)?;
+    Ok(reviewq_app::history::NativeParts {
+        parts,
+        next: record.next_part,
+    })
+}
+
+fn visible_parts(
+    parts: Vec<records::Part>,
+    generation: &str,
+    id: &NativeInputId,
+    position: &FilePosition,
+) -> Result<Vec<VisiblePart>, AppError> {
+    parts
+        .into_iter()
+        .map(|part| {
+            let text = readable_prefix(&part.body.picked)?.to_owned();
+            let content = (part.body.bytes > text.len() as u64).then(|| {
+                ContentReference::File(FileContentRef {
+                    generation: generation.to_owned(),
+                    entry: id.clone(),
+                    part: Some(part.index),
+                    position: position.clone(),
+                })
+            });
+            Ok(VisiblePart {
+                native_index: part.index,
+                kind: part.kind,
+                text,
+                content,
+            })
+        })
+        .collect()
 }
 
 pub(super) fn verify_content(source: &Source, reference: &FileContentRef) -> Result<(), AppError> {

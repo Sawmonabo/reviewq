@@ -22,6 +22,7 @@ mod navigation;
 mod proof;
 mod reader;
 mod records;
+mod task_plan;
 pub(crate) mod tools;
 mod turn_metadata;
 mod watch;
@@ -104,8 +105,22 @@ impl NativeHistoryReader for FileHistory {
     }
 
     fn plan(&self, session: HistorySession) -> AppFuture<'_, Option<NativePlan>> {
+        let binding = session.binding.clone();
         self.inspect(session, move |source, cancel| {
-            navigation::plan(&source, cancel)
+            let tasks = task_plan::read(&binding, &source, cancel)?;
+            let mut plan = navigation::plan(&source, cancel).or_else(|error| {
+                if tasks.is_some() && error == AppError::Unavailable {
+                    Ok(NativePlan {
+                        generation: file::generation(&source)?,
+                        entry: None,
+                        tasks: None,
+                    })
+                } else {
+                    Err(error)
+                }
+            })?;
+            plan.tasks = tasks;
+            Ok(plan)
         })
     }
 
@@ -154,6 +169,21 @@ impl NativeHistoryReader for FileHistory {
             .map_err(|_| AppError::Unavailable)?
         })
     }
+    fn parts(
+        &self,
+        session: HistorySession,
+        reference: FileContentRef,
+        first: u16,
+    ) -> AppFuture<'_, reviewq_app::history::NativeParts> {
+        Box::pin(async move {
+            self.inspect(session, move |source, cancel| {
+                file::parts(&source, reference, first, cancel)
+            })
+            .await?
+            .ok_or(AppError::NotFound)
+        })
+    }
+
     fn content(
         &self,
         session: HistorySession,

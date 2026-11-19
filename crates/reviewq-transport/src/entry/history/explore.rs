@@ -9,7 +9,7 @@ use reviewq_app::history::{NativeNavigation, NavigationQuery, PromptPosition, So
 use reviewq_domain::identity::{NativeInputId, RunId, SessionKey};
 use reviewq_protocol::history::{
     HistoryAvailability, HistoryNavigation, HistoryPlan, HistoryPlanResponse, HistoryText,
-    NavigationPage, PlanEntry, PromptGroup, PromptPreview,
+    NavigationPage, PlanEntry, PlanTask, PlanTaskStatus, PromptGroup, PromptPreview,
 };
 use reviewq_protocol::{
     HistoryCursorDto, HistoryEntryIdDto, HistoryGenerationDto, RunIdDto, SafeCountDto,
@@ -320,15 +320,26 @@ pub(in crate::entry) async fn plan(
         .store
         .history_session(actor.clone(), run.clone(), session.clone())
         .await?;
-    let loaded = entry
-        .file_history
-        .plan(source.value)
-        .await?
-        .ok_or(AppError::Unavailable)?;
-    entry
+    let loaded = match entry.file_history.plan(source.value.clone()).await? {
+        Some(plan) => plan,
+        None => {
+            entry
+                .host
+                .as_ref()
+                .ok_or(AppError::Unavailable)?
+                .history_plan(source.value.clone())
+                .await?
+        }
+    };
+    if entry
         .store
         .history_session(actor, run.clone(), session.clone())
-        .await?;
+        .await?
+        .value
+        != source.value
+    {
+        return Err(AppError::CursorExpired.into());
+    }
     let plan = loaded
         .entry
         .map(|(id, part)| {
@@ -345,6 +356,24 @@ pub(in crate::entry) async fn plan(
             generation: HistoryGenerationDto::new(loaded.generation).ok_or(AppError::Internal)?,
             availability: HistoryAvailability::Available,
             plan,
+            tasks: loaded.tasks.map(|tasks| {
+                tasks
+                    .into_iter()
+                    .map(|task| PlanTask {
+                        id: task.id,
+                        title: task.title,
+                        status: match task.status {
+                            reviewq_app::history::TaskStatus::Pending => PlanTaskStatus::Pending,
+                            reviewq_app::history::TaskStatus::InProgress => {
+                                PlanTaskStatus::InProgress
+                            }
+                            reviewq_app::history::TaskStatus::Completed => {
+                                PlanTaskStatus::Completed
+                            }
+                        },
+                    })
+                    .collect()
+            }),
         },
         source.cursor,
     )?))

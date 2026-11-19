@@ -8,7 +8,8 @@ use axum::http::HeaderMap;
 use axum::response::sse::{Event, KeepAlive, Sse};
 use futures_util::{Stream, stream};
 use reviewq_app::access::AppError;
-use reviewq_app::history::{HistorySession, NativeHistoryReader, SourceAnchor};
+use reviewq_app::history::{HistorySession, NativeHistoryReader, NativeRpcStamp, SourceAnchor};
+use reviewq_app::hosts::NativeHost;
 use reviewq_domain::identity::{RunId, SessionKey};
 use serde::Serialize;
 use tokio::sync::{OwnedSemaphorePermit, watch};
@@ -59,6 +60,7 @@ impl Watchers {
         &self,
         source: HistorySession,
         reader: Arc<dyn NativeHistoryReader>,
+        host: Option<Arc<dyn NativeHost>>,
     ) -> Result<Arc<SharedWatch>, AppError> {
         let key = (
             source.target.run_id().clone(),
@@ -72,7 +74,7 @@ impl Watchers {
             return Ok(watch);
         }
         let (notices, updates) = watch::channel(None);
-        let observer = tokio::spawn(run(reader, source.clone(), notices));
+        let observer = tokio::spawn(run(reader, host, source.clone(), notices));
         let result = Arc::new(SharedWatch {
             source,
             updates,
@@ -85,18 +87,53 @@ impl Watchers {
 
 async fn run(
     reader: Arc<dyn NativeHistoryReader>,
+    host: Option<Arc<dyn NativeHost>>,
     session: HistorySession,
     publish: watch::Sender<Option<Update>>,
 ) {
     let mut previous: Option<SourceAnchor> = None;
+    let mut last_rpc: Option<NativeRpcStamp> = None;
     let mut last_availability = None;
     let mut sequence = 0_u64;
     let mut delay = Duration::from_secs(1);
     let mut events = None;
     loop {
         let check = reader.head(session.clone(), previous.clone()).await;
+        let mut rpc = None;
         let (current, availability, reset) = match check {
-            Ok(Some(stamp)) => (Some(stamp.anchor), "available", stamp.reset),
+            Ok(Some(stamp)) => (
+                Some(stamp.anchor),
+                "available",
+                stamp.reset || last_rpc.is_some(),
+            ),
+            Ok(None)
+                if session.binding.identity().provider()
+                    == reviewq_domain::session::HostProvider::Codex
+                    && host.is_some() =>
+            {
+                match host
+                    .as_ref()
+                    .expect("matched host")
+                    .history_stamp(session.clone())
+                    .await
+                {
+                    Ok(stamp) => {
+                        let reset = last_rpc
+                            .as_ref()
+                            .is_some_and(|last| last.generation != stamp.generation)
+                            || previous.is_some();
+                        rpc = Some(stamp);
+                        (None, "available", reset)
+                    }
+                    Err(AppError::NotFound) => (None, "missing", false),
+                    Err(AppError::Forbidden | AppError::Unauthorized) => (None, "denied", false),
+                    Err(AppError::Busy) => {
+                        tokio::time::sleep(Duration::from_millis(250)).await;
+                        continue;
+                    }
+                    Err(_) => (None, "disconnected", false),
+                }
+            }
             Err(AppError::Busy) => {
                 tokio::time::sleep(Duration::from_millis(250)).await;
                 continue;
@@ -108,7 +145,10 @@ async fn run(
         };
         let changed = current
             .as_ref()
-            .is_some_and(|value| previous.as_ref() != Some(value));
+            .is_some_and(|value| previous.as_ref() != Some(value))
+            || rpc
+                .as_ref()
+                .is_some_and(|value| last_rpc.as_ref() != Some(value));
         let changed_availability = last_availability != Some(availability);
         if changed || changed_availability || reset {
             sequence = sequence.saturating_add(1);
@@ -122,7 +162,12 @@ async fn run(
             let generation = current
                 .as_ref()
                 .or(previous.as_ref())
-                .map(|a| a.generation.clone());
+                .map(|a| a.generation.clone())
+                .or_else(|| {
+                    rpc.as_ref()
+                        .or(last_rpc.as_ref())
+                        .map(|stamp| stamp.generation.clone())
+                });
             if publish
                 .send(Some(Update {
                     sequence,
@@ -135,8 +180,14 @@ async fn run(
                 return;
             }
         }
-        if current.is_some() {
+        let file_available = current.is_some();
+        if file_available {
             previous = current;
+            last_rpc = None;
+        } else if rpc.is_some() {
+            previous = None;
+            last_rpc = rpc;
+            events = None;
         }
         last_availability = Some(availability);
         delay = if availability == "available" {
@@ -144,7 +195,7 @@ async fn run(
         } else {
             (delay * 2).min(Duration::from_secs(30))
         };
-        if availability == "available" && events.is_none() {
+        if file_available && events.is_none() {
             events = reader.watch(session.clone()).await.ok().flatten();
         }
         if let Some(watch) = events.as_mut() {
@@ -179,9 +230,10 @@ pub(in crate::entry) async fn live(
         .clone()
         .try_acquire_owned()
         .map_err(|_| AppError::Busy)?;
-    let lease = entry
-        .history_watches
-        .open(source, entry.file_history.clone())?;
+    let lease =
+        entry
+            .history_watches
+            .open(source, entry.file_history.clone(), entry.host.clone())?;
     let feed = Feed {
         entry: entry.clone(),
         updates: lease.updates.clone(),

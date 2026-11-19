@@ -30,11 +30,16 @@ mod content;
 mod explore;
 pub(super) use content::{ContentQuery, content, read_content};
 mod live;
+mod parts;
 pub(super) use live::Watchers;
 
 pub(super) fn routes() -> axum::Router<Arc<Entry>> {
     use axum::routing::get;
     axum::Router::new()
+        .route(
+            "/runs/{run_id}/sessions/{session_key}/history/parts",
+            get(parts::read),
+        )
         .route(
             "/runs/{run_id}/sessions/{session_key}/history/navigation",
             get(explore::navigation),
@@ -103,8 +108,9 @@ impl From<Point> for FilePosition {
 #[derive(Deserialize, Serialize)]
 struct Within {
     turn: String,
-    boundary: usize,
     forward: bool,
+    item_cursor: Option<String>,
+    item_anchor: Option<String>,
 }
 
 pub(super) async fn page(
@@ -212,7 +218,17 @@ pub(super) async fn read(
             ),
             Err(error) => return Err(error),
         };
-        let mut result = result.ok_or(AppError::Unavailable)?;
+        let mut result = match result {
+            Some(result) => result,
+            None => {
+                entry
+                    .host
+                    .as_ref()
+                    .ok_or(AppError::Unavailable)?
+                    .history_around(lead.value.clone(), around.clone(), limit)
+                    .await?
+            }
+        };
         bind_observed_turns(entry, actor, lead.value, &mut result).await?;
         return encode(
             endpoint,
@@ -341,6 +357,7 @@ fn encode(
     };
     let mut first = 0;
     let mut last = history.entries.len();
+    let mut part_limit = usize::MAX;
     let pinned = match trim {
         Trim::Around(id) => history.entries.iter().position(|entry| &entry.id == id),
         _ => None,
@@ -360,7 +377,7 @@ fn encode(
                     .iter()
                     .skip(first)
                     .take(last - first)
-                    .map(|entry| encode_entry(endpoint, run, session, entry))
+                    .map(|entry| encode_entry(endpoint, run, session, entry, part_limit))
                     .collect::<Result<Vec<_>, _>>()?,
                 cursor(history.older_after_trim(first))?,
                 cursor(history.newer_after_trim(last))?,
@@ -388,7 +405,23 @@ fn encode(
                     first += remove.min(last - first - 1);
                 }
             }
-            Err(HistoryPageEncodeError::TooLarge) => return Err(AppError::PayloadTooLarge),
+            Err(HistoryPageEncodeError::TooLarge) => {
+                let count = history
+                    .entries
+                    .get(first)
+                    .filter(|entry| {
+                        entry
+                            .content
+                            .as_ref()
+                            .and_then(reviewq_app::history::ContentReference::file)
+                            .is_some()
+                    })
+                    .map_or(0, |entry| entry.parts.len().min(part_limit));
+                if count <= 1 {
+                    return Err(AppError::PayloadTooLarge);
+                }
+                part_limit = count.div_ceil(2);
+            }
             Err(HistoryPageEncodeError::Serialization(_)) => return Err(AppError::Internal),
         }
     }
@@ -399,6 +432,7 @@ fn encode_entry(
     run: &RunId,
     session: &SessionKey,
     entry: &VisibleEntry,
+    part_limit: usize,
 ) -> Result<HistoryEntry, AppError> {
     let end = entry
         .text
@@ -416,7 +450,24 @@ fn encode_entry(
             content_ref: None,
         },
     };
+    let next = entry
+        .parts
+        .get(part_limit)
+        .map(|part| part.native_index)
+        .or(entry.next_part);
+    let parts_cursor = match next {
+        Some(first) => {
+            let file = entry
+                .content
+                .as_ref()
+                .and_then(reviewq_app::history::ContentReference::file)
+                .ok_or(AppError::Internal)?;
+            Some(parts::cursor(endpoint, run, session, file, first)?)
+        }
+        None => None,
+    };
     Ok(HistoryEntry {
+        parts_cursor,
         entry_id: HistoryEntryIdDto::new(entry.id.as_str()).ok_or(AppError::Internal)?,
         turn_id: entry
             .turn
@@ -432,6 +483,7 @@ fn encode_entry(
             entry
                 .parts
                 .iter()
+                .take(part_limit)
                 .map(|part| visible_part(endpoint, run, session, part))
                 .collect::<Result<_, _>>()?
         },
@@ -512,8 +564,9 @@ impl Cursor {
             skip_turn: position.skip_turn.map(|id| id.to_string()),
             within: position.within.map(|item| Within {
                 turn: item.turn.to_string(),
-                boundary: item.index,
                 forward: item.forward,
+                item_cursor: item.item_cursor,
+                item_anchor: item.item_anchor.map(|id| id.to_string()),
             }),
         }
     }
@@ -531,8 +584,13 @@ impl Cursor {
                 .map(|w| {
                     Ok(TurnWindow {
                         turn: parse(&w.turn)?,
-                        index: w.boundary,
                         forward: w.forward,
+                        item_cursor: w.item_cursor.clone(),
+                        item_anchor: w
+                            .item_anchor
+                            .as_deref()
+                            .map(|id| id.parse().map_err(|_| AppError::CursorExpired))
+                            .transpose()?,
                     })
                 })
                 .transpose()?,
