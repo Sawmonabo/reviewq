@@ -4,6 +4,16 @@ import type { MergeRequestRow, UnmatchedTicket } from "../api/generated/contract
 import { formatActivityTime, reviewReasonLabel } from "../lib/presentation";
 import { Icon } from "./Icon";
 
+const nativeActivityForReason: Readonly<
+  Partial<Record<string, NonNullable<MergeRequestRow["focusedActivity"]>>>
+> = {
+  agent_input: "blocked",
+  agent_failed: "failed",
+  lead_working: "working",
+  session_working: "working",
+  working: "working",
+};
+
 export function providerLabel(provider: HostProviderDto): string {
   return provider === "claude" ? "Claude Code" : "Codex";
 }
@@ -27,6 +37,14 @@ export function ReviewRow({
   const tracked = row.registeredLeadCount > 0;
   const currentReport = row.fullMrReviewedSha === row.sourceSha;
   const changed = row.mrState === "open" && row.fullMrReviewedSha && !currentReport;
+  const nativeStatusShown =
+    row.mrState === "open" && row.focusedActivity === nativeActivityForReason[status];
+  const showReason =
+    (tracked || (status !== "needs_review" && status !== "all_open")) &&
+    !nativeStatusShown &&
+    row.currentDisposition !== status &&
+    !(currentReport && status === "report_ready") &&
+    !(changed && status === "followup");
   return (
     <button
       type="button"
@@ -60,7 +78,6 @@ export function ReviewRow({
           {row.own && <span className="row-tag">Yours</span>}
           {row.draft && <span className="row-tag">Draft</span>}
           <ReviewBadges review={row} />
-          <ReviewEvidenceBadges review={row} />
         </div>
         <strong className="row-title">{row.tickets[0]?.title || row.title}</strong>
         <div className="row-foot">
@@ -68,13 +85,12 @@ export function ReviewRow({
             <span className="provider-pill">{providerLabel(row.focusedProvider)}</span>
           )}
           {!tracked && <span>No review run started</span>}
-          {(tracked || (status !== "needs_review" && status !== "all_open")) &&
-            !(currentReport && status === "report_ready") &&
-            !(changed && status === "followup") && (
-              <span className="row-tag" data-review-kind={status}>
-                {reviewReasonLabel(status)}
-              </span>
-            )}
+          <ReviewEvidenceBadges review={row} />
+          {showReason && (
+            <span className="row-tag" data-review-kind={status}>
+              {reviewReasonLabel(status)}
+            </span>
+          )}
           {currentReport && (
             <span className="row-tag" data-review-kind="report_ready">
               Agent report ready
@@ -161,19 +177,19 @@ export function ReviewBadges({
   );
 }
 
-export function ReviewEvidenceBadges({ review }: { readonly review: MergeRequestRow }) {
+function ReviewEvidenceBadges({ review }: { readonly review: MergeRequestRow }) {
   const phase = review.focusedActivity;
   const disposition = review.currentDisposition;
   const kind = phase === "blocked" ? "agent_input" : phase === "failed" ? "agent_failed" : phase;
   return (
     <>
       {review.mrState === "open" && phase && (
-        <span className="row-tag" data-review-kind={kind}>
+        <span className="native-status" data-review-kind={kind}>
           {
             {
-              idle: "Agent idle",
-              working: "Agent working",
-              blocked: "Agent blocked",
+              idle: "Idle",
+              working: "Working",
+              blocked: review.reasonKind === "agent_input" ? "Awaiting input" : "Blocked",
               failed: "Agent failed",
             }[phase]
           }
@@ -183,16 +199,16 @@ export function ReviewEvidenceBadges({ review }: { readonly review: MergeRequest
         <span className="row-tag" data-review-kind={disposition}>
           {
             {
-              reviewed: "Marked reviewed",
-              waiting_author: "Marked waiting for author",
-              needs_review: "Marked for review",
+              reviewed: "✓ Reviewed",
+              waiting_author: "Waiting on author",
+              needs_review: "Needs review",
             }[disposition]
           }
         </span>
       )}
       {review.unreadNonReplyCount > 0 && (
         <span className="row-tag" data-review-kind="discussion_update">
-          New activity · {review.unreadNonReplyCount}
+          {review.unreadNonReplyCount} {review.unreadReplies > 0 ? "other updates" : "unread"}
         </span>
       )}
     </>

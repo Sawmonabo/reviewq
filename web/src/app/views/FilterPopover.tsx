@@ -1,4 +1,4 @@
-import { useId, useRef, useState } from "react";
+import { useId, useState } from "react";
 import type { ReactNode } from "react";
 import { Icon } from "../../components/Icon";
 
@@ -22,17 +22,16 @@ export function FilterPopover({
   readonly children: (close: () => void) => ReactNode;
 }) {
   const id = useId();
-  const popup = useRef<HTMLElement>(null);
+  const triggerId = `${id}-trigger`;
   const [open, setOpen] = useState(false);
-  const trigger = useRef<HTMLButtonElement>(null);
   function close() {
-    popup.current?.hidePopover();
-    trigger.current?.focus({ preventScroll: true });
+    document.getElementById(id)?.hidePopover();
+    document.getElementById(triggerId)?.focus({ preventScroll: true });
   }
   return (
     <>
       <button
-        ref={trigger}
+        id={triggerId}
         type="button"
         className="filter-control"
         disabled={disabled}
@@ -50,7 +49,6 @@ export function FilterPopover({
       </button>
       <section
         id={id}
-        ref={popup}
         popover="auto"
         role="dialog"
         aria-label={popupLabel}

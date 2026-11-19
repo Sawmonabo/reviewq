@@ -410,6 +410,28 @@
   background: var(--changed-bg);
   color: var(--changed-text);
 }
+.native-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--muted);
+}
+.native-status::before {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: currentColor;
+  content: "";
+}
+.native-status[data-review-kind="agent_input"] {
+  color: var(--rose);
+}
+.native-status[data-review-kind="working"] {
+  color: var(--green);
+}
+.native-status[data-review-kind="agent_failed"] {
+  color: var(--red);
+}
 .row-tag:is(
   [data-review-kind="report_failed"],
   [data-review-kind="agent_failed"],

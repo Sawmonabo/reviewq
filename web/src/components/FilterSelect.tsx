@@ -1,6 +1,6 @@
 import { Icon } from "./Icon";
 
-type Option = { readonly value: string; readonly label: string };
+type Option = { readonly value: string; readonly label: string; readonly disabled?: boolean };
 
 export function FilterSelect({
   label,
@@ -32,7 +32,7 @@ export function FilterSelect({
         onChange={(event) => onChange(event.currentTarget.value)}
       >
         {options.map((option) => (
-          <option key={option.value} value={option.value}>
+          <option key={option.value} value={option.value} disabled={option.disabled}>
             {option.label}
           </option>
         ))}

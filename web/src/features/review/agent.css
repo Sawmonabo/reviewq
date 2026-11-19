@@ -371,12 +371,6 @@
   .transcript-shell {
     --timeline-gutter: 17px;
   }
-  .agent-composer-shell {
-    padding-inline: 14px;
-  }
-  .composer-shortcut {
-    display: none;
-  }
 }
 @media (pointer: coarse) {
   .timeline-controls {

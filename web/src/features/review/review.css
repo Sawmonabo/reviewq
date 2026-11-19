@@ -21,7 +21,7 @@
 .drawer-breadcrumb .quiet-button {
   min-height: 0;
   padding: 0;
-  color: var(--link);
+  color: var(--ticket-text);
   font-family: inherit;
   font-size: 11px;
   font-weight: 560;
@@ -107,7 +107,8 @@
 }
 .drawer-meta .drawer-state {
   font-size: 10px;
-  padding: 2px 6px;
+  padding: 3px 6px;
+  border-color: color-mix(in srgb, currentColor 32%, var(--canvas));
   font-weight: 480;
 }
 .drawer-meta .drawer-fact {
@@ -144,6 +145,7 @@
   min-width: 0;
   gap: 25px;
   scrollbar-width: thin;
+  scrollbar-color: var(--scroll-thumb) transparent;
 }
 .drawer-surface .drawer-tabs button {
   min-height: 40px;
@@ -157,13 +159,14 @@
   border-color: var(--link);
   font-weight: 520;
 }
-.run-picker {
-  width: min(145px, 39%);
+.drawer-tab-bar > .select-filter {
+  flex: 0 1 auto;
+  max-width: 55%;
   min-height: 29px;
   height: 29px;
-  padding-block: 4px;
-  text-overflow: ellipsis;
-  font-size: 11px;
+}
+.drawer-tab-bar .filter-value {
+  max-width: 135px;
 }
 .run-pages {
   margin-top: 5px;
@@ -250,6 +253,21 @@
   .drawer-actions :is(.menu-trigger, .icon-button),
   .drawer-surface .drawer-tabs button {
     min-height: 44px;
+  }
+}
+@media (max-width: 700px) {
+  .drawer-surface .drawer-header {
+    padding-inline: 19px;
+  }
+  .drawer-heading {
+    padding-block: 20px 16px;
+  }
+  .drawer-surface .drawer-heading h2 {
+    margin-bottom: 14px;
+    font-size: 19px;
+  }
+  .drawer-surface .drawer-tabs {
+    gap: 20px;
   }
 }
 .drawer-surface .drawer-actions button {

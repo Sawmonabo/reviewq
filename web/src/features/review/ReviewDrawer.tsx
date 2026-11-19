@@ -18,12 +18,14 @@ import {
   terminal,
 } from "../../api/review";
 import { ActionMenu } from "../../components/ActionMenu";
+import { FilterSelect } from "../../components/FilterSelect";
 import { Icon } from "../../components/Icon";
+import { providerLabel } from "../../components/ReviewRow";
 import { PanelBoundary } from "../../components/PanelBoundary";
 import { Empty, Loading, Notice } from "../../components/PanelState";
 import { useResource } from "../../hooks/useResource";
 import type { DraftStore } from "../../lib/drafts";
-import { describeError, formatTime, readable, safeUrl } from "../../lib/presentation";
+import { describeError, formatActivityTime, readable, safeUrl } from "../../lib/presentation";
 import { ReviewOverviewPane } from "./ReviewOverviewPane";
 import { ReviewAttention } from "./ReviewAttention";
 import { ChangesMonitor } from "./changes/ChangesMonitor";
@@ -519,33 +521,27 @@ export default function ReviewDrawer({
                 {label}
               </button>
             ))}
-          </div>{" "}
+          </div>
           {!child &&
             ((runs?.items.length ?? 0) > 1 ||
               (!selected && Boolean(runs?.items.length)) ||
               runTrail.length > 0 ||
               Boolean(runs?.nextCursor)) && (
-              <select
-                className="run-picker"
-                aria-label="Runs"
+              <FilterSelect
+                label="Runs"
                 value={run?.runId ?? ""}
-                onChange={(event) => {
-                  if (event.currentTarget.value) onRun(event.currentTarget.value);
-                }}
-              >
-                <option value="" disabled>
-                  Choose run
-                </option>
-                {run && !runs?.items.some((item) => item.runId === run.runId) && (
-                  <option value={run.runId}>Selected run</option>
-                )}
-                {runs?.items.map((item) => (
-                  <option value={item.runId} key={item.runId}>
-                    {item.provider === "claude" ? "Claude Code" : "Codex"} ·{" "}
-                    {item.startedAt ? formatTime(item.startedAt) : item.runId}
-                  </option>
-                ))}
-              </select>
+                options={[
+                  ...(!run ? [{ value: "", label: "Choose run", disabled: true }] : []),
+                  ...(run && !runs?.items.some((item) => item.runId === run.runId)
+                    ? [{ value: run.runId, label: "Selected run" }]
+                    : []),
+                  ...(runs?.items ?? []).map((item) => ({
+                    value: item.runId,
+                    label: `${providerLabel(item.provider)} · ${item.startedAt ? formatActivityTime(item.startedAt) : item.runId}`,
+                  })),
+                ]}
+                onChange={onRun}
+              />
             )}
         </div>
       </header>
