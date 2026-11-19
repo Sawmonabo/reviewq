@@ -87,6 +87,14 @@ pub trait NativeHost: QuestionsPort + Send + Sync {
         Box::pin(async { Err(AppError::Unavailable) })
     }
 
+    fn history_signals(
+        &self,
+        _target: HistorySession,
+    ) -> AppFuture<'_, Option<tokio::sync::broadcast::Receiver<crate::history::NativeLiveSignal>>>
+    {
+        Box::pin(async { Ok(None) })
+    }
+
     fn history_plan(&self, _target: HistorySession) -> AppFuture<'_, crate::history::NativePlan> {
         Box::pin(async { Err(AppError::Unavailable) })
     }

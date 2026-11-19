@@ -12,6 +12,7 @@ mod history;
 mod history_navigation;
 mod history_reads;
 mod launch;
+mod live;
 mod questions;
 mod recovery;
 mod session;
