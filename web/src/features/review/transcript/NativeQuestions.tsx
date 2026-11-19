@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { Form as NativeForm, Question } from "../../../api/generated/contracts/questions";
 import { answerQuestion, readQuestions } from "../../../api/history";
 import type { SessionAddress } from "../../../api/history";
@@ -81,8 +81,8 @@ function QuestionForm({
   const busy = useRef(false);
   const element = useRef<HTMLFormElement>(null);
   const status = outcome?.original === form.status ? outcome.state : form.status;
-  const supported =
-    form.questions.length > 0 && !form.questions.some((question) => question.isSecret);
+  const includesSecret = form.questions.some((question) => question.isSecret);
+  const supported = form.questions.length > 0 && (!includesSecret || form.blocking);
   const open = status === "pending" && supported;
   const draftName = `Question · ${label}`;
   const prefix = [target.runId, target.sessionKey, form.requestId, form.turnId, form.itemId];
@@ -90,30 +90,34 @@ function QuestionForm({
   async function submit() {
     if (!open || busy.current) return;
     const entries = store.getSnapshot().entries;
-    const selected = form.questions.map(
-      (question) =>
-        [
-          question.id,
-          questionValue(
+    const selected = form.questions.map((question) => {
+      const value = question.isSecret
+        ? (secretInput(element.current, question.id)?.value ?? "")
+        : questionValue(
             entries.find((entry) => entry.key === answerKey(prefix, question.id))?.text ?? "",
-          ),
-        ] as const,
+          );
+      return [question.id, value] as const;
+    });
+    const invalid = selected.find(
+      ([, value]) => !value.trim() || new TextEncoder().encode(value).length > 8192,
     );
-    const missing = selected.find(([, value]) => !value.trim());
-    if (missing) {
-      setNotice("Answer each required question.");
+    if (invalid) {
+      setNotice("Enter an answer of up to 8 KiB for each required question.");
       const field = [...(element.current?.querySelectorAll<HTMLElement>("fieldset") ?? [])].find(
-        (entry) => entry.dataset.question === missing[0],
+        (entry) => entry.dataset.question === invalid[0],
       );
-      field?.querySelector("input, button, textarea")?.focus();
+      field?.querySelector<HTMLElement>("input, select, button, textarea")?.focus();
       return;
     }
+    clearSecrets(element.current);
     const id = submission.current ?? crypto.randomUUID();
     submission.current = id;
     busy.current = true;
     setNotice(undefined);
     setOutcome({ state: "submitting", original: form.status });
-    const locked = form.questions.map((question) => answerKey(prefix, question.id));
+    const locked = form.questions
+      .filter((question) => !question.isSecret)
+      .map((question) => answerKey(prefix, question.id));
     for (const key of locked) store.freeze(key);
     try {
       const result = await answerQuestion(target, form.requestId, form.turnId, form.itemId, {
@@ -126,13 +130,27 @@ function QuestionForm({
       onUpdate();
     } catch (failure) {
       for (const key of locked) store.finish(key, false);
-      setNotice(describeError(failure));
+      setNotice(
+        includesSecret
+          ? "ReviewQ could not confirm the native answer. Check the request or open it in the terminal."
+          : describeError(failure),
+      );
       setOutcome({ state: "uncertain", original: form.status });
       onUpdate();
     } finally {
       busy.current = false;
     }
   }
+
+  useEffect(() => {
+    const form = element.current;
+    const clear = () => clearSecrets(form);
+    window.addEventListener("pagehide", clear);
+    return () => {
+      clear();
+      window.removeEventListener("pagehide", clear);
+    };
+  }, [open]);
 
   return (
     <form
@@ -151,8 +169,8 @@ function QuestionForm({
       {!supported && (
         <div className="actions">
           <p className="meta">
-            {form.questions.some((question) => question.isSecret)
-              ? "This request includes a secret answer."
+            {includesSecret
+              ? "Enter this asynchronous secret answer in the native session."
               : "Use the native controls for this request."}
           </p>
           <button type="button" onClick={onTerminal}>
@@ -161,16 +179,20 @@ function QuestionForm({
         </div>
       )}
       {supported &&
-        form.questions.map((question) => (
-          <QuestionField
-            key={question.id}
-            question={question}
-            store={store}
-            draftKey={answerKey(prefix, question.id)}
-            draftName={draftName}
-            open={open}
-          />
-        ))}
+        form.questions.map((question) =>
+          question.isSecret ? (
+            open && <SecretQuestion key={question.id} question={question} />
+          ) : (
+            <QuestionField
+              key={question.id}
+              question={question}
+              store={store}
+              draftKey={answerKey(prefix, question.id)}
+              draftName={draftName}
+              open={open}
+            />
+          ),
+        )}
       {open && (
         <button type="submit" className="primary">
           Send answers
@@ -188,6 +210,54 @@ function QuestionForm({
       )}
     </form>
   );
+}
+
+function SecretQuestion({ question }: { readonly question: Question }) {
+  return (
+    <fieldset data-question={question.id} className="stack">
+      <legend>{question.header}</legend>
+      <p>{question.question}</p>
+      <label className="field">
+        {question.options.length > 0 && !question.isOther ? "Private selection" : "Secret answer"}
+        {question.options.length > 0 && !question.isOther ? (
+          <select name={secretName(question.id)} autoComplete="off" defaultValue="">
+            <option value="">Choose an answer</option>
+            {question.options.map((option) => (
+              <option key={option.label} value={option.label}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        ) : (
+          <input
+            type="password"
+            name={secretName(question.id)}
+            autoComplete="off"
+            maxLength={8192}
+          />
+        )}
+      </label>
+    </fieldset>
+  );
+}
+
+function secretInput(form: HTMLFormElement | null, questionId: string) {
+  const element = form?.elements.namedItem(secretName(questionId));
+  return element instanceof HTMLInputElement || element instanceof HTMLSelectElement
+    ? element
+    : undefined;
+}
+
+function clearSecrets(form: HTMLFormElement | null) {
+  for (const element of form?.querySelectorAll<HTMLInputElement | HTMLSelectElement>(
+    '[name^="native-private-"]',
+  ) ?? []) {
+    element.value = "";
+  }
+}
+
+function secretName(questionId: string) {
+  return `native-private-${questionId}`;
 }
 
 function QuestionField({

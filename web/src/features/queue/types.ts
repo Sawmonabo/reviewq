@@ -9,7 +9,7 @@ export type LaunchTarget = {
   readonly tickets: readonly CompactTicket[];
 };
 
-export type LaunchMode = "prepare" | "pick" | "register";
+export type LaunchMode = "prepare" | "pick" | "register" | "receipts";
 
 export type Launch = (mode: LaunchMode, targets?: readonly LaunchTarget[]) => void;
 
