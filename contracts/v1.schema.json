@@ -732,6 +732,27 @@
       ],
       "type": "object"
     },
+    "AvailableSkill": {
+      "properties": {
+        "description": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "name": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "path"
+      ],
+      "type": "object"
+    },
     "Batch": {
       "properties": {
         "authorityVerified": {
@@ -1148,7 +1169,7 @@
         },
         "skills": {
           "items": {
-            "$ref": "#/definitions/Skill"
+            "$ref": "#/definitions/AvailableSkill"
           },
           "type": "array"
         }
@@ -1749,6 +1770,48 @@
       ],
       "title": "CurrentActionResponseState",
       "type": "string"
+    },
+    "CurrentPatchRevision": {
+      "properties": {
+        "reviewId": {
+          "$ref": "#/definitions/ReviewIdDto"
+        },
+        "revision": {
+          "$ref": "#/definitions/PatchRevisionDto"
+        },
+        "settingsRevision": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/RevisionDto"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "reviewId",
+        "revision"
+      ],
+      "type": "object"
+    },
+    "CurrentPatchRevisionResponse": {
+      "description": "The resource and event head from the same authorized snapshot.",
+      "properties": {
+        "cursor": {
+          "$ref": "#/definitions/EventCursorDto"
+        },
+        "data": {
+          "$ref": "#/definitions/CurrentPatchRevision"
+        }
+      },
+      "required": [
+        "data",
+        "cursor"
+      ],
+      "title": "CurrentPatchRevisionResponse",
+      "type": "object"
     },
     "DecisionResult": {
       "properties": {
@@ -5326,6 +5389,16 @@
         "revision": {
           "$ref": "#/definitions/PatchRevisionDto"
         },
+        "settingsRevision": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/RevisionDto"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "startSha": {
           "$ref": "#/definitions/GitShaDto"
         }
@@ -5357,6 +5430,86 @@
         "cursor"
       ],
       "title": "PatchFileIndexResponse",
+      "type": "object"
+    },
+    "PatchPath": {
+      "properties": {
+        "lookupKey": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/FileIdDto"
+            }
+          ],
+          "description": "A lookup hint accepted by the checked patch index, not a verified patch address."
+        },
+        "newPath": {
+          "type": "string"
+        },
+        "oldPath": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "oldPath",
+        "newPath",
+        "lookupKey"
+      ],
+      "type": "object"
+    },
+    "PatchPaths": {
+      "description": "A bounded compact list with a required nullable keyset continuation.",
+      "properties": {
+        "items": {
+          "items": {
+            "$ref": "#/definitions/PatchPath"
+          },
+          "maxItems": 100,
+          "type": "array"
+        },
+        "nextCursor": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/PageCursorDto"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "partial": {
+          "type": "boolean"
+        },
+        "reviewId": {
+          "$ref": "#/definitions/ReviewIdDto"
+        },
+        "revision": {
+          "$ref": "#/definitions/PatchRevisionDto"
+        }
+      },
+      "required": [
+        "reviewId",
+        "revision",
+        "partial",
+        "items",
+        "nextCursor"
+      ],
+      "type": "object"
+    },
+    "PatchPathsResponse": {
+      "description": "The resource and event head from the same authorized snapshot.",
+      "properties": {
+        "cursor": {
+          "$ref": "#/definitions/EventCursorDto"
+        },
+        "data": {
+          "$ref": "#/definitions/PatchPaths"
+        }
+      },
+      "required": [
+        "data",
+        "cursor"
+      ],
+      "title": "PatchPathsResponse",
       "type": "object"
     },
     "PatchRevisionDto": {
@@ -7030,8 +7183,27 @@
         "completedAt": {
           "$ref": "#/definitions/UtcTimestampDto"
         },
+        "concernCount": {
+          "$ref": "#/definitions/SafeCountDto"
+        },
+        "findingIds": {
+          "items": {
+            "$ref": "#/definitions/ResourceIdDto"
+          },
+          "maxItems": 12,
+          "type": "array"
+        },
         "kind": {
           "$ref": "#/definitions/ResultKind"
+        },
+        "moreFindingIds": {
+          "type": "boolean"
+        },
+        "reasonPreview": {
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "receiptId": {
           "anyOf": [
@@ -7053,7 +7225,11 @@
         "receiptId",
         "kind",
         "checkedSha",
-        "completedAt"
+        "completedAt",
+        "concernCount",
+        "findingIds",
+        "moreFindingIds",
+        "reasonPreview"
       ],
       "type": "object"
     },
@@ -9420,6 +9596,7 @@
     "CheckoutSkillsRequest": "settings",
     "CheckoutSkillsResponse": "settings",
     "CurrentActionResponse": "actions",
+    "CurrentPatchRevisionResponse": "changes",
     "DeliveryReceiptResponse": "delivery",
     "DisconnectSettings": "settings",
     "EventReplayCursor": "common",
@@ -9451,6 +9628,7 @@
     "NotificationStateResponse": "notifications",
     "PatchDiscussionsResponse": "changes",
     "PatchFileIndexResponse": "changes",
+    "PatchPathsResponse": "changes",
     "QuestionAnswerRequest": "questions",
     "QuestionAnswerResponse": "questions",
     "QuestionFormsResponse": "questions",
@@ -9535,6 +9713,7 @@
       "CatalogResponse": "#/definitions/CatalogResponse",
       "CheckoutSkillsResponse": "#/definitions/CheckoutSkillsResponse",
       "CurrentActionResponse": "#/definitions/CurrentActionResponse",
+      "CurrentPatchRevisionResponse": "#/definitions/CurrentPatchRevisionResponse",
       "DeliveryReceiptResponse": "#/definitions/DeliveryReceiptResponse",
       "Failure": "#/definitions/Failure",
       "FollowupAssessmentsResponse": "#/definitions/FollowupAssessmentsResponse",
@@ -9557,6 +9736,7 @@
       "NotificationStateResponse": "#/definitions/NotificationStateResponse",
       "PatchDiscussionsResponse": "#/definitions/PatchDiscussionsResponse",
       "PatchFileIndexResponse": "#/definitions/PatchFileIndexResponse",
+      "PatchPathsResponse": "#/definitions/PatchPathsResponse",
       "QuestionAnswerResponse": "#/definitions/QuestionAnswerResponse",
       "QuestionFormsResponse": "#/definitions/QuestionFormsResponse",
       "QueuePageResponse": "#/definitions/QueuePageResponse",

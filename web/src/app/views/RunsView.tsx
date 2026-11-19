@@ -427,6 +427,11 @@ function ArchiveView({
             <Icon name="clearFilters" size={17} />
           </button>
         )}
+        {archive.pending && (
+          <span className="archive-match-count" role="status">
+            Loading…
+          </span>
+        )}
         {archive.data && (
           <span className="archive-match-count" role="status">
             {archive.data.totalMatching} {archive.data.totalMatching === 1 ? "review" : "reviews"}

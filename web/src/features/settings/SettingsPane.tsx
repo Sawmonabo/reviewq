@@ -15,6 +15,7 @@ import { ModalFrame } from "../../components/Modal";
 import { Loading, Notice } from "../../components/PanelState";
 import { useResource } from "../../hooks/useResource";
 import { describeError, readable } from "../../lib/presentation";
+import { savedValue, saveValue } from "../../lib/view-preferences";
 import { AgentPreferences } from "./AgentPreferences";
 import { Repositories } from "./Repositories";
 import { boardIncludesRepository, settingsFocus, toggleMembership } from "./scope-draft";
@@ -101,7 +102,42 @@ function SettingsEditor({
   const [reviewers, setReviewers] = useState(initial.additionalReviewerIds.join(", "));
   const tests = useRef<Partial<Record<Provider, AbortController>>>({});
   const errorSummary = useRef<HTMLDivElement>(null);
+  const scroll = useRef<HTMLDivElement>(null);
   const { snapshot, draft, tokens } = editor;
+  useEffect(() => {
+    const body = scroll.current;
+    const saved = savedValue("settings.scroll");
+    if (!body || typeof saved !== "number" || !Number.isFinite(saved) || saved <= 0) return;
+    const position = saved;
+    let restoring = true;
+    const observer = new MutationObserver(restore);
+    const frame = requestAnimationFrame(restore);
+    function restore() {
+      if (
+        !restoring ||
+        !body?.clientHeight ||
+        body.querySelector(".agent-preferences[aria-busy='true']")
+      )
+        return;
+      body.scrollTop = position;
+      stop();
+    }
+    function stop() {
+      restoring = false;
+      observer.disconnect();
+      cancelAnimationFrame(frame);
+    }
+    observer.observe(body, { attributes: true, subtree: true, attributeFilter: ["aria-busy"] });
+    body.addEventListener("pointerdown", stop);
+    body.addEventListener("wheel", stop, { passive: true });
+    body.addEventListener("keydown", stop);
+    return () => {
+      stop();
+      body.removeEventListener("pointerdown", stop);
+      body.removeEventListener("wheel", stop);
+      body.removeEventListener("keydown", stop);
+    };
+  }, []);
   useEffect(() => {
     const active = tests.current;
     return () => {
@@ -317,7 +353,11 @@ function SettingsEditor({
 
   return (
     <>
-      <div className="modal-body settings-body">
+      <div
+        className="modal-body settings-body"
+        ref={scroll}
+        onScroll={(event) => saveValue("settings.scroll", event.currentTarget.scrollTop)}
+      >
         <AgentPreferences />
         <form
           className="stack"

@@ -82,6 +82,10 @@ pub struct ResultSummary {
     pub kind: ResultKind,
     pub checked_sha: Option<GitSha>,
     pub completed_at_ms: i64,
+    pub concern_count: u64,
+    pub finding_ids: Vec<String>,
+    pub more_finding_ids: bool,
+    pub reason_preview: Option<String>,
 }
 
 pub struct Enrollment {

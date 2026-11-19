@@ -20,6 +20,7 @@ pub(super) struct Catalogue {
 #[derive(Deserialize)]
 pub(super) struct NativeCommand {
     pub(super) name: String,
+    pub(super) description: Option<String>,
     #[serde(default)]
     pub(super) builtin: bool,
 }
@@ -136,7 +137,7 @@ use std::path::{Path, PathBuf};
 
 use reviewq_app::access::AppFuture;
 use reviewq_app::launch::{NativeModel, NativeModelReader};
-use reviewq_app::settings::NativeSkillReader;
+use reviewq_app::settings::{NativeSkillOption, NativeSkillReader};
 use reviewq_domain::settings::NativeSkill;
 
 impl NativeModelReader for ClaudeCli {
@@ -179,7 +180,7 @@ impl NativeModelReader for ClaudeCli {
 }
 
 impl NativeSkillReader for ClaudeCli {
-    fn skills(&self, checkout: AbsolutePath) -> AppFuture<'_, Vec<NativeSkill>> {
+    fn skills(&self, checkout: AbsolutePath) -> AppFuture<'_, Vec<NativeSkillOption>> {
         Box::pin(async move {
             let catalogue = self.catalogue(checkout.clone()).await?;
             let mut names = BTreeSet::new();
@@ -190,10 +191,13 @@ impl NativeSkillReader for ClaudeCli {
                     continue;
                 }
                 if let Some(path) = skill_path(self, &checkout, name).await? {
-                    output.push(NativeSkill {
-                        name: name.to_owned(),
-                        path,
-                    });
+                    output.push(NativeSkillOption::new(
+                        NativeSkill {
+                            name: name.to_owned(),
+                            path,
+                        },
+                        item.description.clone(),
+                    ));
                 }
             }
             Ok(output)

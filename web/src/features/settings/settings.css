@@ -1,4 +1,10 @@
 .modal.settings-pane {
+  --settings-input: #111114;
+  --settings-input-line: #36363e;
+  --settings-button-line: #303039;
+  --settings-button-hover-line: #454550;
+  --settings-summary: #b8b8c2;
+  --settings-primary-hover: #dce2f3;
   position: fixed;
   inset: 0 0 0 auto;
   width: min(900px, 100vw);
@@ -10,6 +16,14 @@
   border-left: 1px solid var(--strong-line);
   border-radius: 0;
   box-shadow: -20px 0 70px #0008;
+}
+:root[data-theme="light"] .modal.settings-pane {
+  --settings-input: var(--control);
+  --settings-input-line: var(--strong-line);
+  --settings-button-line: var(--control-line);
+  --settings-button-hover-line: var(--control-hover-line);
+  --settings-summary: var(--muted);
+  --settings-primary-hover: color-mix(in srgb, var(--primary), var(--link) 18%);
 }
 .settings-pane::backdrop {
   background: #0009;
@@ -37,8 +51,9 @@
 }
 .settings-pane .modal-frame > header .icon-button {
   background: transparent;
-  border-color: transparent;
-  color: var(--muted);
+  border: 0;
+  border-radius: 0;
+  color: var(--close-text);
   font-size: 22px;
 }
 .settings-pane .modal-body {
@@ -55,7 +70,44 @@
 }
 .settings-pane .modal-frame > footer button {
   padding: 7px 12px;
-  min-height: 34px;
+  min-height: 35px;
+  font-size: 11px;
+}
+.settings-pane .modal-frame > footer .primary {
+  padding-inline: 11px;
+}
+.settings-pane
+  :is(.modal-frame > footer, .connection-fields, .settings-concurrency, .settings-search)
+  button:not(.primary, .quiet-button, .icon-button) {
+  border-color: var(--settings-button-line);
+  background: var(--workspace-secondary);
+  color: var(--workspace-secondary-text);
+  font-size: 11px;
+}
+.settings-pane
+  :is(.modal-frame > footer, .connection-fields, .settings-concurrency, .settings-search)
+  button:not(.primary, .quiet-button, .icon-button):hover:not(:disabled) {
+  border-color: var(--settings-button-hover-line);
+  background: var(--workspace-secondary-hover);
+}
+.settings-pane button.primary:hover:not(:disabled) {
+  background: var(--settings-primary-hover);
+}
+.settings-pane .quiet-button {
+  border: 0;
+  border-radius: 0;
+  color: var(--quiet-text);
+  font-size: 10px;
+}
+.settings-pane .quiet-button:hover:not(:disabled) {
+  color: var(--quiet-hover-text);
+  background: transparent;
+}
+@media (forced-colors: none) {
+  .settings-pane :is(input, select):focus-visible {
+    outline-color: light-dark(var(--focus), #8b9fe7);
+    outline-offset: 2px;
+  }
 }
 .settings-body form {
   display: block;
@@ -80,14 +132,23 @@
   gap: 7px;
 }
 .settings-section input:not([type="checkbox"], [type="radio"]),
-.settings-section select {
+.settings-section select,
+.settings-reviewers input:not([type]) {
   width: 100%;
   min-width: 0;
   height: 40px;
   padding: 9px 12px;
-  background: var(--surface);
-  border-color: var(--strong-line);
+  background: var(--settings-input);
+  border-color: var(--settings-input-line);
   font-size: 13px;
+}
+.settings-section select:enabled {
+  cursor: pointer;
+}
+.settings-section select:enabled:is(:hover, :active) {
+  background: var(--control-hover);
+  border-color: var(--control-hover-line);
+  color: light-dark(var(--text), #fafafa);
 }
 .connection-grid {
   display: grid;
@@ -151,6 +212,7 @@
   height: 15px;
   margin: 0;
   accent-color: var(--link);
+  cursor: inherit;
 }
 .settings-concurrency {
   margin-top: 18px;
@@ -271,7 +333,6 @@
 }
 .settings-selection-body .quiet-button {
   justify-self: start;
-  color: var(--link);
   font-size: 11px;
 }
 .settings-choices {
@@ -297,8 +358,16 @@
 .settings-advanced > summary {
   padding: 8px 0;
   cursor: pointer;
-  color: var(--muted);
+  color: var(--settings-summary);
   font-size: 12px;
+}
+.settings-provider-skill {
+  align-content: start;
+  gap: 7px;
+}
+.settings-provider-skill .quiet-button {
+  min-height: 0;
+  padding: 6px 0;
 }
 .settings-advanced[open] > summary {
   margin-bottom: 9px;

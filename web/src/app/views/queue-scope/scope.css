@@ -2,16 +2,17 @@
   min-width: 150px;
   max-width: min(320px, calc(100vw - 32px));
   max-height: min(540px, 65dvh);
-  padding: 4px;
+  padding: 6px 9px;
 }
 .queue-scope-popup.queue-sprints {
-  width: 235px;
+  width: 183px;
+  padding-inline: 4px;
 }
 .queue-scope-actions {
   display: flex;
   justify-content: space-between;
   gap: 4px;
-  margin-bottom: 5px;
+  margin-bottom: 6px;
 }
 .queue-scope-actions button,
 .queue-scope-group > button {
@@ -22,7 +23,7 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 7px 10px;
+  padding: 8px 10px;
   border-radius: 4px;
   font-size: 12px;
   overflow-wrap: anywhere;
@@ -37,6 +38,9 @@
   height: 15px;
   flex: none;
   margin: 0;
+}
+.queue-scope-popup:not(.queue-sprints) .queue-scope-option {
+  padding-inline: 5px 15px;
 }
 .queue-scope-option small {
   display: block;
@@ -59,9 +63,15 @@
   font-weight: 550;
 }
 .queue-scope-popup > input {
-  width: calc(100% - 12px);
-  margin: 8px 6px 4px;
-  font-size: 11px;
+  width: 100%;
+  height: 40px;
+  margin: 10px 0 4px;
+  padding-inline: 12px;
+  background: var(--control);
+  font-size: 13px;
+}
+.queue-sprints .queue-scope-group > button {
+  margin: 6px 8px;
 }
 .queue-scope-error {
   padding: 8px;

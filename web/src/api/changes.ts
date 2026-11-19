@@ -1,25 +1,42 @@
 import { decodeUtf8, readBoundedBytes } from "./bounded-bytes";
 import { read, request } from "./client";
-import type { PatchFile } from "./generated/contracts";
+import type { PatchFile, PatchFileIndexResponse, PatchPath } from "./generated/contracts";
 import {
   isApprovalViewResponse,
+  isCurrentPatchRevisionResponse,
   isPatchDiscussionsResponse,
   isPatchFileIndexResponse,
+  isPatchPathsResponse,
 } from "./generated/validators.mjs";
 
 export const PATCH_WINDOW_BYTES = 64 * 1024;
+export const PATCH_FILES_PER_PAGE = 10;
+export const PATH_MATCHES_PER_PAGE = 60;
 const MAX_RICH_BYTES = 2 * 1024 * 1024;
+const PATH_CACHE_BYTES = 768 * 1024;
+const RETAINED_PATCH_BYTES = 128 * 1024;
+let retainedIndex:
+  { readonly reviewId: string; readonly result: PatchFileIndexResponse } | undefined;
+let retainedCatalog:
+  | {
+      readonly reviewId: string;
+      readonly revision: string;
+      readonly result: Awaited<ReturnType<typeof loadPatchPathCatalog>>;
+    }
+  | undefined;
+let retainedPatch: { readonly identity: string; readonly result: PatchWindow } | undefined;
 
 export async function readPatchFiles(
   reviewId: string,
   signal: AbortSignal,
-  position?: { readonly revision: string; readonly cursor: string },
+  position?: { readonly revision: string; readonly cursor?: string; readonly path?: PatchPath },
   preferredFileId?: string,
 ) {
-  const query = new URLSearchParams();
+  const query = new URLSearchParams({ limit: String(PATCH_FILES_PER_PAGE) });
   if (position) {
     query.set("revision", position.revision);
-    query.set("cursor", position.cursor);
+    if (position.cursor) query.set("cursor", position.cursor);
+    if (position.path) query.set("filePathHint", position.path.lookupKey);
   }
   if (preferredFileId) query.set("preferredFileId", preferredFileId);
   const result = await read(
@@ -34,6 +51,119 @@ export async function readPatchFiles(
   ) {
     throw new Error("The selected patch index changed.");
   }
+  signal.throwIfAborted();
+  retainedIndex = { reviewId, result };
+  return result;
+}
+
+export async function readInitialPatchFiles(
+  reviewId: string,
+  signal: AbortSignal,
+  preferredFileId: string | undefined,
+): Promise<PatchFileIndexResponse> {
+  const previous = retainedIndex?.reviewId === reviewId ? retainedIndex.result : undefined;
+  if (
+    previous &&
+    previous.data.settingsRevision != null &&
+    (preferredFileId
+      ? previous.data.items.some((file) => file.fileId === preferredFileId)
+      : previous.data.pageNumber === 1)
+  ) {
+    try {
+      const current = await readPatchRevision(reviewId, signal);
+      if (
+        current.data.revision === previous.data.revision &&
+        current.data.settingsRevision === previous.data.settingsRevision
+      ) {
+        return { cursor: current.cursor, data: previous.data };
+      }
+    } catch {
+      signal.throwIfAborted();
+    }
+  }
+  return readPatchFiles(reviewId, signal, undefined, preferredFileId);
+}
+
+export async function readPatchPathCatalog(
+  reviewId: string,
+  revision: string,
+  signal: AbortSignal,
+) {
+  if (retainedCatalog?.reviewId === reviewId && retainedCatalog.revision === revision) {
+    signal.throwIfAborted();
+    return retainedCatalog.result;
+  }
+  const result = await loadPatchPathCatalog(reviewId, revision, signal);
+  signal.throwIfAborted();
+  retainedCatalog = { reviewId, revision, result };
+  return result;
+}
+
+async function loadPatchPathCatalog(reviewId: string, revision: string, signal: AbortSignal) {
+  let paths: PatchPath[] | undefined = [];
+  let bytes = 0;
+  const result = await scanPatchPaths(reviewId, revision, signal, (path) => {
+    if (!paths) return;
+    bytes += 128 + 2 * (path.oldPath.length + path.newPath.length + path.lookupKey.length);
+    if (bytes > PATH_CACHE_BYTES) paths = undefined;
+    else paths.push(path);
+  });
+  return { cursor: result.cursor, data: { ...result.data, paths } };
+}
+
+export async function readPatchPathMatches(
+  reviewId: string,
+  revision: string,
+  signal: AbortSignal,
+  text: string,
+  offset: number,
+) {
+  const paths: PatchPath[] = [];
+  let count = 0;
+  const result = await scanPatchPaths(reviewId, revision, signal, (path) => {
+    if (!matchesPatchPath(path, text)) return;
+    if (count >= offset && paths.length < PATH_MATCHES_PER_PAGE) paths.push(path);
+    count++;
+  });
+  return { cursor: result.cursor, data: { count, paths } };
+}
+
+export function matchesPatchPath(path: PatchPath, text: string) {
+  return path.oldPath.toLowerCase().includes(text) || path.newPath.toLowerCase().includes(text);
+}
+
+async function scanPatchPaths(
+  reviewId: string,
+  revision: string,
+  signal: AbortSignal,
+  visit: (path: PatchPath) => void,
+) {
+  const query = new URLSearchParams({ revision });
+  let count = 0;
+  for (let page = 0; page < 100; page++) {
+    const { cursor, data } = await read(
+      `${changesRoute(reviewId)}/paths?${query}`,
+      isPatchPathsResponse,
+      signal,
+    );
+    if (data.reviewId !== reviewId || data.revision !== revision) {
+      throw new Error("The selected file catalog changed.");
+    }
+    count += data.items.length;
+    data.items.forEach(visit);
+    if (!data.nextCursor) return { cursor, data: { count, partial: data.partial } };
+    query.set("cursor", data.nextCursor);
+  }
+  throw new Error("ReviewQ could not finish reading the file catalog.");
+}
+
+export async function readPatchRevision(reviewId: string, signal: AbortSignal) {
+  const result = await read(
+    `${changesRoute(reviewId)}/revision`,
+    isCurrentPatchRevisionResponse,
+    signal,
+  );
+  if (result.data.reviewId !== reviewId) throw new Error("The selected review changed.");
   return result;
 }
 
@@ -89,6 +219,11 @@ export async function readPatch(
 ): Promise<PatchWindow> {
   const headers = new Headers();
   const pinned = file.patchETag ?? window?.etag;
+  const identity = JSON.stringify([file.reviewId, file.revision, file.fileId, pinned]);
+  if (!window && pinned && retainedPatch?.identity === identity) {
+    signal.throwIfAborted();
+    return retainedPatch.result;
+  }
   if (pinned) headers.set("If-Match", pinned);
   const offset = window?.offset ?? 0;
   const bounded = window === undefined ? MAX_RICH_BYTES : PATCH_WINDOW_BYTES;
@@ -116,7 +251,16 @@ export async function readPatch(
     const bytes = await readBoundedBytes(response, bounded);
     if (bytes.length !== file.byteLength) throw new Error("The selected patch length changed.");
     enforcePatchRows(bytes);
-    return { text: decodeUtf8(bytes), first: 0, next: bytes.length, total: bytes.length, etag };
+    signal.throwIfAborted();
+    const result = {
+      text: decodeUtf8(bytes),
+      first: 0,
+      next: bytes.length,
+      total: bytes.length,
+      etag,
+    };
+    retainedPatch = bytes.length <= RETAINED_PATCH_BYTES ? { identity, result } : undefined;
+    return result;
   }
   const [first, end, total] = contentRange(response);
   if (

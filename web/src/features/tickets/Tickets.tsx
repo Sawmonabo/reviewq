@@ -3,9 +3,9 @@ import { MarkdownContent } from "../../components/markdown/MarkdownContent";
 import { readTicket } from "../../api/tickets";
 import type { TicketCommentOrder } from "../../api/tickets";
 import type { TicketComment } from "../../api/generated/contracts";
-import { Empty, Loading, Notice } from "../../components/PanelState";
+import { Loading, Notice } from "../../components/PanelState";
 import { useResource } from "../../hooks/useResource";
-import { formatTime, safeUrl } from "../../lib/presentation";
+import { formatActivityTime, safeUrl } from "../../lib/presentation";
 import { savedValue, saveValue } from "../../lib/view-preferences";
 import { jiraWiki } from "./wiki";
 import "./tickets.css";
@@ -14,7 +14,7 @@ export default function Tickets({ keys }: { readonly keys: readonly string[] }) 
   const bookmark = `ticket.${keys.join(".")}`;
   const [preferred, setPreferred] = useState(() => savedValue(bookmark));
   const current = typeof preferred === "string" && keys.includes(preferred) ? preferred : keys[0];
-  if (!current) return <Empty title="No linked Jira ticket" />;
+  if (!current) return <p className="meta">No ticket is linked to this merge request.</p>;
   return (
     <section
       className="ticket-pane"
@@ -23,7 +23,7 @@ export default function Tickets({ keys }: { readonly keys: readonly string[] }) 
     >
       {keys.length > 1 && (
         <label className="field">
-          Linked ticket
+          Ticket
           <select
             value={current}
             onChange={(event) => {
@@ -73,7 +73,7 @@ function TicketDetail({ ticketKey }: { readonly ticketKey: string }) {
       <header className="ticket-heading">
         <div className="ticket-status-line">
           {ticket.status && <span className="badge ticket-status green">{ticket.status}</span>}
-          {ticket.issueType && <span>{ticket.issueType}</span>}
+          <span>{ticket.issueType || "Ticket"}</span>
           {url && (
             <a className="ticket-jira-link" href={url} target="_blank" rel="noreferrer">
               Open in Jira ↗
@@ -94,7 +94,7 @@ function TicketDetail({ ticketKey }: { readonly ticketKey: string }) {
                   »
                 </span>
               )}
-              {ticket.priority ?? "Unknown"}
+              {ticket.priority ?? "Not specified"}
             </dd>
           </div>
           <div>
@@ -117,7 +117,7 @@ function TicketDetail({ ticketKey }: { readonly ticketKey: string }) {
           <div>
             <dt>Reporter</dt>
             <dd>
-              <TicketPerson name={ticket.reporter} fallback="Unknown" />
+              <TicketPerson name={ticket.reporter} fallback="Not specified" />
             </dd>
           </div>
           {ticket.components.length > 0 && (
@@ -137,12 +137,14 @@ function TicketDetail({ ticketKey }: { readonly ticketKey: string }) {
       {ticket.warnings.map((warning) => (
         <Notice key={warning}>{warning}</Notice>
       ))}
-      {ticket.description && (
-        <section className="ticket-description" aria-label="Description and scope">
-          <h3>Description &amp; scope</h3>
+      <section className="ticket-description" aria-label="Description and scope">
+        <h3>Description &amp; scope</h3>
+        {ticket.description?.trim() ? (
           <TicketMarkdown body={ticket.description} base={url} />
-        </section>
-      )}
+        ) : (
+          <p className="meta">This ticket has no description.</p>
+        )}
+      </section>
       <section className="ticket-comments stack" aria-label="Jira comments">
         <header className="ticket-comments-heading spread">
           <h3>
@@ -153,7 +155,6 @@ function TicketDetail({ ticketKey }: { readonly ticketKey: string }) {
             <select
               aria-label="Sort ticket comments"
               value={order}
-              disabled={ticket.commentCount < 2}
               onChange={(event) => {
                 setOrder(event.currentTarget.value === "oldest" ? "oldest" : "newest");
                 selectPage([]);
@@ -166,11 +167,11 @@ function TicketDetail({ ticketKey }: { readonly ticketKey: string }) {
         </header>
         {detail.error && <Notice retry={() => selectPage([])}>{detail.error}</Notice>}
         {switching && !detail.error && (
-          <p role="status" className="meta">
-            Loading comments. Showing the previous page.
+          <p role="status" className="sr-only">
+            Loading comments.
           </p>
         )}
-        {!ticket.items.length && <p className="meta">No comments.</p>}
+        {!ticket.items.length && <p className="meta">No comments yet.</p>}
         <div className="ticket-comment-list" aria-busy={switching && !detail.error}>
           {ticket.items.map((comment) => (
             <CommentCard key={comment.id} comment={comment} base={url} />
@@ -199,6 +200,15 @@ function TicketDetail({ ticketKey }: { readonly ticketKey: string }) {
           </div>
         )}
       </section>
+      <p className="ticket-freshness meta">
+        {ticket.updatedAt && (
+          <>
+            Updated <time dateTime={ticket.updatedAt}>{formatActivityTime(ticket.updatedAt)}</time>{" "}
+            ·{" "}
+          </>
+        )}
+        Loaded <time dateTime={ticket.fetchedAt}>{formatActivityTime(ticket.fetchedAt)}</time>
+      </p>
     </>
   );
 }
@@ -223,9 +233,9 @@ function CommentCard({
 }) {
   const [expanded, setExpanded] = useState(false);
   const collapsible = comment.body.length > 1400;
-  const body = collapsible && !expanded ? `${comment.body.slice(0, 1400)}…` : comment.body;
   const permalink = safeUrl(comment.url);
-  const stamp = <time dateTime={comment.createdAt}>{formatTime(comment.createdAt)}</time>;
+  const stamp = <time dateTime={comment.createdAt}>{formatActivityTime(comment.createdAt)}</time>;
+  const folded = collapsible && !expanded;
   return (
     <article className="ticket-comment">
       <div className="ticket-comment-meta">
@@ -240,15 +250,24 @@ function CommentCard({
           stamp
         )}
       </div>
-      <TicketMarkdown body={body} base={base} />
+      <div
+        className={folded ? "ticket-comment-body ticket-comment-folded" : "ticket-comment-body"}
+        onFocusCapture={(event) => {
+          const clip = event.currentTarget.getBoundingClientRect();
+          if (folded && event.target.getBoundingClientRect().bottom > clip.top + clip.height * 0.73)
+            setExpanded(true);
+        }}
+      >
+        <TicketMarkdown body={comment.body} base={base} />
+      </div>
       {collapsible && (
         <button
           type="button"
-          className="text-button"
+          className="ticket-comment-toggle"
           aria-expanded={expanded}
           onClick={() => setExpanded(!expanded)}
         >
-          {expanded ? "Show less" : "Show more"}
+          {expanded ? "Collapse comment" : "Read full comment"}
         </button>
       )}
     </article>

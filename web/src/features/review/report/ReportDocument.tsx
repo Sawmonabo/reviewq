@@ -1,18 +1,21 @@
 import { useMemo, useRef, useState } from "react";
 import type { RunDetail } from "../../../api/generated/contracts";
 import type { QuoteRef, ReportSummary } from "../../../api/generated/contracts/reports";
-import { reportContext, reportFeedback, reportView } from "../../../api/reports";
+import { reportContext, reportDownload, reportFeedback, reportView } from "../../../api/reports";
+import { ActionMenu } from "../../../components/ActionMenu";
+import { Icon } from "../../../components/Icon";
 import { Empty, Loading, Notice } from "../../../components/PanelState";
 import { parseMarkdown } from "../../../components/markdown/parse-markdown";
 import { useDraft } from "../../../hooks/useDraft";
 import { useResource } from "../../../hooks/useResource";
 import type { DraftStore } from "../../../lib/drafts";
-import { safeUrl } from "../../../lib/presentation";
+import { formatTime, readable, safeUrl } from "../../../lib/presentation";
 import { Composer } from "../Composer";
 import { ReportDetails } from "./ReportDetails";
 import { ReportSource } from "./ReportSource";
 import { RichReport } from "./RichReport";
 import type { AcceptedFindingChange } from "./report-structure";
+import { useVisibleContent } from "./useVisibleContent";
 
 type Quote = { readonly text: string; readonly reference: QuoteRef | null };
 type Props = {
@@ -22,6 +25,9 @@ type Props = {
   readonly drafts: DraftStore;
   readonly reviewTitle: string;
   readonly webUrl: string;
+  readonly onRendered: (receiptId: string) => void;
+  readonly onMarkViewed: () => void;
+  readonly markingViewed: boolean;
 };
 
 export default function ReportDocument({
@@ -31,15 +37,24 @@ export default function ReportDocument({
   drafts,
   reviewTitle,
   webUrl,
+  onRendered,
+  onMarkViewed,
+  markingViewed,
 }: Props) {
   const [source, setSource] = useState(false);
   const [sourceOffset, setSourceOffset] = useState(0);
   const [notice, setNotice] = useState<string>();
   const [feedbackNotice, setFeedbackNotice] = useState<string>();
-  const [contextOpen, setContextOpen] = useState(false);
-  const [context, setContext] = useState<"findings" | "changes" | "sections">("findings");
+  const [context, setContext] = useState<"findings" | "changes" | "sections">();
+  const contextTitle =
+    context === "findings"
+      ? "Finding dispositions"
+      : context === "changes"
+        ? "Finding outcomes"
+        : "Source sections";
   const feedback = useRef<HTMLElement>(null);
   const reader = useRef<HTMLDivElement>(null);
+  const reportActions = useRef<HTMLButtonElement>(null);
   const address = [run.reviewId, run.runId, run.leadSessionKey, report.receiptId, report.sha256];
   const quoteKey = JSON.stringify(["quote", ...address]);
   const quoteLabel = `Quote · ${reviewTitle}`;
@@ -73,6 +88,11 @@ export default function ReportDocument({
   const formattingFailure = Boolean(typeof markdown === "string" && !tree);
   const sourceMode = source || !admitted || formattingFailure || Boolean(body.error);
   const target = { runId: run.runId, sessionKey: run.leadSessionKey };
+  useVisibleContent(
+    reader,
+    !sourceMode && !changes.pending && tree ? report.receiptId : undefined,
+    onRendered,
+  );
 
   function focusFeedback() {
     const section = feedback.current;
@@ -151,6 +171,7 @@ export default function ReportDocument({
                     : "Original Markdown"
             }
             onQuote={capture}
+            onRendered={onRendered}
           />
         ) : body.pending || changes.pending ? (
           <Loading label="Loading accepted report…" />
@@ -189,14 +210,64 @@ export default function ReportDocument({
             {source ? "Read formatted report" : "Read original source"}
           </button>
         )}
-        <span className="meta" title={report.sha256}>
-          SHA-256 <code>{report.sha256.slice(0, 12)}</code>
-        </span>
+        <ActionMenu
+          label="Report actions"
+          trigger={<Icon name="more" />}
+          triggerRef={reportActions}
+          items={[
+            ...(report.semanticIndex === "ready" && report.findingCount !== 0
+              ? [{ label: "Finding dispositions", run: () => setContext("findings") }]
+              : []),
+            ...(report.semanticIndex === "ready" && report.changeCount !== 0
+              ? [{ label: "Finding outcomes", run: () => setContext("changes") }]
+              : []),
+            ...(report.semanticIndex === "ready"
+              ? [{ label: "Source sections", run: () => setContext("sections") }]
+              : []),
+            { label: "Download Markdown", href: reportDownload(run.runId, report.receiptId) },
+            { label: "Mark findings viewed", run: onMarkViewed, disabled: markingViewed },
+          ]}
+        />
       </div>
+      {context && (
+        <section className="report-structured stack" aria-label={contextTitle}>
+          <div className="spread">
+            <h3>{contextTitle}</h3>
+            <button
+              className="quiet-button"
+              type="button"
+              onClick={() => {
+                setContext(undefined);
+                reportActions.current?.focus({ preventScroll: true });
+              }}
+            >
+              Close
+            </button>
+          </div>
+          <ReportDetails
+            key={context}
+            run={run}
+            report={report}
+            collection={context}
+            current={current}
+            drafts={drafts}
+            reviewTitle={reviewTitle}
+            onSource={openSource}
+          />
+        </section>
+      )}
+      <span className="sr-only">
+        {current ? "Current" : "Historical"} · {formatTime(report.capturedAt)} ·{" "}
+        {readable(report.coverage)}
+        {report.reviewedSha && ` · Reviewed revision ${report.reviewedSha}`}
+        {report.findingCount !== null && ` · ${report.findingCount} indexed findings`}
+        {report.changeCount !== null && ` · ${report.changeCount} declared changes`}
+        {` · SHA-256 ${report.sha256}`}
+        {report.revisionReason && ` · ${report.revisionReason}`}
+      </span>
       <section className="report-feedback stack" aria-label="Report feedback" ref={feedback}>
         <label className="field report-quote-field">
           Finding or passage to reference
-          <small className="meta">Optional · quote from this report</small>
           <textarea
             rows={2}
             value={quote?.text ?? ""}
@@ -266,44 +337,6 @@ export default function ReportDocument({
           }}
         />
       </section>
-      {report.semanticIndex === "ready" && (
-        <details
-          className="report-structured"
-          onToggle={(event) => setContextOpen(event.currentTarget.open)}
-        >
-          <summary>Finding details and dispositions</summary>
-          {contextOpen && (
-            <section className="stack" aria-label="Structured review context">
-              <div className="actions report-context">
-                {(["findings", "changes", "sections"] as const).map((kind) => (
-                  <button
-                    type="button"
-                    key={kind}
-                    aria-pressed={kind === context}
-                    onClick={() => setContext(kind)}
-                  >
-                    {kind === "findings"
-                      ? "Finding dispositions"
-                      : kind === "changes"
-                        ? "Finding outcomes"
-                        : "Source sections"}
-                  </button>
-                ))}
-              </div>
-              <ReportDetails
-                key={context}
-                run={run}
-                report={report}
-                collection={context}
-                current={current}
-                drafts={drafts}
-                reviewTitle={reviewTitle}
-                onSource={openSource}
-              />
-            </section>
-          )}
-        </details>
-      )}
     </>
   );
 }

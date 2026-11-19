@@ -51,7 +51,9 @@ export function useHistory(
   const generation = last?.generation;
 
   async function load(position: ReadPosition, wanted?: Anchor, background = false) {
-    if (active.current) {
+    if (position === "latest" && !background) resetTo.current = undefined;
+    const requestedJump = position === "around" && wanted && !background;
+    if (active.current && !requestedJump) {
       if (background) pending.current = true;
       return;
     }
@@ -74,7 +76,9 @@ export function useHistory(
       setWaiting(true);
       return;
     }
-    beforeUpdate(position, wanted);
+    active.current?.abort();
+    if (requestedJump) resetTo.current = undefined;
+    if (!adjacent) beforeUpdate(position, wanted);
     const controller = new AbortController();
     active.current = controller;
     pending.current = false;
@@ -91,6 +95,7 @@ export function useHistory(
       );
       if (controller.signal.aborted) return;
       const { data, cursor: eventCursor } = response;
+      if (adjacent) beforeUpdate(position, wanted);
       observeSnapshot(eventCursor);
       setAvailability(data.availability);
       setUpdated(Date.now());
@@ -160,15 +165,24 @@ export function useHistory(
   });
 
   const catchup = useEffectEvent(() => {
-    if (!pinned.size && waiting && !loading && following) {
-      const wanted = resetTo.current;
-      resetTo.current = undefined;
-      void load(wanted ? "around" : "latest", wanted, true);
-    }
+    if (pinned.size || !waiting || loading) return;
+    const wanted = resetTo.current;
+    if (!wanted && !following) return;
+    resetTo.current = undefined;
+    void load(wanted ? "around" : "latest", wanted, !wanted);
   });
 
   useEffect(() => {
-    const firstRead = requestAnimationFrame(() => initialize());
+    // Establish the stream baseline before taking the first page, so its initial
+    // availability notice and the first read observe the same starting point.
+    let initialized = false;
+    function firstPage() {
+      if (initialized) return;
+      initialized = true;
+      window.clearTimeout(firstRead);
+      initialize();
+    }
+    const firstRead = window.setTimeout(firstPage, 50);
     let stream: EventSource | undefined;
     let retry: number | undefined;
     function close() {
@@ -196,7 +210,13 @@ export function useHistory(
         next.addEventListener(kind, (event: MessageEvent<string>) => {
           if (stream !== next) return;
           const value = parseEvent(event.data);
-          if (value?.runId === runId && value.sessionKey === sessionKey) notice(kind, value);
+          if (value?.runId !== runId || value.sessionKey !== sessionKey) return;
+          if (!initialized && kind !== "delta") {
+            if (typeof value.availability === "string") setAvailability(value.availability);
+            firstPage();
+          } else {
+            notice(kind, value);
+          }
         });
       }
     }
@@ -204,7 +224,7 @@ export function useHistory(
     document.addEventListener("visibilitychange", open);
     window.addEventListener("pagehide", close);
     return () => {
-      cancelAnimationFrame(firstRead);
+      window.clearTimeout(firstRead);
       const controller = active.current;
       active.current = undefined;
       controller?.abort();
@@ -215,7 +235,7 @@ export function useHistory(
   }, [runId, sessionKey, bookmark]);
 
   useEffect(() => {
-    if (!waiting || loading || pinned.size || !following) return;
+    if (!waiting || loading || pinned.size) return;
     const frame = requestAnimationFrame(() => catchup());
     return () => cancelAnimationFrame(frame);
   }, [following, loading, pinned.size, waiting]);

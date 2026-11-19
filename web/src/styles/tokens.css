@@ -99,6 +99,9 @@
   --avatar-text: #b0b0bd;
   --dim-text: #80808e;
   --ticket-text: #b0bdda;
+  --quiet-text: #a4aecb;
+  --quiet-hover-text: #d8e0f8;
+  --close-text: #9696a4;
   --transcript-text: #d2d2dc;
   --user-message-bg: #1a1e2b;
   --user-message-text: #e0e4ef;
@@ -125,6 +128,9 @@
   --avatar-text: #575364;
   --dim-text: #646073;
   --ticket-text: #324d98;
+  --quiet-text: var(--link);
+  --quiet-hover-text: var(--text);
+  --close-text: var(--muted);
   --transcript-text: #343441;
   --user-message-bg: #eaeafb;
   --user-message-text: #292c45;

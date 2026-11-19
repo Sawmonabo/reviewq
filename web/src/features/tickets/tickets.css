@@ -26,8 +26,11 @@
 }
 .ticket-jira-link {
   margin-left: auto;
-  color: var(--link);
+  color: light-dark(var(--link), #9faacc);
   white-space: nowrap;
+}
+.ticket-jira-link:is(:hover, :active) {
+  color: var(--quiet-hover-text);
 }
 .ticket-status-line .ticket-status {
   height: 26px;
@@ -41,7 +44,7 @@
   display: flex;
   flex-wrap: wrap;
   gap: 16px 32px;
-  margin: 9px 0 22px;
+  margin: 10px 0 22px;
 }
 .ticket-facts dt {
   margin-bottom: 5px;
@@ -90,10 +93,13 @@
 .ticket-comments h3 {
   font-size: 13px;
   font-weight: 600;
-  margin-bottom: 15px;
+  margin-bottom: 18px;
 }
 .ticket-comments h3 .badge {
   margin-inline-start: 7px;
+  padding: 1px 6px;
+  border-radius: 5px;
+  font-size: 10px;
 }
 .ticket-description .prose {
   color: color-mix(in srgb, var(--text), var(--muted) 40%);
@@ -143,6 +149,24 @@
 .ticket-comments-heading h3 {
   margin-bottom: 0;
 }
+.ticket-comments-heading {
+  margin-bottom: 7px;
+  flex-wrap: wrap;
+}
+.ticket-comments-heading select {
+  width: auto;
+  padding: 6px 9px;
+  font-size: 11px;
+  background: light-dark(var(--surface), #101116);
+  border-color: light-dark(var(--line), #2b2e38);
+  color: light-dark(var(--text), #bfc4d3);
+  cursor: pointer;
+}
+.ticket-comments-heading select:enabled:is(:hover, :active) {
+  background: var(--control-hover);
+  border-color: var(--control-hover-line);
+  color: light-dark(var(--text), #fafafa);
+}
 .ticket-comment-meta {
   gap: 10px;
   min-height: 28px;
@@ -161,25 +185,42 @@
   width: 27px;
   height: 27px;
 }
-.ticket-comment > :is(.prose, .text-button) {
+.ticket-comment > :is(.ticket-comment-body, .ticket-comment-toggle) {
   margin-inline-start: 37px;
 }
-.ticket-comment .text-button {
+.ticket-comment-folded {
+  max-height: 238px;
+  overflow: clip;
+  mask-image: linear-gradient(#000 73%, transparent);
+}
+.ticket-comment-toggle {
   justify-self: start;
+  padding-inline-start: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: light-dark(var(--link), #a8b9e2);
+  font-size: 11px;
+}
+.ticket-comment-toggle:enabled:is(:hover, :active) {
+  background: transparent;
+  color: var(--quiet-hover-text);
 }
 .ticket-comment .prose {
   font-size: 12px;
   line-height: 1.8;
 }
 .ticket-comment-meta a {
-  color: var(--muted);
-}
-.ticket-comment-meta a:hover {
-  color: var(--link);
+  color: light-dark(var(--muted), #828a9e);
+  text-decoration: none;
 }
 .ticket-description .prose pre,
 .ticket-comment .prose pre {
   background: var(--canvas);
+}
+.ticket-freshness {
+  font-size: 10px;
+  margin-top: 20px;
 }
 .prose-source {
   white-space: pre-wrap;

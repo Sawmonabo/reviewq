@@ -128,37 +128,35 @@ export function Repositories({
                 }
               />
             </label>
-            {repo.checkout && (
-              <div className="fields settings-default-skills">
-                {(["claude", "codex"] as const).map((provider) => (
-                  <CheckoutSkill
-                    key={JSON.stringify([
-                      provider,
-                      repo.projectId,
-                      repo.checkout,
-                      gitlab.origin,
-                      connection.expectedRevision,
-                      connectionEpoch,
-                    ])}
-                    body={{
-                      expectedRevision: connection.expectedRevision,
-                      projectId: repo.projectId,
-                      checkout: repo.checkout ?? "",
-                      gitlab,
-                      token: connection.token,
-                      provider,
-                    }}
-                    selected={repo.defaultSkills[provider] ?? null}
-                    onSelect={(skill) =>
-                      onChange({
-                        ...repo,
-                        defaultSkills: { ...repo.defaultSkills, [provider]: skill },
-                      })
-                    }
-                  />
-                ))}
-              </div>
-            )}
+            <div className="fields settings-default-skills">
+              {(["claude", "codex"] as const).map((provider) => (
+                <CheckoutSkill
+                  key={JSON.stringify([
+                    provider,
+                    repo.projectId,
+                    repo.checkout,
+                    gitlab.origin,
+                    connection.expectedRevision,
+                    connectionEpoch,
+                  ])}
+                  body={{
+                    expectedRevision: connection.expectedRevision,
+                    projectId: repo.projectId,
+                    checkout: repo.checkout ?? "",
+                    gitlab,
+                    token: connection.token,
+                    provider,
+                  }}
+                  selected={repo.defaultSkills[provider] ?? null}
+                  onSelect={(skill) =>
+                    onChange({
+                      ...repo,
+                      defaultSkills: { ...repo.defaultSkills, [provider]: skill },
+                    })
+                  }
+                />
+              ))}
+            </div>
           </fieldset>
         </details>
       ))}

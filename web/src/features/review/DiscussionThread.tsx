@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { MarkdownContent } from "../../components/markdown/MarkdownContent";
 import type { PatchDiscussion } from "../../api/generated/contracts";
-import { formatTime, safeUrl } from "../../lib/presentation";
+import { formatActivityTime, safeUrl } from "../../lib/presentation";
 
 export function DiscussionThread({
   thread,
@@ -14,18 +14,21 @@ export function DiscussionThread({
   const first = thread.notes[0];
   const source = safeUrl(thread.webUrl);
   const line = thread.anchor?.newLine ?? thread.anchor?.oldLine;
+  const lineSide = thread.anchor?.newLine == null ? "old" : "new";
   const path = thread.anchor?.newLine == null ? thread.anchor?.oldPath : thread.anchor.newPath;
+  const head = thread.anchor?.headSha;
   if (!first) return null;
   const status = { open: "Open", resolved: "Resolved", comment: "Comment", unknown: "Discussion" }[
     thread.resolution
   ];
   const subject =
-    thread.notes
-      .find((note) => note.body.trim())
-      ?.body.trim()
-      .split("\n", 1)[0]
-      ?.trim()
-      .match(/^.{1,140}/u)?.[0] ?? "Discussion";
+    first.body
+      .replace(/<!--[\s\S]*?-->|<[^>]+>/g, "")
+      .split("\n")
+      .map((line) => line.trim())
+      .find(Boolean)
+      ?.replace(/^#{1,6}\s+|\*\*|__|[_*`](?=\S)|(?<=\S)[_*`]/g, "")
+      .slice(0, 150) || "Discussion";
   return (
     <details
       className="patch-discussion"
@@ -66,15 +69,18 @@ export function DiscussionThread({
               {path && (
                 <code>
                   {path}
-                  {line !== null && line !== undefined ? `:${line}` : ""}
+                  {line !== null && line !== undefined ? `:${lineSide} ${line}` : ""}
                 </code>
+              )}
+              {thread.outdated && typeof head === "string" && (
+                <span title={head}>Commented on {head.slice(0, 12)}</span>
               )}
             </div>
           )}
           {thread.notes.map((note) => {
             const href = safeUrl(note.webUrl);
             const stamp = note.createdAt ? (
-              <time dateTime={note.createdAt}>{formatTime(note.createdAt)}</time>
+              <time dateTime={note.createdAt}>{formatActivityTime(note.createdAt)}</time>
             ) : (
               "Open note in GitLab"
             );
@@ -84,7 +90,7 @@ export function DiscussionThread({
                   <span className="avatar" aria-hidden="true">
                     {note.author.slice(0, 2).toUpperCase()}
                   </span>
-                  <strong>{note.author}</strong>
+                  <strong title={note.author}>{note.author}</strong>
                   {note.ours && <span className="meta">Configured reviewer</span>}
                   {href ? (
                     <a

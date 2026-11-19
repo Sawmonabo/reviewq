@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import type { KeyboardEvent } from "react";
 import { readOverview } from "../../api/client";
 import type {
   HostProviderDto,
@@ -13,8 +14,9 @@ import { Modal } from "../../components/Modal";
 import { Empty, Loading, Notice } from "../../components/PanelState";
 import { useResource } from "../../hooks/useResource";
 import { describeError, readable } from "../../lib/presentation";
+import { submits } from "../../lib/submit-key";
 import { LaunchReceiptCard, LaunchReceipts } from "./LaunchReceipts";
-import { LaunchTargetPicker } from "./LaunchTargetPicker";
+import { isMergeRequestUrl, LaunchTargetPicker } from "./LaunchTargetPicker";
 import { defaultLaunchSkill, launchSkills } from "./launch-skills";
 import { RegistrationGuide } from "./RegistrationGuide";
 import type { PendingLaunch } from "./pending-launches";
@@ -65,8 +67,8 @@ function LaunchEditor({
     mode === "register" ? "claude" : "codex",
   );
   const [skill, setSkill] = useState<string>();
-  const [invocation, setInvocation] = useState<"skill" | "custom">("skill");
-  const [args, setArgs] = useState("");
+  const [preferredInvocation, setInvocation] = useState<"skill" | "custom">();
+  const [editedArgs, setArgs] = useState<string>();
   const [prompt, setPrompt] = useState("");
   const [context, setContext] = useState("");
   const [model, setModel] = useState("");
@@ -115,12 +117,30 @@ function LaunchEditor({
     item.kind === "mr" && item.mrState === "open" ? [item] : [],
   );
   const active = targets[0] ?? (pickMode && !search ? choices[0] : undefined);
+  const args =
+    editedArgs ??
+    (targets.length > 1
+      ? "{ticket}"
+      : (active?.tickets.map((ticket) => ticket.key).join(" ") ?? ""));
+  const ticket = active?.tickets[0]?.key;
+  const uniqueTicket =
+    register &&
+    ticket &&
+    !search &&
+    pick.data?.nextCursor === null &&
+    pick.data.sync.mode === "connected" &&
+    !pick.data.sync.stale &&
+    !pick.data.sync.error &&
+    choices.filter((choice) => choice.tickets.some(({ key }) => key === ticket)).length === 1 &&
+    choices.some((choice) => choice.reviewId === active?.reviewId)
+      ? ticket
+      : undefined;
   const knownUrl =
     targets[0]?.webUrl ??
     (openOverview && openOverview.review.reviewId === active?.reviewId
       ? openOverview.webUrl
       : undefined);
-  const missingUrlId = register && !knownUrl ? active?.reviewId : undefined;
+  const missingUrlId = register && !uniqueTicket && !knownUrl ? active?.reviewId : undefined;
   const registrationUrl = useResource(`registration-url:${missingUrlId ?? ""}`, async (signal) => {
     if (!missingUrlId) return { data: undefined, cursor: "" };
     const { data, cursor } = await readOverview(missingUrlId, signal);
@@ -139,10 +159,10 @@ function LaunchEditor({
   );
   useEffect(() => () => request.current?.abort(), []);
   const skills = launchSkills(catalogs.data ?? []);
+  const defaultSkill = defaultLaunchSkill(skills, catalogs.data ?? []);
+  const invocation = preferredInvocation ?? (defaultSkill ? "skill" : "custom");
   const selectedSkill =
-    skill === undefined
-      ? defaultLaunchSkill(skills, catalogs.data ?? [])
-      : skills.find((choice) => choice.id === skill);
+    skill === undefined ? defaultSkill : skills.find((choice) => choice.id === skill);
   const models = (catalogs.data?.[0]?.models ?? []).filter((candidate) =>
     catalogs.data?.every((entry) => entry.models.some((item) => item.id === candidate.id)),
   );
@@ -153,6 +173,13 @@ function LaunchEditor({
     ),
   );
   const currentPreview = preview?.revision === settingsRevision ? preview.items : undefined;
+
+  function submitFromField(event: KeyboardEvent<HTMLInputElement | HTMLTextAreaElement>) {
+    if (event.defaultPrevented || !submits(event.nativeEvent)) return;
+    event.preventDefault();
+    if (currentPreview) void start();
+    else void prepare();
+  }
 
   function clearPreview() {
     setPreview(undefined);
@@ -169,7 +196,7 @@ function LaunchEditor({
   }
 
   async function track() {
-    if (!pick.data || !url.trim() || busy) return;
+    if (!pick.data || !isMergeRequestUrl(url) || busy) return;
     setBusy(true);
     setNotice(undefined);
     const controller = new AbortController();
@@ -321,7 +348,7 @@ function LaunchEditor({
 
   return (
     <Modal
-      className="launch-pane"
+      className="work-pane launch-pane"
       nonmodal
       title={
         register
@@ -492,7 +519,7 @@ function LaunchEditor({
           <RegistrationGuide
             key={JSON.stringify([provider, active?.reviewId])}
             provider={provider}
-            webUrl={knownUrl ?? registrationUrl.data}
+            target={uniqueTicket ?? knownUrl ?? registrationUrl.data}
             selected={Boolean(active)}
             advanced={advanced}
             nativeId={nativeId}
@@ -514,7 +541,7 @@ function LaunchEditor({
                 <small>
                   {catalogs.data?.find((catalog) => catalog.reviewId === target.reviewId)
                     ?.checkout ?? target.projectPath}{" "}
-                  · {target.sourceSha.slice(0, 12)}
+                  · <code>{target.sourceSha}</code>
                 </small>
               </div>
             ))}
@@ -616,16 +643,20 @@ function LaunchEditor({
                       <details className="launch-disclosure launch-skill-source">
                         <summary>Selected skill source</summary>
                         <ul>
-                          {targets.map((target) => (
-                            <li key={target.reviewId}>
-                              {targets.length > 1 && (
-                                <span>
-                                  {target.projectPath} !{target.iid}
-                                </span>
-                              )}
-                              <code>{selectedSkill.sources.get(target.reviewId)?.path}</code>
-                            </li>
-                          ))}
+                          {targets.map((target) => {
+                            const source = selectedSkill.sources.get(target.reviewId);
+                            return (
+                              <li key={target.reviewId}>
+                                {targets.length > 1 && (
+                                  <span>
+                                    {target.projectPath} !{target.iid}
+                                  </span>
+                                )}
+                                <code>{source?.path}</code>
+                                {source?.description && <p>{source.description}</p>}
+                              </li>
+                            );
+                          })}
                         </ul>
                       </details>
                     )}
@@ -633,6 +664,7 @@ function LaunchEditor({
                       Skill arguments
                       <input
                         value={args}
+                        onKeyDown={submitFromField}
                         onChange={(event) => {
                           setArgs(event.currentTarget.value);
                           clearPreview();
@@ -648,6 +680,7 @@ function LaunchEditor({
                       rows={6}
                       placeholder="Describe the work you want this agent to do…"
                       value={prompt}
+                      onKeyDown={submitFromField}
                       onChange={(event) => {
                         setPrompt(event.currentTarget.value);
                         clearPreview();
@@ -661,6 +694,7 @@ function LaunchEditor({
                     rows={5}
                     placeholder="Add background, a specific concern, or instructions for this invocation…"
                     value={context}
+                    onKeyDown={submitFromField}
                     onChange={(event) => {
                       setContext(event.currentTarget.value);
                       clearPreview();
@@ -690,6 +724,7 @@ function LaunchEditor({
                     Lead effort
                     <select
                       value={effort}
+                      disabled={!efforts.length}
                       onChange={(event) => {
                         setEffort(event.currentTarget.value);
                         clearPreview();
@@ -713,7 +748,7 @@ function LaunchEditor({
           <details className="launch-preview-panel" open key={item.reviewId}>
             <summary>
               <strong>{targets.find((target) => target.reviewId === item.reviewId)?.title}</strong>{" "}
-              · {item.sourceSha.slice(0, 12)}
+              · <code>{item.sourceSha}</code>
             </summary>
             <div className="stack">
               <p className="meta">

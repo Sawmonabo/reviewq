@@ -5,6 +5,7 @@ import type {
   GitShaDto,
   PageCursorDto,
   ReviewIdDto,
+  RevisionDto,
   SafeCountDto,
   UpstreamIdDto,
   UtcTimestampDto,
@@ -12,11 +13,11 @@ import type {
 
 export type ApprovalWarning = "approvals_unavailable" | "rules_unavailable";
 
+export type PatchRevisionDto = string;
+
 export type DiscussionPosition = "text" | "file" | "other";
 
 export type DiscussionResolution = "open" | "resolved" | "comment" | "unknown";
-
-export type PatchRevisionDto = string;
 
 export type PatchAvailability =
   "complete" | "incomplete" | "binary" | "provider_limited" | "missing";
@@ -65,6 +66,19 @@ export interface ApprovalRule {
   id: UpstreamIdDto;
   name: string;
   required: SafeCountDto;
+  [k: string]: unknown;
+}
+
+export interface CurrentPatchRevisionResponse {
+  cursor: EventCursorDto;
+  data: CurrentPatchRevision;
+  [k: string]: unknown;
+}
+
+export interface CurrentPatchRevision {
+  reviewId: ReviewIdDto;
+  revision: PatchRevisionDto;
+  settingsRevision?: RevisionDto | null;
   [k: string]: unknown;
 }
 
@@ -152,6 +166,7 @@ export interface PatchFileIndex {
   pageNumber: SafeCountDto;
   previousCursor: PageCursorDto | null;
   revision: PatchRevisionDto;
+  settingsRevision?: RevisionDto | null;
   startSha: GitShaDto;
   [k: string]: unknown;
 }
@@ -172,5 +187,33 @@ export interface PatchFile {
   renamed: boolean;
   reviewId: ReviewIdDto;
   revision: PatchRevisionDto;
+  [k: string]: unknown;
+}
+
+export interface PatchPathsResponse {
+  cursor: EventCursorDto;
+  data: PatchPaths;
+  [k: string]: unknown;
+}
+
+export interface PatchPaths {
+  /**
+   * @maxItems 100
+   */
+  items: PatchPath[];
+  nextCursor: PageCursorDto | null;
+  partial: boolean;
+  reviewId: ReviewIdDto;
+  revision: PatchRevisionDto;
+  [k: string]: unknown;
+}
+
+export interface PatchPath {
+  /**
+   * A lookup hint accepted by the checked patch index, not a verified patch address.
+   */
+  lookupKey: FileIdDto;
+  newPath: string;
+  oldPath: string;
   [k: string]: unknown;
 }

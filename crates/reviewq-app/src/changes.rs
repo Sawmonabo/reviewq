@@ -22,6 +22,42 @@ pub struct SourcePage<T> {
     pub next_page: Option<u32>,
 }
 
+#[derive(Debug)]
+pub struct PatchPath {
+    pub old_path: String,
+    pub new_path: String,
+    pub lookup_key: String,
+}
+
+#[derive(Debug)]
+pub struct PatchPathCursor {
+    pub page: u32,
+    pub after: String,
+    pub partial: bool,
+}
+
+#[derive(Debug)]
+pub struct PatchPathPage {
+    pub revision: PatchRevision,
+    pub items: Vec<PatchPath>,
+    pub next: Option<PatchPathCursor>,
+    pub partial: bool,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum PatchFileSelection {
+    Exact(String),
+    PathHint(String),
+}
+
+impl PatchFileSelection {
+    pub fn key(&self) -> &str {
+        match self {
+            Self::Exact(key) | Self::PathHint(key) => key,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum PatchAvailability {
     Complete,
@@ -196,6 +232,8 @@ pub struct ApprovalRule {
 }
 
 pub trait ChangeSource: Send + Sync {
+    fn revision(&self, source: MrIdentity) -> AppFuture<'_, PatchRevision>;
+
     fn approvals(
         &self,
         source: MrIdentity,
@@ -209,8 +247,16 @@ pub trait ChangeSource: Send + Sync {
         revision: Option<String>,
         page: u32,
         limit: u16,
-        selected_file: Option<String>,
+        selected_file: Option<PatchFileSelection>,
     ) -> AppFuture<'_, SourcePage<PatchFile>>;
+
+    fn paths(
+        &self,
+        source: MrIdentity,
+        project_path: String,
+        revision: String,
+        cursor: Option<PatchPathCursor>,
+    ) -> AppFuture<'_, PatchPathPage>;
 
     fn patch(
         &self,

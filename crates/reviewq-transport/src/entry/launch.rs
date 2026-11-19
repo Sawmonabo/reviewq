@@ -48,7 +48,13 @@ pub(super) async fn catalog(
         skills: value
             .skills
             .into_iter()
-            .map(skill)
+            .map(|option| {
+                Ok::<_, AppError>(dto::AvailableSkill {
+                    name: option.skill.name,
+                    path: path(&option.skill.path)?,
+                    description: option.description,
+                })
+            })
             .collect::<Result<_, _>>()?,
         models: value
             .models

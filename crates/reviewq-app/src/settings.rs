@@ -18,7 +18,7 @@ mod skills;
 
 pub use reduction::{ReducedWorkspace, local_reduction};
 pub use runtime::{ActiveSource, RuntimeSources, SourceLease};
-pub use skills::{NativeSkillReader, NativeSkills};
+pub use skills::{NativeSkillOption, NativeSkillReader, NativeSkills};
 
 #[derive(Clone)]
 pub struct SecretToken(Box<str>);

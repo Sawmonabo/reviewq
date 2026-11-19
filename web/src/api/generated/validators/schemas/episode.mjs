@@ -3,10 +3,10 @@ import { func0 } from "../runtime.mjs";
 import { validate25 } from "./checkpoint-id-dto.mjs";
 import { validate319 } from "./kind.mjs";
 import { validate232 } from "./utc-timestamp-dto.mjs";
-import { schema285 } from "../metadata-7.mjs";
+import { schema294 } from "../metadata-7.mjs";
 import { validate35 } from "./event-cursor-dto.mjs";
 import { validate323 } from "./cancel-recovery-response-state.mjs";
-function validate937(
+function validate965(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -30,7 +30,7 @@ function validate937(
         ((data.reason === undefined || !func0.call(data, "reason")) &&
           (missing0 = "reason"))
       ) {
-        validate937.errors = [
+        validate965.errors = [
           {
             instancePath,
             schemaPath: "#/required",
@@ -163,7 +163,7 @@ function validate937(
                     vErrors.push(err1);
                   }
                   errors++;
-                  validate937.errors = vErrors;
+                  validate965.errors = vErrors;
                   return false;
                 } else {
                   errors = _errs5;
@@ -184,12 +184,12 @@ function validate937(
                   let data4 = data.reason;
                   const _errs9 = errors;
                   if (typeof data4 !== "string" && data4 !== null) {
-                    validate937.errors = [
+                    validate965.errors = [
                       {
                         instancePath: instancePath + "/reason",
                         schemaPath: "#/properties/reason/type",
                         keyword: "type",
-                        params: { type: schema285.properties.reason.type },
+                        params: { type: schema294.properties.reason.type },
                       },
                     ];
                     return false;
@@ -251,7 +251,7 @@ function validate937(
         }
       }
     } else {
-      validate937.errors = [
+      validate965.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -262,7 +262,7 @@ function validate937(
       return false;
     }
   }
-  validate937.errors = vErrors;
+  validate965.errors = vErrors;
   return errors === 0;
 }
-export { validate937 };
+export { validate965 };

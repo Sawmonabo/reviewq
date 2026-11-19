@@ -3,7 +3,8 @@ use std::io::{Read, Write};
 use std::path::Path;
 
 use super::lease::{Body, MEMORY_LIMIT};
-use super::{fingerprint, hex, safe_path};
+use super::paths::matches_digest;
+use super::{file_lookup_key, hex, safe_path};
 use crate::http::{ResponseReader, private_file};
 use reviewq_app::access::AppError;
 use reviewq_app::changes::{PatchAvailability, PatchFile, PatchMetrics};
@@ -64,6 +65,50 @@ pub(super) fn decode(
     Ok(DiffPage { files, selected })
 }
 
+pub(super) fn find_file(
+    wire: ResponseReader,
+    first: u32,
+    limit: u16,
+    digest: &str,
+) -> Result<Option<String>, AppError> {
+    let mut reader = JsonStreamReader::new(wire);
+    reader.begin_array().map_err(invalid)?;
+    let mut ordinal = first;
+    let mut found = None;
+    while reader.has_next().map_err(invalid)? {
+        if ordinal - first >= u32::from(limit) {
+            return Err(AppError::Unavailable);
+        }
+        let mut old = None;
+        let mut new = None;
+        reader.begin_object().map_err(invalid)?;
+        while reader.has_next().map_err(invalid)? {
+            match reader.next_name().map_err(invalid)? {
+                "old_path" if old.is_none() => old = Some(path(&mut reader)?),
+                "new_path" if new.is_none() => new = Some(path(&mut reader)?),
+                "old_path" | "new_path" => return Err(AppError::Unavailable),
+                _ => reader.skip_value().map_err(invalid)?,
+            }
+        }
+        reader.end_object().map_err(invalid)?;
+        let id = file_lookup_key(
+            ordinal,
+            &old.ok_or(AppError::Unavailable)?,
+            &new.ok_or(AppError::Unavailable)?,
+        );
+        if matches_digest(&id, digest) {
+            if found.is_some() {
+                return Err(AppError::Unavailable);
+            }
+            found = Some(id);
+        }
+        ordinal += 1;
+    }
+    reader.end_array().map_err(invalid)?;
+    reader.consume_trailing_whitespace().map_err(invalid)?;
+    Ok(found)
+}
+
 fn read_item(
     reader: &mut JsonStreamReader<ResponseReader>,
     profile: &Path,
@@ -115,7 +160,7 @@ fn read_item(
     let complete = availability == PatchAvailability::Complete;
     Ok((
         PatchFile {
-            id: format!("{ordinal}-{}", fingerprint(&[&old_path, &new_path])),
+            id: file_lookup_key(ordinal, &old_path, &new_path),
             old_path,
             new_path,
             renamed: info.renamed.ok_or(AppError::Unavailable)?,

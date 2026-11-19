@@ -1,7 +1,7 @@
 import type { ReviewOverview } from "../../api/generated/contracts";
 import { Modal } from "../../components/Modal";
 import { Notice } from "../../components/PanelState";
-import { readable } from "../../lib/presentation";
+import { formatTime, readable } from "../../lib/presentation";
 
 type Attention = NonNullable<ReviewOverview["attention"]>;
 
@@ -90,6 +90,27 @@ export function ReviewAttention({
               {attention.reports.map((item) => (
                 <li key={JSON.stringify([item.runId, item.attentionReceiptId])}>
                   Run <code>{item.runId}</code> · Report receipt <code>{item.receiptId}</code>
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
+        {attention.followups.length > 0 && (
+          <section>
+            <h3>Completed follow-ups</h3>
+            <ul>
+              {attention.followups.map((item) => (
+                <li key={item.batchId}>
+                  {formatTime(item.completedAt)} · Batch <code>{item.batchId}</code>
+                  <div className="meta">
+                    Run <code>{item.runId}</code>
+                    {item.receiptId && (
+                      <>
+                        {" · Report receipt "}
+                        <code>{item.receiptId}</code>
+                      </>
+                    )}
+                  </div>
                 </li>
               ))}
             </ul>

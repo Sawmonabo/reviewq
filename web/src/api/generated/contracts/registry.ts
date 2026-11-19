@@ -109,8 +109,10 @@ import type {
 
 import type {
   ApprovalViewResponse,
+  CurrentPatchRevisionResponse,
   PatchDiscussionsResponse,
   PatchFileIndexResponse,
+  PatchPathsResponse,
 } from "./changes.js";
 
 import type { ArchivePageResponse } from "./archive.js";
@@ -163,6 +165,7 @@ export interface Contracts {
   CatalogResponse: CatalogResponse;
   CheckoutSkillsResponse: CheckoutSkillsResponse;
   CurrentActionResponse: CurrentActionResponse;
+  CurrentPatchRevisionResponse: CurrentPatchRevisionResponse;
   DeliveryReceiptResponse: DeliveryReceiptResponse;
   Failure: Failure;
   FollowupAssessmentsResponse: FollowupAssessmentsResponse;
@@ -185,6 +188,7 @@ export interface Contracts {
   NotificationStateResponse: NotificationStateResponse;
   PatchDiscussionsResponse: PatchDiscussionsResponse;
   PatchFileIndexResponse: PatchFileIndexResponse;
+  PatchPathsResponse: PatchPathsResponse;
   QuestionAnswerResponse: QuestionAnswerResponse;
   QuestionFormsResponse: QuestionFormsResponse;
   QueuePageResponse: QueuePageResponse;

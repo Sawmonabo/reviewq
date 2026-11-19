@@ -70,20 +70,23 @@ export function readFollowupResults(
   );
 }
 
-export async function readFollowupAssessments(
+export async function readFollowupBatchAssessments(
   reviewId: string,
-  throughBatchId: string,
+  batchId: string,
   cursor: string | undefined,
   signal: AbortSignal,
 ) {
   const result = await read(
-    `/reviews/${encodeURIComponent(reviewId)}/followups/assessments${queryString({ throughBatchId, cursor })}`,
+    `/reviews/${encodeURIComponent(reviewId)}/followups/assessments${queryString({ batchId, cursor })}`,
     isFollowupAssessmentsResponse,
     signal,
     512 * 1024,
   );
-  if (result.data.throughBatchId !== throughBatchId)
-    throw new Error("The follow-up assessment boundary changed.");
+  if (
+    result.data.throughBatchId !== batchId ||
+    result.data.items.some((item) => item.batchId !== batchId)
+  )
+    throw new Error("The selected follow-up assessment batch changed.");
   return result;
 }
 

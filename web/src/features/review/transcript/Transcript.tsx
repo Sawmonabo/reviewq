@@ -3,6 +3,7 @@ import {
   useCallback,
   useDeferredValue,
   useEffect,
+  useEffectEvent,
   useLayoutEffect,
   useMemo,
   useRef,
@@ -13,11 +14,11 @@ import type { HostProviderDto } from "../../../api/generated/contracts/common";
 import type { MessageHistoryItem } from "../../../api/generated/contracts/delivery";
 import { historyParts } from "../../../api/history";
 import type { SessionAddress } from "../../../api/history";
-import { Icon } from "../../../components/Icon";
 import { Empty, Loading, Notice } from "../../../components/PanelState";
 import { describeError, formatTime, readable } from "../../../lib/presentation";
 import { EntryBody } from "./EntryBody";
-import { entriesIn, readBookmark, rememberBookmark } from "./history-window";
+import { entriesIn, readBookmark, rememberBookmark, type TimelineBookmark } from "./history-window";
+import { ProviderMark } from "./ProviderMark";
 import { PromptNavigator } from "./PromptNavigator";
 import { HistoryTimestamp } from "./HistoryTimestamp";
 import { FileReadPack, ToolRunHeader } from "./ToolActivity";
@@ -25,6 +26,7 @@ import { activityRows, openKey, toolCatalog, toolOnly } from "./tool-activity";
 import type { ReadPack, ReadTarget, ToolRun } from "./tool-activity";
 import { MarkdownContent } from "../../../components/markdown/MarkdownContent";
 import { useHistory } from "./useHistory";
+import { useInlineProse } from "./useInlineProse";
 
 type Position = {
   readonly id: string;
@@ -54,11 +56,10 @@ type Props = {
   readonly provider: HostProviderDto;
   readonly child: boolean;
   readonly messages: readonly MessageHistoryItem[];
-  readonly resultOnly: boolean;
   readonly working: boolean;
 };
 
-export function Transcript({ target, provider, child, messages, resultOnly, working }: Props) {
+export function Transcript({ target, provider, child, messages, working }: Props) {
   const providerName = readable(provider);
   const bookmark = `history.${target.runId}.${target.sessionKey}`;
   const [saved] = useState(() => readBookmark(bookmark));
@@ -89,6 +90,7 @@ export function Transcript({ target, provider, child, messages, resultOnly, work
   );
   const selectionState = useRef({ hasText: false, ids: new Set<string>() });
   const scrollIntent = useRef(false);
+  const readingPosition = useRef<TimelineBookmark | undefined>(undefined);
   const requestedLatest = useRef(false);
   const activeLatest = useRef(false);
   const toolFocus = useRef<ReadTarget | undefined>(undefined);
@@ -115,12 +117,6 @@ export function Transcript({ target, provider, child, messages, resultOnly, work
   const clippedStart = Boolean(history.older);
   const clippedEnd = Boolean(history.newer || inProgress);
   const entries = useMemo<Visible[]>(() => {
-    if (resultOnly) {
-      const result = [...historyEntries]
-        .reverse()
-        .find((entry) => entry.parts.some((part) => part.kind === "assistant_text"));
-      return result ? [{ kind: "native", id: result.entryId, entry: result }] : [];
-    }
     const deliveries = new Map(
       messages.flatMap((delivery) =>
         delivery.nativeEntryId ? [[delivery.nativeEntryId, delivery] as const] : [],
@@ -156,7 +152,6 @@ export function Transcript({ target, provider, child, messages, resultOnly, work
     inProgress,
     knownTools,
     messages,
-    resultOnly,
   ]);
 
   const rangeExtractor = useCallback(
@@ -182,6 +177,27 @@ export function Transcript({ target, provider, child, messages, resultOnly, work
     overscan: 7,
     rangeExtractor,
   });
+
+  const virtualRows = list.getVirtualItems();
+  const windowHeight = list.scrollRect?.height ?? 0;
+  const windowTop = following
+    ? Math.max(0, list.getTotalSize() - windowHeight)
+    : (list.scrollOffset ?? 0);
+  const nearby = windowHeight
+    ? virtualRows
+        .filter((item) => item.end > windowTop - 120 && item.start < windowTop + windowHeight + 120)
+        .flatMap((item) => {
+          const row = entries[item.index];
+          return row?.kind === "native" && row.entry ? [row.entry] : [];
+        })
+    : [];
+  const prose = useInlineProse(
+    target,
+    history.generation,
+    following ? nearby.reverse() : nearby,
+    selectedText || pinned.size > 0,
+    output?.reference,
+  );
 
   useLayoutEffect(() => {
     if (!entries.length) return;
@@ -218,7 +234,7 @@ export function Transcript({ target, provider, child, messages, resultOnly, work
       });
       anchor.current = undefined;
     }
-  }, [entries, following, list]);
+  }, [entries, following, list, prose]);
 
   useEffect(() => {
     const host = viewport.current;
@@ -261,26 +277,27 @@ export function Transcript({ target, provider, child, messages, resultOnly, work
     };
   }, []);
 
-  useEffect(() => {
-    const host = viewport.current;
-    function save() {
-      const current = visibleAnchor(host);
-      if (current && history.generation)
-        rememberBookmark(bookmark, {
-          entryId: current.id,
-          offset: current.offset,
-          following,
-          generation: history.generation,
-          toolEntry: current.toolEntry ?? false,
-          ...(current.callId ? { callId: current.callId } : {}),
-        });
+  const savePosition = useEffectEvent((host: HTMLDivElement | null) => {
+    const position = historyBookmark(host, history.generation, following);
+    const previous = readingPosition.current;
+    if (position) {
+      rememberBookmark(bookmark, position);
+    } else if (previous && previous.generation === history.generation) {
+      rememberBookmark(bookmark, previous);
     }
+  });
+
+  useLayoutEffect(() => {
+    const host = viewport.current;
+    const save = () => savePosition(host);
+    host?.addEventListener("scrollend", save);
     window.addEventListener("pagehide", save);
     return () => {
       save();
+      host?.removeEventListener("scrollend", save);
       window.removeEventListener("pagehide", save);
     };
-  }, [bookmark, following, history.generation]);
+  }, [bookmark]);
 
   function recordScroll() {
     const host = viewport.current;
@@ -290,26 +307,22 @@ export function Transcript({ target, provider, child, messages, resultOnly, work
       setFollowing(nearEnd);
       scrollIntent.current = false;
     }
-    const current = visibleAnchor(host);
-    if (current && history.generation)
-      rememberBookmark(bookmark, {
-        entryId: current.id,
-        offset: current.offset,
-        following: nearEnd,
-        generation: history.generation,
-        toolEntry: current.toolEntry ?? false,
-        ...(current.callId ? { callId: current.callId } : {}),
-      });
+    const position = historyBookmark(host, history.generation, nearEnd);
+    if (position) readingPosition.current = position;
   }
 
   function gesture(up: boolean) {
     scrollIntent.current = true;
     const host = viewport.current;
     if (!host || history.loading) return;
-    if (up && host.scrollTop < 2 && history.older) {
+    if (up && host.scrollTop < 160 && history.older) {
       setFollowing(false);
       void history.load("older");
-    } else if (!up && host.scrollHeight - host.clientHeight - host.scrollTop < 2 && history.newer) {
+    } else if (
+      !up &&
+      host.scrollHeight - host.clientHeight - host.scrollTop < 160 &&
+      history.newer
+    ) {
       void history.load("newer");
     }
   }
@@ -403,54 +416,49 @@ export function Transcript({ target, provider, child, messages, resultOnly, work
   }
 
   return (
-    <section
-      className="transcript-shell"
-      aria-label={resultOnly ? "Latest child output" : "Native conversation"}
-    >
-      {!resultOnly && (
-        <div className={`timeline-controls ${selectedText ? "has-selection" : ""}`}>
-          {history.older && (
+    <section className="transcript-shell" aria-label="Native conversation">
+      <div className={`timeline-controls ${selectedText ? "has-selection" : ""}`}>
+        {history.older && (
+          <button
+            type="button"
+            disabled={!history.older || history.loading}
+            onClick={() => {
+              setFollowing(false);
+              void history.load("older");
+            }}
+          >
+            Earlier
+          </button>
+        )}
+        {history.newer && (
+          <button
+            type="button"
+            disabled={!history.newer || history.loading}
+            onClick={() => void history.load("newer")}
+          >
+            Later
+          </button>
+        )}
+        {selectedText && (
+          <>
             <button
               type="button"
-              disabled={!history.older || history.loading}
               onClick={() => {
-                setFollowing(false);
-                void history.load("older");
+                const value = getSelection()?.toString();
+                if (value)
+                  void navigator.clipboard
+                    .writeText(value)
+                    .catch((failure: unknown) => setActionNotice(describeError(failure)));
               }}
             >
-              Earlier
+              Copy selection
             </button>
-          )}
-          {history.newer && (
-            <button
-              type="button"
-              disabled={!history.newer || history.loading}
-              onClick={() => void history.load("newer")}
-            >
-              Later
+            <button type="button" onClick={clear}>
+              Clear selection
             </button>
-          )}
-          {selectedText && (
-            <>
-              <button
-                type="button"
-                onClick={() => {
-                  const value = getSelection()?.toString();
-                  if (value)
-                    void navigator.clipboard
-                      .writeText(value)
-                      .catch((failure: unknown) => setActionNotice(describeError(failure)));
-                }}
-              >
-                Copy selection
-              </button>
-              <button type="button" onClick={clear}>
-                Clear selection
-              </button>
-            </>
-          )}
-        </div>
-      )}
+          </>
+        )}
+      </div>
       {actionNotice && <Notice>{actionNotice}</Notice>}
       {history.error && (
         <Notice retry={() => void history.load("latest")}>
@@ -470,9 +478,6 @@ export function Transcript({ target, provider, child, messages, resultOnly, work
             ? "Only part of this conversation is available."
             : `Native history · ${readable(history.availability)}`}
         </Notice>
-      )}
-      {resultOnly && (
-        <p className="timeline-live meta">Latest assistant output from this child session</p>
       )}
       <div
         className="timeline-viewport"
@@ -499,15 +504,11 @@ export function Transcript({ target, provider, child, messages, resultOnly, work
           (history.loading ? (
             <Loading label="Reading native conversation…" />
           ) : (
-            !history.error && (
-              <Empty
-                title={resultOnly ? "No assistant output recorded" : "No conversation entries"}
-              />
-            )
+            !history.error && <Empty title="No native messages are available" />
           ))}
         {entries.length > 0 && (
           <div className="timeline-spacer" style={{ height: list.getTotalSize() }}>
-            {list.getVirtualItems().map((item) => {
+            {virtualRows.map((item) => {
               const row = entries[item.index];
               if (!row) return null;
               if (row.kind === "tool-run" || row.kind === "read-pack") {
@@ -602,6 +603,7 @@ export function Transcript({ target, provider, child, messages, resultOnly, work
                         entry={row.entry}
                         knownTools={knownTools}
                         expanded={expanded}
+                        prose={prose}
                         toggle={(key, open) => setExpanded((known) => toggleKey(known, key, open))}
                         reference={output?.entryId === row.id ? output.reference : undefined}
                         {...(extraParts?.generation === history.generation &&
@@ -620,7 +622,7 @@ export function Transcript({ target, provider, child, messages, resultOnly, work
             })}
           </div>
         )}
-        {!resultOnly && working && !inProgress && (
+        {working && !inProgress && (
           <p className="timeline-working" role="status">
             <span className="timeline-working-dots" aria-hidden="true">
               <i />
@@ -631,7 +633,7 @@ export function Transcript({ target, provider, child, messages, resultOnly, work
           </p>
         )}
       </div>
-      {!resultOnly && history.generation && (
+      {history.generation && (
         <PromptNavigator
           key={history.generation}
           target={target}
@@ -644,7 +646,7 @@ export function Transcript({ target, provider, child, messages, resultOnly, work
           }}
         />
       )}
-      {!resultOnly && (!following || history.waiting) && (
+      {(!following || history.waiting) && (
         <button type="button" className="timeline-jump" onClick={latest}>
           <span aria-hidden="true">↓ </span>
           {history.waiting ? "New messages available" : "Jump to latest"}
@@ -654,21 +656,21 @@ export function Transcript({ target, provider, child, messages, resultOnly, work
   );
 }
 
-function ProviderMark({ provider }: { readonly provider: HostProviderDto }) {
-  if (provider === "codex") return <Icon name="terminal" size={14} />;
-  return (
-    <svg
-      width="14"
-      height="14"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.5"
-      aria-hidden="true"
-    >
-      <path d="m12 2 1.5 6.5L19 5l-3.5 5.5L22 12l-6.5 1.5L19 19l-5.5-3.5L12 22l-1.5-6.5L5 19l3.5-5.5L2 12l6.5-1.5L5 5l5.5 3.5Z" />
-    </svg>
-  );
+function historyBookmark(
+  host: HTMLDivElement | null,
+  generation: string | undefined,
+  following: boolean,
+): TimelineBookmark | undefined {
+  const current = visibleAnchor(host);
+  if (!current || !generation) return;
+  return {
+    entryId: current.id,
+    offset: current.offset,
+    following,
+    generation,
+    toolEntry: current.toolEntry ?? false,
+    ...(current.callId ? { callId: current.callId } : {}),
+  };
 }
 
 function visibleAnchor(host: HTMLDivElement | null): Position | undefined {

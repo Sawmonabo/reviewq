@@ -75,7 +75,7 @@ const schema128 = {
   type: "string",
 };
 const schema130 = { enum: ["unknown", "absent", "confirmed"], type: "string" };
-const schema142 = {
+const schema144 = {
   description: "Stable error codes for the public JSON envelope.",
   enum: [
     "ticket_unverified",
@@ -96,7 +96,7 @@ const schema142 = {
   ],
   type: "string",
 };
-const schema146 = {
+const schema148 = {
   enum: [
     "fixed",
     "clarified_withdrawn",
@@ -107,8 +107,8 @@ const schema146 = {
   ],
   type: "string",
 };
-const schema147 = { enum: ["review", "waiting_author"], type: "string" };
-const schema151 = {
+const schema149 = { enum: ["review", "waiting_author"], type: "string" };
+const schema153 = {
   type: "object",
   properties: {
     authorityVerified: { type: "boolean" },
@@ -127,7 +127,7 @@ const schema151 = {
     holdReason: { type: ["string", "null"] },
   },
 };
-const schema153 = {
+const schema155 = {
   enum: [
     "pending",
     "reserved",
@@ -138,35 +138,6 @@ const schema153 = {
   ],
   type: "string",
 };
-const schema155 = { enum: ["final", "unchanged"], type: "string" };
-const schema156 = {
-  properties: {
-    bindingVerified: { type: "boolean" },
-    generation: { $ref: "#/definitions/EventCursorDto" },
-    policyOverride: { type: ["boolean", "null"] },
-    reason: { type: ["string", "null"] },
-    runId: {
-      anyOf: [{ $ref: "#/definitions/CheckpointIdDto" }, { type: "null" }],
-    },
-    selections: {
-      items: { $ref: "#/definitions/SelectedThread" },
-      type: "array",
-    },
-    state: { $ref: "#/definitions/MonitorState" },
-    updatedAt: { $ref: "#/definitions/UtcTimestampDto" },
-  },
-  required: [
-    "runId",
-    "generation",
-    "state",
-    "policyOverride",
-    "bindingVerified",
-    "reason",
-    "updatedAt",
-    "selections",
-  ],
-  type: "object",
-};
 export {
   schema118,
   schema124,
@@ -174,11 +145,9 @@ export {
   schema126,
   schema128,
   schema130,
-  schema142,
-  schema146,
-  schema147,
-  schema151,
+  schema144,
+  schema148,
+  schema149,
   schema153,
   schema155,
-  schema156,
 };

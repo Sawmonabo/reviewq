@@ -13,6 +13,7 @@ import {
   isHistoryNavigationResponse,
   isHistoryPageResponse,
   isHistoryPartPageResponse,
+  isHistoryResultResponse,
   isMessageHistoryPageResponse,
   isQuestionAnswerResponse,
   isQuestionFormsResponse,
@@ -55,6 +56,19 @@ export async function historyContent(
   if (data.entryId !== entryId || data.generation !== generation || data.reset)
     throw new Error("The native output source changed. Reopen the entry.");
   return data;
+}
+
+export async function historyResult(target: SessionAddress, signal: AbortSignal) {
+  const result = await read(
+    `${path(target)}/history/result`,
+    isHistoryResultResponse,
+    signal,
+    65_536,
+  );
+  verify(target, result.data);
+  if (result.data.entry && !result.data.generation)
+    throw new Error("The final response source changed.");
+  return result;
 }
 
 export async function historyParts(

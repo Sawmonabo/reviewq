@@ -20,20 +20,21 @@ import {
 import { ActionMenu } from "../../components/ActionMenu";
 import { FilterSelect } from "../../components/FilterSelect";
 import { Icon } from "../../components/Icon";
-import { providerLabel } from "../../components/ReviewRow";
 import { PanelBoundary } from "../../components/PanelBoundary";
 import { Empty, Loading, Notice } from "../../components/PanelState";
 import { useResource } from "../../hooks/useResource";
 import type { DraftStore } from "../../lib/drafts";
 import { describeError, formatActivityTime, readable, safeUrl } from "../../lib/presentation";
+import AgentPanel from "./AgentPanel";
 import { ReviewOverviewPane } from "./ReviewOverviewPane";
 import { ReviewAttention } from "./ReviewAttention";
+import Changes from "./changes/Changes";
 import { ChangesMonitor } from "./changes/ChangesMonitor";
+import Findings from "./report/Findings";
+import { useDrawerScroll } from "./useDrawerScroll";
 import "./review.css";
 
-const AgentPanel = lazy(() => import("./AgentPanel"));
-const Changes = lazy(() => import("./changes/Changes"));
-const Findings = lazy(() => import("./report/Findings"));
+const SessionResult = lazy(() => import("./transcript/SessionResult"));
 
 const tabs = [
   ["overview", "Overview"],
@@ -54,13 +55,12 @@ type Props = {
   readonly drafts: DraftStore;
   readonly ticket: ReactNode;
   readonly onTab: (tab: Tab) => void;
-  readonly onSession: (session: string | undefined) => void;
+  readonly onSession: (session: string | undefined, tab?: Tab) => void;
   readonly onRun: (run: string) => void;
   readonly onClose: () => void;
   readonly onReload: () => void;
   readonly onLaunch: (mode: "prepare" | "register", targets: readonly MergeRequestRow[]) => void;
   readonly onMonitor: (targets: readonly MergeRequestRow[], pause: boolean) => void;
-  readonly onSettings: () => void;
 };
 
 export default function ReviewDrawer({
@@ -81,7 +81,6 @@ export default function ReviewDrawer({
   onReload,
   onLaunch,
   onMonitor,
-  onSettings,
 }: Props) {
   const { review } = overview;
   const [runTrail, setRunTrail] = useState<readonly string[]>([]);
@@ -145,7 +144,6 @@ export default function ReviewDrawer({
     overview.decision?.reviewedSha === review.sourceSha ? overview.decision.disposition : null;
   const monitorLead = overview.runs.items.find((item) => item.runId === monitor?.runId);
   const startedAt = overview.runs.items.find((item) => item.runId === run?.runId)?.startedAt;
-  const reviewIdentity = `${review.projectPath} !${review.iid}`;
   const visibleTabs = child
     ? ([
         ["agent", "Conversation"],
@@ -153,6 +151,11 @@ export default function ReviewDrawer({
       ] as const)
     : tabs;
   const activeTab = child && tab !== "findings" ? "agent" : tab;
+  const scrollKey =
+    activeTab === "overview" || (activeTab === "findings" && child)
+      ? `${scope}/${activeTab}`
+      : undefined;
+  const { scroller: scrollerRef, content: setReadingContent } = useDrawerScroll(scrollKey);
 
   async function commandFor(action: "open" | "copy") {
     if (!selected || !run || !session || mutation.current) return;
@@ -161,15 +164,20 @@ export default function ReviewDrawer({
     try {
       const result = await terminal(run.runId, session.sessionKey, action === "open");
       if (result.state === "command") {
-        if (action === "copy") await navigator.clipboard.writeText(result.command);
+        let message = result.opened
+          ? "Opened native terminal."
+          : "Run this command in the terminal.";
+        if (action === "copy") {
+          try {
+            await navigator.clipboard.writeText(result.command);
+            message = "Terminal command copied.";
+          } catch {
+            message = "Copy failed. Copy the exact session command below.";
+          }
+        }
         setOutcome({
           key: scope,
-          message:
-            action === "copy"
-              ? "Terminal command copied."
-              : result.opened
-                ? "Opened native terminal."
-                : "Run this command in the terminal.",
+          message,
           terminal: result.command,
         });
       } else {
@@ -324,8 +332,8 @@ export default function ReviewDrawer({
               type="button"
               className="quiet-button ticket-key"
               onClick={() => {
-                if (child) onSession(undefined);
-                onTab("overview");
+                if (child) onSession(undefined, "overview");
+                else onTab("overview");
               }}
             >
               {review.tickets.map((item) => item.key).join(" · ") || `!${review.iid}`}
@@ -346,10 +354,10 @@ export default function ReviewDrawer({
               <>
                 <span aria-hidden="true">›</span>
                 <button type="button" className="quiet-button" onClick={() => onSession(undefined)}>
-                  {run?.leadMetadata.name ?? "Lead review"}
+                  Lead review
                 </button>
                 <span aria-hidden="true">›</span>
-                <span>{title}</span>
+                <span>Subagent</span>
               </>
             )}
           </div>
@@ -380,9 +388,7 @@ export default function ReviewDrawer({
                 },
                 {
                   label: "Open MR in GitLab",
-                  run: () => {
-                    if (source) window.open(source, "_blank", "noopener,noreferrer");
-                  },
+                  ...(source ? { href: source, target: "_blank", rel: "noreferrer" } : {}),
                   disabled: !source,
                   trailing: <Icon name="external" size={12} />,
                 },
@@ -446,7 +452,8 @@ export default function ReviewDrawer({
             <button
               type="button"
               className="icon-button"
-              aria-label="Close review"
+              aria-label="Close details"
+              title="Close details"
               onClick={onClose}
             >
               <Icon name="close" />
@@ -538,8 +545,7 @@ export default function ReviewDrawer({
                   ...(runs?.items ?? []).map((item) => ({
                     value: item.runId,
                     label: [
-                      item.leadName,
-                      providerLabel(item.provider),
+                      item.provider === "claude" ? "Claude Code" : "Codex",
                       item.startedAt ? formatActivityTime(item.startedAt) : item.runId,
                     ]
                       .filter(Boolean)
@@ -553,13 +559,28 @@ export default function ReviewDrawer({
       </header>
       <div
         id="review-tabpanel"
+        key={scrollKey ?? activeTab}
+        ref={scrollerRef}
         role="tabpanel"
         aria-labelledby={`review-tab-${activeTab}`}
         className={activeTab === "agent" ? "drawer-body agent-body" : "drawer-body"}
       >
-        {outcomeMessage && (
+        {outcomeMessage && <Notice>{outcomeMessage}</Notice>}
+        {command && (
+          <label className="field copy-session-command">
+            Exact session command
+            <textarea
+              value={command}
+              readOnly
+              rows={2}
+              onFocus={(event) => event.currentTarget.select()}
+            />
+          </label>
+        )}
+        {activeTab === "agent" && recoveryActive && recovery.data && (
           <Notice>
-            {outcomeMessage} {command && <code>{command}</code>}
+            Auto-resume {readable(recovery.data.state).toLowerCase()}
+            {recovery.data.reason && ` · ${readable(recovery.data.reason)}`}
           </Notice>
         )}
         {selectionError && (
@@ -583,16 +604,16 @@ export default function ReviewDrawer({
         <PanelBoundary key={activeTab}>
           <Suspense fallback={<Loading label={`Opening ${activeTab}…`} />}>
             {activeTab === "overview" && (
-              <ReviewOverviewPane
-                overview={overview}
-                run={run}
-                ticket={ticket}
-                monitor={follows.data?.monitor?.state}
-                onLaunch={onLaunch}
-                onSettings={onSettings}
-                pending={selectionPending}
-                selected={selected}
-              />
+              <div ref={setReadingContent} className="drawer-reading-content">
+                <ReviewOverviewPane
+                  overview={overview}
+                  run={run}
+                  ticket={ticket}
+                  onLaunch={onLaunch}
+                  pending={selectionPending}
+                  selected={selected}
+                />
+              </div>
             )}
             {activeTab === "changes" && (
               <Changes key={review.reviewId} reviewId={review.reviewId} webUrl={overview.webUrl}>
@@ -613,7 +634,6 @@ export default function ReviewDrawer({
                   run={run}
                   session={session}
                   reviewTitle={review.title}
-                  reviewIdentity={reviewIdentity}
                   {...(startedAt ? { startedAt } : {})}
                   state={review.focusSessionKey === run.leadSessionKey ? review.runStage : null}
                   drafts={drafts}
@@ -623,23 +643,15 @@ export default function ReviewDrawer({
               ) : selectionPending ? (
                 <Loading label="Resolving selected run…" />
               ) : (
-                <Empty title="No confirmed conversation" />
+                <Empty title="No review run registered">
+                  <p>Start or register a review to see its agents.</p>
+                </Empty>
               ))}
             {activeTab === "findings" &&
               (selected && child && run ? (
-                <AgentPanel
-                  key={`${scope}:result`}
-                  run={run}
-                  session={child}
-                  reviewTitle={review.title}
-                  reviewIdentity={reviewIdentity}
-                  {...(startedAt ? { startedAt } : {})}
-                  state={review.focusSessionKey === run.leadSessionKey ? review.runStage : null}
-                  drafts={drafts}
-                  onSession={onSession}
-                  onTerminal={() => void commandFor("open")}
-                  resultOnly
-                />
+                <div ref={setReadingContent} className="drawer-reading-content">
+                  <SessionResult target={{ runId: run.runId, sessionKey: child.sessionKey }} />
+                </div>
               ) : selected && run && session ? (
                 <Findings
                   key={run.runId}
@@ -720,7 +732,14 @@ function DrawerSummary({
     decision_required: ["Review ready", "blue"],
   };
   const native = session?.metadata;
-  const state = reason ? (known[reason] ?? [readable(reason), ""]) : undefined;
+  const archived = reason === "closed_mr" || reason === "archive";
+  const state = archived
+    ? review.focusedReportReviewedSha
+      ? known.report_ready
+      : undefined
+    : reason
+      ? (known[reason] ?? [readable(reason), ""])
+      : undefined;
   const nativeState = !state && native?.status;
   if (child) {
     return (
@@ -730,14 +749,7 @@ function DrawerSummary({
             {readable(nativeState)}
           </span>
         )}
-        <span>
-          {[session?.provider && providerLabel(session.provider), native?.model, native?.effort]
-            .filter(Boolean)
-            .join(" · ")}
-        </span>
-        {native?.startedAt && (
-          <time dateTime={native.startedAt}>{formatActivityTime(native.startedAt)}</time>
-        )}
+        <span>Native subagent conversation and result</span>
       </div>
     );
   }
@@ -748,16 +760,6 @@ function DrawerSummary({
         <span className="drawer-state badge" title="Last reported native status">
           {readable(nativeState)}
         </span>
-      )}
-      {!state && session && (
-        <span>
-          {[providerLabel(session.provider), native?.model, native?.effort]
-            .filter(Boolean)
-            .join(" · ")}
-        </span>
-      )}
-      {!state && native?.startedAt && (
-        <time dateTime={native.startedAt}>{formatActivityTime(native.startedAt)}</time>
       )}
       <span>
         {[review.author?.label, review.projectPath.split("/").at(-1)].filter(Boolean).join(" · ")}
@@ -789,7 +791,10 @@ function captureAttention(overview: ReviewOverview): AttentionSnapshot | undefin
   if (
     !checkpointId ||
     !attention ||
-    (!attention.source.length && !attention.sessions.length && !attention.reports.length)
+    (!attention.source.length &&
+      !attention.sessions.length &&
+      !attention.reports.length &&
+      !attention.followups.length)
   )
     return;
   return {

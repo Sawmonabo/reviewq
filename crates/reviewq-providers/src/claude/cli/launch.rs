@@ -151,7 +151,8 @@ impl ClaudeCli {
             if !self
                 .skills(input.checkout.root.clone())
                 .await?
-                .contains(skill)
+                .iter()
+                .any(|option| &option.skill == skill)
             {
                 return Err(AppError::StaleRevision);
             }

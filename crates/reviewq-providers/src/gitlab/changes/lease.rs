@@ -6,7 +6,7 @@ use std::sync::{Arc, Weak};
 use std::time::{Duration, Instant};
 
 use reviewq_app::access::{AppError, AppFuture};
-use reviewq_app::changes::{PatchBytes, PatchContent, PatchFile, SourcePage};
+use reviewq_app::changes::{PatchBytes, PatchContent, PatchFile, PatchFileSelection, SourcePage};
 use reviewq_domain::identity::MrIdentity;
 use tokio::sync::{Mutex, OnceCell};
 
@@ -26,7 +26,7 @@ pub(super) struct IndexKey {
     pub source: MrIdentity,
     pub revision: String,
     pub offset: (u32, u16),
-    pub preferred: Option<String>,
+    pub preferred: Option<PatchFileSelection>,
 }
 
 type Slot = Arc<OnceCell<PatchBytes>>;

@@ -17,6 +17,7 @@ const paths = {
     "M7 6v12M7 15c0-4 10-2 10-8 M9 4a2 2 0 1 0-4 0 2 2 0 0 0 4 0Z M9 20a2 2 0 1 0-4 0 2 2 0 0 0 4 0Z M19 5a2 2 0 1 0-4 0 2 2 0 0 0 4 0Z",
   chevron: "m6 9 6 6 6-6",
   external: "M13 4h7v7m0-7-9 9 M10 5H5v14h14v-5",
+  download: "M12 4v10m-4-4 4 4 4-4M5 16v4h14v-4",
   check: "m5 12 4 4L19 6",
   clearFilters: "M3 4h18l-7 7v1M10 11 3 4m7 7v8l4-2m2-3 5 5m0-5-5 5",
   warning: "m12 3 10 17H2zm0 6v5m0 3h.01",

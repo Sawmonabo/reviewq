@@ -2,6 +2,7 @@ import { useState } from "react";
 import { readPatchDiscussions, readPatchFiles } from "../../../api/changes";
 import { readOverview } from "../../../api/client";
 import type { FollowupConfigureRequest, PatchDiscussion } from "../../../api/generated/contracts";
+import type { SelectedThread, Selection } from "../../../api/generated/contracts/followups";
 import { changeFollowup, followupEnrollment } from "../../../api/review";
 import { Modal } from "../../../components/Modal";
 import { Empty, Loading, Notice } from "../../../components/PanelState";
@@ -20,6 +21,7 @@ type Command = {
   readonly action: "configure" | "pause" | "resume" | "review-now";
   readonly generation: string | null;
   readonly runId: string | null;
+  readonly state: FollowupConfigureRequest["state"];
   readonly threads: FollowupConfigureRequest["threads"];
 };
 
@@ -62,7 +64,7 @@ export default function MonitorPane({
               ? await changeFollowup(command.reviewId, "configure", {
                   ...body,
                   runId: command.runId,
-                  state: "enabled",
+                  state: command.state,
                   threads: command.threads,
                 })
               : await changeFollowup(command.reviewId, command.action, body);
@@ -82,6 +84,8 @@ export default function MonitorPane({
   return (
     <Modal
       title={pause ? "Pause auto-review" : "Auto-review updates"}
+      className="work-pane monitor-pane"
+      nonmodal
       busy={busy}
       onClose={onClose}
       footer={
@@ -158,7 +162,7 @@ function TargetMonitor({
   readonly result: string | undefined;
 }) {
   const [lead, setLead] = useState("");
-  const [chosen, setChosen] = useState<readonly string[]>([]);
+  const [edited, setEdited] = useState<readonly string[]>();
   const [cursor, setCursor] = useState<string>();
   const [added, setAdded] = useState<readonly PatchDiscussion[]>([]);
   const [moreBusy, setMoreBusy] = useState(false);
@@ -197,41 +201,60 @@ function TargetMonitor({
   );
   const value = resource.data;
   const monitor = value?.enrollment.monitor;
+  const saved = savedSelections(monitor?.selections ?? []);
+  const chosen = edited ?? [...saved.keys()];
+  const unresolved = monitor?.selections.some((record) => record.selected && !record.discussionId);
   const selectedLead =
     lead || monitor?.runId || (value?.runs.length === 1 ? value.runs[0]?.runId : undefined) || "";
-  const available = [...(value?.discussions ?? []), ...added].filter((thread) =>
-    thread.notes.some((note) => note.ours && /^\d+$/.test(note.noteId)),
+  const available = new Map(
+    [...(value?.discussions ?? []), ...added]
+      .filter((thread) => thread.notes.some((note) => note.ours && /^\d+$/.test(note.noteId)))
+      .map((thread) => [thread.discussionId, thread] as const),
+  );
+  const unloaded = [...saved.values()].filter(
+    (selection) => !available.has(selection.discussionId),
   );
   const next = cursor === undefined ? value?.next : cursor;
   const eligible = monitor?.state === "enabled" || monitor?.state === "paused";
 
   function select(ids: readonly string[], run: string, action: Command["action"] = "configure") {
-    const threads = available
-      .filter((thread) => ids.includes(thread.discussionId))
-      .map((thread) => ({
-        discussionId: thread.discussionId,
-        originalNoteIds: thread.notes
-          .filter((note) => note.ours && /^\d+$/.test(note.noteId))
-          .map((note) => note.noteId),
-        findingIds: [
-          ...new Set(
-            monitor?.selections
-              .filter((record) => record.discussionId === thread.discussionId)
-              .flatMap((record) => record.findingIds),
-          ),
-        ],
-      }));
-    if (action === "configure" && (!run || !threads.length)) {
+    if (action === "configure" && (!run || unresolved)) {
       onChoice(undefined);
       return;
+    }
+    const threads: Selection[] = [];
+    if (action === "configure") {
+      for (const id of ids) {
+        const previous = saved.get(id);
+        const thread = available.get(id);
+        if (previous) threads.push(previous);
+        else if (thread) {
+          threads.push({
+            discussionId: id,
+            originalNoteIds: thread.notes
+              .filter((note) => note.ours && /^\d+$/.test(note.noteId))
+              .map((note) => note.noteId),
+          });
+        } else {
+          onChoice(undefined);
+          return;
+        }
+      }
     }
     onChoice({
       reviewId: target.reviewId,
       action,
       generation: monitor?.generation ?? null,
       runId: run || null,
+      state: monitor?.state === "paused" ? "paused" : "enabled",
       threads,
     });
+  }
+
+  function toggle(id: string, checked: boolean) {
+    const ids = checked ? [...chosen, id] : chosen.filter((item) => item !== id);
+    setEdited(ids);
+    select(ids, selectedLead);
   }
 
   async function more() {
@@ -270,6 +293,12 @@ function TargetMonitor({
           Monitor {readable(monitor.state).toLowerCase()}
           {monitor.reason && ` · ${readable(monitor.reason)}`}
         </p>
+      )}
+      {unresolved && !pause && (
+        <Notice>
+          A saved note is missing its discussion reference. Refresh this review before editing
+          selected discussions.
+        </Notice>
       )}
       {value &&
         (pause ? (
@@ -310,7 +339,7 @@ function TargetMonitor({
               <label className="field">
                 Lead run
                 <select
-                  disabled={locked}
+                  disabled={locked || unresolved}
                   value={selectedLead}
                   onChange={(event) => {
                     setLead(event.currentTarget.value);
@@ -318,6 +347,9 @@ function TargetMonitor({
                   }}
                 >
                   <option value="">Choose a lead</option>
+                  {selectedLead && !value.runs.some((item) => item.runId === selectedLead) && (
+                    <option value={selectedLead}>Saved lead</option>
+                  )}
                   {value.runs.map((item) => (
                     <option key={item.runId} value={item.runId}>
                       {readable(item.provider)} ·{" "}
@@ -329,21 +361,32 @@ function TargetMonitor({
             ) : (
               <Empty title="A registered lead is required" />
             )}
-            {available.length ? (
-              available.map((thread) => (
+            {unloaded.length > 0 && (
+              <section className="stack" aria-label="Saved discussions outside this page">
+                {unloaded.map((selection) => (
+                  <label key={selection.discussionId}>
+                    <input
+                      disabled={locked || unresolved}
+                      type="checkbox"
+                      checked={chosen.includes(selection.discussionId)}
+                      onChange={(event) =>
+                        toggle(selection.discussionId, event.currentTarget.checked)
+                      }
+                    />{" "}
+                    Saved discussion <code>{selection.discussionId}</code>
+                  </label>
+                ))}
+              </section>
+            )}
+            {available.size ? (
+              [...available.values()].map((thread) => (
                 <div className="stack" key={thread.discussionId}>
                   <label>
                     <input
-                      disabled={locked}
+                      disabled={locked || unresolved}
                       type="checkbox"
                       checked={chosen.includes(thread.discussionId)}
-                      onChange={(event) => {
-                        const ids = event.currentTarget.checked
-                          ? [...chosen, thread.discussionId]
-                          : chosen.filter((id) => id !== thread.discussionId);
-                        setChosen(ids);
-                        select(ids, selectedLead);
-                      }}
+                      onChange={(event) => toggle(thread.discussionId, event.currentTarget.checked)}
                     />{" "}
                     Monitor this discussion
                     {monitor?.selections.some(
@@ -367,4 +410,18 @@ function TargetMonitor({
         ))}
     </section>
   );
+}
+
+function savedSelections(records: readonly SelectedThread[]) {
+  const selected = new Map<string, Selection>();
+  for (const record of records) {
+    if (!record.selected || !record.discussionId) continue;
+    const previous = selected.get(record.discussionId);
+    selected.set(record.discussionId, {
+      discussionId: record.discussionId,
+      originalNoteIds: [...new Set([...(previous?.originalNoteIds ?? []), record.originalNoteId])],
+      findingIds: [...new Set([...(previous?.findingIds ?? []), ...record.findingIds])],
+    });
+  }
+  return selected;
 }

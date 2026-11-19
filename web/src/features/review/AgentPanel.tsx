@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import type { KeyboardEvent } from "react";
 import { readRun } from "../../api/client";
 import type { RunDetail, RunStage } from "../../api/generated/contracts";
 import type { SessionSummary } from "../../api/generated/contracts/hosts";
@@ -7,11 +8,12 @@ import { Icon } from "../../components/Icon";
 import { Notice } from "../../components/PanelState";
 import { useResource } from "../../hooks/useResource";
 import type { DraftStore } from "../../lib/drafts";
-import { formatTime, readable } from "../../lib/presentation";
+import { formatActivityTime, formatTime, readable } from "../../lib/presentation";
 import { Composer } from "./Composer";
 import { InterruptSession } from "./InterruptSession";
 import { ReportedPlan } from "./ReportedPlan";
 import { NativeQuestions } from "./transcript/NativeQuestions";
+import { ProviderMark } from "./transcript/ProviderMark";
 import { Transcript } from "./transcript/Transcript";
 import "./agent.css";
 
@@ -19,31 +21,33 @@ type Props = {
   readonly run: RunDetail;
   readonly session: SessionSummary;
   readonly reviewTitle: string;
-  readonly reviewIdentity: string;
   readonly startedAt?: string | null;
   readonly state: RunStage | null;
   readonly drafts: DraftStore;
   readonly onSession: (key: string | undefined) => void;
   readonly onTerminal: () => void;
-  readonly resultOnly?: boolean;
 };
 
 export default function AgentPanel({
   run,
   session,
   reviewTitle,
-  reviewIdentity,
   startedAt,
   state,
   drafts,
   onSession,
   onTerminal,
-  resultOnly = false,
 }: Props) {
   const target = { runId: run.runId, sessionKey: session.sessionKey };
   const lead = session.sessionKey === run.leadSessionKey;
 
-  const [toolsOpen, setToolsOpen] = useState(false);
+  const {
+    open: toolsOpen,
+    control: toolsRef,
+    close: closeTools,
+    keydown: onToolsKeyDown,
+    sync: syncTools,
+  } = useSessionMenu();
   const [messages, setMessages] = useState(false);
   const [cursor, setCursor] = useState<string>();
   const deliveryKeys = [
@@ -81,12 +85,12 @@ export default function AgentPanel({
         (run.launch?.requestedEffort && `Requested: ${run.launch.requestedEffort}`))
       : null);
   return (
-    <div className={`agent-panel ${resultOnly ? "result-panel" : ""}`}>
+    <div className="agent-panel">
       <header className="agent-heading">
         <div className="agent-meta">
           <div className="agent-model">
             <strong className="button-label">
-              <Icon name="terminal" size={13} />
+              <ProviderMark provider={session.provider} />
               {readable(session.provider)}
             </strong>
             <span aria-hidden="true">/</span>
@@ -103,41 +107,44 @@ export default function AgentPanel({
                 selected={session}
                 state={state}
                 {...(startedAt ? { startedAt } : {})}
-                reviewIdentity={reviewIdentity}
                 onSession={onSession}
               />
             )}
             <details
               className="agent-session-menu agent-session-tools"
-              onToggle={(event) => setToolsOpen(event.currentTarget.open)}
+              ref={toolsRef}
+              onToggle={syncTools}
+              onKeyDown={onToolsKeyDown}
             >
               <summary className="button-label" aria-label="Session tools">
                 <Icon name="more" size={14} />
               </summary>
-              <div className="agent-session-options session-menu-actions">
-                <ReportedPlan runId={run.runId} sessionKey={session.sessionKey} />
-                {lead && (
-                  <button
-                    type="button"
-                    className="session-menu-option"
-                    aria-expanded={messages}
-                    onClick={(event) => {
-                      event.currentTarget.closest("details")?.removeAttribute("open");
-                      setMessages(!messages);
-                    }}
-                  >
-                    Delivery history
-                  </button>
-                )}
-                {toolsOpen && lead && run.launch && run.launch.state !== "rejected" && (
-                  <InterruptSession
-                    runId={run.runId}
-                    nativeId={run.leadNativeId}
-                    sessionKey={session.sessionKey}
-                    className="session-menu-option"
-                  />
-                )}
-              </div>
+              {toolsOpen && (
+                <div className="agent-session-options session-menu-actions">
+                  <ReportedPlan runId={run.runId} sessionKey={session.sessionKey} />
+                  {lead && (
+                    <button
+                      type="button"
+                      className="session-menu-option"
+                      aria-expanded={messages}
+                      onClick={() => {
+                        closeTools(true);
+                        setMessages(!messages);
+                      }}
+                    >
+                      Delivery history
+                    </button>
+                  )}
+                  {lead && run.launch && run.launch.state !== "rejected" && (
+                    <InterruptSession
+                      runId={run.runId}
+                      nativeId={run.leadNativeId}
+                      sessionKey={session.sessionKey}
+                      className="session-menu-option"
+                    />
+                  )}
+                </div>
+              )}
             </details>
           </div>
         </div>
@@ -183,25 +190,27 @@ export default function AgentPanel({
         provider={session.provider}
         child={!lead}
         messages={outbox.data?.items ?? []}
-        resultOnly={resultOnly}
         working={lead && state === "working"}
       />
-      {!resultOnly && session.provider === "codex" && (
+      {session.provider === "codex" && (
         <NativeQuestions
           target={target}
           store={drafts}
           reviewTitle={reviewTitle}
+          sessionName={session.metadata.name ?? (lead ? "lead review" : "subagent")}
+          child={!lead}
           onTerminal={onTerminal}
         />
       )}
-      {!resultOnly && lead && (
+      {lead && (
         <Composer
           store={drafts}
           target={target}
-          label="Message the review agent…"
+          label="Follow-up message"
+          placeholder="Message the review agent…"
           draftLabel={`Message · ${reviewTitle}`}
           targetLabel="To lead review"
-          targetTitle={reviewTitle}
+          targetTitle={`To lead review${session.metadata.name ? ` · ${session.metadata.name}` : ""}`}
           draftKey={JSON.stringify(["message", run.reviewId, run.runId, run.leadSessionKey])}
           onAccepted={outbox.retry}
         />
@@ -215,19 +224,16 @@ function SessionPicker({
   selected,
   state,
   startedAt,
-  reviewIdentity,
   onSession,
 }: {
   readonly run: RunDetail;
   readonly selected: SessionSummary;
   readonly state: RunStage | null;
   readonly startedAt?: string;
-  readonly reviewIdentity: string;
   readonly onSession: Props["onSession"];
 }) {
   const [trail, setTrail] = useState<readonly string[]>([]);
-  const [open, setOpen] = useState(false);
-  const control = useRef<HTMLDetailsElement>(null);
+  const { open, control: menuRef, close, keydown, sync } = useSessionMenu();
   const cursor = trail.at(-1);
   const page = useResource(
     `session-page:${run.runId}:${cursor ?? ""}`,
@@ -250,40 +256,31 @@ function SessionPicker({
       ? `${agents.length} shown`
       : `${agents.length} in this review`;
 
-  useEffect(() => {
-    if (!open) return;
-    function dismiss(event: PointerEvent) {
-      if (
-        event.target instanceof Node &&
-        control.current &&
-        !control.current.contains(event.target)
-      )
-        control.current.open = false;
-    }
-    document.addEventListener("pointerdown", dismiss);
-    return () => document.removeEventListener("pointerdown", dismiss);
-  }, [open]);
-
   function choose(key: string | undefined) {
-    if (control.current) control.current.open = false;
-    onSession(key);
+    close(true);
+    if ((key ?? run.leadSessionKey) !== selected.sessionKey) onSession(key);
   }
 
   return (
-    <details
-      className="agent-session-menu"
-      ref={control}
-      onToggle={(event) => setOpen(event.currentTarget.open)}
-      onKeyDown={(event) => {
-        if (event.key !== "Escape" || !event.currentTarget.open) return;
-        event.preventDefault();
-        event.stopPropagation();
-        event.currentTarget.open = false;
-        event.currentTarget.querySelector("summary")?.focus();
-      }}
-    >
-      <summary className="button-label">
-        <Icon name="terminal" size={11} />
+    <details className="agent-session-menu" ref={menuRef} onToggle={sync} onKeyDown={keydown}>
+      <summary
+        className="button-label"
+        aria-label={`Subagents · ${count}. Viewing ${isLead ? "lead agent" : (selected.metadata.name ?? "subagent")}`}
+      >
+        <svg
+          width="12"
+          height="12"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.65"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          aria-hidden="true"
+        >
+          <rect x="5" y="7" width="14" height="13" rx="3" />
+          <path d="M12 3v4M3 12v4m18-4v4M9 16h6M9 11h.01M15 11h.01" />
+        </svg>
         <span className="agent-session-selection" title={selected.metadata.name ?? undefined}>
           {isLead ? "Lead agent" : (selected.metadata.name ?? "Subagent")}
         </span>
@@ -298,15 +295,14 @@ function SessionPicker({
             onClick={() => choose(undefined)}
           >
             <span className="session-menu-name">
-              <strong>{run.leadMetadata.name ?? "Lead review"}</strong>
+              <strong>Lead review</strong>
               <small>
-                {reviewIdentity}
-                {leadStarted && ` · ${formatTime(leadStarted)}`}
+                {run.leadMetadata.name ?? (leadStarted && formatActivityTime(leadStarted))}
               </small>
             </span>
             {leadStatus && (
               <small className={`session-menu-status ${leadStatus}`}>
-                {leadStatus === "needs_input" ? "Awaiting input" : readable(leadStatus)}
+                {sessionStatus(leadStatus)}
               </small>
             )}
           </button>
@@ -326,8 +322,8 @@ function SessionPicker({
                 <strong>{item.metadata.name ?? `${readable(item.provider)} subagent`}</strong>
                 <small title={item.nativeId}>
                   {item.metadata.startedAt
-                    ? formatTime(item.metadata.startedAt)
-                    : item.nativeId.slice(0, 24)}
+                    ? `${readable(item.provider)} · ${formatActivityTime(item.metadata.startedAt)}`
+                    : readable(item.provider)}
                 </small>
               </span>
               {item.metadata.status && (
@@ -335,9 +331,10 @@ function SessionPicker({
                   className={`session-menu-status ${item.metadata.status}`}
                   title="Last reported native status"
                 >
-                  {readable(item.metadata.status)}
+                  {sessionStatus(item.metadata.status)}
                 </small>
               )}
+              <span aria-hidden="true">›</span>
             </button>
           ))}
           {trail.length > 0 && (
@@ -370,4 +367,47 @@ function SessionPicker({
       )}
     </details>
   );
+}
+
+function sessionStatus(status: string) {
+  const labels: Readonly<Record<string, string>> = {
+    needs_input: "Awaiting input",
+    not_loaded: "Not available",
+    running: "Working",
+  };
+  return labels[status] ?? readable(status);
+}
+
+function useSessionMenu() {
+  const [open, setOpen] = useState(false);
+  const control = useRef<HTMLDetailsElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    function dismiss(event: PointerEvent) {
+      if (
+        event.target instanceof Node &&
+        control.current &&
+        !control.current.contains(event.target)
+      )
+        control.current.open = false;
+    }
+    document.addEventListener("pointerdown", dismiss);
+    return () => document.removeEventListener("pointerdown", dismiss);
+  }, [open]);
+
+  function close(restoreFocus: boolean) {
+    if (!control.current) return;
+    control.current.open = false;
+    if (restoreFocus) control.current.querySelector("summary")?.focus({ preventScroll: true });
+  }
+
+  function keydown(event: KeyboardEvent<HTMLDetailsElement>) {
+    if (event.key !== "Escape" || !event.currentTarget.open) return;
+    event.preventDefault();
+    event.stopPropagation();
+    close(true);
+  }
+
+  return { open, control, close, keydown, sync: () => setOpen(Boolean(control.current?.open)) };
 }

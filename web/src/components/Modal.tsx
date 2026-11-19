@@ -42,8 +42,15 @@ export function ModalFrame({
     if (nonmodal) node?.show();
     else node?.showModal();
     return () => {
+      const active = document.activeElement;
       node?.close();
-      if (opener instanceof HTMLElement && opener.isConnected) opener.focus();
+      if (
+        opener instanceof HTMLElement &&
+        opener.isConnected &&
+        (!nonmodal || active === document.body || node?.contains(active))
+      ) {
+        opener.focus({ preventScroll: true });
+      }
     };
   }, [nonmodal]);
   return (

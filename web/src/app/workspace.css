@@ -200,7 +200,11 @@
   min-height: 0;
 }
 .workspace-panes.has-detail {
-  grid-template-columns: minmax(0, var(--split, 50%)) 5px minmax(0, 1fr);
+  grid-template-columns: minmax(0, var(--split, 50%)) 0 minmax(0, 1fr);
+  padding-inline-end: 10px;
+}
+.workspace-panes.has-form {
+  grid-template-columns: minmax(0, calc(var(--split, 50%) - 5px)) 5px minmax(0, 1fr);
 }
 .workspace-view,
 .drawer-host {
@@ -209,7 +213,61 @@
   overflow: auto;
   overscroll-behavior: contain;
 }
+.drawer-host[hidden] {
+  display: none;
+}
+.overlay-host {
+  min-height: 0;
+  min-width: 0;
+}
+.modal.work-pane {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  max-width: none;
+  max-height: none;
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+.work-pane .modal-frame {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  max-height: 100%;
+}
+.work-pane .modal-frame > header {
+  min-height: 54px;
+  padding: 14px 27px 0;
+  border: 0;
+}
+.work-pane .modal-frame > header h2 {
+  font-size: 11px;
+  font-weight: 610;
+  letter-spacing: normal;
+}
+.work-pane .modal-frame > header .icon-button {
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font-size: 21px;
+}
+.work-pane .modal-body {
+  flex: 1 1 auto;
+  padding: 12px 27px 24px;
+  scrollbar-width: thin;
+  scrollbar-gutter: stable;
+}
+.work-pane .modal-frame > footer {
+  justify-content: space-between;
+  padding: 13px 27px 18px;
+}
+.work-pane .modal-frame > footer button {
+  font-size: 11px;
+}
 .workspace-view {
+  --workspace-scrollbar-width: 10px;
   scrollbar-gutter: stable;
   scrollbar-width: thin;
   scrollbar-color: transparent transparent;
@@ -220,7 +278,7 @@
   scrollbar-color: var(--scroll-thumb) transparent;
 }
 .workspace-view::-webkit-scrollbar {
-  width: 10px;
+  width: var(--workspace-scrollbar-width);
 }
 .workspace-view::-webkit-scrollbar-thumb {
   border: 2px solid var(--workspace-bg);
@@ -235,9 +293,14 @@
   background: var(--workspace-bg);
 }
 .workspace-inner {
+  container: workspace-content / inline-size;
   max-width: 1660px;
-  padding: 36px var(--gutter);
+  --workspace-inline-gutter: var(--gutter);
+  padding: 36px var(--workspace-inline-gutter);
   margin-inline: auto;
+}
+.workspace-panes.has-detail:not(.has-form) .workspace-inner {
+  padding-inline-end: calc(var(--workspace-inline-gutter) - var(--workspace-scrollbar-width));
 }
 .workspace-title {
   display: flex;
@@ -338,10 +401,30 @@
   pointer-events: none;
   content: "";
 }
+.workspace-panes:not(.has-form) > .splitter {
+  width: 9px;
+  margin-inline-start: 1px;
+  border: 0;
+  background: transparent;
+}
+.workspace-panes:not(.has-form) > .splitter::before {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 2px;
+  pointer-events: none;
+  content: "";
+}
+.workspace-panes:not(.has-form) > .splitter:is(:hover, :focus-visible)::before {
+  background: light-dark(var(--focus), #a3b3da);
+}
+.workspace-panes:not(.has-form) > .splitter:focus-visible {
+  outline-offset: -3px;
+}
 .drawer-host {
   display: flex;
   flex-direction: column;
   min-width: 0;
+  border-inline-start: 1px solid light-dark(var(--line), #33333d);
 }
 .drawer-host > .panel-loading {
   flex: 1;
@@ -537,7 +620,8 @@
 }
 @media (min-width: 1001px) and (max-width: 1150px) {
   .workspace-inner {
-    padding: 28px 24px;
+    --workspace-inline-gutter: 24px;
+    padding-block: 28px;
   }
 }
 @media (max-width: 1000px) {
@@ -548,7 +632,8 @@
     padding-inline: 12px;
   }
   .workspace-inner {
-    padding: 24px 18px;
+    --workspace-inline-gutter: 18px;
+    padding-block: 24px;
   }
 }
 @media (max-width: 700px) {
@@ -606,7 +691,7 @@
     margin-left: 0;
   }
   .workspace-inner {
-    padding: 25px 18px;
+    padding-block: 25px;
   }
   .workspace-title {
     margin-bottom: 24px;
@@ -617,6 +702,9 @@
   }
   .workspace-panes.has-detail {
     display: block;
+  }
+  .workspace-panes.has-detail:not(.has-form) {
+    padding-inline-end: 0;
   }
   .workspace-panes.has-detail .workspace-view,
   .workspace-panes.has-detail .splitter {
@@ -630,6 +718,14 @@
   }
   .drawer-host {
     height: 100%;
+  }
+  .overlay-host {
+    height: 100%;
+  }
+  .work-pane .modal-body,
+  .work-pane .modal-frame > header,
+  .work-pane .modal-frame > footer {
+    padding-inline: 17px;
   }
   .drawer-close-phone {
     display: inline;

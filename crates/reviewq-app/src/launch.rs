@@ -6,6 +6,8 @@ use reviewq_domain::identity::{ReviewId, Revision};
 use reviewq_domain::session::{AbsolutePath, HostProvider};
 use reviewq_domain::settings::{CheckoutBinding, NativeSkill};
 
+use crate::settings::NativeSkillOption;
+
 use crate::access::{AppError, AppFuture};
 use crate::queue::{MergeRequestState, ReviewSource};
 
@@ -139,7 +141,7 @@ pub struct LaunchPreparation {
     pub checkout: CheckoutBinding,
     pub default_skill: Option<NativeSkill>,
     pub models: Vec<NativeModel>,
-    pub skills: Vec<NativeSkill>,
+    pub skills: Vec<NativeSkillOption>,
 }
 
 impl LaunchPreparation {
@@ -163,7 +165,7 @@ impl LaunchPreparation {
             Some(InvocationDraft::Skill { name, path, args }) => {
                 validate_text(Some(&name), 256, false)?;
                 validate_text(args.as_deref(), 16 * 1024, true)?;
-                let mut available = self.skills.iter().filter(|skill| {
+                let mut available = self.skills.iter().map(|option| &option.skill).filter(|skill| {
                     skill.name == name && path.as_ref().is_none_or(|path| *path == skill.path)
                 });
                 let skill = available.next().ok_or(AppError::NotFound)?.clone();
@@ -173,7 +175,7 @@ impl LaunchPreparation {
                 Invocation::Skill { skill, args }
             }
             None => match self.default_skill {
-                Some(skill) if self.skills.contains(&skill) => Invocation::Skill { skill, args: None },
+                Some(skill) if self.skills.iter().any(|option| option.skill == skill) => Invocation::Skill { skill, args: None },
                 Some(_) => return Err(AppError::StaleRevision),
                 None => Invocation::Custom { prompt: "Review the selected merge request and explain the evidence for your findings.".into() },
             },

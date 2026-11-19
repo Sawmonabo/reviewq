@@ -45,7 +45,7 @@ export function CatalogPicker({
   const [busy, setBusy] = useState(false);
   const current = useRef<AbortController | undefined>(undefined);
   const search = useRef<HTMLInputElement>(null);
-  const first = useRef<HTMLButtonElement>(null);
+  const results = useRef<HTMLDivElement>(null);
   const scopeKey = JSON.stringify([
     scope.expectedRevision,
     scope.provider,
@@ -138,9 +138,24 @@ export function CatalogPicker({
       className="catalog-picker stack"
       onKeyDown={(event) => {
         if (event.key === "Escape" && open) {
+          event.preventDefault();
           event.stopPropagation();
           setOpen(false);
           search.current?.focus();
+          return;
+        }
+        if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
+        const choices = Array.from(results.current?.querySelectorAll("button:enabled") ?? []);
+        const index = choices.findIndex((button) => button === event.target);
+        if (event.target !== search.current && index < 0) return;
+        if (index < 0 && event.key === "ArrowUp") return;
+        event.preventDefault();
+        if (!open) {
+          setOpen(true);
+        } else {
+          const next = event.key === "ArrowDown" ? index + 1 : index - 1;
+          const focus = next < 0 ? search.current : choices[next];
+          if (focus instanceof HTMLElement) focus.focus();
         }
       }}
     >
@@ -160,11 +175,7 @@ export function CatalogPicker({
             if (value.trim().length >= 2) setOpen(true);
           }}
           onKeyDown={(event) => {
-            if (event.key === "ArrowDown") {
-              event.preventDefault();
-              if (first.current) first.current.focus();
-              else setOpen(true);
-            } else if (event.key === "Enter") {
+            if (event.key === "Enter") {
               event.preventDefault();
               setOpen(true);
               setForced((count) => count + 1);
@@ -210,15 +221,9 @@ export function CatalogPicker({
             <Empty title={q ? "No matching choices" : "No available choices"} />
           )}
           {visible && (
-            <div className="catalog-results">
-              {visible.map((item, index) => (
-                <button
-                  type="button"
-                  key={item.id}
-                  disabled={disabled}
-                  ref={index === 0 ? first : undefined}
-                  onClick={() => onAdd(item)}
-                >
+            <div className="catalog-results" ref={results}>
+              {visible.map((item) => (
+                <button type="button" key={item.id} disabled={disabled} onClick={() => onAdd(item)}>
                   <strong>{item.label}</strong>
                   <span className="meta">
                     {item.path ?? item.state ?? item.boardType ?? item.id}

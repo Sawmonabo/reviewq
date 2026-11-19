@@ -78,6 +78,15 @@
   padding: 0;
   opacity: 0;
   cursor: pointer;
+  background: #0c0c10;
+}
+.select-filter > select:hover:enabled {
+  color: #fafafa;
+  background: var(--control-hover);
+}
+:root[data-theme="light"] .select-filter > select {
+  color: var(--text);
+  background: var(--control);
 }
 .select-filter:has(select:disabled) {
   opacity: 0.55;
@@ -106,7 +115,7 @@
   font-size: 10px;
 }
 .queue-exclusions {
-  width: min(291px, var(--radix-dropdown-menu-content-available-width));
+  width: min(292px, var(--radix-dropdown-menu-content-available-width));
   min-width: 0;
   background: var(--popup-bg);
   border-color: var(--popup-border);
@@ -124,8 +133,7 @@
   background: var(--popup-hover);
 }
 .exclusion-copy {
-  display: grid;
-  gap: 4px;
+  display: block;
   flex: 1 1 0;
   min-width: 0;
 }
@@ -135,12 +143,17 @@
   justify-content: space-between;
   font-size: 12px;
   font-weight: 500;
+  line-height: 16px;
 }
 .exclusion-copy small,
 .exclusion-copy > span {
   color: var(--muted);
   font-size: 10px;
   line-height: 1.5;
+}
+.exclusion-copy > span {
+  display: block;
+  margin-top: 4px;
 }
 .exclusion-check {
   display: grid;

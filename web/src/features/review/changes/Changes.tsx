@@ -5,13 +5,23 @@ import { ApiResponseError } from "../../../api/client";
 import {
   downloadPatchUrl,
   isRichPatch,
+  PATCH_FILES_PER_PAGE,
   PATCH_WINDOW_BYTES,
   PatchFormattingLimit,
+  readInitialPatchFiles,
   readPatch,
   readPatchDiscussions,
   readPatchFiles,
+  readPatchPathCatalog,
+  readPatchRevision,
 } from "../../../api/changes";
-import type { PatchDiscussion, PatchFile } from "../../../api/generated/contracts";
+import type {
+  PatchDiscussion,
+  PatchFile,
+  PatchFileIndex,
+  PatchPath,
+} from "../../../api/generated/contracts";
+import { FilterSelect } from "../../../components/FilterSelect";
 import { Icon } from "../../../components/Icon";
 import { Pagination } from "../../../components/Pagination";
 import { Empty, Loading, Notice } from "../../../components/PanelState";
@@ -20,13 +30,18 @@ import { safeUrl } from "../../../lib/presentation";
 import { savedValue, saveValue } from "../../../lib/view-preferences";
 import { DiscussionThread } from "../DiscussionThread";
 import { Approvals } from "./Approvals";
+import { ChangedFilePicker, DiffCount, FileKind } from "./ChangedFilePicker";
 import { PatchDocumentView } from "./PatchDocumentView";
 import "./changes.css";
 
-type Position = { readonly revision: string; readonly cursor: string };
+type Boundary = "first" | "last";
+type Position = { readonly revision: string } & (
+  { readonly cursor: string; readonly boundary?: Boundary } | { readonly path: PatchPath }
+);
 type Tab = "files" | "general" | "all";
 type Status = "any" | "open" | "resolved";
 type Window = { readonly offset: number; readonly etag?: string; readonly last?: boolean };
+const MAX_EMPTY_DISCUSSION_PAGES = 4;
 const tabs = [
   ["files", "Files"],
   ["general", "General comments"],
@@ -43,24 +58,36 @@ export default function Changes({
   readonly children?: ReactNode;
 }) {
   const [fileId, setFileId] = useState(() => storedFile(reviewId));
-  const [positions, setPositions] = useState<readonly Position[]>([]);
+  const [position, setPosition] = useState<Position>();
   const [epoch, setEpoch] = useState(0);
-  const [frozenRevision, setFrozenRevision] = useState<string>();
+  const [retained, setRetained] = useState<PatchFileIndex>();
   const [tab, setTab] = useState<Tab>("files");
-  const [query, setQuery] = useState("");
+  const [fileQuery, setFileQuery] = useState("");
   const [status, setStatus] = useState<Status>("any");
   const [involving, setInvolving] = useState(false);
   const participant = useRef<HTMLSelectElement>(null);
-  const indexKey = JSON.stringify([reviewId, epoch, positions.at(-1)]);
+  const indexKey = JSON.stringify([reviewId, epoch, position]);
   const index = useResource(indexKey, async (signal) => {
-    const position = positions.at(-1);
     try {
-      return await readPatchFiles(
-        reviewId,
-        signal,
-        position,
-        position || epoch > 0 ? undefined : storedFile(reviewId),
-      );
+      const result =
+        position || epoch > 0
+          ? await readPatchFiles(reviewId, signal, position)
+          : await readInitialPatchFiles(reviewId, signal, storedFile(reviewId));
+      if (position && !signal.aborted) {
+        if ("path" in position) {
+          const path = position.path;
+          const selected = result.data.items.find(
+            (file) => file.oldPath === path.oldPath && file.newPath === path.newPath,
+          );
+          if (!selected) throw new Error("The file catalog and patch index disagree.");
+          selectFile(selected);
+        } else if (position.boundary) {
+          const selected =
+            position.boundary === "last" ? result.data.items.at(-1) : result.data.items[0];
+          if (selected) selectFile(selected);
+        }
+      }
+      return result;
     } catch (error) {
       if (
         signal.aborted ||
@@ -72,41 +99,78 @@ export default function Changes({
       return readPatchFiles(reviewId, signal);
     }
   });
-  const revision = index.data?.revision ?? frozenRevision;
+  const shown = index.data ?? retained;
+  const revision = shown?.revision;
+  const catalog = useResource(
+    JSON.stringify(["file-catalog", reviewId, revision, epoch]),
+    (signal) =>
+      revision
+        ? readPatchPathCatalog(reviewId, revision, signal)
+        : Promise.resolve({ data: null, cursor: "" }),
+  );
   const current = useResource(
-    `change-current:${reviewId}`,
-    (signal) => readPatchFiles(reviewId, signal),
+    `change-current:${reviewId}:${epoch}`,
+    (signal) =>
+      revision ? readPatchRevision(reviewId, signal) : Promise.resolve({ data: null, cursor: "" }),
     [{ kind: "changes", id: reviewId }],
   );
   const changed = Boolean(revision && current.data && current.data.revision !== revision);
   const [threadTrail, setThreadTrail] = useState<readonly string[]>([]);
+  const discussionScope = tab === "general" ? "general" : "all";
+  const filtering = involving || status !== "any";
   const threads = useResource(
-    `discussions:${reviewId}:${revision ?? ""}:${threadTrail.at(-1) ?? ""}`,
-    (signal) =>
-      revision
-        ? readPatchDiscussions(reviewId, revision, signal, threadTrail.at(-1))
-        : Promise.resolve({ data: null, cursor: "" }),
+    JSON.stringify([
+      "discussions",
+      reviewId,
+      revision,
+      discussionScope,
+      involving,
+      status,
+      threadTrail.at(-1),
+    ]),
+    async (signal) => {
+      if (!revision) return { data: null, cursor: "" };
+      let page = await readPatchDiscussions(reviewId, revision, signal, threadTrail.at(-1));
+      if (!filtering && discussionScope === "all") return page;
+      for (let skipped = 0; skipped < MAX_EMPTY_DISCUSSION_PAGES; skipped++) {
+        const next = page.data.nextCursor;
+        if (
+          !next ||
+          signal.aborted ||
+          page.data.items.some(
+            (thread) =>
+              matchesFilters(thread, status, involving) &&
+              (discussionScope === "all" || isGeneral(thread)),
+          )
+        )
+          break;
+        page = await readPatchDiscussions(reviewId, revision, signal, next);
+      }
+      return page;
+    },
     [{ kind: "discussions", id: reviewId }],
   );
-  const available =
-    index.data?.items.filter((file) =>
-      `${file.newPath} ${file.oldPath}`.toLowerCase().includes(query.toLowerCase()),
-    ) ?? [];
-  const files = index.data?.items ?? [];
+  const files = shown?.items ?? [];
   const file = files.find((entry) => entry.fileId === fileId) ?? files[0];
   const filePosition = file ? files.indexOf(file) : -1;
-  const fileSearch = useRef<HTMLInputElement>(null);
-  const picker = useRef<HTMLDetailsElement>(null);
-  const filtered = (threads.data?.items ?? []).filter(
-    (thread) =>
-      (!involving || thread.ourParticipation) && (status === "any" || thread.resolution === status),
+  const pageNumber = shown?.pageNumber ?? 1;
+  const pageOffset = (pageNumber - 1) * PATCH_FILES_PER_PAGE;
+  const lastKnownFile = pageOffset + files.length;
+  const totalFiles = catalog.data
+    ? `${Math.max(catalog.data.count, lastKnownFile)}${catalog.data.partial ? "+" : ""}`
+    : shown && (!shown.nextCursor || catalog.error)
+      ? `${lastKnownFile}${shown.nextCursor ? "+" : ""}`
+      : undefined;
+  const filtered = (threads.data?.items ?? []).filter((thread) =>
+    matchesFilters(thread, status, involving),
   );
+  const general = filtered.filter(isGeneral);
   const anchors = file ? filtered.filter((thread) => matches(thread, file)) : [];
   const visible =
     tab === "files"
       ? filtered.filter((thread) => !file || !matches(thread, file))
       : tab === "general"
-        ? filtered.filter((thread) => !thread.anchor)
+        ? general
         : filtered;
 
   function selectFile(next: PatchFile) {
@@ -115,44 +179,67 @@ export default function Changes({
   }
 
   function refreshIndex() {
-    setPositions([]);
-    setFrozenRevision(undefined);
+    setPosition(undefined);
+    setRetained(undefined);
     setThreadTrail([]);
     setEpoch((value) => value + 1);
   }
 
-  if (index.pending && !frozenRevision && !index.error) return <Loading label="Loading changes…" />;
+  function movePage(cursor: string | null | undefined, boundary?: Boundary) {
+    if (!cursor || !index.data || index.pending) return;
+    setRetained(index.data);
+    setPosition({ revision: index.data.revision, cursor, ...(boundary ? { boundary } : {}) });
+  }
+
+  function choosePath(path: PatchPath) {
+    if (!index.data || index.pending) return;
+    const found = index.data.items.find(
+      (file) => file.oldPath === path.oldPath && file.newPath === path.newPath,
+    );
+    if (found) {
+      selectFile(found);
+      return;
+    }
+    setRetained(index.data);
+    setPosition({ revision: index.data.revision, path });
+  }
+
+  function clearConversationFilters() {
+    setInvolving(false);
+    setStatus("any");
+    setThreadTrail([]);
+    participant.current?.focus({ preventScroll: true });
+  }
+
+  if (index.pending && !shown && !index.error) return <Loading label="Loading changes…" />;
 
   return (
     <section className="changes stack" aria-label="Changes">
       <div className="changes-top">
         <div>
           <h3>Changes &amp; conversations</h3>
-          {index.data && (
+          {(totalFiles !== undefined || threads.data) && (
             <p className="meta">
-              {files.length}
-              {index.data.nextCursor ? "+" : ""} files · {filtered.length}
-              {threads.data?.nextCursor ? "+" : ""} conversations
+              {totalFiles !== undefined && `${totalFiles} files`}
+              {totalFiles !== undefined && threads.data && " · "}
+              {threads.data &&
+                `${filtered.length}${threads.data.nextCursor || threadTrail.length ? "+" : ""} conversations`}
             </p>
           )}
         </div>
-        <Approvals reviewId={reviewId} displayedSha={index.data?.headSha} />
+        <Approvals reviewId={reviewId} displayedSha={shown?.headSha} webUrl={webUrl} />
       </div>
       {children}
-      {index.data && (
+      {shown && (
         <div className="diff-revision">
-          <span>
-            Source <code>{index.data.headSha.slice(0, 12)}</code>
-          </span>
-          <span>
-            Base <code>{index.data.baseSha.slice(0, 12)}</code>
+          <span title={`Base ${shown.baseSha}`}>
+            Source <code title={shown.headSha}>{shown.headSha.slice(0, 12)}</code>
           </span>
         </div>
       )}
       {changed && (
         <Notice>
-          The source revision changed. The displayed patch remains on{" "}
-          {index.data?.headSha.slice(0, 12)}.
+          The source revision changed. The displayed patch remains on {shown?.headSha.slice(0, 12)}.
           <button type="button" onClick={refreshIndex}>
             Load current changes
           </button>
@@ -160,60 +247,77 @@ export default function Changes({
       )}
       <div className="actions changes-tabs">
         {tabs.map(([id, label]) => (
-          <button key={id} type="button" aria-pressed={tab === id} onClick={() => setTab(id)}>
+          <button
+            key={id}
+            type="button"
+            aria-pressed={tab === id}
+            onClick={() => {
+              if (tab !== id) {
+                setTab(id);
+                setThreadTrail([]);
+              }
+            }}
+          >
             {label}{" "}
-            <strong className="changes-count">
-              {id === "files"
-                ? files.length
-                : id === "general"
-                  ? filtered.filter((thread) => !thread.anchor).length
-                  : filtered.length}
-              {(id === "files" ? index.data?.nextCursor : threads.data?.nextCursor) && "+"}
-            </strong>
+            {id === "files" ? (
+              <strong className="changes-count">{totalFiles}</strong>
+            ) : (
+              threads.data &&
+              (id === "general" || discussionScope === "all") && (
+                <strong className="changes-count">
+                  {id === "general" ? general.length : filtered.length}
+                  {(threads.data.nextCursor || threadTrail.length > 0) && "+"}
+                </strong>
+              )
+            )}
           </button>
         ))}
       </div>
       <div className="actions thread-filters">
-        <label>
-          Show{" "}
-          <select
-            ref={participant}
-            value={involving ? "mine" : "all"}
-            onChange={(event) => setInvolving(event.currentTarget.value === "mine")}
-          >
-            <option value="all">Everyone</option>
-            <option value="mine">Involving you</option>
-          </select>
-        </label>
-        <label>
-          {" "}
-          Status{" "}
-          <select
-            value={status}
-            onChange={(event) => setStatus(event.currentTarget.value as Status)}
-          >
-            <option value="any">Any status</option>
-            <option value="open">Open</option>
-            <option value="resolved">Resolved</option>
-          </select>
-        </label>
-        {(involving || status !== "any") && (
+        <FilterSelect
+          label="Show"
+          accessibleLabel="Conversation participants"
+          selectRef={participant}
+          value={involving ? "mine" : "all"}
+          options={[
+            { value: "all", label: "Everyone" },
+            { value: "mine", label: "Involving you" },
+          ]}
+          onChange={(value) => {
+            setInvolving(value === "mine");
+            setThreadTrail([]);
+          }}
+        />
+        <FilterSelect
+          label="Status"
+          accessibleLabel="Conversation status"
+          value={status}
+          options={[
+            { value: "any", label: "Any status" },
+            { value: "open", label: "Open only" },
+            { value: "resolved", label: "Resolved only" },
+          ]}
+          onChange={(value) => {
+            setStatus(value as Status);
+            setThreadTrail([]);
+          }}
+        />
+        {filtering && (
           <button
             type="button"
-            onClick={() => {
-              setInvolving(false);
-              setStatus("any");
-              participant.current?.focus();
-            }}
+            className="filter-control clear-filters"
+            aria-label="Clear conversation filters"
+            title="Clear conversation filters"
+            onClick={clearConversationFilters}
           >
-            Clear conversation filters
+            <Icon name="clearFilters" size={16} />
           </button>
         )}
       </div>
       {index.error && (
         <Notice retry={index.retry}>
           {index.error}{" "}
-          {positions.length > 0 && (
+          {position && (
             <button type="button" onClick={refreshIndex}>
               Restart file list
             </button>
@@ -222,83 +326,45 @@ export default function Changes({
       )}
       {tab === "files" && (
         <>
-          {index.pending && <Loading label="Loading changed files…" />}
-          {index.data && (
+          {shown && (
             <>
-              <details
-                className="changed-file-picker"
-                ref={picker}
-                onToggle={(event) => {
-                  if (event.currentTarget.open) fileSearch.current?.focus();
+              <ChangedFilePicker
+                reviewId={reviewId}
+                index={shown}
+                selected={file}
+                total={totalFiles}
+                pending={index.pending}
+                catalog={catalog}
+                query={fileQuery}
+                onQuery={setFileQuery}
+                onChooseFile={(file) => {
+                  if (!index.pending) selectFile(file);
                 }}
-              >
-                <summary>
-                  Changed files{" "}
-                  <small>
-                    {files.length}
-                    {index.data.nextCursor ? "+" : ""}
-                  </small>
-                </summary>
-                <label className="search-field">
-                  <Icon name="search" size={13} />
-                  <input
-                    ref={fileSearch}
-                    aria-label="Search files on this page"
-                    value={query}
-                    placeholder="Find a file"
-                    onChange={(event) => setQuery(event.currentTarget.value)}
-                  />
-                </label>
-                <nav aria-label="Changed files">
-                  {available.map((item) => (
-                    <button
-                      type="button"
-                      key={item.fileId}
-                      aria-current={item.fileId === file?.fileId || undefined}
-                      onClick={() => selectFile(item)}
-                    >
-                      <span className="file-initial" aria-label={fileKind(item)}>
-                        {fileKind(item).charAt(0)}
-                      </span>
-                      <code>
-                        {item.renamed ? `${item.oldPath} → ${item.newPath}` : item.newPath}
-                      </code>
-                      {item.lineCount != null && <small>{item.lineCount} rows</small>}
-                    </button>
-                  ))}
-                  {!available.length && (
-                    <p className="meta">
-                      {query ? "No matching files on this page." : "No changed files."}
-                    </p>
-                  )}
-                </nav>
-                <Pagination
-                  trail={positions.map((position) => position.cursor)}
-                  next={index.data.nextCursor}
-                  onPage={(trail) => {
-                    const shown = index.data;
-                    if (!shown) return;
-                    setFrozenRevision(shown.revision);
-                    setPositions(trail.map((cursor) => ({ revision: shown.revision, cursor })));
-                  }}
-                />
-              </details>
+                onChoosePath={choosePath}
+                onPage={movePage}
+              />
               {file && (
                 <SelectedPatch
-                  key={JSON.stringify([file.reviewId, file.revision, file.fileId])}
                   file={file}
                   threads={anchors}
                   webUrl={webUrl}
                   onReload={refreshIndex}
-                  position={filePosition}
-                  total={files.length}
+                  position={pageOffset + filePosition + 1}
+                  total={totalFiles}
+                  previous={filePosition > 0 || Boolean(shown.previousCursor)}
+                  next={filePosition + 1 < files.length || Boolean(shown.nextCursor)}
+                  pending={index.pending}
                   onPrevious={() => {
+                    if (index.pending) return;
                     const next = files[filePosition - 1];
                     if (next) selectFile(next);
+                    else movePage(shown.previousCursor, "last");
                   }}
                   onNext={() => {
+                    if (index.pending) return;
                     const next = files[filePosition + 1];
                     if (next) selectFile(next);
+                    else movePage(shown.nextCursor, "first");
                   }}
                 />
               )}
@@ -309,28 +375,52 @@ export default function Changes({
       {threads.error && <Notice retry={threads.retry}>{threads.error}</Notice>}
       {threads.pending && <Loading label="Loading discussions…" />}
       <section className="discussion-list stack" aria-label="Review discussions">
-        <h3>
-          {tab === "files"
-            ? "Other discussions"
-            : tab === "general"
-              ? "General comments"
-              : "All conversations"}
-        </h3>
+        {tab === "files" && visible.length > 0 && <h3>Other discussions</h3>}
         {threads.data && (
-          <p className="meta">
+          <p role="status" className="sr-only">
             {visible.length} {visible.length === 1 ? "discussion" : "discussions"} on this page
             {tab === "files" && anchors.length > 0 ? ` · ${anchors.length} on this file` : ""}
           </p>
         )}
-        {threads.data && !visible.length && (
-          <p className="meta">
-            {involving || status !== "any"
-              ? "No conversations match the filters."
-              : "No conversations in this view."}
-          </p>
+        {tab !== "files" && threads.data && !visible.length && (
+          <div className="changes-conversation-empty">
+            <div role="status">
+              <Icon name="inbox" size={28} />
+              <h3>
+                {threads.data.nextCursor
+                  ? "No matching conversations on this page"
+                  : filtering
+                    ? tab === "general"
+                      ? "No matching comments"
+                      : "No matching conversations"
+                    : tab === "general"
+                      ? "No general comments yet"
+                      : "No conversations yet"}
+              </h3>
+              {threads.data.nextCursor ? (
+                <p className="meta">More discussion pages are available below.</p>
+              ) : (
+                filtering && <p className="meta">Try changing your filters.</p>
+              )}
+            </div>
+            {filtering && (
+              <button type="button" onClick={clearConversationFilters}>
+                Clear filters
+              </button>
+            )}
+          </div>
         )}
         {visible.map((thread) => (
-          <DiscussionThread key={thread.discussionId} thread={thread} />
+          <DiscussionThread
+            key={thread.discussionId}
+            thread={thread}
+            outside={Boolean(
+              tab === "files" &&
+              !thread.outdated &&
+              thread.anchor &&
+              (!file || !matches(thread, file)),
+            )}
+          />
         ))}
         <Pagination trail={threadTrail} next={threads.data?.nextCursor} onPage={setThreadTrail} />
       </section>
@@ -345,6 +435,9 @@ function SelectedPatch({
   onReload,
   position,
   total,
+  previous,
+  next,
+  pending,
   onPrevious,
   onNext,
 }: {
@@ -353,9 +446,82 @@ function SelectedPatch({
   readonly webUrl: string;
   readonly onReload: () => void;
   readonly position: number;
-  readonly total: number;
+  readonly total: string | undefined;
+  readonly previous: boolean;
+  readonly next: boolean;
+  readonly pending: boolean;
   readonly onPrevious: () => void;
   readonly onNext: () => void;
+}) {
+  const source = safeUrl(webUrl);
+  return (
+    <section className="selected-patch" aria-label={`Patch for ${file.newPath}`}>
+      <div className="spread patch-toolbar">
+        <div className="patch-file-title">
+          <strong>
+            <code>{file.renamed ? `${file.oldPath} → ${file.newPath}` : file.newPath}</code>
+          </strong>
+          <div className="actions patch-links">
+            <span className="meta">
+              <FileKind file={file} />
+            </span>
+            <DiffCount file={file} />
+            {file.availability === "complete" && (
+              <a href={downloadPatchUrl(file)} aria-label="Download patch" title="Download patch">
+                <Icon name="download" size={14} />
+              </a>
+            )}
+            {source && (
+              <a
+                href={`${source}/diffs`}
+                target="_blank"
+                rel="noreferrer"
+                aria-label="Open changes in GitLab"
+                title="Open changes in GitLab"
+              >
+                <Icon name="external" size={13} />
+              </a>
+            )}
+          </div>
+        </div>
+        <div className="actions patch-arrows" aria-label="Changed file position">
+          <button
+            type="button"
+            aria-label="Previous file"
+            aria-disabled={pending || !previous}
+            onClick={onPrevious}
+          >
+            ‹
+          </button>
+          <small>{total === undefined ? `File ${position}` : `${position}/${total}`}</small>
+          <button
+            type="button"
+            aria-label="Next file"
+            aria-disabled={pending || !next}
+            onClick={onNext}
+          >
+            ›
+          </button>
+        </div>
+      </div>
+      <PatchContents
+        key={JSON.stringify([file.reviewId, file.revision, file.fileId])}
+        file={file}
+        threads={threads}
+        onReload={onReload}
+      />
+    </section>
+  );
+}
+
+function PatchContents({
+  file,
+  threads,
+  onReload,
+}: {
+  readonly file: PatchFile;
+  readonly threads: readonly PatchDiscussion[];
+  readonly onReload: () => void;
 }) {
   const [sourceMode, setSourceMode] = useState(!isRichPatch(file));
   const [window, setWindow] = useState<Window>({ offset: 0 });
@@ -379,7 +545,6 @@ function SelectedPatch({
     },
   );
   const body = patch.data;
-  const source = safeUrl(webUrl);
 
   function navigate(target: Window) {
     setBack((items) => [...items, window].slice(-12));
@@ -387,49 +552,7 @@ function SelectedPatch({
   }
 
   return (
-    <section className="selected-patch" aria-label={`Patch for ${file.newPath}`}>
-      <div className="spread patch-toolbar">
-        <div>
-          <strong>
-            <code>{file.renamed ? `${file.oldPath} → ${file.newPath}` : file.newPath}</code>
-          </strong>
-          <div className="actions patch-links">
-            <span className="meta">
-              {fileKind(file)}
-              {file.lineCount !== null && ` · ${file.lineCount} rows`}
-            </span>
-            {file.availability === "complete" && (
-              <a href={downloadPatchUrl(file)}>Download patch</a>
-            )}
-            {source && (
-              <a href={`${source}/diffs`} target="_blank" rel="noreferrer">
-                GitLab changes ↗
-              </a>
-            )}
-          </div>
-        </div>
-        <div className="actions patch-arrows" aria-label="Files on this page">
-          <button
-            type="button"
-            aria-label="Previous file"
-            disabled={position < 1}
-            onClick={onPrevious}
-          >
-            ‹
-          </button>
-          <small>
-            {position + 1} / {total}
-          </small>
-          <button
-            type="button"
-            aria-label="Next file"
-            disabled={position + 1 >= total}
-            onClick={onNext}
-          >
-            ›
-          </button>
-        </div>
-      </div>
+    <>
       {file.availability !== "complete" ? (
         <Notice>{availability(file.availability)}</Notice>
       ) : (
@@ -511,7 +634,7 @@ function SelectedPatch({
       )}
       {(sourceMode || file.availability !== "complete" || (!body && patch.error)) &&
         threads.map((thread) => <DiscussionThread key={thread.discussionId} thread={thread} />)}
-    </section>
+    </>
   );
 }
 
@@ -519,16 +642,21 @@ function matches(thread: PatchDiscussion, file: PatchFile) {
   return (
     !thread.outdated &&
     thread.anchor !== null &&
+    thread.anchor.positionType === "text" &&
     thread.anchor.oldPath === file.oldPath &&
     thread.anchor.newPath === file.newPath &&
     (thread.anchor.newLine !== null || thread.anchor.oldLine !== null)
   );
 }
 
-function fileKind(file: PatchFile) {
-  if (file.deleted) return "Deleted";
-  if (file.created) return "Added";
-  return file.renamed ? "Renamed" : "Modified";
+function matchesFilters(thread: PatchDiscussion, status: Status, involving: boolean) {
+  return (
+    (!involving || thread.ourParticipation) && (status === "any" || thread.resolution === status)
+  );
+}
+
+function isGeneral(thread: PatchDiscussion) {
+  return !thread.anchor && !thread.outdated;
 }
 
 function availability(state: PatchFile["availability"]) {

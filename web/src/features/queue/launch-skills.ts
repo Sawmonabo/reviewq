@@ -1,19 +1,18 @@
-import type { Catalog } from "../../api/generated/contracts/launch";
-import type { Skill } from "../../api/generated/contracts/common";
+import type { AvailableSkill, Catalog } from "../../api/generated/contracts/launch";
 
 type Choice = {
   readonly id: string;
   readonly label: string;
-  readonly sources: ReadonlyMap<string, Skill>;
+  readonly sources: ReadonlyMap<string, AvailableSkill>;
 };
 
 export function launchSkills(catalogs: readonly Catalog[]): Choice[] {
   const first = catalogs[0];
   if (!first) return [];
   const byCatalog = catalogs.map((catalog) => {
-    const byName = new Map<string, Map<string, Skill>>();
+    const byName = new Map<string, Map<string, AvailableSkill>>();
     for (const skill of catalog.skills) {
-      const paths = byName.get(skill.name) ?? new Map<string, Skill>();
+      const paths = byName.get(skill.name) ?? new Map<string, AvailableSkill>();
       paths.set(skill.path, skill);
       byName.set(skill.name, paths);
     }
@@ -29,7 +28,7 @@ export function launchSkills(catalogs: readonly Catalog[]): Choice[] {
     }));
     const exact = matches.every(({ candidates }) => candidates?.has(skill.path));
     if (!exact && !matches.every(({ candidates }) => candidates?.size === 1)) continue;
-    const sources = new Map<string, Skill>();
+    const sources = new Map<string, AvailableSkill>();
     for (const { reviewId, candidates } of matches) {
       const matched = exact ? candidates?.get(skill.path) : candidates?.values().next().value;
       if (matched) sources.set(reviewId, matched);

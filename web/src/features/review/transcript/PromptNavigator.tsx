@@ -1,14 +1,17 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useEffectEvent, useRef, useState } from "react";
+import type { HistoryNavigation } from "../../../api/generated/contracts/history";
 import type { PromptGroup, PromptPreview } from "../../../api/generated/contracts/history";
 import { historyPrompts } from "../../../api/history";
 import type { SessionAddress } from "../../../api/history";
 import { Loading, Notice } from "../../../components/PanelState";
 import { useResource } from "../../../hooks/useResource";
-import { describeError } from "../../../lib/presentation";
 import { HistoryTimestamp } from "./HistoryTimestamp";
 import "./prompt-navigator.css";
 
 type PreviewPath = { readonly group: string; readonly pages: readonly string[] };
+type PreviewPage = Extract<HistoryNavigation, { kind: "previews" }>;
+const MAX_PREVIEW_ITEMS = 24;
+const MAX_CACHED_PREVIEWS = 4;
 
 export function PromptNavigator({
   target,
@@ -24,59 +27,65 @@ export function PromptNavigator({
   readonly onReturnFocus: () => void;
 }) {
   const rail = useRef<HTMLDivElement>(null);
-  const activation = useRef<AbortController | undefined>(undefined);
-  const [maxGroups, setMaxGroups] = useState(32);
+  const previewCache = useRef(new Map<string, PreviewPage>());
+  const [requested, setRequested] = useState(false);
+  const [activation, setActivation] = useState<string>();
   const [visible, setVisible] = useState(false);
   const [pinned, setPinned] = useState(false);
   const [activeOrdinal, setActiveOrdinal] = useState<number>();
   const [windows, setWindows] = useState<readonly string[]>([]);
   const [selected, setSelected] = useState<PreviewPath>();
-  const [jumpError, setJumpError] = useState<string>();
-
   useEffect(() => {
-    const element = rail.current;
-    if (!element) return;
-    const observer = new ResizeObserver(([entry]) => {
-      if (entry) setMaxGroups(Math.max(1, Math.min(64, Math.floor(entry.contentRect.height / 12))));
-    });
-    observer.observe(element);
-    return () => {
-      activation.current?.abort();
-      observer.disconnect();
-    };
+    const request = window.requestIdleCallback(() => setRequested(true), { timeout: 400 });
+    return () => window.cancelIdleCallback(request);
   }, []);
 
   const scope = `${target.runId}:${target.sessionKey}:${generation}`;
   const overviewCursor = windows.at(-1);
   const overview = useResource(
-    `prompts:${scope}:${visible}:${maxGroups}:${overviewCursor ?? ""}`,
-    (signal) =>
-      visible
-        ? historyPrompts(
-            target,
-            { maxGroups, ...(overviewCursor ? { overviewCursor } : {}) },
-            signal,
-          )
-        : Promise.resolve({ data: null, cursor: "" }),
-    visible ? [{ kind: "history", id: target.sessionKey }] : [],
+    `prompts:${scope}:${requested}:${overviewCursor ?? ""}`,
+    async (signal) => {
+      if (!requested) return { data: null, cursor: "" };
+      const result = await historyPrompts(target, overviewCursor ? { overviewCursor } : {}, signal);
+      if (result.data.generation !== generation) throw new Error("Message positions changed.");
+      return result;
+    },
+    requested ? [{ kind: "history", id: target.sessionKey }] : [],
   );
-  const window = overview.data?.kind === "overview" ? overview.data : undefined;
-  const groups = window?.groups ?? [];
-  const location = following && window?.complete ? window.total : activeOrdinal;
+  const overviewPage = overview.data?.kind === "overview" ? overview.data : undefined;
+  const groups = overviewPage?.groups ?? [];
+  const location = following && overviewPage?.complete ? overviewPage.total : activeOrdinal;
   const current = groups.find(
     (group) => location !== undefined && group.first <= location && location <= group.last,
   );
   const group =
     groups.find((item) => item.cursor === selected?.group) ??
-    (pinned ? (current ?? groups.at(-1)) : undefined);
+    (visible ? (current ?? groups.at(-1)) : undefined);
   const previewPages = group?.cursor === selected?.group ? (selected?.pages ?? []) : [];
   const previewCursor = previewPages.at(-1) ?? group?.cursor;
   const previews = useResource(
-    `prompt-preview:${scope}:${visible}:${previewCursor ?? ""}`,
-    (signal) =>
-      visible && previewCursor
-        ? historyPrompts(target, { cursor: previewCursor, limit: 24 }, signal)
-        : Promise.resolve({ data: null, cursor: "" }),
+    `prompt-preview:${scope}:${visible ? (previewCursor ?? "") : ""}`,
+    async (signal) => {
+      if (!visible || !previewCursor || !group) return { data: null, cursor: "" };
+      const cached = previewCache.current.get(previewCursor);
+      if (cached) return { data: cached, cursor: "" };
+      const limit = Math.min(MAX_PREVIEW_ITEMS, group.last - group.first + 1);
+      const result = await historyPrompts(target, { cursor: previewCursor, limit }, signal);
+      signal.throwIfAborted();
+      if (
+        result.data.generation !== generation ||
+        result.data.reset ||
+        result.data.kind !== "previews"
+      )
+        throw new Error("Message positions changed. Reopen the conversation to refresh them.");
+      const cache = previewCache.current;
+      cache.set(previewCursor, result.data);
+      if (cache.size > MAX_CACHED_PREVIEWS) {
+        const oldest = cache.keys().next().value;
+        if (oldest !== undefined) cache.delete(oldest);
+      }
+      return { data: result.data, cursor: result.cursor };
+    },
   );
   const page = previews.data?.kind === "previews" ? previews.data : undefined;
   const items = page?.items.filter(
@@ -84,22 +93,26 @@ export function PromptNavigator({
   );
   const last = items?.at(-1);
   const nextPreview = group && (!last || last.ordinal < group.last) ? page?.nextCursor : null;
-  const empty = window?.total === 0 && window.complete;
+  const empty = overviewPage?.total === 0 && overviewPage.complete;
 
   function close(restoreFocus = false) {
-    activation.current?.abort();
+    setActivation(undefined);
     setPinned(false);
     setVisible(false);
     if (restoreFocus) onReturnFocus();
   }
 
+  function open() {
+    setRequested(true);
+    setVisible(true);
+  }
+
   function choose(group: PromptGroup) {
     if (selected?.group !== group.cursor) {
-      activation.current?.abort();
+      setActivation(undefined);
       setSelected({ group: group.cursor, pages: [] });
-      setJumpError(undefined);
     }
-    setVisible(true);
+    open();
   }
 
   function jump(item: PromptPreview) {
@@ -108,32 +121,26 @@ export function PromptNavigator({
     close(true);
   }
 
-  async function activate(group: PromptGroup) {
+  function activate(group: PromptGroup) {
     choose(group);
     setPinned(true);
     if (group.first !== group.last) return;
     const shown = items?.find((item) => item.ordinal === group.first);
-    if (shown) {
-      jump(shown);
-      return;
-    }
-    activation.current?.abort();
-    const controller = new AbortController();
-    activation.current = controller;
-    try {
-      const { data } = await historyPrompts(
-        target,
-        { cursor: group.cursor, limit: 1 },
-        controller.signal,
-      );
-      if (controller.signal.aborted || data.kind !== "previews" || data.generation !== generation)
-        return;
-      const exact = data.items.find((item) => item.ordinal === group.first);
-      if (exact) jump(exact);
-    } catch (error) {
-      if (!controller.signal.aborted) setJumpError(describeError(error));
-    }
+    if (shown) jump(shown);
+    else setActivation(group.cursor);
   }
+
+  const finishActivation = useEffectEvent(() => {
+    if (activation && group?.cursor === activation && group.first === group.last) {
+      const item = items?.find((candidate) => candidate.ordinal === group.first);
+      if (item) jump(item);
+    }
+  });
+  useEffect(() => {
+    if (!activation || !page) return;
+    const frame = requestAnimationFrame(() => finishActivation());
+    return () => cancelAnimationFrame(frame);
+  }, [activation, page]);
 
   return (
     <div
@@ -141,12 +148,32 @@ export function PromptNavigator({
       data-visible={visible && !empty}
       ref={rail}
       onPointerEnter={(event) => {
-        if (event.pointerType !== "touch") setVisible(true);
+        if (event.pointerType !== "touch") open();
+      }}
+      onPointerMove={(event) => {
+        if (event.pointerType === "touch" || pinned || !overviewPage || !groups.length) return;
+        const track = event.currentTarget.querySelector(".message-navigator-rail");
+        if (
+          !track ||
+          (event.target !== event.currentTarget && !track.contains(event.target as Node))
+        )
+          return;
+        const box = track.getBoundingClientRect();
+        if (!box.height) return;
+        const ordinal = Math.min(
+          overviewPage.total,
+          Math.max(
+            1,
+            Math.floor(((event.clientY - box.top) / box.height) * overviewPage.total) + 1,
+          ),
+        );
+        const marker = groups.find((item) => item.first <= ordinal && ordinal <= item.last);
+        if (marker) choose(marker);
       }}
       onPointerLeave={() => {
         if (!pinned && !rail.current?.contains(document.activeElement)) close();
       }}
-      onFocusCapture={() => setVisible(true)}
+      onFocusCapture={open}
       onBlurCapture={(event) => {
         if (!pinned && !event.currentTarget.contains(event.relatedTarget)) close();
       }}
@@ -186,7 +213,7 @@ export function PromptNavigator({
             const initial = current ?? groups.at(-1);
             if (initial) choose(initial);
             setPinned(true);
-            setVisible(true);
+            open();
           }
         }}
       >
@@ -207,7 +234,8 @@ export function PromptNavigator({
                   : `Messages ${marker.first} to ${marker.last}`
               }
               style={{
-                top: `${((marker.first + marker.last - 1) / 2 / Math.max(1, window?.total ?? 1)) * 100}%`,
+                top: `${((marker.first + marker.last - 1) / 2 / Math.max(1, overviewPage?.total ?? 1)) * 100}%`,
+                height: `min(12px, ${((marker.last - marker.first + 1) / Math.max(1, overviewPage?.total ?? 1)) * 100}%)`,
               }}
               tabIndex={visible ? 0 : -1}
               onPointerEnter={() => choose(marker)}
@@ -224,12 +252,16 @@ export function PromptNavigator({
         (group ||
           overview.pending ||
           overview.error ||
-          window?.nextWindowCursor ||
+          overviewPage?.nextWindowCursor ||
           windows.length > 0) && (
           <div className="message-navigator-preview" aria-label="Message previews">
             <div className="message-navigator-heading">
               <span>
-                {group?.first === group?.last && group ? "Your message" : "Your messages"}
+                {group
+                  ? group.first === group.last
+                    ? "Your message"
+                    : `${group.last - group.first + 1} messages`
+                  : "Your messages"}
               </span>
               <button
                 type="button"
@@ -242,7 +274,6 @@ export function PromptNavigator({
             </div>
             {overview.error && <Notice retry={overview.retry}>{overview.error}</Notice>}
             {previews.error && <Notice retry={previews.retry}>{previews.error}</Notice>}
-            {jumpError && <Notice>{jumpError}</Notice>}
             {(overview.pending || (group && previews.pending)) && (
               <Loading label="Reading messages…" />
             )}
@@ -251,10 +282,10 @@ export function PromptNavigator({
                 {items.map((item) => (
                   <li key={item.entryId}>
                     <button type="button" onClick={() => jump(item)}>
+                      <span>{item.text || "User message"}</span>
                       {item.timestamp && (
                         <HistoryTimestamp timestamp={item.timestamp} includeDate />
                       )}
-                      <span>{item.text}</span>
                     </button>
                   </li>
                 ))}
@@ -293,7 +324,7 @@ export function PromptNavigator({
                 </button>
               </div>
             )}
-            {(window?.nextWindowCursor || windows.length > 0) && (
+            {(overviewPage?.nextWindowCursor || windows.length > 0) && (
               <div className="message-navigator-paging">
                 {windows.length > 0 && (
                   <button
@@ -304,12 +335,13 @@ export function PromptNavigator({
                     Earlier groups
                   </button>
                 )}
-                {window?.nextWindowCursor && (
+                {overviewPage?.nextWindowCursor && (
                   <button
                     type="button"
                     className="quiet-button"
                     onClick={() =>
-                      window.nextWindowCursor && setWindows([...windows, window.nextWindowCursor])
+                      overviewPage.nextWindowCursor &&
+                      setWindows([...windows, overviewPage.nextWindowCursor])
                     }
                   >
                     More groups
@@ -317,7 +349,9 @@ export function PromptNavigator({
                 )}
               </div>
             )}
-            {window && !window.complete && <p className="meta">Message overview is incomplete.</p>}
+            {overviewPage && !overviewPage.complete && !overviewPage.nextWindowCursor && (
+              <p className="meta">Some messages are unavailable.</p>
+            )}
           </div>
         )}
     </div>

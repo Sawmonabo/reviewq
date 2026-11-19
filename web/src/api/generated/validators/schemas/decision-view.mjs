@@ -3,7 +3,7 @@ import { func0 } from "../runtime.mjs";
 import { validate152 } from "./disposition.mjs";
 import { validate232 } from "./utc-timestamp-dto.mjs";
 import { validate147 } from "./git-sha-dto.mjs";
-function validate1131(
+function validate1159(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -20,7 +20,7 @@ function validate1131(
         ((data.reviewedAt === undefined || !func0.call(data, "reviewedAt")) &&
           (missing0 = "reviewedAt"))
       ) {
-        validate1131.errors = [
+        validate1159.errors = [
           {
             instancePath,
             schemaPath: "#/required",
@@ -84,7 +84,7 @@ function validate1131(
               vErrors.push(err1);
             }
             errors++;
-            validate1131.errors = vErrors;
+            validate1159.errors = vErrors;
             return false;
           } else {
             errors = _errs2;
@@ -155,7 +155,7 @@ function validate1131(
                 vErrors.push(err3);
               }
               errors++;
-              validate1131.errors = vErrors;
+              validate1159.errors = vErrors;
               return false;
             } else {
               errors = _errs7;
@@ -229,7 +229,7 @@ function validate1131(
                   vErrors.push(err5);
                 }
                 errors++;
-                validate1131.errors = vErrors;
+                validate1159.errors = vErrors;
                 return false;
               } else {
                 errors = _errs12;
@@ -249,7 +249,7 @@ function validate1131(
         }
       }
     } else {
-      validate1131.errors = [
+      validate1159.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -260,7 +260,7 @@ function validate1131(
       return false;
     }
   }
-  validate1131.errors = vErrors;
+  validate1159.errors = vErrors;
   return errors === 0;
 }
-export { validate1131 };
+export { validate1159 };

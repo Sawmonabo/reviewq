@@ -4,7 +4,9 @@ use std::collections::BTreeMap;
 use std::error::Error;
 use std::io::{self, Write};
 
-use reviewq_protocol::changes::{PatchDiscussionsResponse, PatchFileIndexResponse};
+use reviewq_protocol::changes::{
+    PatchDiscussionsResponse, PatchFileIndexResponse, PatchPathsResponse,
+};
 use reviewq_protocol::events::{InvalidateEvent, ResetEvent};
 use reviewq_protocol::history::{
     HistoryContentResponse, HistoryNavigationResponse, HistoryPageResponse, HistoryPlanResponse,
@@ -87,6 +89,11 @@ fn main() -> Result<(), Box<dyn Error>> {
     )?;
 
     registry.response::<PatchFileIndexResponse>("changes", "PatchFileIndexResponse")?;
+    registry.response::<reviewq_protocol::changes::CurrentPatchRevisionResponse>(
+        "changes",
+        "CurrentPatchRevisionResponse",
+    )?;
+    registry.response::<PatchPathsResponse>("changes", "PatchPathsResponse")?;
     registry.response::<PatchDiscussionsResponse>("changes", "PatchDiscussionsResponse")?;
     registry.response::<reviewq_protocol::changes::ApprovalViewResponse>(
         "changes",

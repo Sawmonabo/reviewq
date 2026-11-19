@@ -35,6 +35,7 @@ import type {
   CatalogResponse,
   CheckoutSkillsResponse,
   CurrentActionResponse,
+  CurrentPatchRevisionResponse,
   DeliveryReceiptResponse,
   Failure,
   FollowupAssessmentsResponse,
@@ -57,6 +58,7 @@ import type {
   NotificationStateResponse,
   PatchDiscussionsResponse,
   PatchFileIndexResponse,
+  PatchPathsResponse,
   QuestionAnswerResponse,
   QuestionFormsResponse,
   QueuePageResponse,
@@ -166,6 +168,9 @@ export function isCheckoutSkillsResponse(
 export function isCurrentActionResponse(
   value: unknown,
 ): value is CurrentActionResponse;
+export function isCurrentPatchRevisionResponse(
+  value: unknown,
+): value is CurrentPatchRevisionResponse;
 export function isDeliveryReceiptResponse(
   value: unknown,
 ): value is DeliveryReceiptResponse;
@@ -228,6 +233,9 @@ export function isPatchDiscussionsResponse(
 export function isPatchFileIndexResponse(
   value: unknown,
 ): value is PatchFileIndexResponse;
+export function isPatchPathsResponse(
+  value: unknown,
+): value is PatchPathsResponse;
 export function isQuestionAnswerResponse(
   value: unknown,
 ): value is QuestionAnswerResponse;

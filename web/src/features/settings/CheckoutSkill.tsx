@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { CheckoutSkillsRequest, Skill } from "../../api/generated/contracts";
 import { checkoutSkills } from "../../api/settings";
 import { Notice } from "../../components/PanelState";
-import { describeError, readable } from "../../lib/presentation";
+import { describeError } from "../../lib/presentation";
 
 export function CheckoutSkill({
   body,
@@ -16,9 +16,13 @@ export function CheckoutSkill({
   const [state, setState] = useState<{ skills?: readonly Skill[]; error?: string }>();
   const [pending, setPending] = useState(false);
   const request = useRef<AbortController | undefined>(undefined);
+  const provider = body.provider === "claude" ? "Claude Code" : "Codex";
+  const canBrowse = Boolean(body.checkout.trim());
+  const skills = state?.skills ?? [];
   useEffect(() => () => request.current?.abort(), []);
 
   async function browse() {
+    if (!canBrowse || pending) return;
     request.current?.abort();
     const controller = new AbortController();
     request.current = controller;
@@ -34,43 +38,44 @@ export function CheckoutSkill({
   }
 
   return (
-    <div className="stack">
-      {state?.skills ? (
-        <label className="field">
-          {readable(body.provider)} default skill
-          <select
-            value={selected?.path ?? ""}
-            onChange={(event) =>
-              onSelect(
-                state.skills?.find((skill) => skill.path === event.currentTarget.value) ?? null,
-              )
-            }
-          >
-            <option value="">No default skill</option>
-            {selected && !state.skills.some((skill) => skill.path === selected.path) && (
-              <option value={selected.path}>{selected.name} · Unavailable</option>
-            )}
-            {state.skills.map((skill) => (
-              <option value={skill.path} key={skill.path}>
-                {skill.name} · {skill.path}
-              </option>
-            ))}
-          </select>
-        </label>
-      ) : (
-        <p className="meta">
-          {readable(body.provider)} default skill · {selected?.name ?? "No default selected"}
-        </p>
-      )}
-      {state?.error && <Notice>{state.error}</Notice>}
-      <button type="button" disabled={pending} onClick={() => void browse()}>
-        {pending ? "Reading checkout…" : `Browse ${readable(body.provider)} skills`}
-      </button>
-      {selected && !state?.skills && (
-        <button type="button" onClick={() => onSelect(null)}>
-          Clear default skill
+    <div className="settings-provider-skill stack">
+      <div className="settings-inline">
+        <h4>{provider}</h4>
+        <button
+          type="button"
+          className="quiet-button"
+          aria-label={`Find ${provider} skills`}
+          disabled={!canBrowse || pending}
+          onClick={() => void browse()}
+        >
+          {pending ? "Reading checkout…" : "Find skills"}
         </button>
-      )}
+      </div>
+      <label className="field">
+        Default skill
+        <select
+          aria-label={`${provider} default skill`}
+          disabled={!canBrowse || pending}
+          value={selected?.path ?? ""}
+          onChange={(event) =>
+            onSelect(skills.find((skill) => skill.path === event.currentTarget.value) ?? null)
+          }
+        >
+          <option value="">Choose at launch</option>
+          {selected && !skills.some((skill) => skill.path === selected.path) && (
+            <option value={selected.path}>
+              {selected.name}
+              {state?.skills && " · Unavailable"}
+            </option>
+          )}
+          {skills.map((skill) => (
+            <option value={skill.path} key={skill.path}>
+              {skill.name} · {skill.path}
+            </option>
+          ))}
+        </select>
+      </label>
+      {state?.error && <Notice>{state.error}</Notice>}
     </div>
   );
 }

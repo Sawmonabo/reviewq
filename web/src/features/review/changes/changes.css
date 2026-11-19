@@ -1,16 +1,13 @@
-.changes {
+.changes.stack,
+.changes .discussion-list,
+.changes .discussion-note {
   min-width: 0;
+  grid-template-columns: minmax(0, 1fr);
 }
 .changes-tabs button[aria-pressed="true"] {
   color: var(--link);
   background: var(--selected);
   border-color: var(--strong-line);
-}
-.approval-card {
-  padding: 9px 12px;
-}
-.approval-card[open] > summary {
-  margin-bottom: 8px;
 }
 .patch-toolbar {
   border-bottom: 1px solid var(--line);
@@ -174,14 +171,6 @@ pre.patch-source {
   font-size: 9px;
   font-weight: 500;
 }
-.thread-filters {
-  color: var(--muted);
-  font-size: 11px;
-}
-.thread-filters select,
-.thread-filters button {
-  font-size: 11px;
-}
 .changed-file-picker {
   border: 1px solid var(--line);
   border-radius: 6px;
@@ -247,6 +236,10 @@ pre.patch-source {
   background: var(--raised);
   padding: 12px 14px;
 }
+.patch-file-title {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
 .patch-toolbar strong code {
   font-size: 11px;
   font-weight: 550;
@@ -257,6 +250,18 @@ pre.patch-source {
 }
 .patch-toolbar .patch-links .meta {
   font-size: inherit;
+}
+.patch-links > a {
+  display: inline-grid;
+  place-items: center;
+  min-width: 24px;
+  min-height: 24px;
+}
+@media (pointer: coarse) {
+  .patch-links > a {
+    min-width: 44px;
+    min-height: 44px;
+  }
 }
 .patch-arrows {
   flex: 0 0 auto;
@@ -269,6 +274,10 @@ pre.patch-source {
   border: 1px solid var(--strong-line);
   font-size: 17px;
 }
+.changes :is(.changed-file-picker .pagination, .patch-arrows) button[aria-disabled="true"] {
+  opacity: 0.52;
+  cursor: default;
+}
 .selected-patch .patch-source {
   border: 0;
   border-radius: 0;
@@ -276,27 +285,126 @@ pre.patch-source {
 .selected-patch > :is(.notice, .surface-card, .patch-discussion) {
   margin: 8px;
 }
-.changes .approval-card {
-  position: relative;
-  padding: 0;
+.approval-card {
+  flex: 0 0 auto;
 }
-.approval-card > summary {
-  list-style: none;
-  color: var(--link);
+.approval-card > button {
+  gap: 6px;
+  padding: 2px 0;
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
+  color: light-dark(var(--muted), #b6bccb);
   white-space: nowrap;
   font-size: 11px;
 }
+.approval-card > button:enabled:is(:hover, :active) {
+  background: transparent;
+  color: light-dark(var(--text), #e1e7ee);
+}
+.approval-card > button:focus-visible {
+  outline-width: 1px;
+  outline-offset: 4px;
+}
+@media (forced-colors: none) {
+  .approval-card > button:focus-visible {
+    outline-color: light-dark(var(--focus), #8faeff);
+  }
+}
+.approval-popup:not(:popover-open) {
+  display: none;
+}
 .approval-popup {
-  position: absolute;
-  z-index: 5;
-  right: 0;
-  top: calc(100% + 8px);
+  position: fixed;
+  inset: auto;
+  position-area: block-end span-inline-start;
+  justify-self: end;
+  position-try-fallbacks:
+    flip-block,
+    flip-inline,
+    flip-block flip-inline;
+  margin: 8px 0;
   width: min(310px, 75vw);
+  max-height: min(64dvh, calc(100dvh - 22px));
+  overflow: auto;
   padding: 16px;
-  border: 1px solid var(--strong-line);
+  border: 1px solid var(--popup-border);
   border-radius: 7px;
-  background: var(--raised);
+  background: var(--popup-bg);
+  color: var(--text);
   box-shadow: 0 12px 36px #0009;
+  grid-template-columns: minmax(0, 1fr);
+}
+@supports not (position-area: block-end span-inline-start) {
+  .approval-popup {
+    inset: 20% 0 auto;
+    margin-inline: auto;
+  }
+}
+.approval-popup :is(p, a, .spread) {
+  font-size: 12px;
+}
+.approval-popup .spread {
+  gap: 8px;
+}
+.approval-popup h3 {
+  font-size: 13px;
+}
+.approval-people {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 17px;
+}
+.approval-person {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+.approval-person:hover {
+  color: var(--link);
+}
+.approval-avatar {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 23px;
+  height: 23px;
+  border-radius: 50%;
+  color: var(--link);
+  background: var(--selected);
+  font-size: 9px;
+}
+.diff-count {
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.patch-toolbar .diff-count {
+  margin-inline-start: 9px;
+  font-size: 10px;
+}
+.diff-count > span:first-child,
+.approval-person svg {
+  color: var(--green);
+}
+.diff-count > span:last-child {
+  color: var(--rose);
+}
+.changes-conversation-empty {
+  display: grid;
+  gap: 12px;
+  justify-items: center;
+  padding: 22px 8px;
+  text-align: center;
+}
+.changes-conversation-empty svg {
+  margin-bottom: 8px;
+  color: var(--muted);
+}
+.changes-conversation-empty p {
+  margin-top: 5px;
 }
 .discussion-list h3 {
   font-size: 13px;
@@ -321,5 +429,5 @@ pre.patch-source {
   font-size: 11px;
 }
 .approval-card .approval-met {
-  color: var(--green);
+  color: light-dark(var(--green), #a9cdb7);
 }
