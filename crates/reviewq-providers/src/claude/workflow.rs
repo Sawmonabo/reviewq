@@ -90,6 +90,7 @@ impl NativeWorkflowProof for ClaudeWorkflow {
         &self,
         call: NativeCall,
         acknowledgement: ExpectedAcknowledgement,
+        include_response: bool,
     ) -> AppFuture<'_, ReportCompletion> {
         Box::pin(async move {
             if call.tool != WorkflowTool::Report {
@@ -106,6 +107,7 @@ impl NativeWorkflowProof for ClaudeWorkflow {
             let response = context
                 .terminal
                 .as_ref()
+                .filter(|_| include_response)
                 .and_then(|terminal| terminal.response.clone());
             let candidate = call.clone();
             let ack = acknowledgement.clone();

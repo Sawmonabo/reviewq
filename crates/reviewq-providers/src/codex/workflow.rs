@@ -1,13 +1,12 @@
 use std::path::Path;
-use std::sync::Arc;
 
 use reviewq_app::access::{AppError, AppFuture};
 use reviewq_app::workflow::{
     CompletedReportCall, ExpectedAcknowledgement, NativeCall, NativeWorkflowProof, ReadyWorkflow,
-    ReportCompletion, ReportContent, WorkflowHold, WorkflowReadiness, WorkflowTool,
+    ReportCompletion, WorkflowHold, WorkflowReadiness, WorkflowTool,
 };
 use reviewq_domain::identity::{NativeInputId, NativeTurnId};
-use reviewq_domain::session::{HostProvider, LeadTarget};
+use reviewq_domain::session::LeadTarget;
 use serde::Deserialize;
 
 use super::Codex;
@@ -110,52 +109,45 @@ impl NativeWorkflowProof for Codex {
         &self,
         call: NativeCall,
         acknowledgement: ExpectedAcknowledgement,
+        include_response: bool,
     ) -> AppFuture<'_, ReportCompletion> {
         Box::pin(async move {
             if call.tool != WorkflowTool::Report {
                 return Err(AppError::Forbidden);
             }
-            let native = call.lead.binding().identity();
-            if native.provider() != HostProvider::Codex || native.profile() != &self.profile {
-                return Err(AppError::Unavailable);
-            }
-            let thread = self.read_thread(native.native_id()).await?;
-            let (generation, _) = workflow_source(
-                &call.lead,
-                &thread,
-                &call.call_id,
-                Some(call.source_position),
-            )
-            .await?;
-            if generation != call.source_generation {
-                return Ok(ReportCompletion::Unproved);
-            }
-            let Some(turn) = self.workflow_turn(&thread, &call.turn_id).await? else {
-                return Ok(ReportCompletion::Pending);
-            };
-            let Some(index) = call_position(&turn, &call.call_id, call.tool) else {
-                return Ok(ReportCompletion::Unproved);
-            };
-            if request_address(&turn, index)? != call.request_entry_id
-                || root_turn(&turn)? != call.root_turn_id
-            {
-                return Ok(ReportCompletion::Unproved);
-            }
+            let thread = self.verified_thread(&call.lead).await?;
+            let path = thread.path.ok_or(AppError::Unavailable)?;
+            let result_entry: NativeInputId =
+                call.call_id.parse().map_err(|_| AppError::Conflict)?;
+            let result = self
+                .exact_item(&thread.id, &call.turn_id, &result_entry)
+                .await;
             let Item::CommandExecution {
                 id,
                 status,
+                command,
+                source,
                 exit_code,
                 aggregated_output,
-                ..
-            } = &turn.items[index]
+            } = (match result {
+                Ok(item) => item.item,
+                Err(AppError::NotFound) => return Ok(ReportCompletion::Pending),
+                Err(error) => return Err(error),
+            })
             else {
                 return Ok(ReportCompletion::Unproved);
             };
-            if status == "inProgress" || turn.status == "inProgress" {
+            if id != call.call_id
+                || !matches!(source.as_deref(), Some("agent" | "unifiedExecStartup"))
+                || !reviewq_command(&command, call.tool)
+            {
+                return Ok(ReportCompletion::Unproved);
+            }
+            if status == "inProgress" {
                 return Ok(ReportCompletion::Pending);
             }
             if status != "completed"
-                || *exit_code != Some(0)
+                || exit_code != Some(0)
                 || !aggregated_output
                     .as_deref()
                     .filter(|value| value.len() <= 8192)
@@ -164,31 +156,17 @@ impl NativeWorkflowProof for Codex {
             {
                 return Ok(ReportCompletion::Unproved);
             }
-            let normal_turn_completion = turn.status == "completed";
-            let final_response = if normal_turn_completion {
-                turn.items[index + 1..]
-                    .iter()
-                    .rev()
-                    .find_map(|item| match item {
-                        Item::AgentMessage {
-                            text,
-                            phase: Some(phase),
-                            ..
-                        } if phase == "final_answer" && !text.is_empty() => {
-                            Some(Arc::new(CapturedResponse(text.as_bytes().into()))
-                                as Arc<dyn ReportContent>)
-                        }
-                        _ => None,
-                    })
-            } else {
-                None
+            let Some(evidence) =
+                crate::history::codex_report_terminal(call.clone(), path, include_response).await?
+            else {
+                return Ok(ReportCompletion::Pending);
             };
             Ok(ReportCompletion::Confirmed(CompletedReportCall {
                 call,
                 acknowledged: acknowledgement,
-                result_entry_id: id.parse().map_err(|_| AppError::Unavailable)?,
-                normal_turn_completion,
-                final_response,
+                result_entry_id: result_entry,
+                normal_turn_completion: evidence.normal,
+                final_response: evidence.response,
             }))
         })
     }
@@ -285,7 +263,7 @@ impl Codex {
         let mut cursor = None;
         for _ in 0..8 {
             let mut page = self
-                .turns(&thread.id, cursor.as_deref(), false, 1, true)
+                .turns(&thread.id, cursor.as_deref(), false, 1, false)
                 .await?;
             if let Some(turn) = page.data.pop().filter(|turn| turn.id == id.as_str()) {
                 return Ok(Some(turn));
@@ -396,29 +374,5 @@ fn reviewq_command(command: &str, tool: WorkflowTool) -> bool {
         WorkflowTool::Action => {
             category == "action" && matches!(operation.as_str(), "declare" | "reconcile")
         }
-    }
-}
-
-struct CapturedResponse(Arc<[u8]>);
-
-impl ReportContent for CapturedResponse {
-    fn byte_length(&self) -> u64 {
-        self.0.len() as u64
-    }
-
-    fn read(&self, offset: u64, length: usize) -> AppFuture<'_, Vec<u8>> {
-        Box::pin(async move {
-            let start = usize::try_from(offset).map_err(|_| AppError::InvalidRequest)?;
-            let end = start.saturating_add(length).min(self.0.len());
-            self.0
-                .get(start..end)
-                .map(<[u8]>::to_vec)
-                .ok_or(AppError::InvalidRequest)
-        })
-    }
-
-    fn verify_unchanged(&self) -> AppFuture<'_, ()> {
-        // This owned snapshot was captured in the same provider response as the proven completion.
-        Box::pin(async { Ok(()) })
     }
 }

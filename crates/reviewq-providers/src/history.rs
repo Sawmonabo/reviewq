@@ -14,6 +14,7 @@ use tokio::sync::Semaphore;
 
 mod claude;
 mod claude_workflow;
+mod codex_report;
 mod content;
 mod file;
 mod identity;
@@ -29,8 +30,10 @@ mod watch;
 
 pub(crate) use claude::{claude_anchor, claude_confirm_prompt};
 pub(crate) use claude_workflow::{claude_workflow_opening, claude_workflow_result};
+pub(crate) use codex_report::codex_report_terminal;
 pub(crate) use locator::{
     inspect_claude_lead, verified_claude_child, verified_claude_source, verified_codex_source,
+    verify_codex_live_source,
 };
 pub(crate) use proof::{codex_opening, codex_question_answered, codex_question_opening};
 pub(crate) use turn_metadata::{

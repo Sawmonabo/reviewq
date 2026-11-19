@@ -5,7 +5,7 @@ use std::path::{Component, Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use reviewq_app::access::AppError;
-use reviewq_app::history::{HistoryParent, HistorySession};
+use reviewq_app::history::{HistoryParent, HistorySession, SourceAnchor};
 use reviewq_app::hosts::HostProof;
 use reviewq_domain::identity::NativeSessionId;
 use reviewq_domain::session::{AbsolutePath, HostProvider, NativeBinding, NativeIdentity};
@@ -38,6 +38,24 @@ pub(crate) async fn verified_codex_source(
         AbsolutePath::from_canonical(path)
             .map(Some)
             .map_err(|_| AppError::Forbidden)
+    })
+    .await
+    .map_err(|_| AppError::Unavailable)?
+}
+
+pub(crate) async fn verify_codex_live_source(
+    binding: NativeBinding,
+    path: AbsolutePath,
+    anchor: SourceAnchor,
+) -> Result<(), AppError> {
+    tokio::task::spawn_blocking(move || {
+        let stopped = AtomicBool::new(false);
+        let source = verify(&binding, None, path.as_path(), &stopped)?.ok_or(AppError::NotFound)?;
+        let length = source.file.metadata().map_err(fs_error)?.len();
+        if file::generation(&source)? != anchor.generation {
+            return Err(AppError::CursorExpired);
+        }
+        file::verify_position(&source.file, &anchor.file, length)
     })
     .await
     .map_err(|_| AppError::Unavailable)?

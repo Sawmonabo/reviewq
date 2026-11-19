@@ -273,7 +273,17 @@ async fn reconcile_one(
     work: ReportWork,
 ) -> Result<(), AppError> {
     let evidence = match proof
-        .report_completion(work.call.clone(), work.acknowledgement.clone())
+        .report_completion(
+            work.call.clone(),
+            work.acknowledgement.clone(),
+            matches!(
+                work.declaration,
+                Declaration::Final {
+                    source: Source::Response,
+                    ..
+                }
+            ),
+        )
         .await
     {
         Ok(ReportCompletion::Pending) | Err(AppError::Unavailable | AppError::Busy) => {

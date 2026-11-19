@@ -146,6 +146,7 @@ pub struct SourceAnchor {
 
 #[derive(Clone, Debug)]
 pub struct NativeHead {
+    pub path: AbsolutePath,
     pub anchor: SourceAnchor,
     pub reset: bool,
 }

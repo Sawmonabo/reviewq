@@ -112,6 +112,8 @@ pub(super) fn head(
     });
     let position = file::file_position(&source.file, complete, complete)?;
     Ok(NativeHead {
+        path: reviewq_domain::session::AbsolutePath::from_canonical(source.path.clone())
+            .map_err(|_| AppError::Forbidden)?,
         anchor: SourceAnchor {
             generation,
             file: position,

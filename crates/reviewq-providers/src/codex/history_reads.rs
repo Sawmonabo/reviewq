@@ -76,16 +76,9 @@ impl Codex {
         if generation != reference.generation {
             return Err(AppError::CursorExpired);
         }
-        let response:ItemResponse=self.connection.read("thread/items/read",json!({
-            "threadId":thread.id,"turnId":reference.turn.as_str(),"itemIds":[reference.entry.as_str()],
-        })).await?;
-        let [item]: [ItemEntry; 1] = response
-            .data
-            .try_into()
-            .map_err(|_| AppError::CursorExpired)?;
-        if item.turn_id != reference.turn.as_str() {
-            return Err(AppError::CursorExpired);
-        }
+        let item = self
+            .exact_item(&thread.id, &reference.turn, &reference.entry)
+            .await?;
         let entry = visible(
             item.item,
             &reference.turn,
@@ -118,6 +111,28 @@ impl Codex {
             text: text[start..end].to_owned(),
             next_offset: (end < text.len()).then_some(end as u64),
         })
+    }
+
+    pub(super) async fn exact_item(
+        &self,
+        thread: &str,
+        turn: &NativeTurnId,
+        entry: &NativeInputId,
+    ) -> Result<ItemEntry, AppError> {
+        let response: ItemResponse = self
+            .connection
+            .read(
+                "thread/items/read",
+                json!({
+                    "threadId": thread, "turnId": turn.as_str(), "itemIds": [entry.as_str()],
+                }),
+            )
+            .await?;
+        let [item]: [ItemEntry; 1] = response.data.try_into().map_err(|_| AppError::NotFound)?;
+        if item.turn_id != turn.as_str() {
+            return Err(AppError::Conflict);
+        }
+        Ok(item)
     }
 
     pub(super) async fn read_around_item(

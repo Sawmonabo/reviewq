@@ -92,6 +92,8 @@ pub trait NativeHost: QuestionsPort + Send + Sync {
     fn history_signals(
         &self,
         _target: HistorySession,
+        _file: Option<(AbsolutePath, crate::history::SourceAnchor)>,
+        _generation: String,
     ) -> AppFuture<'_, Option<tokio::sync::broadcast::Receiver<crate::history::NativeLiveSignal>>>
     {
         Box::pin(async { Ok(None) })
