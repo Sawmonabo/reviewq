@@ -1,5 +1,7 @@
 //! Durable admission, claim fencing, reconciliation and exact receipt lookup.
 
+mod labels;
+use labels::{outcome_label, purpose_label, recoverable_label};
 mod workflow;
 
 pub(crate) use workflow::admit_workflow;
@@ -97,7 +99,9 @@ pub(super) fn admit(
     }
     if matches!(
         input.purpose,
-        MessagePurpose::Publication | MessagePurpose::ThreadFollowup
+        MessagePurpose::Publication
+            | MessagePurpose::ThreadFollowup
+            | MessagePurpose::CodexRecovery
     ) || (input.purpose == MessagePurpose::ReportFeedback) != input.report_ref.is_some()
     {
         return Err(AppError::InvalidRequest.into());
@@ -117,6 +121,11 @@ pub(super) fn admit(
                 .receipt,
         );
     }
+    crate::hosts::recovery::cancel(
+        &tx.sql,
+        &input.target,
+        "recovery_superseded_by_user_message",
+    )?;
     let current_report = input
         .report_ref
         .as_ref()
@@ -766,6 +775,7 @@ fn delivery_row(row: &Row<'_>) -> Result<Delivery, StoreError> {
         "report_feedback" => MessagePurpose::ReportFeedback,
         "publication" => MessagePurpose::Publication,
         "thread_followup" => MessagePurpose::ThreadFollowup,
+        "codex_recovery" => MessagePurpose::CodexRecovery,
         _ => return Err(AppError::Internal.into()),
     };
     let claim = match row.get::<_, Option<String>>(12)?.as_deref() {
@@ -876,31 +886,4 @@ fn emit_delivery(tx: &mut WriteTx<'_>, target: &SessionTarget) -> Result<(), Sto
         ResourceKey::History(Some(target.session_key().clone())),
     ])?;
     Ok(())
-}
-
-fn purpose_label(purpose: MessagePurpose) -> &'static str {
-    match purpose {
-        MessagePurpose::User => "user",
-        MessagePurpose::ReportFeedback => "report_feedback",
-        MessagePurpose::Publication => "publication",
-        MessagePurpose::ThreadFollowup => "thread_followup",
-    }
-}
-
-fn outcome_label(outcome: &DeliveryOutcome) -> &'static str {
-    match outcome {
-        DeliveryOutcome::Queued => "queued",
-        DeliveryOutcome::Dispatching => "dispatching",
-        DeliveryOutcome::Started(_) => "started",
-        DeliveryOutcome::Rejected => "rejected",
-        DeliveryOutcome::Uncertain => "uncertain",
-    }
-}
-
-fn recoverable_label(state: RecoverableDeliveryState) -> &'static str {
-    match state {
-        RecoverableDeliveryState::Queued => "queued",
-        RecoverableDeliveryState::Dispatching => "dispatching",
-        RecoverableDeliveryState::Uncertain => "uncertain",
-    }
 }

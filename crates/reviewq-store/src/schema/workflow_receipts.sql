@@ -60,6 +60,7 @@ CREATE TABLE workflow_dispatch (
     review_id TEXT NOT NULL REFERENCES reviews(review_id),
     action_id TEXT REFERENCES actions(action_id),
     batch_id TEXT,
+    recovery_id TEXT REFERENCES recovery_episodes(episode_id),
     settings_revision INTEGER NOT NULL CHECK (settings_revision >= 0),
     authority_revision INTEGER NOT NULL CHECK (authority_revision > 0),
     head_sha TEXT NOT NULL CHECK (length(head_sha) IN (40, 64)),
@@ -68,7 +69,7 @@ CREATE TABLE workflow_dispatch (
     latest_user_entry_id TEXT,
     latest_user_turn_id TEXT,
     FOREIGN KEY (review_id, batch_id) REFERENCES followup_batches(review_id, batch_id),
-    CHECK ((action_id IS NULL) <> (batch_id IS NULL)),
+    CHECK ((action_id IS NOT NULL)+(batch_id IS NOT NULL)+(recovery_id IS NOT NULL)=1),
     CHECK (action_id IS NULL OR (latest_user_entry_id IS NOT NULL AND latest_user_turn_id IS NOT NULL))
 ) STRICT, WITHOUT ROWID;
 
@@ -76,3 +77,5 @@ CREATE INDEX workflow_dispatch_action ON workflow_dispatch(action_id);
 CREATE INDEX workflow_dispatch_batch ON workflow_dispatch(review_id, batch_id);
 
 CREATE UNIQUE INDEX workflow_dispatch_one_batch ON workflow_dispatch(batch_id) WHERE batch_id IS NOT NULL;
+
+CREATE UNIQUE INDEX workflow_dispatch_recovery ON workflow_dispatch(recovery_id) WHERE recovery_id IS NOT NULL;

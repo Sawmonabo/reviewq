@@ -3,6 +3,7 @@ use std::time::Duration;
 
 use reviewq_app::actions::run_due_publications;
 use reviewq_app::followups::{poll_monitored_reviews, run_due_followups};
+use reviewq_app::hosts::recovery::run_due_recoveries;
 use reviewq_app::notifications::poll_native_attention;
 use reviewq_app::settings::RuntimeSources;
 use reviewq_app::workflow::NativeWorkflowProof;
@@ -52,6 +53,7 @@ pub(super) async fn run(
             _ = async {
                 let _ = tokio::join!(
                     run_due_followups(store.as_ref(), source.as_ref(), native.as_ref()),
+                    run_due_recoveries(store.as_ref(), source.as_ref(), native.as_ref()),
                     run_due_publications(store.as_ref(), source.as_ref(), native.as_ref()),
                 );
             } => {},

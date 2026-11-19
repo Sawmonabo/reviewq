@@ -18,6 +18,7 @@ use crate::workspace::WorkspaceStore;
 mod claude;
 mod messages;
 mod questions;
+pub mod recovery;
 mod work;
 
 pub use claude::{
@@ -96,6 +97,14 @@ pub trait NativeHost: QuestionsPort + Send + Sync {
         _id: NativeInputId,
         _limit: u16,
     ) -> AppFuture<'_, NativeHistoryPage> {
+        Box::pin(async { Err(AppError::Unavailable) })
+    }
+
+    fn interrupt_managed(
+        &self,
+        _target: LeadTarget,
+        _turn: NativeTurnId,
+    ) -> AppFuture<'_, recovery::InterruptState> {
         Box::pin(async { Err(AppError::Unavailable) })
     }
 
@@ -311,11 +320,15 @@ pub enum MessagePurpose {
     ReportFeedback,
     Publication,
     ThreadFollowup,
+    CodexRecovery,
 }
 
 impl MessagePurpose {
     pub fn requires_new_turn(self) -> bool {
-        matches!(self, Self::Publication | Self::ThreadFollowup)
+        matches!(
+            self,
+            Self::Publication | Self::ThreadFollowup | Self::CodexRecovery
+        )
     }
 }
 

@@ -26,11 +26,13 @@ mod claude;
 mod delivery;
 pub(crate) use delivery::{admit_workflow, unresolved_workflow_input};
 mod messages;
+pub(crate) mod recovery;
 
 impl SqliteStore {
     /// Reopens claims left by the previous exclusive profile owner for read-only reconciliation.
     pub async fn recover_delivery_claims(&self) -> Result<(), StoreError> {
         self.write(|tx| {
+            tx.sql.execute("UPDATE managed_interrupts SET state='uncertain' WHERE state='reserved'",[])?;
             let recovered = tx.sql.execute(
                 "UPDATE outbox SET due_at_ms=min(due_at_ms, ?1), claim_kind=NULL
                  WHERE claim_kind IS NOT NULL AND delivery_id NOT IN (SELECT delivery_id FROM claude_deliveries WHERE finished_kind IS NULL)",

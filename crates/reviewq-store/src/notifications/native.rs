@@ -132,6 +132,9 @@ fn record(
             ResourceKey::Session(Some(target.session_key().clone())),
         ])?;
     }
+    if let Some(failure) = observed.recoverable {
+        crate::hosts::recovery::observe_failure(tx, &session, failure)?;
+    }
     publish(tx, &ids)
 }
 

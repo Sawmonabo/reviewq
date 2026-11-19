@@ -29,6 +29,7 @@ pub(super) struct Thread {
     pub path: Option<PathBuf>,
     pub status: ThreadStatus,
     pub model: Option<String>,
+    pub model_provider: Option<String>,
     pub reasoning_effort: Option<String>,
 }
 
@@ -94,6 +95,14 @@ impl NativeHost for Codex {
         limit: u16,
     ) -> AppFuture<'_, NativeHistoryPage> {
         Box::pin(self.read_around_item(target, id, limit))
+    }
+
+    fn interrupt_managed(
+        &self,
+        target: LeadTarget,
+        turn: reviewq_domain::identity::NativeTurnId,
+    ) -> AppFuture<'_, reviewq_app::hosts::recovery::InterruptState> {
+        Box::pin(self.stop_exact_turn(target, turn))
     }
 
     fn dispatch(

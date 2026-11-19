@@ -33,6 +33,20 @@ pub(crate) async fn codex_turn_settings(
     .map(Option::flatten)
 }
 
+pub(crate) async fn codex_exact_turn_settings(
+    binding: NativeBinding,
+    path: PathBuf,
+    turn: String,
+) -> Result<Option<(String, String)>, AppError> {
+    scan(binding, path, move |row| {
+        let exact =
+            row.outer.as_deref() == Some("turn_context") && row.turn.as_ref() == Some(&turn);
+        exact.then(|| row.model.zip(row.effort))
+    })
+    .await
+    .map(Option::flatten)
+}
+
 pub(crate) async fn codex_turn_started(
     binding: NativeBinding,
     path: PathBuf,

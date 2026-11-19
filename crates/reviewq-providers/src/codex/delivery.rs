@@ -2,7 +2,7 @@ use reviewq_app::access::AppError;
 use reviewq_app::hosts::{
     DeliveryObservation, DispatchGuard, MessageBody, ObservedInput, ReportRef,
 };
-use reviewq_app::workflow::WorkflowReadiness;
+use reviewq_app::workflow::{WorkflowBinding, WorkflowReadiness};
 use reviewq_domain::identity::DeliveryId;
 use reviewq_domain::session::{HostProvider, LeadTarget};
 use serde_json::json;
@@ -76,24 +76,58 @@ impl Codex {
             "input": input,
         });
         let (method, guard) = if let Some(head) = head {
-            let Ok(WorkflowReadiness::Ready(ready)) = self.idle_readiness(&lead, &thread).await
-            else {
-                return DeliveryObservation::NotSubmitted;
+            let recovery = guard
+                .workflow()
+                .and_then(|workflow| match &workflow.binding {
+                    WorkflowBinding::Recovery(recovery) => Some(recovery),
+                    _ => None,
+                });
+            let ready = if let Some(recovery) = recovery {
+                match self
+                    .prepare_continuation(
+                        &lead,
+                        recovery.episode.clone(),
+                        recovery.failed_turn.clone(),
+                        recovery.kind,
+                        Some(recovery.account.clone()),
+                        Some(recovery.model_provider.clone()),
+                        true,
+                    )
+                    .await
+                {
+                    Ok((fresh, ready)) if &fresh == recovery => ready,
+                    Err(AppError::Conflict | AppError::StaleRevision) => {
+                        return DeliveryObservation::Rejected;
+                    }
+                    _ => return DeliveryObservation::NotSubmitted,
+                }
+            } else {
+                let Ok(WorkflowReadiness::Ready(ready)) = self.idle_readiness(&lead, &thread).await
+                else {
+                    return DeliveryObservation::NotSubmitted;
+                };
+                ready
             };
+            let expected_status = if recovery.is_some() {
+                "failed"
+            } else {
+                "completed"
+            };
+            if let Some(recovery) = recovery {
+                params["rootTurnId"] = json!(recovery.root_turn.as_str());
+            }
             let Some(previous) = &ready.latest_user_turn_id else {
                 return DeliveryObservation::NotSubmitted;
             };
             let Ok(check) = self.turns(&thread.id, None, false, 1, false).await else {
                 return DeliveryObservation::NotSubmitted;
             };
-            if check
-                .data
-                .first()
-                .is_none_or(|latest| latest.id != previous.as_str() || latest.status != "completed")
-                || !self
-                    .verified_thread(&lead)
-                    .await
-                    .is_ok_and(|thread| matches!(thread.status, ThreadStatus::Idle))
+            if check.data.first().is_none_or(|latest| {
+                latest.id != previous.as_str() || latest.status != expected_status
+            }) || !self
+                .verified_thread(&lead)
+                .await
+                .is_ok_and(|thread| matches!(thread.status, ThreadStatus::Idle))
             {
                 return DeliveryObservation::NotSubmitted;
             }

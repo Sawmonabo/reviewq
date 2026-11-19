@@ -13,6 +13,7 @@ pub mod mcp;
 pub mod notifications;
 pub mod questions;
 pub mod queue;
+pub mod recovery;
 pub mod reports;
 mod scalar;
 pub mod settings;
