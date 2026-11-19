@@ -52,42 +52,47 @@ impl NativeLauncher for ClaudeCli {
             let Ok(mut child) = command.spawn() else {
                 return NativeLaunchResult::Rejected;
             };
-            let Some(out) = child.stdout.take() else {
-                return NativeLaunchResult::Uncertain;
+            let acknowledgement = if let Some(out) = child.stdout.take() {
+                tokio::time::timeout(Duration::from_secs(10), async {
+                    let mut bytes = Vec::new();
+                    out.take(ACK_LIMIT + 1).read_to_end(&mut bytes).await.ok()?;
+                    if bytes.len() as u64 > ACK_LIMIT || !child.wait().await.ok()?.success() {
+                        return None;
+                    }
+                    String::from_utf8(bytes).ok()
+                })
+                .await
+                .ok()
+                .flatten()
+            } else {
+                None
             };
-            let Ok(Some(acknowledgement)) = tokio::time::timeout(Duration::from_secs(10), async {
-                let mut bytes = Vec::new();
-                out.take(ACK_LIMIT + 1).read_to_end(&mut bytes).await.ok()?;
-                if bytes.len() as u64 > ACK_LIMIT || !child.wait().await.ok()?.success() {
-                    return None;
-                }
-                String::from_utf8(bytes).ok()
-            })
-            .await
-            else {
-                return NativeLaunchResult::Uncertain;
-            };
-            let mut observed = None;
+            drop(child);
+            let mut observed_job = None;
             for delay in [0, 150, 300, 600] {
                 if delay != 0 {
                     tokio::time::sleep(Duration::from_millis(delay)).await;
                 }
-                if let Ok(Some(job)) =
-                    claude_job(&self.executable, self.profile.as_path(), cwd, &reservation).await
-                    && matches!(job.kind, JobKind::Background)
-                    && job.id.as_ref().is_some_and(|id| {
-                        acknowledgement
-                            .split(|value: char| !value.is_ascii_alphanumeric())
-                            .any(|token| token == id)
-                    })
+                match claude_job(&self.executable, self.profile.as_path(), cwd, &reservation).await
                 {
-                    observed = Some(job);
-                    break;
+                    Ok(Some(job)) if matches!(job.kind, JobKind::Background) => {
+                        if let Some(id) = job.id {
+                            observed_job = Some(id);
+                            break;
+                        }
+                    }
+                    Err(AppError::Conflict) => return NativeLaunchResult::Uncertain,
+                    _ => {}
                 }
             }
-            if observed.is_none() {
+            let Some(job) = observed_job else {
                 return NativeLaunchResult::Uncertain;
-            }
+            };
+            let acknowledged = acknowledgement.is_some_and(|receipt| {
+                receipt
+                    .split(|value: char| !value.is_ascii_alphanumeric())
+                    .any(|token| token == job)
+            });
             let identity = NativeIdentity::new(HostProvider::Claude, self.profile.clone(), native);
             let binding = NativeBinding::new(identity, input.checkout.root);
             let probe = binding.clone();
@@ -103,7 +108,14 @@ impl NativeLauncher for ClaudeCli {
                 source,
                 activity: None,
             };
-            if progress.register(proof, None).await.is_ok() {
+            if progress
+                .record_observed_native(proof.clone(), Some(job))
+                .await
+                .is_err()
+            {
+                return NativeLaunchResult::Uncertain;
+            }
+            if progress.register(proof, None).await.is_ok() && acknowledged {
                 NativeLaunchResult::Confirmed
             } else {
                 NativeLaunchResult::Uncertain
