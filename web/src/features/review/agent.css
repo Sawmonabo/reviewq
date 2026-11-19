@@ -109,6 +109,7 @@
   overflow-wrap: anywhere;
 }
 .transcript-shell {
+  --timeline-gutter: 27px;
   flex: 1;
   min-height: 0;
   display: flex;
@@ -190,7 +191,7 @@
   position: absolute;
   inset-inline: 0;
   top: 0;
-  padding: 0 27px 23px;
+  padding: 0 var(--timeline-gutter) 23px;
   min-width: 0;
 }
 .timeline-entry[aria-current="true"] {
@@ -268,14 +269,16 @@
   color: var(--text);
   line-height: 1.7;
 }
-.tool-group {
-  border: 1px solid var(--line);
-  padding: 4px 8px;
-  border-radius: 4px;
-  background: var(--surface);
+.message-body .prose table {
+  min-width: 0;
+  font-size: 11px;
 }
-.tool-group summary {
-  color: var(--muted);
+.message-body .prose :is(th, td) {
+  min-width: 0;
+  padding: 7px 9px;
+}
+.message-body .prose th {
+  background: transparent;
 }
 .tool-output-line {
   white-space: pre-wrap;
@@ -294,9 +297,11 @@
 }
 
 @container review-detail (max-width: 470px) {
-  .agent-meta,
-  .timeline-entry {
+  .agent-meta {
     padding-inline: 17px;
+  }
+  .transcript-shell {
+    --timeline-gutter: 17px;
   }
   .agent-composer-shell {
     padding-inline: 14px;

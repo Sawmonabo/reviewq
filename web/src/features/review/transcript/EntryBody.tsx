@@ -3,7 +3,10 @@ import type { HistoryContent, HistoryEntry, HistoryPart } from "../../../api/gen
 import { historyContent } from "../../../api/history";
 import type { SessionAddress } from "../../../api/history";
 import { Notice } from "../../../components/PanelState";
-import { describeError, readable } from "../../../lib/presentation";
+import { describeError } from "../../../lib/presentation";
+import { ToolHeading } from "./ToolActivity";
+import { groupParts, openKey } from "./tool-activity";
+import type { ToolCatalog } from "./tool-activity";
 
 const Markdown = lazy(() =>
   import("../../../components/markdown/MarkdownContent").then((module) => ({
@@ -16,6 +19,7 @@ const encoder = new TextEncoder();
 type Props = {
   readonly target: SessionAddress;
   readonly entry: HistoryEntry;
+  readonly knownTools: ToolCatalog;
   readonly generation: string;
   readonly reference: string | undefined;
   readonly onReference: (reference: string | undefined) => void;
@@ -27,6 +31,7 @@ type Props = {
 
 export function EntryBody({
   entry,
+  knownTools,
   target,
   generation,
   reference,
@@ -37,7 +42,7 @@ export function EntryBody({
   onMoreParts,
 }: Props) {
   const next = extra ? extra.next : entry.partsCursor;
-  const parts = groupParts([...entry.parts, ...(extra?.items ?? [])]);
+  const parts = groupParts(entry, [...entry.parts, ...(extra?.items ?? [])], knownTools);
 
   function value(part: HistoryPart, key: string) {
     return (
@@ -70,30 +75,22 @@ export function EntryBody({
   return (
     <>
       {parts.map((group, index) => {
-        const part = group.parts[0];
-        if (!part) return null;
-        if (group.kind === "prose") return value(part, `part:${index}`);
-        const key = `${entry.entryId}:tool:${index}`;
+        if (group.kind === "prose") return value(group.part, `part:${index}`);
+        const key = openKey(entry.entryId, group.callId);
+        const open = expanded.has(key);
         return (
           <details
-            className="tool-group"
-            key={key}
-            open={expanded.has(key)}
+            className="tool-disclosure"
+            key={`${key}:${index}`}
+            open={open}
             onToggle={(event) => toggle(key, event.currentTarget.open)}
           >
-            <summary>
-              {group.label} · {group.count} {group.count === 1 ? "call" : "calls"}
-              {group.partial && " · Partial"}
-              {group.status !== "completed" && ` · ${readable(group.status)}`}
+            <summary data-tool-call={group.callId}>
+              <ToolHeading call={group.call} state={group.state} timestamp={entry.timestamp} />
             </summary>
-            {expanded.has(key) && (
-              <div className="stack">
-                {group.parts.map((item, ordinal) => (
-                  <section className="stack" key={`${ordinal}:${item.kind}`}>
-                    {item.kind === "tool_call" && <strong>{item.label || item.name}</strong>}
-                    {value(item, `tool:${ordinal}`)}
-                  </section>
-                ))}
+            {open && (
+              <div className="tool-content stack">
+                {group.parts.map((item, ordinal) => value(item, `tool:${ordinal}`))}
               </div>
             )}
           </details>
@@ -238,47 +235,4 @@ function ExpandedOutput({
       )}
     </div>
   );
-}
-
-type ToolGroup = {
-  kind: "tool";
-  label: string;
-  count: number;
-  status: "failed" | "running" | "completed" | "unknown";
-  partial: boolean;
-  parts: HistoryPart[];
-};
-type Group = ToolGroup | { kind: "prose"; parts: HistoryPart[] };
-
-function groupParts(parts: readonly HistoryPart[]) {
-  const groups: Group[] = [];
-  const toolFamilies = new Map<string, string>();
-  for (const part of parts) {
-    if (part.kind === "tool_call") toolFamilies.set(part.callId, family(part.name));
-    if (part.kind === "tool_call" || part.kind === "tool_result") {
-      const label = toolFamilies.get(part.callId) ?? "Tool output";
-      const previous = groups.at(-1);
-      const current: ToolGroup =
-        previous?.kind === "tool" && previous.label === label
-          ? previous
-          : { kind: "tool", label, parts: [], status: "completed", count: 0, partial: false };
-      if (current !== previous) groups.push(current);
-      current.parts.push(part);
-      if (part.kind === "tool_call") current.count++;
-      else if (!toolFamilies.has(part.callId)) {
-        current.partial = true;
-        current.count++;
-      }
-      if (part.state === "failed" || (current.status !== "failed" && part.state !== "completed"))
-        current.status = part.state;
-    } else groups.push({ kind: "prose", parts: [part] });
-  }
-  return groups;
-}
-
-function family(name: string) {
-  if (/^(read|read_file|grep|glob|list_files)$/i.test(name)) return "Read files";
-  if (/shell|exec|bash|terminal/i.test(name)) return "Command";
-  if (/edit|write|patch/i.test(name)) return "Edit files";
-  return name || "Tool";
 }

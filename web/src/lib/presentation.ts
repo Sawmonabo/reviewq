@@ -17,6 +17,13 @@ export function formatActivityTime(value: string): string {
   return Number.isNaN(date.getTime()) ? "Unknown time" : activityTimeFormat.format(date);
 }
 
+const clockTimeFormat = new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" });
+
+export function formatClockTime(value: string): string {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? "Unknown time" : clockTimeFormat.format(date);
+}
+
 export function readable(value: string): string {
   const words = value.replaceAll("_", " ");
   return words.charAt(0).toUpperCase() + words.slice(1);
