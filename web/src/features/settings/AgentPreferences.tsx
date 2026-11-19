@@ -1,10 +1,12 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import {
   readFollowupPreference,
   readRecoveryPreference,
   saveFollowupPreference,
   saveRecoveryPreference,
 } from "../../api/settings";
+import type { FollowupPreferencesResponsePreferences } from "../../api/generated/contracts/followups";
+import type { Preferences } from "../../api/generated/contracts/recovery";
 import { Loading, Notice } from "../../components/PanelState";
 import { useResource } from "../../hooks/useResource";
 import { describeError } from "../../lib/presentation";
@@ -13,140 +15,138 @@ export function AgentPreferences() {
   const recovery = useResource("recovery-preference", readRecoveryPreference, [
     { kind: "settings" },
   ]);
-  const followup = useResource("followup-preference", readFollowupPreference, [
+  const followups = useResource("followup-preference", readFollowupPreference, [
     { kind: "followup" },
   ]);
-  const [resume, setResume] = useState<boolean>();
-  const [automatic, setAutomatic] = useState<boolean>();
+  const [savedRecovery, setSavedRecovery] = useState<Preferences>();
+  const [savedFollowups, setSavedFollowups] = useState<FollowupPreferencesResponsePreferences>();
   const [concurrency, setConcurrency] = useState<string>();
-  const [busy, setBusy] = useState("");
+  const [busy, setBusy] = useState(false);
+  const pending = useRef(false);
   const [notice, setNotice] = useState<string>();
-  const recovering = resume ?? recovery.data?.autoResumeCodexReviews ?? false;
-  const scheduling = automatic ?? followup.data?.automatic ?? false;
-  const count = Number(concurrency ?? followup.data?.autoReviewConcurrency);
+  const resume = latest(recovery.data, savedRecovery);
+  const followup = latest(followups.data, savedFollowups);
+  const count = Number(concurrency ?? followup?.autoReviewConcurrency);
 
-  async function save(kind: "recovery" | "automatic" | "concurrency") {
-    if (busy) return;
-    setBusy(kind);
+  async function save(
+    change: { recovery: boolean } | { automatic: boolean } | { autoReviewConcurrency: number },
+  ) {
+    if (pending.current) return;
+    pending.current = true;
+    setBusy(true);
     setNotice(undefined);
     try {
-      if (kind === "recovery" && recovery.data) {
+      if ("recovery" in change) {
+        if (!resume) return;
         const { data } = await saveRecoveryPreference({
-          expectedRevision: recovery.data.revision,
-          autoResumeCodexReviews: recovering,
+          expectedRevision: resume.revision,
+          autoResumeCodexReviews: change.recovery,
         });
-        setResume(data.autoResumeCodexReviews);
+        setSavedRecovery(data);
         recovery.retry();
-        setNotice(
-          data.autoResumeCodexReviews
-            ? "Automatic Codex recovery enabled."
-            : "Automatic Codex recovery disabled.",
-        );
-      } else if (followup.data) {
+      } else if (followup) {
         const { data } = await saveFollowupPreference({
-          expectedRevision: followup.data.revision,
+          ...change,
+          expectedRevision: followup.revision,
           submissionId: crypto.randomUUID(),
-          ...(kind === "automatic" ? { automatic: scheduling } : { autoReviewConcurrency: count }),
         });
-        if (kind === "automatic") setAutomatic(data.automatic);
-        else setConcurrency(String(data.autoReviewConcurrency));
-        followup.retry();
-        setNotice(
-          kind === "automatic"
-            ? `Automatic follow-ups ${data.automatic ? "enabled" : "disabled"}.`
-            : `Saved maximum of ${data.autoReviewConcurrency} concurrent follow-ups.`,
-        );
+        setSavedFollowups(data);
+        if ("autoReviewConcurrency" in change) setConcurrency(undefined);
+        followups.retry();
       }
     } catch (error) {
       setNotice(describeError(error));
+      recovery.retry();
+      followups.retry();
     } finally {
-      setBusy("");
+      pending.current = false;
+      setBusy(false);
     }
   }
 
   return (
-    <section className="settings-section stack" aria-labelledby="settings-agents">
+    <section className="settings-section agent-preferences" aria-labelledby="settings-agents">
       <h3 id="settings-agents">Agents</h3>
       {notice && <Notice>{notice}</Notice>}
       {recovery.error && <Notice retry={recovery.retry}>{recovery.error}</Notice>}
-      {followup.error && <Notice retry={followup.retry}>{followup.error}</Notice>}
-      {recovery.pending && followup.pending && <Loading label="Reading agent preferences…" />}
-      {recovery.data && (
-        <div className="surface-card stack">
-          <div className="spread">
-            <label>
-              <input
-                type="checkbox"
-                checked={recovering}
-                disabled={Boolean(busy)}
-                onChange={(event) => setResume(event.currentTarget.checked)}
-              />{" "}
-              Automatically resume interrupted reviews
-            </label>
-            <button
-              type="button"
-              disabled={Boolean(busy) || recovering === recovery.data.autoResumeCodexReviews}
-              onClick={() => void save("recovery")}
-            >
-              Save recovery
-            </button>
-          </div>
+      {followups.error && <Notice retry={followups.retry}>{followups.error}</Notice>}
+      {recovery.pending && followups.pending && <Loading label="Reading agent preferences…" />}
+      {resume && (
+        <div className="settings-agent-choice">
+          <label className="settings-check">
+            <input
+              type="checkbox"
+              checked={resume.autoResumeCodexReviews}
+              disabled={busy}
+              onChange={(event) => void save({ recovery: event.currentTarget.checked })}
+            />
+            Automatically resume interrupted reviews
+          </label>
           <p className="meta">
-            Resumes eligible Codex reviews. Turning this off stops eligible queued recoveries.
+            Continue registered reviews after temporary usage or capacity interruptions.
           </p>
         </div>
       )}
-      {followup.data && (
-        <div className="surface-card stack">
-          <div className="spread">
-            <label>
+      {followup && (
+        <>
+          <div className="settings-agent-choice">
+            <label className="settings-check">
               <input
                 type="checkbox"
-                checked={scheduling}
-                disabled={Boolean(busy)}
-                onChange={(event) => setAutomatic(event.currentTarget.checked)}
-              />{" "}
+                checked={followup.automatic}
+                disabled={busy}
+                onChange={(event) => void save({ automatic: event.currentTarget.checked })}
+              />
               Automatically review replies to my review comments
             </label>
-            <button
-              type="button"
-              disabled={Boolean(busy) || scheduling === followup.data.automatic}
-              onClick={() => void save("automatic")}
-            >
-              Save follow-ups
-            </button>
+            <p className="meta">
+              Monitor your published threads until you approve the MR. Disable individual MRs from
+              their actions menu.
+            </p>
           </div>
-          <div className="spread">
-            <label className="field">
-              Concurrent follow-ups (1–8)
+          <div className="settings-concurrency">
+            <label className="field" htmlFor="maximum-follow-ups">
+              Maximum simultaneous follow-ups
+            </label>
+            <div className="actions">
               <input
+                id="maximum-follow-ups"
                 type="number"
                 min={1}
                 max={8}
                 step={1}
-                value={concurrency ?? followup.data.autoReviewConcurrency}
+                value={concurrency ?? followup.autoReviewConcurrency}
                 onChange={(event) => setConcurrency(event.currentTarget.value)}
               />
-            </label>
-            <button
-              type="button"
-              disabled={
-                Boolean(busy) ||
-                !Number.isInteger(count) ||
-                count < 1 ||
-                count > 8 ||
-                count === followup.data.autoReviewConcurrency
-              }
-              onClick={() => void save("concurrency")}
-            >
-              Save concurrency
-            </button>
+              <button
+                type="button"
+                disabled={
+                  busy ||
+                  !Number.isInteger(count) ||
+                  count < 1 ||
+                  count > 8 ||
+                  count === followup.autoReviewConcurrency
+                }
+                onClick={() => void save({ autoReviewConcurrency: count })}
+              >
+                Save
+              </button>
+            </div>
+            <p className="meta">
+              More slots start queued follow-ups. Fewer slots let active reviews finish.
+            </p>
           </div>
-          <p className="meta">
-            The limit applies to newly started checks. Working reviews can finish.
-          </p>
-        </div>
+        </>
       )}
     </section>
   );
+}
+
+function latest<T extends { readonly revision: string }>(
+  snapshot: T | undefined,
+  saved: T | undefined,
+) {
+  return saved && (!snapshot || BigInt(saved.revision) > BigInt(snapshot.revision))
+    ? saved
+    : snapshot;
 }

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import type { ReactNode } from "react";
 import { ApiResponseError } from "../../api/client";
 import { disconnectSettings, readSettings, saveSettings, testConnection } from "../../api/settings";
 import type {
@@ -29,15 +30,22 @@ type Verified = { readonly identity: string };
 export default function SettingsPane({
   onClose,
   onSave,
+  displayOptions,
 }: {
   readonly onClose: () => void;
   readonly onSave: () => void;
+  readonly displayOptions?: ReactNode;
 }) {
   const read = useResource("settings", readSettings);
   return read.data ? (
-    <SettingsEditor initial={read.data} onClose={onClose} onSave={onSave} />
+    <SettingsEditor
+      initial={read.data}
+      onClose={onClose}
+      onSave={onSave}
+      displayOptions={displayOptions}
+    />
   ) : (
-    <Modal title="Settings" onClose={onClose}>
+    <Modal title="Settings" eyebrow="Your workspace" className="settings-pane" onClose={onClose}>
       {read.error ? (
         <Notice retry={read.retry}>{read.error}</Notice>
       ) : (
@@ -51,10 +59,12 @@ function SettingsEditor({
   initial,
   onClose,
   onSave,
+  displayOptions,
 }: {
   readonly initial: SettingsView;
   readonly onClose: () => void;
   readonly onSave: () => void;
+  readonly displayOptions?: ReactNode;
 }) {
   const [editor, setEditor] = useState(() => fromSaved(initial));
   const [busy, setBusy] = useState(false);
@@ -250,6 +260,8 @@ function SettingsEditor({
   return (
     <Modal
       title="Settings"
+      eyebrow="Your workspace"
+      className="settings-pane"
       onClose={onClose}
       busy={busy}
       footer={
@@ -268,7 +280,8 @@ function SettingsEditor({
         </>
       }
     >
-      <div className="settings-body stack">
+      <div className="settings-body">
+        <AgentPreferences />
         <form
           className="stack"
           id="workspace-settings"
@@ -315,7 +328,9 @@ function SettingsEditor({
           <section className="settings-section stack" aria-labelledby="settings-connections">
             <div className="spread">
               <h3 id="settings-connections">Connections</h3>
-              <span className="badge">{readable(snapshot.mode)}</span>
+              {snapshot.mode !== "connected" && (
+                <span className="badge">{readable(snapshot.mode)}</span>
+              )}
             </div>
             <div className="connection-grid">
               {(["gitlab", "jira"] as const).map((provider) => {
@@ -323,11 +338,25 @@ function SettingsEditor({
                 const confirmationResult = verified[provider];
                 const verifiedLabel = confirmationResult?.identity;
                 return (
-                  <fieldset className="surface-card stack" key={provider} disabled={busy}>
-                    <legend>{provider === "gitlab" ? "GitLab" : "Jira Cloud"}</legend>
+                  <fieldset className="connection-fields" key={provider} disabled={busy}>
+                    <legend className="sr-only">
+                      {provider === "gitlab" ? "GitLab" : "Jira Cloud"}
+                    </legend>
+                    <div className="connection-heading">
+                      <h4>{provider === "gitlab" ? "GitLab" : "Jira Cloud"}</h4>
+                      {connection.configured && (
+                        <button
+                          type="button"
+                          className="quiet-button"
+                          onClick={() => setConfirmation(provider)}
+                        >
+                          Disconnect
+                        </button>
+                      )}
+                    </div>
                     {provider === "gitlab" ? (
                       <label className="field">
-                        Origin
+                        GitLab address
                         <input
                           type="url"
                           value={draft.gitlab.origin}
@@ -341,7 +370,7 @@ function SettingsEditor({
                     ) : (
                       <>
                         <label className="field">
-                          Site
+                          Jira site
                           <input
                             type="url"
                             value={draft.jira.site}
@@ -356,7 +385,7 @@ function SettingsEditor({
                           />
                         </label>
                         <label className="field">
-                          Email
+                          Account email
                           <input
                             type="email"
                             value={draft.jira.email}
@@ -369,6 +398,23 @@ function SettingsEditor({
                             }}
                           />
                         </label>
+                      </>
+                    )}
+                    <div className={provider === "jira" ? "jira-token-fields" : undefined}>
+                      <label className="field">
+                        {provider === "gitlab" ? "Personal access token" : "API token"}
+                        <input
+                          type="password"
+                          value={tokens[provider]}
+                          autoComplete="new-password"
+                          spellCheck={false}
+                          onChange={(event) => writeToken(provider, event.currentTarget.value)}
+                          placeholder={
+                            connection.configured ? "Saved token · leave blank to keep" : ""
+                          }
+                        />
+                      </label>
+                      {provider === "jira" && (
                         <label className="field">
                           Token type
                           <select
@@ -385,47 +431,29 @@ function SettingsEditor({
                               });
                             }}
                           >
-                            <option value="scoped">Scoped</option>
                             <option value="unscoped">Unscoped</option>
+                            <option value="scoped">Scoped</option>
                           </select>
                         </label>
-                      </>
-                    )}
-                    <label className="field">
-                      Access token{" "}
-                      {connection.configured && <span className="meta">Token saved</span>}
-                      <input
-                        type="password"
-                        value={tokens[provider]}
-                        autoComplete="new-password"
-                        spellCheck={false}
-                        onChange={(event) => writeToken(provider, event.currentTarget.value)}
-                        placeholder={
-                          connection.configured ? "Leave blank to keep the current token" : ""
-                        }
-                      />
-                    </label>
-                    {errors[provider] && <Notice>{errors[provider]}</Notice>}
-                    {verifiedLabel && (
-                      <span className="badge green">Verified as {verifiedLabel}</span>
-                    )}
-                    {!verifiedLabel && connection.identity && (
-                      <span className="meta">Saved account · {connection.identity.label}</span>
-                    )}
-                    <div className="actions">
-                      <button
-                        type="button"
-                        disabled={Boolean(testing)}
-                        onClick={() => void check(provider)}
-                      >
-                        {testing === provider ? "Checking…" : "Test connection"}
-                      </button>
-                      {connection.configured && (
-                        <button type="button" onClick={() => setConfirmation(provider)}>
-                          Disconnect
-                        </button>
                       )}
                     </div>
+                    <button
+                      type="button"
+                      disabled={Boolean(testing)}
+                      onClick={() => void check(provider)}
+                    >
+                      {testing === provider
+                        ? "Checking…"
+                        : provider === "gitlab"
+                          ? "Test GitLab"
+                          : "Test Jira"}
+                    </button>
+                    {errors[provider] && <Notice>{errors[provider]}</Notice>}
+                    {verifiedLabel && (
+                      <p className="connection-verified" role="status">
+                        Connected as {verifiedLabel}
+                      </p>
+                    )}
                   </fieldset>
                 );
               })}
@@ -686,7 +714,7 @@ function SettingsEditor({
             </label>
           </section>
         </form>
-        <AgentPreferences />
+        {displayOptions}
       </div>
     </Modal>
   );
