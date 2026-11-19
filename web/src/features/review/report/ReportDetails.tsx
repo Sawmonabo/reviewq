@@ -1,7 +1,7 @@
 import { useState } from "react";
 import type { RunDetail } from "../../../api/generated/contracts";
 import type { Descriptor, ReportSummary } from "../../../api/generated/contracts/reports";
-import { reportContext, reportSection, saveDisposition } from "../../../api/reports";
+import { reportContext, saveDisposition } from "../../../api/reports";
 import { Pagination } from "../../../components/Pagination";
 import { Empty, Loading, Notice } from "../../../components/PanelState";
 import { useDraft } from "../../../hooks/useDraft";
@@ -163,7 +163,6 @@ function FindingCard({
   readonly onSave: (value: Saved, version: string) => void;
   readonly onRefresh: () => void;
 }) {
-  const [expanded, setExpanded] = useState(false);
   const [editing, setEditing] = useState(false);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string>();
@@ -182,20 +181,6 @@ function FindingCard({
   const draft = useDraft(drafts, draftKey);
   const edit = decode(draft);
   const patch = item.source;
-  const body = useResource(
-    `finding-source:${report.receiptId}:${item.findingId}:${expanded}`,
-    (signal) =>
-      !patch || !expanded || !patch.length
-        ? Promise.resolve({ data: null, cursor: "" })
-        : reportSection(
-            run.runId,
-            report.receiptId,
-            report.sha256,
-            patch.offset,
-            signal,
-            Math.min(patch.length, 12_000),
-          ),
-  );
 
   function change(next: DispositionDraft) {
     setNotice(
@@ -273,15 +258,9 @@ function FindingCard({
       <h3>{item.title}</h3>
       {saved?.reason && <p className="meta">Local disposition · {saved.reason}</p>}
       {patch && (
-        <details onToggle={(event) => setExpanded(event.currentTarget.open)}>
-          <summary>Read authored finding</summary>
-          {body.error && <Notice retry={body.retry}>{body.error}</Notice>}
-          {expanded && body.pending && <Loading label="Reading finding evidence…" />}
-          {body.data && <pre className="report-source">{body.data.text}</pre>}
-          <button type="button" onClick={() => onSource(patch.offset)}>
-            Open finding in original report
-          </button>
-        </details>
+        <button className="quiet-button" type="button" onClick={() => onSource(patch.offset)}>
+          Open finding in original report
+        </button>
       )}
       {notice && <Notice>{notice}</Notice>}
       {editing && current && (

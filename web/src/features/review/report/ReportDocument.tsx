@@ -54,6 +54,7 @@ export default function ReportDocument({
         : "Source sections";
   const feedback = useRef<HTMLElement>(null);
   const reader = useRef<HTMLDivElement>(null);
+  const reportActions = useRef<HTMLButtonElement>(null);
   const address = [run.reviewId, run.runId, run.leadSessionKey, report.receiptId, report.sha256];
   const quoteKey = JSON.stringify(["quote", ...address]);
   const quoteLabel = `Quote · ${reviewTitle}`;
@@ -212,6 +213,7 @@ export default function ReportDocument({
         <ActionMenu
           label="Report actions"
           trigger={<Icon name="more" />}
+          triggerRef={reportActions}
           items={[
             ...(report.semanticIndex === "ready" && report.findingCount !== 0
               ? [{ label: "Finding dispositions", run: () => setContext("findings") }]
@@ -231,7 +233,14 @@ export default function ReportDocument({
         <section className="report-structured stack" aria-label={contextTitle}>
           <div className="spread">
             <h3>{contextTitle}</h3>
-            <button className="quiet-button" type="button" onClick={() => setContext(undefined)}>
+            <button
+              className="quiet-button"
+              type="button"
+              onClick={() => {
+                setContext(undefined);
+                reportActions.current?.focus({ preventScroll: true });
+              }}
+            >
               Close
             </button>
           </div>

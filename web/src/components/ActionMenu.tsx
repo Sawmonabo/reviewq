@@ -1,6 +1,6 @@
 import * as Menu from "@radix-ui/react-dropdown-menu";
 import { Fragment } from "react";
-import type { ReactNode } from "react";
+import type { ReactNode, Ref } from "react";
 
 type Item = {
   readonly label: string;
@@ -18,16 +18,18 @@ export function ActionMenu({
   trigger,
   items,
   contentClassName,
+  triggerRef,
 }: {
   readonly label: string;
   readonly trigger: ReactNode;
   readonly items: readonly Item[];
   readonly contentClassName?: string;
+  readonly triggerRef?: Ref<HTMLButtonElement>;
 }) {
   return (
     <Menu.Root>
       <Menu.Trigger asChild>
-        <button type="button" className="menu-trigger" aria-label={label}>
+        <button type="button" className="menu-trigger" aria-label={label} ref={triggerRef}>
           {trigger}
         </button>
       </Menu.Trigger>
