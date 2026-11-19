@@ -2,7 +2,7 @@
 import { func0 } from "../runtime.mjs";
 import { validate35 } from "./event-cursor-dto.mjs";
 import { validate53 } from "./provider.mjs";
-function validate66(
+function validate74(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -18,7 +18,7 @@ function validate66(
         ((data.provider === undefined || !func0.call(data, "provider")) &&
           (missing0 = "provider"))
       ) {
-        validate66.errors = [
+        validate74.errors = [
           {
             instancePath,
             schemaPath: "#/required",
@@ -31,7 +31,7 @@ function validate66(
         const _errs1 = errors;
         for (const key0 of Object.keys(data)) {
           if (!(key0 === "expectedRevision" || key0 === "provider")) {
-            validate66.errors = [
+            validate74.errors = [
               {
                 instancePath,
                 schemaPath: "#/additionalProperties",
@@ -92,7 +92,7 @@ function validate66(
         }
       }
     } else {
-      validate66.errors = [
+      validate74.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -103,7 +103,7 @@ function validate66(
       return false;
     }
   }
-  validate66.errors = vErrors;
+  validate74.errors = vErrors;
   return errors === 0;
 }
-export { validate66 };
+export { validate74 };

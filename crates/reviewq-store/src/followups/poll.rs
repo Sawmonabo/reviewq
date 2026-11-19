@@ -25,6 +25,7 @@ const ASSIGNED_RUN: &str = "coalesce(
       WHERE x.review_id=r.review_id AND a.sealed=1 AND a.complete=1
       ORDER BY v.captured_at_ms DESC,v.receipt_id DESC LIMIT 1),
     (SELECT min(x.run_id) FROM runs x WHERE x.review_id=r.review_id HAVING count(*)=1))";
+const DISCOVERY_REFRESH_MS: i64 = 5 * 60 * 1000;
 
 impl FollowupObservationStore for SqliteStore {
     fn tracked_reviews(
@@ -85,11 +86,19 @@ fn list(
          FROM reviews r LEFT JOIN followup_monitors m USING(review_id)
          WHERE r.review_id>?1 AND (r.state='open' OR m.state='enabled')
            AND EXISTS(SELECT 1 FROM configured_projects p WHERE p.origin=r.origin AND p.project_id=r.project_id)
-           AND (m.review_id IS NOT NULL OR EXISTS(SELECT 1 FROM retained_reviews x WHERE x.review_id=r.review_id))
+           AND (m.review_id IS NOT NULL OR EXISTS(SELECT 1 FROM retained_reviews x WHERE x.review_id=r.review_id)
+                OR (EXISTS(SELECT 1 FROM review_discoveries d WHERE d.review_id=r.review_id)
+                  AND NOT EXISTS(SELECT 1 FROM review_source_signals s WHERE s.review_id=r.review_id
+                    AND s.settings_revision=?3 AND s.source_sha=r.head_sha AND s.observed_at_ms>=?4)))
          ORDER BY r.review_id LIMIT ?2"
     );
     let mut statement = db.prepare_cached(&sql)?;
-    let mut rows = statement.query(params![after.as_ref().map_or("", |id| id.as_str()), limit])?;
+    let mut rows = statement.query(params![
+        after.as_ref().map_or("", |id| id.as_str()),
+        limit,
+        settings.as_sqlite_integer(),
+        now_ms()?.saturating_sub(DISCOVERY_REFRESH_MS),
+    ])?;
     let mut items = Vec::new();
     while let Some(row) = rows.next()? {
         let review = parse(text(row, 0)?)?;
@@ -139,7 +148,24 @@ fn record(
         return Err(AppError::StaleRevision.into());
     }
     let reviewers = observations::monitored_reviewers(db, observation.authenticated_actor)?;
-    let events = gitlab::collect(db, &tracked.review, &observation, &reviewers)?;
+    let owned = db.query_row(
+        "SELECT EXISTS(SELECT 1 FROM retained_reviews WHERE review_id=?1)
+                OR EXISTS(SELECT 1 FROM followup_monitors WHERE review_id=?1)",
+        [tracked.review.as_str()],
+        |row| row.get::<_, bool>(0),
+    )?;
+    let events = if owned {
+        gitlab::collect(db, &tracked.review, &observation, &reviewers)?
+    } else {
+        if !db.query_row(
+            "SELECT EXISTS(SELECT 1 FROM review_discoveries WHERE review_id=?1)",
+            [tracked.review.as_str()],
+            |row| row.get::<_, bool>(0),
+        )? {
+            return Err(AppError::StaleRevision.into());
+        }
+        Vec::new()
+    };
     save_observations(tx, std::slice::from_ref(&observation.review))?;
     crate::queue::stage::observe_source(
         tx,

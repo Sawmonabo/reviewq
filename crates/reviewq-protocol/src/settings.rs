@@ -106,6 +106,31 @@ pub struct CatalogRequest {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct CheckoutSkillsRequest {
+    pub expected_revision: RevisionDto,
+    pub gitlab: GitlabDraft,
+    pub token: TokenInput,
+    pub project_id: ProjectIdDto,
+    pub checkout: String,
+    pub provider: crate::HostProviderDto,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct CheckoutSkills {
+    pub settings_revision: RevisionDto,
+    pub project_id: ProjectIdDto,
+    pub checkout: String,
+    pub provider: crate::HostProviderDto,
+    pub skills: Vec<Skill>,
+}
+
+pub type CheckoutSkillsResponse = Success<CheckoutSkills>;
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct Disconnect {
     pub expected_revision: RevisionDto,
     pub provider: Provider,

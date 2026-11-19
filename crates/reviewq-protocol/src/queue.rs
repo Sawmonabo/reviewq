@@ -203,6 +203,7 @@ pub enum RunStage {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct ReviewOverview {
     pub review: MergeRequestRow,
+    pub web_url: String,
     pub decision_revision: RevisionDto,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub decision: Option<crate::decisions::DecisionView>,

@@ -77,6 +77,8 @@ pub struct PatchDiscussion {
     pub discussion_id: String,
     pub anchor: Option<PatchDiscussionAnchor>,
     pub outdated: bool,
+    pub web_url: String,
+    pub our_participation: bool,
     pub notes: Vec<PatchDiscussionNote>,
 }
 
@@ -88,6 +90,22 @@ pub struct PatchDiscussionAnchor {
     pub new_path: String,
     pub old_line: Option<SafeCountDto>,
     pub new_line: Option<SafeCountDto>,
+    pub range: Option<PatchDiscussionRange>,
+}
+
+#[derive(Debug, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct PatchDiscussionRange {
+    pub start: PatchDiscussionLine,
+    pub end: PatchDiscussionLine,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct PatchDiscussionLine {
+    pub old_line: Option<SafeCountDto>,
+    pub new_line: Option<SafeCountDto>,
 }
 
 #[derive(Debug, Serialize)]
@@ -96,7 +114,10 @@ pub struct PatchDiscussionAnchor {
 pub struct PatchDiscussionNote {
     pub note_id: String,
     pub author: String,
+    pub author_id: Option<crate::UpstreamIdDto>,
+    pub ours: bool,
     pub body: String,
     pub created_at: Option<UtcTimestampDto>,
     pub resolved: bool,
+    pub resolved_by: Option<crate::UpstreamIdDto>,
 }

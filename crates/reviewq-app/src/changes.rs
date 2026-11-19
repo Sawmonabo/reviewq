@@ -74,15 +74,30 @@ pub struct DiscussionAnchor {
     pub new_path: String,
     pub old_line: Option<u32>,
     pub new_line: Option<u32>,
+    pub range: Option<DiscussionRange>,
+}
+
+#[derive(Debug)]
+pub struct DiscussionRange {
+    pub start: DiscussionLine,
+    pub end: DiscussionLine,
+}
+
+#[derive(Debug)]
+pub struct DiscussionLine {
+    pub old_line: Option<u32>,
+    pub new_line: Option<u32>,
 }
 
 #[derive(Debug)]
 pub struct DiscussionNote {
     pub id: u64,
     pub author: String,
+    pub author_id: Option<u64>,
     pub body: String,
     pub created_at_ms: Option<i64>,
     pub resolved: bool,
+    pub resolved_by: Option<u64>,
 }
 
 #[derive(Debug)]

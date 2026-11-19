@@ -146,12 +146,11 @@ impl Codex {
         lead: LeadTarget,
         id: NativeTurnId,
     ) -> Result<bool, AppError> {
-        let thread = self.verified_thread(&lead).await?;
-        let page = self.turns(&thread.id, None, false, 8, false).await?;
-        Ok(page
-            .data
-            .iter()
-            .any(|turn| turn.id == id.as_str() && turn.status == "interrupted"))
+        let thread = self.retained_thread(&lead).await?;
+        Ok(self
+            .original_turn(&thread, &id)
+            .await?
+            .is_some_and(|turn| turn.status == "interrupted"))
     }
 
     pub(super) async fn stop_exact_turn(

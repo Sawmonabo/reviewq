@@ -207,6 +207,7 @@ pub(crate) async fn serve(profile: PathBuf, options: Serve) -> Result<(), Failur
     };
     let host = codex.clone().map(|host| host as Arc<dyn NativeHost>);
     let report_files = Arc::new(RegisteredReportFiles);
+    let checkout_claude_profile = options.claude_home.clone();
     let claude_home = match options.claude_home {
         Some(home) => Some(home),
         None if !options.validation => claude_home().ok().filter(|path| path.is_dir()),
@@ -249,6 +250,9 @@ pub(crate) async fn serve(profile: PathBuf, options: Serve) -> Result<(), Failur
             .clone()
             .map(|host| host as Arc<dyn NativeModelReader>),
     };
+    let claude_interrupt = claude_cli
+        .clone()
+        .map(|cli| cli as Arc<dyn reviewq_app::hosts::recovery::NativeJobInterrupt>);
     let launchers = NativeLaunchers {
         codex: codex.map(|host| host as Arc<dyn NativeLauncher>),
         claude: claude_cli.map(|host| host as Arc<dyn NativeLauncher>),
@@ -323,6 +327,7 @@ pub(crate) async fn serve(profile: PathBuf, options: Serve) -> Result<(), Failur
             launchers,
             launches_allowed: !options.validation,
             claude,
+            claude_interrupt,
             terminal,
             workflow: WorkflowIntegration {
                 proof: workflow,
@@ -336,6 +341,14 @@ pub(crate) async fn serve(profile: PathBuf, options: Serve) -> Result<(), Failur
     );
     let mut terminate = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
     publish(&profile, &endpoint)?;
+    let checkout_worker = (!options.validation).then(|| {
+        tokio::spawn(crate::checkout_setup::reconcile::run(
+            store.clone(),
+            profile.clone(),
+            native,
+            checkout_claude_profile,
+        ))
+    });
     println!("ReviewQ http://{browser}/");
 
     let listener_shutdown = wait.clone();
@@ -369,6 +382,10 @@ pub(crate) async fn serve(profile: PathBuf, options: Serve) -> Result<(), Failur
         let _ = desktop.await;
     }
     if let Some(worker) = workflow_worker {
+        worker.abort();
+        let _ = worker.await;
+    }
+    if let Some(worker) = checkout_worker {
         worker.abort();
         let _ = worker.await;
     }

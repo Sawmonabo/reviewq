@@ -68,8 +68,9 @@ const schema23 = {
 };
 const schema24 = { enum: ["gitlab", "jira"], type: "string" };
 const schema29 = { enum: ["member", "starred", "all"], type: "string" };
-const schema33 = { enum: ["enabled", "paused"], type: "string" };
-const schema37 = {
+const schema32 = { enum: ["codex", "claude"], type: "string" };
+const schema36 = { enum: ["enabled", "paused"], type: "string" };
+const schema39 = {
   additionalProperties: false,
   properties: {
     autoReviewConcurrency: {
@@ -86,14 +87,29 @@ const schema37 = {
   title: "FollowupPreferencesRequest",
   type: "object",
 };
-const schema42 = { enum: ["read", "unread", "dismiss"], type: "string" };
-const schema46 = { enum: ["codex", "claude"], type: "string" };
-const schema51 = { enum: ["unicode_codepoints"], type: "string" };
-const schema57 = {
+const schema44 = { enum: ["read", "unread", "dismiss"], type: "string" };
+const schema50 = {
+  additionalProperties: false,
+  properties: {
+    blocking: { type: ["boolean", "null"] },
+    publication: {
+      anyOf: [{ $ref: "#/definitions/Publication" }, { type: "null" }],
+    },
+    reason: { type: "string" },
+  },
+  required: ["reason"],
+  type: "object",
+};
+const schema51 = {
+  enum: ["withheld", "authorized", "published"],
+  type: "string",
+};
+const schema55 = { enum: ["unicode_codepoints"], type: "string" };
+const schema62 = {
   enum: ["reviewed", "waiting_author", "needs_review"],
   type: "string",
 };
-const schema59 = {
+const schema64 = {
   additionalProperties: false,
   properties: {
     context: { type: ["string", "null"] },
@@ -112,7 +128,7 @@ const schema59 = {
   title: "RunPrepareRequest",
   type: "object",
 };
-const schema61 = {
+const schema66 = {
   additionalProperties: false,
   properties: {
     args: { type: ["string", "null"] },
@@ -123,7 +139,7 @@ const schema61 = {
   required: ["kind", "name"],
   type: "object",
 };
-const schema63 = {
+const schema68 = {
   additionalProperties: false,
   properties: {
     context: true,
@@ -151,19 +167,6 @@ const schema63 = {
     { $ref: "#/definitions/RunStartRequestFields2" },
   ],
 };
-const schema64 = {
-  type: "object",
-  properties: {
-    context: { type: ["string", "null"] },
-    effort: { type: ["string", "null"] },
-    expectedSettingsRevision: { $ref: "#/definitions/EventCursorDto" },
-    invocation: { $ref: "#/definitions/RunPrepareRequestInvocation" },
-    model: { type: ["string", "null"] },
-    provider: { $ref: "#/definitions/HostProviderDto" },
-    reviewId: { $ref: "#/definitions/ReviewIdDto" },
-    sourceSha: { $ref: "#/definitions/GitShaDto" },
-  },
-};
 export {
   schema11,
   schema13,
@@ -173,14 +176,15 @@ export {
   schema23,
   schema24,
   schema29,
-  schema33,
-  schema37,
-  schema42,
-  schema46,
+  schema32,
+  schema36,
+  schema39,
+  schema44,
+  schema50,
   schema51,
-  schema57,
-  schema59,
-  schema61,
-  schema63,
+  schema55,
+  schema62,
   schema64,
+  schema66,
+  schema68,
 };

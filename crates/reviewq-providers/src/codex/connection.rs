@@ -21,7 +21,7 @@ use tokio_tungstenite::tungstenite::{Message, protocol::WebSocketConfig};
 use tokio_tungstenite::{WebSocketStream, client_async_with_config};
 
 use super::live::Live;
-use super::questions::{AnswerProof, Questions};
+use super::questions::Questions;
 
 const REQUEST_LIMIT: usize = 8;
 const DISCOVERY_LIMIT: u64 = 16 * 1024;
@@ -41,7 +41,8 @@ enum CommandRequest {
     Rpc(Rpc),
     Answer(
         QuestionAnswer,
-        oneshot::Sender<Result<QuestionForm, AppError>>,
+        QuestionForm,
+        oneshot::Sender<Result<QuestionForm, AnswerError>>,
     ),
 }
 
@@ -69,6 +70,11 @@ impl Effect {
             Self::Launch(guard) => guard.check().await,
         }
     }
+}
+
+pub(super) enum AnswerError {
+    BeforeSend,
+    Uncertain,
 }
 
 pub(super) enum CallError {
@@ -136,39 +142,19 @@ impl Connection {
             .list(thread, request))
     }
 
-    pub(super) fn question_proofs(
+    pub(super) async fn answer(
         &self,
-        thread: &str,
-        request: Option<&str>,
-    ) -> Result<Vec<AnswerProof>, AppError> {
-        Ok(self
-            .questions
-            .lock()
-            .map_err(|_| AppError::Internal)?
-            .proofs(thread, request))
-    }
-
-    pub(super) fn question_answered(
-        &self,
-        thread: &str,
-        proof: AnswerProof,
-    ) -> Result<(), AppError> {
-        self.questions
-            .lock()
-            .map_err(|_| AppError::Internal)?
-            .confirmed(thread, proof);
-        Ok(())
-    }
-
-    pub(super) async fn answer(&self, answer: QuestionAnswer) -> Result<QuestionForm, AppError> {
+        answer: QuestionAnswer,
+        form: QuestionForm,
+    ) -> Result<QuestionForm, AnswerError> {
         let (reply, result) = oneshot::channel();
         self.sender
-            .try_send(CommandRequest::Answer(answer, reply))
-            .map_err(|_| AppError::Busy)?;
+            .try_send(CommandRequest::Answer(answer, form, reply))
+            .map_err(|_| AnswerError::BeforeSend)?;
         timeout(DEADLINE + DEADLINE, result)
             .await
-            .map_err(|_| AppError::Unavailable)?
-            .map_err(|_| AppError::Unavailable)?
+            .map_err(|_| AnswerError::Uncertain)?
+            .map_err(|_| AnswerError::Uncertain)?
     }
 
     pub(super) async fn read<T: DeserializeOwned>(
@@ -248,13 +234,8 @@ impl Daemon {
         while let Some(first) = commands.recv().await {
             let request = match first {
                 CommandRequest::Rpc(request) => request,
-                CommandRequest::Answer(answer, reply) => {
-                    let result = questions
-                        .lock()
-                        .map_err(|_| AppError::Internal)
-                        .and_then(|mut cache| cache.prepare(answer))
-                        .map(|(form, _)| form);
-                    let _ = reply.send(result);
+                CommandRequest::Answer(_, _, reply) => {
+                    let _ = reply.send(Err(AnswerError::BeforeSend));
                     continue;
                 }
             };
@@ -440,25 +421,25 @@ async fn multiplex(
                     Some(CommandRequest::Rpc(request)) => {
                         if dispatch(socket, request, id, &mut pending).await.is_err() { break; }
                     }
-                    Some(CommandRequest::Answer(answer, reply)) => {
+                    Some(CommandRequest::Answer(answer, form, reply)) => {
                         if reply.is_closed() { continue; }
-                        if let Err(error) = answer.check().await {
-                            let _ = reply.send(Err(error));
+                        if answer.check().await.is_err() {
+                            let _ = reply.send(Err(AnswerError::BeforeSend));
                             continue;
                         }
                         if reply.is_closed() { continue; }
                         let prepared = questions.lock().map_err(|_| AppError::Internal)
-                            .and_then(|mut cache| cache.prepare(answer));
+                            .and_then(|mut cache| cache.prepare(answer, form));
                         let result = match prepared {
                             Ok((form, Some(outbound))) => {
                                 if !matches!(timeout(DEADLINE, send(socket,outbound)).await, Ok(Ok(()))) {
-                                    let _ = reply.send(Err(AppError::Unavailable));
+                                    let _ = reply.send(Err(AnswerError::Uncertain));
                                     break;
                                 }
                                 Ok(form)
                             }
                             Ok((form, None)) => Ok(form),
-                            Err(error) => Err(error),
+                            Err(_) => Err(AnswerError::BeforeSend),
                         };
                         let _ = reply.send(result);
                     }

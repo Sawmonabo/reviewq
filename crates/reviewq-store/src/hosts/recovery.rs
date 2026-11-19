@@ -17,6 +17,7 @@ use crate::workspace::{advance_queue, settings_revision};
 use crate::{SqliteStore, StoreError};
 
 mod dispatch;
+mod managed;
 pub(crate) use dispatch::{advance, current, read_authorization, refresh_allowance, requirements};
 
 pub(super) const IN_SCOPE:&str="
@@ -148,29 +149,17 @@ impl RecoveryStore for SqliteStore {
     ) -> AppFuture<'_, InterruptClaim> {
         Box::pin(async move {
             operator(&actor)?;
-            self.write(move |tx| {
-                let db=&tx.sql;
-                let lead=target(db,&actor,&run,&session)?;
-                let managed:bool=db.query_row(
-                    "SELECT EXISTS(SELECT 1 FROM launch_attempts WHERE run_id=?1 AND session_key=?2 AND provider='codex'
-                     AND native_id=?3 AND state IN ('pending','confirmed','uncertain'))",
-                    params![run.as_str(),session.as_str(),lead.binding().identity().native_id().as_str()],|row|row.get(0),
-                )?;
-                if !managed {return Err(AppError::Forbidden.into());}
-                let acquired=db.execute(
-                    "INSERT INTO managed_interrupts VALUES(?1,?2,?3,'reserved',?4)
-                     ON CONFLICT(run_id,lead_session_key,native_turn_id) DO UPDATE SET
-                        state='reserved',updated_at_ms=excluded.updated_at_ms WHERE managed_interrupts.state='deferred'",
-                    params![run.as_str(),session.as_str(),turn.as_str(),now_ms()?],
-                )?==1;
-                let state:String=db.query_row(
-                    "SELECT state FROM managed_interrupts WHERE run_id=?1 AND lead_session_key=?2 AND native_turn_id=?3",
-                    params![run.as_str(),session.as_str(),turn.as_str()],|row|row.get(0),
-                )?;
-                cancel_interrupted(db,&lead,&turn)?;
-                if acquired {emit(tx,&lead)?;}
-                Ok(InterruptClaim {target:lead,turn,state:parse(&state)?,acquired,cursor:crate::connection::read_head(&tx.sql)?})
-            }).await.map_err(StoreError::app)
+            self.write(move |tx| managed::claim(tx, actor, run, session, turn))
+                .await
+                .map_err(StoreError::app)
+        })
+    }
+
+    fn check_interrupt(&self, claim: InterruptClaim) -> AppFuture<'_, ()> {
+        Box::pin(async move {
+            self.read(move |db| managed::check(db, &claim))
+                .await
+                .map_err(StoreError::app)
         })
     }
 
@@ -186,13 +175,15 @@ impl RecoveryStore for SqliteStore {
                 }
                 let changed = tx.sql.execute(
                     "UPDATE managed_interrupts SET state=?4,updated_at_ms=?5 WHERE run_id=?1
-                     AND lead_session_key=?2 AND native_turn_id=?3 AND state IN ('reserved','uncertain')",
+                     AND lead_session_key=?2 AND native_turn_id=?3 AND state IN ('reserved','uncertain')
+                     AND native_job_id IS ?6",
                     params![
                         claim.target.run_id().as_str(),
                         claim.target.session_key().as_str(),
                         claim.turn.as_str(),
                         state.to_string(),
-                        now_ms()?
+                        now_ms()?,
+                        claim.claude_job,
                     ],
                 )?;
                 if changed!=1 {

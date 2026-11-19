@@ -230,11 +230,12 @@ pub(super) fn finish(
         |row| row.get(0),
     )?;
     let mut claim = send.claim;
+    let confirmed_late_drop = state == "uncertain" && finished == Some("dropped");
     if state == "uncertain" {
         if finished.is_none() {
             return Ok(());
         }
-        if !matches!(observation, DeliveryObservation::Started { .. }) {
+        if !confirmed_late_drop && !matches!(observation, DeliveryObservation::Started { .. }) {
             return Err(AppError::Conflict.into());
         }
         let changed = tx.sql.execute(
@@ -246,7 +247,11 @@ pub(super) fn finish(
         }
         claim.work = DeliveryWork::Reconcile { cursor: None };
     }
-    delivery::finish(tx, claim, observation)?;
+    if confirmed_late_drop {
+        delivery::finish_claude_drop(tx, claim)?;
+    } else {
+        delivery::finish(tx, claim, observation)?;
+    }
     if let Some(finished) = finished {
         tx.sql.execute(
             "UPDATE claude_deliveries SET finished_kind=?3 WHERE delivery_id=?1 AND fence=?2",

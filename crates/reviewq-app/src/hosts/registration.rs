@@ -13,7 +13,8 @@ pub async fn authorize_registration(
     actor: Actor,
     review: ReviewId,
 ) -> Result<(Revision, MrIdentity), AppError> {
-    let (revision, mr) = store.authorized_source(actor.clone(), review).await?.value;
+    let (revision, source) = store.authorized_source(actor.clone(), review).await?.value;
+    let mr = source.identity;
     let workspace = store.workspace_context(actor).await?.value;
     if revision != workspace.revision {
         return Err(AppError::StaleRevision);

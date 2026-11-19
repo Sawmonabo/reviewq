@@ -78,13 +78,7 @@ impl SourceAccounts {
         for repo in repositories {
             let path = gitlab.verify_project(repo.project).await?;
             let checkout = match repo.checkout {
-                Some(path) => {
-                    let (observed, remote) = checkout::verify_checkout(&path).await?;
-                    gitlab
-                        .verify_checkout(gitlab.configured_project(repo.project), remote)
-                        .await?;
-                    Some(observed)
-                }
+                Some(path) => Some(checked_checkout(&gitlab, repo.project, &path).await?),
                 None if repo.default_skills.codex.is_none()
                     && repo.default_skills.claude.is_none() =>
                 {
@@ -158,6 +152,18 @@ impl SourceAccounts {
         }
         Ok(scope)
     }
+}
+
+pub(super) async fn checked_checkout(
+    source: &crate::GitLab,
+    project: reviewq_domain::identity::ProjectId,
+    path: &reviewq_domain::session::AbsolutePath,
+) -> Result<reviewq_domain::settings::CheckoutBinding, AppError> {
+    let (checked, remote) = checkout::verify_checkout(path).await?;
+    source
+        .verify_checkout(source.configured_project(project), remote)
+        .await?;
+    Ok(checked)
 }
 
 fn valid_id(id: u64) -> bool {

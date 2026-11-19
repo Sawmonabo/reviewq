@@ -203,6 +203,7 @@ export interface ReviewOverview {
   review: MergeRequestRow;
   runs: RunSummaryPage;
   settingsRevision: RevisionDto;
+  webUrl: string;
   [k: string]: unknown;
 }
 

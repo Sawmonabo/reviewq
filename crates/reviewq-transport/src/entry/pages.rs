@@ -20,8 +20,8 @@ use reviewq_protocol::queue::{
 };
 use reviewq_protocol::{
     CheckpointIdDto, ErrorCode, ErrorDto, EventCursorDto, GitShaDto, HostProviderDto,
-    MergeRequestIidDto, Page, PageCursorDto, ProjectIdDto, ReviewIdDto, RevisionDto, RunDetail,
-    RunDetailResponse, RunIdDto, SafeCountDto, SessionKeyDto, SessionSummary, Success,
+    MergeRequestIidDto, Page, PageCursorDto, ProjectIdDto, ResourceIdDto, ReviewIdDto, RevisionDto,
+    RunDetail, RunDetailResponse, RunIdDto, SafeCountDto, SessionKeyDto, SessionSummary, Success,
     TicketKeyDto, UpstreamIdDto, UtcTimestampDto,
 };
 use serde::{Deserialize, Serialize};
@@ -179,6 +179,7 @@ pub(super) async fn overview(
     )?;
     let data = ReviewOverview {
         review: project_review(&value.item)?,
+        web_url: value.item.source.web_url()?,
         decision_revision: RevisionDto::new(value.item.decision.revision.get())
             .ok_or(AppError::Internal)?,
         decision: Some(super::features::decisions::project(&value.item.decision)?),
@@ -235,6 +236,8 @@ pub(super) async fn read_run(
                     .as_ref()
                     .and_then(|id| SessionKeyDto::new(id.as_str())),
                 provider: provider(row.provider),
+                native_id: ResourceIdDto::new(row.native_id.as_str()).ok_or(AppError::Internal)?,
+                cwd: row.cwd.as_path().display().to_string(),
             })
         })
         .collect::<Result<Vec<_>, AppError>>()?;
@@ -253,7 +256,14 @@ pub(super) async fn read_run(
         run_id: RunIdDto::new(value.lead.run_id().as_str()).ok_or(AppError::Internal)?,
         lead_session_key: SessionKeyDto::new(value.lead.session_key().as_str())
             .ok_or(AppError::Internal)?,
+        lead_native_id: ResourceIdDto::new(value.lead.binding().identity().native_id().as_str())
+            .ok_or(AppError::Internal)?,
+        lead_cwd: value.lead.binding().cwd().as_path().display().to_string(),
         sessions: Page::new(sessions, next).ok_or(AppError::Internal)?,
+        launch: value
+            .launch
+            .map(super::launch::project_run_launch)
+            .transpose()?,
     };
     success(data, cursor)
 }

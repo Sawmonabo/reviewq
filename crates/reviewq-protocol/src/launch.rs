@@ -43,7 +43,7 @@ pub struct StartRequest {
     pub context: Option<String>,
 }
 
-#[derive(Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub enum Invocation {
@@ -100,7 +100,21 @@ pub struct Preview {
 pub type CatalogResponse = Success<Catalog>;
 pub type PreviewResponse = Success<Preview>;
 
-#[derive(Serialize)]
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct RunLaunchDetails {
+    pub source_sha: GitShaDto,
+    pub state: State,
+    pub invocation: Invocation,
+    pub context: Option<String>,
+    pub requested_model: Option<String>,
+    pub requested_effort: Option<String>,
+    pub observed_model: Option<String>,
+    pub observed_effort: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
 #[serde(rename_all = "snake_case")]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub enum State {

@@ -44,13 +44,19 @@ pub(crate) async fn verified_codex_source(
 }
 
 pub(crate) async fn verify_codex_live_source(
-    binding: NativeBinding,
+    session: HistorySession,
     path: AbsolutePath,
     anchor: SourceAnchor,
 ) -> Result<(), AppError> {
     tokio::task::spawn_blocking(move || {
         let stopped = AtomicBool::new(false);
-        let source = verify(&binding, None, path.as_path(), &stopped)?.ok_or(AppError::NotFound)?;
+        let source = verify(
+            &session.binding,
+            session.parent.as_ref(),
+            path.as_path(),
+            &stopped,
+        )?
+        .ok_or(AppError::NotFound)?;
         let length = source.file.metadata().map_err(fs_error)?.len();
         if file::generation(&source)? != anchor.generation {
             return Err(AppError::CursorExpired);

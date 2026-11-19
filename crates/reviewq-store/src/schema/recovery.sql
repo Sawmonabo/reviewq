@@ -46,6 +46,7 @@ CREATE TABLE managed_interrupts (
     run_id TEXT NOT NULL,
     lead_session_key TEXT NOT NULL,
     native_turn_id TEXT NOT NULL,
+    native_job_id TEXT CHECK (native_job_id IS NULL OR length(native_job_id) BETWEEN 1 AND 64),
     state TEXT NOT NULL CHECK (state IN ('reserved','interrupted','deferred','rejected','uncertain')),
     updated_at_ms INTEGER NOT NULL,
     PRIMARY KEY (run_id,lead_session_key,native_turn_id),

@@ -2,11 +2,15 @@
 
 import type {
   EventCursorDto,
+  HistoryEntryIdDto,
+  HistoryTurnIdDto,
   MessageTextDto,
   ObservedInputDto,
+  PageCursorDto,
   ReportHashDto,
   ResourceIdDto,
   RunIdDto,
+  SafeCountDto,
   SessionKeyDto,
   SubmissionIdDto,
   UtcTimestampDto,
@@ -49,6 +53,16 @@ export type DeliveryReceipt1 =
       [k: string]: unknown;
     };
 
+export type RecordedPurpose =
+  | "user"
+  | "report_feedback"
+  | "codex_recovery"
+  | "thread_followup"
+  | "publication";
+
+export type RecordedState =
+  "queued" | "dispatching" | "started" | "rejected" | "uncertain";
+
 export interface SendMessageRequest {
   submissionId: SubmissionIdDto;
   text: MessageTextDto;
@@ -64,5 +78,46 @@ export interface DeliveryReportRef {
   currentReceiptId: ResourceIdDto | null;
   receiptId: ResourceIdDto;
   reportHash: ReportHashDto;
+  [k: string]: unknown;
+}
+
+export interface MessageHistoryPageResponse {
+  cursor: EventCursorDto;
+  data: MessageHistoryItemPage;
+  [k: string]: unknown;
+}
+
+export interface MessageHistoryItemPage {
+  /**
+   * @maxItems 100
+   */
+  items: MessageHistoryItem[];
+  nextCursor: PageCursorDto | null;
+  [k: string]: unknown;
+}
+
+export interface MessageHistoryItem {
+  attachment: MessageAttachment | null;
+  createdAt: UtcTimestampDto;
+  followupBatchId: ResourceIdDto | null;
+  messageId: ResourceIdDto;
+  nativeEntryId: HistoryEntryIdDto | null;
+  nativeTurnId: HistoryTurnIdDto | null;
+  outcomeDetail: string | null;
+  purpose: RecordedPurpose;
+  serviceAdmitted: boolean;
+  state: RecordedState;
+  submissionId: SubmissionIdDto;
+  text: string;
+  updatedAt: UtcTimestampDto;
+  [k: string]: unknown;
+}
+
+export interface MessageAttachment {
+  currentReceiptId: ResourceIdDto | null;
+  quote: string | null;
+  quoteOffset: SafeCountDto | null;
+  receiptId: ResourceIdDto | null;
+  reportHash: ReportHashDto | null;
   [k: string]: unknown;
 }

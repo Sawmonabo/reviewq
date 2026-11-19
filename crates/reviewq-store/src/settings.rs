@@ -16,6 +16,7 @@ use crate::events::snapshot;
 use crate::workspace::{advance_queue, operator, settings_revision};
 use crate::{SqliteStore, StoreError};
 
+pub(crate) mod projection;
 mod scope;
 
 impl SettingsStore for SqliteStore {
@@ -196,7 +197,7 @@ fn view(db: &Database) -> Result<Connections, StoreError> {
         gitlab: summary(db, Provider::GitLab)?,
         jira: summary(db, Provider::Jira)?,
         scope: scope::read(db)?,
-        chat_setup_pending: scope::pending(db)?,
+        chat_setup: projection::summary(db)?,
     })
 }
 
@@ -258,6 +259,7 @@ fn advance(tx: &mut WriteTx<'_>, expected: Revision) -> Result<Snapshot<Connecti
         [next.as_sqlite_integer()],
     )?;
     advance_queue(&tx.sql)?;
+    tx.projection_changed = true;
     tx.emit(&[ResourceKey::Settings, ResourceKey::Queue])?;
     snapshot(&tx.sql, view(&tx.sql)?)
 }

@@ -13,19 +13,21 @@ const MAX_GROUPS: usize = 32;
 pub(super) fn read(
     db: &Connection,
     source: &HistorySession,
+    start_offset: u64,
 ) -> Result<Option<PromptOverviewCheckpoint>, StoreError> {
     ensure_source(db, source)?;
     let key = source.target.session_key().as_str();
     let mut prepared = db.prepare_cached(
-        "SELECT generation,pinned_end,source_witness,total,next_offset,next_witness
-         FROM history_prompt_overviews WHERE session_key=?1",
+        "SELECT generation,pinned_end,source_witness,total,next_offset,next_witness,first_ordinal
+         FROM history_prompt_overviews WHERE session_key=?1 AND start_offset=?2",
     )?;
-    let mut rows = prepared.query([key])?;
+    let mut rows = prepared.query(params![key, sql(start_offset)?])?;
     let Some(row) = rows.next()? else {
         return Ok(None);
     };
     let pinned = integer(row.get(1)?)?;
     let total = integer(row.get(3)?)?;
+    let first_ordinal = integer(row.get(6)?)?;
     let anchor = SourceAnchor {
         generation: row.get(0)?,
         file: FilePosition {
@@ -47,9 +49,9 @@ pub(super) fn read(
     };
     let mut query = db.prepare_cached(
         "SELECT first_ordinal,last_ordinal,start_ordinal,byte_offset,high_water,witness
-           FROM history_prompt_groups WHERE session_key=?1 ORDER BY slot",
+           FROM history_prompt_groups WHERE session_key=?1 AND start_offset=?2 ORDER BY slot",
     )?;
-    let mut rows = query.query([key])?;
+    let mut rows = query.query(params![key, sql(start_offset)?])?;
     let mut groups = Vec::new();
     while let Some(row) = rows.next()? {
         groups.push(PromptGroup {
@@ -66,6 +68,8 @@ pub(super) fn read(
         });
     }
     Ok(Some(PromptOverviewCheckpoint {
+        start_offset,
+        first_ordinal,
         anchor,
         total,
         groups,
@@ -81,9 +85,10 @@ pub(super) fn remember(
 ) -> Result<(), StoreError> {
     ensure_source(db, source)?;
     let key = source.target.session_key().as_str();
+    let start = sql(checkpoint.start_offset)?;
     let previous=db.query_row(
-        "SELECT generation,pinned_end,source_witness FROM history_prompt_overviews WHERE session_key=?1",
-        [key],|row|Ok((row.get::<_,String>(0)?,row.get::<_,i64>(1)?,row.get::<_,Vec<u8>>(2)?)),
+        "SELECT generation,pinned_end,source_witness FROM history_prompt_overviews WHERE session_key=?1 AND start_offset=?2",
+        params![key,start],|row|Ok((row.get::<_,String>(0)?,row.get::<_,i64>(1)?,row.get::<_,Vec<u8>>(2)?)),
     ).optional()?;
     match (previous, expected) {
         (None, None) => {}
@@ -95,6 +100,9 @@ pub(super) fn remember(
     }
     if checkpoint.groups.len() > MAX_GROUPS
         || checkpoint.anchor.file.offset != checkpoint.anchor.file.high_water
+        || checkpoint.start_offset > checkpoint.anchor.file.high_water
+        || checkpoint.first_ordinal == 0
+        || checkpoint.total < checkpoint.first_ordinal - 1
     {
         return Err(AppError::InvalidRequest.into());
     }
@@ -104,13 +112,15 @@ pub(super) fn remember(
         .transpose()?;
     let bound = checkpoint.anchor.file.high_water;
     db.execute(
-        "DELETE FROM history_prompt_overviews WHERE session_key=?1",
-        [key],
+        "DELETE FROM history_prompt_overviews WHERE session_key=?1 AND start_offset=?2",
+        params![key, start],
     )?;
     db.execute(
-        "INSERT INTO history_prompt_overviews VALUES(?1,?2,?3,?4,?5,?6,?7)",
+        "INSERT INTO history_prompt_overviews VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9)",
         params![
             key,
+            start,
+            sql(checkpoint.first_ordinal)?,
             checkpoint.anchor.generation,
             sql(bound)?,
             checkpoint.anchor.file.witness.as_slice(),
@@ -120,14 +130,19 @@ pub(super) fn remember(
         ],
     )?;
     let mut insert =
-        db.prepare_cached("INSERT INTO history_prompt_groups VALUES(?1,?2,?3,?4,?5,?6,?7,?8)")?;
+        db.prepare_cached("INSERT INTO history_prompt_groups VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9)")?;
     for (slot, group) in checkpoint.groups.into_iter().enumerate() {
         let point = group.start.bookmark.into_file()?;
-        if point.high_water > bound || group.last > checkpoint.total {
+        if point.high_water > bound
+            || point.offset < checkpoint.start_offset
+            || group.first < checkpoint.first_ordinal
+            || group.last > checkpoint.total
+        {
             return Err(AppError::InvalidRequest.into());
         }
         insert.execute(params![
             key,
+            start,
             slot as i64,
             sql(group.first)?,
             sql(group.last)?,
@@ -137,6 +152,14 @@ pub(super) fn remember(
             point.witness.as_slice()
         ])?;
     }
+    db.execute(
+        "DELETE FROM history_prompt_overviews
+         WHERE session_key=?1 AND start_offset>0 AND start_offset IN (
+             SELECT start_offset FROM history_prompt_overviews
+             WHERE session_key=?1 AND start_offset>0 ORDER BY start_offset DESC LIMIT -1 OFFSET 127
+         )",
+        [key],
+    )?;
     Ok(())
 }
 

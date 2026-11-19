@@ -48,7 +48,7 @@ impl Codex {
             if thread.path.as_deref() != Some(path.as_path()) || anchor.generation != generation {
                 return Err(AppError::Conflict);
             }
-            crate::history::verify_codex_live_source(source.binding, path, anchor).await?;
+            crate::history::verify_codex_live_source(source, path, anchor).await?;
         } else if self.history_generation(&thread).await? != generation {
             return Err(AppError::CursorExpired);
         }

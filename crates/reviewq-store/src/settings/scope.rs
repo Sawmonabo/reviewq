@@ -170,20 +170,13 @@ pub(super) fn replace(
              WHERE r.project_id=g.project_id AND r.common_dir=g.common_dir AND r.checkout=g.checkout))",
         [origin],
     )?;
-    Ok(())
-}
-
-pub(super) fn pending(db: &Connection) -> Result<bool, StoreError> {
-    Ok(db.query_row(
-        "SELECT EXISTS(SELECT 1 FROM settings_repositories AS r
-         JOIN configured_projects AS p ON p.project_id=r.project_id
-         WHERE r.common_dir IS NOT NULL AND NOT EXISTS (
-             SELECT 1 FROM repo_grants AS g WHERE g.active=1 AND g.verifier IS NOT NULL
-             AND g.origin=p.origin AND g.project_id=p.project_id
-             AND g.common_dir=r.common_dir AND g.checkout=r.checkout))",
+    super::projection::set_desired(db)?;
+    db.execute(
+        "DELETE FROM source_history_projects AS h WHERE NOT EXISTS(
+            SELECT 1 FROM configured_projects p WHERE (p.origin,p.project_id)=(h.origin,h.project_id))",
         [],
-        |row| row.get(0),
-    )?)
+    )?;
+    Ok(())
 }
 
 pub(super) fn discovery_changed(

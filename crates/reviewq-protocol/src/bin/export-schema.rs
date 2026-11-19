@@ -47,6 +47,8 @@ fn main() -> Result<(), Box<dyn Error>> {
     registry
         .response::<reviewq_protocol::settings::CatalogResponse>("settings", "CatalogResponse")?;
     registry.request::<settings::SaveSettings>("settings", "SaveSettings")?;
+    registry.request::<settings::CheckoutSkillsRequest>("settings", "CheckoutSkillsRequest")?;
+    registry.response::<settings::CheckoutSkillsResponse>("settings", "CheckoutSkillsResponse")?;
 
     registry.response::<QueuePageResponse>("queue", "QueuePageResponse")?;
     registry
@@ -101,6 +103,10 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     registry.request::<SendMessageRequest>("delivery", "SendMessageRequest")?;
     registry.response::<DeliveryReceiptResponse>("delivery", "DeliveryReceiptResponse")?;
+    registry.response::<Success<reviewq_protocol::MessageHistoryPage>>(
+        "delivery",
+        "MessageHistoryPageResponse",
+    )?;
 
     registry.response::<launch::CatalogResponse>("launch", "RunCatalogResponse")?;
     registry.response::<launch::PreviewResponse>("launch", "RunPreviewResponse")?;
@@ -173,6 +179,11 @@ fn main() -> Result<(), Box<dyn Error>> {
     registry.response::<Success<reports::CandidateReport>>("reports", "ReportCandidateResponse")?;
     registry.response::<Success<reports::ReportContext>>("reports", "ReportContextResponse")?;
     registry.request::<reports::FeedbackRequest>("reports", "ReportFeedbackRequest")?;
+    registry.request::<reports::DispositionRequest>("reports", "ReportDispositionRequest")?;
+    registry
+        .response::<Success<reports::DispositionReceipt>>("reports", "ReportDispositionResponse")?;
+    registry.request::<reports::ViewedRequest>("reports", "ReportViewedRequest")?;
+    registry.response::<Success<reports::ViewedReceipt>>("reports", "ReportViewedResponse")?;
 
     let mut output = io::stdout().lock();
     serde_json::to_writer_pretty(

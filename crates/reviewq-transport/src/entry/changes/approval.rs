@@ -39,7 +39,7 @@ pub(in crate::entry) async fn approvals(
         .transpose()?;
     let current = provider
         .approvals(
-            source.value.clone(),
+            source.value.identity.clone(),
             expected,
             source.context.scope.additional_reviewers.clone(),
         )

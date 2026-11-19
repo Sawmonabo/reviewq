@@ -53,6 +53,71 @@ pub(super) async fn test(
     )?))
 }
 
+pub(super) async fn checkout_skills(
+    State(entry): State<Arc<Entry>>,
+    headers: HeaderMap,
+    ApiBytes(bytes): ApiBytes,
+) -> Result<Json<dto::CheckoutSkillsResponse>, ApiError> {
+    use reviewq_domain::session::HostProvider;
+    use reviewq_protocol::HostProviderDto;
+
+    let actor = entry.auth.browser_actor(&headers, true)?;
+    let request: dto::CheckoutSkillsRequest = decode(&bytes)?;
+    let expected = revision(request.expected_revision)?;
+    let provider = match request.provider {
+        HostProviderDto::Codex => HostProvider::Codex,
+        HostProviderDto::Claude => HostProvider::Claude,
+    };
+    let reader = entry.skills.reader(provider)?;
+    let checkout = scope::path(request.checkout)?;
+    let project = request
+        .project_id
+        .get()
+        .try_into()
+        .map_err(|_| AppError::InvalidRequest)?;
+    let saved = entry.store.read_credentials(actor.clone()).await?;
+    let input = draft(
+        dto::Provider::Gitlab,
+        dto::ConnectionDraft::Gitlab(request.gitlab),
+        request.token,
+    )?;
+    let gitlab = app::verify_connection(
+        entry.settings_sources.as_ref(),
+        &saved.value,
+        expected,
+        input,
+    )
+    .await?;
+    revision_snapshot(&entry, actor.clone(), expected).await?;
+    let verified = entry
+        .settings_sources
+        .verify_draft_checkout(&gitlab, project, checkout)
+        .await?;
+    let skills = reader.skills(verified.root.clone()).await?;
+    if skills.len() > 256 {
+        return Err(AppError::PayloadTooLarge.into());
+    }
+    let current = revision_snapshot(&entry, actor, expected).await?;
+    Ok(Json(success(
+        dto::CheckoutSkills {
+            settings_revision: request.expected_revision,
+            project_id: request.project_id,
+            checkout: verified
+                .root
+                .as_path()
+                .to_str()
+                .ok_or(AppError::Internal)?
+                .to_owned(),
+            provider: request.provider,
+            skills: skills
+                .into_iter()
+                .map(scope::skill)
+                .collect::<Result<_, _>>()?,
+        },
+        current.cursor,
+    )?))
+}
+
 pub(super) async fn catalog(
     State(entry): State<Arc<Entry>>,
     headers: HeaderMap,
@@ -269,7 +334,7 @@ fn view(snapshot: Snapshot<app::Connections>) -> Result<dto::SettingsResponse, A
         gitlab,
         jira,
         scope,
-        chat_setup_pending,
+        chat_setup,
     } = snapshot.value;
     let mode = if gitlab.is_none() && jira.is_none() {
         dto::Mode::Setup
@@ -334,12 +399,14 @@ fn view(snapshot: Snapshot<app::Connections>) -> Result<dto::SettingsResponse, A
                 .collect::<Result<_, _>>()?,
             additional_reviewer_ids: scope::number_dtos(scope.additional_reviewers)?,
             chat_setup: dto::ChatSetup {
-                state: if chat_setup_pending {
+                state: if chat_setup.cleanup_conflict {
+                    dto::ChatSetupState::CleanupConflict
+                } else if chat_setup.pending {
                     dto::ChatSetupState::Pending
                 } else {
                     dto::ChatSetupState::Ready
                 },
-                issues: Vec::new(),
+                issues: chat_setup.issues,
             },
         },
         snapshot.cursor,

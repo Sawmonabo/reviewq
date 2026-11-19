@@ -2,9 +2,9 @@
 import { func0 } from "../runtime.mjs";
 import { validate35 } from "./event-cursor-dto.mjs";
 import { validate25 } from "./checkpoint-id-dto.mjs";
-import { validate73 } from "./enrollment-state.mjs";
-import { validate76 } from "./selection.mjs";
-function validate70(
+import { validate81 } from "./enrollment-state.mjs";
+import { validate84 } from "./selection.mjs";
+function validate78(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -24,7 +24,7 @@ function validate70(
         ((data.threads === undefined || !func0.call(data, "threads")) &&
           (missing0 = "threads"))
       ) {
-        validate70.errors = [
+        validate78.errors = [
           {
             instancePath,
             schemaPath: "#/required",
@@ -43,7 +43,7 @@ function validate70(
             key0 === "submissionId" ||
             key0 === "threads"
           )) {
-            validate70.errors = [
+            validate78.errors = [
               {
                 instancePath,
                 schemaPath: "#/additionalProperties",
@@ -113,7 +113,7 @@ function validate70(
                 vErrors.push(err1);
               }
               errors++;
-              validate70.errors = vErrors;
+              validate78.errors = vErrors;
               return false;
             } else {
               errors = _errs3;
@@ -154,7 +154,7 @@ function validate70(
               if (data.state !== undefined && func0.call(data, "state")) {
                 const _errs8 = errors;
                 if (
-                  !validate73(data.state, {
+                  !validate81(data.state, {
                     instancePath: instancePath + "/state",
                     parentData: data,
                     parentDataProperty: "state",
@@ -163,8 +163,8 @@ function validate70(
                 ) {
                   vErrors =
                     vErrors === null
-                      ? validate73.errors
-                      : vErrors.concat(validate73.errors);
+                      ? validate81.errors
+                      : vErrors.concat(validate81.errors);
                   errors = vErrors.length;
                 }
                 var valid0 = _errs8 === errors;
@@ -209,7 +209,7 @@ function validate70(
                         for (let i0 = 0; i0 < len0; i0++) {
                           const _errs12 = errors;
                           if (
-                            !validate76(data4[i0], {
+                            !validate84(data4[i0], {
                               instancePath: instancePath + "/threads/" + i0,
                               parentData: data4,
                               parentDataProperty: i0,
@@ -218,8 +218,8 @@ function validate70(
                           ) {
                             vErrors =
                               vErrors === null
-                                ? validate76.errors
-                                : vErrors.concat(validate76.errors);
+                                ? validate84.errors
+                                : vErrors.concat(validate84.errors);
                             errors = vErrors.length;
                           }
                           var valid2 = _errs12 === errors;
@@ -228,7 +228,7 @@ function validate70(
                           }
                         }
                       } else {
-                        validate70.errors = [
+                        validate78.errors = [
                           {
                             instancePath: instancePath + "/threads",
                             schemaPath: "#/properties/threads/type",
@@ -250,7 +250,7 @@ function validate70(
         }
       }
     } else {
-      validate70.errors = [
+      validate78.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -261,7 +261,7 @@ function validate70(
       return false;
     }
   }
-  validate70.errors = vErrors;
+  validate78.errors = vErrors;
   return errors === 0;
 }
-export { validate70 };
+export { validate78 };

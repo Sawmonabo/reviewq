@@ -1433,6 +1433,7 @@ dependencies = [
  "reviewq-domain",
  "sha2",
  "tokio",
+ "url",
 ]
 
 [[package]]

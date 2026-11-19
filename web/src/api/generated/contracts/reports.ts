@@ -15,6 +15,8 @@ import type {
   UtcTimestampDto,
 } from "./common.js";
 
+export type PublicationChoice = "withheld" | "authorized" | "published";
+
 export type QuoteUnit = "unicode_codepoints";
 
 export type OffsetUnit = "unicode_codepoints";
@@ -70,6 +72,20 @@ export type SemanticIndex = "ready" | "source_only";
 export type Verdict =
   "approve" | "request_changes" | "blocked" | "not_specified";
 
+export interface ReportDispositionRequest {
+  disposition: DispositionPatch;
+  expectedVersion: RevisionDto;
+  findingId: ResourceIdDto;
+  receiptId: ResourceIdDto;
+  submissionId: SubmissionIdDto;
+}
+
+export interface DispositionPatch {
+  blocking?: boolean | null;
+  publication?: PublicationChoice | null;
+  reason: string;
+}
+
 export interface ReportFeedbackRequest {
   quote: string;
   quoteRef?: QuoteRef | null;
@@ -83,6 +99,12 @@ export interface QuoteRef {
   length: SafeCountDto;
   offset: SafeCountDto;
   unit: QuoteUnit;
+}
+
+export interface ReportViewedRequest {
+  receiptId: ResourceIdDto;
+  renderedBatchId?: ResourceIdDto | null;
+  submissionId: SubmissionIdDto;
 }
 
 export interface ReportCandidateResponse {
@@ -147,6 +169,19 @@ export interface SourceRange {
   length: SafeCountDto;
   offset: SafeCountDto;
   sha256: ReportHashDto;
+  [k: string]: unknown;
+}
+
+export interface ReportDispositionResponse {
+  cursor: EventCursorDto;
+  data: DispositionReceipt;
+  [k: string]: unknown;
+}
+
+export interface DispositionReceipt {
+  finding: Descriptor;
+  receiptId: ResourceIdDto;
+  userDispositionVersion: RevisionDto;
   [k: string]: unknown;
 }
 
@@ -229,5 +264,18 @@ export interface ReportView {
   delivery: ReportDelivery | null;
   markdown?: string | null;
   report: ReportSummary | null;
+  [k: string]: unknown;
+}
+
+export interface ReportViewedResponse {
+  cursor: EventCursorDto;
+  data: ViewedReceipt;
+  [k: string]: unknown;
+}
+
+export interface ViewedReceipt {
+  previousReceiptId: ResourceIdDto | null;
+  receiptId: ResourceIdDto;
+  renderedBatchId: ResourceIdDto | null;
   [k: string]: unknown;
 }

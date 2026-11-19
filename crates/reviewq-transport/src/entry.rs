@@ -80,6 +80,7 @@ pub trait Store:
     + ClaudeStore
     + ClaudeWorkflowStore
     + HistoryStore
+    + reviewq_app::hosts::QuestionStore
     + SourceRefreshStore
     + ReportStore
     + ReportMutationStore
@@ -109,6 +110,7 @@ impl<
         + ClaudeStore
         + ClaudeWorkflowStore
         + HistoryStore
+        + reviewq_app::hosts::QuestionStore
         + SourceRefreshStore
         + ReportStore
         + ReportMutationStore
@@ -146,6 +148,7 @@ pub(super) struct Entry {
     archive_metadata: workspace::ArchiveCache,
     host: Option<Arc<dyn NativeHost>>,
     claude: Option<Arc<dyn ClaudeCompanion>>,
+    claude_interrupt: Option<Arc<dyn reviewq_app::hosts::recovery::NativeJobInterrupt>>,
     file_history: Arc<dyn NativeHistoryReader>,
     history_watches: history::Watchers,
     workflow: WorkflowIntegration,
@@ -199,6 +202,7 @@ pub struct ServiceRuntime<'a> {
     pub launchers: NativeLaunchers,
     pub launches_allowed: bool,
     pub claude: Option<Arc<dyn ClaudeCompanion>>,
+    pub claude_interrupt: Option<Arc<dyn reviewq_app::hosts::recovery::NativeJobInterrupt>>,
     pub workflow: WorkflowIntegration,
     pub terminal: Arc<dyn NativeTerminal>,
     pub commits: watch::Receiver<EventCursor>,
@@ -226,6 +230,7 @@ pub fn router(
         archive_metadata: workspace::ArchiveCache::default(),
         host,
         claude: runtime.claude,
+        claude_interrupt: runtime.claude_interrupt,
         file_history,
         history_watches: history::Watchers::default(),
         workflow: runtime.workflow,
@@ -251,6 +256,7 @@ pub fn router(
         .route("/settings", get(settings::read).put(settings::save))
         .route("/settings/test", post(settings::test))
         .route("/settings/catalog", post(settings::catalog))
+        .route("/settings/checkout/skills", post(settings::checkout_skills))
         .route("/settings/disconnect", post(settings::disconnect))
         .route("/checkout/grant", post(checkout::grant))
         .route("/events", get(events::feed))

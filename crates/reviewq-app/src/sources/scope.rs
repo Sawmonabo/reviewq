@@ -125,7 +125,7 @@ pub(super) async fn collect(
                 continue;
             }
             for found in gitlab
-                .ticket_reviews(project.clone(), keys.keys().cloned().collect(), true)
+                .ticket_reviews(project.clone(), keys.keys().cloned().collect())
                 .await?
             {
                 let exact = matches_for(&found, keys);
@@ -147,9 +147,14 @@ pub(super) async fn collect(
             if keys.is_empty() {
                 continue;
             }
-            for found in gitlab
-                .ticket_reviews(project.clone(), keys.keys().cloned().collect(), false)
-                .await?
+            for found in super::project_history::closed_matches(
+                store,
+                gitlab,
+                attempt,
+                project.clone(),
+                keys.keys().cloned().collect(),
+            )
+            .await?
             {
                 let exact = matches_for(&found, &keys);
                 add_match(&mut observation, found.review, exact, &mut matches)?;

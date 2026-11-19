@@ -385,6 +385,38 @@ pub(super) fn finish(
     claim: DeliveryClaim,
     observation: DeliveryObservation,
 ) -> Result<DeliveryReceipt, StoreError> {
+    finish_with(tx, claim, observation, CompletionAuthority::Claim)
+}
+
+/// Called only after the Claude bridge identifies a definite drop on the original offer.
+pub(super) fn finish_claude_drop(
+    tx: &mut WriteTx<'_>,
+    claim: DeliveryClaim,
+) -> Result<DeliveryReceipt, StoreError> {
+    if claim.target.binding().identity().provider() != HostProvider::Claude
+        || ClaimKind::from_work(&claim.work) != ClaimKind::Reconcile
+    {
+        return Err(AppError::Conflict.into());
+    }
+    finish_with(
+        tx,
+        claim,
+        DeliveryObservation::NotSubmitted,
+        CompletionAuthority::ClaudeDrop,
+    )
+}
+
+enum CompletionAuthority {
+    Claim,
+    ClaudeDrop,
+}
+
+fn finish_with(
+    tx: &mut WriteTx<'_>,
+    claim: DeliveryClaim,
+    observation: DeliveryObservation,
+    authority: CompletionAuthority,
+) -> Result<DeliveryReceipt, StoreError> {
     let mut stored = matching_claim(&tx.sql, &claim)?;
     let scan = match &observation {
         DeliveryObservation::ReconcileFrom(cursor)
@@ -413,6 +445,11 @@ pub(super) fn finish(
         crate::hosts::recovery::refresh_allowance(&tx.sql, &claim, allowance)?;
     }
     let outcome = match observation {
+        DeliveryObservation::NotSubmitted
+            if matches!(authority, CompletionAuthority::ClaudeDrop) =>
+        {
+            DeliveryOutcome::Queued
+        }
         DeliveryObservation::NotSubmitted | DeliveryObservation::RecoveryAllowanceChanged(_)
             if ClaimKind::from_work(&claim.work) == ClaimKind::Dispatch =>
         {

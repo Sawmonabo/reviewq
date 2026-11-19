@@ -2,6 +2,7 @@
 
 import type {
   EventCursorDto,
+  HostProviderDto,
   PageCursorDto,
   ProjectIdDto,
   ResourceIdDto,
@@ -58,6 +59,15 @@ export interface JiraDraft {
   email: string;
   site: string;
   tokenType: TokenType;
+}
+
+export interface CheckoutSkillsRequest {
+  checkout: string;
+  expectedRevision: RevisionDto;
+  gitlab: GitlabDraft;
+  projectId: ProjectIdDto;
+  provider: HostProviderDto;
+  token: TokenInput;
 }
 
 export interface DisconnectSettings {
@@ -138,6 +148,21 @@ export interface CatalogItem {
   path: string | null;
   state: string | null;
   statusIds: ResourceIdDto[];
+  [k: string]: unknown;
+}
+
+export interface CheckoutSkillsResponse {
+  cursor: EventCursorDto;
+  data: CheckoutSkills;
+  [k: string]: unknown;
+}
+
+export interface CheckoutSkills {
+  checkout: string;
+  projectId: ProjectIdDto;
+  provider: HostProviderDto;
+  settingsRevision: RevisionDto;
+  skills: Skill[];
   [k: string]: unknown;
 }
 

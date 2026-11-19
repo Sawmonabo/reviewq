@@ -4,9 +4,10 @@ use axum::Json;
 use axum::extract::State;
 use axum::http::HeaderMap;
 use reviewq_app::access::{Actor, AppError};
-use reviewq_app::changes::{Discussion, PatchAvailability, PatchFile};
+use reviewq_app::changes::{Discussion, DiscussionLine, PatchAvailability, PatchFile};
+use reviewq_app::queue::ReviewSource;
 use reviewq_app::settings::ActiveSource;
-use reviewq_domain::identity::{MrIdentity, ReviewId};
+use reviewq_domain::identity::ReviewId;
 use reviewq_protocol::changes as dto;
 use reviewq_protocol::{
     EventCursorDto, FileIdDto, GitShaDto, Page, PageCursorDto, PatchETagDto, PatchRevisionDto,
@@ -72,7 +73,13 @@ pub(super) async fn files(
         .as_ref()
         .ok_or(AppError::Unavailable)?;
     let response = provider
-        .files(source.value.clone(), revision, page, limit, selected)
+        .files(
+            source.value.identity.clone(),
+            revision,
+            page,
+            limit,
+            selected,
+        )
         .await?;
     check_source(&entry, &actor, &review_id, &source).await?;
     let position = response.next_page.map(|page| Position {
@@ -128,7 +135,7 @@ pub(super) async fn discussions(
         .as_ref()
         .ok_or(AppError::Unavailable)?;
     let response = provider
-        .discussions(source.value.clone(), revision, page, limit)
+        .discussions(source.value.identity.clone(), revision, page, limit)
         .await?;
     check_source(&entry, &actor, &review_id, &source).await?;
     let position = response.next_page.map(|page| Position {
@@ -139,7 +146,12 @@ pub(super) async fn discussions(
         limit,
     });
     let next = encode(&entry.auth.endpoint, DISCUSSION_CURSOR, position)?;
-    let items = response.items.into_iter().map(discussion).collect();
+    let web_url = source.value.web_url()?;
+    let items = response
+        .items
+        .into_iter()
+        .map(|row| discussion(row, &web_url, &source.context))
+        .collect();
     Ok(Json(Success {
         cursor: EventCursorDto::new(source.cursor.get()).ok_or(AppError::Internal)?,
         data: dto::PatchDiscussions {
@@ -198,7 +210,7 @@ impl ChangeQuery {
 }
 
 struct SelectedSource {
-    value: MrIdentity,
+    value: ReviewSource,
     cursor: reviewq_domain::identity::EventCursor,
     context: ActiveSource,
 }
@@ -234,8 +246,11 @@ async fn check_source(
     if current.context.revision != source.context.revision {
         return Err(AppError::StaleRevision);
     }
-    if current.value != source.value {
+    if current.value.identity != source.value.identity {
         return Err(AppError::NotFound);
+    }
+    if current.value.project_path != source.value.project_path {
+        return Err(AppError::StaleRevision);
     }
     Ok(())
 }
@@ -292,7 +307,21 @@ fn file_metadata(
     })
 }
 
-fn discussion(discussion: Discussion) -> dto::PatchDiscussion {
+fn discussion(
+    discussion: Discussion,
+    web_url: &str,
+    context: &ActiveSource,
+) -> dto::PatchDiscussion {
+    let web_url = discussion.notes.first().map_or_else(
+        || web_url.to_string(),
+        |first| format!("{web_url}#note_{}", first.id),
+    );
+    let ours = |id: Option<u64>| {
+        id.is_some_and(|id| {
+            context.gitlab_account == Some(id) || context.scope.additional_reviewers.contains(&id)
+        })
+    };
+    let our_participation = discussion.notes.iter().any(|note| ours(note.author_id));
     let anchor = discussion.anchor.map(|anchor| dto::PatchDiscussionAnchor {
         old_path: anchor.old_path,
         new_path: anchor.new_path,
@@ -302,6 +331,10 @@ fn discussion(discussion: Discussion) -> dto::PatchDiscussion {
         new_line: anchor
             .new_line
             .and_then(|line| SafeCountDto::new(u64::from(line))),
+        range: anchor.range.map(|range| dto::PatchDiscussionRange {
+            start: project_line(range.start),
+            end: project_line(range.end),
+        }),
     });
     let notes = discussion
         .notes
@@ -309,17 +342,35 @@ fn discussion(discussion: Discussion) -> dto::PatchDiscussion {
         .map(|row| dto::PatchDiscussionNote {
             note_id: row.id.to_string(),
             author: row.author,
+            author_id: row.author_id.and_then(reviewq_protocol::UpstreamIdDto::new),
+            ours: ours(row.author_id),
             body: row.body,
             created_at: row
                 .created_at_ms
                 .and_then(UtcTimestampDto::from_unix_milliseconds),
             resolved: row.resolved,
+            resolved_by: row
+                .resolved_by
+                .and_then(reviewq_protocol::UpstreamIdDto::new),
         })
         .collect();
     dto::PatchDiscussion {
         discussion_id: discussion.id,
         anchor,
         outdated: discussion.outdated,
+        web_url,
+        our_participation,
         notes,
+    }
+}
+
+fn project_line(line: DiscussionLine) -> dto::PatchDiscussionLine {
+    dto::PatchDiscussionLine {
+        old_line: line
+            .old_line
+            .and_then(|line| SafeCountDto::new(u64::from(line))),
+        new_line: line
+            .new_line
+            .and_then(|line| SafeCountDto::new(u64::from(line))),
     }
 }

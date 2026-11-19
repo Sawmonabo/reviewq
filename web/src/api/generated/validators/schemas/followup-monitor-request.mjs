@@ -2,7 +2,7 @@
 import { func0 } from "../runtime.mjs";
 import { validate35 } from "./event-cursor-dto.mjs";
 import { validate25 } from "./checkpoint-id-dto.mjs";
-function validate82(
+function validate89(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -16,7 +16,7 @@ function validate82(
           !func0.call(data, "submissionId")) &&
         (missing0 = "submissionId")
       ) {
-        validate82.errors = [
+        validate89.errors = [
           {
             instancePath,
             schemaPath: "#/required",
@@ -29,7 +29,7 @@ function validate82(
         const _errs1 = errors;
         for (const key0 of Object.keys(data)) {
           if (!(key0 === "expectedGeneration" || key0 === "submissionId")) {
-            validate82.errors = [
+            validate89.errors = [
               {
                 instancePath,
                 schemaPath: "#/additionalProperties",
@@ -99,7 +99,7 @@ function validate82(
                 vErrors.push(err1);
               }
               errors++;
-              validate82.errors = vErrors;
+              validate89.errors = vErrors;
               return false;
             } else {
               errors = _errs3;
@@ -143,7 +143,7 @@ function validate82(
         }
       }
     } else {
-      validate82.errors = [
+      validate89.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -154,7 +154,7 @@ function validate82(
       return false;
     }
   }
-  validate82.errors = vErrors;
+  validate89.errors = vErrors;
   return errors === 0;
 }
-export { validate82 };
+export { validate89 };

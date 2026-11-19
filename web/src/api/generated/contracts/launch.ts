@@ -4,6 +4,7 @@ import type {
   EventCursorDto,
   GitShaDto,
   HostProviderDto,
+  Invocation,
   ObservedInputDto,
   ResourceIdDto,
   ReviewIdDto,
@@ -11,6 +12,7 @@ import type {
   RunIdDto,
   SessionKeyDto,
   Skill,
+  State,
   SubmissionIdDto,
   UtcTimestampDto,
 } from "./common.js";
@@ -33,20 +35,6 @@ export type RunStartRequestInvocation =
       kind: "skill";
       name: string;
       path?: string | null;
-    }
-  | {
-      kind: "custom";
-      prompt: string;
-    };
-
-export type State = "pending" | "confirmed" | "rejected" | "uncertain";
-
-export type Invocation =
-  | {
-      args: string | null;
-      kind: "skill";
-      name: string;
-      path: string | null;
     }
   | {
       kind: "custom";

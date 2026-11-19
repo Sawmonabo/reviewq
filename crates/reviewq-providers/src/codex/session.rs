@@ -26,7 +26,7 @@ pub(super) struct ThreadRead {
 pub(super) struct Thread {
     pub id: String,
     pub cwd: PathBuf,
-    parent_thread_id: Option<String>,
+    pub(super) parent_thread_id: Option<String>,
     source: Option<serde_json::Value>,
     pub path: Option<PathBuf>,
     pub status: ThreadStatus,
@@ -208,6 +208,18 @@ impl Codex {
         Ok(thread)
     }
 
+    pub(super) async fn retained_thread(&self, lead: &LeadTarget) -> Result<Thread, AppError> {
+        let expected = lead.binding().identity();
+        if expected.profile() != &self.profile || expected.provider() != HostProvider::Codex {
+            return Err(AppError::NotFound);
+        }
+        let thread = self.read_thread(expected.native_id()).await?;
+        if !retained_cwd(&thread, lead.binding().cwd()).await? {
+            return Err(AppError::Conflict);
+        }
+        Ok(thread)
+    }
+
     pub(super) async fn read_thread(
         &self,
         native_id: &NativeSessionId,
@@ -224,6 +236,16 @@ impl Codex {
         }
         Ok(found.thread)
     }
+}
+
+pub(super) async fn retained_cwd(
+    thread: &Thread,
+    expected: &AbsolutePath,
+) -> Result<bool, AppError> {
+    if thread.cwd == expected.as_path() {
+        return Ok(true);
+    }
+    Ok(canonical_cwd(thread.cwd.clone()).await? == *expected)
 }
 
 pub(super) async fn canonical_cwd(path: PathBuf) -> Result<AbsolutePath, AppError> {

@@ -1,6 +1,7 @@
 use reviewq_app::access::AppError;
 use reviewq_app::changes::{
-    Discussion, DiscussionAnchor, DiscussionNote, PatchRevision, SourcePage,
+    Discussion, DiscussionAnchor, DiscussionLine, DiscussionNote, DiscussionRange, PatchRevision,
+    SourcePage,
 };
 use reviewq_app::sources::{
     ReviewSourceReader, WorkflowDiscussion, WorkflowNote, WorkflowSnapshot,
@@ -53,6 +54,27 @@ struct Position {
     new_path: String,
     old_line: Option<u32>,
     new_line: Option<u32>,
+    line_range: Option<LineRange>,
+}
+
+#[derive(Deserialize)]
+struct LineRange {
+    start: Line,
+    end: Line,
+}
+
+#[derive(Deserialize)]
+struct Line {
+    old_line: Option<u32>,
+    new_line: Option<u32>,
+}
+
+impl Line {
+    fn project(&self) -> Option<DiscussionLine> {
+        let old_line = self.old_line.filter(|line| *line > 0);
+        let new_line = self.new_line.filter(|line| *line > 0);
+        (old_line.is_some() || new_line.is_some()).then_some(DiscussionLine { old_line, new_line })
+    }
 }
 
 impl GitLab {
@@ -114,13 +136,29 @@ fn project(
     });
     let anchor = position
         .filter(|pos| !outdated && pos.position_type == "text")
-        .filter(|pos| pos.old_line.is_some() || pos.new_line.is_some())
         .filter(|pos| safe_path(&pos.old_path) && safe_path(&pos.new_path))
-        .map(|pos| DiscussionAnchor {
-            old_path: pos.old_path.clone(),
-            new_path: pos.new_path.clone(),
-            old_line: pos.old_line.filter(|line| *line != 0),
-            new_line: pos.new_line.filter(|line| *line != 0),
+        .and_then(|pos| {
+            let range = pos.line_range.as_ref().and_then(|range| {
+                Some(DiscussionRange {
+                    start: range.start.project()?,
+                    end: range.end.project()?,
+                })
+            });
+            let old_line = pos
+                .old_line
+                .filter(|line| *line > 0)
+                .or_else(|| range.as_ref().and_then(|range| range.end.old_line));
+            let new_line = pos
+                .new_line
+                .filter(|line| *line > 0)
+                .or_else(|| range.as_ref().and_then(|range| range.end.new_line));
+            (old_line.is_some() || new_line.is_some()).then(|| DiscussionAnchor {
+                old_path: pos.old_path.clone(),
+                new_path: pos.new_path.clone(),
+                old_line,
+                new_line,
+                range,
+            })
         });
     let notes = std::iter::once(first)
         .chain(notes)
@@ -143,9 +181,11 @@ fn project(
             Ok(DiscussionNote {
                 id: note.id,
                 author: note.author.username,
+                author_id: note.author.id,
                 body: note.body,
                 created_at_ms,
                 resolved: note.resolved,
+                resolved_by: note.resolved_by.map(|user| user.id),
             })
         })
         .collect::<Result<Vec<_>, AppError>>()?;

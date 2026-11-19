@@ -16,6 +16,7 @@ mod live;
 mod questions;
 mod recovery;
 mod session;
+mod turn_lookup;
 mod workflow;
 
 pub struct Codex {
@@ -24,6 +25,7 @@ pub struct Codex {
     question_proofs: tokio::sync::Semaphore,
     capacity: tokio::sync::Mutex<Option<(std::time::Instant, recovery::Usage)>>,
     turn_settings: Option<(String, String)>,
+    turn_lookups: turn_lookup::TurnLookups,
 }
 
 impl Codex {
@@ -61,6 +63,7 @@ impl Codex {
             capacity: tokio::sync::Mutex::new(None),
             profile: AbsolutePath::from_canonical(profile).map_err(|_| AppError::InvalidRequest)?,
             turn_settings,
+            turn_lookups: turn_lookup::TurnLookups::default(),
         })
     }
 }

@@ -220,12 +220,7 @@ pub(super) fn project_receipt(receipt: app::LaunchReceipt) -> Result<dto::Receip
         review_id: ReviewIdDto::new(receipt.review.as_str()).ok_or(AppError::Internal)?,
         submission_id: SubmissionIdDto::new(receipt.submission.as_str())
             .ok_or(AppError::Internal)?,
-        state: match receipt.state {
-            app::LaunchState::Pending => dto::State::Pending,
-            app::LaunchState::Confirmed => dto::State::Confirmed,
-            app::LaunchState::Rejected => dto::State::Rejected,
-            app::LaunchState::Uncertain => dto::State::Uncertain,
-        },
+        state: project_state(receipt.state),
         run_id: receipt
             .run
             .map(|run| RunIdDto::new(run.as_str()).ok_or(AppError::Internal))
@@ -421,14 +416,7 @@ pub(super) fn selection(
 
 fn preview(input: app::LaunchInput) -> Result<dto::Preview, AppError> {
     let prompt = input.prompt();
-    let invocation = match input.invocation {
-        app::Invocation::Custom { prompt } => dto::Invocation::Custom { prompt },
-        app::Invocation::Skill { skill, args } => dto::Invocation::Skill {
-            name: skill.name,
-            path: Some(path(&skill.path)?),
-            args,
-        },
-    };
+    let invocation = project_invocation(input.invocation)?;
     Ok(dto::Preview {
         review_id: ReviewIdDto::new(input.review.as_str()).ok_or(AppError::Internal)?,
         provider: match input.provider {
@@ -444,6 +432,41 @@ fn preview(input: app::LaunchInput) -> Result<dto::Preview, AppError> {
         effort: input.effort,
         prompt,
     })
+}
+
+pub(super) fn project_run_launch(
+    value: app::LaunchDetails,
+) -> Result<dto::RunLaunchDetails, AppError> {
+    Ok(dto::RunLaunchDetails {
+        source_sha: GitShaDto::new(value.source.as_str()).ok_or(AppError::Internal)?,
+        state: project_state(value.state),
+        invocation: project_invocation(value.invocation)?,
+        context: value.context,
+        requested_model: value.requested_model,
+        requested_effort: value.requested_effort,
+        observed_model: value.observed_model,
+        observed_effort: value.observed_effort,
+    })
+}
+
+fn project_invocation(value: app::Invocation) -> Result<dto::Invocation, AppError> {
+    Ok(match value {
+        app::Invocation::Custom { prompt } => dto::Invocation::Custom { prompt },
+        app::Invocation::Skill { skill, args } => dto::Invocation::Skill {
+            name: skill.name,
+            path: Some(path(&skill.path)?),
+            args,
+        },
+    })
+}
+
+fn project_state(state: app::LaunchState) -> dto::State {
+    match state {
+        app::LaunchState::Pending => dto::State::Pending,
+        app::LaunchState::Confirmed => dto::State::Confirmed,
+        app::LaunchState::Rejected => dto::State::Rejected,
+        app::LaunchState::Uncertain => dto::State::Uncertain,
+    }
 }
 
 fn skill(value: NativeSkill) -> Result<Skill, AppError> {

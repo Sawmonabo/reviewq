@@ -107,6 +107,13 @@ pub trait ConnectionSources: Send + Sync {
 
     fn verify(&self, authority: ConnectionAuthority) -> AppFuture<'_, VerifiedAccount>;
 
+    fn verify_draft_checkout<'a>(
+        &'a self,
+        gitlab: &'a SavedConnection,
+        project: reviewq_domain::identity::ProjectId,
+        checkout: reviewq_domain::session::AbsolutePath,
+    ) -> AppFuture<'a, reviewq_domain::settings::CheckoutBinding>;
+
     fn catalog(
         &self,
         authority: ConnectionAuthority,
@@ -180,7 +187,13 @@ pub struct Connections {
     pub gitlab: Option<ConnectionSummary>,
     pub jira: Option<ConnectionSummary>,
     pub scope: WorkspaceScope,
-    pub chat_setup_pending: bool,
+    pub chat_setup: ChatSetup,
+}
+
+pub struct ChatSetup {
+    pub pending: bool,
+    pub cleanup_conflict: bool,
+    pub issues: Vec<String>,
 }
 
 pub struct ConnectionSummary {
