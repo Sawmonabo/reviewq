@@ -3,7 +3,10 @@
 use serde::{Deserialize, Serialize};
 
 use crate::settings::Skill;
-use crate::{GitShaDto, HostProviderDto, ReviewIdDto, RevisionDto, Success};
+use crate::{
+    GitShaDto, HostProviderDto, ResourceIdDto, ReviewIdDto, RevisionDto, RunIdDto, SessionKeyDto,
+    SubmissionIdDto, Success, UtcTimestampDto,
+};
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -22,6 +25,21 @@ pub struct PrepareRequest {
     pub model: Option<String>,
     pub effort: Option<String>,
     pub invocation: Option<Invocation>,
+    pub context: Option<String>,
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct StartRequest {
+    pub review_id: ReviewIdDto,
+    pub provider: HostProviderDto,
+    pub expected_settings_revision: RevisionDto,
+    pub source_sha: GitShaDto,
+    pub submission_id: SubmissionIdDto,
+    pub model: Option<String>,
+    pub effort: Option<String>,
+    pub invocation: Invocation,
     pub context: Option<String>,
 }
 
@@ -81,3 +99,29 @@ pub struct Preview {
 
 pub type CatalogResponse = Success<Catalog>;
 pub type PreviewResponse = Success<Preview>;
+
+#[derive(Serialize)]
+#[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub enum State {
+    Pending,
+    Confirmed,
+    Rejected,
+    Uncertain,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct Receipt {
+    pub review_id: ReviewIdDto,
+    pub submission_id: SubmissionIdDto,
+    pub state: State,
+    pub run_id: Option<RunIdDto>,
+    pub session_key: Option<SessionKeyDto>,
+    pub native_id: Option<ResourceIdDto>,
+    pub created_at: UtcTimestampDto,
+    pub updated_at: UtcTimestampDto,
+}
+
+pub type ReceiptResponse = Success<Receipt>;

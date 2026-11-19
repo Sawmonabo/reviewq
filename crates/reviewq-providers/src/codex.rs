@@ -8,6 +8,7 @@ mod catalog;
 mod connection;
 mod delivery;
 mod history;
+mod launch;
 mod session;
 mod workflow;
 

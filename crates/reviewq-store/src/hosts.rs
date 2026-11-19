@@ -194,7 +194,7 @@ impl LeadStore for SqliteStore {
     }
 }
 
-fn register(
+pub(crate) fn register(
     tx: &mut WriteTx<'_>,
     actor: Actor,
     input: RegisterLead,

@@ -11,7 +11,9 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use reviewq_app::access::Actor;
 use reviewq_app::hosts::{ClaudeCompanion, LeadStore, NativeHost, recover_delivery};
-use reviewq_app::launch::{NativeModelReader, NativeModels};
+use reviewq_app::launch::{
+    LaunchStore, NativeLauncher, NativeLaunchers, NativeModelReader, NativeModels,
+};
 use reviewq_app::notifications::DesktopStore;
 use reviewq_app::reports::reconcile_reports;
 use reviewq_app::settings::{NativeSkillReader, NativeSkills, RuntimeSources};
@@ -120,6 +122,7 @@ pub(crate) async fn serve(profile: PathBuf, options: Serve) -> Result<(), Failur
     )?;
     store.recover_refresh(Actor::local_operator()).await?;
     store.recover_delivery_claims().await?;
+    store.recover_launches().await?;
 
     let network = Arc::new(SourceNetwork::new()?);
     let settings_sources = Arc::new(SourceAccounts::new(
@@ -209,6 +212,10 @@ pub(crate) async fn serve(profile: PathBuf, options: Serve) -> Result<(), Failur
     };
     let models = NativeModels {
         codex: codex.clone().map(|host| host as Arc<dyn NativeModelReader>),
+        claude: None,
+    };
+    let launchers = NativeLaunchers {
+        codex: codex.clone().map(|host| host as Arc<dyn NativeLauncher>),
         claude: None,
     };
     let report_files = Arc::new(RegisteredReportFiles);
@@ -303,6 +310,8 @@ pub(crate) async fn serve(profile: PathBuf, options: Serve) -> Result<(), Failur
             settings_sources,
             skills,
             models,
+            launchers,
+            launches_allowed: !options.validation,
             claude,
             terminal,
             workflow: WorkflowIntegration {

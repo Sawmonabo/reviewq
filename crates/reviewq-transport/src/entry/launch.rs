@@ -7,15 +7,19 @@ use reviewq_app::access::{Actor, AppError};
 use reviewq_app::events::Snapshot;
 use reviewq_app::launch as app;
 use reviewq_app::workspace::ConfiguredProject;
-use reviewq_domain::identity::ReviewId;
+use reviewq_domain::identity::{GitSha, ReviewId, Revision, SubmissionId};
 use reviewq_domain::session::{AbsolutePath, HostProvider};
 use reviewq_domain::settings::NativeSkill;
 use reviewq_protocol::launch as dto;
 use reviewq_protocol::settings::Skill;
-use reviewq_protocol::{GitShaDto, HostProviderDto, ReviewIdDto, RevisionDto};
+use reviewq_protocol::{
+    GitShaDto, HostProviderDto, ResourceIdDto, ReviewIdDto, RevisionDto, RunIdDto, SessionKeyDto,
+    SubmissionIdDto, UtcTimestampDto,
+};
 use serde::de::DeserializeOwned;
+use sha2::{Digest, Sha256};
 
-use super::error::ApiBytes;
+use super::error::{ApiBytes, ApiPath as Path};
 use super::pages::{parse, success};
 use super::{ApiError, Entry};
 
@@ -82,6 +86,153 @@ pub(super) async fn prepare(
     .await?;
     let input = prepared.value.select(selection)?;
     Ok(Json(success(preview(input)?, prepared.cursor)?))
+}
+
+pub(super) struct LaunchCommand {
+    pub review: ReviewId,
+    pub provider: HostProvider,
+    pub submission: SubmissionId,
+    pub selection: app::LaunchSelection,
+    pub expected: Option<(Revision, GitSha)>,
+    pub digest: [u8; 32],
+}
+
+pub(super) async fn start(
+    State(entry): State<Arc<Entry>>,
+    headers: HeaderMap,
+    ApiBytes(bytes): ApiBytes,
+) -> Result<Json<dto::ReceiptResponse>, ApiError> {
+    let actor = entry.auth.browser_actor(&headers, true)?;
+    let input: dto::StartRequest = decode(&bytes)?;
+    let canonical = serde_json::to_vec(&input).map_err(|_| AppError::Internal)?;
+    let command = LaunchCommand {
+        review: parse(input.review_id.as_str())?,
+        provider: provider(input.provider),
+        submission: parse(input.submission_id.as_str())?,
+        selection: selection(
+            Some(input.invocation),
+            input.context,
+            input.model,
+            input.effort,
+        )?,
+        expected: Some((
+            Revision::try_from(input.expected_settings_revision.get())
+                .map_err(|_| AppError::InvalidRequest)?,
+            parse(input.source_sha.as_str())?,
+        )),
+        digest: Sha256::digest(canonical).into(),
+    };
+    let stored = execute(&entry, actor, command).await?;
+    Ok(Json(success(
+        project_receipt(stored.value)?,
+        stored.cursor,
+    )?))
+}
+
+pub(super) async fn execute(
+    entry: &Entry,
+    actor: Actor,
+    command: LaunchCommand,
+) -> Result<Snapshot<app::LaunchReceipt>, AppError> {
+    let LaunchCommand {
+        review,
+        provider,
+        submission,
+        selection,
+        expected,
+        digest,
+    } = command;
+    if let Some(found) = entry
+        .store
+        .launch_receipt(
+            actor.clone(),
+            review.clone(),
+            submission.clone(),
+            Some(digest),
+        )
+        .await?
+    {
+        return Ok(found);
+    }
+    if !entry.sends_allowed {
+        return Err(AppError::Forbidden);
+    }
+    let host = entry.launchers.select(provider)?;
+    let slot = entry
+        .launch_slots
+        .clone()
+        .try_acquire_owned()
+        .map_err(|_| AppError::Busy)?;
+    let prepared = load(entry, actor.clone(), review.clone(), provider).await?;
+    let input = prepared.value.select(selection)?;
+    if expected
+        .as_ref()
+        .is_some_and(|(revision, sha)| *revision != input.settings || &input.source.head_sha != sha)
+    {
+        return Err(AppError::StaleRevision);
+    }
+    let id = match entry
+        .store
+        .claim_launch(actor.clone(), input.clone(), submission, digest)
+        .await?
+    {
+        app::LaunchClaim::Existing(found) => return Ok(found),
+        app::LaunchClaim::Admitted(id) => id,
+    };
+    let store = entry.store.clone();
+    tokio::spawn(async move {
+        let _slot = slot;
+        app::run_launch(store, host, actor, id, input).await
+    })
+    .await
+    .map_err(|_| AppError::Internal)?
+}
+
+pub(super) async fn receipt(
+    State(entry): State<Arc<Entry>>,
+    headers: HeaderMap,
+    Path((review, submission)): Path<(String, String)>,
+) -> Result<Json<dto::ReceiptResponse>, ApiError> {
+    let actor = entry.auth.browser_actor(&headers, false)?;
+    let stored = entry
+        .store
+        .launch_receipt(actor, parse(&review)?, parse(&submission)?, None)
+        .await?
+        .ok_or(AppError::NotFound)?;
+    Ok(Json(success(
+        project_receipt(stored.value)?,
+        stored.cursor,
+    )?))
+}
+
+pub(super) fn project_receipt(receipt: app::LaunchReceipt) -> Result<dto::Receipt, AppError> {
+    Ok(dto::Receipt {
+        review_id: ReviewIdDto::new(receipt.review.as_str()).ok_or(AppError::Internal)?,
+        submission_id: SubmissionIdDto::new(receipt.submission.as_str())
+            .ok_or(AppError::Internal)?,
+        state: match receipt.state {
+            app::LaunchState::Pending => dto::State::Pending,
+            app::LaunchState::Confirmed => dto::State::Confirmed,
+            app::LaunchState::Rejected => dto::State::Rejected,
+            app::LaunchState::Uncertain => dto::State::Uncertain,
+        },
+        run_id: receipt
+            .run
+            .map(|run| RunIdDto::new(run.as_str()).ok_or(AppError::Internal))
+            .transpose()?,
+        session_key: receipt
+            .session
+            .map(|session| SessionKeyDto::new(session.as_str()).ok_or(AppError::Internal))
+            .transpose()?,
+        native_id: receipt
+            .native
+            .map(|native| ResourceIdDto::new(native.as_str()).ok_or(AppError::Internal))
+            .transpose()?,
+        created_at: UtcTimestampDto::from_unix_milliseconds(receipt.created_at_ms)
+            .ok_or(AppError::Internal)?,
+        updated_at: UtcTimestampDto::from_unix_milliseconds(receipt.updated_at_ms)
+            .ok_or(AppError::Internal)?,
+    })
 }
 
 pub(super) async fn load(

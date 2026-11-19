@@ -6,6 +6,7 @@ use std::time::Duration;
 use futures_util::{SinkExt, StreamExt};
 use reviewq_app::access::AppError;
 use reviewq_app::hosts::DispatchGuard;
+use reviewq_app::launch::LaunchProgress;
 use serde::Deserialize;
 use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
@@ -32,8 +33,22 @@ pub(super) struct Connection {
 struct Rpc {
     method: &'static str,
     params: Value,
-    guard: Option<DispatchGuard>,
+    guard: Option<Effect>,
     reply: oneshot::Sender<Result<Value, CallError>>,
+}
+
+enum Effect {
+    Delivery(DispatchGuard),
+    Launch(LaunchProgress),
+}
+
+impl Effect {
+    async fn check(self) -> Result<(), AppError> {
+        match self {
+            Self::Delivery(guard) => guard.check().await,
+            Self::Launch(guard) => guard.check().await,
+        }
+    }
 }
 
 pub(super) enum CallError {
@@ -101,14 +116,28 @@ impl Connection {
         params: Value,
         guard: DispatchGuard,
     ) -> Result<(), CallError> {
-        self.call(method, params, Some(guard)).await.map(|_| ())
+        self.call(method, params, Some(Effect::Delivery(guard)))
+            .await
+            .map(|_| ())
+    }
+
+    pub(super) async fn launch<T: DeserializeOwned>(
+        &self,
+        method: &'static str,
+        params: Value,
+        guard: LaunchProgress,
+    ) -> Result<T, CallError> {
+        let value = self
+            .call(method, params, Some(Effect::Launch(guard)))
+            .await?;
+        serde_json::from_value(value).map_err(|_| CallError::Uncertain)
     }
 
     async fn call(
         &self,
         method: &'static str,
         params: Value,
-        guard: Option<DispatchGuard>,
+        guard: Option<Effect>,
     ) -> Result<Value, CallError> {
         let (reply, receive) = oneshot::channel();
         self.sender

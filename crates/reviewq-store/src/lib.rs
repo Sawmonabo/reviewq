@@ -8,6 +8,7 @@ mod events;
 mod followups;
 mod history;
 mod hosts;
+mod launches;
 mod notifications;
 mod queue;
 mod refresh;

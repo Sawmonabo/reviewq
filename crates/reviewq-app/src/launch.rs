@@ -9,6 +9,12 @@ use reviewq_domain::settings::{CheckoutBinding, NativeSkill};
 use crate::access::{AppError, AppFuture};
 use crate::queue::{MergeRequestState, ReviewSource};
 
+mod effects;
+pub use effects::{
+    LaunchClaim, LaunchProgress, LaunchReceipt, LaunchState, LaunchStore, NativeLaunchResult,
+    NativeLauncher, NativeLaunchers, ObservedLaunchSettings, run_launch,
+};
+
 pub trait NativeModelReader: Send + Sync {
     fn models(&self, checkout: AbsolutePath) -> AppFuture<'_, Vec<NativeModel>>;
 }

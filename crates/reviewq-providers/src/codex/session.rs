@@ -50,23 +50,7 @@ impl NativeHost for Codex {
         Box::pin(async move {
             validate_native_id(&native_id)?;
             let thread = self.read_thread(&native_id).await?;
-            let cwd = tokio::fs::canonicalize(&thread.cwd)
-                .await
-                .unwrap_or(thread.cwd);
-            let cwd = AbsolutePath::from_canonical(cwd).map_err(|_| AppError::Unavailable)?;
-            let binding = NativeBinding::new(
-                NativeIdentity::new(HostProvider::Codex, self.profile.clone(), native_id),
-                cwd,
-            );
-            let source = match thread.path {
-                Some(path) => crate::history::verified_codex_source(binding.clone(), path).await?,
-                None => None,
-            };
-            Ok(HostProof {
-                binding,
-                source,
-                activity: thread.status.activity(),
-            })
+            self.proof(thread, native_id).await
         })
     }
 
@@ -102,6 +86,34 @@ impl NativeHost for Codex {
 }
 
 impl Codex {
+    pub(super) async fn proof(
+        &self,
+        thread: Thread,
+        native_id: NativeSessionId,
+    ) -> Result<HostProof, AppError> {
+        validate_native_id(&native_id)?;
+        if thread.id != native_id.as_str() {
+            return Err(AppError::Conflict);
+        }
+        let cwd = tokio::fs::canonicalize(&thread.cwd)
+            .await
+            .unwrap_or(thread.cwd);
+        let cwd = AbsolutePath::from_canonical(cwd).map_err(|_| AppError::Unavailable)?;
+        let binding = NativeBinding::new(
+            NativeIdentity::new(HostProvider::Codex, self.profile.clone(), native_id),
+            cwd,
+        );
+        let source = match thread.path {
+            Some(path) => crate::history::verified_codex_source(binding.clone(), path).await?,
+            None => None,
+        };
+        Ok(HostProof {
+            binding,
+            source,
+            activity: thread.status.activity(),
+        })
+    }
+
     pub(super) async fn verified_thread(&self, lead: &LeadTarget) -> Result<Thread, AppError> {
         let expected = lead.binding().identity();
         if expected.profile() != &self.profile || expected.provider() != HostProvider::Codex {

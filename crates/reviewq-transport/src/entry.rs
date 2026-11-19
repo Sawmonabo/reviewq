@@ -19,7 +19,7 @@ use reviewq_app::hosts::{
     ClaudeCompanion, ClaudeStore, ClaudeWorkflowStore, LeadStore, MessageHistoryStore, NativeHost,
     NativeTerminal,
 };
-use reviewq_app::launch::NativeModels;
+use reviewq_app::launch::{LaunchStore, NativeLaunchers, NativeModels};
 use reviewq_app::notifications::InboxStore;
 use reviewq_app::queue::{QueueStore, ReviewLookup};
 use reviewq_app::reports::{
@@ -80,6 +80,7 @@ pub trait Store:
     + FollowupStore
     + FollowupCommands
     + SettingsStore
+    + LaunchStore
 {
 }
 impl<
@@ -102,7 +103,8 @@ impl<
         + ActionCommandStore
         + FollowupStore
         + FollowupCommands
-        + SettingsStore,
+        + SettingsStore
+        + LaunchStore,
 > Store for S
 {
 }
@@ -121,6 +123,8 @@ pub(super) struct Entry {
     settings_sources: Arc<dyn ConnectionSources>,
     skills: NativeSkills,
     models: NativeModels,
+    launchers: NativeLaunchers,
+    launch_slots: Arc<Semaphore>,
     refresh_wakeup: Notify,
     host: Option<Arc<dyn NativeHost>>,
     claude: Option<Arc<dyn ClaudeCompanion>>,
@@ -173,6 +177,8 @@ pub struct ServiceRuntime<'a> {
     pub settings_sources: Arc<dyn ConnectionSources>,
     pub skills: NativeSkills,
     pub models: NativeModels,
+    pub launchers: NativeLaunchers,
+    pub launches_allowed: bool,
     pub claude: Option<Arc<dyn ClaudeCompanion>>,
     pub workflow: WorkflowIntegration,
     pub terminal: Arc<dyn NativeTerminal>,
@@ -194,6 +200,8 @@ pub fn router(
         settings_sources: runtime.settings_sources,
         skills: runtime.skills,
         models: runtime.models,
+        launchers: runtime.launchers,
+        launch_slots: Arc::new(Semaphore::new(if runtime.launches_allowed { 4 } else { 0 })),
         refresh_wakeup: Notify::new(),
         host,
         claude: runtime.claude,
@@ -234,6 +242,14 @@ pub fn router(
         .route("/runs/{run_id}", get(pages::run))
         .route("/runs/catalog", post(launch::catalog))
         .route("/runs/prepare", post(launch::prepare))
+        .route(
+            "/runs/start",
+            post(launch::start).layer(DefaultBodyLimit::max(144 * 1024)),
+        )
+        .route(
+            "/reviews/{review_id}/launches/{submission_id}",
+            get(launch::receipt),
+        )
         .route(
             "/runs/{run_id}/sessions/{session_key}/terminal",
             get(terminal::read),
