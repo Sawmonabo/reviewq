@@ -339,3 +339,152 @@ pub(super) fn carry_pending(
     }
     Ok(())
 }
+
+pub(super) fn adopt_remote(
+    db: &Connection,
+    target: &reviewq_app::followups::MonitoredReview,
+    snapshot: &WorkflowSnapshot,
+    time: i64,
+) -> Result<Vec<reviewq_domain::identity::NotificationId>, StoreError> {
+    use reviewq_app::notifications::{Kind, Observation, Source};
+    let mut output = Vec::new();
+    let mut batch_id = None;
+    for row in selected(db, &target.review, target.generation)? {
+        let Ok(discussion) = exact_discussion(&row, snapshot) else {
+            continue;
+        };
+        let previous: (Option<String>, Option<bool>) = db.query_row(
+            "SELECT baseline_sha256,resolved FROM followup_threads
+             WHERE review_id=?1 AND generation=?2 AND original_note_id=?3",
+            params![
+                target.review.as_str(),
+                target.generation.as_sqlite_integer(),
+                row.original
+            ],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )?;
+        let current_hash = fingerprint(discussion);
+        if previous.0.as_deref() == Some(current_hash.as_str()) {
+            continue;
+        }
+        let version = row
+            .version
+            .parse::<u64>()
+            .map_err(|_| AppError::Internal)?
+            .checked_add(1)
+            .ok_or(AppError::Internal)?;
+        let mut observed = Vec::new();
+        if let Some(prior) = previous.1
+            && prior != discussion.resolved
+        {
+            observed.push(if discussion.resolved {
+                ("resolved", Kind::Resolved, None, None)
+            } else {
+                ("reopened", Kind::Reopened, None, None)
+            });
+        }
+        let mut stored = db.prepare_cached(
+            "SELECT body_sha256 FROM followup_note_baselines WHERE review_id=?1 AND generation=?2
+             AND original_note_id=?3 AND note_id=?4",
+        )?;
+        for note in &discussion.notes {
+            if note.author == snapshot.authenticated_actor {
+                continue;
+            }
+            let prior = stored
+                .query_row(
+                    params![
+                        target.review.as_str(),
+                        target.generation.as_sqlite_integer(),
+                        row.original,
+                        note.id.to_string()
+                    ],
+                    |row| row.get::<_, String>(0),
+                )
+                .optional()?;
+            match prior.as_deref() {
+                Some(before) if before == note.body_hash.as_str() => {}
+                Some(_) => {
+                    observed.push(("edit", Kind::EditedReply, Some(note.id), Some(note.author)))
+                }
+                None => observed.push(("reply", Kind::Reply, Some(note.id), Some(note.author))),
+            }
+        }
+        save_notes(
+            db,
+            &target.review,
+            target.generation,
+            &row.original,
+            discussion,
+        )?;
+        db.execute(
+            "UPDATE followup_threads SET discussion_id=?4,discussion_version=?5,baseline_sha256=?6,resolved=?7
+             WHERE review_id=?1 AND generation=?2 AND original_note_id=?3",
+            params![target.review.as_str(),target.generation.as_sqlite_integer(),row.original,
+                discussion.id,version.to_string(),current_hash.as_str(),discussion.resolved],
+        )?;
+        for (kind, inbox_kind, note, actor) in observed {
+            let id = Uuid::new_v4().to_string();
+            let provenance = format!("{}:{version}:{}", kind, note.unwrap_or(0));
+            db.prepare_cached(
+                "INSERT INTO followup_observations(observation_id,review_id,generation,original_note_id,
+                    discussion_id,discussion_version,occurrence_key,kind,actor_id,note_id,observed_at_ms)
+                 VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)",
+            )?.execute(params![
+                id,target.review.as_str(),target.generation.as_sqlite_integer(),row.original,
+                discussion.id,format!("{version}:{current_hash}"),provenance,kind,
+                actor.map(|id|id.to_string()),note.map(|id|id.to_string()),snapshot.observed_at_ms,
+            ])?;
+            let batch = match &batch_id {
+                Some(id) => id,
+                None => batch_id.insert(batch(
+                    db,
+                    &target.review,
+                    &target.run,
+                    target.generation,
+                    time,
+                    false,
+                )?),
+            };
+            attach(db, &target.review, batch, &id, None)?;
+            let mut identity = Sha256::new();
+            for value in [
+                target.review.as_str(),
+                discussion.id.as_str(),
+                kind,
+                current_hash.as_str(),
+            ] {
+                hash_field(&mut identity, value.as_bytes());
+            }
+            identity.update(version.to_be_bytes());
+            identity.update(note.unwrap_or(0).to_be_bytes());
+            let occurrence = ReportHash::from_sha256(identity.finalize().into());
+            let label = match inbox_kind {
+                Kind::Reply => "New reply on a monitored discussion",
+                Kind::EditedReply => "A reply was edited on a monitored discussion",
+                Kind::Resolved => "A monitored discussion was resolved",
+                _ => "A monitored discussion was reopened",
+            };
+            if let Some(id) = crate::notifications::insert_notification(
+                db,
+                Observation {
+                    source: Source::GitLab,
+                    occurrence_id: occurrence.to_string(),
+                    kind: inbox_kind,
+                    review: target.review.clone(),
+                    run: Some(target.run.clone()),
+                    session: None,
+                    event_ref: Some(
+                        note.map_or_else(|| discussion.id.clone(), |id| id.to_string()),
+                    ),
+                    label: label.to_owned(),
+                    occurred_at_ms: snapshot.observed_at_ms,
+                    desktop_episode: None,
+                },
+            )? {
+                output.push(id);
+            }
+        }
+    }
+    Ok(output)
+}
