@@ -67,7 +67,17 @@ pub struct Catalog {
     pub checkout: String,
     pub default_skill: Option<Skill>,
     pub models: Vec<Model>,
-    pub skills: Vec<Skill>,
+    pub skills: Vec<AvailableSkill>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct AvailableSkill {
+    pub name: String,
+    pub path: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
 }
 
 #[derive(Serialize)]

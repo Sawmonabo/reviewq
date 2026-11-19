@@ -5,8 +5,28 @@ use reviewq_domain::settings::{NativeSkill, WorkspaceScope};
 
 use crate::access::{AppError, AppFuture};
 
+pub struct NativeSkillOption {
+    pub skill: NativeSkill,
+    pub description: Option<String>,
+}
+
+impl NativeSkillOption {
+    pub fn new(skill: NativeSkill, description: Option<String>) -> Self {
+        Self {
+            skill,
+            description: description.filter(|text| {
+                !text.trim().is_empty()
+                    && text.len() <= 2048
+                    && !text.chars().any(|character| {
+                        character.is_control() && !matches!(character, '\n' | '\r' | '\t')
+                    })
+            }),
+        }
+    }
+}
+
 pub trait NativeSkillReader: Send + Sync {
-    fn skills(&self, checkout: AbsolutePath) -> AppFuture<'_, Vec<NativeSkill>>;
+    fn skills(&self, checkout: AbsolutePath) -> AppFuture<'_, Vec<NativeSkillOption>>;
 }
 
 #[derive(Default)]
@@ -42,7 +62,7 @@ impl NativeSkills {
                         .as_ref()
                         .ok_or(AppError::InvalidRequest)?;
                     let skills = self.reader(provider)?.skills(checkout.root.clone()).await?;
-                    if !skills.contains(skill) {
+                    if !skills.iter().any(|option| &option.skill == skill) {
                         return Err(AppError::NotFound);
                     }
                 }

@@ -100,7 +100,7 @@ export interface Catalog {
   provider: HostProviderDto;
   reviewId: ReviewIdDto;
   settingsRevision: RevisionDto;
-  skills: Skill[];
+  skills: AvailableSkill[];
   [k: string]: unknown;
 }
 
@@ -110,6 +110,13 @@ export interface Model {
   id: string;
   isDefault: boolean;
   label: string;
+  [k: string]: unknown;
+}
+
+export interface AvailableSkill {
+  description?: string | null;
+  name: string;
+  path: string;
   [k: string]: unknown;
 }
 

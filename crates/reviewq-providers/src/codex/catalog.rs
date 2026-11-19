@@ -3,7 +3,7 @@ use std::path::PathBuf;
 
 use reviewq_app::access::{AppError, AppFuture};
 use reviewq_app::launch::{NativeModel, NativeModelReader};
-use reviewq_app::settings::NativeSkillReader;
+use reviewq_app::settings::{NativeSkillOption, NativeSkillReader};
 use reviewq_domain::session::AbsolutePath;
 use reviewq_domain::settings::NativeSkill;
 use serde::Deserialize;
@@ -31,6 +31,7 @@ struct Skill {
     name: String,
     path: PathBuf,
     enabled: bool,
+    description: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -121,7 +122,7 @@ fn visible(text: &str, limit: usize) -> bool {
 }
 
 impl NativeSkillReader for Codex {
-    fn skills(&self, checkout: AbsolutePath) -> AppFuture<'_, Vec<NativeSkill>> {
+    fn skills(&self, checkout: AbsolutePath) -> AppFuture<'_, Vec<NativeSkillOption>> {
         Box::pin(async move {
             let reply: Catalog = self
                 .connection
@@ -160,10 +161,13 @@ impl NativeSkillReader for Codex {
                 let path =
                     AbsolutePath::from_canonical(skill.path).map_err(|_| AppError::Unavailable)?;
                 if seen.insert((skill.name.clone(), path.clone())) {
-                    result.push(NativeSkill {
-                        name: skill.name,
-                        path,
-                    });
+                    result.push(NativeSkillOption::new(
+                        NativeSkill {
+                            name: skill.name,
+                            path,
+                        },
+                        skill.description,
+                    ));
                 }
             }
             Ok(result)

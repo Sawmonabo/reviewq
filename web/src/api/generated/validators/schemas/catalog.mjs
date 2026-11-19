@@ -5,6 +5,7 @@ import { validate1220 } from "./model.mjs";
 import { validate71 } from "./host-provider-dto.mjs";
 import { validate114 } from "./review-id-dto.mjs";
 import { validate35 } from "./event-cursor-dto.mjs";
+import { validate1225 } from "./available-skill.mjs";
 function validate1218(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
@@ -261,7 +262,7 @@ function validate1218(
                           for (let i1 = 0; i1 < len1; i1++) {
                             const _errs16 = errors;
                             if (
-                              !validate205(data7[i1], {
+                              !validate1225(data7[i1], {
                                 instancePath: instancePath + "/skills/" + i1,
                                 parentData: data7,
                                 parentDataProperty: i1,
@@ -270,8 +271,8 @@ function validate1218(
                             ) {
                               vErrors =
                                 vErrors === null
-                                  ? validate205.errors
-                                  : vErrors.concat(validate205.errors);
+                                  ? validate1225.errors
+                                  : vErrors.concat(validate1225.errors);
                               errors = vErrors.length;
                             }
                             var valid3 = _errs16 === errors;

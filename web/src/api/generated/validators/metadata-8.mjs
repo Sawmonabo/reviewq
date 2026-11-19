@@ -59,7 +59,16 @@ const schema356 = {
   required: ["id", "label", "isDefault", "defaultEffort", "efforts"],
   type: "object",
 };
-const schema359 = {
+const schema357 = {
+  properties: {
+    description: { type: ["string", "null"] },
+    name: { type: "string" },
+    path: { type: "string" },
+  },
+  required: ["name", "path"],
+  type: "object",
+};
+const schema360 = {
   properties: {
     context: { type: ["string", "null"] },
     invocation: { $ref: "#/definitions/Invocation" },
@@ -82,7 +91,7 @@ const schema359 = {
   ],
   type: "object",
 };
-const schema361 = {
+const schema362 = {
   additionalProperties: false,
   properties: {
     args: { type: ["string", "null"] },
@@ -93,7 +102,7 @@ const schema361 = {
   required: ["kind", "name", "path", "args"],
   type: "object",
 };
-const schema363 = {
+const schema364 = {
   properties: {
     effort: { type: ["string", "null"] },
     model: { type: ["string", "null"] },
@@ -111,7 +120,8 @@ export {
   schema348,
   schema350,
   schema356,
-  schema359,
-  schema361,
-  schema363,
+  schema357,
+  schema360,
+  schema362,
+  schema364,
 };

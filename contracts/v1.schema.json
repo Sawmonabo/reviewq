@@ -725,6 +725,27 @@
       ],
       "type": "object"
     },
+    "AvailableSkill": {
+      "properties": {
+        "description": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "name": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "path"
+      ],
+      "type": "object"
+    },
     "Batch": {
       "properties": {
         "authorityVerified": {
@@ -1131,7 +1152,7 @@
         },
         "skills": {
           "items": {
-            "$ref": "#/definitions/Skill"
+            "$ref": "#/definitions/AvailableSkill"
           },
           "type": "array"
         }

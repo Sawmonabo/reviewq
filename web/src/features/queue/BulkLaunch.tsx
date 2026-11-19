@@ -643,16 +643,20 @@ function LaunchEditor({
                       <details className="launch-disclosure launch-skill-source">
                         <summary>Selected skill source</summary>
                         <ul>
-                          {targets.map((target) => (
-                            <li key={target.reviewId}>
-                              {targets.length > 1 && (
-                                <span>
-                                  {target.projectPath} !{target.iid}
-                                </span>
-                              )}
-                              <code>{selectedSkill.sources.get(target.reviewId)?.path}</code>
-                            </li>
-                          ))}
+                          {targets.map((target) => {
+                            const source = selectedSkill.sources.get(target.reviewId);
+                            return (
+                              <li key={target.reviewId}>
+                                {targets.length > 1 && (
+                                  <span>
+                                    {target.projectPath} !{target.iid}
+                                  </span>
+                                )}
+                                <code>{source?.path}</code>
+                                {source?.description && <p>{source.description}</p>}
+                              </li>
+                            );
+                          })}
                         </ul>
                       </details>
                     )}

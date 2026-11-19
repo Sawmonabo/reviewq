@@ -111,7 +111,7 @@ pub(super) async fn checkout_skills(
             provider: request.provider,
             skills: skills
                 .into_iter()
-                .map(scope::skill)
+                .map(|option| scope::skill(option.skill))
                 .collect::<Result<_, _>>()?,
         },
         current.cursor,
