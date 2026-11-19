@@ -18,6 +18,8 @@ use crate::workspace::WorkspaceStore;
 mod claude;
 mod messages;
 mod questions;
+mod registration;
+pub use registration::{authorize_registration, register_proven};
 pub mod recovery;
 mod work;
 
@@ -149,6 +151,7 @@ pub trait NativeHost: QuestionsPort + Send + Sync {
 /// Resolves the companion's identity against the service-selected Claude profile.
 pub trait ClaudeCompanion: Send + Sync {
     fn accepts_profile(&self, profile: &AbsolutePath) -> bool;
+    fn inspect_lead(&self, session: NativeSessionId) -> AppFuture<'_, HostProof>;
     fn prove(&self, context: ClaudeContext) -> AppFuture<'_, HostProof>;
     fn prove_child(
         &self,
@@ -216,12 +219,6 @@ pub async fn link_proven(
     proof: HostProof,
     target: String,
 ) -> Result<NativeLink, AppError> {
-    let HostProof {
-        binding,
-        source: native_source,
-        activity,
-    } = proof;
-    let identity = binding.identity();
     let workspace = store
         .workspace_context(Actor::local_operator())
         .await?
@@ -230,27 +227,7 @@ pub async fn link_proven(
         ReviewResolution::Found(review) => review,
         ReviewResolution::Ambiguous(urls) => return Ok(NativeLink::Ambiguous(urls)),
     };
-    let session_key = match identity.provider() {
-        HostProvider::Codex => identity.native_id().as_str().to_owned(),
-        HostProvider::Claude => format!("claude:{}", identity.native_id()),
-    }
-    .parse()
-    .map_err(|_| AppError::InvalidRequest)?;
-    store
-        .register_lead(
-            Actor::native_session(identity.clone()),
-            RegisterLead {
-                expected_settings: workspace.revision,
-                review,
-                provider: identity.provider(),
-                profile: identity.profile().clone(),
-                native_id: identity.native_id().clone(),
-                session_key,
-                cwd: binding.cwd().clone(),
-                native_source,
-                activity,
-            },
-        )
+    register_proven(store, proof, review, workspace.revision)
         .await
         .map(NativeLink::Linked)
 }

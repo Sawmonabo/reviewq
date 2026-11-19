@@ -11,12 +11,13 @@ use reviewq_app::hosts::{
     ClaudeAnchor, ClaudeChild, ClaudeCompanion, ClaudeContext, HostProof, MessageBody,
     ProvenClaudeChild,
 };
-use reviewq_domain::identity::NativeInputId;
+use reviewq_domain::identity::{NativeInputId, NativeSessionId};
 use reviewq_domain::session::{AbsolutePath, HostProvider, NativeBinding, NativeIdentity};
 use tokio::sync::Semaphore;
 
 use crate::history::{
-    Cancel, claude_anchor, claude_confirm_prompt, verified_claude_child, verified_claude_source,
+    Cancel, claude_anchor, claude_confirm_prompt, inspect_claude_lead, verified_claude_child,
+    verified_claude_source,
 };
 
 mod cli;
@@ -79,6 +80,26 @@ impl ClaudeCompanion for Claude {
     fn accepts_profile(&self, profile: &AbsolutePath) -> bool {
         profile == &self.profile
     }
+    fn inspect_lead(&self, session: NativeSessionId) -> AppFuture<'_, HostProof> {
+        Box::pin(async move {
+            validate_id(&session)?;
+            let permit = self
+                .reads
+                .clone()
+                .try_acquire_owned()
+                .map_err(|_| AppError::Busy)?;
+            let profile = self.profile.clone();
+            let cancel = Cancel(Arc::new(AtomicBool::new(false)));
+            let stopped = cancel.0.clone();
+            tokio::task::spawn_blocking(move || {
+                let _permit = permit;
+                inspect_claude_lead(profile, session, &stopped)
+            })
+            .await
+            .map_err(|_| AppError::Unavailable)?
+        })
+    }
+
     fn prove_child(
         &self,
         root: HistorySession,
@@ -134,12 +155,7 @@ impl ClaudeCompanion for Claude {
             if context.profile != self.profile {
                 return Err(AppError::Forbidden);
             }
-            let session = context.session_id.as_str();
-            if !uuid::Uuid::parse_str(session)
-                .is_ok_and(|id| id.hyphenated().to_string() == session)
-            {
-                return Err(AppError::InvalidRequest);
-            }
+            validate_id(&context.session_id)?;
             let permit = self
                 .reads
                 .clone()
@@ -164,5 +180,16 @@ impl ClaudeCompanion for Claude {
             .await
             .map_err(|_| AppError::Unavailable)?
         })
+    }
+}
+
+fn validate_id(session: &NativeSessionId) -> Result<(), AppError> {
+    let native = session.as_str();
+    if uuid::Uuid::parse_str(native)
+        .is_ok_and(|id| !id.is_nil() && id.hyphenated().to_string() == native)
+    {
+        Ok(())
+    } else {
+        Err(AppError::InvalidRequest)
     }
 }
