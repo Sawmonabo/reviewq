@@ -11,7 +11,7 @@ use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use reviewq_app::access::{Actor, AppError};
 use reviewq_app::events::EventLog;
 use reviewq_app::history::{HistoryStore, NativeHistoryReader};
-use reviewq_app::hosts::{LeadStore, NativeHost};
+use reviewq_app::hosts::{LeadStore, MessageHistoryStore, NativeHost};
 use reviewq_app::queue::{QueueStore, ReviewLookup};
 use reviewq_app::reports::ReportStore;
 use reviewq_app::sources::{ReviewSourceReader, SourceRefreshStore, refresh_queue};
@@ -48,6 +48,7 @@ pub trait Store:
     + HistoryStore
     + SourceRefreshStore
     + ReportStore
+    + MessageHistoryStore
 {
 }
 impl<
@@ -58,7 +59,8 @@ impl<
         + LeadStore
         + HistoryStore
         + SourceRefreshStore
-        + ReportStore,
+        + ReportStore
+        + MessageHistoryStore,
 > Store for S
 {
 }
@@ -144,7 +146,7 @@ pub fn router(
         )
         .route(
             "/runs/{run_id}/sessions/{session_key}/messages",
-            post(messages::send),
+            get(messages::list).post(messages::send),
         )
         .route(
             "/runs/{run_id}/sessions/{session_key}/messages/{submission_id}",

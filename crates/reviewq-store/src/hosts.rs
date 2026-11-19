@@ -20,6 +20,7 @@ use crate::workspace::{advance_queue, allow_review, configured, provider_label, 
 use crate::{SqliteStore, StoreError};
 
 mod delivery;
+mod messages;
 
 impl LeadStore for SqliteStore {
     fn register_lead(
@@ -89,6 +90,14 @@ impl LeadStore for SqliteStore {
                 return Err(AppError::InvalidRequest);
             }
             self.read(move |tx| delivery::recoverable(tx, after, limit))
+                .await
+                .map_err(StoreError::app)
+        })
+    }
+
+    fn next_delivery_due(&self) -> AppFuture<'_, Option<i64>> {
+        Box::pin(async move {
+            self.read(|tx| delivery::next_due(tx))
                 .await
                 .map_err(StoreError::app)
         })

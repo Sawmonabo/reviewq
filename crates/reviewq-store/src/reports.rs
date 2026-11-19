@@ -441,3 +441,29 @@ fn raw<'row>(row: &'row Row<'_>, column: usize) -> Result<&'row [u8], StoreError
         .as_blob()
         .map_err(|_| AppError::Internal.into())
 }
+
+/// Check an accepted report attachment and its exact Unicode scalar selection in the admission transaction.
+pub(crate) fn authorize_feedback(
+    connection: &Connection,
+    run: &RunId,
+    reference: &reviewq_app::hosts::ReportRef,
+) -> Result<Option<ReceiptId>, StoreError> {
+    let stored = version(connection, run, &reference.receipt_id)?;
+    if stored.summary.reference.hash != reference.report_hash {
+        return Err(AppError::PreconditionFailed.into());
+    }
+    if let Some(quote) = &reference.quote {
+        let slice = section(
+            connection,
+            stored.summary.reference,
+            stored.summary.stats.total_code_points,
+            &stored.artifact_id,
+            quote.offset(),
+            quote.length() as u32,
+        )?;
+        if slice.text != quote.text().as_str() {
+            return Err(AppError::PreconditionFailed.into());
+        }
+    }
+    current_receipt(connection, run)
+}

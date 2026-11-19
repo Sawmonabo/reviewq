@@ -113,6 +113,11 @@ text_identity!(
     opaque_id
 );
 text_identity!(
+    /// The stable identity of a retained message in a registered session.
+    MessageId,
+    opaque_id
+);
+text_identity!(
     /// The service-issued UUID of one durable native outbox row.
     DeliveryId,
     canonical_uuid
