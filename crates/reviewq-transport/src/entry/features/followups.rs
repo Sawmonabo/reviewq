@@ -12,7 +12,8 @@ use axum::http::{HeaderMap, header};
 use axum::response::Response;
 use reviewq_app::access::AppError;
 use reviewq_app::followups::{
-    self as app, AssessmentPosition, MAX_ASSESSMENTS, MAX_RESULTS, ResultPosition,
+    self as app, AssessmentPosition, AssessmentSelection, MAX_ASSESSMENTS, MAX_RESULTS,
+    ResultPosition,
 };
 use reviewq_app::reports::FindingConclusion;
 use reviewq_domain::identity::{GitSha, Revision, RunId};
@@ -41,6 +42,7 @@ pub(super) struct AssessmentQuery {
     limit: Option<u16>,
     cursor: Option<String>,
     through_batch_id: Option<ResourceIdDto>,
+    batch_id: Option<ResourceIdDto>,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -149,7 +151,22 @@ pub(super) async fn assessments(
     if !(1..=MAX_ASSESSMENTS).contains(&limit) {
         return Err(AppError::InvalidRequest.into());
     }
-    let scope = format!("browser-followup-assessments:{limit}:{review}");
+    let (selection, scope) = match (query.batch_id, query.through_batch_id) {
+        (Some(_), Some(_)) => return Err(AppError::InvalidRequest.into()),
+        (Some(batch), None) => (
+            AssessmentSelection::Batch(batch.as_str().to_owned()),
+            format!(
+                "browser-followup-assessments-batch:{limit}:{review}:{batch}",
+                batch = batch.as_str()
+            ),
+        ),
+        (None, through) => (
+            AssessmentSelection::Unviewed {
+                through: through.map(|id| id.as_str().to_owned()),
+            },
+            format!("browser-followup-assessments:{limit}:{review}"),
+        ),
+    };
     let endpoint = &entry.auth.endpoint;
     let after = query
         .cursor
@@ -166,13 +183,7 @@ pub(super) async fn assessments(
         .transpose()?;
     let stored = entry
         .store
-        .read_followup_assessments(
-            actor,
-            parse(&review)?,
-            query.through_batch_id.map(|id| id.as_str().to_owned()),
-            after,
-            limit,
-        )
+        .read_followup_assessments(actor, parse(&review)?, selection, after, limit)
         .await?;
     let through = stored.value.through_batch_id.map(resource).transpose()?;
     let items = stored
