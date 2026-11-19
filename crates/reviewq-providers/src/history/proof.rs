@@ -5,9 +5,10 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 
 use reviewq_app::access::AppError;
+use reviewq_app::history::{HistoryParent, HistorySession};
+use reviewq_app::hosts::{QuestionAnchor, QuestionKey, QuestionStatus, answer_digest};
 use reviewq_domain::session::{HostProvider, NativeBinding};
 use serde::Deserialize;
-use sha2::{Digest, Sha256};
 use struson::reader::{JsonReader, JsonStreamReader, ValueType};
 
 use super::reader::NameBudget;
@@ -23,20 +24,32 @@ pub(crate) async fn codex_opening(
     call_id: String,
     position: Option<u64>,
 ) -> Result<(String, u64), AppError> {
-    codex_call(binding, path, call_id, position, None).await
+    codex_call(binding, None, path, call_id, position, None).await
 }
 
 pub(crate) async fn codex_question_opening(
-    binding: NativeBinding,
+    session: HistorySession,
     path: PathBuf,
     call_id: String,
-) -> Result<(), AppError> {
-    codex_call(binding, path, call_id, None, Some("request_user_input")).await?;
-    Ok(())
+) -> Result<QuestionAnchor, AppError> {
+    let (generation, opening) = codex_call(
+        session.binding,
+        session.parent,
+        path,
+        call_id,
+        None,
+        Some("request_user_input"),
+    )
+    .await?;
+    Ok(QuestionAnchor {
+        generation,
+        opening,
+    })
 }
 
 async fn codex_call(
     binding: NativeBinding,
+    parent: Option<HistoryParent>,
     path: PathBuf,
     call_id: String,
     position: Option<u64>,
@@ -48,8 +61,8 @@ async fn codex_call(
     let cancel = Cancel(Arc::new(AtomicBool::new(false)));
     let stopped = cancel.0.clone();
     tokio::task::spawn_blocking(move || {
-        let source =
-            locator::verify(&binding, None, &path, &stopped)?.ok_or(AppError::Unavailable)?;
+        let source = locator::verify(&binding, parent.as_ref(), &path, &stopped)?
+            .ok_or(AppError::Unavailable)?;
         let length = source
             .file
             .metadata()
@@ -130,40 +143,63 @@ pub(super) fn opening(
 }
 
 pub(crate) async fn codex_question_answered(
-    binding: NativeBinding,
+    session: HistorySession,
     path: PathBuf,
-    call_id: String,
-    digest: [u8; 32],
-) -> Result<bool, AppError> {
-    if binding.identity().provider() != HostProvider::Codex {
+    key: QuestionKey,
+    digest: Option<[u8; 32]>,
+) -> Result<Option<QuestionStatus>, AppError> {
+    if session.binding.identity().provider() != HostProvider::Codex {
         return Err(AppError::Forbidden);
     }
     let cancel = Cancel(Arc::new(AtomicBool::new(false)));
     let stopped = cancel.0.clone();
     tokio::task::spawn_blocking(move || {
-        let source =
-            locator::verify(&binding, None, &path, &stopped)?.ok_or(AppError::Unavailable)?;
-        let length = source
-            .file
-            .metadata()
-            .map_err(|_| AppError::Unavailable)?
-            .len();
-        let mut budget = SEARCH_BYTES;
-        let mut end = file::end_of_line(&source.file, length, &mut budget, &stopped)?;
-        while end != 0 {
-            let start = file::end_of_line(&source.file, end - 1, &mut budget, &stopped)?;
-            if answer(
-                file::input(&source.file, start, end, &stopped),
-                &call_id,
-                digest,
-            )
-            .unwrap_or(false)
-            {
-                return Ok(true);
-            }
-            end = start;
+        let source = locator::verify(&session.binding, session.parent.as_ref(), &path, &stopped)?
+            .ok_or(AppError::Unavailable)?;
+        let file = &source.file;
+        let length = file.metadata().map_err(|_| AppError::Unavailable)?.len();
+        let mut budget = file::READ_BUDGET;
+        if file::generation(&source)? != key.anchor.generation
+            || key.anchor.opening >= length
+            || !file::boundary(file, key.anchor.opening)?
+        {
+            return Err(AppError::CursorExpired);
         }
-        Ok(false)
+        let mut lines = file::Lines::new(file, &stopped);
+        let mut start = lines.next(key.anchor.opening, length, &mut budget)?;
+        if !file::boundary(file, start)?
+            || !opening(
+                lines.input(key.anchor.opening, start),
+                key.item.as_str(),
+                Some("request_user_input"),
+            )?
+        {
+            return Err(AppError::CursorExpired);
+        }
+        let mut ended = false;
+        let mut remaining_after_end = 256_u16;
+        for _ in 0..file::MAX_RECORDS {
+            if start == length || remaining_after_end == 0 {
+                break;
+            }
+            if ended {
+                remaining_after_end -= 1;
+            }
+            let end = match lines.next(start, length, &mut budget) {
+                Err(AppError::PayloadTooLarge) if ended => break,
+                result => result?,
+            };
+            if end == length && !file::boundary(file, end)? {
+                break;
+            }
+            match answer(lines.input(start, end), &key, digest) {
+                Ok(Some(QuestionStatus::Answered)) => return Ok(Some(QuestionStatus::Answered)),
+                Ok(Some(QuestionStatus::Closed)) => ended = true,
+                _ => {}
+            }
+            start = end;
+        }
+        Ok(ended.then_some(QuestionStatus::Closed))
     })
     .await
     .map_err(|_| AppError::Unavailable)?
@@ -171,30 +207,46 @@ pub(crate) async fn codex_question_answered(
 
 fn answer(
     input: impl Read,
-    expected_call: &str,
-    expected_digest: [u8; 32],
-) -> Result<bool, AppError> {
+    key: &QuestionKey,
+    expected_digest: Option<[u8; 32]>,
+) -> Result<Option<QuestionStatus>, AppError> {
     let mut reader = JsonStreamReader::new(NameBudget::new(input));
-    let (mut outer, mut kind, mut call, mut output) = (None, None, None, None);
+    let (mut outer, mut kind, mut call, mut turn, mut output) = (None, None, None, None, None);
     object(&mut reader, |name, reader| match name {
         "type" => string(reader, ID_BYTES).map(|value| outer = value),
         "payload" if reader.peek().map_err(invalid)? == ValueType::Object => {
             object(reader, |name, reader| match name {
                 "type" => string(reader, ID_BYTES).map(|value| kind = value),
                 "call_id" => string(reader, ID_BYTES).map(|value| call = value),
-                "output" if reader.peek().map_err(invalid)? == ValueType::String => {
-                    string(reader, 48 * 1024).map(|value| output = value)
+                "turn_id" => string(reader, ID_BYTES).map(|value| turn = value),
+                "output"
+                    if expected_digest.is_some()
+                        && reader.peek().map_err(invalid)? == ValueType::String =>
+                {
+                    // Keep only a bounded decoded field. Skipping the rest still verifies
+                    // the frame's exact native call/turn ownership.
+                    small_output(reader).map(|value| output = value)
                 }
                 _ => reader.skip_value().map_err(invalid),
             })
         }
         _ => reader.skip_value().map_err(invalid),
     })?;
+    reader.consume_trailing_whitespace().map_err(invalid)?;
+    if outer.as_deref() == Some("event_msg")
+        && matches!(
+            kind.as_deref(),
+            Some("task_complete" | "turn_complete" | "turn_aborted")
+        )
+        && turn.as_deref() == Some(key.turn.as_str())
+    {
+        return Ok(Some(QuestionStatus::Closed));
+    }
     if outer.as_deref() != Some("response_item")
         || kind.as_deref() != Some("function_call_output")
-        || call.as_deref() != Some(expected_call)
+        || call.as_deref() != Some(key.item.as_str())
     {
-        return Ok(false);
+        return Ok(None);
     }
     #[derive(Deserialize)]
     struct ResultPayload {
@@ -206,16 +258,32 @@ fn answer(
     }
     let Some(result) = output
         .as_deref()
-        .and_then(|output| serde_json::from_str::<ResultPayload>(output).ok())
+        .and_then(|value| serde_json::from_slice::<ResultPayload>(value).ok())
     else {
-        return Ok(false);
+        return Ok(Some(QuestionStatus::Closed));
     };
     let normalized = result
         .answers
         .into_iter()
         .map(|(id, value)| (id, value.answers))
         .collect::<BTreeMap<_, _>>();
-    let verified: [u8; 32] =
-        Sha256::digest(serde_json::to_vec(&normalized).map_err(|_| AppError::Internal)?).into();
-    Ok(verified == expected_digest)
+    Ok(Some(
+        if answer_digest(&normalized).ok() == expected_digest && expected_digest.is_some() {
+            QuestionStatus::Answered
+        } else {
+            QuestionStatus::Closed
+        },
+    ))
+}
+
+fn small_output<R: Read>(reader: &mut JsonStreamReader<R>) -> Result<Option<Vec<u8>>, AppError> {
+    const MAX: u64 = 68 * 1024;
+    let mut value = reader.next_string_reader().map_err(invalid)?;
+    let mut bytes = Vec::new();
+    (&mut value)
+        .take(MAX + 1)
+        .read_to_end(&mut bytes)
+        .map_err(invalid)?;
+    std::io::copy(&mut value, &mut std::io::sink()).map_err(invalid)?;
+    Ok((bytes.len() as u64 <= MAX).then_some(bytes))
 }

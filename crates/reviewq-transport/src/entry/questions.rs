@@ -4,7 +4,7 @@ use axum::Json;
 use axum::extract::State;
 use axum::http::HeaderMap;
 use reviewq_app::access::{Actor, AppError};
-use reviewq_app::hosts::{QuestionAnswer, QuestionForm, QuestionStatus};
+use reviewq_app::hosts::{QuestionAccess, QuestionAnswer, QuestionForm, QuestionStatus};
 use reviewq_domain::identity::{RunId, SessionKey};
 use reviewq_domain::session::HostProvider;
 use reviewq_protocol::questions as dto;
@@ -52,14 +52,21 @@ pub(super) async fn read(
     validate_request(request.as_deref())?;
     let stored = entry
         .store
-        .history_session(actor, run.clone(), session.clone())
+        .history_session(actor.clone(), run.clone(), session.clone())
         .await?;
     let host = entry
         .host
         .as_ref()
         .filter(|_| stored.value.binding.identity().provider() == HostProvider::Codex);
     let (available, forms) = match host {
-        Some(host) => (true, host.questions(stored.value, request.clone()).await?),
+        Some(host) => (
+            true,
+            host.questions(
+                QuestionAccess::new(actor, stored.value, entry.store.clone()),
+                request.clone(),
+            )
+            .await?,
+        ),
         None => (false, Vec::new()),
     };
     if available && request.is_some() && forms.is_empty() {
@@ -132,9 +139,7 @@ pub(super) async fn respond(
         request,
         submission,
         answers,
-        stored.value,
-        actor,
-        entry.store.clone(),
+        QuestionAccess::new(actor, stored.value, entry.store.clone()),
     );
     let form = host.answer_question(answer).await?;
     success(project(&run, &session, form)?, stored.cursor)

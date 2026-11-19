@@ -80,6 +80,7 @@ pub trait Store:
     + ClaudeStore
     + ClaudeWorkflowStore
     + HistoryStore
+    + reviewq_app::hosts::QuestionStore
     + SourceRefreshStore
     + ReportStore
     + ReportMutationStore
@@ -109,6 +110,7 @@ impl<
         + ClaudeStore
         + ClaudeWorkflowStore
         + HistoryStore
+        + reviewq_app::hosts::QuestionStore
         + SourceRefreshStore
         + ReportStore
         + ReportMutationStore
