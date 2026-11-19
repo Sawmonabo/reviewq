@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import type { ReactNode } from "react";
 import { loadSprints, readQueue, readQueueSync, refreshQueue } from "../../api/workspace";
 import { FilterSelect } from "../../components/FilterSelect";
 import { Icon } from "../../components/Icon";
@@ -20,10 +21,13 @@ import {
 import type { QueueFilters } from "../../features/queue/filters";
 import type { Launch, LaunchTarget, OpenReview } from "../../features/queue/types";
 import type { QueueFacets, QueueRow } from "../../api/generated/contracts";
+import { SelectionActions } from "../SelectionActions";
+import { QueueExclusions } from "./QueueExclusions";
 
 const filterKeys = Object.keys(clearedFilters) as (keyof QueueFilters)[];
 
 type QueueProps = {
+  readonly renderHeader: (selection?: ReactNode) => ReactNode;
   readonly selectedReview?: string | undefined;
   readonly selectedTicket?: string | undefined;
   readonly revision: number;
@@ -37,6 +41,7 @@ type QueueProps = {
 };
 
 export function QueueView({
+  renderHeader,
   selectedReview,
   selectedTicket,
   revision,
@@ -133,6 +138,19 @@ export function QueueView({
 
   return (
     <>
+      {renderHeader(
+        selecting ? (
+          <SelectionActions
+            targets={captured}
+            onLaunch={onLaunch}
+            onMonitor={onMonitor}
+            onCancel={() => {
+              setChecked([]);
+              onSelect(false);
+            }}
+          />
+        ) : undefined,
+      )}
       <div className="queue-filters" aria-label="Review filters">
         <FilterSelect
           label="Board"
@@ -200,39 +218,14 @@ export function QueueView({
           options={Object.entries(states).map(([value, label]) => ({ value, label }))}
           onChange={(value) => update({ ...filters, state: value as QueueFilters["state"] })}
         />
-        <details className="filter-popover queue-hide">
-          <summary className="filter-control">
-            Hide
-            {(filters.hideReviewed || filters.hideInProgress) && (
-              <span className="hide-count">
-                {Number(filters.hideReviewed) + Number(filters.hideInProgress)}
-              </span>
-            )}
-            <Icon name="chevron" size={12} />
-          </summary>
-          <div>
-            <label>
-              <input
-                type="checkbox"
-                checked={filters.hideReviewed}
-                onChange={(event) =>
-                  update({ ...filters, hideReviewed: event.currentTarget.checked })
-                }
-              />
-              Reviewed ({facets?.hideReviewed ?? 0})
-            </label>
-            <label>
-              <input
-                type="checkbox"
-                checked={filters.hideInProgress}
-                onChange={(event) =>
-                  update({ ...filters, hideInProgress: event.currentTarget.checked })
-                }
-              />
-              Being reviewed ({facets?.hideInProgress ?? 0})
-            </label>
-          </div>
-        </details>
+        <QueueExclusions
+          reviewed={filters.hideReviewed}
+          inProgress={filters.hideInProgress}
+          reviewedCount={facets?.hideReviewed}
+          inProgressCount={facets?.hideInProgress}
+          onReviewed={(hideReviewed) => update({ ...filters, hideReviewed })}
+          onInProgress={(hideInProgress) => update({ ...filters, hideInProgress })}
+        />
         <FilterSelect
           label="Sort"
           accessibleLabel="Sort reviews"
@@ -267,42 +260,6 @@ export function QueueView({
         <p className="meta" role="status">
           Loading selected sprint…
         </p>
-      )}
-      {selecting && (
-        <div className="selection-bar actions" aria-label="Selected merge requests">
-          <strong>{captured.length} selected</strong>
-          <button
-            type="button"
-            className="primary"
-            disabled={!captured.length}
-            onClick={() => onLaunch("prepare", captured)}
-          >
-            Prepare reviews
-          </button>
-          <button
-            type="button"
-            disabled={!captured.length}
-            onClick={() => onMonitor(captured, false)}
-          >
-            Auto-review updates
-          </button>
-          <button
-            type="button"
-            disabled={!captured.length}
-            onClick={() => onMonitor(captured, true)}
-          >
-            Pause auto-review
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              setChecked([]);
-              onSelect(false);
-            }}
-          >
-            Cancel
-          </button>
-        </div>
       )}
       {notice && <Notice>{notice}</Notice>}
       {currentSync?.error && (

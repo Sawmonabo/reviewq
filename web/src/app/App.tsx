@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useRef, useState, useSyncExternalStore } from "react";
-import type { CSSProperties } from "react";
+import type { CSSProperties, ReactNode } from "react";
 import { findRunSession, readOverview, readRun, resolveReview } from "../api/client";
 import { startWorkspaceEvents } from "../api/events";
 import type { Notification, RunDetail, SessionSummary } from "../api/generated/contracts";
@@ -70,7 +70,7 @@ export function App() {
   const resolvedRun = useRef<{ reviewId: string; runId: string } | undefined>(undefined);
   const { reviewId, runId, sessionKey, ticket } = route;
   const opened = Boolean(reviewId || ticket);
-  const heading = views.find((item) => item.view === route.view)?.label ?? "Review queue";
+  const title = views.find((item) => item.view === route.view)?.label ?? "Review queue";
 
   const overview = useResource(
     reviewId ?? "",
@@ -125,6 +125,7 @@ export function App() {
       resolvedRun.current = undefined;
       setRoute(readRoute());
       setOverlay(undefined);
+      setSelecting(false);
     }
     function network() {
       setOffline(!navigator.onLine);
@@ -239,6 +240,51 @@ export function App() {
     saveValue("rail", !railSmall);
   }
 
+  function chooseReviewSelection(next: boolean) {
+    setSelecting(next);
+    requestAnimationFrame(() => {
+      const target = next
+        ? document.getElementById("view-title")
+        : workspace.current?.querySelector<HTMLButtonElement>(".workspace-title .menu-trigger");
+      target?.focus();
+    });
+  }
+
+  function renderHeader(selection?: ReactNode) {
+    return (
+      <>
+        <header className="workspace-title">
+          <p>Your workspace</p>
+          <h1 id="view-title" tabIndex={-1}>
+            {title}
+          </h1>
+          {route.view !== "notifications" && (
+            <div className={selection ? "actions workspace-selection" : "actions"}>
+              {selection ?? (
+                <ActionMenu
+                  label="New review"
+                  contentClassName="workspace-action-menu"
+                  trigger={
+                    <span className="button-label">
+                      New review <Icon name="chevron" size={12} />
+                    </span>
+                  }
+                  items={[
+                    { label: "Review MR", run: () => menuLaunch("pick") },
+                    { label: "Select MRs", run: () => chooseReviewSelection(true) },
+                    { label: "Register run", run: () => menuLaunch("register") },
+                    { label: "Pending launches", run: () => menuLaunch("receipts") },
+                  ]}
+                />
+              )}
+            </div>
+          )}
+        </header>
+        {offline && <Notice>Offline. Showing the last available information.</Notice>}
+      </>
+    );
+  }
+
   return (
     <main className={`workspace ${railSmall ? "rail-small" : ""} ${opened ? "has-detail" : ""}`}>
       <a className="skip-link" href="#view-title">
@@ -328,39 +374,15 @@ export function App() {
       >
         <section ref={workspace} className="workspace-view" aria-labelledby="view-title">
           <div className="workspace-inner">
-            <header className="workspace-title">
-              <p>Your workspace</p>
-              <h1 id="view-title" tabIndex={-1}>
-                {heading}
-              </h1>
-              <div className="actions">
-                {route.view !== "notifications" && (
-                  <ActionMenu
-                    label="New review"
-                    trigger={
-                      <span className="button-label">
-                        New review <Icon name="chevron" size={12} />
-                      </span>
-                    }
-                    items={[
-                      { label: "Review MR", run: () => menuLaunch("pick") },
-                      { label: "Select MRs", run: () => setSelecting(true) },
-                      { label: "Register run", run: () => menuLaunch("register") },
-                      { label: "Pending launches", run: () => menuLaunch("receipts") },
-                    ]}
-                  />
-                )}
-              </div>
-            </header>
-            {offline && <Notice>Offline. Showing the last available information.</Notice>}
-            <PanelBoundary key={route.view}>
+            <PanelBoundary key={route.view} leading={renderHeader()}>
               {route.view === "queue" && (
                 <QueueView
+                  renderHeader={renderHeader}
                   selectedReview={reviewId}
                   selectedTicket={ticket}
                   revision={revision}
                   selecting={selecting}
-                  onSelect={setSelecting}
+                  onSelect={chooseReviewSelection}
                   onReview={openReview}
                   onTicket={openTicket}
                   onSettings={() => setSettings(true)}
@@ -370,16 +392,20 @@ export function App() {
               )}
               {route.view === "runs" && (
                 <RunsView
+                  renderHeader={renderHeader}
                   selectedReview={reviewId}
                   selecting={selecting}
-                  onSelect={setSelecting}
+                  onSelect={chooseReviewSelection}
                   onReview={openReview}
                   onLaunch={menuLaunch}
                   onMonitor={monitor}
                 />
               )}
               {route.view === "notifications" && (
-                <AttentionView onOpen={openNotification} onChange={unread.retry} />
+                <>
+                  {renderHeader()}
+                  <AttentionView onOpen={openNotification} onChange={unread.retry} />
+                </>
               )}
             </PanelBoundary>
           </div>

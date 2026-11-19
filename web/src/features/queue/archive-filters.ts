@@ -4,7 +4,7 @@ export const presets = {
   seven: "Last 7 days",
   thirty: "Last 30 days",
   month: "This month",
-  custom: "Custom dates",
+  custom: "Custom range",
 } as const;
 
 export type DatePreset = keyof typeof presets;
@@ -31,8 +31,14 @@ export function localDateRange(preset: DatePreset, start: string, end: string) {
   return { fromInclusive: from.toISOString(), untilExclusive: to.toISOString() };
 }
 
-function parseLocal(value: string) {
+export function parseLocal(value: string) {
   if (!/^\d{4}-\d\d-\d\d$/.test(value)) return;
   const date = new Date(`${value}T00:00:00`);
-  return Number.isNaN(date.getTime()) ? undefined : date;
+  return localDay(date) === value ? date : undefined;
+}
+
+export function localDay(value: Date): string {
+  const year = String(value.getFullYear()).padStart(4, "0");
+  const month = String(value.getMonth() + 1).padStart(2, "0");
+  return `${year}-${month}-${String(value.getDate()).padStart(2, "0")}`;
 }

@@ -29,8 +29,14 @@ export function ReviewRow({
     <button
       type="button"
       className="review-row"
-      aria-current={selected || undefined}
-      aria-pressed={selection?.checked}
+      aria-current={(!selection && selected) || undefined}
+      role={selection ? "checkbox" : undefined}
+      aria-checked={selection?.checked}
+      aria-label={
+        selection
+          ? `Select ${row.tickets.map((ticket) => ticket.key).join(" · ") || row.projectPath} · !${row.iid}`
+          : undefined
+      }
       disabled={disabled}
       onClick={selection?.onToggle ?? onOpen}
     >
@@ -53,7 +59,7 @@ export function ReviewRow({
           {row.draft && <span className="row-tag">Draft</span>}
           <ReviewBadges review={row} />
         </div>
-        <strong className="row-title">{row.title}</strong>
+        <strong className="row-title">{row.tickets[0]?.title || row.title}</strong>
         <div className="row-foot">
           {row.focusedProvider && <span>{providerLabel(row.focusedProvider)}</span>}
           {!tracked && <span>No review run started</span>}
