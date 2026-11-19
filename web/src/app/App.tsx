@@ -513,9 +513,9 @@ export function App() {
                         activeSession.retry();
                       }}
                       onTab={(tab) => move({ ...route, tab })}
-                      onSession={(session) => {
+                      onSession={(session, tab) => {
                         const exactRun = selectedRun?.runId;
-                        if (exactRun) openReview(reviewId, exactRun, "agent", session);
+                        if (exactRun) openReview(reviewId, exactRun, tab ?? "agent", session);
                       }}
                       onRun={(id) => openReview(reviewId, id, route.tab)}
                       onClose={closeDrawer}

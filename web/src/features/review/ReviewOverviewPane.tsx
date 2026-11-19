@@ -35,15 +35,25 @@ export function ReviewOverviewPane({
           <h3>Review details</h3>
           <span className="badge">{readable(review.mrState)}</span>
         </div>
-        <p>
-          <strong>{review.title}</strong>{" "}
-          {source && (
-            <a href={source} target="_blank" rel="noreferrer">
-              GitLab ↗
-            </a>
-          )}
-        </p>
         <dl className="overview-facts">
+          <div>
+            <dt>MR title</dt>
+            <dd>
+              {source ? (
+                <a href={source} target="_blank" rel="noreferrer">
+                  {review.title} ↗
+                </a>
+              ) : (
+                review.title
+              )}
+            </dd>
+          </div>
+          <div>
+            <dt>Registration key</dt>
+            <dd>
+              <code>{review.reviewId}</code>
+            </dd>
+          </div>
           <div>
             <dt>Project</dt>
             <dd>
@@ -61,7 +71,7 @@ export function ReviewOverviewPane({
             </dd>
           </div>
           <div>
-            <dt>Reviewed revision</dt>
+            <dt>Your last review</dt>
             <dd>
               <code title={overview.decision?.reviewedSha ?? review.fullMrReviewedSha ?? undefined}>
                 {(overview.decision?.reviewedSha ?? review.fullMrReviewedSha)?.slice(0, 12) ??
@@ -176,7 +186,8 @@ export function ReviewOverviewPane({
         </section>
       ) : (
         selected && (
-          <Empty title="No registered run">
+          <Empty title="No review run registered">
+            <p>Start a review or connect the conversation already working on this MR.</p>
             <div className="actions">
               {review.mrState === "open" && (
                 <button
@@ -188,7 +199,7 @@ export function ReviewOverviewPane({
                 </button>
               )}
               <button type="button" onClick={() => onLaunch("register", [review])}>
-                Register run
+                Register existing session
               </button>
               <button type="button" onClick={onSettings}>
                 Settings

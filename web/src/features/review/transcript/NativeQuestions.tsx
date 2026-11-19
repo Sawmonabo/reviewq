@@ -1,23 +1,28 @@
-import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useEffect, useId, useRef, useState, useSyncExternalStore } from "react";
 import type { Form as NativeForm, Question } from "../../../api/generated/contracts/questions";
 import { answerQuestion, readQuestions } from "../../../api/history";
 import type { SessionAddress } from "../../../api/history";
 import { Notice } from "../../../components/PanelState";
+import { Icon } from "../../../components/Icon";
 import { useDraft } from "../../../hooks/useDraft";
 import { useResource } from "../../../hooks/useResource";
 import type { DraftStore } from "../../../lib/drafts";
-import { describeError, readable } from "../../../lib/presentation";
+import { describeError } from "../../../lib/presentation";
 import { submits } from "../../../lib/submit-key";
 
 export function NativeQuestions({
   target,
   store,
   reviewTitle,
+  sessionName,
+  child,
   onTerminal,
 }: {
   readonly target: SessionAddress;
   readonly store: DraftStore;
   readonly reviewTitle: string;
+  readonly sessionName: string;
+  readonly child: boolean;
   readonly onTerminal: () => void;
 }) {
   const questions = useResource(
@@ -49,6 +54,7 @@ export function NativeQuestions({
           target={target}
           store={store}
           label={reviewTitle}
+          destination={`To ${sessionName} · ${child ? "Subagent" : "Lead review"}`}
           onTerminal={onTerminal}
           onUpdate={questions.retry}
         />
@@ -62,6 +68,7 @@ function QuestionForm({
   target,
   store,
   label,
+  destination,
   onTerminal,
   onUpdate,
 }: {
@@ -69,6 +76,7 @@ function QuestionForm({
   readonly target: SessionAddress;
   readonly store: DraftStore;
   readonly label: string;
+  readonly destination: string;
   readonly onTerminal: () => void;
   readonly onUpdate: () => void;
 }) {
@@ -77,6 +85,9 @@ function QuestionForm({
     original: NativeForm["status"];
   }>();
   const [notice, setNotice] = useState<string>();
+  const [minimized, setMinimized] = useState(false);
+  const bodyId = useId();
+  const heading = useRef<HTMLButtonElement>(null);
   const submission = useRef<string | undefined>(undefined);
   const busy = useRef(false);
   const element = useRef<HTMLFormElement>(null);
@@ -88,6 +99,14 @@ function QuestionForm({
   const open = status === "pending" && supported;
   const draftName = `Question · ${label}`;
   const prefix = [target.runId, target.sessionKey, form.requestId, form.turnId, form.itemId];
+  const title = {
+    pending: "Answer requested",
+    submitting: "Sending answer…",
+    answered: "Answered",
+    closed: "Closed without a confirmed answer",
+    unavailable: "Answer unavailable",
+    uncertain: "Answer delivery unconfirmed",
+  }[status];
 
   async function submit() {
     if (!open || busy.current) return;
@@ -156,92 +175,122 @@ function QuestionForm({
 
   return (
     <form
-      className="surface-card stack question-form"
+      className="question-form"
       ref={element}
+      aria-label="Answer Codex question"
+      onKeyDown={(event) => {
+        if (event.key === "Escape" && !minimized) {
+          event.preventDefault();
+          event.stopPropagation();
+          setMinimized(true);
+          heading.current?.focus({ preventScroll: true });
+        } else if (
+          (event.target instanceof HTMLTextAreaElement ||
+            (event.target instanceof HTMLInputElement && event.target.type === "password")) &&
+          submits(event.nativeEvent)
+        ) {
+          event.preventDefault();
+          void submit();
+        }
+      }}
       onSubmit={(event) => {
         event.preventDefault();
         void submit();
       }}
     >
-      <div className="spread">
-        <h3>
-          {form.blocking && status === "pending" ? "Native input required" : "Native question"}
-        </h3>
-        <span className={answered ? "badge" : "badge rose"}>{readable(status)}</span>
-      </div>
-      {notice && <Notice>{notice}</Notice>}
-      {reviewable.length > 0 && (
-        <details className="answered-question">
-          <summary>{reviewable.length === 1 ? "View question" : "View questions"}</summary>
-          {reviewable.map((question) => (
-            <section key={question.id} className="stack">
-              <strong>{question.header}</strong>
-              <p>{question.question}</p>
-              {question.options.length > 0 && (
-                <ul>
-                  {question.options.map((option) => (
-                    <li key={option.label}>
-                      {option.label}
-                      {option.description && ` · ${option.description}`}
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </section>
-          ))}
-        </details>
-      )}
-      {status === "pending" && !supported && (
-        <div className="actions">
-          <p className="meta">
-            {includesSecret
-              ? "Enter this asynchronous secret answer in the native session."
-              : "Use the native controls for this request."}
-          </p>
-          <button type="button" onClick={onTerminal}>
-            Open in terminal
-          </button>
-        </div>
-      )}
-      {supported &&
-        form.questions.map((question) =>
-          question.isSecret ? (
-            open && <SecretQuestion key={question.id} question={question} />
-          ) : (
-            <QuestionField
-              key={question.id}
-              question={question}
-              store={store}
-              draftKey={answerKey(prefix, question.id)}
-              draftName={draftName}
-              open={open}
-            />
-          ),
-        )}
-      {open && (
-        <button type="submit" className="primary">
-          Send answers
+      <div className="question-heading">
+        <button
+          ref={heading}
+          type="button"
+          className="quiet-button"
+          aria-label={minimized ? title : "Minimize question"}
+          aria-controls={bodyId}
+          aria-expanded={!minimized}
+          onClick={() => setMinimized(!minimized)}
+        >
+          <Icon name="chevron" size={12} />
+          <span>{title}</span>
         </button>
-      )}
-      {status === "unavailable" && (
-        <div className="actions">
-          <p className="meta">This native request is no longer available in ReviewQ.</p>
-          <button type="button" onClick={onTerminal}>
-            Open in terminal
-          </button>
-        </div>
-      )}
-      {status === "uncertain" && (
-        <div className="actions">
-          <button type="button" onClick={onUpdate}>
-            Check native question
-          </button>
-          <button type="button" onClick={onTerminal}>
-            Open in terminal
-          </button>
-        </div>
-      )}
-      {form.questions.length === 0 && <DetachedAnswers store={store} prefix={prefix} />}
+        <small title={destination}>{destination}</small>
+      </div>
+      <div id={bodyId} hidden={minimized}>
+        {notice && <Notice>{notice}</Notice>}
+        {reviewable.length > 0 && (
+          <details className="answered-question">
+            <summary>{reviewable.length === 1 ? "View question" : "View questions"}</summary>
+            {reviewable.map((question) => (
+              <section key={question.id} className="stack">
+                <strong>{question.header}</strong>
+                <p>{question.question}</p>
+                {question.options.length > 0 && (
+                  <ul>
+                    {question.options.map((option) => (
+                      <li key={option.label}>
+                        {option.label}
+                        {option.description && ` · ${option.description}`}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </section>
+            ))}
+          </details>
+        )}
+        {status === "pending" && !supported && (
+          <div className="actions">
+            <p className="meta">
+              {includesSecret
+                ? "Enter this asynchronous secret answer in the native session."
+                : "Use the native controls for this request."}
+            </p>
+            <button type="button" onClick={onTerminal}>
+              Open in terminal
+            </button>
+          </div>
+        )}
+        {supported &&
+          form.questions.map((question) =>
+            question.isSecret ? (
+              open && <SecretQuestion key={question.id} question={question} />
+            ) : (
+              <QuestionField
+                key={question.id}
+                question={question}
+                store={store}
+                draftKey={answerKey(prefix, question.id)}
+                draftName={draftName}
+                open={open}
+              />
+            ),
+          )}
+        {open && (
+          <div className="question-actions">
+            <small>Enter in an answer sends · Esc minimizes</small>
+            <button type="submit" className="primary">
+              {form.questions.length === 1 ? "Send answer" : "Send answers"}
+            </button>
+          </div>
+        )}
+        {status === "unavailable" && (
+          <div className="actions">
+            <p className="meta">This native request is no longer available in ReviewQ.</p>
+            <button type="button" onClick={onTerminal}>
+              Open in terminal
+            </button>
+          </div>
+        )}
+        {status === "uncertain" && (
+          <div className="actions">
+            <button type="button" onClick={onUpdate}>
+              Check native question
+            </button>
+            <button type="button" onClick={onTerminal}>
+              Open in terminal
+            </button>
+          </div>
+        )}
+        {form.questions.length === 0 && <DetachedAnswers store={store} prefix={prefix} />}
+      </div>
     </form>
   );
 }
@@ -366,56 +415,84 @@ function QuestionField({
   const [limited, setLimited] = useState(false);
   const answer = draft.startsWith("text:") ? draft.slice(5) : "";
   const other = useRef<HTMLTextAreaElement>(null);
+  const [focused, setFocused] = useState(0);
+  const legend = useId();
+  const options = question.options;
+  const choices =
+    question.isOther && options.length > 0
+      ? [...options, { label: "Other", description: "", other: true }]
+      : options;
   function edit(value: string) {
     setLimited(!store.set(draftKey, draftName, value));
   }
   if (!open && !draft) return null;
   return (
-    <fieldset
-      data-question={question.id}
-      className="stack"
-      onKeyDown={(event) => {
-        if (submits(event.nativeEvent)) {
-          event.preventDefault();
-          event.currentTarget.closest("form")?.requestSubmit();
-        }
-      }}
-    >
-      <legend>{question.header}</legend>
-      <p>{question.question}</p>
+    <fieldset data-question={question.id} className="stack">
+      <legend id={legend}>{question.header || question.question}</legend>
+      {question.header && <p>{question.question}</p>}
       {open ? (
         <>
-          {question.options.map((option) => (
-            <label className="question-option" key={option.label}>
-              <input
-                type="radio"
-                name={draftKey}
-                checked={draft === `option:${option.label}`}
-                onChange={() => edit(`option:${option.label}`)}
-              />
-              <span>
-                <strong>{option.label}</strong>
-                {option.description && <small>{option.description}</small>}
-              </span>
-            </label>
-          ))}
-          {question.options.length > 0 && question.isOther && (
-            <label>
-              <input
-                type="radio"
-                name={draftKey}
-                checked={draft.startsWith("text:")}
-                onChange={() => {
-                  edit("text:");
-                  requestAnimationFrame(() => other.current?.focus());
-                }}
-              />{" "}
-              Other
-            </label>
+          {choices.length > 0 && (
+            <div
+              className="question-choices"
+              role="radiogroup"
+              aria-labelledby={legend}
+              onKeyDown={(event) => {
+                const up = ["ArrowUp", "ArrowLeft"].includes(event.key);
+                const down = ["ArrowDown", "ArrowRight"].includes(event.key);
+                if (!up && !down && event.key !== "Home" && event.key !== "End") return;
+                const buttons = [
+                  ...event.currentTarget.querySelectorAll<HTMLButtonElement>("button"),
+                ];
+                const at = buttons.indexOf(document.activeElement as HTMLButtonElement);
+                if (at < 0) return;
+                event.preventDefault();
+                const next =
+                  event.key === "Home"
+                    ? 0
+                    : event.key === "End"
+                      ? buttons.length - 1
+                      : (at + (up ? -1 : 1) + buttons.length) % buttons.length;
+                buttons[next]?.focus({ preventScroll: true });
+              }}
+            >
+              {choices.map((option, index) => {
+                const custom = "other" in option && option.other === true;
+                const checked = custom
+                  ? draft.startsWith("text:")
+                  : draft === `option:${option.label}`;
+                return (
+                  <button
+                    type="button"
+                    role="radio"
+                    className="question-option"
+                    key={custom ? "free-answer" : `option:${option.label}`}
+                    aria-checked={checked}
+                    tabIndex={focused === index ? 0 : -1}
+                    onFocus={() => setFocused(index)}
+                    onClick={() => {
+                      if (!custom) edit(`option:${option.label}`);
+                      else {
+                        if (!checked) edit("text:");
+                        requestAnimationFrame(() => other.current?.focus({ preventScroll: true }));
+                      }
+                    }}
+                  >
+                    <span className="choice-mark" aria-hidden="true">
+                      {checked ? "●" : "○"}
+                    </span>
+                    <span>
+                      <strong>{option.label}</strong>
+                      {option.description && <small>{option.description}</small>}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
           )}
           {(question.options.length === 0 || draft.startsWith("text:")) && (
             <label className="field">
-              Your answer
+              {question.options.length ? "Other answer" : "Your answer"}
               <textarea
                 ref={other}
                 value={answer}

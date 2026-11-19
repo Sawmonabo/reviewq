@@ -25,6 +25,11 @@
   font-family: inherit;
   font-size: 11px;
   font-weight: 560;
+  border-radius: 0;
+}
+.drawer-breadcrumb .quiet-button:is(:hover, :active) {
+  background: transparent;
+  color: var(--link);
 }
 .drawer-breadcrumb a {
   color: var(--muted);
@@ -165,8 +170,14 @@
   font-weight: 400;
 }
 .drawer-surface .drawer-tabs button[aria-selected="true"] {
-  border-color: var(--link);
+  border-color: transparent;
+  box-shadow: inset 0 -2px var(--link);
   color: #e6e6ee;
+}
+@media (forced-colors: active) {
+  .drawer-surface .drawer-tabs button[aria-selected="true"] {
+    border-color: Highlight;
+  }
 }
 :root[data-theme="light"] .drawer-surface .drawer-tabs button[aria-selected="true"] {
   color: var(--text);
@@ -204,12 +215,16 @@
 .drawer-surface .drawer-body > .panel-loading:only-child {
   min-height: 100%;
 }
+.drawer-reading-content {
+  display: flow-root;
+  min-width: 0;
+}
 .overview {
   gap: 22px;
 }
 .overview-review-details {
   border-top: 1px solid var(--line);
-  padding-top: 17px;
+  padding-top: 25px;
 }
 .overview-review-details > button {
   justify-self: start;
@@ -222,15 +237,15 @@
 }
 .overview-facts {
   display: grid;
-  gap: 9px;
+  gap: 10px;
   font-size: 11px;
   line-height: 1.7;
 }
 .overview-facts > div {
   display: grid;
-  grid-template-columns: 115px minmax(0, 1fr);
+  grid-template-columns: min(130px, 36%) minmax(0, 1fr);
   align-items: start;
-  gap: 10px;
+  gap: 18px;
 }
 .overview-facts dt {
   min-width: 0;
