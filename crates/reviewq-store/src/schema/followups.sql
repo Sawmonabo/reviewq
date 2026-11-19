@@ -15,6 +15,7 @@ CREATE TABLE followup_monitors (
     binding_verified INTEGER NOT NULL CHECK (binding_verified IN (0, 1)),
     reason TEXT CHECK (length(CAST(reason AS BLOB)) <= 1024),
     updated_at_ms INTEGER NOT NULL,
+    last_complete_observation_ms INTEGER,
     FOREIGN KEY (review_id, run_id) REFERENCES runs(review_id, run_id),
     CHECK (binding_verified=0 OR (run_id IS NOT NULL AND reviewer_id IS NOT NULL))
 ) STRICT, WITHOUT ROWID;

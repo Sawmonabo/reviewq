@@ -244,11 +244,12 @@ struct CurrentMonitor {
     state: MonitorState,
     verified: bool,
     reviewer_id: Option<String>,
+    policy_override: Option<bool>,
 }
 
 fn current(db: &Connection, review: &ReviewId) -> Result<Option<CurrentMonitor>, StoreError> {
     let mut statement = db.prepare_cached(
-        "SELECT run_id, generation, state, binding_verified, reviewer_id FROM followup_monitors WHERE review_id=?1",
+        "SELECT run_id, generation, state, binding_verified, reviewer_id, policy_override FROM followup_monitors WHERE review_id=?1",
     )?;
     let mut rows = statement.query([review.as_str()])?;
     rows.next()?
@@ -259,6 +260,7 @@ fn current(db: &Connection, review: &ReviewId) -> Result<Option<CurrentMonitor>,
                 state: parse(text(row, 2)?)?,
                 verified: row.get(3)?,
                 reviewer_id: row.get(4)?,
+                policy_override: row.get(5)?,
             })
         })
         .transpose()
@@ -296,10 +298,13 @@ fn monitor(
                 return Err(AppError::NotFound.into());
             }
             let observation = validated_observation(db, &input.review, observation)?;
-            if observation.personal_approval != Some(false) && *state == MonitorState::Enabled {
+            let reviewers = observations::monitored_reviewers(db, observation.authenticated_actor)?;
+            if observation.reviewer_approval(&reviewers) != Some(false)
+                && *state == MonitorState::Enabled
+            {
                 return Err(AppError::Conflict.into());
             }
-            let selected = observations::verified_threads(&observation, selections)?;
+            let selected = observations::verified_threads(&observation, selections, &reviewers)?;
             let owner = observation.authenticated_actor.to_string();
             if let Some(old) = &previous
                 && old.verified
@@ -313,13 +318,15 @@ fn monitor(
                     identity: observation.review.identity.clone(),
                     settings,
                 };
-                notifications = observations::adopt_remote(db, &target, &observation, time)?;
+                notifications =
+                    observations::adopt_remote(db, &target, &observation, &reviewers, time)?;
             }
             let same = if let Some(old) = &previous {
                 old.verified
                     && old.reviewer_id.as_deref() == Some(owner.as_str())
                     && old.run.as_deref() == Some(run.as_str())
                     && old.state == *state
+                    && old.policy_override == Some(*state == MonitorState::Enabled)
                     && observations::same_enrollment(db, &input.review, old.generation, &selected)?
             } else {
                 false
@@ -339,22 +346,24 @@ fn monitor(
                     .ok_or(AppError::Internal)?;
                 db.execute(
                 "INSERT INTO followup_monitors(review_id, run_id, generation, state, policy_override,
-                     binding_verified, updated_at_ms, reviewer_id) VALUES(?1,?2,?3,?4,?5,1,?6,?7)
+                     binding_verified, updated_at_ms, reviewer_id, last_complete_observation_ms) VALUES(?1,?2,?3,?4,?5,1,?6,?7,?8)
                  ON CONFLICT(review_id) DO UPDATE SET run_id=excluded.run_id, generation=excluded.generation,
                      state=excluded.state, policy_override=excluded.policy_override,
                      binding_verified=1, reason=NULL, updated_at_ms=excluded.updated_at_ms,
-                     reviewer_id=excluded.reviewer_id",
+                     reviewer_id=excluded.reviewer_id,last_complete_observation_ms=excluded.last_complete_observation_ms",
                 params![input.review.as_str(), run.as_str(), generation.as_sqlite_integer(),
-                    state.to_string(), *state == MonitorState::Enabled, time, observation.authenticated_actor.to_string()],
+                    state.to_string(), *state == MonitorState::Enabled, time, observation.authenticated_actor.to_string(), observation.observed_at_ms],
             )?;
-                observations::save_selection(
-                    db,
-                    &input.review,
-                    generation,
-                    observation.authenticated_actor,
-                    selected,
-                )?;
+                observations::save_selection(db, &input.review, generation, selected)?;
                 if let Some(old) = previous {
+                    db.execute(
+                        "INSERT INTO followup_threads(review_id,generation,original_note_id,discussion_id,
+                            reviewer_id,selected,discussion_version,baseline_sha256,resolved)
+                         SELECT review_id,?3,original_note_id,discussion_id,reviewer_id,0,discussion_version,
+                            baseline_sha256,resolved FROM followup_threads
+                         WHERE review_id=?1 AND generation=?2 ON CONFLICT DO NOTHING",
+                        params![input.review.as_str(),old.generation.as_sqlite_integer(),generation.as_sqlite_integer()],
+                    )?;
                     observations::carry_pending(
                         db,
                         &input.review,
@@ -364,6 +373,15 @@ fn monitor(
                         time,
                     )?;
                 }
+                observations::add_reviewer_threads(
+                    db,
+                    &input.review,
+                    generation,
+                    &observation,
+                    &reviewers,
+                    None,
+                    false,
+                )?;
                 (generation, *state, None)
             }
         }
@@ -372,7 +390,9 @@ fn monitor(
             let pause = matches!(input.command, MonitorCommand::Pause);
             if !pause {
                 let observation = validated_observation(db, &input.review, observation)?;
-                if observation.personal_approval != Some(false)
+                let reviewers =
+                    observations::monitored_reviewers(db, observation.authenticated_actor)?;
+                if observation.reviewer_approval(&reviewers) != Some(false)
                     || !previous.verified
                     || previous.reviewer_id.as_deref()
                         != Some(observation.authenticated_actor.to_string().as_str())
@@ -384,6 +404,7 @@ fn monitor(
                     &input.review,
                     previous.generation,
                     &observation,
+                    &reviewers,
                 )?;
             }
             if pause {
@@ -411,9 +432,10 @@ fn monitor(
         MonitorCommand::ReviewNow => {
             let previous = previous.ok_or(AppError::NotFound)?;
             let live = validated_observation(db, &input.review, observation)?;
+            let reviewers = observations::monitored_reviewers(db, live.authenticated_actor)?;
             if previous.state == MonitorState::Archived
                 || !previous.verified
-                || live.personal_approval != Some(false)
+                || live.reviewer_approval(&reviewers) != Some(false)
                 || previous.reviewer_id.as_deref()
                     != Some(live.authenticated_actor.to_string().as_str())
             {
@@ -425,6 +447,13 @@ fn monitor(
                 .map(parse)
                 .transpose()?
                 .ok_or(AppError::NotFound)?;
+            observations::require_known_threads(
+                db,
+                &input.review,
+                previous.generation,
+                &live,
+                &reviewers,
+            )?;
             let batch = observations::review_now(
                 db,
                 &input.review,

@@ -1,3 +1,5 @@
+use std::collections::BTreeSet;
+
 use reviewq_domain::identity::{GitSha, Revision};
 use reviewq_domain::session::LeadTarget;
 
@@ -6,7 +8,7 @@ use crate::hosts::MessageBody;
 use crate::queue::MergeRequestState;
 use crate::reports::ReportReference;
 use crate::sources::ReviewSourceReader;
-use crate::workflow::{NativeWorkflowProof, ReadyWorkflow, WorkflowReadiness};
+use crate::workflow::{NativeWorkflowProof, ReadyWorkflow, SelectedNote, WorkflowReadiness};
 
 use super::MonitoredReview;
 
@@ -17,7 +19,7 @@ pub struct CheckMember {
     pub observation_id: String,
     pub discussion_id: String,
     pub discussion_version: String,
-    pub original_note_ids: Vec<String>,
+    pub originals: Vec<SelectedNote>,
     pub finding_ids: Vec<String>,
     pub prior_batch_id: Option<String>,
 }
@@ -26,6 +28,8 @@ pub struct PendingCheck {
     pub batch_id: String,
     pub monitor: MonitoredReview,
     pub lead: LeadTarget,
+    pub authenticated_reviewer: u64,
+    pub configured_reviewers: BTreeSet<u64>,
     pub members: Vec<CheckMember>,
     pub base: Option<ReportReference>,
     pub disposition_version: Revision,
@@ -96,7 +100,10 @@ async fn prepare(
     {
         return Err("followup_merge_request_unavailable");
     }
-    match source.personal_approval {
+    if source.authenticated_actor != check.authenticated_reviewer {
+        return Err("monitored_reviewer_changed");
+    }
+    match source.reviewer_approval(&check.configured_reviewers) {
         Some(false) => {}
         Some(true) => return Err("reviewer_approval_confirmed"),
         None => return Err("reviewer_approval_unknown"),
@@ -104,11 +111,11 @@ async fn prepare(
     for member in &check.members {
         if !source.discussions.iter().any(|discussion| {
             discussion.id == member.discussion_id
-                && member.original_note_ids.iter().all(|original| {
-                    discussion.notes.iter().any(|note| {
-                        note.author == source.authenticated_actor
-                            && original.parse::<u64>().ok() == Some(note.id)
-                    })
+                && member.originals.iter().all(|original| {
+                    check.configured_reviewers.contains(&original.reviewer_id)
+                        && discussion.notes.iter().any(|note| {
+                            note.author == original.reviewer_id && note.id == original.note_id
+                        })
                 })
         }) {
             return Err("followup_selected_discussion_unavailable");
@@ -143,7 +150,12 @@ async fn prepare(
         prompt.push_str(&format!(
             "\nDiscussion {} original note {} observation {} at {}. Finding IDs: {}.",
             member.discussion_id,
-            member.original_note_ids.join(", "),
+            member
+                .originals
+                .iter()
+                .map(|original| original.note_id.to_string())
+                .collect::<Vec<_>>()
+                .join(", "),
             member.observation_id,
             member.discussion_version,
             member.finding_ids.join(", ")

@@ -181,8 +181,17 @@ pub struct WorkflowSnapshot {
     pub review: ReviewSource,
     pub authenticated_actor: u64,
     pub personal_approval: Option<bool>,
+    pub approved_reviewers: Option<Vec<u64>>,
     pub observed_at_ms: i64,
     pub discussions: Vec<WorkflowDiscussion>,
+}
+
+impl WorkflowSnapshot {
+    pub fn reviewer_approval(&self, reviewers: &std::collections::BTreeSet<u64>) -> Option<bool> {
+        self.approved_reviewers
+            .as_ref()
+            .map(|approved| approved.iter().any(|actor| reviewers.contains(actor)))
+    }
 }
 
 pub struct WorkflowDiscussion {
