@@ -34,6 +34,7 @@ export function Splitter({
       onDoubleClick={() => onChange(INITIAL)}
       onPointerDown={(event) => {
         if (event.button !== 0 || !event.isPrimary) return;
+        event.preventDefault();
         drag.current = { x: event.clientX, value };
         event.currentTarget.setPointerCapture(event.pointerId);
       }}
