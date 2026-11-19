@@ -13,12 +13,23 @@ type Props = {
   readonly label: string;
   readonly scope: Omit<CatalogRequest, "kind" | "cursor" | "q" | "view">;
   readonly kind: CatalogKind;
+  readonly inputId?: string;
+  readonly disabled?: boolean;
   readonly connectionEpoch: number;
   readonly unavailable: readonly string[];
   readonly onAdd: (item: CatalogItem) => void;
 };
 
-export function CatalogPicker({ label, scope, kind, unavailable, onAdd, connectionEpoch }: Props) {
+export function CatalogPicker({
+  label,
+  scope,
+  kind,
+  inputId,
+  disabled = false,
+  unavailable,
+  onAdd,
+  connectionEpoch,
+}: Props) {
   const [open, setOpen] = useState(false);
   const [q, setQuery] = useState("");
   const [view, setView] = useState<ProjectView>("member");
@@ -45,6 +56,12 @@ export function CatalogPicker({ label, scope, kind, unavailable, onAdd, connecti
   const query = JSON.stringify([scopeKey, q, view]);
   const bound = page?.query === query ? page : undefined;
   const visible = bound?.items.filter((item) => !unavailable.includes(item.id));
+  const searchLabel =
+    kind === "boards"
+      ? "Search boards"
+      : kind === "projects"
+        ? "Search repositories"
+        : "Search saved filters";
 
   useEffect(() => {
     if (!open) return;
@@ -110,57 +127,68 @@ export function CatalogPicker({ label, scope, kind, unavailable, onAdd, connecti
         if (event.key === "Escape" && open) {
           event.stopPropagation();
           setOpen(false);
+          search.current?.focus();
         }
       }}
     >
-      <button
-        type="button"
-        aria-expanded={open}
-        onClick={() => {
-          setOpen(!open);
-          if (!open) requestAnimationFrame(() => search.current?.focus());
-        }}
-      >
-        {label}
-      </button>
+      <div className="settings-search">
+        <input
+          ref={search}
+          id={inputId}
+          aria-label={searchLabel}
+          placeholder={`${searchLabel}…`}
+          value={q}
+          disabled={disabled}
+          maxLength={200}
+          onChange={(event) => {
+            const value = event.currentTarget.value;
+            setQuery(value);
+            setForced(0);
+            if (value.trim().length >= 2) setOpen(true);
+          }}
+          onKeyDown={(event) => {
+            if (event.key === "ArrowDown") {
+              event.preventDefault();
+              if (first.current) first.current.focus();
+              else setOpen(true);
+            } else if (event.key === "Enter") {
+              event.preventDefault();
+              setOpen(true);
+              setForced((count) => count + 1);
+            }
+          }}
+        />
+        {kind === "projects" && (
+          <select
+            aria-label="Repository visibility"
+            value={view}
+            disabled={disabled}
+            onChange={(event) => {
+              const value = event.currentTarget.value;
+              if (value === "member" || value === "starred" || value === "all") setView(value);
+              setOpen(true);
+            }}
+          >
+            <option value="member">Member projects</option>
+            <option value="starred">Starred projects</option>
+            <option value="all">All visible projects</option>
+          </select>
+        )}
+        <button
+          type="button"
+          disabled={disabled}
+          aria-expanded={open}
+          aria-label={label}
+          onClick={() => {
+            setOpen(!open);
+            if (!open) requestAnimationFrame(() => search.current?.focus());
+          }}
+        >
+          Browse
+        </button>
+      </div>
       {open && (
-        <section className="surface-card stack" aria-label={label}>
-          <div className="actions">
-            <input
-              ref={search}
-              aria-label={`Search ${label.toLowerCase()}`}
-              placeholder="Search by name"
-              value={q}
-              maxLength={200}
-              onChange={(event) => {
-                setQuery(event.currentTarget.value);
-                setForced(0);
-              }}
-              onKeyDown={(event) => {
-                if (event.key === "ArrowDown") {
-                  event.preventDefault();
-                  first.current?.focus();
-                } else if (event.key === "Enter") {
-                  event.preventDefault();
-                  setForced((count) => count + 1);
-                }
-              }}
-            />
-            {kind === "projects" && (
-              <select
-                aria-label="Repository visibility"
-                value={view}
-                onChange={(event) => setView(event.currentTarget.value as ProjectView)}
-              >
-                <option value="member">Member projects</option>
-                <option value="starred">Starred projects</option>
-                <option value="all">All visible projects</option>
-              </select>
-            )}
-            <button type="button" onClick={() => setForced((count) => count + 1)}>
-              Search
-            </button>
-          </div>
+        <section className="catalog-choices stack" aria-label={label}>
           {busy && !bound && <Loading label="Looking up choices…" />}
           {error?.query === query && (
             <Notice retry={() => setForced((count) => count + 1)}>{error.message}</Notice>
@@ -174,6 +202,7 @@ export function CatalogPicker({ label, scope, kind, unavailable, onAdd, connecti
                 <button
                   type="button"
                   key={item.id}
+                  disabled={disabled}
                   ref={index === 0 ? first : undefined}
                   onClick={() => onAdd(item)}
                 >
@@ -187,7 +216,7 @@ export function CatalogPicker({ label, scope, kind, unavailable, onAdd, connecti
             </div>
           )}
           {bound?.next && bound.items.length < 400 && (
-            <button type="button" disabled={busy} onClick={() => void more()}>
+            <button type="button" disabled={busy || disabled} onClick={() => void more()}>
               More choices
             </button>
           )}

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import type { Form as NativeForm, Question } from "../../../api/generated/contracts/questions";
 import { answerQuestion, readQuestions } from "../../../api/history";
 import type { SessionAddress } from "../../../api/history";
@@ -191,7 +191,7 @@ function QuestionForm({
           ))}
         </details>
       )}
-      {!supported && !answered && (
+      {status === "pending" && !supported && (
         <div className="actions">
           <p className="meta">
             {includesSecret
@@ -223,7 +223,7 @@ function QuestionForm({
           Send answers
         </button>
       )}
-      {supported && status === "unavailable" && (
+      {status === "unavailable" && (
         <div className="actions">
           <p className="meta">This native request is no longer available in ReviewQ.</p>
           <button type="button" onClick={onTerminal}>
@@ -241,7 +241,63 @@ function QuestionForm({
           </button>
         </div>
       )}
+      {form.questions.length === 0 && <DetachedAnswers store={store} prefix={prefix} />}
     </form>
+  );
+}
+
+function DetachedAnswers({
+  store,
+  prefix,
+}: {
+  readonly store: DraftStore;
+  readonly prefix: readonly string[];
+}) {
+  const snapshot = useSyncExternalStore(store.subscribe, store.getSnapshot);
+  const questionPrefix = JSON.stringify(["question", ...prefix]).slice(0, -1) + ",";
+  return snapshot.entries
+    .filter((draft) => draft.key.startsWith(questionPrefix))
+    .map((draft) => (
+      <RetainedAnswer
+        key={draft.key}
+        draft={draft.text}
+        onDiscard={() => store.set(draft.key, draft.label, "")}
+      />
+    ));
+}
+
+function RetainedAnswer({
+  draft,
+  onDiscard,
+}: {
+  readonly draft: string;
+  readonly onDiscard: () => void;
+}) {
+  const [error, setError] = useState<string>();
+  return (
+    <div className="actions">
+      <p className="meta">This unsent answer is retained.</p>
+      <button
+        type="button"
+        onClick={() => {
+          setError(undefined);
+          void navigator.clipboard
+            .writeText(questionValue(draft))
+            .catch((failure: unknown) => setError(describeError(failure)));
+        }}
+      >
+        Copy
+      </button>
+      <button
+        type="button"
+        onClick={() => {
+          if (window.confirm("Discard this unsent answer?")) onDiscard();
+        }}
+      >
+        Discard
+      </button>
+      {error && <Notice>{error}</Notice>}
+    </div>
   );
 }
 
@@ -372,27 +428,7 @@ function QuestionField({
           {limited && <Notice>Draft storage full. Free space before adding more text.</Notice>}
         </>
       ) : (
-        <div className="actions">
-          <p className="meta">This unsent answer is retained.</p>
-          <button
-            type="button"
-            onClick={() => {
-              void navigator.clipboard
-                .writeText(questionValue(draft))
-                .catch((error: unknown) => setLimited(Boolean(error)));
-            }}
-          >
-            Copy
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              if (window.confirm("Discard this unsent answer?")) edit("");
-            }}
-          >
-            Discard
-          </button>
-        </div>
+        <RetainedAnswer draft={draft} onDiscard={() => edit("")} />
       )}
     </fieldset>
   );

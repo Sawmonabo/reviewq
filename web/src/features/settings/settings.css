@@ -45,6 +45,8 @@
   flex: 1 1 auto;
   padding: 0 28px 24px;
   scrollbar-gutter: stable;
+  scrollbar-width: thin;
+  scrollbar-color: var(--strong-line) transparent;
 }
 .settings-pane .modal-frame > footer {
   gap: 10px;
@@ -163,20 +165,37 @@
 .settings-concurrency button {
   height: 40px;
 }
-.settings-editor {
-  margin-top: 11px;
-}
 .catalog-picker {
-  justify-items: start;
+  min-width: 0;
 }
-.catalog-picker > section {
+.settings-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   width: 100%;
+}
+.settings-search input {
+  flex: 1 1 auto;
+}
+.settings-search select {
+  flex: 0 1 155px;
+  width: 155px;
+}
+.settings-search button {
+  flex: 0 0 auto;
+  min-height: 34px;
+}
+.catalog-choices {
+  padding: 0;
+  min-width: 0;
 }
 .catalog-results {
   max-height: 260px;
   overflow: auto;
   overscroll-behavior: contain;
   display: grid;
+  border: 1px solid var(--line);
+  border-radius: 5px;
 }
 .catalog-results > button {
   text-align: left;
@@ -184,6 +203,15 @@
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 1px 8px;
   padding: 10px 14px;
+  border: 0;
+  border-radius: 0;
+  background: var(--surface);
+}
+.catalog-results > button + button {
+  border-top: 1px solid var(--line);
+}
+.catalog-results > button:hover {
+  background: var(--hover);
 }
 .catalog-results > button .meta {
   grid-column: 1;
@@ -194,6 +222,97 @@
   align-self: center;
   color: var(--link);
 }
+.settings-selection {
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--surface), var(--canvas) 22%);
+}
+.settings-selection > summary {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  padding: 14px 16px;
+  cursor: pointer;
+  list-style: none;
+}
+.settings-selection > summary::-webkit-details-marker {
+  display: none;
+}
+.settings-selection > summary::before {
+  color: var(--muted);
+  content: "›";
+  font-size: 16px;
+}
+.settings-selection[open] > summary::before {
+  transform: rotate(90deg);
+}
+.settings-selection > summary strong,
+.settings-selection-body h4 {
+  font-size: 13px;
+}
+.settings-selection > summary > span {
+  margin-inline-start: auto;
+  color: var(--muted);
+  font-size: 11px;
+}
+.settings-selection-body {
+  min-width: 0;
+  padding: 9px 16px 18px;
+  border: 0;
+}
+.settings-inline {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+}
+.settings-selection-body .quiet-button {
+  justify-self: start;
+  color: var(--link);
+  font-size: 11px;
+}
+.settings-choices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px 12px;
+}
+.settings-choices .settings-check {
+  min-width: 0;
+  border-radius: 4px;
+  font-size: 12px;
+}
+.settings-check:has(input:disabled) {
+  cursor: default;
+}
+.settings-check:has(input:not(:disabled)):hover {
+  background: var(--hover);
+}
+.settings-check small {
+  color: var(--muted);
+  font-size: 10px;
+}
+.settings-advanced > summary {
+  padding: 8px 0;
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 12px;
+}
+.settings-advanced[open] > summary {
+  margin-bottom: 9px;
+}
+.settings-reviewers {
+  padding-block: 14px;
+  border-bottom: 1px solid var(--line);
+}
+.settings-reviewers input {
+  width: 100%;
+}
+.settings-reviewers .meta {
+  margin-top: 6px;
+}
 @media (max-width: 620px) {
   .connection-grid {
     grid-template-columns: minmax(0, 1fr);
@@ -202,6 +321,18 @@
   .settings-pane .modal-body,
   .settings-pane .modal-frame > footer {
     padding-inline: 16px;
+  }
+  .settings-search {
+    flex-wrap: wrap;
+  }
+  .settings-search:has(select) > input {
+    flex: 1 0 100%;
+  }
+  .settings-search > select {
+    flex: 1 1 auto;
+  }
+  .settings-default-skills {
+    grid-template-columns: minmax(0, 1fr);
   }
 }
 @media (min-width: 701px) {
