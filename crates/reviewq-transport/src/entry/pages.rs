@@ -14,9 +14,9 @@ use reviewq_app::sources::{SourceFailure, SourceSync};
 use reviewq_domain::identity::{EventCursor, ReviewId, RunId};
 use reviewq_domain::session::HostProvider;
 use reviewq_protocol::queue::{
-    CompactTicket, MergeRequestRow, MergeRequestStatus, QueueStatus, QueueSync, QueueSyncMode,
-    ReviewOverview, ReviewOverviewResponse, ReviewSelection, ReviewSelectionResponse, RunStage,
-    RunSummary,
+    CompactTicket, FocusedLaunch, MergeRequestRow, MergeRequestStatus, QueueStatus, QueueSync,
+    QueueSyncMode, ReviewOverview, ReviewOverviewResponse, ReviewSelection,
+    ReviewSelectionResponse, RunStage, RunSummary,
 };
 use reviewq_protocol::{
     CheckpointIdDto, ErrorCode, ErrorDto, EventCursorDto, GitShaDto, HostProviderDto,
@@ -387,6 +387,18 @@ pub(super) fn project_review(item: &QueueItem) -> Result<MergeRequestRow, AppErr
             .focus
             .as_ref()
             .map(|id| SessionKeyDto::new(id.as_str()).ok_or(AppError::Internal))
+            .transpose()?,
+        focused_provider: signals.focused_provider.map(provider),
+        focused_launch: signals.focused_launch.as_ref().map(|launch| FocusedLaunch {
+            observed_model: launch.observed_model.clone(),
+            observed_effort: launch.observed_effort.clone(),
+            requested_model: launch.requested_model.clone(),
+            requested_effort: launch.requested_effort.clone(),
+        }),
+        focused_report_reviewed_sha: signals
+            .focused_report_reviewed_sha
+            .as_ref()
+            .map(|sha| GitShaDto::new(sha.as_str()).ok_or(AppError::Internal))
             .transpose()?,
         full_mr_reviewed_sha: signals
             .full_mr_reviewed_sha

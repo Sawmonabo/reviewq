@@ -6,7 +6,7 @@ import { validate152 } from "./disposition.mjs";
 import { validate114 } from "./review-id-dto.mjs";
 import { validate232 } from "./utc-timestamp-dto.mjs";
 import { validate147 } from "./git-sha-dto.mjs";
-function validate1005(
+function validate1021(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -31,7 +31,7 @@ function validate1005(
           !func0.call(data, "checkpointId")) &&
           (missing0 = "checkpointId"))
       ) {
-        validate1005.errors = [
+        validate1021.errors = [
           {
             instancePath,
             schemaPath: "#/required",
@@ -98,7 +98,7 @@ function validate1005(
               vErrors.push(err1);
             }
             errors++;
-            validate1005.errors = vErrors;
+            validate1021.errors = vErrors;
             return false;
           } else {
             errors = _errs2;
@@ -196,7 +196,7 @@ function validate1005(
                   vErrors.push(err3);
                 }
                 errors++;
-                validate1005.errors = vErrors;
+                validate1021.errors = vErrors;
                 return false;
               } else {
                 errors = _errs8;
@@ -291,7 +291,7 @@ function validate1005(
                       vErrors.push(err5);
                     }
                     errors++;
-                    validate1005.errors = vErrors;
+                    validate1021.errors = vErrors;
                     return false;
                   } else {
                     errors = _errs14;
@@ -365,7 +365,7 @@ function validate1005(
                         vErrors.push(err7);
                       }
                       errors++;
-                      validate1005.errors = vErrors;
+                      validate1021.errors = vErrors;
                       return false;
                     } else {
                       errors = _errs19;
@@ -388,7 +388,7 @@ function validate1005(
         }
       }
     } else {
-      validate1005.errors = [
+      validate1021.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -399,7 +399,7 @@ function validate1005(
       return false;
     }
   }
-  validate1005.errors = vErrors;
+  validate1021.errors = vErrors;
   return errors === 0;
 }
-export { validate1005 };
+export { validate1021 };

@@ -97,9 +97,22 @@ pub struct MergeRequestRow {
     pub has_agent_questions: bool,
     pub focused_run_id: Option<RunIdDto>,
     pub focus_session_key: Option<SessionKeyDto>,
+    pub focused_provider: Option<HostProviderDto>,
+    pub focused_launch: Option<FocusedLaunch>,
+    pub focused_report_reviewed_sha: Option<GitShaDto>,
     pub full_mr_reviewed_sha: Option<GitShaDto>,
     pub coverage: Option<crate::reports::Coverage>,
     pub last_activity_at: Option<UtcTimestampDto>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct FocusedLaunch {
+    pub observed_model: Option<String>,
+    pub observed_effort: Option<String>,
+    pub requested_model: Option<String>,
+    pub requested_effort: Option<String>,
 }
 
 #[derive(Debug, Serialize)]

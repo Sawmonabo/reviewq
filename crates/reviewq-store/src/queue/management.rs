@@ -46,6 +46,7 @@ pub(super) fn reviews(
     while let Some(row) = rows.next()? {
         items.push(queue_item(row)?);
     }
+    super::focus::hydrate(tx, items.iter_mut())?;
     let settings = settings_revision(tx)?;
     Ok(ManagementReviews {
         items,
@@ -68,8 +69,9 @@ pub(super) fn runs(
     let sql = format!("SELECT {ITEM_COLUMNS} {ITEM_FROM} WHERE r.review_id=?1");
     let mut statement = tx.prepare_cached(&sql)?;
     let mut found = statement.query([review.as_str()])?;
-    let item = queue_item(found.next()?.ok_or(AppError::NotFound)?)?;
+    let mut item = queue_item(found.next()?.ok_or(AppError::NotFound)?)?;
     drop(found);
+    super::focus::hydrate(tx, std::iter::once(&mut item))?;
     let mut statement = tx.prepare_cached(
         "SELECT r.run_id,r.started_at_ms,r.lead_session_key,s.provider
         FROM runs r JOIN sessions s ON s.run_id=r.run_id AND s.session_key=r.lead_session_key

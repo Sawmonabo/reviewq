@@ -228,6 +228,8 @@ fn archive(
         latest: row.latest,
         review: row.card.review.review_id.clone(),
     });
+    drop(rows);
+    super::focus::hydrate(db, items.iter_mut().map(|item| &mut item.card.review))?;
     Ok(ArchivePage {
         items,
         next,

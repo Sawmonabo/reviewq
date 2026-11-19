@@ -4,7 +4,9 @@ import type {
   CompactTicket,
   Coverage,
   EventCursorDto,
+  FocusedLaunch,
   GitShaDto,
+  HostProviderDto,
   MergeRequestIidDto,
   MergeRequestStatus,
   NamedUpstreamId,
@@ -56,6 +58,9 @@ export interface ArchiveItem {
   dateSource: ArchiveDate | null;
   draft: boolean;
   focusSessionKey: SessionKeyDto | null;
+  focusedLaunch: FocusedLaunch | null;
+  focusedProvider: HostProviderDto | null;
+  focusedReportReviewedSha: GitShaDto | null;
   focusedRunId: RunIdDto | null;
   fullMrReviewedSha: GitShaDto | null;
   hasAgentQuestions: boolean;

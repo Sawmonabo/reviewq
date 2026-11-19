@@ -172,6 +172,14 @@ pub(super) fn queue(
         });
         items.push(item);
     }
+    drop(rows);
+    super::focus::hydrate(
+        db,
+        items.iter_mut().filter_map(|item| match item {
+            QueueListItem::Review(review) => Some(review.as_mut()),
+            QueueListItem::Unmatched(_) => None,
+        }),
+    )?;
     let revision = settings_revision(db)?;
     Ok(QueuePage {
         items,

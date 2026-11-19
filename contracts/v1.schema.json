@@ -263,6 +263,36 @@
             }
           ]
         },
+        "focusedLaunch": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/FocusedLaunch"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "focusedProvider": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/HostProviderDto"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "focusedReportReviewedSha": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/GitShaDto"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "focusedRunId": {
           "anyOf": [
             {
@@ -412,6 +442,9 @@
         "hasAgentQuestions",
         "focusedRunId",
         "focusSessionKey",
+        "focusedProvider",
+        "focusedLaunch",
+        "focusedReportReviewedSha",
         "fullMrReviewedSha",
         "coverage",
         "lastActivityAt",
@@ -2324,6 +2357,41 @@
       ],
       "type": "string"
     },
+    "FocusedLaunch": {
+      "properties": {
+        "observedEffort": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "observedModel": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "requestedEffort": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "requestedModel": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "observedModel",
+        "observedEffort",
+        "requestedModel",
+        "requestedEffort"
+      ],
+      "type": "object"
+    },
     "FollowupAssessmentsResponse": {
       "description": "The resource and event head from the same authorized snapshot.",
       "properties": {
@@ -3641,6 +3709,36 @@
             }
           ]
         },
+        "focusedLaunch": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/FocusedLaunch"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "focusedProvider": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/HostProviderDto"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "focusedReportReviewedSha": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/GitShaDto"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "focusedRunId": {
           "anyOf": [
             {
@@ -3765,6 +3863,9 @@
         "hasAgentQuestions",
         "focusedRunId",
         "focusSessionKey",
+        "focusedProvider",
+        "focusedLaunch",
+        "focusedReportReviewedSha",
         "fullMrReviewedSha",
         "coverage",
         "lastActivityAt"
@@ -4260,6 +4361,13 @@
             }
           ]
         },
+        "reviewContexts": {
+          "items": {
+            "$ref": "#/definitions/ReviewContext"
+          },
+          "maxItems": 100,
+          "type": "array"
+        },
         "unreadEventCount": {
           "$ref": "#/definitions/SafeCountDto"
         },
@@ -4271,7 +4379,8 @@
         "items",
         "nextCursor",
         "unreadEventCount",
-        "unreadMrCount"
+        "unreadMrCount",
+        "reviewContexts"
       ],
       "type": "object"
     },
@@ -6464,6 +6573,52 @@
       "title": "ReviewCheckpointRequest",
       "type": "object"
     },
+    "ReviewContext": {
+      "properties": {
+        "iid": {
+          "$ref": "#/definitions/MergeRequestIidDto"
+        },
+        "ourComments": {
+          "$ref": "#/definitions/SafeCountDto"
+        },
+        "personalApproval": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "projectPath": {
+          "type": "string"
+        },
+        "reviewId": {
+          "$ref": "#/definitions/ReviewIdDto"
+        },
+        "ticketKeys": {
+          "items": {
+            "$ref": "#/definitions/TicketKeyDto"
+          },
+          "maxItems": 16,
+          "type": "array"
+        },
+        "title": {
+          "type": "string"
+        },
+        "unreadReplies": {
+          "$ref": "#/definitions/SafeCountDto"
+        }
+      },
+      "required": [
+        "reviewId",
+        "title",
+        "projectPath",
+        "iid",
+        "ticketKeys",
+        "ourComments",
+        "unreadReplies",
+        "personalApproval"
+      ],
+      "type": "object"
+    },
     "ReviewDecisionRequest": {
       "additionalProperties": false,
       "properties": {
@@ -6699,6 +6854,36 @@
             }
           ]
         },
+        "focusedLaunch": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/FocusedLaunch"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "focusedProvider": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/HostProviderDto"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "focusedReportReviewedSha": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/GitShaDto"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "focusedRunId": {
           "anyOf": [
             {
@@ -6829,6 +7014,9 @@
         "hasAgentQuestions",
         "focusedRunId",
         "focusSessionKey",
+        "focusedProvider",
+        "focusedLaunch",
+        "focusedReportReviewedSha",
         "fullMrReviewedSha",
         "coverage",
         "lastActivityAt",

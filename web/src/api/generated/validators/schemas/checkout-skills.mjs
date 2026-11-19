@@ -4,7 +4,7 @@ import { validate69 } from "./merge-request-iid-dto.mjs";
 import { validate71 } from "./host-provider-dto.mjs";
 import { validate35 } from "./event-cursor-dto.mjs";
 import { validate205 } from "./skill.mjs";
-function validate326(
+function validate332(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -26,7 +26,7 @@ function validate326(
         ((data.skills === undefined || !func0.call(data, "skills")) &&
           (missing0 = "skills"))
       ) {
-        validate326.errors = [
+        validate332.errors = [
           {
             instancePath,
             schemaPath: "#/required",
@@ -39,7 +39,7 @@ function validate326(
         if (data.checkout !== undefined && func0.call(data, "checkout")) {
           const _errs1 = errors;
           if (typeof data.checkout !== "string") {
-            validate326.errors = [
+            validate332.errors = [
               {
                 instancePath: instancePath + "/checkout",
                 schemaPath: "#/properties/checkout/type",
@@ -149,7 +149,7 @@ function validate326(
                         }
                       }
                     } else {
-                      validate326.errors = [
+                      validate332.errors = [
                         {
                           instancePath: instancePath + "/skills",
                           schemaPath: "#/properties/skills/type",
@@ -170,7 +170,7 @@ function validate326(
         }
       }
     } else {
-      validate326.errors = [
+      validate332.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -181,7 +181,7 @@ function validate326(
       return false;
     }
   }
-  validate326.errors = vErrors;
+  validate332.errors = vErrors;
   return errors === 0;
 }
-export { validate326 };
+export { validate332 };

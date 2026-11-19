@@ -2,7 +2,7 @@
 import { func0 } from "../runtime.mjs";
 import { validate25 } from "./checkpoint-id-dto.mjs";
 import { validate114 } from "./review-id-dto.mjs";
-function validate1053(
+function validate1069(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -20,7 +20,7 @@ function validate1053(
           !func0.call(data, "leadSessionKey")) &&
           (missing0 = "leadSessionKey"))
       ) {
-        validate1053.errors = [
+        validate1069.errors = [
           {
             instancePath,
             schemaPath: "#/required",
@@ -99,7 +99,7 @@ function validate1053(
         }
       }
     } else {
-      validate1053.errors = [
+      validate1069.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -110,7 +110,7 @@ function validate1053(
       return false;
     }
   }
-  validate1053.errors = vErrors;
+  validate1069.errors = vErrors;
   return errors === 0;
 }
-export { validate1053 };
+export { validate1069 };

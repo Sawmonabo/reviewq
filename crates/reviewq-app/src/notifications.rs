@@ -7,7 +7,9 @@ pub use native::{
     NativeAttention, NativeAttentionStore, NativeOccurrence, TrackedNative, poll_native_attention,
 };
 
-use reviewq_domain::identity::{NotificationId, ReviewId, Revision, RunId, SessionKey};
+use reviewq_domain::identity::{
+    MergeRequestIid, NotificationId, ReviewId, Revision, RunId, SessionKey, TicketKey,
+};
 
 use crate::access::{Actor, AppFuture};
 use crate::events::Snapshot;
@@ -99,8 +101,21 @@ pub struct Notification {
 
 pub struct InboxPage {
     pub items: Vec<Notification>,
+    pub review_contexts: Vec<ReviewContext>,
     pub next: Option<InboxPosition>,
     pub counts: UnreadCounts,
+}
+
+/// Compact context shared by all occurrences for a review on the same page.
+pub struct ReviewContext {
+    pub review_id: ReviewId,
+    pub title: String,
+    pub project_path: String,
+    pub iid: MergeRequestIid,
+    pub ticket_keys: Vec<TicketKey>,
+    pub our_comments: u64,
+    pub unread_replies: u64,
+    pub personal_approval: Option<bool>,
 }
 
 pub struct InboxChange {

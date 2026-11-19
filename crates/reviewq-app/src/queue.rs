@@ -232,9 +232,21 @@ pub struct ReviewSignals {
     pub queue_state: String,
     pub run: Option<RunId>,
     pub focus: Option<SessionKey>,
+    pub focused_provider: Option<HostProvider>,
+    pub focused_launch: Option<FocusedLaunch>,
+    pub focused_report_reviewed_sha: Option<GitSha>,
     pub full_mr_reviewed_sha: Option<GitSha>,
     pub coverage: Option<String>,
     pub last_activity_ms: i64,
+}
+
+/// Original invocation settings for the focused run's managed launch.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct FocusedLaunch {
+    pub observed_model: Option<String>,
+    pub observed_effort: Option<String>,
+    pub requested_model: Option<String>,
+    pub requested_effort: Option<String>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

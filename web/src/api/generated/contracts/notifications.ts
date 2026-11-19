@@ -2,12 +2,14 @@
 
 import type {
   EventCursorDto,
+  MergeRequestIidDto,
   PageCursorDto,
   ResourceIdDto,
   ReviewIdDto,
   RunIdDto,
   SafeCountDto,
   SessionKeyDto,
+  TicketKeyDto,
   UtcTimestampDto,
 } from "./common.js";
 
@@ -32,6 +34,10 @@ export interface NotificationPage {
    */
   items: Notification[];
   nextCursor: PageCursorDto | null;
+  /**
+   * @maxItems 100
+   */
+  reviewContexts: ReviewContext[];
   unreadEventCount: SafeCountDto;
   unreadMrCount: SafeCountDto;
   [k: string]: unknown;
@@ -52,6 +58,170 @@ export interface Notification {
   sessionKey: SessionKeyDto | null;
   source: string;
   tab: Tab;
+  [k: string]: unknown;
+}
+
+export interface ReviewContext {
+  iid: MergeRequestIidDto;
+  ourComments: SafeCountDto;
+  personalApproval: boolean | null;
+  projectPath: string;
+  reviewId: ReviewIdDto;
+  /**
+   * @maxItems 16
+   */
+  ticketKeys:
+    | []
+    | [TicketKeyDto]
+    | [TicketKeyDto, TicketKeyDto]
+    | [TicketKeyDto, TicketKeyDto, TicketKeyDto]
+    | [TicketKeyDto, TicketKeyDto, TicketKeyDto, TicketKeyDto]
+    | [TicketKeyDto, TicketKeyDto, TicketKeyDto, TicketKeyDto, TicketKeyDto]
+    | [
+        TicketKeyDto,
+        TicketKeyDto,
+        TicketKeyDto,
+        TicketKeyDto,
+        TicketKeyDto,
+        TicketKeyDto,
+      ]
+    | [
+        TicketKeyDto,
+        TicketKeyDto,
+        TicketKeyDto,
+        TicketKeyDto,
+        TicketKeyDto,
+        TicketKeyDto,
+        TicketKeyDto,
+      ]
+    | [
+        TicketKeyDto,
+        TicketKeyDto,
+        TicketKeyDto,
+        TicketKeyDto,
+        TicketKeyDto,
+        TicketKeyDto,
+        TicketKeyDto,
+        TicketKeyDto,
+      ]
+    | [
+        TicketKeyDto,
+        TicketKeyDto,
+        TicketKeyDto,
+        TicketKeyDto,
+        TicketKeyDto,
+        TicketKeyDto,
+        TicketKeyDto,
+        TicketKeyDto,
+        TicketKeyDto,
+      ]
+    | [
+        TicketKeyDto,
+        TicketKeyDto,
+        TicketKeyDto,
+        TicketKeyDto,
+        TicketKeyDto,
+        TicketKeyDto,
+        TicketKeyDto,
+        TicketKeyDto,
+        TicketKeyDto,
+        TicketKeyDto,
+      ]
+    | [
+        TicketKeyDto,
+        TicketKeyDto,
+        TicketKeyDto,
+        TicketKeyDto,
+        TicketKeyDto,
+        TicketKeyDto,
+        TicketKeyDto,
+        TicketKeyDto,
+        TicketKeyDto,
+        TicketKeyDto,
+        TicketKeyDto,
+      ]
+    | [
+        TicketKeyDto,
+        TicketKeyDto,
+        TicketKeyDto,
+        TicketKeyDto,
+        TicketKeyDto,
+        TicketKeyDto,
+        TicketKeyDto,
+        TicketKeyDto,
+        TicketKeyDto,
+        TicketKeyDto,
+        TicketKeyDto,
+        TicketKeyDto,
+      ]
+    | [
+        TicketKeyDto,
+        TicketKeyDto,
+        TicketKeyDto,
+        TicketKeyDto,
+        TicketKeyDto,
+        TicketKeyDto,
+        TicketKeyDto,
+        TicketKeyDto,
+        TicketKeyDto,
+        TicketKeyDto,
+        TicketKeyDto,
+        TicketKeyDto,
+        TicketKeyDto,
+      ]
+    | [
+        TicketKeyDto,
+        TicketKeyDto,
+        TicketKeyDto,
+        TicketKeyDto,
+        TicketKeyDto,
+        TicketKeyDto,
+        TicketKeyDto,
+        TicketKeyDto,
+        TicketKeyDto,
+        TicketKeyDto,
+        TicketKeyDto,
+        TicketKeyDto,
+        TicketKeyDto,
+        TicketKeyDto,
+      ]
+    | [
+        TicketKeyDto,
+        TicketKeyDto,
+        TicketKeyDto,
+        TicketKeyDto,
+        TicketKeyDto,
+        TicketKeyDto,
+        TicketKeyDto,
+        TicketKeyDto,
+        TicketKeyDto,
+        TicketKeyDto,
+        TicketKeyDto,
+        TicketKeyDto,
+        TicketKeyDto,
+        TicketKeyDto,
+        TicketKeyDto,
+      ]
+    | [
+        TicketKeyDto,
+        TicketKeyDto,
+        TicketKeyDto,
+        TicketKeyDto,
+        TicketKeyDto,
+        TicketKeyDto,
+        TicketKeyDto,
+        TicketKeyDto,
+        TicketKeyDto,
+        TicketKeyDto,
+        TicketKeyDto,
+        TicketKeyDto,
+        TicketKeyDto,
+        TicketKeyDto,
+        TicketKeyDto,
+        TicketKeyDto,
+      ];
+  title: string;
+  unreadReplies: SafeCountDto;
   [k: string]: unknown;
 }
 

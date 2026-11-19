@@ -11,8 +11,8 @@ use reviewq_app::notifications::{
 use reviewq_domain::identity::Revision;
 use reviewq_protocol::notifications::{self as dto, Tab};
 use reviewq_protocol::{
-    Page, PageCursorDto, ResourceIdDto, ReviewIdDto, RunIdDto, SessionKeyDto, Success,
-    UtcTimestampDto,
+    MergeRequestIidDto, Page, PageCursorDto, ResourceIdDto, ReviewIdDto, RunIdDto, SessionKeyDto,
+    Success, TicketKeyDto, UtcTimestampDto,
 };
 use serde::{Deserialize, Serialize};
 
@@ -105,9 +105,32 @@ pub(super) async fn list(
         dto::NotificationPage {
             page,
             counts: counts(stored.value.counts)?,
+            review_contexts: stored
+                .value
+                .review_contexts
+                .into_iter()
+                .map(review_context)
+                .collect::<Result<_, _>>()?,
         },
         stored.cursor,
     )?))
+}
+
+fn review_context(value: app::ReviewContext) -> Result<dto::ReviewContext, AppError> {
+    Ok(dto::ReviewContext {
+        review_id: ReviewIdDto::new(value.review_id.as_str()).ok_or(AppError::Internal)?,
+        title: value.title,
+        project_path: value.project_path,
+        iid: MergeRequestIidDto::new(value.iid.get()).ok_or(AppError::Internal)?,
+        ticket_keys: value
+            .ticket_keys
+            .iter()
+            .map(|key| TicketKeyDto::new(key.as_str()).ok_or(AppError::Internal))
+            .collect::<Result<_, _>>()?,
+        our_comments: count(value.our_comments)?,
+        unread_replies: count(value.unread_replies)?,
+        personal_approval: value.personal_approval,
+    })
 }
 
 pub(super) async fn update(

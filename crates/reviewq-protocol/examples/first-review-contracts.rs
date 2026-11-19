@@ -14,9 +14,9 @@ use reviewq_protocol::history::{
     HistoryPart, HistoryText, HistoryWindow, MAX_HISTORY_PAGE_BYTES,
 };
 use reviewq_protocol::queue::{
-    CompactTicket, MergeRequestRow, MergeRequestStatus, NamedUpstreamId, QueueFacets, QueuePage,
-    QueueRow, QueueStatus, QueueSync, QueueSyncMode, ReviewOverview, ReviewSelection, RunStage,
-    RunSummary, UnmatchedTicket,
+    CompactTicket, FocusedLaunch, MergeRequestRow, MergeRequestStatus, NamedUpstreamId,
+    QueueFacets, QueuePage, QueueRow, QueueStatus, QueueSync, QueueSyncMode, ReviewOverview,
+    ReviewSelection, RunStage, RunSummary, UnmatchedTicket,
 };
 use reviewq_protocol::{
     CheckpointIdDto, DeliveryReceipt, DeliveryState, EventCursorDto, FileIdDto, GitShaDto,
@@ -335,8 +335,16 @@ fn review() -> MergeRequestRow {
         run_stage: Some(RunStage::Working),
         reason_kind: None,
         has_agent_questions: false,
-        focused_run_id: None,
-        focus_session_key: None,
+        focused_run_id: Some(RunIdDto::new(RUN).unwrap()),
+        focus_session_key: Some(SessionKeyDto::new(LEAD).unwrap()),
+        focused_provider: Some(HostProviderDto::Codex),
+        focused_launch: Some(FocusedLaunch {
+            observed_model: Some("fixture-model".into()),
+            observed_effort: Some("high".into()),
+            requested_model: Some("fixture-model".into()),
+            requested_effort: Some("high".into()),
+        }),
+        focused_report_reviewed_sha: Some(GitShaDto::new(SHA).unwrap()),
         full_mr_reviewed_sha: None,
         coverage: None,
         last_activity_at: None,

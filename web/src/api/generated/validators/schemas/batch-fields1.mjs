@@ -4,8 +4,8 @@ import { validate25 } from "./checkpoint-id-dto.mjs";
 import { validate147 } from "./git-sha-dto.mjs";
 import { validate232 } from "./utc-timestamp-dto.mjs";
 import { validate35 } from "./event-cursor-dto.mjs";
-import { schema148 } from "../metadata-3.mjs";
-function validate423(
+import { schema150 } from "../metadata-3.mjs";
+function validate429(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -19,7 +19,7 @@ function validate423(
       ) {
         const _errs1 = errors;
         if (typeof data.authorityVerified !== "boolean") {
-          validate423.errors = [
+          validate429.errors = [
             {
               instancePath: instancePath + "/authorityVerified",
               schemaPath: "#/properties/authorityVerified/type",
@@ -109,7 +109,7 @@ function validate423(
                 vErrors.push(err1);
               }
               errors++;
-              validate423.errors = vErrors;
+              validate429.errors = vErrors;
               return false;
             } else {
               errors = _errs5;
@@ -183,7 +183,7 @@ function validate423(
                   vErrors.push(err3);
                 }
                 errors++;
-                validate423.errors = vErrors;
+                validate429.errors = vErrors;
                 return false;
               } else {
                 errors = _errs10;
@@ -254,7 +254,7 @@ function validate423(
                     vErrors.push(err5);
                   }
                   errors++;
-                  validate423.errors = vErrors;
+                  validate429.errors = vErrors;
                   return false;
                 } else {
                   errors = _errs15;
@@ -326,13 +326,13 @@ function validate423(
                       let data7 = data.holdReason;
                       const _errs21 = errors;
                       if (typeof data7 !== "string" && data7 !== null) {
-                        validate423.errors = [
+                        validate429.errors = [
                           {
                             instancePath: instancePath + "/holdReason",
                             schemaPath: "#/properties/holdReason/type",
                             keyword: "type",
                             params: {
-                              type: schema148.properties.holdReason.type,
+                              type: schema150.properties.holdReason.type,
                             },
                           },
                         ];
@@ -350,7 +350,7 @@ function validate423(
         }
       }
     } else {
-      validate423.errors = [
+      validate429.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -361,7 +361,7 @@ function validate423(
       return false;
     }
   }
-  validate423.errors = vErrors;
+  validate429.errors = vErrors;
   return errors === 0;
 }
-export { validate423 };
+export { validate429 };

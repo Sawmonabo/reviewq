@@ -9,7 +9,7 @@ use reviewq_app::access::{Actor, AppError, AppFuture};
 use reviewq_app::events::{ResourceKey, Snapshot};
 use reviewq_app::notifications::{
     InboxChange, InboxPage, InboxPosition, InboxStore, InboxView, MAX_INBOX_PAGE,
-    MAX_INBOX_SELECTION, Notification, NotificationAction, UnreadCounts,
+    MAX_INBOX_SELECTION, Notification, NotificationAction, ReviewContext, UnreadCounts,
 };
 use reviewq_domain::identity::{NotificationId, Revision};
 use rusqlite::{Connection, Row, params};
@@ -224,11 +224,70 @@ fn page(
         }
         items.push(decode(row)?);
     }
+    drop(rows);
+    let review_contexts = review_contexts(db, &items)?;
     Ok(InboxPage {
         items,
+        review_contexts,
         next,
         counts: counts(db, scope_code, &scope_id, watermark)?,
     })
+}
+
+fn review_contexts(
+    db: &Connection,
+    items: &[Notification],
+) -> Result<Vec<ReviewContext>, StoreError> {
+    if items.is_empty() {
+        return Ok(Vec::new());
+    }
+    let mut seen = HashSet::with_capacity(items.len());
+    let reviews = items
+        .iter()
+        .map(|item| item.review.as_str())
+        .filter(|id| seen.insert(*id))
+        .collect::<Vec<_>>();
+    let selected = serde_json::to_string(&reviews).map_err(|_| AppError::Internal)?;
+    let mut statement = db.prepare_cached(
+        "SELECT r.review_id,r.title,r.project_path,r.iid,
+                (SELECT json_group_array(ticket_key) FROM
+                   (SELECT ticket_key FROM scoped_review_issues WHERE review_id=r.review_id
+                    UNION SELECT ticket_key FROM retained_review_tickets WHERE review_id=r.review_id
+                    ORDER BY ticket_key LIMIT 16)),
+                e.our_comments,e.unread_replies,e.personal_approval
+         FROM json_each(?1) p JOIN reviews r ON r.review_id=p.value
+         JOIN review_activity_evidence e ON e.review_id=r.review_id
+         ORDER BY p.key",
+    )?;
+    let mut rows = statement.query([selected])?;
+    let mut contexts = Vec::with_capacity(reviews.len());
+    while let Some(row) = rows.next()? {
+        let ticket_keys = serde_json::from_str::<Vec<String>>(text(row, 4)?)
+            .map_err(|_| AppError::Internal)?
+            .iter()
+            .map(|key| parse(key))
+            .collect::<Result<_, _>>()?;
+        contexts.push(ReviewContext {
+            review_id: parse(text(row, 0)?)?,
+            title: row.get(1)?,
+            project_path: row.get(2)?,
+            iid: row
+                .get::<_, i64>(3)?
+                .try_into()
+                .map_err(|_| AppError::Internal)?,
+            ticket_keys,
+            our_comments: row
+                .get::<_, i64>(5)?
+                .try_into()
+                .map_err(|_| AppError::Internal)?,
+            unread_replies: row
+                .get::<_, i64>(6)?
+                .try_into()
+                .map_err(|_| AppError::Internal)?,
+            personal_approval: row.get(7)?,
+        });
+    }
+    Ok(contexts)
 }
 
 fn decode(row: &Row<'_>) -> Result<Notification, StoreError> {
