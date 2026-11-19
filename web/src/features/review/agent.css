@@ -222,12 +222,17 @@
   align-items: center;
   padding-inline: 0 4px;
   border: 0;
+  border-radius: 0;
   background: transparent;
   gap: 5px;
-  color: var(--amber);
+  color: light-dark(var(--amber), #dbb779);
   font-size: 12px;
   font-weight: 600;
   flex-shrink: 0;
+}
+.question-heading button:enabled:is(:hover, :active) {
+  background: transparent;
+  border-color: currentColor;
 }
 .question-heading button[aria-expanded="false"] svg {
   transform: rotate(-90deg);

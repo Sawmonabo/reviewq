@@ -4,11 +4,6 @@
   min-width: 0;
   grid-template-columns: minmax(0, 1fr);
 }
-.changes-tabs button[aria-pressed="true"] {
-  color: var(--link);
-  background: var(--selected);
-  border-color: var(--strong-line);
-}
 .patch-toolbar {
   border-bottom: 1px solid var(--line);
   padding-block: 7px;
@@ -157,17 +152,18 @@ pre.patch-source {
   flex: 1;
   padding: 8px 6px;
   border: 0;
+  border-radius: 4px;
   background: transparent;
-  color: var(--muted);
+  color: light-dark(var(--muted), #999baa);
   font-size: 11px;
 }
 .changes .changes-tabs button[aria-pressed="true"] {
-  background: var(--hover);
-  color: var(--text);
+  background: light-dark(var(--hover), #24242e);
+  color: light-dark(var(--text), #e1e3ee);
 }
 .changes-count {
   margin-left: 4px;
-  color: var(--muted);
+  color: light-dark(var(--muted), #a8acc0);
   font-size: 9px;
   font-weight: 500;
 }
@@ -178,11 +174,12 @@ pre.patch-source {
 }
 .changed-file-picker > summary {
   padding: 11px 13px;
+  color: light-dark(var(--text), #d3d5e1);
   font-size: 11px;
 }
 .changed-file-picker > summary small {
   float: right;
-  color: var(--muted);
+  color: light-dark(var(--muted), #828592);
 }
 .changed-file-picker > .search-field {
   margin: 0 10px 6px;
