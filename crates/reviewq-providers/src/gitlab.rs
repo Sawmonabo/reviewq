@@ -1,7 +1,7 @@
 use reqwest::{Client, header};
 use reviewq_app::access::{AppError, AppFuture};
 use reviewq_app::queue::{MergeRequestState, ReviewSource};
-use reviewq_app::sources::{ReviewResolution, ReviewSourceReader};
+use reviewq_app::sources::{ReviewResolution, ReviewSourceReader, WorkflowSnapshot};
 use reviewq_app::workspace::ConfiguredProject;
 use reviewq_domain::identity::{GitLabOrigin, MrIdentity, ProjectId};
 use serde::Deserialize;
@@ -46,6 +46,10 @@ impl ReviewSourceReader for GitLab {
                 .await?;
             self.review(identity.project_id(), &project.path_with_namespace, mr)
         })
+    }
+
+    fn workflow_snapshot(&self, identity: MrIdentity) -> AppFuture<'_, WorkflowSnapshot> {
+        Box::pin(self.read_workflow_snapshot(identity))
     }
 
     fn reviews(&self, project: ConfiguredProject) -> AppFuture<'_, Vec<ReviewSource>> {

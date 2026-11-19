@@ -43,7 +43,6 @@ impl NativeWorkflowProof for Codex {
             if !matches!(thread.status, ThreadStatus::Active { .. }) {
                 return Err(AppError::NotFound);
             }
-            let generation = self.workflow_generation(&lead, &thread).await?;
             let mut turns = self.turns(&thread.id, None, false, 1, true).await?;
             let turn = turns
                 .data
@@ -64,11 +63,14 @@ impl NativeWorkflowProof for Codex {
             {
                 return Err(AppError::Conflict);
             }
+            let (source_generation, source_position) =
+                workflow_source(&lead, &thread, &call_id, None).await?;
             Ok(NativeCall {
                 lead,
                 turn_id: turn.id.parse().map_err(|_| AppError::Unavailable)?,
                 call_id,
-                source_generation: generation,
+                source_generation,
+                source_position,
                 request_entry_id: request_address(&turn, index)?,
                 tool,
             })
@@ -89,7 +91,14 @@ impl NativeWorkflowProof for Codex {
                 return Err(AppError::Unavailable);
             }
             let thread = self.read_thread(native.native_id()).await?;
-            if self.workflow_generation(&call.lead, &thread).await? != call.source_generation {
+            let (generation, _) = workflow_source(
+                &call.lead,
+                &thread,
+                &call.call_id,
+                Some(call.source_position),
+            )
+            .await?;
+            if generation != call.source_generation {
                 return Ok(ReportCompletion::Unproved);
             }
             let Some(turn) = self.workflow_turn(&thread, &call.turn_id).await? else {
@@ -155,18 +164,6 @@ impl NativeWorkflowProof for Codex {
 }
 
 impl Codex {
-    async fn workflow_generation(
-        &self,
-        lead: &LeadTarget,
-        thread: &Thread,
-    ) -> Result<String, AppError> {
-        let path = thread.path.as_ref().ok_or(AppError::Unavailable)?;
-        crate::history::verified_codex_source(lead.binding().clone(), path.clone())
-            .await?
-            .ok_or(AppError::Unavailable)?;
-        self.history_generation(thread).await
-    }
-
     async fn workflow_turn(
         &self,
         thread: &Thread,
@@ -190,6 +187,22 @@ impl Codex {
         }
         Ok(None)
     }
+}
+
+async fn workflow_source(
+    lead: &LeadTarget,
+    thread: &Thread,
+    call_id: &str,
+    position: Option<u64>,
+) -> Result<(String, u64), AppError> {
+    let path = thread.path.as_ref().ok_or(AppError::Unavailable)?;
+    crate::history::codex_opening(
+        lead.binding().clone(),
+        path.clone(),
+        call_id.to_owned(),
+        position,
+    )
+    .await
 }
 
 fn call_position(turn: &Turn, call_id: &str, expected: WorkflowTool) -> Option<usize> {

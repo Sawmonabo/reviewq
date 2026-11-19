@@ -6,7 +6,7 @@ mod index;
 pub use capture::{
     AcceptedReport, ArtifactChunk, CHUNK_BYTES, CapturedArtifact, Declaration, HandoffReceipt,
     HandoffState, ReportCaptureStore, ReportFileSource, ReportWork, RevisionEvidence, Source,
-    reconcile_reports,
+    hash_report_file, reconcile_reports,
 };
 
 use reviewq_domain::identity::{GitSha, ReceiptId, ReportHash, Revision, RunId};
@@ -91,6 +91,8 @@ pub struct ReportSummary {
     pub revision_reason: Option<String>,
     pub full_mr_reviewed_sha: Option<GitSha>,
     pub coverage: Coverage,
+    pub coverage_source_sha: Option<GitSha>,
+    pub coverage_target_sha: Option<GitSha>,
     pub verdict: Verdict,
     pub semantic_index: SemanticIndex,
     pub finding_count: Option<u64>,
@@ -180,7 +182,8 @@ pub enum Descriptor {
         id: String,
         conclusion: FindingConclusion,
         reason: String,
-        checked_sha: GitSha,
+        checked_sha: Option<GitSha>,
+        discussion_ids: Vec<String>,
     },
     Disposition {
         id: String,

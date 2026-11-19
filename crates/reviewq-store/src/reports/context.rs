@@ -103,9 +103,14 @@ fn query(collection: Collection) -> &'static str {
              FROM report_findings WHERE run_id=?1 AND receipt_id=?2 AND finding_id>?3
              ORDER BY finding_id LIMIT ?5",
         Collection::Changes =>
-            "SELECT finding_id, conclusion, reason, checked_sha
-             FROM report_changes WHERE run_id=?1 AND receipt_id=?2 AND finding_id>?3
-             ORDER BY finding_id LIMIT ?5",
+            "SELECT c.finding_id, c.conclusion, c.reason, c.checked_sha,
+                (SELECT json_group_array(d.discussion_id) FROM (
+                    SELECT discussion_id FROM report_change_discussions
+                    WHERE run_id=c.run_id AND receipt_id=c.receipt_id AND finding_id=c.finding_id
+                    ORDER BY discussion_id
+                ) d)
+             FROM report_changes c WHERE c.run_id=?1 AND c.receipt_id=?2 AND c.finding_id>?3
+             ORDER BY c.finding_id LIMIT ?5",
         Collection::Sections =>
             "SELECT title, scalar_offset, scalar_length, evidence_sha256
              FROM report_sections WHERE run_id=?1 AND receipt_id=?2 AND scalar_offset>?3
@@ -149,7 +154,8 @@ fn decode(collection: Collection, row: &Row<'_>) -> Result<Descriptor, StoreErro
             id: row.get(0)?,
             conclusion: parse(text(row, 1)?)?,
             reason: row.get(2)?,
-            checked_sha: parse(text(row, 3)?)?,
+            checked_sha: optional(row, 3)?,
+            discussion_ids: serde_json::from_str(text(row, 4)?).map_err(|_| AppError::Internal)?,
         },
         Collection::Sections => Descriptor::Section {
             title: row.get(0)?,

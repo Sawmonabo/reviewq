@@ -260,7 +260,7 @@ pub(super) fn next_line(
     Ok(end)
 }
 
-fn end_of_line(
+pub(super) fn end_of_line(
     file: &File,
     mut end: u64,
     budget: &mut u64,
@@ -293,7 +293,7 @@ fn block_size(remaining: u64, budget: &mut u64, cancelled: &AtomicBool) -> Resul
     Ok(length as usize)
 }
 
-fn boundary(file: &File, value: u64) -> Result<bool, AppError> {
+pub(super) fn boundary(file: &File, value: u64) -> Result<bool, AppError> {
     if value == 0 {
         return Ok(true);
     }

@@ -17,7 +17,7 @@ use reviewq_app::workspace::{WorkspaceConfig, WorkspaceStore};
 use reviewq_domain::session::{AbsolutePath, HostProvider};
 use reviewq_providers::{Claude, Codex, FileHistory, GitLab, RegisteredReportFiles, Workflows};
 use reviewq_store::SqliteStore;
-use reviewq_transport::{ServiceEndpoint, ServiceIdentity};
+use reviewq_transport::{ServiceEndpoint, ServiceIdentity, WorkflowIntegration};
 use sha2::{Digest, Sha256};
 use socket2::{Domain, Protocol, Socket, Type};
 use tokio::net::TcpListener;
@@ -161,6 +161,7 @@ pub(crate) async fn serve(profile: PathBuf, options: Serve) -> Result<(), Failur
     };
     let host = codex.clone().map(|host| host as Arc<dyn NativeHost>);
     let workflow = Arc::new(Workflows::new(codex));
+    let report_files = Arc::new(RegisteredReportFiles);
     let sends_allowed = !options.validation && host.is_some();
     let claude = match options.claude_home {
         Some(home) => Some(home),
@@ -184,6 +185,7 @@ pub(crate) async fn serve(profile: PathBuf, options: Serve) -> Result<(), Failur
         Some(tokio::spawn(capture_reports(
             store.clone(),
             workflow.clone(),
+            report_files.clone(),
         )))
     };
     let (shutdown, wait) = watch::channel(false);
@@ -195,7 +197,10 @@ pub(crate) async fn serve(profile: PathBuf, options: Serve) -> Result<(), Failur
         reviewq_transport::ServiceRuntime {
             sends_allowed,
             claude,
-            workflow,
+            workflow: WorkflowIntegration {
+                proof: workflow,
+                report_files,
+            },
             endpoint: endpoint.clone(),
             web: &web,
             commits: store.subscribe(),
@@ -238,11 +243,15 @@ pub(crate) async fn serve(profile: PathBuf, options: Serve) -> Result<(), Failur
     Ok(())
 }
 
-async fn capture_reports(store: Arc<SqliteStore>, workflow: Arc<Workflows>) {
+async fn capture_reports(
+    store: Arc<SqliteStore>,
+    workflow: Arc<Workflows>,
+    report_files: Arc<RegisteredReportFiles>,
+) {
     let mut commits = store.subscribe_reports();
     loop {
         commits.borrow_and_update();
-        if reconcile_reports(store.as_ref(), workflow.as_ref(), &RegisteredReportFiles)
+        if reconcile_reports(store.as_ref(), workflow.as_ref(), report_files.as_ref())
             .await
             .is_err()
         {

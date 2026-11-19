@@ -14,7 +14,7 @@ use crate::connection::WriteTx;
 use crate::events::now_ms;
 use crate::notifications::insert_notification;
 use crate::queue::identity_for_review;
-use crate::workspace::{advance_queue, configured};
+use crate::workspace::{advance_queue, configured, settings_revision};
 
 pub(super) fn complete(
     tx: &mut WriteTx<'_>,
@@ -38,18 +38,27 @@ pub(super) fn complete(
     }
     let current = head(db, run)?;
     let base = db.query_row(
-        "SELECT base_receipt_id, disposition_version FROM report_handoffs WHERE receipt_id=?1",
+        "SELECT base_receipt_id, disposition_version, settings_revision FROM report_handoffs WHERE receipt_id=?1",
         [receipt],
-        |row| Ok((row.get::<_, Option<String>>(0)?, row.get::<_, i64>(1)?)),
+        |row| Ok((row.get::<_, Option<String>>(0)?, row.get::<_, i64>(1)?, row.get::<_, i64>(2)?)),
     )?;
     let newer: bool = db.query_row(
         "SELECT EXISTS (SELECT 1 FROM report_handoffs
-             WHERE run_id=?1 AND rowid>(SELECT rowid FROM report_handoffs WHERE receipt_id=?2)
-               AND state<>'failed')",
-        params![run, receipt],
+             WHERE run_id=?1 AND receipt_id<>?2 AND
+                ((source_generation=?3 AND source_position>?4) OR
+                   (source_generation<>?3 AND state IN ('pending_completion','recorded'))))",
+        params![
+            run,
+            receipt,
+            work.call.source_generation,
+            db_int(work.call.source_position)?
+        ],
         |row| row.get(0),
     )?;
-    if newer || current.receipt.as_ref() != base.0.as_ref() || current.disposition_version != base.1
+    if newer
+        || current.receipt.as_ref() != base.0.as_ref()
+        || current.disposition_version != base.1
+        || base.2 != settings_revision(db)?.as_sqlite_integer()
     {
         return reject(
             tx,
@@ -68,8 +77,22 @@ pub(super) fn complete(
         } => {
             let captured = artifact.as_ref().ok_or(AppError::Internal)?;
             let artifact_id = stage.as_deref().ok_or(AppError::Conflict)?;
+            if captured.semantic_failure {
+                return reject(
+                    tx,
+                    &work,
+                    Some(captured),
+                    "report_semantic_evidence_invalid",
+                    Some(&result),
+                );
+            }
             if let Some(reference) = amends {
-                if !current.matches(reference)
+                if !current.complete
+                    || !current.matches(reference)
+                    || current
+                        .original_hash
+                        .as_ref()
+                        .is_some_and(|hash| Some(hash) != current.hash.as_ref())
                     || current.hash.as_deref() != Some(captured.hash.as_str())
                     || current.verdict.as_deref() != Some(verdict.to_string().as_str())
                     || !current.matches_revision(revision)
@@ -181,6 +204,10 @@ struct Head {
     coverage: Option<String>,
     source_kind: Option<String>,
     source_path: Option<Vec<u8>>,
+    complete: bool,
+    original_hash: Option<String>,
+    coverage_source: Option<String>,
+    coverage_target: Option<String>,
 }
 
 impl Head {
@@ -200,7 +227,7 @@ impl Head {
 fn head(db: &Connection, run: &str) -> Result<Head, StoreError> {
     Ok(db.query_row(
         "SELECT h.receipt_id, h.disposition_version, a.sha256, v.attention_receipt_id, v.reviewed_sha,
-                v.revision_reason, v.full_mr_reviewed_sha, v.verdict, v.coverage, c.source_kind, c.source_path
+                v.revision_reason, v.full_mr_reviewed_sha, v.verdict, v.coverage, c.source_kind, c.source_path, a.complete, a.original_sha256, v.coverage_source_sha, v.coverage_target_sha
          FROM report_heads h JOIN report_versions v USING(run_id, receipt_id)
          JOIN artifacts a USING(artifact_id)
          LEFT JOIN report_handoffs c ON c.run_id=v.run_id AND c.receipt_id=v.handoff_receipt_id
@@ -208,11 +235,11 @@ fn head(db: &Connection, run: &str) -> Result<Head, StoreError> {
         [run], |row| Ok(Head {
             receipt: row.get(0)?, disposition_version: row.get(1)?, hash: row.get(2)?,
             attention: row.get(3)?, reviewed_sha: row.get(4)?, revision_reason: row.get(5)?,
-            full_sha: row.get(6)?, verdict: row.get(7)?, coverage: row.get(8)?, source_kind: row.get(9)?, source_path: row.get(10)?,
+            full_sha: row.get(6)?, verdict: row.get(7)?, coverage: row.get(8)?, source_kind: row.get(9)?, source_path: row.get(10)?, complete: row.get(11)?, original_hash: row.get(12)?, coverage_source: row.get(13)?, coverage_target: row.get(14)?,
         }),
     ).optional()?.unwrap_or(Head {
         receipt: None, disposition_version: 0, hash: None, attention: None,
-        reviewed_sha: None, revision_reason: None, full_sha: None, verdict: None, coverage: None, source_kind: None, source_path: None,
+        reviewed_sha: None, revision_reason: None, full_sha: None, verdict: None, coverage: None, source_kind: None, source_path: None, complete: false, original_hash: None, coverage_source: None, coverage_target: None,
     }))
 }
 
@@ -290,11 +317,13 @@ fn promote(
         "INSERT INTO report_versions(run_id, receipt_id, artifact_id, handoff_receipt_id,
           parent_receipt_id, attention_receipt_id, reviewed_sha, revision_reason, full_mr_reviewed_sha,
           coverage, verdict, semantic_index, finding_count, change_count, captured_at_ms,
-          starting_disposition_version)
-         VALUES(?1,?2,?3,?2,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15)",
+          starting_disposition_version, coverage_source_sha, coverage_target_sha)
+         VALUES(?1,?2,?3,?2,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17)",
         params![run, receipt, artifact, previous.receipt, attention, reviewed, reason, known_full,
             coverage, verdict.to_string(), semantic, count, count.map(|_| 0_i64), time,
-            previous.disposition_version],
+            previous.disposition_version,
+            if amendment { previous.coverage_source.as_deref() } else { reviewed },
+            if amendment { previous.coverage_target.as_deref() } else { None }],
     )?;
     if let Some(items) = &captured.index {
         write_index(db, run, receipt, items)?;

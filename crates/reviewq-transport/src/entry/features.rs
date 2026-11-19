@@ -15,7 +15,26 @@ use super::Entry;
 
 pub(super) fn routes() -> Router<Arc<Entry>> {
     Router::new()
-        .route("/followups/preferences", get(followups::preferences))
+        .route(
+            "/followups/preferences",
+            get(followups::preferences).put(followups::save_preferences),
+        )
+        .route(
+            "/reviews/{review_id}/followups/configure",
+            axum::routing::post(followups::configure).layer(DefaultBodyLimit::max(512 * 1024)),
+        )
+        .route(
+            "/reviews/{review_id}/followups/pause",
+            axum::routing::post(followups::pause),
+        )
+        .route(
+            "/reviews/{review_id}/followups/resume",
+            axum::routing::post(followups::resume),
+        )
+        .route(
+            "/reviews/{review_id}/followups/review-now",
+            axum::routing::post(followups::review_now),
+        )
         .route("/reviews/{review_id}/followups", get(followups::enrollment))
         .route(
             "/reviews/{review_id}/followups/results",

@@ -145,7 +145,7 @@ fn visit(
     Ok(())
 }
 
-fn verify(
+pub(super) fn verify(
     binding: &NativeBinding,
     parent: Option<&HistoryParent>,
     candidate: &Path,

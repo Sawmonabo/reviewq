@@ -209,8 +209,10 @@ CREATE TABLE report_handoffs (
     turn_id TEXT NOT NULL,
     call_id TEXT NOT NULL,
     source_generation TEXT NOT NULL CHECK (length(CAST(source_generation AS BLOB)) BETWEEN 1 AND 512),
+    source_position INTEGER NOT NULL CHECK (source_position >= 0),
     request_entry_id TEXT,
     result_entry_id TEXT,
+    request_sha256 TEXT NOT NULL CHECK (length(request_sha256) = 64),
     declaration_sha256 TEXT NOT NULL CHECK (length(declaration_sha256) = 64),
     form TEXT NOT NULL CHECK (form IN ('final', 'unchanged', 'needs_input')),
     state TEXT NOT NULL CHECK (state IN ('pending_completion', 'recorded', 'failed')),
@@ -230,6 +232,7 @@ CREATE TABLE report_handoffs (
     reason TEXT CHECK (length(CAST(reason AS BLOB)) <= 2048),
     created_at_ms INTEGER NOT NULL,
     updated_at_ms INTEGER NOT NULL CHECK (updated_at_ms >= created_at_ms),
+    settings_revision INTEGER NOT NULL CHECK (settings_revision >= 0),
     CHECK ((expected_receipt_id IS NULL) = (expected_sha256 IS NULL)),
     CHECK ((source_kind='file') = (source_path IS NOT NULL)),
     CHECK ((form='final') = (verdict IS NOT NULL)),
@@ -239,6 +242,7 @@ CREATE TABLE report_handoffs (
     UNIQUE (run_id, lead_session_key, turn_id, call_id)
 ) STRICT;
 
+CREATE UNIQUE INDEX report_handoff_native_order ON report_handoffs(run_id, source_generation, source_position);
 CREATE INDEX report_handoff_latest ON report_handoffs(run_id, created_at_ms DESC, receipt_id DESC);
 CREATE INDEX report_handoff_artifact ON report_handoffs(artifact_id);
 CREATE INDEX report_handoff_pending ON report_handoffs(due_at_ms, receipt_id)
@@ -255,6 +259,8 @@ CREATE TABLE report_versions (
     revision_reason TEXT CHECK (length(CAST(revision_reason AS BLOB)) BETWEEN 1 AND 1024),
     full_mr_reviewed_sha TEXT CHECK (length(full_mr_reviewed_sha) IN (40, 64)),
     coverage TEXT NOT NULL CHECK (coverage IN ('full_mr', 'selected_threads')),
+    coverage_source_sha TEXT CHECK (length(coverage_source_sha) IN (40, 64)),
+    coverage_target_sha TEXT CHECK (length(coverage_target_sha) IN (40, 64)),
     verdict TEXT NOT NULL CHECK (verdict IN ('approve', 'request_changes', 'blocked', 'not_specified')),
     semantic_index TEXT NOT NULL CHECK (semantic_index IN ('ready', 'source_only')),
     finding_count INTEGER CHECK (finding_count >= 0),
@@ -317,9 +323,19 @@ CREATE TABLE report_changes (
     conclusion TEXT NOT NULL CHECK (conclusion IN (
         'fixed', 'clarified_withdrawn', 'superseded', 'partly_addressed', 'still_present', 'unverified')),
     reason TEXT NOT NULL CHECK (length(CAST(reason AS BLOB)) BETWEEN 1 AND 384),
-    checked_sha TEXT NOT NULL CHECK (length(checked_sha) IN (40, 64)),
+    checked_sha TEXT CHECK (length(checked_sha) IN (40, 64)),
     PRIMARY KEY (run_id, receipt_id, finding_id),
     FOREIGN KEY (run_id, receipt_id) REFERENCES report_versions(run_id, receipt_id)
+) STRICT, WITHOUT ROWID;
+
+CREATE TABLE report_change_discussions (
+    run_id TEXT NOT NULL,
+    receipt_id TEXT NOT NULL,
+    finding_id TEXT NOT NULL,
+    discussion_id TEXT NOT NULL CHECK (length(CAST(discussion_id AS BLOB)) BETWEEN 1 AND 256),
+    PRIMARY KEY (run_id, receipt_id, finding_id, discussion_id),
+    FOREIGN KEY (run_id, receipt_id, finding_id)
+        REFERENCES report_changes(run_id, receipt_id, finding_id)
 ) STRICT, WITHOUT ROWID;
 
 CREATE TABLE finding_dispositions (
@@ -611,6 +627,7 @@ CREATE TABLE followup_batches (
     private_manifest TEXT CHECK (json_valid(private_manifest) AND length(CAST(private_manifest AS BLOB)) <= 131072),
     authority_verified INTEGER NOT NULL CHECK (authority_verified IN (0, 1)),
     holds_slot INTEGER NOT NULL CHECK (holds_slot IN (0, 1)),
+    manual_requested INTEGER NOT NULL DEFAULT 0 CHECK (manual_requested IN (0, 1)),
     hold_reason TEXT CHECK (length(CAST(hold_reason AS BLOB)) <= 1024),
     submission_id TEXT,
     native_turn_id TEXT,
@@ -727,3 +744,51 @@ CREATE INDEX report_mutation_version ON report_mutation_receipts(run_id, receipt
 CREATE INDEX report_mutation_previous ON report_mutation_receipts(run_id, previous_receipt_id);
 CREATE INDEX report_mutation_disposition
     ON report_mutation_receipts(run_id, disposition_version, finding_id);
+
+CREATE TABLE followup_command_receipts (
+    actor_key BLOB NOT NULL,
+    operation TEXT NOT NULL CHECK (operation IN ('followup_monitor','followup_preferences')),
+    submission_id TEXT NOT NULL,
+    review_id TEXT REFERENCES reviews(review_id),
+    generation INTEGER NOT NULL CHECK (generation > 0),
+    state TEXT CHECK (state IN ('enabled','paused','archived')),
+    batch_id TEXT,
+    automatic INTEGER CHECK (automatic IN (0, 1)),
+    active_limit INTEGER CHECK (active_limit BETWEEN 1 AND 8),
+    PRIMARY KEY (actor_key, operation, submission_id),
+    FOREIGN KEY (actor_key, operation, submission_id)
+        REFERENCES mutation_receipts(actor_key, operation, submission_id),
+    FOREIGN KEY (review_id, batch_id) REFERENCES followup_batches(review_id, batch_id),
+    CHECK ((operation='followup_monitor') = (review_id IS NOT NULL AND state IS NOT NULL)),
+    CHECK ((operation='followup_preferences') = (automatic IS NOT NULL AND active_limit IS NOT NULL))
+) STRICT, WITHOUT ROWID;
+
+CREATE INDEX followup_command_batch ON followup_command_receipts(review_id, batch_id);
+
+CREATE TABLE followup_note_baselines (
+    review_id TEXT NOT NULL,
+    generation INTEGER NOT NULL,
+    original_note_id TEXT NOT NULL,
+    note_id TEXT NOT NULL,
+    reviewer_id TEXT NOT NULL,
+    body_sha256 TEXT NOT NULL CHECK (length(body_sha256)=64),
+    PRIMARY KEY (review_id, generation, original_note_id, note_id),
+    FOREIGN KEY (review_id, generation, original_note_id)
+        REFERENCES followup_threads(review_id, generation, original_note_id)
+) STRICT, WITHOUT ROWID;
+
+CREATE TABLE workflow_dispatch (
+    delivery_id TEXT PRIMARY KEY REFERENCES messages(message_id),
+    review_id TEXT NOT NULL REFERENCES reviews(review_id),
+    action_id TEXT REFERENCES actions(action_id),
+    batch_id TEXT,
+    settings_revision INTEGER NOT NULL CHECK (settings_revision >= 0),
+    head_sha TEXT NOT NULL CHECK (length(head_sha) IN (40, 64)),
+    model TEXT NOT NULL CHECK (length(model) BETWEEN 1 AND 128),
+    effort TEXT NOT NULL CHECK (length(effort) BETWEEN 1 AND 64),
+    FOREIGN KEY (review_id, batch_id) REFERENCES followup_batches(review_id, batch_id),
+    CHECK ((action_id IS NULL) <> (batch_id IS NULL))
+) STRICT, WITHOUT ROWID;
+
+CREATE INDEX workflow_dispatch_action ON workflow_dispatch(action_id);
+CREATE INDEX workflow_dispatch_batch ON workflow_dispatch(review_id, batch_id);

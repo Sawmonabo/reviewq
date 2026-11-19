@@ -12,12 +12,14 @@ use reviewq_app::access::{Actor, AppError};
 use reviewq_app::actions::ActionStore;
 use reviewq_app::decisions::{Checkpoints, DecisionStore};
 use reviewq_app::events::EventLog;
-use reviewq_app::followups::FollowupStore;
+use reviewq_app::followups::{FollowupCommands, FollowupStore};
 use reviewq_app::history::{HistoryStore, NativeHistoryReader};
 use reviewq_app::hosts::{ClaudeCompanion, LeadStore, MessageHistoryStore, NativeHost};
 use reviewq_app::notifications::InboxStore;
 use reviewq_app::queue::{QueueStore, ReviewLookup};
-use reviewq_app::reports::{ReportCaptureStore, ReportMutationStore, ReportStore};
+use reviewq_app::reports::{
+    ReportCaptureStore, ReportFileSource, ReportMutationStore, ReportStore,
+};
 use reviewq_app::sources::{ReviewSourceReader, SourceRefreshStore, refresh_queue};
 use reviewq_app::workflow::NativeWorkflowProof;
 use reviewq_app::workspace::WorkspaceStore;
@@ -63,6 +65,7 @@ pub trait Store:
     + DecisionStore
     + ActionStore
     + FollowupStore
+    + FollowupCommands
 {
 }
 impl<
@@ -80,12 +83,19 @@ impl<
         + InboxStore
         + DecisionStore
         + ActionStore
-        + FollowupStore,
+        + FollowupStore
+        + FollowupCommands,
 > Store for S
 {
 }
 
 type RefreshResult = Option<Result<usize, AppError>>;
+
+/// Native proof and guarded artifact reads for the workflow routes.
+pub struct WorkflowIntegration {
+    pub proof: Arc<dyn NativeWorkflowProof>,
+    pub report_files: Arc<dyn ReportFileSource>,
+}
 
 pub(super) struct Entry {
     store: Arc<dyn Store>,
@@ -93,7 +103,7 @@ pub(super) struct Entry {
     host: Option<Arc<dyn NativeHost>>,
     claude: Option<Arc<dyn ClaudeCompanion>>,
     file_history: Arc<dyn NativeHistoryReader>,
-    workflow: Arc<dyn NativeWorkflowProof>,
+    workflow: WorkflowIntegration,
     sends_allowed: bool,
     commits: watch::Receiver<EventCursor>,
     shutdown: watch::Receiver<bool>,
@@ -137,7 +147,7 @@ pub struct ServiceRuntime<'a> {
     pub web: &'a Path,
     pub sends_allowed: bool,
     pub claude: Option<Arc<dyn ClaudeCompanion>>,
-    pub workflow: Arc<dyn NativeWorkflowProof>,
+    pub workflow: WorkflowIntegration,
     pub commits: watch::Receiver<EventCursor>,
     pub shutdown: watch::Receiver<bool>,
 }

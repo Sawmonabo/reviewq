@@ -13,10 +13,12 @@ use tokio::sync::Semaphore;
 mod file;
 mod identity;
 mod locator;
+mod proof;
 mod reader;
 mod records;
 
 pub(crate) use locator::{verified_claude_source, verified_codex_source};
+pub(crate) use proof::codex_opening;
 
 pub struct FileHistory {
     reads: Arc<Semaphore>,
