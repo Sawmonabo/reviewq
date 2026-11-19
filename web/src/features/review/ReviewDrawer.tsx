@@ -260,48 +260,41 @@ export default function ReviewDrawer({
     <aside className="drawer-surface" aria-labelledby="review-title">
       <header className="drawer-header">
         <div className="drawer-header-row">
-          <div>
-            <div className="drawer-breadcrumb">
-              {child ? (
+          <div className="drawer-breadcrumb">
+            <button
+              type="button"
+              className="quiet-button ticket-key"
+              onClick={() => {
+                if (child) onSession(undefined);
+                onTab("overview");
+              }}
+            >
+              {review.tickets.map((item) => item.key).join(" · ") || `!${review.iid}`}
+            </button>
+            {review.tickets.length > 0 && (
+              <>
+                <span aria-hidden="true">/</span>
+                {source ? (
+                  <a href={source} target="_blank" rel="noreferrer">
+                    !{review.iid}
+                  </a>
+                ) : (
+                  <span>!{review.iid}</span>
+                )}
+              </>
+            )}
+            {child && (
+              <>
+                <span aria-hidden="true">›</span>
                 <button type="button" className="quiet-button" onClick={() => onSession(undefined)}>
-                  <Icon name="back" size={13} /> Return to lead
+                  Lead review
                 </button>
-              ) : (
-                <>
-                  {review.tickets[0] && <span className="ticket-key">{review.tickets[0].key}</span>}
-                  <span className="truncate" title={review.projectPath}>
-                    {review.projectPath}
-                  </span>
-                  <strong>!{review.iid}</strong>
-                </>
-              )}
-            </div>
-            <h2 id="review-title">{review.title}</h2>
+                <span aria-hidden="true">›</span>
+                <span>Subagent</span>
+              </>
+            )}
           </div>
           <div className="actions drawer-actions">
-            {(run || Boolean(runs?.items.length)) && !child && (
-              <select
-                className="run-picker"
-                aria-label="Review run"
-                value={run?.runId ?? ""}
-                onChange={(event) => {
-                  if (event.currentTarget.value) onRun(event.currentTarget.value);
-                }}
-              >
-                <option value="" disabled>
-                  Choose run
-                </option>
-                {run && !runs?.items.some((item) => item.runId === run.runId) && (
-                  <option value={run.runId}>Selected run</option>
-                )}
-                {runs?.items.map((item) => (
-                  <option value={item.runId} key={item.runId}>
-                    {readable(item.provider)} ·{" "}
-                    {item.startedAt ? formatTime(item.startedAt) : item.runId}
-                  </option>
-                ))}
-              </select>
-            )}
             <ActionMenu
               label="Review actions"
               trigger={<Icon name="more" />}
@@ -379,6 +372,15 @@ export default function ReviewDrawer({
             </button>
           </div>
         </div>
+        <div className="drawer-heading">
+          <h2
+            id="review-title"
+            title={child ? "Subagent" : (review.tickets[0]?.title ?? review.title)}
+          >
+            {child ? "Subagent" : (review.tickets[0]?.title ?? review.title)}
+          </h2>
+          <DrawerSummary review={review} run={run} child={Boolean(child)} />
+        </div>
         {(Boolean(runs?.nextCursor) || runTrail.length > 0) && (
           <div className="actions run-pages">
             {runTrail.length > 0 && (
@@ -399,47 +401,76 @@ export default function ReviewDrawer({
           </div>
         )}
         {otherRuns.error && <Notice retry={otherRuns.retry}>{otherRuns.error}</Notice>}
-        <div
-          role="tablist"
-          aria-label={child ? "Child session" : "Review details"}
-          className="drawer-tabs"
-          onKeyDown={(event) => {
-            const current = visibleTabs.findIndex(([id]) => id === activeTab);
-            const last = visibleTabs.length - 1;
-            const next =
-              event.key === "Home"
-                ? 0
-                : event.key === "End"
-                  ? last
-                  : event.key === "ArrowLeft"
-                    ? (current + last) % visibleTabs.length
-                    : event.key === "ArrowRight"
-                      ? (current + 1) % visibleTabs.length
-                      : -1;
-            const item = visibleTabs[next];
-            if (!item) return;
-            event.preventDefault();
-            activate(item[0]);
-            buttonRefs.current[next]?.focus();
-          }}
-        >
-          {visibleTabs.map(([id, label], index) => (
-            <button
-              type="button"
-              role="tab"
-              id={`review-tab-${id}`}
-              key={id}
-              ref={(element) => {
-                buttonRefs.current[index] = element;
-              }}
-              aria-controls="review-tabpanel"
-              aria-selected={id === activeTab}
-              tabIndex={id === activeTab ? 0 : -1}
-              onClick={() => activate(id)}
-            >
-              {label}
-            </button>
-          ))}
+        <div className="drawer-tab-bar">
+          <div
+            role="tablist"
+            aria-label={child ? "Child session" : "Review details"}
+            className="drawer-tabs"
+            onKeyDown={(event) => {
+              const current = visibleTabs.findIndex(([id]) => id === activeTab);
+              const last = visibleTabs.length - 1;
+              const next =
+                event.key === "Home"
+                  ? 0
+                  : event.key === "End"
+                    ? last
+                    : event.key === "ArrowLeft"
+                      ? (current + last) % visibleTabs.length
+                      : event.key === "ArrowRight"
+                        ? (current + 1) % visibleTabs.length
+                        : -1;
+              const item = visibleTabs[next];
+              if (!item) return;
+              event.preventDefault();
+              activate(item[0]);
+              buttonRefs.current[next]?.focus();
+            }}
+          >
+            {visibleTabs.map(([id, label], index) => (
+              <button
+                type="button"
+                role="tab"
+                id={`review-tab-${id}`}
+                key={id}
+                ref={(element) => {
+                  buttonRefs.current[index] = element;
+                }}
+                aria-controls="review-tabpanel"
+                aria-selected={id === activeTab}
+                tabIndex={id === activeTab ? 0 : -1}
+                onClick={() => activate(id)}
+              >
+                {label}
+              </button>
+            ))}
+          </div>{" "}
+          {!child &&
+            ((runs?.items.length ?? 0) > 1 ||
+              (!selected && Boolean(runs?.items.length)) ||
+              runTrail.length > 0 ||
+              Boolean(runs?.nextCursor)) && (
+              <select
+                className="run-picker"
+                aria-label="Runs"
+                value={run?.runId ?? ""}
+                onChange={(event) => {
+                  if (event.currentTarget.value) onRun(event.currentTarget.value);
+                }}
+              >
+                <option value="" disabled>
+                  Choose run
+                </option>
+                {run && !runs?.items.some((item) => item.runId === run.runId) && (
+                  <option value={run.runId}>Selected run</option>
+                )}
+                {runs?.items.map((item) => (
+                  <option value={item.runId} key={item.runId}>
+                    {item.provider === "claude" ? "Claude Code" : "Codex"} ·{" "}
+                    {item.startedAt ? formatTime(item.startedAt) : item.runId}
+                  </option>
+                ))}
+              </select>
+            )}
         </div>
       </header>
       <div
@@ -555,6 +586,48 @@ export default function ReviewDrawer({
   );
 }
 
+function DrawerSummary({
+  review,
+  run,
+  child,
+}: {
+  readonly review: MergeRequestRow;
+  readonly run: RunDetail | undefined;
+  readonly child: boolean;
+}) {
+  if (child) return <p className="drawer-meta">Native subagent conversation and result</p>;
+  const reason = run && review.focusedRunId === run.runId ? review.reasonKind : null;
+  const known: Readonly<Record<string, readonly [string, string]>> = {
+    agent_input: ["Agent needs input", "rose"],
+    permission_required: ["Agent needs input", "rose"],
+    report_ready: ["Response ready", "blue"],
+    report_failed: ["Findings could not be saved", "red"],
+    lead_working: ["Working", "green"],
+    session_working: ["Working", "green"],
+    waiting_author: ["Waiting on author", "amber"],
+    discussion_update: ["Follow-up ready", "blue"],
+    decision_required: ["Review ready", "blue"],
+  };
+  const state = reason ? (known[reason] ?? [readable(reason), ""]) : undefined;
+  return (
+    <div className="drawer-meta">
+      {state && <span className={`drawer-state badge ${state[1]}`}>{state[0]}</span>}
+      <span>
+        {[review.author?.label, review.projectPath.split("/").at(-1)].filter(Boolean).join(" · ")}
+      </span>
+      {review.personalApproval && <span className="drawer-fact approved">You approved</span>}
+      {review.ourComments > 0 && (
+        <span className="drawer-fact comments">Commented · {review.ourComments}</span>
+      )}
+      {review.unreadReplies > 0 && (
+        <span className="drawer-fact replies">
+          {review.unreadReplies === 1 ? "New reply" : "New replies"} · {review.unreadReplies}
+        </span>
+      )}
+    </div>
+  );
+}
+
 function Overview({
   overview,
   run,
@@ -579,9 +652,9 @@ function Overview({
   return (
     <div className="overview stack">
       {ticket}
-      <section className="surface-card stack" aria-label="Merge request">
+      <section className="overview-review-details stack" aria-label="Review details">
         <div className="spread">
-          <h3>Merge request</h3>
+          <h3>Review details</h3>
           <span className="badge">{readable(review.mrState)}</span>
         </div>
         <p>
@@ -592,7 +665,7 @@ function Overview({
             </a>
           )}
         </p>
-        <dl className="detail-facts">
+        <dl className="overview-facts">
           <div>
             <dt>Project</dt>
             <dd>
@@ -627,9 +700,9 @@ function Overview({
       </section>
       {pending && <Loading label="Resolving selected run…" />}
       {run ? (
-        <section className="surface-card stack" aria-label="Selected run">
+        <section className="overview-review-details stack" aria-label="Selected run">
           <h3>Selected run</h3>
-          <dl className="detail-facts">
+          <dl className="overview-facts">
             <div>
               <dt>Run</dt>
               <dd>
