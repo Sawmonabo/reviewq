@@ -7,6 +7,7 @@ pub mod history;
 mod hosts;
 pub mod mcp;
 pub mod queue;
+pub mod reports;
 mod scalar;
 
 pub use common::{ErrorCode, ErrorDto, Failure, Page, Success, UtcTimestampDto};

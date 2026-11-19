@@ -13,6 +13,7 @@ use reviewq_app::events::EventLog;
 use reviewq_app::history::{HistoryStore, NativeHistoryReader};
 use reviewq_app::hosts::{LeadStore, NativeHost};
 use reviewq_app::queue::{QueueStore, ReviewLookup};
+use reviewq_app::reports::ReportStore;
 use reviewq_app::sources::{ReviewSourceReader, SourceRefreshStore, refresh_queue};
 use reviewq_app::workspace::WorkspaceStore;
 use reviewq_protocol::queue::QueueSync;
@@ -25,6 +26,7 @@ mod auth;
 mod changes;
 mod control;
 mod error;
+mod features;
 mod history;
 mod hosts;
 mod mcp;
@@ -45,6 +47,7 @@ pub trait Store:
     + LeadStore
     + HistoryStore
     + SourceRefreshStore
+    + ReportStore
 {
 }
 impl<
@@ -54,7 +57,8 @@ impl<
         + EventLog
         + LeadStore
         + HistoryStore
-        + SourceRefreshStore,
+        + SourceRefreshStore
+        + ReportStore,
 > Store for S
 {
 }
@@ -133,6 +137,7 @@ pub fn router(
         )
         .route("/runs/{run_id}", get(pages::run))
         .route("/native/codex/link", post(hosts::link))
+        .merge(features::routes())
         .route(
             "/runs/{run_id}/sessions/{session_key}/history/page",
             get(history::page),

@@ -7,6 +7,7 @@ mod history;
 mod hosts;
 mod queue;
 mod refresh;
+mod reports;
 mod workspace;
 
 pub use connection::{SqliteStore, StoreIdentity};

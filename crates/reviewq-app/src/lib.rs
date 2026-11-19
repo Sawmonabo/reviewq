@@ -6,5 +6,6 @@ pub mod events;
 pub mod history;
 pub mod hosts;
 pub mod queue;
+pub mod reports;
 pub mod sources;
 pub mod workspace;
