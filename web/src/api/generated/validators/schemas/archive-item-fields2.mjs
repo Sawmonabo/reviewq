@@ -6,7 +6,7 @@ import { validate147 } from "./git-sha-dto.mjs";
 import { validate25 } from "./checkpoint-id-dto.mjs";
 import { validate69 } from "./merge-request-iid-dto.mjs";
 import { validate232 } from "./utc-timestamp-dto.mjs";
-function validate271(
+function validate272(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -21,7 +21,7 @@ function validate271(
         let data0 = data.focusedLeadName;
         const _errs1 = errors;
         if (typeof data0 !== "string" && data0 !== null) {
-          validate271.errors = [
+          validate272.errors = [
             {
               instancePath: instancePath + "/focusedLeadName",
               schemaPath: "#/properties/focusedLeadName/type",
@@ -93,7 +93,7 @@ function validate271(
               vErrors.push(err1);
             }
             errors++;
-            validate271.errors = vErrors;
+            validate272.errors = vErrors;
             return false;
           } else {
             errors = _errs4;
@@ -168,7 +168,7 @@ function validate271(
                 vErrors.push(err3);
               }
               errors++;
-              validate271.errors = vErrors;
+              validate272.errors = vErrors;
               return false;
             } else {
               errors = _errs9;
@@ -242,7 +242,7 @@ function validate271(
                   vErrors.push(err5);
                 }
                 errors++;
-                validate271.errors = vErrors;
+                validate272.errors = vErrors;
                 return false;
               } else {
                 errors = _errs14;
@@ -316,7 +316,7 @@ function validate271(
                     vErrors.push(err7);
                   }
                   errors++;
-                  validate271.errors = vErrors;
+                  validate272.errors = vErrors;
                   return false;
                 } else {
                   errors = _errs19;
@@ -339,7 +339,7 @@ function validate271(
                 ) {
                   const _errs23 = errors;
                   if (typeof data.hasAgentQuestions !== "boolean") {
-                    validate271.errors = [
+                    validate272.errors = [
                       {
                         instancePath: instancePath + "/hasAgentQuestions",
                         schemaPath: "#/properties/hasAgentQuestions/type",
@@ -433,7 +433,7 @@ function validate271(
                           vErrors.push(err9);
                         }
                         errors++;
-                        validate271.errors = vErrors;
+                        validate272.errors = vErrors;
                         return false;
                       } else {
                         errors = _errs27;
@@ -457,7 +457,7 @@ function validate271(
         }
       }
     } else {
-      validate271.errors = [
+      validate272.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -468,7 +468,7 @@ function validate271(
       return false;
     }
   }
-  validate271.errors = vErrors;
+  validate272.errors = vErrors;
   return errors === 0;
 }
-export { validate271 };
+export { validate272 };

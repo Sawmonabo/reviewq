@@ -101,7 +101,8 @@ const schema225 = {
     title: { type: "string" },
   },
 };
-const schema236 = {
+const schema234 = { enum: ["text", "file", "other"], type: "string" };
+const schema239 = {
   type: "object",
   properties: {
     author: { type: "string" },
@@ -118,12 +119,8 @@ const schema236 = {
     resolved: { type: ["boolean", "null"] },
   },
 };
-const schema238 = {
+const schema241 = {
   enum: ["open", "resolved", "comment", "unknown"],
-  type: "string",
-};
-const schema243 = {
-  enum: ["complete", "incomplete", "binary", "provider_limited", "missing"],
   type: "string",
 };
 export {
@@ -135,7 +132,7 @@ export {
   schema221,
   schema223,
   schema225,
-  schema236,
-  schema238,
-  schema243,
+  schema234,
+  schema239,
+  schema241,
 };

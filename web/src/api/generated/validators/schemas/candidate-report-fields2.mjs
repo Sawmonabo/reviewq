@@ -2,9 +2,9 @@
 import { func0 } from "../runtime.mjs";
 import { validate25 } from "./checkpoint-id-dto.mjs";
 import { validate134 } from "./report-hash-dto.mjs";
-import { validate932 } from "./artifact-stats.mjs";
+import { validate946 } from "./artifact-stats.mjs";
 import { validate127 } from "./safe-count-dto.mjs";
-function validate928(
+function validate942(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -15,7 +15,7 @@ function validate928(
       if (data.reason !== undefined && func0.call(data, "reason")) {
         const _errs1 = errors;
         if (typeof data.reason !== "string") {
-          validate928.errors = [
+          validate942.errors = [
             {
               instancePath: instancePath + "/reason",
               schemaPath: "#/properties/reason/type",
@@ -108,7 +108,7 @@ function validate928(
                 vErrors.push(err1);
               }
               errors++;
-              validate928.errors = vErrors;
+              validate942.errors = vErrors;
               return false;
             } else {
               errors = _errs5;
@@ -149,7 +149,7 @@ function validate928(
               if (data.stats !== undefined && func0.call(data, "stats")) {
                 const _errs10 = errors;
                 if (
-                  !validate932(data.stats, {
+                  !validate946(data.stats, {
                     instancePath: instancePath + "/stats",
                     parentData: data,
                     parentDataProperty: "stats",
@@ -158,8 +158,8 @@ function validate928(
                 ) {
                   vErrors =
                     vErrors === null
-                      ? validate932.errors
-                      : vErrors.concat(validate932.errors);
+                      ? validate946.errors
+                      : vErrors.concat(validate946.errors);
                   errors = vErrors.length;
                 }
                 var valid0 = _errs10 === errors;
@@ -170,7 +170,7 @@ function validate928(
                 if (data.text !== undefined && func0.call(data, "text")) {
                   const _errs11 = errors;
                   if (typeof data.text !== "string") {
-                    validate928.errors = [
+                    validate942.errors = [
                       {
                         instancePath: instancePath + "/text",
                         schemaPath: "#/properties/text/type",
@@ -240,7 +240,7 @@ function validate928(
         }
       }
     } else {
-      validate928.errors = [
+      validate942.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -251,7 +251,7 @@ function validate928(
       return false;
     }
   }
-  validate928.errors = vErrors;
+  validate942.errors = vErrors;
   return errors === 0;
 }
-export { validate928 };
+export { validate942 };

@@ -3,9 +3,9 @@ import { func0 } from "../runtime.mjs";
 import { validate25 } from "./checkpoint-id-dto.mjs";
 import { validate127 } from "./safe-count-dto.mjs";
 import { validate232 } from "./utc-timestamp-dto.mjs";
-import { validate260 } from "./coverage.mjs";
+import { validate261 } from "./coverage.mjs";
 import { validate147 } from "./git-sha-dto.mjs";
-function validate989(
+function validate1003(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -136,7 +136,7 @@ function validate989(
                   vErrors.push(err1);
                 }
                 errors++;
-                validate989.errors = vErrors;
+                validate1003.errors = vErrors;
                 return false;
               } else {
                 errors = _errs5;
@@ -156,7 +156,7 @@ function validate989(
               if (data.complete !== undefined && func0.call(data, "complete")) {
                 const _errs9 = errors;
                 if (typeof data.complete !== "boolean") {
-                  validate989.errors = [
+                  validate1003.errors = [
                     {
                       instancePath: instancePath + "/complete",
                       schemaPath: "#/properties/complete/type",
@@ -177,7 +177,7 @@ function validate989(
                 ) {
                   const _errs11 = errors;
                   if (
-                    !validate260(data.coverage, {
+                    !validate261(data.coverage, {
                       instancePath: instancePath + "/coverage",
                       parentData: data,
                       parentDataProperty: "coverage",
@@ -186,8 +186,8 @@ function validate989(
                   ) {
                     vErrors =
                       vErrors === null
-                        ? validate260.errors
-                        : vErrors.concat(validate260.errors);
+                        ? validate261.errors
+                        : vErrors.concat(validate261.errors);
                     errors = vErrors.length;
                   }
                   var valid0 = _errs11 === errors;
@@ -253,7 +253,7 @@ function validate989(
                         vErrors.push(err3);
                       }
                       errors++;
-                      validate989.errors = vErrors;
+                      validate1003.errors = vErrors;
                       return false;
                     } else {
                       errors = _errs13;
@@ -328,7 +328,7 @@ function validate989(
                           vErrors.push(err5);
                         }
                         errors++;
-                        validate989.errors = vErrors;
+                        validate1003.errors = vErrors;
                         return false;
                       } else {
                         errors = _errs18;
@@ -352,7 +352,7 @@ function validate989(
         }
       }
     } else {
-      validate989.errors = [
+      validate1003.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -363,7 +363,7 @@ function validate989(
       return false;
     }
   }
-  validate989.errors = vErrors;
+  validate1003.errors = vErrors;
   return errors === 0;
 }
-export { validate989 };
+export { validate1003 };

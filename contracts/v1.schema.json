@@ -66,6 +66,16 @@
         "approved": {
           "type": "boolean"
         },
+        "approvedCount": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SafeCountDto"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "id": {
           "$ref": "#/definitions/UpstreamIdDto"
         },
@@ -80,7 +90,8 @@
         "id",
         "name",
         "approved",
-        "required"
+        "required",
+        "approvedCount"
       ],
       "type": "object"
     },
@@ -177,6 +188,18 @@
         "id": {
           "$ref": "#/definitions/UpstreamIdDto"
         },
+        "isYou": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "name": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "username": {
           "type": [
             "string",
@@ -187,6 +210,8 @@
       "required": [
         "id",
         "username",
+        "name",
+        "isYou",
         "approvedAt"
       ],
       "type": "object"
@@ -2177,6 +2202,14 @@
         "open"
       ],
       "type": "object"
+    },
+    "DiscussionPosition": {
+      "enum": [
+        "text",
+        "file",
+        "other"
+      ],
+      "type": "string"
     },
     "DiscussionResolution": {
       "enum": [
@@ -4752,6 +4785,12 @@
     },
     "PatchDiscussionAnchor": {
       "properties": {
+        "baseSha": {
+          "$ref": "#/definitions/GitShaDto"
+        },
+        "headSha": {
+          "$ref": "#/definitions/GitShaDto"
+        },
         "newLine": {
           "anyOf": [
             {
@@ -4778,6 +4817,9 @@
         "oldPath": {
           "type": "string"
         },
+        "positionType": {
+          "$ref": "#/definitions/DiscussionPosition"
+        },
         "range": {
           "anyOf": [
             {
@@ -4787,9 +4829,16 @@
               "type": "null"
             }
           ]
+        },
+        "startSha": {
+          "$ref": "#/definitions/GitShaDto"
         }
       },
       "required": [
+        "baseSha",
+        "startSha",
+        "headSha",
+        "positionType",
         "oldPath",
         "newPath",
         "oldLine",
@@ -4976,6 +5025,16 @@
     "PatchFile": {
       "description": "One immutable address even when another revision serves identical bytes.",
       "properties": {
+        "additions": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SafeCountDto"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "availability": {
           "$ref": "#/definitions/PatchAvailability"
         },
@@ -4994,6 +5053,16 @@
         },
         "deleted": {
           "type": "boolean"
+        },
+        "deletions": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SafeCountDto"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "fileId": {
           "$ref": "#/definitions/FileIdDto"
@@ -5057,6 +5126,8 @@
         "byteLength",
         "lineCount",
         "maxLineBytes",
+        "additions",
+        "deletions",
         "patchETag"
       ],
       "type": "object"
@@ -5087,6 +5158,19 @@
             }
           ]
         },
+        "pageNumber": {
+          "$ref": "#/definitions/SafeCountDto"
+        },
+        "previousCursor": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/PageCursorDto"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "revision": {
           "$ref": "#/definitions/PatchRevisionDto"
         },
@@ -5099,6 +5183,8 @@
         "baseSha",
         "startSha",
         "headSha",
+        "pageNumber",
+        "previousCursor",
         "items",
         "nextCursor"
       ],

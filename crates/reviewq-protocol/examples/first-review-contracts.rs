@@ -366,6 +366,8 @@ fn patch_index(revision: &str, head: &str, etag: Option<&str>) -> PatchFileIndex
         base_sha: GitShaDto::new("0000000000000000000000000000000000000001").unwrap(),
         start_sha: GitShaDto::new("0000000000000000000000000000000000000002").unwrap(),
         head_sha: GitShaDto::new(head).unwrap(),
+        page_number: count(1),
+        previous_cursor: None,
         page: Page::new(
             vec![PatchFile {
                 review_id: ReviewIdDto::new(REVIEW).unwrap(),
@@ -380,6 +382,8 @@ fn patch_index(revision: &str, head: &str, etag: Option<&str>) -> PatchFileIndex
                 byte_length: Some(count(42)),
                 line_count: Some(count(2)),
                 max_line_bytes: Some(count(27)),
+                additions: Some(count(1)),
+                deletions: Some(count(0)),
                 patch_etag: etag.and_then(PatchETagDto::new),
             }],
             None,

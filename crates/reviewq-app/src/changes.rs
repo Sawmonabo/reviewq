@@ -18,6 +18,7 @@ pub struct PatchRevision {
 pub struct SourcePage<T> {
     pub revision: PatchRevision,
     pub items: Vec<T>,
+    pub page: u32,
     pub next_page: Option<u32>,
 }
 
@@ -46,7 +47,14 @@ pub struct PatchMetrics {
     pub byte_length: usize,
     pub line_count: usize,
     pub max_line_bytes: usize,
+    pub line_changes: Option<LineChanges>,
     pub etag: String,
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+pub struct LineChanges {
+    pub additions: usize,
+    pub deletions: usize,
 }
 
 #[derive(Clone)]
@@ -111,11 +119,22 @@ impl DiscussionResolution {
 
 #[derive(Debug)]
 pub struct DiscussionAnchor {
+    pub base_sha: GitSha,
+    pub start_sha: GitSha,
+    pub head_sha: GitSha,
+    pub position_type: DiscussionPosition,
     pub old_path: String,
     pub new_path: String,
     pub old_line: Option<u32>,
     pub new_line: Option<u32>,
     pub range: Option<DiscussionRange>,
+}
+
+#[derive(Debug)]
+pub enum DiscussionPosition {
+    Text,
+    File,
+    Other,
 }
 
 #[derive(Debug)]
@@ -163,6 +182,7 @@ pub struct ApprovalFacts {
 pub struct Approver {
     pub id: u64,
     pub username: Option<String>,
+    pub name: Option<String>,
     pub approved_at_ms: Option<i64>,
 }
 
@@ -172,6 +192,7 @@ pub struct ApprovalRule {
     pub name: String,
     pub approved: bool,
     pub required: u32,
+    pub approved_count: Option<usize>,
 }
 
 pub trait ChangeSource: Send + Sync {

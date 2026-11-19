@@ -1,7 +1,7 @@
 use reviewq_app::access::AppError;
 use reviewq_app::changes::{
-    Discussion, DiscussionAnchor, DiscussionLine, DiscussionNote, DiscussionRange,
-    DiscussionResolution, PatchRevision, SourcePage,
+    Discussion, DiscussionAnchor, DiscussionLine, DiscussionNote, DiscussionPosition,
+    DiscussionRange, DiscussionResolution, PatchRevision, SourcePage,
 };
 use reviewq_app::sources::{
     DiscoveryEvidence, ReviewSourceReader, WorkflowDiscussion, WorkflowNote, WorkflowSnapshot,
@@ -10,7 +10,7 @@ use reviewq_domain::identity::{MrIdentity, ReportHash};
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
 
-use super::{DiffRefs, GitLab, safe_path};
+use super::{DiffRefs, GitLab, git_sha, safe_path};
 
 const MAX_DISCUSSION_BYTES: usize = 512 * 1024;
 
@@ -77,6 +77,46 @@ impl Line {
     }
 }
 
+impl Position {
+    fn anchor(&self) -> Option<DiscussionAnchor> {
+        if !safe_path(&self.old_path) || !safe_path(&self.new_path) {
+            return None;
+        }
+        let (position_type, old_line, new_line, range) = match self.position_type.as_str() {
+            "text" => {
+                let range = self.line_range.as_ref().and_then(|range| {
+                    Some(DiscussionRange {
+                        start: range.start.project()?,
+                        end: range.end.project()?,
+                    })
+                });
+                let old_line = self
+                    .old_line
+                    .filter(|line| *line > 0)
+                    .or_else(|| range.as_ref().and_then(|range| range.end.old_line));
+                let new_line = self
+                    .new_line
+                    .filter(|line| *line > 0)
+                    .or_else(|| range.as_ref().and_then(|range| range.end.new_line));
+                (DiscussionPosition::Text, old_line, new_line, range)
+            }
+            "file" => (DiscussionPosition::File, None, None, None),
+            _ => (DiscussionPosition::Other, None, None, None),
+        };
+        Some(DiscussionAnchor {
+            base_sha: git_sha(&self.refs.base_sha).ok()?,
+            start_sha: git_sha(&self.refs.start_sha).ok()?,
+            head_sha: git_sha(&self.refs.head_sha).ok()?,
+            position_type,
+            old_path: self.old_path.clone(),
+            new_path: self.new_path.clone(),
+            old_line,
+            new_line,
+            range,
+        })
+    }
+}
+
 impl GitLab {
     pub(super) async fn discussion_page(
         &self,
@@ -108,6 +148,7 @@ impl GitLab {
         Ok(SourcePage {
             revision: current,
             items,
+            page,
             next_page,
         })
     }
@@ -134,32 +175,7 @@ fn project(
             || pos.refs.base_sha != revision.base.as_str()
             || pos.refs.start_sha != revision.start.as_str()
     });
-    let anchor = position
-        .filter(|pos| !outdated && pos.position_type == "text")
-        .filter(|pos| safe_path(&pos.old_path) && safe_path(&pos.new_path))
-        .and_then(|pos| {
-            let range = pos.line_range.as_ref().and_then(|range| {
-                Some(DiscussionRange {
-                    start: range.start.project()?,
-                    end: range.end.project()?,
-                })
-            });
-            let old_line = pos
-                .old_line
-                .filter(|line| *line > 0)
-                .or_else(|| range.as_ref().and_then(|range| range.end.old_line));
-            let new_line = pos
-                .new_line
-                .filter(|line| *line > 0)
-                .or_else(|| range.as_ref().and_then(|range| range.end.new_line));
-            (old_line.is_some() || new_line.is_some()).then(|| DiscussionAnchor {
-                old_path: pos.old_path.clone(),
-                new_path: pos.new_path.clone(),
-                old_line,
-                new_line,
-                range,
-            })
-        });
+    let anchor = position.and_then(Position::anchor);
     let notes = std::iter::once(first)
         .chain(notes)
         .map(|note| {

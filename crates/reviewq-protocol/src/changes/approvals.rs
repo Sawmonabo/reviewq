@@ -39,6 +39,8 @@ pub struct ApprovalFacts {
 pub struct Approver {
     pub id: UpstreamIdDto,
     pub username: Option<String>,
+    pub name: Option<String>,
+    pub is_you: Option<bool>,
     pub approved_at: Option<UtcTimestampDto>,
 }
 
@@ -50,6 +52,7 @@ pub struct ApprovalRule {
     pub name: String,
     pub approved: bool,
     pub required: SafeCountDto,
+    pub approved_count: Option<SafeCountDto>,
 }
 
 pub type ApprovalViewResponse = Success<ApprovalView>;

@@ -2,7 +2,7 @@
 import { func0 } from "../runtime.mjs";
 import { validate25 } from "./checkpoint-id-dto.mjs";
 import { validate134 } from "./report-hash-dto.mjs";
-function validate945(
+function validate959(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -17,7 +17,7 @@ function validate945(
         ((data.sha256 === undefined || !func0.call(data, "sha256")) &&
           (missing0 = "sha256"))
       ) {
-        validate945.errors = [
+        validate959.errors = [
           {
             instancePath,
             schemaPath: "#/required",
@@ -71,7 +71,7 @@ function validate945(
         }
       }
     } else {
-      validate945.errors = [
+      validate959.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -82,7 +82,7 @@ function validate945(
       return false;
     }
   }
-  validate945.errors = vErrors;
+  validate959.errors = vErrors;
   return errors === 0;
 }
-export { validate945 };
+export { validate959 };

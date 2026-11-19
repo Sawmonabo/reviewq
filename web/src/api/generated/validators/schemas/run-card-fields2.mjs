@@ -5,8 +5,8 @@ import { validate147 } from "./git-sha-dto.mjs";
 import { validate25 } from "./checkpoint-id-dto.mjs";
 import { validate69 } from "./merge-request-iid-dto.mjs";
 import { validate232 } from "./utc-timestamp-dto.mjs";
-import { validate283 } from "./merge-request-status.mjs";
-function validate1126(
+import { validate284 } from "./merge-request-status.mjs";
+function validate1140(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -71,7 +71,7 @@ function validate1126(
             vErrors.push(err1);
           }
           errors++;
-          validate1126.errors = vErrors;
+          validate1140.errors = vErrors;
           return false;
         } else {
           errors = _errs2;
@@ -146,7 +146,7 @@ function validate1126(
               vErrors.push(err3);
             }
             errors++;
-            validate1126.errors = vErrors;
+            validate1140.errors = vErrors;
             return false;
           } else {
             errors = _errs7;
@@ -220,7 +220,7 @@ function validate1126(
                 vErrors.push(err5);
               }
               errors++;
-              validate1126.errors = vErrors;
+              validate1140.errors = vErrors;
               return false;
             } else {
               errors = _errs12;
@@ -294,7 +294,7 @@ function validate1126(
                   vErrors.push(err7);
                 }
                 errors++;
-                validate1126.errors = vErrors;
+                validate1140.errors = vErrors;
                 return false;
               } else {
                 errors = _errs17;
@@ -317,7 +317,7 @@ function validate1126(
               ) {
                 const _errs21 = errors;
                 if (typeof data.hasAgentQuestions !== "boolean") {
-                  validate1126.errors = [
+                  validate1140.errors = [
                     {
                       instancePath: instancePath + "/hasAgentQuestions",
                       schemaPath: "#/properties/hasAgentQuestions/type",
@@ -411,7 +411,7 @@ function validate1126(
                         vErrors.push(err9);
                       }
                       errors++;
-                      validate1126.errors = vErrors;
+                      validate1140.errors = vErrors;
                       return false;
                     } else {
                       errors = _errs25;
@@ -434,7 +434,7 @@ function validate1126(
                     ) {
                       const _errs29 = errors;
                       if (
-                        !validate283(data.mrState, {
+                        !validate284(data.mrState, {
                           instancePath: instancePath + "/mrState",
                           parentData: data,
                           parentDataProperty: "mrState",
@@ -443,8 +443,8 @@ function validate1126(
                       ) {
                         vErrors =
                           vErrors === null
-                            ? validate283.errors
-                            : vErrors.concat(validate283.errors);
+                            ? validate284.errors
+                            : vErrors.concat(validate284.errors);
                         errors = vErrors.length;
                       }
                       var valid0 = _errs29 === errors;
@@ -459,7 +459,7 @@ function validate1126(
         }
       }
     } else {
-      validate1126.errors = [
+      validate1140.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -470,7 +470,7 @@ function validate1126(
       return false;
     }
   }
-  validate1126.errors = vErrors;
+  validate1140.errors = vErrors;
   return errors === 0;
 }
-export { validate1126 };
+export { validate1140 };

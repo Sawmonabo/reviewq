@@ -17,6 +17,10 @@ function validate231(
           (missing0 = "id")) ||
         ((data.username === undefined || !func0.call(data, "username")) &&
           (missing0 = "username")) ||
+        ((data.name === undefined || !func0.call(data, "name")) &&
+          (missing0 = "name")) ||
+        ((data.isYou === undefined || !func0.call(data, "isYou")) &&
+          (missing0 = "isYou")) ||
         ((data.approvedAt === undefined || !func0.call(data, "approvedAt")) &&
           (missing0 = "approvedAt"))
       ) {
@@ -122,16 +126,16 @@ function validate231(
             var valid0 = true;
           }
           if (valid0) {
-            if (data.username !== undefined && func0.call(data, "username")) {
-              let data2 = data.username;
+            if (data.isYou !== undefined && func0.call(data, "isYou")) {
+              let data2 = data.isYou;
               const _errs7 = errors;
-              if (typeof data2 !== "string" && data2 !== null) {
+              if (typeof data2 !== "boolean" && data2 !== null) {
                 validate231.errors = [
                   {
-                    instancePath: instancePath + "/username",
-                    schemaPath: "#/properties/username/type",
+                    instancePath: instancePath + "/isYou",
+                    schemaPath: "#/properties/isYou/type",
                     keyword: "type",
-                    params: { type: schema89.properties.username.type },
+                    params: { type: schema89.properties.isYou.type },
                   },
                 ];
                 return false;
@@ -139,6 +143,49 @@ function validate231(
               var valid0 = _errs7 === errors;
             } else {
               var valid0 = true;
+            }
+            if (valid0) {
+              if (data.name !== undefined && func0.call(data, "name")) {
+                let data3 = data.name;
+                const _errs9 = errors;
+                if (typeof data3 !== "string" && data3 !== null) {
+                  validate231.errors = [
+                    {
+                      instancePath: instancePath + "/name",
+                      schemaPath: "#/properties/name/type",
+                      keyword: "type",
+                      params: { type: schema89.properties.name.type },
+                    },
+                  ];
+                  return false;
+                }
+                var valid0 = _errs9 === errors;
+              } else {
+                var valid0 = true;
+              }
+              if (valid0) {
+                if (
+                  data.username !== undefined &&
+                  func0.call(data, "username")
+                ) {
+                  let data4 = data.username;
+                  const _errs11 = errors;
+                  if (typeof data4 !== "string" && data4 !== null) {
+                    validate231.errors = [
+                      {
+                        instancePath: instancePath + "/username",
+                        schemaPath: "#/properties/username/type",
+                        keyword: "type",
+                        params: { type: schema89.properties.username.type },
+                      },
+                    ];
+                    return false;
+                  }
+                  var valid0 = _errs11 === errors;
+                } else {
+                  var valid0 = true;
+                }
+              }
             }
           }
         }

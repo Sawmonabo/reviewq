@@ -105,6 +105,7 @@ impl ChangeSource for GitLab {
                     Ok(SourcePage {
                         revision: current,
                         items: scan.files,
+                        page,
                         next_page: next,
                     })
                 })

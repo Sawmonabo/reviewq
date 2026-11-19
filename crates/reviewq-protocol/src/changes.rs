@@ -8,7 +8,7 @@ pub use approvals::{
 };
 
 use crate::scalar::{
-    FileIdDto, GitShaDto, PatchETagDto, PatchRevisionDto, ReviewIdDto, SafeCountDto,
+    FileIdDto, GitShaDto, PageCursorDto, PatchETagDto, PatchRevisionDto, ReviewIdDto, SafeCountDto,
 };
 use crate::{Page, Success, UtcTimestampDto};
 
@@ -20,6 +20,8 @@ pub struct PatchFileIndex {
     pub base_sha: GitShaDto,
     pub start_sha: GitShaDto,
     pub head_sha: GitShaDto,
+    pub page_number: SafeCountDto,
+    pub previous_cursor: Option<PageCursorDto>,
     #[serde(flatten)]
     pub page: Page<PatchFile>,
 }
@@ -43,6 +45,8 @@ pub struct PatchFile {
     pub byte_length: Option<SafeCountDto>,
     pub line_count: Option<SafeCountDto>,
     pub max_line_bytes: Option<SafeCountDto>,
+    pub additions: Option<SafeCountDto>,
+    pub deletions: Option<SafeCountDto>,
     #[serde(rename = "patchETag")]
     pub patch_etag: Option<PatchETagDto>,
 }
@@ -97,11 +101,24 @@ pub enum DiscussionResolution {
 #[serde(rename_all = "camelCase")]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct PatchDiscussionAnchor {
+    pub base_sha: GitShaDto,
+    pub start_sha: GitShaDto,
+    pub head_sha: GitShaDto,
+    pub position_type: DiscussionPosition,
     pub old_path: String,
     pub new_path: String,
     pub old_line: Option<SafeCountDto>,
     pub new_line: Option<SafeCountDto>,
     pub range: Option<PatchDiscussionRange>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub enum DiscussionPosition {
+    Text,
+    File,
+    Other,
 }
 
 #[derive(Debug, Serialize)]

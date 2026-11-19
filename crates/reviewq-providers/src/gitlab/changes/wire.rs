@@ -12,6 +12,9 @@ use tokio::io::AsyncWriteExt;
 use super::lease::{Body, MEMORY_LIMIT};
 use super::{fingerprint, hex, safe_path};
 
+mod stats;
+use stats::DiffStats;
+
 pub(super) const MAX_DIFF_RESPONSE: usize = 32 * 1024 * 1024;
 type Wire = Box<dyn Read + Send>;
 
@@ -200,31 +203,41 @@ struct BodyScan {
     line_length: usize,
     was_cr: bool,
     digest: Sha256,
+    stats: DiffStats,
 }
 
 impl BodyScan {
     fn inspect(&mut self, chunk: &[u8]) {
         self.length += chunk.len();
         self.digest.update(chunk);
-        for byte in chunk {
-            if *byte == b'\n' {
+        for line in chunk.split_inclusive(|byte| *byte == b'\n') {
+            let bytes = line.strip_suffix(b"\n").unwrap_or(line);
+            self.stats.part(bytes, self.line_length == 0);
+            self.line_length += bytes.len();
+            if let Some(last) = bytes.last() {
+                self.was_cr = *last == b'\r';
+            }
+            if bytes.len() != line.len() {
                 self.lines += 1;
                 self.max_line = self
                     .max_line
                     .max(self.line_length - usize::from(self.was_cr));
+                self.stats.end_line();
                 self.line_length = 0;
-            } else {
-                self.line_length += 1;
+                self.was_cr = false;
             }
-            self.was_cr = *byte == b'\r';
         }
     }
 
-    fn finish(self) -> PatchMetrics {
+    fn finish(mut self) -> PatchMetrics {
+        if self.line_length != 0 {
+            self.stats.end_line();
+        }
         PatchMetrics {
             byte_length: self.length,
             line_count: self.lines + usize::from(self.line_length != 0),
             max_line_bytes: self.max_line.max(self.line_length),
+            line_changes: self.stats.finish(self.length == 0),
             etag: format!("\"{}\"", hex(&self.digest.finalize())),
         }
     }
@@ -242,6 +255,7 @@ fn body(
         line_length: 0,
         was_cr: false,
         digest: Sha256::new(),
+        stats: DiffStats::new(),
     };
     // Read loop below uses fixed-sized blocks even for a multi-megabyte JSON string.
     let mut buffer = [0; 64 * 1024];
@@ -287,4 +301,36 @@ fn private_file(profile: &Path) -> std::io::Result<File> {
     let file = tempfile::tempfile_in(profile)?;
     file.set_permissions(std::fs::Permissions::from_mode(0o600))?;
     Ok(file)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{BodyScan, DiffStats, Sha256};
+    use sha2::Digest;
+
+    #[test]
+    fn counts_hunk_lines_across_chunks_and_withholds_partial_counts() {
+        let scan = || BodyScan {
+            length: 0,
+            lines: 0,
+            max_line: 0,
+            line_length: 0,
+            was_cr: false,
+            digest: Sha256::new(),
+            stats: DiffStats::new(),
+        };
+        let mut complete = scan();
+        let patch = b"--- a/file\r\n+++ b/file\r\n@@ -1,3 +1,3 @@\r\n old\r\n--- old\r\n+++ new\r\n tail\r\n@@ -5 +5 @@\r\n-old\r\n+new\r\n\\ No newline at end of file";
+        for chunk in patch.chunks(7) {
+            complete.inspect(chunk);
+        }
+        let metrics = complete.finish();
+        let counts = metrics.line_changes.unwrap();
+        assert_eq!((counts.additions, counts.deletions), (2, 2));
+        assert_eq!((metrics.line_count, metrics.byte_length), (11, patch.len()));
+
+        let mut partial = scan();
+        partial.inspect(b"@@ -0,0 +1,2 @@\n+only the first line");
+        assert!(partial.finish().line_changes.is_none());
+    }
 }
