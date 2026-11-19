@@ -1,3 +1,4 @@
+import { invoke } from "./bridge.js";
 import { currentSettings } from "./settings.js";
 
 const PLUGIN = "reviewq";
@@ -21,7 +22,7 @@ function canSend(state) {
     && !state.draft && !state.pendingPrompt && !state.activeTurn;
 }
 
-async function postOutcome($, invoke, state, attempt) {
+async function postOutcome($, state, attempt) {
   const { offer, outcome } = attempt;
   if (!outcome || outcome === attempt.posted || await $.session.id() !== state.id) return;
   let accepted = outcome;
@@ -43,7 +44,7 @@ async function postOutcome($, invoke, state, attempt) {
   }
 }
 
-export async function deliver($, invoke, state, offer) {
+export async function deliver($, state, offer) {
   if (!state.readRecovery) {
     const saved = await $.store.get(deliveryKey(state));
     if (saved?.offer && saved.outcome?.kind === "started" && !state.delivery) {
@@ -52,7 +53,7 @@ export async function deliver($, invoke, state, offer) {
     state.readRecovery = true;
   }
   if (state.delivery) {
-    await postOutcome($, invoke, state, state.delivery);
+    await postOutcome($, state, state.delivery);
     return;
   }
   if (!offer || offer.generation !== state.generation) return;
@@ -67,26 +68,26 @@ export async function deliver($, invoke, state, offer) {
   state.delivery = attempt;
   if (!canSend(state) || await $.session.id() !== state.id) {
     attempt.outcome = { kind: "deferred" };
-    await postOutcome($, invoke, state, attempt);
+    await postOutcome($, state, attempt);
     return;
   }
   const prior = await $.session.messages({ last: 1 });
   attempt.after = Array.isArray(prior) ? prior.at(-1)?.uuid : undefined;
   if (!attempt.after || attempt.revision !== state.inputRevision) {
     attempt.outcome = { kind: "deferred" };
-    await postOutcome($, invoke, state, attempt);
+    await postOutcome($, state, attempt);
     return;
   }
   const authorization = await invoke($, "delivery-check", state.id, { offer });
   if (!authorization.data) {
     attempt.authorizationUnknown = true;
     attempt.outcome = { kind: "deferred" };
-    await postOutcome($, invoke, state, attempt);
+    await postOutcome($, state, attempt);
     return;
   }
   if (!canSend(state) || attempt.revision !== state.inputRevision || await $.session.id() !== state.id) {
     attempt.outcome = { kind: "dropped" };
-    await postOutcome($, invoke, state, attempt);
+    await postOutcome($, state, attempt);
     return;
   }
 
@@ -96,7 +97,7 @@ export async function deliver($, invoke, state, offer) {
     if (observed?.model !== wanted.model || observed.effort !== wanted.effort
         || !canSend(state) || attempt.revision !== state.inputRevision || await $.session.id() !== state.id) {
       attempt.outcome = { kind: "dropped" };
-      await postOutcome($, invoke, state, attempt);
+      await postOutcome($, state, attempt);
       return;
     }
   }
@@ -112,7 +113,7 @@ export async function deliver($, invoke, state, offer) {
   } catch {
     attempt.outcome = { kind: "uncertain" };
   }
-  await postOutcome($, invoke, state, attempt);
+  await postOutcome($, state, attempt);
 }
 
 export function observeInput(state, event, entryId) {

@@ -19,6 +19,7 @@ const REQUIRED: &[&str] = &[
     "hosts/claude/.claude-plugin/marketplace.json",
     "hosts/claude/plugin/.claude-plugin/plugin.json",
     "hosts/claude/plugin/hooks/hooks.json",
+    "hosts/claude/plugin/hooks/bridge.js",
     "hosts/claude/plugin/hooks/register.jsx",
     "hosts/codex/skills/reviewq/SKILL.md",
     "hosts/codex/skills/reviewq/agents/openai.yaml",

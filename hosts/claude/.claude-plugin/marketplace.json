@@ -1,5 +1,6 @@
 {
   "name": "reviewq",
+  "description": "Local ReviewQ integration for Claude Code.",
   "owner": { "name": "ReviewQ" },
   "plugins": [
     { "name": "reviewq", "source": "./plugin", "description": "Link a Claude Code conversation to a review." }

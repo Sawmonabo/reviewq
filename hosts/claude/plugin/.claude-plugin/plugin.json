@@ -1,5 +1,6 @@
 {
   "name": "reviewq",
+  "author": { "name": "ReviewQ" },
   "description": "Link a Claude Code conversation to a review.",
   "version": "0.1.0"
 }
