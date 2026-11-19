@@ -4,7 +4,10 @@ CREATE TABLE review_source_signals (
     source_sha TEXT NOT NULL CHECK (length(source_sha) IN (40,64)),
     personal_approval INTEGER CHECK (personal_approval IN (0,1)),
     our_comments INTEGER NOT NULL CHECK (our_comments >= 0),
-    observed_at_ms INTEGER NOT NULL
+    observed_at_ms INTEGER NOT NULL,
+    our_threads INTEGER CHECK (our_threads >= 0),
+    open_threads INTEGER CHECK (open_threads BETWEEN 0 AND our_threads),
+    CHECK (our_threads IS NOT NULL OR open_threads IS NULL)
 ) STRICT, WITHOUT ROWID;
 
 CREATE TABLE review_discovery_due (

@@ -5,6 +5,8 @@ import type {
   HistoryTurnIdDto,
   ResourceIdDto,
   RevisionDto,
+  RunIdDto,
+  SessionKeyDto,
 } from "./common.js";
 
 export type Kind = "usage_limit" | "model_capacity" | "access";
@@ -69,6 +71,19 @@ export interface InterruptResponse {
 export interface InterruptReceipt {
   state: InterruptState;
   turnId: HistoryTurnIdDto;
+  [k: string]: unknown;
+}
+
+export interface InterruptTargetResponse {
+  cursor: EventCursorDto;
+  data: InterruptTarget;
+  [k: string]: unknown;
+}
+
+export interface InterruptTarget {
+  runId: RunIdDto;
+  sessionKey: SessionKeyDto;
+  turnId: HistoryTurnIdDto | null;
   [k: string]: unknown;
 }
 

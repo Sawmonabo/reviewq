@@ -226,7 +226,7 @@ impl Compare<'_> {
         root: &str,
         prior: Option<(bool, i64)>,
     ) -> Result<(), StoreError> {
-        let Some(resolved) = discussion.resolved else {
+        let Some(resolved) = discussion.resolution.resolved() else {
             return Ok(());
         };
         let changed = prior.is_none_or(|(previous, _)| previous != resolved);

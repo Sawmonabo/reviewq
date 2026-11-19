@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import type { MergeRequestRow, ReviewOverview, RunDetail } from "../../api/generated/contracts";
 import { Empty, Loading } from "../../components/PanelState";
 import { readable, safeUrl } from "../../lib/presentation";
+import { InterruptSession } from "./InterruptSession";
 import { ReportedPlan } from "./ReportedPlan";
 
 export function ReviewOverviewPane({
@@ -25,6 +26,7 @@ export function ReviewOverviewPane({
 }) {
   const { review } = overview;
   const source = safeUrl(overview.webUrl);
+  const discussions = overview.ourDiscussions;
   return (
     <div className="overview stack">
       {ticket}
@@ -72,6 +74,22 @@ export function ReviewOverviewPane({
             <dd>{readable(overview.decision?.disposition ?? review.queueState)}</dd>
           </div>
           <div>
+            <dt>Our discussions</dt>
+            <dd>
+              {discussions
+                ? `${discussions.total} total · ${discussions.open === null ? "Open count unknown" : `${discussions.open} open`}`
+                : "Not observed"}
+            </dd>
+          </div>
+          <div>
+            <dt>Our comments</dt>
+            <dd>
+              {discussions || review.ourComments > 0
+                ? `${review.ourComments} posted on GitLab`
+                : "Not observed"}
+            </dd>
+          </div>
+          <div>
             <dt>Automated follow-up</dt>
             <dd>{monitor ? readable(monitor) : "No enrollment"}</dd>
           </div>
@@ -101,12 +119,30 @@ export function ReviewOverviewPane({
               </dd>
             </div>
             <div>
-              <dt>Model</dt>
-              <dd>{run.launch?.observedModel ?? run.launch?.requestedModel ?? "Unavailable"}</dd>
+              <dt>Requested model</dt>
+              <dd>{run.launch ? (run.launch.requestedModel ?? "CLI default") : "Not recorded"}</dd>
             </div>
             <div>
-              <dt>Effort</dt>
-              <dd>{run.launch?.observedEffort ?? run.launch?.requestedEffort ?? "Unavailable"}</dd>
+              <dt>Requested effort</dt>
+              <dd>{run.launch ? (run.launch.requestedEffort ?? "CLI default") : "Not recorded"}</dd>
+            </div>
+            <div>
+              <dt>Reported model</dt>
+              <dd>{run.leadMetadata.model ?? run.launch?.observedModel ?? "Not reported yet"}</dd>
+            </div>
+            <div>
+              <dt>Reported effort</dt>
+              <dd>{run.leadMetadata.effort ?? run.launch?.observedEffort ?? "Not reported yet"}</dd>
+            </div>
+            <div>
+              <dt>Skill requested</dt>
+              <dd>
+                {run.launch?.invocation.kind === "skill"
+                  ? run.launch.invocation.name
+                  : run.launch
+                    ? "Custom prompt"
+                    : "Not recorded"}
+              </dd>
             </div>
             {run.launch && (
               <div>
@@ -129,6 +165,14 @@ export function ReviewOverviewPane({
             </details>
           )}
           <ReportedPlan runId={run.runId} sessionKey={run.leadSessionKey} />
+          {selected && run.launch && run.launch.state !== "rejected" && (
+            <InterruptSession
+              key={run.leadSessionKey}
+              runId={run.runId}
+              nativeId={run.leadNativeId}
+              sessionKey={run.leadSessionKey}
+            />
+          )}
         </section>
       ) : (
         selected && (

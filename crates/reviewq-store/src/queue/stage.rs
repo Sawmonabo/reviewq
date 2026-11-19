@@ -77,12 +77,15 @@ pub(crate) fn observe_source(
         return Ok(());
     }
     let approval = source.reviewer_approval(reviewers);
-    let comments = source
-        .discussions
-        .iter()
-        .flat_map(|thread| &thread.notes)
-        .filter(|note| reviewers.contains(&note.author))
-        .count();
+    let comments = count_discussions(
+        source.discussions.iter().map(|thread| {
+            (
+                thread.resolution,
+                thread.notes.iter().map(|note| note.author),
+            )
+        }),
+        reviewers,
+    );
     observe_signals(
         tx,
         review,
@@ -90,8 +93,43 @@ pub(crate) fn observe_source(
         &source.review.head_sha,
         source.observed_at_ms,
         approval,
-        Some(comments as i64),
+        Some(comments),
     )
+}
+
+pub(crate) struct ObservedComments {
+    count: i64,
+    total: i64,
+    open: Option<i64>,
+}
+
+pub(crate) fn count_discussions<A: IntoIterator<Item = u64>>(
+    threads: impl Iterator<Item = (reviewq_app::changes::DiscussionResolution, A)>,
+    reviewers: &BTreeSet<u64>,
+) -> ObservedComments {
+    use reviewq_app::changes::DiscussionResolution;
+    let mut result = ObservedComments {
+        count: 0,
+        total: 0,
+        open: Some(0),
+    };
+    for (resolution, authors) in threads {
+        let ours = authors
+            .into_iter()
+            .filter(|author| reviewers.contains(author))
+            .count();
+        if ours == 0 {
+            continue;
+        }
+        result.count += ours as i64;
+        result.total += 1;
+        match resolution {
+            DiscussionResolution::Unknown => result.open = None,
+            DiscussionResolution::Open => result.open = result.open.map(|open| open + 1),
+            _ => {}
+        }
+    }
+    result
 }
 
 pub(crate) fn observe_signals(
@@ -101,26 +139,46 @@ pub(crate) fn observe_signals(
     head: &GitSha,
     observed_at: i64,
     approval: Option<bool>,
-    comments: Option<i64>,
+    comments: Option<ObservedComments>,
 ) -> Result<(), StoreError> {
+    let comments = comments.as_ref();
     let changed = tx.sql.prepare_cached(
-        "INSERT INTO review_source_signals VALUES (?1,?2,?3,?4,coalesce(?5,0),?6)
-         ON CONFLICT(review_id) DO UPDATE SET settings_revision=excluded.settings_revision,
-           source_sha=excluded.source_sha,personal_approval=coalesce(excluded.personal_approval,
-             CASE WHEN source_sha=excluded.source_sha AND settings_revision=excluded.settings_revision THEN personal_approval END),
-           our_comments=coalesce(?5,CASE WHEN source_sha=excluded.source_sha AND settings_revision=excluded.settings_revision THEN our_comments END,0),
-           observed_at_ms=excluded.observed_at_ms
-         WHERE observed_at_ms<excluded.observed_at_ms
-           AND (settings_revision,source_sha,CASE WHEN ?5 IS NOT NULL THEN our_comments ELSE 0 END,
-                CASE WHEN excluded.personal_approval IS NOT NULL THEN personal_approval ELSE NULL END)
-               IS DISTINCT FROM (excluded.settings_revision,excluded.source_sha,excluded.our_comments,excluded.personal_approval)"
-    )?.execute(params![review.as_str(),settings.as_sqlite_integer(),head.as_str(),approval,comments,observed_at])?;
+        "INSERT INTO review_source_signals
+            (review_id, settings_revision, source_sha, personal_approval, our_comments,
+             observed_at_ms, our_threads, open_threads)
+         VALUES (?1, ?2, ?3, ?4, coalesce(?5,0), ?6, ?7, ?8)
+         ON CONFLICT(review_id) DO UPDATE SET
+           settings_revision = ?2, source_sha = ?3, observed_at_ms = ?6,
+           personal_approval = coalesce(?4,
+             CASE WHEN (settings_revision,source_sha)=(?2,?3) THEN personal_approval END),
+           our_comments = coalesce(?5,
+             CASE WHEN (settings_revision,source_sha)=(?2,?3) THEN our_comments END, 0),
+           our_threads = coalesce(?7,
+             CASE WHEN (settings_revision,source_sha)=(?2,?3) THEN our_threads END),
+           open_threads = CASE WHEN ?7 IS NOT NULL THEN ?8
+             WHEN (settings_revision,source_sha)=(?2,?3) THEN open_threads END
+         WHERE (observed_at_ms < ?6 OR (observed_at_ms = ?6 AND our_threads IS NULL AND ?7 IS NOT NULL))
+           AND ((settings_revision,source_sha) <> (?2,?3)
+             OR (?4 IS NOT NULL AND personal_approval IS NOT ?4)
+             OR (?7 IS NOT NULL AND (our_comments,our_threads,open_threads) IS NOT (?5,?7,?8)))"
+    )?.execute(params![
+        review.as_str(), settings.as_sqlite_integer(), head.as_str(), approval,
+        comments.map(|value| value.count), observed_at,
+        comments.map(|value| value.total), comments.and_then(|value| value.open),
+    ])?;
     if changed != 0 {
         advance_queue(&tx.sql)?;
         tx.emit(&[
             ResourceKey::Queue,
             ResourceKey::Review(Some(review.clone())),
         ])?;
+    } else {
+        // A later, identical snapshot must still fence out older observations.
+        tx.sql.execute(
+            "UPDATE review_source_signals SET observed_at_ms=?2
+                        WHERE review_id=?1 AND observed_at_ms<?2",
+            params![review.as_str(), observed_at],
+        )?;
     }
     Ok(())
 }

@@ -56,18 +56,9 @@ type Props = {
   readonly messages: readonly MessageHistoryItem[];
   readonly resultOnly: boolean;
   readonly working: boolean;
-  readonly onObservedTurn: (turn: string | undefined) => void;
 };
 
-export function Transcript({
-  target,
-  provider,
-  child,
-  messages,
-  resultOnly,
-  working,
-  onObservedTurn,
-}: Props) {
+export function Transcript({ target, provider, child, messages, resultOnly, working }: Props) {
   const providerName = readable(provider);
   const bookmark = `history.${target.runId}.${target.sessionKey}`;
   const [saved] = useState(() => readBookmark(bookmark));
@@ -229,9 +220,6 @@ export function Transcript({
     }
   }, [entries, following, list]);
 
-  useEffect(() => {
-    onObservedTurn(history.live?.turnId);
-  }, [history.live?.turnId, onObservedTurn]);
   useEffect(() => {
     const host = viewport.current;
     if (!host) return;

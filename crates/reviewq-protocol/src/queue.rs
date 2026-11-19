@@ -232,6 +232,8 @@ pub enum RunStage {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct ReviewOverview {
     pub review: MergeRequestRow,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub our_discussions: Option<DiscussionCounts>,
     pub web_url: String,
     pub decision_revision: RevisionDto,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -241,6 +243,14 @@ pub struct ReviewOverview {
     pub settings_revision: RevisionDto,
     pub checkpoint_id: Option<CheckpointIdDto>,
     pub runs: Page<RunSummary>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct DiscussionCounts {
+    pub total: SafeCountDto,
+    pub open: Option<SafeCountDto>,
 }
 
 pub type ReviewOverviewResponse = Success<ReviewOverview>;

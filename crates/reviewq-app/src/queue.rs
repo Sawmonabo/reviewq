@@ -285,10 +285,17 @@ pub struct RunSummary {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ReviewOverview {
     pub item: QueueItem,
+    pub our_discussions: Option<DiscussionCounts>,
     pub settings_revision: Revision,
     pub frontier: Frontier,
     pub runs: Vec<RunSummary>,
     pub next_run: Option<RunPosition>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DiscussionCounts {
+    pub total: u32,
+    pub open: Option<u32>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

@@ -89,3 +89,14 @@ pub type RecoveryPreferencesResponse = Success<Preferences>;
 pub type RecoveryStateResponse = Success<Option<Episode>>;
 pub type CancelRecoveryResponse = Success<Episode>;
 pub type InterruptResponse = Success<InterruptReceipt>;
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct InterruptTarget {
+    pub run_id: crate::RunIdDto,
+    pub session_key: crate::SessionKeyDto,
+    pub turn_id: Option<HistoryTurnIdDto>,
+}
+
+pub type InterruptTargetResponse = Success<InterruptTarget>;

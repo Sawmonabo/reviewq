@@ -20,7 +20,10 @@ pub(super) fn routes() -> Router<Arc<Entry>> {
             "/runs/{run}/sessions/{session}/recovery/cancel",
             post(cancel),
         )
-        .route("/runs/{run}/sessions/{session}/interrupt", post(interrupt))
+        .route(
+            "/runs/{run}/sessions/{session}/interrupt",
+            get(interrupt_target).post(interrupt),
+        )
 }
 
 async fn preferences(
@@ -87,6 +90,41 @@ async fn cancel(
         )
         .await?;
     Ok(Json(success(episode(stored.value)?, stored.cursor)?))
+}
+
+async fn interrupt_target(
+    State(entry): State<Arc<Entry>>,
+    headers: HeaderMap,
+    Path((run, session)): Path<(String, String)>,
+) -> Result<Json<dto::InterruptTargetResponse>, ApiError> {
+    let actor = entry.auth.browser_actor(&headers, false)?;
+    let stored = entry
+        .store
+        .interrupt_target(actor, parse(&run)?, parse(&session)?)
+        .await?;
+    let turn = match (entry.sends_allowed, stored.value) {
+        (true, Some(app::ManagedInterruptTarget::Codex(lead))) => match &entry.host {
+            Some(host) => host.interruptible_turn(lead).await?,
+            None => None,
+        },
+        (true, Some(app::ManagedInterruptTarget::Claude(turn)))
+            if entry.claude_interrupt.is_some() =>
+        {
+            Some(turn)
+        }
+        _ => None,
+    };
+    Ok(Json(success(
+        dto::InterruptTarget {
+            run_id: reviewq_protocol::RunIdDto::new(run).ok_or(AppError::InvalidRequest)?,
+            session_key: reviewq_protocol::SessionKeyDto::new(session)
+                .ok_or(AppError::InvalidRequest)?,
+            turn_id: turn
+                .map(|id| HistoryTurnIdDto::new(id.as_str()).ok_or(AppError::Internal))
+                .transpose()?,
+        },
+        stored.cursor,
+    )?))
 }
 
 async fn interrupt(

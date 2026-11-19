@@ -2,8 +2,8 @@
 import { func0 } from "../runtime.mjs";
 import { validate69 } from "./merge-request-iid-dto.mjs";
 import { validate232 } from "./utc-timestamp-dto.mjs";
-import { schema232 } from "../metadata-5.mjs";
-function validate735(
+import { schema234 } from "../metadata-5.mjs";
+function validate742(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -14,7 +14,7 @@ function validate735(
       if (data.author !== undefined && func0.call(data, "author")) {
         const _errs1 = errors;
         if (typeof data.author !== "string") {
-          validate735.errors = [
+          validate742.errors = [
             {
               instancePath: instancePath + "/author",
               schemaPath: "#/properties/author/type",
@@ -83,7 +83,7 @@ function validate735(
               vErrors.push(err1);
             }
             errors++;
-            validate735.errors = vErrors;
+            validate742.errors = vErrors;
             return false;
           } else {
             errors = _errs4;
@@ -103,7 +103,7 @@ function validate735(
           if (data.body !== undefined && func0.call(data, "body")) {
             const _errs8 = errors;
             if (typeof data.body !== "string") {
-              validate735.errors = [
+              validate742.errors = [
                 {
                   instancePath: instancePath + "/body",
                   schemaPath: "#/properties/body/type",
@@ -172,7 +172,7 @@ function validate735(
                   vErrors.push(err3);
                 }
                 errors++;
-                validate735.errors = vErrors;
+                validate742.errors = vErrors;
                 return false;
               } else {
                 errors = _errs11;
@@ -192,7 +192,7 @@ function validate735(
               if (data.noteId !== undefined && func0.call(data, "noteId")) {
                 const _errs15 = errors;
                 if (typeof data.noteId !== "string") {
-                  validate735.errors = [
+                  validate742.errors = [
                     {
                       instancePath: instancePath + "/noteId",
                       schemaPath: "#/properties/noteId/type",
@@ -210,7 +210,7 @@ function validate735(
                 if (data.ours !== undefined && func0.call(data, "ours")) {
                   const _errs17 = errors;
                   if (typeof data.ours !== "boolean") {
-                    validate735.errors = [
+                    validate742.errors = [
                       {
                         instancePath: instancePath + "/ours",
                         schemaPath: "#/properties/ours/type",
@@ -232,13 +232,13 @@ function validate735(
                     let data6 = data.resolvable;
                     const _errs19 = errors;
                     if (typeof data6 !== "boolean" && data6 !== null) {
-                      validate735.errors = [
+                      validate742.errors = [
                         {
                           instancePath: instancePath + "/resolvable",
                           schemaPath: "#/properties/resolvable/type",
                           keyword: "type",
                           params: {
-                            type: schema232.properties.resolvable.type,
+                            type: schema234.properties.resolvable.type,
                           },
                         },
                       ];
@@ -256,13 +256,13 @@ function validate735(
                       let data7 = data.resolved;
                       const _errs21 = errors;
                       if (typeof data7 !== "boolean" && data7 !== null) {
-                        validate735.errors = [
+                        validate742.errors = [
                           {
                             instancePath: instancePath + "/resolved",
                             schemaPath: "#/properties/resolved/type",
                             keyword: "type",
                             params: {
-                              type: schema232.properties.resolved.type,
+                              type: schema234.properties.resolved.type,
                             },
                           },
                         ];
@@ -280,7 +280,7 @@ function validate735(
         }
       }
     } else {
-      validate735.errors = [
+      validate742.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -291,7 +291,7 @@ function validate735(
       return false;
     }
   }
-  validate735.errors = vErrors;
+  validate742.errors = vErrors;
   return errors === 0;
 }
-export { validate735 };
+export { validate742 };

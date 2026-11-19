@@ -6,7 +6,7 @@ import { validate295 } from "./run-stage.mjs";
 import { validate147 } from "./git-sha-dto.mjs";
 import { validate301 } from "./compact-ticket.mjs";
 import { validate127 } from "./safe-count-dto.mjs";
-function validate837(
+function validate844(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -46,7 +46,7 @@ function validate837(
               }
             }
           } else {
-            validate837.errors = [
+            validate844.errors = [
               {
                 instancePath: instancePath + "/registeredProviders",
                 schemaPath: "#/properties/registeredProviders/type",
@@ -137,7 +137,7 @@ function validate837(
                 vErrors.push(err1);
               }
               errors++;
-              validate837.errors = vErrors;
+              validate844.errors = vErrors;
               return false;
             } else {
               errors = _errs6;
@@ -204,7 +204,7 @@ function validate837(
                       }
                     }
                   } else {
-                    validate837.errors = [
+                    validate844.errors = [
                       {
                         instancePath: instancePath + "/tickets",
                         schemaPath: "#/properties/tickets/type",
@@ -223,7 +223,7 @@ function validate837(
                 if (data.title !== undefined && func0.call(data, "title")) {
                   const _errs14 = errors;
                   if (typeof data.title !== "string") {
-                    validate837.errors = [
+                    validate844.errors = [
                       {
                         instancePath: instancePath + "/title",
                         schemaPath: "#/properties/title/type",
@@ -293,7 +293,7 @@ function validate837(
         }
       }
     } else {
-      validate837.errors = [
+      validate844.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -304,7 +304,7 @@ function validate837(
       return false;
     }
   }
-  validate837.errors = vErrors;
+  validate844.errors = vErrors;
   return errors === 0;
 }
-export { validate837 };
+export { validate844 };

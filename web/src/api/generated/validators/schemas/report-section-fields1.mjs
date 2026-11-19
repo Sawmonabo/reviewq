@@ -4,7 +4,7 @@ import { validate127 } from "./safe-count-dto.mjs";
 import { validate130 } from "./offset-unit.mjs";
 import { validate134 } from "./report-hash-dto.mjs";
 import { validate25 } from "./checkpoint-id-dto.mjs";
-function validate1011(
+function validate1018(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -15,7 +15,7 @@ function validate1011(
       if (data.complete !== undefined && func0.call(data, "complete")) {
         const _errs1 = errors;
         if (typeof data.complete !== "boolean") {
-          validate1011.errors = [
+          validate1018.errors = [
             {
               instancePath: instancePath + "/complete",
               schemaPath: "#/properties/complete/type",
@@ -84,7 +84,7 @@ function validate1011(
               vErrors.push(err1);
             }
             errors++;
-            validate1011.errors = vErrors;
+            validate1018.errors = vErrors;
             return false;
           } else {
             errors = _errs4;
@@ -203,7 +203,7 @@ function validate1011(
                     vErrors.push(err3);
                   }
                   errors++;
-                  validate1011.errors = vErrors;
+                  validate1018.errors = vErrors;
                   return false;
                 } else {
                   errors = _errs11;
@@ -268,7 +268,7 @@ function validate1011(
                     if (data.text !== undefined && func0.call(data, "text")) {
                       const _errs17 = errors;
                       if (typeof data.text !== "string") {
-                        validate1011.errors = [
+                        validate1018.errors = [
                           {
                             instancePath: instancePath + "/text",
                             schemaPath: "#/properties/text/type",
@@ -290,7 +290,7 @@ function validate1011(
         }
       }
     } else {
-      validate1011.errors = [
+      validate1018.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -301,7 +301,7 @@ function validate1011(
       return false;
     }
   }
-  validate1011.errors = vErrors;
+  validate1018.errors = vErrors;
   return errors === 0;
 }
-export { validate1011 };
+export { validate1018 };

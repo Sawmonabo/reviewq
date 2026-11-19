@@ -134,6 +134,8 @@ pub trait NativeHost: QuestionsPort + Send + Sync {
         Box::pin(async { Err(AppError::Unavailable) })
     }
 
+    fn interruptible_turn(&self, target: LeadTarget) -> AppFuture<'_, Option<NativeTurnId>>;
+
     fn observe_interrupt(&self, _target: LeadTarget, _turn: NativeTurnId) -> AppFuture<'_, bool> {
         Box::pin(async { Ok(false) })
     }

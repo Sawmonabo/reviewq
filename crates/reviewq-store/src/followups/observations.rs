@@ -156,7 +156,7 @@ fn save_thread(
         thread.note.author.to_string(),
         selected,
         fingerprint.as_ref().map(ReportHash::as_str),
-        thread.discussion.resolved
+        thread.discussion.resolution.resolved()
     ])?;
     for finding in thread.finding_ids {
         db.prepare_cached(
@@ -219,7 +219,7 @@ fn fingerprint(discussion: &WorkflowDiscussion) -> ReportHash {
     notes.sort_unstable_by_key(|note| note.id);
     let mut digest = Sha256::new();
     hash_field(&mut digest, discussion.id.as_bytes());
-    digest.update([discussion.resolved.map_or(2, u8::from)]);
+    digest.update([discussion.resolution.resolved().map_or(2, u8::from)]);
     for note in notes {
         digest.update(note.id.to_be_bytes());
         digest.update(note.author.to_be_bytes());
@@ -620,7 +620,7 @@ pub(super) fn adopt_remote(
             .checked_add(1)
             .ok_or(AppError::Internal)?;
         let mut observed = Vec::new();
-        if let (Some(prior), Some(resolved)) = (previous.1, discussion.resolved)
+        if let (Some(prior), Some(resolved)) = (previous.1, discussion.resolution.resolved())
             && prior != resolved
             && !discussion
                 .resolved_by
@@ -678,7 +678,7 @@ pub(super) fn adopt_remote(
                 discussion.id,
                 version.to_string(),
                 current_hash.as_str(),
-                discussion.resolved
+                discussion.resolution.resolved()
             ],
         )?;
         for (kind, inbox_kind, note, actor) in observed {

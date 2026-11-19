@@ -166,7 +166,7 @@ fn record_discovery(
     }
     let complete = observation
         .as_ref()
-        .is_some_and(|value| value.approved_reviewers.is_some() && value.note_authors.is_some());
+        .is_some_and(|value| value.approved_reviewers.is_some() && value.discussions.is_some());
     let delay = if complete {
         DISCOVERY_REFRESH_MS
     } else {
@@ -183,11 +183,13 @@ fn record_discovery(
         let approval = value
             .approved_reviewers
             .map(|actors| actors.into_iter().any(|actor| reviewers.contains(&actor)));
-        let comments = value.note_authors.map(|actors| {
-            actors
-                .into_iter()
-                .filter(|actor| reviewers.contains(actor))
-                .count() as i64
+        let comments = value.discussions.map(|threads| {
+            crate::queue::stage::count_discussions(
+                threads
+                    .into_iter()
+                    .map(|thread| (thread.resolution, thread.authors)),
+                &reviewers,
+            )
         });
         save_observations(tx, std::slice::from_ref(&value.review))?;
         crate::queue::stage::observe_signals(

@@ -181,6 +181,15 @@ pub(super) async fn overview(
     )?;
     let data = ReviewOverview {
         review: project_review(&value.item)?,
+        our_discussions: value
+            .our_discussions
+            .map(|value| {
+                Ok::<_, AppError>(reviewq_protocol::queue::DiscussionCounts {
+                    total: count(u64::from(value.total))?,
+                    open: value.open.map(|n| count(u64::from(n))).transpose()?,
+                })
+            })
+            .transpose()?,
         web_url: value.item.source.web_url()?,
         decision_revision: RevisionDto::new(value.item.decision.revision.get())
             .ok_or(AppError::Internal)?,

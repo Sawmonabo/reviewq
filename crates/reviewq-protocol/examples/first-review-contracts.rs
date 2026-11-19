@@ -97,6 +97,7 @@ fn emit_resources(output: &Path) -> Result<(), Box<dyn Error>> {
         output,
         "overview",
         &snapshot(ReviewOverview {
+            our_discussions: None,
             review: review(),
             web_url: "https://gitlab.example/forge/alpha/-/merge_requests/41".into(),
             decision_revision: RevisionDto::new(0).unwrap(),

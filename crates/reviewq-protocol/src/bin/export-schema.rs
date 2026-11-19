@@ -141,6 +141,10 @@ fn main() -> Result<(), Box<dyn Error>> {
     )?;
     registry
         .request::<reviewq_protocol::recovery::InterruptRequest>("recovery", "InterruptRequest")?;
+    registry.response::<reviewq_protocol::recovery::InterruptTargetResponse>(
+        "recovery",
+        "InterruptTargetResponse",
+    )?;
     registry.response::<reviewq_protocol::recovery::InterruptResponse>(
         "recovery",
         "InterruptResponse",

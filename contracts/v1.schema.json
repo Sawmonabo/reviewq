@@ -2156,6 +2156,28 @@
       "title": "DisconnectSettings",
       "type": "object"
     },
+    "DiscussionCounts": {
+      "properties": {
+        "open": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SafeCountDto"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "total": {
+          "$ref": "#/definitions/SafeCountDto"
+        }
+      },
+      "required": [
+        "total",
+        "open"
+      ],
+      "type": "object"
+    },
     "DiscussionResolution": {
       "enum": [
         "open",
@@ -3508,6 +3530,49 @@
         "uncertain"
       ],
       "type": "string"
+    },
+    "InterruptTarget": {
+      "properties": {
+        "runId": {
+          "$ref": "#/definitions/RunIdDto"
+        },
+        "sessionKey": {
+          "$ref": "#/definitions/SessionKeyDto"
+        },
+        "turnId": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/HistoryTurnIdDto"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "runId",
+        "sessionKey",
+        "turnId"
+      ],
+      "type": "object"
+    },
+    "InterruptTargetResponse": {
+      "description": "The resource and event head from the same authorized snapshot.",
+      "properties": {
+        "cursor": {
+          "$ref": "#/definitions/EventCursorDto"
+        },
+        "data": {
+          "$ref": "#/definitions/InterruptTarget"
+        }
+      },
+      "required": [
+        "data",
+        "cursor"
+      ],
+      "title": "InterruptTargetResponse",
+      "type": "object"
     },
     "InvalidateEvent": {
       "description": "Bounded resource descriptors for an `invalidate` event.",
@@ -6878,6 +6943,16 @@
         "decisionRevision": {
           "$ref": "#/definitions/RevisionDto"
         },
+        "ourDiscussions": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/DiscussionCounts"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "review": {
           "$ref": "#/definitions/MergeRequestRow"
         },
@@ -9030,6 +9105,7 @@
     "HistoryPlanResponse": "history",
     "InterruptRequest": "recovery",
     "InterruptResponse": "recovery",
+    "InterruptTargetResponse": "recovery",
     "InvalidateEvent": "common",
     "LaunchReceiptResponse": "launch",
     "LoadSprintsRequest": "queue",
@@ -9137,6 +9213,7 @@
       "HistoryPartPageResponse": "#/definitions/HistoryPartPageResponse",
       "HistoryPlanResponse": "#/definitions/HistoryPlanResponse",
       "InterruptResponse": "#/definitions/InterruptResponse",
+      "InterruptTargetResponse": "#/definitions/InterruptTargetResponse",
       "LaunchReceiptResponse": "#/definitions/LaunchReceiptResponse",
       "LoadSprintsResponse": "#/definitions/LoadSprintsResponse",
       "MessageHistoryPageResponse": "#/definitions/MessageHistoryPageResponse",

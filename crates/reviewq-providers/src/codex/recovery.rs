@@ -152,36 +152,41 @@ impl Codex {
             .is_some_and(|turn| turn.status == "interrupted"))
     }
 
+    pub(super) async fn active_managed_turn(
+        &self,
+        lead: &LeadTarget,
+    ) -> Result<Option<NativeTurnId>, AppError> {
+        let thread = self.verified_thread(lead).await?;
+        match thread.status {
+            ThreadStatus::Active { .. } => {}
+            ThreadStatus::Idle => return Ok(None),
+            _ => return Err(AppError::Unavailable),
+        }
+        let latest = self.turns(&thread.id, None, false, 1, false).await?;
+        latest
+            .data
+            .first()
+            .filter(|turn| turn.status == "inProgress")
+            .map(|turn| turn.id.parse().map_err(|_| AppError::Unavailable))
+            .transpose()
+    }
+
     pub(super) async fn stop_exact_turn(
         &self,
         lead: LeadTarget,
         id: NativeTurnId,
     ) -> Result<InterruptState, AppError> {
-        let thread = match self.verified_thread(&lead).await {
-            Ok(thread) => thread,
-            Err(AppError::Conflict | AppError::Forbidden | AppError::NotFound) => {
+        match self.active_managed_turn(&lead).await {
+            Ok(Some(current)) if current == id => {}
+            Ok(_) | Err(AppError::Conflict | AppError::Forbidden | AppError::NotFound) => {
                 return Ok(InterruptState::Rejected);
             }
             Err(_) => return Ok(InterruptState::Deferred),
-        };
-        match thread.status {
-            ThreadStatus::Active { .. } => {}
-            ThreadStatus::Idle => return Ok(InterruptState::Rejected),
-            _ => return Ok(InterruptState::Deferred),
         }
-        let Ok(latest) = self.turns(&thread.id, None, false, 1, false).await else {
-            return Ok(InterruptState::Deferred);
-        };
-        if latest
-            .data
-            .first()
-            .is_none_or(|turn| turn.id != id.as_str() || turn.status != "inProgress")
-        {
-            return Ok(InterruptState::Rejected);
-        }
+        let thread_id = lead.binding().identity().native_id().as_str();
         match self
             .connection
-            .interrupt(json!({"threadId":thread.id,"turnId":id.as_str()}))
+            .interrupt(json!({"threadId":thread_id,"turnId":id.as_str()}))
             .await
         {
             Err(super::connection::CallError::BeforeSend(_)) => {
@@ -194,7 +199,7 @@ impl Codex {
             if delay != 0 {
                 tokio::time::sleep(Duration::from_millis(delay)).await;
             }
-            let Ok(found) = self.turns(&thread.id, None, false, 1, false).await else {
+            let Ok(found) = self.turns(thread_id, None, false, 1, false).await else {
                 continue;
             };
             if found

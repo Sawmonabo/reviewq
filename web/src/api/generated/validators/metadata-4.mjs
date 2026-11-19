@@ -46,16 +46,4 @@ const schema200 = {
   enum: ["interrupted", "deferred", "rejected", "uncertain"],
   type: "string",
 };
-const schema204 = {
-  enum: ["pending", "confirmed", "rejected", "uncertain"],
-  type: "string",
-};
-export {
-  schema157,
-  schema158,
-  schema168,
-  schema186,
-  schema197,
-  schema200,
-  schema204,
-};
+export { schema157, schema158, schema168, schema186, schema197, schema200 };

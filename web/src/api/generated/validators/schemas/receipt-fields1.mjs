@@ -4,8 +4,8 @@ import { validate232 } from "./utc-timestamp-dto.mjs";
 import { validate25 } from "./checkpoint-id-dto.mjs";
 import { validate388 } from "./observed-input-dto.mjs";
 import { validate114 } from "./review-id-dto.mjs";
-import { validate640 } from "./state.mjs";
-function validate632(
+import { validate647 } from "./state.mjs";
+function validate639(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -88,7 +88,7 @@ function validate632(
               vErrors.push(err1);
             }
             errors++;
-            validate632.errors = vErrors;
+            validate639.errors = vErrors;
             return false;
           } else {
             errors = _errs3;
@@ -162,7 +162,7 @@ function validate632(
                 vErrors.push(err3);
               }
               errors++;
-              validate632.errors = vErrors;
+              validate639.errors = vErrors;
               return false;
             } else {
               errors = _errs8;
@@ -236,7 +236,7 @@ function validate632(
                   vErrors.push(err5);
                 }
                 errors++;
-                validate632.errors = vErrors;
+                validate639.errors = vErrors;
                 return false;
               } else {
                 errors = _errs13;
@@ -328,7 +328,7 @@ function validate632(
                       vErrors.push(err7);
                     }
                     errors++;
-                    validate632.errors = vErrors;
+                    validate639.errors = vErrors;
                     return false;
                   } else {
                     errors = _errs19;
@@ -402,7 +402,7 @@ function validate632(
                         vErrors.push(err9);
                       }
                       errors++;
-                      validate632.errors = vErrors;
+                      validate639.errors = vErrors;
                       return false;
                     } else {
                       errors = _errs24;
@@ -422,7 +422,7 @@ function validate632(
                     if (data.state !== undefined && func0.call(data, "state")) {
                       const _errs28 = errors;
                       if (
-                        !validate640(data.state, {
+                        !validate647(data.state, {
                           instancePath: instancePath + "/state",
                           parentData: data,
                           parentDataProperty: "state",
@@ -431,8 +431,8 @@ function validate632(
                       ) {
                         vErrors =
                           vErrors === null
-                            ? validate640.errors
-                            : vErrors.concat(validate640.errors);
+                            ? validate647.errors
+                            : vErrors.concat(validate647.errors);
                         errors = vErrors.length;
                       }
                       var valid0 = _errs28 === errors;
@@ -447,7 +447,7 @@ function validate632(
         }
       }
     } else {
-      validate632.errors = [
+      validate639.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -458,7 +458,7 @@ function validate632(
       return false;
     }
   }
-  validate632.errors = vErrors;
+  validate639.errors = vErrors;
   return errors === 0;
 }
-export { validate632 };
+export { validate639 };

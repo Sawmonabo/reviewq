@@ -66,6 +66,11 @@ pub struct PreparedRecovery {
     pub reviewer: u64,
 }
 
+pub enum ManagedInterruptTarget {
+    Codex(LeadTarget),
+    Claude(NativeTurnId),
+}
+
 #[derive(Clone)]
 pub struct InterruptClaim {
     pub target: LeadTarget,
@@ -130,6 +135,12 @@ pub trait RecoveryStore: Send + Sync {
         cancel: bool,
     ) -> AppFuture<'_, ()>;
     fn reserve_recovery(&self, input: PreparedRecovery) -> AppFuture<'_, ()>;
+    fn interrupt_target(
+        &self,
+        actor: Actor,
+        run: RunId,
+        session: SessionKey,
+    ) -> AppFuture<'_, Snapshot<Option<ManagedInterruptTarget>>>;
     fn claim_interrupt(
         &self,
         actor: Actor,

@@ -12,6 +12,7 @@ import type {
   CancelRecoveryResponse,
   InterruptRequest,
   InterruptResponse,
+  InterruptTargetResponse,
   RecoveryPreferencesResponse,
   RecoveryStateResponse,
   SaveRecoveryPreferencesRequest,
@@ -174,6 +175,7 @@ export interface Contracts {
   HistoryPartPageResponse: HistoryPartPageResponse;
   HistoryPlanResponse: HistoryPlanResponse;
   InterruptResponse: InterruptResponse;
+  InterruptTargetResponse: InterruptTargetResponse;
   LaunchReceiptResponse: LaunchReceiptResponse;
   LoadSprintsResponse: LoadSprintsResponse;
   MessageHistoryPageResponse: MessageHistoryPageResponse;

@@ -280,8 +280,13 @@ pub struct DiscoveryEvidence {
     pub review: ReviewSource,
     pub authenticated_actor: u64,
     pub approved_reviewers: Option<Vec<u64>>,
-    pub note_authors: Option<Vec<u64>>,
+    pub discussions: Option<Vec<DiscoveryDiscussion>>,
     pub observed_at_ms: i64,
+}
+
+pub struct DiscoveryDiscussion {
+    pub resolution: crate::changes::DiscussionResolution,
+    pub authors: Vec<u64>,
 }
 
 impl WorkflowSnapshot {
@@ -296,7 +301,7 @@ pub struct WorkflowDiscussion {
     pub id: String,
     pub root_note_id: Option<u64>,
     pub resolved_by: Option<u64>,
-    pub resolved: Option<bool>,
+    pub resolution: crate::changes::DiscussionResolution,
     pub notes: Vec<WorkflowNote>,
 }
 

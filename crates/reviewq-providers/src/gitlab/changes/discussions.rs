@@ -219,12 +219,14 @@ impl GitLab {
         );
         let approved_reviewers =
             facts?.map(|facts| facts.approvers.into_iter().map(|value| value.id).collect());
-        let note_authors = match discussions {
+        let discussions = match discussions {
             Ok(discussions) => Some(
                 discussions
                     .into_iter()
-                    .flat_map(|thread| thread.notes)
-                    .map(|note| note.author)
+                    .map(|thread| reviewq_app::sources::DiscoveryDiscussion {
+                        resolution: thread.resolution,
+                        authors: thread.notes.into_iter().map(|note| note.author).collect(),
+                    })
                     .collect(),
             ),
             Err(AppError::StaleRevision) => return Err(AppError::StaleRevision),
@@ -238,7 +240,7 @@ impl GitLab {
             review,
             authenticated_actor,
             approved_reviewers,
-            note_authors,
+            discussions,
             observed_at_ms: jiff::Timestamp::now().as_millisecond(),
         })
     }
@@ -283,11 +285,10 @@ impl GitLab {
                         .iter()
                         .filter(|note| !note.system && !note.confidential)
                 };
-                let resolved = DiscussionResolution::from_notes(
+                let resolution = DiscussionResolution::from_notes(
                     visible().map(|note| (note.resolvable, note.resolved)),
-                )
-                .resolved();
-                let resolved_by = resolved.and_then(|resolved| {
+                );
+                let resolved_by = resolution.resolved().and_then(|resolved| {
                     let mut actors = visible()
                         .filter(|note| {
                             note.resolvable == Some(true) && note.resolved == Some(resolved)
@@ -349,7 +350,7 @@ impl GitLab {
                         id: discussion.id,
                         root_note_id,
                         resolved_by,
-                        resolved,
+                        resolution,
                         notes,
                     });
                 }

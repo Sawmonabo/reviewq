@@ -3,13 +3,13 @@ import { readRun } from "../../api/client";
 import type { RunDetail, RunStage } from "../../api/generated/contracts";
 import type { SessionSummary } from "../../api/generated/contracts/hosts";
 import { messageHistory } from "../../api/history";
-import { interrupt } from "../../api/review";
 import { Icon } from "../../components/Icon";
 import { Notice } from "../../components/PanelState";
 import { useResource } from "../../hooks/useResource";
 import type { DraftStore } from "../../lib/drafts";
-import { describeError, formatTime, readable } from "../../lib/presentation";
+import { formatTime, readable } from "../../lib/presentation";
 import { Composer } from "./Composer";
+import { InterruptSession } from "./InterruptSession";
 import { ReportedPlan } from "./ReportedPlan";
 import { NativeQuestions } from "./transcript/NativeQuestions";
 import { Transcript } from "./transcript/Transcript";
@@ -43,9 +43,7 @@ export default function AgentPanel({
   const target = { runId: run.runId, sessionKey: session.sessionKey };
   const lead = session.sessionKey === run.leadSessionKey;
 
-  const [notice, setNotice] = useState<string>();
-  const [busy, setBusy] = useState(false);
-  const [turn, setTurn] = useState<string>();
+  const [toolsOpen, setToolsOpen] = useState(false);
   const [messages, setMessages] = useState(false);
   const [cursor, setCursor] = useState<string>();
   const deliveryKeys = [
@@ -69,20 +67,6 @@ export default function AgentPanel({
         : Promise.resolve({ data: null, cursor: "" }),
   );
   const deliveryPage = cursor ? priorDeliveries : outbox;
-
-  async function stop() {
-    if (!turn || busy) return;
-    setBusy(true);
-    setNotice(undefined);
-    try {
-      const result = await interrupt(run.runId, session.sessionKey, { expectedTurnId: turn });
-      setNotice(`Interrupt · ${readable(result.state)}`);
-    } catch (error) {
-      setNotice(describeError(error));
-    } finally {
-      setBusy(false);
-    }
-  }
 
   const model =
     session.metadata.model ??
@@ -123,7 +107,10 @@ export default function AgentPanel({
                 onSession={onSession}
               />
             )}
-            <details className="agent-session-menu agent-session-tools">
+            <details
+              className="agent-session-menu agent-session-tools"
+              onToggle={(event) => setToolsOpen(event.currentTarget.open)}
+            >
               <summary className="button-label" aria-label="Session tools">
                 <Icon name="more" size={14} />
               </summary>
@@ -142,21 +129,18 @@ export default function AgentPanel({
                     Delivery history
                   </button>
                 )}
-                {turn && (
-                  <button
-                    type="button"
+                {toolsOpen && lead && run.launch && run.launch.state !== "rejected" && (
+                  <InterruptSession
+                    runId={run.runId}
+                    nativeId={run.leadNativeId}
+                    sessionKey={session.sessionKey}
                     className="session-menu-option"
-                    disabled={busy}
-                    onClick={() => void stop()}
-                  >
-                    Interrupt session
-                  </button>
+                  />
                 )}
               </div>
             </details>
           </div>
         </div>
-        {notice && <Notice>{notice}</Notice>}
         {messages && lead && (
           <section className="agent-deliveries surface-card stack" aria-label="Delivery history">
             {deliveryPage.error && <Notice retry={deliveryPage.retry}>{deliveryPage.error}</Notice>}
@@ -201,7 +185,6 @@ export default function AgentPanel({
         messages={outbox.data?.items ?? []}
         resultOnly={resultOnly}
         working={lead && state === "working"}
-        onObservedTurn={setTurn}
       />
       {!resultOnly && session.provider === "codex" && (
         <NativeQuestions

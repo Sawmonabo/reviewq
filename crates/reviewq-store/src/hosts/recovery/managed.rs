@@ -1,5 +1,5 @@
 use reviewq_app::access::{Actor, AppError};
-use reviewq_app::hosts::recovery::{InterruptClaim, InterruptState};
+use reviewq_app::hosts::recovery::{InterruptClaim, InterruptState, ManagedInterruptTarget};
 use reviewq_domain::identity::{NativeTurnId, RunId, SessionKey};
 use reviewq_domain::session::{HostProvider, LeadTarget};
 use rusqlite::{Connection, OptionalExtension, params};
@@ -11,6 +11,21 @@ use crate::hosts::claude::COMPANION_FRESH_MS;
 use crate::queue::{lead_for_run, parse};
 
 use super::{cancel_interrupted, emit};
+
+pub(super) fn target(
+    db: &Connection,
+    actor: &Actor,
+    run: &RunId,
+    session: &SessionKey,
+) -> Result<Option<ManagedInterruptTarget>, StoreError> {
+    let lead = scoped(db, actor, run, session)?;
+    match managed_job(db, &lead).map_err(StoreError::app) {
+        Ok(None) => Ok(Some(ManagedInterruptTarget::Codex(lead))),
+        Ok(Some(_)) => Ok(fresh_claude_turn(db, &lead)?.map(ManagedInterruptTarget::Claude)),
+        Err(AppError::Forbidden) => Ok(None),
+        Err(error) => Err(error.into()),
+    }
+}
 
 pub(super) fn claim(
     tx: &mut WriteTx<'_>,
@@ -146,23 +161,31 @@ fn active_claude_turn(
     target: &LeadTarget,
     turn: &NativeTurnId,
 ) -> Result<(), StoreError> {
-    let live: bool = db.query_row(
-        "SELECT EXISTS(SELECT 1 FROM claude_companions c JOIN sessions s USING(session_key)
-         WHERE s.run_id=?1 AND c.session_key=?2 AND c.turn_id=?3 AND c.seen_at_ms>?4
-           AND s.host_activity IN ('working','blocked')
-           AND NOT EXISTS(SELECT 1 FROM claude_turns t
-             WHERE t.session_key=c.session_key AND t.turn_id=c.turn_id))",
-        params![
-            target.run_id().as_str(),
-            target.session_key().as_str(),
-            turn.as_str(),
-            now_ms()?.saturating_sub(COMPANION_FRESH_MS)
-        ],
-        |row| row.get(0),
-    )?;
-    if live {
+    if fresh_claude_turn(db, target)?.as_ref() == Some(turn) {
         Ok(())
     } else {
         Err(AppError::Conflict.into())
     }
+}
+
+fn fresh_claude_turn(
+    db: &Connection,
+    target: &LeadTarget,
+) -> Result<Option<NativeTurnId>, StoreError> {
+    let turn: Option<String> = db
+        .query_row(
+            "SELECT c.turn_id FROM claude_companions c JOIN sessions s USING(session_key)
+         WHERE s.run_id=?1 AND c.session_key=?2 AND c.turn_id IS NOT NULL AND c.seen_at_ms>?3
+           AND s.host_activity IN ('working','blocked')
+           AND NOT EXISTS(SELECT 1 FROM claude_turns t
+             WHERE t.session_key=c.session_key AND t.turn_id=c.turn_id)",
+            params![
+                target.run_id().as_str(),
+                target.session_key().as_str(),
+                now_ms()?.saturating_sub(COMPANION_FRESH_MS)
+            ],
+            |row| row.get(0),
+        )
+        .optional()?;
+    turn.as_deref().map(parse).transpose()
 }

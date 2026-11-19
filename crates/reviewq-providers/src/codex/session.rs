@@ -133,6 +133,13 @@ impl NativeHost for Codex {
         Box::pin(self.read_around_item(target, id, anchor, limit))
     }
 
+    fn interruptible_turn(
+        &self,
+        target: LeadTarget,
+    ) -> AppFuture<'_, Option<reviewq_domain::identity::NativeTurnId>> {
+        Box::pin(async move { self.active_managed_turn(&target).await })
+    }
+
     fn observe_interrupt(
         &self,
         target: LeadTarget,

@@ -15,6 +15,7 @@ import {
   isFollowupResultsResponse,
   isHistoryPlanResponse,
   isInterruptResponse,
+  isInterruptTargetResponse,
   isRecoveryStateResponse,
   isReviewDecisionResponse,
   isTerminalResponse,
@@ -119,6 +120,17 @@ export async function cancelRecovery(
   );
   if (result.data.episodeId !== body.episodeId) throw new Error("The recovery episode changed.");
   return result.data;
+}
+
+export async function readInterruptTarget(runId: string, sessionKey: string, signal: AbortSignal) {
+  const result = await read(
+    `${sessionPath(runId, sessionKey)}/interrupt`,
+    isInterruptTargetResponse,
+    signal,
+  );
+  if (result.data.runId !== runId || result.data.sessionKey !== sessionKey)
+    throw new Error("The selected interrupt target changed.");
+  return result;
 }
 
 export async function interrupt(runId: string, sessionKey: string, body: InterruptRequest) {

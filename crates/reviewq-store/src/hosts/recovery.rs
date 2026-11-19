@@ -140,6 +140,20 @@ impl RecoveryStore for SqliteStore {
         })
     }
 
+    fn interrupt_target(
+        &self,
+        actor: Actor,
+        run: RunId,
+        session: SessionKey,
+    ) -> AppFuture<'_, Snapshot<Option<reviewq_app::hosts::recovery::ManagedInterruptTarget>>> {
+        Box::pin(async move {
+            operator(&actor)?;
+            self.read(move |db| snapshot(db, managed::target(db, &actor, &run, &session)?))
+                .await
+                .map_err(StoreError::app)
+        })
+    }
+
     fn claim_interrupt(
         &self,
         actor: Actor,

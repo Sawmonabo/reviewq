@@ -210,6 +210,7 @@ export interface ReviewOverview {
   checkpointId: CheckpointIdDto | null;
   decision?: DecisionView | null;
   decisionRevision: RevisionDto;
+  ourDiscussions?: DiscussionCounts | null;
   review: MergeRequestRow;
   runs: RunSummaryPage;
   settingsRevision: RevisionDto;
@@ -251,6 +252,12 @@ export interface DecisionView {
   disposition: Disposition | null;
   reviewedAt: UtcTimestampDto | null;
   reviewedSha: GitShaDto | null;
+  [k: string]: unknown;
+}
+
+export interface DiscussionCounts {
+  open: SafeCountDto | null;
+  total: SafeCountDto;
   [k: string]: unknown;
 }
 

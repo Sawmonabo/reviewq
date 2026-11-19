@@ -314,9 +314,28 @@ fn overview(
     } else {
         None
     };
+    let settings_revision = settings_revision(connection)?;
+    let our_discussions = connection
+        .query_row(
+            "SELECT our_threads, open_threads FROM review_source_signals
+         WHERE review_id=?1 AND settings_revision=?2 AND source_sha=?3 AND our_threads IS NOT NULL",
+            params![
+                review_id.as_str(),
+                settings_revision.as_sqlite_integer(),
+                item.source.head_sha.as_str()
+            ],
+            |row| {
+                Ok(reviewq_app::queue::DiscussionCounts {
+                    total: row.get(0)?,
+                    open: row.get(1)?,
+                })
+            },
+        )
+        .optional()?;
     Ok(ReviewOverview {
         item,
-        settings_revision: settings_revision(connection)?,
+        our_discussions,
+        settings_revision,
         frontier: decisions::capture_frontier(connection, &review_id, &runs)?,
         runs,
         next_run,
