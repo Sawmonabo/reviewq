@@ -146,3 +146,61 @@ pub struct AssessmentPage<I = Assessment> {
     pub next_cursor: Option<PageCursorDto>,
     pub through_batch_id: Option<ResourceIdDto>,
 }
+
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct PreferencesRequest {
+    pub submission_id: SubmissionIdDto,
+    pub expected_revision: RevisionDto,
+    pub automatic: Option<bool>,
+    pub auto_review_concurrency: Option<u8>,
+}
+
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub enum EnrollmentState {
+    Enabled,
+    Paused,
+}
+
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct Selection {
+    pub discussion_id: ResourceIdDto,
+    pub original_note_ids: Vec<crate::UpstreamIdDto>,
+    #[serde(default)]
+    pub finding_ids: Vec<ResourceIdDto>,
+}
+
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct ConfigureRequest {
+    pub submission_id: SubmissionIdDto,
+    pub expected_generation: Option<RevisionDto>,
+    pub run_id: RunIdDto,
+    pub state: EnrollmentState,
+    pub threads: Vec<Selection>,
+}
+
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct MonitorRequest {
+    pub submission_id: SubmissionIdDto,
+    pub expected_generation: Option<RevisionDto>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct MonitorReceipt {
+    pub review_id: crate::ReviewIdDto,
+    pub submission_id: SubmissionIdDto,
+    pub generation: RevisionDto,
+    pub state: MonitorState,
+    pub batch_id: Option<ResourceIdDto>,
+}

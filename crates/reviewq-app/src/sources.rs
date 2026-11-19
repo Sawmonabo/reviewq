@@ -8,6 +8,7 @@ use crate::workspace::{ConfiguredProject, WorkspaceStore};
 /// Reads verified provider metadata outside the store transaction.
 pub trait ReviewSourceReader: ChangeSource {
     fn review(&self, identity: MrIdentity) -> AppFuture<'_, ReviewSource>;
+    fn workflow_snapshot(&self, identity: MrIdentity) -> AppFuture<'_, WorkflowSnapshot>;
 
     fn reviews(&self, project: ConfiguredProject) -> AppFuture<'_, Vec<ReviewSource>>;
 
@@ -94,4 +95,27 @@ async fn scan(
         reviews.extend(records);
     }
     Ok(reviews)
+}
+
+/// One full authorized GitLab observation pinned to a particular MR head.
+pub struct WorkflowSnapshot {
+    pub review: ReviewSource,
+    pub authenticated_actor: u64,
+    pub personal_approval: bool,
+    pub observed_at_ms: i64,
+    pub discussions: Vec<WorkflowDiscussion>,
+}
+
+pub struct WorkflowDiscussion {
+    pub id: String,
+    pub resolved: bool,
+    pub notes: Vec<WorkflowNote>,
+}
+
+pub struct WorkflowNote {
+    pub id: u64,
+    pub author: u64,
+    pub body_hash: reviewq_domain::identity::ReportHash,
+    pub positioned_head: Option<reviewq_domain::identity::GitSha>,
+    pub created_at_ms: i64,
 }

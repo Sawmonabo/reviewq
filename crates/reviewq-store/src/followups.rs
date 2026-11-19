@@ -1,5 +1,8 @@
 //! Scoped enrollment, exact retained batch outcomes and unread assessment pages.
 
+mod commands;
+mod observations;
+
 use reviewq_app::access::{Actor, AppError, AppFuture};
 use reviewq_app::events::Snapshot;
 use reviewq_app::followups::{

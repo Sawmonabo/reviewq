@@ -1,5 +1,12 @@
 //! Monitor ownership, frozen work and scoped result projections.
 
+mod commands;
+
+pub use commands::{
+    FollowupCommands, MonitorCommand, MonitorReceipt, MonitorRequest, Selection, UpdatePreferences,
+    execute_monitor_command,
+};
+
 use reviewq_domain::identity::{GitSha, ReceiptId, ReviewId, Revision, RunId, SubmissionId};
 
 use crate::access::{Actor, AppFuture};

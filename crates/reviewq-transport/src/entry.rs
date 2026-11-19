@@ -12,7 +12,7 @@ use reviewq_app::access::{Actor, AppError};
 use reviewq_app::actions::ActionStore;
 use reviewq_app::decisions::{Checkpoints, DecisionStore};
 use reviewq_app::events::EventLog;
-use reviewq_app::followups::FollowupStore;
+use reviewq_app::followups::{FollowupCommands, FollowupStore};
 use reviewq_app::hosts::{LeadStore, MessageHistoryStore, NativeHost};
 use reviewq_app::notifications::InboxStore;
 use reviewq_app::queue::{QueueStore, ReviewLookup};
@@ -57,6 +57,7 @@ pub trait Store:
     + DecisionStore
     + ActionStore
     + FollowupStore
+    + FollowupCommands
 {
 }
 impl<
@@ -73,7 +74,8 @@ impl<
         + InboxStore
         + DecisionStore
         + ActionStore
-        + FollowupStore,
+        + FollowupStore
+        + FollowupCommands,
 > Store for S
 {
 }
