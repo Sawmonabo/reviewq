@@ -87,7 +87,7 @@ async fn receive(
     lookup: bool,
 ) -> Result<Json<Success<dto::HandoffReceipt>>, ApiError> {
     authenticate(entry, headers)?;
-    let proof = entry.workflow.as_deref().ok_or(AppError::Unavailable)?;
+    let proof = entry.workflow.as_ref();
     let command: dto::HandoffCommand =
         serde_json::from_slice(bytes).map_err(|_| AppError::InvalidRequest)?;
     let (session, turn, call_id, expected, handoff) = match command {

@@ -18,7 +18,7 @@ use super::session::Thread;
 #[serde(rename_all = "camelCase")]
 pub(super) struct Turns {
     pub data: Vec<Turn>,
-    next_cursor: Option<String>,
+    pub(super) next_cursor: Option<String>,
     backwards_cursor: Option<String>,
 }
 
@@ -47,6 +47,15 @@ pub(super) enum Item {
     AgentMessage {
         id: String,
         text: String,
+        phase: Option<String>,
+    },
+    CommandExecution {
+        id: String,
+        command: String,
+        source: Option<String>,
+        status: String,
+        exit_code: Option<i32>,
+        aggregated_output: Option<String>,
     },
     #[serde(other)]
     Other,
@@ -190,7 +199,7 @@ impl Codex {
         })
     }
 
-    async fn history_generation(&self, thread: &Thread) -> Result<String, AppError> {
+    pub(super) async fn history_generation(&self, thread: &Thread) -> Result<String, AppError> {
         let mut hash = Sha256::new();
         hash.update(self.profile.as_path().as_os_str().as_bytes());
         hash.update([0]);
@@ -280,8 +289,8 @@ fn visible(
                 .join("\n");
             (id, text, VisibleKind::User, started)
         }
-        Item::AgentMessage { id, text } => (id, text, VisibleKind::Assistant, completed),
-        Item::Other => return None,
+        Item::AgentMessage { id, text, .. } => (id, text, VisibleKind::Assistant, completed),
+        Item::Other | Item::CommandExecution { .. } => return None,
     };
     Some(
         id.parse()

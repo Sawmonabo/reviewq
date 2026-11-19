@@ -10,10 +10,11 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use reviewq_app::access::Actor;
 use reviewq_app::hosts::{ClaudeCompanion, LeadStore, NativeHost, recover_delivery};
+use reviewq_app::reports::reconcile_reports;
 use reviewq_app::sources::{ReviewSourceReader, SourceRefreshStore};
 use reviewq_app::workspace::{WorkspaceConfig, WorkspaceStore};
 use reviewq_domain::session::{AbsolutePath, HostProvider};
-use reviewq_providers::{Claude, Codex, FileHistory, GitLab};
+use reviewq_providers::{Claude, Codex, FileHistory, GitLab, RegisteredReportFiles, Workflows};
 use reviewq_store::SqliteStore;
 use reviewq_transport::{ServiceEndpoint, ServiceIdentity};
 use sha2::{Digest, Sha256};
@@ -146,17 +147,19 @@ pub(crate) async fn serve(profile: PathBuf, options: Serve) -> Result<(), Failur
         }
     }
     let source = source.map(|source| Arc::new(source) as Arc<dyn ReviewSourceReader>);
-    let host = match (options.codex_bin, options.codex_home) {
+    let codex = match (options.codex_bin, options.codex_home) {
         (Some(executable), Some(home)) => {
             let metadata = home.canonicalize()?.metadata()?;
             if metadata.uid() != rustix::process::getuid().as_raw() {
                 return Err("the selected Codex profile must belong to the service user".into());
             }
             let settings = options.codex_model.zip(options.codex_effort);
-            Some(Arc::new(Codex::new(executable, home, settings)?) as Arc<dyn NativeHost>)
+            Some(Arc::new(Codex::new(executable, home, settings)?))
         }
         _ => None,
     };
+    let host = codex.clone().map(|host| host as Arc<dyn NativeHost>);
+    let workflow = Arc::new(Workflows::new(codex));
     let sends_allowed = !options.validation && host.is_some();
     let claude = match options.claude_home {
         Some(home) => Some(home),
@@ -173,6 +176,15 @@ pub(crate) async fn serve(profile: PathBuf, options: Serve) -> Result<(), Failur
             store.subscribe_deliveries(),
         ))
     });
+    let reports = if options.validation {
+        None
+    } else {
+        store.recover_report_claims().await?;
+        Some(tokio::spawn(capture_reports(
+            store.clone(),
+            workflow.clone(),
+        )))
+    };
     let (shutdown, wait) = watch::channel(false);
     let router = reviewq_transport::router(
         store.clone(),
@@ -182,7 +194,7 @@ pub(crate) async fn serve(profile: PathBuf, options: Serve) -> Result<(), Failur
         reviewq_transport::ServiceRuntime {
             sends_allowed,
             claude,
-            workflow: None,
+            workflow,
             endpoint: endpoint.clone(),
             web: &web,
             commits: store.subscribe(),
@@ -215,10 +227,39 @@ pub(crate) async fn serve(profile: PathBuf, options: Serve) -> Result<(), Failur
         delivery.abort();
         let _ = delivery.await;
     }
+    if let Some(reports) = reports {
+        reports.abort();
+        let _ = reports.await;
+    }
     fs::remove_file(profile.join(RUNTIME))?;
     store.close(Duration::from_secs(10)).await?;
     result?;
     Ok(())
+}
+
+async fn capture_reports(store: Arc<SqliteStore>, workflow: Arc<Workflows>) {
+    let mut commits = store.subscribe_reports();
+    loop {
+        commits.borrow_and_update();
+        if reconcile_reports(store.as_ref(), workflow.as_ref(), &RegisteredReportFiles)
+            .await
+            .is_err()
+        {
+            tokio::time::sleep(Duration::from_secs(1)).await;
+            continue;
+        }
+        let due = match store.next_report_due().await {
+            Ok(due) => due,
+            Err(_) => {
+                tokio::time::sleep(Duration::from_secs(1)).await;
+                continue;
+            }
+        };
+        tokio::select! {
+            result = commits.changed() => if result.is_err() { break; },
+            () = wait_until_due(due) => {},
+        }
+    }
 }
 
 pub(crate) fn claude_home() -> Result<PathBuf, Failure> {
@@ -283,25 +324,24 @@ async fn dispatch_deliveries(
                 continue;
             }
         };
-        let wait_due = async {
-            match due {
-                Some(due) => {
-                    let now = SystemTime::now()
-                        .duration_since(UNIX_EPOCH)
-                        .ok()
-                        .and_then(|value| i64::try_from(value.as_millis()).ok())
-                        .unwrap_or(due);
-                    let delay = due.saturating_sub(now).max(20) as u64;
-                    tokio::time::sleep(Duration::from_millis(delay)).await;
-                }
-                None => std::future::pending::<()>().await,
-            }
-        };
         tokio::select! {
             result = commits.changed() => if result.is_err() { break; },
-            () = wait_due => {}
+            () = wait_until_due(due) => {}
         }
     }
+}
+
+async fn wait_until_due(due: Option<i64>) {
+    let Some(due) = due else {
+        return std::future::pending::<()>().await;
+    };
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .ok()
+        .and_then(|value| i64::try_from(value.as_millis()).ok())
+        .unwrap_or(due);
+    let delay = due.saturating_sub(now).max(20) as u64;
+    tokio::time::sleep(Duration::from_millis(delay)).await;
 }
 
 fn native_listener(port: u16) -> Result<TcpListener, std::io::Error> {

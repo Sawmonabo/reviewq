@@ -26,6 +26,26 @@ mod accept;
 const CLAIM_MS: i64 = 60_000;
 const RECHECK_MS: i64 = 2_000;
 
+impl SqliteStore {
+    /// Reconciles pending native handoffs promptly after reopening the exclusive profile.
+    pub async fn recover_report_claims(&self) -> Result<(), StoreError> {
+        self.write(|tx| {
+            tx.sql.execute("UPDATE report_handoffs SET due_at_ms=min(due_at_ms, ?1) WHERE state='pending_completion'", [now_ms()?])?;
+            Ok(())
+        }).await
+    }
+
+    pub async fn next_report_due(&self) -> Result<Option<i64>, StoreError> {
+        self.read(|db| {
+            Ok(db.query_row(
+                "SELECT due_at_ms FROM report_handoffs WHERE state='pending_completion' ORDER BY due_at_ms,receipt_id LIMIT 1",
+                [],
+                |row| row.get(0),
+            ).optional()?)
+        }).await
+    }
+}
+
 impl ReportCaptureStore for SqliteStore {
     fn report_lead(&self, session: SessionKey) -> AppFuture<'_, LeadTarget> {
         Box::pin(async move {
@@ -369,6 +389,7 @@ fn stage(
         ResourceKey::Report(Some(run.clone())),
         ResourceKey::Run(Some(run.clone())),
     ])?;
+    tx.report_changed = true;
     snapshot(
         &tx.sql,
         HandoffReceipt {

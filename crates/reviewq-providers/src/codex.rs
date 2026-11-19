@@ -8,6 +8,7 @@ mod connection;
 mod delivery;
 mod history;
 mod session;
+mod workflow;
 
 pub struct Codex {
     profile: AbsolutePath,

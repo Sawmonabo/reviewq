@@ -93,7 +93,7 @@ pub(super) struct Entry {
     host: Option<Arc<dyn NativeHost>>,
     claude: Option<Arc<dyn ClaudeCompanion>>,
     file_history: Arc<dyn NativeHistoryReader>,
-    workflow: Option<Arc<dyn NativeWorkflowProof>>,
+    workflow: Arc<dyn NativeWorkflowProof>,
     sends_allowed: bool,
     commits: watch::Receiver<EventCursor>,
     shutdown: watch::Receiver<bool>,
@@ -137,7 +137,7 @@ pub struct ServiceRuntime<'a> {
     pub web: &'a Path,
     pub sends_allowed: bool,
     pub claude: Option<Arc<dyn ClaudeCompanion>>,
-    pub workflow: Option<Arc<dyn NativeWorkflowProof>>,
+    pub workflow: Arc<dyn NativeWorkflowProof>,
     pub commits: watch::Receiver<EventCursor>,
     pub shutdown: watch::Receiver<bool>,
 }

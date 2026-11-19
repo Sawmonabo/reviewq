@@ -38,12 +38,14 @@ pub struct SqliteStore {
     workers: Mutex<Workers>,
     wakeup: watch::Sender<EventCursor>,
     delivery_wakeup: watch::Sender<()>,
+    report_wakeup: watch::Sender<()>,
 }
 
 pub(crate) struct WriteTx<'connection> {
     pub(crate) sql: Transaction<'connection>,
     pub(crate) wakeup: Option<EventCursor>,
     pub(crate) delivery_changed: bool,
+    pub(crate) report_changed: bool,
 }
 
 impl SqliteStore {
@@ -54,6 +56,7 @@ impl SqliteStore {
             let head = read_head(&reader)?;
             let (wakeup, _) = watch::channel(head);
             let (delivery_wakeup, _) = watch::channel(());
+            let (report_wakeup, _) = watch::channel(());
             let profile = Arc::new(profile);
             let reader = Worker::start(reader, profile.clone(), false)?;
             let writer = Worker::start(writer, profile, true)?;
@@ -62,6 +65,7 @@ impl SqliteStore {
                 workers: Mutex::new(Workers { reader, writer }),
                 wakeup,
                 delivery_wakeup,
+                report_wakeup,
             })
         })
         .await
@@ -87,6 +91,11 @@ impl SqliteStore {
     /// Wake the delivery dispatcher only after a committed outbox change.
     pub fn subscribe_deliveries(&self) -> watch::Receiver<()> {
         self.delivery_wakeup.subscribe()
+    }
+
+    /// Wake the capture worker after a new report handoff is committed.
+    pub fn subscribe_reports(&self) -> watch::Receiver<()> {
+        self.report_wakeup.subscribe()
     }
 
     /// Creates a verified recovery copy at a new private destination.
@@ -147,12 +156,14 @@ impl SqliteStore {
     {
         let wakeup = self.wakeup.clone();
         let delivery_wakeup = self.delivery_wakeup.clone();
+        let report_wakeup = self.report_wakeup.clone();
         self.submit(true, move |connection, _| {
             let sql = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
             let mut tx = WriteTx {
                 sql,
                 wakeup: None,
                 delivery_changed: false,
+                report_changed: false,
             };
             let result = f(&mut tx)?;
             tx.sql.commit()?;
@@ -161,6 +172,9 @@ impl SqliteStore {
             }
             if tx.delivery_changed {
                 delivery_wakeup.send_replace(());
+            }
+            if tx.report_changed {
+                report_wakeup.send_replace(());
             }
             Ok(result)
         })
