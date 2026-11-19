@@ -18,6 +18,7 @@ mod approvals;
 mod discussions;
 mod lease;
 mod paths;
+mod selection;
 mod wire;
 
 pub(super) use lease::Leases;
@@ -81,7 +82,7 @@ impl ChangeSource for GitLab {
             let indexed = slot
                 .get_or_try_init(|| async {
                     let (mut scan, mut next) = self
-                        .scan_diffs(&source, page, limit, selected, page == 1)
+                        .scan_diffs(&source, page, limit, selected, page == 1 || limit == 1)
                         .await?;
                     let mut page = page;
                     if selected.is_some_and(|file| {
@@ -136,6 +137,16 @@ impl ChangeSource for GitLab {
                 .await?;
             Ok(indexed.clone())
         })
+    }
+
+    fn selected(
+        &self,
+        source: MrIdentity,
+        revision: String,
+        ordinal: u32,
+        hint: Option<String>,
+    ) -> AppFuture<'_, reviewq_app::changes::SelectedPatch> {
+        Box::pin(self.selected_patch(source, revision, ordinal, hint))
     }
 
     fn paths(

@@ -291,6 +291,10 @@ pub fn router(
             "/reviews/{review_id}/changes/revision",
             get(changes::revision),
         )
+        .route(
+            "/reviews/{review_id}/changes/selected",
+            get(changes::selected),
+        )
         .route("/reviews/{review_id}/changes/paths", get(changes::paths))
         .route("/reviews/{review_id}/changes/patch", get(changes::patch))
         .route(

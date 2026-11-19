@@ -22,6 +22,15 @@ pub struct SourcePage<T> {
     pub next_page: Option<u32>,
 }
 
+/// One REST-verified selection, with an optional small whole-file projection.
+pub struct SelectedPatch {
+    pub revision: PatchRevision,
+    pub file: PatchFile,
+    pub ordinal: u32,
+    pub next: Option<u32>,
+    pub text: Option<String>,
+}
+
 #[derive(Debug)]
 pub struct PatchPath {
     pub old_path: String,
@@ -249,6 +258,14 @@ pub trait ChangeSource: Send + Sync {
         limit: u16,
         selected_file: Option<PatchFileSelection>,
     ) -> AppFuture<'_, SourcePage<PatchFile>>;
+
+    fn selected(
+        &self,
+        source: MrIdentity,
+        revision: String,
+        ordinal: u32,
+        hint: Option<String>,
+    ) -> AppFuture<'_, SelectedPatch>;
 
     fn paths(
         &self,

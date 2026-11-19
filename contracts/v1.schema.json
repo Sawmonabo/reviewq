@@ -8539,6 +8539,73 @@
       "title": "SaveSettingsRepositoryBinding",
       "type": "object"
     },
+    "SelectedPatch": {
+      "properties": {
+        "file": {
+          "$ref": "#/definitions/PatchFile"
+        },
+        "nextCursor": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/PageCursorDto"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "ordinal": {
+          "$ref": "#/definitions/SafeCountDto"
+        },
+        "previousCursor": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/PageCursorDto"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "settingsRevision": {
+          "$ref": "#/definitions/RevisionDto"
+        },
+        "text": {
+          "description": "Exact original UTF-8 when the selected complete patch fits the inline limit.",
+          "maxLength": 131072,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "file",
+        "ordinal",
+        "settingsRevision",
+        "previousCursor",
+        "nextCursor",
+        "text"
+      ],
+      "type": "object"
+    },
+    "SelectedPatchResponse": {
+      "description": "The resource and event head from the same authorized snapshot.",
+      "properties": {
+        "cursor": {
+          "$ref": "#/definitions/EventCursorDto"
+        },
+        "data": {
+          "$ref": "#/definitions/SelectedPatch"
+        }
+      },
+      "required": [
+        "data",
+        "cursor"
+      ],
+      "title": "SelectedPatchResponse",
+      "type": "object"
+    },
     "SelectedThread": {
       "properties": {
         "discussionId": {
@@ -9740,6 +9807,7 @@
     "RunStartRequest": "launch",
     "SaveRecoveryPreferencesRequest": "recovery",
     "SaveSettings": "settings",
+    "SelectedPatchResponse": "changes",
     "SendMessageRequest": "delivery",
     "SettingsResponse": "settings",
     "TerminalResponse": "hosts",
@@ -9835,6 +9903,7 @@
       "RunCatalogResponse": "#/definitions/RunCatalogResponse",
       "RunDetailResponse": "#/definitions/RunDetailResponse",
       "RunPreviewResponse": "#/definitions/RunPreviewResponse",
+      "SelectedPatchResponse": "#/definitions/SelectedPatchResponse",
       "SettingsResponse": "#/definitions/SettingsResponse",
       "TerminalResponse": "#/definitions/TerminalResponse",
       "TicketDetailResponse": "#/definitions/TicketDetailResponse",

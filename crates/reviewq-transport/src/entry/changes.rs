@@ -24,9 +24,11 @@ use super::{ApiError, Entry, ServiceEndpoint};
 mod approval;
 mod paths;
 mod raw;
+mod selection;
 pub(super) use approval::approvals;
 pub(super) use paths::paths;
 pub(super) use raw::patch;
+pub(super) use selection::selected;
 
 const FILE_CURSOR: &[u8] = b"reviewq-changes-files-v1";
 const DISCUSSION_CURSOR: &[u8] = b"reviewq-changes-discussions-v1";

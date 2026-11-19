@@ -88,6 +88,10 @@ fn main() -> Result<(), Box<dyn Error>> {
         "RegisteredSessionResponse",
     )?;
 
+    registry.response::<reviewq_protocol::changes::SelectedPatchResponse>(
+        "changes",
+        "SelectedPatchResponse",
+    )?;
     registry.response::<PatchFileIndexResponse>("changes", "PatchFileIndexResponse")?;
     registry.response::<reviewq_protocol::changes::CurrentPatchRevisionResponse>(
         "changes",

@@ -113,6 +113,7 @@ import type {
   PatchDiscussionsResponse,
   PatchFileIndexResponse,
   PatchPathsResponse,
+  SelectedPatchResponse,
 } from "./changes.js";
 
 import type { ArchivePageResponse } from "./archive.js";
@@ -211,6 +212,7 @@ export interface Contracts {
   RunCatalogResponse: RunCatalogResponse;
   RunDetailResponse: RunDetailResponse;
   RunPreviewResponse: RunPreviewResponse;
+  SelectedPatchResponse: SelectedPatchResponse;
   SettingsResponse: SettingsResponse;
   TerminalResponse: TerminalResponse;
   TicketDetailResponse: TicketDetailResponse;

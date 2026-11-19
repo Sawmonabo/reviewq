@@ -81,6 +81,7 @@ import type {
   RunCatalogResponse,
   RunDetailResponse,
   RunPreviewResponse,
+  SelectedPatchResponse,
   SettingsResponse,
   TerminalResponse,
   TicketDetailResponse,
@@ -292,6 +293,9 @@ export function isRunDetailResponse(value: unknown): value is RunDetailResponse;
 export function isRunPreviewResponse(
   value: unknown,
 ): value is RunPreviewResponse;
+export function isSelectedPatchResponse(
+  value: unknown,
+): value is SelectedPatchResponse;
 export function isSettingsResponse(value: unknown): value is SettingsResponse;
 export function isTerminalResponse(value: unknown): value is TerminalResponse;
 export function isTicketDetailResponse(
