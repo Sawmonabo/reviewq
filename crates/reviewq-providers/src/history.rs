@@ -160,7 +160,17 @@ impl NativeHistoryReader for FileHistory {
         request: Option<String>,
     ) -> AppFuture<'_, Option<Vec<QuestionForm>>> {
         self.inspect(session, move |source, cancel| {
-            questions::read(&source, known, request.as_deref(), cancel)
+            questions::read(&source, &known, request.as_deref(), cancel)
+        })
+    }
+
+    fn prove_async_question(
+        &self,
+        session: HistorySession,
+        evidence: ObservedAsyncQuestion,
+    ) -> AppFuture<'_, Option<QuestionForm>> {
+        self.inspect(session, move |source, cancel| {
+            questions::prove(&source, &evidence, cancel)
         })
     }
 
@@ -249,4 +259,43 @@ impl NativeHistoryReader for FileHistory {
                 .await
         })
     }
+}
+
+pub(crate) async fn observe_async_questions(
+    session: HistorySession,
+    started_at_ms: i64,
+    known: Vec<ObservedAsyncQuestion>,
+) -> Result<Vec<ObservedAsyncQuestion>, AppError> {
+    let stopped = Cancel(Arc::new(AtomicBool::new(false)));
+    let cancel = stopped.0.clone();
+    tokio::task::spawn_blocking(move || match locator::locate(&session, &cancel)? {
+        Some(source) => questions::observe(&source, started_at_ms, &known, &cancel),
+        None => Ok(Vec::new()),
+    })
+    .await
+    .map_err(|_| AppError::Unavailable)?
+}
+
+pub(crate) async fn verify_pending_async_question(
+    mut session: HistorySession,
+    path: std::path::PathBuf,
+    mut evidence: ObservedAsyncQuestion,
+) -> Result<bool, AppError> {
+    let stopped = Cancel(Arc::new(AtomicBool::new(false)));
+    let cancel = stopped.0.clone();
+    let source = reviewq_domain::session::AbsolutePath::from_canonical(path)
+        .map_err(|_| AppError::Conflict)?;
+    if session.source.as_ref().is_some_and(|path| path != &source) {
+        return Err(AppError::Conflict);
+    }
+    session.source = Some(source);
+    evidence.state = reviewq_app::hosts::QuestionStatus::Pending;
+    tokio::task::spawn_blocking(move || {
+        let source = locator::locate(&session, &cancel)?.ok_or(AppError::Unavailable)?;
+        let form = questions::prove(&source, &evidence, &cancel)?;
+        Ok(form.state == reviewq_app::hosts::QuestionStatus::Pending
+            && !form.questions.iter().any(|q| q.secret))
+    })
+    .await
+    .map_err(|_| AppError::Unavailable)?
 }

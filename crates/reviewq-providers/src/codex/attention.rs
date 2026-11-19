@@ -78,6 +78,13 @@ impl Codex {
             .children(&target.session, target.child_cursor.as_ref())
             .await
             .ok();
+        let async_questions = super::super::history::observe_async_questions(
+            target.session,
+            target.started_at_ms,
+            target.questions,
+        )
+        .await
+        .unwrap_or_default();
         Ok(Some(NativeAttention {
             activity,
             metadata,
@@ -85,6 +92,7 @@ impl Codex {
             terminal_failure,
             recoverable,
             events,
+            async_questions,
         }))
     }
 }

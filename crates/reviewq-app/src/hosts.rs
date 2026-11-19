@@ -33,9 +33,9 @@ pub use messages::{
     MessagePosition, RecordedMessage, RecordedPurpose,
 };
 pub use questions::{
-    ObservedAsyncQuestion, Question, QuestionAccess, QuestionAdmission, QuestionAnchor,
-    QuestionAnswer, QuestionForm, QuestionKey, QuestionMode, QuestionOption, QuestionReceipt,
-    QuestionStatus, QuestionStore, QuestionsPort, answer_digest,
+    AsyncQuestionDispatch, ObservedAsyncQuestion, Question, QuestionAccess, QuestionAdmission,
+    QuestionAnchor, QuestionAnswer, QuestionForm, QuestionKey, QuestionMode, QuestionOption,
+    QuestionReceipt, QuestionStatus, QuestionStore, QuestionsPort, answer_digest,
 };
 pub use work::{DispatchGuard, receipt, recover_delivery, send_message};
 
@@ -472,6 +472,7 @@ pub enum DeliveryWork {
         text: MessageBody,
         report_ref: Option<ReportRef>,
         workflow: Option<Box<crate::workflow::WorkflowGuard>>,
+        async_question: Option<Box<AsyncQuestionDispatch>>,
     },
     Reconcile {
         cursor: Option<String>,

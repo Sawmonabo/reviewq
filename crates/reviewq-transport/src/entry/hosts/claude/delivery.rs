@@ -116,6 +116,7 @@ pub(super) async fn check(
         text,
         report_ref,
         workflow,
+        ..
     } = claim.work
     else {
         return Err(AppError::Conflict.into());

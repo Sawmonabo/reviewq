@@ -42,7 +42,7 @@ impl NativeAttentionStore for SqliteStore {
 
 fn tracked(db: &Connection, after: Option<SessionKey>) -> Result<Vec<TrackedNative>, StoreError> {
     let mut statement = db.prepare_cached(
-        "SELECT s.run_id,s.session_key,f.native_turn_id,s.child_scan_cursor,s.child_scan_archived FROM sessions s JOIN runs x USING(run_id)
+        "SELECT s.run_id,s.session_key,f.native_turn_id,s.child_scan_cursor,s.child_scan_archived,x.started_at_ms FROM sessions s JOIN runs x USING(run_id)
          JOIN reviews r USING(review_id) LEFT JOIN notification_native_failures f USING(session_key)
          WHERE s.provider='codex' AND r.state='open' AND s.session_key>?1
            AND EXISTS(SELECT 1 FROM configured_projects p WHERE p.origin=r.origin AND p.project_id=r.project_id)
@@ -55,13 +55,18 @@ fn tracked(db: &Connection, after: Option<SessionKey>) -> Result<Vec<TrackedNati
             row.get::<_, Option<String>>(2)?,
             row.get::<_, Option<String>>(3)?,
             row.get::<_, Option<bool>>(4)?,
+            row.get::<_, i64>(5)?,
         ))
     })?;
     let mut output = Vec::new();
     for row in rows {
-        let (run, session, failure, cursor, archived) = row?;
+        let (run, key, failure, cursor, archived, started_at_ms) = row?;
+        let session = history_session(db, &Actor::local_operator(), parse(&run)?, parse(&key)?)?;
+        let questions = crate::hosts::questions::active_async(db, &session)?;
         output.push(TrackedNative {
-            session: history_session(db, &Actor::local_operator(), parse(&run)?, parse(&session)?)?,
+            session,
+            questions,
+            started_at_ms,
             known_failure: failure.as_deref().map(parse).transpose()?,
             child_cursor: cursor.map(|cursor| NativeChildCursor {
                 cursor,
@@ -127,6 +132,27 @@ fn record(
         |row| row.get(0),
     )?;
     let mut ids = Vec::new();
+    let mut questions_changed = false;
+    for evidence in observed.async_questions {
+        let inserted = crate::hosts::questions::remember_async(db, &session, &evidence)?;
+        questions_changed |= inserted;
+        if inserted
+            && evidence.state == reviewq_app::hosts::QuestionStatus::Pending
+            && let Some(id) = insert(
+                db,
+                HostProvider::Codex,
+                target,
+                NativeOccurrence {
+                    kind: Kind::AgentQuestion,
+                    native_ref: evidence.key.request,
+                    at_ms: Some(evidence.occurred_at_ms),
+                    desktop_episode: None,
+                },
+            )?
+        {
+            ids.push(id);
+        }
+    }
     for event in observed.events {
         if matches!(event.kind, Kind::AgentFailure | Kind::Quota)
             && event.at_ms.is_none_or(|time| time < started)
@@ -137,10 +163,10 @@ fn record(
             ids.push(id);
         }
     }
-    if (changed || !children.is_empty()) && ids.is_empty() {
+    if (changed || metadata || questions_changed || !children.is_empty()) && ids.is_empty() {
         advance_queue(&tx.sql)?;
     }
-    if changed || metadata || !children.is_empty() {
+    if changed || metadata || questions_changed || !children.is_empty() {
         let mut keys = vec![
             ResourceKey::Queue,
             ResourceKey::Review(Some(target.review_id().clone())),

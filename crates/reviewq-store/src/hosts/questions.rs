@@ -2,8 +2,8 @@ use reviewq_app::access::{Actor, AppError, AppFuture};
 use reviewq_app::events::ResourceKey;
 use reviewq_app::history::HistorySession;
 use reviewq_app::hosts::{
-    ObservedAsyncQuestion, QuestionAdmission, QuestionAnchor, QuestionKey, QuestionReceipt,
-    QuestionStatus, QuestionStore,
+    MessageBody, ObservedAsyncQuestion, QuestionAdmission, QuestionAnchor, QuestionKey,
+    QuestionReceipt, QuestionStatus, QuestionStore,
 };
 use reviewq_domain::identity::{ReceiptId, SubmissionId};
 use reviewq_domain::session::HostProvider;
@@ -15,6 +15,16 @@ use crate::history::history_session;
 use crate::queue::{parse, text};
 use crate::workspace::actor_key;
 use crate::{SqliteStore, StoreError};
+
+pub(super) mod async_answers;
+pub(crate) use async_answers::remember as remember_async;
+
+pub(crate) fn active_async(
+    db: &Connection,
+    session: &HistorySession,
+) -> Result<Vec<ObservedAsyncQuestion>, StoreError> {
+    async_answers::list(db, session, None, true)
+}
 
 const FIELDS: &str = "request_id,native_turn_id,native_item_id,source_generation,source_position,
                      blocking,answer_digest,state,attempt_id";
@@ -29,28 +39,47 @@ impl QuestionStore for SqliteStore {
         Box::pin(async move {
             self.read(move |db| {
                 check(db, &actor, &session)?;
-                let mut statement = db.prepare_cached(
-                    "SELECT request_id,native_turn_id,native_item_id,source_generation,source_position,
-                            source_line_sha256,state FROM native_async_questions
-                     WHERE (run_id,session_key)=(?1,?2) AND (?3 IS NULL OR request_id=?3)
-                     ORDER BY (state='pending') DESC,occurred_at_ms DESC,request_id LIMIT 8",
-                )?;
-                let mut rows = statement.query(params![session.target.run_id().as_str(), session.target.session_key().as_str(), request])?;
-                let mut found = Vec::new();
-                while let Some(row) = rows.next()? {
-                    found.push(ObservedAsyncQuestion {
-                        key: QuestionKey {
-                            request: row.get(0)?,
-                            turn: parse(text(row, 1)?)?,
-                            item: parse(text(row, 2)?)?,
-                            anchor: QuestionAnchor { generation: row.get(3)?, opening: u64::try_from(row.get::<_, i64>(4)?).map_err(|_| AppError::Internal)? },
-                        },
-                        line_sha256: parse(text(row, 5)?)?,
-                        state: question_state(text(row, 6)?)?,
-                    });
-                }
-                Ok(found)
-            }).await.map_err(StoreError::app)
+                async_answers::list(db, &session, request.as_deref(), false)
+            })
+            .await
+            .map_err(StoreError::app)
+        })
+    }
+
+    fn admit_async_answer(
+        &self,
+        actor: Actor,
+        session: HistorySession,
+        submission: SubmissionId,
+        question: ObservedAsyncQuestion,
+        body: MessageBody,
+        digest: [u8; 32],
+    ) -> AppFuture<'_, QuestionStatus> {
+        Box::pin(async move {
+            self.write(move |tx| {
+                async_answers::admit(tx, actor, session, submission, question, body, digest)
+            })
+            .await
+            .map_err(StoreError::app)
+        })
+    }
+
+    fn replay_async_answer(
+        &self,
+        actor: Actor,
+        session: HistorySession,
+        submission: SubmissionId,
+        request: String,
+        digest: [u8; 32],
+    ) -> AppFuture<'_, Option<QuestionStatus>> {
+        Box::pin(async move {
+            self.read(move |db| {
+                check(db, &actor, &session)?;
+                let digest = async_answers::request_digest(&session.target, &request, digest);
+                async_answers::replay(db, &actor, &session.target, &submission, &request, &digest)
+            })
+            .await
+            .map_err(StoreError::app)
         })
     }
 

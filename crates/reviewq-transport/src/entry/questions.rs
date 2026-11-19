@@ -5,7 +5,8 @@ use axum::extract::State;
 use axum::http::HeaderMap;
 use reviewq_app::access::{Actor, ActorScope, AppError};
 use reviewq_app::hosts::{
-    QuestionAccess, QuestionAnswer, QuestionForm, QuestionMode, QuestionStatus,
+    ObservedAsyncQuestion, QuestionAccess, QuestionAnswer, QuestionForm, QuestionMode,
+    QuestionStatus,
 };
 use reviewq_domain::identity::{RunId, SessionKey};
 use reviewq_domain::session::HostProvider;
@@ -59,7 +60,7 @@ pub(super) async fn read(
     let host = entry
         .host
         .as_ref()
-        .filter(|_| stored.value.binding.identity().provider() == HostProvider::Codex);
+        .filter(|host| host.supports_questions(stored.value.binding.identity()));
     let mut forms = match host {
         Some(host) => {
             host.questions(
@@ -96,7 +97,7 @@ pub(super) async fn read(
         });
         forms.truncate(8);
     }
-    let can_answer = entry.sends_allowed;
+    let can_answer = entry.sends_allowed && host.is_some();
     let local_operator = matches!(actor.scope(), ActorScope::LocalOperator);
     if entry
         .store
@@ -167,15 +168,16 @@ pub(super) async fn respond(
     if stored.value.binding.identity().provider() != HostProvider::Codex {
         return Err(AppError::Unavailable);
     }
-    if !entry
+    let known = entry
         .store
         .observed_async_questions(actor.clone(), stored.value.clone(), Some(request.clone()))
         .await?
-        .is_empty()
-    {
-        return Err(AppError::PreconditionFailed);
-    }
-    let host = entry.host.as_ref().ok_or(AppError::Unavailable)?;
+        .pop();
+    let host = entry
+        .host
+        .as_ref()
+        .filter(|host| host.supports_questions(stored.value.binding.identity()))
+        .ok_or(AppError::Unavailable)?;
     let submission = parse(input.submission_id.as_str())?;
     let answers = input
         .answers
@@ -187,13 +189,70 @@ pub(super) async fn respond(
         request,
         submission,
         answers,
-        QuestionAccess::new(actor, stored.value, entry.store.clone()),
+        QuestionAccess::new(actor.clone(), stored.value, entry.store.clone()),
     );
-    let form = host.answer_question(answer).await?;
+    let form = match known {
+        Some(evidence) => respond_async(entry, actor, answer, evidence).await?,
+        None => host.answer_question(answer).await?,
+    };
     success(
         project(&run, &session, form, true, local_operator)?,
         stored.cursor,
     )
+}
+
+async fn respond_async(
+    entry: &Entry,
+    actor: Actor,
+    answer: QuestionAnswer,
+    evidence: ObservedAsyncQuestion,
+) -> Result<QuestionForm, AppError> {
+    let digest = answer.digest()?;
+    let session = answer.session().clone();
+    if let Some(state) = entry
+        .store
+        .replay_async_answer(
+            actor.clone(),
+            session.clone(),
+            answer.submission.clone(),
+            answer.request.clone(),
+            digest,
+        )
+        .await?
+    {
+        let bare = QuestionForm {
+            request: evidence.key.request.clone(),
+            turn: evidence.key.turn.clone(),
+            item: evidence.key.item.clone(),
+            blocking: false,
+            mode: QuestionMode::Async,
+            state,
+            questions: Vec::new(),
+        };
+        let form = entry
+            .file_history
+            .async_questions(session, vec![evidence], Some(answer.request))
+            .await
+            .ok()
+            .flatten()
+            .and_then(|mut forms| forms.pop())
+            .unwrap_or(bare);
+        return Ok(QuestionForm { state, ..form });
+    }
+    let mut form = entry
+        .file_history
+        .prove_async_question(session.clone(), evidence.clone())
+        .await?
+        .ok_or(AppError::Unavailable)?;
+    if form.state != QuestionStatus::Pending {
+        return Err(AppError::PreconditionFailed);
+    }
+    let body = answer.async_body(&form)?;
+    form.state = entry
+        .store
+        .admit_async_answer(actor, session, answer.submission, evidence, body, digest)
+        .await?;
+    Ok(form)
 }
 
 fn project(
@@ -215,10 +274,9 @@ fn project(
             QuestionMode::Async => dto::Mode::Async,
         },
         answerable: can_answer
-            && value.mode == QuestionMode::Native
             && value.state == QuestionStatus::Pending
             && (!value.questions.iter().any(|question| question.secret)
-                || (value.blocking && local_operator)),
+                || (value.mode == QuestionMode::Native && value.blocking && local_operator)),
         status: match value.state {
             QuestionStatus::Pending => dto::Status::Pending,
             QuestionStatus::Submitting => dto::Status::Submitting,
