@@ -5,15 +5,27 @@ import { MarkdownContent } from "../../../components/markdown/MarkdownContent";
 import { useResource } from "../../../hooks/useResource";
 import { ExpandedOutput } from "./ExpandedOutput";
 
-export default function SessionResult({ target }: { readonly target: SessionAddress }) {
-  const resource = useResource(
-    `result:${target.runId}:${target.sessionKey}`,
-    (signal) => historyResult(target, signal),
-    [
-      { kind: "history", id: target.sessionKey },
-      { kind: "session", id: target.sessionKey },
-    ],
+export function useSessionResult(target: SessionAddress | undefined) {
+  return useResource(
+    target ? `result:${target.runId}:${target.sessionKey}` : "result:none",
+    (signal) =>
+      target ? historyResult(target, signal) : Promise.resolve({ data: null, cursor: "" }),
+    target
+      ? [
+          { kind: "history", id: target.sessionKey },
+          { kind: "session", id: target.sessionKey },
+        ]
+      : [],
   );
+}
+
+export default function SessionResult({
+  target,
+  resource,
+}: {
+  readonly target: SessionAddress;
+  readonly resource: ReturnType<typeof useSessionResult>;
+}) {
   const value = resource.data;
   if (resource.error && !value) return <Notice retry={resource.retry}>{resource.error}</Notice>;
   if (!value) return <Loading label="Loading result…" />;

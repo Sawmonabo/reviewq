@@ -1,4 +1,4 @@
-import { lazy, Suspense, useRef, useState } from "react";
+import { Suspense, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { readOverview } from "../../api/client";
 import type {
@@ -31,10 +31,9 @@ import { ReviewAttention } from "./ReviewAttention";
 import Changes from "./changes/Changes";
 import { ChangesMonitor } from "./changes/ChangesMonitor";
 import Findings from "./report/Findings";
+import SessionResult, { useSessionResult } from "./transcript/SessionResult";
 import { useDrawerScroll } from "./useDrawerScroll";
 import "./review.css";
-
-const SessionResult = lazy(() => import("./transcript/SessionResult"));
 
 const tabs = [
   ["overview", "Overview"],
@@ -153,6 +152,15 @@ export default function ReviewDrawer({
       ] as const)
     : tabs;
   const activeTab = child && tab !== "findings" ? "agent" : tab;
+  const childTarget = run && child ? { runId: run.runId, sessionKey: child.sessionKey } : undefined;
+  const childResult = useSessionResult(
+    child &&
+      (activeTab === "findings" ||
+        child.metadata.status === "failed" ||
+        child.metadata.status === "system_error")
+      ? childTarget
+      : undefined,
+  );
   const scrollKey =
     activeTab === "overview" || (activeTab === "findings" && child)
       ? `${scope}/${activeTab}`
@@ -466,7 +474,13 @@ export default function ReviewDrawer({
           <h2 id="review-title" title={title}>
             {title}
           </h2>
-          <DrawerSummary review={review} run={run} session={session} child={Boolean(child)} />
+          <DrawerSummary
+            review={review}
+            run={run}
+            session={session}
+            child={Boolean(child)}
+            earlierFailure={Boolean(childResult.data?.failure?.followedByLeadReport)}
+          />
         </div>
         {(Boolean(runs?.nextCursor) || runTrail.length > 0) && (
           <div className="actions run-pages">
@@ -665,7 +679,10 @@ export default function ReviewDrawer({
             {activeTab === "findings" &&
               (selected && child && run ? (
                 <div ref={setReadingContent} className="drawer-reading-content">
-                  <SessionResult target={{ runId: run.runId, sessionKey: child.sessionKey }} />
+                  <SessionResult
+                    target={{ runId: run.runId, sessionKey: child.sessionKey }}
+                    resource={childResult}
+                  />
                 </div>
               ) : selected && run && session ? (
                 <Findings
@@ -722,11 +739,13 @@ function DrawerSummary({
   run,
   session,
   child,
+  earlierFailure,
 }: {
   readonly review: MergeRequestRow;
   readonly run: RunDetail | undefined;
   readonly session: SessionSummary | undefined;
   readonly child: boolean;
+  readonly earlierFailure: boolean;
 }) {
   const reason =
     !child &&
@@ -759,9 +778,9 @@ function DrawerSummary({
   if (child) {
     return (
       <div className="drawer-meta">
-        {nativeState && (
+        {(earlierFailure || nativeState) && (
           <span className="drawer-state badge" title="Last reported native status">
-            {readable(nativeState)}
+            {earlierFailure ? "Failed earlier" : readable(nativeState || "")}
           </span>
         )}
         <span>Native subagent conversation and result</span>
