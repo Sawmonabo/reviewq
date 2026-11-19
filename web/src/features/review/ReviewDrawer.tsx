@@ -139,6 +139,8 @@ export default function ReviewDrawer({
   const disposition =
     overview.decision?.reviewedSha === review.sourceSha ? overview.decision.disposition : null;
   const monitorLead = overview.runs.items.find((item) => item.runId === monitor?.runId);
+  const startedAt = overview.runs.items.find((item) => item.runId === run?.runId)?.startedAt;
+  const reviewIdentity = `${review.projectPath} !${review.iid}`;
   const visibleTabs = child
     ? ([
         ["agent", "Conversation"],
@@ -609,6 +611,8 @@ export default function ReviewDrawer({
                   run={run}
                   session={session}
                   reviewTitle={review.title}
+                  reviewIdentity={reviewIdentity}
+                  {...(startedAt ? { startedAt } : {})}
                   state={review.focusedRunId === run.runId ? review.runStage : null}
                   drafts={drafts}
                   onSession={onSession}
@@ -626,6 +630,8 @@ export default function ReviewDrawer({
                   run={run}
                   session={child}
                   reviewTitle={review.title}
+                  reviewIdentity={reviewIdentity}
+                  {...(startedAt ? { startedAt } : {})}
                   state={review.focusedRunId === run.runId ? review.runStage : null}
                   drafts={drafts}
                   onSession={onSession}

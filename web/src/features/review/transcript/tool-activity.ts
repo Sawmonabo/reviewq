@@ -38,6 +38,7 @@ export type ToolRun = {
   readonly kind: "tool-run";
   readonly id: string;
   readonly anchorId: string;
+  readonly members: readonly string[];
   readonly summary: ToolSummary;
   readonly open: boolean;
 };
@@ -109,12 +110,13 @@ export function activityRows(
     const id = `tools:${first.entryId}`;
     const clipped = (index === 0 && clippedStart) || (end === entries.length && clippedEnd);
     const summary = summarize(run, known, clipped);
-    if (run.length > 1 || summary.count > 1) {
-      const open = expandedRuns.has(id);
-      rows.push({ kind: "tool-run", id, anchorId: first.entryId, summary, open });
+    if (summary.count > 1) {
+      const members = run.map((entry) => entry.entryId);
+      const open = members.some((entryId) => expandedRuns.has(entryId));
+      rows.push({ kind: "tool-run", id, anchorId: first.entryId, members, summary, open });
       if (open) rows.push(...expandedRows(run, known, expandedReads, clipped));
     } else {
-      rows.push(native(first));
+      rows.push(...run.map((entry) => native(entry)));
     }
     index = end;
   }
@@ -200,7 +202,7 @@ function expandedRows(
     const id = `reads:${first.entryId}`;
     const summary = summarize(reads, known, clipped && (index === 0 || end === run.length));
     const part = first.parts.find(isTool);
-    if (part && (reads.length > 1 || summary.count > 1) && !expandedReads.has(id)) {
+    if (part && summary.count > 1 && !reads.some((entry) => expandedReads.has(entry.entryId))) {
       const files = new Map<string, ReadTarget & { readonly label: string }>();
       for (const entry of reads) {
         for (const item of entry.parts) {

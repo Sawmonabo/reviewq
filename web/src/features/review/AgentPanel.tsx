@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from "react";
 import { readRun } from "../../api/client";
-import type { ReactNode } from "react";
 import type { RunDetail, RunStage } from "../../api/generated/contracts";
 import type { SessionSummary } from "../../api/generated/contracts/hosts";
 import { messageHistory } from "../../api/history";
@@ -20,6 +19,8 @@ type Props = {
   readonly run: RunDetail;
   readonly session: SessionSummary;
   readonly reviewTitle: string;
+  readonly reviewIdentity: string;
+  readonly startedAt?: string | null;
   readonly state: RunStage | null;
   readonly drafts: DraftStore;
   readonly onSession: (key: string | undefined) => void;
@@ -31,6 +32,8 @@ export default function AgentPanel({
   run,
   session,
   reviewTitle,
+  reviewIdentity,
+  startedAt,
   state,
   drafts,
   onSession,
@@ -45,16 +48,27 @@ export default function AgentPanel({
   const [turn, setTurn] = useState<string>();
   const [messages, setMessages] = useState(false);
   const [cursor, setCursor] = useState<string>();
+  const deliveryKeys = [
+    { kind: "session", id: session.sessionKey },
+    { kind: "run", id: run.runId },
+    { kind: "history", id: session.sessionKey },
+  ] as const;
   const outbox = useResource(
-    `deliveries:${run.runId}:${session.sessionKey}:${cursor ?? ""}:${lead}`,
+    `deliveries:${run.runId}:${session.sessionKey}:${lead}`,
     (signal) =>
-      lead ? messageHistory(target, cursor, signal) : Promise.resolve({ data: null, cursor: "" }),
-    [
-      { kind: "session", id: session.sessionKey },
-      { kind: "run", id: run.runId },
-      { kind: "history", id: session.sessionKey },
-    ],
+      lead
+        ? messageHistory(target, undefined, signal)
+        : Promise.resolve({ data: null, cursor: "" }),
+    deliveryKeys,
   );
+  const priorDeliveries = useResource(
+    `earlier-deliveries:${run.runId}:${session.sessionKey}:${cursor ?? ""}`,
+    (signal) =>
+      lead && cursor
+        ? messageHistory(target, cursor, signal)
+        : Promise.resolve({ data: null, cursor: "" }),
+  );
+  const deliveryPage = cursor ? priorDeliveries : outbox;
 
   async function stop() {
     if (!turn || busy) return;
@@ -86,40 +100,61 @@ export default function AgentPanel({
             <span aria-hidden="true">·</span>
             <span>{effort ?? "Effort not reported"}</span>
           </div>
-          <SessionPicker run={run} selected={session} onSession={onSession}>
-            <button type="button" className="session-menu-option" onClick={onTerminal}>
-              Open in terminal
-            </button>
-            <ReportedPlan runId={run.runId} sessionKey={session.sessionKey} />
-            {lead && (
-              <button
-                type="button"
-                className="session-menu-option"
-                aria-expanded={messages}
-                onClick={() => setMessages(!messages)}
-              >
-                Delivery history
-              </button>
+          <div className="agent-tools">
+            {(!lead ||
+              run.sessions.nextCursor ||
+              run.sessions.items.some((item) => item.sessionKey !== run.leadSessionKey)) && (
+              <SessionPicker
+                run={run}
+                selected={session}
+                state={state}
+                {...(startedAt ? { startedAt } : {})}
+                reviewIdentity={reviewIdentity}
+                onSession={onSession}
+              />
             )}
-            {turn && (
-              <button
-                type="button"
-                className="session-menu-option"
-                disabled={busy}
-                onClick={() => void stop()}
-              >
-                Interrupt session
-              </button>
-            )}
-          </SessionPicker>
+            <details className="agent-session-menu agent-session-tools">
+              <summary className="button-label" aria-label="Session tools">
+                <Icon name="more" size={14} />
+              </summary>
+              <div className="agent-session-options session-menu-actions">
+                <ReportedPlan runId={run.runId} sessionKey={session.sessionKey} />
+                {lead && (
+                  <button
+                    type="button"
+                    className="session-menu-option"
+                    aria-expanded={messages}
+                    onClick={(event) => {
+                      event.currentTarget.closest("details")?.removeAttribute("open");
+                      setMessages(!messages);
+                    }}
+                  >
+                    Delivery history
+                  </button>
+                )}
+                {turn && (
+                  <button
+                    type="button"
+                    className="session-menu-option"
+                    disabled={busy}
+                    onClick={() => void stop()}
+                  >
+                    Interrupt session
+                  </button>
+                )}
+              </div>
+            </details>
+          </div>
         </div>
         {notice && <Notice>{notice}</Notice>}
         {messages && lead && (
           <section className="agent-deliveries surface-card stack" aria-label="Delivery history">
-            {outbox.error && <Notice retry={outbox.retry}>{outbox.error}</Notice>}
-            {outbox.pending && <p className="meta">Loading deliveries…</p>}
-            {outbox.data?.items.length === 0 && <p className="meta">No recorded deliveries.</p>}
-            {outbox.data?.items.map((item) => (
+            {deliveryPage.error && <Notice retry={deliveryPage.retry}>{deliveryPage.error}</Notice>}
+            {deliveryPage.pending && <p className="meta">Loading deliveries…</p>}
+            {deliveryPage.data?.items.length === 0 && (
+              <p className="meta">No recorded deliveries.</p>
+            )}
+            {deliveryPage.data?.items.map((item) => (
               <div className="stack" key={item.messageId}>
                 <div className="spread">
                   <span className="badge">
@@ -140,8 +175,8 @@ export default function AgentPanel({
             ))}
             <div className="actions">
               {cursor && <button onClick={() => setCursor(undefined)}>Latest deliveries</button>}
-              {outbox.data?.nextCursor && (
-                <button onClick={() => setCursor(outbox.data?.nextCursor ?? undefined)}>
+              {deliveryPage.data?.nextCursor && (
+                <button onClick={() => setCursor(deliveryPage.data?.nextCursor ?? undefined)}>
                   Older deliveries
                 </button>
               )}
@@ -152,9 +187,10 @@ export default function AgentPanel({
       <Transcript
         target={target}
         provider={session.provider}
-        messages={cursor ? [] : (outbox.data?.items ?? [])}
+        child={!lead}
+        messages={outbox.data?.items ?? []}
         resultOnly={resultOnly}
-        working={state === "working"}
+        working={lead && state === "working"}
         onObservedTurn={setTurn}
       />
       {!resultOnly && (
@@ -184,13 +220,17 @@ export default function AgentPanel({
 function SessionPicker({
   run,
   selected,
+  state,
+  startedAt,
+  reviewIdentity,
   onSession,
-  children,
 }: {
   readonly run: RunDetail;
   readonly selected: SessionSummary;
+  readonly state: RunStage | null;
+  readonly startedAt?: string;
+  readonly reviewIdentity: string;
   readonly onSession: Props["onSession"];
-  readonly children: ReactNode;
 }) {
   const [trail, setTrail] = useState<readonly string[]>([]);
   const [open, setOpen] = useState(false);
@@ -206,6 +246,10 @@ function SessionPicker({
   const visible = cursor ? page.data : run.sessions;
   const agents = (visible?.items ?? []).filter((item) => item.sessionKey !== run.leadSessionKey);
   const isLead = selected.sessionKey === run.leadSessionKey;
+  const count =
+    trail.length || visible?.nextCursor
+      ? `${agents.length} shown`
+      : `${agents.length} in this review`;
 
   useEffect(() => {
     if (!open) return;
@@ -248,12 +292,27 @@ function SessionPicker({
         <div className="agent-session-options">
           <button
             type="button"
-            className="session-menu-option"
+            className="session-menu-option session-menu-lead"
             aria-current={isLead || undefined}
             onClick={() => choose(undefined)}
           >
-            Lead review
+            <span className="session-menu-name">
+              <strong>Lead review</strong>
+              <small>
+                {reviewIdentity}
+                {startedAt && ` · ${formatTime(startedAt)}`}
+              </small>
+            </span>
+            {state && (
+              <small className={`session-menu-status ${state}`}>
+                {state === "needs_input" ? "Awaiting input" : readable(state)}
+              </small>
+            )}
           </button>
+          <div className="session-menu-divider">
+            <span>Subagents</span>
+            <small>{count}</small>
+          </div>
           {agents.map((item) => (
             <button
               type="button"
@@ -262,7 +321,10 @@ function SessionPicker({
               key={item.sessionKey}
               onClick={() => choose(item.sessionKey)}
             >
-              {readable(item.provider)} subagent · {item.nativeId.slice(0, 12)}
+              <span className="session-menu-name">
+                <strong>{readable(item.provider)} subagent</strong>
+                <small title={item.nativeId}>{item.nativeId.slice(0, 24)}</small>
+              </span>
             </button>
           ))}
           {trail.length > 0 && (
@@ -291,7 +353,6 @@ function SessionPicker({
             </span>
           )}
           {cursor && page.error && <Notice retry={page.retry}>{page.error}</Notice>}
-          <div className="session-menu-actions">{children}</div>
         </div>
       )}
     </details>

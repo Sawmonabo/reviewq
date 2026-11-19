@@ -31,6 +31,11 @@
   color: var(--text);
   font-weight: 560;
 }
+.agent-tools {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
 .agent-session-menu {
   position: relative;
   z-index: 6;
@@ -47,26 +52,73 @@
   font-size: 10px;
   color: var(--text);
 }
+.agent-session-menu > summary::-webkit-details-marker {
+  display: none;
+}
+.agent-session-tools > summary {
+  padding: 4px;
+  border-color: transparent;
+}
+.agent-session-menu[open] > summary,
+.agent-session-menu > summary:hover {
+  background: var(--hover);
+}
 .agent-session-options {
   position: absolute;
   top: calc(100% + 7px);
   right: 0;
-  width: min(310px, 75vw);
+  width: min(356px, 75vw);
   max-height: min(480px, 55vh);
   padding: 6px;
   overflow: auto;
   overscroll-behavior: contain;
-  border: 1px solid var(--strong-line);
-  border-radius: 8px;
-  background: var(--raised);
+  border: 1px solid var(--popup-border);
+  border-radius: 6px;
+  background: var(--popup-bg);
   box-shadow: 0 12px 32px #0008;
 }
 .session-menu-option {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
   width: 100%;
   text-align: left;
   background: transparent;
   border-color: transparent;
   font-size: 12px;
+}
+.session-menu-name {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+.session-menu-name strong {
+  font-weight: 550;
+}
+.session-menu-name small,
+.session-menu-divider small {
+  color: var(--muted);
+  font-size: 10px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.session-menu-status {
+  flex: 0 0 auto;
+  color: var(--muted);
+}
+.session-menu-status.needs_input {
+  color: var(--rose);
+}
+.session-menu-divider {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 4px 4px 0;
+  padding: 9px 6px 5px;
+  border-top: 1px solid var(--line);
+  color: var(--text);
 }
 .session-menu-option[aria-current="true"] {
   background: var(--selected);
@@ -74,9 +126,9 @@
 .session-menu-actions {
   display: grid;
   gap: 3px;
-  border-top: 1px solid var(--line);
-  margin-top: 4px;
-  padding-top: 4px;
+}
+.agent-session-tools .agent-session-options {
+  width: min(245px, 75vw);
 }
 .session-menu-actions details {
   padding: 4px 9px;
@@ -180,6 +232,8 @@
   overscroll-behavior: contain;
   overflow-anchor: none;
   scrollbar-gutter: stable;
+  scrollbar-width: thin;
+  scrollbar-color: var(--strong-line) transparent;
 }
 .timeline-spacer {
   position: relative;

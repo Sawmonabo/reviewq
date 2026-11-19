@@ -175,6 +175,7 @@
 .drawer-surface > .drawer-body {
   padding: 24px 25px 36px;
   scrollbar-width: thin;
+  scrollbar-color: var(--strong-line) transparent;
 }
 .drawer-surface > .agent-body {
   padding: 0;

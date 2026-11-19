@@ -17,7 +17,12 @@ import type { ReadPack, ReadTarget, ToolRun } from "./tool-activity";
 import { TranscriptMarkdown } from "./TranscriptMarkdown";
 import { useHistory } from "./useHistory";
 
-type Position = { readonly id: string; readonly offset: number };
+type Position = {
+  readonly id: string;
+  readonly offset: number;
+  readonly toolEntry?: boolean;
+  readonly callId?: string;
+};
 type ExtraParts = {
   readonly entryId: string;
   readonly generation: string;
@@ -38,6 +43,7 @@ type Visible = MessageRow | ToolRun | ReadPack;
 type Props = {
   readonly target: SessionAddress;
   readonly provider: HostProviderDto;
+  readonly child: boolean;
   readonly messages: readonly MessageHistoryItem[];
   readonly resultOnly: boolean;
   readonly working: boolean;
@@ -47,6 +53,7 @@ type Props = {
 export function Transcript({
   target,
   provider,
+  child,
   messages,
   resultOnly,
   working,
@@ -59,15 +66,26 @@ export function Transcript({
   const [pinned, setPinned] = useState<ReadonlySet<string>>(() => new Set());
   const [selectedText, setSelectedText] = useState(false);
   const [actionNotice, setActionNotice] = useState<string>();
-  const [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set());
-  const [expandedRuns, setExpandedRuns] = useState<ReadonlySet<string>>(() => new Set());
-  const [expandedReads, setExpandedReads] = useState<ReadonlySet<string>>(() => new Set());
+  const [expanded, setExpanded] = useState<ReadonlySet<string>>(
+    () =>
+      new Set(
+        saved && !saved.following && saved.callId ? [openKey(saved.entryId, saved.callId)] : [],
+      ),
+  );
+  const [expandedRuns, setExpandedRuns] = useState<ReadonlySet<string>>(
+    () => new Set(saved && !saved.following && saved.toolEntry !== false ? [saved.entryId] : []),
+  );
+  const [expandedReads, setExpandedReads] = useState<ReadonlySet<string>>(
+    () => new Set(saved && !saved.following && saved.toolEntry !== false ? [saved.entryId] : []),
+  );
   const [output, setOutput] = useState<OutputSelection>();
   const [extraParts, setExtraParts] = useState<ExtraParts>();
   const partsRequest = useRef<AbortController | undefined>(undefined);
   const viewport = useRef<HTMLDivElement>(null);
   const anchor = useRef<Position | undefined>(
-    saved ? { id: saved.entryId, offset: saved.offset } : undefined,
+    saved
+      ? { id: saved.entryId, offset: saved.offset, toolEntry: saved.toolEntry ?? true }
+      : undefined,
   );
   const selectionState = useRef({ hasText: false, ids: new Set<string>() });
   const scrollIntent = useRef(false);
@@ -77,10 +95,7 @@ export function Transcript({
 
   const history = useHistory(target, bookmark, following, pinned, (position, wanted) => {
     if (position === "around" && wanted) {
-      anchor.current = {
-        id: wanted.entryId,
-        offset: anchor.current?.id === wanted.entryId ? anchor.current.offset : 0,
-      };
+      if (anchor.current?.id !== wanted.entryId) anchor.current = { id: wanted.entryId, offset: 0 };
     } else if (position !== "latest") {
       anchor.current = visibleAnchor(viewport.current);
     }
@@ -174,8 +189,9 @@ export function Transcript({
     } else if (anchor.current) {
       const saved = anchor.current;
       const focus = toolFocus.current?.entryId === saved.id ? toolFocus.current : undefined;
+      const exactEntry = Boolean(focus || saved.toolEntry);
       const index = entries.findIndex(
-        (entry) => (focus ? entry.id : historyId(entry)) === saved.id,
+        (entry) => (exactEntry ? entry.id : historyId(entry)) === saved.id,
       );
       if (index < 0) return;
       const container = viewport.current;
@@ -184,7 +200,7 @@ export function Transcript({
         if (!container?.isConnected) return;
         const displayed = [...container.querySelectorAll<HTMLElement>("[data-entry]")];
         const row = displayed.find((item) =>
-          focus ? item.dataset.entry === saved.id : item.dataset.nativeEntry === saved.id,
+          exactEntry ? item.dataset.entry === saved.id : item.dataset.nativeEntry === saved.id,
         );
         if (row)
           container.scrollTop +=
@@ -255,6 +271,8 @@ export function Transcript({
           offset: current.offset,
           following,
           generation: history.generation,
+          toolEntry: current.toolEntry ?? false,
+          ...(current.callId ? { callId: current.callId } : {}),
         });
     }
     window.addEventListener("pagehide", save);
@@ -279,6 +297,8 @@ export function Transcript({
         offset: current.offset,
         following: nearEnd,
         generation: history.generation,
+        toolEntry: current.toolEntry ?? false,
+        ...(current.callId ? { callId: current.callId } : {}),
       });
   }
 
@@ -359,20 +379,26 @@ export function Transcript({
   function expandRun(run: ToolRun) {
     anchor.current = visibleAnchor(viewport.current);
     setFollowing(false);
-    setExpandedRuns((known) => toggleKey(known, run.id, !run.open));
+    setExpandedRuns((known) => {
+      if (!run.open) return toggleKey(known, run.anchorId, true);
+      const next = new Set(known);
+      for (const id of run.members) next.delete(id);
+      return next;
+    });
   }
 
-  function inspectRead(pack: ReadPack, at: ReadTarget) {
+  function inspectRead(at: ReadTarget) {
     const host = viewport.current;
     const active = document.activeElement?.closest<HTMLElement>("[data-native-entry]");
     anchor.current = {
       id: at.entryId,
+      toolEntry: true,
       offset:
         active && host ? active.getBoundingClientRect().top - host.getBoundingClientRect().top : 0,
     };
     toolFocus.current = at;
     setFollowing(false);
-    setExpandedReads((known) => toggleKey(known, pack.id, true));
+    setExpandedReads((known) => toggleKey(known, at.entryId, true));
     setExpanded((known) => toggleKey(known, openKey(at.entryId, at.callId), true));
   }
 
@@ -499,24 +525,31 @@ export function Transcript({
                     {row.kind === "tool-run" ? (
                       <ToolRunHeader run={row} onToggle={() => expandRun(row)} />
                     ) : (
-                      <FileReadPack pack={row} onInspect={(entry) => inspectRead(row, entry)} />
+                      <FileReadPack pack={row} onInspect={inspectRead} />
                     )}
                   </article>
                 );
               }
               const justTools = row.entry && toolOnly(row.entry);
+              const assignment = Boolean(
+                child &&
+                row.entry?.parts.length &&
+                row.entry.parts.every((part) => part.kind === "assignment"),
+              );
               const user = row.entry
                 ? row.entry.parts.some((part) => part.kind === "user_prompt")
                 : Boolean(row.delivery);
               const followup = user && row.delivery?.purpose === "thread_followup";
               const automatic = followup || (user && row.delivery?.purpose === "codex_recovery");
-              const role = user
-                ? automatic
-                  ? followup
-                    ? "ReviewQ follow-up"
-                    : "ReviewQ"
-                  : "You"
-                : providerName;
+              const role = assignment
+                ? "Parent agent"
+                : user
+                  ? automatic
+                    ? followup
+                      ? "ReviewQ follow-up"
+                      : "ReviewQ"
+                    : "You"
+                  : providerName;
               const timestamp = row.entry?.timestamp ?? row.delivery?.createdAt;
               return (
                 <article
@@ -526,15 +559,26 @@ export function Transcript({
                   data-native-entry={row.kind === "delivery" ? undefined : row.id}
                   data-tool-member={row.grouped ? "" : undefined}
                   key={row.id}
-                  className={`timeline-entry ${justTools ? "tool-entry" : user ? "user-entry" : "agent-entry"}`}
+                  className={`timeline-entry ${justTools ? "tool-entry" : assignment || user ? "user-entry" : "agent-entry"}`}
                   style={{ transform: `translateY(${item.start}px)` }}
                 >
                   {!justTools && (
                     <header className="timeline-message-heading">
                       <span className="timeline-symbol" aria-hidden="true">
-                        {user ? automatic ? "RQ" : "Y" : <ProviderMark provider={provider} />}
+                        {assignment ? (
+                          "A"
+                        ) : user ? (
+                          automatic ? (
+                            "RQ"
+                          ) : (
+                            "Y"
+                          )
+                        ) : (
+                          <ProviderMark provider={provider} />
+                        )}
                       </span>
                       <strong>{role}</strong>
+                      {assignment && <span className="timeline-entry-label">Assignment</span>}
                       {timestamp && (
                         <time dateTime={timestamp} title={formatTime(timestamp)}>
                           {formatClockTime(timestamp)}
@@ -634,11 +678,31 @@ function ProviderMark({ provider }: { readonly provider: HostProviderDto }) {
 
 function visibleAnchor(host: HTMLDivElement | null): Position | undefined {
   if (!host) return;
-  const boundary = host.getBoundingClientRect().top;
+  const frame = host.getBoundingClientRect();
+  const active = document.activeElement?.closest<HTMLElement>("[data-tool-call]");
+  const focused = active?.closest<HTMLElement>("[data-native-entry]");
+  if (focused && host.contains(focused) && focused.dataset.nativeEntry) {
+    const bounds = focused.getBoundingClientRect();
+    if (bounds.bottom > frame.top && bounds.top < frame.bottom)
+      return {
+        id: focused.dataset.nativeEntry,
+        offset: bounds.top - frame.top,
+        toolEntry: true,
+        ...(active?.dataset.toolCall ? { callId: active.dataset.toolCall } : {}),
+      };
+  }
   for (const node of host.querySelectorAll<HTMLElement>("[data-native-entry]")) {
     const item = node.getBoundingClientRect();
-    if (item.bottom > boundary && node.dataset.nativeEntry)
-      return { id: node.dataset.nativeEntry, offset: item.top - boundary };
+    if (item.bottom > frame.top && node.dataset.nativeEntry) {
+      const tool = node.querySelector<HTMLElement>("details[open] > [data-tool-call]");
+      return {
+        id: node.dataset.nativeEntry,
+        offset: item.top - frame.top,
+        toolEntry:
+          node.classList.contains("tool-entry") && node.dataset.entry === node.dataset.nativeEntry,
+        ...(tool?.dataset.toolCall ? { callId: tool.dataset.toolCall } : {}),
+      };
+    }
   }
 }
 
