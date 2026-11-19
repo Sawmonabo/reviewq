@@ -27,6 +27,7 @@ pub(super) struct Turns {
 #[serde(rename_all = "camelCase")]
 pub(super) struct Turn {
     pub id: String,
+    pub root_turn_id: Option<String>,
     pub status: String,
     started_at: Option<i64>,
     completed_at: Option<i64>,

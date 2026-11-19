@@ -225,7 +225,8 @@ impl ReportStore for SqliteStore {
                 authorize_run(tx, &actor, &run)?;
                 let mut statement = tx.prepare_cached(
                     "SELECT h.artifact_id, a.sha256, h.turn_id, h.call_id, h.declaration_sha256,
-                       h.reason, a.byte_length, a.total_code_points, a.line_count, a.max_line_bytes, a.complete, a.original_sha256
+                       h.reason, a.byte_length, a.total_code_points, a.line_count, a.max_line_bytes, a.complete,
+                       a.original_sha256, h.reconciled_by_batch_id
                      FROM report_handoffs h JOIN artifacts a USING(artifact_id)
                      WHERE h.run_id=?1 AND h.receipt_id=?2 AND h.state='failed' AND a.sealed=1"
                 )?;
@@ -246,6 +247,7 @@ impl ReportStore for SqliteStore {
                     call_id: row.get(3)?,
                     declaration_sha256: parse(text(row, 4)?)?,
                     reason: row.get(5)?,
+                    reconciled_by_batch_id: row.get(12)?,
                 };
                 snapshot(tx, candidate)
             }).await.map_err(StoreError::app)

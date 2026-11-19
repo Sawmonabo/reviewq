@@ -83,6 +83,7 @@ CREATE TABLE followup_batches (
     hold_reason TEXT CHECK (length(CAST(hold_reason AS BLOB)) <= 1024),
     submission_id TEXT,
     native_turn_id TEXT,
+    continuation_turn_id TEXT,
     lease_fence INTEGER NOT NULL DEFAULT 0 CHECK (lease_fence >= 0),
     lease_until_ms INTEGER,
     due_at_ms INTEGER,
@@ -111,15 +112,28 @@ CREATE TABLE followup_members (
     review_id TEXT NOT NULL,
     batch_id TEXT NOT NULL,
     observation_id TEXT NOT NULL,
-    reconciles_batch_id TEXT,
     PRIMARY KEY (review_id, batch_id, observation_id),
     FOREIGN KEY (review_id, batch_id) REFERENCES followup_batches(review_id, batch_id),
-    FOREIGN KEY (review_id, observation_id) REFERENCES followup_observations(review_id, observation_id),
-    FOREIGN KEY (review_id, reconciles_batch_id) REFERENCES followup_batches(review_id, batch_id)
+    FOREIGN KEY (review_id, observation_id) REFERENCES followup_observations(review_id, observation_id)
 ) STRICT, WITHOUT ROWID;
 
 CREATE INDEX followup_member_observation ON followup_members(review_id, observation_id);
-CREATE INDEX followup_member_lineage ON followup_members(review_id, reconciles_batch_id);
+
+CREATE TABLE followup_member_predecessors (
+    review_id TEXT NOT NULL,
+    batch_id TEXT NOT NULL,
+    observation_id TEXT NOT NULL,
+    predecessor_batch_id TEXT NOT NULL,
+    predecessor_observation_id TEXT NOT NULL,
+    PRIMARY KEY (review_id,batch_id,observation_id,predecessor_batch_id,predecessor_observation_id),
+    FOREIGN KEY (review_id,batch_id,observation_id)
+        REFERENCES followup_members(review_id,batch_id,observation_id) ON UPDATE CASCADE,
+    FOREIGN KEY (review_id,predecessor_batch_id,predecessor_observation_id)
+        REFERENCES followup_members(review_id,batch_id,observation_id),
+    CHECK (batch_id <> predecessor_batch_id)
+) STRICT, WITHOUT ROWID;
+
+CREATE INDEX followup_member_lineage ON followup_member_predecessors(review_id,predecessor_batch_id,predecessor_observation_id);
 
 CREATE TABLE followup_results (
     ordinal INTEGER PRIMARY KEY,
@@ -135,6 +149,20 @@ CREATE TABLE followup_results (
     FOREIGN KEY (review_id, run_id) REFERENCES runs(review_id, run_id),
     FOREIGN KEY (run_id, receipt_id) REFERENCES report_versions(run_id, receipt_id)
 ) STRICT;
+
+CREATE TABLE followup_reconciled_observations (
+    review_id TEXT NOT NULL,
+    batch_id TEXT NOT NULL,
+    observation_id TEXT NOT NULL,
+    assessment_batch_id TEXT NOT NULL,
+    PRIMARY KEY (review_id,batch_id,observation_id),
+    FOREIGN KEY (review_id,batch_id,observation_id)
+        REFERENCES followup_members(review_id,batch_id,observation_id),
+    FOREIGN KEY (review_id,assessment_batch_id)
+        REFERENCES followup_results(review_id,batch_id)
+) STRICT, WITHOUT ROWID;
+
+CREATE INDEX followup_reconciled_result ON followup_reconciled_observations(review_id,assessment_batch_id,batch_id);
 
 CREATE INDEX followup_result_history ON followup_results(review_id, completed_at_ms DESC, batch_id DESC);
 CREATE INDEX followup_result_receipt ON followup_results(run_id, receipt_id);

@@ -55,14 +55,48 @@ pub(super) fn decode(source: &str) -> Result<Vec<Assessment>, StoreError> {
 }
 
 pub(super) fn bound(db: &Connection, call: &NativeCall) -> Result<Option<String>, StoreError> {
+    let root = call.root_turn_id.as_ref().filter(|root| {
+        call.lead.binding().identity().provider() == reviewq_domain::session::HostProvider::Codex
+            && *root != &call.turn_id
+    });
     Ok(db.query_row(
         "SELECT b.batch_id FROM followup_batches b JOIN workflow_dispatch w ON w.batch_id=b.batch_id
          JOIN messages m ON m.message_id=w.delivery_id
          WHERE b.review_id=?1 AND b.run_id=?2 AND b.lead_session_key=?3 AND b.state='executing'
-           AND b.authority_verified=1 AND b.native_turn_id=?4 AND m.native_turn_id=?4 AND m.state='started'",
+           AND b.authority_verified=1 AND b.native_turn_id=m.native_turn_id AND m.state='started'
+           AND (
+               b.native_turn_id=?4 AND b.continuation_turn_id IS NULL OR
+               b.native_turn_id=?5 AND EXISTS(
+                   SELECT 1 FROM followup_monitors active WHERE active.review_id=b.review_id
+                     AND active.run_id=b.run_id AND active.generation=b.generation
+                     AND active.state='enabled' AND active.binding_verified=1
+                     AND coalesce(active.policy_override,(SELECT automatic FROM followup_preferences WHERE singleton=1),0)=1
+               ) AND EXISTS(
+                   SELECT 1 FROM report_handoffs prior WHERE prior.batch_id=b.batch_id AND prior.form='needs_input'
+                     AND prior.state='recorded' AND prior.source_generation=?6 AND prior.source_position<?7
+                     AND (b.continuation_turn_id=?4 OR
+                          b.hold_reason='followup_native_input_required' AND
+                          prior.turn_id=coalesce(b.continuation_turn_id,b.native_turn_id))
+               )
+           )",
         params![call.lead.review_id().as_str(),call.lead.run_id().as_str(),
-            call.lead.session_key().as_str(),call.turn_id.as_str()],|row|row.get(0),
+            call.lead.session_key().as_str(),call.turn_id.as_str(),root.map(|turn|turn.as_str()),
+            call.source_generation,super::db_int(call.source_position)?],|row|row.get(0),
     ).optional()?)
+}
+
+pub(super) fn continue_on_turn(
+    db: &Connection,
+    batch: &str,
+    call: &NativeCall,
+) -> Result<bool, StoreError> {
+    let updated = db.execute(
+        "UPDATE followup_batches SET continuation_turn_id=?2,holds_slot=1,hold_reason=NULL
+         WHERE batch_id=?1 AND state='executing' AND native_turn_id<>?2
+           AND continuation_turn_id IS NOT ?2",
+        params![batch, call.turn_id.as_str()],
+    )?;
+    Ok(updated == 1)
 }
 
 pub(super) fn action_turn(db: &Connection, call: &NativeCall) -> Result<bool, StoreError> {
@@ -157,6 +191,7 @@ pub(super) fn complete(
     if changed != 1 {
         return Err(AppError::Conflict.into());
     }
+    super::reconciliation::accept(db, review, &manifest.batch_id)?;
     tx.emit(&[ResourceKey::Followup(Some(
         work.call.lead.review_id().clone(),
     ))])?;

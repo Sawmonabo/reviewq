@@ -24,6 +24,7 @@ use crate::{SqliteStore, StoreError};
 mod accept;
 mod batch;
 mod edits;
+mod reconciliation;
 
 const CLAIM_MS: i64 = 60_000;
 const RECHECK_MS: i64 = 2_000;
@@ -324,7 +325,7 @@ fn saved(
 ) -> Result<Option<HandoffReceipt>, StoreError> {
     let mut statement = db.prepare_cached(
         "SELECT receipt_id, state, request_sha256, source_generation, source_position,
-                request_entry_id, declaration_sha256 FROM report_handoffs
+                request_entry_id, declaration_sha256, root_turn_id FROM report_handoffs
          WHERE run_id=?1 AND lead_session_key=?2 AND turn_id=?3 AND call_id=?4",
     )?;
     let mut rows = statement.query(params![
@@ -340,6 +341,7 @@ fn saved(
         || text(row, 3)? != call.source_generation
         || row.get::<_, i64>(4)? != db_int(call.source_position)?
         || optional::<NativeInputId>(row, 5)? != call.request_entry_id
+        || optional::<reviewq_domain::identity::NativeTurnId>(row, 7)? != call.root_turn_id
     {
         return Err(AppError::IdempotencyConflict.into());
     }
@@ -451,9 +453,9 @@ fn stage(
            source_generation, request_entry_id, declaration_sha256, form, source_kind, source_path,
            source_hash, reviewed_sha, revision_reason, verdict, expected_receipt_id, expected_sha256,
            base_receipt_id, disposition_version, reason, state, due_at_ms, created_at_ms, updated_at_ms,
-           source_position, request_sha256, settings_revision, batch_id, assessments, edits)
+           source_position, request_sha256, settings_revision, batch_id, assessments, edits, root_turn_id)
          VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,
-                'pending_completion',?21,?21,?21,?22,?23,?24,?25,?26,?27)",
+                'pending_completion',?21,?21,?21,?22,?23,?24,?25,?26,?27,?28)",
         params![
             receipt_id, run.as_str(), call.lead.session_key().as_str(), call.turn_id.as_str(), call.call_id,
             call.source_generation, call.request_entry_id.as_ref().map(|id| id.as_str()), declaration_sha256.as_str(),
@@ -462,8 +464,14 @@ fn stage(
             verdict.map(|value| value.to_string()), expected.as_ref().map(|value| value.receipt_id.as_str()),
             expected.as_ref().map(|value| value.hash.as_str()), base, version, reason, time,
             db_int(call.source_position)?, request_sha256.as_str(), settings.as_sqlite_integer(), scoped_batch, assessments, edits,
+            call.root_turn_id.as_ref().map(|turn| turn.as_str()),
         ],
     )?;
+    if let Some(batch) = scoped_batch
+        && batch::continue_on_turn(&tx.sql, &batch, &call)?
+    {
+        tx.emit(&[ResourceKey::Followup(Some(call.lead.review_id().clone()))])?;
+    }
     tx.emit(&[
         ResourceKey::Report(Some(run.clone())),
         ResourceKey::Run(Some(run.clone())),
@@ -484,7 +492,7 @@ fn claim(db: &Connection, limit: u16) -> Result<Vec<ReportWork>, StoreError> {
     let mut query = db.prepare_cached(
         "SELECT receipt_id, run_id, lead_session_key, turn_id, call_id, source_generation,
             request_entry_id, declaration_sha256, form, source_kind, source_path, source_hash,
-            reviewed_sha, revision_reason, verdict, expected_receipt_id, expected_sha256, reason, fence, source_position, assessments, edits
+            reviewed_sha, revision_reason, verdict, expected_receipt_id, expected_sha256, reason, fence, source_position, assessments, edits, root_turn_id
          FROM report_handoffs WHERE state='pending_completion' AND due_at_ms<=?1
          ORDER BY due_at_ms, receipt_id LIMIT ?2",
     )?;
@@ -503,6 +511,7 @@ fn claim(db: &Connection, limit: u16) -> Result<Vec<ReportWork>, StoreError> {
             call: NativeCall {
                 lead,
                 turn_id: parse(text(row, 3)?)?,
+                root_turn_id: optional(row, 22)?,
                 call_id: row.get(4)?,
                 source_generation: row.get(5)?,
                 source_position: u64::try_from(row.get::<_, i64>(19)?)

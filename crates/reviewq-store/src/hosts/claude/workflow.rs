@@ -56,7 +56,8 @@ fn context(
                              AND m.native_turn_id=c.latest_prompt_turn_id AND m.native_input_id=c.latest_prompt_id
                              AND m.state='started' AND m.actor_key IS NOT NULL AND m.purpose IN ('user','report_feedback')
                      )) THEN c.latest_prompt_id END,
-           coalesce(s.host_activity='working',0)
+           coalesce(s.host_activity='working',0),
+           coalesce(s.host_activity='idle' AND s.host_questions=0 AND c.permission_turn_id IS NULL,0)
          FROM claude_companions c JOIN sessions s USING(session_key)
          WHERE c.session_key=?1 AND c.seen_at_ms>?2",
             params![key, now_ms()?.saturating_sub(COMPANION_FRESH_MS)],
@@ -66,19 +67,22 @@ fn context(
                     row.get::<_, Option<String>>(1)?,
                     row.get::<_, Option<String>>(2)?,
                     row.get::<_, bool>(3)?,
+                    row.get::<_, bool>(4)?,
                 ))
             },
         )
         .optional()?;
-    let (active_turn, request, ready) = if let Some((generation, seen, request, working)) = live {
-        (
-            seen.filter(|_| working).as_deref().map(parse).transpose()?,
-            request.as_deref().map(parse).transpose()?,
-            fresh(db, &lead, &generation)?.1,
-        )
-    } else {
-        (None, None, None)
-    };
+    let (active_turn, request, ready, idle) =
+        if let Some((generation, seen, request, working, idle)) = live {
+            (
+                seen.filter(|_| working).as_deref().map(parse).transpose()?,
+                request.as_deref().map(parse).transpose()?,
+                fresh(db, &lead, &generation)?.1,
+                idle,
+            )
+        } else {
+            (None, None, None, false)
+        };
     let terminal = if let Some(turn) = turn {
         let row = db
             .query_row(
@@ -115,6 +119,7 @@ fn context(
     Ok(ClaudeWorkflowContext {
         session,
         active_turn,
+        idle,
         request,
         ready,
         terminal,

@@ -1,8 +1,8 @@
 use reviewq_app::access::{AppError, AppFuture};
 use reviewq_app::events::ResourceKey;
 use reviewq_app::followups::{
-    CheckMember, FollowupWorkerStore, MAX_FROZEN_OBSERVATIONS, MonitoredReview, PendingCheck,
-    PreparedCheck,
+    CheckMember, ExecutingCheck, FollowupWorkerStore, MAX_FROZEN_OBSERVATIONS, MonitoredReview,
+    PendingCheck, PreparedCheck,
 };
 use reviewq_app::reports::ReportReference;
 use reviewq_app::workflow::{SelectedNote, WorkflowAdmission, WorkflowBinding};
@@ -18,6 +18,8 @@ use crate::hosts::admit_workflow;
 use crate::queue::{identity_for_review, lead_for_run, parse, text};
 use crate::workspace::{advance_queue, settings_revision};
 use crate::{SqliteStore, StoreError};
+
+mod idle;
 
 const ELIGIBLE: &str = "
   b.state='pending' AND b.authority_verified=1 AND m.binding_verified=1
@@ -54,7 +56,7 @@ pub(crate) struct FrozenMember {
     pub(crate) discussion_version: String,
     pub(crate) originals: Vec<FrozenOriginal>,
     pub(crate) finding_ids: Vec<String>,
-    pub(crate) prior_batch_id: Option<String>,
+    pub(crate) prior_batches: Vec<String>,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -65,6 +67,22 @@ pub(crate) struct FrozenOriginal {
 }
 
 impl FollowupWorkerStore for SqliteStore {
+    fn checks_awaiting_idle(&self) -> AppFuture<'_, Vec<ExecutingCheck>> {
+        Box::pin(async move {
+            self.read(|db| idle::checks(db))
+                .await
+                .map_err(StoreError::app)
+        })
+    }
+
+    fn observe_check_idle(&self, check: ExecutingCheck) -> AppFuture<'_, ()> {
+        Box::pin(async move {
+            self.write(move |tx| idle::observe(tx, check))
+                .await
+                .map_err(StoreError::app)
+        })
+    }
+
     fn due_checks(&self, limit: u16) -> AppFuture<'_, Vec<PendingCheck>> {
         Box::pin(async move {
             if !(1..=16).contains(&limit) {
@@ -185,7 +203,11 @@ fn members(
     batch: &str,
 ) -> Result<Vec<CheckMember>, StoreError> {
     let mut statement = db.prepare_cached(
-           "SELECT o.observation_id,o.discussion_id,o.discussion_version,o.original_note_id,m.reconciles_batch_id,
+           "SELECT o.observation_id,o.discussion_id,o.discussion_version,o.original_note_id,
+          (SELECT json_group_array(prior.predecessor_batch_id) FROM (
+             SELECT DISTINCT predecessor_batch_id FROM followup_member_predecessors
+             WHERE review_id=m.review_id AND batch_id=m.batch_id AND observation_id=m.observation_id
+             ORDER BY predecessor_batch_id LIMIT 32) prior),
           (SELECT json_group_array(f.finding_id) FROM (
              SELECT DISTINCT finding_id FROM followup_thread_findings
              WHERE review_id=o.review_id AND generation=o.generation AND (
@@ -225,7 +247,7 @@ fn members(
                 }
                 values
             },
-            prior_batch_id: row.get(4)?,
+            prior_batches: serde_json::from_str(text(row, 4)?).map_err(|_| AppError::Internal)?,
             finding_ids: serde_json::from_str(text(row, 5)?).map_err(|_| AppError::Internal)?,
         });
     }
@@ -306,7 +328,7 @@ fn reserve(tx: &mut WriteTx<'_>, check: PreparedCheck) -> Result<(), StoreError>
                     })
                     .collect(),
                 finding_ids: member.finding_ids,
-                prior_batch_id: member.prior_batch_id,
+                prior_batches: member.prior_batches,
             })
             .collect(),
     };

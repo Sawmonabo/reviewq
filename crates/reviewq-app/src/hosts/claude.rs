@@ -84,6 +84,7 @@ pub struct ClaudeTurnResult {
 pub struct ClaudeWorkflowContext {
     pub session: HistorySession,
     pub active_turn: Option<NativeTurnId>,
+    pub idle: bool,
     pub request: Option<NativeInputId>,
     pub ready: Option<ReadyWorkflow>,
     pub terminal: Option<ClaudeTurnResult>,

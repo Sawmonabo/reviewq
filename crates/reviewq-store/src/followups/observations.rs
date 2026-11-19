@@ -336,7 +336,7 @@ pub(super) fn review_now(
             discussion.id, format!("{}:{}", row.version, fingerprint), format!("request:{submission}"),
             snapshot.authenticated_actor.to_string(), snapshot.observed_at_ms,
         ])?;
-        attach(db, review, &batch, &observation, None)?;
+        attach(db, review, &batch, &observation)?;
         link_original(db, review, generation, &observation, &row.original)?;
         by_discussion.insert(&discussion.id, observation);
     }
@@ -446,13 +446,12 @@ fn attach(
     review: &ReviewId,
     batch: &str,
     observation: &str,
-    prior: Option<&str>,
 ) -> Result<(), StoreError> {
     db.prepare_cached(
-        "INSERT INTO followup_members(review_id,batch_id,observation_id,reconciles_batch_id)
-         VALUES(?1,?2,?3,?4) ON CONFLICT DO NOTHING",
+        "INSERT INTO followup_members(review_id,batch_id,observation_id)
+         VALUES(?1,?2,?3) ON CONFLICT DO NOTHING",
     )?
-    .execute(params![review.as_str(), batch, observation, prior])?;
+    .execute(params![review.as_str(), batch, observation])?;
     Ok(())
 }
 
@@ -472,54 +471,115 @@ pub(super) fn carry_pending(
             |row| Ok((row.get::<_, String>(0)?, row.get::<_, bool>(1)?)),
         )
         .optional()?;
-    let Some((old, manual)) = old else {
-        return Ok(());
-    };
+    if let Some((old, manual)) = old {
+        db.execute(
+            "UPDATE followup_batches SET state='cancelled',hold_reason='monitor_reconfigured'
+             WHERE batch_id=?1 AND state='pending'",
+            [&old],
+        )?;
+        transfer(db, review, run, &old, to, time, manual)?;
+    }
+    Ok(())
+}
+
+pub(crate) fn retry_batch(
+    db: &Connection,
+    review: &ReviewId,
+    old: &str,
+    time: i64,
+) -> Result<(), StoreError> {
+    let current = db.query_row(
+        "SELECT m.run_id,m.generation,b.manual_requested FROM followup_batches b
+         JOIN followup_monitors m USING(review_id) JOIN reviews r USING(review_id)
+         WHERE b.review_id=?1 AND b.batch_id=?2 AND b.state='reconciliation' AND b.authority_verified=1
+           AND r.state='open' AND m.binding_verified=1 AND m.run_id=b.run_id AND m.reason IS NULL
+           AND (b.manual_requested=1 AND m.state IN ('enabled','paused') OR
+                m.state='enabled' AND coalesce(m.policy_override,(SELECT automatic FROM followup_preferences WHERE singleton=1),0)=1)
+           AND EXISTS(SELECT 1 FROM configured_projects p WHERE p.origin=r.origin AND p.project_id=r.project_id)",
+        params![review.as_str(),old], |row| Ok((row.get::<_,String>(0)?, row.get(1)?, row.get(2)?)),
+    ).optional()?;
+    if let Some((run, generation, manual)) = current {
+        transfer(
+            db,
+            review,
+            &crate::queue::parse(&run)?,
+            old,
+            super::revision(generation)?,
+            time,
+            manual,
+        )?;
+    }
+    Ok(())
+}
+
+fn transfer(
+    db: &Connection,
+    review: &ReviewId,
+    run: &RunId,
+    old: &str,
+    generation: Revision,
+    time: i64,
+    manual: bool,
+) -> Result<(), StoreError> {
     let mut statement = db.prepare_cached(
-        "SELECT o.discussion_id,o.discussion_version,o.occurrence_key,o.kind,o.actor_id,o.note_id,
-            o.observed_at_ms,
-            (SELECT json_group_array(s.original_note_id) FROM (
-                 SELECT n.original_note_id FROM followup_threads n WHERE n.review_id=o.review_id
-                   AND n.generation=?3 AND n.selected=1 AND n.discussion_id=o.discussion_id
-                   AND (n.original_note_id=o.original_note_id OR EXISTS (
-                       SELECT 1 FROM followup_observation_origins g WHERE g.review_id=o.review_id
-                         AND g.observation_id=o.observation_id AND g.original_note_id=n.original_note_id
-                   )) ORDER BY n.original_note_id
-             ) s)
+        "SELECT o.observation_id,o.generation,o.discussion_id,o.discussion_version,o.occurrence_key,
+            o.kind,o.actor_id,o.note_id,o.observed_at_ms,
+          (SELECT json_group_array(n.original_note_id) FROM followup_observation_origins g
+            JOIN followup_threads n ON n.review_id=g.review_id AND n.original_note_id=g.original_note_id
+            JOIN followup_threads p ON p.review_id=g.review_id AND p.generation=g.generation AND p.original_note_id=g.original_note_id
+            WHERE g.review_id=o.review_id AND g.observation_id=o.observation_id
+              AND n.generation=?3 AND n.selected=1 AND n.discussion_id=o.discussion_id AND n.reviewer_id=p.reviewer_id)
          FROM followup_members m JOIN followup_observations o USING(review_id,observation_id)
          WHERE m.review_id=?1 AND m.batch_id=?2 ORDER BY o.observation_id",
     )?;
-    let mut rows = statement.query(params![review.as_str(), old, to.as_sqlite_integer()])?;
-    db.execute(
-        "UPDATE followup_batches SET state='cancelled', hold_reason='monitor_reconfigured'
-         WHERE batch_id=?1 AND state='pending'",
-        [&old],
-    )?;
+    let mut rows = statement.query(params![
+        review.as_str(),
+        old,
+        generation.as_sqlite_integer()
+    ])?;
     let mut next = None;
     while let Some(row) = rows.next()? {
-        let origins: Vec<String> =
-            serde_json::from_str(crate::queue::text(row, 7)?).map_err(|_| AppError::Internal)?;
+        let prior: String = row.get(0)?;
+        let mut origins: Vec<String> =
+            serde_json::from_str(crate::queue::text(row, 9)?).map_err(|_| AppError::Internal)?;
+        origins.sort_unstable();
         let Some(original) = origins.first() else {
             continue;
         };
-        let id = Uuid::new_v4().to_string();
-        db.prepare_cached(
-            "INSERT INTO followup_observations(observation_id,review_id,generation,original_note_id,
-                discussion_id,discussion_version,occurrence_key,kind,actor_id,note_id,observed_at_ms)
-             VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)",
-        )?.execute(params![
-            id, review.as_str(), to.as_sqlite_integer(), original,
-            row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?, row.get::<_, String>(3)?,
-            row.get::<_, Option<String>>(4)?, row.get::<_, Option<String>>(5)?, row.get::<_, i64>(6)?,
-        ])?;
-        let batch = match &next {
-            Some(id) => id,
-            None => next.insert(batch(db, review, run, to, time, manual)?),
+        let observed_generation: i64 = row.get(1)?;
+        let id = if observed_generation == generation.as_sqlite_integer() {
+            prior.clone()
+        } else {
+            let id = Uuid::new_v4().to_string();
+            let occurrence: String = row.get(4)?;
+            db.prepare_cached(
+                "INSERT INTO followup_observations(observation_id,review_id,generation,original_note_id,
+                    discussion_id,discussion_version,occurrence_key,kind,actor_id,note_id,observed_at_ms)
+                 VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)
+                 ON CONFLICT(review_id,generation,original_note_id,occurrence_key) DO NOTHING",
+            )?.execute(params![id,review.as_str(),generation.as_sqlite_integer(),original,
+                row.get::<_,String>(2)?,row.get::<_,String>(3)?,occurrence,row.get::<_,String>(5)?,
+                row.get::<_,Option<String>>(6)?,row.get::<_,Option<String>>(7)?,row.get::<_,i64>(8)?])?;
+            let id: String = db.query_row(
+                "SELECT observation_id FROM followup_observations WHERE review_id=?1 AND generation=?2
+                 AND original_note_id=?3 AND occurrence_key=?4 AND discussion_id=?5 AND discussion_version=?6",
+                params![review.as_str(),generation.as_sqlite_integer(),original,occurrence,row.get::<_,String>(2)?,
+                    row.get::<_,String>(3)?], |row| row.get(0),
+            )?;
+            for original in origins {
+                link_original(db, review, generation, &id, &original)?;
+            }
+            id
         };
-        attach(db, review, batch, &id, Some(&old))?;
-        for original in origins {
-            link_original(db, review, to, &id, &original)?;
-        }
+        let next_batch = match &next {
+            Some(id) => id,
+            None => next.insert(batch(db, review, run, generation, time, manual)?),
+        };
+        attach(db, review, next_batch, &id)?;
+        db.prepare_cached(
+            "INSERT INTO followup_member_predecessors(review_id,batch_id,observation_id,
+                predecessor_batch_id,predecessor_observation_id) VALUES(?1,?2,?3,?4,?5) ON CONFLICT DO NOTHING",
+        )?.execute(params![review.as_str(),next_batch,id,old,prior])?;
     }
     Ok(())
 }
@@ -647,7 +707,7 @@ pub(super) fn adopt_remote(
                     false,
                 )?),
             };
-            attach(db, &target.review, batch, &id, None)?;
+            attach(db, &target.review, batch, &id)?;
             link_original(db, &target.review, target.generation, &id, &row.original)?;
             occurrences.insert(key, id);
             let mut identity = Sha256::new();
