@@ -46,7 +46,7 @@ CREATE TABLE managed_interrupts (
     run_id TEXT NOT NULL,
     lead_session_key TEXT NOT NULL,
     native_turn_id TEXT NOT NULL,
-    state TEXT NOT NULL CHECK (state IN ('reserved','interrupted','rejected','uncertain')),
+    state TEXT NOT NULL CHECK (state IN ('reserved','interrupted','deferred','rejected','uncertain')),
     updated_at_ms INTEGER NOT NULL,
     PRIMARY KEY (run_id,lead_session_key,native_turn_id),
     FOREIGN KEY (run_id,lead_session_key) REFERENCES runs(run_id,lead_session_key)

@@ -2,6 +2,7 @@ use std::collections::BTreeMap;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use reviewq_app::access::AppError;
+use reviewq_app::hosts::QuestionStatus;
 use reviewq_app::hosts::recovery::{InterruptState, RecoveryAuthorization, RecoveryKind};
 use reviewq_app::workflow::{ReadyWorkflow, WorkflowReadiness};
 use reviewq_domain::identity::{NativeTurnId, ReportHash};
@@ -84,7 +85,19 @@ impl Codex {
             .ok_or(AppError::Unavailable)?
             .parse()
             .map_err(|_| AppError::Unavailable)?;
-        if !self.connection.questions(&thread.id, None)?.is_empty() {
+        if self
+            .connection
+            .questions(&thread.id, None)?
+            .iter()
+            .any(|question| {
+                matches!(
+                    question.state,
+                    QuestionStatus::Pending
+                        | QuestionStatus::Submitting
+                        | QuestionStatus::Uncertain
+                )
+            })
+        {
             return Err(AppError::Busy);
         }
         let WorkflowReadiness::Ready(ready) = self
@@ -146,11 +159,21 @@ impl Codex {
         lead: LeadTarget,
         id: NativeTurnId,
     ) -> Result<InterruptState, AppError> {
-        let thread = self.verified_thread(&lead).await?;
-        if !matches!(thread.status, ThreadStatus::Active { .. }) {
-            return Ok(InterruptState::Rejected);
+        let thread = match self.verified_thread(&lead).await {
+            Ok(thread) => thread,
+            Err(AppError::Conflict | AppError::Forbidden | AppError::NotFound) => {
+                return Ok(InterruptState::Rejected);
+            }
+            Err(_) => return Ok(InterruptState::Deferred),
+        };
+        match thread.status {
+            ThreadStatus::Active { .. } => {}
+            ThreadStatus::Idle => return Ok(InterruptState::Rejected),
+            _ => return Ok(InterruptState::Deferred),
         }
-        let latest = self.turns(&thread.id, None, false, 1, false).await?;
+        let Ok(latest) = self.turns(&thread.id, None, false, 1, false).await else {
+            return Ok(InterruptState::Deferred);
+        };
         if latest
             .data
             .first()
@@ -158,13 +181,17 @@ impl Codex {
         {
             return Ok(InterruptState::Rejected);
         }
-        let _: Result<Value, _> = self
+        match self
             .connection
-            .read(
-                "turn/interrupt",
-                json!({"threadId":thread.id,"turnId":id.as_str()}),
-            )
-            .await;
+            .interrupt(json!({"threadId":thread.id,"turnId":id.as_str()}))
+            .await
+        {
+            Err(super::connection::CallError::BeforeSend(_)) => {
+                return Ok(InterruptState::Deferred);
+            }
+            Err(super::connection::CallError::Denied(_)) => return Ok(InterruptState::Rejected),
+            _ => {}
+        }
         for delay in [0, 100, 250] {
             if delay != 0 {
                 tokio::time::sleep(Duration::from_millis(delay)).await;

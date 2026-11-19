@@ -11,7 +11,7 @@ use reviewq_domain::session::LeadTarget;
 use rusqlite::{Connection, params};
 use uuid::Uuid;
 
-use super::{emit, preferences};
+use super::{IN_SCOPE, emit, preferences};
 use crate::StoreError;
 use crate::connection::WriteTx;
 use crate::events::now_ms;
@@ -19,12 +19,8 @@ use crate::hosts::admit_workflow;
 use crate::queue::{lead_for_run, parse};
 use crate::workspace::settings_revision;
 
-const CURRENT: &str = "
-   r.state='open' AND r.head_sha=e.head_sha
-   AND EXISTS(SELECT 1 FROM configured_projects p WHERE p.origin=r.origin AND p.project_id=r.project_id)
-   AND NOT EXISTS(SELECT 1 FROM runs newer JOIN runs own ON own.run_id=e.run_id
-      WHERE newer.review_id=e.review_id AND (newer.started_at_ms,newer.run_id)>(own.started_at_ms,own.run_id))
-   AND NOT EXISTS(SELECT 1 FROM messages m JOIN outbox o ON o.delivery_id=m.message_id
+const READY: &str = "
+   NOT EXISTS(SELECT 1 FROM messages m JOIN outbox o ON o.delivery_id=m.message_id
       WHERE m.run_id=e.run_id AND m.state IN ('queued','dispatching','uncertain')
         AND (e.delivery_id IS NULL OR m.message_id<>e.delivery_id))
    AND NOT EXISTS(SELECT 1 FROM sessions s WHERE s.run_id=e.run_id
@@ -75,7 +71,7 @@ pub(super) fn reserve(tx: &mut WriteTx<'_>, input: PreparedRecovery) -> Result<(
     let sql = format!(
         "SELECT EXISTS(SELECT 1 FROM recovery_episodes e JOIN reviews r USING(review_id)
            WHERE e.episode_id=?1 AND e.run_id=?2 AND e.lead_session_key=?3 AND e.revision=?4
-             AND e.state='waiting' AND e.due_at_ms<=?5 AND e.head_sha=?6 AND {CURRENT})"
+             AND e.state='waiting' AND e.due_at_ms<=?5 AND e.head_sha=?6 AND ({IN_SCOPE}) AND ({READY}))"
     );
     let eligible: bool = db.query_row(
         &sql,
@@ -135,7 +131,7 @@ pub(crate) fn current(
     let sql = format!(
         "SELECT EXISTS(SELECT 1 FROM recovery_episodes e JOIN reviews r USING(review_id)
            WHERE e.episode_id=?1 AND e.review_id=?2 AND e.run_id=?3 AND e.lead_session_key=?4
-             AND e.submission_id=?5 AND e.failed_turn_id=?6 AND e.state='queued' AND {CURRENT})"
+             AND e.submission_id=?5 AND e.failed_turn_id=?6 AND e.state='queued' AND ({IN_SCOPE}) AND ({READY}))"
     );
     Ok(db.query_row(
         &sql,

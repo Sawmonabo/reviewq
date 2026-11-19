@@ -19,6 +19,13 @@ use crate::{SqliteStore, StoreError};
 mod dispatch;
 pub(crate) use dispatch::{advance, current, read_authorization, refresh_allowance, requirements};
 
+pub(super) const IN_SCOPE:&str="
+   e.settings_revision=(SELECT settings_revision FROM service_state WHERE singleton=1)
+   AND r.state='open' AND r.head_sha=e.head_sha
+   AND EXISTS(SELECT 1 FROM configured_projects p WHERE p.origin=r.origin AND p.project_id=r.project_id)
+   AND NOT EXISTS(SELECT 1 FROM runs newer JOIN runs original ON original.run_id=e.run_id
+      WHERE newer.review_id=e.review_id AND (newer.started_at_ms,newer.run_id)>(original.started_at_ms,original.run_id))";
+
 impl RecoveryStore for SqliteStore {
     fn recovery_preferences(&self, actor: Actor) -> AppFuture<'_, Snapshot<Preferences>> {
         Box::pin(async move {
@@ -64,27 +71,40 @@ impl RecoveryStore for SqliteStore {
         actor: Actor,
         run: RunId,
         session: SessionKey,
+        episode_id: String,
         expected: Revision,
     ) -> AppFuture<'_, Snapshot<Episode>> {
         Box::pin(async move {
             operator(&actor)?;
             self.write(move |tx| {
-                let lead = target(&tx.sql, &actor, &run, &session)?;
-                let episode = latest(&tx.sql, &lead)?.ok_or(AppError::NotFound)?;
-                if episode.revision != expected {
-                    return Err(AppError::StaleRevision.into());
+                let lead=target(&tx.sql,&actor,&run,&session)?;
+                let current=latest(&tx.sql,&lead)?.ok_or(AppError::NotFound)?;
+                if current.id!=episode_id || current.revision!=expected {return Err(AppError::StaleRevision.into());}
+                if matches!(current.state,reviewq_app::hosts::recovery::RecoveryState::Complete | reviewq_app::hosts::recovery::RecoveryState::Cancelled) {
+                    return snapshot(&tx.sql,current);
                 }
-                cancel(&tx.sql, &lead, "recovery_cancelled_by_operator")?;
-                emit(tx, &lead)?;
-                snapshot(&tx.sql, latest(&tx.sql, &lead)?.ok_or(AppError::NotFound)?)
-            })
-            .await
-            .map_err(StoreError::app)
+                let changed=tx.sql.execute(
+                    "UPDATE recovery_episodes SET state='cancelled',reason='recovery_cancelled_by_operator',
+                        due_at_ms=NULL,revision=revision+1
+                     WHERE episode_id=?1 AND run_id=?2 AND lead_session_key=?3 AND revision=?4",
+                    params![episode_id,run.as_str(),session.as_str(),expected.as_sqlite_integer()],
+                )?;
+                if changed!=1 {return Err(AppError::StaleRevision.into());}
+                emit(tx,&lead)?;
+                snapshot(&tx.sql,latest(&tx.sql,&lead)?.ok_or(AppError::NotFound)?)
+            }).await.map_err(StoreError::app)
         })
     }
 
     fn due_recovery(&self) -> AppFuture<'_, Vec<Candidate>> {
-        Box::pin(async move { self.read(|db| due(db)).await.map_err(StoreError::app) })
+        Box::pin(async move {
+            self.write(|tx| {
+                retire_obsolete(tx)?;
+                due(&tx.sql)
+            })
+            .await
+            .map_err(StoreError::app)
+        })
     }
 
     fn defer_recovery(
@@ -138,7 +158,9 @@ impl RecoveryStore for SqliteStore {
                 )?;
                 if !managed {return Err(AppError::Forbidden.into());}
                 let acquired=db.execute(
-                    "INSERT INTO managed_interrupts VALUES(?1,?2,?3,'reserved',?4) ON CONFLICT DO NOTHING",
+                    "INSERT INTO managed_interrupts VALUES(?1,?2,?3,'reserved',?4)
+                     ON CONFLICT(run_id,lead_session_key,native_turn_id) DO UPDATE SET
+                        state='reserved',updated_at_ms=excluded.updated_at_ms WHERE managed_interrupts.state='deferred'",
                     params![run.as_str(),session.as_str(),turn.as_str(),now_ms()?],
                 )?==1;
                 let state:String=db.query_row(
@@ -295,10 +317,12 @@ pub(crate) fn observe_failure(
         return Ok(());
     }
     let observed = now_ms()?;
-    let timing = failure.at_ms.unwrap_or(observed);
+    let Some(timing) = failure.at_ms else {
+        return Ok(());
+    };
     let active: bool = db.query_row(
         "SELECT EXISTS(SELECT 1 FROM runs WHERE run_id=?1 AND started_at_ms<=?2)",
-        params![lead.run_id().as_str(), timing.saturating_add(1000)],
+        params![lead.run_id().as_str(), timing],
         |row| row.get(0),
     )?;
     if !active {
@@ -397,20 +421,39 @@ fn latest(db: &Connection, lead: &LeadTarget) -> Result<Option<Episode>, StoreEr
     rows.next()?.map(decode).transpose()
 }
 
+fn retire_obsolete(tx: &mut WriteTx<'_>) -> Result<(), StoreError> {
+    let sql = format!(
+        "UPDATE recovery_episodes SET state='cancelled',reason='recovery_binding_changed',
+             due_at_ms=NULL,revision=revision+1
+         WHERE episode_id IN (
+            SELECT e.episode_id FROM recovery_episodes e JOIN reviews r USING(review_id)
+             WHERE e.state IN ('waiting','disabled','queued') AND NOT ({IN_SCOPE})
+             ORDER BY e.observed_at_ms,e.episode_id LIMIT 32)",
+    );
+    if tx.sql.execute(&sql, [])? > 0 {
+        tx.delivery_changed = true;
+        advance_queue(&tx.sql)?;
+        tx.emit(&[ResourceKey::Queue, ResourceKey::Run(None)])?;
+    }
+    Ok(())
+}
+
 fn due(db: &Connection) -> Result<Vec<Candidate>, StoreError> {
     if !preferences(db)?.automatic {
         return Ok(Vec::new());
     }
-    let mut statement=db.prepare_cached(
+    let sql=format!(
         "SELECT e.episode_id,e.revision,e.failed_turn_id,e.kind,e.state,e.reason,e.run_id,e.lead_session_key,
             e.head_sha,e.settings_revision,e.account_hash,
             (SELECT p.capacity_hash FROM recovery_episodes p WHERE p.run_id=e.run_id
                AND p.lead_session_key=e.lead_session_key AND p.kind=e.kind AND p.attempted_count>0
                AND p.resumed_turn_id IS NOT NULL AND p.capacity_hash IS NOT NULL
                ORDER BY p.observed_at_ms DESC,p.episode_id DESC LIMIT 1),e.model_provider
-         FROM recovery_episodes e WHERE e.state='waiting' AND e.due_at_ms<=?1
+         FROM recovery_episodes e JOIN reviews r USING(review_id)
+         WHERE e.state='waiting' AND e.due_at_ms<=?1 AND ({IN_SCOPE})
          ORDER BY e.due_at_ms,e.episode_id LIMIT 2"
-    )?;
+    );
+    let mut statement = db.prepare_cached(&sql)?;
     let mut rows = statement.query([now_ms()?])?;
     let mut output = Vec::new();
     while let Some(row) = rows.next()? {

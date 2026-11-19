@@ -127,11 +127,27 @@ pub struct NativeHead {
 }
 
 #[derive(Clone, Debug)]
-pub struct PromptPosition {
-    pub next_ordinal: u64,
-    pub file: FilePosition,
+pub enum HistoryBookmark {
+    File(FilePosition),
+    Rpc(NativePosition),
 }
 
+impl HistoryBookmark {
+    pub fn into_file(self) -> Result<FilePosition, crate::access::AppError> {
+        match self {
+            Self::File(file) => Ok(file),
+            Self::Rpc(_) => Err(crate::access::AppError::CursorExpired),
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct PromptPosition {
+    pub next_ordinal: u64,
+    pub bookmark: HistoryBookmark,
+}
+
+#[derive(Clone)]
 pub enum NavigationQuery {
     Overview {
         groups: u16,
@@ -156,7 +172,7 @@ pub struct PromptPreview {
     pub entry: NativeInputId,
     pub at_ms: Option<i64>,
     pub text: String,
-    pub anchor: FilePosition,
+    pub anchor: HistoryBookmark,
     pub after: PromptPosition,
 }
 

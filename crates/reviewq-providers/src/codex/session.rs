@@ -88,13 +88,22 @@ impl NativeHost for Codex {
         Box::pin(self.read_current_plan(target))
     }
 
+    fn history_navigation(
+        &self,
+        target: HistorySession,
+        query: reviewq_app::history::NavigationQuery,
+    ) -> AppFuture<'_, reviewq_app::history::NativeNavigation> {
+        Box::pin(self.read_prompt_navigation(target, query))
+    }
+
     fn history_around(
         &self,
         target: HistorySession,
         id: reviewq_domain::identity::NativeInputId,
+        anchor: Option<(NativePosition, String)>,
         limit: u16,
     ) -> AppFuture<'_, NativeHistoryPage> {
-        Box::pin(self.read_around_item(target, id, limit))
+        Box::pin(self.read_around_item(target, id, anchor, limit))
     }
 
     fn observe_interrupt(

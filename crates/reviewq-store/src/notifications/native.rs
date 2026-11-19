@@ -115,8 +115,18 @@ fn record(
             params![target.session_key().as_str(), failure.as_str()],
         )?;
     }
+    let started: i64 = db.query_row(
+        "SELECT started_at_ms FROM runs WHERE run_id=?1",
+        [target.run_id().as_str()],
+        |row| row.get(0),
+    )?;
     let mut ids = Vec::new();
     for event in observed.events {
+        if matches!(event.kind, Kind::AgentFailure | Kind::Quota)
+            && event.at_ms.is_none_or(|time| time < started)
+        {
+            continue;
+        }
         if let Some(id) = insert(db, HostProvider::Codex, target, event)? {
             ids.push(id);
         }
