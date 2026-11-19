@@ -50,8 +50,12 @@ fn context(
     let live = db
         .query_row(
             "SELECT c.generation, c.turn_id,
-           CASE WHEN s.host_activity='working' AND c.latest_prompt_manual=1
-                     AND c.turn_id=c.latest_prompt_turn_id THEN c.latest_prompt_id END,
+           CASE WHEN s.host_activity='working' AND c.turn_id=c.latest_prompt_turn_id
+                     AND (c.latest_prompt_manual=1 OR EXISTS (
+                           SELECT 1 FROM messages m WHERE m.session_key=c.session_key AND m.run_id=s.run_id
+                             AND m.native_turn_id=c.latest_prompt_turn_id AND m.native_input_id=c.latest_prompt_id
+                             AND m.state='started' AND m.actor_key IS NOT NULL AND m.purpose IN ('user','report_feedback')
+                     )) THEN c.latest_prompt_id END,
            coalesce(s.host_activity='working',0)
          FROM claude_companions c JOIN sessions s USING(session_key)
          WHERE c.session_key=?1 AND c.seen_at_ms>?2",

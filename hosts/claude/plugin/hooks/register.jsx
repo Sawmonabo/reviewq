@@ -1,6 +1,7 @@
 import { deliver, finishTurn, observeFirstStep, observeInput, observeTurn, reviewqOrigin } from "./delivery.js";
 import { registerWorkflowTools, reportTurn, stageAction, stageReport } from "./workflow.js";
 import { childrenChanged, reconcileChildren } from "./children.js";
+import { currentSettings } from "./settings.js";
 
 const HEARTBEAT_MS = 5000;
 const OFFLINE_MS = 30000;
@@ -75,6 +76,7 @@ async function refresh($, target) {
 }
 
 async function heartbeat($, state, allowDelivery = true) {
+  const settings = await currentSettings($, state);
   const result = await invoke($, "heartbeat", state.id, {
     generation: state.generation,
     sequence: ++state.sequence,
@@ -85,8 +87,8 @@ async function heartbeat($, state, allowDelivery = true) {
     latestPromptId: state.lastPrompt ?? null,
     latestPromptTurnId: state.lastPromptTurn ?? null,
     latestPromptManual: !!state.lastPromptTurn && !!state.lastPromptManual,
-    model: state.model ?? null,
-    effort: state.effort ?? null,
+    model: settings?.model ?? null,
+    effort: settings?.effort ?? null,
   });
   if (state === session && await $.session.id() === state.id) {
     if (result.data?.protocolVersion === 1) {

@@ -61,6 +61,13 @@ struct Check {
 pub(super) struct Effect {
     text: String,
     report_context: Option<String>,
+    settings: Option<Settings>,
+}
+
+#[derive(Serialize)]
+struct Settings {
+    model: String,
+    effort: String,
 }
 
 pub(super) async fn check(
@@ -106,7 +113,9 @@ pub(super) async fn check(
         .authorize_claude_delivery(lead, offer, anchor, ready)
         .await?;
     let DeliveryWork::Dispatch {
-        text, report_ref, ..
+        text,
+        report_ref,
+        workflow,
     } = claim.work
     else {
         return Err(AppError::Conflict.into());
@@ -131,6 +140,10 @@ pub(super) async fn check(
         Effect {
             text: text.as_str().to_owned(),
             report_context,
+            settings: workflow.map(|guard| Settings {
+                model: guard.ready.model,
+                effort: guard.ready.effort,
+            }),
         },
         *entry.commits.borrow(),
     )?))
