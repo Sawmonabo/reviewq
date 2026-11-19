@@ -32,8 +32,8 @@ struct UpstreamNote {
     confidential: bool,
     #[serde(default)]
     system: bool,
-    #[serde(default)]
-    resolved: bool,
+    resolvable: Option<bool>,
+    resolved: Option<bool>,
     resolved_by: Option<ConnectedUser>,
     position: Option<Position>,
 }
@@ -184,6 +184,7 @@ fn project(
                 author_id: note.author.id,
                 body: note.body,
                 created_at_ms,
+                resolvable: note.resolvable,
                 resolved: note.resolved,
                 resolved_by: note.resolved_by.map(|user| user.id),
             })
@@ -309,7 +310,7 @@ impl GitLab {
                     if note_ids.len() > MAX_WORKFLOW_NOTES {
                         return Err(AppError::PayloadTooLarge);
                     }
-                    resolved.get_or_insert(note.resolved);
+                    resolved.get_or_insert(note.resolved.unwrap_or(false));
                     let positioned_head = note
                         .position
                         .map(|position| position.refs.head_sha.parse())

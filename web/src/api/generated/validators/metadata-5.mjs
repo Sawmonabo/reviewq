@@ -107,19 +107,25 @@ const schema221 = {
   ],
   type: "object",
 };
-const schema235 = {
-  enum: ["complete", "incomplete", "binary", "provider_limited", "missing"],
-  type: "string",
+const schema231 = {
+  type: "object",
+  properties: {
+    author: { type: "string" },
+    authorId: {
+      anyOf: [{ $ref: "#/definitions/MergeRequestIidDto" }, { type: "null" }],
+    },
+    body: { type: "string" },
+    createdAt: {
+      anyOf: [{ $ref: "#/definitions/UtcTimestampDto" }, { type: "null" }],
+    },
+    noteId: { type: "string" },
+    ours: { type: "boolean" },
+    resolvable: { type: ["boolean", "null"] },
+    resolved: { type: ["boolean", "null"] },
+  },
 };
-const schema242 = {
-  enum: [
-    "pending",
-    "submitting",
-    "answered",
-    "closed",
-    "unavailable",
-    "uncertain",
-  ],
+const schema237 = {
+  enum: ["complete", "incomplete", "binary", "provider_limited", "missing"],
   type: "string",
 };
 export {
@@ -130,6 +136,6 @@ export {
   schema218,
   schema220,
   schema221,
-  schema235,
-  schema242,
+  schema231,
+  schema237,
 };

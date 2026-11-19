@@ -12,6 +12,12 @@ pub struct TicketIdentity {
     pub title: String,
 }
 
+#[derive(Clone, Copy)]
+pub enum CommentOrder {
+    Newest,
+    Oldest,
+}
+
 pub struct TicketDetail {
     pub identity: TicketIdentity,
     pub id: u64,
@@ -29,6 +35,7 @@ pub struct TicketDetail {
     pub estimate: Option<f64>,
     pub warning: Option<&'static str>,
     pub comments: Vec<TicketComment>,
+    pub comment_count: u32,
     pub next_offset: Option<u32>,
 }
 

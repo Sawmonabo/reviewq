@@ -45,6 +45,7 @@ pub struct TicketDetail {
     #[cfg_attr(feature = "schema", schemars(range(min = 0)))]
     pub estimate: Option<f64>,
     pub warnings: Vec<&'static str>,
+    pub comment_count: crate::SafeCountDto,
     #[serde(flatten)]
     pub comments: Page<TicketComment>,
 }
@@ -54,6 +55,7 @@ pub struct TicketDetail {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct TicketComment {
     pub id: UpstreamIdDto,
+    pub url: String,
     pub author: Option<String>,
     pub author_id: Option<String>,
     pub body: String,

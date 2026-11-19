@@ -4647,8 +4647,17 @@
         "ours": {
           "type": "boolean"
         },
+        "resolvable": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
         "resolved": {
-          "type": "boolean"
+          "type": [
+            "boolean",
+            "null"
+          ]
         },
         "resolvedBy": {
           "anyOf": [
@@ -4668,6 +4677,7 @@
         "ours",
         "body",
         "createdAt",
+        "resolvable",
         "resolved",
         "resolvedBy"
       ],
@@ -8365,10 +8375,14 @@
               "type": "null"
             }
           ]
+        },
+        "url": {
+          "type": "string"
         }
       },
       "required": [
         "id",
+        "url",
         "author",
         "authorId",
         "body",
@@ -8391,6 +8405,9 @@
             "string",
             "null"
           ]
+        },
+        "commentCount": {
+          "$ref": "#/definitions/SafeCountDto"
         },
         "components": {
           "items": {
@@ -8497,6 +8514,7 @@
         "description",
         "estimate",
         "warnings",
+        "commentCount",
         "items",
         "nextCursor"
       ],

@@ -1,9 +1,16 @@
 import { queryString, read } from "./client";
 import { isTicketDetailResponse } from "./generated/validators.mjs";
 
-export async function readTicket(key: string, cursor: string | undefined, signal: AbortSignal) {
+export type TicketCommentOrder = "newest" | "oldest";
+
+export async function readTicket(
+  key: string,
+  order: TicketCommentOrder,
+  cursor: string | undefined,
+  signal: AbortSignal,
+) {
   const result = await read(
-    `/tickets/${encodeURIComponent(key)}${queryString({ cursor })}`,
+    `/tickets/${encodeURIComponent(key)}${queryString({ order, cursor })}`,
     isTicketDetailResponse,
     signal,
   );

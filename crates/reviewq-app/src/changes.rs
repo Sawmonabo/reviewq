@@ -96,7 +96,8 @@ pub struct DiscussionNote {
     pub author_id: Option<u64>,
     pub body: String,
     pub created_at_ms: Option<i64>,
-    pub resolved: bool,
+    pub resolvable: Option<bool>,
+    pub resolved: Option<bool>,
     pub resolved_by: Option<u64>,
 }
 

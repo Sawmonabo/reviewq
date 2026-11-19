@@ -3,7 +3,7 @@ import { func0 } from "../runtime.mjs";
 import { validate25 } from "./checkpoint-id-dto.mjs";
 import { validate71 } from "./host-provider-dto.mjs";
 import { validate232 } from "./utc-timestamp-dto.mjs";
-function validate1056(
+function validate1060(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -23,7 +23,7 @@ function validate1056(
         ((data.startedAt === undefined || !func0.call(data, "startedAt")) &&
           (missing0 = "startedAt"))
       ) {
-        validate1056.errors = [
+        validate1060.errors = [
           {
             instancePath,
             schemaPath: "#/required",
@@ -156,7 +156,7 @@ function validate1056(
                     vErrors.push(err1);
                   }
                   errors++;
-                  validate1056.errors = vErrors;
+                  validate1060.errors = vErrors;
                   return false;
                 } else {
                   errors = _errs5;
@@ -177,7 +177,7 @@ function validate1056(
         }
       }
     } else {
-      validate1056.errors = [
+      validate1060.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -188,7 +188,7 @@ function validate1056(
       return false;
     }
   }
-  validate1056.errors = vErrors;
+  validate1060.errors = vErrors;
   return errors === 0;
 }
-export { validate1056 };
+export { validate1060 };

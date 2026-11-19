@@ -5,8 +5,8 @@ import { validate69 } from "./merge-request-iid-dto.mjs";
 import { validate232 } from "./utc-timestamp-dto.mjs";
 import { validate278 } from "./merge-request-status.mjs";
 import { validate127 } from "./safe-count-dto.mjs";
-import { schema253 } from "../metadata-6.mjs";
-function validate812(
+import { schema255 } from "../metadata-6.mjs";
+function validate816(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -71,7 +71,7 @@ function validate812(
             vErrors.push(err1);
           }
           errors++;
-          validate812.errors = vErrors;
+          validate816.errors = vErrors;
           return false;
         } else {
           errors = _errs2;
@@ -94,7 +94,7 @@ function validate812(
         ) {
           const _errs6 = errors;
           if (typeof data.hasAgentQuestions !== "boolean") {
-            validate812.errors = [
+            validate816.errors = [
               {
                 instancePath: instancePath + "/hasAgentQuestions",
                 schemaPath: "#/properties/hasAgentQuestions/type",
@@ -187,7 +187,7 @@ function validate812(
                   vErrors.push(err3);
                 }
                 errors++;
-                validate812.errors = vErrors;
+                validate816.errors = vErrors;
                 return false;
               } else {
                 errors = _errs10;
@@ -252,7 +252,7 @@ function validate812(
                   if (data.own !== undefined && func0.call(data, "own")) {
                     const _errs16 = errors;
                     if (typeof data.own !== "boolean") {
-                      validate812.errors = [
+                      validate816.errors = [
                         {
                           instancePath: instancePath + "/own",
                           schemaPath: "#/properties/own/type",
@@ -274,13 +274,13 @@ function validate812(
                       let data7 = data.personalApproval;
                       const _errs18 = errors;
                       if (typeof data7 !== "boolean" && data7 !== null) {
-                        validate812.errors = [
+                        validate816.errors = [
                           {
                             instancePath: instancePath + "/personalApproval",
                             schemaPath: "#/properties/personalApproval/type",
                             keyword: "type",
                             params: {
-                              type: schema253.properties.personalApproval.type,
+                              type: schema255.properties.personalApproval.type,
                             },
                           },
                         ];
@@ -298,7 +298,7 @@ function validate812(
         }
       }
     } else {
-      validate812.errors = [
+      validate816.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -309,7 +309,7 @@ function validate812(
       return false;
     }
   }
-  validate812.errors = vErrors;
+  validate816.errors = vErrors;
   return errors === 0;
 }
-export { validate812 };
+export { validate816 };

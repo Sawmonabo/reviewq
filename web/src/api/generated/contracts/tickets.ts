@@ -3,6 +3,7 @@
 import type {
   EventCursorDto,
   PageCursorDto,
+  SafeCountDto,
   TicketKeyDto,
   UpstreamIdDto,
   UtcTimestampDto,
@@ -17,6 +18,7 @@ export interface TicketDetailResponse {
 export interface TicketDetail {
   assignee: string | null;
   assigneeId: string | null;
+  commentCount: SafeCountDto;
   components: string[];
   description: string | null;
   estimate: number | null;
@@ -45,5 +47,6 @@ export interface TicketComment {
   createdAt: UtcTimestampDto;
   id: UpstreamIdDto;
   updatedAt: UtcTimestampDto | null;
+  url: string;
   [k: string]: unknown;
 }

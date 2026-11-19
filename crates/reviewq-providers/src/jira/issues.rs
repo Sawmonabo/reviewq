@@ -2,7 +2,7 @@ use std::collections::HashSet;
 
 use reviewq_app::access::{AppError, AppFuture};
 use reviewq_app::sources::{
-    ScopedSprint, ScopedTicket, SprintPage, TicketDetail, TicketIdentity, TicketPage,
+    CommentOrder, ScopedSprint, ScopedTicket, SprintPage, TicketDetail, TicketIdentity, TicketPage,
     TicketSourceReader,
 };
 use reviewq_domain::identity::TicketKey;
@@ -50,8 +50,9 @@ impl TicketSourceReader for Jira {
         estimate_fields: Vec<String>,
         offset: u32,
         limit: u16,
+        order: CommentOrder,
     ) -> AppFuture<'_, TicketDetail> {
-        Box::pin(self.ticket_detail(key, estimate_fields, offset, limit))
+        Box::pin(self.ticket_detail(key, estimate_fields, offset, limit, order))
     }
 
     fn sprints(&self, board: u64, offset: u32, include_closed: bool) -> AppFuture<'_, SprintPage> {
