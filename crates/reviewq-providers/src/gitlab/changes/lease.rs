@@ -2,11 +2,11 @@ use std::collections::VecDeque;
 use std::fs::File;
 use std::os::unix::fs::FileExt;
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, Weak};
 use std::time::{Duration, Instant};
 
 use reviewq_app::access::{AppError, AppFuture};
-use reviewq_app::changes::{PatchBytes, PatchContent};
+use reviewq_app::changes::{PatchBytes, PatchContent, PatchFile, SourcePage};
 use reviewq_domain::identity::MrIdentity;
 use tokio::sync::{Mutex, OnceCell};
 
@@ -21,7 +21,16 @@ pub(super) struct Key {
     pub file: String,
 }
 
+#[derive(Eq, PartialEq)]
+pub(super) struct IndexKey {
+    pub source: MrIdentity,
+    pub revision: String,
+    pub offset: (u32, u16),
+    pub preferred: Option<String>,
+}
+
 type Slot = Arc<OnceCell<PatchBytes>>;
+type IndexSlot = OnceCell<SourcePage<PatchFile>>;
 
 struct Lease {
     key: Key,
@@ -32,6 +41,7 @@ struct Lease {
 pub(in crate::gitlab) struct Leases {
     pub(super) profile: PathBuf,
     entries: Arc<Mutex<VecDeque<Lease>>>,
+    scans: Mutex<Vec<(IndexKey, Weak<IndexSlot>)>>,
 }
 
 pub(super) enum Body {
@@ -55,7 +65,29 @@ impl Leases {
                     .retain(|entry| entry.used_at.elapsed() < INACTIVITY || entry.in_use());
             }
         });
-        Self { profile, entries }
+        Self {
+            profile,
+            entries,
+            scans: Mutex::new(Vec::new()),
+        }
+    }
+
+    pub(super) async fn index(&self, key: IndexKey) -> Result<Arc<IndexSlot>, AppError> {
+        let mut scans = self.scans.lock().await;
+        scans.retain(|(_, pending)| pending.strong_count() > 0);
+        if let Some(active) = scans
+            .iter()
+            .find(|(existing, _)| existing == &key)
+            .and_then(|(_, pending)| pending.upgrade())
+        {
+            return Ok(active);
+        }
+        if scans.len() >= MAX_LEASES {
+            return Err(AppError::Busy);
+        }
+        let slot = Arc::new(OnceCell::new());
+        scans.push((key, Arc::downgrade(&slot)));
+        Ok(slot)
     }
 
     pub(super) async fn slot(&self, key: Key) -> Result<Slot, AppError> {

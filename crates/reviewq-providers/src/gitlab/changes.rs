@@ -18,8 +18,8 @@ mod discussions;
 mod lease;
 mod wire;
 
-use lease::Key;
 pub(super) use lease::Leases;
+use lease::{IndexKey, Key};
 
 const MAX_PATCH_FILES: u32 = 10_000;
 
@@ -53,39 +53,54 @@ impl ChangeSource for GitLab {
                 page
             };
             let current = self.patch_revision(&source, revision.as_deref()).await?;
-            let (scan, next) = self
-                .scan_diffs(&source, page, limit, selected, page == 1)
+            let slot = self
+                .patches
+                .index(IndexKey {
+                    source: source.clone(),
+                    revision: current.id.clone(),
+                    offset: (page, limit),
+                    preferred: selected_file.clone(),
+                })
                 .await?;
-            if selected.is_some_and(|file| !scan.files.iter().any(|candidate| candidate.id == file))
-            {
-                return Err(AppError::NotFound);
-            }
-            self.patch_revision(&source, Some(&current.id)).await?;
-            if let Some((file, body)) = scan.selected
-                && let Ok(slot) = self
-                    .patches
-                    .slot(Key {
-                        source,
-                        revision: current.id.clone(),
-                        file: file.id.clone(),
+            let indexed = slot
+                .get_or_try_init(|| async {
+                    let (scan, next) = self
+                        .scan_diffs(&source, page, limit, selected, page == 1)
+                        .await?;
+                    if selected.is_some_and(|file| {
+                        !scan.files.iter().any(|candidate| candidate.id == file)
+                    }) {
+                        return Err(AppError::NotFound);
+                    }
+                    self.patch_revision(&source, Some(&current.id)).await?;
+                    if let Some((file, body)) = scan.selected
+                        && let Ok(slot) = self
+                            .patches
+                            .slot(Key {
+                                source,
+                                revision: current.id.clone(),
+                                file: file.id.clone(),
+                            })
+                            .await
+                    {
+                        let _ = slot
+                            .get_or_init(|| async {
+                                PatchBytes {
+                                    revision: current.clone(),
+                                    file,
+                                    body: Arc::new(body),
+                                }
+                            })
+                            .await;
+                    }
+                    Ok(SourcePage {
+                        revision: current,
+                        items: scan.files,
+                        next_page: next,
                     })
-                    .await
-            {
-                let _ = slot
-                    .get_or_init(|| async {
-                        PatchBytes {
-                            revision: current.clone(),
-                            file,
-                            body: Arc::new(body),
-                        }
-                    })
-                    .await;
-            }
-            Ok(SourcePage {
-                revision: current,
-                items: scan.files,
-                next_page: next,
-            })
+                })
+                .await?;
+            Ok(indexed.clone())
         })
     }
 

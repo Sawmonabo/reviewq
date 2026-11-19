@@ -10,9 +10,13 @@ use reviewq_domain::session::{
 
 use crate::access::{Actor, AppError, AppFuture};
 use crate::events::Snapshot;
+use crate::history::{NativeHistoryPage, NativePosition};
 use crate::queue::ReviewSource;
 use crate::sources::{ReviewResolution, ReviewSourceReader};
 use crate::workspace::WorkspaceStore;
+
+mod work;
+pub use work::{DispatchGuard, receipt, recover_delivery, send_message};
 
 const MAX_MESSAGE_CHARACTERS: usize = 12_000;
 const MAX_SAFE_INTEGER: u64 = 9_007_199_254_740_991;
@@ -22,6 +26,24 @@ pub const MAX_RECOVERY_LIMIT: u16 = 128;
 /// Read-only provider proof of the exact native conversation and working directory.
 pub trait NativeHost: Send + Sync {
     fn prove(&self, native_id: NativeSessionId) -> AppFuture<'_, NativeBinding>;
+    fn history(
+        &self,
+        target: LeadTarget,
+        position: NativePosition,
+        limit: u16,
+    ) -> AppFuture<'_, NativeHistoryPage>;
+    fn dispatch(
+        &self,
+        target: LeadTarget,
+        delivery: DeliveryId,
+        text: MessageBody,
+        guard: DispatchGuard,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = DeliveryObservation> + Send + '_>>;
+    fn observe(
+        &self,
+        target: LeadTarget,
+        delivery: DeliveryId,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = DeliveryObservation> + Send + '_>>;
 }
 
 pub enum NativeLink {

@@ -1,5 +1,6 @@
 use std::fs::File;
 use std::io::{BufReader, Cursor, Read, Seek, SeekFrom, Write};
+use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 
 use reviewq_app::access::AppError;
@@ -45,7 +46,7 @@ pub(super) async fn receive(
         length += chunk.len();
         if spool.is_none() && length > MEMORY_LIMIT {
             let path = profile.to_owned();
-            let file = tokio::task::spawn_blocking(move || tempfile::tempfile_in(path))
+            let file = tokio::task::spawn_blocking(move || private_file(&path))
                 .await
                 .map_err(|_| AppError::Internal)?
                 .map_err(|_| AppError::Internal)?;
@@ -257,7 +258,7 @@ fn body(
         scan.inspect(chunk);
         if retain {
             if file.is_none() && scan.length > MEMORY_LIMIT {
-                let mut body = tempfile::tempfile_in(profile).map_err(|_| AppError::Internal)?;
+                let mut body = private_file(profile).map_err(|_| AppError::Internal)?;
                 body.write_all(&prefix).map_err(|_| AppError::Internal)?;
                 prefix = Vec::new();
                 file = Some(body);
@@ -277,4 +278,10 @@ fn body(
 
 fn invalid<T>(_: T) -> AppError {
     AppError::Unavailable
+}
+
+fn private_file(profile: &Path) -> std::io::Result<File> {
+    let file = tempfile::tempfile_in(profile)?;
+    file.set_permissions(std::fs::Permissions::from_mode(0o600))?;
+    Ok(file)
 }

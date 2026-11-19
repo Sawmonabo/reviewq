@@ -14,7 +14,7 @@ pub struct PatchRevision {
     pub head: GitSha,
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct SourcePage<T> {
     pub revision: PatchRevision,
     pub items: Vec<T>,

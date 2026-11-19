@@ -51,6 +51,12 @@ pub(crate) struct Serve {
     /// Directory belonging to the configured running Codex daemon.
     #[arg(long, value_name = "DIR", requires = "codex_bin")]
     pub(crate) codex_home: Option<PathBuf>,
+    /// Exact Codex model to send when starting an idle linked turn.
+    #[arg(long, requires_all = ["codex_bin", "codex_effort"])]
+    pub(crate) codex_model: Option<String>,
+    /// Exact Codex reasoning effort paired with the configured model.
+    #[arg(long, requires = "codex_model")]
+    pub(crate) codex_effort: Option<String>,
     #[arg(long, requires = "runtime_root")]
     pub(crate) validation: bool,
     #[arg(long, requires = "validation")]

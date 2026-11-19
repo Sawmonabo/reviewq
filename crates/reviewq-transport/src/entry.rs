@@ -24,7 +24,9 @@ mod auth;
 mod changes;
 mod control;
 mod error;
+mod history;
 mod hosts;
+mod messages;
 mod pages;
 
 pub use control::{ControlRequest, ServiceEndpoint, ServiceIdentity};
@@ -48,6 +50,7 @@ pub(super) struct Entry {
     store: Arc<dyn Store>,
     source: Option<Arc<dyn ReviewSourceReader>>,
     host: Option<Arc<dyn NativeHost>>,
+    sends_allowed: bool,
     auth: Auth,
     refresh: Mutex<Option<watch::Receiver<RefreshResult>>>,
 }
@@ -85,6 +88,7 @@ pub fn router(
     store: Arc<dyn Store>,
     source: Option<Arc<dyn ReviewSourceReader>>,
     host: Option<Arc<dyn NativeHost>>,
+    sends_allowed: bool,
     endpoint: ServiceEndpoint,
     web: &Path,
 ) -> Router {
@@ -92,6 +96,7 @@ pub fn router(
         store,
         source,
         host,
+        sends_allowed,
         auth: Auth::new(endpoint),
         refresh: Mutex::new(None),
     });
@@ -110,6 +115,18 @@ pub fn router(
         )
         .route("/runs/{run_id}", get(pages::run))
         .route("/native/codex/link", post(hosts::link))
+        .route(
+            "/runs/{run_id}/sessions/{session_key}/history/page",
+            get(history::page),
+        )
+        .route(
+            "/runs/{run_id}/sessions/{session_key}/messages",
+            post(messages::send),
+        )
+        .route(
+            "/runs/{run_id}/sessions/{session_key}/messages/{submission_id}",
+            get(messages::get),
+        )
         .fallback(api_not_found)
         .layer(DefaultBodyLimit::max(64 * 1024));
     Router::new()

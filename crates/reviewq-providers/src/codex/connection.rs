@@ -5,6 +5,7 @@ use std::time::Duration;
 
 use futures_util::{SinkExt, StreamExt};
 use reviewq_app::access::AppError;
+use reviewq_app::hosts::DispatchGuard;
 use serde::Deserialize;
 use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
@@ -31,9 +32,25 @@ pub(super) struct Connection {
 struct Rpc {
     method: &'static str,
     params: Value,
-    reply: oneshot::Sender<Result<Value, AppError>>,
+    guard: Option<DispatchGuard>,
+    reply: oneshot::Sender<Result<Value, CallError>>,
 }
 
+pub(super) enum CallError {
+    BeforeSend(AppError),
+    Denied(AppError),
+    Remote(AppError),
+    Uncertain,
+}
+
+impl CallError {
+    fn app(self) -> AppError {
+        match self {
+            Self::BeforeSend(error) | Self::Denied(error) | Self::Remote(error) => error,
+            Self::Uncertain => AppError::Unavailable,
+        }
+    }
+}
 struct Daemon {
     executable: PathBuf,
     profile: PathBuf,
@@ -71,22 +88,46 @@ impl Connection {
         method: &'static str,
         params: Value,
     ) -> Result<T, AppError> {
+        let response = self
+            .call(method, params, None)
+            .await
+            .map_err(CallError::app)?;
+        serde_json::from_value(response).map_err(|_| AppError::Unavailable)
+    }
+
+    pub(super) async fn submit(
+        &self,
+        method: &'static str,
+        params: Value,
+        guard: DispatchGuard,
+    ) -> Result<(), CallError> {
+        self.call(method, params, Some(guard)).await.map(|_| ())
+    }
+
+    async fn call(
+        &self,
+        method: &'static str,
+        params: Value,
+        guard: Option<DispatchGuard>,
+    ) -> Result<Value, CallError> {
         let (reply, receive) = oneshot::channel();
         self.sender
             .try_send(Rpc {
                 method,
                 params,
+                guard,
                 reply,
             })
-            .map_err(|error| match error {
-                mpsc::error::TrySendError::Full(_) => AppError::Busy,
-                mpsc::error::TrySendError::Closed(_) => AppError::Unavailable,
+            .map_err(|error| {
+                CallError::BeforeSend(match error {
+                    mpsc::error::TrySendError::Full(_) => AppError::Busy,
+                    mpsc::error::TrySendError::Closed(_) => AppError::Unavailable,
+                })
             })?;
-        let response = timeout(DEADLINE + DEADLINE, receive)
+        timeout(DEADLINE + DEADLINE, receive)
             .await
-            .map_err(|_| AppError::Unavailable)?
-            .map_err(|_| AppError::Unavailable)??;
-        serde_json::from_value(response).map_err(|_| AppError::Unavailable)
+            .map_err(|_| CallError::Uncertain)?
+            .map_err(|_| CallError::Uncertain)?
     }
 }
 
@@ -118,17 +159,28 @@ impl Daemon {
                     .and_then(Result::ok);
             }
             let Some(ws) = socket.as_mut() else {
-                let _ = request.reply.send(Err(AppError::Unavailable));
+                let _ = request
+                    .reply
+                    .send(Err(CallError::BeforeSend(AppError::Unavailable)));
                 continue;
             };
+            if let Some(guard) = request.guard {
+                if let Err(error) = guard.check().await {
+                    let _ = request.reply.send(Err(CallError::Denied(error)));
+                    continue;
+                }
+                if request.reply.is_closed() {
+                    continue;
+                }
+            }
             id = id.wrapping_add(1).max(2);
             match timeout(DEADLINE, exchange(ws, id, request.method, request.params)).await {
                 Ok(Ok(result)) => {
-                    let _ = request.reply.send(result);
+                    let _ = request.reply.send(result.map_err(CallError::Remote));
                 }
                 _ => {
                     socket = None;
-                    let _ = request.reply.send(Err(AppError::Unavailable));
+                    let _ = request.reply.send(Err(CallError::Uncertain));
                 }
             }
         }
