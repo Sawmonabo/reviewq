@@ -466,36 +466,6 @@
   background: var(--selected);
   border-radius: 5px;
 }
-.inbox-list,
-.inbox-events {
-  padding: 0;
-  margin: 0;
-  list-style: none;
-}
-.inbox-list {
-  display: grid;
-  gap: 7px;
-}
-.inbox-group summary {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-.inbox-group summary .meta {
-  margin-left: auto;
-}
-.inbox-dot.unread {
-  background: var(--focus);
-}
-.inbox-events > li {
-  border-top: 1px solid var(--line);
-  margin-top: 8px;
-  padding-top: 8px;
-}
-.inbox-events .quiet-button {
-  text-align: left;
-}
 @media (min-width: 1001px) and (max-width: 1150px) {
   .workspace-inner {
     padding: 28px 24px;
