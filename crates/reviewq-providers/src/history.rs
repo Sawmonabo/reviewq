@@ -293,8 +293,15 @@ pub(crate) async fn verify_pending_async_question(
     tokio::task::spawn_blocking(move || {
         let source = locator::locate(&session, &cancel)?.ok_or(AppError::Unavailable)?;
         let form = questions::prove(&source, &evidence, &cancel)?;
-        Ok(form.state == reviewq_app::hosts::QuestionStatus::Pending
-            && !form.questions.iter().any(|q| q.secret))
+        match form.state {
+            reviewq_app::hosts::QuestionStatus::Pending
+                if !form.questions.iter().any(|q| q.secret) =>
+            {
+                Ok(true)
+            }
+            reviewq_app::hosts::QuestionStatus::Answered => Ok(false),
+            _ => Err(AppError::Forbidden),
+        }
     })
     .await
     .map_err(|_| AppError::Unavailable)?

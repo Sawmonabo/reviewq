@@ -220,15 +220,7 @@ async fn respond_async(
         )
         .await?
     {
-        let bare = QuestionForm {
-            request: evidence.key.request.clone(),
-            turn: evidence.key.turn.clone(),
-            item: evidence.key.item.clone(),
-            blocking: false,
-            mode: QuestionMode::Async,
-            state,
-            questions: Vec::new(),
-        };
+        let bare = evidence.form(state);
         let form = entry
             .file_history
             .async_questions(session, vec![evidence], Some(answer.request))

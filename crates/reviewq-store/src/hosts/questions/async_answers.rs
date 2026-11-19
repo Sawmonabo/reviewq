@@ -237,9 +237,11 @@ pub(in crate::hosts) fn advance(
     target: &SessionTarget,
     delivery: &DeliveryId,
     outcome: &DeliveryOutcome,
+    terminal_answer: bool,
 ) -> Result<(), StoreError> {
     let state = match outcome {
         DeliveryOutcome::Started(_) => "answered",
+        DeliveryOutcome::Rejected if terminal_answer => "answered",
         DeliveryOutcome::Rejected => "unavailable",
         DeliveryOutcome::Uncertain => "uncertain",
         _ => return Ok(()),
