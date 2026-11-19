@@ -67,7 +67,7 @@
   color: var(--primary-text);
 }
 .composer .composer-send:not(:disabled):hover {
-  background: var(--link);
+  background: color-mix(in srgb, var(--primary) 72%, white);
 }
 @media (pointer: coarse) {
   .composer .composer-send {

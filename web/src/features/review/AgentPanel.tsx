@@ -151,6 +151,7 @@ export default function AgentPanel({
       </header>
       <Transcript
         target={target}
+        provider={session.provider}
         messages={cursor ? [] : (outbox.data?.items ?? [])}
         resultOnly={resultOnly}
         working={state === "working"}
@@ -171,6 +172,7 @@ export default function AgentPanel({
           label="Message the review agent…"
           draftLabel={`Message · ${reviewTitle}`}
           targetLabel="To lead review"
+          targetTitle={reviewTitle}
           draftKey={JSON.stringify(["message", run.reviewId, run.runId, run.leadSessionKey])}
           onAccepted={outbox.retry}
         />

@@ -1,13 +1,14 @@
 import { defaultRangeExtractor, useVirtualizer } from "@tanstack/react-virtual";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { HistoryEntry, HistoryPart } from "../../../api/generated/contracts";
+import type { HostProviderDto } from "../../../api/generated/contracts/common";
 import type { MessageHistoryItem } from "../../../api/generated/contracts/delivery";
 import { historyParts } from "../../../api/history";
 import type { SessionAddress } from "../../../api/history";
 import { Icon } from "../../../components/Icon";
 import { Empty, Loading, Notice } from "../../../components/PanelState";
-import { describeError, formatTime, readable } from "../../../lib/presentation";
-import { EntryBody } from "./EntryBody";
+import { describeError, formatActivityTime, formatTime, readable } from "../../../lib/presentation";
+import { EntryBody, TranscriptMarkdown } from "./EntryBody";
 import { entriesIn, readBookmark, rememberBookmark } from "./history-window";
 import { PromptNavigator } from "./PromptNavigator";
 import { useHistory } from "./useHistory";
@@ -29,13 +30,22 @@ type Visible = {
 };
 type Props = {
   readonly target: SessionAddress;
+  readonly provider: HostProviderDto;
   readonly messages: readonly MessageHistoryItem[];
   readonly resultOnly: boolean;
   readonly working: boolean;
   readonly onObservedTurn: (turn: string | undefined) => void;
 };
 
-export function Transcript({ target, messages, resultOnly, working, onObservedTurn }: Props) {
+export function Transcript({
+  target,
+  provider,
+  messages,
+  resultOnly,
+  working,
+  onObservedTurn,
+}: Props) {
+  const providerName = readable(provider);
   const bookmark = `history.${target.runId}.${target.sessionKey}`;
   const [saved] = useState(() => readBookmark(bookmark));
   const [following, setFollowing] = useState(saved?.following ?? true);
@@ -80,7 +90,15 @@ export function Transcript({ target, messages, resultOnly, working, onObservedTu
         .find((entry) => entry.parts.some((part) => part.kind === "assistant_text"));
       return result ? [{ id: result.entryId, entry: result }] : [];
     }
-    const rows: Visible[] = historyEntries.map((entry) => ({ id: entry.entryId, entry }));
+    const deliveries = new Map(
+      messages.flatMap((delivery) =>
+        delivery.nativeEntryId ? [[delivery.nativeEntryId, delivery] as const] : [],
+      ),
+    );
+    const rows: Visible[] = historyEntries.map((entry) => {
+      const delivery = deliveries.get(entry.entryId);
+      return { id: entry.entryId, entry, ...(delivery ? { delivery } : {}) };
+    });
     if (following && inProgress)
       rows.push({ id: inProgress.entryId, provisional: inProgress.text });
     for (const delivery of messages.slice().reverse()) {
@@ -407,40 +425,48 @@ export function Transcript({ target, messages, resultOnly, working, onObservedTu
             {list.getVirtualItems().map((item) => {
               const row = entries[item.index];
               if (!row) return null;
-              const user =
-                row.entry?.parts.some((part) => part.kind === "user_prompt") ||
-                Boolean(row.delivery);
+              const user = row.entry
+                ? row.entry.parts.some((part) => part.kind === "user_prompt")
+                : Boolean(row.delivery);
+              const followup = user && row.delivery?.purpose === "thread_followup";
+              const automatic = followup || (user && row.delivery?.purpose === "codex_recovery");
+              const role = user
+                ? automatic
+                  ? followup
+                    ? "ReviewQ follow-up"
+                    : "ReviewQ"
+                  : "You"
+                : providerName;
+              const timestamp = row.entry?.timestamp ?? row.delivery?.createdAt;
               return (
                 <article
                   ref={list.measureElement}
                   data-index={item.index}
                   data-entry={row.id}
                   key={row.id}
-                  className={`timeline-entry ${user ? "user-entry" : ""}`}
+                  className={`timeline-entry ${user ? "user-entry" : "agent-entry"}`}
                   style={{ transform: `translateY(${item.start}px)` }}
                 >
-                  <span className="timeline-symbol">
-                    <Icon name={user ? "send" : "terminal"} size={13} />
-                  </span>
+                  <header className="timeline-message-heading">
+                    <span className="timeline-symbol" aria-hidden="true">
+                      {user ? automatic ? "RQ" : "Y" : <ProviderMark provider={provider} />}
+                    </span>
+                    <strong>{role}</strong>
+                    {timestamp && (
+                      <time dateTime={timestamp} title={formatTime(timestamp)}>
+                        {formatActivityTime(timestamp)}
+                      </time>
+                    )}
+                    {row.delivery && <span className="badge">{readable(row.delivery.state)}</span>}
+                    {row.provisional !== undefined && <span className="badge green">Working</span>}
+                  </header>
                   <div className="message-body stack">
-                    <div className="spread meta">
-                      <strong>{user ? "You" : "Agent"}</strong>
-                      {row.entry?.timestamp && (
-                        <time dateTime={row.entry.timestamp}>
-                          {formatTime(row.entry.timestamp)}
-                        </time>
-                      )}
-                      {row.delivery && (
-                        <span className="badge">{readable(row.delivery.state)}</span>
-                      )}
-                      {row.provisional !== undefined && (
-                        <span className="badge green">Working</span>
-                      )}
-                    </div>
                     {row.provisional !== undefined && (
                       <p className="message-copy">{row.provisional}</p>
                     )}
-                    {row.delivery && <p className="message-copy">{row.delivery.text}</p>}
+                    {row.delivery && !row.entry && (
+                      <TranscriptMarkdown source={row.delivery.text} />
+                    )}
                     {row.entry && history.generation && (
                       <EntryBody
                         key={history.generation}
@@ -475,16 +501,39 @@ export function Transcript({ target, messages, resultOnly, working, onObservedTu
         )}
         {!resultOnly && working && !inProgress && (
           <p className="timeline-working" role="status">
-            Working…
+            <span className="timeline-working-dots" aria-hidden="true">
+              <i />
+              <i />
+              <i />
+            </span>
+            {providerName} is working
           </p>
         )}
       </div>
       {!resultOnly && (!following || history.waiting) && (
         <button type="button" className="timeline-jump" onClick={latest}>
+          <span aria-hidden="true">↓ </span>
           {history.waiting ? "New messages available" : "Jump to latest"}
         </button>
       )}
     </section>
+  );
+}
+
+function ProviderMark({ provider }: { readonly provider: HostProviderDto }) {
+  if (provider === "codex") return <Icon name="terminal" size={14} />;
+  return (
+    <svg
+      width="14"
+      height="14"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      aria-hidden="true"
+    >
+      <path d="m12 2 1.5 6.5L19 5l-3.5 5.5L22 12l-6.5 1.5L19 19l-5.5-3.5L12 22l-1.5-6.5L5 19l3.5-5.5L2 12l6.5-1.5L5 5l5.5 3.5Z" />
+    </svg>
   );
 }
 
