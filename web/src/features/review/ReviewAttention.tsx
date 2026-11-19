@@ -7,6 +7,7 @@ type Attention = NonNullable<ReviewOverview["attention"]>;
 
 export function ReviewAttention({
   attention,
+  confirmLabel,
   stale,
   busy,
   source,
@@ -15,6 +16,7 @@ export function ReviewAttention({
   onRefresh,
 }: {
   readonly attention: Attention;
+  readonly confirmLabel: string;
   readonly stale: boolean;
   readonly busy: boolean;
   readonly source: string | undefined;
@@ -33,7 +35,7 @@ export function ReviewAttention({
             Cancel
           </button>
           <button type="button" className="primary" disabled={stale || busy} onClick={onConfirm}>
-            Mark displayed follow-up handled
+            {confirmLabel}
           </button>
         </>
       }

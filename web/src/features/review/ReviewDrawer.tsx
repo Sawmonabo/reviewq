@@ -178,6 +178,10 @@ export default function ReviewDrawer({
 
   async function decide(disposition: Disposition) {
     if (mutation.current || !canMutate) return;
+    if (disposition !== "needs_review" && snapshot) {
+      setAcknowledgement({ ...snapshot, disposition });
+      return;
+    }
     mutation.current = true;
     setBusy(true);
     try {
@@ -208,19 +212,29 @@ export default function ReviewDrawer({
 
   async function confirmAttention() {
     if (!acknowledgement || changedSinceCapture || mutation.current) return;
-    const { checkpointId, expectedRevision, expectedSettingsRevision, sourceSha } = acknowledgement;
+    const { checkpointId, expectedRevision, expectedSettingsRevision, sourceSha, disposition } =
+      acknowledgement;
     mutation.current = true;
     setBusy(true);
     try {
-      await saveDecision(review.reviewId, {
+      const basis = {
         submissionId: crypto.randomUUID(),
         checkpointId,
         expectedRevision,
         expectedSettingsRevision,
         sourceSha,
-      });
+      };
+      await saveDecision(review.reviewId, disposition ? { ...basis, disposition } : basis);
       setAcknowledgement(undefined);
-      setOutcome({ key: scope, message: "Follow-up checkpoint saved." });
+      setOutcome({
+        key: scope,
+        message:
+          disposition === "reviewed"
+            ? "Review marked complete."
+            : disposition === "waiting_author"
+              ? "Waiting on author."
+              : "Follow-up checkpoint saved.",
+      });
       onReload();
     } catch (error) {
       setAcknowledgement(undefined);
@@ -574,12 +588,25 @@ export default function ReviewDrawer({
       {acknowledgement && (
         <ReviewAttention
           attention={acknowledgement.attention}
+          confirmLabel={
+            acknowledgement.disposition === "reviewed"
+              ? "Review complete"
+              : acknowledgement.disposition === "waiting_author"
+                ? "Waiting on author"
+                : "Mark displayed follow-up handled"
+          }
           stale={changedSinceCapture}
           busy={busy}
           source={source}
           onClose={() => setAcknowledgement(undefined)}
           onConfirm={() => void confirmAttention()}
-          onRefresh={() => setAcknowledgement(snapshot)}
+          onRefresh={() =>
+            setAcknowledgement(
+              snapshot && acknowledgement.disposition
+                ? { ...snapshot, disposition: acknowledgement.disposition }
+                : snapshot,
+            )
+          }
         />
       )}
     </aside>
@@ -780,6 +807,7 @@ function Overview({
 
 type AttentionSnapshot = {
   readonly checkpointId: string;
+  readonly disposition?: "reviewed" | "waiting_author";
   readonly expectedRevision: string;
   readonly expectedSettingsRevision: string;
   readonly sourceSha: string;
