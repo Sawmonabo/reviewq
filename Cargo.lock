@@ -1407,6 +1407,8 @@ dependencies = [
  "base64 0.22.1",
  "clap",
  "getrandom 0.4.3",
+ "hyper",
+ "hyper-util",
  "reqwest",
  "reviewq-app",
  "reviewq-domain",

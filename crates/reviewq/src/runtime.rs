@@ -34,6 +34,7 @@ use tokio::sync::watch;
 use crate::{cli::Serve, runtime_settings};
 
 mod desktop;
+mod http;
 mod workflow;
 
 const RUNTIME: &str = "service.json";
@@ -359,15 +360,14 @@ pub(crate) async fn serve(profile: PathBuf, options: Serve) -> Result<(), Failur
         }
         shutdown.send_replace(true);
     });
-    let serve_v4 = axum::serve(v4, router.clone()).with_graceful_shutdown(wait_for_stop(wait));
-    let result = match v6 {
+    let serve_v4 = http::serve(v4, router.clone(), wait);
+    match v6 {
         Some(v6) => {
-            let serve_v6 =
-                axum::serve(v6, router).with_graceful_shutdown(wait_for_stop(listener_shutdown));
-            tokio::try_join!(serve_v4, serve_v6).map(|_| ())
+            let serve_v6 = http::serve(v6, router, listener_shutdown);
+            tokio::join!(serve_v4, serve_v6);
         }
         None => serve_v4.await,
-    };
+    }
     stop.abort();
     if let Some(delivery) = delivery {
         delivery.abort();
@@ -391,7 +391,6 @@ pub(crate) async fn serve(profile: PathBuf, options: Serve) -> Result<(), Failur
     }
     fs::remove_file(profile.join(RUNTIME))?;
     store.close(Duration::from_secs(10)).await?;
-    result?;
     Ok(())
 }
 
