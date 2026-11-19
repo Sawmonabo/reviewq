@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { RunDetail } from "../../../api/generated/contracts";
 import type { ResultSummary } from "../../../api/generated/contracts/followups";
 import type { ReportSummary } from "../../../api/generated/contracts/reports";
@@ -9,9 +9,8 @@ import type { DraftStore } from "../../../lib/drafts";
 import { describeError, formatActivityTime, formatTime, readable } from "../../../lib/presentation";
 import { savedValue, saveValue } from "../../../lib/view-preferences";
 import { FollowupResults } from "./FollowupResults";
+import ReportDocument from "./ReportDocument";
 import "./report.css";
-
-const ReportDocument = lazy(() => import("./ReportDocument"));
 
 type Props = {
   readonly run: RunDetail;
@@ -293,18 +292,16 @@ export default function Findings({ run, drafts, reviewTitle, webUrl, followup, o
         ))}
       {report && (
         <article className="stack" aria-label="Accepted findings">
-          <Suspense fallback={<Loading label="Loading report reader…" />}>
-            <ReportDocument
-              key={report.receiptId}
-              run={run}
-              report={report}
-              current={chosen === latestId}
-              drafts={drafts}
-              reviewTitle={reviewTitle}
-              webUrl={webUrl}
-              onRendered={(id) => void acknowledge(id, undefined, true)}
-            />
-          </Suspense>
+          <ReportDocument
+            key={report.receiptId}
+            run={run}
+            report={report}
+            current={chosen === latestId}
+            drafts={drafts}
+            reviewTitle={reviewTitle}
+            webUrl={webUrl}
+            onRendered={(id) => void acknowledge(id, undefined, true)}
+          />
           <details className="report-version-meta">
             <summary>Report version details</summary>
             <div className="stack">

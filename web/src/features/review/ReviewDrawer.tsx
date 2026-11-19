@@ -25,15 +25,15 @@ import { Empty, Loading, Notice } from "../../components/PanelState";
 import { useResource } from "../../hooks/useResource";
 import type { DraftStore } from "../../lib/drafts";
 import { describeError, formatActivityTime, readable, safeUrl } from "../../lib/presentation";
+import AgentPanel from "./AgentPanel";
 import { ReviewOverviewPane } from "./ReviewOverviewPane";
 import { ReviewAttention } from "./ReviewAttention";
+import Changes from "./changes/Changes";
 import { ChangesMonitor } from "./changes/ChangesMonitor";
+import Findings from "./report/Findings";
 import { useDrawerScroll } from "./useDrawerScroll";
 import "./review.css";
 
-const AgentPanel = lazy(() => import("./AgentPanel"));
-const Changes = lazy(() => import("./changes/Changes"));
-const Findings = lazy(() => import("./report/Findings"));
 const SessionResult = lazy(() => import("./transcript/SessionResult"));
 
 const tabs = [

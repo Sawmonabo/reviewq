@@ -56,7 +56,9 @@ export function ReviewOverviewPane({
           </div>
           <div>
             <dt>Your last review</dt>
-            <dd>{reviewed ? <code title={reviewed}>{reviewed.slice(0, 12)}</code> : "Not recorded"}</dd>
+            <dd>
+              {reviewed ? <code title={reviewed}>{reviewed.slice(0, 12)}</code> : "Not recorded"}
+            </dd>
           </div>
           <div>
             <dt>Review state</dt>
@@ -175,7 +177,8 @@ export function ReviewOverviewPane({
 
 function ReviewRequest({ launch }: { readonly launch: NonNullable<RunDetail["launch"]> }) {
   const args = launch.invocation.kind === "skill";
-  const request = launch.invocation.kind === "skill" ? launch.invocation.args : launch.invocation.prompt;
+  const request =
+    launch.invocation.kind === "skill" ? launch.invocation.args : launch.invocation.prompt;
   const context = launch.context?.trim() !== request?.trim() ? launch.context : undefined;
   return (
     <>
