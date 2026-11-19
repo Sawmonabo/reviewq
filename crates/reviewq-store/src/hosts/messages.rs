@@ -56,7 +56,7 @@ fn read_page(
     let mut statement = db.prepare_cached(
         "SELECT message_id, submission_id, purpose, state, body, receipt_id, report_hash,
             current_receipt_id, quoted_text, quoted_offset, native_turn_id, native_input_id,
-            actor_key IS NOT NULL, created_at_ms, updated_at_ms
+            actor_key IS NOT NULL, created_at_ms, updated_at_ms, outcome_detail, followup_batch_id
          FROM messages
          WHERE run_id=?1 AND session_key=?2 AND (?3 IS NULL OR (created_at_ms, message_id)<(?3,?4))
          ORDER BY created_at_ms DESC, message_id DESC LIMIT ?5",
@@ -123,6 +123,8 @@ fn decode(row: &Row<'_>) -> Result<RecordedMessage, StoreError> {
         native_turn_id: optional(row, 10)?,
         native_entry_id: optional(row, 11)?,
         service_admitted: row.get(12)?,
+        outcome_detail: row.get(15)?,
+        followup_batch_id: row.get(16)?,
         updated_at_ms: row.get(14)?,
     })
 }

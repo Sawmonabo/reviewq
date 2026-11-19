@@ -1,0 +1,246 @@
+//! Inbox occurrence admission, scoped projection and exact-ID acknowledgement.
+
+use std::collections::HashSet;
+
+use reviewq_app::access::{Actor, AppError, AppFuture};
+use reviewq_app::events::{ResourceKey, Snapshot};
+use reviewq_app::notifications::{
+    InboxChange, InboxPage, InboxPosition, InboxStore, InboxView, MAX_INBOX_PAGE,
+    MAX_INBOX_SELECTION, Notification, NotificationAction, UnreadCounts,
+};
+use reviewq_domain::identity::{NotificationId, Revision};
+use rusqlite::{Connection, OptionalExtension, Row, params};
+
+use crate::events::{now_ms, snapshot};
+use crate::queue::{identity_for_review, parse, text};
+use crate::workspace::{ReadScope, actor_key, allow_review, scope, settings_revision};
+use crate::{SqliteStore, StoreError};
+
+impl InboxStore for SqliteStore {
+    fn read_inbox(
+        &self,
+        actor: Actor,
+        view: InboxView,
+        after: Option<InboxPosition>,
+        limit: u16,
+    ) -> AppFuture<'_, Snapshot<InboxPage>> {
+        Box::pin(async move {
+            if !(1..=MAX_INBOX_PAGE).contains(&limit) {
+                return Err(AppError::InvalidRequest);
+            }
+            self.read(move |tx| snapshot(tx, page(tx, actor, view, after, limit)?))
+                .await
+                .map_err(StoreError::app)
+        })
+    }
+
+    fn assign_notifications(
+        &self,
+        actor: Actor,
+        action: NotificationAction,
+        ids: Vec<NotificationId>,
+    ) -> AppFuture<'_, Snapshot<InboxChange>> {
+        Box::pin(async move {
+            if ids.is_empty() || ids.len() > MAX_INBOX_SELECTION {
+                return Err(AppError::InvalidRequest);
+            }
+            self.write(move |tx| {
+                let (scope_code, scope_id) = define_scope(scope(&tx.sql, &actor)?);
+                let mut seen = HashSet::new();
+                let mut authorized = Vec::new();
+                for id in ids {
+                    if !seen.insert(id.clone()) {
+                        continue;
+                    }
+                    let review = tx.sql.query_row(
+                        "SELECT review_id FROM notifications WHERE notification_id=?1",
+                        [id.as_str()], |row| row.get::<_, String>(0),
+                    ).optional()?.ok_or(AppError::NotFound)?;
+                    let review = parse(&review)?;
+                    allow_review(&tx.sql, scope(&tx.sql, &actor)?, &review,
+                        &identity_for_review(&tx.sql, &review)?)?;
+                    authorized.push(id);
+                }
+                let time = now_ms()?;
+                let mut affected = Vec::new();
+                let sql = match action {
+                    NotificationAction::Read => "UPDATE notifications SET read_at_ms=?2
+                         WHERE notification_id=?1 AND dismissed_at_ms IS NULL AND read_at_ms IS NULL",
+                    NotificationAction::Unread => "UPDATE notifications SET read_at_ms=NULL
+                         WHERE notification_id=?1 AND dismissed_at_ms IS NULL AND read_at_ms IS NOT NULL",
+                    NotificationAction::Dismiss => "UPDATE notifications SET dismissed_at_ms=?2
+                         WHERE notification_id=?1 AND dismissed_at_ms IS NULL",
+                };
+                for id in authorized {
+                    let changed = if matches!(action, NotificationAction::Unread) {
+                        tx.sql.prepare_cached(sql)?.execute([id.as_str()])?
+                    } else {
+                        tx.sql.prepare_cached(sql)?.execute(params![id.as_str(), time])?
+                    };
+                    if changed != 0 {
+                        affected.push(id);
+                    }
+                }
+                if !affected.is_empty() {
+                    tx.sql.execute(
+                        "UPDATE service_state SET inbox_revision=inbox_revision+1 WHERE singleton=1", [],
+                    )?;
+                    let keys = if affected.len() <= 31 {
+                        affected.iter().map(|id| ResourceKey::Notification(Some(id.clone())))
+                            .collect::<Vec<_>>()
+                    } else {
+                        vec![ResourceKey::Notification(None)]
+                    };
+                    tx.emit(&keys)?;
+                }
+                let counts = counts(&tx.sql, scope_code, &scope_id, i64::MAX)?;
+                snapshot(&tx.sql, InboxChange { affected, counts })
+            }).await.map_err(StoreError::app)
+        })
+    }
+}
+
+const JOIN_SCOPE: &str = "
+    FROM notifications n JOIN reviews r ON r.review_id=n.review_id
+    WHERE n.ordinal<=?3 AND n.dismissed_at_ms IS NULL
+      AND (?1=0 OR (?1=1 AND EXISTS(
+        SELECT 1 FROM configured_projects p WHERE p.origin=r.origin AND p.project_id=r.project_id
+      )) OR (?1=2 AND n.review_id=?2))";
+
+fn define_scope(scope: ReadScope) -> (i64, String) {
+    match scope {
+        ReadScope::Local => (0, String::new()),
+        ReadScope::Grant => (1, String::new()),
+        ReadScope::Review(id) => (2, id.to_string()),
+    }
+}
+
+fn page(
+    db: &Connection,
+    actor: Actor,
+    view: InboxView,
+    after: Option<InboxPosition>,
+    limit: u16,
+) -> Result<InboxPage, StoreError> {
+    use sha2::{Digest, Sha256};
+
+    let (scope_code, scope_id) = define_scope(scope(db, &actor)?);
+    let mut digest = Sha256::new();
+    digest.update(actor_key(&actor));
+    digest.update(actor.grant_epoch().map_or(0, Revision::get).to_be_bytes());
+    digest.update(settings_revision(db)?.get().to_be_bytes());
+    let scope_key: [u8; 32] = digest.finalize().into();
+    let revision = Revision::try_from(db.query_row(
+        "SELECT inbox_revision FROM service_state WHERE singleton=1",
+        [],
+        |row| row.get::<_, i64>(0),
+    )?)
+    .map_err(|_| AppError::Internal)?;
+    let (watermark, time, source, id) = if let Some(position) = &after {
+        if position.scope != scope_key
+            || position.revision != revision
+            || position.limit != limit
+            || position.view != view
+        {
+            return Err(AppError::CursorExpired.into());
+        }
+        (
+            position.watermark,
+            Some(position.occurred_at_ms),
+            position.source.to_string(),
+            position.id.as_str(),
+        )
+    } else {
+        let watermark = db.query_row(
+            "SELECT coalesce(max(ordinal), 0) FROM notifications",
+            [],
+            |row| row.get(0),
+        )?;
+        (watermark, None, String::new(), "")
+    };
+    let sql = format!(
+        "SELECT n.notification_id, n.source, n.kind, n.review_id, n.run_id, n.session_key,
+             n.label, n.occurred_at_ms, n.read_at_ms, n.notified_at_ms
+         {JOIN_SCOPE}
+           AND (?4 OR n.read_at_ms IS NULL)
+           AND (?5 IS NULL OR n.occurred_at_ms<?5 OR
+             (n.occurred_at_ms=?5 AND (n.source>?6 OR (n.source=?6 AND n.notification_id<?7))))
+         ORDER BY n.occurred_at_ms DESC, n.source ASC, n.notification_id DESC LIMIT ?8"
+    );
+    let mut statement = db.prepare_cached(&sql)?;
+    let mut rows = statement.query(params![
+        scope_code,
+        scope_id,
+        watermark,
+        view == InboxView::All,
+        time,
+        source,
+        id,
+        limit + 1,
+    ])?;
+    let mut items = Vec::with_capacity(usize::from(limit));
+    let mut next = None;
+    while let Some(row) = rows.next()? {
+        if items.len() == usize::from(limit) {
+            next = items.last().map(|item: &Notification| InboxPosition {
+                scope: scope_key,
+                limit,
+                view,
+                watermark,
+                revision,
+                occurred_at_ms: item.occurred_at_ms,
+                source: item.source,
+                id: item.id.clone(),
+            });
+            break;
+        }
+        items.push(decode(row)?);
+    }
+    Ok(InboxPage {
+        items,
+        next,
+        counts: counts(db, scope_code, &scope_id, watermark)?,
+    })
+}
+
+fn decode(row: &Row<'_>) -> Result<Notification, StoreError> {
+    Ok(Notification {
+        id: parse(text(row, 0)?)?,
+        source: parse(text(row, 1)?)?,
+        kind: parse(text(row, 2)?)?,
+        review: parse(text(row, 3)?)?,
+        run: row
+            .get::<_, Option<String>>(4)?
+            .as_deref()
+            .map(parse)
+            .transpose()?,
+        session: row
+            .get::<_, Option<String>>(5)?
+            .as_deref()
+            .map(parse)
+            .transpose()?,
+        label: row.get(6)?,
+        occurred_at_ms: row.get(7)?,
+        read_at_ms: row.get(8)?,
+        notified_at_ms: row.get(9)?,
+    })
+}
+
+fn counts(
+    db: &Connection,
+    scope: i64,
+    scope_id: &str,
+    watermark: i64,
+) -> Result<UnreadCounts, StoreError> {
+    let sql = format!(
+        "SELECT count(*), count(DISTINCT n.review_id) {JOIN_SCOPE} AND n.read_at_ms IS NULL"
+    );
+    let (events, mrs): (i64, i64) =
+        db.query_row(&sql, params![scope, scope_id, watermark], |row| {
+            Ok((row.get(0)?, row.get(1)?))
+        })?;
+    Ok(UnreadCounts {
+        event_count: u64::try_from(events).map_err(|_| AppError::Internal)?,
+        mr_count: u64::try_from(mrs).map_err(|_| AppError::Internal)?,
+    })
+}

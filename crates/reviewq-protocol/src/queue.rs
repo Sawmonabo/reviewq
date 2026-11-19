@@ -160,6 +160,8 @@ pub enum RunStage {
 pub struct ReviewOverview {
     pub review: MergeRequestRow,
     pub decision_revision: RevisionDto,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub decision: Option<crate::decisions::DecisionView>,
     pub settings_revision: RevisionDto,
     pub checkpoint_id: Option<CheckpointIdDto>,
     pub runs: Page<RunSummary>,

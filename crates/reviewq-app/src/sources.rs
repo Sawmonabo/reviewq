@@ -1,4 +1,4 @@
-use reviewq_domain::identity::{EventCursor, Revision};
+use reviewq_domain::identity::{EventCursor, MrIdentity, Revision};
 
 use crate::access::{Actor, AppError, AppFuture};
 use crate::changes::ChangeSource;
@@ -7,6 +7,8 @@ use crate::workspace::{ConfiguredProject, WorkspaceStore};
 
 /// Reads verified provider metadata outside the store transaction.
 pub trait ReviewSourceReader: ChangeSource {
+    fn review(&self, identity: MrIdentity) -> AppFuture<'_, ReviewSource>;
+
     fn reviews(&self, project: ConfiguredProject) -> AppFuture<'_, Vec<ReviewSource>>;
 
     /// Resolves a user-supplied URL, project/IID or unique ticket in configured projects.

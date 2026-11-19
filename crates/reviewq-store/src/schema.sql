@@ -4,7 +4,8 @@ CREATE TABLE service_state (
     event_head INTEGER NOT NULL DEFAULT 0 CHECK (event_head >= 0),
     event_floor INTEGER NOT NULL DEFAULT 0 CHECK (event_floor BETWEEN 0 AND event_head),
     queue_revision INTEGER NOT NULL DEFAULT 0 CHECK (queue_revision >= 0),
-    settings_revision INTEGER NOT NULL DEFAULT 0 CHECK (settings_revision >= 0)
+    settings_revision INTEGER NOT NULL DEFAULT 0 CHECK (settings_revision >= 0),
+    inbox_revision INTEGER NOT NULL DEFAULT 0 CHECK (inbox_revision >= 0)
 ) STRICT;
 
 CREATE TABLE events (
@@ -113,13 +114,15 @@ CREATE TABLE messages (
     run_id TEXT NOT NULL,
     session_key TEXT NOT NULL,
     purpose TEXT NOT NULL CHECK (purpose IN ('user', 'report_feedback', 'codex_recovery', 'thread_followup', 'publication')),
-    body TEXT NOT NULL CHECK (length(CAST(body AS BLOB)) BETWEEN 1 AND 48000),
+    body TEXT NOT NULL CHECK (length(CAST(body AS BLOB)) <= 48000),
     receipt_id TEXT,
     report_hash TEXT CHECK (length(report_hash) = 64),
     current_receipt_id TEXT,
     quoted_text TEXT CHECK (length(CAST(quoted_text AS BLOB)) BETWEEN 1 AND 48000),
     quoted_offset INTEGER CHECK (quoted_offset >= 0),
     state TEXT NOT NULL CHECK (state IN ('queued', 'dispatching', 'started', 'rejected', 'uncertain')),
+    outcome_detail TEXT CHECK (length(CAST(outcome_detail AS BLOB)) <= 2048),
+    followup_batch_id TEXT,
     created_at_ms INTEGER NOT NULL,
     updated_at_ms INTEGER NOT NULL CHECK (updated_at_ms >= created_at_ms),
     native_turn_id TEXT,
@@ -127,6 +130,7 @@ CREATE TABLE messages (
     CHECK ((actor_key IS NULL) = (operation IS NULL)),
     CHECK (actor_key IS NULL OR (length(actor_key) = 32 AND length(message_id) = 36)),
     CHECK (quoted_offset IS NULL OR quoted_text IS NOT NULL),
+    CHECK (length(CAST(body AS BLOB)) > 0 OR quoted_text IS NOT NULL),
     CHECK (actor_key IS NULL OR (
         ((purpose = 'report_feedback') = (receipt_id IS NOT NULL)) AND
         ((receipt_id IS NULL) = (report_hash IS NULL)) AND
@@ -321,3 +325,106 @@ CREATE TABLE report_reads (
 ) STRICT, WITHOUT ROWID;
 
 CREATE INDEX report_read_version ON report_reads(run_id, receipt_id);
+
+CREATE TABLE notifications (
+    ordinal INTEGER PRIMARY KEY,
+    notification_id TEXT NOT NULL UNIQUE,
+    source TEXT NOT NULL CHECK (source IN ('gitlab', 'codex', 'claude', 'report', 'action', 'followup', 'service')),
+    occurrence_id TEXT NOT NULL CHECK (length(CAST(occurrence_id AS BLOB)) BETWEEN 1 AND 512),
+    kind TEXT NOT NULL CHECK (kind IN (
+        'reply', 'edited_reply', 'resolved', 'reopened', 'new_head', 'approval_withdrawn',
+        'agent_question', 'agent_permission', 'agent_failure', 'quota', 'report_ready', 'report_failed',
+        'action_needs_input', 'followup_ready', 'followup_needs_input')),
+    review_id TEXT NOT NULL REFERENCES reviews(review_id),
+    run_id TEXT,
+    session_key TEXT,
+    event_ref TEXT CHECK (length(CAST(event_ref AS BLOB)) <= 512),
+    label TEXT NOT NULL CHECK (length(CAST(label AS BLOB)) BETWEEN 1 AND 384),
+    occurred_at_ms INTEGER NOT NULL,
+    read_at_ms INTEGER,
+    dismissed_at_ms INTEGER,
+    notified_at_ms INTEGER,
+    UNIQUE (source, occurrence_id),
+    FOREIGN KEY (review_id, run_id) REFERENCES runs(review_id, run_id),
+    FOREIGN KEY (run_id, session_key) REFERENCES sessions(run_id, session_key),
+    CHECK (session_key IS NULL OR run_id IS NOT NULL)
+) STRICT;
+
+CREATE INDEX notifications_order ON notifications(occurred_at_ms DESC, source, notification_id DESC)
+    WHERE dismissed_at_ms IS NULL;
+CREATE INDEX notifications_unread ON notifications(review_id, ordinal)
+    WHERE dismissed_at_ms IS NULL AND read_at_ms IS NULL;
+CREATE INDEX notifications_review ON notifications(review_id, occurred_at_ms DESC);
+CREATE INDEX notifications_run_owner ON notifications(review_id, run_id);
+CREATE INDEX notifications_session_owner ON notifications(run_id, session_key);
+
+CREATE TABLE desktop_receipts (
+    receipt_id TEXT PRIMARY KEY,
+    episode_key TEXT NOT NULL UNIQUE CHECK (length(CAST(episode_key AS BLOB)) BETWEEN 1 AND 512),
+    notification_id TEXT NOT NULL REFERENCES notifications(notification_id),
+    state TEXT NOT NULL CHECK (state IN ('claimed', 'delivered', 'failed', 'uncertain')),
+    fence INTEGER NOT NULL CHECK (fence > 0),
+    attempted_at_ms INTEGER NOT NULL,
+    finished_at_ms INTEGER,
+    due_at_ms INTEGER,
+    reason TEXT CHECK (length(CAST(reason AS BLOB)) <= 128),
+    CHECK ((state='claimed') = (finished_at_ms IS NULL)),
+    CHECK (due_at_ms IS NULL OR state='failed')
+) STRICT;
+
+CREATE INDEX desktop_receipt_notification ON desktop_receipts(notification_id);
+CREATE INDEX desktop_receipt_due ON desktop_receipts(due_at_ms, receipt_id) WHERE state='failed';
+
+CREATE TABLE review_decisions (
+    review_id TEXT PRIMARY KEY REFERENCES reviews(review_id),
+    revision INTEGER NOT NULL CHECK (revision > 0),
+    disposition TEXT CHECK (disposition IN ('reviewed', 'waiting_author', 'needs_review')),
+    reviewed_sha TEXT CHECK (length(reviewed_sha) IN (40, 64)),
+    reviewed_at_ms INTEGER,
+    CHECK ((reviewed_sha IS NULL) = (reviewed_at_ms IS NULL)),
+    CHECK (reviewed_sha IS NULL OR disposition IN ('reviewed', 'waiting_author'))
+) STRICT, WITHOUT ROWID;
+
+CREATE TABLE review_decision_receipts (
+    actor_key BLOB NOT NULL,
+    operation TEXT NOT NULL CHECK (operation IN ('review_decision', 'review_checkpoint')),
+    submission_id TEXT NOT NULL,
+    review_id TEXT NOT NULL REFERENCES reviews(review_id),
+    revision INTEGER NOT NULL CHECK (revision > 0),
+    disposition TEXT CHECK (disposition IN ('reviewed', 'waiting_author', 'needs_review')),
+    reviewed_sha TEXT CHECK (length(reviewed_sha) IN (40, 64)),
+    reviewed_at_ms INTEGER,
+    checkpoint_id TEXT,
+    PRIMARY KEY (actor_key, operation, submission_id),
+    UNIQUE (review_id, revision),
+    FOREIGN KEY (actor_key, operation, submission_id)
+        REFERENCES mutation_receipts(actor_key, operation, submission_id)
+) STRICT, WITHOUT ROWID;
+
+CREATE TABLE review_handled_frontiers (
+    review_id TEXT PRIMARY KEY REFERENCES reviews(review_id),
+    source_ordinal INTEGER CHECK (source_ordinal > 0)
+) STRICT, WITHOUT ROWID;
+
+CREATE TABLE review_handled_reports (
+    review_id TEXT NOT NULL,
+    run_id TEXT NOT NULL,
+    attention_receipt_id TEXT NOT NULL,
+    PRIMARY KEY (review_id, run_id, attention_receipt_id),
+    FOREIGN KEY (review_id, run_id) REFERENCES runs(review_id, run_id),
+    FOREIGN KEY (run_id, attention_receipt_id) REFERENCES report_versions(run_id, receipt_id)
+) STRICT, WITHOUT ROWID;
+
+CREATE INDEX review_handled_report_version ON review_handled_reports(run_id, attention_receipt_id);
+
+CREATE TABLE review_handled_sessions (
+    review_id TEXT NOT NULL,
+    run_id TEXT NOT NULL,
+    session_key TEXT NOT NULL,
+    ordinal INTEGER NOT NULL CHECK (ordinal > 0),
+    PRIMARY KEY (review_id, run_id, session_key),
+    FOREIGN KEY (review_id, run_id) REFERENCES runs(review_id, run_id),
+    FOREIGN KEY (run_id, session_key) REFERENCES sessions(run_id, session_key)
+) STRICT, WITHOUT ROWID;
+
+CREATE INDEX review_handled_session_owner ON review_handled_sessions(run_id, session_key);

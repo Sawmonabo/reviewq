@@ -37,6 +37,8 @@ pub struct RecordedMessage {
     pub submission_id: SubmissionId,
     pub purpose: RecordedPurpose,
     pub state: DeliveryState,
+    pub outcome_detail: Option<String>,
+    pub followup_batch_id: Option<String>,
     pub text: String,
     pub attachment: Option<MessageAttachment>,
     pub native_turn_id: Option<NativeTurnId>,

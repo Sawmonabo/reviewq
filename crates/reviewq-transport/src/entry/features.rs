@@ -1,16 +1,31 @@
 //! Production HTTP routes for review-owned state.
 
+pub(super) mod decisions;
+mod notifications;
 mod reports;
 
 use std::sync::Arc;
 
-use axum::Router;
 use axum::routing::get;
+use axum::{Router, extract::DefaultBodyLimit};
 
 use super::Entry;
 
 pub(super) fn routes() -> Router<Arc<Entry>> {
     Router::new()
+        .route(
+            "/reviews/{review_id}/decisions",
+            axum::routing::post(decisions::save),
+        )
+        .route(
+            "/reviews/{review_id}/checkpoint",
+            axum::routing::post(decisions::checkpoint),
+        )
+        .route("/notifications", get(notifications::list))
+        .route(
+            "/notifications/state",
+            axum::routing::post(notifications::update).layer(DefaultBodyLimit::max(2_100_000)),
+        )
         .route("/runs/{run_id}/report", get(reports::current))
         .route("/runs/{run_id}/report/history", get(reports::history))
         .route("/runs/{run_id}/report/context", get(reports::context))

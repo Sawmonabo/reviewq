@@ -9,7 +9,7 @@ use crate::{
 
 macro_rules! wire_enum {
     ($name:ident { $($value:ident),+ $(,)? }) => {
-        #[derive(Debug, Serialize)]
+        #[derive(Clone, Debug, Serialize)]
         #[serde(rename_all = "snake_case")]
         #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
         pub enum $name { $($value),+ }
@@ -59,7 +59,7 @@ pub struct ArtifactStats {
     pub complete: bool,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct ReportReference {
@@ -90,7 +90,7 @@ pub struct ReportSummary {
     pub stats: ArtifactStats,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct ReportDelivery {
@@ -112,9 +112,9 @@ pub struct ReportView {
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-pub struct ReportHistory {
+pub struct ReportHistory<I = ReportSummary> {
     #[serde(flatten)]
-    pub page: Page<ReportSummary>,
+    pub page: Page<I>,
     pub current_receipt_id: Option<ResourceIdDto>,
     pub delivery: Option<ReportDelivery>,
 }
@@ -125,6 +125,8 @@ pub struct ReportHistory {
 pub struct ReportSection {
     #[serde(flatten)]
     pub report: ReportReference,
+    pub complete: bool,
+    pub original_sha256: Option<ReportHashDto>,
     pub text: String,
     pub offset: SafeCountDto,
     pub next_offset: Option<SafeCountDto>,
@@ -177,11 +179,11 @@ pub enum Descriptor {
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-pub struct ReportContext {
+pub struct ReportContext<I = Descriptor> {
     pub base_report: Option<ReportReference>,
     pub user_disposition_version: RevisionDto,
     #[serde(flatten)]
-    pub page: Page<Descriptor>,
+    pub page: Page<I>,
 }
 
 #[derive(Debug, Serialize)]

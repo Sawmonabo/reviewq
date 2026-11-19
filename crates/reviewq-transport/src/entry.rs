@@ -9,9 +9,11 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use reviewq_app::access::{Actor, AppError};
+use reviewq_app::decisions::{Checkpoints, DecisionStore};
 use reviewq_app::events::EventLog;
 use reviewq_app::history::{HistoryStore, NativeHistoryReader};
 use reviewq_app::hosts::{LeadStore, MessageHistoryStore, NativeHost};
+use reviewq_app::notifications::InboxStore;
 use reviewq_app::queue::{QueueStore, ReviewLookup};
 use reviewq_app::reports::ReportStore;
 use reviewq_app::sources::{ReviewSourceReader, SourceRefreshStore, refresh_queue};
@@ -51,6 +53,8 @@ pub trait Store:
     + SourceRefreshStore
     + ReportStore
     + MessageHistoryStore
+    + InboxStore
+    + DecisionStore
 {
 }
 impl<
@@ -62,7 +66,9 @@ impl<
         + HistoryStore
         + SourceRefreshStore
         + ReportStore
-        + MessageHistoryStore,
+        + MessageHistoryStore
+        + InboxStore
+        + DecisionStore,
 > Store for S
 {
 }
@@ -80,6 +86,7 @@ pub(super) struct Entry {
     event_slots: Arc<Semaphore>,
     auth: Auth,
     refresh: Mutex<Option<watch::Receiver<RefreshResult>>>,
+    checkpoints: Checkpoints,
 }
 
 #[derive(Deserialize)]
@@ -138,6 +145,7 @@ pub fn router(
         event_slots: Arc::new(Semaphore::new(32)),
         auth: Auth::new(runtime.endpoint),
         refresh: Mutex::new(None),
+        checkpoints: Checkpoints::default(),
     });
     let web = runtime.web;
     let api = Router::new()

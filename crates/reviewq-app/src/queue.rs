@@ -4,6 +4,7 @@ use reviewq_domain::identity::{GitSha, MrIdentity, ReviewId, Revision, RunId, Se
 use reviewq_domain::session::{HostProvider, LeadTarget};
 
 use crate::access::{Actor, AppError, AppFuture};
+use crate::decisions::{Decision, Frontier};
 use crate::events::Snapshot;
 use crate::sources::SourceSync;
 
@@ -95,6 +96,8 @@ pub struct QueueItem {
     pub review_id: ReviewId,
     pub source: ReviewSource,
     pub registered_lead_count: u64,
+    pub decision: Decision,
+    pub pending_source_updates: bool,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -126,6 +129,7 @@ pub struct RunSummary {
 pub struct ReviewOverview {
     pub item: QueueItem,
     pub settings_revision: Revision,
+    pub frontier: Frontier,
     pub runs: Vec<RunSummary>,
     pub next_run: Option<RunPosition>,
 }
