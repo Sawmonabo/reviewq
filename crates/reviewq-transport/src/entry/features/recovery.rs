@@ -100,7 +100,6 @@ async fn interrupt(
     }
     let actor = entry.auth.browser_actor(&headers, true)?;
     let input: dto::InterruptRequest = read(&bytes)?;
-    let host = entry.host.as_ref().ok_or(AppError::Unavailable)?;
     let claim = entry
         .store
         .claim_interrupt(
@@ -111,18 +110,27 @@ async fn interrupt(
         )
         .await?;
     let state = if claim.acquired {
-        let observed = host
-            .interrupt_managed(claim.target.clone(), claim.turn.clone())
-            .await
-            .unwrap_or(app::InterruptState::Deferred);
+        let observed = if claim.claude_job.is_some() {
+            let guard = app::InterruptGuard::new(entry.store.clone(), claim.clone());
+            match entry.claude_interrupt.as_ref() {
+                Some(host) => host
+                    .interrupt_job(guard)
+                    .await
+                    .unwrap_or(app::InterruptState::Deferred),
+                None => app::InterruptState::Deferred,
+            }
+        } else if let Some(host) = entry.host.as_ref() {
+            host.interrupt_managed(claim.target.clone(), claim.turn.clone())
+                .await
+                .unwrap_or(app::InterruptState::Deferred)
+        } else {
+            app::InterruptState::Deferred
+        };
         entry.store.finish_interrupt(claim, observed).await?
     } else if matches!(
         claim.state,
         app::InterruptState::Uncertain | app::InterruptState::Reserved
-    ) && host
-        .observe_interrupt(claim.target.clone(), claim.turn.clone())
-        .await
-        .unwrap_or(false)
+    ) && stopped_job(&entry, &claim).await
     {
         entry
             .store
@@ -144,6 +152,24 @@ async fn interrupt(
         },
     };
     Ok(Json(success(receipt, state.cursor)?))
+}
+
+async fn stopped_job(entry: &Entry, claim: &app::InterruptClaim) -> bool {
+    if claim.claude_job.is_some() {
+        match entry.claude_interrupt.as_ref() {
+            Some(host) => host
+                .observe_stopped_job(claim.clone())
+                .await
+                .unwrap_or(false),
+            None => false,
+        }
+    } else if let Some(host) = entry.host.as_ref() {
+        host.observe_interrupt(claim.target.clone(), claim.turn.clone())
+            .await
+            .unwrap_or(false)
+    } else {
+        false
+    }
 }
 
 fn read<T: DeserializeOwned>(bytes: &[u8]) -> Result<T, AppError> {

@@ -7,6 +7,7 @@ use std::sync::atomic::AtomicBool;
 use reviewq_app::access::AppError;
 use reviewq_app::history::{HistoryParent, HistorySession};
 use reviewq_app::hosts::{QuestionAnchor, QuestionKey, QuestionStatus, answer_digest};
+use reviewq_domain::identity::NativeTurnId;
 use reviewq_domain::session::{HostProvider, NativeBinding};
 use serde::Deserialize;
 use struson::reader::{JsonReader, JsonStreamReader, ValueType};
@@ -31,6 +32,7 @@ pub(crate) async fn codex_question_opening(
     session: HistorySession,
     path: PathBuf,
     call_id: String,
+    turn: NativeTurnId,
 ) -> Result<QuestionAnchor, AppError> {
     let (generation, opening) = codex_call(
         session.binding,
@@ -38,7 +40,7 @@ pub(crate) async fn codex_question_opening(
         path,
         call_id,
         None,
-        Some("request_user_input"),
+        Some(turn),
     )
     .await?;
     Ok(QuestionAnchor {
@@ -53,7 +55,7 @@ async fn codex_call(
     path: PathBuf,
     call_id: String,
     position: Option<u64>,
-    name: Option<&'static str>,
+    expected_question_turn: Option<NativeTurnId>,
 ) -> Result<(String, u64), AppError> {
     if binding.identity().provider() != HostProvider::Codex {
         return Err(AppError::Forbidden);
@@ -68,7 +70,14 @@ async fn codex_call(
             .metadata()
             .map_err(|_| AppError::Unavailable)?
             .len();
-        let mut budget = SEARCH_BYTES;
+        let mut budget = if expected_question_turn.is_some() {
+            file::READ_BUDGET
+        } else {
+            SEARCH_BYTES
+        };
+        let name = expected_question_turn
+            .as_ref()
+            .map(|_| "request_user_input");
         let offset = if let Some(position) = position {
             if position >= length || !file::boundary(&source.file, position)? {
                 return Err(AppError::Conflict);
@@ -103,6 +112,12 @@ async fn codex_call(
                 end = start;
             }
         };
+        if let Some(turn) = expected_question_turn
+            && super::turn_metadata::turn_before(&source, offset, &stopped)?.as_deref()
+                != Some(turn.as_str())
+        {
+            return Err(AppError::Conflict);
+        }
         Ok((file::generation(&source)?, offset))
     })
     .await
@@ -192,7 +207,7 @@ pub(crate) async fn codex_question_answered(
             if end == length && !file::boundary(file, end)? {
                 break;
             }
-            match answer(lines.input(start, end), &key, digest) {
+            match answer(lines.input(start, end), &key, digest, !ended) {
                 Ok(Some(QuestionStatus::Answered)) => return Ok(Some(QuestionStatus::Answered)),
                 Ok(Some(QuestionStatus::Closed)) => ended = true,
                 _ => {}
@@ -209,6 +224,7 @@ fn answer(
     input: impl Read,
     key: &QuestionKey,
     expected_digest: Option<[u8; 32]>,
+    allow_implicit_turn: bool,
 ) -> Result<Option<QuestionStatus>, AppError> {
     let mut reader = JsonStreamReader::new(NameBudget::new(input));
     let (mut outer, mut kind, mut call, mut turn, mut output) = (None, None, None, None, None);
@@ -234,17 +250,25 @@ fn answer(
     })?;
     reader.consume_trailing_whitespace().map_err(invalid)?;
     if outer.as_deref() == Some("event_msg")
-        && matches!(
-            kind.as_deref(),
-            Some("task_complete" | "turn_complete" | "turn_aborted")
-        )
-        && turn.as_deref() == Some(key.turn.as_str())
+        && match kind.as_deref() {
+            Some("task_complete" | "turn_complete" | "turn_aborted") => {
+                turn.as_deref() == Some(key.turn.as_str())
+            }
+            Some("task_started" | "turn_started") => turn
+                .as_deref()
+                .is_some_and(|turn| turn != key.turn.as_str()),
+            _ => false,
+        }
     {
         return Ok(Some(QuestionStatus::Closed));
     }
     if outer.as_deref() != Some("response_item")
         || kind.as_deref() != Some("function_call_output")
         || call.as_deref() != Some(key.item.as_str())
+        || match turn.as_deref() {
+            Some(turn) => turn != key.turn.as_str(),
+            None => !allow_implicit_turn,
+        }
     {
         return Ok(None);
     }

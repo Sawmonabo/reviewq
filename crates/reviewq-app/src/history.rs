@@ -28,6 +28,7 @@ pub trait HistoryStore: Send + Sync {
     fn prompt_overview_checkpoint(
         &self,
         source: HistorySession,
+        start_offset: u64,
     ) -> AppFuture<'_, Option<PromptOverviewCheckpoint>>;
     fn remember_prompt_overview(
         &self,
@@ -72,6 +73,13 @@ pub trait NativeHistoryReader: Send + Sync {
         session: HistorySession,
         query: NavigationQuery,
     ) -> AppFuture<'_, Option<NativeNavigation>>;
+
+    fn extend_overview(
+        &self,
+        session: HistorySession,
+        checkpoint: PromptOverviewCheckpoint,
+        pinned_start: Option<FilePosition>,
+    ) -> AppFuture<'_, Option<PromptOverviewCheckpoint>>;
 
     fn plan(&self, session: HistorySession) -> AppFuture<'_, Option<NativePlan>>;
 
@@ -219,8 +227,11 @@ pub enum NativeNavigation {
     },
 }
 
-/// A sparse first navigation window, with only source witnesses and prompt ordinals.
+/// A bounded navigation window containing source witnesses and prompt ordinals.
+#[derive(Clone)]
 pub struct PromptOverviewCheckpoint {
+    pub start_offset: u64,
+    pub first_ordinal: u64,
     pub anchor: SourceAnchor,
     pub total: u64,
     pub groups: Vec<PromptGroup>,

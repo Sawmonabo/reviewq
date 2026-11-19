@@ -8,6 +8,7 @@ use tokio::process::Command;
 use tokio::sync::Mutex;
 
 mod catalog;
+mod interrupt;
 mod launch;
 
 pub struct ClaudeCli {

@@ -1,5 +1,7 @@
 //! Opt-in continuation and exact managed interrupt authority.
 
+use std::sync::Arc;
+
 use reviewq_domain::identity::{GitSha, NativeTurnId, ReportHash, Revision, RunId, SessionKey};
 use reviewq_domain::session::LeadTarget;
 
@@ -64,12 +66,38 @@ pub struct PreparedRecovery {
     pub reviewer: u64,
 }
 
+#[derive(Clone)]
 pub struct InterruptClaim {
     pub target: LeadTarget,
+    pub claude_job: Option<String>,
     pub turn: NativeTurnId,
     pub state: InterruptState,
     pub acquired: bool,
     pub cursor: reviewq_domain::identity::EventCursor,
+}
+
+pub struct InterruptGuard {
+    store: Arc<dyn RecoveryStore>,
+    claim: InterruptClaim,
+}
+
+impl InterruptGuard {
+    pub fn new(store: Arc<dyn RecoveryStore>, claim: InterruptClaim) -> Self {
+        Self { store, claim }
+    }
+
+    pub fn claim(&self) -> &InterruptClaim {
+        &self.claim
+    }
+
+    pub async fn check(&self) -> Result<(), crate::access::AppError> {
+        self.store.check_interrupt(self.claim.clone()).await
+    }
+}
+
+pub trait NativeJobInterrupt: Send + Sync {
+    fn interrupt_job(&self, guard: InterruptGuard) -> AppFuture<'_, InterruptState>;
+    fn observe_stopped_job(&self, claim: InterruptClaim) -> AppFuture<'_, bool>;
 }
 
 pub trait RecoveryStore: Send + Sync {
@@ -109,6 +137,7 @@ pub trait RecoveryStore: Send + Sync {
         session: SessionKey,
         turn: NativeTurnId,
     ) -> AppFuture<'_, InterruptClaim>;
+    fn check_interrupt(&self, claim: InterruptClaim) -> AppFuture<'_, ()>;
     fn finish_interrupt(
         &self,
         claim: InterruptClaim,

@@ -250,6 +250,9 @@ pub(crate) async fn serve(profile: PathBuf, options: Serve) -> Result<(), Failur
             .clone()
             .map(|host| host as Arc<dyn NativeModelReader>),
     };
+    let claude_interrupt = claude_cli
+        .clone()
+        .map(|cli| cli as Arc<dyn reviewq_app::hosts::recovery::NativeJobInterrupt>);
     let launchers = NativeLaunchers {
         codex: codex.map(|host| host as Arc<dyn NativeLauncher>),
         claude: claude_cli.map(|host| host as Arc<dyn NativeLauncher>),
@@ -324,6 +327,7 @@ pub(crate) async fn serve(profile: PathBuf, options: Serve) -> Result<(), Failur
             launchers,
             launches_allowed: !options.validation,
             claude,
+            claude_interrupt,
             terminal,
             workflow: WorkflowIntegration {
                 proof: workflow,

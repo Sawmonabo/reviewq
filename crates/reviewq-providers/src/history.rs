@@ -111,6 +111,17 @@ impl NativeHistoryReader for FileHistory {
         })
     }
 
+    fn extend_overview(
+        &self,
+        session: HistorySession,
+        checkpoint: reviewq_app::history::PromptOverviewCheckpoint,
+        pinned_start: Option<reviewq_app::history::FilePosition>,
+    ) -> AppFuture<'_, Option<reviewq_app::history::PromptOverviewCheckpoint>> {
+        self.inspect(session, move |source, cancel| {
+            navigation::extend(&source, checkpoint, pinned_start, cancel)
+        })
+    }
+
     fn plan(&self, session: HistorySession) -> AppFuture<'_, Option<NativePlan>> {
         let binding = session.binding.clone();
         self.inspect(session, move |source, cancel| {

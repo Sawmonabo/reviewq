@@ -208,6 +208,18 @@ impl Codex {
         Ok(thread)
     }
 
+    pub(super) async fn retained_thread(&self, lead: &LeadTarget) -> Result<Thread, AppError> {
+        let expected = lead.binding().identity();
+        if expected.profile() != &self.profile || expected.provider() != HostProvider::Codex {
+            return Err(AppError::NotFound);
+        }
+        let thread = self.read_thread(expected.native_id()).await?;
+        if !retained_cwd(&thread, lead.binding().cwd()).await? {
+            return Err(AppError::Conflict);
+        }
+        Ok(thread)
+    }
+
     pub(super) async fn read_thread(
         &self,
         native_id: &NativeSessionId,

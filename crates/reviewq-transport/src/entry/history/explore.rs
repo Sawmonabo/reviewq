@@ -103,63 +103,93 @@ async fn native_navigation(
     source: &HistorySession,
     query: NavigationQuery,
 ) -> Result<NativeNavigation, AppError> {
-    let use_checkpoint = matches!(
-        query,
+    let window = match &query {
         NavigationQuery::Overview {
             groups: 32,
-            start: None
-        }
-    );
-    let _build = if use_checkpoint {
+            start: None,
+        } => Some((0, 1, None, None)),
+        NavigationQuery::Overview {
+            groups: 32,
+            start: Some((start, generation)),
+        } => match &start.bookmark {
+            HistoryBookmark::File(point) => Some((
+                point.offset,
+                start.next_ordinal,
+                Some(point.clone()),
+                Some(generation.as_str()),
+            )),
+            HistoryBookmark::Rpc(_) => None,
+        },
+        _ => None,
+    };
+    let _build = if window.is_some() {
         Some(entry.history_watches.claim_overview(source).await?)
     } else {
         None
     };
-    let prior = if use_checkpoint {
+    let prior = if let Some((offset, _, _, _)) = window.as_ref() {
         entry
             .store
-            .prompt_overview_checkpoint(source.clone())
+            .prompt_overview_checkpoint(source.clone(), *offset)
             .await?
     } else {
         None
     };
-    if let Some(prior) = prior.as_ref()
-        && let Some(head) = entry
-            .file_history
-            .head(source.clone(), Some(prior.anchor.clone()))
-            .await?
-        && !head.reset
-        && head.anchor == prior.anchor
+    if let (Some((_, first, point, generation)), Some(checkpoint)) = (&window, &prior)
+        && checkpoint.first_ordinal == *first
+        && generation.is_none_or(|generation| generation == checkpoint.anchor.generation)
     {
-        return Ok(PromptOverviewCheckpoint {
-            anchor: prior.anchor.clone(),
-            total: prior.total,
-            groups: prior.groups.clone(),
-            next: prior.next.clone(),
+        match entry
+            .file_history
+            .extend_overview(source.clone(), checkpoint.clone(), point.clone())
+            .await
+        {
+            Ok(Some(updated)) => {
+                if updated.anchor != checkpoint.anchor {
+                    entry
+                        .store
+                        .remember_prompt_overview(
+                            source.clone(),
+                            Some(checkpoint.anchor.clone()),
+                            updated.clone(),
+                        )
+                        .await?;
+                }
+                return Ok(updated.navigation());
+            }
+            Ok(None) | Err(AppError::CursorExpired) => {}
+            Err(error) => return Err(error),
         }
-        .navigation());
     }
     if let Some(result) = entry
         .file_history
         .navigation(source.clone(), query.clone())
         .await?
     {
-        if use_checkpoint
-            && let NativeNavigation::Overview {
+        if let (
+            Some((start_offset, first_ordinal, pinned, _)),
+            NativeNavigation::Overview {
                 source: Some(anchor),
                 total,
                 groups,
                 next,
                 ..
-            } = &result
+            },
+        ) = (window, &result)
+            && !prior.as_ref().is_some_and(|saved| {
+                pinned.is_some()
+                    && saved.anchor.generation == anchor.generation
+                    && saved.anchor.file.high_water > anchor.file.high_water
+            })
         {
-            let expected = prior.map(|prior| prior.anchor);
             entry
                 .store
                 .remember_prompt_overview(
                     source.clone(),
-                    expected,
+                    prior.map(|saved| saved.anchor),
                     PromptOverviewCheckpoint {
+                        start_offset,
+                        first_ordinal,
                         anchor: anchor.clone(),
                         total: *total,
                         groups: groups.clone(),

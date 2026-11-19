@@ -118,7 +118,11 @@ impl QuestionsPort for Codex {
                 }
                 match form {
                     Some(form) => {
-                        form.state = display_status(receipt.state, Some(form.state));
+                        if !(receipt.state == QuestionStatus::Unavailable
+                            && form.state == QuestionStatus::Pending)
+                        {
+                            form.state = display_status(receipt.state, Some(form.state));
+                        }
                     }
                     None => {
                         let mut form = receipt.form();
@@ -173,25 +177,30 @@ impl QuestionsPort for Codex {
                 .map_err(|_| AppError::Busy)?;
             let session = answer.session();
             let thread = self.question_thread(session, true).await?;
-            if !matches!(thread.status, ThreadStatus::Active { .. }) {
-                return Err(AppError::Conflict);
-            }
-            let page = self.turns(&thread.id, None, false, 1, false).await?;
-            if !page
-                .data
-                .first()
-                .is_some_and(|turn| turn.id == form.turn.as_str() && turn.status == "inProgress")
-            {
-                return Err(AppError::Conflict);
+            if form.blocking {
+                if !matches!(thread.status, ThreadStatus::Active { .. }) {
+                    return Err(AppError::Conflict);
+                }
+                let page = self.turns(&thread.id, None, false, 1, false).await?;
+                if !page.data.first().is_some_and(|turn| {
+                    turn.id == form.turn.as_str() && turn.status == "inProgress"
+                }) {
+                    return Err(AppError::Conflict);
+                }
             }
             let path = thread.path.ok_or(AppError::Unavailable)?;
             let anchor = crate::history::codex_question_opening(
                 session.clone(),
                 path,
                 form.item.as_str().to_owned(),
+                form.turn.clone(),
             )
             .await?;
             let attempted = QuestionReceipt {
+                attempt_id: uuid::Uuid::new_v4()
+                    .to_string()
+                    .parse()
+                    .map_err(|_| AppError::Internal)?,
                 key: QuestionKey {
                     request: form.request.clone(),
                     turn: form.turn.clone(),

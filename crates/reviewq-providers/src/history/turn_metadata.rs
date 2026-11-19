@@ -64,6 +64,32 @@ pub(crate) async fn codex_turn_started(
     .await
 }
 
+/// Resolves the native turn boundary immediately preceding an opening item.
+pub(super) fn turn_before(
+    source: &locator::Source,
+    mut end: u64,
+    cancelled: &AtomicBool,
+) -> Result<Option<String>, AppError> {
+    let mut budget = file::READ_BUDGET;
+    let mut lines = file::Lines::new(&source.file, cancelled);
+    for _ in 0..file::MAX_RECORDS {
+        if end == 0 || budget == 0 {
+            break;
+        }
+        let start = lines.previous(end - 1, &mut budget)?;
+        let row = read(lines.input(start, end))?;
+        if row.turn.is_some()
+            && (row.outer.as_deref() == Some("turn_context")
+                || (row.outer.as_deref() == Some("event_msg")
+                    && matches!(row.kind.as_deref(), Some("task_started" | "turn_started"))))
+        {
+            return Ok(row.turn);
+        }
+        end = start;
+    }
+    Ok(None)
+}
+
 async fn scan<T: Send + 'static>(
     binding: NativeBinding,
     path: PathBuf,

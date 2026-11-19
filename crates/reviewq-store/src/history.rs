@@ -20,9 +20,10 @@ impl HistoryStore for SqliteStore {
     fn prompt_overview_checkpoint(
         &self,
         source: HistorySession,
+        start_offset: u64,
     ) -> AppFuture<'_, Option<PromptOverviewCheckpoint>> {
         Box::pin(async move {
-            self.read(move |db| index::read(db, &source))
+            self.read(move |db| index::read(db, &source, start_offset))
                 .await
                 .map_err(StoreError::app)
         })
