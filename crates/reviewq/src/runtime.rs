@@ -182,6 +182,7 @@ pub(crate) async fn serve(profile: PathBuf, options: Serve) -> Result<(), Failur
         reviewq_transport::ServiceRuntime {
             sends_allowed,
             claude,
+            workflow: None,
             endpoint: endpoint.clone(),
             web: &web,
             commits: store.subscribe(),

@@ -199,3 +199,93 @@ pub struct CandidateReport {
     pub declaration_sha256: ReportHashDto,
     pub reason: String,
 }
+
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub enum PublicationChoice {
+    Withheld,
+    Authorized,
+    Published,
+}
+
+#[derive(Debug, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct DispositionPatch {
+    pub blocking: Option<bool>,
+    pub publication: Option<PublicationChoice>,
+    pub reason: String,
+}
+
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct DispositionRequest {
+    pub submission_id: crate::SubmissionIdDto,
+    pub expected_version: RevisionDto,
+    pub receipt_id: ResourceIdDto,
+    pub finding_id: ResourceIdDto,
+    pub disposition: DispositionPatch,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct DispositionReceipt {
+    pub receipt_id: ResourceIdDto,
+    pub user_disposition_version: RevisionDto,
+    pub finding: Descriptor,
+}
+
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct ViewedRequest {
+    pub submission_id: crate::SubmissionIdDto,
+    pub receipt_id: ResourceIdDto,
+    pub rendered_batch_id: Option<ResourceIdDto>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct ViewedReceipt {
+    pub receipt_id: ResourceIdDto,
+    pub previous_receipt_id: Option<ResourceIdDto>,
+    pub rendered_batch_id: Option<ResourceIdDto>,
+}
+
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub enum QuoteUnit {
+    UnicodeCodepoints,
+}
+
+#[derive(Debug, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct QuoteRef {
+    pub offset: SafeCountDto,
+    pub length: SafeCountDto,
+    pub unit: QuoteUnit,
+}
+
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct FeedbackRequest {
+    pub submission_id: crate::SubmissionIdDto,
+    pub receipt_id: ResourceIdDto,
+    pub report_hash: ReportHashDto,
+    pub quote: String,
+    pub quote_ref: Option<QuoteRef>,
+    pub text: crate::MessageTextDto,
+}
+
+mod handoff;
+pub use handoff::{
+    AcceptedReport, Handoff, HandoffCommand, HandoffReceipt, HandoffState, NativeContext,
+    NativeReportAddress, ReportRevision, ReportSource, ReportVerdict,
+};

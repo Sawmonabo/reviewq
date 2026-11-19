@@ -17,8 +17,9 @@ use reviewq_app::history::{HistoryStore, NativeHistoryReader};
 use reviewq_app::hosts::{ClaudeCompanion, LeadStore, MessageHistoryStore, NativeHost};
 use reviewq_app::notifications::InboxStore;
 use reviewq_app::queue::{QueueStore, ReviewLookup};
-use reviewq_app::reports::ReportStore;
+use reviewq_app::reports::{ReportCaptureStore, ReportMutationStore, ReportStore};
 use reviewq_app::sources::{ReviewSourceReader, SourceRefreshStore, refresh_queue};
+use reviewq_app::workflow::NativeWorkflowProof;
 use reviewq_app::workspace::WorkspaceStore;
 use reviewq_domain::identity::EventCursor;
 use reviewq_protocol::queue::QueueSync;
@@ -55,6 +56,8 @@ pub trait Store:
     + HistoryStore
     + SourceRefreshStore
     + ReportStore
+    + ReportMutationStore
+    + ReportCaptureStore
     + MessageHistoryStore
     + InboxStore
     + DecisionStore
@@ -71,6 +74,8 @@ impl<
         + HistoryStore
         + SourceRefreshStore
         + ReportStore
+        + ReportMutationStore
+        + ReportCaptureStore
         + MessageHistoryStore
         + InboxStore
         + DecisionStore
@@ -88,6 +93,7 @@ pub(super) struct Entry {
     host: Option<Arc<dyn NativeHost>>,
     claude: Option<Arc<dyn ClaudeCompanion>>,
     file_history: Arc<dyn NativeHistoryReader>,
+    workflow: Option<Arc<dyn NativeWorkflowProof>>,
     sends_allowed: bool,
     commits: watch::Receiver<EventCursor>,
     shutdown: watch::Receiver<bool>,
@@ -131,6 +137,7 @@ pub struct ServiceRuntime<'a> {
     pub web: &'a Path,
     pub sends_allowed: bool,
     pub claude: Option<Arc<dyn ClaudeCompanion>>,
+    pub workflow: Option<Arc<dyn NativeWorkflowProof>>,
     pub commits: watch::Receiver<EventCursor>,
     pub shutdown: watch::Receiver<bool>,
 }
@@ -149,6 +156,7 @@ pub fn router(
         host,
         claude: runtime.claude,
         file_history,
+        workflow: runtime.workflow,
         sends_allowed: runtime.sends_allowed,
         commits: runtime.commits,
         shutdown: runtime.shutdown,

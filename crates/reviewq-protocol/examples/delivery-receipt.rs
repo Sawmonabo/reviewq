@@ -12,6 +12,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     assert!(UtcTimestampDto::new("2026-02-31T00:00:00.000Z").is_none());
     let response = DeliveryReceiptResponse {
         data: DeliveryReceipt {
+            report_ref: None,
             submission_id: SubmissionIdDto::new("send_42").unwrap(),
             run_id: RunIdDto::new("run_active").unwrap(),
             session_key: SessionKeyDto::new("codex:active").unwrap(),

@@ -176,7 +176,7 @@ CREATE UNIQUE INDEX runs_review_identity ON runs(review_id, run_id);
 
 CREATE TABLE artifacts (
     artifact_id TEXT PRIMARY KEY,
-    sha256 TEXT NOT NULL CHECK (length(sha256) = 64 AND sha256 NOT GLOB '*[^0-9a-f]*'),
+    sha256 TEXT CHECK (length(sha256) = 64 AND sha256 NOT GLOB '*[^0-9a-f]*'),
     original_sha256 TEXT CHECK (original_sha256 IS NULL OR (
         length(original_sha256) = 64 AND original_sha256 NOT GLOB '*[^0-9a-f]*')),
     byte_length INTEGER NOT NULL CHECK (byte_length >= 0),
@@ -184,7 +184,7 @@ CREATE TABLE artifacts (
     line_count INTEGER NOT NULL CHECK (line_count BETWEEN 0 AND total_code_points),
     max_line_bytes INTEGER NOT NULL CHECK (max_line_bytes BETWEEN 0 AND byte_length),
     complete INTEGER NOT NULL CHECK (complete IN (0, 1)),
-    sealed INTEGER NOT NULL CHECK (sealed IN (0, 1)),
+    sealed INTEGER NOT NULL CHECK (sealed IN (0, 1) AND (sealed=0 OR sha256 IS NOT NULL)),
     created_at_ms INTEGER NOT NULL
 ) STRICT;
 
@@ -207,14 +207,32 @@ CREATE TABLE report_handoffs (
     lead_session_key TEXT NOT NULL,
     turn_id TEXT NOT NULL,
     call_id TEXT NOT NULL,
+    source_generation TEXT NOT NULL CHECK (length(CAST(source_generation AS BLOB)) BETWEEN 1 AND 512),
+    request_entry_id TEXT,
+    result_entry_id TEXT,
     declaration_sha256 TEXT NOT NULL CHECK (length(declaration_sha256) = 64),
     form TEXT NOT NULL CHECK (form IN ('final', 'unchanged', 'needs_input')),
     state TEXT NOT NULL CHECK (state IN ('pending_completion', 'recorded', 'failed')),
     source_kind TEXT CHECK (source_kind IN ('file', 'response')),
+    source_path BLOB,
+    source_hash TEXT CHECK (length(source_hash) = 64),
+    reviewed_sha TEXT CHECK (length(reviewed_sha) IN (40, 64)),
+    revision_reason TEXT CHECK (length(CAST(revision_reason AS BLOB)) <= 1024),
+    verdict TEXT CHECK (verdict IN ('approve', 'request_changes', 'blocked', 'not_specified')),
+    expected_receipt_id TEXT,
+    expected_sha256 TEXT CHECK (length(expected_sha256) = 64),
+    base_receipt_id TEXT,
+    disposition_version INTEGER NOT NULL CHECK (disposition_version >= 0),
+    fence INTEGER NOT NULL DEFAULT 0 CHECK (fence >= 0),
+    due_at_ms INTEGER NOT NULL,
     artifact_id TEXT REFERENCES artifacts(artifact_id),
     reason TEXT CHECK (length(CAST(reason AS BLOB)) <= 2048),
     created_at_ms INTEGER NOT NULL,
     updated_at_ms INTEGER NOT NULL CHECK (updated_at_ms >= created_at_ms),
+    CHECK ((expected_receipt_id IS NULL) = (expected_sha256 IS NULL)),
+    CHECK ((source_kind='file') = (source_path IS NOT NULL)),
+    CHECK ((form='final') = (verdict IS NOT NULL)),
+    CHECK (state<>'recorded' OR result_entry_id IS NOT NULL),
     FOREIGN KEY (run_id, lead_session_key) REFERENCES runs(run_id, lead_session_key),
     UNIQUE (run_id, receipt_id),
     UNIQUE (run_id, lead_session_key, turn_id, call_id)
@@ -222,7 +240,7 @@ CREATE TABLE report_handoffs (
 
 CREATE INDEX report_handoff_latest ON report_handoffs(run_id, created_at_ms DESC, receipt_id DESC);
 CREATE INDEX report_handoff_artifact ON report_handoffs(artifact_id);
-CREATE INDEX report_handoff_pending ON report_handoffs(updated_at_ms, receipt_id)
+CREATE INDEX report_handoff_pending ON report_handoffs(due_at_ms, receipt_id)
     WHERE state='pending_completion';
 
 CREATE TABLE report_versions (
@@ -683,3 +701,28 @@ CREATE TABLE followup_result_reads (
 ) STRICT, WITHOUT ROWID;
 
 CREATE INDEX followup_result_read_owner ON followup_result_reads(review_id, batch_id);
+
+CREATE TABLE report_mutation_receipts (
+    actor_key BLOB NOT NULL,
+    operation TEXT NOT NULL CHECK (operation IN ('report_disposition', 'report_viewed')),
+    submission_id TEXT NOT NULL,
+    run_id TEXT NOT NULL,
+    receipt_id TEXT NOT NULL,
+    disposition_version INTEGER,
+    finding_id TEXT,
+    previous_receipt_id TEXT,
+    rendered_batch_id TEXT,
+    PRIMARY KEY (actor_key, operation, submission_id),
+    FOREIGN KEY (actor_key, operation, submission_id)
+        REFERENCES mutation_receipts(actor_key, operation, submission_id),
+    FOREIGN KEY (run_id, receipt_id) REFERENCES report_versions(run_id, receipt_id),
+    FOREIGN KEY (run_id, previous_receipt_id) REFERENCES report_versions(run_id, receipt_id),
+    FOREIGN KEY (run_id, disposition_version, finding_id)
+        REFERENCES finding_dispositions(run_id, disposition_version, finding_id),
+    CHECK ((operation='report_disposition') = (disposition_version IS NOT NULL AND finding_id IS NOT NULL))
+) STRICT, WITHOUT ROWID;
+
+CREATE INDEX report_mutation_version ON report_mutation_receipts(run_id, receipt_id);
+CREATE INDEX report_mutation_previous ON report_mutation_receipts(run_id, previous_receipt_id);
+CREATE INDEX report_mutation_disposition
+    ON report_mutation_receipts(run_id, disposition_version, finding_id);

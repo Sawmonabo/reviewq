@@ -40,6 +40,7 @@ export type EventCursorDto = string;
  */
 export type DeliveryReceipt = {
   createdAt: UtcTimestampDto;
+  reportRef?: DeliveryReportRef | null;
   runId: RunIdDto;
   sessionKey: SessionKeyDto;
   submissionId: SubmissionIdDto;
@@ -50,6 +51,10 @@ export type DeliveryReceipt = {
  * An RFC 3339 UTC timestamp with exact millisecond precision and a trailing Z.
  */
 export type UtcTimestampDto = string;
+/**
+ * SHA-256 of exact report bytes or their declaration.
+ */
+export type ReportHashDto = string;
 /**
  * A registered run identifier.
  */
@@ -209,6 +214,7 @@ export type QueueSyncMode = "setup" | "connected" | "disconnected";
  * A signed handle for a displayed review checkpoint.
  */
 export type CheckpointIdDto = string;
+export type Disposition = "reviewed" | "waiting_author" | "needs_review";
 export type HostProviderDto = "codex" | "claude";
 export type ReviewSelection =
   | {
@@ -279,6 +285,12 @@ export interface SendMessageRequest {
 export interface DeliveryReceiptResponse {
   cursor: EventCursorDto;
   data: DeliveryReceipt;
+  [k: string]: unknown;
+}
+export interface DeliveryReportRef {
+  currentReceiptId: ResourceIdDto | null;
+  receiptId: ResourceIdDto;
+  reportHash: ReportHashDto;
   [k: string]: unknown;
 }
 /**
@@ -545,11 +557,45 @@ export interface ReviewOverviewResponse {
   [k: string]: unknown;
 }
 export interface ReviewOverview {
+  attention?: Attention | null;
   checkpointId: CheckpointIdDto | null;
+  decision?: DecisionView | null;
   decisionRevision: RevisionDto;
   review: MergeRequestRow;
   runs: RunSummaryPage;
   settingsRevision: RevisionDto;
+  [k: string]: unknown;
+}
+export interface Attention {
+  reports: ReportAttention[];
+  sessions: SessionAttention[];
+  source: ObservedAttention[];
+  [k: string]: unknown;
+}
+export interface ReportAttention {
+  attentionReceiptId: ResourceIdDto;
+  receiptId: ResourceIdDto;
+  runId: RunIdDto;
+  [k: string]: unknown;
+}
+export interface SessionAttention {
+  eventId: ResourceIdDto;
+  kind: string;
+  label: string;
+  runId: RunIdDto;
+  sessionKey: SessionKeyDto;
+  [k: string]: unknown;
+}
+export interface ObservedAttention {
+  eventId: ResourceIdDto;
+  kind: string;
+  label: string;
+  [k: string]: unknown;
+}
+export interface DecisionView {
+  disposition: Disposition | null;
+  reviewedAt: UtcTimestampDto | null;
+  reviewedSha: GitShaDto | null;
   [k: string]: unknown;
 }
 /**

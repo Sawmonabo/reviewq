@@ -13,4 +13,5 @@ pub mod notifications;
 pub mod queue;
 pub mod reports;
 pub mod sources;
+pub mod workflow;
 pub mod workspace;

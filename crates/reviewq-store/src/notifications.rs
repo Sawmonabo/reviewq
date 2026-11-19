@@ -256,3 +256,30 @@ fn counts(
         mr_count: u64::try_from(mrs).map_err(|_| AppError::Internal)?,
     })
 }
+
+/// Saves one stable occurrence in the transaction that observed it.
+pub(crate) fn insert_notification(
+    db: &Connection,
+    input: reviewq_app::notifications::Observation,
+) -> Result<Option<NotificationId>, StoreError> {
+    let id = uuid::Uuid::new_v4().to_string();
+    let changed = db.execute(
+        "INSERT INTO notifications(notification_id, source, occurrence_id, kind, review_id, run_id,
+                                    session_key, event_ref, label, occurred_at_ms)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+         ON CONFLICT(source, occurrence_id) DO NOTHING",
+        params![
+            id,
+            input.source.to_string(),
+            input.occurrence_id,
+            input.kind.to_string(),
+            input.review.as_str(),
+            input.run.as_ref().map(|v| v.as_str()),
+            input.session.as_ref().map(|v| v.as_str()),
+            input.event_ref,
+            input.label,
+            input.occurred_at_ms,
+        ],
+    )?;
+    (changed == 1).then(|| parse(&id)).transpose()
+}

@@ -42,7 +42,8 @@ const pattern3 = new RegExp(
   "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}Z$",
   "u",
 );
-const schema23 = {
+const pattern4 = new RegExp("^[0-9a-f]{64}$", "u");
+const schema25 = {
   description: "Stable error codes for the public JSON envelope.",
   enum: [
     "invalid_request",
@@ -62,23 +63,23 @@ const schema23 = {
   ],
   type: "string",
 };
-const schema26 = {
+const schema28 = {
   enum: ["available", "partial", "unavailable"],
   type: "string",
 };
-const pattern5 = new RegExp("^[^\\ud800-\\udfff]*$", "u");
-const pattern6 = new RegExp("^[A-Za-z0-9_-]{1,512}$", "u");
-const pattern7 = new RegExp("^([0-9A-Fa-f]{40}|[0-9A-Fa-f]{64})$", "u");
-const schema45 = {
+const pattern6 = new RegExp("^[^\\ud800-\\udfff]*$", "u");
+const pattern7 = new RegExp("^[A-Za-z0-9_-]{1,512}$", "u");
+const pattern8 = new RegExp("^([0-9A-Fa-f]{40}|[0-9A-Fa-f]{64})$", "u");
+const schema47 = {
   enum: ["complete", "incomplete", "binary", "provider_limited", "missing"],
   type: "string",
 };
-const pattern8 = new RegExp('^"[0-9a-f]{64}"$', "u");
-const pattern9 = new RegExp(
+const pattern9 = new RegExp('^"[0-9a-f]{64}"$', "u");
+const pattern10 = new RegExp(
   "^([1-9][0-9]{0,17}|[1-8][0-9]{18}|9[0-1][0-9]{17}|92[0-1][0-9]{16}|922[0-2][0-9]{15}|9223[0-2][0-9]{14}|92233[0-6][0-9]{13}|922337[0-1][0-9]{12}|92233720[0-2][0-9]{10}|922337203[0-5][0-9]{9}|9223372036[0-7][0-9]{8}|92233720368[0-4][0-9]{7}|922337203685[0-3][0-9]{6}|9223372036854[0-6][0-9]{5}|92233720368547[0-6][0-9]{4}|922337203685477[0-4][0-9]{3}|9223372036854775[0-7][0-9]{2}|922337203685477580[0-6][0-9]{0}|9223372036854775807)$",
   "u",
 );
-const schema54 = {
+const schema56 = {
   properties: {
     author: {
       anyOf: [{ $ref: "#/definitions/NamedUpstreamId" }, { type: "null" }],
@@ -127,16 +128,16 @@ const schema54 = {
   ],
   type: "object",
 };
-const schema55 = { enum: ["open", "closed", "merged"], type: "string" };
-const schema56 = {
+const schema57 = { enum: ["open", "closed", "merged"], type: "string" };
+const schema58 = {
   enum: ["needs_review", "waiting_author", "followup", "reviewed", "archive"],
   type: "string",
 };
-const schema57 = {
+const schema59 = {
   enum: ["needs_input", "working", "waiting", "archived"],
   type: "string",
 };
-const schema59 = {
+const schema61 = {
   properties: {
     assignee: { type: ["string", "null"] },
     key: { $ref: "#/definitions/CheckpointIdDto" },
@@ -147,11 +148,15 @@ const schema59 = {
   required: ["key", "title", "status", "priority", "assignee"],
   type: "object",
 };
-const schema61 = {
+const schema63 = {
   enum: ["setup", "connected", "disconnected"],
   type: "string",
 };
-const schema66 = { enum: ["codex", "claude"], type: "string" };
+const schema71 = {
+  enum: ["reviewed", "waiting_author", "needs_review"],
+  type: "string",
+};
+const schema74 = { enum: ["codex", "claude"], type: "string" };
 export {
   func0,
   pattern0,
@@ -162,19 +167,21 @@ export {
   pattern2,
   formats0,
   pattern3,
-  schema23,
-  schema26,
-  pattern5,
+  pattern4,
+  schema25,
+  schema28,
   pattern6,
   pattern7,
-  schema45,
   pattern8,
+  schema47,
   pattern9,
-  schema54,
-  schema55,
+  pattern10,
   schema56,
   schema57,
+  schema58,
   schema59,
   schema61,
-  schema66,
+  schema63,
+  schema71,
+  schema74,
 };

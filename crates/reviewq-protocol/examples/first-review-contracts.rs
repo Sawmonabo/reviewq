@@ -198,6 +198,7 @@ fn emit_history_and_receipt(output: &Path) -> Result<(), Box<dyn Error>> {
             output,
             name,
             &snapshot(DeliveryReceipt {
+                report_ref: None,
                 submission_id: SubmissionIdDto::new(submission).unwrap(),
                 run_id: RunIdDto::new(RUN).unwrap(),
                 session_key: SessionKeyDto::new(LEAD).unwrap(),

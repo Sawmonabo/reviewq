@@ -1,5 +1,14 @@
 //! Review reports, immutable source reads and finding projections.
 
+mod capture;
+mod index;
+
+pub use capture::{
+    AcceptedReport, ArtifactChunk, CHUNK_BYTES, CapturedArtifact, Declaration, HandoffReceipt,
+    HandoffState, ReportCaptureStore, ReportFileSource, ReportWork, RevisionEvidence, Source,
+    reconcile_reports,
+};
+
 use reviewq_domain::identity::{GitSha, ReceiptId, ReportHash, Revision, RunId};
 
 use crate::access::{Actor, AppError, AppFuture};
@@ -257,4 +266,77 @@ pub trait ReportStore: Send + Sync {
         offset: u64,
         characters: u32,
     ) -> AppFuture<'_, Snapshot<CandidateReport>>;
+}
+
+#[derive(Clone)]
+pub struct DispositionEdit {
+    pub run: RunId,
+    pub receipt: ReceiptId,
+    pub expected_revision: Revision,
+    pub finding_id: String,
+    pub submission: reviewq_domain::identity::SubmissionId,
+    pub blocking: Option<bool>,
+    pub publication: Option<Publication>,
+    pub reason: String,
+}
+
+pub struct DispositionReceipt {
+    pub receipt_id: ReceiptId,
+    pub disposition_version: Revision,
+    pub finding: Descriptor,
+}
+
+pub struct ViewedReport {
+    pub run: RunId,
+    pub receipt: ReceiptId,
+    pub submission: reviewq_domain::identity::SubmissionId,
+    pub rendered_batch_id: Option<String>,
+}
+
+pub struct ViewReceipt {
+    pub receipt_id: ReceiptId,
+    pub previous_receipt_id: Option<ReceiptId>,
+    pub rendered_batch_id: Option<String>,
+}
+
+pub trait ReportMutationStore: Send + Sync {
+    fn set_disposition(
+        &self,
+        actor: Actor,
+        edit: DispositionEdit,
+    ) -> AppFuture<'_, Snapshot<DispositionReceipt>>;
+    fn mark_report_viewed(
+        &self,
+        actor: Actor,
+        view: ViewedReport,
+    ) -> AppFuture<'_, Snapshot<ViewReceipt>>;
+}
+
+pub async fn send_feedback(
+    store: &(impl crate::hosts::LeadStore + crate::queue::QueueStore + ?Sized),
+    actor: Actor,
+    run: RunId,
+    submission_id: reviewq_domain::identity::SubmissionId,
+    text: crate::hosts::MessageBody,
+    reference: crate::hosts::ReportRef,
+) -> Result<Snapshot<crate::hosts::DeliveryReceipt>, AppError> {
+    use crate::hosts::{MessagePurpose, SubmitMessage};
+
+    let target = store
+        .read_run(actor.clone(), run, None, 1)
+        .await?
+        .value
+        .lead;
+    store
+        .admit_message(
+            actor,
+            SubmitMessage {
+                target,
+                submission_id,
+                text,
+                purpose: MessagePurpose::ReportFeedback,
+                report_ref: Some(reference),
+            },
+        )
+        .await
 }

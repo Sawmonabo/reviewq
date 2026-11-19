@@ -2,6 +2,7 @@
 import { func0 } from "../runtime.mjs";
 import { validate41 } from "./observed-input-dto.mjs";
 import { validate45 } from "./utc-timestamp-dto.mjs";
+import { validate47 } from "./delivery-report-ref.mjs";
 import { validate25 } from "./checkpoint-id-dto.mjs";
 function validate40(
   data,
@@ -629,37 +630,84 @@ function validate40(
           var valid6 = true;
         }
         if (valid6) {
-          if (data.runId !== undefined && func0.call(data, "runId")) {
+          if (data.reportRef !== undefined && func0.call(data, "reportRef")) {
+            let data11 = data.reportRef;
             const _errs32 = errors;
+            const _errs33 = errors;
+            let valid7 = false;
+            const _errs34 = errors;
             if (
-              !validate25(data.runId, {
-                instancePath: instancePath + "/runId",
+              !validate47(data11, {
+                instancePath: instancePath + "/reportRef",
                 parentData: data,
-                parentDataProperty: "runId",
+                parentDataProperty: "reportRef",
                 rootData,
               })
             ) {
               vErrors =
                 vErrors === null
-                  ? validate25.errors
-                  : vErrors.concat(validate25.errors);
+                  ? validate47.errors
+                  : vErrors.concat(validate47.errors);
               errors = vErrors.length;
+            }
+            var _valid1 = _errs34 === errors;
+            valid7 = valid7 || _valid1;
+            if (!valid7) {
+              const _errs35 = errors;
+              if (data11 !== null) {
+                const err25 = {
+                  instancePath: instancePath + "/reportRef",
+                  schemaPath: "#/properties/reportRef/anyOf/1/type",
+                  keyword: "type",
+                  params: { type: "null" },
+                };
+                if (vErrors === null) {
+                  vErrors = [err25];
+                } else {
+                  vErrors.push(err25);
+                }
+                errors++;
+              }
+              var _valid1 = _errs35 === errors;
+              valid7 = valid7 || _valid1;
+            }
+            if (!valid7) {
+              const err26 = {
+                instancePath: instancePath + "/reportRef",
+                schemaPath: "#/properties/reportRef/anyOf",
+                keyword: "anyOf",
+                params: {},
+              };
+              if (vErrors === null) {
+                vErrors = [err26];
+              } else {
+                vErrors.push(err26);
+              }
+              errors++;
+              validate40.errors = vErrors;
+              return false;
+            } else {
+              errors = _errs33;
+              if (vErrors !== null) {
+                if (_errs33) {
+                  vErrors.length = _errs33;
+                } else {
+                  vErrors = null;
+                }
+              }
             }
             var valid6 = _errs32 === errors;
           } else {
             var valid6 = true;
           }
           if (valid6) {
-            if (
-              data.sessionKey !== undefined &&
-              func0.call(data, "sessionKey")
-            ) {
-              const _errs33 = errors;
+            if (data.runId !== undefined && func0.call(data, "runId")) {
+              const _errs37 = errors;
               if (
-                !validate25(data.sessionKey, {
-                  instancePath: instancePath + "/sessionKey",
+                !validate25(data.runId, {
+                  instancePath: instancePath + "/runId",
                   parentData: data,
-                  parentDataProperty: "sessionKey",
+                  parentDataProperty: "runId",
                   rootData,
                 })
               ) {
@@ -669,21 +717,21 @@ function validate40(
                     : vErrors.concat(validate25.errors);
                 errors = vErrors.length;
               }
-              var valid6 = _errs33 === errors;
+              var valid6 = _errs37 === errors;
             } else {
               var valid6 = true;
             }
             if (valid6) {
               if (
-                data.submissionId !== undefined &&
-                func0.call(data, "submissionId")
+                data.sessionKey !== undefined &&
+                func0.call(data, "sessionKey")
               ) {
-                const _errs34 = errors;
+                const _errs38 = errors;
                 if (
-                  !validate25(data.submissionId, {
-                    instancePath: instancePath + "/submissionId",
+                  !validate25(data.sessionKey, {
+                    instancePath: instancePath + "/sessionKey",
                     parentData: data,
-                    parentDataProperty: "submissionId",
+                    parentDataProperty: "sessionKey",
                     rootData,
                   })
                 ) {
@@ -693,33 +741,58 @@ function validate40(
                       : vErrors.concat(validate25.errors);
                   errors = vErrors.length;
                 }
-                var valid6 = _errs34 === errors;
+                var valid6 = _errs38 === errors;
               } else {
                 var valid6 = true;
               }
               if (valid6) {
                 if (
-                  data.updatedAt !== undefined &&
-                  func0.call(data, "updatedAt")
+                  data.submissionId !== undefined &&
+                  func0.call(data, "submissionId")
                 ) {
-                  const _errs35 = errors;
+                  const _errs39 = errors;
                   if (
-                    !validate45(data.updatedAt, {
-                      instancePath: instancePath + "/updatedAt",
+                    !validate25(data.submissionId, {
+                      instancePath: instancePath + "/submissionId",
                       parentData: data,
-                      parentDataProperty: "updatedAt",
+                      parentDataProperty: "submissionId",
                       rootData,
                     })
                   ) {
                     vErrors =
                       vErrors === null
-                        ? validate45.errors
-                        : vErrors.concat(validate45.errors);
+                        ? validate25.errors
+                        : vErrors.concat(validate25.errors);
                     errors = vErrors.length;
                   }
-                  var valid6 = _errs35 === errors;
+                  var valid6 = _errs39 === errors;
                 } else {
                   var valid6 = true;
+                }
+                if (valid6) {
+                  if (
+                    data.updatedAt !== undefined &&
+                    func0.call(data, "updatedAt")
+                  ) {
+                    const _errs40 = errors;
+                    if (
+                      !validate45(data.updatedAt, {
+                        instancePath: instancePath + "/updatedAt",
+                        parentData: data,
+                        parentDataProperty: "updatedAt",
+                        rootData,
+                      })
+                    ) {
+                      vErrors =
+                        vErrors === null
+                          ? validate45.errors
+                          : vErrors.concat(validate45.errors);
+                      errors = vErrors.length;
+                    }
+                    var valid6 = _errs40 === errors;
+                  } else {
+                    var valid6 = true;
+                  }
                 }
               }
             }

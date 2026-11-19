@@ -1,6 +1,34 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "definitions": {
+    "Attention": {
+      "properties": {
+        "reports": {
+          "items": {
+            "$ref": "#/definitions/ReportAttention"
+          },
+          "type": "array"
+        },
+        "sessions": {
+          "items": {
+            "$ref": "#/definitions/SessionAttention"
+          },
+          "type": "array"
+        },
+        "source": {
+          "items": {
+            "$ref": "#/definitions/ObservedAttention"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "source",
+        "reports",
+        "sessions"
+      ],
+      "type": "object"
+    },
     "CheckpointIdDto": {
       "description": "A signed handle for a displayed review checkpoint.",
       "maxUtf8Bytes": 512,
@@ -19,6 +47,46 @@
       "required": [
         "key",
         "title"
+      ],
+      "type": "object"
+    },
+    "DecisionView": {
+      "properties": {
+        "disposition": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/Disposition"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "reviewedAt": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/UtcTimestampDto"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "reviewedSha": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/GitShaDto"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "disposition",
+        "reviewedSha",
+        "reviewedAt"
       ],
       "type": "object"
     },
@@ -110,6 +178,16 @@
         "createdAt": {
           "$ref": "#/definitions/UtcTimestampDto"
         },
+        "reportRef": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/DeliveryReportRef"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "runId": {
           "$ref": "#/definitions/RunIdDto"
         },
@@ -148,6 +226,40 @@
       ],
       "title": "DeliveryReceiptResponse",
       "type": "object"
+    },
+    "DeliveryReportRef": {
+      "properties": {
+        "currentReceiptId": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ResourceIdDto"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "receiptId": {
+          "$ref": "#/definitions/ResourceIdDto"
+        },
+        "reportHash": {
+          "$ref": "#/definitions/ReportHashDto"
+        }
+      },
+      "required": [
+        "receiptId",
+        "reportHash",
+        "currentReceiptId"
+      ],
+      "type": "object"
+    },
+    "Disposition": {
+      "enum": [
+        "reviewed",
+        "waiting_author",
+        "needs_review"
+      ],
+      "type": "string"
     },
     "ErrorCode": {
       "description": "Stable error codes for the public JSON envelope.",
@@ -661,6 +773,25 @@
       },
       "required": [
         "id",
+        "label"
+      ],
+      "type": "object"
+    },
+    "ObservedAttention": {
+      "properties": {
+        "eventId": {
+          "$ref": "#/definitions/ResourceIdDto"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "eventId",
+        "kind",
         "label"
       ],
       "type": "object"
@@ -1232,6 +1363,30 @@
       ],
       "type": "string"
     },
+    "ReportAttention": {
+      "properties": {
+        "attentionReceiptId": {
+          "$ref": "#/definitions/ResourceIdDto"
+        },
+        "receiptId": {
+          "$ref": "#/definitions/ResourceIdDto"
+        },
+        "runId": {
+          "$ref": "#/definitions/RunIdDto"
+        }
+      },
+      "required": [
+        "runId",
+        "receiptId",
+        "attentionReceiptId"
+      ],
+      "type": "object"
+    },
+    "ReportHashDto": {
+      "description": "SHA-256 of exact report bytes or their declaration.",
+      "pattern": "^[0-9a-f]{64}$",
+      "type": "string"
+    },
     "ResetEvent": {
       "description": "The terminal `reset` event body. A reset has no SSE id.",
       "properties": {
@@ -1299,10 +1454,30 @@
     },
     "ReviewOverview": {
       "properties": {
+        "attention": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/Attention"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "checkpointId": {
           "anyOf": [
             {
               "$ref": "#/definitions/CheckpointIdDto"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "decision": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/DecisionView"
             },
             {
               "type": "null"
@@ -1547,6 +1722,33 @@
         "text"
       ],
       "title": "SendMessageRequest",
+      "type": "object"
+    },
+    "SessionAttention": {
+      "properties": {
+        "eventId": {
+          "$ref": "#/definitions/ResourceIdDto"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "runId": {
+          "$ref": "#/definitions/RunIdDto"
+        },
+        "sessionKey": {
+          "$ref": "#/definitions/SessionKeyDto"
+        }
+      },
+      "required": [
+        "runId",
+        "sessionKey",
+        "eventId",
+        "kind",
+        "label"
+      ],
       "type": "object"
     },
     "SessionKeyDto": {
