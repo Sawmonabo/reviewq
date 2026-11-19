@@ -1,0 +1,303 @@
+use std::collections::BTreeMap;
+use std::fs::{self, OpenOptions, Permissions};
+use std::io;
+use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+use std::path::{Path, PathBuf};
+
+use sha2::{Digest, Sha256};
+
+use super::{
+    Failure, Release,
+    bundle::{self, Bundle, Entry},
+    paths::{self, Paths},
+};
+
+fn current(paths: &Paths) -> PathBuf {
+    paths.profile.join("current")
+}
+
+fn release_target(release: &Release) -> PathBuf {
+    PathBuf::from("releases").join(&release.id)
+}
+
+fn skill_target(paths: &Paths) -> PathBuf {
+    current(paths).join("hosts/codex/skills/reviewq")
+}
+
+fn launcher_target(paths: &Paths) -> PathBuf {
+    current(paths).join("bin/reviewq")
+}
+
+pub(super) fn unit_digest(path: &Path) -> Result<Option<String>, Failure> {
+    if !paths::exists(path)? {
+        return Ok(None);
+    }
+    let file = bundle::regular(path).map_err(|_| paths::conflict(path))?;
+    paths::private(&file, path)?;
+    if file.metadata()?.len() > 16 * 1024 {
+        return Err(paths::conflict(path));
+    }
+    Ok(Some(bundle::digest_file(file)?))
+}
+
+pub(super) fn preflight(
+    paths: &Paths,
+    old: Option<&Release>,
+    next: Option<&Release>,
+) -> Result<(), Failure> {
+    let wanted = [old, next];
+    allowed_link(
+        &current(paths),
+        wanted.into_iter().flatten().map(release_target),
+    )?;
+    allowed_link(
+        &paths.launcher,
+        wanted.into_iter().flatten().map(|_| launcher_target(paths)),
+    )?;
+    if let Some(existing) = unit_digest(&paths.unit)?
+        && !wanted
+            .into_iter()
+            .flatten()
+            .any(|release| release.unit == existing)
+    {
+        return Err(paths::conflict(&paths.unit));
+    }
+    for skill in wanted
+        .into_iter()
+        .flatten()
+        .filter_map(|release| release.skill.as_deref())
+    {
+        allowed_link(
+            skill,
+            old.filter(|release| release.skill.as_deref() == Some(skill))
+                .into_iter()
+                .chain(next.filter(|release| release.skill.as_deref() == Some(skill)))
+                .map(|_| skill_target(paths)),
+        )?;
+    }
+    Ok(())
+}
+
+pub(super) fn check_new_skill(old: Option<&Release>, next: &Release) -> Result<(), Failure> {
+    if let Some(skill) = next.skill.as_deref()
+        && old.and_then(|release| release.skill.as_deref()) != Some(skill)
+        && paths::exists(skill)?
+    {
+        return Err(paths::conflict(skill));
+    }
+    Ok(())
+}
+
+fn allowed_link(path: &Path, allowed: impl Iterator<Item = PathBuf>) -> Result<(), Failure> {
+    if paths::exists(path)? {
+        let actual = fs::read_link(path).map_err(|_| paths::conflict(path))?;
+        if !allowed.into_iter().any(|target| target == actual) {
+            return Err(paths::conflict(path));
+        }
+    }
+    Ok(())
+}
+
+pub(super) fn stage(paths: &Paths, bundle: &Bundle) -> Result<(), Failure> {
+    let releases = paths.profile.join("releases");
+    let destination = releases.join(&bundle.id);
+    if paths::exists(&destination)? {
+        if Bundle::read(&destination)?.id != bundle.id {
+            return Err(paths::conflict(&destination));
+        }
+    } else {
+        let stage = tempfile::Builder::new()
+            .prefix(".reviewq-release.")
+            .permissions(Permissions::from_mode(0o700))
+            .tempdir_in(&releases)?;
+        for entry in &bundle.manifest.files {
+            let path = stage.path().join(&entry.path);
+            paths::ensure_dir(paths::parent(&path)?, true)?;
+            copy(&bundle.root.join(&entry.path), &path, entry.mode)?;
+        }
+        copy(
+            &bundle.root.join("manifest.json"),
+            &stage.path().join("manifest.json"),
+            0o600,
+        )?;
+        let staged = Bundle::read(stage.path())?;
+        if staged.id != bundle.id {
+            return Err("The release changed while being staged.".into());
+        }
+        paths::sync(stage.path())?;
+        rustix::fs::renameat_with(
+            rustix::fs::CWD,
+            stage.path(),
+            rustix::fs::CWD,
+            &destination,
+            rustix::fs::RenameFlags::NOREPLACE,
+        )?;
+        paths::sync(&releases)?;
+    }
+    for (name, entry) in assets(bundle) {
+        let path = paths.profile.join("assets").join(name);
+        if paths::exists(&path)? {
+            verify(&path, entry)?;
+        } else {
+            paths::ensure_dir(paths::parent(&path)?, true)?;
+            let mut stage = tempfile::Builder::new()
+                .prefix(".reviewq-asset.")
+                .permissions(Permissions::from_mode(entry.mode))
+                .tempfile_in(paths::parent(&path)?)?;
+            io::copy(
+                &mut bundle::regular(&destination.join(&entry.path))?,
+                stage.as_file_mut(),
+            )?;
+            stage.as_file().sync_all()?;
+            verify(stage.path(), entry)?;
+            stage.persist_noclobber(&path)?;
+            paths::sync(paths::parent(&path)?)?;
+        }
+    }
+    Ok(())
+}
+
+fn copy(from: &Path, to: &Path, mode: u32) -> Result<(), Failure> {
+    let mut source = bundle::regular(from)?;
+    let mut destination = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(mode)
+        .open(to)?;
+    destination.set_permissions(Permissions::from_mode(mode))?;
+    io::copy(&mut source, &mut destination)?;
+    destination.sync_all()?;
+    paths::sync(paths::parent(to)?)
+}
+
+fn assets(bundle: &Bundle) -> impl Iterator<Item = (&str, &Entry)> {
+    bundle
+        .manifest
+        .files
+        .iter()
+        .filter_map(|entry| Some((entry.path.strip_prefix("web/assets/")?, entry)))
+}
+
+fn verify(path: &Path, entry: &Entry) -> Result<(), Failure> {
+    let file = bundle::regular(path).map_err(|_| paths::conflict(path))?;
+    if file.metadata()?.len() != entry.size || bundle::digest_file(file)? != entry.sha256 {
+        return Err(paths::conflict(path));
+    }
+    Ok(())
+}
+
+pub(super) fn set(
+    paths: &Paths,
+    old: Option<&Release>,
+    next: &Release,
+    unit: &[u8],
+) -> Result<(), Failure> {
+    preflight(paths, old, Some(next))?;
+    ensure_link(&paths.launcher, &launcher_target(paths))?;
+    let config = crate::runtime_settings::config_path(&paths.profile, false);
+    if !paths::exists(&config)? {
+        let body = std::env::var("WSL_DISTRO_NAME")
+            .ok()
+            .filter(|value| !value.is_empty())
+            .map_or_else(
+                || serde_json::json!({}),
+                |wsl| serde_json::json!({"wslDistribution":wsl}),
+            );
+        paths::write_json(&config, &body)?;
+    }
+    if unit_digest(&paths.unit)?.as_deref() != Some(&next.unit) {
+        if bundle::hex(&Sha256::digest(unit)) != next.unit {
+            return Err("Service unit changed after planning.".into());
+        }
+        paths::atomic_file(&paths.unit, unit, paths::exists(&paths.unit)?)?;
+    }
+    ensure_link(&current(paths), &release_target(next))?;
+    if let Some(previous) = old.and_then(|release| release.skill.as_deref())
+        && next.skill.as_deref() != Some(previous)
+    {
+        remove_link(previous, &skill_target(paths))?;
+    }
+    if let Some(skill) = next.skill.as_deref() {
+        paths::ensure_dir(paths::parent(skill)?, false)?;
+        ensure_link(skill, &skill_target(paths))?;
+    }
+    Ok(())
+}
+
+fn ensure_link(path: &Path, target: &Path) -> Result<(), Failure> {
+    let exists = paths::exists(path)?;
+    if exists && fs::read_link(path)? == target {
+        return Ok(());
+    }
+    paths::link(path, target, exists)
+}
+
+fn remove_link(path: &Path, target: &Path) -> Result<(), Failure> {
+    allowed_link(path, std::iter::once(target.to_path_buf()))?;
+    if paths::exists(path)? {
+        fs::remove_file(path)?;
+        paths::sync(paths::parent(path)?)?;
+    }
+    Ok(())
+}
+
+pub(super) fn remove(
+    paths: &Paths,
+    release: &Release,
+    known: &[String],
+) -> Result<Vec<PathBuf>, Failure> {
+    let mut conflicts = Vec::new();
+    if let Some(skill) = release.skill.as_deref()
+        && remove_link(skill, &skill_target(paths)).is_err()
+    {
+        conflicts.push(skill.to_path_buf());
+    }
+    if unit_digest(&paths.unit)?.as_deref() == Some(&release.unit) {
+        fs::remove_file(&paths.unit)?;
+        paths::sync(paths::parent(&paths.unit)?)?;
+    }
+    if remove_link(&current(paths), &release_target(release)).is_err() {
+        conflicts.push(current(paths));
+        return Ok(conflicts);
+    }
+    let mut owned_assets = BTreeMap::new();
+    for id in known {
+        let directory = paths.profile.join("releases").join(id);
+        if !paths::exists(&directory)? {
+            continue;
+        }
+        let Ok(bundle) = Bundle::read(&directory) else {
+            conflicts.push(directory);
+            continue;
+        };
+        if &bundle.id != id {
+            conflicts.push(directory);
+            continue;
+        }
+        for (name, entry) in assets(&bundle) {
+            let copy = paths.profile.join("assets").join(name);
+            if paths::exists(&copy)? {
+                owned_assets.insert(copy, (entry.size, entry.sha256.clone()));
+            }
+        }
+        fs::remove_dir_all(&directory)?;
+        paths::sync(paths::parent(&directory)?)?;
+    }
+    for (path, (size, digest)) in owned_assets {
+        let valid = (|| -> Result<bool, Failure> {
+            let file = bundle::regular(&path)?;
+            Ok(file.metadata()?.len() == size && bundle::digest_file(file)? == digest)
+        })()
+        .unwrap_or(false);
+        if valid {
+            fs::remove_file(&path)?;
+            paths::sync(paths::parent(&path)?)?;
+        } else {
+            conflicts.push(path);
+        }
+    }
+    if remove_link(&paths.launcher, &launcher_target(paths)).is_err() {
+        conflicts.push(paths.launcher.clone());
+    }
+    Ok(conflicts)
+}

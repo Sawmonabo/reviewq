@@ -1,0 +1,19 @@
+[Unit]
+Description=ReviewQ
+
+[Service]
+Type=exec
+ExecStart=:@executable@ serve
+Environment=@home@
+Environment=@data@
+Environment=@config@
+Environment=@state@
+Environment=@codex@
+Environment=@claude@
+UMask=0077
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=20
+
+[Install]
+WantedBy=default.target

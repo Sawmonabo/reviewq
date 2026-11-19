@@ -76,6 +76,12 @@ pub(crate) async fn serve(profile: PathBuf, options: Serve) -> Result<(), Failur
         None => profile.join("current/web"),
     }
     .canonicalize()?;
+    let retained_assets = profile.join("assets");
+    let retained_assets = (options.web.is_none()
+        && retained_assets
+            .symlink_metadata()
+            .is_ok_and(|metadata| metadata.is_dir()))
+    .then_some(retained_assets);
     if !web.join("index.html").is_file() {
         return Err("build the browser assets before serving".into());
     }
@@ -336,6 +342,7 @@ pub(crate) async fn serve(profile: PathBuf, options: Serve) -> Result<(), Failur
             },
             endpoint: endpoint.clone(),
             web: &web,
+            retained_assets: retained_assets.as_deref(),
             commits: store.subscribe(),
             shutdown: wait.clone(),
         },
@@ -598,6 +605,13 @@ fn validate_profile(path: &Path) -> Result<(), Failure> {
 }
 
 pub(crate) fn read_endpoint(profile: &Path) -> Result<ServiceEndpoint, Failure> {
+    read_endpoint_with_build(profile, &executable_digest()?)
+}
+
+pub(crate) fn read_endpoint_with_build(
+    profile: &Path,
+    digest: &str,
+) -> Result<ServiceEndpoint, Failure> {
     validate_profile(profile)?;
     let file = private_file(&profile.join(RUNTIME))?;
     let mut data = Vec::new();
@@ -609,7 +623,7 @@ pub(crate) fn read_endpoint(profile: &Path) -> Result<ServiceEndpoint, Failure> 
     let identity = endpoint.identity();
     if !endpoint.is_valid()
         || identity.profile_id != profile_id(profile)
-        || identity.build_digest != executable_digest()?
+        || identity.build_digest != digest
     {
         return Err("service endpoint does not match this build and profile".into());
     }

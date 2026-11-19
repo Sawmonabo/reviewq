@@ -194,6 +194,7 @@ struct SessionResult {
 pub struct ServiceRuntime<'a> {
     pub endpoint: ServiceEndpoint,
     pub web: &'a Path,
+    pub retained_assets: Option<&'a Path>,
     pub sends_allowed: bool,
     pub source_poll_interval: Option<Duration>,
     pub settings_sources: Arc<dyn ConnectionSources>,
@@ -341,9 +342,15 @@ pub fn router(
         )
         .fallback(api_not_found)
         .layer(DefaultBodyLimit::max(64 * 1024));
-    Router::new()
+    let router = Router::new()
         .merge(mcp::mount(entry.clone()))
-        .nest("/api/v1", api)
+        .nest("/api/v1", api);
+    let router = if let Some(assets) = runtime.retained_assets {
+        router.nest_service("/assets", ServeDir::new(assets))
+    } else {
+        router
+    };
+    router
         .fallback_service(
             ServeDir::new(web).not_found_service(ServeFile::new(web.join("index.html"))),
         )

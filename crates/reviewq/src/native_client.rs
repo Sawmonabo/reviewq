@@ -3,6 +3,7 @@ use std::time::Duration;
 
 use reqwest::Client;
 use reviewq_domain::identity::{NativeSessionId, ReviewId, RunId, SessionKey};
+use reviewq_domain::session::HostProvider;
 use reviewq_protocol::EventCursorDto;
 use reviewq_transport::{ServiceEndpoint, ServiceIdentity};
 use serde::Deserialize;
@@ -62,7 +63,7 @@ pub(crate) async fn link(profile: &Path, target: String) -> Result<(), Failure> 
     }))?;
     let linked =
         link_result(bridge(&client, &endpoint, "/api/v1/native/codex/link", body).await?).await?;
-    println!("{}", link_text(&endpoint, linked, "Codex")?);
+    println!("{}", link_text(&endpoint, linked, HostProvider::Codex)?);
     Ok(())
 }
 
@@ -89,7 +90,11 @@ pub(crate) async fn claude(
         let linked =
             link_result(bridge(&client, &endpoint, "/api/v1/native/claude/link", body).await?)
                 .await?;
-        (true, false, link_text(&endpoint, linked, "Claude Code")?)
+        (
+            true,
+            false,
+            link_text(&endpoint, linked, HostProvider::Claude)?,
+        )
     } else {
         #[derive(Deserialize)]
         #[serde(rename_all = "camelCase")]
@@ -179,7 +184,7 @@ async fn link_result(response: reqwest::Response) -> Result<Linked, Failure> {
 fn link_text(
     endpoint: &ServiceEndpoint,
     linked: Linked,
-    provider: &str,
+    provider: HostProvider,
 ) -> Result<String, Failure> {
     let review: ReviewId = linked.review_id.parse()?;
     let run: RunId = linked.run_id.parse()?;
@@ -189,8 +194,13 @@ fn link_text(
         .append_pair("reviewId", review.as_str())
         .append_pair("runId", run.as_str())
         .append_pair("tab", "agent");
+    let name = match provider {
+        HostProvider::Claude => "Claude Code",
+        HostProvider::Codex => "Codex",
+    };
+    let guidance = reviewq_app::launch::report_guidance(provider);
     Ok(format!(
-        "Linked this {provider} conversation.\n{url}\nContinue the review in this terminal or open it with ReviewQ."
+        "Linked this {name} conversation.\n{url}\nContinue the review in this terminal or open it with ReviewQ.\n{guidance}"
     ))
 }
 
@@ -285,8 +295,11 @@ pub(crate) async fn open(profile: &Path, options: Open) -> Result<(), Failure> {
     let url = format!("http://{}/#ticket={ticket}", endpoint.browser());
     if options.print_url {
         println!("{url}");
-    } else {
-        std::process::Command::new("xdg-open").arg(url).spawn()?;
+    } else if !crate::service::capture("xdg-open", &[&url], true)
+        .await
+        .is_ok_and(|(opened, _)| opened)
+    {
+        println!("Open ReviewQ at http://{}/", endpoint.browser());
     }
     Ok(())
 }

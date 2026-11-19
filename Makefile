@@ -13,7 +13,7 @@ else
 RUST_COMMAND = $(CARGO_DRIVER)
 endif
 
-.PHONY: check crate-deps rust-check fmt-check lint test doc-test web-check web-build web-install web-test fmt check-low check-cached test-package
+.PHONY: check crate-deps rust-check fmt-check lint test doc-test web-check web-build web-install web-test fmt check-low check-cached test-package package
 .PHONY: contracts contracts-check contracts-verify contracts-verify-browser
 
 check: crate-deps rust-check web-check contracts-check contracts-verify
@@ -82,6 +82,10 @@ web-check:
 
 web-build:
 	cd web && pnpm run build
+
+package: web-build
+	cargo build --locked --release -p reviewq -j $(BUILD_JOBS)
+	node tools/package/assemble.mjs $(if $(PACKAGE_OUT),"$(PACKAGE_OUT)")
 
 check-low:
 	$(MAKE) check BUILD_JOBS=1 TEST_THREADS=1

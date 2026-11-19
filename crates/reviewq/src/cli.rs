@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use clap::{Args, Parser, Subcommand};
 use reviewq_domain::identity::{GitSha, NotificationId, ProjectId, SubmissionId};
 
-use crate::{checkout_setup, native_client, runtime};
+use crate::{checkout_setup, install, native_client, runtime, service};
 
 mod action;
 mod report;
@@ -26,6 +26,21 @@ struct CommandLine {
 
 #[derive(Subcommand)]
 enum Command {
+    /// Install or update the user service from a local release.
+    Install {
+        #[arg(long, value_name = "DIRECTORY")]
+        from: PathBuf,
+    },
+    /// Start the installed user service.
+    Start,
+    /// Stop the installed user service.
+    Stop,
+    /// Read recent entries from the installed user's service journal.
+    Logs,
+    /// Send one local test notification.
+    NotifyTest,
+    /// Remove the installed application and keep private review data.
+    Uninstall,
     /// Serve the dashboard and API in the foreground.
     Serve(Serve),
     /// Open a private browser session.
@@ -74,6 +89,9 @@ enum Command {
 
 #[derive(Subcommand)]
 enum Internal {
+    VerifyBundle {
+        directory: PathBuf,
+    },
     SetupWorktree {
         #[arg(long)]
         settings: PathBuf,
@@ -169,7 +187,28 @@ pub(crate) fn run() -> Result<(), Failure> {
 }
 
 async fn execute(options: CommandLine) -> Result<(), Failure> {
+    if options.profile.is_some()
+        && matches!(
+            options.command,
+            Some(
+                Command::Install { .. }
+                    | Command::Uninstall
+                    | Command::Start
+                    | Command::Stop
+                    | Command::Logs
+                    | Command::NotifyTest
+            )
+        )
+    {
+        return Err("Managed lifecycle commands use the installed XDG profile.".into());
+    }
     match options.command {
+        Some(Command::Install { from }) => install::install(&from).await,
+        Some(Command::Uninstall) => install::uninstall().await,
+        Some(Command::Start) => service::operate(true).await,
+        Some(Command::Stop) => service::operate(false).await,
+        Some(Command::Logs) => service::logs().await,
+        Some(Command::NotifyTest) => service::notify().await,
         Some(Command::Serve(serve)) => {
             let profile = match (options.profile, serve.runtime_root.as_ref()) {
                 (Some(_), Some(_)) => return Err("use either --profile or --runtime-root".into()),
@@ -229,6 +268,9 @@ async fn execute(options: CommandLine) -> Result<(), Failure> {
             }
             Ok(())
         }
+        Some(Command::Internal(Internal::VerifyBundle { directory })) => {
+            crate::install::verify_bundle(&directory)
+        }
         Some(Command::Internal(Internal::SetupWorktree {
             settings,
             common_dir,
@@ -246,9 +288,7 @@ async fn execute(options: CommandLine) -> Result<(), Failure> {
         Some(Command::Internal(Internal::ClaudeCompanion { session_id, target })) => {
             native_client::claude(&runtime::profile(options.profile)?, session_id, target).await
         }
-        Some(Command::Open(open)) => {
-            native_client::open(&runtime::profile(options.profile)?, open).await
-        }
-        None => native_client::open(&runtime::profile(options.profile)?, Open::default()).await,
+        Some(Command::Open(open)) => service::open(options.profile, open).await,
+        None => service::open(options.profile, Open::default()).await,
     }
 }
