@@ -1,12 +1,12 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
-import { ApiResponseError, readOverview } from "../../api/client";
+import { readOverview } from "../../api/client";
 import type {
   HostProviderDto,
   RunPrepareRequest,
   RunStartRequest,
 } from "../../api/generated/contracts";
 import type { Catalog, Preview, Receipt } from "../../api/generated/contracts/launch";
-import { launchReceipt, prepareRun, registerRun, runCatalog, startRun } from "../../api/launch";
+import { prepareRun, registerRun, runCatalog, startRun } from "../../api/launch";
 import { readQueue, trackReview } from "../../api/workspace";
 import { Icon } from "../../components/Icon";
 import { Modal } from "../../components/Modal";
@@ -72,12 +72,23 @@ function LaunchEditor({
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string>();
   const pending = useSyncExternalStore(watchPendingLaunches, pendingLaunches);
+  const [noReceipt, setNoReceipt] = useState<ReadonlySet<string>>(() => new Set());
+  const [earlierResults, setEarlierResults] = useState<
+    ReadonlyArray<{ item: PendingLaunch; receipt: Receipt }>
+  >([]);
   const targetIds = new Set(targets.map((target) => target.reviewId));
   const earlier = pending.filter(
     (item) =>
       targetIds.has(item.reviewId) &&
       !attempts.some((attempt) => attempt.request.submissionId === item.submissionId),
   );
+  const prior = earlierResults.filter((record) => targetIds.has(record.item.reviewId));
+  const confirmedEarlier = prior.some(
+    ({ receipt }) => receipt.state === "confirmed" && receipt.runId,
+  );
+  const blocked =
+    confirmedEarlier || earlier.some((item) => item.request || !noReceipt.has(item.submissionId));
+
   const request = useRef<AbortController | undefined>(undefined);
   const register = mode === "register";
   const active = targets[0];
@@ -158,7 +169,7 @@ function LaunchEditor({
   }
 
   async function prepare() {
-    if (busy || earlier.length || !catalogs.data?.length || !targets.length) return;
+    if (busy || blocked || !catalogs.data?.length || !targets.length) return;
     setBusy(true);
     setNotice(undefined);
     const controller = new AbortController();
@@ -199,11 +210,13 @@ function LaunchEditor({
   }
 
   async function start() {
-    if (busy || earlier.length || !currentPreview || attempts.length) return;
+    if (busy || blocked || !currentPreview || attempts.length) return;
     setBusy(true);
     setNotice(undefined);
     try {
       for (const preview of currentPreview) {
+        const previous = earlier.find((item) => item.reviewId === preview.reviewId);
+        if (previous && (previous.request || !noReceipt.has(previous.submissionId))) continue;
         const item: RunStartRequest = {
           reviewId: preview.reviewId,
           provider: preview.provider,
@@ -213,11 +226,12 @@ function LaunchEditor({
           model: preview.model,
           effort: preview.effort,
           context: preview.context,
-          submissionId: crypto.randomUUID(),
+          submissionId: previous?.submissionId ?? crypto.randomUUID(),
         };
         const reference: PendingLaunch = {
           reviewId: item.reviewId,
           submissionId: item.submissionId,
+          request: item,
           title:
             targets.find((target) => target.reviewId === item.reviewId)?.title ?? item.reviewId,
         };
@@ -240,39 +254,6 @@ function LaunchEditor({
     } finally {
       setBusy(false);
     }
-  }
-
-  async function reconcile(attempt: Attempt) {
-    if (busy) return;
-    setBusy(true);
-    const controller = new AbortController();
-    request.current = controller;
-    let updated: Attempt;
-    try {
-      const receipt = await launchReceipt(
-        attempt.request.reviewId,
-        attempt.request.submissionId,
-        controller.signal,
-      );
-      settleLaunchReceipt(receipt);
-      updated = { request: attempt.request, receipt };
-    } catch (error) {
-      updated = {
-        request: attempt.request,
-        error:
-          error instanceof ApiResponseError && error.code === "not_found"
-            ? "The service has no saved receipt for this submission yet."
-            : describeError(error),
-      };
-    } finally {
-      setBusy(false);
-    }
-    if (!controller.signal.aborted)
-      setAttempts((current) =>
-        current.map((item) =>
-          item.request.submissionId === attempt.request.submissionId ? updated : item,
-        ),
-      );
   }
 
   async function registerSelected() {
@@ -318,10 +299,12 @@ function LaunchEditor({
               <button
                 type="button"
                 className="primary"
-                disabled={busy || earlier.length > 0}
+                disabled={busy || blocked}
                 onClick={() => void start()}
               >
-                Start {targets.length === 1 ? "review" : `${targets.length} reviews`}
+                {earlier.length > 0
+                  ? "Retry the prepared submission"
+                  : `Start ${targets.length === 1 ? "review" : `${targets.length} reviews`}`}
               </button>
             ) : (
               <button
@@ -329,7 +312,7 @@ function LaunchEditor({
                 className="primary"
                 disabled={
                   busy ||
-                  earlier.length > 0 ||
+                  blocked ||
                   !active ||
                   !catalogs.data?.length ||
                   (invocation === "skill" ? !selectedSkill : !prompt.trim())
@@ -347,7 +330,29 @@ function LaunchEditor({
         {notice && <Notice>{notice}</Notice>}
         {!register &&
           earlier.map((item) => (
-            <LaunchReceiptCard key={item.submissionId} item={item} onOpen={onOpen} />
+            <LaunchReceiptCard
+              key={item.submissionId}
+              item={item}
+              onOpen={onOpen}
+              onNoReceipt={() => setNoReceipt((known) => new Set([...known, item.submissionId]))}
+              onReceipt={(receipt) => {
+                if (
+                  receipt.state === "rejected" ||
+                  (receipt.state === "confirmed" && receipt.runId)
+                ) {
+                  setEarlierResults((known) => [...known, { item, receipt }]);
+                }
+              }}
+            />
+          ))}
+        {!register &&
+          prior.map(({ item, receipt }) => (
+            <LaunchReceiptCard
+              key={item.submissionId}
+              item={item}
+              onOpen={onOpen}
+              initialReceipt={receipt}
+            />
           ))}
         {register && (
           <div className="surface-card stack">
@@ -640,32 +645,24 @@ function LaunchEditor({
         ))}
         {attempts.map((attempt) => {
           const target = targets.find((item) => item.reviewId === attempt.request.reviewId);
-          const run = attempt.receipt?.state === "confirmed" ? attempt.receipt.runId : null;
-          return (
-            <div className="surface-card stack" key={attempt.request.submissionId}>
-              <strong>{target?.title ?? attempt.request.reviewId}</strong>
-              <span className="badge">
-                {run
-                  ? "Started"
-                  : attempt.refused || attempt.receipt?.state === "rejected"
-                    ? "Rejected"
-                    : "Start unconfirmed"}
-              </span>
-              {attempt.error && <Notice>{attempt.error}</Notice>}
-              {attempt.receipt?.nativeId && <code>{attempt.receipt.nativeId}</code>}
-              {run ? (
-                <button type="button" onClick={() => onOpen(attempt.request.reviewId, run)}>
-                  Open run
-                </button>
-              ) : (
-                !attempt.refused &&
-                attempt.receipt?.state !== "rejected" && (
-                  <button type="button" disabled={busy} onClick={() => void reconcile(attempt)}>
-                    Check saved launch receipt
-                  </button>
-                )
-              )}
-            </div>
+          const item = {
+            reviewId: attempt.request.reviewId,
+            submissionId: attempt.request.submissionId,
+            title: target?.title ?? attempt.request.reviewId,
+            request: attempt.request,
+          };
+          return attempt.refused ? (
+            <Notice key={item.submissionId}>
+              {item.title} · {attempt.error}
+            </Notice>
+          ) : (
+            <LaunchReceiptCard
+              key={item.submissionId}
+              item={item}
+              onOpen={onOpen}
+              initialReceipt={attempt.receipt}
+              initialNotice={attempt.error}
+            />
           );
         })}
       </div>
