@@ -1,0 +1,61 @@
+.archive-custom-dates .rdp-root {
+  --rdp-accent-color: var(--link);
+  --rdp-accent-background-color: var(--selected);
+  --rdp-day-height: 34px;
+  --rdp-day_button-height: 31px;
+  --rdp-day_button-width: 100%;
+  --rdp-nav_button-height: 25px;
+  --rdp-nav_button-width: 25px;
+  --rdp-nav-height: 32px;
+  margin-top: 14px;
+  color: var(--muted);
+  font-size: 11px;
+}
+.archive-custom-dates :is(.rdp-months, .rdp-month, .rdp-month_grid) {
+  width: 100%;
+  max-width: none;
+}
+.archive-custom-dates .rdp-month_grid {
+  table-layout: fixed;
+}
+.archive-custom-dates .rdp-caption_label {
+  color: var(--text);
+  font-size: 11px;
+  font-weight: 550;
+}
+.archive-custom-dates .rdp-weekday {
+  color: var(--dim-text);
+  font-size: 9px;
+}
+.archive-custom-dates .rdp-day_button {
+  min-width: 0;
+  border: 0;
+  border-radius: 5px;
+  font-size: 11px;
+}
+.archive-custom-dates .rdp-day_button:hover:not(:disabled) {
+  background: var(--popup-hover);
+  color: var(--text);
+}
+.archive-custom-dates :is(.rdp-range_start, .rdp-range_end) .rdp-day_button {
+  color: var(--primary-text);
+  background: var(--link);
+}
+.archive-custom-dates .rdp-today .rdp-day_button {
+  position: relative;
+}
+.archive-custom-dates .rdp-today .rdp-day_button::after {
+  content: "";
+  position: absolute;
+  bottom: 3px;
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: currentColor;
+}
+.archive-calendar-chevron[data-direction="left"] {
+  rotate: 90deg;
+}
+.archive-calendar-chevron[data-direction="right"] {
+  rotate: -90deg;
+}

@@ -1,0 +1,217 @@
+.archive-trigger {
+  padding-inline: 11px;
+  gap: 9px;
+}
+.archive-trigger > svg:first-child {
+  color: var(--muted);
+}
+.archive-popover {
+  position: fixed;
+  inset: auto;
+  margin: 8px 0;
+  position-area: block-end span-inline-end;
+  position-try-fallbacks:
+    flip-inline,
+    flip-block,
+    flip-inline flip-block;
+  justify-self: start;
+  max-width: calc(100vw - 32px);
+  max-height: calc(100dvh - 32px);
+  padding: 0;
+  overflow: auto;
+  color: var(--text);
+  background: var(--popup-bg);
+  border: 1px solid var(--popup-border);
+  border-radius: 9px;
+  box-shadow: 0 16px 54px #0009;
+}
+@supports not (position-area: block-end span-inline-end) {
+  .archive-popover {
+    inset: 20% 0 auto;
+    margin-inline: auto;
+  }
+}
+.archive-date-popover {
+  width: 490px;
+}
+.archive-date-layout {
+  display: grid;
+  grid-template-columns: 136px minmax(0, 1fr);
+}
+.archive-date-presets {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 18px 9px;
+  border-inline-end: 1px solid var(--line);
+}
+.archive-date-presets > span {
+  padding: 0 10px 11px;
+  color: var(--dim-text);
+  font-size: 9px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+}
+.archive-date-presets > button {
+  min-height: 36px;
+  padding: 8px 10px;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font-size: 11px;
+  text-align: left;
+}
+.archive-date-presets > button:hover:not(:disabled),
+.archive-date-presets > button[aria-pressed="true"] {
+  background: var(--selected);
+  color: var(--link);
+}
+.archive-custom-dates {
+  padding: 18px 18px 12px;
+}
+.archive-range-fields {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 14px minmax(0, 1fr);
+  align-items: end;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 10px;
+}
+.archive-range-fields input[type="date"] {
+  display: block;
+  width: 100%;
+  margin-top: 6px;
+  padding: 7px 6px;
+  background: var(--workspace-bg);
+}
+.archive-range-fields > span {
+  align-self: end;
+  margin-bottom: 7px;
+}
+.archive-calendar-loading {
+  min-height: 275px;
+  padding: 12px 0;
+}
+.archive-popup-footer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 14px;
+  border-top: 1px solid var(--line);
+  font-size: 10px;
+}
+.archive-popup-footer > span {
+  flex: 1;
+  color: var(--muted);
+}
+.archive-popup-footer button {
+  font-size: 10px;
+  white-space: nowrap;
+}
+.archive-date-error {
+  color: var(--red);
+  font-size: 11px;
+}
+.archive-sprint-popover {
+  width: 300px;
+  padding: 8px;
+}
+.archive-sprint-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 8px 6px;
+  border-bottom: 1px solid var(--line);
+  color: var(--muted);
+}
+.archive-sprint-search:focus-within {
+  border-color: var(--focus);
+}
+.archive-sprint-search > svg {
+  flex: none;
+}
+.archive-sprint-search > input:not([type]) {
+  width: 100%;
+  padding: 5px 0;
+  border: 0;
+  background: none;
+  font-size: 11px;
+}
+.archive-sprint-search input:focus-visible {
+  outline: none;
+}
+.archive-sprint-any {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  margin: 6px 0 9px;
+  padding: 9px 10px;
+  border: 0;
+  background: none;
+  font-size: 11px;
+}
+.archive-sprint-any > svg {
+  color: var(--link);
+}
+.archive-sprint-board {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.archive-sprint-board > legend,
+.archive-sprint-empty {
+  padding: 7px 10px;
+  color: var(--muted);
+  font-size: 10px;
+}
+.archive-sprint-board > legend {
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.archive-sprint-option {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 8px 10px;
+  overflow-wrap: anywhere;
+  border-radius: 5px;
+  cursor: pointer;
+  font-size: 11px;
+}
+.archive-sprint-option:hover,
+.archive-sprint-option:focus-within {
+  background: var(--popup-hover);
+}
+.archive-sprint-option:has(:checked) {
+  background: var(--selected);
+}
+.archive-sprint-option input {
+  margin: 0;
+  flex: none;
+}
+.archive-sprint-popover .archive-popup-footer {
+  margin-top: 8px;
+  padding: 6px 8px 0;
+}
+@media (max-width: 520px) {
+  .archive-date-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .archive-date-presets {
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+    padding: 8px;
+    border-inline-end: 0;
+    border-bottom: 1px solid var(--line);
+  }
+  .archive-date-presets > span {
+    flex-basis: 100%;
+    padding-bottom: 0;
+  }
+  .archive-custom-dates {
+    padding: 12px;
+  }
+}

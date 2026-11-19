@@ -2,7 +2,6 @@ import { useState } from "react";
 import type { ReactNode } from "react";
 import type { RunCard, RunStage } from "../../api/generated/contracts";
 import { readArchive, readQueue, readQueueSync, readRuns } from "../../api/workspace";
-import { FilterSelect } from "../../components/FilterSelect";
 import { Icon } from "../../components/Icon";
 import { Pagination } from "../../components/Pagination";
 import { Empty, Loading, Notice } from "../../components/PanelState";
@@ -14,6 +13,8 @@ import { useResource } from "../../hooks/useResource";
 import { formatActivityTime, readable, reviewReasonLabel } from "../../lib/presentation";
 import { savedValue, saveValue } from "../../lib/view-preferences";
 import { SelectionActions } from "../SelectionActions";
+import { ArchiveDateFilter } from "./archive/ArchiveDateFilter";
+import { ArchiveSprintFilter } from "./archive/ArchiveSprintFilter";
 import "./runs.css";
 
 const stages = [
@@ -305,6 +306,12 @@ function ArchiveView({
     }
   }
   for (const id of sprintPair) if (!known.has(id)) known.set(id, `Sprint ${id.split(":")[1]}`);
+  const boardLabels = new Map(
+    [...(catalog.data?.facets.boards ?? []), ...(archive.data?.boards ?? [])].map((board) => [
+      board.id,
+      board.label,
+    ]),
+  );
 
   function setField<T extends string>(key: string, setter: (newValue: T) => void, value: T) {
     setter(value);
@@ -327,69 +334,27 @@ function ArchiveView({
             }
           />
         </label>
-        <FilterSelect
-          label="Reviewed"
-          value={preset}
-          options={Object.entries(presets).map(([value, label]) => ({ value, label }))}
-          onChange={(value) => setField("archive.date", changePreset, value as DatePreset)}
+        <ArchiveDateFilter
+          value={{ preset, start, end }}
+          onChange={(value) => {
+            setField("archive.date", changePreset, value.preset);
+            setField("archive.start", changeStart, value.start);
+            setField("archive.end", changeEnd, value.end);
+          }}
         />
-        {preset === "custom" && (
-          <>
-            <label>
-              From
-              <input
-                type="date"
-                value={start}
-                onChange={(event) =>
-                  setField("archive.start", changeStart, event.currentTarget.value)
-                }
-              />
-            </label>
-            <label>
-              Through
-              <input
-                type="date"
-                value={end}
-                onChange={(event) => setField("archive.end", changeEnd, event.currentTarget.value)}
-              />
-            </label>
-          </>
-        )}
-        <details className="filter-popover queue-hide">
-          <summary className="filter-control">
-            <span className="filter-label">Sprint</span>
-            {sprintPair.length ? `${sprintPair.length} selected` : "All sprints"}
-            <Icon name="chevron" size={12} />
-          </summary>
-          <div>
-            {known.size ? (
-              [...known].map(([id, label]) => {
-                const board = id.split(":")[0];
-                return (
-                  <label key={id}>
-                    <input
-                      type="checkbox"
-                      checked={sprintPair.includes(id)}
-                      onChange={(event) => {
-                        const next = event.currentTarget.checked
-                          ? [...sprintPair, id].slice(0, 32)
-                          : sprintPair.filter((pair) => pair !== id);
-                        setPairs(next);
-                        setTrail([]);
-                        saveValue("archive.pairs", next);
-                      }}
-                    />{" "}
-                    {label} ·{" "}
-                    {archive.data?.boards.find((entry) => entry.id === board)?.label ??
-                      `Board ${board}`}
-                  </label>
-                );
-              })
-            ) : (
-              <p>No qualified sprints found.</p>
-            )}
-          </div>
-        </details>
+        <ArchiveSprintFilter
+          options={[...known].map(([id, label]) => {
+            const board = id.split(":")[0] ?? "";
+            return { id, label, board: boardLabels.get(board) ?? `Board ${board}` };
+          })}
+          selected={sprintPair}
+          pending={archive.pending || catalog.pending}
+          onChange={(next) => {
+            setPairs(next);
+            setTrail([]);
+            saveValue("archive.pairs", next);
+          }}
+        />
         {(preset !== "all" || sprintPair.length > 0 || q) && (
           <button
             type="button"
