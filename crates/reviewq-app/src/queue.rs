@@ -322,6 +322,7 @@ pub struct RunDetail {
     pub sessions: Vec<SessionSummary>,
     pub next_session: Option<SessionPosition>,
     pub launch: Option<crate::launch::LaunchDetails>,
+    pub request_evidence: Option<crate::launch::RequestEvidence>,
 }
 
 pub trait QueueStore: Send + Sync {

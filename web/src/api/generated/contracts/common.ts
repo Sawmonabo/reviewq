@@ -100,6 +100,8 @@ export type FindingConclusion =
   | "still_present"
   | "unverified";
 
+export type HistoryGenerationDto = string;
+
 export type State = "pending" | "confirmed" | "rejected" | "uncertain";
 
 export type Invocation =

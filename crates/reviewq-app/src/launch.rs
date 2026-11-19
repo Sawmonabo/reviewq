@@ -86,6 +86,29 @@ pub struct LaunchDetails {
     pub observed_effort: Option<String>,
 }
 
+/// Independently recorded request metadata scoped to the exact lead of a run.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RequestEvidence {
+    pub requested_model: Option<String>,
+    pub requested_effort: Option<String>,
+    pub skill_name: String,
+    pub input: Option<RequestInput>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RequestInput {
+    pub slot: RequestInputSlot,
+    pub turn: reviewq_domain::identity::NativeTurnId,
+    pub entry: reviewq_domain::identity::NativeInputId,
+    pub generation: String,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum RequestInputSlot {
+    ReviewRequest,
+    SkillArguments,
+}
+
 #[derive(Clone)]
 pub struct LaunchInput {
     pub review: ReviewId,
