@@ -11,6 +11,7 @@ mod hosts;
 pub mod launch;
 pub mod mcp;
 pub mod notifications;
+pub mod questions;
 pub mod queue;
 pub mod reports;
 mod scalar;

@@ -49,6 +49,7 @@ mod launch;
 mod mcp;
 mod messages;
 mod pages;
+mod questions;
 mod settings;
 mod sources;
 mod terminal;
@@ -257,6 +258,14 @@ pub fn router(
         .route(
             "/runs/{run_id}/sessions/{session_key}/terminal/open",
             post(terminal::open),
+        )
+        .route(
+            "/runs/{run_id}/sessions/{session_key}/questions",
+            get(questions::list),
+        )
+        .route(
+            "/runs/{run_id}/sessions/{session_key}/questions/{request_id}/answer",
+            post(questions::answer),
         )
         .route("/native/codex/link", post(hosts::link))
         .route(

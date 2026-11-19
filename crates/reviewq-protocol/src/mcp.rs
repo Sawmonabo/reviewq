@@ -3,7 +3,8 @@
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    HostProviderDto, MessageTextDto, RevisionDto, RunIdDto, SessionKeyDto, SubmissionIdDto,
+    HostProviderDto, MessageTextDto, ResourceIdDto, RevisionDto, RunIdDto, SessionKeyDto,
+    SubmissionIdDto,
 };
 
 #[derive(Deserialize)]
@@ -107,4 +108,15 @@ pub enum FollowupAction {
     Pause,
     Resume,
     ReviewNow,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct AnswerReviewQuestion {
+    pub target: String,
+    pub session_key: Option<SessionKeyDto>,
+    pub request_id: ResourceIdDto,
+    pub submission_id: SubmissionIdDto,
+    pub answers: std::collections::BTreeMap<String, crate::questions::Values>,
 }

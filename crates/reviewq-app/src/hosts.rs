@@ -17,6 +17,7 @@ use crate::workspace::WorkspaceStore;
 
 mod claude;
 mod messages;
+mod questions;
 mod work;
 
 pub use claude::{
@@ -27,6 +28,9 @@ pub use claude::{
 pub use messages::{
     MAX_MESSAGE_HISTORY_PAGE, MessageAttachment, MessageHistory, MessageHistoryStore,
     MessagePosition, RecordedMessage, RecordedPurpose,
+};
+pub use questions::{
+    Question, QuestionAnswer, QuestionForm, QuestionOption, QuestionStatus, QuestionsPort,
 };
 pub use work::{DispatchGuard, receipt, recover_delivery, send_message};
 
@@ -57,7 +61,7 @@ pub enum HostPhase {
     Failed,
 }
 
-pub trait NativeHost: Send + Sync {
+pub trait NativeHost: QuestionsPort + Send + Sync {
     fn prove(&self, native_id: NativeSessionId) -> AppFuture<'_, HostProof>;
     fn history(
         &self,

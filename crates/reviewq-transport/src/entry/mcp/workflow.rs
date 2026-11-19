@@ -1,12 +1,15 @@
 use reviewq_app::access::{Actor, AppError};
 use reviewq_app::followups::{MonitorCommand, MonitorRequest, MonitorState};
 use reviewq_domain::identity::{ReviewId, Revision, RunId, SessionKey};
-use reviewq_protocol::mcp::{ConfigureFollowups, FollowupAction, StartReview};
+use reviewq_protocol::mcp::{
+    AnswerReviewQuestion, ConfigureFollowups, FollowupAction, StartReview,
+};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
 use crate::entry::features::followups::{execute, project_receipt, selection};
 use crate::entry::pages::parse;
+use crate::entry::questions;
 use crate::entry::{Entry, launch};
 
 use super::operations::{ResolvedReview, alternatives, dashboard, resolve, run_summary};
@@ -151,6 +154,56 @@ pub(super) async fn followups(
         "submissionId":result.value.submission.as_str(), "followups":project_receipt(result.value)?,
         "dashboard":dashboard(entry, &review, None),
     }))
+}
+
+pub(super) async fn answer(
+    entry: &Entry,
+    actor: Actor,
+    args: AnswerReviewQuestion,
+) -> Result<Value, AppError> {
+    let review = match resolve(entry, &actor, &args.target).await? {
+        ResolvedReview::Review(id) => id,
+        ResolvedReview::Alternatives(urls) => return Ok(alternatives(urls)),
+    };
+    let (run, session) = if let Some(session) = args.session_key {
+        let session: SessionKey = parse(session.as_str())?;
+        let run = entry
+            .store
+            .run_for_session(actor.clone(), review.clone(), session.clone())
+            .await?;
+        (run, session)
+    } else {
+        let choices = entry
+            .store
+            .management_runs(actor.clone(), review.clone(), 0, 10)
+            .await?
+            .value;
+        if choices.total > 1 {
+            let choices: Vec<_> = choices
+                .runs
+                .iter()
+                .map(|run| run_summary(entry, &review, run))
+                .collect();
+            return Ok(
+                json!({"state":"ambiguous","choices":choices,"dashboard":dashboard(entry,&review,None)}),
+            );
+        }
+        let selected = choices.runs.into_iter().next().ok_or(AppError::NotFound)?;
+        (selected.run_id, selected.lead_session_key)
+    };
+    let result = questions::respond(
+        entry,
+        actor,
+        run,
+        session,
+        args.request_id.as_str().to_owned(),
+        reviewq_protocol::questions::Answer {
+            submission_id: args.submission_id,
+            answers: args.answers,
+        },
+    )
+    .await?;
+    serde_json::to_value(result.data).map_err(|_| AppError::Internal)
 }
 
 async fn exact_lead(

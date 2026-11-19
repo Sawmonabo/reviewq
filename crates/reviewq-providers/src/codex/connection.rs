@@ -1,11 +1,13 @@
+use std::collections::HashMap;
 use std::os::unix::fs::{FileTypeExt, MetadataExt};
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use futures_util::{SinkExt, StreamExt};
 use reviewq_app::access::AppError;
-use reviewq_app::hosts::DispatchGuard;
+use reviewq_app::hosts::{DispatchGuard, QuestionAnswer, QuestionForm};
 use reviewq_app::launch::LaunchProgress;
 use serde::Deserialize;
 use serde::de::DeserializeOwned;
@@ -14,9 +16,11 @@ use tokio::io::AsyncReadExt;
 use tokio::net::UnixStream;
 use tokio::process::Command;
 use tokio::sync::{mpsc, oneshot};
-use tokio::time::timeout;
+use tokio::time::{Instant, sleep_until, timeout};
 use tokio_tungstenite::tungstenite::{Message, protocol::WebSocketConfig};
 use tokio_tungstenite::{WebSocketStream, client_async_with_config};
+
+use super::questions::{AnswerProof, Questions};
 
 const REQUEST_LIMIT: usize = 8;
 const DISCOVERY_LIMIT: u64 = 16 * 1024;
@@ -27,7 +31,16 @@ const IDLE_TIME: Duration = Duration::from_secs(60);
 type Socket = WebSocketStream<UnixStream>;
 
 pub(super) struct Connection {
-    sender: mpsc::Sender<Rpc>,
+    sender: mpsc::Sender<CommandRequest>,
+    questions: Arc<Mutex<Questions>>,
+}
+
+enum CommandRequest {
+    Rpc(Rpc),
+    Answer(
+        QuestionAnswer,
+        oneshot::Sender<Result<QuestionForm, AppError>>,
+    ),
 }
 
 struct Rpc {
@@ -35,6 +48,11 @@ struct Rpc {
     params: Value,
     guard: Option<Effect>,
     reply: oneshot::Sender<Result<Value, CallError>>,
+}
+
+struct Pending {
+    reply: oneshot::Sender<Result<Value, CallError>>,
+    deadline: Instant,
 }
 
 enum Effect {
@@ -94,8 +112,56 @@ impl Connection {
             profile,
             owner,
         };
-        tokio::spawn(daemon.run(commands));
-        Self { sender }
+        let questions = Arc::new(Mutex::new(Questions::default()));
+        tokio::spawn(daemon.run(commands, questions.clone()));
+        Self { sender, questions }
+    }
+
+    pub(super) fn questions(
+        &self,
+        thread: &str,
+        request: Option<&str>,
+    ) -> Result<Vec<QuestionForm>, AppError> {
+        Ok(self
+            .questions
+            .lock()
+            .map_err(|_| AppError::Internal)?
+            .list(thread, request))
+    }
+
+    pub(super) fn question_proofs(
+        &self,
+        thread: &str,
+        request: Option<&str>,
+    ) -> Result<Vec<AnswerProof>, AppError> {
+        Ok(self
+            .questions
+            .lock()
+            .map_err(|_| AppError::Internal)?
+            .proofs(thread, request))
+    }
+
+    pub(super) fn question_answered(
+        &self,
+        thread: &str,
+        proof: AnswerProof,
+    ) -> Result<(), AppError> {
+        self.questions
+            .lock()
+            .map_err(|_| AppError::Internal)?
+            .confirmed(thread, proof);
+        Ok(())
+    }
+
+    pub(super) async fn answer(&self, answer: QuestionAnswer) -> Result<QuestionForm, AppError> {
+        let (reply, result) = oneshot::channel();
+        self.sender
+            .try_send(CommandRequest::Answer(answer, reply))
+            .map_err(|_| AppError::Busy)?;
+        timeout(DEADLINE + DEADLINE, result)
+            .await
+            .map_err(|_| AppError::Unavailable)?
+            .map_err(|_| AppError::Unavailable)?
     }
 
     pub(super) async fn read<T: DeserializeOwned>(
@@ -141,12 +207,12 @@ impl Connection {
     ) -> Result<Value, CallError> {
         let (reply, receive) = oneshot::channel();
         self.sender
-            .try_send(Rpc {
+            .try_send(CommandRequest::Rpc(Rpc {
                 method,
                 params,
                 guard,
                 reply,
-            })
+            }))
             .map_err(|error| {
                 CallError::BeforeSend(match error {
                     mpsc::error::TrySendError::Full(_) => AppError::Busy,
@@ -161,56 +227,37 @@ impl Connection {
 }
 
 impl Daemon {
-    async fn run(self, mut commands: mpsc::Receiver<Rpc>) {
-        let mut socket = None;
+    async fn run(
+        self,
+        mut commands: mpsc::Receiver<CommandRequest>,
+        questions: Arc<Mutex<Questions>>,
+    ) {
         let mut id = 1_u64;
-        loop {
-            let request = match socket.as_mut() {
-                None => commands.recv().await,
-                Some(ws) => tokio::select! {
-                    request = commands.recv() => request,
-                    frame = timeout(IDLE_TIME, receive_frame(ws)) => {
-                        if !matches!(frame, Ok(Ok(_))) {
-                            socket = None;
-                        }
-                        continue;
-                    }
-                },
+        while let Some(first) = commands.recv().await {
+            let request = match first {
+                CommandRequest::Rpc(request) => request,
+                CommandRequest::Answer(answer, reply) => {
+                    let result = questions
+                        .lock()
+                        .map_err(|_| AppError::Internal)
+                        .and_then(|mut cache| cache.prepare(answer))
+                        .map(|(form, _)| form);
+                    let _ = reply.send(result);
+                    continue;
+                }
             };
-            let Some(request) = request else { break };
             if request.reply.is_closed() {
                 continue;
             }
-            if socket.is_none() {
-                socket = timeout(DEADLINE, self.connect())
-                    .await
-                    .ok()
-                    .and_then(Result::ok);
-            }
-            let Some(ws) = socket.as_mut() else {
+            let Ok(Ok(mut socket)) = timeout(DEADLINE, self.connect()).await else {
                 let _ = request
                     .reply
                     .send(Err(CallError::BeforeSend(AppError::Unavailable)));
                 continue;
             };
-            if let Some(guard) = request.guard {
-                if let Err(error) = guard.check().await {
-                    let _ = request.reply.send(Err(CallError::Denied(error)));
-                    continue;
-                }
-                if request.reply.is_closed() {
-                    continue;
-                }
-            }
-            id = id.wrapping_add(1).max(2);
-            match timeout(DEADLINE, exchange(ws, id, request.method, request.params)).await {
-                Ok(Ok(result)) => {
-                    let _ = request.reply.send(result.map_err(CallError::Remote));
-                }
-                _ => {
-                    socket = None;
-                    let _ = request.reply.send(Err(CallError::Uncertain));
-                }
+            multiplex(&mut socket, request, &mut commands, &questions, &mut id).await;
+            if let Ok(mut cache) = questions.lock() {
+                cache.disconnect();
             }
         }
     }
@@ -238,7 +285,7 @@ impl Daemon {
             "initialize",
             json!({
                 "clientInfo": {"name":"reviewq","version":env!("CARGO_PKG_VERSION")},
-                "capabilities": {"experimentalApi":false}
+                "capabilities": {"experimentalApi":true}
             }),
         )
         .await
@@ -335,6 +382,128 @@ impl Daemon {
     }
 }
 
+async fn multiplex(
+    socket: &mut Socket,
+    first: Rpc,
+    commands: &mut mpsc::Receiver<CommandRequest>,
+    questions: &Mutex<Questions>,
+    id: &mut u64,
+) {
+    let mut pending = HashMap::new();
+    if dispatch(socket, first, id, &mut pending).await.is_err() {
+        return;
+    }
+    let mut last_activity = Instant::now();
+    loop {
+        let (question_active, question_deadline) = questions
+            .lock()
+            .ok()
+            .map(|mut cache| cache.next())
+            .unwrap_or((false, None));
+        let next_deadline = pending
+            .values()
+            .map(|item| item.deadline)
+            .min()
+            .or_else(|| (!question_active).then_some(last_activity + IDLE_TIME));
+        let wake = match (next_deadline, question_deadline) {
+            (Some(left), Some(right)) => left.min(right),
+            (Some(value), None) | (None, Some(value)) => value,
+            (None, None) => last_activity + IDLE_TIME,
+        };
+        tokio::select! {
+            work = commands.recv(), if pending.len() < REQUEST_LIMIT => {
+                last_activity = Instant::now();
+                match work {
+                    Some(CommandRequest::Rpc(request)) => {
+                        if dispatch(socket, request, id, &mut pending).await.is_err() { break; }
+                    }
+                    Some(CommandRequest::Answer(answer, reply)) => {
+                        if reply.is_closed() { continue; }
+                        if let Err(error) = answer.check().await {
+                            let _ = reply.send(Err(error));
+                            continue;
+                        }
+                        if reply.is_closed() { continue; }
+                        let prepared = questions.lock().map_err(|_| AppError::Internal)
+                            .and_then(|mut cache| cache.prepare(answer));
+                        let result = match prepared {
+                            Ok((form, Some(outbound))) => {
+                                if !matches!(timeout(DEADLINE, send(socket,outbound)).await, Ok(Ok(()))) {
+                                    let _ = reply.send(Err(AppError::Unavailable));
+                                    break;
+                                }
+                                Ok(form)
+                            }
+                            Ok((form, None)) => Ok(form),
+                            Err(error) => Err(error),
+                        };
+                        let _ = reply.send(result);
+                    }
+                    None => break,
+                }
+            }
+            event = receive_frame(socket) => {
+                last_activity = Instant::now();
+                match event {
+                    Ok(Some(frame)) if frame.get("method").is_some() => {
+                        if let Ok(mut cache) = questions.lock() { cache.frames(&frame); }
+                    }
+                    Ok(Some(frame)) => {
+                        if let Some(id) = frame.get("id").and_then(Value::as_u64)
+                            && let Some(active) = pending.remove(&id) {
+                            let _ = active.reply.send(rpc_result(frame).map_err(CallError::Remote));
+                        }
+                    }
+                    Ok(None) => (),
+                    Err(()) => break,
+                }
+            }
+            () = sleep_until(wake) => {
+                let now = Instant::now();
+                pending.retain(|_, item| !item.reply.is_closed() && item.deadline > now);
+                if pending.is_empty() && !question_active && now >= last_activity + IDLE_TIME { break; }
+            }
+        }
+    }
+    for (_, item) in pending {
+        let _ = item.reply.send(Err(CallError::Uncertain));
+    }
+}
+
+async fn dispatch(
+    socket: &mut Socket,
+    request: Rpc,
+    id: &mut u64,
+    pending: &mut HashMap<u64, Pending>,
+) -> Result<(), ()> {
+    if request.reply.is_closed() {
+        return Ok(());
+    }
+    if let Some(guard) = request.guard
+        && let Err(error) = guard.check().await
+    {
+        let _ = request.reply.send(Err(CallError::Denied(error)));
+        return Ok(());
+    }
+    if request.reply.is_closed() {
+        return Ok(());
+    }
+    *id = id.wrapping_add(1).max(2);
+    let wire = json!({"id": *id, "method": request.method, "params": request.params});
+    if !matches!(timeout(DEADLINE, send(socket, wire)).await, Ok(Ok(()))) {
+        let _ = request.reply.send(Err(CallError::Uncertain));
+        return Err(());
+    }
+    pending.insert(
+        *id,
+        Pending {
+            reply: request.reply,
+            deadline: Instant::now() + DEADLINE,
+        },
+    );
+    Ok(())
+}
+
 async fn exchange(
     socket: &mut Socket,
     id: u64,
@@ -349,15 +518,21 @@ async fn exchange(
         if frame.get("id").and_then(Value::as_u64) != Some(id) || frame.get("method").is_some() {
             continue;
         }
-        if let Some(result) = frame.get("result") {
-            return Ok(Ok(result.clone()));
-        }
-        let error = match frame.pointer("/error/code").and_then(Value::as_i64) {
-            Some(-32600 | -32602) => AppError::NotFound,
-            _ => AppError::Unavailable,
-        };
-        return Ok(Err(error));
+        return Ok(rpc_result(frame));
     }
+}
+
+fn rpc_result(mut frame: Value) -> Result<Value, AppError> {
+    if let Some(result) = frame
+        .as_object_mut()
+        .and_then(|object| object.remove("result"))
+    {
+        return Ok(result);
+    }
+    Err(match frame.pointer("/error/code").and_then(Value::as_i64) {
+        Some(-32600 | -32602) => AppError::NotFound,
+        _ => AppError::Unavailable,
+    })
 }
 
 async fn send(socket: &mut Socket, value: Value) -> Result<(), ()> {

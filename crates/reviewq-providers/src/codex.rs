@@ -9,12 +9,14 @@ mod connection;
 mod delivery;
 mod history;
 mod launch;
+mod questions;
 mod session;
 mod workflow;
 
 pub struct Codex {
     profile: AbsolutePath,
     connection: connection::Connection,
+    question_proofs: tokio::sync::Semaphore,
     turn_settings: Option<(String, String)>,
 }
 
@@ -49,6 +51,7 @@ impl Codex {
         }
         Ok(Self {
             connection: connection::Connection::new(executable, profile.clone(), metadata.uid()),
+            question_proofs: tokio::sync::Semaphore::new(4),
             profile: AbsolutePath::from_canonical(profile).map_err(|_| AppError::InvalidRequest)?,
             turn_settings,
         })

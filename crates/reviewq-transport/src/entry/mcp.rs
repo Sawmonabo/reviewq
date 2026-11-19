@@ -9,7 +9,8 @@ use axum::response::{IntoResponse, Response};
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use reviewq_app::access::{Actor, AppError};
 use reviewq_protocol::mcp::{
-    ConfigureFollowups, GetReview, ListReviews, ReadTranscript, SendReviewMessage, StartReview,
+    AnswerReviewQuestion, ConfigureFollowups, GetReview, ListReviews, ReadTranscript,
+    SendReviewMessage, StartReview,
 };
 use rmcp::model::{
     CallToolRequestParams, CallToolResponse, CallToolResult, ContentBlock, Implementation,
@@ -64,6 +65,10 @@ pub(super) fn mount(entry: Arc<Entry>) -> Router<Arc<Entry>> {
                 "Queue an explicit message for the selected lead.",
             ),
             tool::<StartReview>("StartReview", "Start an explicitly selected native review."),
+            tool::<AnswerReviewQuestion>(
+                "AnswerReviewQuestion",
+                "Answer one exact pending native question.",
+            ),
             tool::<ConfigureFollowups>(
                 "ConfigureFollowups",
                 "Configure review follow-ups for an exact registered lead.",
@@ -219,6 +224,7 @@ impl Server {
             "ReadTranscript" => operations::transcript(&self.entry, actor, arguments(input)?).await,
             "SendReviewMessage" => operations::send(&self.entry, actor, arguments(input)?).await,
             "StartReview" => workflow::start(&self.entry, actor, arguments(input)?).await,
+            "AnswerReviewQuestion" => workflow::answer(&self.entry, actor, arguments(input)?).await,
             "ConfigureFollowups" => {
                 workflow::followups(&self.entry, actor, arguments(input)?).await
             }
