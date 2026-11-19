@@ -9,6 +9,9 @@ use serde_json::Value;
 use super::issues::optional_label;
 use super::{Jira, METADATA_LIMIT, numeric_id, safe_label, valid_estimate_field, valid_project};
 
+mod cache;
+pub(super) use cache::Cache;
+
 const DESCRIPTION_LIMIT: usize = 256 * 1024;
 const COMMENT_LIMIT: usize = 64 * 1024;
 const COMMENTS_PAGE: u16 = 26;
@@ -45,7 +48,7 @@ impl Jira {
     pub(super) async fn ticket_detail(
         &self,
         key: TicketKey,
-        estimate_fields: Vec<String>,
+        mut estimate_fields: Vec<String>,
         offset: u32,
         limit: u16,
         order: CommentOrder,
@@ -57,6 +60,44 @@ impl Jira {
         {
             return Err(AppError::InvalidRequest);
         }
+        estimate_fields.sort_unstable();
+        estimate_fields.dedup();
+        let fetch =
+            || self.fetch_ticket_detail(key.clone(), estimate_fields.clone(), offset, limit, order);
+        // A continuation must check the current issue identity and cursor boundary in Jira.
+        let result = if let Some(lease) = &self.lease
+            && offset == 0
+        {
+            lease.check().await?;
+            let result = self
+                .ticket_cache
+                .read(key.clone(), estimate_fields.clone(), limit, order, fetch)
+                .await;
+            lease.check().await?;
+            result
+        } else {
+            fetch().await
+        };
+        if matches!(
+            result,
+            Err(AppError::Forbidden
+                | AppError::NotFound
+                | AppError::Conflict
+                | AppError::CursorExpired)
+        ) {
+            self.ticket_cache.remove(&key);
+        }
+        result
+    }
+
+    async fn fetch_ticket_detail(
+        &self,
+        key: TicketKey,
+        estimate_fields: Vec<String>,
+        offset: u32,
+        limit: u16,
+        order: CommentOrder,
+    ) -> Result<TicketDetail, AppError> {
         let fields = std::iter::once(
             "summary,project,status,priority,assignee,reporter,issuetype,labels,components,description,updated",
         )

@@ -159,6 +159,7 @@ pub(super) async fn ticket(
             .first()
             .map(|comment| (comment.created_at_ms, comment.id));
         if position.issue != result.id || witness != Some(position.previous) {
+            provider.invalidate_issue_details(Some(&key));
             return Err(AppError::CursorExpired.into());
         }
         result.comments.remove(0);
