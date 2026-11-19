@@ -1,10 +1,10 @@
 //! Production HTTP routes for review-owned state.
 
-mod actions;
+pub(super) mod actions;
 pub(super) mod decisions;
 pub(super) mod followups;
 pub(super) mod notifications;
-mod reports;
+pub(super) mod reports;
 
 use std::sync::Arc;
 

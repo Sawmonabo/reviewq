@@ -10,8 +10,8 @@ use reviewq_app::history::{
 };
 use reviewq_domain::identity::{EventCursor, NativeInputId, RunId, SessionKey};
 use reviewq_protocol::history::{
-    HistoryAvailability, HistoryEntry, HistoryPage, HistoryPageEncodeError, HistoryPageResponse,
-    HistoryPart, HistoryText, HistoryToolState, HistoryWindow,
+    Direction, HistoryAvailability, HistoryEntry, HistoryPage, HistoryPageEncodeError,
+    HistoryPageResponse, HistoryPart, HistoryText, HistoryToolState, HistoryWindow,
 };
 use reviewq_protocol::{
     EventCursorDto, HistoryCursorDto, HistoryEntryIdDto, HistoryGenerationDto, HistoryTurnIdDto,
@@ -56,6 +56,7 @@ pub(super) struct HistoryQuery {
     pub(super) cursor: Option<String>,
     pub(super) around_id: Option<String>,
     pub(super) locator: Option<String>,
+    pub(super) direction: Option<Direction>,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -147,7 +148,8 @@ pub(super) async fn read(
         .as_deref()
         .map(super::pages::parse)
         .transpose()?;
-    if (around.is_some() && query.cursor.is_some()) || (query.locator.is_some() && around.is_none())
+    if (around.is_some() && (query.cursor.is_some() || query.direction.is_some()))
+        || (query.locator.is_some() && around.is_none())
     {
         return Err(AppError::InvalidRequest);
     }
@@ -157,11 +159,21 @@ pub(super) async fn read(
         .as_deref()
         .map(|token| endpoint.decode_cursor::<Cursor>(CURSOR, token))
         .transpose()?;
+    let requested_newer = query
+        .direction
+        .map(|value| matches!(value, Direction::Newer));
+    let cursor_newer = cursor.as_ref().map(|cursor| {
+        cursor
+            .within
+            .as_ref()
+            .map_or(cursor.ascending, |within| within.forward)
+    });
     if cursor.as_ref().is_some_and(|cursor| {
         cursor.run != run.as_str()
             || cursor.session != session.as_str()
             || cursor.limit != limit
             || cursor.byte_limit != byte_limit
+            || requested_newer.is_some_and(|value| Some(value) != cursor_newer)
     }) {
         return Err(AppError::CursorExpired);
     }
@@ -169,11 +181,16 @@ pub(super) async fn read(
         .store
         .history_session(actor.clone(), run.clone(), session.clone())
         .await?;
+    let newer = requested_newer.or(cursor_newer).unwrap_or(false);
+    let first = NativePosition {
+        ascending: newer,
+        ..NativePosition::default()
+    };
     let position = cursor
         .as_ref()
         .map(Cursor::native_position)
         .transpose()?
-        .unwrap_or_default();
+        .unwrap_or_else(|| first.clone());
     if let Some(around) = around {
         let anchor = query
             .locator
@@ -205,7 +222,7 @@ pub(super) async fn read(
             (limit, byte_limit),
             result,
             reset,
-            Some(&around),
+            Trim::Around(&around),
         );
     }
     let mut reset = false;
@@ -220,7 +237,7 @@ pub(super) async fn read(
         }
         Ok(_) | Err(AppError::CursorExpired) if cursor.is_some() => {
             reset = true;
-            native_page(entry, lead.value.clone(), NativePosition::default(), limit).await?
+            native_page(entry, lead.value.clone(), first, limit).await?
         }
         Err(error) => return Err(error),
         Ok(page) => page,
@@ -234,7 +251,11 @@ pub(super) async fn read(
         (limit, byte_limit),
         history,
         reset,
-        None,
+        if newer {
+            Trim::FromStart
+        } else {
+            Trim::FromEnd
+        },
     )
 }
 
@@ -293,6 +314,12 @@ async fn native_page(
     host.history(session, position, limit).await
 }
 
+enum Trim<'a> {
+    FromStart,
+    FromEnd,
+    Around(&'a NativeInputId),
+}
+
 fn encode(
     endpoint: &ServiceEndpoint,
     run: &RunId,
@@ -301,7 +328,7 @@ fn encode(
     budget: (u16, usize),
     history: NativeHistoryPage,
     reset: bool,
-    around: Option<&NativeInputId>,
+    trim: Trim<'_>,
 ) -> Result<Vec<u8>, AppError> {
     let cursor = |position: Option<NativePosition>| {
         position
@@ -314,7 +341,10 @@ fn encode(
     };
     let mut first = 0;
     let mut last = history.entries.len();
-    let pinned = around.and_then(|id| history.entries.iter().position(|entry| &entry.id == id));
+    let pinned = match trim {
+        Trim::Around(id) => history.entries.iter().position(|entry| &entry.id == id),
+        _ => None,
+    };
     loop {
         let data = HistoryPage {
             run_id: RunIdDto::new(run.as_str()).ok_or(AppError::Internal)?,
@@ -333,19 +363,7 @@ fn encode(
                     .map(|entry| encode_entry(endpoint, run, session, entry))
                     .collect::<Result<Vec<_>, _>>()?,
                 cursor(history.older_after_trim(first))?,
-                cursor(if last == history.entries.len() {
-                    history.newer.clone()
-                } else {
-                    history
-                        .entries
-                        .get(last)
-                        .and_then(|entry| entry.content.as_ref())
-                        .map(|content| NativePosition {
-                            file: Some(content.position.clone()),
-                            ascending: true,
-                            ..NativePosition::default()
-                        })
-                })?,
+                cursor(history.newer_after_trim(last))?,
             )
             .ok_or(AppError::Internal)?,
         };
@@ -364,6 +382,8 @@ fn encode(
                     last -= remove.min(last - anchor - 1);
                 } else if let Some(anchor) = pinned {
                     first += remove.min(anchor - first);
+                } else if matches!(trim, Trim::FromStart) {
+                    last -= remove.min(last - first - 1);
                 } else {
                     first += remove.min(last - first - 1);
                 }

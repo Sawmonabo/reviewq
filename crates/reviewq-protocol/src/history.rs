@@ -19,6 +19,14 @@ pub use navigation::*;
 
 const MAX_HISTORY_TEXT_BYTES: usize = 64 * 1024;
 
+#[derive(Clone, Copy, Debug, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub enum Direction {
+    Older,
+    Newer,
+}
+
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]

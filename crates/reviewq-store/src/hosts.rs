@@ -6,8 +6,8 @@ use reviewq_app::access::{Actor, ActorScope, AppError, AppFuture};
 use reviewq_app::events::{ResourceKey, Snapshot};
 use reviewq_app::hosts::{
     DeliveryClaim, DeliveryObservation, DeliveryReceipt, DeliveryRecoveryCursor, HostActivity,
-    HostPhase, LeadStore, MAX_RECOVERY_LIMIT, RecoverableDelivery, RecoverableDeliveryState,
-    RegisterLead, SubmitMessage,
+    HostPhase, LeadStore, MAX_RECOVERY_LIMIT, MessageReplay, RecoverableDelivery,
+    RecoverableDeliveryState, RegisterLead, SubmitMessage,
 };
 use reviewq_domain::identity::{DeliveryId, RunId, SessionKey, SubmissionId};
 use reviewq_domain::session::{
@@ -83,6 +83,18 @@ impl LeadStore for SqliteStore {
     ) -> AppFuture<'_, Snapshot<DeliveryReceipt>> {
         Box::pin(async move {
             self.write(move |tx| delivery::admit(tx, actor, input))
+                .await
+                .map_err(StoreError::app)
+        })
+    }
+
+    fn replay_message(
+        &self,
+        actor: Actor,
+        input: MessageReplay,
+    ) -> AppFuture<'_, Option<Snapshot<DeliveryReceipt>>> {
+        Box::pin(async move {
+            self.read(move |db| delivery::replay(db, actor, input))
                 .await
                 .map_err(StoreError::app)
         })

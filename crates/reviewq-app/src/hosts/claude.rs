@@ -3,9 +3,9 @@
 use reviewq_domain::identity::{
     DeliveryFence, DeliveryId, NativeInputId, NativeSessionId, NativeTurnId, ReportHash,
 };
-use reviewq_domain::session::{AbsolutePath, LeadTarget, NativeBinding};
+use reviewq_domain::session::{AbsolutePath, LeadTarget, NativeBinding, SessionTarget};
 
-use crate::access::{AppError, AppFuture};
+use crate::access::{Actor, AppError, AppFuture};
 use crate::events::Snapshot;
 use crate::history::{FilePosition, HistorySession};
 use crate::workflow::ReadyWorkflow;
@@ -133,6 +133,12 @@ pub enum ClaudeClassicEvent {
 }
 
 pub trait ClaudeStore: Send + Sync {
+    fn claude_companion_available(
+        &self,
+        actor: Actor,
+        target: SessionTarget,
+    ) -> AppFuture<'_, Option<bool>>;
+
     fn pending_claude_launch(&self, context: ClaudeContext) -> AppFuture<'_, bool>;
 
     fn record_claude_classic(

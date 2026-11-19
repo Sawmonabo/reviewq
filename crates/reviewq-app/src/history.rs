@@ -243,6 +243,31 @@ pub struct NativeHistoryPage {
 }
 
 impl NativeHistoryPage {
+    pub fn newer_after_trim(&self, end: usize) -> Option<NativePosition> {
+        if end == self.entries.len() {
+            return self.newer.clone();
+        }
+        if let Some(record) = self
+            .entries
+            .get(end)
+            .and_then(|entry| entry.content.as_ref())
+        {
+            return Some(NativePosition {
+                file: Some(record.position.clone()),
+                ascending: true,
+                ..NativePosition::default()
+            });
+        }
+        let (position, turn, start) = self.within.as_ref()?;
+        let mut position = position.clone();
+        position.within = Some(TurnWindow {
+            turn: turn.clone(),
+            index: start + end,
+            forward: true,
+        });
+        Some(position)
+    }
+
     pub fn older_after_trim(&self, count: usize) -> Option<NativePosition> {
         if count == 0 {
             return self.older.clone();

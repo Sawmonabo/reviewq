@@ -7,8 +7,8 @@ use crate::events::Snapshot;
 use crate::settings::RuntimeSources;
 
 use super::{
-    DeliveryClaim, DeliveryReceipt, DeliveryWork, LeadStore, MessageBody, MessagePurpose,
-    NativeHost, RecoverableDelivery, SubmitMessage,
+    DeliveryClaim, DeliveryReceipt, DeliveryWork, LeadStore, MessageBody, NativeHost,
+    RecoverableDelivery, SubmitMessage,
 };
 
 /// The dispatch adapter must call this after preparing the exact native request.
@@ -83,13 +83,7 @@ pub async fn send_message(
     store
         .admit_message(
             actor,
-            SubmitMessage {
-                target,
-                submission_id: submission,
-                text: message,
-                purpose: MessagePurpose::User,
-                report_ref: None,
-            },
+            SubmitMessage::user_input(target, submission, message, None),
         )
         .await
 }

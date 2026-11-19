@@ -332,7 +332,7 @@ pub async fn send_feedback(
     text: crate::hosts::MessageBody,
     reference: crate::hosts::ReportRef,
 ) -> Result<Snapshot<crate::hosts::DeliveryReceipt>, AppError> {
-    use crate::hosts::{MessagePurpose, SubmitMessage};
+    use crate::hosts::SubmitMessage;
 
     let target = store
         .read_run(actor.clone(), run, None, 1)
@@ -342,13 +342,7 @@ pub async fn send_feedback(
     store
         .admit_message(
             actor,
-            SubmitMessage {
-                target,
-                submission_id,
-                text,
-                purpose: MessagePurpose::ReportFeedback,
-                report_ref: Some(reference),
-            },
+            SubmitMessage::user_input(target, submission_id, text, Some(reference)),
         )
         .await
 }

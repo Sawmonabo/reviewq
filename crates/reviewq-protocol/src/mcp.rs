@@ -3,8 +3,8 @@
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    GitShaDto, HostProviderDto, MessageTextDto, ResourceIdDto, RevisionDto, RunIdDto,
-    SessionKeyDto, SubmissionIdDto,
+    GitShaDto, HistoryEntryIdDto, HostProviderDto, MessageTextDto, ResourceIdDto, RevisionDto,
+    RunIdDto, SessionKeyDto, SubmissionIdDto,
 };
 
 #[derive(Deserialize)]
@@ -38,6 +38,32 @@ pub struct GetReview {
     pub offset: Option<u32>,
     pub limit: Option<u16>,
     pub launch_submission_id: Option<SubmissionIdDto>,
+    pub question_id: Option<ResourceIdDto>,
+    pub report: Option<ReportRead>,
+}
+
+#[derive(Deserialize)]
+#[serde(
+    rename_all = "snake_case",
+    rename_all_fields = "camelCase",
+    tag = "kind",
+    deny_unknown_fields
+)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub enum ReportRead {
+    Summary {
+        receipt_id: Option<ResourceIdDto>,
+    },
+    Section {
+        receipt_id: Option<ResourceIdDto>,
+        offset: Option<crate::SafeCountDto>,
+        characters: Option<u32>,
+    },
+    Candidate {
+        receipt_id: ResourceIdDto,
+        offset: Option<crate::SafeCountDto>,
+        characters: Option<u32>,
+    },
 }
 
 #[derive(Deserialize)]
@@ -50,12 +76,20 @@ pub struct ReadTranscript {
 }
 
 #[derive(Deserialize)]
-#[serde(rename_all = "snake_case", tag = "kind", deny_unknown_fields)]
+#[serde(
+    rename_all = "snake_case",
+    rename_all_fields = "camelCase",
+    tag = "kind",
+    deny_unknown_fields
+)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub enum TranscriptRead {
     Page {
         cursor: Option<String>,
         limit: Option<u16>,
+        direction: Option<crate::history::Direction>,
+        around_id: Option<HistoryEntryIdDto>,
+        locator: Option<String>,
     },
     Content {
         #[serde(rename = "ref")]
@@ -72,6 +106,7 @@ pub struct SendReviewMessage {
     pub session_key: Option<SessionKeyDto>,
     pub submission_id: SubmissionIdDto,
     pub text: MessageTextDto,
+    pub finding: Option<crate::reports::FeedbackReference>,
 }
 
 #[derive(Deserialize, Serialize)]

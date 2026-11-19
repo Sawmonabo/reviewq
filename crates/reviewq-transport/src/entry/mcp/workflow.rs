@@ -10,7 +10,7 @@ use sha2::{Digest, Sha256};
 use crate::entry::features::followups::{execute, project_receipt, selection};
 use crate::entry::pages::parse;
 use crate::entry::questions;
-use crate::entry::{Entry, launch};
+use crate::entry::{Entry, launch, targets};
 
 use super::operations::{ResolvedReview, alternatives, dashboard, resolve, run_summary};
 
@@ -31,7 +31,7 @@ pub(super) async fn start(
         return launch_output(entry, stored.value);
     }
     let review = match resolve(entry, &actor, &args.target).await? {
-        ResolvedReview::Review(id) => id,
+        ResolvedReview::Review(id, _) => id,
         ResolvedReview::Alternatives(urls) => return Ok(alternatives(urls)),
     };
     let stored = launch::execute(
@@ -75,18 +75,18 @@ pub(super) async fn followups(
     actor: Actor,
     args: ConfigureFollowups,
 ) -> Result<Value, AppError> {
-    let review = match resolve(entry, &actor, &args.target).await? {
-        ResolvedReview::Review(id) => id,
+    let (review, target_session) = match resolve(entry, &actor, &args.target).await? {
+        ResolvedReview::Review(id, session) => (id, session),
         ResolvedReview::Alternatives(urls) => return Ok(alternatives(urls)),
     };
     let run = args
         .run_id
         .map(|value| parse::<RunId>(value.as_str()))
         .transpose()?;
-    let session = args
-        .session_key
-        .map(|value| parse::<SessionKey>(value.as_str()))
-        .transpose()?;
+    let session = targets::session(
+        target_session,
+        args.session_key.as_ref().map(|key| key.as_str()),
+    )?;
     let explicit = exact_lead(entry, &actor, &review, run, session.as_ref()).await?;
     let command = match args.action {
         FollowupAction::Configure => {
@@ -182,12 +182,15 @@ pub(super) async fn answer(
     actor: Actor,
     args: AnswerReviewQuestion,
 ) -> Result<Value, AppError> {
-    let review = match resolve(entry, &actor, &args.target).await? {
-        ResolvedReview::Review(id) => id,
+    let (review, target_session) = match resolve(entry, &actor, &args.target).await? {
+        ResolvedReview::Review(id, session) => (id, session),
         ResolvedReview::Alternatives(urls) => return Ok(alternatives(urls)),
     };
-    let (run, session) = if let Some(session) = args.session_key {
-        let session: SessionKey = parse(session.as_str())?;
+    let session = targets::session(
+        target_session,
+        args.session_key.as_ref().map(|key| key.as_str()),
+    )?;
+    let (run, session) = if let Some(session) = session {
         let run = entry
             .store
             .run_for_session(actor.clone(), review.clone(), session.clone())

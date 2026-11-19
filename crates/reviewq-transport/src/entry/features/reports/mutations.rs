@@ -111,32 +111,47 @@ pub(in crate::entry::features) async fn feedback(
     let run = parse(&run)?;
     let input: dto::FeedbackRequest =
         serde_json::from_slice(&bytes).map_err(|_| AppError::InvalidRequest)?;
-    let quote = match input.quote_ref {
-        Some(range) => {
-            let quote = ReportQuote::new(MessageBody::new(&input.quote)?, range.offset.get())?;
-            if quote.length() != range.length.get() {
-                return Err(AppError::InvalidRequest.into());
-            }
-            Some(quote)
-        }
-        None if input.quote.is_empty() => None,
-        None => return Err(AppError::InvalidRequest.into()),
-    };
+    let reference = feedback_reference(
+        input.receipt_id,
+        input.report_hash,
+        &input.quote,
+        input.quote_ref,
+    )?;
     let receipt = reviewq_app::reports::send_feedback(
         entry.store.as_ref(),
         actor,
         run,
         parse(input.submission_id.as_str())?,
         MessageBody::new(input.text.as_str())?,
-        ReportRef {
-            receipt_id: parse(input.receipt_id.as_str())?,
-            report_hash: parse(input.report_hash.as_str())?,
-            quote,
-        },
+        reference,
     )
     .await?;
     Ok((
         StatusCode::ACCEPTED,
         Json(crate::entry::messages::project(receipt)?),
     ))
+}
+
+pub(in crate::entry) fn feedback_reference(
+    receipt_id: reviewq_protocol::ResourceIdDto,
+    report_hash: dto::ReportHashDto,
+    text: &str,
+    range: Option<dto::QuoteRef>,
+) -> Result<ReportRef, AppError> {
+    let quote = match range {
+        Some(range) => {
+            let quote = ReportQuote::new(MessageBody::new(text)?, range.offset.get())?;
+            if quote.length() != range.length.get() {
+                return Err(AppError::InvalidRequest);
+            }
+            Some(quote)
+        }
+        None if text.is_empty() => None,
+        None => return Err(AppError::InvalidRequest),
+    };
+    Ok(ReportRef {
+        receipt_id: parse(receipt_id.as_str())?,
+        report_hash: parse(report_hash.as_str())?,
+        quote,
+    })
 }

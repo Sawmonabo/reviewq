@@ -279,6 +279,17 @@ pub struct QuoteRef {
 #[derive(Debug, serde::Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct FeedbackReference {
+    pub receipt_id: ResourceIdDto,
+    pub report_hash: ReportHashDto,
+    #[serde(default)]
+    pub quote: String,
+    pub quote_ref: Option<QuoteRef>,
+}
+
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct FeedbackRequest {
     pub submission_id: crate::SubmissionIdDto,
     pub receipt_id: ResourceIdDto,

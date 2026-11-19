@@ -156,9 +156,18 @@ pub(crate) fn save_observations(
 ) -> Result<Vec<ReviewId>, StoreError> {
     let mut results = Vec::with_capacity(source.len());
     let mut changed = Vec::new();
+    let mut inbox = Vec::new();
     for item in source {
         let (id, written) = save_review(&tx.sql, item, true)?;
         if written {
+            if let Some(id) = crate::notifications::gitlab::observe_head(
+                &tx.sql,
+                &id,
+                &item.head_sha,
+                item.updated_at_ms,
+            )? {
+                inbox.push(id);
+            }
             changed.push(ResourceKey::Review(Some(id.clone())));
         }
         results.push(id);
@@ -171,6 +180,7 @@ pub(crate) fn save_observations(
             tx.emit(&keys)?;
         }
     }
+    crate::notifications::publish(tx, &inbox)?;
     Ok(results)
 }
 
@@ -214,6 +224,39 @@ impl ReviewLookup for SqliteStore {
                 let id = find_review_id(connection, &mr)?.ok_or(AppError::NotFound)?;
                 allow_review(connection, access, &id, &mr)?;
                 Ok(id)
+            })
+            .await
+            .map_err(StoreError::app)
+        })
+    }
+
+    fn registered_session(
+        &self,
+        actor: Actor,
+        session: reviewq_domain::identity::SessionKey,
+    ) -> AppFuture<'_, Option<reviewq_domain::session::SessionTarget>> {
+        Box::pin(async move {
+            self.read(move |db| {
+                let binding = db
+                    .prepare_cached(
+                        "SELECT r.review_id, r.run_id FROM sessions s JOIN runs r USING(run_id)
+                     WHERE s.session_key=?1",
+                    )?
+                    .query_row([session.as_str()], |row| {
+                        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                    })
+                    .optional()?;
+                let Some((review, run)) = binding else {
+                    return Ok(None);
+                };
+                let review = parse(&review)?;
+                let mr = identity_for_review(db, &review)?;
+                allow_review(db, scope(db, &actor)?, &review, &mr)?;
+                Ok(Some(reviewq_domain::session::SessionTarget::new(
+                    review,
+                    parse(&run)?,
+                    session,
+                )))
             })
             .await
             .map_err(StoreError::app)
