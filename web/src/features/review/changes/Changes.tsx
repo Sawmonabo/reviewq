@@ -11,7 +11,7 @@ import {
   readPatchDiscussions,
   readPatchFiles,
 } from "../../../api/changes";
-import type { PatchDiscussion, PatchFile } from "../../../api/generated/contracts";
+import type { PatchDiscussion, PatchFile, PatchFileIndex } from "../../../api/generated/contracts";
 import { Icon } from "../../../components/Icon";
 import { Pagination } from "../../../components/Pagination";
 import { Empty, Loading, Notice } from "../../../components/PanelState";
@@ -23,7 +23,12 @@ import { Approvals } from "./Approvals";
 import { PatchDocumentView } from "./PatchDocumentView";
 import "./changes.css";
 
-type Position = { readonly revision: string; readonly cursor: string };
+type Boundary = "first" | "last";
+type Position = {
+  readonly revision: string;
+  readonly cursor: string;
+  readonly boundary?: Boundary;
+};
 type Tab = "files" | "general" | "all";
 type Status = "any" | "open" | "resolved";
 type Window = { readonly offset: number; readonly etag?: string; readonly last?: boolean };
@@ -43,24 +48,29 @@ export default function Changes({
   readonly children?: ReactNode;
 }) {
   const [fileId, setFileId] = useState(() => storedFile(reviewId));
-  const [positions, setPositions] = useState<readonly Position[]>([]);
+  const [position, setPosition] = useState<Position>();
   const [epoch, setEpoch] = useState(0);
-  const [frozenRevision, setFrozenRevision] = useState<string>();
+  const [retained, setRetained] = useState<PatchFileIndex>();
   const [tab, setTab] = useState<Tab>("files");
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState<Status>("any");
   const [involving, setInvolving] = useState(false);
   const participant = useRef<HTMLSelectElement>(null);
-  const indexKey = JSON.stringify([reviewId, epoch, positions.at(-1)]);
+  const indexKey = JSON.stringify([reviewId, epoch, position]);
   const index = useResource(indexKey, async (signal) => {
-    const position = positions.at(-1);
     try {
-      return await readPatchFiles(
+      const result = await readPatchFiles(
         reviewId,
         signal,
         position,
         position || epoch > 0 ? undefined : storedFile(reviewId),
       );
+      if (position?.boundary && !signal.aborted) {
+        const selected =
+          position.boundary === "last" ? result.data.items.at(-1) : result.data.items[0];
+        if (selected) selectFile(selected);
+      }
+      return result;
     } catch (error) {
       if (
         signal.aborted ||
@@ -72,7 +82,8 @@ export default function Changes({
       return readPatchFiles(reviewId, signal);
     }
   });
-  const revision = index.data?.revision ?? frozenRevision;
+  const shown = index.data ?? retained;
+  const revision = shown?.revision;
   const current = useResource(
     `change-current:${reviewId}`,
     (signal) => readPatchFiles(reviewId, signal),
@@ -89,12 +100,13 @@ export default function Changes({
     [{ kind: "discussions", id: reviewId }],
   );
   const available =
-    index.data?.items.filter((file) =>
+    shown?.items.filter((file) =>
       `${file.newPath} ${file.oldPath}`.toLowerCase().includes(query.toLowerCase()),
     ) ?? [];
-  const files = index.data?.items ?? [];
+  const files = shown?.items ?? [];
   const file = files.find((entry) => entry.fileId === fileId) ?? files[0];
   const filePosition = file ? files.indexOf(file) : -1;
+  const pageNumber = shown?.pageNumber ?? 1;
   const fileSearch = useRef<HTMLInputElement>(null);
   const picker = useRef<HTMLDetailsElement>(null);
   const filtered = (threads.data?.items ?? []).filter(
@@ -117,10 +129,16 @@ export default function Changes({
   }
 
   function refreshIndex() {
-    setPositions([]);
-    setFrozenRevision(undefined);
+    setPosition(undefined);
+    setRetained(undefined);
     setThreadTrail([]);
     setEpoch((value) => value + 1);
+  }
+
+  function movePage(cursor: string | null | undefined, boundary?: Boundary) {
+    if (!cursor || !index.data || index.pending) return;
+    setRetained(index.data);
+    setPosition({ revision: index.data.revision, cursor, ...(boundary ? { boundary } : {}) });
   }
 
   function clearConversationFilters() {
@@ -129,38 +147,37 @@ export default function Changes({
     participant.current?.focus({ preventScroll: true });
   }
 
-  if (index.pending && !frozenRevision && !index.error) return <Loading label="Loading changes…" />;
+  if (index.pending && !shown && !index.error) return <Loading label="Loading changes…" />;
 
   return (
     <section className="changes stack" aria-label="Changes">
       <div className="changes-top">
         <div>
           <h3>Changes &amp; conversations</h3>
-          {index.data && (
+          {shown && (
             <p className="meta">
               {files.length}
-              {index.data.nextCursor ? "+" : ""} files · {filtered.length}
+              {shown.previousCursor || shown.nextCursor ? "+" : ""} files · {filtered.length}
               {threads.data?.nextCursor ? "+" : ""} conversations
             </p>
           )}
         </div>
-        <Approvals reviewId={reviewId} displayedSha={index.data?.headSha} webUrl={webUrl} />
+        <Approvals reviewId={reviewId} displayedSha={shown?.headSha} webUrl={webUrl} />
       </div>
       {children}
-      {index.data && (
+      {shown && (
         <div className="diff-revision">
           <span>
-            Source <code>{index.data.headSha.slice(0, 12)}</code>
+            Source <code>{shown.headSha.slice(0, 12)}</code>
           </span>
           <span>
-            Base <code>{index.data.baseSha.slice(0, 12)}</code>
+            Base <code>{shown.baseSha.slice(0, 12)}</code>
           </span>
         </div>
       )}
       {changed && (
         <Notice>
-          The source revision changed. The displayed patch remains on{" "}
-          {index.data?.headSha.slice(0, 12)}.
+          The source revision changed. The displayed patch remains on {shown?.headSha.slice(0, 12)}.
           <button type="button" onClick={refreshIndex}>
             Load current changes
           </button>
@@ -172,7 +189,9 @@ export default function Changes({
             {label}{" "}
             <strong className="changes-count">
               {id === "files" ? files.length : id === "general" ? general.length : filtered.length}
-              {(id === "files" ? index.data?.nextCursor : threads.data?.nextCursor) && "+"}
+              {(id === "files"
+                ? shown?.previousCursor || shown?.nextCursor
+                : threads.data?.nextCursor) && "+"}
             </strong>
           </button>
         ))}
@@ -218,7 +237,7 @@ export default function Changes({
       {index.error && (
         <Notice retry={index.retry}>
           {index.error}{" "}
-          {positions.length > 0 && (
+          {position && (
             <button type="button" onClick={refreshIndex}>
               Restart file list
             </button>
@@ -227,8 +246,7 @@ export default function Changes({
       )}
       {tab === "files" && (
         <>
-          {index.pending && <Loading label="Loading changed files…" />}
-          {index.data && (
+          {shown && (
             <>
               <details
                 className="changed-file-picker"
@@ -241,7 +259,7 @@ export default function Changes({
                   Changed files{" "}
                   <small>
                     {files.length}
-                    {index.data.nextCursor ? "+" : ""}
+                    {shown.previousCursor || shown.nextCursor ? "+" : ""}
                   </small>
                 </summary>
                 <label className="search-field">
@@ -254,7 +272,7 @@ export default function Changes({
                     onChange={(event) => setQuery(event.currentTarget.value)}
                   />
                 </label>
-                <nav aria-label="Changed files">
+                <nav aria-label="Changed files" aria-busy={index.pending}>
                   {available.map((item) => (
                     <button
                       type="button"
@@ -277,33 +295,50 @@ export default function Changes({
                     </p>
                   )}
                 </nav>
-                <Pagination
-                  trail={positions.map((position) => position.cursor)}
-                  next={index.data.nextCursor}
-                  onPage={(trail) => {
-                    const shown = index.data;
-                    if (!shown) return;
-                    setFrozenRevision(shown.revision);
-                    setPositions(trail.map((cursor) => ({ revision: shown.revision, cursor })));
-                  }}
-                />
+                {(shown.previousCursor || shown.nextCursor) && (
+                  <nav className="pagination" aria-label="Changed file pages">
+                    <button
+                      type="button"
+                      aria-disabled={!shown.previousCursor || index.pending}
+                      onClick={() => movePage(shown.previousCursor)}
+                    >
+                      Previous
+                    </button>
+                    <span className="meta" role="status">
+                      {index.pending ? "Loading files…" : `Page ${pageNumber}`}
+                    </span>
+                    <button
+                      type="button"
+                      aria-disabled={!shown.nextCursor || index.pending}
+                      onClick={() => movePage(shown.nextCursor)}
+                    >
+                      Next
+                    </button>
+                  </nav>
+                )}
               </details>
               {file && (
                 <SelectedPatch
-                  key={JSON.stringify([file.reviewId, file.revision, file.fileId])}
                   file={file}
                   threads={anchors}
                   webUrl={webUrl}
                   onReload={refreshIndex}
                   position={filePosition}
                   total={files.length}
+                  previous={Boolean(shown.previousCursor)}
+                  next={Boolean(shown.nextCursor)}
+                  pending={index.pending}
                   onPrevious={() => {
+                    if (index.pending) return;
                     const next = files[filePosition - 1];
                     if (next) selectFile(next);
+                    else movePage(shown.previousCursor, "last");
                   }}
                   onNext={() => {
+                    if (index.pending) return;
                     const next = files[filePosition + 1];
                     if (next) selectFile(next);
+                    else movePage(shown.nextCursor, "first");
                   }}
                 />
               )}
@@ -354,7 +389,10 @@ export default function Changes({
             key={thread.discussionId}
             thread={thread}
             outside={Boolean(
-              !thread.outdated && thread.anchor && (!file || !matches(thread, file)),
+              tab === "files" &&
+              !thread.outdated &&
+              thread.anchor &&
+              (!file || !matches(thread, file)),
             )}
           />
         ))}
@@ -371,6 +409,9 @@ function SelectedPatch({
   onReload,
   position,
   total,
+  previous,
+  next,
+  pending,
   onPrevious,
   onNext,
 }: {
@@ -380,38 +421,13 @@ function SelectedPatch({
   readonly onReload: () => void;
   readonly position: number;
   readonly total: number;
+  readonly previous: boolean;
+  readonly next: boolean;
+  readonly pending: boolean;
   readonly onPrevious: () => void;
   readonly onNext: () => void;
 }) {
-  const [sourceMode, setSourceMode] = useState(!isRichPatch(file));
-  const [window, setWindow] = useState<Window>({ offset: 0 });
-  const [back, setBack] = useState<readonly Window[]>([]);
-  const bookmark = `patch.scroll.${file.reviewId}.${file.revision}.${file.fileId}`;
-  const patch = useResource(
-    JSON.stringify([file.revision, file.fileId, sourceMode, window]),
-    async (signal) => {
-      if (file.availability !== "complete") return { cursor: "", data: null };
-      try {
-        return { cursor: "", data: await readPatch(file, signal, sourceMode ? window : undefined) };
-      } catch (error) {
-        if (
-          !sourceMode &&
-          !signal.aborted &&
-          (error instanceof PatchFormattingLimit || error instanceof ResponseSizeLimit)
-        )
-          setSourceMode(true);
-        throw error;
-      }
-    },
-  );
-  const body = patch.data;
   const source = safeUrl(webUrl);
-
-  function navigate(target: Window) {
-    setBack((items) => [...items, window].slice(-12));
-    setWindow(target);
-  }
-
   return (
     <section className="selected-patch" aria-label={`Patch for ${file.newPath}`}>
       <div className="spread patch-toolbar">
@@ -439,7 +455,7 @@ function SelectedPatch({
           <button
             type="button"
             aria-label="Previous file"
-            disabled={position < 1}
+            aria-disabled={pending || (position < 1 && !previous)}
             onClick={onPrevious}
           >
             ‹
@@ -450,13 +466,62 @@ function SelectedPatch({
           <button
             type="button"
             aria-label="Next file"
-            disabled={position + 1 >= total}
+            aria-disabled={pending || (position + 1 >= total && !next)}
             onClick={onNext}
           >
             ›
           </button>
         </div>
       </div>
+      <PatchContents
+        key={JSON.stringify([file.reviewId, file.revision, file.fileId])}
+        file={file}
+        threads={threads}
+        onReload={onReload}
+      />
+    </section>
+  );
+}
+
+function PatchContents({
+  file,
+  threads,
+  onReload,
+}: {
+  readonly file: PatchFile;
+  readonly threads: readonly PatchDiscussion[];
+  readonly onReload: () => void;
+}) {
+  const [sourceMode, setSourceMode] = useState(!isRichPatch(file));
+  const [window, setWindow] = useState<Window>({ offset: 0 });
+  const [back, setBack] = useState<readonly Window[]>([]);
+  const bookmark = `patch.scroll.${file.reviewId}.${file.revision}.${file.fileId}`;
+  const patch = useResource(
+    JSON.stringify([file.revision, file.fileId, sourceMode, window]),
+    async (signal) => {
+      if (file.availability !== "complete") return { cursor: "", data: null };
+      try {
+        return { cursor: "", data: await readPatch(file, signal, sourceMode ? window : undefined) };
+      } catch (error) {
+        if (
+          !sourceMode &&
+          !signal.aborted &&
+          (error instanceof PatchFormattingLimit || error instanceof ResponseSizeLimit)
+        )
+          setSourceMode(true);
+        throw error;
+      }
+    },
+  );
+  const body = patch.data;
+
+  function navigate(target: Window) {
+    setBack((items) => [...items, window].slice(-12));
+    setWindow(target);
+  }
+
+  return (
+    <>
       {file.availability !== "complete" ? (
         <Notice>{availability(file.availability)}</Notice>
       ) : (
@@ -538,13 +603,13 @@ function SelectedPatch({
       )}
       {(sourceMode || file.availability !== "complete" || (!body && patch.error)) &&
         threads.map((thread) => <DiscussionThread key={thread.discussionId} thread={thread} />)}
-    </section>
+    </>
   );
 }
 
 function DiffCount({ file }: { readonly file: PatchFile }) {
   const { additions, deletions } = file;
-  if (typeof additions !== "number" || typeof deletions !== "number") return null;
+  if (additions == null || deletions == null) return null;
   return (
     <small className="diff-count" aria-label={`${additions} additions, ${deletions} deletions`}>
       <span>+{additions}</span> <span>−{deletions}</span>
@@ -556,6 +621,7 @@ function matches(thread: PatchDiscussion, file: PatchFile) {
   return (
     !thread.outdated &&
     thread.anchor !== null &&
+    thread.anchor.positionType === "text" &&
     thread.anchor.oldPath === file.oldPath &&
     thread.anchor.newPath === file.newPath &&
     (thread.anchor.newLine !== null || thread.anchor.oldLine !== null)

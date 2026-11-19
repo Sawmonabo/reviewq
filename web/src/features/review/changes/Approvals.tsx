@@ -119,9 +119,10 @@ function approvalStatus(value: ApprovalView | undefined): { label: string; met: 
     return { label: "Not required", met: true };
   }
   const met =
-    value?.approvals?.approved === true ||
-    (required != null && left === 0) ||
-    Boolean(rules?.length && rules.every((rule) => rule.approved));
+    left != null
+      ? left === 0
+      : value?.approvals?.approved === true ||
+        Boolean(rules?.length && rules.every((rule) => rule.approved));
   if (rules?.length === 1) {
     const rule = rules[0];
     if (rule) return { label: ruleProgress(rule, value), met };
@@ -147,8 +148,7 @@ function ruleProgress(
 ) {
   if (!rule.required) return "Optional";
   const count = rule.approvedCount;
-  if (typeof count === "number" && Number.isSafeInteger(count) && count >= 0)
-    return `${Math.min(count, rule.required)} of ${rule.required}`;
+  if (count != null) return `${Math.min(count, rule.required)} of ${rule.required}`;
   const left = value?.approvals?.left;
   if (
     value?.rules?.filter((item) => item.required > 0).length === 1 &&
@@ -197,16 +197,12 @@ function ApprovalDetail({
         <div className="approval-people" aria-label="Approved by">
           {!value.approvals.approvers.length && <p className="meta">No approvals yet.</p>}
           {value.approvals.approvers.map((approver) => {
-            const label =
-              typeof approver.name === "string" && approver.name
-                ? approver.name
-                : (approver.username ?? approver.id);
+            const label = approver.name || approver.username || approver.id;
             const name = approver.isYou === true ? "You" : label;
             const href =
-              (typeof approver.webUrl === "string" && safeUrl(approver.webUrl)) ||
-              (source && approver.username && /^[\w.-]+$/.test(approver.username)
+              source && approver.username && /^[\w][\w.-]*$/.test(approver.username)
                 ? safeUrl(`/${encodeURIComponent(approver.username)}`, source)
-                : undefined);
+                : undefined;
             const title = [
               label,
               approver.username && `@${approver.username}`,
