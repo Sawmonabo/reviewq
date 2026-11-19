@@ -1,21 +1,7 @@
 import type { ReactNode } from "react";
 import type { MergeRequestRow, UnmatchedTicket } from "../api/generated/contracts/queue";
-import { formatActivityTime, readable } from "../lib/presentation";
+import { formatActivityTime, providerLabel, reviewReasonLabel } from "../lib/presentation";
 import { Icon } from "./Icon";
-
-const reasons: Readonly<Record<string, string>> = {
-  needs_input: "Awaiting input",
-  working: "Working",
-  waiting: "Waiting",
-  waiting_author: "Waiting on author",
-  reviewed: "✓ Reviewed",
-  followup: "Needs re-review",
-  archive: "Archived",
-  report_ready: "Agent report ready",
-  agent_question: "Agent question",
-  agent_input: "Agent input",
-  code_changed: "New commits need review",
-};
 
 export function ReviewRow({
   row,
@@ -64,10 +50,11 @@ export function ReviewRow({
         </div>
         <strong className="row-title">{row.title}</strong>
         <div className="row-foot">
+          {row.focusedProvider && <span>{providerLabel(row.focusedProvider)}</span>}
           {!tracked && <span>No review run started</span>}
           {(tracked || (status !== "needs_review" && status !== "all_open")) && (
             <span className="row-tag" data-review-kind={status}>
-              {reasons[status] ?? readable(status)}
+              {reviewReasonLabel(status)}
             </span>
           )}
           {detail}
