@@ -94,6 +94,12 @@ pub trait NativeHistoryReader: Send + Sync {
         request: Option<String>,
     ) -> AppFuture<'_, Option<Vec<QuestionForm>>>;
 
+    fn prove_async_question(
+        &self,
+        session: HistorySession,
+        evidence: ObservedAsyncQuestion,
+    ) -> AppFuture<'_, Option<QuestionForm>>;
+
     fn watch(
         &self,
         _session: HistorySession,

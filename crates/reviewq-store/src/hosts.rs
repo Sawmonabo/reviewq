@@ -28,7 +28,7 @@ mod delivery;
 pub(crate) use delivery::{admit_workflow, unresolved_workflow_input};
 mod messages;
 pub(crate) mod metadata;
-mod questions;
+pub(crate) mod questions;
 pub(crate) mod recovery;
 
 impl SqliteStore {

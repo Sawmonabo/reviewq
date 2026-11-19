@@ -731,7 +731,7 @@ pub(super) fn object<R: Read>(
     reader.end_object().map_err(invalid)
 }
 
-fn date(raw: Option<String>) -> Option<i64> {
+pub(super) fn date(raw: Option<String>) -> Option<i64> {
     raw?.parse::<jiff::Timestamp>()
         .ok()
         .map(|stamp| stamp.as_millisecond())

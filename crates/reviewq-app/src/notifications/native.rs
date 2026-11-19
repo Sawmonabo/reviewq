@@ -2,7 +2,7 @@ use reviewq_domain::identity::{NativeTurnId, SessionKey};
 
 use crate::access::{AppError, AppFuture};
 use crate::history::HistorySession;
-use crate::hosts::{HostActivity, HostProof, NativeSessionMetadata};
+use crate::hosts::{HostActivity, HostProof, NativeSessionMetadata, ObservedAsyncQuestion};
 use crate::workflow::NativeWorkflowProof;
 
 use super::Kind;
@@ -11,6 +11,8 @@ pub struct TrackedNative {
     pub session: HistorySession,
     pub known_failure: Option<NativeTurnId>,
     pub child_cursor: Option<NativeChildCursor>,
+    pub started_at_ms: i64,
+    pub questions: Vec<ObservedAsyncQuestion>,
 }
 
 pub struct NativeChildCursor {
@@ -30,6 +32,7 @@ pub struct NativeAttention {
     pub terminal_failure: Option<NativeTurnId>,
     pub recoverable: Option<crate::hosts::recovery::NativeFailure>,
     pub events: Vec<NativeOccurrence>,
+    pub async_questions: Vec<ObservedAsyncQuestion>,
 }
 
 pub struct NativeOccurrence {

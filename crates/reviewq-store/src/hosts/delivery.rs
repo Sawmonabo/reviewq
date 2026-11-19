@@ -2,13 +2,14 @@
 
 mod admission;
 mod labels;
-pub(super) use admission::{admit, read_receipt, replay};
-use admission::{find_receipt, insert_intent, request_digest, validate_target};
+pub(super) use admission::{admit, find_receipt, insert_intent, read_receipt, replay};
+use admission::{request_digest, validate_target};
 use labels::{outcome_label, recoverable_label};
 mod workflow;
 
 pub(crate) use workflow::admit_workflow;
 
+use super::questions::async_answers;
 use crate::StoreError;
 use crate::connection::WriteTx;
 use crate::events::now_ms;
@@ -30,7 +31,7 @@ const RECEIPT_COLUMNS: &str =
     "d.message_id, d.submission_id, r.review_id, d.run_id, d.session_key, d.state,
      d.created_at_ms, d.updated_at_ms, d.native_turn_id, d.native_input_id, coalesce(o.fence, 0),
      d.purpose, o.claim_kind, m.grant_id, m.grant_epoch, o.due_at_ms, coalesce(o.retry_count, 0),
-     d.receipt_id, d.report_hash, d.current_receipt_id, o.reconcile_cursor, o.uncertain_turn_id, o.uncertain_input_id";
+     d.receipt_id, d.report_hash, d.current_receipt_id, o.reconcile_cursor, o.uncertain_turn_id, o.uncertain_input_id, d.operation";
 const RECEIPT_JOIN: &str =
     "messages d JOIN runs r ON r.run_id=d.run_id
      JOIN mutation_receipts m ON m.actor_key=d.actor_key AND m.operation=d.operation AND m.submission_id=d.submission_id
@@ -55,6 +56,7 @@ struct Delivery {
     receipt: DeliveryReceipt,
     fence: DeliveryFence,
     purpose: MessagePurpose,
+    operation: String,
     claim: Option<ClaimKind>,
     grant: Option<(String, Revision)>,
     due_at_ms: Option<i64>,
@@ -194,13 +196,21 @@ pub(super) fn claim(
                         time,
                     )?;
                 }
+                if delivery.operation == async_answers::OPERATION {
+                    async_answers::advance(
+                        tx,
+                        target.target(),
+                        &delivery_id,
+                        &DeliveryOutcome::Rejected,
+                    )?;
+                }
                 emit_delivery(tx, target.target())?;
                 return Ok(None);
             }
             (
                 ClaimKind::Dispatch,
                 "dispatching",
-                dispatch_work(&tx.sql, &delivery_id)?,
+                dispatch_work(&tx.sql, &delivery, target.target())?,
             )
         }
         RecoverableDeliveryState::Dispatching | RecoverableDeliveryState::Uncertain => (
@@ -257,7 +267,7 @@ pub(super) fn existing_dispatch(
         return Err(AppError::Conflict.into());
     }
     Ok(DeliveryClaim {
-        work: dispatch_work(connection, &id)?,
+        work: dispatch_work(connection, &stored, target.target())?,
         delivery_id: id,
         fence,
         target,
@@ -266,6 +276,10 @@ pub(super) fn existing_dispatch(
 }
 
 fn registered_lead(connection: &Connection, delivery: &Delivery) -> Result<LeadTarget, StoreError> {
+    if delivery.operation == async_answers::OPERATION {
+        let session = async_answers::binding(connection, &delivery.receipt.target)?;
+        return Ok(LeadTarget::new(session.target, session.binding));
+    }
     let target =
         lead_for_run(connection, delivery.receipt.target.run_id())?.ok_or(AppError::Internal)?;
     if target.target() != &delivery.receipt.target {
@@ -305,11 +319,11 @@ pub(super) fn authorize_dispatch(
     if !grant_current(connection, &stored)? {
         return Err(AppError::Forbidden.into());
     }
-    if claim.work != dispatch_work(connection, &claim.delivery_id)? {
-        return Err(AppError::Conflict.into());
-    }
     if !workflow_authorized(connection, &claim.target, &stored, workflow.as_deref())? {
         return Err(AppError::Forbidden.into());
+    }
+    if claim.work != dispatch_work(connection, &stored, claim.target.target())? {
+        return Err(AppError::Conflict.into());
     }
     Ok(())
 }
@@ -320,6 +334,12 @@ fn workflow_authorized(
     delivery: &Delivery,
     guard: Option<&reviewq_app::workflow::WorkflowGuard>,
 ) -> Result<bool, StoreError> {
+    if delivery.operation == async_answers::OPERATION {
+        return Ok(guard.is_none()
+            && async_answers::review_open(db, target.target())?
+            && async_answers::for_delivery(db, target.target(), &delivery.receipt.delivery_id)?
+                .is_some());
+    }
     match guard {
         Some(guard) if guard.binding.message_purpose() == delivery.purpose => {
             workflow::current(db, target, &delivery.receipt.submission_id, guard)
@@ -550,6 +570,9 @@ fn finish_with(
             now,
         )?;
     }
+    if stored.operation == async_answers::OPERATION {
+        async_answers::advance(tx, claim.target.target(), &claim.delivery_id, &outcome)?;
+    }
     tx.delivery_changed = true;
     stored.receipt.outcome = outcome;
     stored.receipt.updated_at_ms = timestamp;
@@ -640,6 +663,7 @@ fn delivery_row(row: &Row<'_>) -> Result<Delivery, StoreError> {
         receipt,
         fence,
         purpose,
+        operation: row.get(23)?,
         claim,
         grant,
         due_at_ms: row.get(15)?,
@@ -657,7 +681,12 @@ fn delivery_row(row: &Row<'_>) -> Result<Delivery, StoreError> {
     })
 }
 
-fn dispatch_work(connection: &Connection, id: &DeliveryId) -> Result<DeliveryWork, StoreError> {
+fn dispatch_work(
+    connection: &Connection,
+    delivery: &Delivery,
+    target: &SessionTarget,
+) -> Result<DeliveryWork, StoreError> {
+    let id = &delivery.receipt.delivery_id;
     let mut statement = connection.prepare_cached(
         "SELECT body, receipt_id, report_hash, quoted_text, quoted_offset FROM messages WHERE message_id=?1"
     )?;
@@ -694,6 +723,14 @@ fn dispatch_work(connection: &Connection, id: &DeliveryId) -> Result<DeliveryWor
         text: text_value,
         report_ref,
         workflow: workflow::read_guard(connection, id)?.map(Box::new),
+        async_question: if delivery.operation == async_answers::OPERATION {
+            Some(Box::new(
+                async_answers::for_delivery(connection, target, id)?
+                    .ok_or(AppError::StaleRevision)?,
+            ))
+        } else {
+            None
+        },
     })
 }
 

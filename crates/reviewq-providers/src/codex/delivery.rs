@@ -33,8 +33,17 @@ impl Codex {
         } else {
             None
         };
-        let Ok(mut thread) = self.verified_thread(&lead).await else {
-            return DeliveryObservation::NotSubmitted;
+        let question = guard.async_question();
+        let thread = match question {
+            Some(question) => self.bound_history_thread(&question.session).await,
+            None => self.verified_thread(&lead).await,
+        };
+        let mut thread = match thread {
+            Ok(thread) => thread,
+            Err(AppError::Conflict | AppError::Forbidden) if question.is_some() => {
+                return DeliveryObservation::Rejected;
+            }
+            Err(_) => return DeliveryObservation::NotSubmitted,
         };
         if matches!(thread.status, ThreadStatus::NotLoaded) {
             if automatic {
@@ -56,6 +65,26 @@ impl Codex {
             }
             thread = resumed.thread;
         }
+        let question_source = if let Some(question) = question {
+            if thread.parent_thread_id.as_deref()
+                != question
+                    .session
+                    .parent
+                    .as_ref()
+                    .map(|parent| parent.native_id.as_str())
+            {
+                return DeliveryObservation::Rejected;
+            }
+            thread.path.clone().or_else(|| {
+                question
+                    .session
+                    .source
+                    .as_ref()
+                    .map(|path| path.as_path().to_owned())
+            })
+        } else {
+            None
+        };
         let mut input = vec![json!({"type":"text","text":text.as_str()})];
         if let Some(report) = report {
             let quote = report.quote.map(|quote| {
@@ -181,8 +210,15 @@ impl Codex {
             (method, guard)
         };
 
-        match self.connection.submit(method, params, guard).await {
+        match self
+            .connection
+            .submit(method, params, guard, question_source)
+            .await
+        {
             Err(CallError::BeforeSend(_)) => DeliveryObservation::NotSubmitted,
+            Err(CallError::Denied(AppError::Busy | AppError::Unavailable)) => {
+                DeliveryObservation::NotSubmitted
+            }
             Err(CallError::Denied(_)) => DeliveryObservation::Rejected,
             // A reply, missing reply or exact remote error alone does not prove native input.
             _ => self.find_input(lead, delivery, None, automatic).await,

@@ -21,6 +21,13 @@ pub struct DispatchGuard {
 }
 
 impl DispatchGuard {
+    pub fn async_question(&self) -> Option<&super::AsyncQuestionDispatch> {
+        match &self.claim.work {
+            DeliveryWork::Dispatch { async_question, .. } => async_question.as_deref(),
+            DeliveryWork::Reconcile { .. } => None,
+        }
+    }
+
     pub fn workflow(&self) -> Option<&crate::workflow::WorkflowGuard> {
         match &self.claim.work {
             DeliveryWork::Dispatch { workflow, .. } => workflow.as_deref(),

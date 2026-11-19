@@ -49,6 +49,10 @@ struct NativeForm {
 }
 
 impl QuestionsPort for Codex {
+    fn supports_questions(&self, identity: &reviewq_domain::session::NativeIdentity) -> bool {
+        identity.profile() == &self.profile && identity.provider() == HostProvider::Codex
+    }
+
     fn questions(
         &self,
         access: QuestionAccess,

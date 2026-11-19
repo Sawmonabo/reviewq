@@ -91,7 +91,7 @@ pub(in crate::hosts) fn admit(
     )
 }
 
-pub(super) fn insert_intent(
+pub(in crate::hosts) fn insert_intent(
     tx: &mut WriteTx<'_>,
     actor: &Actor,
     input: &SubmitMessage,
@@ -202,7 +202,7 @@ pub(super) fn validate_target(
     Ok(lead)
 }
 
-pub(super) fn find_receipt(
+pub(in crate::hosts) fn find_receipt(
     connection: &Connection,
     key: &[u8; 32],
     operation: &str,

@@ -59,14 +59,28 @@ struct Pending {
 }
 
 enum Effect {
-    Delivery(DispatchGuard),
+    Delivery(DispatchGuard, Option<PathBuf>),
     Launch(LaunchProgress),
 }
 
 impl Effect {
     async fn check(self) -> Result<(), AppError> {
         match self {
-            Self::Delivery(guard) => guard.check().await,
+            Self::Delivery(guard, question_source) => {
+                if let Some(question) = guard.async_question() {
+                    let path = question_source.ok_or(AppError::Unavailable)?;
+                    if !crate::history::verify_pending_async_question(
+                        question.session.clone(),
+                        path,
+                        question.question.clone(),
+                    )
+                    .await?
+                    {
+                        return Err(AppError::PreconditionFailed);
+                    }
+                }
+                guard.check().await
+            }
             Self::Launch(guard) => guard.check().await,
         }
     }
@@ -174,10 +188,15 @@ impl Connection {
         method: &'static str,
         params: Value,
         guard: DispatchGuard,
+        question_source: Option<PathBuf>,
     ) -> Result<(), CallError> {
-        self.call(method, params, Some(Effect::Delivery(guard)))
-            .await
-            .map(|_| ())
+        self.call(
+            method,
+            params,
+            Some(Effect::Delivery(guard, question_source)),
+        )
+        .await
+        .map(|_| ())
     }
 
     pub(super) async fn interrupt(&self, params: Value) -> Result<(), CallError> {

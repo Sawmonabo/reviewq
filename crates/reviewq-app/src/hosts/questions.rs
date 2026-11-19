@@ -8,6 +8,8 @@ use crate::access::{Actor, ActorScope, AppError, AppFuture};
 use crate::history::{HistorySession, HistoryStore};
 use sha2::{Digest, Sha256};
 
+use super::MessageBody;
+
 #[derive(Clone, Eq, PartialEq)]
 pub struct Question {
     pub id: String,
@@ -41,7 +43,7 @@ pub enum QuestionMode {
     Async,
 }
 
-#[derive(Clone, Copy, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum QuestionStatus {
     Pending,
     Submitting,
@@ -103,13 +105,13 @@ impl QuestionAccess {
     }
 }
 
-#[derive(Clone, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct QuestionAnchor {
     pub generation: String,
     pub opening: u64,
 }
 
-#[derive(Clone, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct QuestionKey {
     pub request: String,
     pub turn: NativeTurnId,
@@ -117,10 +119,18 @@ pub struct QuestionKey {
     pub anchor: QuestionAnchor,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ObservedAsyncQuestion {
     pub key: QuestionKey,
     pub line_sha256: ReportHash,
+    pub occurred_at_ms: i64,
     pub state: QuestionStatus,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AsyncQuestionDispatch {
+    pub session: HistorySession,
+    pub question: ObservedAsyncQuestion,
 }
 
 pub struct QuestionReceipt {
@@ -162,6 +172,25 @@ pub trait QuestionStore: HistoryStore + Send + Sync {
         session: HistorySession,
         request: Option<String>,
     ) -> AppFuture<'_, Vec<ObservedAsyncQuestion>>;
+
+    fn admit_async_answer(
+        &self,
+        actor: Actor,
+        session: HistorySession,
+        submission: SubmissionId,
+        question: ObservedAsyncQuestion,
+        body: MessageBody,
+        digest: [u8; 32],
+    ) -> AppFuture<'_, QuestionStatus>;
+
+    fn replay_async_answer(
+        &self,
+        actor: Actor,
+        session: HistorySession,
+        submission: SubmissionId,
+        request: String,
+        digest: [u8; 32],
+    ) -> AppFuture<'_, Option<QuestionStatus>>;
 
     fn question_attempts(
         &self,
@@ -233,6 +262,24 @@ impl QuestionAnswer {
 
     pub fn digest(&self) -> Result<[u8; 32], AppError> {
         answer_digest(&self.answers)
+    }
+
+    pub fn async_body(&self, form: &QuestionForm) -> Result<MessageBody, AppError> {
+        use std::fmt::Write as _;
+
+        if form.mode != QuestionMode::Async || self.validate(form)? {
+            return Err(AppError::InvalidRequest);
+        }
+        let mut text = format!("Answer to Codex question ({}:{}):", form.turn, form.item);
+        for question in &form.questions {
+            write!(
+                text,
+                "\n\n{}: {}",
+                question.id, self.answers[&question.id][0]
+            )
+            .map_err(|_| AppError::Internal)?;
+        }
+        MessageBody::new(&text)
     }
 
     pub fn validate(&self, form: &QuestionForm) -> Result<bool, AppError> {
@@ -330,6 +377,8 @@ pub fn answer_digest(answers: &BTreeMap<String, Vec<String>>) -> Result<[u8; 32]
 }
 
 pub trait QuestionsPort: Send + Sync {
+    fn supports_questions(&self, identity: &NativeIdentity) -> bool;
+
     fn questions(
         &self,
         access: QuestionAccess,
