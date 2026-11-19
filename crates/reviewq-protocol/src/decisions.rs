@@ -74,6 +74,17 @@ pub struct Attention {
     pub source: Vec<ObservedAttention>,
     pub reports: Vec<ReportAttention>,
     pub sessions: Vec<SessionAttention>,
+    pub followups: Vec<FollowupAttention>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct FollowupAttention {
+    pub run_id: crate::RunIdDto,
+    pub batch_id: crate::ResourceIdDto,
+    pub receipt_id: Option<crate::ResourceIdDto>,
+    pub completed_at: UtcTimestampDto,
 }
 
 #[derive(Debug, Serialize)]

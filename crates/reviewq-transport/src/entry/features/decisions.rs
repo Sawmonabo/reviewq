@@ -190,9 +190,27 @@ pub(in crate::entry) fn project_attention(
             })
         })
         .collect::<Result<_, _>>()?;
+    let followups = frontier
+        .followups
+        .iter()
+        .map(|followup| {
+            Ok::<_, AppError>(dto::FollowupAttention {
+                run_id: run(followup.run.as_str())?,
+                batch_id: resource(&followup.batch_id)?,
+                receipt_id: followup
+                    .receipt
+                    .as_ref()
+                    .map(|id| resource(id.as_str()))
+                    .transpose()?,
+                completed_at: UtcTimestampDto::from_unix_milliseconds(followup.completed_at_ms)
+                    .ok_or(AppError::Internal)?,
+            })
+        })
+        .collect::<Result<_, _>>()?;
     Ok(dto::Attention {
         source,
         reports,
         sessions,
+        followups,
     })
 }

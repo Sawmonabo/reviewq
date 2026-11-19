@@ -168,6 +168,10 @@ CREATE INDEX followup_reconciled_result ON followup_reconciled_observations(revi
 CREATE INDEX followup_result_history ON followup_results(review_id, completed_at_ms DESC, batch_id DESC);
 CREATE INDEX followup_result_receipt ON followup_results(run_id, receipt_id);
 
+CREATE TABLE review_handled_followup_results (
+    result_ordinal INTEGER PRIMARY KEY REFERENCES followup_results(ordinal)
+) STRICT;
+
 CREATE TABLE followup_assessments (
     review_id TEXT NOT NULL,
     batch_id TEXT NOT NULL,

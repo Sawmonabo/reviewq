@@ -699,6 +699,12 @@
     },
     "Attention": {
       "properties": {
+        "followups": {
+          "items": {
+            "$ref": "#/definitions/FollowupAttention"
+          },
+          "type": "array"
+        },
         "reports": {
           "items": {
             "$ref": "#/definitions/ReportAttention"
@@ -721,7 +727,8 @@
       "required": [
         "source",
         "reports",
-        "sessions"
+        "sessions",
+        "followups"
       ],
       "type": "object"
     },
@@ -2521,6 +2528,36 @@
         "cursor"
       ],
       "title": "FollowupAssessmentsResponse",
+      "type": "object"
+    },
+    "FollowupAttention": {
+      "properties": {
+        "batchId": {
+          "$ref": "#/definitions/ResourceIdDto"
+        },
+        "completedAt": {
+          "$ref": "#/definitions/UtcTimestampDto"
+        },
+        "receiptId": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ResourceIdDto"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "runId": {
+          "$ref": "#/definitions/RunIdDto"
+        }
+      },
+      "required": [
+        "runId",
+        "batchId",
+        "receiptId",
+        "completedAt"
+      ],
       "type": "object"
     },
     "FollowupConfigureRequest": {

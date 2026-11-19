@@ -37,6 +37,15 @@ pub struct ReportFrontier {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub struct FollowupFrontier {
+    pub ordinal: i64,
+    pub run: RunId,
+    pub batch_id: String,
+    pub receipt: Option<ReceiptId>,
+    pub completed_at_ms: i64,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ObservedAttention {
     pub ordinal: i64,
     pub id: NotificationId,
@@ -56,6 +65,7 @@ pub struct Frontier {
     pub source: Vec<ObservedAttention>,
     pub reports: Vec<ReportFrontier>,
     pub sessions: Vec<SessionFrontier>,
+    pub followups: Vec<FollowupFrontier>,
 }
 
 #[derive(Clone)]

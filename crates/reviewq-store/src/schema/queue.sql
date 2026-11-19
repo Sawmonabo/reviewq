@@ -26,6 +26,28 @@ CREATE VIEW review_active_sessions AS
        OR (c.seen_at_ms > unixepoch('subsec') * 1000 - 30000 AND
            (s.parent_session_key IS NULL OR child.companion_generation=c.generation));
 
+CREATE VIEW review_pending_followup_results AS
+    SELECT result.ordinal, result.review_id, result.run_id, result.batch_id,
+           result.receipt_id, result.completed_at_ms
+    FROM followup_results result
+    JOIN followup_monitors monitor USING(review_id)
+    JOIN reviews review USING(review_id)
+    JOIN runs latest ON latest.run_id=(SELECT run_id FROM runs WHERE review_id=result.review_id
+         ORDER BY started_at_ms DESC,run_id DESC LIMIT 1)
+    LEFT JOIN review_reviewer_activity handoff ON handoff.review_id=result.review_id
+        AND handoff.source_sha=review.head_sha
+        AND handoff.settings_revision=(SELECT settings_revision FROM service_state WHERE singleton=1)
+    WHERE monitor.state='enabled' AND result.completed_at_ms>=latest.started_at_ms
+      AND result.completed_at_ms>coalesce(handoff.latest_comment_at_ms,0)
+      AND NOT EXISTS (SELECT 1 FROM review_handled_followup_results handled
+           WHERE handled.result_ordinal=result.ordinal)
+      AND EXISTS (SELECT 1 FROM followup_assessments a
+           WHERE a.review_id=result.review_id AND a.batch_id=result.batch_id AND a.next_action='review'
+             AND NOT EXISTS (SELECT 1 FROM followup_results newer
+                  JOIN followup_assessments other USING(review_id,batch_id)
+                  WHERE newer.review_id=result.review_id AND other.discussion_id=a.discussion_id
+                    AND (newer.completed_at_ms,newer.ordinal)>(result.completed_at_ms,result.ordinal)));
+
 CREATE VIEW review_activity_evidence AS
     SELECT r.review_id, r.state='open' AS is_open,
       x.run_id, x.lead_session_key, lead.host_activity,
@@ -60,18 +82,8 @@ CREATE VIEW review_activity_evidence AS
            AND batch.authority_verified=1 AND batch.state IN ('pending','reserved','executing','reconciliation')
          ORDER BY CASE batch.state WHEN 'reconciliation' THEN 0 WHEN 'executing' THEN 1 ELSE 2 END,
                   batch.latest_observed_at_ms DESC,batch.batch_id DESC LIMIT 1),
-        (SELECT 'ready' FROM followup_results result
-         JOIN followup_assessments a USING(review_id,batch_id)
-         JOIN followup_monitors monitor USING(review_id)
-         WHERE result.review_id=r.review_id AND monitor.state='enabled'
-           AND a.next_action='review' AND result.completed_at_ms>=x.started_at_ms
-           AND result.completed_at_ms>max(coalesce(ra.latest_comment_at_ms,0),coalesce(d.reviewed_at_ms,0),
-               coalesce((SELECT n.occurred_at_ms FROM notifications n WHERE n.ordinal=handled.source_ordinal),0))
-           AND NOT EXISTS (SELECT 1 FROM followup_results newer
-                JOIN followup_assessments other USING(review_id,batch_id)
-                WHERE newer.review_id=result.review_id AND other.discussion_id=a.discussion_id
-                  AND (newer.completed_at_ms,newer.batch_id)>(result.completed_at_ms,result.batch_id))
-         LIMIT 1)) AS followup_state,
+        (SELECT 'ready' FROM review_pending_followup_results pending
+         WHERE pending.review_id=r.review_id LIMIT 1)) AS followup_state,
       EXISTS (SELECT 1 FROM messages m WHERE m.run_id=x.run_id AND m.state='uncertain') AS uncertain_delivery,
       (SELECT state FROM recovery_episodes k WHERE k.run_id=x.run_id AND k.lead_session_key=x.lead_session_key
           AND k.head_sha=r.head_sha AND k.settings_revision=(SELECT settings_revision FROM service_state WHERE singleton=1)

@@ -2,8 +2,8 @@
 
 use reviewq_app::access::{Actor, ActorScope, AppError, AppFuture};
 use reviewq_app::decisions::{
-    Decision, DecisionRequest, DecisionResult, DecisionStore, Disposition, Frontier,
-    ObservedAttention, ReportFrontier, SessionFrontier, TerminalDecision,
+    Decision, DecisionRequest, DecisionResult, DecisionStore, Disposition, FollowupFrontier,
+    Frontier, ObservedAttention, ReportFrontier, SessionFrontier, TerminalDecision,
 };
 use reviewq_app::events::{ResourceKey, Snapshot};
 use reviewq_app::queue::{MergeRequestState, ReviewSource, RunSummary};
@@ -420,6 +420,24 @@ pub(crate) fn capture_frontier(
             });
         }
     }
+    let mut followups = db.prepare_cached(
+        "SELECT ordinal, run_id, batch_id, receipt_id, completed_at_ms
+         FROM review_pending_followup_results WHERE review_id=?1 ORDER BY ordinal LIMIT 20",
+    )?;
+    let mut rows = followups.query([review.as_str()])?;
+    while let Some(row) = rows.next()? {
+        frontier.followups.push(FollowupFrontier {
+            ordinal: row.get(0)?,
+            run: parse(text(row, 1)?)?,
+            batch_id: row.get(2)?,
+            receipt: row
+                .get::<_, Option<String>>(3)?
+                .as_deref()
+                .map(parse)
+                .transpose()?,
+            completed_at_ms: row.get(4)?,
+        });
+    }
     Ok(frontier)
 }
 
@@ -457,6 +475,21 @@ fn mark_handled(db: &Connection, review: &ReviewId, frontier: Frontier) -> Resul
             session.run.as_str(),
             session.session.as_str(),
             session.event.ordinal
+        ])?;
+    }
+    for followup in frontier.followups {
+        db.prepare_cached(
+            "INSERT INTO review_handled_followup_results(result_ordinal)
+             SELECT ordinal FROM followup_results
+             WHERE ordinal=?1 AND review_id=?2 AND run_id=?3 AND batch_id=?4 AND receipt_id IS ?5
+             ON CONFLICT DO NOTHING",
+        )?
+        .execute(params![
+            followup.ordinal,
+            review.as_str(),
+            followup.run.as_str(),
+            followup.batch_id,
+            followup.receipt.as_ref().map(|id| id.as_str())
         ])?;
     }
     Ok(())
