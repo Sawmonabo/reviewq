@@ -5,10 +5,11 @@ use reviewq_app::reports::{
     CapturedArtifact, CorrectionKind, Declaration, Descriptor, ReportEdits, ReportReference,
     ReportWork, RevisionEvidence, Source as ReportSource, Verdict,
 };
+use reviewq_app::workflow::ReportFailureAddress;
 use reviewq_domain::identity::NativeInputId;
 use rusqlite::{Connection, OptionalExtension, params};
 
-use super::{batch, db_int, edits, ensure_claim};
+use super::{batch, db_int, edits, ensure_claim, failures};
 use crate::StoreError;
 use crate::connection::WriteTx;
 use crate::events::now_ms;
@@ -22,6 +23,7 @@ pub(super) fn complete(
     result: NativeInputId,
     artifact: Option<CapturedArtifact>,
     continuity_verified: bool,
+    resolved: Vec<ReportFailureAddress>,
 ) -> Result<(), StoreError> {
     let db = &tx.sql;
     let stage = ensure_claim(db, &work)?;
@@ -279,6 +281,16 @@ pub(super) fn complete(
             updated_at_ms=max(updated_at_ms, ?3) WHERE receipt_id=?1",
         params![receipt, result.as_str(), time],
     )?;
+    if let Declaration::Final {
+        revision: RevisionEvidence::Exact(sha),
+        amends: None,
+        edits,
+        ..
+    } = &work.declaration
+        && edits.correction.is_none()
+    {
+        failures::resolve(db, &work, sha, resolved)?;
+    }
     if let Some(manifest) = &scoped {
         match &work.declaration {
             Declaration::Final { .. } => batch::complete(tx, &work, manifest, receipt, time)?,
@@ -340,12 +352,26 @@ pub(super) fn reject(
             work.call.lead.review_id().clone(),
         ))])?;
     }
-    emit(
-        tx,
-        work,
-        time,
-        Some((Kind::ReportFailed, "Report could not be accepted")),
-    )
+    if matches!(work.declaration, Declaration::Final { .. }) {
+        if let Some(notification) = failures::note(
+            &tx.sql,
+            &work.call,
+            work.acknowledgement.receipt_id.to_string(),
+            reason,
+            "report_delivery_failure",
+            time,
+        )? {
+            tx.emit(&[ResourceKey::Notification(Some(notification))])?;
+        }
+        emit(tx, work, time, None)
+    } else {
+        emit(
+            tx,
+            work,
+            time,
+            Some((Kind::ReportFailed, "Report could not be accepted")),
+        )
+    }
 }
 
 struct Head {

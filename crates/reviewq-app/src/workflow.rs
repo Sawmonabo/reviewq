@@ -50,6 +50,14 @@ pub struct CompletedReportCall {
     pub final_response: Option<Arc<dyn ReportContent>>,
 }
 
+/// Earlier failed report address bound to the same registered lead.
+#[derive(Clone)]
+pub struct ReportFailureAddress {
+    pub notification: reviewq_domain::identity::NotificationId,
+    pub turn: NativeTurnId,
+    pub item: NativeInputId,
+}
+
 /// One confirmed private native source. A reader keeps the source generation fixed.
 pub trait ReportContent: Send + Sync {
     fn byte_length(&self) -> u64;
@@ -271,4 +279,12 @@ pub trait NativeWorkflowProof: Send + Sync {
         acknowledgement: ExpectedAcknowledgement,
         include_response: bool,
     ) -> AppFuture<'_, ReportCompletion>;
+
+    fn earlier_report_failures(
+        &self,
+        _call: NativeCall,
+        _candidates: Vec<ReportFailureAddress>,
+    ) -> AppFuture<'_, Vec<ReportFailureAddress>> {
+        Box::pin(async { Ok(Vec::new()) })
+    }
 }
