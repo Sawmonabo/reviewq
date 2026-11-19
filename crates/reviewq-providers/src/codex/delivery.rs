@@ -2,7 +2,7 @@ use reviewq_app::hosts::{
     DeliveryObservation, DispatchGuard, MessageBody, ObservedInput, ReportRef,
 };
 use reviewq_domain::identity::DeliveryId;
-use reviewq_domain::session::LeadTarget;
+use reviewq_domain::session::{HostProvider, LeadTarget};
 use serde_json::json;
 
 use super::Codex;
@@ -89,7 +89,7 @@ impl Codex {
             Err(CallError::BeforeSend(_)) => DeliveryObservation::NotSubmitted,
             Err(CallError::Denied(_)) => DeliveryObservation::Rejected,
             // A reply, missing reply or exact remote error alone does not prove native input.
-            _ => self.find_input(lead, delivery).await,
+            _ => self.find_input(lead, delivery, None).await,
         }
     }
 
@@ -97,26 +97,51 @@ impl Codex {
         &self,
         lead: LeadTarget,
         delivery: DeliveryId,
+        mut cursor: Option<String>,
     ) -> DeliveryObservation {
-        let Ok(thread) = self.verified_thread(&lead).await else {
+        let identity = lead.binding().identity();
+        if identity.provider() != HostProvider::Codex || identity.profile() != &self.profile {
+            return DeliveryObservation::Uncertain;
+        }
+        let Ok(thread) = self.read_thread(identity.native_id()).await else {
             return DeliveryObservation::Uncertain;
         };
-        let Ok(turns) = self.turns(&thread.id, None, false, 8, true).await else {
+        if thread.cwd != lead.binding().cwd().as_path()
+            && canonical_cwd(thread.cwd.clone()).await.as_ref().ok() != Some(lead.binding().cwd())
+        {
             return DeliveryObservation::Uncertain;
-        };
-        for turn in turns.data {
-            for item in turn.items {
-                if let Item::UserMessage { id, client_id, .. } = item
-                    && client_id.as_deref() == Some(delivery.as_str())
-                    && let (Ok(turn_id), Ok(entry_id)) = (turn.id.parse(), id.parse())
-                {
-                    return DeliveryObservation::Started {
-                        delivery_id: delivery,
-                        input: ObservedInput { turn_id, entry_id },
-                    };
+        }
+        for _ in 0..4 {
+            let Ok(mut turns) = self
+                .turns(&thread.id, cursor.as_deref(), false, 1, true)
+                .await
+            else {
+                return DeliveryObservation::Uncertain;
+            };
+            if let Some(turn) = turns.data.pop() {
+                for item in turn.items {
+                    if let Item::UserMessage { id, client_id, .. } = item
+                        && client_id.as_deref() == Some(delivery.as_str())
+                        && let (Ok(turn_id), Ok(entry_id)) = (turn.id.parse(), id.parse())
+                    {
+                        return DeliveryObservation::Started {
+                            delivery_id: delivery,
+                            input: ObservedInput { turn_id, entry_id },
+                        };
+                    }
                 }
             }
+            let Some(next) = turns
+                .next_cursor
+                .filter(|value| Some(value) != cursor.as_ref())
+            else {
+                return DeliveryObservation::Uncertain;
+            };
+            cursor = Some(next);
         }
-        DeliveryObservation::Uncertain
+        cursor.map_or(
+            DeliveryObservation::Uncertain,
+            DeliveryObservation::ReconcileFrom,
+        )
     }
 }

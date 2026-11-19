@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::fmt::Write as _;
 use std::fs::{self, DirBuilder, File, OpenOptions};
 use std::io::{Read, Write};
@@ -275,58 +276,73 @@ async fn dispatch_deliveries(
     host: Arc<dyn NativeHost>,
     mut commits: watch::Receiver<()>,
 ) {
-    let mut after = None;
+    const CONCURRENCY: usize = 4;
+    let mut running = tokio::task::JoinSet::new();
+    let mut active = HashMap::new();
     loop {
         commits.borrow_and_update();
-        let batch = match store
-            .recoverable_deliveries(HostProvider::Codex, after.take(), 16)
-            .await
-        {
-            Ok(batch) => batch,
-            Err(_) => {
-                tokio::time::sleep(Duration::from_secs(1)).await;
-                continue;
+        let mut retry = false;
+        if running.len() < CONCURRENCY {
+            match store
+                .recoverable_deliveries(HostProvider::Codex, None, CONCURRENCY as u16)
+                .await
+            {
+                Ok(batch) => {
+                    for candidate in batch {
+                        if running.len() == CONCURRENCY {
+                            break;
+                        }
+                        let id = candidate.cursor.delivery_id.clone();
+                        if active.values().any(|running| running == &id) {
+                            continue;
+                        }
+                        let store = store.clone();
+                        let host = host.clone();
+                        let task = running.spawn(async move {
+                            if !matches!(
+                                tokio::time::timeout(
+                                    Duration::from_secs(60),
+                                    recover_delivery(store, host.as_ref(), candidate)
+                                )
+                                .await,
+                                Ok(Ok(()))
+                            ) {
+                                tokio::time::sleep(Duration::from_secs(1)).await;
+                            }
+                        });
+                        active.insert(task.id(), id);
+                    }
+                }
+                Err(_) => retry = true,
             }
+        }
+        let due = if running.len() < CONCURRENCY && !retry {
+            match store.next_delivery_due(HostProvider::Codex).await {
+                Ok(due) => due,
+                Err(_) => {
+                    retry = true;
+                    None
+                }
+            }
+        } else {
+            None
         };
-        let mut failed = false;
-        let mut running = tokio::task::JoinSet::new();
-        for candidate in batch {
-            after = Some(candidate.cursor.clone());
-            if running.len() == 4 {
-                failed |= !matches!(running.join_next().await, Some(Ok(true)));
-            }
-            let store = store.clone();
-            let host = host.clone();
-            running.spawn(async move {
-                matches!(
-                    tokio::time::timeout(
-                        Duration::from_secs(60),
-                        recover_delivery(store, host.as_ref(), candidate)
-                    )
-                    .await,
-                    Ok(Ok(()))
-                )
-            });
-        }
-        while let Some(result) = running.join_next().await {
-            failed |= !matches!(result, Ok(true));
-        }
-        if failed {
-            tokio::time::sleep(Duration::from_secs(1)).await;
-        }
-        if after.is_some() {
-            continue;
-        }
-        let due = match store.next_delivery_due(HostProvider::Codex).await {
-            Ok(due) => due,
-            Err(_) => {
+        let deadline = async {
+            if retry {
                 tokio::time::sleep(Duration::from_secs(1)).await;
-                continue;
+            } else {
+                wait_until_due(due).await;
             }
         };
         tokio::select! {
             result = commits.changed() => if result.is_err() { break; },
-            () = wait_until_due(due) => {}
+            result = running.join_next_with_id(), if !running.is_empty() => {
+                if let Some(result) = result {
+                    let id = result.map_or_else(|error| error.id(), |(id, ())| id);
+                    active.remove(&id);
+                }
+            },
+            () = deadline => {}
         }
     }
 }

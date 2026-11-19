@@ -71,6 +71,7 @@ pub trait NativeHost: Send + Sync {
         &self,
         target: LeadTarget,
         delivery: DeliveryId,
+        cursor: Option<String>,
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = DeliveryObservation> + Send + '_>>;
 }
 
@@ -330,7 +331,9 @@ pub enum DeliveryWork {
         text: MessageBody,
         report_ref: Option<ReportRef>,
     },
-    Reconcile,
+    Reconcile {
+        cursor: Option<String>,
+    },
 }
 
 /// An outcome established by the host adapter for this exact claim.
@@ -347,6 +350,8 @@ pub enum DeliveryObservation {
     Rejected,
     /// The call might have taken effect, requiring reconciliation before retry.
     Uncertain,
+    /// Exact readback can continue at an older native page. No dispatch is authorized.
+    ReconcileFrom(String),
 }
 
 /// Transactional operations for verified registration and message delivery.

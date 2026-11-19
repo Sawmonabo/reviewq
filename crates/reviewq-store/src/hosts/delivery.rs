@@ -27,7 +27,7 @@ const RECEIPT_COLUMNS: &str =
     "d.message_id, d.submission_id, r.review_id, d.run_id, d.session_key, d.state,
      d.created_at_ms, d.updated_at_ms, d.native_turn_id, d.native_input_id, coalesce(o.fence, 0),
      d.purpose, o.claim_kind, m.grant_id, m.grant_epoch, o.due_at_ms, coalesce(o.retry_count, 0),
-     d.receipt_id, d.report_hash, d.current_receipt_id";
+     d.receipt_id, d.report_hash, d.current_receipt_id, o.reconcile_cursor";
 const RECEIPT_JOIN: &str =
     "messages d JOIN runs r ON r.run_id=d.run_id
      JOIN mutation_receipts m ON m.actor_key=d.actor_key AND m.operation=d.operation AND m.submission_id=d.submission_id
@@ -52,6 +52,7 @@ struct Delivery {
     grant: Option<(String, Revision)>,
     due_at_ms: Option<i64>,
     retry_count: u8,
+    reconcile_cursor: Option<String>,
 }
 
 #[derive(Clone, Copy, Eq, PartialEq)]
@@ -64,7 +65,7 @@ impl ClaimKind {
     fn from_work(work: &DeliveryWork) -> Self {
         match work {
             DeliveryWork::Dispatch { .. } => Self::Dispatch,
-            DeliveryWork::Reconcile => Self::Reconcile,
+            DeliveryWork::Reconcile { .. } => Self::Reconcile,
         }
     }
 
@@ -335,9 +336,13 @@ pub(super) fn claim(
                 dispatch_work(&tx.sql, &delivery_id)?,
             )
         }
-        RecoverableDeliveryState::Dispatching | RecoverableDeliveryState::Uncertain => {
-            (ClaimKind::Reconcile, prior, DeliveryWork::Reconcile)
-        }
+        RecoverableDeliveryState::Dispatching | RecoverableDeliveryState::Uncertain => (
+            ClaimKind::Reconcile,
+            prior,
+            DeliveryWork::Reconcile {
+                cursor: delivery.reconcile_cursor,
+            },
+        ),
     };
     let fence = delivery.fence.checked_add(1).ok_or(AppError::Internal)?;
     let changed = tx.sql.execute(
@@ -422,6 +427,15 @@ pub(super) fn finish(
     observation: DeliveryObservation,
 ) -> Result<DeliveryReceipt, StoreError> {
     let mut stored = matching_claim(&tx.sql, &claim)?;
+    let scan = match &observation {
+        DeliveryObservation::ReconcileFrom(cursor)
+            if !cursor.is_empty() && cursor.len() <= 2048 =>
+        {
+            Some(cursor.clone())
+        }
+        DeliveryObservation::ReconcileFrom(_) => return Err(AppError::InvalidRequest.into()),
+        _ => None,
+    };
     let outcome = match observation {
         DeliveryObservation::NotSubmitted
             if ClaimKind::from_work(&claim.work) == ClaimKind::Dispatch =>
@@ -436,7 +450,9 @@ pub(super) fn finish(
             DeliveryOutcome::Started(input)
         }
         DeliveryObservation::Rejected => DeliveryOutcome::Rejected,
-        DeliveryObservation::Uncertain => DeliveryOutcome::Uncertain,
+        DeliveryObservation::Uncertain | DeliveryObservation::ReconcileFrom(_) => {
+            DeliveryOutcome::Uncertain
+        }
     };
     let state = outcome_label(&outcome);
     let prior = outcome_label(&stored.receipt.outcome);
@@ -478,11 +494,16 @@ pub(super) fn finish(
             )?;
         }
         _ => {
-            let retry_count = stored.retry_count.saturating_add(1).min(7);
-            let due_at_ms = now.saturating_add(1_000_i64 << (retry_count - 1));
+            let (retry_count, delay) = if scan.is_some() {
+                (stored.retry_count, 250)
+            } else {
+                let count = stored.retry_count.saturating_add(1).min(7);
+                (count, 1_000_i64 << (count - 1))
+            };
+            let due_at_ms = now.saturating_add(delay);
             tx.sql.execute(
-                "UPDATE outbox SET claim_kind=NULL, due_at_ms=?2, retry_count=?3 WHERE delivery_id=?1",
-                params![claim.delivery_id.as_str(), due_at_ms, retry_count],
+                "UPDATE outbox SET claim_kind=NULL, due_at_ms=?2, retry_count=?3, reconcile_cursor=?4 WHERE delivery_id=?1",
+                params![claim.delivery_id.as_str(), due_at_ms, retry_count, scan],
             )?;
         }
     }
@@ -577,6 +598,7 @@ fn delivery_row(row: &Row<'_>) -> Result<Delivery, StoreError> {
         grant,
         due_at_ms: row.get(15)?,
         retry_count: row.get(16)?,
+        reconcile_cursor: row.get(20)?,
     })
 }
 

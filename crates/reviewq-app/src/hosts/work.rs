@@ -70,9 +70,13 @@ pub async fn recover_delivery(
             )
             .await
         }
-        DeliveryWork::Reconcile => {
-            host.observe(claim.target.clone(), claim.delivery_id.clone())
-                .await
+        DeliveryWork::Reconcile { cursor } => {
+            host.observe(
+                claim.target.clone(),
+                claim.delivery_id.clone(),
+                cursor.clone(),
+            )
+            .await
         }
     };
     store.finish_delivery(claim, result).await?;

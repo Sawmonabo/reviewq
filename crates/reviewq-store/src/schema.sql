@@ -158,7 +158,8 @@ CREATE TABLE outbox (
     fence INTEGER NOT NULL DEFAULT 0 CHECK (fence >= 0),
     claim_kind TEXT CHECK (claim_kind IN ('dispatch', 'reconcile')),
     due_at_ms INTEGER NOT NULL,
-    retry_count INTEGER NOT NULL DEFAULT 0 CHECK (retry_count BETWEEN 0 AND 7)
+    retry_count INTEGER NOT NULL DEFAULT 0 CHECK (retry_count BETWEEN 0 AND 7),
+    reconcile_cursor TEXT CHECK (length(CAST(reconcile_cursor AS BLOB)) BETWEEN 1 AND 2048)
 ) STRICT, WITHOUT ROWID;
 
 CREATE INDEX outbox_due ON outbox(due_at_ms, delivery_id);

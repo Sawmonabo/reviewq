@@ -145,11 +145,14 @@ async fn exercise(db: &Path, backup: &Path, inputs: &Path) -> Result<(), Box<dyn
         .claim_delivery(id.clone(), RecoverableDeliveryState::Queued)
         .await?
         .unwrap();
+    store.close(Duration::from_secs(10)).await?;
+    let store = SqliteStore::open(absolute(db)).await?;
+    store.recover_delivery_claims().await?;
     let retry = store
         .claim_delivery(id.clone(), RecoverableDeliveryState::Dispatching)
         .await?
         .unwrap();
-    assert_eq!(retry.work, DeliveryWork::Reconcile);
+    assert_eq!(retry.work, DeliveryWork::Reconcile { cursor: None });
     assert_eq!(
         store.authorize_dispatch(retry.clone()).await,
         Err(AppError::Forbidden)
