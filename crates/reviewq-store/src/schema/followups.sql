@@ -83,6 +83,7 @@ CREATE TABLE followup_batches (
     hold_reason TEXT CHECK (length(CAST(hold_reason AS BLOB)) <= 1024),
     submission_id TEXT,
     native_turn_id TEXT,
+    continuation_turn_id TEXT,
     lease_fence INTEGER NOT NULL DEFAULT 0 CHECK (lease_fence >= 0),
     lease_until_ms INTEGER,
     due_at_ms INTEGER,

@@ -96,6 +96,7 @@ impl NativeWorkflowProof for Codex {
             Ok(NativeCall {
                 lead,
                 turn_id: turn.id.parse().map_err(|_| AppError::Unavailable)?,
+                root_turn_id: root_turn(&turn)?,
                 call_id,
                 source_generation,
                 source_position,
@@ -135,7 +136,9 @@ impl NativeWorkflowProof for Codex {
             let Some(index) = call_position(&turn, &call.call_id, call.tool) else {
                 return Ok(ReportCompletion::Unproved);
             };
-            if request_address(&turn, index)? != call.request_entry_id {
+            if request_address(&turn, index)? != call.request_entry_id
+                || root_turn(&turn)? != call.root_turn_id
+            {
                 return Ok(ReportCompletion::Unproved);
             }
             let Item::CommandExecution {
@@ -285,6 +288,13 @@ impl Codex {
         }
         Ok(None)
     }
+}
+
+fn root_turn(turn: &Turn) -> Result<Option<NativeTurnId>, AppError> {
+    turn.root_turn_id
+        .as_ref()
+        .map(|id| id.parse().map_err(|_| AppError::Unavailable))
+        .transpose()
 }
 
 async fn workflow_source(

@@ -21,6 +21,7 @@ pub enum WorkflowTool {
 pub struct NativeCall {
     pub lead: LeadTarget,
     pub turn_id: NativeTurnId,
+    pub root_turn_id: Option<NativeTurnId>,
     pub call_id: String,
     pub source_generation: String,
     pub source_position: u64,

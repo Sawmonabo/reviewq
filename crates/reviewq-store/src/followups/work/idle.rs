@@ -17,7 +17,7 @@ const AWAITING_IDLE: &str = "
 
 pub(super) fn checks(db: &Connection) -> Result<Vec<ExecutingCheck>, StoreError> {
     let sql = format!(
-        "SELECT b.batch_id,b.run_id,b.lead_session_key,b.native_turn_id
+        "SELECT b.batch_id,b.run_id,b.lead_session_key,coalesce(b.continuation_turn_id,b.native_turn_id)
            FROM followup_batches b JOIN reviews r USING(review_id)
            WHERE {AWAITING_IDLE} ORDER BY b.holds_slot DESC,b.latest_observed_at_ms,b.batch_id LIMIT 8"
     );
@@ -60,7 +60,7 @@ pub(super) fn observe(tx: &mut WriteTx<'_>, check: ExecutingCheck) -> Result<(),
             completed_at_ms=CASE WHEN r.state IN ('closed','merged') THEN ?5 ELSE x.completed_at_ms END
          FROM followup_batches b JOIN reviews r USING(review_id)
          WHERE x.batch_id=b.batch_id AND b.batch_id=?1 AND b.run_id=?2 AND b.lead_session_key=?3
-            AND b.native_turn_id=?4 AND {AWAITING_IDLE}"
+            AND coalesce(b.continuation_turn_id,b.native_turn_id)=?4 AND {AWAITING_IDLE}"
     );
     let updated = tx.sql.execute(
         &sql,

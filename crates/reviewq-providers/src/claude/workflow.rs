@@ -76,6 +76,7 @@ impl NativeWorkflowProof for ClaudeWorkflow {
             Ok(NativeCall {
                 lead,
                 turn_id,
+                root_turn_id: None,
                 call_id,
                 tool,
                 source_generation: opening.generation,

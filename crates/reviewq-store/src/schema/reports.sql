@@ -30,6 +30,7 @@ CREATE TABLE report_handoffs (
     run_id TEXT NOT NULL REFERENCES runs(run_id),
     lead_session_key TEXT NOT NULL,
     turn_id TEXT NOT NULL,
+    root_turn_id TEXT,
     call_id TEXT NOT NULL,
     source_generation TEXT NOT NULL CHECK (length(CAST(source_generation AS BLOB)) BETWEEN 1 AND 512),
     source_position INTEGER NOT NULL CHECK (source_position >= 0),
