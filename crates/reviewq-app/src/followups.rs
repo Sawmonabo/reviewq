@@ -158,16 +158,24 @@ pub struct MonitoredReview {
     pub settings: Revision,
 }
 
+/// One tracked provider review and its current optional automatic monitor.
+pub struct TrackedReview {
+    pub review: ReviewId,
+    pub identity: reviewq_domain::identity::MrIdentity,
+    pub settings: Revision,
+    pub monitor: Option<MonitoredReview>,
+}
+
 pub trait FollowupObservationStore: Send + Sync {
-    fn monitored_reviews(
+    fn tracked_reviews(
         &self,
         after: Option<ReviewId>,
         limit: u16,
-    ) -> AppFuture<'_, Vec<MonitoredReview>>;
+    ) -> AppFuture<'_, Vec<TrackedReview>>;
     fn record_monitor_unavailable(&self, target: MonitoredReview) -> AppFuture<'_, ()>;
-    fn record_monitor_observation(
+    fn record_workflow_observation(
         &self,
-        target: MonitoredReview,
+        target: TrackedReview,
         observation: crate::sources::WorkflowSnapshot,
     ) -> AppFuture<'_, ()>;
 }
@@ -178,14 +186,17 @@ pub async fn poll_monitored_reviews(
     after: Option<ReviewId>,
 ) -> Result<Option<ReviewId>, crate::access::AppError> {
     const LIMIT: u16 = 8;
-    let rows = store.monitored_reviews(after, LIMIT).await?;
+    let rows = store.tracked_reviews(after, LIMIT).await?;
     let next = (rows.len() == usize::from(LIMIT))
         .then(|| rows.last().map(|row| row.review.clone()))
         .flatten();
     for row in rows {
         let committed = match source.workflow_snapshot(row.identity.clone()).await {
-            Ok(observation) => store.record_monitor_observation(row, observation).await,
-            Err(_) => store.record_monitor_unavailable(row).await,
+            Ok(observation) => store.record_workflow_observation(row, observation).await,
+            Err(_) => match row.monitor {
+                Some(monitor) => store.record_monitor_unavailable(monitor).await,
+                None => continue,
+            },
         };
         if let Err(error) = committed
             && !matches!(

@@ -57,6 +57,7 @@ CREATE TABLE followup_observations (
     actor_id TEXT,
     note_id TEXT,
     observed_at_ms INTEGER NOT NULL,
+    notification_id TEXT REFERENCES notifications(notification_id),
     FOREIGN KEY (review_id, generation, original_note_id)
         REFERENCES followup_threads(review_id, generation, original_note_id),
     UNIQUE (review_id, generation, original_note_id, occurrence_key),

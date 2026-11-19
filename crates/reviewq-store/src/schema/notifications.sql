@@ -58,3 +58,45 @@ CREATE TABLE desktop_members (
     PRIMARY KEY (receipt_id, notification_id),
     UNIQUE (notification_id)
 ) STRICT, WITHOUT ROWID;
+
+CREATE TABLE notification_gitlab_heads (
+    review_id TEXT PRIMARY KEY REFERENCES reviews(review_id),
+    sha TEXT NOT NULL CHECK (length(sha) IN (40,64)),
+    updated_at_ms INTEGER NOT NULL,
+    version INTEGER NOT NULL CHECK (version>0)
+) STRICT, WITHOUT ROWID;
+
+CREATE TABLE notification_gitlab_observations (
+    review_id TEXT PRIMARY KEY REFERENCES reviews(review_id),
+    actor_id TEXT NOT NULL,
+    observed_at_ms INTEGER NOT NULL,
+    personally_approved INTEGER CHECK (personally_approved IN (0,1)),
+    approval_version INTEGER NOT NULL CHECK (approval_version>0)
+) STRICT, WITHOUT ROWID;
+
+CREATE TABLE notification_gitlab_threads (
+    review_id TEXT NOT NULL REFERENCES reviews(review_id),
+    root_note_id TEXT NOT NULL,
+    resolved INTEGER NOT NULL CHECK (resolved IN (0,1)),
+    version INTEGER NOT NULL CHECK (version>0),
+    PRIMARY KEY (review_id,root_note_id)
+) STRICT, WITHOUT ROWID;
+
+CREATE TABLE notification_gitlab_notes (
+    review_id TEXT NOT NULL REFERENCES reviews(review_id),
+    note_id TEXT NOT NULL,
+    actor_id TEXT NOT NULL,
+    sha256 TEXT NOT NULL CHECK (length(sha256)=64),
+    version INTEGER NOT NULL CHECK (version>0),
+    PRIMARY KEY (review_id,note_id)
+) STRICT, WITHOUT ROWID;
+
+CREATE TABLE notification_gitlab_evidence (
+    notification_id TEXT PRIMARY KEY REFERENCES notifications(notification_id),
+    review_id TEXT NOT NULL REFERENCES reviews(review_id),
+    discussion_id TEXT NOT NULL,
+    note_id TEXT,
+    sha256 TEXT CHECK (length(sha256)=64)
+) STRICT, WITHOUT ROWID;
+
+CREATE INDEX notification_gitlab_source_link ON notification_gitlab_evidence(review_id,discussion_id,note_id,sha256);

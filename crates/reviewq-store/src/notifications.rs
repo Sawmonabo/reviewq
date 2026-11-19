@@ -2,6 +2,7 @@
 
 use std::collections::HashSet;
 mod desktop;
+pub(crate) mod gitlab;
 
 use reviewq_app::access::{Actor, AppError, AppFuture};
 use reviewq_app::events::{ResourceKey, Snapshot};
@@ -265,6 +266,28 @@ fn counts(
 }
 
 /// Saves one stable occurrence in the transaction that observed it.
+pub(crate) fn publish(
+    tx: &mut crate::connection::WriteTx<'_>,
+    ids: &[NotificationId],
+) -> Result<(), StoreError> {
+    if ids.is_empty() {
+        return Ok(());
+    }
+    crate::workspace::advance_queue(&tx.sql)?;
+    let mut keys = vec![ResourceKey::Queue];
+    if ids.len() < reviewq_app::events::MAX_INVALIDATION_KEYS {
+        keys.extend(
+            ids.iter()
+                .cloned()
+                .map(|id| ResourceKey::Notification(Some(id))),
+        );
+    } else {
+        keys.push(ResourceKey::Notification(None));
+    }
+    tx.emit(&keys)?;
+    Ok(())
+}
+
 pub(crate) fn insert_notification(
     db: &Connection,
     input: reviewq_app::notifications::Observation,
