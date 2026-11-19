@@ -240,6 +240,27 @@ impl Codex {
         Ok(thread)
     }
 
+    pub(super) async fn bound_history_thread(
+        &self,
+        session: &HistorySession,
+    ) -> Result<Thread, AppError> {
+        let identity = session.binding.identity();
+        if identity.provider() != HostProvider::Codex || identity.profile() != &self.profile {
+            return Err(AppError::NotFound);
+        }
+        let thread = self.read_thread(identity.native_id()).await?;
+        if thread.parent_thread_id.as_deref()
+            != session
+                .parent
+                .as_ref()
+                .map(|parent| parent.native_id.as_str())
+            || !retained_cwd(&thread, session.binding.cwd()).await?
+        {
+            return Err(AppError::Conflict);
+        }
+        Ok(thread)
+    }
+
     pub(super) async fn read_thread(
         &self,
         native_id: &NativeSessionId,

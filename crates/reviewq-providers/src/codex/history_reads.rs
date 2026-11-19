@@ -4,14 +4,12 @@ use reviewq_app::history::{
     RpcContentRef, VisibleEntry, VisiblePartKind,
 };
 use reviewq_domain::identity::{NativeInputId, NativeTurnId, ReportHash};
-use reviewq_domain::session::HostProvider;
 use serde::Deserialize;
 use serde_json::json;
 use sha2::{Digest, Sha256};
 
 use super::Codex;
 use super::history::{Item, visible};
-use super::session::canonical_cwd;
 
 impl Codex {
     pub(super) async fn item_page(
@@ -61,17 +59,10 @@ impl Codex {
         offset: u64,
         limit: u32,
     ) -> Result<NativeContent, AppError> {
-        let native = session.binding.identity();
-        if native.provider() != HostProvider::Codex || native.profile() != &self.profile {
-            return Err(AppError::NotFound);
-        }
         if !(4..=65_536).contains(&limit) {
             return Err(AppError::InvalidRequest);
         }
-        let thread = self.read_thread(native.native_id()).await?;
-        if canonical_cwd(thread.cwd.clone()).await? != *session.binding.cwd() {
-            return Err(AppError::Conflict);
-        }
+        let thread = self.bound_history_thread(&session).await?;
         let generation = self.history_generation(&thread).await?;
         if generation != reference.generation {
             return Err(AppError::CursorExpired);
@@ -184,14 +175,7 @@ impl Codex {
         &self,
         session: HistorySession,
     ) -> Result<reviewq_app::history::NativeRpcStamp, AppError> {
-        let native = session.binding.identity();
-        if native.provider() != HostProvider::Codex || native.profile() != &self.profile {
-            return Err(AppError::NotFound);
-        }
-        let thread = self.read_thread(native.native_id()).await?;
-        if canonical_cwd(thread.cwd.clone()).await? != *session.binding.cwd() {
-            return Err(AppError::Conflict);
-        }
+        let thread = self.bound_history_thread(&session).await?;
         let generation = self.history_generation(&thread).await?;
         let page = self.turns(&thread.id, None, false, 1, false).await?;
         let Some(turn) = page.data.first() else {

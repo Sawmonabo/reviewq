@@ -237,6 +237,10 @@ pub(crate) fn register(
     }
 
     let native = binding.identity();
+    let metadata_update = match native.provider() {
+        HostProvider::Codex => metadata::MetadataUpdate::Full,
+        HostProvider::Claude => metadata::MetadataUpdate::Partial,
+    };
     if let Some(target) = native_lead(&tx.sql, native)? {
         if target.binding() != &binding
             || identity_for_review(&tx.sql, target.review_id())? != input.review.identity
@@ -249,8 +253,12 @@ pub(crate) fn register(
                 params![target.session_key().as_str(), bytes(source)],
             )?;
         }
-        let metadata_changed =
-            metadata::record(&tx.sql, target.session_key().as_str(), &input.metadata)?;
+        let metadata_changed = metadata::record(
+            &tx.sql,
+            target.session_key().as_str(),
+            &input.metadata,
+            metadata_update,
+        )?;
         if metadata_changed {
             tx.emit(&[
                 ResourceKey::Queue,
@@ -308,7 +316,12 @@ pub(crate) fn register(
             input.native_source.as_ref().map(bytes), phase, questions
         ],
     )?;
-    metadata::record(&tx.sql, input.session_key.as_str(), &input.metadata)?;
+    metadata::record(
+        &tx.sql,
+        input.session_key.as_str(),
+        &input.metadata,
+        metadata_update,
+    )?;
     advance_queue(&tx.sql)?;
     tx.emit(&[
         ResourceKey::Queue,

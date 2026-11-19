@@ -110,7 +110,8 @@ impl ClaudeCompanion for Claude {
                 .cwd
                 .as_path()
                 .canonicalize()
-                .map_err(|_| AppError::NotFound)?;
+                .unwrap_or_else(|_| child.cwd.as_path().to_path_buf());
+            // The verified child record must still match this exact stored directory.
             let cwd = AbsolutePath::from_canonical(cwd).map_err(|_| AppError::Forbidden)?;
             let binding = NativeBinding::new(
                 NativeIdentity::new(

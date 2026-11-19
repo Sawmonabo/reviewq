@@ -2,32 +2,16 @@ use reviewq_app::access::AppError;
 use reviewq_app::hosts::recovery::{NativeFailure, RecoveryKind};
 use reviewq_app::hosts::{HostPhase, QuestionStatus};
 use reviewq_app::notifications::{Kind, NativeAttention, NativeOccurrence, TrackedNative};
-use reviewq_domain::session::HostProvider;
 
 use super::Codex;
-use super::session::{ThreadStatus, retained_cwd};
+use super::session::ThreadStatus;
 
 impl Codex {
     pub(crate) async fn attention(
         &self,
         target: TrackedNative,
     ) -> Result<Option<NativeAttention>, AppError> {
-        let binding = &target.session.binding;
-        let identity = binding.identity();
-        if identity.provider() != HostProvider::Codex || identity.profile() != &self.profile {
-            return Err(AppError::NotFound);
-        }
-        let thread = self.read_thread(identity.native_id()).await?;
-        if !retained_cwd(&thread, binding.cwd()).await?
-            || thread.parent_thread_id.as_deref()
-                != target
-                    .session
-                    .parent
-                    .as_ref()
-                    .map(|parent| parent.native_id.as_str())
-        {
-            return Err(AppError::Conflict);
-        }
+        let thread = self.bound_history_thread(&target.session).await?;
         let mut activity = thread.status.activity();
         let mut metadata = thread.metadata();
         let mut events = Vec::new();

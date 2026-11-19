@@ -5,6 +5,11 @@ use rusqlite::{Connection, Row, params};
 
 use crate::StoreError;
 
+pub(crate) enum MetadataUpdate {
+    Full,
+    Partial,
+}
+
 pub(crate) fn read(db: &Connection, session: &str) -> Result<NativeSessionMetadata, StoreError> {
     Ok(db.query_row(
         "SELECT s.native_name, coalesce(s.native_status, s.host_activity), s.native_started_at_ms,
@@ -30,6 +35,7 @@ pub(crate) fn record(
     db: &Connection,
     session: &str,
     value: &NativeSessionMetadata,
+    update: MetadataUpdate,
 ) -> Result<bool, StoreError> {
     let observed = (
         value.name.as_deref(),
@@ -39,17 +45,29 @@ pub(crate) fn record(
         value.effort.as_deref(),
     );
     let changed = db.execute(
-        "UPDATE sessions SET native_name=coalesce(?2,native_name), native_status=coalesce(?3,native_status),
-            native_started_at_ms=coalesce(?4,native_started_at_ms), native_model=coalesce(?5,native_model),
-            native_effort=coalesce(?6,native_effort)
-         WHERE session_key=?1 AND (
-            native_name IS DISTINCT FROM coalesce(?2,native_name)
-            OR native_status IS DISTINCT FROM coalesce(?3,native_status)
-            OR native_started_at_ms IS DISTINCT FROM coalesce(?4,native_started_at_ms)
-            OR native_model IS DISTINCT FROM coalesce(?5,native_model)
-            OR native_effort IS DISTINCT FROM coalesce(?6,native_effort)
-         )",
-        params![session, observed.0, observed.1, observed.2, observed.3, observed.4],
+        "WITH observed AS (
+            SELECT CASE WHEN ?7 THEN ?2 ELSE coalesce(?2,native_name) END AS name,
+                CASE WHEN ?7 THEN ?3 ELSE coalesce(?3,native_status) END AS status,
+                CASE WHEN ?7 THEN ?4 ELSE coalesce(?4,native_started_at_ms) END AS started_at_ms,
+                CASE WHEN ?7 THEN ?5 ELSE coalesce(?5,native_model) END AS model,
+                CASE WHEN ?7 THEN ?6 ELSE coalesce(?6,native_effort) END AS effort
+            FROM sessions WHERE session_key=?1
+         ) UPDATE sessions
+            SET native_name=observed.name, native_status=observed.status,
+                native_started_at_ms=observed.started_at_ms, native_model=observed.model,
+                native_effort=observed.effort
+         FROM observed WHERE session_key=?1 AND
+            (native_name,native_status,native_started_at_ms,native_model,native_effort)
+              IS DISTINCT FROM (observed.name,observed.status,observed.started_at_ms,observed.model,observed.effort)",
+        params![
+            session,
+            observed.0,
+            observed.1,
+            observed.2,
+            observed.3,
+            observed.4,
+            matches!(update, MetadataUpdate::Full)
+        ],
     )?;
     Ok(changed != 0)
 }

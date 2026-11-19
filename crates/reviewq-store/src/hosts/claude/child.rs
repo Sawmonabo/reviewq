@@ -82,8 +82,13 @@ pub(super) fn record(
          WHERE companion_generation<>excluded.companion_generation OR sequence<excluded.sequence",
         params![bound, child.generation, sequence],
     )?;
-    let metadata_changed =
-        accepted != 0 && super::super::metadata::record(db, &bound, &child.metadata)?;
+    let metadata_changed = accepted != 0
+        && super::super::metadata::record(
+            db,
+            &bound,
+            &child.metadata,
+            super::super::metadata::MetadataUpdate::Partial,
+        )?;
     if changed != 0 {
         advance_queue(db)?;
     }

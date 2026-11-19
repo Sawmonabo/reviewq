@@ -7,7 +7,6 @@ use reviewq_app::history::{
     VisiblePart, VisiblePartKind,
 };
 use reviewq_domain::identity::NativeTurnId;
-use reviewq_domain::session::HostProvider;
 use serde::Deserialize;
 use serde_json::json;
 use sha2::{Digest, Sha256};
@@ -130,14 +129,7 @@ impl Codex {
         if !(1..=100).contains(&limit) {
             return Err(AppError::InvalidRequest);
         }
-        let identity = target.binding.identity();
-        if identity.profile() != &self.profile || identity.provider() != HostProvider::Codex {
-            return Err(AppError::NotFound);
-        }
-        let thread = self.read_thread(identity.native_id()).await?;
-        if super::session::canonical_cwd(thread.cwd.clone()).await? != *target.binding.cwd() {
-            return Err(AppError::Conflict);
-        }
+        let thread = self.bound_history_thread(&target).await?;
         if position.file.is_some() {
             return Err(AppError::CursorExpired);
         }

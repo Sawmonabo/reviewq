@@ -2,9 +2,10 @@
 
 use reviewq_app::history::HistorySession;
 use reviewq_app::notifications::DiscoveredChildren;
-use reviewq_domain::identity::SessionKey;
+use reviewq_domain::identity::{ReportHash, SessionKey};
 use reviewq_domain::session::HostProvider;
 use rusqlite::{Connection, OptionalExtension, params};
+use sha2::{Digest, Sha256};
 
 use crate::StoreError;
 use crate::queue::parse;
@@ -19,6 +20,7 @@ pub(crate) fn record(
     let parent_key = parent.target.session_key().as_str();
     let run = parent.target.run_id().as_str();
     let owner = parent.binding.identity();
+    let profile = bytes(owner.profile());
     let mut updates = Vec::new();
     for child in page.children {
         let native = child.binding.identity();
@@ -29,20 +31,21 @@ pub(crate) fn record(
             continue;
         }
         let id = native.native_id().as_str();
-        let profile = bytes(native.profile());
+        let session_key = child_session_key(profile, id);
         let cwd = bytes(child.binding.cwd());
         let (phase, questions) = activity_columns(child.activity);
         let source = child.source.as_ref().map(bytes);
         let changed = db.execute(
             "INSERT INTO sessions(session_key,run_id,provider,profile,native_id,cwd,source_path,
                host_activity,host_questions,parent_session_key)
-             VALUES(?1,?2,'codex',?3,?1,?4,?5,?6,?7,?8)
+             VALUES(?1,?2,'codex',?3,?4,?5,?6,?7,?8,?9)
              ON CONFLICT(provider,profile,native_id) DO UPDATE SET
                source_path=coalesce(excluded.source_path,sessions.source_path)
              WHERE sessions.run_id=excluded.run_id AND sessions.parent_session_key=excluded.parent_session_key
                AND sessions.cwd=excluded.cwd
-               AND coalesce(excluded.source_path,sessions.source_path) IS DISTINCT FROM sessions.source_path",
-            params![id, run, profile, cwd, source, phase, questions, parent_key],
+               AND coalesce(excluded.source_path,sessions.source_path) IS DISTINCT FROM sessions.source_path
+             ON CONFLICT(session_key) DO NOTHING",
+            params![session_key, run, profile, id, cwd, source, phase, questions, parent_key],
         )? != 0;
         if !changed {
             continue;
@@ -56,7 +59,7 @@ pub(crate) fn record(
             )
             .optional()?;
         if let Some(key) = bound {
-            metadata::record(db, &key, &child.metadata)?;
+            metadata::record(db, &key, &child.metadata, metadata::MetadataUpdate::Partial)?;
             updates.push(parse(&key)?);
         }
     }
@@ -68,4 +71,13 @@ pub(crate) fn record(
         params![parent_key, next, archived],
     )?;
     Ok(updates)
+}
+
+fn child_session_key(profile: &[u8], native_id: &str) -> String {
+    let mut identity = Sha256::new();
+    identity.update((profile.len() as u64).to_be_bytes());
+    identity.update(profile);
+    identity.update(native_id);
+    let digest = ReportHash::from_sha256(identity.finalize().into());
+    format!("codex-child:{digest}")
 }

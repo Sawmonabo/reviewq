@@ -9,7 +9,6 @@ use serde_json::Value;
 use tokio::sync::broadcast;
 
 use super::Codex;
-use super::session::canonical_cwd;
 
 const MAX_DELTA_BYTES: usize = 8 * 1024;
 const PENDING_DELTAS: usize = 4;
@@ -40,10 +39,7 @@ impl Codex {
         if identity.provider() != HostProvider::Codex || identity.profile() != &self.profile {
             return Ok(None);
         }
-        let thread = self.read_thread(identity.native_id()).await?;
-        if canonical_cwd(thread.cwd.clone()).await? != *source.binding.cwd() {
-            return Err(AppError::Conflict);
-        }
+        let thread = self.bound_history_thread(&source).await?;
         if let Some((path, anchor)) = file {
             if thread.path.as_deref() != Some(path.as_path()) || anchor.generation != generation {
                 return Err(AppError::Conflict);

@@ -103,8 +103,12 @@ fn record(
            AND (host_activity,host_questions) IS DISTINCT FROM (?2,?3)",
         params![target.session_key().as_str(), phase, questions],
     )? != 0;
-    let metadata =
-        crate::hosts::metadata::record(db, target.session_key().as_str(), &observed.metadata)?;
+    let metadata = crate::hosts::metadata::record(
+        db,
+        target.session_key().as_str(),
+        &observed.metadata,
+        crate::hosts::metadata::MetadataUpdate::Full,
+    )?;
     let children = match observed.children {
         Some(page) => crate::hosts::children::record(db, &session, page)?,
         None => Vec::new(),
