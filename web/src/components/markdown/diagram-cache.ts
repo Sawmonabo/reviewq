@@ -12,13 +12,15 @@ export const DiagramCacheContext = createContext<{
   diagram?: Diagram;
 } | null>(null);
 
-export function reusableDiagram(root: SVGSVGElement, id: string) {
+export function reusableDiagram(root: SVGSVGElement, id: string, sourceLength: number) {
+  // Bound retained UTF-16 storage to 128 KiB, in addition to one eligible source.
+  const limit = 64 * 1024;
   if (
+    sourceLength > limit ||
     root.id !== id ||
     [...root.querySelectorAll("[id]")].some((element) => !element.id.startsWith(id))
   )
     return undefined;
   const svg = new XMLSerializer().serializeToString(root);
-  // Bound retained UTF-16 storage to 128 KiB, in addition to one eligible source.
-  return svg.length <= 64 * 1024 ? svg : undefined;
+  return svg.length <= limit ? svg : undefined;
 }

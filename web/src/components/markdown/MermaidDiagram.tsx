@@ -76,8 +76,8 @@ export default function MermaidDiagram({ source }: { readonly source: string }) 
           for (const unsafe of parsed.querySelectorAll("script, foreignObject, image, a"))
             unsafe.remove();
           if (cache && !hit) {
-            const svg = reusableDiagram(root, renderId);
-            if (svg) cache.diagram = { source, theme, id: renderId, svg };
+            const reusable = reusableDiagram(root, renderId, svg.length);
+            if (reusable) cache.diagram = { source, theme, id: renderId, svg: reusable };
           }
           target.replaceChildren(document.importNode(root, true));
           setResult({ source, size: { width, height } });
