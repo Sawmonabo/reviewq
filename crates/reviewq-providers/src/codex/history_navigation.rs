@@ -65,6 +65,7 @@ impl Codex {
                     total: ordinal - 1,
                     complete: next.is_none(),
                     groups: groups_found,
+                    source: None,
                     next: next.map(|position| bookmark(ordinal, position)),
                 })
             }

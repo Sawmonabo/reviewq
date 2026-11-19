@@ -34,6 +34,8 @@ const SCHEMA: &str = concat!(
     "\n",
     include_str!("../schema/recovery.sql"),
     "\n",
+    include_str!("../schema/history_index.sql"),
+    "\n",
     include_str!("../schema/settings.sql"),
     "\n",
     include_str!("../schema/sources.sql"),

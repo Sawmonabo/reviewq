@@ -25,6 +25,17 @@ pub struct HistoryParent {
 }
 
 pub trait HistoryStore: Send + Sync {
+    fn prompt_overview_checkpoint(
+        &self,
+        source: HistorySession,
+    ) -> AppFuture<'_, Option<PromptOverviewCheckpoint>>;
+    fn remember_prompt_overview(
+        &self,
+        source: HistorySession,
+        expected: Option<SourceAnchor>,
+        checkpoint: PromptOverviewCheckpoint,
+    ) -> AppFuture<'_, ()>;
+
     fn verified_history_turns(
         &self,
         actor: Actor,
@@ -161,6 +172,7 @@ pub enum NavigationQuery {
     },
 }
 
+#[derive(Clone)]
 pub struct PromptGroup {
     pub first: u64,
     pub last: u64,
@@ -183,6 +195,7 @@ pub enum NativeNavigation {
         complete: bool,
         groups: Vec<PromptGroup>,
         next: Option<PromptPosition>,
+        source: Option<SourceAnchor>,
     },
     Previews {
         generation: String,
@@ -190,6 +203,27 @@ pub enum NativeNavigation {
         items: Vec<PromptPreview>,
         next: Option<PromptPosition>,
     },
+}
+
+/// A sparse first navigation window, with only source witnesses and prompt ordinals.
+pub struct PromptOverviewCheckpoint {
+    pub anchor: SourceAnchor,
+    pub total: u64,
+    pub groups: Vec<PromptGroup>,
+    pub next: Option<PromptPosition>,
+}
+
+impl PromptOverviewCheckpoint {
+    pub fn navigation(self) -> NativeNavigation {
+        NativeNavigation::Overview {
+            generation: self.anchor.generation.clone(),
+            total: self.total,
+            complete: self.next.is_none(),
+            groups: self.groups,
+            next: self.next,
+            source: Some(self.anchor),
+        }
+    }
 }
 
 pub struct NativePlan {

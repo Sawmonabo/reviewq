@@ -12,7 +12,7 @@ use reviewq_app::history::{HistorySession, NativeHistoryReader, NativeRpcStamp, 
 use reviewq_app::hosts::NativeHost;
 use reviewq_domain::identity::{RunId, SessionKey};
 use serde::Serialize;
-use tokio::sync::{OwnedSemaphorePermit, watch};
+use tokio::sync::{Mutex as AsyncMutex, OwnedMutexGuard, OwnedSemaphorePermit, watch};
 use tokio::task::JoinHandle;
 
 use crate::entry::error::ApiPath as Path;
@@ -24,6 +24,7 @@ type SourceKey = (RunId, SessionKey);
 #[derive(Default)]
 pub(in crate::entry) struct Watchers {
     sources: Mutex<HashMap<SourceKey, Weak<SharedWatch>>>,
+    index_builds: Mutex<HashMap<SourceKey, Weak<AsyncMutex<()>>>>,
 }
 
 struct SharedWatch {
@@ -56,6 +57,28 @@ struct Notice<'a> {
 }
 
 impl Watchers {
+    pub(super) async fn claim_overview(
+        &self,
+        session: &HistorySession,
+    ) -> Result<OwnedMutexGuard<()>, AppError> {
+        let key = (
+            session.target.run_id().clone(),
+            session.target.session_key().clone(),
+        );
+        let guard = {
+            let mut builds = self.index_builds.lock().map_err(|_| AppError::Internal)?;
+            builds.retain(|_, build| build.strong_count() > 0);
+            if let Some(active) = builds.get(&key).and_then(Weak::upgrade) {
+                active
+            } else {
+                let active = Arc::new(AsyncMutex::new(()));
+                builds.insert(key, Arc::downgrade(&active));
+                active
+            }
+        };
+        Ok(guard.lock_owned().await)
+    }
+
     fn open(
         &self,
         source: HistorySession,
