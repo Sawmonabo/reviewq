@@ -85,7 +85,7 @@ impl Inventory {
         };
         for owned in &self.entries {
             if matches!(owned, Owned::Exclusion { .. }) {
-                let dependencies = self
+                let dependencies = unresolved
                     .entries
                     .iter()
                     .filter(|entry| {

@@ -260,6 +260,20 @@ impl WorkspaceStore for SqliteStore {
         })
     }
 
+    fn request_checkout_projection(
+        &self,
+        actor: Actor,
+        settings: Revision,
+        common_dir: AbsolutePath,
+    ) -> AppFuture<'_, Snapshot<bool>> {
+        Box::pin(async move {
+            operator(&actor).map_err(StoreError::app)?;
+            self.write(move |tx| crate::settings::projection::request(tx, settings, common_dir))
+                .await
+                .map_err(StoreError::app)
+        })
+    }
+
     fn authenticate_grant(&self, verifier: [u8; 32]) -> AppFuture<'_, Actor> {
         Box::pin(async move {
             self.read(move |tx| {

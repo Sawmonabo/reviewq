@@ -72,6 +72,10 @@ pub(super) fn inventory(profile: &Path, common: &Path) -> Result<PathBuf, Failur
     Ok(credential_path(profile, common)?.with_extension("json"))
 }
 
+pub(super) fn hook_inventory(profile: &Path, common: &Path) -> Result<PathBuf, Failure> {
+    Ok(credential_path(profile, common)?.with_extension("hooks.json"))
+}
+
 pub(super) fn credential(profile: &Path, common: &Path) -> Result<[u8; 32], Failure> {
     if let Some(key) = existing_credential(profile, common)? {
         return Ok(key);
@@ -173,6 +177,12 @@ impl Edit {
             after: None,
             mode: 0,
         }
+    }
+
+    pub(super) fn executable(path: PathBuf, before: Option<Existing>, bytes: Vec<u8>) -> Self {
+        let mut edit = Self::new(path, before, bytes, true);
+        edit.mode = 0o700;
+        edit
     }
 
     pub(super) fn apply(&self) -> Result<(), Failure> {

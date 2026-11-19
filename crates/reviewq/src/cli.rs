@@ -74,6 +74,12 @@ enum Command {
 
 #[derive(Subcommand)]
 enum Internal {
+    SetupWorktree {
+        #[arg(long)]
+        settings: PathBuf,
+        #[arg(long)]
+        common_dir: PathBuf,
+    },
     ClaudeHook,
     ClaudeBridge {
         #[arg(value_enum)]
@@ -222,6 +228,13 @@ async fn execute(options: CommandLine) -> Result<(), Failure> {
                 let _ = native_client::claude_hook(&profile).await;
             }
             Ok(())
+        }
+        Some(Command::Internal(Internal::SetupWorktree {
+            settings,
+            common_dir,
+        })) => {
+            checkout_setup::worktree(&runtime::profile(options.profile)?, settings, common_dir)
+                .await
         }
         Some(Command::Internal(Internal::ClaudeBridge {
             operation,

@@ -103,6 +103,12 @@ pub trait WorkspaceStore: Send + Sync {
     -> AppFuture<'_, Snapshot<GrantBinding>>;
     fn revoke_grant(&self, actor: Actor, common_dir: AbsolutePath)
     -> AppFuture<'_, Snapshot<bool>>;
+    fn request_checkout_projection(
+        &self,
+        actor: Actor,
+        settings: Revision,
+        common_dir: AbsolutePath,
+    ) -> AppFuture<'_, Snapshot<bool>>;
 
     /// Replaces active memberships and checkout authority under one settings revision.
     /// A revoked or rotated grant cannot be reactivated at its older epoch.

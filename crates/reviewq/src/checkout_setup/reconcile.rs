@@ -21,9 +21,10 @@ pub(crate) async fn run(
     let mut commits = store.subscribe_checkout_projections();
     let url = format!("http://{endpoint}/mcp");
     let mut boot = true;
+    let mut retry = Duration::from_secs(15);
     loop {
         commits.borrow_and_update();
-        if reconcile(
+        let pending = match reconcile(
             store.as_ref(),
             &profile,
             &url,
@@ -31,17 +32,19 @@ pub(crate) async fn run(
             boot,
         )
         .await
-        .is_err()
         {
-            tokio::select! {
-                _ = tokio::time::sleep(Duration::from_secs(1)) => (),
-                result = commits.changed() => if result.is_err() { break; },
-            }
-            continue;
-        }
+            Ok(pending) => pending,
+            Err(_) => true,
+        };
         boot = false;
-        if commits.changed().await.is_err() {
-            break;
+        tokio::select! {
+            result = commits.changed() => {
+                if result.is_err() { break; }
+                retry = Duration::from_secs(15);
+            },
+            _ = tokio::time::sleep(retry), if pending => {
+                retry = (retry * 2).min(Duration::from_secs(300));
+            },
         }
     }
 }
@@ -52,16 +55,18 @@ async fn reconcile(
     url: &str,
     claude_profile: Option<&Path>,
     boot: bool,
-) -> Result<(), Failure> {
+) -> Result<bool, Failure> {
     let mut after = None;
+    let mut pending = false;
     loop {
         let jobs = store.checkout_projections(boot, after).await?;
         let Some(last) = jobs.last() else {
-            return Ok(());
+            return Ok(pending);
         };
         after = Some(last.checkout.common_dir.clone());
         for job in jobs {
             if let Err(error) = one(store, profile, url, claude_profile, &job).await {
+                pending = true;
                 let issue = format!("{}: {error}", job.checkout.root.as_path().display());
                 let issue = issue
                     .chars()

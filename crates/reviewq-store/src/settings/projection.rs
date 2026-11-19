@@ -1,13 +1,13 @@
 use std::os::unix::ffi::OsStrExt;
 
 use reviewq_app::access::{AppError, AppFuture};
-use reviewq_app::events::ResourceKey;
+use reviewq_app::events::{ResourceKey, Snapshot};
 use reviewq_app::settings::ChatSetup;
 use reviewq_app::workspace::{
     CheckoutProjection, ConfiguredProject, IssueGrant, ProjectionOutcome,
     RepositoryChatProjectionStore,
 };
-use reviewq_domain::identity::{GitLabOrigin, ProjectId};
+use reviewq_domain::identity::{GitLabOrigin, ProjectId, Revision};
 use reviewq_domain::session::AbsolutePath;
 use reviewq_domain::settings::CheckoutBinding;
 use rusqlite::{Connection, OptionalExtension, params};
@@ -190,6 +190,28 @@ pub(crate) fn suppress(db: &Connection, common: &AbsolutePath) -> Result<bool, S
          WHERE common_dir=?1 AND desired=1 AND suppressed=0",
         [bytes(common)],
     )? != 0)
+}
+
+pub(crate) fn request(
+    tx: &mut WriteTx<'_>,
+    settings: Revision,
+    common: AbsolutePath,
+) -> Result<Snapshot<bool>, StoreError> {
+    if settings_revision(&tx.sql)? != settings {
+        return Err(AppError::StaleRevision.into());
+    }
+    let scheduled = tx.sql.execute(
+        "UPDATE checkout_projections AS p SET ready=0,issue=NULL
+         WHERE p.common_dir=?1 AND p.desired=1 AND p.suppressed=0 AND EXISTS (
+           SELECT 1 FROM repo_grants g WHERE g.active=1 AND g.verifier IS NOT NULL
+           AND (g.common_dir,g.origin,g.project_id,g.checkout)=(p.common_dir,p.origin,p.project_id,p.checkout))",
+        [bytes(&common)]
+    )? != 0;
+    if scheduled {
+        tx.projection_changed = true;
+        tx.emit(&[ResourceKey::Settings])?;
+    }
+    crate::events::snapshot(&tx.sql, scheduled)
 }
 
 pub(crate) fn applied_address(

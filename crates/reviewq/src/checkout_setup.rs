@@ -13,11 +13,31 @@ use crate::{native_client, runtime};
 
 mod files;
 mod git;
+mod hooks;
 mod projection;
 pub(crate) mod reconcile;
 
 type Failure = Box<dyn std::error::Error + Send + Sync>;
 const GRANT: &str = "/api/v1/checkout/grant";
+
+pub(crate) async fn worktree(
+    profile: &Path,
+    settings: PathBuf,
+    common: PathBuf,
+) -> Result<(), Failure> {
+    if settings != crate::runtime_settings::config_path(profile, false)
+        || git::common_directory(None).await? != common
+    {
+        return Err("The Git checkout does not match the registered ReviewQ setup.".into());
+    }
+    let endpoint = runtime::read_endpoint(profile)?;
+    let client = native_client::client()?;
+    let settings_revision = settings_revision(&client, &endpoint).await?;
+    let body = serde_json::to_vec(&json!({ "action":"projectWorktree", "commonDir":common,
+        "settingsRevision":settings_revision }))?;
+    native_client::signed(&client, &endpoint, "POST", GRANT, &body).await?;
+    Ok(())
+}
 
 pub(crate) async fn install(
     profile: &Path,
@@ -28,15 +48,7 @@ pub(crate) async fn install(
     let checkout = git::discover(directory.as_deref()).await?;
     let endpoint = runtime::read_endpoint(profile)?;
     let client = native_client::client()?;
-    let status = native_client::signed(&client, &endpoint, "GET", "/api/v1/status", b"").await?;
-    native_client::verify_ready(&endpoint, &status)?;
-    let status: Value = serde_json::from_slice(&status)?;
-    let revision = serde_json::from_value::<RevisionDto>(
-        status
-            .pointer("/data/settingsRevision")
-            .cloned()
-            .ok_or("The service did not return a settings revision.")?,
-    )?;
+    let revision = settings_revision(&client, &endpoint).await?;
     let url = format!("http://{}/mcp", endpoint.native());
     let claude = projection::claude_config(claude_home.as_deref())?;
     let lock = files::hold(profile, &checkout.common)?;
@@ -72,7 +84,23 @@ pub(crate) async fn install(
     Ok(())
 }
 
+async fn settings_revision(
+    client: &reqwest::Client,
+    endpoint: &reviewq_transport::ServiceEndpoint,
+) -> Result<RevisionDto, Failure> {
+    let status = native_client::signed(client, endpoint, "GET", "/api/v1/status", b"").await?;
+    native_client::verify_ready(endpoint, &status)?;
+    let status: Value = serde_json::from_slice(&status)?;
+    Ok(serde_json::from_value(
+        status
+            .pointer("/data/settingsRevision")
+            .cloned()
+            .ok_or("The service did not return a settings revision.")?,
+    )?)
+}
+
 struct Prepared {
+    profile: PathBuf,
     checkout: git::Checkout,
     claude: Option<PathBuf>,
     inventory: PathBuf,
@@ -86,7 +114,12 @@ impl Prepared {
     async fn apply(&mut self) -> Result<(), Failure> {
         self.plan
             .apply(&self.inventory, &self.checkout, self.claude.as_deref())
-            .await
+            .await?;
+        if let Err(error) = hooks::reconcile(&self.profile, &self.checkout).await {
+            self.plan.rollback()?;
+            return Err(error);
+        }
+        Ok(())
     }
 
     fn finish(self) -> Result<(), Failure> {
@@ -115,6 +148,7 @@ async fn prepare(
     )
     .await?;
     Ok(Prepared {
+        profile: profile.to_owned(),
         checkout,
         claude,
         inventory,
@@ -189,6 +223,7 @@ pub(crate) async fn revoke(profile: &Path, directory: Option<PathBuf>) -> Result
 }
 
 async fn clean_owned(profile: &Path, common: &Path) -> Result<(), Failure> {
+    hooks::cleanup(profile, common)?;
     let inventory = files::inventory(profile, common)?;
     let previous = projection::Inventory::load(&inventory)?;
     let _client_locks = lock_clients(profile, &previous, None)?;
