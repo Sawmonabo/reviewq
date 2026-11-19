@@ -64,6 +64,7 @@ impl Actor {
 pub enum AppError {
     InvalidRequest,
     ReportCorrectionRequired,
+    TicketUnverified,
     Unauthorized,
     Forbidden,
     NotFound,
@@ -87,6 +88,9 @@ impl Display for AppError {
         let message = match self {
             Self::InvalidRequest => "invalid request",
             Self::ReportCorrectionRequired => REPORT_CORRECTION_MESSAGE,
+            Self::TicketUnverified => {
+                "Could not verify a Jira key in this merge request. Check the Jira connection and issue access."
+            }
             Self::Unauthorized => "authentication required",
             Self::Forbidden => "forbidden",
             Self::NotFound => "resource not found",

@@ -55,8 +55,12 @@ CREATE TABLE reviews (
     head_sha TEXT NOT NULL CHECK (length(head_sha) IN (40, 64)),
     state TEXT NOT NULL CHECK (state IN ('open', 'closed', 'merged')),
     updated_at_ms INTEGER NOT NULL,
+    author_id INTEGER CHECK (author_id > 0),
+    author_username TEXT,
+    draft INTEGER NOT NULL DEFAULT 0 CHECK (draft IN (0,1)),
     observation_cursor INTEGER NOT NULL DEFAULT 0 CHECK (observation_cursor >= 0),
-    UNIQUE (origin, project_id, iid)
+    UNIQUE (origin, project_id, iid),
+    CHECK ((author_id IS NULL) = (author_username IS NULL))
 ) STRICT;
 
 CREATE INDEX reviews_queue_order ON reviews(updated_at_ms DESC, review_id DESC);
@@ -74,6 +78,7 @@ CREATE TABLE retained_review_tickets (
     review_id TEXT NOT NULL REFERENCES reviews(review_id) ON DELETE CASCADE,
     ticket_key TEXT NOT NULL,
     title TEXT NOT NULL,
+    verified_cursor INTEGER NOT NULL CHECK (verified_cursor >= 0),
     PRIMARY KEY (review_id, ticket_key)
 ) STRICT, WITHOUT ROWID;
 

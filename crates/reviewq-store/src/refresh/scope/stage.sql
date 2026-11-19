@@ -1,7 +1,8 @@
 CREATE TEMP TABLE IF NOT EXISTS refresh_mrs (
     origin TEXT NOT NULL, project_id INTEGER NOT NULL, iid INTEGER NOT NULL,
     project_path TEXT NOT NULL, title TEXT NOT NULL, head_sha TEXT NOT NULL,
-    state TEXT NOT NULL, updated_at_ms INTEGER NOT NULL, discovered INTEGER NOT NULL,
+    state TEXT NOT NULL, updated_at_ms INTEGER NOT NULL, author_id INTEGER,
+    author_username TEXT, draft INTEGER NOT NULL, discovered INTEGER NOT NULL,
     PRIMARY KEY (origin, project_id, iid)
 ) STRICT, WITHOUT ROWID;
 

@@ -1,7 +1,7 @@
 use reviewq_app::access::{Actor, AppError, AppFuture};
 use reviewq_app::events::{ResourceKey, Snapshot};
 use reviewq_app::queue::{TicketAuthority, TrackReview, TrackedReviewReceipt, TrackingStore};
-use reviewq_domain::identity::TicketKey;
+use reviewq_domain::identity::{EventCursor, TicketKey};
 use rusqlite::{Connection, params};
 
 use super::{check_observation, save_observations, source_for_review};
@@ -38,9 +38,10 @@ impl TrackingStore for SqliteStore {
                 )? != 0;
                 for ticket in input.tickets {
                     changed |= tx.sql.prepare_cached(
-                        "INSERT INTO retained_review_tickets VALUES (?1,?2,?3)
-                         ON CONFLICT(review_id,ticket_key) DO UPDATE SET title=excluded.title WHERE title<>excluded.title",
-                    )?.execute(params![id.as_str(),ticket.key.as_str(),ticket.title])? != 0;
+                        "INSERT INTO retained_review_tickets VALUES (?1,?2,?3,?4)
+                         ON CONFLICT(review_id,ticket_key) DO UPDATE SET title=excluded.title,verified_cursor=excluded.verified_cursor
+                         WHERE title<>excluded.title AND verified_cursor<=excluded.verified_cursor",
+                    )?.execute(params![id.as_str(),ticket.key.as_str(),ticket.title,input.before.as_sqlite_integer()])? != 0;
                 }
                 if changed {
                     advance_queue(&tx.sql)?;
@@ -78,15 +79,19 @@ impl TrackingStore for SqliteStore {
     }
 }
 
-pub(crate) fn retain_current_tickets(db: &Connection) -> Result<(), StoreError> {
-    db.execute(
-        "INSERT INTO retained_review_tickets(review_id,ticket_key,title)
-         SELECT si.review_id,si.ticket_key,min(i.title) FROM scoped_review_issues si
+pub(crate) fn retain_current_tickets(
+    db: &Connection,
+    observed: Option<EventCursor>,
+) -> Result<bool, StoreError> {
+    let changed = db.execute(
+        "INSERT INTO retained_review_tickets(review_id,ticket_key,title,verified_cursor)
+         SELECT si.review_id,si.ticket_key,min(i.title),coalesce(?1,0) FROM scoped_review_issues si
          JOIN scoped_issues i USING(board_id,ticket_key)
          WHERE EXISTS (SELECT 1 FROM retained_reviews WHERE review_id=si.review_id)
          GROUP BY si.review_id,si.ticket_key
-         ON CONFLICT(review_id,ticket_key) DO UPDATE SET title=excluded.title WHERE title<>excluded.title",
-        [],
+         ON CONFLICT(review_id,ticket_key) DO UPDATE SET title=excluded.title,verified_cursor=excluded.verified_cursor
+         WHERE ?1 IS NOT NULL AND title<>excluded.title AND verified_cursor<excluded.verified_cursor",
+        [observed.map(EventCursor::as_sqlite_integer)],
     )?;
-    Ok(())
+    Ok(changed != 0)
 }

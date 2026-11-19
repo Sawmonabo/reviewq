@@ -22,6 +22,14 @@ pub struct ReviewSource {
     pub head_sha: GitSha,
     pub state: MergeRequestState,
     pub updated_at_ms: i64,
+    pub author: Option<ReviewAuthor>,
+    pub draft: bool,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ReviewAuthor {
+    pub id: u64,
+    pub username: String,
 }
 
 /// Authoritative provider lifecycle of a merge request.

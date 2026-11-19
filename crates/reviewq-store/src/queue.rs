@@ -8,8 +8,8 @@ use reviewq_app::access::{Actor, AppError, AppFuture};
 use reviewq_app::events::{ResourceKey, Snapshot};
 use reviewq_app::queue::{
     CompactTicket, MAX_QUEUE_PAGE, MergeRequestState, PageContext, QueueItem, QueueKey,
-    QueueListItem, QueuePage, QueuePosition, QueueStore, ReviewOverview, ReviewSource, RunDetail,
-    RunPosition, RunSummary, SessionPosition, SessionSummary,
+    QueueListItem, QueuePage, QueuePosition, QueueStore, ReviewAuthor, ReviewOverview,
+    ReviewSource, RunDetail, RunPosition, RunSummary, SessionPosition, SessionSummary,
 };
 use reviewq_domain::identity::{
     EventCursor, GitLabOrigin, MergeRequestIid, MrIdentity, ProjectId, ReviewId, RunId,
@@ -53,12 +53,12 @@ const ITEM_COLUMNS: &str =
                  AND handled.run_id=run.run_id AND handled.attention_receipt_id=v.attention_receipt_id
              )),
      (SELECT json_group_array(json_array(ticket_key,title)) FROM (
-         SELECT ticket_key, coalesce(min(CASE WHEN current THEN title END), min(title)) AS title
+         SELECT ticket_key, coalesce(min(CASE WHEN retained THEN title END), min(title)) AS title
          FROM (
-             SELECT i.ticket_key, i.title, 1 AS current FROM scoped_review_issues si
+             SELECT i.ticket_key, i.title, 0 AS retained FROM scoped_review_issues si
              JOIN scoped_issues i USING(board_id,ticket_key) WHERE si.review_id=r.review_id
-             UNION ALL SELECT ticket_key, title, 0 FROM retained_review_tickets WHERE review_id=r.review_id
-         ) GROUP BY ticket_key ORDER BY ticket_key))";
+             UNION ALL SELECT ticket_key, title, 1 FROM retained_review_tickets WHERE review_id=r.review_id
+         ) GROUP BY ticket_key ORDER BY ticket_key)), r.author_id, r.author_username, r.draft";
 const SCOPE_PREDICATE: &str =
     "(((?1 = 0 OR ?1 = 1)
        AND EXISTS (SELECT 1 FROM configured_projects c WHERE c.origin=r.origin AND c.project_id=r.project_id)
@@ -449,31 +449,20 @@ pub(crate) fn source_for_review(
     db: &Connection,
     review: &ReviewId,
 ) -> Result<ReviewSource, StoreError> {
-    let (project_path, title, sha, updated_at_ms, state) = db.query_row(
-        "SELECT project_path,title,head_sha,updated_at_ms,state FROM reviews WHERE review_id=?1",
-        [review.as_str()],
-        |row| {
-            Ok((
-                row.get(0)?,
-                row.get(1)?,
-                row.get::<_, String>(2)?,
-                row.get(3)?,
-                row.get::<_, String>(4)?,
-            ))
-        },
-    )?;
+    let mut statement = db.prepare_cached(
+        "SELECT origin,project_id,iid,project_path,title,head_sha,state,updated_at_ms,author_id,author_username,draft
+         FROM reviews WHERE review_id=?1")?;
+    let mut rows = statement.query([review.as_str()])?;
+    let row = rows.next()?.ok_or(AppError::NotFound)?;
     Ok(ReviewSource {
-        identity: identity_for_review(db, review)?,
-        project_path,
-        title,
-        head_sha: parse(&sha)?,
-        state: match state.as_str() {
-            "open" => MergeRequestState::Open,
-            "closed" => MergeRequestState::Closed,
-            "merged" => MergeRequestState::Merged,
-            _ => return Err(AppError::Internal.into()),
-        },
-        updated_at_ms,
+        identity: identity(row, 0)?,
+        project_path: row.get(3)?,
+        title: row.get(4)?,
+        head_sha: parse(text(row, 5)?)?,
+        state: parse_state(text(row, 6)?)?,
+        updated_at_ms: row.get(7)?,
+        author: read_author(row, 8)?,
+        draft: row.get(10)?,
     })
 }
 
@@ -507,15 +496,21 @@ pub(crate) fn save_review(
         return Err(AppError::InvalidRequest.into());
     }
     let id = find_review_id(connection, &source.identity)?;
+    let author_id = author_number(source)?;
+    let author_name = source
+        .author
+        .as_ref()
+        .map(|author| author.username.as_str());
     if let Some(review_id) = id {
         let changed = if refresh {
             connection.execute(
                 "UPDATE reviews SET project_path=?2, title=?3, head_sha=?4, state=?5, updated_at_ms=?6,
-                 observation_cursor=(SELECT event_head+1 FROM service_state WHERE singleton=1)
+                 author_id=?7,author_username=?8,draft=?9,observation_cursor=(SELECT event_head+1 FROM service_state WHERE singleton=1)
                  WHERE review_id=?1 AND updated_at_ms<=?6
-                   AND (project_path, title, head_sha, state, updated_at_ms) IS DISTINCT FROM (?2, ?3, ?4, ?5, ?6)",
+                   AND (project_path,title,head_sha,state,updated_at_ms,author_id,author_username,draft)
+                        IS DISTINCT FROM (?2,?3,?4,?5,?6,?7,?8,?9)",
                 params![review_id.as_str(), source.project_path, source.title, source.head_sha.as_str(),
-                        state_label(source.state), source.updated_at_ms],
+                        state_label(source.state), source.updated_at_ms,author_id,author_name,source.draft],
             )? == 1
         } else {
             false
@@ -525,12 +520,12 @@ pub(crate) fn save_review(
     let review_id: ReviewId = parse(&Uuid::new_v4().to_string())?;
     connection.execute(
         "INSERT INTO reviews(review_id, origin, project_id, iid, project_path, title, head_sha, state,
-          updated_at_ms, observation_cursor)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9,
+          updated_at_ms, author_id,author_username,draft,observation_cursor)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9,?10,?11,?12,
            (SELECT event_head+1 FROM service_state WHERE singleton=1))",
         params![review_id.as_str(), source.identity.origin().as_str(), source.identity.project_id().as_sqlite_integer(),
                 source.identity.iid().as_sqlite_integer(), source.project_path, source.title, source.head_sha.as_str(),
-                state_label(source.state), source.updated_at_ms],
+                state_label(source.state), source.updated_at_ms,author_id,author_name,source.draft],
     )?;
     Ok((review_id, true))
 }
@@ -544,7 +539,8 @@ pub(crate) fn check_observation(
         .prepare_cached(
             "SELECT EXISTS(SELECT 1 FROM reviews r WHERE origin=?1 AND project_id=?2 AND iid=?3
           AND observation_cursor>?4
-          AND (project_path,title,head_sha,state,updated_at_ms) IS DISTINCT FROM (?5,?6,?7,?8,?9))",
+          AND (project_path,title,head_sha,state,updated_at_ms,author_id,author_username,draft)
+            IS DISTINCT FROM (?5,?6,?7,?8,?9,?10,?11,?12))",
         )?
         .query_row(
             params![
@@ -557,6 +553,9 @@ pub(crate) fn check_observation(
                 item.head_sha.as_str(),
                 state_label(item.state),
                 item.updated_at_ms,
+                author_number(item)?,
+                item.author.as_ref().map(|author| author.username.as_str()),
+                item.draft,
             ],
             |row| row.get::<_, bool>(0),
         )?;
@@ -584,13 +583,10 @@ fn queue_item(row: &Row<'_>) -> Result<QueueItem, StoreError> {
             project_path: row.get(4)?,
             title: row.get(5)?,
             head_sha: parse(text(row, 6)?)?,
-            state: match text(row, 7)? {
-                "open" => MergeRequestState::Open,
-                "closed" => MergeRequestState::Closed,
-                "merged" => MergeRequestState::Merged,
-                _ => return Err(AppError::Internal.into()),
-            },
+            state: parse_state(text(row, 7)?)?,
             updated_at_ms: row.get(8)?,
+            author: read_author(row, 18)?,
+            draft: row.get(20)?,
         },
         tickets,
         registered_lead_count: u64::try_from(row.get::<_, i64>(9)?)
@@ -600,6 +596,35 @@ fn queue_item(row: &Row<'_>) -> Result<QueueItem, StoreError> {
         pending_native_attention: row.get(15)?,
         pending_report_attention: row.get(16)?,
     })
+}
+
+fn read_author(row: &Row<'_>, offset: usize) -> Result<Option<ReviewAuthor>, StoreError> {
+    let id: Option<i64> = row.get(offset)?;
+    id.map(|id| {
+        Ok(ReviewAuthor {
+            id: u64::try_from(id).map_err(|_| AppError::Internal)?,
+            username: row.get(offset + 1)?,
+        })
+    })
+    .transpose()
+}
+
+pub(crate) fn author_number(review: &ReviewSource) -> Result<Option<i64>, StoreError> {
+    Ok(review
+        .author
+        .as_ref()
+        .map(|author| i64::try_from(author.id))
+        .transpose()
+        .map_err(|_| AppError::InvalidRequest)?)
+}
+
+fn parse_state(value: &str) -> Result<MergeRequestState, StoreError> {
+    match value {
+        "open" => Ok(MergeRequestState::Open),
+        "closed" => Ok(MergeRequestState::Closed),
+        "merged" => Ok(MergeRequestState::Merged),
+        _ => Err(AppError::Internal.into()),
+    }
 }
 
 pub(crate) fn identity(row: &Row<'_>, offset: usize) -> Result<MrIdentity, StoreError> {

@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use reqwest::header;
 use reviewq_app::access::{AppError, AppFuture};
-use reviewq_app::queue::{MergeRequestState, ReviewSource};
+use reviewq_app::queue::{MergeRequestState, ReviewAuthor, ReviewSource};
 use reviewq_app::settings::SourceLease;
 use reviewq_app::sources::{
     MatchedReview, ReviewResolution, ReviewSourceReader, UnverifiedTrack, WorkflowSnapshot,
@@ -124,7 +124,16 @@ struct MergeRequest {
     state: String,
     updated_at: String,
     source_branch: String,
+    author: Option<Author>,
+    #[serde(default)]
+    draft: bool,
     diff_refs: Option<changes::DiffRefs>,
+}
+
+#[derive(Deserialize)]
+struct Author {
+    id: u64,
+    username: String,
 }
 
 impl GitLab {
@@ -299,6 +308,19 @@ impl GitLab {
             ),
             project_path: project_path.into(),
             title: row.title,
+            author: row
+                .author
+                .map(|author| {
+                    if !(1..=i64::MAX as u64).contains(&author.id) {
+                        return Err(AppError::Unavailable);
+                    }
+                    Ok(ReviewAuthor {
+                        id: author.id,
+                        username: crate::settings::safe_label(&author.username, 256)?,
+                    })
+                })
+                .transpose()?,
+            draft: row.draft,
             head_sha: row.sha.parse().map_err(|_| AppError::Unavailable)?,
             state,
             updated_at_ms: updated_at.as_millisecond(),

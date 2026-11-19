@@ -101,9 +101,18 @@ impl SourceRefreshStore for SqliteStore {
         result: Result<SourceObservation, SourceFailure>,
     ) -> AppFuture<'_, ()> {
         Box::pin(async move {
-            self.write(move |tx| finish(tx, attempt, result))
-                .await
-                .map_err(StoreError::app)
+            self.write_prepared(
+                move |db| {
+                    scope::prepare(db, result.as_ref().ok())?;
+                    Ok(result)
+                },
+                move |tx, result| {
+                    finish(tx, attempt, result)?;
+                    scope::clear(&tx.sql)
+                },
+            )
+            .await
+            .map_err(StoreError::app)
         })
     }
 
