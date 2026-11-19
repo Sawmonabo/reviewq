@@ -224,6 +224,7 @@
   --comparison-heading: #b5a9c3;
   --thread-divider: #302a35;
   --thread-heading: #d2c1df;
+  --thread-link: #a9bfe9;
 }
 :root[data-theme="light"] .report-authored {
   --comparison-before: var(--surface);
@@ -234,6 +235,7 @@
   --comparison-heading: var(--muted);
   --thread-divider: var(--line);
   --thread-heading: var(--text);
+  --thread-link: var(--link);
 }
 .report-authored .table-scroll:has(> .report-before-after) {
   margin-block: 0;
@@ -325,6 +327,11 @@
 .report-previous-threads:has(> thead > tr > th:nth-child(3):last-child)
   :is(th, td):nth-child(3):last-child {
   width: 30%;
+}
+.report-previous-threads a {
+  color: var(--thread-link);
+  text-decoration: underline;
+  text-underline-offset: 3px;
 }
 .report-previous-threads [data-report-thread-status="confirmed"] {
   color: var(--green);
