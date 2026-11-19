@@ -97,6 +97,14 @@ impl NativeHost for Codex {
         Box::pin(self.read_around_item(target, id, limit))
     }
 
+    fn observe_interrupt(
+        &self,
+        target: LeadTarget,
+        turn: reviewq_domain::identity::NativeTurnId,
+    ) -> AppFuture<'_, bool> {
+        Box::pin(self.observe_exact_interrupt(target, turn))
+    }
+
     fn interrupt_managed(
         &self,
         target: LeadTarget,

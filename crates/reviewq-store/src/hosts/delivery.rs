@@ -621,10 +621,7 @@ pub(super) fn finish(
     let uncertain_proof = match &observation {
         DeliveryObservation::UncertainInput { delivery_id, input }
             if delivery_id == &claim.delivery_id
-                && matches!(
-                    claim.purpose,
-                    MessagePurpose::Publication | MessagePurpose::ThreadFollowup
-                )
+                && claim.purpose.requires_new_turn()
                 && stored
                     .raced_input
                     .as_ref()
@@ -635,13 +632,18 @@ pub(super) fn finish(
         DeliveryObservation::UncertainInput { .. } => return Err(AppError::Conflict.into()),
         _ => None,
     };
+    if let DeliveryObservation::RecoveryAllowanceChanged(ref allowance) = observation {
+        crate::hosts::recovery::refresh_allowance(&tx.sql, &claim, allowance)?;
+    }
     let outcome = match observation {
-        DeliveryObservation::NotSubmitted
+        DeliveryObservation::NotSubmitted | DeliveryObservation::RecoveryAllowanceChanged(_)
             if ClaimKind::from_work(&claim.work) == ClaimKind::Dispatch =>
         {
             DeliveryOutcome::Queued
         }
-        DeliveryObservation::NotSubmitted => return Err(AppError::Conflict.into()),
+        DeliveryObservation::NotSubmitted | DeliveryObservation::RecoveryAllowanceChanged(_) => {
+            return Err(AppError::Conflict.into());
+        }
         DeliveryObservation::Started { delivery_id, input } => {
             if delivery_id != claim.delivery_id
                 || stored

@@ -1,10 +1,12 @@
 use reviewq_app::access::AppError;
 use reviewq_app::hosts::recovery::{PreparedRecovery, RecoveryAuthorization, RecoveryKind};
-use reviewq_app::hosts::{DeliveryOutcome, MessageBody};
+use reviewq_app::hosts::{
+    DeliveryClaim, DeliveryOutcome, DeliveryWork, MessageBody, MessagePurpose,
+};
 use reviewq_app::workflow::{
     WorkflowAdmission, WorkflowBinding, WorkflowRequirement, WorkflowRequirements,
 };
-use reviewq_domain::identity::{MrIdentity, SubmissionId};
+use reviewq_domain::identity::{MrIdentity, ReportHash, SubmissionId};
 use reviewq_domain::session::LeadTarget;
 use rusqlite::{Connection, params};
 use uuid::Uuid;
@@ -32,7 +34,13 @@ const CURRENT: &str = "
    AND NOT EXISTS(SELECT 1 FROM action_heads h JOIN actions a USING(run_id,action_id)
        WHERE h.run_id=e.run_id AND a.state IN ('working','checking','retry_wait'))
    AND NOT EXISTS(SELECT 1 FROM followup_batches b WHERE b.run_id=e.run_id AND b.authority_verified=1
-       AND (b.state='reserved' OR b.state='executing' AND coalesce(b.continuation_turn_id,b.native_turn_id)<>e.failed_turn_id))";
+       AND (b.state='reserved' OR b.state='executing' AND (
+          coalesce(b.continuation_turn_id,b.native_turn_id)<>e.failed_turn_id OR
+          NOT EXISTS(SELECT 1 FROM followup_monitors monitor WHERE monitor.review_id=b.review_id
+             AND monitor.run_id=b.run_id AND monitor.generation=b.generation AND monitor.state='enabled'
+             AND monitor.binding_verified=1 AND coalesce(monitor.policy_override,
+                (SELECT automatic FROM followup_preferences WHERE singleton=1),0)=1)
+       )))";
 
 pub(super) fn reserve(tx: &mut WriteTx<'_>, input: PreparedRecovery) -> Result<(), StoreError> {
     let PreparedRecovery {
@@ -180,6 +188,34 @@ pub(crate) fn requirements(
     })
 }
 
+pub(crate) fn refresh_allowance(
+    db: &Connection,
+    claim: &DeliveryClaim,
+    hash: &ReportHash,
+) -> Result<(), StoreError> {
+    let DeliveryWork::Dispatch {
+        workflow: Some(guard),
+        ..
+    } = &claim.work
+    else {
+        return Err(AppError::Conflict.into());
+    };
+    let WorkflowBinding::Recovery(auth) = &guard.binding else {
+        return Err(AppError::Conflict.into());
+    };
+    if claim.purpose != MessagePurpose::CodexRecovery {
+        return Err(AppError::Conflict.into());
+    }
+    db.execute(
+        "UPDATE recovery_episodes AS e SET capacity_hash=?3 WHERE episode_id=?1 AND delivery_id=?2
+           AND state='queued' AND capacity_hash=?4 AND revision=?5 AND resumed_turn_id IS NULL
+           AND (kind='model_capacity' OR NOT EXISTS(SELECT 1 FROM recovery_episodes p WHERE p.run_id=e.run_id
+                AND p.lead_session_key=e.lead_session_key AND p.kind=e.kind AND p.capacity_hash=?3 AND p.resumed_turn_id IS NOT NULL))",
+        params![auth.episode,claim.delivery_id.as_str(),hash.as_str(),auth.capacity.as_str(),guard.authority_revision.as_sqlite_integer()],
+    )?;
+    Ok(())
+}
+
 pub(crate) fn advance(
     tx: &mut WriteTx<'_>,
     lead: &LeadTarget,
@@ -203,6 +239,25 @@ pub(crate) fn advance(
          WHERE episode_id=?1 AND submission_id=?2 AND (state IS NOT ?3 OR reason IS NOT ?4 OR resumed_turn_id IS NOT ?5)",
         params![auth.episode,submission.as_str(),state,reason,turn,at],
     )?;
+    if let Some(turn) = turn {
+        let adopted=tx.sql.execute(
+            "UPDATE followup_batches AS b SET continuation_turn_id=?4,holds_slot=1,hold_reason=NULL
+             WHERE review_id=?1 AND run_id=?2 AND lead_session_key=?3 AND state='executing'
+               AND authority_verified=1 AND coalesce(continuation_turn_id,native_turn_id)=?5
+               AND EXISTS(SELECT 1 FROM recovery_episodes e WHERE e.episode_id=?6 AND e.state='started'
+                 AND e.submission_id=?7 AND e.resumed_turn_id=?4)
+               AND EXISTS(SELECT 1 FROM followup_monitors m WHERE m.review_id=b.review_id AND m.run_id=b.run_id
+                 AND m.generation=b.generation AND m.state='enabled' AND m.binding_verified=1
+                 AND coalesce(m.policy_override,(SELECT automatic FROM followup_preferences WHERE singleton=1),0)=1)",
+            params![lead.review_id().as_str(),lead.run_id().as_str(),lead.session_key().as_str(),turn,auth.failed_turn.as_str(),
+                auth.episode,submission.as_str()],
+        )?;
+        if adopted != 0 {
+            tx.emit(&[reviewq_app::events::ResourceKey::Followup(Some(
+                lead.review_id().clone(),
+            ))])?;
+        }
+    }
     if changed != 0 {
         emit(tx, lead)?;
     }

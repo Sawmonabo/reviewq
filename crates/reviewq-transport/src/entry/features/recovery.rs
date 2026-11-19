@@ -94,6 +94,9 @@ async fn interrupt(
     Path((run, session)): Path<(String, String)>,
     ApiBytes(bytes): ApiBytes,
 ) -> Result<Json<dto::InterruptResponse>, ApiError> {
+    if !entry.sends_allowed {
+        return Err(AppError::Unavailable.into());
+    }
     let actor = entry.auth.browser_actor(&headers, true)?;
     let input: dto::InterruptRequest = read(&bytes)?;
     let host = entry.host.as_ref().ok_or(AppError::Unavailable)?;
@@ -112,6 +115,18 @@ async fn interrupt(
             .await
             .unwrap_or(app::InterruptState::Uncertain);
         entry.store.finish_interrupt(claim, observed).await?
+    } else if matches!(
+        claim.state,
+        app::InterruptState::Uncertain | app::InterruptState::Reserved
+    ) && host
+        .observe_interrupt(claim.target.clone(), claim.turn.clone())
+        .await
+        .unwrap_or(false)
+    {
+        entry
+            .store
+            .finish_interrupt(claim, app::InterruptState::Interrupted)
+            .await?
     } else {
         reviewq_app::events::Snapshot {
             value: claim.state,
