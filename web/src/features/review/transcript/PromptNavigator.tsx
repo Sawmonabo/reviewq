@@ -4,7 +4,8 @@ import { historyPrompts } from "../../../api/history";
 import type { SessionAddress } from "../../../api/history";
 import { Loading, Notice } from "../../../components/PanelState";
 import { useResource } from "../../../hooks/useResource";
-import { describeError, formatActivityTime, formatTime } from "../../../lib/presentation";
+import { describeError } from "../../../lib/presentation";
+import { HistoryTimestamp } from "./HistoryTimestamp";
 import "./prompt-navigator.css";
 
 type PreviewPath = { readonly group: string; readonly pages: readonly string[] };
@@ -251,9 +252,7 @@ export function PromptNavigator({
                   <li key={item.entryId}>
                     <button type="button" onClick={() => jump(item)}>
                       {item.timestamp && (
-                        <time dateTime={item.timestamp} title={formatTime(item.timestamp)}>
-                          {formatActivityTime(item.timestamp)}
-                        </time>
+                        <HistoryTimestamp timestamp={item.timestamp} includeDate />
                       )}
                       <span>{item.text}</span>
                     </button>

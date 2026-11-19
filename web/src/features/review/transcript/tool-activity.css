@@ -76,7 +76,9 @@
 }
 .tool-name {
   color: var(--tool-color);
-  font: 550 12px/1.4 var(--mono);
+  font-size: 12px;
+  font-weight: 550;
+  line-height: 1.4;
 }
 .tool-count,
 .tool-failed,

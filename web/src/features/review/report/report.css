@@ -356,14 +356,7 @@
   font-size: 10px;
   line-height: 1.7;
 }
-.report-finding[data-blocking="true"]
-  .report-finding:has(.report-finding-field[data-field="location"])
-  .report-finding-header {
-  margin-bottom: 12px;
-  padding-bottom: 0;
-  border-bottom: 0;
-}
-.report-finding-kicker {
+.report-finding[data-blocking="true"] .report-finding-kicker {
   color: var(--amber);
 }
 .report-finding-kicker > strong {

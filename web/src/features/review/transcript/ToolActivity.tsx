@@ -1,5 +1,5 @@
 import type { HistoryToolState } from "../../../api/generated/contracts/history";
-import { formatClockTime, formatTime } from "../../../lib/presentation";
+import { HistoryTimestamp } from "./HistoryTimestamp";
 import { toolKind } from "./tool-activity";
 import type {
   ReadPack,
@@ -124,11 +124,7 @@ export function ToolHeading({
       <span className="tool-heading-meta">
         {state === "failed" && <span className="tool-failed">Failed</span>}
         {state === "running" && <span className="tool-running">Running</span>}
-        {timestamp && (
-          <time dateTime={timestamp} title={formatTime(timestamp)}>
-            {formatClockTime(timestamp)}
-          </time>
-        )}
+        {timestamp && <HistoryTimestamp timestamp={timestamp} />}
       </span>
     </span>
   );
