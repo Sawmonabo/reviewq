@@ -13,6 +13,7 @@ import { ReportDetails } from "./ReportDetails";
 import { ReportSource } from "./ReportSource";
 import { RichReport } from "./RichReport";
 import type { AcceptedFindingChange } from "./report-structure";
+import { useVisibleContent } from "./useVisibleContent";
 
 type Quote = { readonly text: string; readonly reference: QuoteRef | null };
 type Props = {
@@ -22,6 +23,7 @@ type Props = {
   readonly drafts: DraftStore;
   readonly reviewTitle: string;
   readonly webUrl: string;
+  readonly onRendered: (receiptId: string) => void;
 };
 
 export default function ReportDocument({
@@ -31,6 +33,7 @@ export default function ReportDocument({
   drafts,
   reviewTitle,
   webUrl,
+  onRendered,
 }: Props) {
   const [source, setSource] = useState(false);
   const [sourceOffset, setSourceOffset] = useState(0);
@@ -73,6 +76,11 @@ export default function ReportDocument({
   const formattingFailure = Boolean(typeof markdown === "string" && !tree);
   const sourceMode = source || !admitted || formattingFailure || Boolean(body.error);
   const target = { runId: run.runId, sessionKey: run.leadSessionKey };
+  useVisibleContent(
+    reader,
+    !sourceMode && !changes.pending && tree ? report.receiptId : undefined,
+    onRendered,
+  );
 
   function focusFeedback() {
     const section = feedback.current;
@@ -151,6 +159,7 @@ export default function ReportDocument({
                     : "Original Markdown"
             }
             onQuote={capture}
+            onRendered={onRendered}
           />
         ) : body.pending || changes.pending ? (
           <Loading label="Loading accepted report…" />

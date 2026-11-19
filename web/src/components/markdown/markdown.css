@@ -64,6 +64,8 @@
   background: var(--raised);
 }
 .table-scroll {
+  min-inline-size: 0;
+  max-inline-size: 100%;
   overflow-x: auto;
   margin: 4px 0 12px;
 }

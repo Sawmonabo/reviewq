@@ -3,6 +3,7 @@ import type { ReportSummary } from "../../../api/generated/contracts/reports";
 import { reportSection } from "../../../api/reports";
 import { Loading, Notice } from "../../../components/PanelState";
 import { useResource } from "../../../hooks/useResource";
+import { useVisibleContent } from "./useVisibleContent";
 
 const STEP = 12_000;
 
@@ -12,12 +13,14 @@ export function ReportSource({
   requestedOffset,
   reason,
   onQuote,
+  onRendered,
 }: {
   readonly runId: string;
   readonly report: ReportSummary;
   readonly requestedOffset: number;
   readonly reason: string;
   readonly onQuote: (text: string, offset: number) => void;
+  readonly onRendered: (receiptId: string) => void;
 }) {
   const [seek, setSeek] = useState<{ request: number; offset: number }>();
   const [entry, setEntry] = useState("");
@@ -28,6 +31,7 @@ export function ReportSource({
     reportSection(runId, report.receiptId, report.sha256, offset, signal),
   );
   const value = source.data;
+  useVisibleContent(block, value?.receiptId, onRendered);
 
   function move(next: number) {
     if (!Number.isSafeInteger(next) || next < 0 || next > Math.max(0, report.totalCodePoints - 1)) {

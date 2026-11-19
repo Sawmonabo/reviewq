@@ -1,6 +1,11 @@
+.findings,
+.findings .stack {
+  grid-template-columns: minmax(0, 1fr);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
 .findings {
   gap: 12px;
-  min-width: 0;
 }
 .report-tools {
   display: flex;
@@ -11,31 +16,25 @@
   margin-bottom: 4px;
   min-height: 26px;
 }
-.report-tools > .quiet-button,
-.report-earlier > summary {
+.report-tools > .quiet-button {
   min-height: 0;
   padding: 5px 6px;
-  color: var(--link);
+  color: var(--muted);
   font-size: 10px;
 }
-.report-earlier > summary {
-  list-style: none;
-  cursor: pointer;
-}
-.report-earlier[open] {
-  flex: 1 0 100%;
-  order: 1;
-}
-.report-earlier[open] > section {
-  margin-top: 8px;
-  border-top: 1px solid var(--line);
-  padding-top: 10px;
+.report-tools > .quiet-button:is(:hover, :active) {
+  background: transparent;
+  color: var(--text);
 }
 .report-history-list {
   gap: 0;
   padding: 4px;
   border: 1px solid var(--line);
   border-radius: 5px;
+}
+.report-check-heading {
+  padding: 6px 9px;
+  font-size: 11px;
 }
 .report-version {
   display: flex;
@@ -94,7 +93,7 @@
   font-size: 22px;
   font-weight: 620;
   letter-spacing: -0.45px;
-  line-height: 1.35;
+  line-height: 1.15;
 }
 .rich-report .report-authored h2 {
   margin-top: 3px;
