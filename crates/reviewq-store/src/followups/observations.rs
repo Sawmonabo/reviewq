@@ -590,9 +590,9 @@ pub(super) fn adopt_remote(
     snapshot: &WorkflowSnapshot,
     reviewers: &BTreeSet<u64>,
     time: i64,
-) -> Result<Vec<reviewq_domain::identity::NotificationId>, StoreError> {
-    use reviewq_app::notifications::{Kind, Observation, Source};
-    let mut output = Vec::new();
+) -> Result<bool, StoreError> {
+    use reviewq_app::notifications::Kind;
+    let mut changed = false;
     let mut batch_id = None;
     let mut occurrences: HashMap<(&String, &str, Option<u64>), String> = HashMap::new();
     for row in selected(db, &target.review, target.generation)? {
@@ -687,14 +687,27 @@ pub(super) fn adopt_remote(
             }
             let id = Uuid::new_v4().to_string();
             let provenance = format!("{}:{version}:{}", kind, note.unwrap_or(0));
+            let hash = note
+                .and_then(|id| discussion.notes.iter().find(|note| note.id == id))
+                .map(|note| note.body_hash.as_str());
+            let notification = crate::notifications::gitlab::occurrence_for(
+                db,
+                &target.review,
+                &discussion.id,
+                inbox_kind,
+                note,
+                hash,
+                snapshot.observed_at_ms,
+            )?;
             db.prepare_cached(
                 "INSERT INTO followup_observations(observation_id,review_id,generation,original_note_id,
-                    discussion_id,discussion_version,occurrence_key,kind,actor_id,note_id,observed_at_ms)
-                 VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)",
+                    discussion_id,discussion_version,occurrence_key,kind,actor_id,note_id,observed_at_ms,notification_id)
+                 VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)",
             )?.execute(params![
                 id,target.review.as_str(),target.generation.as_sqlite_integer(),row.original,
                 discussion.id,format!("{version}:{current_hash}"),provenance,kind,
                 actor.map(|id|id.to_string()),note.map(|id|id.to_string()),snapshot.observed_at_ms,
+                notification.as_ref().map(|id|id.as_str()),
             ])?;
             let batch = match &batch_id {
                 Some(id) => id,
@@ -710,44 +723,8 @@ pub(super) fn adopt_remote(
             attach(db, &target.review, batch, &id)?;
             link_original(db, &target.review, target.generation, &id, &row.original)?;
             occurrences.insert(key, id);
-            let mut identity = Sha256::new();
-            for value in [
-                target.review.as_str(),
-                discussion.id.as_str(),
-                kind,
-                current_hash.as_str(),
-            ] {
-                hash_field(&mut identity, value.as_bytes());
-            }
-            identity.update(version.to_be_bytes());
-            identity.update(note.unwrap_or(0).to_be_bytes());
-            let occurrence = ReportHash::from_sha256(identity.finalize().into());
-            let label = match inbox_kind {
-                Kind::Reply => "New reply on a monitored discussion",
-                Kind::EditedReply => "A reply was edited on a monitored discussion",
-                Kind::Resolved => "A monitored discussion was resolved",
-                _ => "A monitored discussion was reopened",
-            };
-            if let Some(id) = crate::notifications::insert_notification(
-                db,
-                Observation {
-                    source: Source::GitLab,
-                    occurrence_id: occurrence.to_string(),
-                    kind: inbox_kind,
-                    review: target.review.clone(),
-                    run: Some(target.run.clone()),
-                    session: None,
-                    event_ref: Some(
-                        note.map_or_else(|| discussion.id.clone(), |id| id.to_string()),
-                    ),
-                    label: label.to_owned(),
-                    occurred_at_ms: snapshot.observed_at_ms,
-                    desktop_episode: None,
-                },
-            )? {
-                output.push(id);
-            }
+            changed = true;
         }
     }
-    Ok(output)
+    Ok(changed)
 }

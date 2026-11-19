@@ -285,7 +285,7 @@ fn monitor(
         return Err(AppError::StaleRevision.into());
     }
     let time = now_ms()?;
-    let mut notifications = Vec::new();
+    let mut new_notifications = Vec::new();
     let mut changed = true;
     let (generation, state, batch_id) = match &input.command {
         MonitorCommand::Configure {
@@ -305,6 +305,9 @@ fn monitor(
                 return Err(AppError::Conflict.into());
             }
             let selected = observations::verified_threads(&observation, selections, &reviewers)?;
+            new_notifications =
+                crate::notifications::gitlab::collect(db, &input.review, &observation, &reviewers)?;
+            let mut observed_followups = false;
             let owner = observation.authenticated_actor.to_string();
             if let Some(old) = &previous
                 && old.verified
@@ -318,7 +321,7 @@ fn monitor(
                     identity: observation.review.identity.clone(),
                     settings,
                 };
-                notifications =
+                observed_followups =
                     observations::adopt_remote(db, &target, &observation, &reviewers, time)?;
             }
             let same = if let Some(old) = &previous {
@@ -332,7 +335,7 @@ fn monitor(
                 false
             };
             if same {
-                changed = !notifications.is_empty();
+                changed = observed_followups;
                 (
                     previous.as_ref().ok_or(AppError::Internal)?.generation,
                     *state,
@@ -479,22 +482,14 @@ fn monitor(
         params![key.as_slice(), MONITOR, input.submission.as_str(), input.review.as_str(),
             generation.as_sqlite_integer(), state.to_string(), batch_id],
     )?;
+    crate::notifications::publish(tx, &new_notifications)?;
     if changed {
-        advance_queue(db)?;
-        let mut keys = vec![
+        advance_queue(&tx.sql)?;
+        let keys = [
             ResourceKey::Followup(Some(input.review.clone())),
             ResourceKey::Review(Some(input.review.clone())),
             ResourceKey::Queue,
         ];
-        if notifications.len() <= 29 {
-            keys.extend(
-                notifications
-                    .into_iter()
-                    .map(|id| ResourceKey::Notification(Some(id))),
-            );
-        } else {
-            keys.push(ResourceKey::Notification(None));
-        }
         tx.emit(&keys)?;
     }
     snapshot(

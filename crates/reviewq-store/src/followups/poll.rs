@@ -1,6 +1,6 @@
 use reviewq_app::access::{AppError, AppFuture};
 use reviewq_app::events::ResourceKey;
-use reviewq_app::followups::{FollowupObservationStore, MonitoredReview};
+use reviewq_app::followups::{FollowupObservationStore, MonitoredReview, TrackedReview};
 use reviewq_app::queue::MergeRequestState;
 use reviewq_app::sources::WorkflowSnapshot;
 use reviewq_domain::identity::ReviewId;
@@ -9,6 +9,7 @@ use rusqlite::{Connection, OptionalExtension, params};
 use super::{observations, revision};
 use crate::connection::WriteTx;
 use crate::events::now_ms;
+use crate::notifications::{gitlab, publish};
 use crate::queue::{identity_for_review, parse, save_observations, text};
 use crate::workspace::{advance_queue, configured, settings_revision};
 use crate::{SqliteStore, StoreError};
@@ -26,11 +27,11 @@ const ASSIGNED_RUN: &str = "coalesce(
     (SELECT min(x.run_id) FROM runs x WHERE x.review_id=r.review_id HAVING count(*)=1))";
 
 impl FollowupObservationStore for SqliteStore {
-    fn monitored_reviews(
+    fn tracked_reviews(
         &self,
         after: Option<ReviewId>,
         limit: u16,
-    ) -> AppFuture<'_, Vec<MonitoredReview>> {
+    ) -> AppFuture<'_, Vec<TrackedReview>> {
         Box::pin(async move {
             if !(1..=32).contains(&limit) {
                 return Err(AppError::InvalidRequest);
@@ -55,9 +56,9 @@ impl FollowupObservationStore for SqliteStore {
         })
     }
 
-    fn record_monitor_observation(
+    fn record_workflow_observation(
         &self,
-        target: MonitoredReview,
+        target: TrackedReview,
         observation: WorkflowSnapshot,
     ) -> AppFuture<'_, ()> {
         Box::pin(async move {
@@ -72,34 +73,44 @@ fn list(
     db: &Connection,
     after: Option<ReviewId>,
     limit: u16,
-) -> Result<Vec<MonitoredReview>, StoreError> {
+) -> Result<Vec<TrackedReview>, StoreError> {
     let settings = settings_revision(db)?;
     let sql = format!(
-        "WITH targets AS (
-             SELECT m.review_id,m.run_id,m.generation
-               FROM followup_monitors m JOIN reviews r USING(review_id)
-               WHERE m.review_id>?1 AND {ACTIVE}
-             UNION ALL
-             SELECT r.review_id,{ASSIGNED_RUN},0
-             FROM reviews r
-             WHERE r.review_id>?1 AND r.state='open'
-               AND (SELECT automatic FROM followup_preferences WHERE singleton=1)=1
-               AND EXISTS(SELECT 1 FROM configured_projects p WHERE p.origin=r.origin AND p.project_id=r.project_id)
-               AND NOT EXISTS(SELECT 1 FROM followup_monitors m WHERE m.review_id=r.review_id)
-              )
-              SELECT review_id,run_id,generation FROM targets
-              WHERE run_id IS NOT NULL ORDER BY review_id LIMIT ?2");
+        "SELECT r.review_id,
+           CASE WHEN {ACTIVE} THEN m.run_id
+                WHEN m.review_id IS NULL AND (SELECT automatic FROM followup_preferences WHERE singleton=1)=1
+                    THEN {ASSIGNED_RUN} END,
+           CASE WHEN {ACTIVE} THEN m.generation ELSE 0 END
+         FROM reviews r LEFT JOIN followup_monitors m USING(review_id)
+         WHERE r.review_id>?1 AND (r.state='open' OR m.state='enabled')
+           AND EXISTS(SELECT 1 FROM configured_projects p WHERE p.origin=r.origin AND p.project_id=r.project_id)
+           AND (m.review_id IS NOT NULL OR EXISTS(SELECT 1 FROM runs x WHERE x.review_id=r.review_id)
+              OR EXISTS(SELECT 1 FROM review_decisions x WHERE x.review_id=r.review_id)
+              OR EXISTS(SELECT 1 FROM notifications x WHERE x.review_id=r.review_id))
+         ORDER BY r.review_id LIMIT ?2"
+    );
     let mut statement = db.prepare_cached(&sql)?;
     let mut rows = statement.query(params![after.as_ref().map_or("", |id| id.as_str()), limit])?;
     let mut items = Vec::new();
     while let Some(row) = rows.next()? {
         let review = parse(text(row, 0)?)?;
-        items.push(MonitoredReview {
-            identity: identity_for_review(db, &review)?,
+        let identity = identity_for_review(db, &review)?;
+        let run = row.get::<_, Option<String>>(1)?;
+        let monitor = match run {
+            Some(run) => Some(MonitoredReview {
+                identity: identity.clone(),
+                review: review.clone(),
+                run: parse(&run)?,
+                generation: revision(row.get(2)?)?,
+                settings,
+            }),
+            None => None,
+        };
+        items.push(TrackedReview {
             review,
-            run: parse(text(row, 1)?)?,
-            generation: revision(row.get(2)?)?,
+            identity,
             settings,
+            monitor,
         });
     }
     Ok(items)
@@ -107,35 +118,43 @@ fn list(
 
 fn record(
     tx: &mut WriteTx<'_>,
-    target: MonitoredReview,
+    tracked: TrackedReview,
     observation: WorkflowSnapshot,
 ) -> Result<(), StoreError> {
     let db = &tx.sql;
-    if target.settings != settings_revision(db)?
-        || !configured(db, &target.identity)?
-        || observation.review.identity != target.identity
+    if tracked.settings != settings_revision(db)?
+        || !configured(db, &tracked.identity)?
+        || observation.review.identity != tracked.identity
+        || identity_for_review(db, &tracked.review)? != tracked.identity
     {
         return Err(AppError::StaleRevision.into());
     }
-    let mut target = target;
-    let review = &target.review;
-    let reviewers = observations::monitored_reviewers(db, observation.authenticated_actor)?;
-    let initial = target.generation.as_sqlite_integer() == 0;
-    if !initial {
-        active(db, &target)?;
-    }
     let local_updated: i64 = db.query_row(
         "SELECT updated_at_ms FROM reviews WHERE review_id=?1",
-        [review.as_str()],
+        [tracked.review.as_str()],
         |row| row.get(0),
     )?;
     if local_updated > observation.review.updated_at_ms {
         return Err(AppError::StaleRevision.into());
     }
+    let reviewers = observations::monitored_reviewers(db, observation.authenticated_actor)?;
+    let events = gitlab::collect(db, &tracked.review, &observation, &reviewers)?;
     save_observations(tx, std::slice::from_ref(&observation.review))?;
+    publish(tx, &events)?;
+    let Some(mut target) = tracked.monitor else {
+        return Ok(());
+    };
+    let review = &target.review;
+    let initial = target.generation.as_sqlite_integer() == 0;
+    if !initial {
+        match active(&tx.sql, &target).map_err(StoreError::app) {
+            Err(AppError::StaleRevision) => return Ok(()),
+            result => result?,
+        }
+    }
     let db = &tx.sql;
     let now = now_ms()?;
-    let mut keys = vec![
+    let keys = [
         ResourceKey::Followup(Some(review.clone())),
         ResourceKey::Review(Some(review.clone())),
         ResourceKey::Queue,
@@ -155,7 +174,7 @@ fn record(
             .optional()?
             .flatten();
         if assigned.as_deref() != Some(target.run.as_str()) {
-            return Err(AppError::StaleRevision.into());
+            return Ok(());
         }
         target.generation = revision(1)?;
         db.execute(
@@ -241,19 +260,8 @@ fn record(
             "UPDATE followup_monitors SET last_complete_observation_ms=?2 WHERE review_id=?1",
             params![review.as_str(), observation.observed_at_ms],
         )?;
-        if evidence.is_empty() && changed == 0 && !selected {
+        if !evidence && changed == 0 && !selected {
             return Ok(());
-        }
-        if !evidence.is_empty() {
-            if evidence.len() <= 29 {
-                keys.extend(
-                    evidence
-                        .into_iter()
-                        .map(|id| ResourceKey::Notification(Some(id))),
-                );
-            } else {
-                keys.push(ResourceKey::Notification(None));
-            }
         }
     }
     advance_queue(&tx.sql)?;
