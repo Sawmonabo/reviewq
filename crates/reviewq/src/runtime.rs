@@ -11,6 +11,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use reviewq_app::access::Actor;
 use reviewq_app::hosts::{ClaudeCompanion, LeadStore, NativeHost, recover_delivery};
+use reviewq_app::notifications::DesktopStore;
 use reviewq_app::reports::reconcile_reports;
 use reviewq_app::sources::{ReviewSourceReader, SourceRefreshStore};
 use reviewq_app::workspace::{WorkspaceConfig, WorkspaceStore};
@@ -26,11 +27,21 @@ use socket2::{Domain, Protocol, Socket, Type};
 use tokio::net::TcpListener;
 use tokio::sync::watch;
 
-use crate::cli::Serve;
+use crate::{cli::Serve, runtime_settings};
+
+mod desktop;
 
 const RUNTIME: &str = "service.json";
 const MAX_DESCRIPTOR: u64 = 8192;
 type Failure = Box<dyn std::error::Error + Send + Sync>;
+
+pub(crate) fn has_descriptor(profile: &Path) -> Result<bool, std::io::Error> {
+    match fs::symlink_metadata(profile.join(RUNTIME)) {
+        Ok(_) => Ok(true),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(error) => Err(error),
+    }
+}
 
 pub(crate) fn profile(override_path: Option<PathBuf>) -> Result<PathBuf, Failure> {
     if let Some(path) = override_path {
@@ -49,6 +60,8 @@ pub(crate) fn profile(override_path: Option<PathBuf>) -> Result<PathBuf, Failure
 }
 
 pub(crate) async fn serve(profile: PathBuf, options: Serve) -> Result<(), Failure> {
+    let settings = runtime_settings::Settings::load(&profile, options.validation)?;
+    let (browser_port, native_port) = settings.ports(options.port, options.native_port)?;
     let web = match options.web.as_ref() {
         Some(path) => path.clone(),
         None if options.validation => {
@@ -64,8 +77,8 @@ pub(crate) async fn serve(profile: PathBuf, options: Serve) -> Result<(), Failur
         return Err("validation requires a separate private runtime".into());
     }
     create_profile(&profile)?;
-    let v4 = TcpListener::bind((Ipv4Addr::LOCALHOST, options.port)).await?;
-    let v6 = match native_listener(options.native_port) {
+    let v4 = TcpListener::bind((Ipv4Addr::LOCALHOST, browser_port)).await?;
+    let v6 = match native_listener(native_port) {
         Ok(listener) => Some(listener),
         Err(error)
             if matches!(
@@ -151,9 +164,13 @@ pub(crate) async fn serve(profile: PathBuf, options: Serve) -> Result<(), Failur
         }
     }
     let source = source.map(|source| Arc::new(source) as Arc<dyn ReviewSourceReader>);
-    let codex_executable = options
-        .codex_bin
-        .or_else(|| default_executable("codex", options.validation));
+    let codex_executable = options.codex_bin.or_else(|| {
+        default_executable(
+            "codex",
+            settings.codex_command.as_deref(),
+            options.validation,
+        )
+    });
     let codex_home = options.codex_home.or_else(|| {
         (!options.validation)
             .then(|| chosen_profile("CODEX_HOME", ".codex"))
@@ -189,9 +206,13 @@ pub(crate) async fn serve(profile: PathBuf, options: Serve) -> Result<(), Failur
         .map(Claude::new)
         .transpose()?
         .map(|claude| Arc::new(claude) as Arc<dyn ClaudeCompanion>);
-    let claude_executable = options
-        .claude_bin
-        .or_else(|| default_executable("claude", options.validation));
+    let claude_executable = options.claude_bin.or_else(|| {
+        default_executable(
+            "claude",
+            settings.claude_command.as_deref(),
+            options.validation,
+        )
+    });
     let terminal_provider = |executable: Option<PathBuf>, profile: Option<PathBuf>| {
         executable
             .zip(profile)
@@ -205,6 +226,8 @@ pub(crate) async fn serve(profile: PathBuf, options: Serve) -> Result<(), Failur
     } else {
         options
             .wsl_distribution
+            .or(settings.wsl_distribution)
+            .filter(|value| !value.is_empty())
             .or_else(|| std::env::var("WSL_DISTRO_NAME").ok())
     };
     let terminal = Arc::new(Terminal::new(
@@ -229,6 +252,12 @@ pub(crate) async fn serve(profile: PathBuf, options: Serve) -> Result<(), Failur
             report_files.clone(),
         )))
     };
+    let desktop = if !options.validation && settings.desktop_notifications {
+        store.recover_desktop_claims().await?;
+        desktop::start(store.clone(), browser)
+    } else {
+        None
+    };
     let (shutdown, wait) = watch::channel(false);
     let router = reviewq_transport::router(
         store.clone(),
@@ -237,6 +266,8 @@ pub(crate) async fn serve(profile: PathBuf, options: Serve) -> Result<(), Failur
         Arc::new(FileHistory::default()),
         reviewq_transport::ServiceRuntime {
             sends_allowed,
+            source_poll_interval: (!options.validation)
+                .then_some(Duration::from_secs(settings.poll_seconds)),
             claude,
             terminal,
             workflow: WorkflowIntegration {
@@ -278,6 +309,10 @@ pub(crate) async fn serve(profile: PathBuf, options: Serve) -> Result<(), Failur
     if let Some(reports) = reports {
         reports.abort();
         let _ = reports.await;
+    }
+    if let Some(desktop) = desktop {
+        desktop.abort();
+        let _ = desktop.await;
     }
     fs::remove_file(profile.join(RUNTIME))?;
     store.close(Duration::from_secs(10)).await?;
@@ -326,9 +361,12 @@ fn chosen_profile(variable: &str, fallback: &str) -> Option<PathBuf> {
         .filter(|path| path.is_absolute())
 }
 
-fn default_executable(name: &str, validation: bool) -> Option<PathBuf> {
+fn default_executable(name: &str, configured: Option<&str>, validation: bool) -> Option<PathBuf> {
     if validation {
         return None;
+    }
+    if let Some(configured) = configured {
+        return runtime_settings::executable(configured);
     }
     let home = std::env::var_os("HOME")
         .map(PathBuf::from)

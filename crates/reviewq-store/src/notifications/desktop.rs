@@ -57,6 +57,19 @@ impl DesktopStore for SqliteStore {
                 .map_err(StoreError::app)
         })
     }
+
+    fn next_desktop_due(&self) -> AppFuture<'_, Option<i64>> {
+        Box::pin(async move {
+            self.read(|db| {
+                Ok(db.query_row(
+                    "SELECT d.due_at_ms FROM desktop_receipts d JOIN notifications n USING(notification_id)
+                     WHERE d.state='failed' AND d.due_at_ms IS NOT NULL AND d.attempts<3 AND n.read_at_ms IS NULL
+                       AND n.dismissed_at_ms IS NULL ORDER BY d.due_at_ms,d.receipt_id LIMIT 1",
+                    [], |row| row.get(0),
+                ).optional()?)
+            }).await.map_err(StoreError::app)
+        })
+    }
 }
 
 fn claim(tx: &mut WriteTx<'_>) -> Result<Option<DesktopClaim>, StoreError> {

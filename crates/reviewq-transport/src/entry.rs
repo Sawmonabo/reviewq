@@ -1,5 +1,6 @@
 use std::path::Path;
 use std::sync::Arc;
+use std::time::Duration;
 
 use axum::extract::{DefaultBodyLimit, OriginalUri, Request, State};
 use axum::http::{HeaderMap, header};
@@ -152,6 +153,7 @@ pub struct ServiceRuntime<'a> {
     pub endpoint: ServiceEndpoint,
     pub web: &'a Path,
     pub sends_allowed: bool,
+    pub source_poll_interval: Option<Duration>,
     pub claude: Option<Arc<dyn ClaudeCompanion>>,
     pub workflow: WorkflowIntegration,
     pub terminal: Arc<dyn NativeTerminal>,
@@ -184,6 +186,11 @@ pub fn router(
         checkpoints: Checkpoints::default(),
     });
     let web = runtime.web;
+    if let Some(interval) = runtime.source_poll_interval
+        && entry.source.is_some()
+    {
+        tokio::spawn(poll_source(entry.clone(), interval));
+    }
     let api = Router::new()
         .route("/status", get(status))
         .route("/checkout/grant", post(checkout::grant))
@@ -241,6 +248,21 @@ pub fn router(
         )
         .layer(middleware::from_fn_with_state(entry.clone(), guard))
         .with_state(entry)
+}
+
+async fn poll_source(entry: Arc<Entry>, interval: Duration) {
+    let mut shutdown = entry.shutdown.clone();
+    while !*shutdown.borrow_and_update() {
+        tokio::select! {
+            result = shutdown.changed() => if result.is_err() { break; },
+            () = tokio::time::sleep(interval) => {
+                tokio::select! {
+                    _ = shutdown.changed() => break,
+                    _ = entry.refresh() => {},
+                }
+            }
+        }
+    }
 }
 
 async fn guard(State(entry): State<Arc<Entry>>, request: Request, next: Next) -> Response {
