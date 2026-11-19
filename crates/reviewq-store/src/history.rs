@@ -1,7 +1,9 @@
+use std::collections::BTreeMap;
+
 use reviewq_app::access::{Actor, ActorScope, AppError, AppFuture};
 use reviewq_app::events::Snapshot;
 use reviewq_app::history::{HistoryParent, HistorySession, HistoryStore};
-use reviewq_domain::identity::{RunId, SessionKey};
+use reviewq_domain::identity::{NativeInputId, NativeTurnId, RunId, SessionKey};
 use reviewq_domain::session::{NativeBinding, NativeIdentity, SessionTarget};
 use rusqlite::{Connection, params};
 
@@ -11,6 +13,42 @@ use crate::workspace::{allow_review, scope};
 use crate::{SqliteStore, StoreError};
 
 impl HistoryStore for SqliteStore {
+    fn verified_history_turns(
+        &self,
+        actor: Actor,
+        source: HistorySession,
+        entries: Vec<NativeInputId>,
+    ) -> AppFuture<'_, BTreeMap<NativeInputId, NativeTurnId>> {
+        Box::pin(async move {
+            if entries.len() > 100 {
+                return Err(AppError::InvalidRequest);
+            }
+            self.read(move |db| {
+                let run=source.target.run_id().clone();
+                let session=source.target.session_key().clone();
+                if history_session(db,&actor,run.clone(),session.clone())?!=source {
+                    return Err(AppError::CursorExpired.into());
+                }
+                let ids=serde_json::to_string(&entries.iter().map(|value|value.as_str()).collect::<Vec<_>>())
+                    .map_err(|_|AppError::Internal)?;
+                let mut result=BTreeMap::new();
+                let mut select=db.prepare_cached(
+                    "SELECT m.native_input_id,m.native_turn_id FROM json_each(?3) j JOIN messages m ON m.native_input_id=j.value
+                     WHERE m.run_id=?1 AND m.session_key=?2 AND m.state='started' AND m.actor_key IS NOT NULL",
+                )?;
+                let mut rows=select.query(params![run.as_str(),session.as_str(),ids])?;
+                while let Some(row)=rows.next()? {
+                    let entry=parse(text(row,0)?)?;
+                    let turn=parse(text(row,1)?)?;
+                    if result.insert(entry,turn).is_some() {
+                        return Err(AppError::Conflict.into());
+                    }
+                }
+                Ok(result)
+            }).await.map_err(StoreError::app)
+        })
+    }
+
     fn history_session(
         &self,
         actor: Actor,

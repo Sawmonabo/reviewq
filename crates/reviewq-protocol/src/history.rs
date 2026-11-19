@@ -14,6 +14,9 @@ use crate::scalar::{
 
 /// Encoded JSON budget for one history page.
 pub const MAX_HISTORY_PAGE_BYTES: usize = 256 * 1024;
+mod navigation;
+pub use navigation::*;
+
 const MAX_HISTORY_TEXT_BYTES: usize = 64 * 1024;
 
 #[derive(Debug, Serialize)]

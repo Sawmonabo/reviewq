@@ -14,11 +14,11 @@ use super::locator::Source;
 use super::records;
 
 const BLOCK: usize = 32 * 1024;
-const MAX_RECORDS: usize = 100_000;
-const READ_BUDGET: u64 = 512 * 1024 * 1024;
+pub(super) const MAX_RECORDS: usize = 100_000;
+pub(super) const READ_BUDGET: u64 = 512 * 1024 * 1024;
 
 pub(super) fn page(
-    source: Source,
+    source: &Source,
     position: NativePosition,
     limit: u16,
     cancelled: &AtomicBool,
@@ -30,7 +30,7 @@ pub(super) fn page(
     let length = file.metadata().map_err(io_error)?.len();
     let mut budget = READ_BUDGET;
     let complete = end_of_line(file, length, &mut budget, cancelled)?;
-    let generation = generation(&source)?;
+    let generation = generation(source)?;
     let had_position = position.file.is_some();
     let initial = match position.file {
         Some(witness) => {
@@ -215,7 +215,7 @@ pub(super) fn content(
     })
 }
 
-fn readable_prefix(raw: &[u8]) -> Result<&str, AppError> {
+pub(super) fn readable_prefix(raw: &[u8]) -> Result<&str, AppError> {
     match std::str::from_utf8(raw) {
         Ok(text) => Ok(text),
         Err(error) if error.error_len().is_none() => {

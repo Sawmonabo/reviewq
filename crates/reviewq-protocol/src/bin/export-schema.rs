@@ -6,7 +6,9 @@ use std::io::{self, Write};
 
 use reviewq_protocol::changes::{PatchDiscussionsResponse, PatchFileIndexResponse};
 use reviewq_protocol::events::{InvalidateEvent, ResetEvent};
-use reviewq_protocol::history::{HistoryContentResponse, HistoryPageResponse};
+use reviewq_protocol::history::{
+    HistoryContentResponse, HistoryNavigationResponse, HistoryPageResponse, HistoryPlanResponse,
+};
 use reviewq_protocol::queue::{QueuePageResponse, ReviewOverviewResponse, ReviewSelectionResponse};
 use reviewq_protocol::{
     DeliveryReceiptResponse, EventCursorDto, Failure, RunDetailResponse, SendMessageRequest,
@@ -42,6 +44,8 @@ fn main() -> Result<(), Box<dyn Error>> {
     registry.response::<PatchFileIndexResponse>("PatchFileIndexResponse")?;
     registry.response::<PatchDiscussionsResponse>("PatchDiscussionsResponse")?;
     registry.response::<HistoryPageResponse>("HistoryPageResponse")?;
+    registry.response::<HistoryNavigationResponse>("HistoryNavigationResponse")?;
+    registry.response::<HistoryPlanResponse>("HistoryPlanResponse")?;
     registry.response::<HistoryContentResponse>("HistoryContentResponse")?;
     registry.response::<DeliveryReceiptResponse>("DeliveryReceiptResponse")?;
     registry.response::<Failure>("Failure")?;

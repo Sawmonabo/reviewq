@@ -8,7 +8,7 @@ use reviewq_app::history::{
     FilePosition, HistorySession, NativeHistoryPage, NativePosition, ToolState, TurnWindow,
     VisibleEntry, VisibleKind, VisiblePart, VisiblePartKind,
 };
-use reviewq_domain::identity::{EventCursor, RunId, SessionKey};
+use reviewq_domain::identity::{EventCursor, NativeInputId, RunId, SessionKey};
 use reviewq_protocol::history::{
     HistoryAvailability, HistoryEntry, HistoryPage, HistoryPageEncodeError, HistoryPageResponse,
     HistoryPart, HistoryText, HistoryToolState, HistoryWindow,
@@ -27,13 +27,35 @@ const DEFAULT_PAGE_LIMIT: u16 = 30;
 const DEFAULT_PAGE_BYTES: usize = 64 * 1024;
 
 mod content;
+mod explore;
 pub(super) use content::{ContentQuery, content, read_content};
+mod live;
+pub(super) use live::Watchers;
+
+pub(super) fn routes() -> axum::Router<Arc<Entry>> {
+    use axum::routing::get;
+    axum::Router::new()
+        .route(
+            "/runs/{run_id}/sessions/{session_key}/history/navigation",
+            get(explore::navigation),
+        )
+        .route(
+            "/runs/{run_id}/sessions/{session_key}/history/plan",
+            get(explore::plan),
+        )
+        .route(
+            "/runs/{run_id}/sessions/{session_key}/history/stream",
+            get(live::live),
+        )
+}
 
 #[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(super) struct HistoryQuery {
     pub(super) limit: Option<u16>,
     pub(super) cursor: Option<String>,
+    pub(super) around_id: Option<String>,
+    pub(super) locator: Option<String>,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -120,6 +142,15 @@ pub(super) async fn read(
     if !(1..=100).contains(&limit) {
         return Err(AppError::InvalidRequest);
     }
+    let around: Option<NativeInputId> = query
+        .around_id
+        .as_deref()
+        .map(super::pages::parse)
+        .transpose()?;
+    if (around.is_some() && query.cursor.is_some()) || (query.locator.is_some() && around.is_none())
+    {
+        return Err(AppError::InvalidRequest);
+    }
     let endpoint = &entry.auth.endpoint;
     let cursor = query
         .cursor
@@ -143,9 +174,43 @@ pub(super) async fn read(
         .map(Cursor::native_position)
         .transpose()?
         .unwrap_or_default();
+    if let Some(around) = around {
+        let anchor = query
+            .locator
+            .as_deref()
+            .map(|token| explore::open_anchor(endpoint, &run, &session, &around, token))
+            .transpose()?;
+        let history = entry
+            .file_history
+            .around(lead.value.clone(), around.clone(), anchor.clone(), limit)
+            .await;
+        let (result, reset) = match history {
+            Ok(history) => (history, false),
+            Err(AppError::CursorExpired) if anchor.is_some() => (
+                entry
+                    .file_history
+                    .around(lead.value.clone(), around.clone(), None, limit)
+                    .await?,
+                true,
+            ),
+            Err(error) => return Err(error),
+        };
+        let mut result = result.ok_or(AppError::Unavailable)?;
+        bind_observed_turns(entry, actor, lead.value, &mut result).await?;
+        return encode(
+            endpoint,
+            &run,
+            &session,
+            lead.cursor,
+            (limit, byte_limit),
+            result,
+            reset,
+            Some(&around),
+        );
+    }
     let mut reset = false;
     let history = native_page(entry, lead.value.clone(), position, limit).await;
-    let history = match history {
+    let mut history = match history {
         Ok(page)
             if cursor
                 .as_ref()
@@ -155,15 +220,12 @@ pub(super) async fn read(
         }
         Ok(_) | Err(AppError::CursorExpired) if cursor.is_some() => {
             reset = true;
-            native_page(entry, lead.value, NativePosition::default(), limit).await?
+            native_page(entry, lead.value.clone(), NativePosition::default(), limit).await?
         }
         Err(error) => return Err(error),
         Ok(page) => page,
     };
-    entry
-        .store
-        .history_session(actor, run.clone(), session.clone())
-        .await?;
+    bind_observed_turns(entry, actor, lead.value, &mut history).await?;
     encode(
         endpoint,
         &run,
@@ -172,7 +234,46 @@ pub(super) async fn read(
         (limit, byte_limit),
         history,
         reset,
+        None,
     )
+}
+
+async fn bind_observed_turns(
+    entry: &Entry,
+    actor: Actor,
+    source: HistorySession,
+    page: &mut NativeHistoryPage,
+) -> Result<(), AppError> {
+    let inputs = page
+        .entries
+        .iter()
+        .filter(|item| item.kind == VisibleKind::User && item.turn.is_none())
+        .map(|item| item.id.clone())
+        .collect::<Vec<_>>();
+    if inputs.is_empty() {
+        let current = entry
+            .store
+            .history_session(
+                actor,
+                source.target.run_id().clone(),
+                source.target.session_key().clone(),
+            )
+            .await?;
+        if current.value != source {
+            return Err(AppError::CursorExpired);
+        }
+        return Ok(());
+    }
+    let known = entry
+        .store
+        .verified_history_turns(actor, source, inputs)
+        .await?;
+    for item in &mut page.entries {
+        if item.kind == VisibleKind::User && item.turn.is_none() {
+            item.turn = known.get(&item.id).cloned();
+        }
+    }
+    Ok(())
 }
 
 async fn native_page(
@@ -200,6 +301,7 @@ fn encode(
     budget: (u16, usize),
     history: NativeHistoryPage,
     reset: bool,
+    around: Option<&NativeInputId>,
 ) -> Result<Vec<u8>, AppError> {
     let cursor = |position: Option<NativePosition>| {
         position
@@ -210,7 +312,9 @@ fn encode(
             })
             .transpose()
     };
-    let mut trim = 0;
+    let mut first = 0;
+    let mut last = history.entries.len();
+    let pinned = around.and_then(|id| history.entries.iter().position(|entry| &entry.id == id));
     loop {
         let data = HistoryPage {
             run_id: RunIdDto::new(run.as_str()).ok_or(AppError::Internal)?,
@@ -224,11 +328,24 @@ fn encode(
                 history
                     .entries
                     .iter()
-                    .skip(trim)
+                    .skip(first)
+                    .take(last - first)
                     .map(|entry| encode_entry(endpoint, run, session, entry))
                     .collect::<Result<Vec<_>, _>>()?,
-                cursor(history.older_after_trim(trim))?,
-                cursor(history.newer.clone())?,
+                cursor(history.older_after_trim(first))?,
+                cursor(if last == history.entries.len() {
+                    history.newer.clone()
+                } else {
+                    history
+                        .entries
+                        .get(last)
+                        .and_then(|entry| entry.content.as_ref())
+                        .map(|content| NativePosition {
+                            file: Some(content.position.clone()),
+                            ascending: true,
+                            ..NativePosition::default()
+                        })
+                })?,
             )
             .ok_or(AppError::Internal)?,
         };
@@ -239,8 +356,17 @@ fn encode(
         .encode_bounded(budget.1);
         match result {
             Ok(bytes) => return Ok(bytes),
-            Err(HistoryPageEncodeError::TooLarge) if history.entries.len() - trim > 1 => {
-                trim += (history.entries.len() - trim) / 2;
+            Err(HistoryPageEncodeError::TooLarge) if last - first > 1 => {
+                let remove = (last - first).div_ceil(4);
+                if let Some(anchor) = pinned
+                    && last - anchor - 1 > anchor - first
+                {
+                    last -= remove.min(last - anchor - 1);
+                } else if let Some(anchor) = pinned {
+                    first += remove.min(anchor - first);
+                } else {
+                    first += remove.min(last - first - 1);
+                }
             }
             Err(HistoryPageEncodeError::TooLarge) => return Err(AppError::PayloadTooLarge),
             Err(HistoryPageEncodeError::Serialization(_)) => return Err(AppError::Internal),

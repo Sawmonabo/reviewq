@@ -1,5 +1,7 @@
 //! Visible native history for one verified lead.
 
+use std::collections::BTreeMap;
+
 use reviewq_domain::identity::{NativeInputId, NativeSessionId, NativeTurnId, RunId, SessionKey};
 use reviewq_domain::session::{AbsolutePath, NativeBinding, SessionTarget};
 
@@ -23,6 +25,13 @@ pub struct HistoryParent {
 }
 
 pub trait HistoryStore: Send + Sync {
+    fn verified_history_turns(
+        &self,
+        actor: Actor,
+        source: HistorySession,
+        entries: Vec<NativeInputId>,
+    ) -> AppFuture<'_, BTreeMap<NativeInputId, NativeTurnId>>;
+
     fn history_session(
         &self,
         actor: Actor,
@@ -38,6 +47,28 @@ pub trait NativeHistoryReader: Send + Sync {
         position: NativePosition,
         limit: u16,
     ) -> AppFuture<'_, Option<NativeHistoryPage>>;
+
+    fn around(
+        &self,
+        session: HistorySession,
+        id: NativeInputId,
+        anchor: Option<SourceAnchor>,
+        limit: u16,
+    ) -> AppFuture<'_, Option<NativeHistoryPage>>;
+
+    fn navigation(
+        &self,
+        session: HistorySession,
+        query: NavigationQuery,
+    ) -> AppFuture<'_, Option<NativeNavigation>>;
+
+    fn plan(&self, session: HistorySession) -> AppFuture<'_, Option<NativePlan>>;
+
+    fn head(
+        &self,
+        session: HistorySession,
+        previous: Option<SourceAnchor>,
+    ) -> AppFuture<'_, Option<NativeHead>>;
 
     fn content(
         &self,
@@ -63,6 +94,71 @@ pub struct FilePosition {
     pub offset: u64,
     pub high_water: u64,
     pub witness: [u8; 32],
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SourceAnchor {
+    pub generation: String,
+    pub file: FilePosition,
+}
+
+#[derive(Clone, Debug)]
+pub struct NativeHead {
+    pub anchor: SourceAnchor,
+    pub reset: bool,
+}
+
+#[derive(Clone, Debug)]
+pub struct PromptPosition {
+    pub next_ordinal: u64,
+    pub file: FilePosition,
+}
+
+pub enum NavigationQuery {
+    Overview {
+        groups: u16,
+    },
+    Previews {
+        start: PromptPosition,
+        first: u64,
+        limit: u16,
+        generation: String,
+    },
+}
+
+pub struct PromptGroup {
+    pub first: u64,
+    pub last: u64,
+    pub start: PromptPosition,
+}
+
+pub struct PromptPreview {
+    pub ordinal: u64,
+    pub entry: NativeInputId,
+    pub at_ms: Option<i64>,
+    pub text: String,
+    pub anchor: FilePosition,
+    pub after: PromptPosition,
+}
+
+pub enum NativeNavigation {
+    Overview {
+        generation: String,
+        total: u64,
+        complete: bool,
+        groups: Vec<PromptGroup>,
+    },
+    Previews {
+        generation: String,
+        complete: bool,
+        items: Vec<PromptPreview>,
+        next: Option<PromptPosition>,
+    },
+}
+
+pub struct NativePlan {
+    pub generation: String,
+    pub entry: Option<(NativeInputId, VisiblePart)>,
 }
 
 #[derive(Clone, Debug)]

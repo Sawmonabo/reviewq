@@ -129,6 +129,7 @@ pub(super) struct Entry {
     host: Option<Arc<dyn NativeHost>>,
     claude: Option<Arc<dyn ClaudeCompanion>>,
     file_history: Arc<dyn NativeHistoryReader>,
+    history_watches: history::Watchers,
     workflow: WorkflowIntegration,
     terminal: Arc<dyn NativeTerminal>,
     sends_allowed: bool,
@@ -206,6 +207,7 @@ pub fn router(
         host,
         claude: runtime.claude,
         file_history,
+        history_watches: history::Watchers::default(),
         workflow: runtime.workflow,
         terminal: runtime.terminal,
         sends_allowed: runtime.sends_allowed,
@@ -270,6 +272,7 @@ pub fn router(
             post(hosts::claude_registration),
         )
         .merge(features::routes())
+        .merge(history::routes())
         .route(
             "/runs/{run_id}/sessions/{session_key}/history/page",
             get(history::page),
