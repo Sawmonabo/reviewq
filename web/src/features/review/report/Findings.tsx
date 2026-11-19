@@ -6,7 +6,7 @@ import { markReportViewed, reportDownload, reportHistory, reportView } from "../
 import { Empty, Loading, Notice } from "../../../components/PanelState";
 import { useResource } from "../../../hooks/useResource";
 import type { DraftStore } from "../../../lib/drafts";
-import { describeError, formatTime, readable } from "../../../lib/presentation";
+import { describeError, formatActivityTime, formatTime, readable } from "../../../lib/presentation";
 import { savedValue, saveValue } from "../../../lib/view-preferences";
 import { FollowupResults } from "./FollowupResults";
 import "./report.css";
@@ -17,21 +17,12 @@ type Props = {
   readonly run: RunDetail;
   readonly drafts: DraftStore;
   readonly reviewTitle: string;
-  readonly identity: string;
   readonly webUrl: string;
   readonly followup: ResultSummary | null | undefined;
   readonly onRun: (run: string) => void;
 };
 
-export default function Findings({
-  run,
-  drafts,
-  reviewTitle,
-  identity,
-  webUrl,
-  followup,
-  onRun,
-}: Props) {
+export default function Findings({ run, drafts, reviewTitle, webUrl, followup, onRun }: Props) {
   const bookmark = `report.receipt.${run.runId}`;
   const [receipt, setReceipt] = useState<string | undefined>(() => {
     const value = savedValue(bookmark);
@@ -165,7 +156,7 @@ export default function Findings({
         </button>
       </div>
       {history && (
-        <section className="surface-card stack" aria-label="Report versions">
+        <section className="report-history-list stack" aria-label="Report versions">
           {versions.pending && <Loading label="Reading accepted report versions…" />}
           {versions.error && <Notice retry={versions.retry}>{versions.error}</Notice>}
           {!versions.data?.items.length && !versions.pending && (
@@ -174,15 +165,17 @@ export default function Findings({
           {versions.data?.items.map((version) => (
             <button
               type="button"
-              className="report-version"
+              className="report-version quiet-button"
               key={version.receiptId}
               aria-pressed={chosen === version.receiptId}
               onClick={() => choose(version.receiptId)}
             >
-              <span>
-                {formatTime(version.capturedAt)} · {readable(version.verdict)}
+              <time dateTime={version.capturedAt} title={formatTime(version.capturedAt)}>
+                {formatActivityTime(version.capturedAt)}
+              </time>
+              <span className="meta" title={version.sha256}>
+                {version.receiptId === latestId ? "Latest" : readable(version.verdict)}
               </span>
-              <code>{version.sha256.slice(0, 12)}</code>
             </button>
           ))}
           <div className="actions">
@@ -218,7 +211,6 @@ export default function Findings({
               current={chosen === latestId}
               drafts={drafts}
               reviewTitle={reviewTitle}
-              identity={identity}
               webUrl={webUrl}
             />
           </Suspense>

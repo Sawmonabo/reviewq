@@ -33,6 +33,7 @@ type Props = {
   readonly target: SessionAddress;
   readonly draftKey: string;
   readonly label: string;
+  readonly placeholder?: string;
   readonly targetLabel: string;
   readonly targetTitle?: string;
   readonly draftLabel?: string;
@@ -46,6 +47,7 @@ export function Composer({
   target,
   draftKey,
   label,
+  placeholder = label,
   targetLabel,
   targetTitle,
   draftLabel = label,
@@ -84,6 +86,7 @@ export function Composer({
   function finish(attempt: Attempt, receipt: DeliveryReceipt) {
     remember({ submissionId: attempt.submissionId, receipt });
     const accepted = receipt.state !== "rejected";
+    if (accepted) setFailure(undefined);
     if (accepted && !attempt.receipt) {
       store.finish(draftKey, true);
       attempt.accepted?.();
@@ -92,6 +95,7 @@ export function Composer({
 
   async function reconcile(attempt: Attempt, retry: boolean) {
     if (busy) return;
+    setFailure(undefined);
     setBusy(true);
     try {
       const result = await readReceipt(target, attempt.submissionId, AbortSignal.timeout(10_000));
@@ -119,6 +123,7 @@ export function Composer({
     if (!available || managed.has(draftKey)) return;
     const captured = store.freeze(draftKey);
     if (!captured) return;
+    setFailure(undefined);
     const submissionId = crypto.randomUUID();
     const dispatch = () =>
       send?.(captured.text, submissionId) ??
@@ -155,7 +160,7 @@ export function Composer({
   }
 
   const [failure, setFailure] = useState<string>();
-  const sendLabel = send ? "Send feedback" : "Send to review agent";
+  const sendLabel = "Send to review agent";
   function edit(value: string) {
     setFailure(undefined);
     const accepted = store.set(draftKey, draftLabel, value);
@@ -199,14 +204,14 @@ export function Composer({
             Draft storage full. Shorten an existing draft or free space before inserting more text.
           </Notice>
         )}
-        <label className="sr-only" htmlFor={input}>
+        <label className={send ? "feedback-label" : "sr-only"} htmlFor={input}>
           {label}
         </label>
         <textarea
           id={input}
           value={composition ?? text}
-          rows={2}
-          placeholder={label}
+          rows={send ? 3 : 2}
+          placeholder={placeholder}
           onCompositionStart={(event) => setComposition(event.currentTarget.value)}
           onCompositionEnd={(event) => {
             setComposition(undefined);
@@ -232,13 +237,13 @@ export function Composer({
           </span>
           <button
             type="submit"
-            className="composer-send"
+            className={send ? "primary feedback-send" : "composer-send"}
             aria-label={sendLabel}
             title={busy ? "Submitting…" : sendLabel}
             aria-busy={busy}
             disabled={!available}
           >
-            <Icon name="send" size={16} />
+            {send ? busy ? "Submitting…" : sendLabel : <Icon name="send" size={16} />}
           </button>
         </div>
       </form>

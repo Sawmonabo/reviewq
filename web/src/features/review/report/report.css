@@ -1,75 +1,6 @@
 .findings {
-  gap: 14px;
-  min-width: 0;
-}
-.report-heading h3 {
-  font-size: 18px;
-}
-.report-heading code {
-  overflow-wrap: anywhere;
-}
-.report-version {
-  width: 100%;
-  display: flex;
-  gap: 8px;
-  justify-content: space-between;
-  text-align: left;
-}
-.report-version[aria-pressed="true"] {
-  border-color: var(--focus);
-  background: var(--selected);
-}
-.report-source {
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-  line-height: 1.6;
-  padding: 9px;
-  background: var(--canvas);
-  border: 1px solid var(--line);
-  border-radius: 5px;
-}
-.report-context button[aria-pressed="true"] {
-  border-color: var(--focus);
-  background: var(--selected);
-}
-.report-blocks > div {
-  min-width: 0;
-  padding-bottom: 11px;
-}
-.finding-card .badge {
-  white-space: normal;
-}
-.disposition-form {
-  border-top: 1px solid var(--line);
-  padding-top: 10px;
-}
-.report-feedback {
-  padding: 0;
-}
-.report-feedback h3 {
-  padding: 9px 13px;
-}
-.report-feedback .composer {
-  border-radius: 0 0 6px 6px;
-}
-.report-quote {
-  margin: 0 13px 10px;
-  padding: 7px 9px;
-  border-left: 2px solid var(--focus);
-  background: var(--raised);
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-}
-.report-quote cite {
-  color: var(--muted);
-  font-size: 12px;
-  display: block;
-}
-.source-nav {
-  gap: 6px;
-}
-.findings {
   gap: 12px;
+  min-width: 0;
 }
 .report-tools {
   display: flex;
@@ -84,8 +15,8 @@
 .report-earlier > summary {
   min-height: 0;
   padding: 5px 6px;
-  font-size: 10px;
   color: var(--link);
+  font-size: 10px;
 }
 .report-earlier > summary {
   list-style: none;
@@ -100,39 +31,76 @@
   border-top: 1px solid var(--line);
   padding-top: 10px;
 }
+.report-history-list {
+  gap: 0;
+  padding: 4px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+}
+.report-version {
+  display: flex;
+  width: 100%;
+  justify-content: space-between;
+  gap: 8px;
+  text-align: start;
+}
+.report-history-list .report-version {
+  min-height: 33px;
+  padding: 6px 9px;
+  font-size: 11px;
+}
+.report-history-list .report-version + .report-version {
+  border-top: 1px solid var(--line);
+}
+.report-version[aria-pressed="true"] {
+  color: var(--text);
+}
+.report-source {
+  padding: 9px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: var(--canvas);
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  line-height: 1.6;
+}
+.source-nav {
+  gap: 6px;
+}
 .report-source-tools {
-  color: var(--muted);
-  border-bottom: 1px solid var(--line);
   padding: 0 0 8px;
+  color: var(--muted);
 }
 .report-source-tools > .quiet-button {
-  padding: 4px 0;
   min-height: 0;
+  padding: 4px 0;
   font-size: 11px;
 }
 .report-version-meta {
   padding: 9px 0;
+  border-top: 1px solid var(--line);
   color: var(--muted);
   font-size: 11px;
-  border-top: 1px solid var(--line);
 }
 .report-version-meta[open] > .stack {
   margin-top: 8px;
 }
-.report-identity {
-  margin-bottom: 7px;
-  color: var(--muted);
-  font-size: 10px;
-  font-weight: 580;
-  letter-spacing: 0.11em;
-  text-transform: uppercase;
+.report-blocks > div {
+  min-width: 0;
+  padding-bottom: 14px;
 }
 .rich-report .report-authored h1 {
+  margin: 0 0 10px;
   font-size: 22px;
   font-weight: 620;
   letter-spacing: -0.45px;
   line-height: 1.35;
-  margin-bottom: 10px;
+}
+.rich-report .report-authored h2 {
+  margin-top: 3px;
+  font-size: 21px;
+  font-weight: 570;
+  letter-spacing: -0.25px;
 }
 .rich-report .report-authored .prose {
   line-height: 1.8;
@@ -140,70 +108,166 @@
 .rich-report .report-authored p {
   margin-block: 0 13px;
 }
-.report-verdict {
-  margin-block: 7px 14px;
-  border: 1px solid color-mix(in srgb, var(--amber), var(--canvas) 70%);
-  padding: 10px 12px;
-  border-radius: 8px;
-  background: color-mix(in srgb, var(--amber-bg), var(--canvas) 38%);
-  color: var(--amber);
-}
-.report-verdict.request_changes,
-.report-verdict.blocked {
-  border-color: color-mix(in srgb, var(--red), var(--canvas) 65%);
-  background: color-mix(in srgb, var(--red-bg), var(--canvas) 40%);
-  color: var(--red);
-}
-.report-verdict.approve {
-  border-color: color-mix(in srgb, var(--green), var(--canvas) 65%);
-  background: color-mix(in srgb, var(--green-bg), var(--canvas) 40%);
-  color: var(--green);
-}
-.report-verdict-label {
-  font-size: 14px;
-  text-transform: uppercase;
-  font-weight: 660;
-}
-.report-verdict-label::before {
-  content: "";
-  display: inline-block;
-  width: 7px;
-  height: 7px;
-  margin-inline-end: 9px;
-  border-radius: 50%;
-  background: currentColor;
-  vertical-align: middle;
-}
-.rich-report .report-verdict .prose {
-  color: color-mix(in srgb, var(--text), currentColor 25%);
-  font-size: 11px;
-  margin-top: 7px;
-}
-.rich-report .report-verdict .prose > :last-child {
-  margin-bottom: 0;
-}
-.report-counts {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-  align-items: center;
-  margin-bottom: 5px;
+.rich-report .report-authored blockquote {
+  padding: 0 0 0 12px;
+  border: 0;
+  border-inline-start: 2px solid var(--strong-line);
+  border-radius: 0;
+  background: transparent;
   color: var(--muted);
-  font-size: 11px;
-}
-.report-counts strong {
-  color: var(--amber);
-  font-size: 17px;
-  margin-inline-end: 4px;
 }
 .report-section-nav {
   display: flex;
   flex-wrap: wrap;
-  gap: 3px 12px;
-  margin: 8px 0 4px;
+  gap: 7px 16px;
+  margin: 15px 0 14px;
 }
 .report-section-nav > button {
   min-height: 22px;
-  padding: 2px 0;
+  padding: 0;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.7;
+}
+.report-section-nav > button:hover {
+  color: var(--text);
+  text-decoration: underline;
+  text-underline-offset: 4px;
+}
+.report-finding {
+  --finding-line: color-mix(in srgb, var(--strong-line) 65%, var(--line));
+  --finding-key-width: 92px;
+  --finding-field-gap: 14px;
+  padding: 24px;
+  border: 1px solid var(--finding-line);
+  border-top: 3px solid var(--muted);
+  border-radius: 11px;
+  background: var(--surface);
+}
+.report-finding[data-blocking="true"] {
+  border-top-color: var(--rose);
+}
+.report-finding[data-blocking="false"] {
+  border-top-color: var(--amber);
+}
+.report-finding-header {
+  margin-bottom: 16px;
+}
+.report-finding:has(.report-finding-fields) .report-finding-header {
+  margin-bottom: 20px;
+  padding-bottom: 17px;
+  border-bottom: 1px solid var(--finding-line);
+}
+.report-finding-kicker {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px 10px;
+  margin-bottom: 10px;
+  color: var(--muted);
   font-size: 10px;
+  line-height: 1.7;
+}
+.report-finding[data-blocking="true"] .report-finding-kicker {
+  color: var(--amber);
+}
+.report-finding-kicker > strong {
+  color: var(--text);
+}
+.report-finding-severity {
+  padding: 0 6px;
+  border-radius: 4px;
+  background: var(--selected);
+  color: var(--link);
+  font-weight: 650;
+}
+.report-finding-header h3 {
+  margin: 0 0 8px;
+  font-size: 22px;
+  font-weight: 600;
+  line-height: 1.3;
+  letter-spacing: -0.025em;
+}
+.report-finding-fields,
+.report-finding-field > dd {
+  margin: 0;
+  min-width: 0;
+}
+.report-finding-field {
+  display: grid;
+  grid-template-columns: var(--finding-key-width) minmax(0, 1fr);
+  gap: var(--finding-field-gap);
+  margin-bottom: 18px;
+}
+.report-finding-field:last-child {
+  margin-bottom: 0;
+}
+.report-finding-field > dt {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1.8;
+  text-transform: uppercase;
+  letter-spacing: 0.055em;
+}
+.report-finding-field[data-field="proposed comment"] > dd {
+  padding: 13px 15px;
+  border: 1px solid var(--finding-line);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--selected) 65%, var(--surface));
+}
+.report-finding-field .prose > :last-child {
+  margin-bottom: 0;
+}
+.report-selection-action {
+  position: sticky;
+  bottom: 8px;
+  z-index: 3;
+  display: flex;
+  justify-content: flex-end;
+  pointer-events: none;
+}
+.report-selection-action > button {
+  pointer-events: auto;
+}
+.report-feedback {
+  padding: 19px 0 12px;
+  border-top: 1px solid var(--line);
+}
+.report-quote-field {
+  gap: 4px;
+  color: var(--text);
+  font-size: 11px;
+}
+.report-quote-actions {
+  gap: 10px;
+}
+.report-structured {
+  padding: 9px 0;
+  border-top: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 11px;
+}
+.report-structured[open] > section {
+  margin-top: 12px;
+}
+.report-context button[aria-pressed="true"] {
+  border-color: var(--focus);
+  background: var(--selected);
+}
+.finding-card .badge {
+  white-space: normal;
+}
+.disposition-form {
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}
+@container review-detail (max-width: 465px) {
+  .report-finding {
+    padding: 16px;
+  }
+  .report-finding-field {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 5px;
+  }
 }
