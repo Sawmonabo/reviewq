@@ -9,7 +9,9 @@ use crate::settings::ActiveSource;
 use crate::workspace::{ConfiguredProject, WorkspaceStore};
 
 mod scope;
+mod tickets;
 pub use scope::{MatchedReview, ScopedIssue, ScopedMatch, ScopedSprint, SourceObservation};
+pub use tickets::{TicketComment, TicketDetail, TicketIdentity, UnverifiedTrack};
 
 /// Reads verified provider metadata outside the store transaction.
 pub trait ReviewSourceReader: ChangeSource {
@@ -26,6 +28,11 @@ pub trait ReviewSourceReader: ChangeSource {
     ) -> AppFuture<'_, ()>;
 
     fn review(&self, identity: MrIdentity) -> AppFuture<'_, ReviewSource>;
+    fn trackable_review(
+        &self,
+        projects: Vec<ConfiguredProject>,
+        canonical_url: String,
+    ) -> AppFuture<'_, UnverifiedTrack>;
     fn workflow_snapshot(&self, identity: MrIdentity) -> AppFuture<'_, WorkflowSnapshot>;
 
     fn reviews(&self, project: ConfiguredProject) -> AppFuture<'_, Vec<ReviewSource>>;
@@ -69,6 +76,14 @@ pub struct TicketPage {
 }
 
 pub trait TicketSourceReader: Send + Sync {
+    fn issue_identity(&self, key: TicketKey) -> AppFuture<'_, Option<TicketIdentity>>;
+    fn issue_detail(
+        &self,
+        key: TicketKey,
+        estimate_fields: Vec<String>,
+        offset: u32,
+        limit: u16,
+    ) -> AppFuture<'_, TicketDetail>;
     fn sprints(&self, board: u64, offset: u32) -> AppFuture<'_, scope::SprintPage>;
     fn issues(
         &self,

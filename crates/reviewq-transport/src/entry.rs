@@ -21,7 +21,7 @@ use reviewq_app::hosts::{
 };
 use reviewq_app::launch::{LaunchStore, NativeLaunchers, NativeModels};
 use reviewq_app::notifications::InboxStore;
-use reviewq_app::queue::{QueueStore, ReviewLookup};
+use reviewq_app::queue::{QueueStore, ReviewLookup, TrackingStore};
 use reviewq_app::reports::{
     ReportCaptureStore, ReportFileSource, ReportMutationStore, ReportStore,
 };
@@ -56,6 +56,7 @@ mod settings;
 mod sources;
 mod targets;
 mod terminal;
+mod tracking;
 
 pub use control::{ControlRequest, ServiceEndpoint, ServiceIdentity};
 
@@ -66,6 +67,7 @@ use error::{ApiBytes, ApiError};
 pub trait Store:
     WorkspaceStore
     + QueueStore
+    + TrackingStore
     + ReviewLookup
     + EventLog
     + LeadStore
@@ -90,6 +92,7 @@ pub trait Store:
 impl<
     S: WorkspaceStore
         + QueueStore
+        + TrackingStore
         + ReviewLookup
         + EventLog
         + LeadStore
@@ -239,6 +242,8 @@ pub fn router(
         .route("/queue", get(pages::queue))
         .route("/queue/refresh", post(refresh::start))
         .route("/queue/refresh/{refresh_id}", get(refresh::status))
+        .route("/tracking", post(tracking::track))
+        .route("/tickets/{key}", get(tracking::ticket))
         .route("/reviews/resolve", get(pages::resolve))
         .route("/reviews/{review_id}", get(pages::overview))
         .route("/reviews/{review_id}/changes/files", get(changes::files))

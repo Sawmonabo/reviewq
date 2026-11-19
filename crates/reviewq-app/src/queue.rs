@@ -10,6 +10,9 @@ use crate::decisions::{Decision, Frontier};
 use crate::events::Snapshot;
 use crate::sources::SourceSync;
 
+mod tracking;
+pub use tracking::{TicketAuthority, TrackReview, TrackedReviewReceipt, TrackingStore};
+
 /// Current provider evidence used to create the compact registered review.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ReviewSource {

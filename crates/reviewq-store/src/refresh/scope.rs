@@ -13,6 +13,7 @@ pub(super) fn replace(
     sprints: Vec<ScopedSprint>,
     associations: impl Iterator<Item = (ReviewId, HashSet<ScopedMatch>)>,
 ) -> Result<(), StoreError> {
+    crate::queue::tracking::retain_current_tickets(db)?;
     db.execute_batch("DELETE FROM scoped_issues; DELETE FROM scoped_sprints;")?;
     let mut sprint_insert = db.prepare_cached(
         "INSERT INTO scoped_sprints (board_id,sprint_id,label) VALUES (?1,?2,?3)",
@@ -63,6 +64,7 @@ pub(super) fn replace(
             ])?;
         }
     }
+    crate::queue::tracking::retain_current_tickets(db)?;
     Ok(())
 }
 

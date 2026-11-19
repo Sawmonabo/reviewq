@@ -4,7 +4,9 @@ use reqwest::header;
 use reviewq_app::access::{AppError, AppFuture};
 use reviewq_app::queue::{MergeRequestState, ReviewSource};
 use reviewq_app::settings::SourceLease;
-use reviewq_app::sources::{MatchedReview, ReviewResolution, ReviewSourceReader, WorkflowSnapshot};
+use reviewq_app::sources::{
+    MatchedReview, ReviewResolution, ReviewSourceReader, UnverifiedTrack, WorkflowSnapshot,
+};
 use reviewq_app::workspace::ConfiguredProject;
 use reviewq_domain::identity::{GitLabOrigin, MrIdentity, ProjectId, TicketKey};
 use serde::Deserialize;
@@ -69,6 +71,14 @@ impl ReviewSourceReader for GitLab {
 
     fn workflow_snapshot(&self, identity: MrIdentity) -> AppFuture<'_, WorkflowSnapshot> {
         Box::pin(self.read_workflow_snapshot(identity))
+    }
+
+    fn trackable_review(
+        &self,
+        projects: Vec<ConfiguredProject>,
+        canonical_url: String,
+    ) -> AppFuture<'_, UnverifiedTrack> {
+        Box::pin(self.track_url(projects, canonical_url))
     }
 
     fn reviews(&self, project: ConfiguredProject) -> AppFuture<'_, Vec<ReviewSource>> {

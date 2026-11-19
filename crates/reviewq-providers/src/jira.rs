@@ -16,7 +16,9 @@ use crate::http::SourceNetwork;
 use crate::settings::{origin, safe_label};
 
 mod issues;
+mod tickets;
 pub(crate) use issues::valid_project;
+pub(crate) use tickets::valid_issue_key;
 
 const METADATA_LIMIT: usize = 1024 * 1024;
 const PAGE_LIMIT: usize = 100;
@@ -24,6 +26,7 @@ const PAGE_LIMIT: usize = 100;
 pub(crate) struct Jira {
     network: Arc<SourceNetwork>,
     cloud_id: String,
+    site: Url,
     api: Url,
     headers: HeaderMap,
     lease: Option<reviewq_app::settings::SourceLease>,
@@ -91,7 +94,7 @@ impl Jira {
         let site = origin(site, fixture)?;
         let id = uuid::Uuid::parse_str(cloud).map_err(|_| AppError::InvalidRequest)?;
         let api = match token_type {
-            JiraTokenType::Unscoped => site,
+            JiraTokenType::Unscoped => site.clone(),
             JiraTokenType::Scoped if fixture => site
                 .join(&format!("ex/jira/{id}/"))
                 .map_err(|_| AppError::Internal)?,
@@ -109,6 +112,7 @@ impl Jira {
         Ok(Self {
             network,
             cloud_id: cloud.to_owned(),
+            site,
             api,
             headers,
             lease,

@@ -2,8 +2,10 @@ use std::collections::HashSet;
 
 use reviewq_app::access::{AppError, AppFuture};
 use reviewq_app::sources::{
-    ScopedSprint, ScopedTicket, SprintPage, TicketPage, TicketSourceReader,
+    ScopedSprint, ScopedTicket, SprintPage, TicketDetail, TicketIdentity, TicketPage,
+    TicketSourceReader,
 };
+use reviewq_domain::identity::TicketKey;
 use reviewq_domain::settings::{BoardScope, BoardType};
 use serde::Deserialize;
 use serde_json::Value;
@@ -25,6 +27,26 @@ struct Issue {
 }
 
 impl TicketSourceReader for Jira {
+    fn issue_identity(&self, key: TicketKey) -> AppFuture<'_, Option<TicketIdentity>> {
+        Box::pin(async move {
+            match self.ticket_identity(key).await {
+                Ok(ticket) => Ok(Some(ticket)),
+                Err(AppError::NotFound) => Ok(None),
+                Err(error) => Err(error),
+            }
+        })
+    }
+
+    fn issue_detail(
+        &self,
+        key: TicketKey,
+        estimate_fields: Vec<String>,
+        offset: u32,
+        limit: u16,
+    ) -> AppFuture<'_, TicketDetail> {
+        Box::pin(self.ticket_detail(key, estimate_fields, offset, limit))
+    }
+
     fn sprints(&self, board: u64, offset: u32) -> AppFuture<'_, SprintPage> {
         Box::pin(async move {
             let page = self
@@ -246,7 +268,7 @@ fn validate_token(token: &str) -> Result<(), AppError> {
     Ok(())
 }
 
-fn optional_label(value: &Value, key: &str) -> Result<Option<String>, AppError> {
+pub(super) fn optional_label(value: &Value, key: &str) -> Result<Option<String>, AppError> {
     if value.is_null() {
         return Ok(None);
     }
