@@ -1,6 +1,11 @@
 //! Monitor ownership, frozen work and scoped result projections.
 
 mod commands;
+mod work;
+pub use work::{
+    CheckMember, FollowupWorkerStore, MAX_FROZEN_OBSERVATIONS, PendingCheck, PreparedCheck,
+    run_due_followups,
+};
 
 pub use commands::{
     FollowupCommands, MonitorCommand, MonitorReceipt, MonitorRequest, Selection, UpdatePreferences,

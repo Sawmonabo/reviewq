@@ -13,7 +13,7 @@ use crate::workflow::{
 };
 
 use super::index;
-use super::{ArtifactStats, Descriptor, ReportReference, Verdict};
+use super::{ArtifactStats, Descriptor, FindingConclusion, ReportReference, Verdict};
 
 pub const CHUNK_BYTES: usize = 64 * 1024;
 const SEMANTIC_BYTES: u64 = 4 * 1024 * 1024;
@@ -35,16 +35,27 @@ pub enum RevisionEvidence {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub struct Assessment {
+    pub discussion_id: String,
+    pub conclusion: FindingConclusion,
+    pub reason: String,
+    pub finding_ids: Vec<String>,
+    pub next_action: crate::followups::NextAction,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum Declaration {
     Final {
         source: Source,
         revision: RevisionEvidence,
         verdict: Verdict,
         amends: Option<ReportReference>,
+        assessments: Vec<Assessment>,
     },
     Unchanged {
         accepted: ReportReference,
         source: Source,
+        assessments: Vec<Assessment>,
     },
     NeedsInput {
         reason: String,
@@ -52,6 +63,13 @@ pub enum Declaration {
 }
 
 impl Declaration {
+    pub fn assessments(&self) -> &[Assessment] {
+        match self {
+            Self::Final { assessments, .. } | Self::Unchanged { assessments, .. } => assessments,
+            Self::NeedsInput { .. } => &[],
+        }
+    }
+
     pub fn validate(&self) -> Result<(), AppError> {
         if matches!(
             self,
@@ -63,6 +81,22 @@ impl Declaration {
                 ..
             }
         ) {
+            return Err(AppError::InvalidRequest);
+        }
+        let mut discussions = std::collections::HashSet::new();
+        if self.assessments().len() > 10
+            || self.assessments().iter().any(|assessment| {
+                assessment.discussion_id.is_empty()
+                    || assessment.discussion_id.len() > 256
+                    || !discussions.insert(&assessment.discussion_id)
+                    || assessment.reason.trim().is_empty()
+                    || assessment.reason.len() > 1024
+                    || assessment.finding_ids.len() > 50
+                    || assessment.finding_ids.iter().any(|id| {
+                        id.is_empty() || id.len() > 64 || id.chars().any(char::is_control)
+                    })
+            })
+        {
             return Err(AppError::InvalidRequest);
         }
         let reason = match self {

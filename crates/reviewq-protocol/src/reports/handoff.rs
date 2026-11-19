@@ -48,14 +48,28 @@ pub enum Handoff {
         verdict: ReportVerdict,
         #[serde(rename = "amendsReport", skip_serializing_if = "Option::is_none")]
         amends: Option<AcceptedReference>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        assessments: Vec<Assessment>,
     },
     Unchanged {
         accepted: AcceptedReference,
         source: ReportSource,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        assessments: Vec<Assessment>,
     },
     NeedsInput {
         reason: String,
     },
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct Assessment {
+    pub discussion_id: ResourceIdDto,
+    pub conclusion: super::FindingConclusion,
+    pub reason: String,
+    pub finding_ids: Vec<ResourceIdDto>,
+    pub next_action: crate::followups::NextAction,
 }
 
 #[derive(Debug, Deserialize, Serialize)]

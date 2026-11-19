@@ -205,6 +205,7 @@ fn declaration(input: dto::Handoff, provider: HostProvider) -> Result<Declaratio
             revision,
             verdict,
             amends,
+            assessments,
         } => Declaration::Final {
             source: project_source(source, provider)?,
             revision: match (revision.sha, revision.reason) {
@@ -218,6 +219,7 @@ fn declaration(input: dto::Handoff, provider: HostProvider) -> Result<Declaratio
                 dto::ReportVerdict::Blocked => Verdict::Blocked,
                 dto::ReportVerdict::NotSpecified => Verdict::NotSpecified,
             },
+            assessments: project_assessments(assessments)?,
             amends: amends
                 .map(|base| -> Result<_, AppError> {
                     Ok(ReportReference {
@@ -227,7 +229,12 @@ fn declaration(input: dto::Handoff, provider: HostProvider) -> Result<Declaratio
                 })
                 .transpose()?,
         },
-        dto::Handoff::Unchanged { accepted, source } => Declaration::Unchanged {
+        dto::Handoff::Unchanged {
+            accepted,
+            source,
+            assessments,
+        } => Declaration::Unchanged {
+            assessments: project_assessments(assessments)?,
             accepted: ReportReference {
                 receipt_id: parse(accepted.receipt_id.as_str())?,
                 hash: parse(accepted.sha256.as_str())?,
@@ -238,6 +245,40 @@ fn declaration(input: dto::Handoff, provider: HostProvider) -> Result<Declaratio
     })
 }
 
+fn project_assessments(values: Vec<dto::Assessment>) -> Result<Vec<app::Assessment>, AppError> {
+    values
+        .into_iter()
+        .map(|value| {
+            use reviewq_app::followups::NextAction;
+            use reviewq_app::reports::FindingConclusion;
+            let conclusion = match value.conclusion {
+                dto::FindingConclusion::Fixed => FindingConclusion::Fixed,
+                dto::FindingConclusion::ClarifiedWithdrawn => FindingConclusion::ClarifiedWithdrawn,
+                dto::FindingConclusion::Superseded => FindingConclusion::Superseded,
+                dto::FindingConclusion::PartlyAddressed => FindingConclusion::PartlyAddressed,
+                dto::FindingConclusion::StillPresent => FindingConclusion::StillPresent,
+                dto::FindingConclusion::Unverified => FindingConclusion::Unverified,
+            };
+            Ok(app::Assessment {
+                discussion_id: value.discussion_id.as_str().to_owned(),
+                conclusion,
+                reason: value.reason,
+                finding_ids: value
+                    .finding_ids
+                    .into_iter()
+                    .map(|id| id.as_str().to_owned())
+                    .collect(),
+                next_action: match value.next_action {
+                    reviewq_protocol::followups::NextAction::Review => NextAction::Review,
+                    reviewq_protocol::followups::NextAction::WaitingAuthor => {
+                        NextAction::WaitingAuthor
+                    }
+                },
+            })
+        })
+        .collect()
+}
+
 fn source_mut(handoff: &mut dto::Handoff) -> Option<&mut dto::ReportSource> {
     match handoff {
         dto::Handoff::Final { source, .. } | dto::Handoff::Unchanged { source, .. } => Some(source),
@@ -246,7 +287,7 @@ fn source_mut(handoff: &mut dto::Handoff) -> Option<&mut dto::ReportSource> {
 }
 
 fn absolute_path(path: &str) -> Result<AbsolutePath, AppError> {
-    if path.len() > 4096 || path.contains(' ') {
+    if path.len() > 4096 || path.contains('\0') {
         return Err(AppError::InvalidRequest);
     }
     AbsolutePath::from_canonical(PathBuf::from(path)).map_err(|_| AppError::InvalidRequest)

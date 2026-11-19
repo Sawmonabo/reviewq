@@ -22,6 +22,7 @@ use crate::workspace::{configured, settings_revision};
 use crate::{SqliteStore, StoreError};
 
 mod accept;
+mod batch;
 
 const CLAIM_MS: i64 = 60_000;
 const RECHECK_MS: i64 = 2_000;
@@ -201,9 +202,28 @@ impl ReportCaptureStore for SqliteStore {
         artifact: Option<CapturedArtifact>,
     ) -> AppFuture<'_, ()> {
         Box::pin(async move {
-            self.write(move |tx| accept::complete(tx, work, result_entry, artifact))
-                .await
-                .map_err(StoreError::app)
+            let scoped_preserved = if matches!(&work.declaration,Declaration::Final{assessments,..} if !assessments.is_empty())
+            {
+                let context = work.clone();
+                let candidate = artifact
+                    .as_ref()
+                    .and_then(|artifact| artifact.index.as_ref())
+                    .map(|index| batch::finding_ranges(index));
+                let input = self
+                    .read(move |db| batch::source_check(db, &context, candidate))
+                    .await
+                    .map_err(StoreError::app)?;
+                tokio::task::spawn_blocking(move || batch::source_preserved(input))
+                    .await
+                    .map_err(|_| AppError::Internal)?
+            } else {
+                true
+            };
+            self.write(move |tx| {
+                accept::complete(tx, work, result_entry, artifact, scoped_preserved)
+            })
+            .await
+            .map_err(StoreError::app)
         })
     }
 
@@ -345,12 +365,27 @@ fn stage(
         )
         .optional()?
         .unwrap_or((None, 0));
+    let scoped_batch = batch::bound(db, &call)?;
+    if (!declaration.assessments().is_empty() && scoped_batch.is_none())
+        || (scoped_batch.is_some()
+            && declaration.assessments().is_empty()
+            && !matches!(declaration, Declaration::NeedsInput { .. }))
+    {
+        return Err(AppError::Conflict.into());
+    }
+    if batch::action_turn(db, &call)?
+        && matches!(declaration, Declaration::Final { amends: None, .. })
+    {
+        return Err(AppError::Forbidden.into());
+    }
+    let assessments = batch::encode(declaration.assessments())?;
     let (form, source, revision, verdict, expected, reason) = match declaration {
         Declaration::Final {
             source,
             revision,
             verdict,
             amends,
+            ..
         } => (
             "final",
             Some(source),
@@ -359,9 +394,9 @@ fn stage(
             amends,
             None,
         ),
-        Declaration::Unchanged { accepted, source } => {
-            ("unchanged", Some(source), None, None, Some(accepted), None)
-        }
+        Declaration::Unchanged {
+            accepted, source, ..
+        } => ("unchanged", Some(source), None, None, Some(accepted), None),
         Declaration::NeedsInput { reason } => ("needs_input", None, None, None, None, Some(reason)),
     };
     let (kind, path, hash) = match source {
@@ -381,9 +416,9 @@ fn stage(
            source_generation, request_entry_id, declaration_sha256, form, source_kind, source_path,
            source_hash, reviewed_sha, revision_reason, verdict, expected_receipt_id, expected_sha256,
            base_receipt_id, disposition_version, reason, state, due_at_ms, created_at_ms, updated_at_ms,
-           source_position, request_sha256, settings_revision)
+           source_position, request_sha256, settings_revision, batch_id, assessments)
          VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,
-                'pending_completion',?21,?21,?21,?22,?23,?24)",
+                'pending_completion',?21,?21,?21,?22,?23,?24,?25,?26)",
         params![
             receipt_id, run.as_str(), call.lead.session_key().as_str(), call.turn_id.as_str(), call.call_id,
             call.source_generation, call.request_entry_id.as_ref().map(|id| id.as_str()), declaration_sha256.as_str(),
@@ -391,7 +426,7 @@ fn stage(
             hash.as_ref().map(|hash| hash.as_str()), head.as_ref().map(|sha| sha.as_str()), revision_reason,
             verdict.map(|value| value.to_string()), expected.as_ref().map(|value| value.receipt_id.as_str()),
             expected.as_ref().map(|value| value.hash.as_str()), base, version, reason, time,
-            db_int(call.source_position)?, request_sha256.as_str(), settings_revision(db)?.as_sqlite_integer(),
+            db_int(call.source_position)?, request_sha256.as_str(), settings_revision(db)?.as_sqlite_integer(), scoped_batch, assessments,
         ],
     )?;
     tx.emit(&[
@@ -414,7 +449,7 @@ fn claim(db: &Connection, limit: u16) -> Result<Vec<ReportWork>, StoreError> {
     let mut query = db.prepare_cached(
         "SELECT receipt_id, run_id, lead_session_key, turn_id, call_id, source_generation,
             request_entry_id, declaration_sha256, form, source_kind, source_path, source_hash,
-            reviewed_sha, revision_reason, verdict, expected_receipt_id, expected_sha256, reason, fence, source_position
+            reviewed_sha, revision_reason, verdict, expected_receipt_id, expected_sha256, reason, fence, source_position, assessments
          FROM report_handoffs WHERE state='pending_completion' AND due_at_ms<=?1
          ORDER BY due_at_ms, receipt_id LIMIT ?2",
     )?;
@@ -472,6 +507,7 @@ fn declaration(row: &Row<'_>) -> Result<Declaration, StoreError> {
         None => None,
         _ => return Err(AppError::Internal.into()),
     };
+    let assessments = batch::decode(text(row, 20)?)?;
     let expected = optional(row, 15)?
         .map(|id| {
             Ok::<_, StoreError>(ReportReference {
@@ -489,9 +525,11 @@ fn declaration(row: &Row<'_>) -> Result<Declaration, StoreError> {
             },
             verdict: parse(text(row, 14)?)?,
             amends: expected,
+            assessments,
         },
         "unchanged" => Declaration::Unchanged {
             accepted: expected.ok_or(AppError::Internal)?,
+            assessments,
             source: source.ok_or(AppError::Internal)?,
         },
         "needs_input" => Declaration::NeedsInput {

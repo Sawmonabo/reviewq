@@ -23,6 +23,7 @@ use crate::workspace::{advance_queue, allow_review, configured, provider_label, 
 use crate::{SqliteStore, StoreError};
 
 mod delivery;
+pub(crate) use delivery::admit_workflow;
 mod messages;
 
 impl SqliteStore {

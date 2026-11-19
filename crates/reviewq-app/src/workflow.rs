@@ -94,6 +94,14 @@ pub enum WorkflowBinding {
     Followup(String),
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct WorkflowGuard {
+    pub binding: WorkflowBinding,
+    pub settings: Revision,
+    pub head: GitSha,
+    pub ready: ReadyWorkflow,
+}
+
 pub struct WorkflowAdmission {
     pub target: LeadTarget,
     pub submission: SubmissionId,
