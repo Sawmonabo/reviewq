@@ -63,7 +63,7 @@ impl NativeWorkflowProof for Workflows {
             self.codex
                 .as_ref()
                 .ok_or(AppError::Unavailable)?
-                .prepare_continuation(&lead, id, turn, kind, account, provider, false)
+                .prepare_continuation(&lead, id, turn, kind, (account, provider), false)
                 .await
         })
     }

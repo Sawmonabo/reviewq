@@ -38,7 +38,7 @@ pub struct ExpectedAcknowledgement {
 pub enum ReportCompletion {
     Pending,
     Unproved,
-    Confirmed(CompletedReportCall),
+    Confirmed(Box<CompletedReportCall>),
 }
 
 pub struct CompletedReportCall {

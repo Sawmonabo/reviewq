@@ -457,7 +457,7 @@ pub enum DeliveryWork {
     Dispatch {
         text: MessageBody,
         report_ref: Option<ReportRef>,
-        workflow: Option<crate::workflow::WorkflowGuard>,
+        workflow: Option<Box<crate::workflow::WorkflowGuard>>,
     },
     Reconcile {
         cursor: Option<String>,

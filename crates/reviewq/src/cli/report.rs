@@ -209,7 +209,7 @@ async fn complete(context: &Context, input: Complete) -> Result<Handoff, Failure
         },
         verdict: input.verdict.into(),
         amends,
-        corrects: metadata.corrects_report,
+        corrects: metadata.corrects_report.map(Box::new),
         finding_changes: metadata.finding_changes,
         section_changes: metadata.section_changes,
         assessments: metadata.assessments,

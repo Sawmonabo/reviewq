@@ -698,7 +698,7 @@ fn dispatch_work(connection: &Connection, id: &DeliveryId) -> Result<DeliveryWor
     Ok(DeliveryWork::Dispatch {
         text: text_value,
         report_ref,
-        workflow: workflow::read_guard(connection, id)?,
+        workflow: workflow::read_guard(connection, id)?.map(Box::new),
     })
 }
 

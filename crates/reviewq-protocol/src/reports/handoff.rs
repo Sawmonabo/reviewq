@@ -49,7 +49,7 @@ pub enum Handoff {
         #[serde(rename = "amendsReport", skip_serializing_if = "Option::is_none")]
         amends: Option<AcceptedReference>,
         #[serde(rename = "correctsReport", skip_serializing_if = "Option::is_none")]
-        corrects: Option<Correction>,
+        corrects: Option<Box<Correction>>,
         #[serde(
             rename = "findingChanges",
             default,

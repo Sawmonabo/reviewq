@@ -497,8 +497,8 @@ fn emit(tx: &mut WriteTx<'_>, target: &LeadTarget, notify: Option<&str>) -> Resu
         ResourceKey::Review(Some(target.review_id().clone())),
         ResourceKey::Queue,
     ];
-    if let Some(action) = notify {
-        if let Some(notification) = insert_notification(
+    if let Some(action) = notify
+        && let Some(notification) = insert_notification(
             &tx.sql,
             Observation {
                 source: Source::Action,
@@ -512,9 +512,9 @@ fn emit(tx: &mut WriteTx<'_>, target: &LeadTarget, notify: Option<&str>) -> Resu
                 occurred_at_ms: now_ms()?,
                 desktop_episode: None,
             },
-        )? {
-            keys.push(ResourceKey::Notification(Some(notification)));
-        }
+        )?
+    {
+        keys.push(ResourceKey::Notification(Some(notification)));
     }
     advance_queue(&tx.sql)?;
     tx.emit(&keys)?;

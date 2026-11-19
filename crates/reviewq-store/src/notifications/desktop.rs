@@ -31,7 +31,7 @@ impl DesktopStore for SqliteStore {
     }
 
     fn claim_desktop(&self) -> AppFuture<'_, Option<DesktopClaim>> {
-        Box::pin(async move { self.write(|tx| claim(tx)).await.map_err(StoreError::app) })
+        Box::pin(async move { self.write(claim).await.map_err(StoreError::app) })
     }
 
     fn refresh_desktop_claim(&self, claim: DesktopClaim) -> AppFuture<'_, Option<DesktopClaim>> {

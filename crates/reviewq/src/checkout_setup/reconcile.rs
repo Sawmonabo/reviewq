@@ -138,13 +138,12 @@ async fn one(
     if Topology::read(common)?.fingerprint != topology.fingerprint {
         return Err("The linked Git worktrees changed while ReviewQ was preparing setup.".into());
     }
-    if let Some(key) = files::existing_credential(profile, common)? {
-        if store
+    if let Some(key) = files::existing_credential(profile, common)?
+        && store
             .retired_checkout_verifier(job.clone(), Sha256::digest(key).into())
             .await?
-        {
-            clean_owned(profile, common).await?;
-        }
+    {
+        clean_owned(profile, common).await?;
     }
     let claude = projection::claude_config(claude_profile)?;
     let mut changes = prepare(profile, checkout, url, claude, lock).await?;

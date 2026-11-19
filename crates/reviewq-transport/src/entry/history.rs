@@ -215,8 +215,7 @@ pub(super) async fn read(
         bind_observed_turns(entry, actor, lead.value, &mut result).await?;
         return encode(
             endpoint,
-            &run,
-            &session,
+            (&run, &session),
             lead.cursor,
             (limit, byte_limit),
             result,
@@ -244,8 +243,7 @@ pub(super) async fn read(
     bind_observed_turns(entry, actor, lead.value, &mut history).await?;
     encode(
         endpoint,
-        &run,
-        &session,
+        (&run, &session),
         lead.cursor,
         (limit, byte_limit),
         history,
@@ -376,8 +374,7 @@ enum Trim<'a> {
 
 fn encode(
     endpoint: &ServiceEndpoint,
-    run: &RunId,
-    session: &SessionKey,
+    (run, session): (&RunId, &SessionKey),
     event: EventCursor,
     budget: (u16, usize),
     history: NativeHistoryPage,

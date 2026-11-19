@@ -133,13 +133,13 @@ impl NativeWorkflowProof for ClaudeWorkflow {
             } else {
                 None
             };
-            Ok(ReportCompletion::Confirmed(CompletedReportCall {
+            Ok(ReportCompletion::Confirmed(Box::new(CompletedReportCall {
                 call,
                 acknowledged: acknowledgement,
                 result_entry_id: found.entry,
                 normal_turn_completion: normal,
                 final_response,
-            }))
+            })))
         })
     }
 }

@@ -71,7 +71,7 @@ struct EntryLocator {
 #[serde(tag = "source", rename_all = "snake_case")]
 enum Bookmark {
     File { point: Point },
-    Rpc { position: Cursor },
+    Rpc { position: Box<Cursor> },
 }
 
 impl Bookmark {
@@ -86,7 +86,13 @@ impl Bookmark {
                 point: point.clone().into(),
             },
             HistoryBookmark::Rpc(position) => Self::Rpc {
-                position: Cursor::new(run, session, generation, (32, 64 * 1024), position.clone()),
+                position: Box::new(Cursor::new(
+                    run,
+                    session,
+                    generation,
+                    (32, 64 * 1024),
+                    position.clone(),
+                )),
             },
         }
     }

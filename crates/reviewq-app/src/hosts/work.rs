@@ -22,7 +22,7 @@ pub struct DispatchGuard {
 impl DispatchGuard {
     pub fn workflow(&self) -> Option<&crate::workflow::WorkflowGuard> {
         match &self.claim.work {
-            DeliveryWork::Dispatch { workflow, .. } => workflow.as_ref(),
+            DeliveryWork::Dispatch { workflow, .. } => workflow.as_deref(),
             DeliveryWork::Reconcile { .. } => None,
         }
     }

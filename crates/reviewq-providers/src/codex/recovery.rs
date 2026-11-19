@@ -54,8 +54,7 @@ impl Codex {
         episode: String,
         failed_turn: NativeTurnId,
         kind: RecoveryKind,
-        account: Option<ReportHash>,
-        provider: Option<String>,
+        (account, provider): (Option<ReportHash>, Option<String>),
         fresh: bool,
     ) -> Result<(RecoveryAuthorization, ReadyWorkflow), AppError> {
         let account = account.ok_or(AppError::Unavailable)?;

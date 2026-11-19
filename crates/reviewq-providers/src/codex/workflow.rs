@@ -168,13 +168,13 @@ impl NativeWorkflowProof for Codex {
             else {
                 return Ok(ReportCompletion::Pending);
             };
-            Ok(ReportCompletion::Confirmed(CompletedReportCall {
+            Ok(ReportCompletion::Confirmed(Box::new(CompletedReportCall {
                 call,
                 acknowledged: acknowledgement,
                 result_entry_id: result_entry,
                 normal_turn_completion: evidence.normal,
                 final_response: evidence.response,
-            }))
+            })))
         })
     }
 }
