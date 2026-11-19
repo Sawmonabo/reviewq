@@ -2,10 +2,10 @@
 import { func0 } from "../runtime.mjs";
 import { validate69 } from "./merge-request-iid-dto.mjs";
 import { validate127 } from "./safe-count-dto.mjs";
-import { schema221 } from "../metadata-5.mjs";
+import { schema222 } from "../metadata-5.mjs";
 import { validate114 } from "./review-id-dto.mjs";
 import { validate25 } from "./checkpoint-id-dto.mjs";
-function validate697(
+function validate702(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -34,7 +34,7 @@ function validate697(
           !func0.call(data, "personalApproval")) &&
           (missing0 = "personalApproval"))
       ) {
-        validate697.errors = [
+        validate702.errors = [
           {
             instancePath,
             schemaPath: "#/required",
@@ -96,13 +96,13 @@ function validate697(
               let data2 = data.personalApproval;
               const _errs3 = errors;
               if (typeof data2 !== "boolean" && data2 !== null) {
-                validate697.errors = [
+                validate702.errors = [
                   {
                     instancePath: instancePath + "/personalApproval",
                     schemaPath: "#/properties/personalApproval/type",
                     keyword: "type",
                     params: {
-                      type: schema221.properties.personalApproval.type,
+                      type: schema222.properties.personalApproval.type,
                     },
                   },
                 ];
@@ -119,7 +119,7 @@ function validate697(
               ) {
                 const _errs5 = errors;
                 if (typeof data.projectPath !== "string") {
-                  validate697.errors = [
+                  validate702.errors = [
                     {
                       instancePath: instancePath + "/projectPath",
                       schemaPath: "#/properties/projectPath/type",
@@ -167,7 +167,7 @@ function validate697(
                     if (errors === _errs8) {
                       if (Array.isArray(data5)) {
                         if (data5.length > 16) {
-                          validate697.errors = [
+                          validate702.errors = [
                             {
                               instancePath: instancePath + "/ticketKeys",
                               schemaPath: "#/properties/ticketKeys/maxItems",
@@ -203,7 +203,7 @@ function validate697(
                           }
                         }
                       } else {
-                        validate697.errors = [
+                        validate702.errors = [
                           {
                             instancePath: instancePath + "/ticketKeys",
                             schemaPath: "#/properties/ticketKeys/type",
@@ -222,7 +222,7 @@ function validate697(
                     if (data.title !== undefined && func0.call(data, "title")) {
                       const _errs11 = errors;
                       if (typeof data.title !== "string") {
-                        validate697.errors = [
+                        validate702.errors = [
                           {
                             instancePath: instancePath + "/title",
                             schemaPath: "#/properties/title/type",
@@ -269,7 +269,7 @@ function validate697(
         }
       }
     } else {
-      validate697.errors = [
+      validate702.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -280,7 +280,7 @@ function validate697(
       return false;
     }
   }
-  validate697.errors = vErrors;
+  validate702.errors = vErrors;
   return errors === 0;
 }
-export { validate697 };
+export { validate702 };

@@ -2,8 +2,8 @@
 import { func0 } from "../runtime.mjs";
 import { validate25 } from "./checkpoint-id-dto.mjs";
 import { validate48 } from "./history-cursor-dto.mjs";
-import { schema369 } from "../metadata-9.mjs";
-function validate1250(
+import { schema371 } from "../metadata-9.mjs";
+function validate1265(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -42,7 +42,7 @@ function validate1250(
               for (let i0 = 0; i0 < len0; i0++) {
                 const _errs4 = errors;
                 if (typeof data1[i0] !== "string") {
-                  validate1250.errors = [
+                  validate1265.errors = [
                     {
                       instancePath: instancePath + "/labels/" + i0,
                       schemaPath: "#/properties/labels/items/type",
@@ -58,7 +58,7 @@ function validate1250(
                 }
               }
             } else {
-              validate1250.errors = [
+              validate1265.errors = [
                 {
                   instancePath: instancePath + "/labels",
                   schemaPath: "#/properties/labels/type",
@@ -128,7 +128,7 @@ function validate1250(
                 vErrors.push(err1);
               }
               errors++;
-              validate1250.errors = vErrors;
+              validate1265.errors = vErrors;
               return false;
             } else {
               errors = _errs7;
@@ -149,12 +149,12 @@ function validate1250(
               let data4 = data.priority;
               const _errs11 = errors;
               if (typeof data4 !== "string" && data4 !== null) {
-                validate1250.errors = [
+                validate1265.errors = [
                   {
                     instancePath: instancePath + "/priority",
                     schemaPath: "#/properties/priority/type",
                     keyword: "type",
-                    params: { type: schema369.properties.priority.type },
+                    params: { type: schema371.properties.priority.type },
                   },
                 ];
                 return false;
@@ -168,12 +168,12 @@ function validate1250(
                 let data5 = data.reporter;
                 const _errs13 = errors;
                 if (typeof data5 !== "string" && data5 !== null) {
-                  validate1250.errors = [
+                  validate1265.errors = [
                     {
                       instancePath: instancePath + "/reporter",
                       schemaPath: "#/properties/reporter/type",
                       keyword: "type",
-                      params: { type: schema369.properties.reporter.type },
+                      params: { type: schema371.properties.reporter.type },
                     },
                   ];
                   return false;
@@ -190,12 +190,12 @@ function validate1250(
                   let data6 = data.reporterId;
                   const _errs15 = errors;
                   if (typeof data6 !== "string" && data6 !== null) {
-                    validate1250.errors = [
+                    validate1265.errors = [
                       {
                         instancePath: instancePath + "/reporterId",
                         schemaPath: "#/properties/reporterId/type",
                         keyword: "type",
-                        params: { type: schema369.properties.reporterId.type },
+                        params: { type: schema371.properties.reporterId.type },
                       },
                     ];
                     return false;
@@ -209,12 +209,12 @@ function validate1250(
                     let data7 = data.status;
                     const _errs17 = errors;
                     if (typeof data7 !== "string" && data7 !== null) {
-                      validate1250.errors = [
+                      validate1265.errors = [
                         {
                           instancePath: instancePath + "/status",
                           schemaPath: "#/properties/status/type",
                           keyword: "type",
-                          params: { type: schema369.properties.status.type },
+                          params: { type: schema371.properties.status.type },
                         },
                       ];
                       return false;
@@ -227,7 +227,7 @@ function validate1250(
                     if (data.title !== undefined && func0.call(data, "title")) {
                       const _errs19 = errors;
                       if (typeof data.title !== "string") {
-                        validate1250.errors = [
+                        validate1265.errors = [
                           {
                             instancePath: instancePath + "/title",
                             schemaPath: "#/properties/title/type",
@@ -249,7 +249,7 @@ function validate1250(
         }
       }
     } else {
-      validate1250.errors = [
+      validate1265.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -260,7 +260,7 @@ function validate1250(
       return false;
     }
   }
-  validate1250.errors = vErrors;
+  validate1265.errors = vErrors;
   return errors === 0;
 }
-export { validate1250 };
+export { validate1265 };

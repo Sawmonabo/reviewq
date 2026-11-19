@@ -2,9 +2,9 @@
 import { func0 } from "../runtime.mjs";
 import { validate25 } from "./checkpoint-id-dto.mjs";
 import { validate48 } from "./history-cursor-dto.mjs";
-import { validate560 } from "./history-tool-state.mjs";
-import { validate507 } from "./history-text.mjs";
-function validate564(
+import { validate565 } from "./history-tool-state.mjs";
+import { validate512 } from "./history-text.mjs";
+function validate569(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -25,7 +25,7 @@ function validate564(
         ((data.contentRef === undefined || !func0.call(data, "contentRef")) &&
           (missing0 = "contentRef"))
       ) {
-        validate564.errors = [
+        validate569.errors = [
           {
             instancePath,
             schemaPath: "#/required",
@@ -110,7 +110,7 @@ function validate564(
                 vErrors.push(err1);
               }
               errors++;
-              validate564.errors = vErrors;
+              validate569.errors = vErrors;
               return false;
             } else {
               errors = _errs3;
@@ -131,7 +131,7 @@ function validate564(
               let data2 = data.kind;
               const _errs7 = errors;
               if (typeof data2 !== "string") {
-                validate564.errors = [
+                validate569.errors = [
                   {
                     instancePath: instancePath + "/kind",
                     schemaPath: "#/properties/kind/type",
@@ -142,7 +142,7 @@ function validate564(
                 return false;
               }
               if ("tool_result" !== data2) {
-                validate564.errors = [
+                validate569.errors = [
                   {
                     instancePath: instancePath + "/kind",
                     schemaPath: "#/properties/kind/const",
@@ -160,7 +160,7 @@ function validate564(
               if (data.state !== undefined && func0.call(data, "state")) {
                 const _errs9 = errors;
                 if (
-                  !validate560(data.state, {
+                  !validate565(data.state, {
                     instancePath: instancePath + "/state",
                     parentData: data,
                     parentDataProperty: "state",
@@ -169,8 +169,8 @@ function validate564(
                 ) {
                   vErrors =
                     vErrors === null
-                      ? validate560.errors
-                      : vErrors.concat(validate560.errors);
+                      ? validate565.errors
+                      : vErrors.concat(validate565.errors);
                   errors = vErrors.length;
                 }
                 var valid0 = _errs9 === errors;
@@ -181,7 +181,7 @@ function validate564(
                 if (data.text !== undefined && func0.call(data, "text")) {
                   const _errs10 = errors;
                   if (
-                    !validate507(data.text, {
+                    !validate512(data.text, {
                       instancePath: instancePath + "/text",
                       parentData: data,
                       parentDataProperty: "text",
@@ -190,8 +190,8 @@ function validate564(
                   ) {
                     vErrors =
                       vErrors === null
-                        ? validate507.errors
-                        : vErrors.concat(validate507.errors);
+                        ? validate512.errors
+                        : vErrors.concat(validate512.errors);
                     errors = vErrors.length;
                   }
                   var valid0 = _errs10 === errors;
@@ -204,7 +204,7 @@ function validate564(
         }
       }
     } else {
-      validate564.errors = [
+      validate569.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -215,7 +215,7 @@ function validate564(
       return false;
     }
   }
-  validate564.errors = vErrors;
+  validate569.errors = vErrors;
   return errors === 0;
 }
-export { validate564 };
+export { validate569 };

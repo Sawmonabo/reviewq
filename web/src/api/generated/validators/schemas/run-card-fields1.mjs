@@ -2,11 +2,12 @@
 import { func0 } from "../runtime.mjs";
 import { validate257 } from "./named-upstream-id.mjs";
 import { validate260 } from "./coverage.mjs";
+import { validate152 } from "./disposition.mjs";
 import { validate25 } from "./checkpoint-id-dto.mjs";
-import { validate265 } from "./focused-launch.mjs";
+import { validate266 } from "./focused-activity.mjs";
+import { validate268 } from "./focused-launch.mjs";
 import { validate71 } from "./host-provider-dto.mjs";
-import { validate147 } from "./git-sha-dto.mjs";
-function validate1088(
+function validate1097(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -68,7 +69,7 @@ function validate1088(
             vErrors.push(err1);
           }
           errors++;
-          validate1088.errors = vErrors;
+          validate1097.errors = vErrors;
           return false;
         } else {
           errors = _errs2;
@@ -139,7 +140,7 @@ function validate1088(
               vErrors.push(err3);
             }
             errors++;
-            validate1088.errors = vErrors;
+            validate1097.errors = vErrors;
             return false;
           } else {
             errors = _errs7;
@@ -156,119 +157,119 @@ function validate1088(
           var valid0 = true;
         }
         if (valid0) {
-          if (data.draft !== undefined && func0.call(data, "draft")) {
+          if (
+            data.currentDisposition !== undefined &&
+            func0.call(data, "currentDisposition")
+          ) {
+            let data2 = data.currentDisposition;
             const _errs11 = errors;
-            if (typeof data.draft !== "boolean") {
-              validate1088.errors = [
-                {
-                  instancePath: instancePath + "/draft",
-                  schemaPath: "#/properties/draft/type",
+            const _errs12 = errors;
+            let valid3 = false;
+            const _errs13 = errors;
+            if (
+              !validate152(data2, {
+                instancePath: instancePath + "/currentDisposition",
+                parentData: data,
+                parentDataProperty: "currentDisposition",
+                rootData,
+              })
+            ) {
+              vErrors =
+                vErrors === null
+                  ? validate152.errors
+                  : vErrors.concat(validate152.errors);
+              errors = vErrors.length;
+            }
+            var _valid2 = _errs13 === errors;
+            valid3 = valid3 || _valid2;
+            if (!valid3) {
+              const _errs14 = errors;
+              if (data2 !== null) {
+                const err4 = {
+                  instancePath: instancePath + "/currentDisposition",
+                  schemaPath: "#/properties/currentDisposition/anyOf/1/type",
                   keyword: "type",
-                  params: { type: "boolean" },
-                },
-              ];
+                  params: { type: "null" },
+                };
+                if (vErrors === null) {
+                  vErrors = [err4];
+                } else {
+                  vErrors.push(err4);
+                }
+                errors++;
+              }
+              var _valid2 = _errs14 === errors;
+              valid3 = valid3 || _valid2;
+            }
+            if (!valid3) {
+              const err5 = {
+                instancePath: instancePath + "/currentDisposition",
+                schemaPath: "#/properties/currentDisposition/anyOf",
+                keyword: "anyOf",
+                params: {},
+              };
+              if (vErrors === null) {
+                vErrors = [err5];
+              } else {
+                vErrors.push(err5);
+              }
+              errors++;
+              validate1097.errors = vErrors;
               return false;
+            } else {
+              errors = _errs12;
+              if (vErrors !== null) {
+                if (_errs12) {
+                  vErrors.length = _errs12;
+                } else {
+                  vErrors = null;
+                }
+              }
             }
             var valid0 = _errs11 === errors;
           } else {
             var valid0 = true;
           }
           if (valid0) {
-            if (
-              data.focusSessionKey !== undefined &&
-              func0.call(data, "focusSessionKey")
-            ) {
-              let data3 = data.focusSessionKey;
-              const _errs13 = errors;
-              const _errs14 = errors;
-              let valid3 = false;
-              const _errs15 = errors;
-              if (
-                !validate25(data3, {
-                  instancePath: instancePath + "/focusSessionKey",
-                  parentData: data,
-                  parentDataProperty: "focusSessionKey",
-                  rootData,
-                })
-              ) {
-                vErrors =
-                  vErrors === null
-                    ? validate25.errors
-                    : vErrors.concat(validate25.errors);
-                errors = vErrors.length;
-              }
-              var _valid2 = _errs15 === errors;
-              valid3 = valid3 || _valid2;
-              if (!valid3) {
-                const _errs16 = errors;
-                if (data3 !== null) {
-                  const err4 = {
-                    instancePath: instancePath + "/focusSessionKey",
-                    schemaPath: "#/properties/focusSessionKey/anyOf/1/type",
+            if (data.draft !== undefined && func0.call(data, "draft")) {
+              const _errs16 = errors;
+              if (typeof data.draft !== "boolean") {
+                validate1097.errors = [
+                  {
+                    instancePath: instancePath + "/draft",
+                    schemaPath: "#/properties/draft/type",
                     keyword: "type",
-                    params: { type: "null" },
-                  };
-                  if (vErrors === null) {
-                    vErrors = [err4];
-                  } else {
-                    vErrors.push(err4);
-                  }
-                  errors++;
-                }
-                var _valid2 = _errs16 === errors;
-                valid3 = valid3 || _valid2;
-              }
-              if (!valid3) {
-                const err5 = {
-                  instancePath: instancePath + "/focusSessionKey",
-                  schemaPath: "#/properties/focusSessionKey/anyOf",
-                  keyword: "anyOf",
-                  params: {},
-                };
-                if (vErrors === null) {
-                  vErrors = [err5];
-                } else {
-                  vErrors.push(err5);
-                }
-                errors++;
-                validate1088.errors = vErrors;
+                    params: { type: "boolean" },
+                  },
+                ];
                 return false;
-              } else {
-                errors = _errs14;
-                if (vErrors !== null) {
-                  if (_errs14) {
-                    vErrors.length = _errs14;
-                  } else {
-                    vErrors = null;
-                  }
-                }
               }
-              var valid0 = _errs13 === errors;
+              var valid0 = _errs16 === errors;
             } else {
               var valid0 = true;
             }
             if (valid0) {
               if (
-                data.focusedLaunch !== undefined &&
-                func0.call(data, "focusedLaunch")
+                data.focusSessionKey !== undefined &&
+                func0.call(data, "focusSessionKey")
               ) {
-                let data4 = data.focusedLaunch;
+                let data4 = data.focusSessionKey;
                 const _errs18 = errors;
                 const _errs19 = errors;
                 let valid4 = false;
                 const _errs20 = errors;
                 if (
-                  !validate265(data4, {
-                    instancePath: instancePath + "/focusedLaunch",
+                  !validate25(data4, {
+                    instancePath: instancePath + "/focusSessionKey",
                     parentData: data,
-                    parentDataProperty: "focusedLaunch",
+                    parentDataProperty: "focusSessionKey",
                     rootData,
                   })
                 ) {
                   vErrors =
                     vErrors === null
-                      ? validate265.errors
-                      : vErrors.concat(validate265.errors);
+                      ? validate25.errors
+                      : vErrors.concat(validate25.errors);
                   errors = vErrors.length;
                 }
                 var _valid3 = _errs20 === errors;
@@ -277,8 +278,8 @@ function validate1088(
                   const _errs21 = errors;
                   if (data4 !== null) {
                     const err6 = {
-                      instancePath: instancePath + "/focusedLaunch",
-                      schemaPath: "#/properties/focusedLaunch/anyOf/1/type",
+                      instancePath: instancePath + "/focusSessionKey",
+                      schemaPath: "#/properties/focusSessionKey/anyOf/1/type",
                       keyword: "type",
                       params: { type: "null" },
                     };
@@ -294,8 +295,8 @@ function validate1088(
                 }
                 if (!valid4) {
                   const err7 = {
-                    instancePath: instancePath + "/focusedLaunch",
-                    schemaPath: "#/properties/focusedLaunch/anyOf",
+                    instancePath: instancePath + "/focusSessionKey",
+                    schemaPath: "#/properties/focusSessionKey/anyOf",
                     keyword: "anyOf",
                     params: {},
                   };
@@ -305,7 +306,7 @@ function validate1088(
                     vErrors.push(err7);
                   }
                   errors++;
-                  validate1088.errors = vErrors;
+                  validate1097.errors = vErrors;
                   return false;
                 } else {
                   errors = _errs19;
@@ -323,26 +324,26 @@ function validate1088(
               }
               if (valid0) {
                 if (
-                  data.focusedProvider !== undefined &&
-                  func0.call(data, "focusedProvider")
+                  data.focusedActivity !== undefined &&
+                  func0.call(data, "focusedActivity")
                 ) {
-                  let data5 = data.focusedProvider;
+                  let data5 = data.focusedActivity;
                   const _errs23 = errors;
                   const _errs24 = errors;
                   let valid5 = false;
                   const _errs25 = errors;
                   if (
-                    !validate71(data5, {
-                      instancePath: instancePath + "/focusedProvider",
+                    !validate266(data5, {
+                      instancePath: instancePath + "/focusedActivity",
                       parentData: data,
-                      parentDataProperty: "focusedProvider",
+                      parentDataProperty: "focusedActivity",
                       rootData,
                     })
                   ) {
                     vErrors =
                       vErrors === null
-                        ? validate71.errors
-                        : vErrors.concat(validate71.errors);
+                        ? validate266.errors
+                        : vErrors.concat(validate266.errors);
                     errors = vErrors.length;
                   }
                   var _valid4 = _errs25 === errors;
@@ -351,8 +352,8 @@ function validate1088(
                     const _errs26 = errors;
                     if (data5 !== null) {
                       const err8 = {
-                        instancePath: instancePath + "/focusedProvider",
-                        schemaPath: "#/properties/focusedProvider/anyOf/1/type",
+                        instancePath: instancePath + "/focusedActivity",
+                        schemaPath: "#/properties/focusedActivity/anyOf/1/type",
                         keyword: "type",
                         params: { type: "null" },
                       };
@@ -368,8 +369,8 @@ function validate1088(
                   }
                   if (!valid5) {
                     const err9 = {
-                      instancePath: instancePath + "/focusedProvider",
-                      schemaPath: "#/properties/focusedProvider/anyOf",
+                      instancePath: instancePath + "/focusedActivity",
+                      schemaPath: "#/properties/focusedActivity/anyOf",
                       keyword: "anyOf",
                       params: {},
                     };
@@ -379,7 +380,7 @@ function validate1088(
                       vErrors.push(err9);
                     }
                     errors++;
-                    validate1088.errors = vErrors;
+                    validate1097.errors = vErrors;
                     return false;
                   } else {
                     errors = _errs24;
@@ -397,27 +398,26 @@ function validate1088(
                 }
                 if (valid0) {
                   if (
-                    data.focusedReportReviewedSha !== undefined &&
-                    func0.call(data, "focusedReportReviewedSha")
+                    data.focusedLaunch !== undefined &&
+                    func0.call(data, "focusedLaunch")
                   ) {
-                    let data6 = data.focusedReportReviewedSha;
+                    let data6 = data.focusedLaunch;
                     const _errs28 = errors;
                     const _errs29 = errors;
                     let valid6 = false;
                     const _errs30 = errors;
                     if (
-                      !validate147(data6, {
-                        instancePath:
-                          instancePath + "/focusedReportReviewedSha",
+                      !validate268(data6, {
+                        instancePath: instancePath + "/focusedLaunch",
                         parentData: data,
-                        parentDataProperty: "focusedReportReviewedSha",
+                        parentDataProperty: "focusedLaunch",
                         rootData,
                       })
                     ) {
                       vErrors =
                         vErrors === null
-                          ? validate147.errors
-                          : vErrors.concat(validate147.errors);
+                          ? validate268.errors
+                          : vErrors.concat(validate268.errors);
                       errors = vErrors.length;
                     }
                     var _valid5 = _errs30 === errors;
@@ -426,10 +426,8 @@ function validate1088(
                       const _errs31 = errors;
                       if (data6 !== null) {
                         const err10 = {
-                          instancePath:
-                            instancePath + "/focusedReportReviewedSha",
-                          schemaPath:
-                            "#/properties/focusedReportReviewedSha/anyOf/1/type",
+                          instancePath: instancePath + "/focusedLaunch",
+                          schemaPath: "#/properties/focusedLaunch/anyOf/1/type",
                           keyword: "type",
                           params: { type: "null" },
                         };
@@ -445,10 +443,8 @@ function validate1088(
                     }
                     if (!valid6) {
                       const err11 = {
-                        instancePath:
-                          instancePath + "/focusedReportReviewedSha",
-                        schemaPath:
-                          "#/properties/focusedReportReviewedSha/anyOf",
+                        instancePath: instancePath + "/focusedLaunch",
+                        schemaPath: "#/properties/focusedLaunch/anyOf",
                         keyword: "anyOf",
                         params: {},
                       };
@@ -458,7 +454,7 @@ function validate1088(
                         vErrors.push(err11);
                       }
                       errors++;
-                      validate1088.errors = vErrors;
+                      validate1097.errors = vErrors;
                       return false;
                     } else {
                       errors = _errs29;
@@ -476,26 +472,26 @@ function validate1088(
                   }
                   if (valid0) {
                     if (
-                      data.focusedRunId !== undefined &&
-                      func0.call(data, "focusedRunId")
+                      data.focusedProvider !== undefined &&
+                      func0.call(data, "focusedProvider")
                     ) {
-                      let data7 = data.focusedRunId;
+                      let data7 = data.focusedProvider;
                       const _errs33 = errors;
                       const _errs34 = errors;
                       let valid7 = false;
                       const _errs35 = errors;
                       if (
-                        !validate25(data7, {
-                          instancePath: instancePath + "/focusedRunId",
+                        !validate71(data7, {
+                          instancePath: instancePath + "/focusedProvider",
                           parentData: data,
-                          parentDataProperty: "focusedRunId",
+                          parentDataProperty: "focusedProvider",
                           rootData,
                         })
                       ) {
                         vErrors =
                           vErrors === null
-                            ? validate25.errors
-                            : vErrors.concat(validate25.errors);
+                            ? validate71.errors
+                            : vErrors.concat(validate71.errors);
                         errors = vErrors.length;
                       }
                       var _valid6 = _errs35 === errors;
@@ -504,9 +500,9 @@ function validate1088(
                         const _errs36 = errors;
                         if (data7 !== null) {
                           const err12 = {
-                            instancePath: instancePath + "/focusedRunId",
+                            instancePath: instancePath + "/focusedProvider",
                             schemaPath:
-                              "#/properties/focusedRunId/anyOf/1/type",
+                              "#/properties/focusedProvider/anyOf/1/type",
                             keyword: "type",
                             params: { type: "null" },
                           };
@@ -522,8 +518,8 @@ function validate1088(
                       }
                       if (!valid7) {
                         const err13 = {
-                          instancePath: instancePath + "/focusedRunId",
-                          schemaPath: "#/properties/focusedRunId/anyOf",
+                          instancePath: instancePath + "/focusedProvider",
+                          schemaPath: "#/properties/focusedProvider/anyOf",
                           keyword: "anyOf",
                           params: {},
                         };
@@ -533,7 +529,7 @@ function validate1088(
                           vErrors.push(err13);
                         }
                         errors++;
-                        validate1088.errors = vErrors;
+                        validate1097.errors = vErrors;
                         return false;
                       } else {
                         errors = _errs34;
@@ -557,7 +553,7 @@ function validate1088(
         }
       }
     } else {
-      validate1088.errors = [
+      validate1097.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -568,7 +564,7 @@ function validate1088(
       return false;
     }
   }
-  validate1088.errors = vErrors;
+  validate1097.errors = vErrors;
   return errors === 0;
 }
-export { validate1088 };
+export { validate1097 };

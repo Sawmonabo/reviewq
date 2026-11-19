@@ -15,45 +15,103 @@ export function DiscussionThread({
   readonly thread: PatchDiscussion;
   readonly outside?: boolean;
 }) {
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(() => thread.resolution !== "resolved");
   const first = thread.notes[0];
   const source = safeUrl(thread.webUrl);
   const line = thread.anchor?.newLine ?? thread.anchor?.oldLine;
+  const path = thread.anchor?.newLine == null ? thread.anchor?.oldPath : thread.anchor.newPath;
   if (!first) return null;
   const status = { open: "Open", resolved: "Resolved", comment: "Comment", unknown: "Discussion" }[
     thread.resolution
   ];
+  const subject =
+    thread.notes
+      .find((note) => note.body.trim())
+      ?.body.trim()
+      .split("\n", 1)[0]
+      ?.trim()
+      .match(/^.{1,140}/u)?.[0] ?? "Discussion";
   return (
-    <details className="patch-discussion" onToggle={(event) => setOpen(event.currentTarget.open)}>
+    <details
+      className="patch-discussion"
+      open={open}
+      onToggle={(event) => setOpen(event.currentTarget.open)}
+    >
       <summary>
-        <strong>{first.author}</strong> · {thread.outdated ? "Earlier revision" : status}
-        {outside && " · Outside the displayed diff"}
-        {thread.notes.length > 1 && ` · ${thread.notes.length} notes`}
+        <span className="discussion-heading">
+          <span
+            className="row-tag"
+            data-review-kind={
+              thread.resolution === "open"
+                ? "thread_reply"
+                : thread.resolution === "resolved"
+                  ? "reviewed"
+                  : undefined
+            }
+          >
+            {status}
+          </span>
+          <strong className="discussion-subject">{subject}</strong>
+          {!open && thread.outdated && <small>Earlier revision</small>}
+          {!open && !thread.outdated && outside && <small>Outside the displayed diff</small>}
+          {thread.notes.length > 1 && <small>{thread.notes.length} comments</small>}
+        </span>
       </summary>
-      {source && (
-        <a target="_blank" rel="noreferrer" href={source}>
-          {thread.anchor ? `${thread.anchor.newPath}${line ? `:${line}` : ""}` : "Open in GitLab"} ↗
-        </a>
-      )}
       {open && (
-        <Suspense fallback={<p>{first.body}</p>}>
-          {thread.notes.map((note) => (
-            <article className="discussion-note stack" key={note.noteId}>
-              <div className="spread">
-                <strong>
-                  {note.author}
-                  {note.ours ? " · You or a configured reviewer" : ""}
-                </strong>
-                {note.createdAt && (
-                  <time className="meta" dateTime={note.createdAt}>
-                    {formatTime(note.createdAt)}
-                  </time>
-                )}
-              </div>
-              <Markdown source={note.body} base={source} />
-            </article>
-          ))}
-        </Suspense>
+        <>
+          {(path || thread.outdated || outside) && (
+            <div className="discussion-location">
+              <strong>
+                {thread.outdated
+                  ? "Earlier revision"
+                  : outside
+                    ? "Outside the displayed diff"
+                    : "Code discussion"}
+              </strong>
+              {path && (
+                <code>
+                  {path}
+                  {line !== null && line !== undefined ? `:${line}` : ""}
+                </code>
+              )}
+            </div>
+          )}
+          <Suspense fallback={<p>{first.body}</p>}>
+            {thread.notes.map((note) => {
+              const href = safeUrl(note.webUrl);
+              const stamp = note.createdAt ? (
+                <time dateTime={note.createdAt}>{formatTime(note.createdAt)}</time>
+              ) : (
+                "Open note in GitLab"
+              );
+              return (
+                <article className="discussion-note stack" key={note.noteId}>
+                  <header className="discussion-note-meta">
+                    <span className="avatar" aria-hidden="true">
+                      {note.author.slice(0, 2).toUpperCase()}
+                    </span>
+                    <strong>{note.author}</strong>
+                    {note.ours && <span className="meta">Configured reviewer</span>}
+                    {href ? (
+                      <a
+                        className="meta"
+                        target="_blank"
+                        rel="noreferrer"
+                        href={href}
+                        title="Open note in GitLab"
+                      >
+                        {stamp} ↗
+                      </a>
+                    ) : (
+                      note.createdAt && <span className="meta">{stamp}</span>
+                    )}
+                  </header>
+                  <Markdown source={note.body} base={source} />
+                </article>
+              );
+            })}
+          </Suspense>
+        </>
       )}
     </details>
   );

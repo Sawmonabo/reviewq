@@ -5,7 +5,7 @@ import { readArchive, readQueue, readQueueSync, readRuns } from "../../api/works
 import { Icon } from "../../components/Icon";
 import { Pagination } from "../../components/Pagination";
 import { Empty, Loading, Notice } from "../../components/PanelState";
-import { providerLabel, ReviewBadges } from "../../components/ReviewRow";
+import { providerLabel, ReviewBadges, ReviewEvidenceBadges } from "../../components/ReviewRow";
 import { localDateRange, presets } from "../../features/queue/archive-filters";
 import type { DatePreset } from "../../features/queue/archive-filters";
 import type { Launch, LaunchTarget, OpenReview } from "../../features/queue/types";
@@ -518,6 +518,7 @@ function RunRow({
             {row.runIds.length} {row.runIds.length === 1 ? "run" : "runs"}
           </span>
           <ReviewBadges review={row} />
+          <ReviewEvidenceBadges review={row} />
           {row.runStage === "working" && row.hasAgentQuestions && (
             <span className="row-tag" data-review-kind="agent_input">
               Question pending
@@ -535,6 +536,15 @@ function RunRow({
             ? row.title
             : `${row.projectPath} !${row.iid}`}
         </p>
+        {row.registeredProviders.length > 1 && (
+          <div className="actions" aria-label="Registered lead providers">
+            {row.registeredProviders.map((provider) => (
+              <span className="provider-pill" key={provider}>
+                {providerLabel(provider)}
+              </span>
+            ))}
+          </div>
+        )}
         <div className="run-card-footer">
           <span>{metadata.join(" · ")}</span>
           <span>

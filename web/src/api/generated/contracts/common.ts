@@ -60,6 +60,8 @@ export type Coverage = "full_mr" | "selected_threads";
 
 export type SessionKeyDto = string;
 
+export type FocusedActivity = "idle" | "working" | "blocked" | "failed";
+
 export type MergeRequestIidDto = string;
 
 export type MergeRequestStatus = "open" | "closed" | "merged";

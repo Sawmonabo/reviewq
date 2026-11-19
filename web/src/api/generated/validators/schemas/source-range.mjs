@@ -2,7 +2,7 @@
 import { func0 } from "../runtime.mjs";
 import { validate127 } from "./safe-count-dto.mjs";
 import { validate134 } from "./report-hash-dto.mjs";
-function validate929(
+function validate938(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -19,7 +19,7 @@ function validate929(
         ((data.sha256 === undefined || !func0.call(data, "sha256")) &&
           (missing0 = "sha256"))
       ) {
-        validate929.errors = [
+        validate938.errors = [
           {
             instancePath,
             schemaPath: "#/required",
@@ -95,7 +95,7 @@ function validate929(
         }
       }
     } else {
-      validate929.errors = [
+      validate938.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -106,7 +106,7 @@ function validate929(
       return false;
     }
   }
-  validate929.errors = vErrors;
+  validate938.errors = vErrors;
   return errors === 0;
 }
-export { validate929 };
+export { validate938 };

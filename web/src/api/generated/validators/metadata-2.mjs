@@ -136,6 +136,11 @@ const schema92 = {
 const schema99 = { enum: ["full_mr", "selected_threads"], type: "string" };
 const schema100 = { enum: ["decision", "report", "followup"], type: "string" };
 const schema101 = {
+  description: "Most recent verified phase on the focused native session.",
+  enum: ["idle", "working", "blocked", "failed"],
+  type: "string",
+};
+const schema102 = {
   properties: {
     observedEffort: { type: ["string", "null"] },
     observedModel: { type: ["string", "null"] },
@@ -150,30 +155,46 @@ const schema101 = {
   ],
   type: "object",
 };
-const schema103 = { enum: ["verified", "partial", "unknown"], type: "string" };
-const schema104 = { enum: ["open", "closed", "merged"], type: "string" };
-const schema105 = {
+const schema104 = {
   type: "object",
   properties: {
+    membership: { $ref: "#/definitions/ArchiveMembership" },
+    mrState: { $ref: "#/definitions/MergeRequestStatus" },
     ourComments: { $ref: "#/definitions/SafeCountDto" },
     own: { type: "boolean" },
     personalApproval: { type: ["boolean", "null"] },
     projectId: { $ref: "#/definitions/MergeRequestIidDto" },
     projectPath: { type: "string" },
     queueState: { $ref: "#/definitions/QueueStatus" },
-    reasonKind: { type: ["string", "null"] },
-    registeredLeadCount: { $ref: "#/definitions/SafeCountDto" },
   },
 };
-const schema106 = {
+const schema105 = { enum: ["verified", "partial", "unknown"], type: "string" };
+const schema106 = { enum: ["open", "closed", "merged"], type: "string" };
+const schema107 = {
   enum: ["needs_review", "waiting_author", "followup", "reviewed", "archive"],
   type: "string",
 };
 const schema108 = {
+  type: "object",
+  properties: {
+    reasonKind: { type: ["string", "null"] },
+    registeredLeadCount: { $ref: "#/definitions/SafeCountDto" },
+    registeredProviders: {
+      items: { $ref: "#/definitions/HostProviderDto" },
+      type: "array",
+    },
+    reviewId: { $ref: "#/definitions/ReviewIdDto" },
+    runIds: { items: { $ref: "#/definitions/CheckpointIdDto" }, type: "array" },
+    runStage: { anyOf: [{ $ref: "#/definitions/RunStage" }, { type: "null" }] },
+    sourceSha: { $ref: "#/definitions/GitShaDto" },
+    sprintPairs: { items: { $ref: "#/definitions/SprintPair" }, type: "array" },
+  },
+};
+const schema109 = {
   enum: ["needs_input", "working", "waiting", "archived"],
   type: "string",
 };
-const schema112 = {
+const schema113 = {
   properties: {
     episodeId: { $ref: "#/definitions/CheckpointIdDto" },
     failedTurnId: { $ref: "#/definitions/CheckpointIdDto" },
@@ -193,11 +214,11 @@ const schema112 = {
   title: "CancelRecoveryResponseEpisode",
   type: "object",
 };
-const schema113 = {
+const schema114 = {
   enum: ["usage_limit", "model_capacity", "access"],
   type: "string",
 };
-const schema114 = {
+const schema115 = {
   enum: [
     "disabled",
     "waiting",
@@ -224,12 +245,14 @@ export {
   schema99,
   schema100,
   schema101,
-  schema103,
+  schema102,
   schema104,
   schema105,
   schema106,
+  schema107,
   schema108,
-  schema112,
+  schema109,
   schema113,
   schema114,
+  schema115,
 };

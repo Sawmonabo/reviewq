@@ -2,9 +2,9 @@
 import { func0 } from "../runtime.mjs";
 import { validate25 } from "./checkpoint-id-dto.mjs";
 import { validate71 } from "./host-provider-dto.mjs";
-import { schema272 } from "../metadata-6.mjs";
+import { schema273 } from "../metadata-6.mjs";
 import { validate114 } from "./review-id-dto.mjs";
-function validate888(
+function validate897(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -34,7 +34,7 @@ function validate888(
           !func0.call(data, "reportGuidance")) &&
           (missing0 = "reportGuidance"))
       ) {
-        validate888.errors = [
+        validate897.errors = [
           {
             instancePath,
             schemaPath: "#/required",
@@ -47,7 +47,7 @@ function validate888(
         if (data.cwd !== undefined && func0.call(data, "cwd")) {
           const _errs1 = errors;
           if (typeof data.cwd !== "string") {
-            validate888.errors = [
+            validate897.errors = [
               {
                 instancePath: instancePath + "/cwd",
                 schemaPath: "#/properties/cwd/type",
@@ -134,7 +134,7 @@ function validate888(
                 ) {
                   const _errs6 = errors;
                   if (typeof data.reportGuidance !== "string") {
-                    validate888.errors = [
+                    validate897.errors = [
                       {
                         instancePath: instancePath + "/reportGuidance",
                         schemaPath: "#/properties/reportGuidance/type",
@@ -156,13 +156,13 @@ function validate888(
                     let data5 = data.reviewCheckout;
                     const _errs8 = errors;
                     if (typeof data5 !== "string" && data5 !== null) {
-                      validate888.errors = [
+                      validate897.errors = [
                         {
                           instancePath: instancePath + "/reviewCheckout",
                           schemaPath: "#/properties/reviewCheckout/type",
                           keyword: "type",
                           params: {
-                            type: schema272.properties.reviewCheckout.type,
+                            type: schema273.properties.reviewCheckout.type,
                           },
                         },
                       ];
@@ -229,7 +229,7 @@ function validate888(
         }
       }
     } else {
-      validate888.errors = [
+      validate897.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -240,7 +240,7 @@ function validate888(
       return false;
     }
   }
-  validate888.errors = vErrors;
+  validate897.errors = vErrors;
   return errors === 0;
 }
-export { validate888 };
+export { validate897 };
