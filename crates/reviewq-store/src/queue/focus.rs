@@ -30,7 +30,17 @@ pub(super) fn hydrate<'a>(
         .collect::<Vec<_>>();
     let selected = serde_json::to_string(&keys).map_err(|_| AppError::Internal)?;
     let mut statement = db.prepare_cached(
-        "SELECT p.value->>0,s.provider,l.run_id IS NOT NULL,l.observed_model,l.observed_effort,
+        "SELECT p.value->>0,s.provider,
+                (l.run_id IS NOT NULL OR s.native_model IS NOT NULL OR s.native_effort IS NOT NULL
+                    OR c.model IS NOT NULL OR c.effort IS NOT NULL),
+                CASE WHEN s.native_model IS NOT NULL OR s.native_effort IS NOT NULL
+                       THEN s.native_model
+                     WHEN c.model IS NOT NULL OR c.effort IS NOT NULL THEN c.model
+                     ELSE l.observed_model END,
+                CASE WHEN s.native_model IS NOT NULL OR s.native_effort IS NOT NULL
+                       THEN s.native_effort
+                     WHEN c.model IS NOT NULL OR c.effort IS NOT NULL THEN c.effort
+                     ELSE l.observed_effort END,
                 l.requested_model,l.requested_effort,v.reviewed_sha,
                 (SELECT a.host_activity FROM review_active_sessions a WHERE a.session_key=s.session_key),
                 (SELECT json_group_array(provider) FROM (
@@ -44,9 +54,10 @@ pub(super) fn hydrate<'a>(
          FROM json_each(?1) p
          LEFT JOIN runs r ON r.run_id=(p.value->>2) AND r.review_id=(p.value->>1)
          LEFT JOIN sessions s ON s.session_key=(p.value->>3) AND s.run_id=r.run_id
+         LEFT JOIN claude_companions c ON c.session_key=s.session_key
          LEFT JOIN sessions lead ON lead.session_key=r.lead_session_key AND lead.run_id=r.run_id
          LEFT JOIN launch_attempts l
-           ON l.run_id=r.run_id AND l.review_id=r.review_id AND l.session_key=r.lead_session_key
+           ON l.run_id=r.run_id AND l.review_id=r.review_id AND l.session_key=s.session_key
          LEFT JOIN report_heads h ON h.run_id=r.run_id
          LEFT JOIN report_versions v ON v.run_id=h.run_id AND v.receipt_id=h.receipt_id",
     )?;

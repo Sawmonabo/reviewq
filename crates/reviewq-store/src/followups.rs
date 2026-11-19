@@ -8,9 +8,9 @@ pub(crate) mod work;
 use reviewq_app::access::{Actor, AppError, AppFuture};
 use reviewq_app::events::Snapshot;
 use reviewq_app::followups::{
-    Assessment, AssessmentPage, AssessmentPosition, Batch, Enrollment, FollowupStore,
-    MAX_ASSESSMENTS, MAX_RESULTS, MAX_SELECTED_NOTES, Monitor, Preferences, ResultPage,
-    ResultPosition, ResultSummary, SelectedThread,
+    Assessment, AssessmentPage, AssessmentPosition, AssessmentSelection, Batch, Enrollment,
+    FollowupStore, MAX_ASSESSMENTS, MAX_RESULTS, MAX_SELECTED_NOTES, Monitor, Preferences,
+    ResultPage, ResultPosition, ResultSummary, SelectedThread,
 };
 use reviewq_domain::identity::{ReviewId, Revision};
 use rusqlite::{Connection, OptionalExtension, Row, params};
@@ -83,7 +83,7 @@ impl FollowupStore for SqliteStore {
         &self,
         actor: Actor,
         review: ReviewId,
-        through: Option<String>,
+        selection: AssessmentSelection,
         after: Option<AssessmentPosition>,
         limit: u16,
     ) -> AppFuture<'_, Snapshot<AssessmentPage>> {
@@ -93,7 +93,10 @@ impl FollowupStore for SqliteStore {
             }
             self.read(move |db| {
                 authorize(db, &actor, &review)?;
-                snapshot(db, assessments(db, &actor, &review, through, after, limit)?)
+                snapshot(
+                    db,
+                    assessments(db, &actor, &review, selection, after, limit)?,
+                )
             })
             .await
             .map_err(StoreError::app)
@@ -258,10 +261,14 @@ fn assessments(
     db: &Connection,
     actor: &Actor,
     review: &ReviewId,
-    through: Option<String>,
+    selection: AssessmentSelection,
     after: Option<AssessmentPosition>,
     limit: u16,
 ) -> Result<AssessmentPage, StoreError> {
+    let (through, exact) = match selection {
+        AssessmentSelection::Unviewed { through } => (through, false),
+        AssessmentSelection::Batch(id) => (Some(id), true),
+    };
     let pinned = match (through, &after) {
         (Some(through), Some(after)) if through != after.through_batch_id => {
             return Err(AppError::CursorExpired.into());
@@ -301,10 +308,10 @@ fn assessments(
                  ORDER BY finding_id LIMIT 50
              ) f)
          FROM followup_results r JOIN followup_assessments a USING(review_id, batch_id)
-         WHERE r.review_id=?1 AND r.ordinal<=?2 AND
+         WHERE r.review_id=?1 AND r.ordinal BETWEEN CASE WHEN ?7 THEN ?2 ELSE 0 END AND ?2 AND
             (r.ordinal>?3 OR (r.ordinal=?3 AND a.discussion_id>?4))
-            AND NOT EXISTS (SELECT 1 FROM followup_result_reads v
-                WHERE v.viewer_key=?5 AND v.review_id=r.review_id AND v.batch_id=r.batch_id)
+            AND (?7 OR NOT EXISTS (SELECT 1 FROM followup_result_reads v
+                WHERE v.viewer_key=?5 AND v.review_id=r.review_id AND v.batch_id=r.batch_id))
          ORDER BY r.ordinal, a.discussion_id LIMIT ?6"
     )?;
     let (ordinal, id) = after.as_ref().map_or((0, ""), |position| {
@@ -317,6 +324,7 @@ fn assessments(
         id,
         actor_key(actor).as_slice(),
         limit + 1,
+        exact,
     ])?;
     let mut items = Vec::with_capacity(usize::from(limit));
     let mut has_more = false;

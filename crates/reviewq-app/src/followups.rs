@@ -121,6 +121,11 @@ pub struct AssessmentPosition {
     pub discussion_id: String,
 }
 
+pub enum AssessmentSelection {
+    Unviewed { through: Option<String> },
+    Batch(String),
+}
+
 pub struct AssessmentPage {
     pub items: Vec<Assessment>,
     pub through_batch_id: Option<String>,
@@ -142,7 +147,7 @@ pub trait FollowupStore: Send + Sync {
         &self,
         actor: Actor,
         review: ReviewId,
-        through: Option<String>,
+        selection: AssessmentSelection,
         after: Option<AssessmentPosition>,
         limit: u16,
     ) -> AppFuture<'_, Snapshot<AssessmentPage>>;

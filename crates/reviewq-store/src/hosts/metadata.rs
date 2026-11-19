@@ -49,8 +49,9 @@ pub(crate) fn record(
             SELECT CASE WHEN ?7 THEN ?2 ELSE coalesce(?2,native_name) END AS name,
                 CASE WHEN ?7 THEN ?3 ELSE coalesce(?3,native_status) END AS status,
                 CASE WHEN ?7 THEN ?4 ELSE coalesce(?4,native_started_at_ms) END AS started_at_ms,
-                CASE WHEN ?7 THEN ?5 ELSE coalesce(?5,native_model) END AS model,
-                CASE WHEN ?7 THEN ?6 ELSE coalesce(?6,native_effort) END AS effort
+                coalesce(?5,native_model) AS model,
+                CASE WHEN ?5 IS NOT NULL AND ?5 IS NOT native_model THEN ?6
+                    ELSE coalesce(?6,native_effort) END AS effort
             FROM sessions WHERE session_key=?1
          ) UPDATE sessions
             SET native_name=observed.name, native_status=observed.status,
