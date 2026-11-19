@@ -104,7 +104,8 @@ pub(super) fn complete(
         if scope.report_receipt_id != current.receipt
             || scope.report_hash != current.hash
             || scope.disposition_version != current.disposition_version as u64
-            || (!matches!(work.declaration, Declaration::NeedsInput { .. })
+            || ((!matches!(work.declaration, Declaration::NeedsInput { .. })
+                || !work.declaration.assessments().is_empty())
                 && !batch::assessments_match(scope, work.declaration.assessments()))
         {
             return reject(

@@ -208,7 +208,6 @@ pub(crate) async fn serve(profile: PathBuf, options: Serve) -> Result<(), Failur
     };
     let workflow = Arc::new(Workflows::new(codex));
     let report_files = Arc::new(RegisteredReportFiles);
-    let sends_allowed = !options.validation && host.is_some();
     let claude_home = match options.claude_home {
         Some(home) => Some(home),
         None if !options.validation => claude_home().ok().filter(|path| path.is_dir()),
@@ -219,6 +218,7 @@ pub(crate) async fn serve(profile: PathBuf, options: Serve) -> Result<(), Failur
         .map(Claude::new)
         .transpose()?
         .map(|claude| Arc::new(claude) as Arc<dyn ClaudeCompanion>);
+    let sends_allowed = !options.validation && (host.is_some() || claude.is_some());
     let claude_executable = options.claude_bin.or_else(|| {
         default_executable(
             "claude",

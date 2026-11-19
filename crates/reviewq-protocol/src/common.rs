@@ -11,7 +11,7 @@ pub struct UtcTimestampDto(
 );
 
 /// The resource and event head from the same authorized snapshot.
-#[derive(Debug, Serialize)]
+#[derive(Debug, serde::Deserialize, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct Success<T> {
     pub data: T,

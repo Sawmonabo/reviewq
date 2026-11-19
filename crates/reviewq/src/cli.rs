@@ -5,6 +5,10 @@ use reviewq_domain::identity::ProjectId;
 
 use crate::{checkout_setup, native_client, runtime};
 
+mod action;
+mod report;
+mod workflow;
+
 type Failure = Box<dyn std::error::Error + Send + Sync>;
 
 #[derive(Parser)]
@@ -31,6 +35,20 @@ enum Command {
     Refresh,
     /// Link the current Codex terminal to an exact review without opening a browser.
     Link { target: String },
+    /// Deliver a report from the current registered Codex tool call.
+    Report {
+        #[command(flatten)]
+        scope: workflow::Profile,
+        #[command(subcommand)]
+        command: report::Report,
+    },
+    /// Record or reconcile publication intent for the current registered lead.
+    Action {
+        #[command(flatten)]
+        scope: workflow::Profile,
+        #[command(subcommand)]
+        command: action::Action,
+    },
     /// Manage the authorization of a local Git checkout.
     #[command(subcommand)]
     Checkout(Checkout),
@@ -141,6 +159,12 @@ async fn execute(options: CommandLine) -> Result<(), Failure> {
         Some(Command::Refresh) => native_client::refresh(&runtime::profile(options.profile)?).await,
         Some(Command::Link { target }) => {
             native_client::link(&runtime::profile(options.profile)?, target).await
+        }
+        Some(Command::Report { scope, command }) => {
+            report::execute(options.profile, scope, command).await
+        }
+        Some(Command::Action { scope, command }) => {
+            action::execute(options.profile, scope, command).await
         }
         Some(Command::Checkout(Checkout::Setup {
             project,

@@ -262,7 +262,13 @@ fn declaration(input: dto::Handoff, provider: HostProvider) -> Result<Declaratio
             },
             source: project_source(source, provider)?,
         },
-        dto::Handoff::NeedsInput { reason } => Declaration::NeedsInput { reason },
+        dto::Handoff::NeedsInput {
+            reason,
+            assessments,
+        } => Declaration::NeedsInput {
+            reason,
+            assessments: project_assessments(assessments)?,
+        },
     })
 }
 

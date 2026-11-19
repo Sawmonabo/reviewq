@@ -85,7 +85,7 @@ pub struct Action {
     pub reason: Option<String>,
 }
 
-#[derive(Debug, serde::Deserialize)]
+#[derive(Debug, serde::Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct DeclareCommand {
     pub session_key: crate::SessionKeyDto,
@@ -111,7 +111,7 @@ pub struct CommentTarget {
     pub discussion_id: Option<ResourceIdDto>,
 }
 
-#[derive(Debug, serde::Deserialize)]
+#[derive(Debug, serde::Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ReconcileCommand {
     pub session_key: crate::SessionKeyDto,

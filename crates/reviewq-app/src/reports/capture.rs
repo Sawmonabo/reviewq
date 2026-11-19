@@ -60,6 +60,7 @@ pub enum Declaration {
     },
     NeedsInput {
         reason: String,
+        assessments: Vec<Assessment>,
     },
 }
 
@@ -76,8 +77,9 @@ impl Declaration {
 
     pub fn assessments(&self) -> &[Assessment] {
         match self {
-            Self::Final { assessments, .. } | Self::Unchanged { assessments, .. } => assessments,
-            Self::NeedsInput { .. } => &[],
+            Self::Final { assessments, .. }
+            | Self::Unchanged { assessments, .. }
+            | Self::NeedsInput { assessments, .. } => assessments,
         }
     }
 
@@ -125,7 +127,7 @@ impl Declaration {
                 revision: RevisionEvidence::Unknown(reason),
                 ..
             }
-            | Self::NeedsInput { reason } => Some(reason),
+            | Self::NeedsInput { reason, .. } => Some(reason),
             _ => None,
         };
         if reason.is_some_and(|reason| reason.trim().is_empty() || reason.len() > 1024) {

@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use super::ReportHashDto;
 use crate::{GitShaDto, HistoryTurnIdDto, ResourceIdDto, SessionKeyDto};
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct NativeReportAddress {
     pub session_key: SessionKeyDto,
@@ -16,7 +16,7 @@ pub enum HandoffCommand {
     Companion(CompanionCommand),
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct CodexCommand {
     pub session_key: SessionKeyDto,
@@ -73,6 +73,8 @@ pub enum Handoff {
     },
     NeedsInput {
         reason: String,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        assessments: Vec<Assessment>,
     },
 }
 
@@ -183,7 +185,7 @@ pub struct AcceptedReference {
     pub sha256: ReportHashDto,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AcceptedReport {
     pub receipt_id: ResourceIdDto,
@@ -191,7 +193,7 @@ pub struct AcceptedReport {
     pub source: Option<ReportSource>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum HandoffState {
     PendingCompletion,
@@ -199,7 +201,7 @@ pub enum HandoffState {
     Failed,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct HandoffReceipt {
     pub receipt_id: ResourceIdDto,

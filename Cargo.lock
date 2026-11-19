@@ -1343,6 +1343,7 @@ dependencies = [
  "reqwest",
  "reviewq-app",
  "reviewq-domain",
+ "reviewq-protocol",
  "reviewq-providers",
  "reviewq-store",
  "reviewq-transport",

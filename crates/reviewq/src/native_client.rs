@@ -123,7 +123,7 @@ pub(crate) async fn claude(
     Ok(())
 }
 
-async fn bridge(
+pub(crate) async fn bridge(
     client: &Client,
     endpoint: &ServiceEndpoint,
     path: &str,
@@ -283,7 +283,10 @@ pub(crate) fn verify_ready(endpoint: &ServiceEndpoint, bytes: &[u8]) -> Result<(
     Ok(())
 }
 
-async fn bounded(mut response: reqwest::Response, max: usize) -> Result<Vec<u8>, Failure> {
+pub(crate) async fn bounded(
+    mut response: reqwest::Response,
+    max: usize,
+) -> Result<Vec<u8>, Failure> {
     let mut bytes = Vec::new();
     while let Some(chunk) = response.chunk().await? {
         if chunk.len() > max - bytes.len() {

@@ -233,6 +233,10 @@ pub fn router(
             post(terminal::open),
         )
         .route("/native/codex/link", post(hosts::link))
+        .route(
+            "/native/codex/registration",
+            post(hosts::codex_registration),
+        )
         .route("/native/claude/link", post(hosts::claude_link))
         .merge(hosts::claude::routes())
         .route(

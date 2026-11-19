@@ -24,6 +24,13 @@ struct LinkCommand {
     target: String,
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct CodexAddress {
+    protocol_version: u16,
+    thread_id: String,
+}
+
 #[derive(Serialize)]
 struct AmbiguousTarget {
     #[serde(flatten)]
@@ -54,6 +61,30 @@ pub(super) async fn link(
         )
         .await?,
     )
+}
+
+pub(super) async fn codex_registration(
+    State(entry): State<Arc<Entry>>,
+    headers: HeaderMap,
+    ApiBytes(bytes): ApiBytes,
+) -> Result<Json<Success<ReviewSelection>>, ApiError> {
+    let input: CodexAddress = bridge_command(&entry, &headers, &bytes, 4096)?;
+    protocol(input.protocol_version)?;
+    let host = entry.host.as_deref().ok_or(AppError::Unavailable)?;
+    let proof = host
+        .prove(
+            input
+                .thread_id
+                .parse()
+                .map_err(|_| AppError::InvalidRequest)?,
+        )
+        .await?;
+    let registered = entry.store.lookup_native_lead(proof.binding).await?;
+    let lead = registered.value.ok_or(AppError::NotFound)?;
+    Ok(Json(super::pages::success(
+        selection(&lead)?,
+        registered.cursor,
+    )?))
 }
 
 #[derive(Deserialize)]

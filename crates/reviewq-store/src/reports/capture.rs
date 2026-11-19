@@ -430,7 +430,7 @@ fn stage(
             None,
             None,
         ),
-        Declaration::NeedsInput { reason } => {
+        Declaration::NeedsInput { reason, .. } => {
             ("needs_input", None, None, None, None, Some(reason), None)
         }
     };
@@ -578,6 +578,7 @@ fn declaration(row: &Row<'_>) -> Result<Declaration, StoreError> {
         },
         "needs_input" => Declaration::NeedsInput {
             reason: row.get(17)?,
+            assessments,
         },
         _ => return Err(AppError::Internal.into()),
     })

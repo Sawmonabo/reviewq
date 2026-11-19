@@ -319,13 +319,25 @@ fn reviewq_command(command: &str, tool: WorkflowTool) -> bool {
         }
         _ => command,
     };
-    if inner.contains(['\n', '\r', ';', '&', '|', '`', '$', '<', '>']) {
+    if inner.contains(['\n', '\r', ';', '&', '|', '`', '$', '<']) {
         return false;
     }
     let Some(arguments) = shlex::split(inner) else {
         return false;
     };
-    let [executable, category, operation, ..] = arguments.as_slice() else {
+    let argv = if inner.contains('>') {
+        match arguments.as_slice() {
+            [arguments @ .., redirect, target]
+                if redirect == ">" && !target.is_empty() && inner.matches('>').count() == 1 =>
+            {
+                arguments
+            }
+            _ => return false,
+        }
+    } else {
+        &arguments
+    };
+    let [executable, category, operation, ..] = argv else {
         return false;
     };
     if Path::new(executable)
@@ -336,8 +348,13 @@ fn reviewq_command(command: &str, tool: WorkflowTool) -> bool {
         return false;
     }
     match tool {
-        WorkflowTool::Report => category == "report" && operation == "complete",
-        WorkflowTool::Action => category == "action" && operation == "declare",
+        WorkflowTool::Report => {
+            category == "report"
+                && matches!(operation.as_str(), "complete" | "unchanged" | "needs-input")
+        }
+        WorkflowTool::Action => {
+            category == "action" && matches!(operation.as_str(), "declare" | "reconcile")
+        }
     }
 }
 
