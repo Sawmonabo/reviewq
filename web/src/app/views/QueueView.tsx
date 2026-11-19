@@ -5,7 +5,7 @@ import { loadSprints, readQueue, readQueueSync, refreshQueue } from "../../api/w
 import { FilterSelect } from "../../components/FilterSelect";
 import { Icon } from "../../components/Icon";
 import { Pagination } from "../../components/Pagination";
-import { Empty, Loading, Notice } from "../../components/PanelState";
+import { Loading, Notice } from "../../components/PanelState";
 import { ReviewRow, UnmatchedReviewRow } from "../../components/ReviewRow";
 import { useResource } from "../../hooks/useResource";
 import { describeError, formatActivityTime, formatTime } from "../../lib/presentation";
@@ -76,9 +76,26 @@ export function QueueView({
   const list = useResource(
     `queue:${revision}:${JSON.stringify(params)}`,
     async (signal) => {
-      const result = await readQueue(params, signal);
+      const baseline =
+        params.hideReviewed || params.hideInProgress
+          ? readQueue(
+              {
+                ...params,
+                hideReviewed: false,
+                hideInProgress: false,
+                cursor: undefined,
+                limit: 1,
+              },
+              signal,
+            ).catch(() => undefined)
+          : undefined;
+      const [result, unhidden] = await Promise.all([readQueue(params, signal), baseline]);
+      const hiddenCount =
+        unhidden?.cursor === result.cursor
+          ? Math.max(0, unhidden.data.totalMrs - result.data.totalMrs)
+          : undefined;
       if (!signal.aborted) setLastFacets(result.data.facets);
-      return result;
+      return { ...result, data: { ...result.data, hiddenCount } };
     },
     [{ kind: "queue" }, { kind: "settings" }],
   );
@@ -168,6 +185,25 @@ export function QueueView({
           />
         ) : undefined,
       )}
+      {currentSync?.error && (
+        <Notice>
+          {currentSync.error.message}
+          {currentSync.lastSuccessAt &&
+            ` · Last confirmed ${formatActivityTime(currentSync.lastSuccessAt)}`}
+        </Notice>
+      )}
+      {currentSync && currentSync.mode !== "connected" && (
+        <div className="notice queue-setup" role="status">
+          <span>
+            {currentSync.mode === "disconnected"
+              ? "Review checks are paused. Reconnect in Settings."
+              : "Connect GitLab and Jira to choose your team’s reviews."}
+          </span>
+          <button type="button" onClick={onSettings}>
+            Open settings
+          </button>
+        </div>
+      )}
       <div className="queue-filters" aria-label="Review filters">
         <ScopeFilters
           scope={scope}
@@ -254,6 +290,11 @@ export function QueueView({
           aria-label="Search reviews or tickets"
           onChange={(event) => update({ ...filters, q: event.currentTarget.value })}
         />
+        {page?.hiddenCount !== undefined && (
+          <span className="queue-hidden-count" role="status">
+            {page.hiddenCount} {page.hiddenCount === 1 ? "MR" : "MRs"} hidden
+          </span>
+        )}
       </div>
       {loadingSprint && (
         <p className="meta" role="status">
@@ -262,13 +303,6 @@ export function QueueView({
       )}
       {notice && <Notice>{notice}</Notice>}
       {settingsRead.error && <Notice retry={settingsRead.retry}>{settingsRead.error}</Notice>}
-      {currentSync?.error && (
-        <Notice>
-          {currentSync.error.message}
-          {currentSync.lastSuccessAt &&
-            ` · Last confirmed ${formatTime(currentSync.lastSuccessAt)}`}
-        </Notice>
-      )}
       {list.error && (
         <Notice retry={list.retry}>
           {list.error}
@@ -280,20 +314,6 @@ export function QueueView({
         </Notice>
       )}
       {list.pending && <Loading label="Loading review queue…" />}
-      {page && !page.items.length && currentSync?.mode !== "connected" && (
-        <Empty
-          title={
-            currentSync?.mode === "disconnected"
-              ? "Source connections paused"
-              : "Connect your workspace"
-          }
-        >
-          <p>Configure GitLab, Jira and the team scope to discover reviews.</p>
-          <button className="primary" type="button" onClick={onSettings}>
-            Open settings
-          </button>
-        </Empty>
-      )}
       {page && (page.items.length > 0 || currentSync?.mode === "connected") && (
         <section className="review-list" aria-label="Reviews">
           <div className="review-list-head">
@@ -335,7 +355,7 @@ export function QueueView({
                     selected={selectedReview === row.reviewId}
                     onOpen={() => onReview(row.reviewId)}
                     disabled={selecting && !eligible.includes(row)}
-                    {...(selecting && eligible.includes(row)
+                    {...(selecting
                       ? {
                           selection: {
                             checked: checked.includes(row.reviewId),

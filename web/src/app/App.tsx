@@ -56,7 +56,7 @@ export function App() {
   const [railSmall, setRailSmall] = useState(savedValue("rail") === true);
   const [theme, setTheme] = useState(savedValue("theme") === "light" ? "light" : "dark");
   const [compact, setCompact] = useState(savedValue("compact") === true);
-  const [settings, setSettings] = useState(false);
+  const [settings, setSettings] = useState(savedValue("settings.open") === true);
   const [revision, setRevision] = useState(0);
   const [overlay, setOverlay] = useState<Overlay>();
   const [selecting, setSelecting] = useState(false);
@@ -65,6 +65,7 @@ export function App() {
   const draftsFull = useSyncExternalStore(drafts.subscribe, drafts.isFull);
   const panes = useRef<HTMLDivElement>(null);
   const workspace = useRef<HTMLElement>(null);
+  const workspaceBody = useRef<HTMLDivElement>(null);
   const drawer = useRef<HTMLDivElement>(null);
   const opener = useRef<HTMLElement | undefined>(undefined);
   const resolvedRun = useRef<{ reviewId: string; runId: string } | undefined>(undefined);
@@ -150,6 +151,7 @@ export function App() {
     document.documentElement.dataset.theme = theme;
     document.documentElement.dataset.density = compact ? "compact" : "regular";
   }, [theme, compact]);
+  useEffect(() => saveValue("settings.open", settings), [settings]);
   useEffect(() => {
     const host = panes.current;
     if (!host) return;
@@ -162,9 +164,34 @@ export function App() {
   }, []);
   useEffect(() => {
     const target = workspace.current;
-    if (!target) return;
+    const content = workspaceBody.current;
+    if (!target || !content) return;
     const saved = savedValue(`scroll.${route.view}`);
-    if (typeof saved === "number" && Number.isFinite(saved)) target.scrollTop = saved;
+    const position = typeof saved === "number" && Number.isFinite(saved) ? saved : 0;
+    let restoring = position > 0;
+    let restoreTimer: number | undefined;
+    const observer = new ResizeObserver(restoreScroll);
+    function stopRestoring() {
+      restoring = false;
+      observer.disconnect();
+      window.clearTimeout(restoreTimer);
+    }
+    function restoreScroll() {
+      if (!restoring || !target) return;
+      if (target.scrollHeight - target.clientHeight >= position) {
+        target.scrollTop = position;
+        stopRestoring();
+      }
+    }
+    target.scrollTop = 0;
+    restoreScroll();
+    if (restoring) {
+      observer.observe(content);
+      restoreTimer = window.setTimeout(() => {
+        target.scrollTop = position;
+        stopRestoring();
+      }, 3500);
+    }
     let scrollbar: number | undefined;
     function showScrollbar() {
       target?.classList.add("is-scrolling");
@@ -172,12 +199,19 @@ export function App() {
       scrollbar = window.setTimeout(() => target?.classList.remove("is-scrolling"), 900);
     }
     function save() {
-      if (target) saveValue(`scroll.${route.view}`, target.scrollTop);
+      if (target && !restoring) saveValue(`scroll.${route.view}`, target.scrollTop);
     }
+    target.addEventListener("pointerdown", stopRestoring, { passive: true });
+    target.addEventListener("wheel", stopRestoring, { passive: true });
+    target.addEventListener("keydown", stopRestoring);
     target.addEventListener("scroll", showScrollbar, { passive: true });
     target.addEventListener("scrollend", save);
     window.addEventListener("pagehide", save);
     return () => {
+      stopRestoring();
+      target.removeEventListener("pointerdown", stopRestoring);
+      target.removeEventListener("wheel", stopRestoring);
+      target.removeEventListener("keydown", stopRestoring);
       target.removeEventListener("scroll", showScrollbar);
       target.classList.remove("is-scrolling");
       window.clearTimeout(scrollbar);
@@ -208,8 +242,7 @@ export function App() {
     setRoute(canonical);
   }
   function openReview(id: string, exactRun?: string, tab: Tab = "overview", child?: string) {
-    if (!opened && document.activeElement instanceof HTMLElement)
-      opener.current = document.activeElement;
+    rememberOpener();
     move({
       view: route.view,
       reviewId: id,
@@ -219,9 +252,13 @@ export function App() {
     });
   }
   function openTicket(key: string) {
-    if (!opened && document.activeElement instanceof HTMLElement)
-      opener.current = document.activeElement;
+    rememberOpener();
     move({ view: route.view, ticket: key, tab: "overview" });
+  }
+  function rememberOpener() {
+    const target = document.activeElement;
+    if (target instanceof HTMLElement && (!opened || workspace.current?.contains(target)))
+      opener.current = target;
   }
   function closeDrawer() {
     move({ view: route.view, tab: "overview" });
@@ -303,7 +340,23 @@ export function App() {
   }
 
   return (
-    <main className={`workspace ${railSmall ? "rail-small" : ""} ${opened ? "has-detail" : ""}`}>
+    <main
+      className={`workspace ${railSmall ? "rail-small" : ""} ${opened ? "has-detail" : ""}`}
+      onKeyDown={(event) => {
+        if (
+          event.key !== "Escape" ||
+          event.defaultPrevented ||
+          !opened ||
+          overlay ||
+          settings ||
+          document.querySelector(":popover-open, [role='menu'][data-state='open']") ||
+          (event.target instanceof Element && event.target.closest("select"))
+        )
+          return;
+        event.preventDefault();
+        closeDrawer();
+      }}
+    >
       <a className="skip-link" href="#view-title">
         Skip to workspace
       </a>
@@ -390,7 +443,7 @@ export function App() {
         style={{ "--split": `${split}%` } as CSSProperties}
       >
         <section ref={workspace} className="workspace-view" aria-labelledby="view-title">
-          <div className="workspace-inner">
+          <div className="workspace-inner" ref={workspaceBody}>
             <PanelBoundary key={route.view} leading={renderHeader()}>
               {route.view === "queue" && (
                 <QueueView
@@ -435,10 +488,6 @@ export function App() {
               ref={drawer}
               tabIndex={-1}
               aria-label={ticket ? "Ticket details" : "Review details"}
-              onKeyDown={(event) => {
-                if (event.key === "Escape" && !event.defaultPrevented && !overlay && !settings)
-                  closeDrawer();
-              }}
             >
               <PanelBoundary key={reviewId ?? ticket}>
                 <Suspense fallback={<Loading label="Opening detail panel…" />}>

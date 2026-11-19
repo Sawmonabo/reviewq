@@ -1,16 +1,16 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import type { ReactNode } from "react";
 import type { RunCard, RunStage } from "../../api/generated/contracts";
 import { readArchive, readQueue, readQueueSync, readRuns } from "../../api/workspace";
 import { Icon } from "../../components/Icon";
 import { Pagination } from "../../components/Pagination";
-import { Empty, Loading, Notice } from "../../components/PanelState";
+import { Loading, Notice } from "../../components/PanelState";
 import { providerLabel, ReviewBadges } from "../../components/ReviewRow";
 import { localDateRange, presets } from "../../features/queue/archive-filters";
 import type { DatePreset } from "../../features/queue/archive-filters";
 import type { Launch, LaunchTarget, OpenReview } from "../../features/queue/types";
 import { useResource } from "../../hooks/useResource";
-import { formatActivityTime, readable, reviewReasonLabel } from "../../lib/presentation";
+import { formatActivityTime, reviewReasonLabel } from "../../lib/presentation";
 import { savedValue, saveValue } from "../../lib/view-preferences";
 import { SelectionActions } from "../SelectionActions";
 import { ArchiveDateFilter } from "./archive/ArchiveDateFilter";
@@ -23,6 +23,12 @@ const stages = [
   ["waiting", "Waiting", "waiting"],
   ["archived", "Archived", "archived"],
 ] as const;
+const archiveDate = new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric" });
+const archiveDateSources = {
+  decision: "Recorded review",
+  report: "Accepted review report",
+  followup: "Accepted review recheck",
+};
 
 export function RunsView({
   renderHeader,
@@ -44,7 +50,10 @@ export function RunsView({
   const [stage, setStage] = useState<RunStage>(
     () => stages.find(([id]) => id === savedValue("runs.stage"))?.[0] ?? "needs_input",
   );
-  const [query, setQuery] = useState("");
+  const [query, setQuery] = useState(() => {
+    const saved = savedValue("runs.search");
+    return (typeof saved === "string" ? saved : storedText("archive.search")).slice(0, 200);
+  });
   const [trail, setTrail] = useState<readonly string[]>([]);
   const [checked, setChecked] = useState<readonly string[]>([]);
   const [questions, setQuestions] = useState(false);
@@ -72,6 +81,12 @@ export function RunsView({
   const sync = useResource("runs-queue-sync", readQueueSync, [{ kind: "queue_sync" }]).data;
   const eligible = (runs.data?.items ?? []).filter((row) => row.mrState === "open");
   const captured = eligible.filter((row) => checked.includes(row.reviewId));
+  function changeQuery(value: string) {
+    setQuery(value);
+    saveValue("runs.search", value);
+    setTrail([]);
+    setChecked([]);
+  }
 
   return (
     <>
@@ -88,17 +103,22 @@ export function RunsView({
           />
         ) : undefined,
       )}
-      <div className="run-stage-tabs" aria-label="Filter review runs">
+      <div className="run-stage-tabs" role="group" aria-label="Filter review runs">
         {stages.map(([id, label, field]) => (
           <button
             type="button"
             key={id}
             aria-pressed={id === stage}
+            aria-controls="review-runs-list"
             onClick={() => {
+              if (id === stage) return;
               setStage(id);
               setTrail([]);
               setChecked([]);
+              setQuestions(false);
+              setReason("");
               saveValue("runs.stage", id);
+              if (id === "archived" && selecting) onSelect(false);
             }}
           >
             <span>{label}</span>
@@ -108,22 +128,24 @@ export function RunsView({
       </div>
       {counts.error && !runs.data && <Notice retry={counts.retry}>{counts.error}</Notice>}
       {stage === "archived" ? (
-        <ArchiveView selectedReview={selectedReview} onReview={onReview} />
+        <ArchiveView
+          selectedReview={selectedReview}
+          onReview={onReview}
+          query={query}
+          onSearch={changeQuery}
+        />
       ) : (
         <>
           <div className="run-search-controls">
             <label className="run-search">
               <Icon name="search" size={14} />
               <input
+                type="search"
                 aria-label="Search review runs"
                 placeholder="Search ticket or title"
                 value={query}
                 maxLength={200}
-                onChange={(event) => {
-                  setQuery(event.currentTarget.value);
-                  setTrail([]);
-                  setChecked([]);
-                }}
+                onChange={(event) => changeQuery(event.currentTarget.value)}
               />
             </label>
             {(stage === "working" || questions) && (
@@ -189,47 +211,69 @@ export function RunsView({
             </Notice>
           )}
           {runs.pending && <Loading label="Loading review runs…" />}
-          {runs.data && !runs.data.items.length && (
-            <Empty title="No runs in this stage">
-              <p>Other stages remain available above.</p>
-            </Empty>
-          )}
-          {runs.data && runs.data.items.length > 0 && (
-            <ul className="run-items">
-              {runs.data.items.map((row) => (
-                <li key={row.reviewId}>
-                  <RunRow
-                    row={row}
-                    selected={row.reviewId === selectedReview}
-                    disabled={selecting && !eligible.includes(row)}
-                    onOpen={() => onReview(row.reviewId, row.focusedRunId ?? undefined)}
-                    onReason={
-                      row.reasonKind
-                        ? () => {
-                            setReason(row.reasonKind ?? "");
-                            setTrail([]);
-                            setChecked([]);
+          <section
+            id="review-runs-list"
+            aria-label={`${stages.find(([id]) => id === stage)?.[1]} review runs`}
+          >
+            {runs.data && !runs.data.items.length && (
+              <div className="run-empty" role="status">
+                <h3>
+                  {query.trim()
+                    ? "No runs match your search"
+                    : reason || questions
+                      ? "No runs match these filters"
+                      : {
+                          needs_input: "Nothing awaiting your input",
+                          working: "No runs working right now",
+                          waiting: "No reviews waiting",
+                        }[stage]}
+                </h3>
+                <p>
+                  {query.trim()
+                    ? "Try another ticket, title or MR number."
+                    : stage === "waiting"
+                      ? "Reviews waiting on author changes or merge appear here."
+                      : "Start a review or choose another view."}
+                </p>
+              </div>
+            )}
+            {runs.data && runs.data.items.length > 0 && (
+              <ul className="run-items">
+                {runs.data.items.map((row) => (
+                  <li key={row.reviewId}>
+                    <RunRow
+                      row={row}
+                      selected={row.reviewId === selectedReview}
+                      disabled={selecting && !eligible.includes(row)}
+                      onOpen={() => onReview(row.reviewId, row.focusedRunId ?? undefined)}
+                      onReason={
+                        row.reasonKind
+                          ? () => {
+                              setReason(row.reasonKind ?? "");
+                              setTrail([]);
+                              setChecked([]);
+                            }
+                          : undefined
+                      }
+                      {...(selecting
+                        ? {
+                            selection: {
+                              checked: checked.includes(row.reviewId),
+                              onToggle: () =>
+                                setChecked((old) =>
+                                  old.includes(row.reviewId)
+                                    ? old.filter((id) => id !== row.reviewId)
+                                    : [...old, row.reviewId],
+                                ),
+                            },
                           }
-                        : undefined
-                    }
-                    {...(selecting && eligible.includes(row)
-                      ? {
-                          selection: {
-                            checked: checked.includes(row.reviewId),
-                            onToggle: () =>
-                              setChecked((old) =>
-                                old.includes(row.reviewId)
-                                  ? old.filter((id) => id !== row.reviewId)
-                                  : [...old, row.reviewId],
-                              ),
-                          },
-                        }
-                      : {})}
-                  />
-                </li>
-              ))}
-            </ul>
-          )}
+                        : {})}
+                    />
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
           <Pagination
             trail={trail}
             next={runs.data?.nextCursor}
@@ -255,11 +299,15 @@ export function RunsView({
 function ArchiveView({
   selectedReview,
   onReview,
+  query,
+  onSearch,
 }: {
   readonly selectedReview?: string | undefined;
   readonly onReview: OpenReview;
+  readonly query: string;
+  readonly onSearch: (value: string) => void;
 }) {
-  const [q, changeSearch] = useState(() => storedText("archive.search").slice(0, 200));
+  const search = useRef<HTMLInputElement>(null);
   const [preset, changePreset] = useState<DatePreset>(() => {
     const saved = savedValue("archive.date");
     return typeof saved === "string" && Object.hasOwn(presets, saved)
@@ -279,7 +327,7 @@ function ArchiveView({
   const [trail, setTrail] = useState<readonly string[]>([]);
   const dates = localDateRange(preset, start, end);
   const filters = {
-    q,
+    q: query,
     fromInclusive: dates.fromInclusive,
     untilExclusive: dates.untilExclusive,
     sprintPair,
@@ -318,6 +366,16 @@ function ArchiveView({
     saveValue(key, value);
     setTrail([]);
   }
+  const restricted = preset !== "all" || sprintPair.length > 0 || Boolean(query.trim());
+  function clear() {
+    onSearch("");
+    setField("archive.date", changePreset, "all");
+    setField("archive.start", changeStart, "");
+    setField("archive.end", changeEnd, "");
+    setPairs([]);
+    saveValue("archive.pairs", []);
+    search.current?.focus({ preventScroll: true });
+  }
 
   return (
     <>
@@ -325,13 +383,16 @@ function ArchiveView({
         <label className="run-search">
           <Icon name="search" size={14} />
           <input
+            ref={search}
+            type="search"
             aria-label="Search archive"
             placeholder="Search ticket or title"
             maxLength={200}
-            value={q}
-            onChange={(event) =>
-              setField("archive.search", changeSearch, event.currentTarget.value)
-            }
+            value={query}
+            onChange={(event) => {
+              setTrail([]);
+              onSearch(event.currentTarget.value);
+            }}
           />
         </label>
         <ArchiveDateFilter
@@ -355,31 +416,19 @@ function ArchiveView({
             saveValue("archive.pairs", next);
           }}
         />
-        {(preset !== "all" || sprintPair.length > 0 || q) && (
+        {restricted && (
           <button
             type="button"
             className="filter-control clear-filters"
             aria-label="Clear archive filters"
             title="Clear archive filters"
-            onClick={() => {
-              changeSearch("");
-              changePreset("all");
-              changeStart("");
-              changeEnd("");
-              setPairs([]);
-              setTrail([]);
-              saveValue("archive.search", "");
-              saveValue("archive.date", "all");
-              saveValue("archive.start", "");
-              saveValue("archive.end", "");
-              saveValue("archive.pairs", []);
-            }}
+            onClick={clear}
           >
             <Icon name="clearFilters" size={17} />
           </button>
         )}
         {archive.data && (
-          <span className="archive-match-count">
+          <span className="archive-match-count" role="status">
             {archive.data.totalMatching} {archive.data.totalMatching === 1 ? "review" : "reviews"}
           </span>
         )}
@@ -396,57 +445,84 @@ function ArchiveView({
         </Notice>
       )}
       {archive.pending && !dates.invalid && <Loading label="Loading archive…" />}
-      {archive.data && (
-        <>
-          {archive.data.boards.some((board) => !board.available) && (
-            <Notice>
-              Sprint membership unavailable for{" "}
-              {archive.data.boards
-                .filter((board) => !board.available)
-                .map((board) => board.label)
-                .join(", ")}
-              .
-            </Notice>
-          )}
-          {!archive.data.items.length && <Empty title="No archived reviews match these filters" />}
-          <ul className="run-items">
-            {archive.data.items.map((row) => {
-              const date = row.latestMatchingReviewAt;
-              const sprintNames = row.sprintPairs.map(
-                ({ boardId, sprintId }) =>
-                  known.get(`${boardId}:${sprintId}`) ?? `Sprint ${sprintId}`,
-              );
-              return (
-                <li key={row.reviewId}>
-                  <RunRow
-                    row={row}
-                    selected={row.reviewId === selectedReview}
-                    onOpen={() => onReview(row.reviewId, row.focusedRunId ?? row.runIds[0])}
-                    archiveDetails={
-                      <>
-                        {date ? (
-                          <time dateTime={date} title={formatActivityTime(date)}>
-                            Reviewed {new Date(date).toLocaleDateString()}
-                          </time>
-                        ) : (
-                          "Review date unavailable"
-                        )}
-                        {" · "}
-                        {row.membership !== "verified"
-                          ? `${readable(row.membership)} sprint membership`
-                          : sprintNames.length
-                            ? sprintNames.join(", ")
-                            : "No sprint"}
-                      </>
-                    }
-                  />
-                </li>
-              );
-            })}
-          </ul>
-          <Pagination trail={trail} next={archive.data.nextCursor} onPage={setTrail} />
-        </>
-      )}
+      <section id="review-runs-list" aria-label="Archived review runs">
+        {archive.data && (
+          <>
+            {archive.data.boards.some((board) => !board.available) && (
+              <Notice>
+                Sprint membership unavailable for{" "}
+                {archive.data.boards
+                  .filter((board) => !board.available)
+                  .map((board) => board.label)
+                  .join(", ")}
+                .
+              </Notice>
+            )}
+            {!archive.data.items.length &&
+              (restricted ? (
+                <div className="archive-empty" role="status">
+                  <Icon name="calendar" size={38} />
+                  <h3>No reviews match these filters</h3>
+                  <p>Try a different review date or sprint.</p>
+                  <button type="button" onClick={clear}>
+                    Clear filters
+                  </button>
+                </div>
+              ) : (
+                <div className="run-empty" role="status">
+                  <h3>No archived reviews</h3>
+                  <p>Merged and closed MRs appear here with their review history.</p>
+                </div>
+              ))}
+            <ul className="run-items">
+              {archive.data.items.map((row) => {
+                const date = row.latestMatchingReviewAt;
+                const sprintNames = row.sprintPairs
+                  .filter(
+                    ({ boardId, sprintId }) =>
+                      !sprintPair.length || sprintPair.includes(`${boardId}:${sprintId}`),
+                  )
+                  .map(
+                    ({ boardId, sprintId }) =>
+                      known.get(`${boardId}:${sprintId}`) ?? `Sprint ${sprintId}`,
+                  );
+                return (
+                  <li key={row.reviewId}>
+                    <RunRow
+                      row={row}
+                      selected={row.reviewId === selectedReview}
+                      onOpen={() => onReview(row.reviewId, row.focusedRunId ?? row.runIds[0])}
+                      archiveDetails={
+                        <span className="archive-reviewed">
+                          {date ? (
+                            <time
+                              dateTime={date}
+                              title={`${row.dateSource ? archiveDateSources[row.dateSource] : "Review date"} · ${formatActivityTime(date)}`}
+                            >
+                              Reviewed {archiveDate.format(new Date(date))}
+                            </time>
+                          ) : (
+                            "Review date unavailable"
+                          )}
+                          <span className="archive-sprint-name">
+                            {sprintNames.length
+                              ? sprintNames.join(", ")
+                              : row.membership === "verified"
+                                ? "No sprint"
+                                : "Sprint unavailable"}
+                            {row.membership === "partial" && " · Partial membership"}
+                          </span>
+                        </span>
+                      }
+                    />
+                  </li>
+                );
+              })}
+            </ul>
+            <Pagination trail={trail} next={archive.data.nextCursor} onPage={setTrail} />
+          </>
+        )}
+      </section>
     </>
   );
 }
@@ -469,20 +545,23 @@ function RunRow({
   readonly archiveDetails?: ReactNode;
 }) {
   const reason = row.reasonKind ?? row.runStage;
+  const kind = row.mrState === "open" ? reason : "archived";
   const label =
     row.mrState === "merged"
       ? "Merged"
       : row.mrState === "closed"
         ? "Closed"
         : reason
-          ? reviewReasonLabel(reason)
+          ? reason === "awaiting_merge"
+            ? "Awaiting merge"
+            : reviewReasonLabel(reason)
           : undefined;
   const launch = row.focusedLaunch;
   const metadata = [
-    row.focusedLeadName,
     row.focusedProvider && providerLabel(row.focusedProvider),
     launch?.observedModel ||
-      (launch?.requestedModel && `Requested model: ${launch.requestedModel}`),
+      (launch?.requestedModel && `Requested model: ${launch.requestedModel}`) ||
+      (row.focusedProvider && "Model not reported"),
     launch?.observedEffort ||
       (launch?.requestedEffort && `Requested effort: ${launch.requestedEffort}`),
     row.focusedReportReviewedSha && `Report reviewed ${row.focusedReportReviewedSha.slice(0, 8)}`,
@@ -525,16 +604,14 @@ function RunRow({
             </span>
           )}
           {label && (!onReason || Boolean(selection)) && (
-            <span className="row-tag run-reason" data-review-kind={reason}>
+            <span className="row-tag run-reason" data-review-kind={kind}>
               {label}
             </span>
           )}
         </div>
         <h3>{row.tickets[0]?.title || row.title}</h3>
         <p className="run-card-project">
-          {row.tickets[0]?.title && row.tickets[0].title !== row.title
-            ? row.title
-            : `${row.projectPath} !${row.iid}`}
+          {row.focusedLeadName ?? `${row.projectPath} !${row.iid}`}
         </p>
         {row.registeredProviders.length > 1 && (
           <div className="actions" aria-label="Registered lead providers">
@@ -557,7 +634,7 @@ function RunRow({
         <button
           type="button"
           className="row-tag run-reason run-reason-filter"
-          data-review-kind={reason}
+          data-review-kind={kind}
           aria-label={`Filter by ${label}`}
           onClick={onReason}
         >

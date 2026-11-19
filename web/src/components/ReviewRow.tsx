@@ -85,7 +85,7 @@ export function ReviewRow({
             <span className="provider-pill">{providerLabel(row.focusedProvider)}</span>
           )}
           {!tracked && <span>No review run started</span>}
-          <ReviewEvidenceBadges review={row} />
+          <ReviewActivityBadge review={row} />
           {showReason && (
             <span className="row-tag" data-review-kind={status}>
               {reviewReasonLabel(status)}
@@ -96,9 +96,19 @@ export function ReviewRow({
               Agent report ready
             </span>
           )}
+          {row.currentDisposition && row.currentDisposition !== "needs_review" && (
+            <span className="local-review-decision" data-review-kind={row.currentDisposition}>
+              {row.currentDisposition === "reviewed" ? "✓ Reviewed" : "Waiting on author"}
+            </span>
+          )}
           {changed && (
             <span className="row-tag" data-review-kind="code_changed">
               New commits need review
+            </span>
+          )}
+          {row.unreadNonReplyCount > 0 && (
+            <span className="row-tag unread-updates" data-review-kind="updates">
+              {row.unreadNonReplyCount} {row.unreadReplies > 0 ? "other updates" : "unread"}
             </span>
           )}
           {detail}
@@ -157,61 +167,49 @@ export function ReviewBadges({
   readonly review: Pick<MergeRequestRow, "personalApproval" | "ourComments" | "unreadReplies">;
 }) {
   return (
-    <>
+    <span className="review-evidence">
       {review.personalApproval && (
-        <span className="row-tag" data-review-kind="reviewed">
+        <span className="row-tag" data-review-kind="awaiting_merge">
           You approved
         </span>
       )}
       {review.ourComments > 0 && (
-        <span className="row-tag" data-review-kind="commented">
+        <span
+          className="row-tag"
+          data-review-kind="commented"
+          title={`${review.ourComments} ${review.ourComments === 1 ? "comment" : "comments"} posted on GitLab by your configured review accounts`}
+        >
           Commented · {review.ourComments}
         </span>
       )}
       {review.unreadReplies > 0 && (
-        <span className="row-tag" data-review-kind="thread_reply">
+        <span
+          className="row-tag"
+          data-review-kind="thread_reply"
+          title="Unread replies in GitLab discussions you commented on"
+        >
           New {review.unreadReplies === 1 ? "reply" : "replies"} · {review.unreadReplies}
         </span>
       )}
-    </>
+    </span>
   );
 }
 
-function ReviewEvidenceBadges({ review }: { readonly review: MergeRequestRow }) {
+function ReviewActivityBadge({ review }: { readonly review: MergeRequestRow }) {
   const phase = review.focusedActivity;
-  const disposition = review.currentDisposition;
+  if (review.mrState !== "open" || !phase) return null;
   const kind = phase === "blocked" ? "agent_input" : phase === "failed" ? "agent_failed" : phase;
   return (
-    <>
-      {review.mrState === "open" && phase && (
-        <span className="native-status" data-review-kind={kind}>
-          {
-            {
-              idle: "Idle",
-              working: "Working",
-              blocked: review.reasonKind === "agent_input" ? "Awaiting input" : "Blocked",
-              failed: "Agent failed",
-            }[phase]
-          }
-        </span>
-      )}
-      {disposition && (
-        <span className="row-tag" data-review-kind={disposition}>
-          {
-            {
-              reviewed: "✓ Reviewed",
-              waiting_author: "Waiting on author",
-              needs_review: "Needs review",
-            }[disposition]
-          }
-        </span>
-      )}
-      {review.unreadNonReplyCount > 0 && (
-        <span className="row-tag">
-          {review.unreadNonReplyCount} {review.unreadReplies > 0 ? "other updates" : "unread"}
-        </span>
-      )}
-    </>
+    <span className="native-status" data-review-kind={kind}>
+      {
+        {
+          idle: "Idle",
+          working: "Working",
+          blocked: review.reasonKind === "agent_input" ? "Awaiting input" : "Blocked",
+          failed: "Agent failed",
+        }[phase]
+      }
+    </span>
   );
 }
 

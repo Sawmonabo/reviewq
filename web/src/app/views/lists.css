@@ -22,6 +22,9 @@
   line-height: 1;
   white-space: nowrap;
   cursor: pointer;
+  transition:
+    background-color 120ms,
+    border-color 120ms;
 }
 .filter-control > svg {
   flex: none;
@@ -78,6 +81,9 @@
 }
 .select-filter:has(select:disabled) {
   opacity: 0.55;
+}
+.select-filter > select:disabled {
+  cursor: default;
 }
 .filter-label {
   color: var(--muted);
@@ -155,13 +161,22 @@
   width: 35px;
   justify-content: center;
   padding: 0;
-  color: var(--muted);
+  color: var(--clear-filters-text);
+}
+.clear-filters:hover:not(:disabled),
+.clear-filters:active:not(:disabled) {
+  color: var(--clear-filters-hover);
 }
 .queue-search-row {
   display: flex;
   align-items: center;
   gap: 8px;
+  flex-wrap: wrap;
   margin-bottom: 15px;
+}
+.queue-hidden-count {
+  color: var(--muted);
+  font-size: 11px;
 }
 .queue-search-row .queue-search {
   width: min(420px, 100%);
@@ -211,6 +226,7 @@
   font-size: 9px;
   font-weight: 500;
   letter-spacing: 1px;
+  line-height: 12px;
   text-transform: uppercase;
 }
 .review-empty {
@@ -238,7 +254,7 @@
   justify-content: space-between;
   align-items: center;
   gap: 18px;
-  padding: calc(var(--row-padding) - 0.5px) 20px;
+  padding: calc(var(--row-padding) - 1px) 20px;
   border: 0;
   border-radius: 0;
   background: transparent;
@@ -349,12 +365,32 @@
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  padding: 0 5px;
-  border: 1px solid var(--strong-line);
+  padding: 1px 5px;
+  border: 1px solid var(--popup-border);
   border-radius: 3px;
   color: var(--muted);
   font-size: 9px;
+  line-height: 12px;
   white-space: nowrap;
+}
+.review-evidence {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.review-evidence:empty {
+  display: none;
+}
+.local-review-decision[data-review-kind="reviewed"] {
+  color: var(--green);
+}
+.local-review-decision[data-review-kind="waiting_author"] {
+  color: var(--link);
+}
+.row-tag.unread-updates {
+  color: var(--muted);
+  padding: 2px 6px;
 }
 .row-tag[data-review-kind] {
   border-color: var(--control-line);
@@ -466,7 +502,11 @@
   padding: 3px 0;
   border: 0;
   background: transparent;
+  color: var(--text);
   font-size: 11px;
+  line-height: 18px;
+  letter-spacing: normal;
+  text-transform: none;
 }
 .select-all-reviews:hover:not(:disabled) {
   background: transparent;
@@ -504,5 +544,13 @@
   }
   .review-row {
     padding-inline: 15px;
+  }
+  .row-person {
+    line-height: normal;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .filter-control {
+    transition: none;
   }
 }

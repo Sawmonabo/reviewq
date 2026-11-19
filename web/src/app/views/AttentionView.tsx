@@ -6,7 +6,8 @@ import { assignNotifications, readNotifications } from "../../api/workspace";
 import { Empty, Loading, Notice } from "../../components/PanelState";
 import { ReviewBadges } from "../../components/ReviewRow";
 import { useResource } from "../../hooks/useResource";
-import { describeError, formatActivityTime, readable } from "../../lib/presentation";
+import { describeError, formatActivityTime, formatTime, readable } from "../../lib/presentation";
+import { savedValue, saveValue } from "../../lib/view-preferences";
 import "./attention.css";
 
 type InboxHistory = {
@@ -18,6 +19,19 @@ type InboxHistory = {
 
 const historyLimit = 450;
 const historyChanged = "The inbox changed. Load older updates again to continue.";
+const eventLabels: Readonly<Record<string, string>> = {
+  author_reply: "Author reply",
+  code_changed: "New commits",
+  failed: "Agent error",
+  finished: "Review response",
+  needs_input: "Needs your input",
+  new_head: "New commits",
+  reopened: "Thread reopened",
+  reply: "Thread reply",
+  report_ready: "Review response",
+  resolved: "Thread resolved",
+  thread_reply: "Thread reply",
+};
 
 export function AttentionView({
   onOpen,
@@ -26,7 +40,9 @@ export function AttentionView({
   readonly onOpen: (item: Notification) => void;
   readonly onChange: () => void;
 }) {
-  const [mode, setMode] = useState<"unread" | "all">("unread");
+  const [mode, setMode] = useState<"unread" | "all">(() =>
+    savedValue("inbox.mode") === "all" ? "all" : "unread",
+  );
   const [older, setOlder] = useState<InboxHistory>();
   const [revision, setRevision] = useState(0);
   const [frozen, setFrozen] = useState<readonly string[]>();
@@ -34,6 +50,8 @@ export function AttentionView({
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string>();
   const request = useRef<AbortController | undefined>(undefined);
+  const selectionTrigger = useRef<HTMLButtonElement>(null);
+  const selectShown = useRef<HTMLButtonElement>(null);
   useEffect(() => () => request.current?.abort(), []);
   const page = useResource(
     `inbox:${mode}:${revision}`,
@@ -61,10 +79,17 @@ export function AttentionView({
     if (nextMode === mode) return;
     request.current?.abort();
     setMode(nextMode);
+    saveValue("inbox.mode", nextMode);
     setOlder(undefined);
     setFrozen(undefined);
     setEligible([]);
     setNotice(undefined);
+  }
+
+  function leaveSelection() {
+    setFrozen(undefined);
+    setEligible([]);
+    requestAnimationFrame(() => selectionTrigger.current?.focus({ preventScroll: true }));
   }
 
   function refreshHistory() {
@@ -134,7 +159,7 @@ export function AttentionView({
   return (
     <>
       <div className="inbox-summary">
-        <div className="inbox-filters" aria-label="Notification view">
+        <div className="inbox-filters" role="group" aria-label="Filter notifications">
           <button
             type="button"
             aria-pressed={mode === "unread"}
@@ -163,6 +188,7 @@ export function AttentionView({
             <>
               <button
                 type="button"
+                ref={selectShown}
                 className="quiet-button"
                 disabled={busy || !eligibleShown.length}
                 onClick={() => setFrozen(allSelected ? [] : eligibleShown)}
@@ -195,10 +221,7 @@ export function AttentionView({
                 type="button"
                 className="quiet-button"
                 disabled={busy}
-                onClick={() => {
-                  setFrozen(undefined);
-                  setEligible([]);
-                }}
+                onClick={leaveSelection}
               >
                 Cancel
               </button>
@@ -208,10 +231,14 @@ export function AttentionView({
               {groups.length > 0 && (
                 <button
                   type="button"
+                  ref={selectionTrigger}
                   disabled={busy}
                   onClick={() => {
                     setEligible([...byId.keys()]);
                     setFrozen([]);
+                    requestAnimationFrame(() =>
+                      selectShown.current?.focus({ preventScroll: true }),
+                    );
                   }}
                 >
                   Select
@@ -258,6 +285,7 @@ export function AttentionView({
                   className="inbox-select-group"
                   type="button"
                   role="checkbox"
+                  aria-label={`Select ${context?.ticketKeys.join(" · ") || context?.title || latest.label} notifications`}
                   aria-checked={
                     marked.length === 0
                       ? false
@@ -303,7 +331,9 @@ export function AttentionView({
                 {context && <span className="inbox-preview">{latest.label}</span>}
                 <div className="inbox-meta inbox-caption">
                   <span>{updates}</span>
-                  <time dateTime={latest.occurredAt}>{formatActivityTime(latest.occurredAt)}</time>
+                  <time dateTime={latest.occurredAt} title={formatTime(latest.occurredAt)}>
+                    {formatActivityTime(latest.occurredAt)}
+                  </time>
                 </div>
               </button>
               <details className="inbox-items">
@@ -334,11 +364,12 @@ export function AttentionView({
                         onClick={() => onOpen(item)}
                       >
                         <span>
-                          {notificationSource(item.source)} · {readable(item.kind)}
+                          {notificationSource(item.source)} ·{" "}
+                          {eventLabels[item.kind] ?? readable(item.kind)}
                         </span>
                         <strong>{item.label}</strong>
-                        <time dateTime={item.occurredAt}>
-                          {formatActivityTime(item.occurredAt)} · {item.readAt ? "Read" : "Unread"}
+                        <time dateTime={item.occurredAt} title={formatTime(item.occurredAt)}>
+                          {formatActivityTime(item.occurredAt)}
                         </time>
                       </button>
                       <div className="actions inbox-event-actions">
@@ -391,5 +422,9 @@ function group(items: readonly Notification[]) {
     group.push(item);
     result.set(item.reviewId, group);
   }
-  return [...result];
+  return [...result].sort(([leftId, left], [rightId, right]) => {
+    const latestLeft = left[0]?.occurredAt ?? "";
+    const latestRight = right[0]?.occurredAt ?? "";
+    return latestRight.localeCompare(latestLeft) || leftId.localeCompare(rightId);
+  });
 }
