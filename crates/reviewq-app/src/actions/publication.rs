@@ -286,3 +286,36 @@ pub fn confirms_prior_target(
         })
     })
 }
+
+pub(crate) fn proves_target_absence(
+    snapshot: &WorkflowSnapshot,
+    target: &CommentTarget,
+    head: &GitSha,
+) -> bool {
+    let relevant =
+        |thread: &WorkflowDiscussion| target.discussion.as_ref().is_none_or(|id| &thread.id == id);
+    if target
+        .discussion
+        .as_ref()
+        .is_some_and(|id| !snapshot.discussions.iter().any(|row| &row.id == id))
+    {
+        return false;
+    }
+    snapshot
+        .discussions
+        .iter()
+        .filter(|thread| relevant(thread))
+        .all(|thread| {
+            // An incomplete root cannot rule out a top-level or explicitly scoped match.
+            thread.root_note_id.is_some()
+                && !thread.notes.iter().any(|note| {
+                    note.author == snapshot.authenticated_actor
+                        && note.body_hash == target.hash
+                        && note
+                            .positioned_head
+                            .as_ref()
+                            .is_none_or(|actual| actual == head)
+                        && note_scope(thread, note, target.discussion.as_deref())
+                })
+        })
+}

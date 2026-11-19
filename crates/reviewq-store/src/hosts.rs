@@ -168,6 +168,18 @@ impl LeadStore for SqliteStore {
         })
     }
 
+    fn workflow_requirements(
+        &self,
+        claim: &DeliveryClaim,
+    ) -> AppFuture<'_, reviewq_app::workflow::WorkflowRequirements> {
+        let claim = claim.clone();
+        Box::pin(async move {
+            self.read(move |db| delivery::workflow_requirements(db, claim))
+                .await
+                .map_err(StoreError::app)
+        })
+    }
+
     fn finish_delivery(
         &self,
         claim: DeliveryClaim,

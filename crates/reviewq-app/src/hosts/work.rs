@@ -25,6 +25,12 @@ impl DispatchGuard {
         }
     }
 
+    pub async fn workflow_requirements(
+        &self,
+    ) -> Result<crate::workflow::WorkflowRequirements, AppError> {
+        self.store.workflow_requirements(&self.claim).await
+    }
+
     /// Records successful revalidation by the adapter immediately before automatic delivery.
     pub fn confirm_workflow(
         mut self,

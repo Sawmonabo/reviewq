@@ -493,6 +493,23 @@ pub(super) fn authorize_dispatch(
     Ok(())
 }
 
+pub(super) fn workflow_requirements(
+    db: &Connection,
+    claim: DeliveryClaim,
+) -> Result<reviewq_app::workflow::WorkflowRequirements, StoreError> {
+    let DeliveryWork::Dispatch {
+        workflow: Some(guard),
+        ..
+    } = &claim.work
+    else {
+        return Err(AppError::Forbidden.into());
+    };
+    let target = claim.target.clone();
+    let guard = guard.clone();
+    authorize_dispatch(db, claim)?;
+    workflow::requirements(db, &target, &guard)
+}
+
 pub(super) fn finish(
     tx: &mut WriteTx<'_>,
     claim: DeliveryClaim,

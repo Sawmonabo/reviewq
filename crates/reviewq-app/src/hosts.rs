@@ -437,6 +437,12 @@ pub trait LeadStore: Send + Sync {
     /// Rechecks the current dispatch fence and authority immediately before native I/O.
     fn authorize_dispatch(&self, claim: DeliveryClaim) -> AppFuture<'_, ()>;
 
+    /// Fresh-source proof requirements for exactly one current automatic claim.
+    fn workflow_requirements(
+        &self,
+        claim: &DeliveryClaim,
+    ) -> AppFuture<'_, crate::workflow::WorkflowRequirements>;
+
     /// Commits a matching claim and fence. Started also requires its observed
     /// delivery ID to match the claim. A stale observation returns conflict.
     fn finish_delivery(

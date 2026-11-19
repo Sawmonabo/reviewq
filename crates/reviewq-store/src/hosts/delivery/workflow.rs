@@ -1,23 +1,28 @@
 use reviewq_app::access::{Actor, AppError};
 use reviewq_app::events::ResourceKey;
 use reviewq_app::hosts::{DeliveryOutcome, MessagePurpose, SubmitMessage};
-use reviewq_app::workflow::{ReadyWorkflow, WorkflowAdmission, WorkflowBinding, WorkflowGuard};
+use reviewq_app::workflow::{
+    ReadyWorkflow, SelectedDiscussion, WorkflowAdmission, WorkflowBinding, WorkflowGuard,
+    WorkflowRequirement, WorkflowRequirements,
+};
 use reviewq_domain::identity::{DeliveryId, Revision, SubmissionId};
 use reviewq_domain::session::LeadTarget;
-use rusqlite::{Connection, params};
+use rusqlite::{Connection, OptionalExtension, params};
 use sha2::{Digest, Sha256};
 
 use super::{emit_delivery, find_receipt, insert_intent, request_digest, validate_target};
 use crate::StoreError;
 use crate::connection::WriteTx;
-use crate::queue::{parse, text};
+use crate::queue::{identity_for_review, parse, text};
 use crate::workspace::{actor_key, advance_queue, hash_field, settings_revision};
 
 pub(crate) fn admit_workflow(
     tx: &mut WriteTx<'_>,
     command: WorkflowAdmission,
 ) -> Result<DeliveryId, StoreError> {
+    let authority_revision = authority_revision(&tx.sql, &command.binding)?;
     let guard = WorkflowGuard {
+        authority_revision,
         binding: command.binding,
         settings: command.settings,
         head: command.head,
@@ -72,11 +77,11 @@ pub(crate) fn admit_workflow(
     let (id, _) = insert_intent(tx, &actor, &input, operation, &digest, None, batch)?;
     tx.sql.execute(
         "INSERT INTO workflow_dispatch(delivery_id,review_id,action_id,batch_id,settings_revision,head_sha,
-              model,effort,latest_user_entry_id,latest_user_turn_id) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)",
+              model,effort,latest_user_entry_id,latest_user_turn_id,authority_revision) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)",
         params![id.as_str(),input.target.review_id().as_str(),action,batch,guard.settings.as_sqlite_integer(),
             guard.head.as_str(),guard.ready.model,guard.ready.effort,
             guard.ready.latest_user_entry_id.as_ref().map(|id|id.as_str()),
-            guard.ready.latest_user_turn_id.as_ref().map(|id|id.as_str())],
+            guard.ready.latest_user_turn_id.as_ref().map(|id|id.as_str()), guard.authority_revision.as_sqlite_integer()],
     )?;
     emit_delivery(tx, input.target.target())?;
     Ok(id)
@@ -116,7 +121,7 @@ pub(super) fn read_guard(
     id: &DeliveryId,
 ) -> Result<Option<WorkflowGuard>, StoreError> {
     let mut statement = db.prepare_cached(
-        "SELECT action_id,batch_id,settings_revision,head_sha,model,effort,latest_user_entry_id,latest_user_turn_id
+        "SELECT action_id,batch_id,settings_revision,head_sha,model,effort,latest_user_entry_id,latest_user_turn_id,authority_revision
          FROM workflow_dispatch WHERE delivery_id=?1",
     )?;
     let mut rows = statement.query([id.as_str()])?;
@@ -133,6 +138,8 @@ pub(super) fn read_guard(
     };
     Ok(Some(WorkflowGuard {
         binding,
+        authority_revision: Revision::try_from(row.get::<_, i64>(8)?)
+            .map_err(|_| AppError::Internal)?,
         settings: Revision::try_from(row.get::<_, i64>(2)?).map_err(|_| AppError::Internal)?,
         head: parse(text(row, 3)?)?,
         ready: ReadyWorkflow {
@@ -158,7 +165,9 @@ pub(super) fn current(
     submission: &SubmissionId,
     guard: &WorkflowGuard,
 ) -> Result<bool, StoreError> {
-    if settings_revision(db)? != guard.settings {
+    if settings_revision(db)? != guard.settings
+        || authority_revision(db, &guard.binding)? != guard.authority_revision
+    {
         return Ok(false);
     }
     let open: bool = db.query_row(
@@ -200,6 +209,107 @@ pub(super) fn current(
             params![batch,target.review_id().as_str(),target.run_id().as_str(),target.session_key().as_str(),
                 submission.as_str(),guard.head.as_str()],|row|row.get(0),
         )?),
+    }
+}
+
+fn authority_revision(db: &Connection, binding: &WorkflowBinding) -> Result<Revision, StoreError> {
+    let (query, id) = match binding {
+        WorkflowBinding::Action(id) => (
+            "SELECT revision FROM actions WHERE action_id=?1 AND authority_verified=1",
+            id.as_str(),
+        ),
+        WorkflowBinding::Followup(id) => (
+            "SELECT lease_fence FROM followup_batches WHERE batch_id=?1 AND authority_verified=1",
+            id.as_str(),
+        ),
+    };
+    let revision: i64 = db
+        .prepare_cached(query)?
+        .query_row([id], |row| row.get(0))
+        .optional()?
+        .ok_or(AppError::Forbidden)?;
+    if revision <= 0 {
+        return Err(AppError::Forbidden.into());
+    }
+    Revision::try_from(revision).map_err(|_| AppError::Internal.into())
+}
+
+pub(super) fn requirements(
+    db: &Connection,
+    lead: &LeadTarget,
+    guard: &WorkflowGuard,
+) -> Result<WorkflowRequirements, StoreError> {
+    let identity = identity_for_review(db, lead.review_id())?;
+    match &guard.binding {
+        WorkflowBinding::Action(id) => {
+            let (reviewer, approval): (String, String) = db.query_row(
+                "SELECT authenticated_actor_id,approval_state FROM actions WHERE action_id=?1",
+                [id.as_str()],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )?;
+            let mut statement = db.prepare_cached(
+                "SELECT body_sha256,discussion_id FROM action_targets
+                 WHERE action_id=?1 AND evidence_state='absent' ORDER BY ordinal",
+            )?;
+            let mut rows = statement.query([id.as_str()])?;
+            let mut remaining = Vec::new();
+            while let Some(row) = rows.next()? {
+                remaining.push(reviewq_app::actions::CommentTarget {
+                    hash: parse(text(row, 0)?)?,
+                    discussion: row.get(1)?,
+                });
+            }
+            let approval_pending = approval == "absent";
+            if remaining.is_empty() && !approval_pending {
+                return Err(AppError::Conflict.into());
+            }
+            Ok(WorkflowRequirements {
+                identity,
+                reviewer_id: reviewer.parse().map_err(|_| AppError::Internal)?,
+                requirement: WorkflowRequirement::Publication {
+                    remaining_targets: remaining,
+                    approval_pending,
+                },
+            })
+        }
+        WorkflowBinding::Followup(batch) => {
+            use crate::followups::work::FrozenManifest;
+            use std::collections::{BTreeMap, BTreeSet};
+
+            let (manifest,reviewer):(String,String)=db.query_row(
+                "SELECT b.private_manifest,m.reviewer_id FROM followup_batches b JOIN followup_monitors m USING(review_id)
+                 WHERE b.batch_id=?1 AND b.review_id=?2",
+                params![batch,lead.review_id().as_str()],|row|Ok((row.get(0)?,row.get(1)?)),
+            )?;
+            let manifest: FrozenManifest =
+                serde_json::from_str(&manifest).map_err(|_| AppError::Internal)?;
+            let mut matched: BTreeMap<String, BTreeSet<u64>> = BTreeMap::new();
+            for observation in manifest.observations {
+                let values = matched.entry(observation.discussion_id).or_default();
+                for note in observation.original_note_ids {
+                    values.insert(note.parse().map_err(|_| AppError::Internal)?);
+                }
+            }
+            let discussions = matched
+                .into_iter()
+                .map(|(discussion_id, original_note_ids)| SelectedDiscussion {
+                    discussion_id,
+                    original_note_ids: original_note_ids.into_iter().collect(),
+                })
+                .collect::<Vec<_>>();
+            if discussions.is_empty()
+                || discussions
+                    .iter()
+                    .any(|item| item.original_note_ids.is_empty())
+            {
+                return Err(AppError::Conflict.into());
+            }
+            Ok(WorkflowRequirements {
+                identity,
+                reviewer_id: reviewer.parse().map_err(|_| AppError::Internal)?,
+                requirement: WorkflowRequirement::Followup { discussions },
+            })
+        }
     }
 }
 

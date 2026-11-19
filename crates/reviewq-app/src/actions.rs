@@ -2,6 +2,7 @@
 
 mod publication;
 mod work;
+pub(crate) use publication::proves_target_absence;
 pub use work::{PublicationRetry, PublicationWorkerStore, run_due_publications};
 
 pub use publication::{
