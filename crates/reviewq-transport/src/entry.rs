@@ -9,8 +9,10 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use reviewq_app::access::{Actor, AppError};
+use reviewq_app::actions::ActionStore;
 use reviewq_app::decisions::{Checkpoints, DecisionStore};
 use reviewq_app::events::EventLog;
+use reviewq_app::followups::FollowupStore;
 use reviewq_app::hosts::{LeadStore, MessageHistoryStore, NativeHost};
 use reviewq_app::notifications::InboxStore;
 use reviewq_app::queue::{QueueStore, ReviewLookup};
@@ -40,10 +42,10 @@ use error::{ApiBytes, ApiError};
 
 /// Shared application ports for one ReviewQ listener pair.
 pub trait Store:
-    WorkspaceStore + QueueStore + ReviewLookup + EventLog + LeadStore + SourceRefreshStore + ReportStore + MessageHistoryStore + InboxStore + DecisionStore
+    WorkspaceStore + QueueStore + ReviewLookup + EventLog + LeadStore + SourceRefreshStore + ReportStore + MessageHistoryStore + InboxStore + DecisionStore + ActionStore + FollowupStore
 {
 }
-impl<S: WorkspaceStore + QueueStore + ReviewLookup + EventLog + LeadStore + SourceRefreshStore + ReportStore + MessageHistoryStore + InboxStore + DecisionStore>
+impl<S: WorkspaceStore + QueueStore + ReviewLookup + EventLog + LeadStore + SourceRefreshStore + ReportStore + MessageHistoryStore + InboxStore + DecisionStore + ActionStore + FollowupStore>
     Store for S
 {
 }

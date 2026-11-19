@@ -1,9 +1,11 @@
 //! Versioned JSON contracts for ReviewQ transport adapters.
 
+pub mod actions;
 pub mod changes;
 pub mod decisions;
 mod common;
 pub mod events;
+pub mod followups;
 pub mod history;
 pub mod notifications;
 mod hosts;
