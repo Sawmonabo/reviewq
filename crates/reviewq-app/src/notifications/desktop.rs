@@ -4,6 +4,7 @@ use crate::access::{AppError, AppFuture};
 
 use super::Kind;
 
+#[derive(Clone)]
 pub struct DesktopClaim {
     pub id: String,
     pub fence: u64,
@@ -25,7 +26,7 @@ pub enum DesktopOutcome {
 pub trait DesktopStore: Send + Sync {
     fn recover_desktop_claims(&self) -> AppFuture<'_, ()>;
     fn claim_desktop(&self) -> AppFuture<'_, Option<DesktopClaim>>;
-    fn desktop_still_unread(&self, claim: &DesktopClaim) -> AppFuture<'_, bool>;
+    fn refresh_desktop_claim(&self, claim: DesktopClaim) -> AppFuture<'_, Option<DesktopClaim>>;
     fn finish_desktop(&self, claim: DesktopClaim, result: DesktopOutcome) -> AppFuture<'_, ()>;
 }
 
@@ -40,17 +41,17 @@ pub async fn dispatch_desktop(
     let Some(claim) = store.claim_desktop().await? else {
         return Ok(());
     };
-    if !store.desktop_still_unread(&claim).await? {
+    let Some(current) = store.refresh_desktop_claim(claim.clone()).await? else {
         return store
             .finish_desktop(
                 claim,
                 DesktopOutcome::NotStarted("notification_no_longer_unread"),
             )
             .await;
-    }
-    let result = match notifier.notify(&claim).await {
+    };
+    let result = match notifier.notify(&current).await {
         Ok(result) => result,
         Err(_) => DesktopOutcome::Uncertain("notification_bridge_unknown"),
     };
-    store.finish_desktop(claim, result).await
+    store.finish_desktop(current, result).await
 }

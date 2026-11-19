@@ -11,11 +11,12 @@ CREATE TABLE followup_monitors (
     generation INTEGER NOT NULL CHECK (generation > 0),
     state TEXT NOT NULL CHECK (state IN ('enabled', 'paused', 'archived')),
     policy_override INTEGER CHECK (policy_override IN (0, 1)),
+    reviewer_id TEXT,
     binding_verified INTEGER NOT NULL CHECK (binding_verified IN (0, 1)),
     reason TEXT CHECK (length(CAST(reason AS BLOB)) <= 1024),
     updated_at_ms INTEGER NOT NULL,
     FOREIGN KEY (review_id, run_id) REFERENCES runs(review_id, run_id),
-    CHECK (binding_verified=0 OR run_id IS NOT NULL)
+    CHECK (binding_verified=0 OR (run_id IS NOT NULL AND reviewer_id IS NOT NULL))
 ) STRICT, WITHOUT ROWID;
 
 CREATE TABLE followup_threads (

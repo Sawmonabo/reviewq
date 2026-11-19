@@ -110,6 +110,19 @@ fn record(
     save_observations(tx, std::slice::from_ref(&observation.review))?;
     let db = &tx.sql;
     let now = now_ms()?;
+    let mut keys = vec![
+        ResourceKey::Followup(Some(review.clone())),
+        ResourceKey::Review(Some(review.clone())),
+        ResourceKey::Queue,
+    ];
+    let reviewer: Option<String> = db.query_row(
+        "SELECT reviewer_id FROM followup_monitors WHERE review_id=?1",
+        [review.as_str()],
+        |row| row.get(0),
+    )?;
+    if reviewer.as_deref() != Some(observation.authenticated_actor.to_string().as_str()) {
+        return hold(tx, review, now, "monitored_reviewer_changed");
+    }
     let stopped = match (&observation.review.state, observation.personal_approval) {
         (MergeRequestState::Closed | MergeRequestState::Merged, _) => {
             Some(("archived", "merge_request_closed"))
@@ -117,11 +130,6 @@ fn record(
         (_, Some(true)) => Some(("paused", "reviewer_approval_confirmed")),
         _ => None,
     };
-    let mut keys = vec![
-        ResourceKey::Followup(Some(review.clone())),
-        ResourceKey::Review(Some(review.clone())),
-        ResourceKey::Queue,
-    ];
     if let Some((state, reason)) = stopped {
         db.execute(
             "UPDATE followup_monitors SET state=?2,reason=?3,updated_at_ms=max(updated_at_ms,?4)
@@ -136,15 +144,16 @@ fn record(
             )?;
         }
     } else if observation.personal_approval.is_none() {
-        let changed = db.execute(
-            "UPDATE followup_monitors SET reason='reviewer_approval_unknown',updated_at_ms=max(updated_at_ms,?2)
-             WHERE review_id=?1 AND reason IS NOT 'reviewer_approval_unknown'",
-            params![review.as_str(),now],
-        )?;
-        if changed == 0 {
-            return Ok(());
-        }
+        return hold(tx, review, now, "reviewer_approval_unknown");
     } else {
+        if let Err(error) =
+            observations::require_known_threads(db, review, target.generation, &observation)
+        {
+            if error.app() == AppError::Conflict {
+                return hold(tx, review, now, "monitored_discussion_unavailable");
+            }
+            return Err(AppError::Internal.into());
+        }
         let changed = db.execute(
             "UPDATE followup_monitors SET reason=NULL,updated_at_ms=max(updated_at_ms,?2)
              WHERE review_id=?1 AND reason IS NOT NULL",
@@ -168,5 +177,22 @@ fn record(
     }
     advance_queue(&tx.sql)?;
     tx.emit(&keys)?;
+    Ok(())
+}
+
+fn hold(tx: &mut WriteTx<'_>, review: &ReviewId, now: i64, reason: &str) -> Result<(), StoreError> {
+    let changed = tx.sql.execute(
+        "UPDATE followup_monitors SET reason=?2,updated_at_ms=max(updated_at_ms,?3)
+         WHERE review_id=?1 AND reason IS NOT ?2",
+        params![review.as_str(), reason, now],
+    )?;
+    if changed != 0 {
+        advance_queue(&tx.sql)?;
+        tx.emit(&[
+            ResourceKey::Followup(Some(review.clone())),
+            ResourceKey::Review(Some(review.clone())),
+            ResourceKey::Queue,
+        ])?;
+    }
     Ok(())
 }
