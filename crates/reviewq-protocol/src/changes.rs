@@ -31,6 +31,16 @@ pub type PatchFileIndexResponse = Success<PatchFileIndex>;
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct CurrentPatchRevision {
+    pub review_id: ReviewIdDto,
+    pub revision: PatchRevisionDto,
+}
+
+pub type CurrentPatchRevisionResponse = Success<CurrentPatchRevision>;
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct PatchPaths {
     pub review_id: ReviewIdDto,
     pub revision: PatchRevisionDto,

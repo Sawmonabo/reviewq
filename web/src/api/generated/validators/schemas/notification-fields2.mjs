@@ -3,8 +3,8 @@ import { func0 } from "../runtime.mjs";
 import { validate232 } from "./utc-timestamp-dto.mjs";
 import { validate114 } from "./review-id-dto.mjs";
 import { validate25 } from "./checkpoint-id-dto.mjs";
-import { validate720 } from "./tab.mjs";
-function validate715(
+import { validate726 } from "./tab.mjs";
+function validate721(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -66,7 +66,7 @@ function validate715(
             vErrors.push(err1);
           }
           errors++;
-          validate715.errors = vErrors;
+          validate721.errors = vErrors;
           return false;
         } else {
           errors = _errs2;
@@ -158,7 +158,7 @@ function validate715(
                 vErrors.push(err3);
               }
               errors++;
-              validate715.errors = vErrors;
+              validate721.errors = vErrors;
               return false;
             } else {
               errors = _errs8;
@@ -232,7 +232,7 @@ function validate715(
                   vErrors.push(err5);
                 }
                 errors++;
-                validate715.errors = vErrors;
+                validate721.errors = vErrors;
                 return false;
               } else {
                 errors = _errs13;
@@ -252,7 +252,7 @@ function validate715(
               if (data.source !== undefined && func0.call(data, "source")) {
                 const _errs17 = errors;
                 if (typeof data.source !== "string") {
-                  validate715.errors = [
+                  validate721.errors = [
                     {
                       instancePath: instancePath + "/source",
                       schemaPath: "#/properties/source/type",
@@ -270,7 +270,7 @@ function validate715(
                 if (data.tab !== undefined && func0.call(data, "tab")) {
                   const _errs19 = errors;
                   if (
-                    !validate720(data.tab, {
+                    !validate726(data.tab, {
                       instancePath: instancePath + "/tab",
                       parentData: data,
                       parentDataProperty: "tab",
@@ -279,8 +279,8 @@ function validate715(
                   ) {
                     vErrors =
                       vErrors === null
-                        ? validate720.errors
-                        : vErrors.concat(validate720.errors);
+                        ? validate726.errors
+                        : vErrors.concat(validate726.errors);
                     errors = vErrors.length;
                   }
                   var valid0 = _errs19 === errors;
@@ -293,7 +293,7 @@ function validate715(
         }
       }
     } else {
-      validate715.errors = [
+      validate721.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -304,7 +304,7 @@ function validate715(
       return false;
     }
   }
-  validate715.errors = vErrors;
+  validate721.errors = vErrors;
   return errors === 0;
 }
-export { validate715 };
+export { validate721 };

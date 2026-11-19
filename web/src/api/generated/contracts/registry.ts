@@ -109,6 +109,7 @@ import type {
 
 import type {
   ApprovalViewResponse,
+  CurrentPatchRevisionResponse,
   PatchDiscussionsResponse,
   PatchFileIndexResponse,
   PatchPathsResponse,
@@ -164,6 +165,7 @@ export interface Contracts {
   CatalogResponse: CatalogResponse;
   CheckoutSkillsResponse: CheckoutSkillsResponse;
   CurrentActionResponse: CurrentActionResponse;
+  CurrentPatchRevisionResponse: CurrentPatchRevisionResponse;
   DeliveryReceiptResponse: DeliveryReceiptResponse;
   Failure: Failure;
   FollowupAssessmentsResponse: FollowupAssessmentsResponse;

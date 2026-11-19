@@ -35,6 +35,7 @@ import type {
   CatalogResponse,
   CheckoutSkillsResponse,
   CurrentActionResponse,
+  CurrentPatchRevisionResponse,
   DeliveryReceiptResponse,
   Failure,
   FollowupAssessmentsResponse,
@@ -167,6 +168,9 @@ export function isCheckoutSkillsResponse(
 export function isCurrentActionResponse(
   value: unknown,
 ): value is CurrentActionResponse;
+export function isCurrentPatchRevisionResponse(
+  value: unknown,
+): value is CurrentPatchRevisionResponse;
 export function isDeliveryReceiptResponse(
   value: unknown,
 ): value is DeliveryReceiptResponse;

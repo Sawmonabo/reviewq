@@ -3,6 +3,7 @@ import { read, request } from "./client";
 import type { PatchFile, PatchPath } from "./generated/contracts";
 import {
   isApprovalViewResponse,
+  isCurrentPatchRevisionResponse,
   isPatchDiscussionsResponse,
   isPatchFileIndexResponse,
   isPatchPathsResponse,
@@ -102,6 +103,16 @@ async function scanPatchPaths(
     query.set("cursor", data.nextCursor);
   }
   throw new Error("ReviewQ could not finish reading the file catalog.");
+}
+
+export async function readPatchRevision(reviewId: string, signal: AbortSignal) {
+  const result = await read(
+    `${changesRoute(reviewId)}/revision`,
+    isCurrentPatchRevisionResponse,
+    signal,
+  );
+  if (result.data.reviewId !== reviewId) throw new Error("The selected review changed.");
+  return result;
 }
 
 export async function readPatchDiscussions(

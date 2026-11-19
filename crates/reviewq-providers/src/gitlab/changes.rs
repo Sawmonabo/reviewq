@@ -34,6 +34,10 @@ pub(super) struct DiffRefs {
 }
 
 impl ChangeSource for GitLab {
+    fn revision(&self, source: MrIdentity) -> AppFuture<'_, PatchRevision> {
+        Box::pin(async move { self.patch_revision(&source, None).await })
+    }
+
     fn approvals(
         &self,
         source: MrIdentity,

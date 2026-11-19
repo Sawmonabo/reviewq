@@ -232,6 +232,8 @@ pub struct ApprovalRule {
 }
 
 pub trait ChangeSource: Send + Sync {
+    fn revision(&self, source: MrIdentity) -> AppFuture<'_, PatchRevision>;
+
     fn approvals(
         &self,
         source: MrIdentity,

@@ -12,11 +12,11 @@ import type {
 
 export type ApprovalWarning = "approvals_unavailable" | "rules_unavailable";
 
+export type PatchRevisionDto = string;
+
 export type DiscussionPosition = "text" | "file" | "other";
 
 export type DiscussionResolution = "open" | "resolved" | "comment" | "unknown";
-
-export type PatchRevisionDto = string;
 
 export type PatchAvailability =
   "complete" | "incomplete" | "binary" | "provider_limited" | "missing";
@@ -65,6 +65,18 @@ export interface ApprovalRule {
   id: UpstreamIdDto;
   name: string;
   required: SafeCountDto;
+  [k: string]: unknown;
+}
+
+export interface CurrentPatchRevisionResponse {
+  cursor: EventCursorDto;
+  data: CurrentPatchRevision;
+  [k: string]: unknown;
+}
+
+export interface CurrentPatchRevision {
+  reviewId: ReviewIdDto;
+  revision: PatchRevisionDto;
   [k: string]: unknown;
 }
 

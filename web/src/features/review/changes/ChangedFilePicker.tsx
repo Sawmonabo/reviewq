@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   matchesPatchPath,
   PATH_MATCHES_PER_PAGE,
@@ -43,6 +43,7 @@ export function ChangedFilePicker({
 }: Props) {
   const input = useRef<HTMLInputElement>(null);
   const [search, setSearch] = useState("");
+  const [knownCount, setKnownCount] = useState<{ readonly text: string; readonly count: number }>();
   const [offset, setOffset] = useState(0);
   const text = query.toLowerCase();
   const cached = catalog.data?.paths;
@@ -52,14 +53,20 @@ export function ChangedFilePicker({
     const timer = window.setTimeout(() => setSearch(text), 180);
     return () => window.clearTimeout(timer);
   }, [needsSearch, text]);
+  const readingSearch = needsSearch && search === text;
   const matches = useResource(
-    JSON.stringify(["file-search", reviewId, index.revision, needsSearch, search, offset]),
-    (signal) =>
-      needsSearch && search
-        ? readPatchPathMatches(reviewId, index.revision, signal, search, offset)
-        : Promise.resolve({ data: null, cursor: "" }),
+    JSON.stringify(["file-search", reviewId, index.revision, readingSearch, search, offset]),
+    async (signal) => {
+      if (!readingSearch) return { data: null, cursor: "" };
+      const result = await readPatchPathMatches(reviewId, index.revision, signal, search, offset);
+      if (!signal.aborted) setKnownCount({ text: search, count: result.data.count });
+      return result;
+    },
   );
-  const cachedMatches = cached?.filter((path) => matchesPatchPath(path, text));
+  const cachedMatches = useMemo(
+    () => (text ? cached?.filter((path) => matchesPatchPath(path, text)) : undefined),
+    [cached, text],
+  );
   const result = cachedMatches
     ? {
         count: cachedMatches.length,
@@ -69,6 +76,7 @@ export function ChangedFilePicker({
       ? matches.data
       : undefined;
   const searching = Boolean(text && !result && !catalog.error && !matches.error);
+  const count = result?.count ?? (knownCount?.text === text ? knownCount.count : 0);
 
   return (
     <details
@@ -139,24 +147,30 @@ export function ChangedFilePicker({
         )}
       </nav>
       {text
-        ? result &&
-          (offset > 0 || result.count > PATH_MATCHES_PER_PAGE) && (
+        ? (offset > 0 || count > PATH_MATCHES_PER_PAGE) && (
             <nav className="pagination" aria-label="File search pages">
               <button
                 type="button"
-                aria-disabled={offset === 0}
-                onClick={() => offset > 0 && setOffset(offset - PATH_MATCHES_PER_PAGE)}
+                aria-disabled={searching || offset === 0}
+                onClick={() =>
+                  !searching && offset > 0 && setOffset(offset - PATH_MATCHES_PER_PAGE)
+                }
               >
                 Previous
               </button>
               <span className="meta" role="status">
-                {offset + 1}–{offset + result.paths.length} of {result.count}
+                {result
+                  ? `${offset + 1}–${offset + result.paths.length} of ${count}`
+                  : searching
+                    ? "Loading files…"
+                    : null}
               </span>
               <button
                 type="button"
-                aria-disabled={offset + PATH_MATCHES_PER_PAGE >= result.count}
+                aria-disabled={searching || offset + PATH_MATCHES_PER_PAGE >= count}
                 onClick={() =>
-                  offset + PATH_MATCHES_PER_PAGE < result.count &&
+                  !searching &&
+                  offset + PATH_MATCHES_PER_PAGE < count &&
                   setOffset(offset + PATH_MATCHES_PER_PAGE)
                 }
               >

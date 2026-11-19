@@ -50,6 +50,30 @@ struct Position {
     limit: u16,
 }
 
+pub(super) async fn revision(
+    State(entry): State<Arc<Entry>>,
+    headers: HeaderMap,
+    Path(review): Path<String>,
+) -> Result<Json<dto::CurrentPatchRevisionResponse>, ApiError> {
+    let actor = entry.auth.browser_actor(&headers, false)?;
+    let review_id = parse_review(&review)?;
+    let source = read_source(&entry, &actor, &review_id).await?;
+    let provider = source
+        .context
+        .reader
+        .as_ref()
+        .ok_or(AppError::Unavailable)?;
+    let current = provider.revision(source.value.identity.clone()).await?;
+    check_source(&entry, &actor, &review_id, &source).await?;
+    Ok(Json(Success {
+        cursor: EventCursorDto::new(source.cursor.get()).ok_or(AppError::Internal)?,
+        data: dto::CurrentPatchRevision {
+            review_id: ReviewIdDto::new(review).ok_or(AppError::Internal)?,
+            revision: patch_revision(&current.id)?,
+        },
+    }))
+}
+
 pub(super) async fn files(
     State(entry): State<Arc<Entry>>,
     headers: HeaderMap,

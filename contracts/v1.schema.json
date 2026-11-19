@@ -1735,6 +1735,38 @@
       "title": "CurrentActionResponseState",
       "type": "string"
     },
+    "CurrentPatchRevision": {
+      "properties": {
+        "reviewId": {
+          "$ref": "#/definitions/ReviewIdDto"
+        },
+        "revision": {
+          "$ref": "#/definitions/PatchRevisionDto"
+        }
+      },
+      "required": [
+        "reviewId",
+        "revision"
+      ],
+      "type": "object"
+    },
+    "CurrentPatchRevisionResponse": {
+      "description": "The resource and event head from the same authorized snapshot.",
+      "properties": {
+        "cursor": {
+          "$ref": "#/definitions/EventCursorDto"
+        },
+        "data": {
+          "$ref": "#/definitions/CurrentPatchRevision"
+        }
+      },
+      "required": [
+        "data",
+        "cursor"
+      ],
+      "title": "CurrentPatchRevisionResponse",
+      "type": "object"
+    },
     "DecisionResult": {
       "properties": {
         "checkpointId": {
@@ -9458,6 +9490,7 @@
     "CheckoutSkillsRequest": "settings",
     "CheckoutSkillsResponse": "settings",
     "CurrentActionResponse": "actions",
+    "CurrentPatchRevisionResponse": "changes",
     "DeliveryReceiptResponse": "delivery",
     "DisconnectSettings": "settings",
     "EventReplayCursor": "common",
@@ -9574,6 +9607,7 @@
       "CatalogResponse": "#/definitions/CatalogResponse",
       "CheckoutSkillsResponse": "#/definitions/CheckoutSkillsResponse",
       "CurrentActionResponse": "#/definitions/CurrentActionResponse",
+      "CurrentPatchRevisionResponse": "#/definitions/CurrentPatchRevisionResponse",
       "DeliveryReceiptResponse": "#/definitions/DeliveryReceiptResponse",
       "Failure": "#/definitions/Failure",
       "FollowupAssessmentsResponse": "#/definitions/FollowupAssessmentsResponse",

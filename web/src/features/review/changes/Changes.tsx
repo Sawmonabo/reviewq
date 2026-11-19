@@ -12,6 +12,7 @@ import {
   readPatchDiscussions,
   readPatchFiles,
   readPatchPathCatalog,
+  readPatchRevision,
 } from "../../../api/changes";
 import type {
   PatchDiscussion,
@@ -109,8 +110,9 @@ export default function Changes({
         : Promise.resolve({ data: null, cursor: "" }),
   );
   const current = useResource(
-    `change-current:${reviewId}`,
-    (signal) => readPatchFiles(reviewId, signal),
+    `change-current:${reviewId}:${epoch}`,
+    (signal) =>
+      revision ? readPatchRevision(reviewId, signal) : Promise.resolve({ data: null, cursor: "" }),
     [{ kind: "changes", id: reviewId }],
   );
   const changed = Boolean(revision && current.data && current.data.revision !== revision);

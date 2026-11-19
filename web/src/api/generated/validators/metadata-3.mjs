@@ -75,7 +75,7 @@ const schema128 = {
   type: "string",
 };
 const schema130 = { enum: ["unknown", "absent", "confirmed"], type: "string" };
-const schema142 = {
+const schema144 = {
   description: "Stable error codes for the public JSON envelope.",
   enum: [
     "ticket_unverified",
@@ -96,7 +96,7 @@ const schema142 = {
   ],
   type: "string",
 };
-const schema146 = {
+const schema148 = {
   enum: [
     "fixed",
     "clarified_withdrawn",
@@ -107,8 +107,8 @@ const schema146 = {
   ],
   type: "string",
 };
-const schema147 = { enum: ["review", "waiting_author"], type: "string" };
-const schema151 = {
+const schema149 = { enum: ["review", "waiting_author"], type: "string" };
+const schema153 = {
   type: "object",
   properties: {
     authorityVerified: { type: "boolean" },
@@ -127,7 +127,7 @@ const schema151 = {
     holdReason: { type: ["string", "null"] },
   },
 };
-const schema153 = {
+const schema155 = {
   enum: [
     "pending",
     "reserved",
@@ -138,26 +138,6 @@ const schema153 = {
   ],
   type: "string",
 };
-const schema155 = {
-  type: "object",
-  properties: {
-    batchId: { $ref: "#/definitions/CheckpointIdDto" },
-    checkedSha: {
-      anyOf: [{ $ref: "#/definitions/GitShaDto" }, { type: "null" }],
-    },
-    completedAt: { $ref: "#/definitions/UtcTimestampDto" },
-    concernCount: { $ref: "#/definitions/SafeCountDto" },
-    findingIds: {
-      items: { $ref: "#/definitions/CheckpointIdDto" },
-      maxItems: 12,
-      type: "array",
-    },
-    kind: { $ref: "#/definitions/ResultKind" },
-    moreFindingIds: { type: "boolean" },
-    reasonPreview: { type: ["string", "null"] },
-  },
-};
-const schema156 = { enum: ["final", "unchanged"], type: "string" };
 export {
   schema118,
   schema124,
@@ -165,11 +145,9 @@ export {
   schema126,
   schema128,
   schema130,
-  schema142,
-  schema146,
-  schema147,
-  schema151,
+  schema144,
+  schema148,
+  schema149,
   schema153,
   schema155,
-  schema156,
 };
