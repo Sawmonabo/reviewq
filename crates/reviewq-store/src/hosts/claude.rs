@@ -13,7 +13,60 @@ use crate::{SqliteStore, StoreError};
 
 pub(super) const COMPANION_FRESH_MS: i64 = 30_000;
 
+mod delivery;
+
 impl ClaudeStore for SqliteStore {
+    fn offer_claude_delivery(
+        &self,
+        lead: LeadTarget,
+        generation: String,
+    ) -> AppFuture<'_, Option<reviewq_app::hosts::ClaudeOffer>> {
+        Box::pin(async move {
+            self.write(move |tx| delivery::offer(tx, lead, generation))
+                .await
+                .map_err(StoreError::app)
+        })
+    }
+
+    fn claude_delivery(
+        &self,
+        lead: LeadTarget,
+        offer: reviewq_app::hosts::ClaudeOffer,
+    ) -> AppFuture<'_, reviewq_app::hosts::ClaudeSend> {
+        Box::pin(async move {
+            self.read(move |db| delivery::read(db, lead, &offer))
+                .await
+                .map_err(StoreError::app)
+        })
+    }
+
+    fn authorize_claude_delivery(
+        &self,
+        lead: LeadTarget,
+        offer: reviewq_app::hosts::ClaudeOffer,
+        anchor: reviewq_app::hosts::ClaudeAnchor,
+        checked_workflow: Option<reviewq_app::workflow::ReadyWorkflow>,
+    ) -> AppFuture<'_, reviewq_app::hosts::DeliveryClaim> {
+        Box::pin(async move {
+            self.write(move |tx| delivery::authorize(tx, lead, offer, anchor, checked_workflow))
+                .await
+                .map_err(StoreError::app)
+        })
+    }
+
+    fn finish_claude_delivery(
+        &self,
+        lead: LeadTarget,
+        offer: reviewq_app::hosts::ClaudeOffer,
+        result: reviewq_app::hosts::ClaudeDeliveryResult,
+    ) -> AppFuture<'_, ()> {
+        Box::pin(async move {
+            self.write(move |tx| delivery::finish(tx, lead, offer, result))
+                .await
+                .map_err(StoreError::app)
+        })
+    }
+
     fn record_claude_heartbeat(
         &self,
         lead: LeadTarget,

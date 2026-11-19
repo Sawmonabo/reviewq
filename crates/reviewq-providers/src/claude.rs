@@ -6,11 +6,13 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 
 use reviewq_app::access::{AppError, AppFuture};
-use reviewq_app::hosts::{ClaudeCompanion, ClaudeContext, HostProof};
+use reviewq_app::history::HistorySession;
+use reviewq_app::hosts::{ClaudeAnchor, ClaudeCompanion, ClaudeContext, HostProof, MessageBody};
+use reviewq_domain::identity::NativeInputId;
 use reviewq_domain::session::{AbsolutePath, HostProvider, NativeBinding, NativeIdentity};
 use tokio::sync::Semaphore;
 
-use crate::history::{Cancel, verified_claude_source};
+use crate::history::{Cancel, claude_anchor, claude_confirm_prompt, verified_claude_source};
 
 pub struct Claude {
     profile: AbsolutePath,
@@ -35,7 +37,52 @@ impl Claude {
     }
 }
 
+impl Claude {
+    fn read_native<T: Send + 'static>(
+        &self,
+        session: HistorySession,
+        operation: impl FnOnce(HistorySession, &AtomicBool) -> Result<T, AppError> + Send + 'static,
+    ) -> AppFuture<'_, T> {
+        Box::pin(async move {
+            if session.binding.identity().profile() != &self.profile || session.source.is_none() {
+                return Err(AppError::Forbidden);
+            }
+            let permit = self
+                .reads
+                .clone()
+                .try_acquire_owned()
+                .map_err(|_| AppError::Busy)?;
+            let cancel = Cancel(Arc::new(AtomicBool::new(false)));
+            let stopped = cancel.0.clone();
+            tokio::task::spawn_blocking(move || {
+                let _permit = permit;
+                operation(session, &stopped)
+            })
+            .await
+            .map_err(|_| AppError::Unavailable)?
+        })
+    }
+}
+
 impl ClaudeCompanion for Claude {
+    fn anchor(&self, session: HistorySession) -> AppFuture<'_, ClaudeAnchor> {
+        self.read_native(session, |session, cancelled| {
+            claude_anchor(&session, cancelled)
+        })
+    }
+
+    fn confirm_prompt(
+        &self,
+        session: HistorySession,
+        anchor: ClaudeAnchor,
+        entry: NativeInputId,
+        text: MessageBody,
+    ) -> AppFuture<'_, ()> {
+        self.read_native(session, move |session, cancelled| {
+            claude_confirm_prompt(&session, &anchor, &entry, &text, cancelled)
+        })
+    }
+
     fn prove(&self, context: ClaudeContext) -> AppFuture<'_, HostProof> {
         Box::pin(async move {
             if context.profile != self.profile {

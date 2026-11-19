@@ -36,7 +36,7 @@ const RECEIPT_JOIN: &str =
     "messages d JOIN runs r ON r.run_id=d.run_id
      JOIN mutation_receipts m ON m.actor_key=d.actor_key AND m.operation=d.operation AND m.submission_id=d.submission_id
      LEFT JOIN outbox o ON o.delivery_id=d.message_id";
-const SCHEDULE_FROM: &str = "FROM outbox o JOIN messages m ON m.message_id=o.delivery_id
+pub(super) const SCHEDULE_FROM: &str = "FROM outbox o JOIN messages m ON m.message_id=o.delivery_id
     JOIN sessions s ON s.run_id=m.run_id AND s.session_key=m.session_key
     WHERE s.provider=?1 AND NOT EXISTS (
         SELECT 1 FROM messages prior JOIN outbox pending ON pending.delivery_id=prior.message_id
@@ -433,6 +433,29 @@ pub(super) fn claim(
         purpose: delivery.purpose,
         work,
     }))
+}
+
+pub(super) fn existing_dispatch(
+    connection: &Connection,
+    id: DeliveryId,
+    fence: DeliveryFence,
+    target: LeadTarget,
+) -> Result<DeliveryClaim, StoreError> {
+    let stored = by_id(connection, &id)?.ok_or(AppError::NotFound)?;
+    if stored.fence != fence
+        || (!matches!(stored.receipt.outcome, DeliveryOutcome::Uncertain)
+            && stored.claim != Some(ClaimKind::Dispatch))
+        || stored.receipt.target != *target.target()
+    {
+        return Err(AppError::Conflict.into());
+    }
+    Ok(DeliveryClaim {
+        work: dispatch_work(connection, &id)?,
+        delivery_id: id,
+        fence,
+        target,
+        purpose: stored.purpose,
+    })
 }
 
 fn registered_lead(connection: &Connection, delivery: &Delivery) -> Result<LeadTarget, StoreError> {

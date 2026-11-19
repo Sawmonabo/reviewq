@@ -9,6 +9,8 @@ use crate::runtime;
 #[derive(Clone, clap::ValueEnum)]
 pub(crate) enum ClaudeBridgeOperation {
     Heartbeat,
+    DeliveryCheck,
+    Hook,
 }
 
 pub(crate) async fn claude_bridge(
@@ -19,6 +21,8 @@ pub(crate) async fn claude_bridge(
     let native: NativeSessionId = session_id.parse()?;
     let (path, limit) = match operation {
         ClaudeBridgeOperation::Heartbeat => ("/api/v1/native/claude/heartbeat", 16_384usize),
+        ClaudeBridgeOperation::DeliveryCheck => ("/api/v1/native/claude/delivery-check", 16_384),
+        ClaudeBridgeOperation::Hook => ("/api/v1/native/claude/hook", 16_384),
     };
     let mut input = Vec::new();
     std::io::stdin()
@@ -50,7 +54,7 @@ pub(crate) async fn claude_bridge(
     verify_ready(&endpoint, &status)?;
     let result = bridge(&client, &endpoint, path, serde_json::to_vec(&payload)?).await?;
     let status = result.status();
-    let body = bounded(result, 128 * 1024).await?;
+    let body = bounded(result, 256 * 1024).await?;
     if !status.is_success() {
         let detail = match status.as_u16() {
             404 => "This Claude session has no verified ReviewQ binding.",

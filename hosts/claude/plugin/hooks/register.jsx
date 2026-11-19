@@ -1,3 +1,5 @@
+import { deliver, finishTurn, observeFirstStep, observeInput, observeTurn, reviewqOrigin } from "./delivery.js";
+
 const HEARTBEAT_MS = 5000;
 const OFFLINE_MS = 30000;
 let session;
@@ -46,6 +48,7 @@ async function current($) {
       id,
       generation: Array.from(salt, byte => byte.toString(16).padStart(2, "0")).join(""),
       sequence: 0,
+      inputRevision: 0,
       linked: false,
       lastSeen: 0,
       label: undefined,
@@ -70,7 +73,7 @@ async function heartbeat($, state) {
   const result = await invoke($, "heartbeat", state.id, {
     generation: state.generation,
     sequence: ++state.sequence,
-    phase: state.question ? "blocked" : state.working ? "working" : state.phase ?? null,
+    phase: state.question ? "blocked" : state.working || state.activeTurn || state.pendingPrompt ? "working" : state.phase ?? null,
     hasQuestions: !!state.question,
     turnId: state.turnId ?? null,
     latestPromptId: state.lastPrompt ?? null,
@@ -81,6 +84,7 @@ async function heartbeat($, state) {
     if (result.data?.protocolVersion === 1) {
       state.lastSeen = Date.now();
       state.label = result.data.label;
+      await deliver($, invoke, state, result.data.offer);
     }
     $.ui.invalidate("ui.render");
   }
@@ -129,8 +133,11 @@ export function register(on) {
   on("prompt.submit", async ($, event, next) => {
     const state = await current($);
     state.pendingPrompt = true;
+    const owned = state.delivery?.started && reviewqOrigin(event.origin);
+    if (!owned) state.inputRevision += 1;
     try {
-      return await next(event);
+      const context = owned ? state.delivery.context : undefined;
+      return await next(context ? { ...event, context: [...(event.context ?? []), context] } : event);
     } finally {
       state.pendingPrompt = false;
       if (state === session) schedule($, 0, !state.linked);
@@ -141,15 +148,21 @@ export function register(on) {
     if (event.agentId) return next(event);
     const state = await current($);
     state.turnId = event.turnId;
+    state.activeTurn = event.turnId;
     state.phase = "working";
+    observeTurn(state, event.turnId);
     if (state.linked) schedule($);
     return next(event);
   });
 
-  on("turn.step", ($, event, next) => {
+  on("turn.step", async ($, event, next) => {
     if (!event.agentId && session?.turnId === event.turnId) {
       session.model = event.model;
       session.effort = typeof event.effort === "string" ? event.effort : undefined;
+      if (event.index === 0 && session.delivery) {
+        await observeFirstStep($, session, event);
+        schedule($);
+      }
     }
     return next(event);
   });
@@ -157,7 +170,9 @@ export function register(on) {
   on("turn.complete", async ($, event, next) => {
     const result = await next(event);
     if (!event.agentId && session?.turnId === event.turnId) {
+      session.activeTurn = undefined;
       session.phase = event.reason === "error" ? "failed" : "idle";
+      finishTurn(session, event.turnId);
       session.question = undefined;
       if (session.linked) schedule($);
     }
@@ -169,6 +184,8 @@ export function register(on) {
     if (!event.agentId && result.uuid === event.uuid && session?.linked
       && !event.message.isMeta && event.message.role === "user") {
       session.lastPrompt = result.uuid;
+      session.inputRevision += 1;
+      observeInput(session, event, result.uuid);
     }
     return result;
   });
