@@ -33,7 +33,10 @@ type Position = {
   readonly offset: number;
   readonly toolEntry?: boolean;
   readonly callId?: string;
+  readonly reopenPages?: number;
 };
+const SCROLL_IDLE_MS = 160;
+const MAX_REOPEN_PAGES = 4;
 type ExtraParts = {
   readonly entryId: string;
   readonly generation: string;
@@ -85,12 +88,18 @@ export function Transcript({ target, provider, child, messages, working }: Props
   const viewport = useRef<HTMLDivElement>(null);
   const anchor = useRef<Position | undefined>(
     saved
-      ? { id: saved.entryId, offset: saved.offset, toolEntry: saved.toolEntry ?? true }
+      ? {
+          id: saved.entryId,
+          offset: saved.offset,
+          toolEntry: saved.toolEntry ?? true,
+          ...(!saved.following ? { reopenPages: 0 } : {}),
+        }
       : undefined,
   );
   const selectionState = useRef({ hasText: false, ids: new Set<string>() });
   const scrollIntent = useRef(false);
   const readingPosition = useRef<TimelineBookmark | undefined>(undefined);
+  const written = useRef(saved);
   const requestedLatest = useRef(false);
   const activeLatest = useRef(false);
   const toolFocus = useRef<ReadTarget | undefined>(undefined);
@@ -98,7 +107,7 @@ export function Transcript({ target, provider, child, messages, working }: Props
   const history = useHistory(target, bookmark, following, pinned, (position, wanted) => {
     if (position === "around" && wanted) {
       if (anchor.current?.id !== wanted.entryId) anchor.current = { id: wanted.entryId, offset: 0 };
-    } else if (position !== "latest") {
+    } else if (position !== "latest" && anchor.current?.reopenPages === undefined) {
       anchor.current = visibleAnchor(viewport.current);
     }
   });
@@ -199,6 +208,18 @@ export function Transcript({ target, provider, child, messages, working }: Props
     output?.reference,
   );
 
+  const extendReopen = useEffectEvent((position: Position, direction: "older" | "newer") => {
+    if (
+      position.reopenPages === undefined ||
+      position.reopenPages >= MAX_REOPEN_PAGES ||
+      history.loading ||
+      !history[direction]
+    )
+      return;
+    anchor.current = { ...position, reopenPages: position.reopenPages + 1 };
+    void history.load(direction);
+  });
+
   useLayoutEffect(() => {
     if (!entries.length) return;
     if (following || requestedLatest.current) {
@@ -215,15 +236,29 @@ export function Transcript({ target, provider, child, messages, working }: Props
       if (index < 0) return;
       const container = viewport.current;
       list.scrollToIndex(index, { align: "start" });
-      requestAnimationFrame(() => {
-        if (!container?.isConnected) return;
+      const frame = requestAnimationFrame(() => {
+        if (!container?.isConnected || anchor.current !== saved) return;
         const displayed = [...container.querySelectorAll<HTMLElement>("[data-entry]")];
         const row = displayed.find((item) =>
           exactEntry ? item.dataset.entry === saved.id : item.dataset.nativeEntry === saved.id,
         );
-        if (row)
-          container.scrollTop +=
-            row.getBoundingClientRect().top - container.getBoundingClientRect().top - saved.offset;
+        if (row) {
+          list.cancelScroll();
+          const wanted =
+            container.scrollTop +
+            row.getBoundingClientRect().top -
+            container.getBoundingClientRect().top -
+            saved.offset;
+          const max = container.scrollHeight - container.clientHeight;
+          container.scrollTop = wanted;
+          // The surrounding page or late inline prose can change the
+          // scroll bounds. Keep the target until it fits or the reader moves.
+          if (saved.reopenPages !== undefined && (wanted > max + 1 || wanted < -1)) {
+            extendReopen(saved, wanted < 0 ? "older" : "newer");
+            return;
+          }
+        }
+        anchor.current = undefined;
         if (focus && toolFocus.current === focus) {
           const tool = [...(row?.querySelectorAll<HTMLElement>("[data-tool-call]") ?? [])].find(
             (item) => item.dataset.toolCall === focus.callId,
@@ -232,7 +267,7 @@ export function Transcript({ target, provider, child, messages, working }: Props
           toolFocus.current = undefined;
         }
       });
-      anchor.current = undefined;
+      return () => cancelAnimationFrame(frame);
     }
   }, [entries, following, list, prose]);
 
@@ -278,26 +313,45 @@ export function Transcript({ target, provider, child, messages, working }: Props
   }, []);
 
   const savePosition = useEffectEvent((host: HTMLDivElement | null) => {
-    const position = historyBookmark(host, history.generation, following);
+    if (anchor.current?.reopenPages !== undefined) return;
+    const current = historyBookmark(host, history.generation, following);
     const previous = readingPosition.current;
-    if (position) {
+    const position =
+      current ?? (previous?.generation === history.generation ? previous : undefined);
+    if (position && !sameBookmark(position, written.current)) {
       rememberBookmark(bookmark, position);
-    } else if (previous && previous.generation === history.generation) {
-      rememberBookmark(bookmark, previous);
+      written.current = position;
     }
   });
 
   useLayoutEffect(() => {
     const host = viewport.current;
-    const save = () => savePosition(host);
-    host?.addEventListener("scrollend", save);
-    window.addEventListener("pagehide", save);
+    let timer: number | undefined;
+    function flush() {
+      window.clearTimeout(timer);
+      timer = undefined;
+      savePosition(host);
+    }
+    function settle() {
+      window.clearTimeout(timer);
+      timer = window.setTimeout(flush, SCROLL_IDLE_MS);
+    }
+    host?.addEventListener("scrollend", settle);
+    host?.addEventListener("wheel", settle, { passive: true });
+    host?.addEventListener("touchmove", settle, { passive: true });
+    window.addEventListener("pagehide", flush);
     return () => {
-      save();
-      host?.removeEventListener("scrollend", save);
-      window.removeEventListener("pagehide", save);
+      flush();
+      host?.removeEventListener("scrollend", settle);
+      host?.removeEventListener("wheel", settle);
+      host?.removeEventListener("touchmove", settle);
+      window.removeEventListener("pagehide", flush);
     };
   }, [bookmark]);
+
+  function leaveReopen() {
+    if (anchor.current?.reopenPages !== undefined) anchor.current = undefined;
+  }
 
   function recordScroll() {
     const host = viewport.current;
@@ -312,6 +366,7 @@ export function Transcript({ target, provider, child, messages, working }: Props
   }
 
   function gesture(up: boolean) {
+    leaveReopen();
     scrollIntent.current = true;
     const host = viewport.current;
     if (!host || history.loading) return;
@@ -335,6 +390,7 @@ export function Transcript({ target, provider, child, messages, working }: Props
   }
 
   function latest() {
+    leaveReopen();
     clear();
     setFollowing(true);
     requestedLatest.current = true;
@@ -488,12 +544,15 @@ export function Transcript({ target, provider, child, messages, working }: Props
           if (event.deltaY) gesture(event.deltaY < 0);
         }}
         onTouchMove={() => {
+          leaveReopen();
           scrollIntent.current = true;
         }}
         onPointerDown={(event) => {
           const box = event.currentTarget.getBoundingClientRect();
-          if (event.target === event.currentTarget && box.right - event.clientX < 17)
+          if (event.target === event.currentTarget && box.right - event.clientX < 17) {
+            leaveReopen();
             scrollIntent.current = true;
+          }
         }}
         onKeyDown={(event) => {
           if (["PageUp", "ArrowUp", "Home"].includes(event.key)) gesture(true);
@@ -641,6 +700,7 @@ export function Transcript({ target, provider, child, messages, working }: Props
           following={following}
           onReturnFocus={() => viewport.current?.focus({ preventScroll: true })}
           onJump={(id, locator) => {
+            leaveReopen();
             setFollowing(false);
             void history.load("around", { entryId: id, locator });
           }}
@@ -673,6 +733,18 @@ function historyBookmark(
   };
 }
 
+function sameBookmark(left: TimelineBookmark, right: TimelineBookmark | undefined) {
+  return (
+    right &&
+    left.entryId === right.entryId &&
+    left.offset === right.offset &&
+    left.following === right.following &&
+    left.generation === right.generation &&
+    left.toolEntry === right.toolEntry &&
+    left.callId === right.callId
+  );
+}
+
 function visibleAnchor(host: HTMLDivElement | null): Position | undefined {
   if (!host) return;
   const frame = host.getBoundingClientRect();
@@ -690,7 +762,7 @@ function visibleAnchor(host: HTMLDivElement | null): Position | undefined {
   }
   for (const node of host.querySelectorAll<HTMLElement>("[data-native-entry]")) {
     const item = node.getBoundingClientRect();
-    if (item.bottom > frame.top && node.dataset.nativeEntry) {
+    if (item.bottom > frame.top && item.top < frame.bottom && node.dataset.nativeEntry) {
       const tool = node.querySelector<HTMLElement>("details[open] > [data-tool-call]");
       return {
         id: node.dataset.nativeEntry,
