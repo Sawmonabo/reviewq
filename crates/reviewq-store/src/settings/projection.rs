@@ -92,8 +92,8 @@ impl RepositoryChatProjectionStore for SqliteStore {
                 check(&tx.sql, &job)?;
                 let common = bytes(&job.checkout.common_dir);
                 let changed = match outcome {
-                    ProjectionOutcome::Applied(verifier) if job.desired => {
-                        applied(tx, &job, &verifier)?
+                    ProjectionOutcome::Applied { verifier, topology } if job.desired => {
+                        applied(tx, &job, &verifier, &topology)?
                     }
                     ProjectionOutcome::Removed if !job.desired => tx.sql.execute(
                         "DELETE FROM checkout_projections WHERE common_dir=?1 AND desired=0",
@@ -229,6 +229,7 @@ fn applied(
     tx: &mut WriteTx<'_>,
     job: &CheckoutProjection,
     verifier: &[u8; 32],
+    topology: &[u8; 32],
 ) -> Result<usize, StoreError> {
     let db = &tx.sql;
     let common = bytes(&job.checkout.common_dir);
@@ -248,8 +249,9 @@ fn applied(
         return Err(AppError::StaleRevision.into());
     }
     Ok(db.execute(
-        "UPDATE checkout_projections SET issue=NULL,ready=1 WHERE common_dir=?1 AND ready=0",
-        [common],
+        "UPDATE checkout_projections SET issue=NULL,ready=1,requested_topology=?2
+         WHERE common_dir=?1 AND (ready=0 OR requested_topology IS DISTINCT FROM ?2)",
+        params![common, topology.as_slice()],
     )?)
 }
 

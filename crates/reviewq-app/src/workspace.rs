@@ -64,7 +64,10 @@ pub struct CheckoutProjection {
 }
 
 pub enum ProjectionOutcome {
-    Applied([u8; 32]),
+    Applied {
+        verifier: [u8; 32],
+        topology: [u8; 32],
+    },
     Removed,
     Deferred(String),
 }

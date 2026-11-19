@@ -135,6 +135,9 @@ async fn one(
     if checkout.root != job.checkout.root.as_path() || checkout.common != common {
         return Err("The local Git checkout has changed. Update its binding in Settings.".into());
     }
+    if Topology::read(common)?.fingerprint != topology.fingerprint {
+        return Err("The linked Git worktrees changed while ReviewQ was preparing setup.".into());
+    }
     if let Some(key) = files::existing_credential(profile, common)? {
         if store
             .retired_checkout_verifier(job.clone(), Sha256::digest(key).into())
@@ -160,7 +163,13 @@ async fn one(
         .await?;
     changes.apply().await?;
     if let Err(error) = store
-        .finish_checkout_projection(job.clone(), ProjectionOutcome::Applied(changes.verifier))
+        .finish_checkout_projection(
+            job.clone(),
+            ProjectionOutcome::Applied {
+                verifier: changes.verifier,
+                topology: topology.fingerprint,
+            },
+        )
         .await
     {
         changes.plan.rollback()?;
