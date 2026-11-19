@@ -159,6 +159,7 @@ fn emit_resources(output: &Path) -> Result<(), Box<dyn Error>> {
             )
             .unwrap(),
             launch: None,
+            request_evidence: None,
         }),
     )?;
     emit(

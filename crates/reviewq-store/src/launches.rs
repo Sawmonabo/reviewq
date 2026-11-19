@@ -427,6 +427,41 @@ fn invocation(input: &LaunchInput) -> Result<String, StoreError> {
     Ok(encoded)
 }
 
+pub(crate) fn request_evidence(
+    db: &Connection,
+    run: &RunId,
+) -> Result<Option<reviewq_app::launch::RequestEvidence>, StoreError> {
+    use reviewq_app::launch::{RequestEvidence, RequestInput, RequestInputSlot};
+    let mut query = db.prepare_cached(
+        "SELECT requested_model, requested_effort, skill_name, input_slot,
+                native_turn_id, native_entry_id, source_generation
+         FROM run_request_evidence WHERE run_id=?1",
+    )?;
+    let mut rows = query.query([run.as_str()])?;
+    let Some(row) = rows.next()? else {
+        return Ok(None);
+    };
+    let input = match row.get::<_, Option<String>>(3)? {
+        Some(slot) => Some(RequestInput {
+            slot: match slot.as_str() {
+                "review_request" => RequestInputSlot::ReviewRequest,
+                "skill_arguments" => RequestInputSlot::SkillArguments,
+                _ => return Err(AppError::Internal.into()),
+            },
+            turn: parse(text(row, 4)?)?,
+            entry: parse(text(row, 5)?)?,
+            generation: row.get(6)?,
+        }),
+        None => None,
+    };
+    Ok(Some(RequestEvidence {
+        requested_model: row.get(0)?,
+        requested_effort: row.get(1)?,
+        skill_name: row.get(2)?,
+        input,
+    }))
+}
+
 pub(crate) fn run_launch_details(
     db: &Connection,
     run: &RunId,

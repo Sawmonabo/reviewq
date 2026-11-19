@@ -406,6 +406,7 @@ fn run_detail(
         sessions,
         next_session,
         launch: crate::launches::run_launch_details(connection, &run_id)?,
+        request_evidence: crate::launches::request_evidence(connection, &run_id)?,
     })
 }
 

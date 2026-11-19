@@ -113,6 +113,34 @@ pub type PreviewResponse = Success<Preview>;
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct RequestEvidence {
+    pub requested_model: Option<String>,
+    pub requested_effort: Option<String>,
+    pub skill_name: String,
+    pub input: Option<RequestInput>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct RequestInput {
+    pub slot: RequestInputSlot,
+    pub turn_id: crate::HistoryTurnIdDto,
+    pub entry_id: crate::HistoryEntryIdDto,
+    pub generation: crate::HistoryGenerationDto,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub enum RequestInputSlot {
+    ReviewRequest,
+    SkillArguments,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct RunLaunchDetails {
     pub source_sha: GitShaDto,
     pub state: State,

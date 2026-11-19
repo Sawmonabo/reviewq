@@ -3,6 +3,9 @@
 import type {
   EventCursorDto,
   GitShaDto,
+  HistoryEntryIdDto,
+  HistoryGenerationDto,
+  HistoryTurnIdDto,
   HostProviderDto,
   Invocation,
   PageCursorDto,
@@ -13,6 +16,8 @@ import type {
   State,
   UtcTimestampDto,
 } from "./common.js";
+
+export type RequestInputSlot = "review_request" | "skill_arguments";
 
 export type TerminalResult = {
   nativeId: ResourceIdDto;
@@ -82,6 +87,7 @@ export interface RunDetail {
   leadMetadata: NativeSessionMetadata;
   leadNativeId: ResourceIdDto;
   leadSessionKey: SessionKeyDto;
+  requestEvidence?: RequestEvidence | null;
   reviewId: ReviewIdDto;
   runId: RunIdDto;
   sessions: SessionSummaryPage;
@@ -106,6 +112,22 @@ export interface NativeSessionMetadata {
   name: string | null;
   startedAt: UtcTimestampDto | null;
   status: string | null;
+  [k: string]: unknown;
+}
+
+export interface RequestEvidence {
+  input: RequestInput | null;
+  requestedEffort: string | null;
+  requestedModel: string | null;
+  skillName: string;
+  [k: string]: unknown;
+}
+
+export interface RequestInput {
+  entryId: HistoryEntryIdDto;
+  generation: HistoryGenerationDto;
+  slot: RequestInputSlot;
+  turnId: HistoryTurnIdDto;
   [k: string]: unknown;
 }
 

@@ -42,3 +42,19 @@ CREATE TABLE native_async_questions (
 
 CREATE INDEX native_async_question_pending ON native_async_questions(run_id, occurred_at_ms DESC, session_key)
     WHERE state='pending';
+
+CREATE TABLE run_request_evidence (
+    run_id TEXT PRIMARY KEY,
+    lead_session_key TEXT NOT NULL,
+    requested_model TEXT CHECK (length(CAST(requested_model AS BLOB)) BETWEEN 1 AND 256),
+    requested_effort TEXT CHECK (length(CAST(requested_effort AS BLOB)) BETWEEN 1 AND 64),
+    skill_name TEXT NOT NULL CHECK (length(CAST(skill_name AS BLOB)) BETWEEN 1 AND 256),
+    input_slot TEXT CHECK (input_slot IN ('review_request','skill_arguments')),
+    native_turn_id TEXT CHECK (length(CAST(native_turn_id AS BLOB)) BETWEEN 1 AND 256),
+    native_entry_id TEXT CHECK (length(CAST(native_entry_id AS BLOB)) BETWEEN 1 AND 256),
+    source_generation TEXT CHECK (length(source_generation)=64 AND source_generation NOT GLOB '*[^0-9a-f]*'),
+    CHECK ((input_slot IS NULL) = (native_turn_id IS NULL)
+       AND (input_slot IS NULL) = (native_entry_id IS NULL)
+       AND (input_slot IS NULL) = (source_generation IS NULL)),
+    FOREIGN KEY (run_id, lead_session_key) REFERENCES runs(run_id, lead_session_key)
+) STRICT, WITHOUT ROWID;

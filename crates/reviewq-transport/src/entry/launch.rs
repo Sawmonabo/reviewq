@@ -440,6 +440,34 @@ fn preview(input: app::LaunchInput) -> Result<dto::Preview, AppError> {
     })
 }
 
+pub(super) fn project_request_evidence(
+    value: app::RequestEvidence,
+) -> Result<dto::RequestEvidence, AppError> {
+    let input = value
+        .input
+        .map(|input| {
+            Ok::<_, AppError>(dto::RequestInput {
+                slot: match input.slot {
+                    app::RequestInputSlot::ReviewRequest => dto::RequestInputSlot::ReviewRequest,
+                    app::RequestInputSlot::SkillArguments => dto::RequestInputSlot::SkillArguments,
+                },
+                turn_id: reviewq_protocol::HistoryTurnIdDto::new(input.turn.as_str())
+                    .ok_or(AppError::Internal)?,
+                entry_id: reviewq_protocol::HistoryEntryIdDto::new(input.entry.as_str())
+                    .ok_or(AppError::Internal)?,
+                generation: reviewq_protocol::HistoryGenerationDto::new(input.generation)
+                    .ok_or(AppError::Internal)?,
+            })
+        })
+        .transpose()?;
+    Ok(dto::RequestEvidence {
+        requested_model: value.requested_model,
+        requested_effort: value.requested_effort,
+        skill_name: value.skill_name,
+        input,
+    })
+}
+
 pub(super) fn project_run_launch(
     value: app::LaunchDetails,
 ) -> Result<dto::RunLaunchDetails, AppError> {

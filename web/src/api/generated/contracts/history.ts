@@ -3,6 +3,7 @@
 import type {
   EventCursorDto,
   HistoryEntryIdDto,
+  HistoryGenerationDto,
   HistoryTurnIdDto,
   RunIdDto,
   SafeCountDto,
@@ -11,8 +12,6 @@ import type {
 } from "./common.js";
 
 export type HistoryAvailability = "available" | "partial" | "unavailable";
-
-export type HistoryGenerationDto = string;
 
 export type HistoryCursorDto = string;
 

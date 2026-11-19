@@ -111,6 +111,8 @@ pub struct RunDetail {
     pub lead_metadata: NativeSessionMetadata,
     pub sessions: Page<SessionSummary>,
     pub launch: Option<crate::launch::RunLaunchDetails>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub request_evidence: Option<crate::launch::RequestEvidence>,
 }
 
 pub type RunDetailResponse = Success<RunDetail>;

@@ -273,6 +273,10 @@ pub(super) async fn read_run(
         lead_cwd: value.lead.binding().cwd().as_path().display().to_string(),
         lead_metadata: session_metadata(&value.lead_metadata),
         sessions: Page::new(sessions, next).ok_or(AppError::Internal)?,
+        request_evidence: value
+            .request_evidence
+            .map(super::launch::project_request_evidence)
+            .transpose()?,
         launch: value
             .launch
             .map(super::launch::project_run_launch)

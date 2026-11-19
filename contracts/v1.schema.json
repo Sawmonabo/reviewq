@@ -7097,6 +7097,72 @@
       ],
       "type": "object"
     },
+    "RequestEvidence": {
+      "properties": {
+        "input": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/RequestInput"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "requestedEffort": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "requestedModel": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "skillName": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "requestedModel",
+        "requestedEffort",
+        "skillName",
+        "input"
+      ],
+      "type": "object"
+    },
+    "RequestInput": {
+      "properties": {
+        "entryId": {
+          "$ref": "#/definitions/HistoryEntryIdDto"
+        },
+        "generation": {
+          "$ref": "#/definitions/HistoryGenerationDto"
+        },
+        "slot": {
+          "$ref": "#/definitions/RequestInputSlot"
+        },
+        "turnId": {
+          "$ref": "#/definitions/HistoryTurnIdDto"
+        }
+      },
+      "required": [
+        "slot",
+        "turnId",
+        "entryId",
+        "generation"
+      ],
+      "type": "object"
+    },
+    "RequestInputSlot": {
+      "enum": [
+        "review_request",
+        "skill_arguments"
+      ],
+      "type": "string"
+    },
     "ResetEvent": {
       "description": "The terminal `reset` event body. A reset has no SSE id.",
       "properties": {
@@ -7907,6 +7973,16 @@
         },
         "leadSessionKey": {
           "$ref": "#/definitions/SessionKeyDto"
+        },
+        "requestEvidence": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/RequestEvidence"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "reviewId": {
           "$ref": "#/definitions/ReviewIdDto"
