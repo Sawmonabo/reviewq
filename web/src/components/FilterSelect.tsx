@@ -9,6 +9,7 @@ export function FilterSelect({
   options,
   onChange,
   disabled = false,
+  scope = false,
 }: {
   readonly label: string;
   readonly accessibleLabel?: string;
@@ -16,10 +17,15 @@ export function FilterSelect({
   readonly options: readonly Option[];
   readonly onChange: (value: string) => void;
   readonly disabled?: boolean;
+  readonly scope?: boolean;
 }) {
   const shown = (options.find((option) => option.value === value) ?? options[0])?.label;
   return (
-    <label className="filter-control select-filter">
+    <label
+      className={
+        scope ? "filter-control select-filter scope-filter" : "filter-control select-filter"
+      }
+    >
       <span className="filter-label">{label}</span>
       <span className="filter-value" title={shown}>
         {shown}

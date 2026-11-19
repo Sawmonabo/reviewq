@@ -1,7 +1,7 @@
 import { useState } from "react";
 import type { ReactNode } from "react";
 import type { RunCard, RunStage } from "../../api/generated/contracts";
-import { readArchive, readQueue, readRuns } from "../../api/workspace";
+import { readArchive, readQueue, readQueueSync, readRuns } from "../../api/workspace";
 import { FilterSelect } from "../../components/FilterSelect";
 import { Icon } from "../../components/Icon";
 import { Pagination } from "../../components/Pagination";
@@ -70,6 +70,7 @@ export function RunsView({
         : readRuns(filters, signal),
     [{ kind: "run" }, { kind: "review" }, { kind: "queue" }],
   );
+  const sync = useResource("runs-queue-sync", readQueueSync, [{ kind: "queue_sync" }]).data;
   const eligible = (runs.data?.items ?? []).filter((row) => row.mrState === "open");
   const captured = eligible.filter((row) => checked.includes(row.reviewId));
 
@@ -244,6 +245,14 @@ export function RunsView({
             }}
           />
         </>
+      )}
+      {sync?.lastSuccessAt && (
+        <footer className="workspace-sync">
+          <time dateTime={sync.lastSuccessAt}>
+            {sync.stale ? "Last successful sync" : "Last updated"}:{" "}
+            {formatActivityTime(sync.lastSuccessAt)}
+          </time>
+        </footer>
       )}
     </>
   );
