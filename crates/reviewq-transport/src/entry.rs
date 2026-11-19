@@ -14,7 +14,9 @@ use reviewq_app::decisions::{Checkpoints, DecisionStore};
 use reviewq_app::events::EventLog;
 use reviewq_app::followups::{FollowupCommands, FollowupStore};
 use reviewq_app::history::{HistoryStore, NativeHistoryReader};
-use reviewq_app::hosts::{ClaudeCompanion, LeadStore, MessageHistoryStore, NativeHost};
+use reviewq_app::hosts::{
+    ClaudeCompanion, LeadStore, MessageHistoryStore, NativeHost, NativeTerminal,
+};
 use reviewq_app::notifications::InboxStore;
 use reviewq_app::queue::{QueueStore, ReviewLookup};
 use reviewq_app::reports::{
@@ -42,6 +44,7 @@ mod hosts;
 mod mcp;
 mod messages;
 mod pages;
+mod terminal;
 
 pub use control::{ControlRequest, ServiceEndpoint, ServiceIdentity};
 
@@ -104,6 +107,7 @@ pub(super) struct Entry {
     claude: Option<Arc<dyn ClaudeCompanion>>,
     file_history: Arc<dyn NativeHistoryReader>,
     workflow: WorkflowIntegration,
+    terminal: Arc<dyn NativeTerminal>,
     sends_allowed: bool,
     commits: watch::Receiver<EventCursor>,
     shutdown: watch::Receiver<bool>,
@@ -148,6 +152,7 @@ pub struct ServiceRuntime<'a> {
     pub sends_allowed: bool,
     pub claude: Option<Arc<dyn ClaudeCompanion>>,
     pub workflow: WorkflowIntegration,
+    pub terminal: Arc<dyn NativeTerminal>,
     pub commits: watch::Receiver<EventCursor>,
     pub shutdown: watch::Receiver<bool>,
 }
@@ -167,6 +172,7 @@ pub fn router(
         claude: runtime.claude,
         file_history,
         workflow: runtime.workflow,
+        terminal: runtime.terminal,
         sends_allowed: runtime.sends_allowed,
         commits: runtime.commits,
         shutdown: runtime.shutdown,
@@ -192,6 +198,14 @@ pub fn router(
             get(changes::discussions),
         )
         .route("/runs/{run_id}", get(pages::run))
+        .route(
+            "/runs/{run_id}/sessions/{session_key}/terminal",
+            get(terminal::read),
+        )
+        .route(
+            "/runs/{run_id}/sessions/{session_key}/terminal/open",
+            post(terminal::open),
+        )
         .route("/native/codex/link", post(hosts::link))
         .route("/native/claude/link", post(hosts::claude_link))
         .route(

@@ -30,6 +30,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     registry.response::<ReviewOverviewResponse>("ReviewOverviewResponse")?;
     registry.response::<ReviewSelectionResponse>("ReviewSelectionResponse")?;
     registry.response::<RunDetailResponse>("RunDetailResponse")?;
+    registry.response::<reviewq_protocol::TerminalResponse>("TerminalResponse")?;
     registry.response::<PatchFileIndexResponse>("PatchFileIndexResponse")?;
     registry.response::<PatchDiscussionsResponse>("PatchDiscussionsResponse")?;
     registry.response::<HistoryPageResponse>("HistoryPageResponse")?;

@@ -91,6 +91,12 @@ pub(crate) struct Serve {
     /// Directory belonging to the selected Claude Code profile.
     #[arg(long, value_name = "DIR")]
     pub(crate) claude_home: Option<PathBuf>,
+    /// Path to the configured Claude Code executable.
+    #[arg(long, value_name = "FILE")]
+    pub(crate) claude_bin: Option<PathBuf>,
+    /// WSL distribution used when opening a terminal.
+    #[arg(long)]
+    pub(crate) wsl_distribution: Option<String>,
     #[arg(long, requires = "runtime_root")]
     pub(crate) validation: bool,
     #[arg(long, requires = "validation")]

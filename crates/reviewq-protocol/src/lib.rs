@@ -19,7 +19,7 @@ pub use hosts::{
     DeliveryReceipt, DeliveryReceiptResponse, DeliveryReportRef, DeliveryState, HostProviderDto,
     MessageAttachment, MessageHistoryItem, MessageHistoryPage, MessageTextDto, ObservedInputDto,
     RecordedPurpose, RecordedState, RunDetail, RunDetailResponse, SendMessageRequest,
-    SessionSummary,
+    SessionSummary, TerminalHandoff, TerminalResponse, TerminalResult,
 };
 pub use scalar::{
     CheckpointIdDto, EventCursorDto, FileIdDto, GitShaDto, HistoryCursorDto, HistoryEntryIdDto,

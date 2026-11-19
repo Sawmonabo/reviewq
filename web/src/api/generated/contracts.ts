@@ -229,6 +229,36 @@ export type ReviewSelection =
       runId: null;
       [k: string]: unknown;
     };
+export type TerminalResult = {
+  nativeId: ResourceIdDto;
+  provider: HostProviderDto;
+  runId: RunIdDto;
+  sessionKey: SessionKeyDto;
+  [k: string]: unknown;
+} & TerminalResult1;
+export type TerminalResult1 =
+  | {
+      command: string;
+      opened: boolean;
+      state: "command";
+      [k: string]: unknown;
+    }
+  | {
+      state: "restore_checkout";
+      [k: string]: unknown;
+    }
+  | {
+      state: "configure_provider";
+      [k: string]: unknown;
+    }
+  | {
+      state: "foreground_claude";
+      [k: string]: unknown;
+    }
+  | {
+      state: "inspect_parent";
+      [k: string]: unknown;
+    };
 
 export interface Contracts {
   InvalidateEvent: InvalidateEvent;
@@ -245,6 +275,7 @@ export interface Contracts {
   ReviewOverviewResponse: ReviewOverviewResponse;
   ReviewSelectionResponse: ReviewSelectionResponse;
   RunDetailResponse: RunDetailResponse;
+  TerminalResponse: TerminalResponse;
 }
 /**
  * Bounded resource descriptors for an `invalidate` event.
@@ -657,5 +688,13 @@ export interface SessionSummary {
   parentSessionKey: SessionKeyDto | null;
   provider: HostProviderDto;
   sessionKey: SessionKeyDto;
+  [k: string]: unknown;
+}
+/**
+ * The resource and event head from the same authorized snapshot.
+ */
+export interface TerminalResponse {
+  cursor: EventCursorDto;
+  data: TerminalResult;
   [k: string]: unknown;
 }

@@ -1,0 +1,227 @@
+//! Argument-vector launch and exact shell-quoted commands for native conversations.
+
+use std::path::{Path, PathBuf};
+use std::process::Stdio;
+use std::time::Duration;
+
+use reviewq_app::access::{AppError, AppFuture};
+use reviewq_app::history::HistorySession;
+use reviewq_app::hosts::{NativeTerminal, TerminalHandoff, TerminalInstruction};
+use reviewq_domain::session::HostProvider;
+use serde::Deserialize;
+use tokio::io::AsyncReadExt;
+use tokio::process::Command;
+
+pub struct Terminal {
+    codex: Option<TerminalProvider>,
+    claude: Option<TerminalProvider>,
+    wsl_distribution: Option<String>,
+}
+
+pub struct TerminalProvider {
+    pub executable: PathBuf,
+    pub profile: PathBuf,
+}
+
+impl Terminal {
+    pub fn new(
+        codex: Option<TerminalProvider>,
+        claude: Option<TerminalProvider>,
+        wsl_distribution: Option<String>,
+    ) -> Self {
+        Self {
+            codex,
+            claude,
+            wsl_distribution,
+        }
+    }
+}
+
+impl NativeTerminal for Terminal {
+    fn terminal(&self, session: HistorySession, open: bool) -> AppFuture<'_, TerminalHandoff> {
+        Box::pin(async move {
+            use TerminalHandoff::Instruction;
+            if session.parent.is_some() {
+                return Ok(Instruction(TerminalInstruction::InspectParent));
+            }
+            let cwd = session.binding.cwd().as_path();
+            if !tokio::fs::canonicalize(cwd)
+                .await
+                .is_ok_and(|path| path == cwd && path.is_dir())
+            {
+                return Ok(Instruction(TerminalInstruction::RestoreCheckout));
+            }
+            let native = session.binding.identity();
+            let id = native.native_id().as_str();
+            if !uuid::Uuid::parse_str(id)
+                .is_ok_and(|value| !value.is_nil() && value.hyphenated().to_string() == id)
+            {
+                return Err(AppError::Conflict);
+            }
+            let (provider, root_variable) = match native.provider() {
+                HostProvider::Codex => (self.codex.as_ref(), "CODEX_HOME"),
+                HostProvider::Claude => (self.claude.as_ref(), "CLAUDE_CONFIG_DIR"),
+            };
+            let Some(provider) = provider else {
+                return Ok(Instruction(TerminalInstruction::ConfigureProvider));
+            };
+            let profile = tokio::fs::canonicalize(&provider.profile)
+                .await
+                .map_err(|_| AppError::Unavailable)?;
+            if profile != native.profile().as_path() {
+                return Ok(Instruction(TerminalInstruction::ConfigureProvider));
+            }
+            let Ok(executable) = tokio::fs::canonicalize(&provider.executable).await else {
+                return Ok(Instruction(TerminalInstruction::ConfigureProvider));
+            };
+            if !executable.is_file() {
+                return Ok(Instruction(TerminalInstruction::ConfigureProvider));
+            }
+            let (operation, argument) = match native.provider() {
+                HostProvider::Codex => ("resume", id.to_owned()),
+                HostProvider::Claude => match claude_job(&executable, &profile, cwd, id).await? {
+                    Some(Job {
+                        kind: JobKind::Interactive,
+                        pid: Some(_),
+                        ..
+                    }) => return Ok(Instruction(TerminalInstruction::ForegroundClaude)),
+                    Some(Job {
+                        kind: JobKind::Background,
+                        id: Some(job),
+                        pid: Some(_),
+                        ..
+                    }) => ("attach", job),
+                    _ => ("--resume", id.to_owned()),
+                },
+            };
+            let cwd = utf8(cwd)?;
+            let assignment = format!("{root_variable}={}", utf8(&profile)?);
+            let argv = ["env", &assignment, utf8(&executable)?, operation, &argument];
+            let command = format!(
+                "cd {} && {}",
+                shlex::try_quote(cwd).map_err(|_| AppError::Unavailable)?,
+                shlex::try_join(argv).map_err(|_| AppError::Unavailable)?
+            );
+            let opened = if open && let Some(distro) = &self.wsl_distribution {
+                open_wsl(distro, cwd, argv).await
+            } else {
+                false
+            };
+            Ok(TerminalHandoff::Command { command, opened })
+        })
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct Job {
+    session_id: Option<String>,
+    cwd: PathBuf,
+    kind: JobKind,
+    id: Option<String>,
+    pid: Option<u32>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "lowercase")]
+enum JobKind {
+    Interactive,
+    Background,
+    #[serde(other)]
+    Unknown,
+}
+
+async fn claude_job(
+    executable: &Path,
+    profile: &Path,
+    cwd: &Path,
+    session_id: &str,
+) -> Result<Option<Job>, AppError> {
+    let mut child = Command::new(executable)
+        .args(["agents", "--json", "--all", "--cwd"])
+        .arg(cwd)
+        .current_dir(cwd)
+        .env("CLAUDE_CONFIG_DIR", profile)
+        .kill_on_drop(true)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .map_err(|_| AppError::Unavailable)?;
+    let output = child.stdout.take().ok_or(AppError::Unavailable)?;
+    let rows = tokio::time::timeout(Duration::from_secs(4), async move {
+        let mut body = Vec::new();
+        output
+            .take(256 * 1024 + 1)
+            .read_to_end(&mut body)
+            .await
+            .map_err(|_| AppError::Unavailable)?;
+        if body.len() > 256 * 1024 {
+            return Err(AppError::PayloadTooLarge);
+        }
+        if !child.wait().await.is_ok_and(|value| value.success()) {
+            return Err(AppError::Unavailable);
+        }
+        serde_json::from_slice::<Vec<Job>>(&body).map_err(|_| AppError::Unavailable)
+    })
+    .await
+    .map_err(|_| AppError::Unavailable)??;
+    let mut matches = rows
+        .into_iter()
+        .filter(|job| job.session_id.as_deref() == Some(session_id));
+    let Some(job) = matches.next() else {
+        return Ok(None);
+    };
+    if matches.next().is_some()
+        || job.cwd != cwd
+        || job.id.as_ref().is_some_and(|id| {
+            id.is_empty() || id.len() > 64 || !id.bytes().all(|byte| byte.is_ascii_alphanumeric())
+        })
+    {
+        return Err(AppError::Conflict);
+    }
+    if matches!(job.kind, JobKind::Unknown | JobKind::Background)
+        && job.pid.is_some()
+        && job.id.is_none()
+    {
+        return Err(AppError::Unavailable);
+    }
+    Ok(Some(job))
+}
+
+async fn open_wsl(distro: &str, cwd: &str, argv: [&str; 5]) -> bool {
+    if distro.starts_with('-')
+        || distro.is_empty()
+        || [distro, cwd]
+            .into_iter()
+            .chain(argv)
+            .any(|value| value.contains(';') || value.chars().any(char::is_control))
+    {
+        return false;
+    }
+    let mut command = Command::new("wt.exe");
+    command
+        .args([
+            "new-tab",
+            "--title",
+            "ReviewQ",
+            "wsl.exe",
+            "--distribution",
+            distro,
+            "--cd",
+            cwd,
+            "--exec",
+        ])
+        .args(argv)
+        .kill_on_drop(true)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    tokio::time::timeout(Duration::from_secs(3), command.status())
+        .await
+        .is_ok_and(|status| status.is_ok_and(|status| status.success()))
+}
+
+fn utf8(path: &Path) -> Result<&str, AppError> {
+    path.to_str().ok_or(AppError::Unavailable)
+}

@@ -1851,6 +1851,116 @@
       ],
       "type": "object"
     },
+    "TerminalResponse": {
+      "description": "The resource and event head from the same authorized snapshot.",
+      "properties": {
+        "cursor": {
+          "$ref": "#/definitions/EventCursorDto"
+        },
+        "data": {
+          "$ref": "#/definitions/TerminalResult"
+        }
+      },
+      "required": [
+        "data",
+        "cursor"
+      ],
+      "title": "TerminalResponse",
+      "type": "object"
+    },
+    "TerminalResult": {
+      "oneOf": [
+        {
+          "properties": {
+            "command": {
+              "type": "string"
+            },
+            "opened": {
+              "type": "boolean"
+            },
+            "state": {
+              "const": "command",
+              "type": "string"
+            }
+          },
+          "required": [
+            "state",
+            "command",
+            "opened"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "state": {
+              "const": "restore_checkout",
+              "type": "string"
+            }
+          },
+          "required": [
+            "state"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "state": {
+              "const": "configure_provider",
+              "type": "string"
+            }
+          },
+          "required": [
+            "state"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "state": {
+              "const": "foreground_claude",
+              "type": "string"
+            }
+          },
+          "required": [
+            "state"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "state": {
+              "const": "inspect_parent",
+              "type": "string"
+            }
+          },
+          "required": [
+            "state"
+          ],
+          "type": "object"
+        }
+      ],
+      "properties": {
+        "nativeId": {
+          "$ref": "#/definitions/ResourceIdDto"
+        },
+        "provider": {
+          "$ref": "#/definitions/HostProviderDto"
+        },
+        "runId": {
+          "$ref": "#/definitions/RunIdDto"
+        },
+        "sessionKey": {
+          "$ref": "#/definitions/SessionKeyDto"
+        }
+      },
+      "required": [
+        "runId",
+        "sessionKey",
+        "provider",
+        "nativeId"
+      ],
+      "type": "object"
+    },
     "TicketKeyDto": {
       "description": "A Jira issue key.",
       "maxUtf8Bytes": 512,
@@ -1921,7 +2031,8 @@
       "QueuePageResponse": "#/definitions/QueuePageResponse",
       "ReviewOverviewResponse": "#/definitions/ReviewOverviewResponse",
       "ReviewSelectionResponse": "#/definitions/ReviewSelectionResponse",
-      "RunDetailResponse": "#/definitions/RunDetailResponse"
+      "RunDetailResponse": "#/definitions/RunDetailResponse",
+      "TerminalResponse": "#/definitions/TerminalResponse"
     }
   }
 }

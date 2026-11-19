@@ -15,7 +15,10 @@ use reviewq_app::reports::reconcile_reports;
 use reviewq_app::sources::{ReviewSourceReader, SourceRefreshStore};
 use reviewq_app::workspace::{WorkspaceConfig, WorkspaceStore};
 use reviewq_domain::session::{AbsolutePath, HostProvider};
-use reviewq_providers::{Claude, Codex, FileHistory, GitLab, RegisteredReportFiles, Workflows};
+use reviewq_providers::{
+    Claude, Codex, FileHistory, GitLab, RegisteredReportFiles, Terminal, TerminalProvider,
+    Workflows,
+};
 use reviewq_store::SqliteStore;
 use reviewq_transport::{ServiceEndpoint, ServiceIdentity, WorkflowIntegration};
 use sha2::{Digest, Sha256};
@@ -148,14 +151,27 @@ pub(crate) async fn serve(profile: PathBuf, options: Serve) -> Result<(), Failur
         }
     }
     let source = source.map(|source| Arc::new(source) as Arc<dyn ReviewSourceReader>);
-    let codex = match (options.codex_bin, options.codex_home) {
+    let codex_executable = options
+        .codex_bin
+        .or_else(|| default_executable("codex", options.validation));
+    let codex_home = options.codex_home.or_else(|| {
+        (!options.validation)
+            .then(|| chosen_profile("CODEX_HOME", ".codex"))
+            .flatten()
+            .filter(|home| home.is_dir())
+    });
+    let codex = match (codex_executable.as_ref(), codex_home.as_ref()) {
         (Some(executable), Some(home)) => {
             let metadata = home.canonicalize()?.metadata()?;
             if metadata.uid() != rustix::process::getuid().as_raw() {
                 return Err("the selected Codex profile must belong to the service user".into());
             }
             let settings = options.codex_model.zip(options.codex_effort);
-            Some(Arc::new(Codex::new(executable, home, settings)?))
+            Some(Arc::new(Codex::new(
+                executable.clone(),
+                home.clone(),
+                settings,
+            )?))
         }
         _ => None,
     };
@@ -163,14 +179,39 @@ pub(crate) async fn serve(profile: PathBuf, options: Serve) -> Result<(), Failur
     let workflow = Arc::new(Workflows::new(codex));
     let report_files = Arc::new(RegisteredReportFiles);
     let sends_allowed = !options.validation && host.is_some();
-    let claude = match options.claude_home {
+    let claude_home = match options.claude_home {
         Some(home) => Some(home),
         None if !options.validation => claude_home().ok().filter(|path| path.is_dir()),
         None => None,
-    }
-    .map(Claude::new)
-    .transpose()?
-    .map(|claude| Arc::new(claude) as Arc<dyn ClaudeCompanion>);
+    };
+    let claude = claude_home
+        .clone()
+        .map(Claude::new)
+        .transpose()?
+        .map(|claude| Arc::new(claude) as Arc<dyn ClaudeCompanion>);
+    let claude_executable = options
+        .claude_bin
+        .or_else(|| default_executable("claude", options.validation));
+    let terminal_provider = |executable: Option<PathBuf>, profile: Option<PathBuf>| {
+        executable
+            .zip(profile)
+            .map(|(executable, profile)| TerminalProvider {
+                executable,
+                profile,
+            })
+    };
+    let distribution = if options.validation {
+        None
+    } else {
+        options
+            .wsl_distribution
+            .or_else(|| std::env::var("WSL_DISTRO_NAME").ok())
+    };
+    let terminal = Arc::new(Terminal::new(
+        terminal_provider(codex_executable, codex_home),
+        terminal_provider(claude_executable, claude_home),
+        distribution,
+    ));
     let delivery = host.as_ref().filter(|_| sends_allowed).map(|host| {
         tokio::spawn(dispatch_deliveries(
             store.clone(),
@@ -197,6 +238,7 @@ pub(crate) async fn serve(profile: PathBuf, options: Serve) -> Result<(), Failur
         reviewq_transport::ServiceRuntime {
             sends_allowed,
             claude,
+            terminal,
             workflow: WorkflowIntegration {
                 proof: workflow,
                 report_files,
@@ -273,11 +315,26 @@ async fn capture_reports(
 }
 
 pub(crate) fn claude_home() -> Result<PathBuf, Failure> {
-    std::env::var_os("CLAUDE_CONFIG_DIR")
-        .map(PathBuf::from)
-        .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".claude")))
-        .filter(|path| path.is_absolute())
+    chosen_profile("CLAUDE_CONFIG_DIR", ".claude")
         .ok_or_else(|| "cannot resolve the Claude configuration directory".into())
+}
+
+fn chosen_profile(variable: &str, fallback: &str) -> Option<PathBuf> {
+    std::env::var_os(variable)
+        .map(PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(fallback)))
+        .filter(|path| path.is_absolute())
+}
+
+fn default_executable(name: &str, validation: bool) -> Option<PathBuf> {
+    if validation {
+        return None;
+    }
+    let home = std::env::var_os("HOME")
+        .map(PathBuf::from)
+        .filter(|home| home.is_absolute())?;
+    let executable = home.join(".local/bin").join(name);
+    executable.is_file().then_some(executable)
 }
 
 async fn dispatch_deliveries(

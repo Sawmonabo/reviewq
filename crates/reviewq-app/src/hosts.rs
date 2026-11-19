@@ -87,6 +87,23 @@ pub struct ClaudeContext {
     pub transcript: Option<AbsolutePath>,
 }
 
+/// Opens or displays the terminal for an independently scoped native session.
+pub trait NativeTerminal: Send + Sync {
+    fn terminal(&self, session: HistorySession, open: bool) -> AppFuture<'_, TerminalHandoff>;
+}
+
+pub enum TerminalHandoff {
+    Command { command: String, opened: bool },
+    Instruction(TerminalInstruction),
+}
+
+pub enum TerminalInstruction {
+    RestoreCheckout,
+    ConfigureProvider,
+    ForegroundClaude,
+    InspectParent,
+}
+
 pub enum NativeLink {
     Linked(Snapshot<LeadTarget>),
     Ambiguous(Vec<String>),

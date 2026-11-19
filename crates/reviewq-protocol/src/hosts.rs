@@ -128,6 +128,31 @@ pub enum HostProviderDto {
     Claude,
 }
 
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct TerminalResult {
+    pub run_id: RunIdDto,
+    pub session_key: SessionKeyDto,
+    pub provider: HostProviderDto,
+    pub native_id: crate::ResourceIdDto,
+    #[serde(flatten)]
+    pub handoff: TerminalHandoff,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(tag = "state", rename_all = "snake_case")]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub enum TerminalHandoff {
+    Command { command: String, opened: bool },
+    RestoreCheckout,
+    ConfigureProvider,
+    ForegroundClaude,
+    InspectParent,
+}
+
+pub type TerminalResponse = Success<TerminalResult>;
+
 #[cfg(feature = "schema")]
 fn message_text_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
     schemars::json_schema!({

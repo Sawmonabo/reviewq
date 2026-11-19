@@ -15,6 +15,7 @@ import type {
   ReviewOverviewResponse,
   ReviewSelectionResponse,
   RunDetailResponse,
+  TerminalResponse,
 } from "./contracts.js";
 
 export function isInvalidateEvent(value: unknown): value is InvalidateEvent;
@@ -47,3 +48,4 @@ export function isReviewSelectionResponse(
   value: unknown,
 ): value is ReviewSelectionResponse;
 export function isRunDetailResponse(value: unknown): value is RunDetailResponse;
+export function isTerminalResponse(value: unknown): value is TerminalResponse;

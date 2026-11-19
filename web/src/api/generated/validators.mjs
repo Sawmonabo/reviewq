@@ -13,3 +13,4 @@ export { validate143 as isQueuePageResponse } from "./validators/schemas/queue-p
 export { validate197 as isReviewOverviewResponse } from "./validators/schemas/review-overview-response.mjs";
 export { validate236 as isReviewSelectionResponse } from "./validators/schemas/review-selection-response.mjs";
 export { validate244 as isRunDetailResponse } from "./validators/schemas/run-detail-response.mjs";
+export { validate259 as isTerminalResponse } from "./validators/schemas/terminal-response.mjs";
