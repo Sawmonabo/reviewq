@@ -55,7 +55,15 @@ impl HistoryPageResponse {
 
     /// Encodes the entire HTTP envelope, including JSON escapes, within 256 KiB.
     pub fn encode(&self) -> Result<Vec<u8>, HistoryPageEncodeError> {
-        let mut writer = HistoryPageWriter::default();
+        self.encode_bounded(MAX_HISTORY_PAGE_BYTES)
+    }
+
+    pub fn encode_bounded(&self, limit: usize) -> Result<Vec<u8>, HistoryPageEncodeError> {
+        let mut writer = HistoryPageWriter {
+            limit: limit.min(MAX_HISTORY_PAGE_BYTES),
+            bytes: Vec::new(),
+            overflowed: false,
+        };
         match serde_json::to_writer(&mut writer, &self.0) {
             Ok(()) => Ok(writer.bytes),
             Err(_) if writer.overflowed => Err(HistoryPageEncodeError::TooLarge),
@@ -83,23 +91,21 @@ impl std::error::Error for HistoryPageEncodeError {
     }
 }
 
-#[derive(Default)]
 struct HistoryPageWriter {
+    limit: usize,
     bytes: Vec<u8>,
     overflowed: bool,
 }
 
 impl Write for HistoryPageWriter {
     fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
-        if bytes.len() > MAX_HISTORY_PAGE_BYTES - self.bytes.len() {
+        if bytes.len() > self.limit - self.bytes.len() {
             self.overflowed = true;
             return Err(io::Error::other("history page byte budget exceeded"));
         }
         let required = self.bytes.len() + bytes.len();
         if required > self.bytes.capacity() {
-            let capacity = (2 * self.bytes.capacity())
-                .max(required)
-                .min(MAX_HISTORY_PAGE_BYTES);
+            let capacity = (2 * self.bytes.capacity()).max(required).min(self.limit);
             self.bytes.reserve_exact(capacity - self.bytes.len());
         }
         self.bytes.extend_from_slice(bytes);
@@ -153,7 +159,31 @@ pub struct HistoryEntry {
     pub turn_id: Option<HistoryTurnIdDto>,
     pub timestamp: Option<UtcTimestampDto>,
     pub parts: Vec<HistoryPart>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "schema", schemars(with = "HistoryCursorDto"))]
+    pub content_ref: Option<HistoryCursorDto>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "schema", schemars(with = "SafeCountDto"))]
+    pub text_bytes: Option<SafeCountDto>,
 }
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct HistoryContent {
+    pub run_id: RunIdDto,
+    pub session_key: SessionKeyDto,
+    pub entry_id: HistoryEntryIdDto,
+    pub generation: HistoryGenerationDto,
+    pub availability: HistoryAvailability,
+    pub offset: SafeCountDto,
+    pub text: HistoryText,
+    pub next_cursor: Option<HistoryCursorDto>,
+    pub complete: bool,
+    pub reset: bool,
+}
+
+pub type HistoryContentResponse = Success<HistoryContent>;
 
 /// Ordered visible content for the first Codex reader.
 #[derive(Debug, Serialize)]

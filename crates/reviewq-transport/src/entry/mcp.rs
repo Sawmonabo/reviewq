@@ -199,8 +199,6 @@ impl ServerHandler for Server {
 impl Server {
     async fn call(&self, request: CallToolRequestParams, actor: Actor) -> Result<Value, AppError> {
         let _permit = self.gates.enter(&actor).await?;
-        // The transaction that reads or admits the operation rechecks the same epoch.
-        self.entry.store.workspace_context(actor.clone()).await?;
         let input = request.arguments.unwrap_or_default();
         match request.name.as_ref() {
             "ListReviews" => operations::list(&self.entry, actor, arguments(input)?).await,

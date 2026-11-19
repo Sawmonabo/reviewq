@@ -37,6 +37,14 @@ pub trait NativeHistoryReader: Send + Sync {
         position: NativePosition,
         limit: u16,
     ) -> AppFuture<'_, Option<NativeHistoryPage>>;
+
+    fn content(
+        &self,
+        session: HistorySession,
+        reference: FileContentRef,
+        offset: u64,
+        limit: u32,
+    ) -> AppFuture<'_, NativeContent>;
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -46,7 +54,28 @@ pub struct NativePosition {
     pub skip_turn: Option<NativeTurnId>,
     pub within: Option<TurnWindow>,
     /// Complete record boundary from the verified native file descriptor.
-    pub file_offset: Option<u64>,
+    pub file: Option<FilePosition>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct FilePosition {
+    pub offset: u64,
+    pub high_water: u64,
+    pub witness: [u8; 32],
+}
+
+#[derive(Clone, Debug)]
+pub struct FileContentRef {
+    pub generation: String,
+    pub entry: NativeInputId,
+    pub position: FilePosition,
+}
+
+#[derive(Debug)]
+pub struct NativeContent {
+    pub generation: String,
+    pub text: String,
+    pub next_offset: Option<u64>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -69,7 +98,8 @@ pub struct VisibleEntry {
     pub at_ms: Option<i64>,
     pub kind: VisibleKind,
     pub text: String,
-    pub record_offset: Option<u64>,
+    pub content: Option<FileContentRef>,
+    pub text_bytes: Option<u64>,
 }
 
 #[derive(Debug)]
@@ -86,13 +116,13 @@ impl NativeHistoryPage {
         if count == 0 {
             return self.older.clone();
         }
-        if let Some(offset) = self
+        if let Some(record) = self
             .entries
             .get(count)
-            .and_then(|entry| entry.record_offset)
+            .and_then(|entry| entry.content.as_ref())
         {
             return Some(NativePosition {
-                file_offset: Some(offset),
+                file: Some(record.position.clone()),
                 ..NativePosition::default()
             });
         }

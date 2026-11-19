@@ -177,6 +177,8 @@ fn emit_history_and_receipt(output: &Path) -> Result<(), Box<dyn Error>> {
             entry_id: HistoryEntryIdDto::new("active-item-0").unwrap(),
             turn_id: Some(HistoryTurnIdDto::new("active-turn-0").unwrap()),
             timestamp: None,
+            content_ref: None,
+            text_bytes: None,
             parts: vec![HistoryPart::AssistantText {
                 text: HistoryText::new("Ready.").unwrap(),
             }],
@@ -248,6 +250,8 @@ fn user_entry(entry: &str, text: String) -> HistoryEntry {
         entry_id: HistoryEntryIdDto::new(entry).unwrap(),
         turn_id: Some(HistoryTurnIdDto::new(TURN).unwrap()),
         timestamp: None,
+        content_ref: None,
+        text_bytes: None,
         parts: vec![HistoryPart::UserPrompt {
             text: HistoryText::new(text).unwrap(),
         }],

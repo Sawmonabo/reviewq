@@ -106,7 +106,7 @@ impl Codex {
             return Err(AppError::NotFound);
         }
         let thread = self.read_thread(identity.native_id()).await?;
-        if position.file_offset.is_some() {
+        if position.file.is_some() {
             return Err(AppError::CursorExpired);
         }
         let generation = self.history_generation(&thread).await?;
@@ -237,7 +237,7 @@ fn turn_neighbors(
             ascending: !position.ascending,
             skip_turn: Some(id.clone()),
             within: None,
-            file_offset: None,
+            file: None,
         })
     };
     if position.ascending {
@@ -291,7 +291,8 @@ fn visible(
                 at_ms,
                 kind,
                 text,
-                record_offset: None,
+                content: None,
+                text_bytes: None,
             })
             .map_err(|_| AppError::Unavailable),
     )

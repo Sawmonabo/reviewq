@@ -53,6 +53,11 @@ pub enum TranscriptRead {
         cursor: Option<String>,
         limit: Option<u16>,
     },
+    Content {
+        #[serde(rename = "ref")]
+        reference: String,
+        cursor: Option<String>,
+    },
 }
 
 #[derive(Deserialize)]

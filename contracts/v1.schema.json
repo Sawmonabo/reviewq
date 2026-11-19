@@ -243,6 +243,77 @@
       ],
       "type": "string"
     },
+    "HistoryContent": {
+      "properties": {
+        "availability": {
+          "$ref": "#/definitions/HistoryAvailability"
+        },
+        "complete": {
+          "type": "boolean"
+        },
+        "entryId": {
+          "$ref": "#/definitions/HistoryEntryIdDto"
+        },
+        "generation": {
+          "$ref": "#/definitions/HistoryGenerationDto"
+        },
+        "nextCursor": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/HistoryCursorDto"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "offset": {
+          "$ref": "#/definitions/SafeCountDto"
+        },
+        "reset": {
+          "type": "boolean"
+        },
+        "runId": {
+          "$ref": "#/definitions/RunIdDto"
+        },
+        "sessionKey": {
+          "$ref": "#/definitions/SessionKeyDto"
+        },
+        "text": {
+          "$ref": "#/definitions/HistoryText"
+        }
+      },
+      "required": [
+        "runId",
+        "sessionKey",
+        "entryId",
+        "generation",
+        "availability",
+        "offset",
+        "text",
+        "nextCursor",
+        "complete",
+        "reset"
+      ],
+      "type": "object"
+    },
+    "HistoryContentResponse": {
+      "description": "The resource and event head from the same authorized snapshot.",
+      "properties": {
+        "cursor": {
+          "$ref": "#/definitions/EventCursorDto"
+        },
+        "data": {
+          "$ref": "#/definitions/HistoryContent"
+        }
+      },
+      "required": [
+        "data",
+        "cursor"
+      ],
+      "title": "HistoryContentResponse",
+      "type": "object"
+    },
     "HistoryCursorDto": {
       "description": "An opaque continuation for one bounded native history source.",
       "maxUtf8Bytes": 8192,
@@ -252,6 +323,9 @@
     "HistoryEntry": {
       "description": "A visible native entry. Provider timestamps can be unknown.",
       "properties": {
+        "contentRef": {
+          "$ref": "#/definitions/HistoryCursorDto"
+        },
         "entryId": {
           "$ref": "#/definitions/HistoryEntryIdDto"
         },
@@ -260,6 +334,9 @@
             "$ref": "#/definitions/HistoryPart"
           },
           "type": "array"
+        },
+        "textBytes": {
+          "$ref": "#/definitions/SafeCountDto"
         },
         "timestamp": {
           "anyOf": [
@@ -1635,6 +1712,7 @@
     "responses": {
       "DeliveryReceiptResponse": "#/definitions/DeliveryReceiptResponse",
       "Failure": "#/definitions/Failure",
+      "HistoryContentResponse": "#/definitions/HistoryContentResponse",
       "HistoryPageResponse": "#/definitions/HistoryPageResponse",
       "PatchDiscussionsResponse": "#/definitions/PatchDiscussionsResponse",
       "PatchFileIndexResponse": "#/definitions/PatchFileIndexResponse",

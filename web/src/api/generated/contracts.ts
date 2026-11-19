@@ -110,15 +110,27 @@ export type ErrorCode =
   | "busy"
   | "unavailable"
   | "internal";
-/**
- * The history HTTP envelope, available as checked JSON bytes.
- */
-export type HistoryPageResponse = Success;
 export type HistoryAvailability = "available" | "partial" | "unavailable";
 /**
  * A generation independent of the global event journal.
  */
 export type HistoryGenerationDto = string;
+/**
+ * An opaque continuation for one bounded native history source.
+ */
+export type HistoryCursorDto = string;
+/**
+ * A nonnegative, exactly representable JSON count or byte offset.
+ */
+export type SafeCountDto = number;
+/**
+ * Visible text bounded by its exact decoded UTF-8 byte length.
+ */
+export type HistoryText = string;
+/**
+ * The history HTTP envelope, available as checked JSON bytes.
+ */
+export type HistoryPageResponse = Success;
 /**
  * Ordered visible content for the first Codex reader.
  */
@@ -133,18 +145,6 @@ export type HistoryPart =
       text: HistoryText;
       [k: string]: unknown;
     };
-/**
- * Visible text bounded by its exact decoded UTF-8 byte length.
- */
-export type HistoryText = string;
-/**
- * An opaque continuation for one bounded native history source.
- */
-export type HistoryCursorDto = string;
-/**
- * A nonnegative, exactly representable JSON count or byte offset.
- */
-export type SafeCountDto = number;
 /**
  * An opaque keyset continuation for list resources.
  */
@@ -231,6 +231,7 @@ export interface Contracts {
   SendMessageRequest: SendMessageRequest;
   DeliveryReceiptResponse: DeliveryReceiptResponse;
   Failure: Failure;
+  HistoryContentResponse: HistoryContentResponse;
   HistoryPageResponse: HistoryPageResponse;
   PatchDiscussionsResponse: PatchDiscussionsResponse;
   PatchFileIndexResponse: PatchFileIndexResponse;
@@ -308,6 +309,27 @@ export interface ErrorDto {
 /**
  * The resource and event head from the same authorized snapshot.
  */
+export interface HistoryContentResponse {
+  cursor: EventCursorDto;
+  data: HistoryContent;
+  [k: string]: unknown;
+}
+export interface HistoryContent {
+  availability: HistoryAvailability;
+  complete: boolean;
+  entryId: HistoryEntryIdDto;
+  generation: HistoryGenerationDto;
+  nextCursor: HistoryCursorDto | null;
+  offset: SafeCountDto;
+  reset: boolean;
+  runId: RunIdDto;
+  sessionKey: SessionKeyDto;
+  text: HistoryText;
+  [k: string]: unknown;
+}
+/**
+ * The resource and event head from the same authorized snapshot.
+ */
 export interface Success {
   cursor: EventCursorDto;
   data: HistoryPage;
@@ -332,8 +354,10 @@ export interface HistoryPage {
  * A visible native entry. Provider timestamps can be unknown.
  */
 export interface HistoryEntry {
+  contentRef?: HistoryCursorDto;
   entryId: HistoryEntryIdDto;
   parts: HistoryPart[];
+  textBytes?: SafeCountDto;
   timestamp: UtcTimestampDto | null;
   turnId: HistoryTurnIdDto | null;
   [k: string]: unknown;

@@ -5,7 +5,8 @@ use axum::http::{HeaderMap, header};
 use axum::response::{IntoResponse, Response};
 use reviewq_app::access::{Actor, AppError};
 use reviewq_app::history::{
-    HistorySession, NativeHistoryPage, NativePosition, TurnWindow, VisibleEntry, VisibleKind,
+    FilePosition, HistorySession, NativeHistoryPage, NativePosition, TurnWindow, VisibleEntry,
+    VisibleKind,
 };
 use reviewq_domain::identity::{EventCursor, RunId, SessionKey};
 use reviewq_protocol::history::{
@@ -14,7 +15,7 @@ use reviewq_protocol::history::{
 };
 use reviewq_protocol::{
     EventCursorDto, HistoryCursorDto, HistoryEntryIdDto, HistoryGenerationDto, HistoryTurnIdDto,
-    RunIdDto, SessionKeyDto, UtcTimestampDto,
+    RunIdDto, SafeCountDto, SessionKeyDto, UtcTimestampDto,
 };
 use serde::{Deserialize, Serialize};
 
@@ -22,7 +23,11 @@ use super::error::{ApiPath as Path, ApiQuery as Query};
 use super::{ApiError, Entry, ServiceEndpoint};
 
 const CURSOR: &[u8] = b"reviewq-native-history-v1";
-const PREVIEW_BYTES: usize = 40 * 1024;
+const DEFAULT_PAGE_LIMIT: u16 = 30;
+const DEFAULT_PAGE_BYTES: usize = 64 * 1024;
+
+mod content;
+pub(super) use content::{ContentQuery, content, read_content};
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -41,7 +46,35 @@ struct Cursor {
     ascending: bool,
     skip_turn: Option<String>,
     within: Option<Within>,
-    file_offset: Option<u64>,
+    file: Option<Point>,
+    byte_limit: usize,
+}
+
+#[derive(Clone, Deserialize, Eq, PartialEq, Serialize)]
+struct Point {
+    offset: u64,
+    high_water: u64,
+    witness: [u8; 32],
+}
+
+impl From<FilePosition> for Point {
+    fn from(point: FilePosition) -> Self {
+        Self {
+            offset: point.offset,
+            high_water: point.high_water,
+            witness: point.witness,
+        }
+    }
+}
+
+impl From<Point> for FilePosition {
+    fn from(point: Point) -> Self {
+        Self {
+            offset: point.offset,
+            high_water: point.high_water,
+            witness: point.witness,
+        }
+    }
 }
 
 #[derive(Deserialize, Serialize)]
@@ -58,12 +91,18 @@ pub(super) async fn page(
     Query(query): Query<HistoryQuery>,
 ) -> Result<Response, ApiError> {
     let actor = entry.auth.browser_actor(&headers, false)?;
+    let budget = if query.limit.is_some() {
+        256 * 1024
+    } else {
+        DEFAULT_PAGE_BYTES
+    };
     let body = read(
         &entry,
         actor,
         super::pages::parse(&run)?,
         super::pages::parse(&session)?,
         query,
+        budget,
     )
     .await?;
     Ok(([(header::CONTENT_TYPE, "application/json")], body).into_response())
@@ -75,8 +114,9 @@ pub(super) async fn read(
     run: RunId,
     session: SessionKey,
     query: HistoryQuery,
+    byte_limit: usize,
 ) -> Result<Vec<u8>, AppError> {
-    let limit = query.limit.unwrap_or(100);
+    let limit = query.limit.unwrap_or(DEFAULT_PAGE_LIMIT);
     if !(1..=100).contains(&limit) {
         return Err(AppError::InvalidRequest);
     }
@@ -87,7 +127,10 @@ pub(super) async fn read(
         .map(|token| endpoint.decode_cursor::<Cursor>(CURSOR, token))
         .transpose()?;
     if cursor.as_ref().is_some_and(|cursor| {
-        cursor.run != run.as_str() || cursor.session != session.as_str() || cursor.limit != limit
+        cursor.run != run.as_str()
+            || cursor.session != session.as_str()
+            || cursor.limit != limit
+            || cursor.byte_limit != byte_limit
     }) {
         return Err(AppError::CursorExpired);
     }
@@ -121,7 +164,15 @@ pub(super) async fn read(
         .store
         .history_session(actor, run.clone(), session.clone())
         .await?;
-    encode(endpoint, &run, &session, lead.cursor, limit, history, reset)
+    encode(
+        endpoint,
+        &run,
+        &session,
+        lead.cursor,
+        (limit, byte_limit),
+        history,
+        reset,
+    )
 }
 
 async fn native_page(
@@ -146,14 +197,14 @@ fn encode(
     run: &RunId,
     session: &SessionKey,
     event: EventCursor,
-    limit: u16,
+    budget: (u16, usize),
     history: NativeHistoryPage,
     reset: bool,
 ) -> Result<Vec<u8>, AppError> {
     let cursor = |position: Option<NativePosition>| {
         position
             .map(|position| {
-                let witness = Cursor::new(run, session, &history.generation, limit, position);
+                let witness = Cursor::new(run, session, &history.generation, budget, position);
                 HistoryCursorDto::new(endpoint.encode_cursor(CURSOR, &witness)?)
                     .ok_or(AppError::Internal)
             })
@@ -174,7 +225,7 @@ fn encode(
                     .entries
                     .iter()
                     .skip(trim)
-                    .map(encode_entry)
+                    .map(|entry| encode_entry(endpoint, run, session, entry))
                     .collect::<Result<Vec<_>, _>>()?,
                 cursor(history.older_after_trim(trim))?,
                 cursor(history.newer.clone())?,
@@ -185,7 +236,7 @@ fn encode(
             data,
             EventCursorDto::new(event.get()).ok_or(AppError::Internal)?,
         )
-        .encode();
+        .encode_bounded(budget.1);
         match result {
             Ok(bytes) => return Ok(bytes),
             Err(HistoryPageEncodeError::TooLarge) if history.entries.len() - trim > 1 => {
@@ -197,10 +248,17 @@ fn encode(
     }
 }
 
-fn encode_entry(entry: &VisibleEntry) -> Result<HistoryEntry, AppError> {
+fn encode_entry(
+    endpoint: &ServiceEndpoint,
+    run: &RunId,
+    session: &SessionKey,
+    entry: &VisibleEntry,
+) -> Result<HistoryEntry, AppError> {
     let end = entry
         .text
-        .floor_char_boundary(PREVIEW_BYTES.min(entry.text.len()));
+        .char_indices()
+        .nth(512)
+        .map_or(entry.text.len(), |(offset, _)| offset);
     let text = HistoryText::new(&entry.text[..end]).ok_or(AppError::Internal)?;
     let part = match entry.kind {
         VisibleKind::User => HistoryPart::UserPrompt { text },
@@ -217,6 +275,13 @@ fn encode_entry(entry: &VisibleEntry) -> Result<HistoryEntry, AppError> {
             .at_ms
             .and_then(UtcTimestampDto::from_unix_milliseconds),
         parts: vec![part],
+        content_ref: entry
+            .content
+            .as_ref()
+            .filter(|_| entry.text_bytes.is_some_and(|count| count > end as u64))
+            .map(|source| content::reference(endpoint, run, session, source))
+            .transpose()?,
+        text_bytes: entry.text_bytes.and_then(SafeCountDto::new),
     })
 }
 
@@ -225,16 +290,17 @@ impl Cursor {
         run: &RunId,
         session: &SessionKey,
         generation: &str,
-        limit: u16,
+        budget: (u16, usize),
         position: NativePosition,
     ) -> Self {
         Self {
             run: run.to_string(),
             session: session.to_string(),
             generation: generation.into(),
-            limit,
+            limit: budget.0,
+            byte_limit: budget.1,
             native: position.cursor,
-            file_offset: position.file_offset,
+            file: position.file.map(Into::into),
             ascending: position.ascending,
             skip_turn: position.skip_turn.map(|id| id.to_string()),
             within: position.within.map(|item| Within {
@@ -250,7 +316,7 @@ impl Cursor {
         Ok(NativePosition {
             cursor: self.native.clone(),
             ascending: self.ascending,
-            file_offset: self.file_offset,
+            file: self.file.clone().map(Into::into),
             skip_turn: self.skip_turn.as_deref().map(parse).transpose()?,
             within: self
                 .within

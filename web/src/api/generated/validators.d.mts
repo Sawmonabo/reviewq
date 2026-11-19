@@ -7,6 +7,7 @@ import type {
   SendMessageRequest,
   DeliveryReceiptResponse,
   Failure,
+  HistoryContentResponse,
   HistoryPageResponse,
   PatchDiscussionsResponse,
   PatchFileIndexResponse,
@@ -26,6 +27,9 @@ export function isDeliveryReceiptResponse(
   value: unknown,
 ): value is DeliveryReceiptResponse;
 export function isFailure(value: unknown): value is Failure;
+export function isHistoryContentResponse(
+  value: unknown,
+): value is HistoryContentResponse;
 export function isHistoryPageResponse(
   value: unknown,
 ): value is HistoryPageResponse;

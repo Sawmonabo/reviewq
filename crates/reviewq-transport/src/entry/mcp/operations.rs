@@ -9,7 +9,7 @@ use reviewq_protocol::mcp::{
 use serde_json::{Value, json};
 
 use crate::entry::Entry;
-use crate::entry::history::{HistoryQuery, read};
+use crate::entry::history::{ContentQuery, HistoryQuery, read, read_content};
 use crate::entry::messages;
 use crate::entry::pages::{parse, project_review, queue_sync};
 
@@ -160,28 +160,46 @@ pub(super) async fn transcript(
         args.session_key.as_ref().map(|id| id.as_str()),
     )
     .await?;
-    let TranscriptRead::Page { cursor, limit } = args.read;
-    let limit = limit.unwrap_or(10);
-    if !(1..=25).contains(&limit) {
-        return Err(AppError::InvalidRequest);
+    match args.read {
+        TranscriptRead::Page { cursor, limit } => {
+            let budget = if limit.is_none() {
+                16 * 1024
+            } else {
+                32 * 1024
+            };
+            let limit = limit.unwrap_or(10);
+            if !(1..=25).contains(&limit) {
+                return Err(AppError::InvalidRequest);
+            }
+            let encoded = read(
+                entry,
+                actor,
+                run,
+                session,
+                HistoryQuery {
+                    limit: Some(limit),
+                    cursor,
+                },
+                budget,
+            )
+            .await?;
+            let mut value: Value =
+                serde_json::from_slice(&encoded).map_err(|_| AppError::Internal)?;
+            Ok(value.get_mut("data").ok_or(AppError::Internal)?.take())
+        }
+        TranscriptRead::Content { reference, cursor } => {
+            let source = read_content(
+                entry,
+                actor,
+                run,
+                session,
+                ContentQuery { reference, cursor },
+                8 * 1024,
+            )
+            .await?;
+            serde_json::to_value(source.data).map_err(|_| AppError::Internal)
+        }
     }
-    let encoded = read(
-        entry,
-        actor,
-        run,
-        session,
-        HistoryQuery {
-            limit: Some(limit),
-            cursor,
-        },
-    )
-    .await?;
-    if encoded.len() > 32 * 1024 {
-        return Err(AppError::PayloadTooLarge);
-    }
-    let mut value: Value = serde_json::from_slice(&encoded).map_err(|_| AppError::Internal)?;
-    let data = value.get_mut("data").ok_or(AppError::Internal)?;
-    Ok(data.take())
 }
 
 pub(super) async fn send(

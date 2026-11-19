@@ -9,19 +9,19 @@ use reviewq_app::history::{HistoryParent, HistorySession};
 use reviewq_domain::identity::NativeSessionId;
 use reviewq_domain::session::{AbsolutePath, HostProvider, NativeBinding};
 use rustix::fs::{self as secure, Mode, OFlags, ResolveFlags};
-use serde_json::Value;
 use sha2::{Digest, Sha256};
 
-use super::file;
+use super::{file, identity};
 
 const MAX_DISCOVERY_ENTRIES: usize = 16_384;
-const MAX_IDENTITY_RECORD: u64 = 64 * 1024;
+const IDENTITY_SCAN_BYTES: u64 = 64 * 1024 * 1024;
 
 pub(super) struct Source {
     pub file: File,
     pub provider: HostProvider,
     pub native_id: NativeSessionId,
     pub fingerprint: [u8; 32],
+    pub root_session: Option<NativeSessionId>,
 }
 
 pub(crate) async fn verified_codex_source(
@@ -189,9 +189,10 @@ fn verify(
     {
         return Err(AppError::Forbidden);
     }
-    let mut budget = 4 * MAX_IDENTITY_RECORD;
+    let provider = identity.provider();
+    let mut budget = IDENTITY_SCAN_BYTES;
     let mut offset = 0;
-    let header_records = if identity.provider() == HostProvider::Codex {
+    let header_records = if provider == HostProvider::Codex {
         1
     } else {
         64
@@ -200,70 +201,63 @@ fn verify(
         if offset == metadata.len() {
             break;
         }
-        let max = metadata.len().min(offset + MAX_IDENTITY_RECORD);
-        let end = file::next_line(&file, offset, max, &mut budget, cancelled)?;
-        let mut bytes = Vec::new();
-        file::input(&file, offset, end, cancelled)
-            .read_to_end(&mut bytes)
-            .map_err(fs_error)?;
-        if !bytes.ends_with(b"\n") {
-            return Ok(None);
-        }
-        offset = end;
-        let Ok(value) = serde_json::from_slice::<Value>(&bytes) else {
-            continue;
-        };
-        if identity_matches(&value, binding, parent)? {
+        let end = file::next_line(&file, offset, metadata.len(), &mut budget, cancelled)?;
+        let record = identity::read(provider, file::input(&file, offset, end, cancelled));
+        if let Ok(record) = record
+            && identity_matches(&record, binding, parent)
+        {
+            let mut sample = Vec::new();
+            file::input(&file, offset, end, cancelled)
+                .take(4096)
+                .read_to_end(&mut sample)
+                .map_err(fs_error)?;
+            let mut fingerprint = Sha256::new();
+            fingerprint.update(candidate.as_os_str().as_encoded_bytes());
+            fingerprint.update(offset.to_be_bytes());
+            fingerprint.update(end.to_be_bytes());
+            fingerprint.update(sample);
             return Ok(Some(Source {
                 file,
-                provider: identity.provider(),
+                provider,
                 native_id: identity.native_id().clone(),
-                fingerprint: Sha256::digest(bytes).into(),
+                fingerprint: fingerprint.finalize().into(),
+                root_session: if provider == HostProvider::Claude {
+                    parent.map(|parent| parent.native_id.clone())
+                } else {
+                    None
+                },
             }));
         }
+        offset = end;
     }
     Ok(None)
 }
 
 fn identity_matches(
-    value: &Value,
+    record: &identity::IdentityRecord,
     binding: &NativeBinding,
     parent: Option<&HistoryParent>,
-) -> Result<bool, AppError> {
+) -> bool {
     let identity = binding.identity();
     let id = identity.native_id().as_str();
     match identity.provider() {
         HostProvider::Codex => {
-            if value.get("type").and_then(Value::as_str) != Some("session_meta") {
-                return Ok(false);
-            }
-            let meta = value.get("payload").ok_or(AppError::Forbidden)?;
-            let found = meta
-                .pointer("/source/subagent/thread_spawn/parent_thread_id")
-                .and_then(Value::as_str);
             let expected = parent.map(|parent| parent.native_id.as_str());
-            let cwd = meta.get("cwd").and_then(Value::as_str).map(Path::new);
-            Ok(meta.get("id").and_then(Value::as_str) == Some(id)
-                && found == expected
-                && cwd.is_some_and(|path| {
+            record.session.as_deref() == Some(id)
+                && record.parent.as_deref() == expected
+                && record.cwd.as_deref().is_some_and(|path| {
                     path == binding.cwd().as_path()
                         || path.canonicalize().ok().as_deref() == Some(binding.cwd().as_path())
-                }))
+                })
         }
-        HostProvider::Claude => {
-            let found = value.get("sessionId").and_then(Value::as_str);
-            let sidechain = value
-                .get("isSidechain")
-                .and_then(Value::as_bool)
-                .unwrap_or(false);
-            let agent = value.get("agentId").and_then(Value::as_str);
-            match parent {
-                Some(parent) => {
-                    Ok(sidechain && agent == Some(id) && found == Some(parent.native_id.as_str()))
-                }
-                None => Ok(!sidechain && found == Some(id)),
+        HostProvider::Claude => match parent {
+            Some(parent) => {
+                record.sidechain
+                    && record.agent.as_deref() == Some(id)
+                    && record.session.as_deref() == Some(parent.native_id.as_str())
             }
-        }
+            None => !record.sidechain && record.session.as_deref() == Some(id),
+        },
     }
 }
 

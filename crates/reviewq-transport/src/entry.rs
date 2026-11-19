@@ -162,6 +162,10 @@ pub fn router(
             get(history::page),
         )
         .route(
+            "/runs/{run_id}/sessions/{session_key}/history/content",
+            get(history::content),
+        )
+        .route(
             "/runs/{run_id}/sessions/{session_key}/messages",
             get(messages::list).post(messages::send),
         )
