@@ -288,6 +288,14 @@
 .output-reader {
   min-width: 0;
 }
+.output-disclosure.quiet-button,
+.output-navigation .quiet-button {
+  justify-self: start;
+  min-height: 24px;
+  padding: 2px 0;
+  color: var(--link);
+  font-size: 11px;
+}
 .timeline-live {
   padding: 6px 15px 10px;
 }

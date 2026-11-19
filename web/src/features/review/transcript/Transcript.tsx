@@ -8,12 +8,13 @@ import type { SessionAddress } from "../../../api/history";
 import { Icon } from "../../../components/Icon";
 import { Empty, Loading, Notice } from "../../../components/PanelState";
 import { describeError, formatClockTime, formatTime, readable } from "../../../lib/presentation";
-import { EntryBody, TranscriptMarkdown } from "./EntryBody";
+import { EntryBody } from "./EntryBody";
 import { entriesIn, readBookmark, rememberBookmark } from "./history-window";
 import { PromptNavigator } from "./PromptNavigator";
 import { FileReadPack, ToolRunHeader } from "./ToolActivity";
 import { activityRows, openKey, toolCatalog, toolOnly } from "./tool-activity";
 import type { ReadPack, ReadTarget, ToolRun } from "./tool-activity";
+import { TranscriptMarkdown } from "./TranscriptMarkdown";
 import { useHistory } from "./useHistory";
 
 type Position = { readonly id: string; readonly offset: number };

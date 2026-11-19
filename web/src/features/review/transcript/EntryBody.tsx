@@ -1,20 +1,10 @@
-import { lazy, Suspense, useEffect, useRef, useState } from "react";
-import type { HistoryContent, HistoryEntry, HistoryPart } from "../../../api/generated/contracts";
-import { historyContent } from "../../../api/history";
+import type { HistoryEntry, HistoryPart } from "../../../api/generated/contracts";
 import type { SessionAddress } from "../../../api/history";
-import { Notice } from "../../../components/PanelState";
-import { describeError } from "../../../lib/presentation";
+import { ExpandedOutput } from "./ExpandedOutput";
 import { ToolHeading } from "./ToolActivity";
 import { groupParts, openKey } from "./tool-activity";
 import type { ToolCatalog } from "./tool-activity";
-
-const Markdown = lazy(() =>
-  import("../../../components/markdown/MarkdownContent").then((module) => ({
-    default: module.MarkdownContent,
-  })),
-);
-const LIMIT = 4;
-const encoder = new TextEncoder();
+import { TranscriptMarkdown } from "./TranscriptMarkdown";
 
 type Props = {
   readonly target: SessionAddress;
@@ -42,32 +32,57 @@ export function EntryBody({
   onMoreParts,
 }: Props) {
   const next = extra ? extra.next : entry.partsCursor;
-  const parts = groupParts(entry, [...entry.parts, ...(extra?.items ?? [])], knownTools);
+  const sourceParts = [...entry.parts, ...(extra?.items ?? [])];
+  const parts = groupParts(entry, sourceParts, knownTools);
+  const wholeEntry =
+    entry.contentRef && !sourceParts.some((part) => part.contentRef === entry.contentRef)
+      ? entry.contentRef
+      : undefined;
+  const entryFormat = parts.some((group) => group.kind === "prose") ? "markdown" : "text";
+
+  function disclosure(ref: string, format: "markdown" | "text", entire = false) {
+    const open = reference === ref;
+    return (
+      <div className="stack">
+        <button
+          type="button"
+          className="output-disclosure quiet-button"
+          onClick={() => onReference(open ? undefined : ref)}
+          aria-expanded={open}
+        >
+          {entire
+            ? open
+              ? "Close complete entry"
+              : "Read complete entry"
+            : open
+              ? "Close full output"
+              : "Read full output"}
+        </button>
+        {open && (
+          <ExpandedOutput
+            key={ref}
+            target={target}
+            generation={generation}
+            entryId={entry.entryId}
+            reference={ref}
+            format={format}
+          />
+        )}
+      </div>
+    );
+  }
 
   function value(part: HistoryPart, key: string) {
+    const formatted = part.kind !== "tool_call" && part.kind !== "tool_result";
     return (
       <div className="stack" key={key}>
-        {part.kind === "assistant_text" ||
-        part.kind === "user_prompt" ||
-        part.kind === "assignment" ||
-        part.kind === "plan" ? (
-          <TranscriptMarkdown source={part.text} />
-        ) : (
-          <pre className="tool-output-line">{part.text}</pre>
-        )}
-        {part.contentRef && (
-          <button
-            type="button"
-            onClick={() =>
-              onReference(
-                reference === part.contentRef ? undefined : (part.contentRef ?? undefined),
-              )
-            }
-            aria-expanded={reference === part.contentRef}
-          >
-            {reference === part.contentRef ? "Close full output" : "Read full output"}
-          </button>
-        )}
+        {(!part.contentRef || reference !== part.contentRef) &&
+          (formatted ? (
+            <TranscriptMarkdown source={part.text} />
+          ) : (
+            <pre className="tool-output-line">{part.text}</pre>
+          ))}
+        {part.contentRef && disclosure(part.contentRef, formatted ? "markdown" : "text")}
       </div>
     );
   }
@@ -96,143 +111,12 @@ export function EntryBody({
           </details>
         );
       })}
-      {entry.contentRef && (
-        <button
-          type="button"
-          onClick={() => onReference(reference === entry.contentRef ? undefined : entry.contentRef)}
-          aria-expanded={reference === entry.contentRef}
-        >
-          {reference === entry.contentRef ? "Close complete entry" : "Read complete entry"}
-        </button>
-      )}
+      {wholeEntry && disclosure(wholeEntry, entryFormat, true)}
       {next && (
-        <button type="button" onClick={() => onMoreParts(next)}>
+        <button className="quiet-button" type="button" onClick={() => onMoreParts(next)}>
           More parts
         </button>
       )}
-      {reference && (
-        <ExpandedOutput
-          key={reference}
-          target={target}
-          generation={generation}
-          entryId={entry.entryId}
-          reference={reference}
-        />
-      )}
     </>
-  );
-}
-
-export function TranscriptMarkdown({ source }: { readonly source: string }) {
-  return (
-    <Suspense fallback={<p className="message-copy">{source}</p>}>
-      <Markdown source={source} />
-    </Suspense>
-  );
-}
-
-function ExpandedOutput({
-  target,
-  entryId,
-  generation,
-  reference,
-}: {
-  readonly target: SessionAddress;
-  readonly entryId: string;
-  readonly generation: string;
-  readonly reference: string;
-}) {
-  const [ranges, setRanges] = useState<readonly HistoryContent[]>([]);
-  const [error, setError] = useState<string>();
-  const [waiting, setWaiting] = useState(false);
-  const request = useRef<AbortController | undefined>(undefined);
-  const text = useRef<HTMLPreElement>(null);
-  const latest = ranges.at(-1);
-  useEffect(() => () => request.current?.abort(), []);
-
-  async function read(cursor?: string, replace = false) {
-    if (request.current) return;
-    const selection = getSelection();
-    if (
-      (ranges.length >= LIMIT || replace) &&
-      text.current &&
-      selection &&
-      !selection.isCollapsed &&
-      selection.rangeCount &&
-      selection.getRangeAt(0).intersectsNode(text.current)
-    ) {
-      setWaiting(true);
-      return;
-    }
-    const controller = new AbortController();
-    request.current = controller;
-    setError(undefined);
-    try {
-      const range = await historyContent(
-        target,
-        entryId,
-        generation,
-        reference,
-        cursor,
-        controller.signal,
-      );
-      if (controller.signal.aborted) return;
-      const expectedOffset = latest ? latest.offset + encoder.encode(latest.text).length : 0;
-      if (
-        (!replace && range.offset !== expectedOffset) ||
-        encoder.encode(range.text).length > 65_536
-      )
-        throw new Error("The next native output range is unavailable.");
-      setRanges((items) => (replace ? [range] : [...items, range].slice(-LIMIT)));
-      setWaiting(false);
-    } catch (failure) {
-      if (!controller.signal.aborted) setError(describeError(failure));
-    } finally {
-      if (request.current === controller) request.current = undefined;
-    }
-  }
-
-  return (
-    <div className="output-reader surface-card stack">
-      {!ranges.length && (
-        <button type="button" onClick={() => void read()}>
-          Load native output
-        </button>
-      )}
-      {error && <Notice>{error}</Notice>}
-      {ranges.length > 0 && (
-        <pre ref={text} className="tool-output-line" aria-label="Native output text">
-          {ranges.map((range) => (
-            <span key={range.offset}>{range.text}</span>
-          ))}
-        </pre>
-      )}
-      <div className="actions">
-        {(ranges[0]?.offset ?? 0) > 0 && (
-          <button type="button" onClick={() => void read(undefined, true)}>
-            Start of output
-          </button>
-        )}
-        {latest?.nextCursor && (
-          <button type="button" onClick={() => void read(latest.nextCursor ?? undefined)}>
-            More output
-          </button>
-        )}
-      </div>
-      {waiting && (
-        <Notice>
-          More output available.{" "}
-          <button
-            type="button"
-            onClick={() => {
-              getSelection()?.removeAllRanges();
-              setWaiting(false);
-            }}
-          >
-            Clear selection
-          </button>
-        </Notice>
-      )}
-    </div>
   );
 }
