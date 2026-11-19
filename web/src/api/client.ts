@@ -70,14 +70,19 @@ export async function write<T>(
   accepts: (data: unknown) => data is T,
   signal?: AbortSignal,
 ): Promise<T> {
-  return decode(await request(path, {
-    method,
-    ...(signal ? { signal } : {}),
-    ...(body === undefined ? {} : {
-      body: JSON.stringify(body),
-      headers: { "Content-Type": "application/json" },
+  return decode(
+    await request(path, {
+      method,
+      ...(signal ? { signal } : {}),
+      ...(body === undefined
+        ? {}
+        : {
+            body: JSON.stringify(body),
+            headers: { "Content-Type": "application/json" },
+          }),
     }),
-  }), accepts);
+    accepts,
+  );
 }
 
 export async function request(path: string, options: RequestInit = {}): Promise<Response> {
@@ -90,7 +95,11 @@ export async function request(path: string, options: RequestInit = {}): Promise<
   return response;
 }
 
-export function queryString(values: Readonly<Record<string, string | number | boolean | readonly string[] | null | undefined>>): string {
+export function queryString(
+  values: Readonly<
+    Record<string, string | number | boolean | readonly string[] | null | undefined>
+  >,
+): string {
   const params = new URLSearchParams();
   for (const [key, value] of Object.entries(values)) {
     if (value === null || value === undefined) continue;
@@ -103,7 +112,11 @@ export function queryString(values: Readonly<Record<string, string | number | bo
   return params.size ? `?${params}` : "";
 }
 
-async function decode<T>(response: Response, accepts: (data: unknown) => data is T, limit = 12 * 1024 * 1024): Promise<T> {
+async function decode<T>(
+  response: Response,
+  accepts: (data: unknown) => data is T,
+  limit = 12 * 1024 * 1024,
+): Promise<T> {
   const payload: unknown = JSON.parse(decodeUtf8(await readBoundedBytes(response, limit)));
   if (!accepts(payload)) throw new Error("ReviewQ returned an invalid response.");
   return payload;
@@ -166,7 +179,11 @@ async function apiError(response: Response): Promise<Error> {
 }
 
 export class ApiResponseError extends Error {
-  constructor(readonly code: string, message: string, readonly retryable: boolean) {
+  constructor(
+    readonly code: string,
+    message: string,
+    readonly retryable: boolean,
+  ) {
     super(message);
   }
 }

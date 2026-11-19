@@ -15,36 +15,65 @@ type Props = {
 
 export function PatchDocumentView({ text, discussions, restoreScroll, rememberScroll }: Props) {
   const [patch, setPatch] = useState<PatchDocument>();
-  const mount = useCallback((host: HTMLDivElement | null) => {
-    if (!host) return;
-    const rendered = mountPatchDocument(host, text);
-    const scroller = host.closest(".drawer-body");
-    if (scroller) scroller.scrollTop = restoreScroll();
-    setPatch(rendered);
-    return () => {
-      if (scroller) rememberScroll(scroller.scrollTop);
-      host.replaceChildren();
-    };
-  }, [text, restoreScroll, rememberScroll]);
-  return <>
-    <div ref={mount} className="patch-source patch-rich" tabIndex={0} aria-label="Selectable unified patch" onCopy={copyRows} />
-    {patch && discussions.map((thread) => <ThreadPortal key={thread.discussionId} patch={patch} thread={thread} />)}
-  </>;
+  const mount = useCallback(
+    (host: HTMLDivElement | null) => {
+      if (!host) return;
+      const rendered = mountPatchDocument(host, text);
+      const scroller = host.closest(".drawer-body");
+      if (scroller) scroller.scrollTop = restoreScroll();
+      setPatch(rendered);
+      return () => {
+        if (scroller) rememberScroll(scroller.scrollTop);
+        host.replaceChildren();
+      };
+    },
+    [text, restoreScroll, rememberScroll],
+  );
+  return (
+    <>
+      <div
+        ref={mount}
+        className="patch-source patch-rich"
+        tabIndex={0}
+        aria-label="Selectable unified patch"
+        onCopy={copyRows}
+      />
+      {patch &&
+        discussions.map((thread) => (
+          <ThreadPortal key={thread.discussionId} patch={patch} thread={thread} />
+        ))}
+    </>
+  );
 }
 
-function ThreadPortal({ patch, thread }: { readonly patch: PatchDocument; readonly thread: PatchDiscussion }) {
+function ThreadPortal({
+  patch,
+  thread,
+}: {
+  readonly patch: PatchDocument;
+  readonly thread: PatchDiscussion;
+}) {
   const [slot, setSlot] = useState<HTMLElement>();
-  const attach = useCallback((Marker: HTMLSpanElement | null) => {
-    if (!Marker) return;
-    const anchor = thread.anchor;
-    const selected = anchor?.range?.end;
-    const endNew = selected?.newLine ?? anchor?.newLine;
-    const endOld = selected?.oldLine ?? anchor?.oldLine;
-    const target = (endNew != null ? patch.anchor(`new:${endNew}`) : undefined)
-      ?? (endOld != null ? patch.anchor(`old:${endOld}`) : undefined);
-    setSlot(target);
-  }, [patch, thread.anchor]);
-  return <><span ref={attach} hidden />{slot && createPortal(<DiscussionThread thread={thread} />, slot)}</>;
+  const attach = useCallback(
+    (Marker: HTMLSpanElement | null) => {
+      if (!Marker) return;
+      const anchor = thread.anchor;
+      const selected = anchor?.range?.end;
+      const endNew = selected?.newLine ?? anchor?.newLine;
+      const endOld = selected?.oldLine ?? anchor?.oldLine;
+      const target =
+        (endNew != null ? patch.anchor(`new:${endNew}`) : undefined) ??
+        (endOld != null ? patch.anchor(`old:${endOld}`) : undefined);
+      setSlot(target);
+    },
+    [patch, thread.anchor],
+  );
+  return (
+    <>
+      <span ref={attach} hidden />
+      {slot && createPortal(<DiscussionThread thread={thread} />, slot)}
+    </>
+  );
 }
 
 function copyRows(event: ClipboardEvent<HTMLDivElement>) {
@@ -61,8 +90,12 @@ function copyRows(event: ClipboardEvent<HTMLDivElement>) {
     const child = row.firstChild;
     if (row.classList.contains("patch-row") && child?.nodeType === Node.TEXT_NODE) {
       const text = child.nodeValue ?? "";
-      chunks.push(text.slice(range.startContainer === child ? range.startOffset : 0,
-        range.endContainer === child ? range.endOffset : undefined));
+      chunks.push(
+        text.slice(
+          range.startContainer === child ? range.startOffset : 0,
+          range.endContainer === child ? range.endOffset : undefined,
+        ),
+      );
     }
     if (row === endRow) break;
     row = row.nextElementSibling;

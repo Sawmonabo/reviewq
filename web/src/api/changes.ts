@@ -1,7 +1,11 @@
 import { decodeUtf8, readBoundedBytes } from "./bounded-bytes";
 import { read, request } from "./client";
 import type { PatchFile } from "./generated/contracts";
-import { isApprovalViewResponse, isPatchDiscussionsResponse, isPatchFileIndexResponse } from "./generated/validators.mjs";
+import {
+  isApprovalViewResponse,
+  isPatchDiscussionsResponse,
+  isPatchFileIndexResponse,
+} from "./generated/validators.mjs";
 
 export const PATCH_WINDOW_BYTES = 64 * 1024;
 const MAX_RICH_BYTES = 2 * 1024 * 1024;
@@ -88,7 +92,11 @@ export async function readPatch(
   if (pinned) headers.set("If-Match", pinned);
   const offset = window?.offset ?? 0;
   const bounded = window === undefined ? MAX_RICH_BYTES : PATCH_WINDOW_BYTES;
-  if (window) headers.set("Range", window.last ? `bytes=-${bounded}` : `bytes=${offset}-${offset + bounded - 1}`);
+  if (window)
+    headers.set(
+      "Range",
+      window.last ? `bytes=-${bounded}` : `bytes=${offset}-${offset + bounded - 1}`,
+    );
   const response = await request(patchRoute(file), { headers, signal });
   const etag = response.headers.get("ETag");
   if (
@@ -181,7 +189,8 @@ function enforcePatchRows(bytes: Uint8Array) {
     if (index === bytes.length || bytes[index] === 10) {
       rows++;
       const width = index - start - (bytes[index - 1] === 13 && bytes[index] === 10 ? 1 : 0);
-      if (rows > 20_000 || width > 16_384) throw new PatchFormattingLimit("Patch formatting limit reached.");
+      if (rows > 20_000 || width > 16_384)
+        throw new PatchFormattingLimit("Patch formatting limit reached.");
       start = index + 1;
     }
   }

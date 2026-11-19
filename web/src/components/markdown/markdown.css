@@ -1,20 +1,98 @@
-.prose { color: var(--text); font-size: 13px; line-height: 1.75; overflow-wrap: anywhere; }
-.prose > :first-child { margin-top: 0; }
-.prose > :last-child { margin-bottom: 0; }
-.prose :is(p, ul, ol, table, blockquote, pre, details) { margin: 0 0 11px; }
-.prose h1 { font-size: 21px; }
-.prose h2 { font-size: 17px; }
-.prose :is(h1, h2, h3, h4) { line-height: 1.4; margin: 15px 0 7px; }
-.prose :is(ul, ol) { padding-inline-start: 22px; }
-.prose li p { margin-bottom: 4px; }
-.prose :is(pre, blockquote), .prose-source, .mermaid-figure pre { padding: 9px 11px; background: var(--raised); border: 1px solid var(--line); border-radius: 5px; white-space: pre-wrap; overflow-wrap: anywhere; }
-.prose blockquote { border-inline-start: 2px solid var(--focus); margin-inline: 0; }
-.prose :not(pre) > code { border-radius: 3px; background: var(--raised); padding: 1px 3px; }
-.prose table { border-collapse: collapse; width: max-content; min-width: 100%; }
-.prose :is(th, td) { border: 1px solid var(--line); padding: 6px 9px; min-width: 75px; max-width: 280px; text-align: start; }
-.prose th { background: var(--raised); }
-.table-scroll { overflow-x: auto; margin: 4px 0 12px; }
-.mermaid-figure { display: grid; gap: 6px; margin: 14px 0; min-width: 0; border: 1px solid var(--line); border-radius: 5px; padding: 8px; }
-.diagram-frame { display: grid; place-items: center; min-height: 100px; overflow: hidden; background: #f7f8fc; cursor: grab; touch-action: none; border-radius: 4px; padding: 8px; }
-.diagram-art { width: 100%; transform-origin: left top; }
-.diagram-art svg { display: block; width: 100%; height: auto; }
+.prose {
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.75;
+  overflow-wrap: anywhere;
+}
+.prose > :first-child {
+  margin-top: 0;
+}
+.prose > :last-child {
+  margin-bottom: 0;
+}
+.prose :is(p, ul, ol, table, blockquote, pre, details) {
+  margin: 0 0 11px;
+}
+.prose h1 {
+  font-size: 21px;
+}
+.prose h2 {
+  font-size: 17px;
+}
+.prose :is(h1, h2, h3, h4) {
+  line-height: 1.4;
+  margin: 15px 0 7px;
+}
+.prose :is(ul, ol) {
+  padding-inline-start: 22px;
+}
+.prose li p {
+  margin-bottom: 4px;
+}
+.prose :is(pre, blockquote),
+.prose-source,
+.mermaid-figure pre {
+  padding: 9px 11px;
+  background: var(--raised);
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.prose blockquote {
+  border-inline-start: 2px solid var(--focus);
+  margin-inline: 0;
+}
+.prose :not(pre) > code {
+  border-radius: 3px;
+  background: var(--raised);
+  padding: 1px 3px;
+}
+.prose table {
+  border-collapse: collapse;
+  width: max-content;
+  min-width: 100%;
+}
+.prose :is(th, td) {
+  border: 1px solid var(--line);
+  padding: 6px 9px;
+  min-width: 75px;
+  max-width: 280px;
+  text-align: start;
+}
+.prose th {
+  background: var(--raised);
+}
+.table-scroll {
+  overflow-x: auto;
+  margin: 4px 0 12px;
+}
+.mermaid-figure {
+  display: grid;
+  gap: 6px;
+  margin: 14px 0;
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  padding: 8px;
+}
+.diagram-frame {
+  display: grid;
+  place-items: center;
+  min-height: 100px;
+  overflow: hidden;
+  background: #f7f8fc;
+  cursor: grab;
+  touch-action: none;
+  border-radius: 4px;
+  padding: 8px;
+}
+.diagram-art {
+  width: 100%;
+  transform-origin: left top;
+}
+.diagram-art svg {
+  display: block;
+  width: 100%;
+  height: auto;
+}

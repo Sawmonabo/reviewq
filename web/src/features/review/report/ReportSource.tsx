@@ -6,7 +6,13 @@ import { useResource } from "../../../hooks/useResource";
 
 const STEP = 12_000;
 
-export function ReportSource({ runId, report, requestedOffset, reason, onQuote }: {
+export function ReportSource({
+  runId,
+  report,
+  requestedOffset,
+  reason,
+  onQuote,
+}: {
   readonly runId: string;
   readonly report: ReportSummary;
   readonly requestedOffset: number;
@@ -19,7 +25,8 @@ export function ReportSource({ runId, report, requestedOffset, reason, onQuote }
   const block = useRef<HTMLPreElement>(null);
   const offset = seek?.request === requestedOffset ? seek.offset : requestedOffset;
   const source = useResource(`source:${runId}:${report.receiptId}:${offset}`, (signal) =>
-    reportSection(runId, report.receiptId, report.sha256, offset, signal));
+    reportSection(runId, report.receiptId, report.sha256, offset, signal),
+  );
   const value = source.data;
 
   function move(next: number) {
@@ -46,7 +53,12 @@ export function ReportSource({ runId, report, requestedOffset, reason, onQuote }
     const before = document.createRange();
     before.selectNodeContents(host);
     before.setEnd(selected.startContainer, selected.startOffset);
-    if (value.text.slice(before.toString().length, before.toString().length + selected.toString().length) !== selected.toString()) {
+    if (
+      value.text.slice(
+        before.toString().length,
+        before.toString().length + selected.toString().length,
+      ) !== selected.toString()
+    ) {
       setProblem("The selection must match the original Markdown.");
       return;
     }
@@ -54,23 +66,78 @@ export function ReportSource({ runId, report, requestedOffset, reason, onQuote }
     onQuote(selected.toString(), value.offset + [...before.toString()].length);
   }
 
-  return <section className="surface-card stack" aria-label="Report source window">
-    <div className="spread"><h3>{reason}</h3>{value && <span className="meta">Characters {value.offset + 1}–{value.nextOffset ?? value.totalCodePoints} of {value.totalCodePoints}</span>}</div>
-    <div className="actions source-nav">
-      <button type="button" disabled={offset === 0} onClick={() => move(0)}>Start</button>
-      <button type="button" disabled={offset === 0} onClick={() => move(Math.max(0, offset - STEP))}>Previous</button>
-      <button type="button" disabled={value?.nextOffset == null} onClick={() => { if (value?.nextOffset != null) move(value.nextOffset); }}>Next</button>
-      <button type="button" disabled={offset >= report.totalCodePoints - STEP} onClick={() => move(Math.max(0, report.totalCodePoints - STEP))}>End</button>
-      <button type="button" disabled={!value} onClick={capture}>Quote selection</button>
-    </div>
-    <form className="actions" onSubmit={(event) => { event.preventDefault(); move(Number(entry)); }}>
-      <label>Source offset <input type="number" min={0} max={report.totalCodePoints} value={entry} onChange={(event) => setEntry(event.currentTarget.value)} /></label>
-      <button type="submit" disabled={!entry}>Go to offset</button>
-    </form>
-    <p className="meta">Browser Find searches this source window.</p>
-    {problem && <Notice>{problem}</Notice>}
-    {source.error && <Notice retry={source.retry}>{source.error}</Notice>}
-    {source.pending && <Loading label="Reading original Markdown…" />}
-    {value && <pre ref={block} className="report-source" tabIndex={0}>{value.text}</pre>}
-  </section>;
+  return (
+    <section className="surface-card stack" aria-label="Report source window">
+      <div className="spread">
+        <h3>{reason}</h3>
+        {value && (
+          <span className="meta">
+            Characters {value.offset + 1}–{value.nextOffset ?? value.totalCodePoints} of{" "}
+            {value.totalCodePoints}
+          </span>
+        )}
+      </div>
+      <div className="actions source-nav">
+        <button type="button" disabled={offset === 0} onClick={() => move(0)}>
+          Start
+        </button>
+        <button
+          type="button"
+          disabled={offset === 0}
+          onClick={() => move(Math.max(0, offset - STEP))}
+        >
+          Previous
+        </button>
+        <button
+          type="button"
+          disabled={value?.nextOffset == null}
+          onClick={() => {
+            if (value?.nextOffset != null) move(value.nextOffset);
+          }}
+        >
+          Next
+        </button>
+        <button
+          type="button"
+          disabled={offset >= report.totalCodePoints - STEP}
+          onClick={() => move(Math.max(0, report.totalCodePoints - STEP))}
+        >
+          End
+        </button>
+        <button type="button" disabled={!value} onClick={capture}>
+          Quote selection
+        </button>
+      </div>
+      <form
+        className="actions"
+        onSubmit={(event) => {
+          event.preventDefault();
+          move(Number(entry));
+        }}
+      >
+        <label>
+          Source offset{" "}
+          <input
+            type="number"
+            min={0}
+            max={report.totalCodePoints}
+            value={entry}
+            onChange={(event) => setEntry(event.currentTarget.value)}
+          />
+        </label>
+        <button type="submit" disabled={!entry}>
+          Go to offset
+        </button>
+      </form>
+      <p className="meta">Browser Find searches this source window.</p>
+      {problem && <Notice>{problem}</Notice>}
+      {source.error && <Notice retry={source.retry}>{source.error}</Notice>}
+      {source.pending && <Loading label="Reading original Markdown…" />}
+      {value && (
+        <pre ref={block} className="report-source" tabIndex={0}>
+          {value.text}
+        </pre>
+      )}
+    </section>
+  );
 }

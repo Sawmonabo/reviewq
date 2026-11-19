@@ -1,5 +1,10 @@
 export const presets = {
-  all: "All time", week: "This week", seven: "Last 7 days", thirty: "Last 30 days", month: "This month", custom: "Custom dates",
+  all: "All time",
+  week: "This week",
+  seven: "Last 7 days",
+  thirty: "Last 30 days",
+  month: "This month",
+  custom: "Custom dates",
 } as const;
 
 export type DatePreset = keyof typeof presets;
@@ -21,7 +26,7 @@ export function localDateRange(preset: DatePreset, start: string, end: string) {
   const to = new Date(from);
   to.setDate(to.getDate() + 1);
   if (preset === "month") from.setDate(1);
-  else if (preset === "week") from.setDate(from.getDate() - (from.getDay() + 6) % 7);
+  else if (preset === "week") from.setDate(from.getDate() - ((from.getDay() + 6) % 7));
   else from.setDate(from.getDate() - (preset === "seven" ? 6 : 29));
   return { fromInclusive: from.toISOString(), untilExclusive: to.toISOString() };
 }

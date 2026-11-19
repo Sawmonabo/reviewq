@@ -7,7 +7,10 @@ import remarkRehype from "remark-rehype";
 import { unified } from "unified";
 import { safeUrl } from "../../lib/presentation";
 
-const sentence = unified().use(remarkParse).use(remarkGfm).use(remarkRehype, { allowDangerousHtml: true })
+const sentence = unified()
+  .use(remarkParse)
+  .use(remarkGfm)
+  .use(remarkRehype, { allowDangerousHtml: true })
   .use(rehypeRaw)
   .use(rehypeSanitize, {
     ...defaultSchema,
@@ -20,8 +23,13 @@ export function parseMarkdown(source: string, base?: string): Root | undefined {
   const encoder = new TextEncoder();
   if (source.length > 1024 * 1024 || encoder.encode(source).length > 1024 * 1024) return;
   const lines = source.split("\n");
-  if (lines.length - (lines.at(-1) === "" ? 1 : 0) > 10_000
-    || lines.some((line) => line.length > 16_384 || encoder.encode(line.replace(/\r$/, "")).length > 16_384)) return;
+  if (
+    lines.length - (lines.at(-1) === "" ? 1 : 0) > 10_000 ||
+    lines.some(
+      (line) => line.length > 16_384 || encoder.encode(line.replace(/\r$/, "")).length > 16_384,
+    )
+  )
+    return;
   const tree = sentence.runSync(sentence.parse(source));
   const pending: { node: Root | RootContent; depth: number }[] = [{ node: tree, depth: 0 }];
   let count = 0;
@@ -39,8 +47,12 @@ export function parseMarkdown(source: string, base?: string): Root | undefined {
 
 function safeElement(node: Element, base: string | undefined) {
   if (node.tagName === "img") {
-    const href = typeof node.properties.src === "string" ? safeUrl(node.properties.src, base) : undefined;
-    const label = typeof node.properties.alt === "string" && node.properties.alt ? node.properties.alt : "Attachment";
+    const href =
+      typeof node.properties.src === "string" ? safeUrl(node.properties.src, base) : undefined;
+    const label =
+      typeof node.properties.alt === "string" && node.properties.alt
+        ? node.properties.alt
+        : "Attachment";
     node.tagName = href ? "a" : "span";
     node.properties = href ? { href, target: "_blank", rel: ["noreferrer"] } : {};
     node.children = [{ type: "text", value: label }];

@@ -1,16 +1,70 @@
-.findings { gap: 14px; min-width: 0; }
-.report-heading h3 { font-size: 18px; }
-.report-heading code { overflow-wrap: anywhere; }
-.report-version { width: 100%; display: flex; gap: 8px; justify-content: space-between; text-align: left; }
-.report-version[aria-pressed="true"] { border-color: var(--focus); background: var(--selected); }
-.report-source { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.6; padding: 9px; background: var(--canvas); border: 1px solid var(--line); border-radius: 5px; }
-.report-context button[aria-pressed="true"] { border-color: var(--focus); background: var(--selected); }
-.report-blocks > div { min-width: 0; padding-bottom: 11px; }
-.finding-card .badge { white-space: normal; }
-.disposition-form { border-top: 1px solid var(--line); padding-top: 10px; }
-.report-feedback { padding: 0; }
-.report-feedback h3 { padding: 9px 13px; }
-.report-feedback .composer { border-radius: 0 0 6px 6px; }
-.report-quote { margin: 0 13px 10px; padding: 7px 9px; border-left: 2px solid var(--focus); background: var(--raised); white-space: pre-wrap; overflow-wrap: anywhere; }
-.report-quote cite { color: var(--muted); font-size: 12px; display: block; }
-.source-nav { gap: 6px; }
+.findings {
+  gap: 14px;
+  min-width: 0;
+}
+.report-heading h3 {
+  font-size: 18px;
+}
+.report-heading code {
+  overflow-wrap: anywhere;
+}
+.report-version {
+  width: 100%;
+  display: flex;
+  gap: 8px;
+  justify-content: space-between;
+  text-align: left;
+}
+.report-version[aria-pressed="true"] {
+  border-color: var(--focus);
+  background: var(--selected);
+}
+.report-source {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  line-height: 1.6;
+  padding: 9px;
+  background: var(--canvas);
+  border: 1px solid var(--line);
+  border-radius: 5px;
+}
+.report-context button[aria-pressed="true"] {
+  border-color: var(--focus);
+  background: var(--selected);
+}
+.report-blocks > div {
+  min-width: 0;
+  padding-bottom: 11px;
+}
+.finding-card .badge {
+  white-space: normal;
+}
+.disposition-form {
+  border-top: 1px solid var(--line);
+  padding-top: 10px;
+}
+.report-feedback {
+  padding: 0;
+}
+.report-feedback h3 {
+  padding: 9px 13px;
+}
+.report-feedback .composer {
+  border-radius: 0 0 6px 6px;
+}
+.report-quote {
+  margin: 0 13px 10px;
+  padding: 7px 9px;
+  border-left: 2px solid var(--focus);
+  background: var(--raised);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.report-quote cite {
+  color: var(--muted);
+  font-size: 12px;
+  display: block;
+}
+.source-nav {
+  gap: 6px;
+}

@@ -70,7 +70,11 @@ export function useResource<T>(
   }, [key, keys, epoch]);
 
   const current = result?.key === key ? result : undefined;
-  return { ...current, pending: current === undefined, retry: () => setEpoch((value) => value + 1) };
+  return {
+    ...current,
+    pending: current === undefined,
+    retry: () => setEpoch((value) => value + 1),
+  };
 }
 
 function errorMessage(error: unknown): string {

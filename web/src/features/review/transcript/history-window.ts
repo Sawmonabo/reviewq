@@ -25,11 +25,28 @@ export function entriesIn(pages: readonly HistoryPage[]) {
 
 export function readBookmark(key: string): TimelineBookmark | undefined {
   const value = savedValue(key);
-  if (value && typeof value === "object" && "entryId" in value && "offset" in value && "following" in value && "generation" in value
-    && typeof value.entryId === "string" && typeof value.offset === "number" && Number.isFinite(value.offset)
-    && typeof value.following === "boolean" && typeof value.generation === "string") {
-    return { entryId: value.entryId, offset: value.offset, following: value.following, generation: value.generation };
+  if (
+    value &&
+    typeof value === "object" &&
+    "entryId" in value &&
+    "offset" in value &&
+    "following" in value &&
+    "generation" in value &&
+    typeof value.entryId === "string" &&
+    typeof value.offset === "number" &&
+    Number.isFinite(value.offset) &&
+    typeof value.following === "boolean" &&
+    typeof value.generation === "string"
+  ) {
+    return {
+      entryId: value.entryId,
+      offset: value.offset,
+      following: value.following,
+      generation: value.generation,
+    };
   }
 }
 
-export function rememberBookmark(key: string, value: TimelineBookmark) { saveValue(key, value); }
+export function rememberBookmark(key: string, value: TimelineBookmark) {
+  saveValue(key, value);
+}

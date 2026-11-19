@@ -8,13 +8,32 @@ import { PAGE_LIMIT, readBookmark } from "./history-window";
 
 type ReadPosition = "older" | "newer" | "latest" | "around";
 type Anchor = { readonly entryId: string; readonly locator?: string };
-type Delta = { readonly runId: string; readonly sessionKey: string; readonly generation: string; readonly turnId: string; readonly entryId: string;
-  readonly block: number; readonly offset: number; readonly text: string; readonly provisional: boolean };
-type Provisional = { readonly entryId: string; readonly turnId: string; readonly text: string; readonly bytes: number };
+type Delta = {
+  readonly runId: string;
+  readonly sessionKey: string;
+  readonly generation: string;
+  readonly turnId: string;
+  readonly entryId: string;
+  readonly block: number;
+  readonly offset: number;
+  readonly text: string;
+  readonly provisional: boolean;
+};
+type Provisional = {
+  readonly entryId: string;
+  readonly turnId: string;
+  readonly text: string;
+  readonly bytes: number;
+};
 const utf8 = new TextEncoder();
 
-export function useHistory(target: SessionAddress, bookmark: string, following: boolean, pinned: ReadonlySet<string>,
-  beforeUpdate: (position: ReadPosition, anchor?: Anchor) => void) {
+export function useHistory(
+  target: SessionAddress,
+  bookmark: string,
+  following: boolean,
+  pinned: ReadonlySet<string>,
+  beforeUpdate: (position: ReadPosition, anchor?: Anchor) => void,
+) {
   const [pages, setPages] = useState<readonly HistoryPage[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string>();
@@ -31,14 +50,28 @@ export function useHistory(target: SessionAddress, bookmark: string, following: 
   const generation = last?.generation;
 
   async function load(position: ReadPosition, wanted?: Anchor, background = false) {
-    if (active.current) { if (background) pending.current = true; return; }
-    const cursor = position === "older" ? first?.nextCursor : position === "newer" ? last?.previousCursor : undefined;
+    if (active.current) {
+      if (background) pending.current = true;
+      return;
+    }
+    const cursor =
+      position === "older"
+        ? first?.nextCursor
+        : position === "newer"
+          ? last?.previousCursor
+          : undefined;
     if ((position === "older" || position === "newer") && !cursor) return;
     const adjacent = position === "older" || position === "newer";
     const evict = position === "older" ? last : first;
-    if (pinned.size && ((!adjacent) || (pages.length >= PAGE_LIMIT && evict?.items.some((item) => pinned.has(item.entryId))))) {
+    if (
+      pinned.size &&
+      (!adjacent ||
+        (pages.length >= PAGE_LIMIT && evict?.items.some((item) => pinned.has(item.entryId))))
+    ) {
       if (position === "around") resetTo.current = wanted;
-      pending.current = true; setWaiting(true); return;
+      pending.current = true;
+      setWaiting(true);
+      return;
     }
     beforeUpdate(position, wanted);
     const controller = new AbortController();
@@ -46,15 +79,25 @@ export function useHistory(target: SessionAddress, bookmark: string, following: 
     pending.current = false;
     setLoading(true);
     try {
-      const response = await historyPage(target, cursor ? { cursor } : wanted
-        ? { aroundId: wanted.entryId, ...(wanted.locator ? { locator: wanted.locator } : {}) } : {}, controller.signal);
+      const response = await historyPage(
+        target,
+        cursor
+          ? { cursor }
+          : wanted
+            ? { aroundId: wanted.entryId, ...(wanted.locator ? { locator: wanted.locator } : {}) }
+            : {},
+        controller.signal,
+      );
       if (controller.signal.aborted) return;
       const { data, cursor: eventCursor } = response;
       observeSnapshot(eventCursor);
-      setAvailability(data.availability); setUpdated(Date.now()); setError(undefined);
+      setAvailability(data.availability);
+      setUpdated(Date.now());
+      setError(undefined);
       setWaiting(pending.current);
       if (data.reset || !adjacent || data.generation !== generation) {
-        setPages([data]); setLive(undefined);
+        setPages([data]);
+        setLive(undefined);
       } else if (position === "older") {
         setPages((items) => [data, ...items].slice(0, PAGE_LIMIT));
       } else {
@@ -64,7 +107,10 @@ export function useHistory(target: SessionAddress, bookmark: string, following: 
     } catch (failure) {
       if (!controller.signal.aborted) setError(describeError(failure));
     } finally {
-      if (active.current === controller) { active.current = undefined; setLoading(false); }
+      if (active.current === controller) {
+        active.current = undefined;
+        setLoading(false);
+      }
     }
   }
 
@@ -76,23 +122,39 @@ export function useHistory(target: SessionAddress, bookmark: string, following: 
 
   const notice = useEffectEvent((kind: string, value: Record<string, unknown>) => {
     if (kind === "delta") {
-      if (!isDelta(value) || value.generation !== generation || !following || pinned.size || value.block !== 0) {
-        if (!following || pinned.size) { pending.current = true; setWaiting(true); }
+      if (
+        !isDelta(value) ||
+        value.generation !== generation ||
+        !following ||
+        pinned.size ||
+        value.block !== 0
+      ) {
+        if (!following || pinned.size) {
+          pending.current = true;
+          setWaiting(true);
+        }
         return;
       }
       const bytes = utf8.encode(value.text).length;
       if (bytes > 65_536 || value.offset + bytes > 65_536) return;
       setLive((current) => {
         if (!current || current.entryId !== value.entryId) {
-          return value.offset === 0 ? { entryId: value.entryId, turnId: value.turnId, text: value.text, bytes } : current;
+          return value.offset === 0
+            ? { entryId: value.entryId, turnId: value.turnId, text: value.text, bytes }
+            : current;
         }
         return current.bytes === value.offset
-          ? { ...current, text: current.text + value.text, bytes: current.bytes + bytes } : current;
+          ? { ...current, text: current.text + value.text, bytes: current.bytes + bytes }
+          : current;
       });
       return;
     }
     if (typeof value.availability === "string") setAvailability(value.availability);
-    if (!following || pinned.size) { pending.current = true; setWaiting(true); return; }
+    if (!following || pinned.size) {
+      pending.current = true;
+      setWaiting(true);
+      return;
+    }
     void load(last?.previousCursor && kind !== "reset" ? "newer" : "latest", undefined, true);
   });
 
@@ -108,13 +170,22 @@ export function useHistory(target: SessionAddress, bookmark: string, following: 
     initialize();
     let stream: EventSource | undefined;
     let retry: number | undefined;
-    function close() { stream?.close(); stream = undefined; if (retry !== undefined) window.clearTimeout(retry); }
+    function close() {
+      stream?.close();
+      stream = undefined;
+      if (retry !== undefined) window.clearTimeout(retry);
+    }
     function open() {
-      if (document.hidden) { close(); return; }
+      if (document.hidden) {
+        close();
+        return;
+      }
       if (stream) return;
       const next = new EventSource(nativeHistoryUrl(target));
       stream = next;
-      next.onopen = () => { if (stream === next) setOnline(true); };
+      next.onopen = () => {
+        if (stream === next) setOnline(true);
+      };
       next.onerror = () => {
         if (stream !== next) return;
         if (retry !== undefined) window.clearTimeout(retry);
@@ -124,7 +195,8 @@ export function useHistory(target: SessionAddress, bookmark: string, following: 
         next.addEventListener(kind, (event: MessageEvent<string>) => {
           if (stream !== next) return;
           const value = parseEvent(event.data);
-          if (value?.runId === target.runId && value.sessionKey === target.sessionKey) notice(kind, value);
+          if (value?.runId === target.runId && value.sessionKey === target.sessionKey)
+            notice(kind, value);
         });
       }
     }
@@ -141,25 +213,47 @@ export function useHistory(target: SessionAddress, bookmark: string, following: 
     };
   }, [target.runId, target.sessionKey, bookmark]);
 
-  useEffect(() => { catchup(); }, [following, loading, pinned.size, waiting]);
+  useEffect(() => {
+    catchup();
+  }, [following, loading, pinned.size, waiting]);
 
   return {
-    pages, older: Boolean(first?.nextCursor), newer: Boolean(last?.previousCursor),
-    waiting, loading, error, online, availability, updated, live, generation, load,
+    pages,
+    older: Boolean(first?.nextCursor),
+    newer: Boolean(last?.previousCursor),
+    waiting,
+    loading,
+    error,
+    online,
+    availability,
+    updated,
+    live,
+    generation,
+    load,
   };
 }
 
 function isDelta(value: Record<string, unknown>): value is Record<string, unknown> & Delta {
-  return typeof value.generation === "string" && typeof value.turnId === "string" && typeof value.entryId === "string"
-    && typeof value.block === "number" && typeof value.offset === "number" && Number.isSafeInteger(value.offset)
-    && value.offset >= 0 && typeof value.text === "string" && value.provisional === true;
+  return (
+    typeof value.generation === "string" &&
+    typeof value.turnId === "string" &&
+    typeof value.entryId === "string" &&
+    typeof value.block === "number" &&
+    typeof value.offset === "number" &&
+    Number.isSafeInteger(value.offset) &&
+    value.offset >= 0 &&
+    typeof value.text === "string" &&
+    value.provisional === true
+  );
 }
 
 function parseEvent(source: string): Record<string, unknown> | undefined {
   if (source.length > 150_000) return;
   try {
     const value: unknown = JSON.parse(source);
-    return typeof value === "object" && value !== null ? value as Record<string, unknown> : undefined;
+    return typeof value === "object" && value !== null
+      ? (value as Record<string, unknown>)
+      : undefined;
   } catch {
     return undefined;
   }

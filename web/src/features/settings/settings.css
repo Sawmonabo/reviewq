@@ -1,15 +1,62 @@
-.settings-body { gap: 22px; }
-.settings-body form { gap: 18px; }
-.settings-section { min-width: 0; padding: 0 0 15px; border-bottom: 1px solid var(--line); }
-.settings-section > h3, .settings-section > .spread h3 { font-size: 16px; }
-.connection-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
-.connection-grid > fieldset { align-content: start; }
-.settings-editor { margin-top: 11px; }
-.catalog-picker { justify-items: start; }
-.catalog-picker > section { width: 100%; }
-.catalog-results { max-height: 215px; overflow: auto; overscroll-behavior: contain; display: grid; }
-.catalog-results > button { text-align: left; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 1px 8px; padding: 7px 10px; }
-.catalog-results > button .meta { grid-column: 1; }
-.catalog-add { grid-column: 2; grid-row: 1 / span 2; align-self: center; color: var(--link); }
-.settings-section :is(input, label, button, strong, summary) { overflow-wrap: anywhere; }
-@media (max-width: 620px) { .connection-grid { grid-template-columns: minmax(0, 1fr); } }
+.settings-body {
+  gap: 22px;
+}
+.settings-body form {
+  gap: 18px;
+}
+.settings-section {
+  min-width: 0;
+  padding: 0 0 15px;
+  border-bottom: 1px solid var(--line);
+}
+.settings-section > h3,
+.settings-section > .spread h3 {
+  font-size: 16px;
+}
+.connection-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+.connection-grid > fieldset {
+  align-content: start;
+}
+.settings-editor {
+  margin-top: 11px;
+}
+.catalog-picker {
+  justify-items: start;
+}
+.catalog-picker > section {
+  width: 100%;
+}
+.catalog-results {
+  max-height: 215px;
+  overflow: auto;
+  overscroll-behavior: contain;
+  display: grid;
+}
+.catalog-results > button {
+  text-align: left;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 1px 8px;
+  padding: 7px 10px;
+}
+.catalog-results > button .meta {
+  grid-column: 1;
+}
+.catalog-add {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  align-self: center;
+  color: var(--link);
+}
+.settings-section :is(input, label, button, strong, summary) {
+  overflow-wrap: anywhere;
+}
+@media (max-width: 620px) {
+  .connection-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

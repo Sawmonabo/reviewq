@@ -26,7 +26,9 @@ export function watchResources(keys: readonly ResourceKeyDto[], notify: () => vo
         if (reconnect === undefined) reconnect = window.setTimeout(replay, 50);
       } else observeSnapshot(value);
     },
-    close() { listeners.delete(listener); },
+    close() {
+      listeners.delete(listener);
+    },
   };
 }
 
@@ -77,10 +79,19 @@ function replay() {
     const version = BigInt(event.lastEventId);
     if (!cursor || version > BigInt(cursor)) cursor = event.lastEventId;
     for (const entry of listeners) {
-      if (entry.snapshot && version <= BigInt(entry.snapshot) || entry.delivered && version <= BigInt(entry.delivered)) continue;
-      if (body.resources.some((resource) => entry.keys.some((key) =>
-        key.kind === resource.kind && (!key.id || !resource.id || key.id === resource.id),
-      ))) {
+      if (
+        (entry.snapshot && version <= BigInt(entry.snapshot)) ||
+        (entry.delivered && version <= BigInt(entry.delivered))
+      )
+        continue;
+      if (
+        body.resources.some((resource) =>
+          entry.keys.some(
+            (key) =>
+              key.kind === resource.kind && (!key.id || !resource.id || key.id === resource.id),
+          ),
+        )
+      ) {
         entry.delivered = event.lastEventId;
         entry.notify();
       }

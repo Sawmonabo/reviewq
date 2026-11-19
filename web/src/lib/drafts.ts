@@ -16,7 +16,9 @@ export class DraftStore {
 
   subscribe = (listener: () => void) => {
     this.#listeners.add(listener);
-    return () => { this.#listeners.delete(listener); };
+    return () => {
+      this.#listeners.delete(listener);
+    };
   };
 
   set(key: string, label: string, text: string): boolean {

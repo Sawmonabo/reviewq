@@ -1,6 +1,11 @@
 import { useEffect, useEffectEvent, useRef, useState } from "react";
 import { browseCatalog } from "../../api/settings";
-import type { CatalogItem, CatalogKind, CatalogRequest, ProjectView } from "../../api/generated/contracts/settings";
+import type {
+  CatalogItem,
+  CatalogKind,
+  CatalogRequest,
+  ProjectView,
+} from "../../api/generated/contracts/settings";
 import { Empty, Loading, Notice } from "../../components/PanelState";
 import { describeError } from "../../lib/presentation";
 
@@ -18,14 +23,25 @@ export function CatalogPicker({ label, scope, kind, unavailable, onAdd, connecti
   const [q, setQuery] = useState("");
   const [view, setView] = useState<ProjectView>("member");
   const [forced, setForced] = useState(0);
-  const [page, setPage] = useState<{ query: string; items: readonly CatalogItem[]; next: string | null }>();
+  const [page, setPage] = useState<{
+    query: string;
+    items: readonly CatalogItem[];
+    next: string | null;
+  }>();
   const [error, setError] = useState<{ query: string; message: string }>();
   const [busy, setBusy] = useState(false);
   const current = useRef<AbortController | undefined>(undefined);
   const search = useRef<HTMLInputElement>(null);
   const first = useRef<HTMLButtonElement>(null);
-  const scopeKey = JSON.stringify([scope.expectedRevision, scope.provider, scope.boardId, connectionEpoch]);
-  const lookup = useEffectEvent((signal: AbortSignal) => browseCatalog({ ...scope, kind, q, ...(kind === "projects" ? { view } : {}) }, signal));
+  const scopeKey = JSON.stringify([
+    scope.expectedRevision,
+    scope.provider,
+    scope.boardId,
+    connectionEpoch,
+  ]);
+  const lookup = useEffectEvent((signal: AbortSignal) =>
+    browseCatalog({ ...scope, kind, q, ...(kind === "projects" ? { view } : {}) }, signal),
+  );
   const query = JSON.stringify([scopeKey, q, view]);
   const bound = page?.query === query ? page : undefined;
   const visible = bound?.items.filter((item) => !unavailable.includes(item.id));
@@ -35,18 +51,32 @@ export function CatalogPicker({ label, scope, kind, unavailable, onAdd, connecti
     const controller = new AbortController();
     current.current?.abort();
     current.current = controller;
-    const timer = window.setTimeout(() => {
-      setBusy(true);
-      void lookup(controller.signal).then(
-        ({ data }) => {
-          if (!controller.signal.aborted) { setPage({ query, items: data.items, next: data.nextCursor }); setError(undefined); setBusy(false); }
-        },
-        (failure: unknown) => {
-          if (!controller.signal.aborted) { setError({ query, message: describeError(failure) }); setBusy(false); }
-        },
-      );
-    }, forced || q.length < 2 ? 0 : 300);
-    return () => { controller.abort(); current.current?.abort(); window.clearTimeout(timer); };
+    const timer = window.setTimeout(
+      () => {
+        setBusy(true);
+        void lookup(controller.signal).then(
+          ({ data }) => {
+            if (!controller.signal.aborted) {
+              setPage({ query, items: data.items, next: data.nextCursor });
+              setError(undefined);
+              setBusy(false);
+            }
+          },
+          (failure: unknown) => {
+            if (!controller.signal.aborted) {
+              setError({ query, message: describeError(failure) });
+              setBusy(false);
+            }
+          },
+        );
+      },
+      forced || q.length < 2 ? 0 : 300,
+    );
+    return () => {
+      controller.abort();
+      current.current?.abort();
+      window.clearTimeout(timer);
+    };
   }, [open, forced, scopeKey, q, kind, view, query]);
 
   async function more() {
@@ -56,37 +86,113 @@ export function CatalogPicker({ label, scope, kind, unavailable, onAdd, connecti
     current.current = controller;
     setBusy(true);
     try {
-      const { data } = await browseCatalog({ ...scope, kind, q, cursor: bound.next, ...(kind === "projects" ? { view } : {}) }, controller.signal);
-      if (!controller.signal.aborted) setPage({ query, items: [...bound.items, ...data.items].slice(0, 400), next: data.nextCursor });
+      const { data } = await browseCatalog(
+        { ...scope, kind, q, cursor: bound.next, ...(kind === "projects" ? { view } : {}) },
+        controller.signal,
+      );
+      if (!controller.signal.aborted)
+        setPage({
+          query,
+          items: [...bound.items, ...data.items].slice(0, 400),
+          next: data.nextCursor,
+        });
     } catch (failure) {
       if (!controller.signal.aborted) setError({ query, message: describeError(failure) });
-    } finally { if (!controller.signal.aborted) setBusy(false); }
+    } finally {
+      if (!controller.signal.aborted) setBusy(false);
+    }
   }
 
-  return <div className="catalog-picker stack" onKeyDown={(event) => {
-    if (event.key === "Escape" && open) { event.stopPropagation(); setOpen(false); }
-  }}>
-    <button type="button" aria-expanded={open} onClick={() => {
-      setOpen(!open);
-      if (!open) requestAnimationFrame(() => search.current?.focus());
-    }}>{label}</button>
-    {open && <section className="surface-card stack" aria-label={label}>
-      <div className="actions">
-        <input ref={search} aria-label={`Search ${label.toLowerCase()}`} placeholder="Search by name" value={q} maxLength={200}
-          onChange={(event) => { setQuery(event.currentTarget.value); setForced(0); }}
-          onKeyDown={(event) => { if (event.key === "ArrowDown") { event.preventDefault(); first.current?.focus(); } else if (event.key === "Enter") { event.preventDefault(); setForced((count) => count + 1); } }} />
-        {kind === "projects" && <select aria-label="Repository visibility" value={view} onChange={(event) => setView(event.currentTarget.value as ProjectView)}>
-          <option value="member">Member projects</option><option value="starred">Starred projects</option><option value="all">All visible projects</option>
-        </select>}
-        <button type="button" onClick={() => setForced((count) => count + 1)}>Search</button>
-      </div>
-      {busy && !bound && <Loading label="Looking up choices…" />}
-      {error?.query === query && <Notice retry={() => setForced((count) => count + 1)}>{error.message}</Notice>}
-      {visible?.length === 0 && <Empty title={q ? "No matching choices" : "No available choices"} />}
-      {visible && <div className="catalog-results">{visible.map((item, index) => <button type="button" key={item.id} ref={index === 0 ? first : undefined} onClick={() => onAdd(item)}>
-        <strong>{item.label}</strong><span className="meta">{item.path ?? item.state ?? item.boardType ?? item.id}</span><span className="catalog-add">Add</span>
-      </button>)}</div>}
-      {bound?.next && bound.items.length < 400 && <button type="button" disabled={busy} onClick={() => void more()}>More choices</button>}
-    </section>}
-  </div>;
+  return (
+    <div
+      className="catalog-picker stack"
+      onKeyDown={(event) => {
+        if (event.key === "Escape" && open) {
+          event.stopPropagation();
+          setOpen(false);
+        }
+      }}
+    >
+      <button
+        type="button"
+        aria-expanded={open}
+        onClick={() => {
+          setOpen(!open);
+          if (!open) requestAnimationFrame(() => search.current?.focus());
+        }}
+      >
+        {label}
+      </button>
+      {open && (
+        <section className="surface-card stack" aria-label={label}>
+          <div className="actions">
+            <input
+              ref={search}
+              aria-label={`Search ${label.toLowerCase()}`}
+              placeholder="Search by name"
+              value={q}
+              maxLength={200}
+              onChange={(event) => {
+                setQuery(event.currentTarget.value);
+                setForced(0);
+              }}
+              onKeyDown={(event) => {
+                if (event.key === "ArrowDown") {
+                  event.preventDefault();
+                  first.current?.focus();
+                } else if (event.key === "Enter") {
+                  event.preventDefault();
+                  setForced((count) => count + 1);
+                }
+              }}
+            />
+            {kind === "projects" && (
+              <select
+                aria-label="Repository visibility"
+                value={view}
+                onChange={(event) => setView(event.currentTarget.value as ProjectView)}
+              >
+                <option value="member">Member projects</option>
+                <option value="starred">Starred projects</option>
+                <option value="all">All visible projects</option>
+              </select>
+            )}
+            <button type="button" onClick={() => setForced((count) => count + 1)}>
+              Search
+            </button>
+          </div>
+          {busy && !bound && <Loading label="Looking up choices…" />}
+          {error?.query === query && (
+            <Notice retry={() => setForced((count) => count + 1)}>{error.message}</Notice>
+          )}
+          {visible?.length === 0 && (
+            <Empty title={q ? "No matching choices" : "No available choices"} />
+          )}
+          {visible && (
+            <div className="catalog-results">
+              {visible.map((item, index) => (
+                <button
+                  type="button"
+                  key={item.id}
+                  ref={index === 0 ? first : undefined}
+                  onClick={() => onAdd(item)}
+                >
+                  <strong>{item.label}</strong>
+                  <span className="meta">
+                    {item.path ?? item.state ?? item.boardType ?? item.id}
+                  </span>
+                  <span className="catalog-add">Add</span>
+                </button>
+              ))}
+            </div>
+          )}
+          {bound?.next && bound.items.length < 400 && (
+            <button type="button" disabled={busy} onClick={() => void more()}>
+              More choices
+            </button>
+          )}
+        </section>
+      )}
+    </div>
+  );
 }
