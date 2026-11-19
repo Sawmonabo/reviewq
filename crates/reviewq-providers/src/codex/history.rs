@@ -55,7 +55,6 @@ pub(super) enum Item {
     AgentMessage {
         id: String,
         text: String,
-        phase: Option<String>,
         questions: Option<Vec<serde_json::Value>>,
     },
     CommandExecution {

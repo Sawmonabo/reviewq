@@ -120,10 +120,11 @@ impl NativeWorkflowProof for Workflows {
         &self,
         call: NativeCall,
         acknowledgement: ExpectedAcknowledgement,
+        include_response: bool,
     ) -> AppFuture<'_, ReportCompletion> {
         Box::pin(async move {
             self.reader(&call.lead)?
-                .report_completion(call, acknowledgement)
+                .report_completion(call, acknowledgement, include_response)
                 .await
         })
     }

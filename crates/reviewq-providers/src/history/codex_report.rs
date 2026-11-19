@@ -1,0 +1,228 @@
+use std::io::Read;
+use std::path::PathBuf;
+use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
+
+use reviewq_app::access::AppError;
+use reviewq_app::history::FileContentRef;
+use reviewq_app::workflow::{NativeCall, ReportContent};
+use reviewq_domain::identity::NativeInputId;
+use sha2::{Digest, Sha256};
+use struson::reader::{JsonReader, JsonStreamReader, ValueType};
+
+use super::records::{ID_BYTES, invalid, object, string};
+use super::{Cancel, content, file, locator, proof, reader::NameBudget};
+
+pub(crate) struct CodexTerminalReport {
+    pub normal: bool,
+    pub response: Option<Arc<dyn ReportContent>>,
+}
+
+pub(crate) async fn codex_report_terminal(
+    call: NativeCall,
+    path: PathBuf,
+    include_response: bool,
+) -> Result<Option<CodexTerminalReport>, AppError> {
+    let cancel = Cancel(Arc::new(AtomicBool::new(false)));
+    let stopped = cancel.0.clone();
+    let Some((source, normal, response)) = tokio::task::spawn_blocking(move || {
+        let source = locator::verify(call.lead.binding(), None, &path, &stopped)?
+            .ok_or(AppError::Unavailable)?;
+        let outcome = terminal(&source, &call, include_response, &stopped)?;
+        Ok::<_, AppError>(outcome.map(|(normal, response)| (source, normal, response)))
+    })
+    .await
+    .map_err(|_| AppError::Unavailable)??
+    else {
+        return Ok(None);
+    };
+    let response = match response {
+        Some((reference, digest)) => {
+            Some(content::report_content(source, reference, digest).await?)
+        }
+        None => None,
+    };
+    Ok(Some(CodexTerminalReport { normal, response }))
+}
+
+type FinalResponse = (FileContentRef, [u8; 32]);
+
+fn terminal(
+    source: &locator::Source,
+    call: &NativeCall,
+    include_response: bool,
+    cancelled: &AtomicBool,
+) -> Result<Option<(bool, Option<FinalResponse>)>, AppError> {
+    let generation = file::generation(source)?;
+    let length = source
+        .file
+        .metadata()
+        .map_err(|_| AppError::Unavailable)?
+        .len();
+    let mut budget = file::READ_BUDGET;
+    if generation != call.source_generation
+        || call.source_position >= length
+        || !file::boundary(&source.file, call.source_position)?
+    {
+        return Err(AppError::Conflict);
+    }
+    let mut lines = file::Lines::new(&source.file, cancelled);
+    let mut offset = lines.next(call.source_position, length, &mut budget)?;
+    if !file::boundary(&source.file, offset)?
+        || !proof::opening(
+            lines.input(call.source_position, offset),
+            &call.call_id,
+            None,
+        )?
+    {
+        return Err(AppError::Conflict);
+    }
+    let mut result_seen = false;
+    let mut response = None;
+    let turn = call.turn_id.as_str();
+    for _ in 0..file::MAX_RECORDS {
+        if offset == length {
+            return Ok(None);
+        }
+        let start = offset;
+        offset = lines.next(start, length, &mut budget)?;
+        if offset == length && !file::boundary(&source.file, offset)? {
+            return Ok(None);
+        }
+        let event = event(lines.input(start, offset))?;
+        if event.turn.as_deref() != Some(turn) {
+            continue;
+        }
+        match event.kind.as_deref() {
+            Some("task_complete" | "turn_complete" | "turn_aborted") => {
+                if let Some(root) = &call.root_turn_id
+                    && event.root.as_deref() != Some(root.as_str())
+                {
+                    return Err(AppError::Conflict);
+                }
+                let normal = event.kind.as_deref() != Some("turn_aborted") && !event.has_error;
+                let response = response
+                    .filter(|_| normal)
+                    .map(|(entry, start, end)| {
+                        let reference = FileContentRef {
+                            generation,
+                            entry,
+                            part: None,
+                            position: file::file_position(&source.file, start, end)?,
+                        };
+                        Ok::<_, AppError>((reference, hash_record(lines.input(start, end))?))
+                    })
+                    .transpose()?;
+                return Ok(Some((normal, response)));
+            }
+            Some("exec_command_end") if event.call.as_deref() == Some(call.call_id.as_str()) => {
+                result_seen = true;
+            }
+            Some("item_completed")
+                if event.thread.as_deref() == Some(source.native_id.as_str()) =>
+            {
+                match event.item.kind.as_deref() {
+                    Some("CommandExecution")
+                        if event.item.id.as_deref() == Some(call.call_id.as_str()) =>
+                    {
+                        result_seen = true;
+                    }
+                    Some("UserMessage") => return Err(AppError::Conflict),
+                    Some("AgentMessage")
+                        if include_response
+                            && result_seen
+                            && event.item.phase.as_deref() == Some("final_answer") =>
+                    {
+                        response = if !event.item.restricted {
+                            event
+                                .item
+                                .id
+                                .and_then(|id| id.parse::<NativeInputId>().ok())
+                                .map(|entry| (entry, start, offset))
+                        } else {
+                            None
+                        };
+                    }
+                    _ => {}
+                }
+            }
+            _ => {}
+        }
+    }
+    // Require the exact terminal event within this native scan budget.
+    Err(AppError::PayloadTooLarge)
+}
+
+#[derive(Default)]
+struct Event {
+    kind: Option<String>,
+    thread: Option<String>,
+    turn: Option<String>,
+    root: Option<String>,
+    call: Option<String>,
+    has_error: bool,
+    item: Item,
+}
+
+#[derive(Default)]
+struct Item {
+    kind: Option<String>,
+    id: Option<String>,
+    phase: Option<String>,
+    restricted: bool,
+}
+
+fn event(input: impl Read) -> Result<Event, AppError> {
+    let mut reader = JsonStreamReader::new(NameBudget::new(input));
+    let mut outer = None;
+    let mut result = Event::default();
+    object(&mut reader, |name, reader| match name {
+        "type" => string(reader, ID_BYTES).map(|value| outer = value),
+        "payload" if reader.peek().map_err(invalid)? == ValueType::Object => {
+            object(reader, |name, reader| match name {
+                "type" => string(reader, ID_BYTES).map(|value| result.kind = value),
+                "thread_id" => string(reader, ID_BYTES).map(|value| result.thread = value),
+                "turn_id" => string(reader, ID_BYTES).map(|value| result.turn = value),
+                "root_turn_id" => string(reader, ID_BYTES).map(|value| result.root = value),
+                "call_id" => string(reader, ID_BYTES).map(|value| result.call = value),
+                "error" => non_null(reader).map(|value| result.has_error = value),
+                "item" if reader.peek().map_err(invalid)? == ValueType::Object => {
+                    object(reader, |name, reader| match name {
+                        "type" => string(reader, ID_BYTES).map(|value| result.item.kind = value),
+                        "id" => string(reader, ID_BYTES).map(|value| result.item.id = value),
+                        "phase" => string(reader, ID_BYTES).map(|value| result.item.phase = value),
+                        "moderation" | "delivery" => {
+                            non_null(reader).map(|value| result.item.restricted |= value)
+                        }
+                        _ => reader.skip_value().map_err(invalid),
+                    })
+                }
+                _ => reader.skip_value().map_err(invalid),
+            })
+        }
+        _ => reader.skip_value().map_err(invalid),
+    })?;
+    reader.consume_trailing_whitespace().map_err(invalid)?;
+    if outer.as_deref() != Some("event_msg") {
+        result.kind = None;
+    }
+    Ok(result)
+}
+
+fn non_null<R: Read>(reader: &mut JsonStreamReader<R>) -> Result<bool, AppError> {
+    let non_null = reader.peek().map_err(invalid)? != ValueType::Null;
+    reader.skip_value().map_err(invalid)?;
+    Ok(non_null)
+}
+
+fn hash_record(mut input: impl Read) -> Result<[u8; 32], AppError> {
+    let mut digest = Sha256::new();
+    let mut buffer = [0; 32 * 1024];
+    loop {
+        let used = input.read(&mut buffer).map_err(|_| AppError::Unavailable)?;
+        if used == 0 {
+            return Ok(digest.finalize().into());
+        }
+        digest.update(&buffer[..used]);
+    }
+}

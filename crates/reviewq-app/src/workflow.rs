@@ -241,5 +241,6 @@ pub trait NativeWorkflowProof: Send + Sync {
         &self,
         call: NativeCall,
         acknowledgement: ExpectedAcknowledgement,
+        include_response: bool,
     ) -> AppFuture<'_, ReportCompletion>;
 }

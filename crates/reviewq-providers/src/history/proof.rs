@@ -96,7 +96,7 @@ async fn codex_call(
     .map_err(|_| AppError::Unavailable)?
 }
 
-fn opening(
+pub(super) fn opening(
     input: impl Read,
     expected: &str,
     expected_tool: Option<&str>,

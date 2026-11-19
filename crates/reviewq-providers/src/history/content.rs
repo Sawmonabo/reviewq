@@ -5,8 +5,11 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use reviewq_app::access::AppError;
+use reviewq_app::access::AppFuture;
 use reviewq_app::history::{FileContentRef, NativeContent};
+use reviewq_app::workflow::ReportContent;
 use reviewq_domain::identity::SessionKey;
+use sha2::{Digest, Sha256};
 use tokio::sync::{Mutex as AsyncMutex, mpsc, oneshot};
 
 use super::{file, locator::Source, records};
@@ -48,7 +51,7 @@ impl Streams {
         });
         if !can_continue {
             current.take();
-            *current = Some(Read::start(source, reference, offset).await?);
+            *current = Some(Read::start(source, reference, offset, None).await?);
         }
         let read = current.as_mut().ok_or(AppError::Internal)?;
         let result = read.next(offset, limit).await;
@@ -102,6 +105,7 @@ impl Read {
         source: Source,
         reference: FileContentRef,
         offset: u64,
+        expected_record: Option<[u8; 32]>,
     ) -> Result<Self, AppError> {
         let generation = reference.generation.clone();
         let (metadata, ready) = oneshot::channel();
@@ -139,6 +143,11 @@ impl Read {
                 prepared.end,
                 &cancel,
             );
+            let mut digest = expected_record.map(|_| Sha256::new());
+            let input = Hashing {
+                inner: input,
+                digest: digest.as_mut(),
+            };
             let observed = records::stream_body(
                 source.provider,
                 input,
@@ -149,6 +158,7 @@ impl Read {
             );
             if observed.is_some_and(|record| record.id == reference.entry)
                 && write.seen == prepared.bytes
+                && digest.map(|hash| <[u8; 32]>::from(hash.finalize())) == expected_record
                 && file::verify_content(&source, &reference).is_ok()
             {
                 let _ = write.flush();
@@ -176,10 +186,7 @@ impl Read {
             return Ok(response.clone());
         }
         let requested = (self.length - self.at).min(limit as u64) as usize;
-        while self.buffer.len() < requested {
-            let part = self.output.recv().await.ok_or(AppError::Unavailable)??;
-            self.buffer.extend(part);
-        }
+        self.fill(requested).await?;
         let prefix = file::readable_prefix(&self.buffer[..requested])?;
         if requested > 0 && prefix.is_empty() {
             return Err(AppError::CursorExpired);
@@ -195,6 +202,80 @@ impl Read {
         };
         self.previous = Some((offset, limit, reply.clone()));
         Ok(reply)
+    }
+
+    async fn fill(&mut self, requested: usize) -> Result<(), AppError> {
+        while self.buffer.len() < requested {
+            let part = self.output.recv().await.ok_or(AppError::Unavailable)??;
+            self.buffer.extend(part);
+        }
+        Ok(())
+    }
+}
+
+/// A report consumes the same native body decoder sequentially, but may split UTF-8.
+pub(super) async fn report_content(
+    source: Source,
+    reference: FileContentRef,
+    record_digest: [u8; 32],
+) -> Result<Arc<dyn ReportContent>, AppError> {
+    let read = Read::start(source, reference, 0, Some(record_digest)).await?;
+    Ok(Arc::new(Response {
+        length: read.length,
+        reader: AsyncMutex::new(read),
+    }))
+}
+
+struct Response {
+    length: u64,
+    reader: AsyncMutex<Read>,
+}
+
+impl ReportContent for Response {
+    fn byte_length(&self) -> u64 {
+        self.length
+    }
+
+    fn read(&self, offset: u64, length: usize) -> AppFuture<'_, Vec<u8>> {
+        Box::pin(async move {
+            let mut read = self.reader.lock().await;
+            if length > 65_536 || offset != read.at || length as u64 > self.length - read.at {
+                return Err(AppError::InvalidRequest);
+            }
+            read.fill(length).await?;
+            let bytes = read.buffer.drain(..length).collect();
+            read.at += length as u64;
+            Ok(bytes)
+        })
+    }
+
+    fn verify_unchanged(&self) -> AppFuture<'_, ()> {
+        Box::pin(async move {
+            let mut read = self.reader.lock().await;
+            if read.at != self.length || !read.buffer.is_empty() {
+                return Err(AppError::Conflict);
+            }
+            match read.output.recv().await {
+                None => Ok(()),
+                Some(Err(error)) => Err(error),
+                Some(Ok(_)) => Err(AppError::Conflict),
+            }
+        })
+    }
+}
+
+struct Hashing<'a, R> {
+    inner: R,
+    digest: Option<&'a mut Sha256>,
+}
+
+impl<R: io::Read> io::Read for Hashing<'_, R> {
+    fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
+        let length = self.inner.read(buffer)?;
+        if let Some(digest) = self.digest.as_mut() {
+            digest.update(&buffer[..length]);
+        }
+        Ok(length)
     }
 }
 
