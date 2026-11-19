@@ -3,12 +3,12 @@ use std::borrow::Cow;
 use percent_encoding::percent_decode_str;
 use reviewq_app::access::AppError;
 use reviewq_app::queue::{MergeRequestState, ReviewSource};
-use reviewq_app::sources::ReviewResolution;
+use reviewq_app::sources::{ReviewResolution, UnverifiedTrack};
 use reviewq_app::workspace::ConfiguredProject;
 use reviewq_domain::identity::{MergeRequestIid, ProjectId};
 use url::Url;
 
-use super::{GitLab, MAX_PROVIDER_PAGES, METADATA_LIMIT, MergeRequest};
+use super::{GitLab, MAX_PROVIDER_PAGES, METADATA_LIMIT, MergeRequest, Project};
 
 const MAX_CANDIDATES: usize = 20;
 
@@ -25,6 +25,34 @@ struct Matches {
 }
 
 impl GitLab {
+    pub(super) async fn track_url(
+        &self,
+        projects: Vec<ConfiguredProject>,
+        url: String,
+    ) -> Result<UnverifiedTrack, AppError> {
+        if url.len() > 2_048 || url.trim() != url {
+            return Err(AppError::InvalidRequest);
+        }
+        let Target::Web(url) = Target::parse(&url)? else {
+            return Err(AppError::InvalidRequest);
+        };
+        let (path, iid) = self.web_address(&url)?;
+        let projects = projects
+            .into_iter()
+            .filter(|item| item.origin == self.identity)
+            .map(|item| item.project_id)
+            .collect();
+        let (project, id, row) = self.direct_row(projects, &path, iid).await?;
+        if row.title.len() > 4096 || row.source_branch.len() > 4096 {
+            return Err(AppError::PayloadTooLarge);
+        }
+        let candidate_tickets = super::tickets::candidate_keys(&row.title, &row.source_branch)?;
+        Ok(UnverifiedTrack {
+            review: self.review(id, &project.path_with_namespace, row)?,
+            candidate_tickets,
+        })
+    }
+
     pub(super) async fn resolve_target(
         &self,
         projects: Vec<ConfiguredProject>,
@@ -88,6 +116,16 @@ impl GitLab {
         path: &str,
         iid: MergeRequestIid,
     ) -> Result<ReviewSource, AppError> {
+        let (project, id, row) = self.direct_row(projects, path, iid).await?;
+        self.review(id, &project.path_with_namespace, row)
+    }
+
+    async fn direct_row(
+        &self,
+        projects: Vec<ProjectId>,
+        path: &str,
+        iid: MergeRequestIid,
+    ) -> Result<(Project, ProjectId, MergeRequest), AppError> {
         if projects.is_empty() || !valid_path(path) {
             return Err(AppError::NotFound);
         }
@@ -102,7 +140,7 @@ impl GitLab {
             return Err(AppError::NotFound);
         }
         let row = self.merge_request(id, iid).await?;
-        self.review(id, &project.path_with_namespace, row)
+        Ok((project, id, row))
     }
 
     pub(super) async fn merge_request(

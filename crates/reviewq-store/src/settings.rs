@@ -88,6 +88,7 @@ impl SettingsStore for SqliteStore {
                     save(&tx.sql, connection)?;
                 }
                 if changed {
+                    crate::queue::tracking::retain_current_tickets(&tx.sql)?;
                     tx.sql.execute_batch(
                         "DELETE FROM review_discoveries;
                          DELETE FROM scoped_issues;
@@ -236,12 +237,11 @@ fn recheck(db: &Database, expected: Revision) -> Result<(), StoreError> {
 }
 
 fn pinned(db: &Database) -> Result<bool, StoreError> {
-    Ok(db.query_row(
-        "SELECT EXISTS(SELECT 1 FROM runs) OR EXISTS(SELECT 1 FROM review_decisions)
-             OR EXISTS(SELECT 1 FROM notifications)",
-        [],
-        |row| row.get(0),
-    )?)
+    Ok(
+        db.query_row("SELECT EXISTS(SELECT 1 FROM retained_reviews)", [], |row| {
+            row.get(0)
+        })?,
+    )
 }
 
 fn label(provider: Provider) -> &'static str {

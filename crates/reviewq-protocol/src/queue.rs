@@ -9,6 +9,12 @@ use crate::scalar::{
 };
 use crate::{ErrorDto, EventCursorDto, Page, Success, UtcTimestampDto};
 
+mod tracking;
+pub use tracking::{
+    TicketComment, TicketDetail, TicketDetailResponse, TrackReviewRequest, TrackReviewResponse,
+    TrackedReview,
+};
+
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]

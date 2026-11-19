@@ -98,10 +98,8 @@ impl SourceRefreshStore for SqliteStore {
                 let mut query = db.prepare_cached(
                     "SELECT origin,project_id,iid FROM reviews AS r
                      WHERE r.origin=(SELECT origin FROM settings WHERE provider='gitlab')
-                     AND r.state<>'merged' AND (
-                         EXISTS (SELECT 1 FROM runs WHERE review_id=r.review_id)
-                         OR EXISTS (SELECT 1 FROM review_decisions WHERE review_id=r.review_id)
-                         OR EXISTS (SELECT 1 FROM notifications WHERE review_id=r.review_id))
+                     AND r.state<>'merged'
+                     AND EXISTS (SELECT 1 FROM retained_reviews WHERE review_id=r.review_id)
                      ORDER BY r.review_id LIMIT ?1",
                 )?;
                 let mut rows = query.query([MAX_PUBLICATION_REVIEWS as i64 + 1])?;

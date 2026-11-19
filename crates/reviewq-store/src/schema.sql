@@ -66,6 +66,25 @@ CREATE TABLE review_discoveries (
     review_id TEXT PRIMARY KEY REFERENCES reviews(review_id) ON DELETE CASCADE
 ) STRICT, WITHOUT ROWID;
 
+CREATE TABLE review_tracking (
+    review_id TEXT PRIMARY KEY REFERENCES reviews(review_id) ON DELETE CASCADE
+) STRICT, WITHOUT ROWID;
+
+CREATE TABLE retained_review_tickets (
+    review_id TEXT NOT NULL REFERENCES reviews(review_id) ON DELETE CASCADE,
+    ticket_key TEXT NOT NULL,
+    title TEXT NOT NULL,
+    PRIMARY KEY (review_id, ticket_key)
+) STRICT, WITHOUT ROWID;
+
+CREATE INDEX retained_review_tickets_key ON retained_review_tickets(ticket_key, review_id);
+
+CREATE VIEW retained_reviews AS
+    SELECT review_id FROM review_tracking
+    UNION ALL SELECT review_id FROM runs
+    UNION ALL SELECT review_id FROM review_decisions
+    UNION ALL SELECT review_id FROM notifications;
+
 CREATE TABLE runs (
     run_id TEXT PRIMARY KEY,
     review_id TEXT NOT NULL REFERENCES reviews(review_id),

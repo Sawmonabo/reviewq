@@ -32,6 +32,7 @@ use crate::{SqliteStore, StoreError};
 
 mod discovery;
 mod management;
+pub(crate) mod tracking;
 
 const ITEM_COLUMNS: &str =
     "r.review_id, r.origin, r.project_id, r.iid, r.project_path, r.title, r.head_sha, r.state, r.updated_at_ms,
@@ -52,19 +53,18 @@ const ITEM_COLUMNS: &str =
                  AND handled.run_id=run.run_id AND handled.attention_receipt_id=v.attention_receipt_id
              )),
      (SELECT json_group_array(json_array(ticket_key,title)) FROM (
-         SELECT i.ticket_key,min(i.title) AS title FROM scoped_review_issues si
-         JOIN scoped_issues i USING(board_id,ticket_key)
-         WHERE si.review_id=r.review_id GROUP BY i.ticket_key ORDER BY i.ticket_key))";
+         SELECT ticket_key, coalesce(min(CASE WHEN current THEN title END), min(title)) AS title
+         FROM (
+             SELECT i.ticket_key, i.title, 1 AS current FROM scoped_review_issues si
+             JOIN scoped_issues i USING(board_id,ticket_key) WHERE si.review_id=r.review_id
+             UNION ALL SELECT ticket_key, title, 0 FROM retained_review_tickets WHERE review_id=r.review_id
+         ) GROUP BY ticket_key ORDER BY ticket_key))";
 const SCOPE_PREDICATE: &str =
     "(((?1 = 0 OR ?1 = 1)
        AND EXISTS (SELECT 1 FROM configured_projects c WHERE c.origin=r.origin AND c.project_id=r.project_id)
        AND (EXISTS (SELECT 1 FROM review_discoveries d WHERE d.review_id=r.review_id)
-            OR EXISTS (SELECT 1 FROM runs WHERE runs.review_id=r.review_id)
-            OR EXISTS (SELECT 1 FROM review_decisions WHERE review_id=r.review_id)
-            OR EXISTS (SELECT 1 FROM notifications WHERE review_id=r.review_id)))
-      OR (?1 = 0 AND (EXISTS (SELECT 1 FROM runs WHERE runs.review_id=r.review_id)
-            OR EXISTS (SELECT 1 FROM review_decisions WHERE review_id=r.review_id)
-            OR EXISTS (SELECT 1 FROM notifications WHERE review_id=r.review_id)))
+            OR EXISTS (SELECT 1 FROM retained_reviews WHERE review_id=r.review_id)))
+      OR (?1 = 0 AND EXISTS (SELECT 1 FROM retained_reviews WHERE review_id=r.review_id))
       OR (?1 = 2 AND r.review_id=?2))";
 
 impl QueueStore for SqliteStore {
