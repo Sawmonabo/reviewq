@@ -1,6 +1,6 @@
 use reviewq_app::access::{Actor, AppError};
 use reviewq_app::hosts::{MessageBody, send_message};
-use reviewq_app::queue::{MergeRequestState, QueueItem};
+use reviewq_app::queue::{ManagementFilter, RunSummary};
 use reviewq_app::sources::ReviewResolution;
 use reviewq_domain::identity::{ReviewId, RunId, SessionKey};
 use reviewq_protocol::mcp::{
@@ -13,7 +13,10 @@ use crate::entry::history::{ContentQuery, HistoryQuery, read, read_content};
 use crate::entry::messages;
 use crate::entry::pages::{parse, project_review, queue_sync};
 
-const MAX_OFFSET: u32 = 4096;
+enum ResolvedReview {
+    Review(ReviewId),
+    Alternatives(Vec<String>),
+}
 
 pub(super) async fn list(
     entry: &Entry,
@@ -21,131 +24,96 @@ pub(super) async fn list(
     args: ListReviews,
 ) -> Result<Value, AppError> {
     let limit = list_limit(args.limit)?;
-    let offset = offset(args.offset)?;
-    let filter = args.filter.unwrap_or(ReviewFilter::All);
-    if matches!(
-        filter,
-        ReviewFilter::NeedsInput
-            | ReviewFilter::AgentQuestions
-            | ReviewFilter::Working
-            | ReviewFilter::Waiting
-    ) {
-        return Err(AppError::Unavailable);
-    }
-    let mut next = None;
-    let mut total = 0_u64;
-    let mut values = Vec::new();
-    let sync = loop {
-        let rows = entry
-            .store
-            .read_queue(actor.clone(), next, 100)
-            .await?
-            .value;
-        if rows.total > u64::from(MAX_OFFSET) && !matches!(filter, ReviewFilter::All) {
-            return Err(AppError::PayloadTooLarge);
-        }
-        for item in rows.items.iter().filter(|row| matches_review(row, filter)) {
-            if total >= u64::from(offset) && values.len() < usize::from(limit) {
-                let data = project_review(item)?;
-                values.push(json!({
-                    "summary": data,
-                    "dashboard": dashboard(entry, &item.review_id, None)
-                }));
-            }
-            total += 1;
-        }
-        let sync = queue_sync(entry.source.is_some(), rows.sync);
-        if matches!(filter, ReviewFilter::All) && values.len() == usize::from(limit) {
-            total = rows.total;
-            break sync;
-        }
-        next = rows.next;
-        if next.is_none() {
-            break sync;
-        }
+    let offset = args.offset.unwrap_or(0);
+    let filter = match args.filter.unwrap_or(ReviewFilter::NeedsInput) {
+        ReviewFilter::All => ManagementFilter::All,
+        ReviewFilter::NeedsInput => ManagementFilter::NeedsInput,
+        ReviewFilter::AgentQuestions => ManagementFilter::AgentQuestions,
+        ReviewFilter::Working => ManagementFilter::Working,
+        ReviewFilter::Waiting => ManagementFilter::Waiting,
+        ReviewFilter::Archived => ManagementFilter::Archived,
+        ReviewFilter::Unstarted => ManagementFilter::Unstarted,
     };
-    let next = u64::from(offset) + values.len() as u64;
+    let page = entry
+        .store
+        .management_reviews(actor, filter, offset, limit)
+        .await?
+        .value;
+    let mut values = Vec::with_capacity(page.items.len());
+    for item in &page.items {
+        let data = project_review(item)?;
+        values.push(json!({
+            "summary": data,
+            "dashboard": dashboard(entry, &item.review_id, None),
+        }));
+    }
+    let sync = queue_sync(entry.source.is_some(), page.sync);
     Ok(json!({
         "lastSyncAt": sync.last_success_at,
         "lastSyncAttemptAt": sync.last_attempt_at,
         "syncFailed": sync.error.is_some(),
-        "reviews": values,
-        "total": total,
-        "nextOffset": (next < total).then_some(next)
+        "reviews": values, "total": page.total,
+        "nextOffset": next_offset(offset, values.len(), page.total),
     }))
-}
-
-fn matches_review(row: &QueueItem, filter: ReviewFilter) -> bool {
-    match filter {
-        ReviewFilter::All => true,
-        ReviewFilter::Unstarted => {
-            row.registered_lead_count == 0 && row.source.state == MergeRequestState::Open
-        }
-        ReviewFilter::Archived => {
-            row.registered_lead_count != 0 && row.source.state != MergeRequestState::Open
-        }
-        _ => false,
-    }
 }
 
 pub(super) async fn get(entry: &Entry, actor: Actor, args: GetReview) -> Result<Value, AppError> {
-    let review = resolve(entry, &actor, &args.target).await?;
+    let review = match resolve(entry, &actor, &args.target).await? {
+        ResolvedReview::Review(id) => id,
+        ResolvedReview::Alternatives(urls) => return Ok(alternatives(urls)),
+    };
     let limit = list_limit(args.limit)?;
-    let offset = offset(args.offset)? as usize;
+    let offset = args.offset.unwrap_or(0);
     let selected = match args.session_key {
-        Some(session) => {
-            let session: SessionKey = parse(session.as_str())?;
-            Some(
-                entry
-                    .store
-                    .run_for_session(actor.clone(), review.clone(), session)
-                    .await?,
-            )
-        }
+        Some(session) => Some(
+            entry
+                .store
+                .run_for_session(actor.clone(), review.clone(), parse(session.as_str())?)
+                .await?,
+        ),
         None => None,
     };
-    let mut next = None;
-    let mut total = 0;
-    let mut result = Vec::new();
-    let summary = loop {
-        let overview = entry
-            .store
-            .read_review(actor.clone(), review.clone(), next, 100)
-            .await?
-            .value;
-        let remaining = usize::from(limit).saturating_sub(result.len());
-        let index = offset.saturating_sub(total);
-        total += overview.runs.len();
-        if total > MAX_OFFSET as usize {
-            return Err(AppError::PayloadTooLarge);
-        }
-        for run in overview.runs.into_iter().skip(index).take(remaining) {
-            let provider = match run.provider {
-                reviewq_domain::session::HostProvider::Codex => "codex",
-                reviewq_domain::session::HostProvider::Claude => "claude",
-            };
-            result.push(json!({
-                "runId":run.run_id.as_str(),
-                "leadSessionKey":run.lead_session_key.as_str(),
-                "provider":provider,
-                "startedAt":reviewq_protocol::UtcTimestampDto::from_unix_milliseconds(run.started_at_ms),
-                "dashboard":dashboard(entry, &review, Some(&run.run_id)),
-            }));
-        }
-        next = overview.next_run;
-        if next.is_none() {
-            break project_review(&overview.item)?;
-        }
-    };
-    let after = offset + result.len();
-    let sync = entry.store.read_queue(actor, None, 1).await?.value.sync;
-    let sync = queue_sync(entry.source.is_some(), sync);
+    let page = entry
+        .store
+        .management_runs(actor, review.clone(), offset, limit)
+        .await?
+        .value;
+    let runs: Vec<Value> = page
+        .runs
+        .iter()
+        .map(|run| run_summary(entry, &review, run))
+        .collect();
+    let sync = queue_sync(entry.source.is_some(), page.sync);
     Ok(json!({
-        "review":summary, "runs":result, "total":total,
-        "nextOffset":(after < total).then_some(after),
+        "review": project_review(&page.item)?,
+        "runs":runs, "total":page.total,
+        "nextOffset": next_offset(offset, runs.len(), page.total),
         "lastSyncAt":sync.last_success_at, "syncFailed":sync.error.is_some(),
-        "dashboard":dashboard(entry, &review, selected.as_ref())
+        "dashboard":dashboard(entry, &review, selected.as_ref()),
     }))
+}
+
+fn run_summary(entry: &Entry, review: &ReviewId, run: &RunSummary) -> Value {
+    let provider = match run.provider {
+        reviewq_domain::session::HostProvider::Codex => "codex",
+        reviewq_domain::session::HostProvider::Claude => "claude",
+    };
+    json!({
+        "runId":run.run_id.as_str(),
+        "leadSessionKey":run.lead_session_key.as_str(),
+        "provider":provider,
+        "startedAt":reviewq_protocol::UtcTimestampDto::from_unix_milliseconds(run.started_at_ms),
+        "dashboard":dashboard(entry, review, Some(&run.run_id)),
+    })
+}
+
+fn alternatives(urls: Vec<String>) -> Value {
+    json!({"state":"ambiguous", "choices": urls})
+}
+
+fn next_offset(offset: u32, size: usize, total: u64) -> Option<u32> {
+    let next = offset.checked_add(u32::try_from(size).ok()?)?;
+    (u64::from(next) < total).then_some(next)
 }
 
 pub(super) async fn transcript(
@@ -153,10 +121,14 @@ pub(super) async fn transcript(
     actor: Actor,
     args: ReadTranscript,
 ) -> Result<Value, AppError> {
-    let (_, run, session) = select(
+    let review = match resolve(entry, &actor, &args.target).await? {
+        ResolvedReview::Review(id) => id,
+        ResolvedReview::Alternatives(urls) => return Ok(alternatives(urls)),
+    };
+    let (run, session) = select(
         entry,
         &actor,
-        &args.target,
+        review,
         args.session_key.as_ref().map(|id| id.as_str()),
     )
     .await?;
@@ -210,13 +182,32 @@ pub(super) async fn send(
     if !entry.sends_allowed {
         return Err(AppError::Forbidden);
     }
-    let (review, run, session) = select(
-        entry,
-        &actor,
-        &args.target,
-        args.session_key.as_ref().map(|id| id.as_str()),
-    )
-    .await?;
+    let review = match resolve(entry, &actor, &args.target).await? {
+        ResolvedReview::Review(id) => id,
+        ResolvedReview::Alternatives(urls) => return Ok(alternatives(urls)),
+    };
+    let (run, session) = if let Some(session) = &args.session_key {
+        select(entry, &actor, review.clone(), Some(session.as_str())).await?
+    } else {
+        let choices = entry
+            .store
+            .management_runs(actor.clone(), review.clone(), 0, 10)
+            .await?
+            .value;
+        if choices.total > 1 {
+            let runs: Vec<_> = choices
+                .runs
+                .iter()
+                .map(|run| run_summary(entry, &review, run))
+                .collect();
+            return Ok(json!({
+                "state":"ambiguous", "choices":runs, "total":choices.total,
+                "dashboard":dashboard(entry, &review, None),
+            }));
+        }
+        let lead = choices.runs.into_iter().next().ok_or(AppError::NotFound)?;
+        (lead.run_id, lead.lead_session_key)
+    };
     let message = MessageBody::new(args.text.as_str())?;
     let receipt = send_message(
         entry.store.as_ref(),
@@ -236,17 +227,16 @@ pub(super) async fn send(
 async fn select(
     entry: &Entry,
     actor: &Actor,
-    target: &str,
+    id: ReviewId,
     session: Option<&str>,
-) -> Result<(ReviewId, RunId, SessionKey), AppError> {
-    let id = resolve(entry, actor, target).await?;
+) -> Result<(RunId, SessionKey), AppError> {
     if let Some(session) = session {
         let session: SessionKey = parse(session)?;
         let run = entry
             .store
             .run_for_session(actor.clone(), id.clone(), session.clone())
             .await?;
-        return Ok((id, run, session));
+        return Ok((run, session));
     }
     let selected = entry
         .store
@@ -254,33 +244,34 @@ async fn select(
         .await?
         .value;
     let lead = selected.lead().ok_or(AppError::NotFound)?;
-    Ok((id, lead.run_id().clone(), lead.session_key().clone()))
+    Ok((lead.run_id().clone(), lead.session_key().clone()))
 }
 
-async fn resolve(entry: &Entry, actor: &Actor, target: &str) -> Result<ReviewId, AppError> {
+async fn resolve(entry: &Entry, actor: &Actor, target: &str) -> Result<ResolvedReview, AppError> {
     if let Ok(id) = parse::<ReviewId>(target) {
         match entry
             .store
             .resolve_selection(actor.clone(), id.clone(), None)
             .await
         {
-            Ok(_) => return Ok(id),
+            Ok(_) => return Ok(ResolvedReview::Review(id)),
             Err(AppError::NotFound) => {}
             Err(error) => return Err(error),
         }
     }
     let source = entry.source.as_ref().ok_or(AppError::NotFound)?;
     let workspace = entry.store.workspace_context(actor.clone()).await?.value;
-    let result = source
+    match source
         .resolve(workspace.projects, target.to_owned())
-        .await?;
-    let ReviewResolution::Found(found) = result else {
-        return Err(AppError::Conflict);
-    };
-    entry
-        .store
-        .review_by_mr(actor.clone(), found.identity)
-        .await
+        .await?
+    {
+        ReviewResolution::Ambiguous(urls) => Ok(ResolvedReview::Alternatives(urls)),
+        ReviewResolution::Found(found) => entry
+            .store
+            .review_by_mr(actor.clone(), found.identity)
+            .await
+            .map(ResolvedReview::Review),
+    }
 }
 
 fn dashboard(entry: &Entry, review: &ReviewId, run: Option<&RunId>) -> String {
@@ -300,13 +291,6 @@ fn list_limit(value: Option<u16>) -> Result<u16, AppError> {
     let value = value.unwrap_or(25);
     (1..=25)
         .contains(&value)
-        .then_some(value)
-        .ok_or(AppError::InvalidRequest)
-}
-
-fn offset(value: Option<u32>) -> Result<u32, AppError> {
-    let value = value.unwrap_or(0);
-    (value <= MAX_OFFSET)
         .then_some(value)
         .ok_or(AppError::InvalidRequest)
 }

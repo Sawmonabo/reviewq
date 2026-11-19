@@ -3,7 +3,8 @@ use std::path::PathBuf;
 use reviewq_app::access::{AppError, AppFuture};
 use reviewq_app::history::{HistorySession, NativeHistoryPage, NativePosition};
 use reviewq_app::hosts::{
-    DeliveryObservation, DispatchGuard, HostProof, MessageBody, NativeHost, ReportRef,
+    DeliveryObservation, DispatchGuard, HostActivity, HostPhase, HostProof, MessageBody,
+    NativeHost, ReportRef,
 };
 use reviewq_domain::identity::{DeliveryId, NativeSessionId};
 use reviewq_domain::session::{
@@ -61,7 +62,11 @@ impl NativeHost for Codex {
                 Some(path) => crate::history::verified_codex_source(binding.clone(), path).await?,
                 None => None,
             };
-            Ok(HostProof { binding, source })
+            Ok(HostProof {
+                binding,
+                source,
+                activity: thread.status.activity(),
+            })
         })
     }
 
@@ -145,4 +150,29 @@ fn validate_native_id(id: &NativeSessionId) -> Result<(), AppError> {
         return Err(AppError::InvalidRequest);
     }
     Ok(())
+}
+
+impl ThreadStatus {
+    fn activity(&self) -> Option<HostActivity> {
+        let (phase, has_questions) = match self {
+            Self::Idle => (HostPhase::Idle, false),
+            Self::SystemError => (HostPhase::Failed, false),
+            Self::NotLoaded => return None,
+            Self::Active { active_flags } => {
+                let phase = if active_flags.is_empty() {
+                    HostPhase::Working
+                } else {
+                    HostPhase::Blocked
+                };
+                (
+                    phase,
+                    active_flags.iter().any(|flag| flag == "waitingOnUserInput"),
+                )
+            }
+        };
+        Some(HostActivity {
+            phase,
+            has_questions,
+        })
+    }
 }

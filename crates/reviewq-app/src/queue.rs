@@ -65,6 +65,22 @@ pub trait ReviewLookup: Send + Sync {
         session: SessionKey,
     ) -> AppFuture<'_, RunId>;
 
+    fn management_reviews(
+        &self,
+        actor: Actor,
+        filter: ManagementFilter,
+        offset: u32,
+        limit: u16,
+    ) -> AppFuture<'_, Snapshot<ManagementReviews>>;
+
+    fn management_runs(
+        &self,
+        actor: Actor,
+        review: ReviewId,
+        offset: u32,
+        limit: u16,
+    ) -> AppFuture<'_, Snapshot<ManagementRuns>>;
+
     /// An explicit missing or foreign run always returns scoped not-found.
     fn resolve_selection(
         &self,
@@ -72,6 +88,32 @@ pub trait ReviewLookup: Send + Sync {
         review_id: ReviewId,
         run_id: Option<RunId>,
     ) -> AppFuture<'_, Snapshot<SelectedLead>>;
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ManagementFilter {
+    All,
+    Unstarted,
+    Archived,
+    NeedsInput,
+    Working,
+    Waiting,
+    AgentQuestions,
+}
+
+#[derive(Debug)]
+pub struct ManagementReviews {
+    pub items: Vec<QueueItem>,
+    pub total: u64,
+    pub sync: SourceSync,
+}
+
+#[derive(Debug)]
+pub struct ManagementRuns {
+    pub item: QueueItem,
+    pub runs: Vec<RunSummary>,
+    pub total: u64,
+    pub sync: SourceSync,
 }
 
 /// Maximum rows in one compact queue, overview, or run-detail read.

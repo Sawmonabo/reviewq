@@ -34,6 +34,21 @@ pub const MAX_RECOVERY_LIMIT: u16 = 128;
 pub struct HostProof {
     pub binding: NativeBinding,
     pub source: Option<AbsolutePath>,
+    pub activity: Option<HostActivity>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct HostActivity {
+    pub phase: HostPhase,
+    pub has_questions: bool,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum HostPhase {
+    Idle,
+    Working,
+    Blocked,
+    Failed,
 }
 
 pub trait NativeHost: Send + Sync {
@@ -75,6 +90,7 @@ pub async fn link_codex(
     let HostProof {
         binding,
         source: native_source,
+        activity,
     } = host.prove(native_id).await?;
     let identity = binding.identity();
     if identity.provider() != HostProvider::Codex {
@@ -105,6 +121,7 @@ pub async fn link_codex(
                 session_key,
                 cwd: binding.cwd().clone(),
                 native_source,
+                activity,
             },
         )
         .await
@@ -121,6 +138,7 @@ pub struct RegisterLead {
     pub session_key: SessionKey,
     pub cwd: AbsolutePath,
     pub native_source: Option<AbsolutePath>,
+    pub activity: Option<HostActivity>,
 }
 
 /// A user message admitted to the native outbox.

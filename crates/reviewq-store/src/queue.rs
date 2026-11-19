@@ -7,9 +7,10 @@ use std::str::FromStr;
 use reviewq_app::access::{Actor, AppError, AppFuture};
 use reviewq_app::events::{ResourceKey, Snapshot};
 use reviewq_app::queue::{
-    MAX_QUEUE_PAGE, MergeRequestState, PageContext, QueueItem, QueuePage, QueuePosition,
-    QueueStore, ReviewLookup, ReviewOverview, ReviewSource, RunDetail, RunPosition, RunSummary,
-    SelectedLead, SessionPosition, SessionSummary,
+    MAX_QUEUE_PAGE, ManagementFilter, ManagementReviews, ManagementRuns, MergeRequestState,
+    PageContext, QueueItem, QueuePage, QueuePosition, QueueStore, ReviewLookup, ReviewOverview,
+    ReviewSource, RunDetail, RunPosition, RunSummary, SelectedLead, SessionPosition,
+    SessionSummary,
 };
 use reviewq_domain::identity::{
     GitLabOrigin, MergeRequestIid, MrIdentity, ProjectId, ReviewId, RunId,
@@ -28,6 +29,8 @@ use crate::workspace::{
     settings_revision,
 };
 use crate::{SqliteStore, StoreError};
+
+mod management;
 
 const ITEM_COLUMNS: &str =
     "r.review_id, r.origin, r.project_id, r.iid, r.project_path, r.title, r.head_sha, r.state, r.updated_at_ms,
@@ -157,6 +160,38 @@ pub(crate) fn save_observations(
 }
 
 impl ReviewLookup for SqliteStore {
+    fn management_reviews(
+        &self,
+        actor: Actor,
+        filter: ManagementFilter,
+        offset: u32,
+        limit: u16,
+    ) -> AppFuture<'_, Snapshot<ManagementReviews>> {
+        Box::pin(async move {
+            check_limit(limit)?;
+            self.read(move |tx| {
+                snapshot(tx, management::reviews(tx, actor, filter, offset, limit)?)
+            })
+            .await
+            .map_err(StoreError::app)
+        })
+    }
+
+    fn management_runs(
+        &self,
+        actor: Actor,
+        review: ReviewId,
+        offset: u32,
+        limit: u16,
+    ) -> AppFuture<'_, Snapshot<ManagementRuns>> {
+        Box::pin(async move {
+            check_limit(limit)?;
+            self.read(move |tx| snapshot(tx, management::runs(tx, actor, review, offset, limit)?))
+                .await
+                .map_err(StoreError::app)
+        })
+    }
+
     fn review_by_mr(&self, actor: Actor, mr: MrIdentity) -> AppFuture<'_, ReviewId> {
         Box::pin(async move {
             self.read(move |connection| {

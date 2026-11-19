@@ -84,6 +84,8 @@ CREATE TABLE sessions (
     native_id TEXT NOT NULL,
     cwd BLOB NOT NULL,
     source_path BLOB,
+    host_activity TEXT CHECK (host_activity IS NULL OR host_activity IN ('idle','working','blocked','failed')),
+    host_questions INTEGER NOT NULL DEFAULT 0 CHECK (host_questions IN (0,1)),
     parent_session_key TEXT CHECK (parent_session_key <> session_key),
     UNIQUE (run_id, session_key),
     UNIQUE (provider, profile, native_id),

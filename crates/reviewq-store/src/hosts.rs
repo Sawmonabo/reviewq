@@ -5,8 +5,9 @@ use std::os::unix::ffi::OsStrExt;
 use reviewq_app::access::{Actor, ActorScope, AppError, AppFuture};
 use reviewq_app::events::{ResourceKey, Snapshot};
 use reviewq_app::hosts::{
-    DeliveryClaim, DeliveryObservation, DeliveryReceipt, DeliveryRecoveryCursor, LeadStore,
-    MAX_RECOVERY_LIMIT, RecoverableDelivery, RecoverableDeliveryState, RegisterLead, SubmitMessage,
+    DeliveryClaim, DeliveryObservation, DeliveryReceipt, DeliveryRecoveryCursor, HostActivity,
+    HostPhase, LeadStore, MAX_RECOVERY_LIMIT, RecoverableDelivery, RecoverableDeliveryState,
+    RegisterLead, SubmitMessage,
 };
 use reviewq_domain::identity::{DeliveryId, RunId, SessionKey, SubmissionId};
 use reviewq_domain::session::{LeadTarget, NativeBinding, NativeIdentity, SessionTarget};
@@ -184,6 +185,21 @@ fn register(
                 params![target.session_key().as_str(), bytes(source)],
             )?;
         }
+        if let Some(activity) = input.activity {
+            let (phase, questions) = activity_columns(Some(activity));
+            let changed = tx.sql.execute(
+                "UPDATE sessions SET host_activity=?2,host_questions=?3
+                 WHERE session_key=?1 AND (host_activity,host_questions) IS DISTINCT FROM (?2,?3)",
+                params![target.session_key().as_str(), phase, questions],
+            )?;
+            if changed != 0 {
+                advance_queue(&tx.sql)?;
+                tx.emit(&[
+                    ResourceKey::Queue,
+                    ResourceKey::Run(Some(target.run_id().clone())),
+                ])?;
+            }
+        }
         return snapshot(&tx.sql, target);
     }
 
@@ -206,9 +222,10 @@ fn register(
         "INSERT INTO runs(run_id, review_id, lead_session_key, started_at_ms) VALUES (?1, ?2, ?3, ?4)",
         params![run_id.as_str(), review_id.as_str(), input.session_key.as_str(), now_ms()?],
     )?;
+    let (phase, questions) = activity_columns(input.activity);
     tx.sql.execute(
-        "INSERT INTO sessions(session_key, run_id, provider, profile, native_id, cwd, source_path)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+        "INSERT INTO sessions(session_key, run_id, provider, profile, native_id, cwd, source_path, host_activity, host_questions)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
         params![
             input.session_key.as_str(),
             run_id.as_str(),
@@ -216,7 +233,7 @@ fn register(
             bytes(native.profile()),
             native.native_id().as_str(),
             bytes(binding.cwd()),
-            input.native_source.as_ref().map(bytes)
+            input.native_source.as_ref().map(bytes), phase, questions
         ],
     )?;
     advance_queue(&tx.sql)?;
@@ -255,4 +272,17 @@ fn allow_target(
         return Err(AppError::NotFound.into());
     }
     Ok(())
+}
+
+fn activity_columns(activity: Option<HostActivity>) -> (Option<&'static str>, bool) {
+    let Some(value) = activity else {
+        return (None, false);
+    };
+    let phase = match value.phase {
+        HostPhase::Idle => "idle",
+        HostPhase::Working => "working",
+        HostPhase::Blocked => "blocked",
+        HostPhase::Failed => "failed",
+    };
+    (Some(phase), value.has_questions)
 }
