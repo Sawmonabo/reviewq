@@ -43,6 +43,9 @@ CREATE VIEW review_activity_evidence AS
          ORDER BY CASE batch.state WHEN 'reconciliation' THEN 0 WHEN 'executing' THEN 1 ELSE 2 END,
                   batch.latest_observed_at_ms DESC,batch.batch_id DESC LIMIT 1) AS followup_state,
       EXISTS (SELECT 1 FROM messages m WHERE m.run_id=x.run_id AND m.state='uncertain') AS uncertain_delivery,
+      (SELECT state FROM recovery_episodes k WHERE k.run_id=x.run_id AND k.lead_session_key=x.lead_session_key
+          AND k.head_sha=r.head_sha AND k.settings_revision=(SELECT settings_revision FROM service_state WHERE singleton=1)
+          ORDER BY k.observed_at_ms DESC,k.episode_id DESC LIMIT 1) AS recovery_state,
       EXISTS (SELECT 1 FROM notifications n WHERE n.review_id=r.review_id AND n.kind='approval_withdrawn'
          AND n.ordinal > coalesce(handled.source_ordinal,0)) AS approval_withdrawn,
       EXISTS (SELECT 1 FROM notifications n WHERE n.review_id=r.review_id AND n.source='gitlab'
@@ -83,7 +86,7 @@ CREATE VIEW review_activity AS
     SELECT e.*, reviewq_stage(
         is_open,run_id IS NOT NULL,host_activity,blocking_question,has_questions,family_working,family_failed,
         action_state,action_intent,report_state,followup_state,uncertain_delivery,personal_approval,
-        approval_withdrawn,pending_source,pending_report,current_decision,our_comments>0
+        approval_withdrawn,pending_source,pending_report,current_decision,our_comments>0,recovery_state
     ) AS stage_reason,
     reviewq_queue_state(is_open,personal_approval,pending_source,changed_after_handoff,current_decision,our_comments>0) AS queue_state
     FROM review_activity_evidence e;

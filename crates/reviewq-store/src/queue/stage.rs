@@ -15,13 +15,14 @@ pub(crate) fn register(db: &Connection) -> rusqlite::Result<()> {
     let flags = FunctionFlags::SQLITE_UTF8
         | FunctionFlags::SQLITE_DETERMINISTIC
         | FunctionFlags::SQLITE_INNOCUOUS;
-    db.create_scalar_function("reviewq_stage", 18, flags, |args| {
+    db.create_scalar_function("reviewq_stage", 19, flags, |args| {
         let newest: Option<String> = args.get(2)?;
         let action: Option<String> = args.get(7)?;
         let intent: Option<String> = args.get(8)?;
         let report: Option<String> = args.get(9)?;
         let followup: Option<String> = args.get(10)?;
         let decision: Option<String> = args.get(16)?;
+        let recovery: Option<String> = args.get(18)?;
         let stage = classify_review(&WorkspaceEvidence {
             open: args.get(0)?,
             registered: args.get(1)?,
@@ -41,6 +42,7 @@ pub(crate) fn register(db: &Connection) -> rusqlite::Result<()> {
             pending_report: args.get(15)?,
             decision: decision.as_deref(),
             reviewer_comments: args.get(17)?,
+            recovery: recovery.as_deref(),
         });
         Ok(stage.map(|stage| format!("{}/{}", stage.stage.as_str(), stage.reason)))
     })?;

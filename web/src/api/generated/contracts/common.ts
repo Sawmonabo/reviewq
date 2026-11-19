@@ -20,9 +20,9 @@ export type ResourceKindDto =
 
 export type ResetReasonDto = "cursor_expired" | "cursor_ahead" | "stream_lag";
 
-export type PageCursorDto = string;
-
 export type RevisionDto = string;
+
+export type PageCursorDto = string;
 
 export type EventReplayCursor = string;
 
@@ -31,6 +31,8 @@ export type RunIdDto = string;
 export type SubmissionIdDto = string;
 
 export type UpstreamIdDto = string;
+
+export type HistoryTurnIdDto = string;
 
 export type SafeCountDto = number;
 
@@ -53,8 +55,6 @@ export type ProjectIdDto = string;
 export type EventCursorDto = string;
 
 export type UtcTimestampDto = string;
-
-export type HistoryTurnIdDto = string;
 
 export type HistoryEntryIdDto = string;
 

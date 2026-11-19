@@ -63,7 +63,7 @@ export interface Enrollment {
   batches: Batch[];
   latestCompletedResult: ResultSummary | null;
   monitor: Monitor | null;
-  preferences: Preferences;
+  preferences: FollowupEnrollmentResponsePreferences;
   unviewedBatchCount: SafeCountDto;
   [k: string]: unknown;
 }
@@ -119,7 +119,7 @@ export interface SelectedThread {
   [k: string]: unknown;
 }
 
-export interface Preferences {
+export interface FollowupEnrollmentResponsePreferences {
   autoReviewConcurrency: number;
   automatic: boolean;
   revision: RevisionDto;
@@ -143,6 +143,13 @@ export interface MonitorReceipt {
 
 export interface FollowupPreferencesResponse {
   cursor: EventCursorDto;
-  data: Preferences;
+  data: FollowupPreferencesResponsePreferences;
+  [k: string]: unknown;
+}
+
+export interface FollowupPreferencesResponsePreferences {
+  autoReviewConcurrency: number;
+  automatic: boolean;
+  revision: RevisionDto;
   [k: string]: unknown;
 }

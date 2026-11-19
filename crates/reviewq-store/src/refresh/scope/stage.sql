@@ -8,6 +8,7 @@ CREATE TEMP TABLE IF NOT EXISTS refresh_mrs (
 
 CREATE TEMP TABLE IF NOT EXISTS refresh_sprints (
     board_id INTEGER NOT NULL, sprint_id INTEGER NOT NULL, label TEXT NOT NULL,
+    active INTEGER NOT NULL,
     PRIMARY KEY (board_id, sprint_id)
 ) STRICT, WITHOUT ROWID;
 

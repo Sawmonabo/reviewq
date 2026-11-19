@@ -44,6 +44,7 @@ pub struct WorkspaceEvidence<'a> {
     pub pending_report: bool,
     pub decision: Option<&'a str>,
     pub reviewer_comments: bool,
+    pub recovery: Option<&'a str>,
 }
 
 pub fn classify_review(evidence: &WorkspaceEvidence<'_>) -> Option<Stage> {
@@ -56,12 +57,19 @@ pub fn classify_review(evidence: &WorkspaceEvidence<'_>) -> Option<Stage> {
         e if e.blocking_question => (NeedsInput, "agent_input"),
         e if e.newest_activity == Some("blocked") => (NeedsInput, "permission_required"),
         e if e.newest_activity == Some("working") => (Working, "lead_working"),
-        e if e.family_failed && !e.pending_report => (NeedsInput, "agent_failed"),
+        e if e.family_failed && !e.pending_report && e.recovery.is_none() => {
+            (NeedsInput, "agent_failed")
+        }
         e if e.family_working => (Working, "session_working"),
         e if e.any_question => (NeedsInput, "agent_input"),
         e if matches!(e.action, Some("working" | "checking")) => (Working, "action_verifying"),
         e if e.report_state == Some("failed") => (NeedsInput, "report_failed"),
         e if e.report_state == Some("pending_completion") => (Working, "report_saving"),
+        e if matches!(e.recovery, Some("waiting" | "queued")) => (Waiting, "recovery_pending"),
+        e if matches!(e.recovery, Some("disabled" | "cancelled")) => {
+            (NeedsInput, "recovery_required")
+        }
+        e if e.recovery == Some("uncertain") => (NeedsInput, "recovery_uncertain"),
         e if e.uncertain_delivery || e.followup_state == Some("reconciliation") => {
             (NeedsInput, "delivery_uncertain")
         }

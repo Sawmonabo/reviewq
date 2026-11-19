@@ -3,12 +3,14 @@
 import type {
   InvalidateEvent,
   ResetEvent,
+  CancelRecoveryRequest,
   CatalogRequest,
   DisconnectSettings,
   EventReplayCursor,
   FollowupConfigureRequest,
   FollowupMonitorRequest,
   FollowupPreferencesRequest,
+  InterruptRequest,
   NotificationStateRequest,
   QuestionAnswerRequest,
   ReportFeedbackRequest,
@@ -17,11 +19,13 @@ import type {
   RunCatalogRequest,
   RunPrepareRequest,
   RunStartRequest,
+  SaveRecoveryPreferencesRequest,
   SaveSettings,
   SendMessageRequest,
   TestConnection,
   TrackReviewRequest,
   ApprovalViewResponse,
+  CancelRecoveryResponse,
   CatalogResponse,
   CurrentActionResponse,
   DeliveryReceiptResponse,
@@ -34,6 +38,7 @@ import type {
   HistoryPageResponse,
   HistoryPartPageResponse,
   HistoryPlanResponse,
+  InterruptResponse,
   LaunchReceiptResponse,
   NotificationPageResponse,
   NotificationStateResponse,
@@ -43,6 +48,8 @@ import type {
   QuestionFormsResponse,
   QueuePageResponse,
   QueueSyncResponse,
+  RecoveryPreferencesResponse,
+  RecoveryStateResponse,
   RefreshResponse,
   ReportCandidateResponse,
   ReportContextResponse,
@@ -65,6 +72,9 @@ import type {
 
 export function isInvalidateEvent(value: unknown): value is InvalidateEvent;
 export function isResetEvent(value: unknown): value is ResetEvent;
+export function isCancelRecoveryRequest(
+  value: unknown,
+): value is CancelRecoveryRequest;
 export function isCatalogRequest(value: unknown): value is CatalogRequest;
 export function isDisconnectSettings(
   value: unknown,
@@ -79,6 +89,7 @@ export function isFollowupMonitorRequest(
 export function isFollowupPreferencesRequest(
   value: unknown,
 ): value is FollowupPreferencesRequest;
+export function isInterruptRequest(value: unknown): value is InterruptRequest;
 export function isNotificationStateRequest(
   value: unknown,
 ): value is NotificationStateRequest;
@@ -97,6 +108,9 @@ export function isReviewDecisionRequest(
 export function isRunCatalogRequest(value: unknown): value is RunCatalogRequest;
 export function isRunPrepareRequest(value: unknown): value is RunPrepareRequest;
 export function isRunStartRequest(value: unknown): value is RunStartRequest;
+export function isSaveRecoveryPreferencesRequest(
+  value: unknown,
+): value is SaveRecoveryPreferencesRequest;
 export function isSaveSettings(value: unknown): value is SaveSettings;
 export function isSendMessageRequest(
   value: unknown,
@@ -108,6 +122,9 @@ export function isTrackReviewRequest(
 export function isApprovalViewResponse(
   value: unknown,
 ): value is ApprovalViewResponse;
+export function isCancelRecoveryResponse(
+  value: unknown,
+): value is CancelRecoveryResponse;
 export function isCatalogResponse(value: unknown): value is CatalogResponse;
 export function isCurrentActionResponse(
   value: unknown,
@@ -140,6 +157,7 @@ export function isHistoryPartPageResponse(
 export function isHistoryPlanResponse(
   value: unknown,
 ): value is HistoryPlanResponse;
+export function isInterruptResponse(value: unknown): value is InterruptResponse;
 export function isLaunchReceiptResponse(
   value: unknown,
 ): value is LaunchReceiptResponse;
@@ -163,6 +181,12 @@ export function isQuestionFormsResponse(
 ): value is QuestionFormsResponse;
 export function isQueuePageResponse(value: unknown): value is QueuePageResponse;
 export function isQueueSyncResponse(value: unknown): value is QueueSyncResponse;
+export function isRecoveryPreferencesResponse(
+  value: unknown,
+): value is RecoveryPreferencesResponse;
+export function isRecoveryStateResponse(
+  value: unknown,
+): value is RecoveryStateResponse;
 export function isRefreshResponse(value: unknown): value is RefreshResponse;
 export function isReportCandidateResponse(
   value: unknown,

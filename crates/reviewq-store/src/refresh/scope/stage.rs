@@ -47,9 +47,14 @@ pub(super) fn load(db: &Connection, source: &SourceObservation) -> Result<(), St
     for row in &source.owned {
         save_review(row, false)?;
     }
-    let mut sprint = db.prepare_cached("INSERT INTO refresh_sprints VALUES(?1,?2,?3)")?;
+    let mut sprint = db.prepare_cached("INSERT INTO refresh_sprints VALUES(?1,?2,?3,?4)")?;
     for row in &source.sprints {
-        sprint.execute(params![number(row.board)?, number(row.id)?, row.label])?;
+        sprint.execute(params![
+            number(row.board)?,
+            number(row.id)?,
+            row.label,
+            row.active
+        ])?;
     }
     let mut issue =
         db.prepare_cached("INSERT INTO refresh_issues VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)")?;
@@ -103,7 +108,8 @@ pub(super) fn replace_scope(db: &Connection) -> Result<bool, StoreError> {
         "DELETE FROM scoped_sprints AS p WHERE NOT EXISTS (
            SELECT 1 FROM refresh_sprints s WHERE (s.board_id,s.sprint_id)=(p.board_id,p.sprint_id))",
         "INSERT INTO scoped_sprints SELECT * FROM refresh_sprints WHERE true
-         ON CONFLICT(board_id,sprint_id) DO UPDATE SET label=excluded.label WHERE label<>excluded.label",
+         ON CONFLICT(board_id,sprint_id) DO UPDATE SET label=excluded.label,active=excluded.active
+         WHERE (label,active) IS DISTINCT FROM (excluded.label,excluded.active)",
         "DELETE FROM scoped_issues AS p WHERE NOT EXISTS (
            SELECT 1 FROM refresh_issues s WHERE (s.board_id,s.ticket_key)=(p.board_id,p.ticket_key))",
         "INSERT INTO scoped_issues SELECT * FROM refresh_issues WHERE true

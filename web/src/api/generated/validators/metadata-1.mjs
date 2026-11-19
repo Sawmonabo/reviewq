@@ -22,7 +22,7 @@ const schema13 = {
   enum: ["cursor_expired", "cursor_ahead", "stream_lag"],
   type: "string",
 };
-const schema14 = {
+const schema16 = {
   additionalProperties: false,
   properties: {
     boardId: true,
@@ -44,7 +44,7 @@ const schema14 = {
     { $ref: "#/definitions/CatalogRequestFields2" },
   ],
 };
-const schema15 = {
+const schema17 = {
   type: "object",
   properties: {
     boardId: {
@@ -61,15 +61,15 @@ const schema15 = {
     states: { default: [], items: { type: "string" }, type: "array" },
   },
 };
-const schema19 = { enum: ["scoped", "unscoped"], type: "string" };
-const schema22 = {
+const schema21 = { enum: ["scoped", "unscoped"], type: "string" };
+const schema23 = {
   enum: ["projects", "boards", "board", "statuses", "filters", "sprints"],
   type: "string",
 };
-const schema23 = { enum: ["gitlab", "jira"], type: "string" };
-const schema28 = { enum: ["member", "starred", "all"], type: "string" };
-const schema32 = { enum: ["enabled", "paused"], type: "string" };
-const schema36 = {
+const schema24 = { enum: ["gitlab", "jira"], type: "string" };
+const schema29 = { enum: ["member", "starred", "all"], type: "string" };
+const schema33 = { enum: ["enabled", "paused"], type: "string" };
+const schema37 = {
   additionalProperties: false,
   properties: {
     autoReviewConcurrency: {
@@ -86,14 +86,14 @@ const schema36 = {
   title: "FollowupPreferencesRequest",
   type: "object",
 };
-const schema38 = { enum: ["read", "unread", "dismiss"], type: "string" };
-const schema44 = { enum: ["unicode_codepoints"], type: "string" };
-const schema50 = {
+const schema40 = { enum: ["read", "unread", "dismiss"], type: "string" };
+const schema46 = { enum: ["unicode_codepoints"], type: "string" };
+const schema52 = {
   enum: ["reviewed", "waiting_author", "needs_review"],
   type: "string",
 };
-const schema52 = { enum: ["codex", "claude"], type: "string" };
-const schema54 = {
+const schema54 = { enum: ["codex", "claude"], type: "string" };
+const schema56 = {
   additionalProperties: false,
   properties: {
     context: { type: ["string", "null"] },
@@ -112,7 +112,7 @@ const schema54 = {
   title: "RunPrepareRequest",
   type: "object",
 };
-const schema56 = {
+const schema58 = {
   additionalProperties: false,
   properties: {
     args: { type: ["string", "null"] },
@@ -123,7 +123,7 @@ const schema56 = {
   required: ["kind", "name"],
   type: "object",
 };
-const schema58 = {
+const schema60 = {
   additionalProperties: false,
   properties: {
     context: true,
@@ -151,7 +151,7 @@ const schema58 = {
     { $ref: "#/definitions/RunStartRequestFields2" },
   ],
 };
-const schema59 = {
+const schema61 = {
   type: "object",
   properties: {
     context: { type: ["string", "null"] },
@@ -164,7 +164,7 @@ const schema59 = {
     sourceSha: { $ref: "#/definitions/GitShaDto" },
   },
 };
-const schema63 = {
+const schema66 = {
   additionalProperties: false,
   properties: {
     boardId: true,
@@ -195,7 +195,7 @@ const schema63 = {
     { $ref: "#/definitions/SaveSettingsBoardScopeFields2" },
   ],
 };
-const schema64 = {
+const schema67 = {
   type: "object",
   properties: {
     boardId: { $ref: "#/definitions/CheckpointIdDto" },
@@ -214,43 +214,25 @@ const schema64 = {
     storyPointsField: { type: ["string", "null"] },
   },
 };
-const schema66 = { enum: ["scrum", "kanban"], type: "string" };
-const schema67 = {
-  additionalProperties: false,
-  properties: {
-    boardSelection: { $ref: "#/definitions/BoardSelection" },
-    checkout: { type: ["string", "null"] },
-    defaultSkills: { $ref: "#/definitions/SaveSettingsDefaultSkills" },
-    path: { type: "string" },
-    projectId: { $ref: "#/definitions/MergeRequestIidDto" },
-  },
-  required: ["projectId", "path", "boardSelection", "defaultSkills"],
-  title: "SaveSettingsRepositoryBinding",
-  type: "object",
-};
-const schema68 = { enum: ["selected", "any"], type: "string" };
 export {
   schema11,
   schema13,
-  schema14,
-  schema15,
-  schema19,
-  schema22,
+  schema16,
+  schema17,
+  schema21,
   schema23,
-  schema28,
-  schema32,
-  schema36,
-  schema38,
-  schema44,
-  schema50,
+  schema24,
+  schema29,
+  schema33,
+  schema37,
+  schema40,
+  schema46,
   schema52,
   schema54,
   schema56,
   schema58,
-  schema59,
-  schema63,
-  schema64,
+  schema60,
+  schema61,
   schema66,
   schema67,
-  schema68,
 };

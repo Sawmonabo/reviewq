@@ -7,10 +7,9 @@ use std::str::FromStr;
 use reviewq_app::access::{Actor, AppError, AppFuture};
 use reviewq_app::events::{ResourceKey, Snapshot};
 use reviewq_app::queue::{
-    CompactTicket, MAX_QUEUE_PAGE, MergeRequestState, PageContext, QueueItem, QueueKey,
-    QueueListItem, QueuePage, QueuePosition, QueueStore, ReviewAuthor, ReviewOverview,
-    ReviewSignals, ReviewSource, RunDetail, RunPosition, RunSummary, SessionPosition,
-    SessionSummary,
+    CompactTicket, MAX_QUEUE_PAGE, MergeRequestState, PageContext, QueueFilter, QueueItem,
+    QueuePage, QueuePosition, QueueStore, ReviewAuthor, ReviewOverview, ReviewSignals,
+    ReviewSource, RunDetail, RunPosition, RunSummary, SessionPosition, SessionSummary,
 };
 use reviewq_domain::identity::{
     EventCursor, GitLabOrigin, MergeRequestIid, MrIdentity, ProjectId, ReviewId, RunId,
@@ -30,7 +29,7 @@ use crate::workspace::{
 };
 use crate::{SqliteStore, StoreError};
 
-mod discovery;
+mod filters;
 mod lookup;
 mod management;
 pub(crate) mod stage;
@@ -75,6 +74,30 @@ const SCOPE_PREDICATE: &str =
       OR (?1 = 2 AND r.review_id=?2))";
 
 impl QueueStore for SqliteStore {
+    fn queue_readiness(
+        &self,
+        actor: Actor,
+    ) -> AppFuture<'_, Snapshot<reviewq_app::queue::QueueReadiness>> {
+        Box::pin(async move {
+            operator(&actor).map_err(StoreError::app)?;
+            self.read(|db| {
+                let settings = settings_revision(db)?;
+                let (projects,total) = db.query_row(
+                    "SELECT (SELECT count(*) FROM configured_projects),
+                      (SELECT count(*) FROM reviews r JOIN configured_projects p USING(origin,project_id)
+                       WHERE r.state='open' AND (EXISTS(SELECT 1 FROM review_discoveries d WHERE d.review_id=r.review_id)
+                            OR EXISTS(SELECT 1 FROM review_tracking t WHERE t.review_id=r.review_id)))",
+                    [],
+                    |row| Ok((row.get::<_,i64>(0)?,row.get::<_,i64>(1)?))
+                )?;
+                snapshot(db,reviewq_app::queue::QueueReadiness {
+                    settings,projects:projects.try_into().map_err(|_|AppError::Internal)?,
+                    total_mrs:total.try_into().map_err(|_|AppError::Internal)?,
+                    sync:crate::refresh::read_sync(db,settings)?,
+                })
+            }).await.map_err(StoreError::app)
+        })
+    }
     fn observe_reviews(
         &self,
         actor: Actor,
@@ -101,12 +124,13 @@ impl QueueStore for SqliteStore {
     fn read_queue(
         &self,
         actor: Actor,
+        filter: QueueFilter,
         after: Option<QueuePosition>,
         limit: u16,
     ) -> AppFuture<'_, Snapshot<QueuePage>> {
         Box::pin(async move {
             check_limit(limit)?;
-            self.read(move |tx| snapshot(tx, queue(tx, actor, after, limit)?))
+            self.read(move |tx| snapshot(tx, filters::queue(tx, actor, filter, after, limit)?))
                 .await
                 .map_err(StoreError::app)
         })
@@ -213,86 +237,6 @@ fn page_context(
         return Err(AppError::CursorExpired.into());
     }
     Ok(context)
-}
-
-fn queue(
-    connection: &Connection,
-    actor: Actor,
-    after: Option<QueuePosition>,
-    limit: u16,
-) -> Result<QueuePage, StoreError> {
-    let access = scope(connection, &actor)?;
-    let context = page_context(
-        connection,
-        &actor,
-        limit,
-        after.as_ref().map(|row| &row.context),
-    )?;
-    let (scope_code, scope_id) = match &access {
-        ReadScope::Local => (0, None),
-        ReadScope::Grant => (1, None),
-        ReadScope::Review(review) => (2, Some(review.as_str())),
-    };
-    let total_sql = format!("SELECT count(*) FROM reviews AS r WHERE {SCOPE_PREDICATE}");
-    let total: i64 =
-        connection.query_row(&total_sql, params![scope_code, scope_id], |row| row.get(0))?;
-    let total_mrs = u64::try_from(total).map_err(|_| AppError::Internal)?;
-    let mut items = Vec::new();
-    let after = after.as_ref().map(|position| &position.key);
-    let wanted = limit + 1;
-    let after_ticket = match after {
-        Some(QueueKey::Ticket(key)) => Some(key.as_str()),
-        _ => None,
-    };
-    if after_ticket.is_none() {
-        let (key_time, key_id) = match after {
-            Some(QueueKey::Review {
-                updated_at_ms,
-                review_id,
-            }) => (*updated_at_ms, review_id.as_str()),
-            _ => (i64::MAX, "~"),
-        };
-        let page_sql = format!(
-            "SELECT {ITEM_COLUMNS} {ITEM_FROM} WHERE {SCOPE_PREDICATE}
-             AND (r.updated_at_ms, r.review_id) < (?3, ?4) ORDER BY r.updated_at_ms DESC, r.review_id DESC LIMIT ?5"
-        );
-        let mut statement = connection.prepare_cached(&page_sql)?;
-        let mut rows = statement.query(params![scope_code, scope_id, key_time, key_id, wanted])?;
-        while let Some(row) = rows.next()? {
-            items.push(QueueListItem::Review(Box::new(queue_item(row)?)));
-        }
-    }
-    let total_tickets = if matches!(access, ReadScope::Local) {
-        if items.len() < usize::from(wanted) {
-            let remaining = wanted - items.len() as u16;
-            items.extend(
-                discovery::unmatched(connection, after_ticket, remaining)?
-                    .into_iter()
-                    .map(QueueListItem::Unmatched),
-            );
-        }
-        discovery::unmatched_total(connection)?
-    } else {
-        0
-    };
-    let next = if items.len() > usize::from(limit) {
-        items.pop();
-        items.last().map(|item| QueuePosition {
-            context,
-            key: item.key(),
-        })
-    } else {
-        None
-    };
-    let settings_revision = settings_revision(connection)?;
-    Ok(QueuePage {
-        items,
-        next,
-        total: total_mrs + total_tickets,
-        total_mrs,
-        settings_revision,
-        sync: crate::refresh::read_sync(connection, settings_revision)?,
-    })
 }
 
 fn overview(

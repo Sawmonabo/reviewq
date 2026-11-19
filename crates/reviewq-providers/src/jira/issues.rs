@@ -71,6 +71,7 @@ impl TicketSourceReader for Jira {
                     board,
                     id: item.id.parse().map_err(|_| AppError::Unavailable)?,
                     label: item.label,
+                    active: item.state.as_deref() == Some("active"),
                 });
             }
             Ok(SprintPage {

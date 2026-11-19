@@ -18,6 +18,7 @@ CREATE TABLE scoped_sprints (
     board_id INTEGER NOT NULL CHECK (board_id > 0),
     sprint_id INTEGER NOT NULL CHECK (sprint_id > 0),
     label TEXT NOT NULL,
+    active INTEGER NOT NULL CHECK (active IN (0,1)),
     PRIMARY KEY (board_id, sprint_id)
 ) STRICT, WITHOUT ROWID;
 

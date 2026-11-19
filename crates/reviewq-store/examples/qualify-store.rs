@@ -125,14 +125,37 @@ fn message(target: LeadTarget) -> SubmitMessage {
 
 async fn exercise(db: &Path, backup: &Path, inputs: &Path) -> Result<(), Box<dyn Error>> {
     let (store, a, b, lead) = setup(db, inputs).await?;
-    let page = store.read_queue(a.clone(), None, 1).await?;
+    let page = store
+        .read_queue(
+            a.clone(),
+            reviewq_app::queue::QueueFilter::all_open(),
+            None,
+            1,
+        )
+        .await?;
     let native = Actor::native_session(lead.binding().identity().clone());
     assert_eq!(
-        store.read_queue(native.clone(), None, 1).await?.value.total,
+        store
+            .read_queue(
+                native.clone(),
+                reviewq_app::queue::QueueFilter::all_open(),
+                None,
+                1
+            )
+            .await?
+            .value
+            .total,
         1
     );
     assert_eq!(
-        store.read_queue(native, page.value.next, 1).await,
+        store
+            .read_queue(
+                native,
+                reviewq_app::queue::QueueFilter::all_open(),
+                page.value.next,
+                1
+            )
+            .await,
         Err(AppError::CursorExpired)
     );
 
