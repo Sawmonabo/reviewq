@@ -76,10 +76,8 @@ fn archive_scope(db: &Connection, actor: Actor) -> Result<ArchiveScope, StoreErr
             limited = true;
             break;
         }
-        if ticket_keys.len() > 64 {
-            limited = true;
-            ticket_keys.truncate(64);
-        }
+        let complete = ticket_keys.len() <= 64;
+        ticket_keys.truncate(64);
         keys.extend(ticket_keys.iter().cloned());
         if keys.len() > 8192 {
             limited = true;
@@ -92,6 +90,7 @@ fn archive_scope(db: &Connection, actor: Actor) -> Result<ArchiveScope, StoreErr
                 .iter()
                 .map(|key| parse(key))
                 .collect::<Result<BTreeSet<_>, _>>()?,
+            complete,
         });
     }
     Ok(ArchiveScope {

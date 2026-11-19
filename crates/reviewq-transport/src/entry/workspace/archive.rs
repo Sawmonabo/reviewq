@@ -61,6 +61,11 @@ pub(in crate::entry) async fn list(
             .collect::<Vec<_>>(),
     ))?;
     let (scope, metadata, generation) = metadata(&entry, &actor).await?;
+    let generation = if query.pairs.is_empty() {
+        [0; 16]
+    } else {
+        generation
+    };
     let endpoint = &entry.auth.endpoint;
     let after = cursor
         .as_deref()
@@ -192,8 +197,16 @@ async fn metadata(
     } else {
         30
     };
-    let mut generation = [0; 16];
-    getrandom::fill(&mut generation).map_err(|_| AppError::Internal)?;
+    let generation = if let Some(previous) = cache.as_ref().filter(|previous| {
+        previous.coverage.as_ref() == &scope
+            && previous.membership.membership == membership.membership
+    }) {
+        previous.generation
+    } else {
+        let mut next = [0; 16];
+        getrandom::fill(&mut next).map_err(|_| AppError::Internal)?;
+        next
+    };
     let scope = Arc::new(scope);
     let membership = Arc::new(membership);
     *cache = Some(CachedMetadata {

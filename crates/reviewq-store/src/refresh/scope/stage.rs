@@ -78,15 +78,18 @@ pub(super) fn load(db: &Connection, source: &SourceObservation) -> Result<(), St
             membership.execute(params![board, ticket.key.as_str(), number(id)?])?;
         }
     }
-    let mut sprint = db.prepare_cached("INSERT INTO refresh_loaded_sprints VALUES(?1,?2)")?;
+    let mut sprint = db.prepare_cached("INSERT INTO refresh_loaded_sprints VALUES(?1,?2,?3)")?;
     let mut member =
         db.prepare_cached("INSERT INTO refresh_loaded_sprint_issues VALUES(?1,?2,?3)")?;
     for row in &source.loaded_sprints {
         let (board, id) = (number(row.sprint.board)?, number(row.sprint.id)?);
-        sprint.execute(params![board, id])?;
+        sprint.execute(params![board, id, false])?;
         for key in &row.tickets {
             member.execute(params![board, id, key.as_str()])?;
         }
+    }
+    for &(board, id) in &source.retired_sprints {
+        sprint.execute(params![number(board)?, number(id)?, true])?;
     }
     Ok(())
 }
@@ -139,6 +142,9 @@ pub(super) fn replace_scope(db: &Connection) -> Result<bool, StoreError> {
            SELECT 1 FROM refresh_review_issues s
            WHERE (s.review_id,s.board_id,s.ticket_key)=(p.review_id,p.board_id,p.ticket_key))",
         "INSERT INTO scoped_review_issues SELECT * FROM refresh_review_issues WHERE true ON CONFLICT DO NOTHING",
+        "DELETE FROM loaded_sprints AS p WHERE EXISTS (
+           SELECT 1 FROM refresh_loaded_sprints q WHERE q.retired=1
+           AND (q.board_id,q.sprint_id)=(p.board_id,p.sprint_id))",
         "DELETE FROM loaded_sprint_issues AS p WHERE EXISTS (
            SELECT 1 FROM refresh_loaded_sprints q WHERE (q.board_id,q.sprint_id)=(p.board_id,p.sprint_id))
            AND NOT EXISTS (SELECT 1 FROM refresh_loaded_sprint_issues q
