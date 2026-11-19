@@ -9,8 +9,10 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use reviewq_app::access::{Actor, AppError};
+use reviewq_app::actions::ActionStore;
 use reviewq_app::decisions::{Checkpoints, DecisionStore};
 use reviewq_app::events::EventLog;
+use reviewq_app::followups::FollowupStore;
 use reviewq_app::history::{HistoryStore, NativeHistoryReader};
 use reviewq_app::hosts::{LeadStore, MessageHistoryStore, NativeHost};
 use reviewq_app::notifications::InboxStore;
@@ -56,6 +58,8 @@ pub trait Store:
     + MessageHistoryStore
     + InboxStore
     + DecisionStore
+    + ActionStore
+    + FollowupStore
 {
 }
 impl<
@@ -69,7 +73,9 @@ impl<
         + ReportStore
         + MessageHistoryStore
         + InboxStore
-        + DecisionStore,
+        + DecisionStore
+        + ActionStore
+        + FollowupStore,
 > Store for S
 {
 }

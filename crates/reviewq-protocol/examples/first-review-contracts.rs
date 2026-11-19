@@ -100,6 +100,7 @@ fn emit_resources(output: &Path) -> Result<(), Box<dyn Error>> {
             review: review(),
             decision_revision: RevisionDto::new(0).unwrap(),
             decision: None,
+            attention: None,
             settings_revision: RevisionDto::new(7).unwrap(),
             checkpoint_id: Some(CheckpointIdDto::new("displayed-frontier").unwrap()),
             runs: Page::new(

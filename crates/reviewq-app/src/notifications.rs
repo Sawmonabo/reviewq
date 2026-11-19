@@ -81,6 +81,7 @@ pub struct Notification {
     pub run: Option<RunId>,
     pub session: Option<SessionKey>,
     pub label: String,
+    pub event_ref: Option<String>,
     pub occurred_at_ms: i64,
     pub read_at_ms: Option<i64>,
     pub notified_at_ms: Option<i64>,

@@ -3,7 +3,7 @@
 use reviewq_app::access::{Actor, ActorScope, AppError, AppFuture};
 use reviewq_app::decisions::{
     Decision, DecisionRequest, DecisionResult, DecisionStore, Disposition, Frontier,
-    ReportFrontier, SessionFrontier,
+    ObservedAttention, ReportFrontier, SessionFrontier,
 };
 use reviewq_app::events::{ResourceKey, Snapshot};
 use reviewq_app::queue::RunSummary;
@@ -312,53 +312,69 @@ pub(crate) fn capture_frontier(
     review: &ReviewId,
     visible_runs: &[RunSummary],
 ) -> Result<Frontier, StoreError> {
-    let source_ordinal = db.query_row(
-        "SELECT max(ordinal) FROM notifications WHERE review_id=?1 AND source='gitlab'",
-        [review.as_str()],
-        |row| row.get(0),
+    let mut source = db.prepare_cached(
+        "SELECT ordinal, notification_id, kind, label FROM notifications n
+         WHERE n.review_id=?1 AND n.source='gitlab' AND n.ordinal>coalesce(
+            (SELECT source_ordinal FROM review_handled_frontiers WHERE review_id=?1), 0)
+         ORDER BY n.ordinal LIMIT 20",
     )?;
-    let mut frontier = Frontier {
-        source_ordinal,
-        ..Frontier::default()
-    };
+    let mut source_rows = source.query([review.as_str()])?;
+    let mut frontier = Frontier::default();
+    while let Some(row) = source_rows.next()? {
+        frontier.source.push(attention(row)?);
+    }
     let mut reports = db.prepare_cached(
-        "SELECT v.attention_receipt_id FROM report_heads h JOIN report_versions v USING(run_id, receipt_id)
-         WHERE h.run_id=?1",
+        "SELECT v.receipt_id, v.attention_receipt_id FROM report_heads h
+         JOIN report_versions v USING(run_id, receipt_id)
+         WHERE h.run_id=?1 AND NOT EXISTS (SELECT 1 FROM review_handled_reports handled
+            WHERE handled.review_id=?2 AND handled.run_id=h.run_id
+              AND handled.attention_receipt_id=v.attention_receipt_id)",
     )?;
     let mut sessions = db.prepare_cached(
-        "SELECT max(ordinal) FROM notifications WHERE review_id=?1 AND run_id=?2 AND session_key=?3
-         AND source IN ('codex', 'claude')",
+        "SELECT ordinal, notification_id, kind, label FROM notifications n
+         WHERE n.review_id=?1 AND n.run_id=?2 AND n.session_key=?3
+            AND n.source IN ('codex', 'claude') AND n.ordinal>coalesce((
+                SELECT ordinal FROM review_handled_sessions h
+                WHERE h.review_id=?1 AND h.run_id=?2 AND h.session_key=?3
+            ), 0)
+         ORDER BY n.ordinal LIMIT 3",
     )?;
     for run in visible_runs {
-        if let Some(attention) = reports
-            .query_row([run.run_id.as_str()], |row| row.get::<_, String>(0))
-            .optional()?
-        {
+        let mut report = reports.query(params![run.run_id.as_str(), review.as_str()])?;
+        if let Some(row) = report.next()? {
             frontier.reports.push(ReportFrontier {
                 run: run.run_id.clone(),
-                attention: parse(&attention)?,
+                receipt: parse(text(row, 0)?)?,
+                attention: parse(text(row, 1)?)?,
             });
         }
-        if let Some(ordinal) = sessions.query_row(
-            params![
-                review.as_str(),
-                run.run_id.as_str(),
-                run.lead_session_key.as_str()
-            ],
-            |row| row.get(0),
-        )? {
+        let mut rows = sessions.query(params![
+            review.as_str(),
+            run.run_id.as_str(),
+            run.lead_session_key.as_str()
+        ])?;
+        while let Some(row) = rows.next()? {
             frontier.sessions.push(SessionFrontier {
                 run: run.run_id.clone(),
                 session: run.lead_session_key.clone(),
-                ordinal,
+                event: attention(row)?,
             });
         }
     }
     Ok(frontier)
 }
 
+fn attention(row: &Row<'_>) -> Result<ObservedAttention, StoreError> {
+    Ok(ObservedAttention {
+        ordinal: row.get(0)?,
+        id: parse(text(row, 1)?)?,
+        kind: parse(text(row, 2)?)?,
+        label: row.get(3)?,
+    })
+}
+
 fn mark_handled(db: &Connection, review: &ReviewId, frontier: Frontier) -> Result<(), StoreError> {
-    if let Some(ordinal) = frontier.source_ordinal {
+    if let Some(ordinal) = frontier.source.last().map(|event| event.ordinal) {
         db.execute(
             "INSERT INTO review_handled_frontiers(review_id, source_ordinal) VALUES(?1, ?2)
              ON CONFLICT(review_id) DO UPDATE SET source_ordinal=max(coalesce(source_ordinal, 0), excluded.source_ordinal)",
@@ -381,7 +397,7 @@ fn mark_handled(db: &Connection, review: &ReviewId, frontier: Frontier) -> Resul
             review.as_str(),
             session.run.as_str(),
             session.session.as_str(),
-            session.ordinal
+            session.event.ordinal
         ])?;
     }
     Ok(())

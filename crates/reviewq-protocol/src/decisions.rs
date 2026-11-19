@@ -57,3 +57,40 @@ pub struct DecisionResult {
     pub decision: DecisionView,
     pub checkpoint_id: Option<CheckpointIdDto>,
 }
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct Attention {
+    pub source: Vec<ObservedAttention>,
+    pub reports: Vec<ReportAttention>,
+    pub sessions: Vec<SessionAttention>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct ObservedAttention {
+    pub event_id: crate::ResourceIdDto,
+    pub kind: String,
+    pub label: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct ReportAttention {
+    pub run_id: crate::RunIdDto,
+    pub receipt_id: crate::ResourceIdDto,
+    pub attention_receipt_id: crate::ResourceIdDto,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct SessionAttention {
+    pub run_id: crate::RunIdDto,
+    pub session_key: crate::SessionKeyDto,
+    #[serde(flatten)]
+    pub event: ObservedAttention,
+}

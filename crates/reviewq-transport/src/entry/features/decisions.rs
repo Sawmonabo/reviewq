@@ -119,3 +119,53 @@ pub(in crate::entry) fn project(value: &Decision) -> Result<dto::DecisionView, A
 fn revision(value: RevisionDto) -> Result<Revision, AppError> {
     Revision::try_from(value.get()).map_err(|_| AppError::InvalidRequest)
 }
+
+pub(in crate::entry) fn project_attention(
+    frontier: &reviewq_app::decisions::Frontier,
+) -> Result<dto::Attention, AppError> {
+    use reviewq_app::decisions::ObservedAttention;
+    use reviewq_protocol::{ResourceIdDto, RunIdDto, SessionKeyDto};
+
+    let resource = |value: &str| ResourceIdDto::new(value).ok_or(AppError::Internal);
+    let run = |value: &str| RunIdDto::new(value).ok_or(AppError::Internal);
+    let occurrence = |event: &ObservedAttention| -> Result<dto::ObservedAttention, AppError> {
+        Ok(dto::ObservedAttention {
+            event_id: resource(event.id.as_str())?,
+            kind: event.kind.to_string(),
+            label: event.label.clone(),
+        })
+    };
+    let source = frontier
+        .source
+        .iter()
+        .map(occurrence)
+        .collect::<Result<_, _>>()?;
+    let reports = frontier
+        .reports
+        .iter()
+        .map(|report| {
+            Ok::<_, AppError>(dto::ReportAttention {
+                run_id: run(report.run.as_str())?,
+                receipt_id: resource(report.receipt.as_str())?,
+                attention_receipt_id: resource(report.attention.as_str())?,
+            })
+        })
+        .collect::<Result<_, _>>()?;
+    let sessions = frontier
+        .sessions
+        .iter()
+        .map(|session| {
+            Ok::<_, AppError>(dto::SessionAttention {
+                run_id: run(session.run.as_str())?,
+                session_key: SessionKeyDto::new(session.session.as_str())
+                    .ok_or(AppError::Internal)?,
+                event: occurrence(&session.event)?,
+            })
+        })
+        .collect::<Result<_, _>>()?;
+    Ok(dto::Attention {
+        source,
+        reports,
+        sessions,
+    })
+}

@@ -17,7 +17,7 @@ use reviewq_domain::session::HostProvider;
 use reviewq_protocol::queue::{
     MergeRequestRow, MergeRequestStatus, QueueFacets, QueuePage, QueuePageResponse, QueueRow,
     QueueStatus, QueueSync, QueueSyncMode, ReviewOverview, ReviewOverviewResponse, ReviewSelection,
-    ReviewSelectionResponse, RunSummary,
+    ReviewSelectionResponse, RunStage, RunSummary,
 };
 use reviewq_protocol::{
     CheckpointIdDto, ErrorCode, ErrorDto, EventCursorDto, GitShaDto, HostProviderDto,
@@ -229,6 +229,7 @@ pub(super) async fn overview(
             })
         })
         .transpose()?;
+    let attention = super::features::decisions::project_attention(&value.frontier)?;
     let checkpoint = URL_SAFE_NO_PAD.encode(super::control::random()?);
     entry.checkpoints.remember(
         checkpoint.clone(),
@@ -242,6 +243,7 @@ pub(super) async fn overview(
         decision_revision: RevisionDto::new(value.item.decision.revision.get())
             .ok_or(AppError::Internal)?,
         decision: Some(super::features::decisions::project(&value.item.decision)?),
+        attention: Some(attention),
         settings_revision: RevisionDto::new(value.settings_revision.get())
             .ok_or(AppError::Internal)?,
         checkpoint_id: Some(CheckpointIdDto::new(checkpoint).ok_or(AppError::Internal)?),
@@ -353,6 +355,19 @@ pub(super) fn project_review(item: &QueueItem) -> Result<MergeRequestRow, AppErr
         MergeRequestState::Closed => MergeRequestStatus::Closed,
         MergeRequestState::Merged => MergeRequestStatus::Merged,
     };
+    let (run_stage, reason_kind) = if item.registered_lead_count == 0 {
+        (None, None)
+    } else if source.state != MergeRequestState::Open {
+        (Some(RunStage::Archived), None)
+    } else if item.pending_native_attention {
+        (Some(RunStage::NeedsInput), Some("agent_attention"))
+    } else if item.pending_source_updates {
+        (Some(RunStage::NeedsInput), Some("discussion_update"))
+    } else if item.pending_report_attention {
+        (Some(RunStage::NeedsInput), Some("report_ready"))
+    } else {
+        (None, None)
+    };
     Ok(MergeRequestRow {
         review_id: ReviewIdDto::new(item.review_id.as_str()).ok_or(AppError::Internal)?,
         project_id: ProjectIdDto::new(source.identity.project_id().get())
@@ -389,8 +404,8 @@ pub(super) fn project_review(item: &QueueItem) -> Result<MergeRequestRow, AppErr
         unread_replies: count(0)?,
         personal_approval: None,
         registered_lead_count: count(item.registered_lead_count)?,
-        run_stage: None,
-        reason_kind: None,
+        run_stage,
+        reason_kind: reason_kind.map(str::to_owned),
         has_agent_questions: false,
     })
 }

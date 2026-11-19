@@ -1,9 +1,11 @@
 //! Shared ReviewQ use-case contracts for service adapters.
 
 pub mod access;
+pub mod actions;
 pub mod changes;
 pub mod decisions;
 pub mod events;
+pub mod followups;
 pub mod history;
 pub mod hosts;
 mod labels;

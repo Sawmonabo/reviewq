@@ -53,6 +53,7 @@ pub struct Notification {
     pub run_id: Option<RunIdDto>,
     pub session_key: Option<SessionKeyDto>,
     pub label: String,
+    pub event_ref: Option<ResourceIdDto>,
     pub occurred_at: UtcTimestampDto,
     pub read_at: Option<UtcTimestampDto>,
     pub notified_at: Option<UtcTimestampDto>,

@@ -39,7 +39,17 @@ const ITEM_COLUMNS: &str =
      EXISTS (SELECT 1 FROM notifications n WHERE n.review_id=r.review_id AND n.source='gitlab'
              AND n.kind IN ('reply', 'edited_reply', 'resolved', 'reopened', 'approval_withdrawn')
              AND n.ordinal > coalesce((SELECT f.source_ordinal FROM review_handled_frontiers f
-                                        WHERE f.review_id=r.review_id), 0))";
+                                        WHERE f.review_id=r.review_id), 0)),
+     EXISTS (SELECT 1 FROM notifications n WHERE n.review_id=r.review_id AND n.source IN ('codex', 'claude')
+             AND n.run_id IS NOT NULL AND n.session_key IS NOT NULL
+             AND n.ordinal > coalesce((SELECT h.ordinal FROM review_handled_sessions h
+                 WHERE h.review_id=r.review_id AND h.run_id=n.run_id AND h.session_key=n.session_key), 0)),
+     EXISTS (SELECT 1 FROM runs run JOIN report_heads h USING(run_id)
+             JOIN report_versions v USING(run_id, receipt_id)
+             WHERE run.review_id=r.review_id AND NOT EXISTS (
+               SELECT 1 FROM review_handled_reports handled WHERE handled.review_id=r.review_id
+                 AND handled.run_id=run.run_id AND handled.attention_receipt_id=v.attention_receipt_id
+             ))";
 const SCOPE_PREDICATE: &str =
     "(((?1 = 0 OR ?1 = 1)
        AND EXISTS (SELECT 1 FROM configured_projects c WHERE c.origin=r.origin AND c.project_id=r.project_id)
@@ -570,6 +580,8 @@ fn queue_item(row: &Row<'_>) -> Result<QueueItem, StoreError> {
             .map_err(|_| AppError::Internal)?,
         decision: decisions::decode(row, 10)?,
         pending_source_updates: row.get(14)?,
+        pending_native_attention: row.get(15)?,
+        pending_report_attention: row.get(16)?,
     })
 }
 
