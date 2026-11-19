@@ -52,7 +52,8 @@ export function useHistory(
 
   async function load(position: ReadPosition, wanted?: Anchor, background = false) {
     if (position === "latest" && !background) resetTo.current = undefined;
-    const requestedJump = position === "around" && wanted && !background;
+    const requestedJump =
+      !background && (position === "latest" || (position === "around" && wanted !== undefined));
     if (active.current && !requestedJump) {
       if (background) pending.current = true;
       return;
@@ -121,6 +122,7 @@ export function useHistory(
   }
 
   const initialize = useEffectEvent(() => {
+    if (active.current) return;
     const saved = readBookmark(bookmark);
     if (saved && !saved.following) void load("around", { entryId: saved.entryId });
     else void load("latest");
