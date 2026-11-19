@@ -11,7 +11,7 @@ use reviewq_app::hosts::{
     DeliveryReport, DeliveryWork, MessageBody, MessagePurpose, ObservedInput, RecoverableDelivery,
     RecoverableDeliveryState, ReportQuote, ReportRef, SubmitMessage,
 };
-use reviewq_domain::identity::{DeliveryFence, DeliveryId, Revision, SubmissionId};
+use reviewq_domain::identity::{DeliveryFence, DeliveryId, NativeTurnId, Revision, SubmissionId};
 use reviewq_domain::session::{HostProvider, LeadTarget, SessionTarget};
 use rusqlite::{Connection, ErrorCode, OptionalExtension, Row, params};
 use sha2::{Digest, Sha256};
@@ -31,7 +31,7 @@ const RECEIPT_COLUMNS: &str =
     "d.message_id, d.submission_id, r.review_id, d.run_id, d.session_key, d.state,
      d.created_at_ms, d.updated_at_ms, d.native_turn_id, d.native_input_id, coalesce(o.fence, 0),
      d.purpose, o.claim_kind, m.grant_id, m.grant_epoch, o.due_at_ms, coalesce(o.retry_count, 0),
-     d.receipt_id, d.report_hash, d.current_receipt_id, o.reconcile_cursor";
+     d.receipt_id, d.report_hash, d.current_receipt_id, o.reconcile_cursor, o.uncertain_turn_id, o.uncertain_input_id";
 const RECEIPT_JOIN: &str =
     "messages d JOIN runs r ON r.run_id=d.run_id
      JOIN mutation_receipts m ON m.actor_key=d.actor_key AND m.operation=d.operation AND m.submission_id=d.submission_id
@@ -61,6 +61,7 @@ struct Delivery {
     due_at_ms: Option<i64>,
     retry_count: u8,
     reconcile_cursor: Option<String>,
+    raced_input: Option<ObservedInput>,
 }
 
 #[derive(Clone, Copy, Eq, PartialEq)]
@@ -510,6 +511,35 @@ pub(super) fn workflow_requirements(
     workflow::requirements(db, &target, &guard)
 }
 
+pub(crate) fn unresolved_workflow_input(
+    db: &Connection,
+    lead: &LeadTarget,
+    turn: &NativeTurnId,
+) -> Result<Option<AppError>, StoreError> {
+    let ambiguous = db
+        .query_row(
+            "SELECT o.uncertain_turn_id FROM messages m JOIN outbox o ON o.delivery_id=m.message_id
+         JOIN workflow_dispatch w USING(delivery_id)
+         WHERE m.run_id=?1 AND m.session_key=?2 AND m.state IN ('dispatching','uncertain')
+           AND (o.uncertain_turn_id=?3 OR o.uncertain_turn_id IS NULL)
+         ORDER BY o.uncertain_turn_id DESC LIMIT 1",
+            params![
+                lead.run_id().as_str(),
+                lead.session_key().as_str(),
+                turn.as_str()
+            ],
+            |row| row.get::<_, Option<String>>(0),
+        )
+        .optional()?;
+    Ok(ambiguous.map(|known_turn| {
+        if known_turn.is_some() {
+            AppError::Conflict
+        } else {
+            AppError::Busy
+        }
+    }))
+}
+
 pub(super) fn finish(
     tx: &mut WriteTx<'_>,
     claim: DeliveryClaim,
@@ -525,6 +555,23 @@ pub(super) fn finish(
         DeliveryObservation::ReconcileFrom(_) => return Err(AppError::InvalidRequest.into()),
         _ => None,
     };
+    let uncertain_proof = match &observation {
+        DeliveryObservation::UncertainInput { delivery_id, input }
+            if delivery_id == &claim.delivery_id
+                && matches!(
+                    claim.purpose,
+                    MessagePurpose::Publication | MessagePurpose::ThreadFollowup
+                )
+                && stored
+                    .raced_input
+                    .as_ref()
+                    .is_none_or(|previous| previous == input) =>
+        {
+            Some(input.clone())
+        }
+        DeliveryObservation::UncertainInput { .. } => return Err(AppError::Conflict.into()),
+        _ => None,
+    };
     let outcome = match observation {
         DeliveryObservation::NotSubmitted
             if ClaimKind::from_work(&claim.work) == ClaimKind::Dispatch =>
@@ -533,20 +580,31 @@ pub(super) fn finish(
         }
         DeliveryObservation::NotSubmitted => return Err(AppError::Conflict.into()),
         DeliveryObservation::Started { delivery_id, input } => {
-            if delivery_id != claim.delivery_id {
+            if delivery_id != claim.delivery_id
+                || stored
+                    .raced_input
+                    .as_ref()
+                    .is_some_and(|previous| previous != &input)
+            {
                 return Err(AppError::Conflict.into());
             }
             DeliveryOutcome::Started(input)
         }
         DeliveryObservation::Rejected => DeliveryOutcome::Rejected,
-        DeliveryObservation::Uncertain | DeliveryObservation::ReconcileFrom(_) => {
-            DeliveryOutcome::Uncertain
-        }
+        DeliveryObservation::Uncertain
+        | DeliveryObservation::ReconcileFrom(_)
+        | DeliveryObservation::UncertainInput { .. } => DeliveryOutcome::Uncertain,
     };
+    if stored.raced_input.is_some()
+        && matches!(outcome, DeliveryOutcome::Queued | DeliveryOutcome::Rejected)
+    {
+        return Err(AppError::Conflict.into());
+    }
+    let new_raced_input = uncertain_proof.is_some() && stored.raced_input.is_none();
     let state = outcome_label(&outcome);
     let prior = outcome_label(&stored.receipt.outcome);
     let now = now_ms()?;
-    let receipt_changed = stored.receipt.outcome != outcome;
+    let receipt_changed = stored.receipt.outcome != outcome || new_raced_input;
     let timestamp = if receipt_changed {
         now.max(stored.receipt.updated_at_ms)
     } else {
@@ -560,9 +618,10 @@ pub(super) fn finish(
             _ => (None, None),
         };
         let changed = tx.sql.execute(
-            "UPDATE messages SET state=?2, updated_at_ms=?3, native_turn_id=?4, native_input_id=?5
+            "UPDATE messages SET state=?2, updated_at_ms=?3, native_turn_id=?4, native_input_id=?5,
+                outcome_detail=CASE WHEN ?7 THEN 'native_turn_start_unproved' WHEN ?2='started' THEN NULL ELSE outcome_detail END
              WHERE message_id=?1 AND state=?6",
-            params![claim.delivery_id.as_str(), state, timestamp, turn, item, prior],
+            params![claim.delivery_id.as_str(), state, timestamp, turn, item, prior, new_raced_input],
         ).map_err(|error| {
             if error.sqlite_error_code() == Some(ErrorCode::ConstraintViolation) {
                 StoreError::from(AppError::Conflict)
@@ -591,8 +650,12 @@ pub(super) fn finish(
             };
             let due_at_ms = now.saturating_add(delay);
             tx.sql.execute(
-                "UPDATE outbox SET claim_kind=NULL, due_at_ms=?2, retry_count=?3, reconcile_cursor=?4 WHERE delivery_id=?1",
-                params![claim.delivery_id.as_str(), due_at_ms, retry_count, scan],
+                "UPDATE outbox SET claim_kind=NULL,due_at_ms=?2,retry_count=?3,reconcile_cursor=?4,
+                    uncertain_turn_id=coalesce(?5,uncertain_turn_id),uncertain_input_id=coalesce(?6,uncertain_input_id)
+                 WHERE delivery_id=?1",
+                params![claim.delivery_id.as_str(),due_at_ms,retry_count,scan,
+                    uncertain_proof.as_ref().map(|input|input.turn_id.as_str()),
+                    uncertain_proof.as_ref().map(|input|input.entry_id.as_str())],
             )?;
         }
     }
@@ -700,6 +763,15 @@ fn delivery_row(row: &Row<'_>) -> Result<Delivery, StoreError> {
         due_at_ms: row.get(15)?,
         retry_count: row.get(16)?,
         reconcile_cursor: row.get(20)?,
+        raced_input: row
+            .get::<_, Option<String>>(21)?
+            .map(|turn| {
+                Ok::<_, StoreError>(ObservedInput {
+                    turn_id: parse(&turn)?,
+                    entry_id: parse(text(row, 22)?)?,
+                })
+            })
+            .transpose()?,
     })
 }
 

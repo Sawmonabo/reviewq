@@ -361,6 +361,11 @@ pub enum DeliveryWork {
 pub enum DeliveryObservation {
     /// The host proved no native input occurred and the same delivery can retry.
     NotSubmitted,
+    /// The input is observable, but starting an independent turn is unproved.
+    UncertainInput {
+        delivery_id: DeliveryId,
+        input: ObservedInput,
+    },
     /// A native input provably correlated with this delivery ID.
     Started {
         delivery_id: DeliveryId,

@@ -184,6 +184,9 @@ fn declare(
     }
     let run = call.lead.run_id().as_str();
     let session = call.lead.session_key().as_str();
+    if let Some(hold) = crate::hosts::unresolved_workflow_input(db, &call.lead, &call.turn_id)? {
+        return Err(hold.into());
+    }
     let invalid: bool = db.query_row(
         "SELECT EXISTS(SELECT 1 FROM messages WHERE run_id=?1 AND session_key=?2 AND actor_key IS NOT NULL
            AND ((purpose IN ('user','report_feedback') AND state IN ('queued','dispatching','uncertain'))

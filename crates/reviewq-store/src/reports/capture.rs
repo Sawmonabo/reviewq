@@ -365,6 +365,9 @@ fn stage(
         )
         .optional()?
         .unwrap_or((None, 0));
+    if let Some(hold) = crate::hosts::unresolved_workflow_input(db, &call.lead, &call.turn_id)? {
+        return Err(hold.into());
+    }
     let scoped_batch = batch::bound(db, &call)?;
     if (!declaration.assessments().is_empty() && scoped_batch.is_none())
         || (scoped_batch.is_some()
