@@ -211,6 +211,9 @@ pub(super) fn advance(
     outcome: &DeliveryOutcome,
     timestamp: i64,
 ) -> Result<(), StoreError> {
+    if matches!(outcome, DeliveryOutcome::Uncertain) {
+        return uncertain(tx, target, submission, guard, timestamp);
+    }
     let (turn, rejected) = match outcome {
         DeliveryOutcome::Started(input) => (Some(input.turn_id.as_str()), false),
         DeliveryOutcome::Rejected => (None, true),
@@ -227,7 +230,7 @@ pub(super) fn advance(
                 )?
             } else {
                 tx.sql.execute(
-                    "UPDATE followup_batches SET state='executing',native_turn_id=?3
+                    "UPDATE followup_batches SET state='executing',native_turn_id=?3,hold_reason=NULL
                      WHERE batch_id=?1 AND state='reserved' AND submission_id=?2 AND authority_verified=1",
                     params![batch,submission.as_str(),turn],
                 )?
@@ -237,11 +240,11 @@ pub(super) fn advance(
         WorkflowBinding::Action(action) => {
             let changed = tx.sql.execute(
                 "UPDATE actions SET pending_submission_id=NULL,
-                   state=CASE WHEN state='cancelled' THEN state WHEN ?3 IS NULL THEN 'needs_input' ELSE 'checking' END,
+                   state=CASE WHEN state IN ('cancelled','completed') THEN state WHEN ?3 IS NULL THEN 'needs_input' ELSE 'checking' END,
                    last_executed_submission_id=CASE WHEN ?3 IS NULL THEN last_executed_submission_id ELSE ?2 END,
                    last_executed_turn_id=coalesce(?3,last_executed_turn_id),
-                   due_at_ms=CASE WHEN state='cancelled' THEN NULL ELSE ?4 END,
-                   reason=CASE WHEN state='cancelled' THEN reason WHEN ?3 IS NULL THEN 'publication_delivery_rejected' ELSE NULL END,
+                   due_at_ms=CASE WHEN state IN ('cancelled','completed') THEN NULL ELSE ?4 END,
+                   reason=CASE WHEN state IN ('cancelled','completed') THEN reason WHEN ?3 IS NULL THEN 'publication_delivery_rejected' ELSE NULL END,
                    revision=revision+1,updated_at_ms=max(updated_at_ms,?5)
                  WHERE action_id=?1 AND pending_submission_id=?2 AND authority_verified=1",
                 params![action.as_str(),submission.as_str(),turn,timestamp.saturating_add(10_000),timestamp],
@@ -256,6 +259,41 @@ pub(super) fn advance(
             ResourceKey::Queue,
             ResourceKey::Review(Some(target.review_id().clone())),
         ])?;
+    }
+    Ok(())
+}
+
+fn uncertain(
+    tx: &mut WriteTx<'_>,
+    target: &LeadTarget,
+    submission: &SubmissionId,
+    guard: &WorkflowGuard,
+    time: i64,
+) -> Result<(), StoreError> {
+    let resource = match &guard.binding {
+        WorkflowBinding::Action(action) => {
+            let changed=tx.sql.execute(
+                "UPDATE actions SET state='needs_input',reason='publication_delivery_uncertain',due_at_ms=?3,
+                    revision=revision+1,updated_at_ms=max(updated_at_ms,?4)
+                 WHERE action_id=?1 AND pending_submission_id=?2 AND authority_verified=1
+                   AND state NOT IN ('cancelled','completed') AND reason IS NOT 'publication_delivery_uncertain'",
+                params![action.as_str(),submission.as_str(),time.saturating_add(60_000),time],
+            )?;
+            (changed != 0).then_some(ResourceKey::Action(Some(target.run_id().clone())))
+        }
+        WorkflowBinding::Followup(batch) => {
+            let changed=tx.sql.execute(
+                "UPDATE followup_batches SET hold_reason='followup_delivery_uncertain'
+                 WHERE batch_id=?1 AND submission_id=?2 AND state='reserved' AND authority_verified=1
+                   AND hold_reason IS NOT 'followup_delivery_uncertain'",
+                params![batch,submission.as_str()],
+            )?;
+            (changed != 0).then_some(ResourceKey::Followup(Some(target.review_id().clone())))
+        }
+    };
+    if let Some(resource) = resource {
+        advance_queue(&tx.sql)?;
+        tx.emit(&[resource, ResourceKey::Queue])?;
     }
     Ok(())
 }

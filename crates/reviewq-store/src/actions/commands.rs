@@ -1,14 +1,14 @@
 use reviewq_app::access::{AppError, AppFuture};
 use reviewq_app::actions::{
     Action, ActionCommandStore, ActionDeclaration, ActionWork, Approval, Evidence, Intent,
-    PublicationEvidence, State, confirms_prior_target,
+    PublicationEvidence, PublicationRetry, State, confirms_prior_target,
 };
 use reviewq_app::events::{ResourceKey, Snapshot};
 use reviewq_app::notifications::{Kind, Observation, Source};
 use reviewq_app::queue::MergeRequestState;
 use reviewq_app::sources::WorkflowSnapshot;
-use reviewq_app::workflow::{NativeCall, WorkflowTool};
-use reviewq_domain::identity::{MrIdentity, ReportHash, Revision};
+use reviewq_app::workflow::{NativeCall, WorkflowAdmission, WorkflowBinding, WorkflowTool};
+use reviewq_domain::identity::{MrIdentity, ReportHash, Revision, SubmissionId};
 use reviewq_domain::session::LeadTarget;
 use rusqlite::{Connection, OptionalExtension, params};
 use uuid::Uuid;
@@ -16,8 +16,9 @@ use uuid::Uuid;
 use super::{by_id, current};
 use crate::connection::WriteTx;
 use crate::events::{now_ms, snapshot};
+use crate::hosts::admit_workflow;
 use crate::notifications::insert_notification;
-use crate::queue::{identity_for_review, lead_for_run};
+use crate::queue::{identity_for_review, lead_for_run, parse};
 use crate::workspace::{advance_queue, configured, settings_revision};
 use crate::{SqliteStore, StoreError};
 
@@ -68,23 +69,9 @@ impl ActionCommandStore for SqliteStore {
 
     fn current_action_work(&self, lead: LeadTarget) -> AppFuture<'_, Option<ActionWork>> {
         Box::pin(async move {
-            self.read(move |db| {
-                let identity = verified_lead(db, &lead)?;
-                let Some(action) = current(db, lead.run_id())? else { return Ok(None) };
-                if !action.authority_verified {
-                    return Ok(None);
-                }
-                let (actor, settings, declared_at_ms) = db.query_row(
-                    "SELECT authenticated_actor_id, settings_revision, created_at_ms FROM actions WHERE action_id=?1",
-                    [action.id.as_str()], |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?, row.get(2)?)),
-                )?;
-                Ok(Some(ActionWork {
-                    target: lead, identity, action,
-                    authenticated_actor: actor.parse().map_err(|_| AppError::Internal)?,
-                    settings: Revision::try_from(settings).map_err(|_| AppError::Internal)?,
-                    declared_at_ms,
-                }))
-            }).await.map_err(StoreError::app)
+            self.read(move |db| work_for_lead(db, lead))
+                .await
+                .map_err(StoreError::app)
         })
     }
 
@@ -95,11 +82,36 @@ impl ActionCommandStore for SqliteStore {
         superseded_request: bool,
     ) -> AppFuture<'_, Snapshot<Action>> {
         Box::pin(async move {
-            self.write(move |tx| record_evidence(tx, work, evidence, superseded_request))
+            self.write(move |tx| record_evidence(tx, work, evidence, superseded_request, None))
                 .await
                 .map_err(StoreError::app)
         })
     }
+}
+
+pub(super) fn work_for_lead(
+    db: &Connection,
+    lead: LeadTarget,
+) -> Result<Option<ActionWork>, StoreError> {
+    let identity = verified_lead(db, &lead)?;
+    let Some(action) = current(db, lead.run_id())? else {
+        return Ok(None);
+    };
+    if !action.authority_verified {
+        return Ok(None);
+    }
+    let (actor, settings, declared_at_ms) = db.query_row(
+                    "SELECT authenticated_actor_id, settings_revision, created_at_ms FROM actions WHERE action_id=?1",
+                    [action.id.as_str()], |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?, row.get(2)?)),
+                )?;
+    Ok(Some(ActionWork {
+        target: lead,
+        identity,
+        action,
+        authenticated_actor: actor.parse().map_err(|_| AppError::Internal)?,
+        settings: Revision::try_from(settings).map_err(|_| AppError::Internal)?,
+        declared_at_ms,
+    }))
 }
 
 fn verified_lead(db: &Connection, lead: &LeadTarget) -> Result<MrIdentity, StoreError> {
@@ -280,11 +292,12 @@ fn at_open_head(db: &Connection, target: &LeadTarget, head: &str) -> Result<bool
     )?)
 }
 
-fn record_evidence(
+pub(super) fn record_evidence(
     tx: &mut WriteTx<'_>,
     work: ActionWork,
     evidence: PublicationEvidence,
     superseded: bool,
+    retry: Option<PublicationRetry>,
 ) -> Result<Snapshot<Action>, StoreError> {
     let db = &tx.sql;
     if verified_lead(db, &work.target)? != work.identity
@@ -313,6 +326,17 @@ fn record_evidence(
         && action.reviewed_sha.as_ref() == Some(&evidence.auth_head)
         && evidence.open
         && at_open_head(db, &work.target, evidence.auth_head.as_str())?;
+    let retry_allowed = retry.as_ref().is_some_and(|candidate| {
+        action.attempts < 3
+            && action.pending_submission.is_none()
+            && candidate.ready.latest_user_entry_id == action.request_entry
+            && candidate.ready.latest_user_turn_id == action.turn
+            && evidence.approval != Approval::Unknown
+            && evidence
+                .targets
+                .iter()
+                .all(|target| target.state != Evidence::Unknown)
+    });
     let (state, reason, notify) = if !valid_head {
         (
             State::Cancelled,
@@ -366,12 +390,13 @@ fn record_evidence(
             && (matches!(
                 evidence.approval,
                 Approval::Confirmed | Approval::NotRequested
-            ) || (action.approval == Approval::Confirmed
-                && evidence.approval == Approval::Unknown));
+            ));
         if complete {
             (State::Completed, None, false)
         } else if superseded {
             (State::Cancelled, Some("new_native_input"), false)
+        } else if retry_allowed {
+            (State::RetryWait, None, false)
         } else {
             (
                 State::NeedsInput,
@@ -380,12 +405,57 @@ fn record_evidence(
             )
         }
     };
+    let unknown = evidence.approval == Approval::Unknown
+        || evidence
+            .targets
+            .iter()
+            .any(|target| target.state == Evidence::Unknown);
+    let uncertainty: u8 = db.query_row(
+        "SELECT uncertainty_checks FROM actions WHERE action_id=?1",
+        [id],
+        |row| row.get(0),
+    )?;
+    let next_uncertainty = if state == State::NeedsInput && unknown {
+        uncertainty.saturating_add(1).min(4)
+    } else {
+        0
+    };
+    let next = if state == State::NeedsInput {
+        Some(checked.saturating_add(if unknown {
+            10_000_i64 << uncertainty.min(3)
+        } else {
+            60_000
+        }))
+    } else {
+        None
+    };
+    let submission: Option<SubmissionId> = if state == State::RetryWait {
+        Some(parse(&Uuid::new_v4().to_string())?)
+    } else {
+        None
+    };
     db.execute(
         "UPDATE actions SET state=?2,reason=?3,revision=?4,checked_at_ms=?5,updated_at_ms=max(updated_at_ms,?5),
-            due_at_ms=?6 WHERE action_id=?1",
-        params![id, state.to_string(), reason, revision, checked,
-            (state == State::NeedsInput).then_some(checked.saturating_add(60_000))],
+            due_at_ms=?6,uncertainty_checks=?7,
+            pending_submission_id=coalesce(?8,pending_submission_id),attempts=attempts+CASE WHEN ?8 IS NULL THEN 0 ELSE 1 END
+         WHERE action_id=?1",
+        params![id,state.to_string(),reason,revision,checked,next,next_uncertainty,
+            submission.as_ref().map(|id|id.as_str())],
     )?;
+    if let (Some(submission), Some(retry)) = (submission, retry) {
+        admit_workflow(
+            tx,
+            WorkflowAdmission {
+                target: work.target.clone(),
+                submission,
+                body: retry.prompt,
+                binding: WorkflowBinding::Action(action.id.clone()),
+                settings: work.settings,
+                head: evidence.auth_head,
+                ready: retry.ready,
+            },
+        )?;
+    }
     emit(tx, &work.target, notify.then_some(id))?;
     let result = by_id(&tx.sql, work.target.run_id(), id)?.ok_or(AppError::Internal)?;
     snapshot(&tx.sql, result)
