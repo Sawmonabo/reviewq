@@ -109,10 +109,7 @@ export function RichReport({
     }
     const exact = selected.toString();
     const container = root.current.querySelector(`[data-report-block="${start}"] .report-authored`);
-    if (
-      !container?.contains(selected.startContainer) ||
-      !container.contains(selected.endContainer)
-    ) {
+    if (!container?.contains(selected.startContainer)) {
       setError("Select authored report text to quote.");
       return;
     }

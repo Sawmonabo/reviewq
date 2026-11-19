@@ -7,7 +7,6 @@ import {
   isRichPatch,
   PATCH_WINDOW_BYTES,
   PatchFormattingLimit,
-  readApprovals,
   readPatch,
   readPatchDiscussions,
   readPatchFiles,
@@ -17,9 +16,10 @@ import { Icon } from "../../../components/Icon";
 import { Pagination } from "../../../components/Pagination";
 import { Empty, Loading, Notice } from "../../../components/PanelState";
 import { useResource } from "../../../hooks/useResource";
-import { formatTime, safeUrl } from "../../../lib/presentation";
+import { safeUrl } from "../../../lib/presentation";
 import { savedValue, saveValue } from "../../../lib/view-preferences";
 import { DiscussionThread } from "../DiscussionThread";
+import { Approvals } from "./Approvals";
 import { PatchDocumentView } from "./PatchDocumentView";
 import "./changes.css";
 
@@ -137,7 +137,7 @@ export default function Changes({
             </p>
           )}
         </div>
-        <Approvals reviewId={reviewId} />
+        <Approvals reviewId={reviewId} displayedSha={index.data?.headSha} />
       </div>
       {children}
       {index.data && (
@@ -523,72 +523,6 @@ function SelectedPatch({
       {(sourceMode || file.availability !== "complete") &&
         threads.map((thread) => <DiscussionThread key={thread.discussionId} thread={thread} />)}
     </section>
-  );
-}
-
-function Approvals({ reviewId }: { readonly reviewId: string }) {
-  const [open, setOpen] = useState(false);
-  return (
-    <details className="approval-card" onToggle={(event) => setOpen(event.currentTarget.open)}>
-      <summary className="button-label">
-        <Icon name="check" size={14} />
-        Approvals
-        <Icon name="chevron" size={11} />
-      </summary>
-      {open && <ApprovalDetail reviewId={reviewId} />}
-    </details>
-  );
-}
-
-function ApprovalDetail({ reviewId }: { readonly reviewId: string }) {
-  const approvals = useResource(
-    `approvals:${reviewId}`,
-    (signal) => readApprovals(reviewId, signal),
-    [{ kind: "review", id: reviewId }],
-  );
-  const value = approvals.data;
-  return (
-    <div className="stack approval-popup">
-      <h3>Approval requirements</h3>
-      {approvals.error && <Notice retry={approvals.retry}>{approvals.error}</Notice>}
-      {approvals.pending && <Loading label="Loading approval requirements…" />}
-      {value && (
-        <>
-          <p className="meta">
-            Last checked {formatTime(value.observedAt)} · {value.sourceSha.slice(0, 12)}
-          </p>
-          <p>
-            {value.personalApproval === null
-              ? "Your approval is unknown"
-              : value.personalApproval
-                ? "You approved this MR"
-                : "You have not approved this MR"}
-          </p>
-          {value.approvals?.left !== null && value.approvals?.left !== undefined && (
-            <p>{value.approvals.left} more approvals needed</p>
-          )}
-          {value.approvals?.approvers.map((approver) => (
-            <span key={approver.id}>
-              {approver.username ?? approver.id}
-              {approver.approvedAt && ` · ${formatTime(approver.approvedAt)}`}
-            </span>
-          ))}
-          {value.rules?.map((rule) => (
-            <span key={rule.id}>
-              {rule.name} · {rule.required ? `${rule.required} required` : "Optional"}
-              {rule.approved && " · Satisfied"}
-            </span>
-          ))}
-          {value.warnings.map((warning) => (
-            <p className="meta" key={warning}>
-              {warning === "approvals_unavailable"
-                ? "Approval state unavailable"
-                : "Approval rules unavailable"}
-            </p>
-          ))}
-        </>
-      )}
-    </div>
   );
 }
 

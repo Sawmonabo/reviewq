@@ -44,7 +44,8 @@ type Props = {
 export default function BulkLaunch(props: Props) {
   if (props.mode === "receipts")
     return <LaunchReceipts onOpen={props.onOpen} onClose={props.onClose} />;
-  return <LaunchEditor {...props} />;
+  const scope = JSON.stringify([props.mode, props.targets.map((target) => target.reviewId)]);
+  return <LaunchEditor key={scope} {...props} />;
 }
 
 function LaunchEditor({

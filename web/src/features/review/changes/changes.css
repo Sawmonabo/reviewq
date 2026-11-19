@@ -286,3 +286,6 @@ pre.patch-source {
   flex: 1 0 100%;
   font-size: 11px;
 }
+.approval-card .approval-met {
+  color: var(--green);
+}

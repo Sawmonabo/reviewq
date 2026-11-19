@@ -174,13 +174,17 @@
 .overview-facts > div {
   display: grid;
   grid-template-columns: 115px minmax(0, 1fr);
+  align-items: start;
   gap: 10px;
 }
 .overview-facts dt {
+  min-width: 0;
   color: var(--muted);
 }
 .overview-facts dd {
+  min-width: 0;
   overflow-wrap: anywhere;
+  font-size: 11px;
 }
 .overview-facts code {
   font-size: 10px;
@@ -216,17 +220,6 @@
   .drawer-surface .drawer-tabs button {
     min-height: 44px;
   }
-}
-.drawer-surface .overview-facts > div {
-  display: grid;
-  grid-template-columns: 115px minmax(0, 1fr);
-  align-items: start;
-}
-.drawer-surface .overview-facts :is(dt, dd) {
-  min-width: 0;
-}
-.drawer-surface .overview-facts dd {
-  font-size: 11px;
 }
 .drawer-surface .drawer-actions button {
   border: 0;
