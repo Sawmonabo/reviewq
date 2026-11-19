@@ -17,8 +17,8 @@ use reviewq_app::sources::{ReviewSourceReader, SourceRefreshStore};
 use reviewq_app::workspace::{WorkspaceConfig, WorkspaceStore};
 use reviewq_domain::session::{AbsolutePath, HostProvider};
 use reviewq_providers::{
-    Claude, Codex, FileHistory, GitLab, RegisteredReportFiles, SourceNetwork, Terminal,
-    TerminalProvider, Workflows,
+    Claude, Codex, FileHistory, GitLab, RegisteredReportFiles, SourceAccounts, SourceNetwork,
+    Terminal, TerminalProvider, Workflows,
 };
 use reviewq_store::SqliteStore;
 use reviewq_transport::{ServiceEndpoint, ServiceIdentity, WorkflowIntegration};
@@ -119,6 +119,11 @@ pub(crate) async fn serve(profile: PathBuf, options: Serve) -> Result<(), Failur
     store.recover_delivery_claims().await?;
 
     let network = Arc::new(SourceNetwork::new()?);
+    let settings_sources = Arc::new(SourceAccounts::new(
+        network.clone(),
+        profile.clone(),
+        options.validation,
+    ));
     let source = match options.gitlab.as_ref() {
         Some(origin) if options.validation => {
             let url = reqwest::Url::parse(origin)?;
@@ -274,6 +279,7 @@ pub(crate) async fn serve(profile: PathBuf, options: Serve) -> Result<(), Failur
             sends_allowed,
             source_poll_interval: (!options.validation)
                 .then_some(Duration::from_secs(settings.poll_seconds)),
+            settings_sources,
             claude,
             terminal,
             workflow: WorkflowIntegration {

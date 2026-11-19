@@ -14,6 +14,7 @@ use crate::http::SourceNetwork;
 mod changes;
 mod checkout;
 mod lookup;
+mod settings;
 
 const METADATA_LIMIT: usize = 1024 * 1024;
 const MAX_PROVIDER_PAGES: u32 = 40;
@@ -96,6 +97,16 @@ impl GitLab {
         profile: PathBuf,
         http: Arc<SourceNetwork>,
     ) -> Result<Self, AppError> {
+        Self::authenticated(origin, token, profile, http, false)
+    }
+
+    pub(crate) fn authenticated(
+        origin: &str,
+        token: Option<&str>,
+        profile: PathBuf,
+        http: Arc<SourceNetwork>,
+        fixture: bool,
+    ) -> Result<Self, AppError> {
         let origin = Url::parse(origin).map_err(|_| AppError::InvalidRequest)?;
         let local = match origin.host() {
             Some(Host::Ipv4(ip)) => ip.is_loopback(),
@@ -108,7 +119,7 @@ impl GitLab {
             || !origin.username().is_empty()
             || origin.password().is_some()
             || (origin.scheme() != "https"
-                && !(origin.scheme() == "http" && local && token.is_none()))
+                && !(origin.scheme() == "http" && local && (token.is_none() || fixture)))
         {
             return Err(AppError::InvalidRequest);
         }

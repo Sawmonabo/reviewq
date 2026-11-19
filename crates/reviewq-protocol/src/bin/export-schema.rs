@@ -26,6 +26,14 @@ fn main() -> Result<(), Box<dyn Error>> {
     let mut registry = Registry::default();
     registry.request::<SendMessageRequest>("SendMessageRequest")?;
     registry.request::<EventCursorDto>("EventReplayCursor")?;
+    registry.request::<reviewq_protocol::settings::TestConnection>("TestConnection")?;
+    registry.request::<reviewq_protocol::settings::CatalogRequest>("CatalogRequest")?;
+    registry.request::<reviewq_protocol::settings::Disconnect>("DisconnectSettings")?;
+    registry.response::<reviewq_protocol::settings::SettingsResponse>("SettingsResponse")?;
+    registry.response::<reviewq_protocol::settings::VerifiedConnectionResponse>(
+        "VerifiedConnectionResponse",
+    )?;
+    registry.response::<reviewq_protocol::settings::CatalogResponse>("CatalogResponse")?;
     registry.response::<QueuePageResponse>("QueuePageResponse")?;
     registry.response::<ReviewOverviewResponse>("ReviewOverviewResponse")?;
     registry.response::<ReviewSelectionResponse>("ReviewSelectionResponse")?;

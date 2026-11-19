@@ -148,9 +148,10 @@ async fn respond(
     command: MonitorCommand,
 ) -> Result<Receipt, ApiError> {
     let actor = entry.auth.browser_actor(headers, true)?;
+    let source = entry.active_source().await?.reader;
     let stored = execute_monitor_command(
         entry.store.as_ref(),
-        entry.source.as_deref(),
+        source.as_deref(),
         actor,
         MonitorRequest {
             review: parse(review)?,

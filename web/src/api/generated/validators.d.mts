@@ -3,8 +3,12 @@
 import type {
   InvalidateEvent,
   ResetEvent,
+  CatalogRequest,
+  DisconnectSettings,
   EventReplayCursor,
   SendMessageRequest,
+  TestConnection,
+  CatalogResponse,
   DeliveryReceiptResponse,
   Failure,
   HistoryContentResponse,
@@ -15,15 +19,23 @@ import type {
   ReviewOverviewResponse,
   ReviewSelectionResponse,
   RunDetailResponse,
+  SettingsResponse,
   TerminalResponse,
+  VerifiedConnectionResponse,
 } from "./contracts.js";
 
 export function isInvalidateEvent(value: unknown): value is InvalidateEvent;
 export function isResetEvent(value: unknown): value is ResetEvent;
+export function isCatalogRequest(value: unknown): value is CatalogRequest;
+export function isDisconnectSettings(
+  value: unknown,
+): value is DisconnectSettings;
 export function isEventReplayCursor(value: unknown): value is EventReplayCursor;
 export function isSendMessageRequest(
   value: unknown,
 ): value is SendMessageRequest;
+export function isTestConnection(value: unknown): value is TestConnection;
+export function isCatalogResponse(value: unknown): value is CatalogResponse;
 export function isDeliveryReceiptResponse(
   value: unknown,
 ): value is DeliveryReceiptResponse;
@@ -48,4 +60,8 @@ export function isReviewSelectionResponse(
   value: unknown,
 ): value is ReviewSelectionResponse;
 export function isRunDetailResponse(value: unknown): value is RunDetailResponse;
+export function isSettingsResponse(value: unknown): value is SettingsResponse;
 export function isTerminalResponse(value: unknown): value is TerminalResponse;
+export function isVerifiedConnectionResponse(
+  value: unknown,
+): value is VerifiedConnectionResponse;

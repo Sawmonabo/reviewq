@@ -75,9 +75,10 @@ async fn respond(
     actor: Actor,
     request: DecisionRequest,
 ) -> Result<Json<Success<dto::DecisionResult>>, ApiError> {
+    let source = entry.active_source().await?.reader;
     let stored = execute_decision(
         entry.store.as_ref(),
-        entry.source.as_deref(),
+        source.as_deref(),
         &entry.checkpoints,
         actor,
         request,

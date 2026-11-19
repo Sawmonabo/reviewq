@@ -38,7 +38,7 @@ pub(in crate::entry) async fn patch(
         return Err(AppError::InvalidRequest.into());
     }
     let source = read_source(&entry, &actor, &review_id).await?;
-    let provider = entry.source.as_deref().ok_or(AppError::Unavailable)?;
+    let provider = entry.source_reader().await?;
     let patch = provider
         .patch(source.value.clone(), query.revision, query.file_id)
         .await?;
