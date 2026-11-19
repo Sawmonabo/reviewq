@@ -165,30 +165,13 @@ struct ConnectedUser {
     id: u64,
 }
 
-#[derive(Deserialize)]
-struct ApprovalState {
-    project_id: Option<u64>,
-    iid: Option<u64>,
-    approved_by: Vec<ApprovalActor>,
-}
-
-#[derive(Deserialize)]
-struct ApprovalActor {
-    user: ConnectedUser,
-}
-
 impl GitLab {
     pub(in crate::gitlab) async fn read_workflow_snapshot(
         &self,
         identity: MrIdentity,
     ) -> Result<WorkflowSnapshot, AppError> {
         let before = ReviewSourceReader::review(self, identity.clone()).await?;
-        let (_, user) = self.get(self.url("api/v4/user")?, 32 * 1024).await?;
-        let user: ConnectedUser =
-            serde_json::from_slice(&user).map_err(|_| AppError::Unavailable)?;
-        if user.id == 0 {
-            return Err(AppError::Unavailable);
-        }
+        let user = self.approval_account().await?;
         let mut discussions = Vec::new();
         let mut discussion_ids = std::collections::HashSet::new();
         let mut note_ids = std::collections::HashSet::new();
@@ -284,44 +267,23 @@ impl GitLab {
             }
             page = next;
         }
-        let url = self.url(&format!(
-            "api/v4/projects/{}/merge_requests/{}/approvals",
-            identity.project_id(),
-            identity.iid()
-        ))?;
-        let approved_reviewers = match self.get(url, MAX_DISCUSSION_BYTES).await {
-            Ok((_, approvals)) => {
-                let approvals: ApprovalState =
-                    serde_json::from_slice(&approvals).map_err(|_| AppError::Unavailable)?;
-                if approvals
-                    .project_id
-                    .is_some_and(|id| id != identity.project_id().get())
-                    || approvals.iid.is_some_and(|id| id != identity.iid().get())
-                    || approvals.approved_by.iter().any(|actor| actor.user.id == 0)
-                {
-                    return Err(AppError::Unavailable);
-                }
-                Some(
-                    approvals
-                        .approved_by
-                        .into_iter()
-                        .map(|actor| actor.user.id)
-                        .collect::<Vec<_>>(),
-                )
-            }
-            Err(AppError::Unavailable | AppError::NotFound | AppError::Forbidden) => None,
-            Err(error) => return Err(error),
-        };
+        let approved_reviewers = self.read_approval_facts(&identity).await?.map(|facts| {
+            facts
+                .approvers
+                .into_iter()
+                .map(|actor| actor.id)
+                .collect::<Vec<_>>()
+        });
         let after = ReviewSourceReader::review(self, identity.clone()).await?;
         if before != after || after.identity != identity {
             return Err(AppError::StaleRevision);
         }
         Ok(WorkflowSnapshot {
             review: after,
-            authenticated_actor: user.id,
+            authenticated_actor: user,
             personal_approval: approved_reviewers
                 .as_ref()
-                .map(|actors| actors.contains(&user.id)),
+                .map(|actors| actors.contains(&user)),
             approved_reviewers,
             observed_at_ms: jiff::Timestamp::now().as_millisecond(),
             discussions,

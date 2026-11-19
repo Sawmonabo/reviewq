@@ -2,6 +2,11 @@
 
 use serde::Serialize;
 
+mod approvals;
+pub use approvals::{
+    ApprovalFacts, ApprovalRule, ApprovalView, ApprovalViewResponse, ApprovalWarning, Approver,
+};
+
 use crate::scalar::{
     FileIdDto, GitShaDto, PatchETagDto, PatchRevisionDto, ReviewIdDto, SafeCountDto,
 };

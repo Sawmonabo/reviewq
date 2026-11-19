@@ -24,7 +24,7 @@ use reviewq_protocol::{
     CheckpointIdDto, ErrorCode, ErrorDto, EventCursorDto, GitShaDto, HostProviderDto,
     MergeRequestIidDto, Page, PageCursorDto, ProjectIdDto, ReviewIdDto, RevisionDto, RunDetail,
     RunDetailResponse, RunIdDto, SafeCountDto, SessionKeyDto, SessionSummary, Success,
-    TicketKeyDto, UtcTimestampDto,
+    TicketKeyDto, UpstreamIdDto, UtcTimestampDto,
 };
 use serde::{Deserialize, Serialize};
 
@@ -141,6 +141,10 @@ pub(super) async fn queue(
             })
         })
         .transpose()?;
+    let active = entry.active_source().await?;
+    if active.revision != value.settings_revision {
+        return Err(AppError::StaleRevision.into());
+    }
     Ok(Json(success(
         QueuePage {
             page: Page::new(rows, next).ok_or(AppError::Internal)?,
@@ -154,7 +158,7 @@ pub(super) async fn queue(
                 hide_reviewed: self::count(0)?,
                 hide_in_progress: self::count(0)?,
             },
-            sync: queue_sync(&entry.active_source().await?, value.sync),
+            sync: queue_sync(&active, value.sync),
             settings_revision: RevisionDto::new(value.settings_revision.get())
                 .ok_or(AppError::Internal)?,
         },
@@ -419,7 +423,16 @@ pub(super) fn project_review(item: &QueueItem) -> Result<MergeRequestRow, AppErr
                 })
             })
             .collect::<Result<_, AppError>>()?,
-        author: None,
+        author: source
+            .author
+            .as_ref()
+            .map(|author| {
+                Ok(reviewq_protocol::queue::NamedUpstreamId {
+                    id: UpstreamIdDto::new(author.id).ok_or(AppError::Internal)?,
+                    label: author.username.clone(),
+                })
+            })
+            .transpose()?,
         source_sha: GitShaDto::new(source.head_sha.as_str()).ok_or(AppError::Internal)?,
         mr_state,
         queue_state: if source.state != MergeRequestState::Open {
@@ -441,7 +454,7 @@ pub(super) fn project_review(item: &QueueItem) -> Result<MergeRequestRow, AppErr
         },
         updated_at: UtcTimestampDto::from_unix_milliseconds(source.updated_at_ms)
             .ok_or(AppError::Internal)?,
-        draft: false,
+        draft: source.draft,
         own: false,
         our_comments: count(0)?,
         unread_replies: count(0)?,

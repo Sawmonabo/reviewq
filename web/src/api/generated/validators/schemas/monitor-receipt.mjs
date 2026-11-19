@@ -3,8 +3,8 @@ import { func0 } from "../runtime.mjs";
 import { validate25 } from "./checkpoint-id-dto.mjs";
 import { validate46 } from "./event-cursor-dto.mjs";
 import { validate125 } from "./review-id-dto.mjs";
-import { validate315 } from "./monitor-state.mjs";
-function validate326(
+import { validate336 } from "./monitor-state.mjs";
+function validate347(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -26,7 +26,7 @@ function validate326(
         ((data.batchId === undefined || !func0.call(data, "batchId")) &&
           (missing0 = "batchId"))
       ) {
-        validate326.errors = [
+        validate347.errors = [
           {
             instancePath,
             schemaPath: "#/required",
@@ -90,7 +90,7 @@ function validate326(
               vErrors.push(err1);
             }
             errors++;
-            validate326.errors = vErrors;
+            validate347.errors = vErrors;
             return false;
           } else {
             errors = _errs2;
@@ -152,7 +152,7 @@ function validate326(
               if (data.state !== undefined && func0.call(data, "state")) {
                 const _errs8 = errors;
                 if (
-                  !validate315(data.state, {
+                  !validate336(data.state, {
                     instancePath: instancePath + "/state",
                     parentData: data,
                     parentDataProperty: "state",
@@ -161,8 +161,8 @@ function validate326(
                 ) {
                   vErrors =
                     vErrors === null
-                      ? validate315.errors
-                      : vErrors.concat(validate315.errors);
+                      ? validate336.errors
+                      : vErrors.concat(validate336.errors);
                   errors = vErrors.length;
                 }
                 var valid0 = _errs8 === errors;
@@ -199,7 +199,7 @@ function validate326(
         }
       }
     } else {
-      validate326.errors = [
+      validate347.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -210,7 +210,7 @@ function validate326(
       return false;
     }
   }
-  validate326.errors = vErrors;
+  validate347.errors = vErrors;
   return errors === 0;
 }
-export { validate326 };
+export { validate347 };

@@ -70,6 +70,10 @@ impl IntoResponse for ApiError {
 pub(super) fn failure(error: AppError) -> (StatusCode, Failure) {
     let (status, code) = match error {
         AppError::InvalidRequest => (StatusCode::BAD_REQUEST, ErrorCode::InvalidRequest),
+        AppError::TicketUnverified => (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            ErrorCode::TicketUnverified,
+        ),
         AppError::ReportCorrectionRequired => {
             (StatusCode::UNPROCESSABLE_ENTITY, ErrorCode::InvalidRequest)
         }

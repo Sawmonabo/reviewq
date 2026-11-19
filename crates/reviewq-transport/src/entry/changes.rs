@@ -5,7 +5,7 @@ use axum::extract::State;
 use axum::http::HeaderMap;
 use reviewq_app::access::{Actor, AppError};
 use reviewq_app::changes::{Discussion, PatchAvailability, PatchFile};
-use reviewq_app::events::Snapshot;
+use reviewq_app::settings::ActiveSource;
 use reviewq_domain::identity::{MrIdentity, ReviewId};
 use reviewq_protocol::changes as dto;
 use reviewq_protocol::{
@@ -17,7 +17,9 @@ use serde::{Deserialize, Serialize};
 use super::error::{ApiPath as Path, ApiQuery as Query};
 use super::{ApiError, Entry, ServiceEndpoint};
 
+mod approval;
 mod raw;
+pub(super) use approval::approvals;
 pub(super) use raw::patch;
 
 const FILE_CURSOR: &[u8] = b"reviewq-changes-files-v1";
@@ -35,6 +37,7 @@ pub(super) struct ChangeQuery {
 #[derive(Deserialize, Serialize)]
 struct Position {
     review: String,
+    settings: u64,
     revision: String,
     page: u32,
     limit: u16,
@@ -56,15 +59,25 @@ pub(super) async fn files(
     {
         return Err(AppError::InvalidRequest.into());
     }
-    let (limit, page, revision) =
-        query.position(&entry.auth.endpoint, FILE_CURSOR, &review_id, 10)?;
-    let provider = entry.source_reader().await?;
+    let (limit, page, revision) = query.position(
+        &entry.auth.endpoint,
+        FILE_CURSOR,
+        &review_id,
+        source.context.revision.get(),
+        10,
+    )?;
+    let provider = source
+        .context
+        .reader
+        .as_ref()
+        .ok_or(AppError::Unavailable)?;
     let response = provider
         .files(source.value.clone(), revision, page, limit, selected)
         .await?;
-    check_source(&entry, &actor, &review_id, &source.value).await?;
+    check_source(&entry, &actor, &review_id, &source).await?;
     let position = response.next_page.map(|page| Position {
         review: review.clone(),
+        settings: source.context.revision.get(),
         revision: response.revision.id.clone(),
         page,
         limit,
@@ -101,16 +114,26 @@ pub(super) async fn discussions(
     let actor = entry.auth.browser_actor(&headers, false)?;
     let review_id = parse_review(&review)?;
     let source = read_source(&entry, &actor, &review_id).await?;
-    let (limit, page, revision) =
-        query.position(&entry.auth.endpoint, DISCUSSION_CURSOR, &review_id, 20)?;
+    let (limit, page, revision) = query.position(
+        &entry.auth.endpoint,
+        DISCUSSION_CURSOR,
+        &review_id,
+        source.context.revision.get(),
+        20,
+    )?;
     let revision = revision.ok_or(AppError::InvalidRequest)?;
-    let provider = entry.source_reader().await?;
+    let provider = source
+        .context
+        .reader
+        .as_ref()
+        .ok_or(AppError::Unavailable)?;
     let response = provider
         .discussions(source.value.clone(), revision, page, limit)
         .await?;
-    check_source(&entry, &actor, &review_id, &source.value).await?;
+    check_source(&entry, &actor, &review_id, &source).await?;
     let position = response.next_page.map(|page| Position {
         review: review.clone(),
+        settings: source.context.revision.get(),
         revision: response.revision.id.clone(),
         page,
         limit,
@@ -145,6 +168,7 @@ impl ChangeQuery {
         endpoint: &ServiceEndpoint,
         scope: &[u8],
         review: &ReviewId,
+        settings: u64,
         max_limit: u16,
     ) -> Result<(u16, u32, Option<String>), AppError> {
         let limit = self.limit.unwrap_or(max_limit);
@@ -163,6 +187,7 @@ impl ChangeQuery {
         };
         let position: Position = endpoint.decode_cursor(scope, cursor)?;
         if position.review != review.as_str()
+            || position.settings != settings
             || position.limit != limit
             || self.revision.as_deref() != Some(&position.revision)
         {
@@ -172,18 +197,30 @@ impl ChangeQuery {
     }
 }
 
+struct SelectedSource {
+    value: MrIdentity,
+    cursor: reviewq_domain::identity::EventCursor,
+    context: ActiveSource,
+}
+
 async fn read_source(
     entry: &Entry,
     actor: &Actor,
     review: &ReviewId,
-) -> Result<Snapshot<MrIdentity>, AppError> {
+) -> Result<SelectedSource, AppError> {
+    let context = entry.active_source().await?;
     let snapshot = entry
         .store
-        .read_review(actor.clone(), review.clone(), None, 1)
+        .authorized_source(actor.clone(), review.clone())
         .await?;
-    Ok(Snapshot {
-        value: snapshot.value.item.source.identity,
+    let (settings, identity) = snapshot.value;
+    if context.revision != settings {
+        return Err(AppError::StaleRevision);
+    }
+    Ok(SelectedSource {
+        value: identity,
         cursor: snapshot.cursor,
+        context,
     })
 }
 
@@ -191,9 +228,13 @@ async fn check_source(
     entry: &Entry,
     actor: &Actor,
     review: &ReviewId,
-    source: &MrIdentity,
+    source: &SelectedSource,
 ) -> Result<(), AppError> {
-    if read_source(entry, actor, review).await?.value != *source {
+    let current = read_source(entry, actor, review).await?;
+    if current.context.revision != source.context.revision {
+        return Err(AppError::StaleRevision);
+    }
+    if current.value != source.value {
         return Err(AppError::NotFound);
     }
     Ok(())

@@ -2,8 +2,8 @@
 import { func0 } from "../runtime.mjs";
 import { validate25 } from "./checkpoint-id-dto.mjs";
 import { validate159 } from "./board-type.mjs";
-import { schema77 } from "../metadata-2.mjs";
-function validate194(
+import { schema84 } from "../metadata-2.mjs";
+function validate216(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -31,7 +31,7 @@ function validate194(
           !func0.call(data, "estimateField")) &&
           (missing0 = "estimateField"))
       ) {
-        validate194.errors = [
+        validate216.errors = [
           {
             instancePath,
             schemaPath: "#/required",
@@ -95,7 +95,7 @@ function validate194(
               vErrors.push(err1);
             }
             errors++;
-            validate194.errors = vErrors;
+            validate216.errors = vErrors;
             return false;
           } else {
             errors = _errs2;
@@ -166,7 +166,7 @@ function validate194(
                 vErrors.push(err3);
               }
               errors++;
-              validate194.errors = vErrors;
+              validate216.errors = vErrors;
               return false;
             } else {
               errors = _errs7;
@@ -190,12 +190,12 @@ function validate194(
               let data2 = data.estimateField;
               const _errs11 = errors;
               if (typeof data2 !== "string" && data2 !== null) {
-                validate194.errors = [
+                validate216.errors = [
                   {
                     instancePath: instancePath + "/estimateField",
                     schemaPath: "#/properties/estimateField/type",
                     keyword: "type",
-                    params: { type: schema77.properties.estimateField.type },
+                    params: { type: schema84.properties.estimateField.type },
                   },
                 ];
                 return false;
@@ -229,7 +229,7 @@ function validate194(
                 if (data.label !== undefined && func0.call(data, "label")) {
                   const _errs14 = errors;
                   if (typeof data.label !== "string") {
-                    validate194.errors = [
+                    validate216.errors = [
                       {
                         instancePath: instancePath + "/label",
                         schemaPath: "#/properties/label/type",
@@ -248,12 +248,12 @@ function validate194(
                     let data5 = data.path;
                     const _errs16 = errors;
                     if (typeof data5 !== "string" && data5 !== null) {
-                      validate194.errors = [
+                      validate216.errors = [
                         {
                           instancePath: instancePath + "/path",
                           schemaPath: "#/properties/path/type",
                           keyword: "type",
-                          params: { type: schema77.properties.path.type },
+                          params: { type: schema84.properties.path.type },
                         },
                       ];
                       return false;
@@ -267,12 +267,12 @@ function validate194(
                       let data6 = data.state;
                       const _errs18 = errors;
                       if (typeof data6 !== "string" && data6 !== null) {
-                        validate194.errors = [
+                        validate216.errors = [
                           {
                             instancePath: instancePath + "/state",
                             schemaPath: "#/properties/state/type",
                             keyword: "type",
-                            params: { type: schema77.properties.state.type },
+                            params: { type: schema84.properties.state.type },
                           },
                         ];
                         return false;
@@ -315,7 +315,7 @@ function validate194(
                               }
                             }
                           } else {
-                            validate194.errors = [
+                            validate216.errors = [
                               {
                                 instancePath: instancePath + "/statusIds",
                                 schemaPath: "#/properties/statusIds/type",
@@ -339,7 +339,7 @@ function validate194(
         }
       }
     } else {
-      validate194.errors = [
+      validate216.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -350,7 +350,7 @@ function validate194(
       return false;
     }
   }
-  validate194.errors = vErrors;
+  validate216.errors = vErrors;
   return errors === 0;
 }
-export { validate194 };
+export { validate216 };

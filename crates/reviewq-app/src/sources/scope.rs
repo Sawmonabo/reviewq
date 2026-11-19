@@ -77,6 +77,7 @@ pub(super) async fn collect(
     let mut observation = SourceObservation::default();
     let mut requirements = HashMap::<ProjectId, HashMap<TicketKey, Vec<u64>>>::new();
     let mut total_associations = 0;
+    let mut total_memberships = 0;
     for board in scope.boards.iter().filter(|board| board.selection.enabled) {
         let board_id = board.selection.board_id;
         let mut issues = issues(jira, board, None).await?;
@@ -101,6 +102,10 @@ pub(super) async fn collect(
             for sprint in sprints {
                 for key in self::issues(jira, board, Some(sprint.id)).await?.keys() {
                     let issue = issues.get_mut(key).ok_or(AppError::Conflict)?;
+                    total_memberships += 1;
+                    if total_memberships > MAX_ASSOCIATIONS {
+                        return Err(AppError::PayloadTooLarge);
+                    }
                     issue.sprint_ids.push(sprint.id);
                 }
                 observation.sprints.push(sprint);

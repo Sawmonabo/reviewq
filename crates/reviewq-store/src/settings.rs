@@ -88,7 +88,7 @@ impl SettingsStore for SqliteStore {
                     save(&tx.sql, connection)?;
                 }
                 if changed {
-                    crate::queue::tracking::retain_current_tickets(&tx.sql)?;
+                    crate::queue::tracking::retain_current_tickets(&tx.sql, None)?;
                     tx.sql.execute_batch(
                         "DELETE FROM review_discoveries;
                          DELETE FROM scoped_issues;

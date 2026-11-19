@@ -22,6 +22,14 @@ pub struct ReviewSource {
     pub head_sha: GitSha,
     pub state: MergeRequestState,
     pub updated_at_ms: i64,
+    pub author: Option<ReviewAuthor>,
+    pub draft: bool,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ReviewAuthor {
+    pub id: u64,
+    pub username: String,
 }
 
 /// Authoritative provider lifecycle of a merge request.
@@ -62,6 +70,12 @@ impl SelectedLead {
 /// Direct lookup used by review bookmarks and the selected-run browser path.
 pub trait ReviewLookup: Send + Sync {
     fn review_by_mr(&self, actor: Actor, mr: MrIdentity) -> AppFuture<'_, ReviewId>;
+
+    fn authorized_source(
+        &self,
+        actor: Actor,
+        review: ReviewId,
+    ) -> AppFuture<'_, Snapshot<(Revision, MrIdentity)>>;
 
     fn registered_session(
         &self,

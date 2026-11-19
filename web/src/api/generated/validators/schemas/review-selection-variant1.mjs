@@ -2,7 +2,7 @@
 import { func0 } from "../runtime.mjs";
 import { validate25 } from "./checkpoint-id-dto.mjs";
 import { validate125 } from "./review-id-dto.mjs";
-function validate806(
+function validate827(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -20,7 +20,7 @@ function validate806(
           !func0.call(data, "leadSessionKey")) &&
           (missing0 = "leadSessionKey"))
       ) {
-        validate806.errors = [
+        validate827.errors = [
           {
             instancePath,
             schemaPath: "#/required",
@@ -99,7 +99,7 @@ function validate806(
         }
       }
     } else {
-      validate806.errors = [
+      validate827.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -110,7 +110,7 @@ function validate806(
       return false;
     }
   }
-  validate806.errors = vErrors;
+  validate827.errors = vErrors;
   return errors === 0;
 }
-export { validate806 };
+export { validate827 };

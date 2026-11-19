@@ -162,11 +162,22 @@ impl SqliteStore {
         T: Send + 'static,
         F: FnOnce(&mut WriteTx<'_>) -> Result<T, StoreError> + Send + 'static,
     {
+        self.write_prepared(|_| Ok(()), move |tx, ()| f(tx)).await
+    }
+
+    /// Prepares connection-local scratch before acquiring the persistent write lock.
+    pub(crate) async fn write_prepared<T, P, S, F>(&self, prepare: S, f: F) -> Result<T, StoreError>
+    where
+        T: Send + 'static,
+        S: FnOnce(&mut Connection) -> Result<P, StoreError> + Send + 'static,
+        F: FnOnce(&mut WriteTx<'_>, P) -> Result<T, StoreError> + Send + 'static,
+    {
         let wakeup = self.wakeup.clone();
         let delivery_wakeup = self.delivery_wakeup.clone();
         let report_wakeup = self.report_wakeup.clone();
         let desktop_wakeup = self.desktop_wakeup.clone();
         self.submit(true, move |connection, _| {
+            let prepared = prepare(connection)?;
             let sql = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
             let mut tx = WriteTx {
                 sql,
@@ -175,7 +186,7 @@ impl SqliteStore {
                 report_changed: false,
                 desktop_changed: false,
             };
-            let result = f(&mut tx)?;
+            let result = f(&mut tx, prepared)?;
             tx.sql.commit()?;
             if let Some(cursor) = tx.wakeup {
                 wakeup.send_replace(cursor);

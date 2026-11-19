@@ -62,6 +62,7 @@ pub struct ErrorDto {
 #[serde(rename_all = "snake_case")]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub enum ErrorCode {
+    TicketUnverified,
     InvalidRequest,
     Unauthorized,
     Forbidden,

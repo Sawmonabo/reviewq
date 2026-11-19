@@ -4,14 +4,18 @@ use reviewq_app::sources::SourceObservation;
 use rusqlite::{Connection, params};
 
 use crate::StoreError;
-use crate::queue::state_label;
+use crate::queue::{author_number, state_label};
+
+pub(super) fn initialize(db: &Connection) -> Result<(), StoreError> {
+    db.execute_batch(include_str!("stage.sql"))?;
+    Ok(())
+}
 
 pub(super) fn load(db: &Connection, source: &SourceObservation) -> Result<(), StoreError> {
-    db.execute_batch(include_str!("stage.sql"))?;
-    let mut mrs =
-        db.prepare_cached("INSERT INTO refresh_mrs VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9)")?;
+    let mut mrs = db
+        .prepare_cached("INSERT INTO refresh_mrs VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)")?;
     let mut attach = db.prepare_cached("INSERT INTO refresh_links VALUES(?1,?2,?3,?4,?5)")?;
-    let mut save_review = |row: &ReviewSource, discovered: bool| {
+    let mut save_review = |row: &ReviewSource, discovered: bool| -> Result<(), StoreError> {
         mrs.execute(params![
             row.identity.origin().as_str(),
             row.identity.project_id().as_sqlite_integer(),
@@ -21,8 +25,12 @@ pub(super) fn load(db: &Connection, source: &SourceObservation) -> Result<(), St
             row.head_sha.as_str(),
             state_label(row.state),
             row.updated_at_ms,
+            author_number(row)?,
+            row.author.as_ref().map(|author| author.username.as_str()),
+            row.draft,
             discovered,
-        ])
+        ])?;
+        Ok(())
     };
     for (row, links) in source.reviews.values() {
         save_review(row, true)?;
@@ -123,7 +131,7 @@ pub(super) fn replace_scope(db: &Connection) -> Result<bool, StoreError> {
     Ok(changed)
 }
 
-pub(super) fn clear(db: &Connection) -> Result<(), StoreError> {
+pub(in crate::refresh) fn clear(db: &Connection) -> Result<(), StoreError> {
     db.execute_batch(
         "DELETE FROM refresh_mrs; DELETE FROM refresh_sprints; DELETE FROM refresh_issues;
          DELETE FROM refresh_membership; DELETE FROM refresh_links; DELETE FROM refresh_review_issues;",

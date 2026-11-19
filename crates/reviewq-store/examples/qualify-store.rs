@@ -45,6 +45,8 @@ async fn setup(
         .into_iter()
         .map(|record| {
             Ok(ReviewSource {
+                author: None,
+                draft: false,
                 identity: MrIdentity::new(
                     origin.clone(),
                     record.project_id.try_into()?,

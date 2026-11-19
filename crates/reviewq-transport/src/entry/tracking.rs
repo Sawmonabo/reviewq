@@ -56,11 +56,14 @@ pub(super) async fn track(
         .trackable_review(scope.value.projects, request.url)
         .await?;
     let mut tickets = Vec::new();
-    if let Some(jira) = active.tickets {
+    if !prospective.candidate_tickets.is_empty() {
+        let jira = active.tickets.ok_or(AppError::TicketUnverified)?;
         for key in prospective.candidate_tickets {
-            if let Some(ticket) = jira.issue_identity(key).await? {
-                tickets.push(ticket);
-            }
+            tickets.push(
+                jira.issue_identity(key)
+                    .await?
+                    .ok_or(AppError::TicketUnverified)?,
+            );
         }
     }
     let committed = entry

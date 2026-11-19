@@ -4,7 +4,7 @@ use std::sync::Arc;
 use reqwest::header::HeaderMap;
 use reviewq_app::access::{AppError, AppFuture};
 use reviewq_app::changes::{
-    ChangeSource, Discussion, PatchBytes, PatchFile, PatchRevision, SourcePage,
+    ApprovalView, ChangeSource, Discussion, PatchBytes, PatchFile, PatchRevision, SourcePage,
 };
 use reviewq_domain::identity::{GitSha, MrIdentity};
 use serde::Deserialize;
@@ -13,6 +13,7 @@ use sha2::{Digest, Sha256};
 
 use super::GitLab;
 
+mod approvals;
 mod discussions;
 mod lease;
 mod wire;
@@ -30,6 +31,15 @@ pub(super) struct DiffRefs {
 }
 
 impl ChangeSource for GitLab {
+    fn approvals(
+        &self,
+        source: MrIdentity,
+        expected_head: Option<GitSha>,
+        additional_reviewers: Vec<u64>,
+    ) -> AppFuture<'_, ApprovalView> {
+        Box::pin(self.approval_view(source, expected_head, additional_reviewers))
+    }
+
     fn files(
         &self,
         source: MrIdentity,

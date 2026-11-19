@@ -255,6 +255,10 @@ pub fn router(
             "/reviews/{review_id}/changes/discussions",
             get(changes::discussions),
         )
+        .route(
+            "/reviews/{review_id}/changes/approvals",
+            get(changes::approvals),
+        )
         .route("/runs/{run_id}", get(pages::run))
         .route("/runs/catalog", post(launch::catalog))
         .route("/runs/prepare", post(launch::prepare))

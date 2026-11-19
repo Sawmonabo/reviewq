@@ -2,7 +2,7 @@
 import { func0 } from "../runtime.mjs";
 import { validate95 } from "./safe-count-dto.mjs";
 import { validate102 } from "./report-hash-dto.mjs";
-function validate671(
+function validate692(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -19,7 +19,7 @@ function validate671(
         ((data.sha256 === undefined || !func0.call(data, "sha256")) &&
           (missing0 = "sha256"))
       ) {
-        validate671.errors = [
+        validate692.errors = [
           {
             instancePath,
             schemaPath: "#/required",
@@ -95,7 +95,7 @@ function validate671(
         }
       }
     } else {
-      validate671.errors = [
+      validate692.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -106,7 +106,7 @@ function validate671(
       return false;
     }
   }
-  validate671.errors = vErrors;
+  validate692.errors = vErrors;
   return errors === 0;
 }
-export { validate671 };
+export { validate692 };

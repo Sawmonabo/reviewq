@@ -2,10 +2,10 @@
 import { func0 } from "../runtime.mjs";
 import { validate44 } from "./history-cursor-dto.mjs";
 import { validate25 } from "./checkpoint-id-dto.mjs";
-import { validate391 } from "./history-part.mjs";
+import { validate412 } from "./history-part.mjs";
 import { validate95 } from "./safe-count-dto.mjs";
-import { validate209 } from "./utc-timestamp-dto.mjs";
-function validate388(
+import { validate196 } from "./utc-timestamp-dto.mjs";
+function validate409(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -24,7 +24,7 @@ function validate388(
         ((data.parts === undefined || !func0.call(data, "parts")) &&
           (missing0 = "parts"))
       ) {
-        validate388.errors = [
+        validate409.errors = [
           {
             instancePath,
             schemaPath: "#/required",
@@ -86,7 +86,7 @@ function validate388(
                   for (let i0 = 0; i0 < len0; i0++) {
                     const _errs5 = errors;
                     if (
-                      !validate391(data2[i0], {
+                      !validate412(data2[i0], {
                         instancePath: instancePath + "/parts/" + i0,
                         parentData: data2,
                         parentDataProperty: i0,
@@ -95,8 +95,8 @@ function validate388(
                     ) {
                       vErrors =
                         vErrors === null
-                          ? validate391.errors
-                          : vErrors.concat(validate391.errors);
+                          ? validate412.errors
+                          : vErrors.concat(validate412.errors);
                       errors = vErrors.length;
                     }
                     var valid1 = _errs5 === errors;
@@ -105,7 +105,7 @@ function validate388(
                     }
                   }
                 } else {
-                  validate388.errors = [
+                  validate409.errors = [
                     {
                       instancePath: instancePath + "/parts",
                       schemaPath: "#/properties/parts/type",
@@ -155,7 +155,7 @@ function validate388(
                   let valid2 = false;
                   const _errs9 = errors;
                   if (
-                    !validate209(data5, {
+                    !validate196(data5, {
                       instancePath: instancePath + "/timestamp",
                       parentData: data,
                       parentDataProperty: "timestamp",
@@ -164,8 +164,8 @@ function validate388(
                   ) {
                     vErrors =
                       vErrors === null
-                        ? validate209.errors
-                        : vErrors.concat(validate209.errors);
+                        ? validate196.errors
+                        : vErrors.concat(validate196.errors);
                     errors = vErrors.length;
                   }
                   var _valid0 = _errs9 === errors;
@@ -202,7 +202,7 @@ function validate388(
                       vErrors.push(err1);
                     }
                     errors++;
-                    validate388.errors = vErrors;
+                    validate409.errors = vErrors;
                     return false;
                   } else {
                     errors = _errs8;
@@ -273,7 +273,7 @@ function validate388(
                         vErrors.push(err3);
                       }
                       errors++;
-                      validate388.errors = vErrors;
+                      validate409.errors = vErrors;
                       return false;
                     } else {
                       errors = _errs13;
@@ -296,7 +296,7 @@ function validate388(
         }
       }
     } else {
-      validate388.errors = [
+      validate409.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -307,7 +307,7 @@ function validate388(
       return false;
     }
   }
-  validate388.errors = vErrors;
+  validate409.errors = vErrors;
   return errors === 0;
 }
-export { validate388 };
+export { validate409 };
