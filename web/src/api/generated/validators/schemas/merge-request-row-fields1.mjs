@@ -3,9 +3,10 @@ import { func0 } from "../runtime.mjs";
 import { validate257 } from "./named-upstream-id.mjs";
 import { validate260 } from "./coverage.mjs";
 import { validate25 } from "./checkpoint-id-dto.mjs";
+import { validate265 } from "./focused-launch.mjs";
+import { validate71 } from "./host-provider-dto.mjs";
 import { validate147 } from "./git-sha-dto.mjs";
-import { validate69 } from "./merge-request-iid-dto.mjs";
-function validate790(
+function validate803(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -67,7 +68,7 @@ function validate790(
             vErrors.push(err1);
           }
           errors++;
-          validate790.errors = vErrors;
+          validate803.errors = vErrors;
           return false;
         } else {
           errors = _errs2;
@@ -138,7 +139,7 @@ function validate790(
               vErrors.push(err3);
             }
             errors++;
-            validate790.errors = vErrors;
+            validate803.errors = vErrors;
             return false;
           } else {
             errors = _errs7;
@@ -158,7 +159,7 @@ function validate790(
           if (data.draft !== undefined && func0.call(data, "draft")) {
             const _errs11 = errors;
             if (typeof data.draft !== "boolean") {
-              validate790.errors = [
+              validate803.errors = [
                 {
                   instancePath: instancePath + "/draft",
                   schemaPath: "#/properties/draft/type",
@@ -230,7 +231,7 @@ function validate790(
                   vErrors.push(err5);
                 }
                 errors++;
-                validate790.errors = vErrors;
+                validate803.errors = vErrors;
                 return false;
               } else {
                 errors = _errs14;
@@ -248,26 +249,26 @@ function validate790(
             }
             if (valid0) {
               if (
-                data.focusedRunId !== undefined &&
-                func0.call(data, "focusedRunId")
+                data.focusedLaunch !== undefined &&
+                func0.call(data, "focusedLaunch")
               ) {
-                let data4 = data.focusedRunId;
+                let data4 = data.focusedLaunch;
                 const _errs18 = errors;
                 const _errs19 = errors;
                 let valid4 = false;
                 const _errs20 = errors;
                 if (
-                  !validate25(data4, {
-                    instancePath: instancePath + "/focusedRunId",
+                  !validate265(data4, {
+                    instancePath: instancePath + "/focusedLaunch",
                     parentData: data,
-                    parentDataProperty: "focusedRunId",
+                    parentDataProperty: "focusedLaunch",
                     rootData,
                   })
                 ) {
                   vErrors =
                     vErrors === null
-                      ? validate25.errors
-                      : vErrors.concat(validate25.errors);
+                      ? validate265.errors
+                      : vErrors.concat(validate265.errors);
                   errors = vErrors.length;
                 }
                 var _valid3 = _errs20 === errors;
@@ -276,8 +277,8 @@ function validate790(
                   const _errs21 = errors;
                   if (data4 !== null) {
                     const err6 = {
-                      instancePath: instancePath + "/focusedRunId",
-                      schemaPath: "#/properties/focusedRunId/anyOf/1/type",
+                      instancePath: instancePath + "/focusedLaunch",
+                      schemaPath: "#/properties/focusedLaunch/anyOf/1/type",
                       keyword: "type",
                       params: { type: "null" },
                     };
@@ -293,8 +294,8 @@ function validate790(
                 }
                 if (!valid4) {
                   const err7 = {
-                    instancePath: instancePath + "/focusedRunId",
-                    schemaPath: "#/properties/focusedRunId/anyOf",
+                    instancePath: instancePath + "/focusedLaunch",
+                    schemaPath: "#/properties/focusedLaunch/anyOf",
                     keyword: "anyOf",
                     params: {},
                   };
@@ -304,7 +305,7 @@ function validate790(
                     vErrors.push(err7);
                   }
                   errors++;
-                  validate790.errors = vErrors;
+                  validate803.errors = vErrors;
                   return false;
                 } else {
                   errors = _errs19;
@@ -322,26 +323,26 @@ function validate790(
               }
               if (valid0) {
                 if (
-                  data.fullMrReviewedSha !== undefined &&
-                  func0.call(data, "fullMrReviewedSha")
+                  data.focusedProvider !== undefined &&
+                  func0.call(data, "focusedProvider")
                 ) {
-                  let data5 = data.fullMrReviewedSha;
+                  let data5 = data.focusedProvider;
                   const _errs23 = errors;
                   const _errs24 = errors;
                   let valid5 = false;
                   const _errs25 = errors;
                   if (
-                    !validate147(data5, {
-                      instancePath: instancePath + "/fullMrReviewedSha",
+                    !validate71(data5, {
+                      instancePath: instancePath + "/focusedProvider",
                       parentData: data,
-                      parentDataProperty: "fullMrReviewedSha",
+                      parentDataProperty: "focusedProvider",
                       rootData,
                     })
                   ) {
                     vErrors =
                       vErrors === null
-                        ? validate147.errors
-                        : vErrors.concat(validate147.errors);
+                        ? validate71.errors
+                        : vErrors.concat(validate71.errors);
                     errors = vErrors.length;
                   }
                   var _valid4 = _errs25 === errors;
@@ -350,9 +351,8 @@ function validate790(
                     const _errs26 = errors;
                     if (data5 !== null) {
                       const err8 = {
-                        instancePath: instancePath + "/fullMrReviewedSha",
-                        schemaPath:
-                          "#/properties/fullMrReviewedSha/anyOf/1/type",
+                        instancePath: instancePath + "/focusedProvider",
+                        schemaPath: "#/properties/focusedProvider/anyOf/1/type",
                         keyword: "type",
                         params: { type: "null" },
                       };
@@ -368,8 +368,8 @@ function validate790(
                   }
                   if (!valid5) {
                     const err9 = {
-                      instancePath: instancePath + "/fullMrReviewedSha",
-                      schemaPath: "#/properties/fullMrReviewedSha/anyOf",
+                      instancePath: instancePath + "/focusedProvider",
+                      schemaPath: "#/properties/focusedProvider/anyOf",
                       keyword: "anyOf",
                       params: {},
                     };
@@ -379,7 +379,7 @@ function validate790(
                       vErrors.push(err9);
                     }
                     errors++;
-                    validate790.errors = vErrors;
+                    validate803.errors = vErrors;
                     return false;
                   } else {
                     errors = _errs24;
@@ -397,43 +397,155 @@ function validate790(
                 }
                 if (valid0) {
                   if (
-                    data.hasAgentQuestions !== undefined &&
-                    func0.call(data, "hasAgentQuestions")
+                    data.focusedReportReviewedSha !== undefined &&
+                    func0.call(data, "focusedReportReviewedSha")
                   ) {
+                    let data6 = data.focusedReportReviewedSha;
                     const _errs28 = errors;
-                    if (typeof data.hasAgentQuestions !== "boolean") {
-                      validate790.errors = [
-                        {
-                          instancePath: instancePath + "/hasAgentQuestions",
-                          schemaPath: "#/properties/hasAgentQuestions/type",
+                    const _errs29 = errors;
+                    let valid6 = false;
+                    const _errs30 = errors;
+                    if (
+                      !validate147(data6, {
+                        instancePath:
+                          instancePath + "/focusedReportReviewedSha",
+                        parentData: data,
+                        parentDataProperty: "focusedReportReviewedSha",
+                        rootData,
+                      })
+                    ) {
+                      vErrors =
+                        vErrors === null
+                          ? validate147.errors
+                          : vErrors.concat(validate147.errors);
+                      errors = vErrors.length;
+                    }
+                    var _valid5 = _errs30 === errors;
+                    valid6 = valid6 || _valid5;
+                    if (!valid6) {
+                      const _errs31 = errors;
+                      if (data6 !== null) {
+                        const err10 = {
+                          instancePath:
+                            instancePath + "/focusedReportReviewedSha",
+                          schemaPath:
+                            "#/properties/focusedReportReviewedSha/anyOf/1/type",
                           keyword: "type",
-                          params: { type: "boolean" },
-                        },
-                      ];
+                          params: { type: "null" },
+                        };
+                        if (vErrors === null) {
+                          vErrors = [err10];
+                        } else {
+                          vErrors.push(err10);
+                        }
+                        errors++;
+                      }
+                      var _valid5 = _errs31 === errors;
+                      valid6 = valid6 || _valid5;
+                    }
+                    if (!valid6) {
+                      const err11 = {
+                        instancePath:
+                          instancePath + "/focusedReportReviewedSha",
+                        schemaPath:
+                          "#/properties/focusedReportReviewedSha/anyOf",
+                        keyword: "anyOf",
+                        params: {},
+                      };
+                      if (vErrors === null) {
+                        vErrors = [err11];
+                      } else {
+                        vErrors.push(err11);
+                      }
+                      errors++;
+                      validate803.errors = vErrors;
                       return false;
+                    } else {
+                      errors = _errs29;
+                      if (vErrors !== null) {
+                        if (_errs29) {
+                          vErrors.length = _errs29;
+                        } else {
+                          vErrors = null;
+                        }
+                      }
                     }
                     var valid0 = _errs28 === errors;
                   } else {
                     var valid0 = true;
                   }
                   if (valid0) {
-                    if (data.iid !== undefined && func0.call(data, "iid")) {
-                      const _errs30 = errors;
+                    if (
+                      data.focusedRunId !== undefined &&
+                      func0.call(data, "focusedRunId")
+                    ) {
+                      let data7 = data.focusedRunId;
+                      const _errs33 = errors;
+                      const _errs34 = errors;
+                      let valid7 = false;
+                      const _errs35 = errors;
                       if (
-                        !validate69(data.iid, {
-                          instancePath: instancePath + "/iid",
+                        !validate25(data7, {
+                          instancePath: instancePath + "/focusedRunId",
                           parentData: data,
-                          parentDataProperty: "iid",
+                          parentDataProperty: "focusedRunId",
                           rootData,
                         })
                       ) {
                         vErrors =
                           vErrors === null
-                            ? validate69.errors
-                            : vErrors.concat(validate69.errors);
+                            ? validate25.errors
+                            : vErrors.concat(validate25.errors);
                         errors = vErrors.length;
                       }
-                      var valid0 = _errs30 === errors;
+                      var _valid6 = _errs35 === errors;
+                      valid7 = valid7 || _valid6;
+                      if (!valid7) {
+                        const _errs36 = errors;
+                        if (data7 !== null) {
+                          const err12 = {
+                            instancePath: instancePath + "/focusedRunId",
+                            schemaPath:
+                              "#/properties/focusedRunId/anyOf/1/type",
+                            keyword: "type",
+                            params: { type: "null" },
+                          };
+                          if (vErrors === null) {
+                            vErrors = [err12];
+                          } else {
+                            vErrors.push(err12);
+                          }
+                          errors++;
+                        }
+                        var _valid6 = _errs36 === errors;
+                        valid7 = valid7 || _valid6;
+                      }
+                      if (!valid7) {
+                        const err13 = {
+                          instancePath: instancePath + "/focusedRunId",
+                          schemaPath: "#/properties/focusedRunId/anyOf",
+                          keyword: "anyOf",
+                          params: {},
+                        };
+                        if (vErrors === null) {
+                          vErrors = [err13];
+                        } else {
+                          vErrors.push(err13);
+                        }
+                        errors++;
+                        validate803.errors = vErrors;
+                        return false;
+                      } else {
+                        errors = _errs34;
+                        if (vErrors !== null) {
+                          if (_errs34) {
+                            vErrors.length = _errs34;
+                          } else {
+                            vErrors = null;
+                          }
+                        }
+                      }
+                      var valid0 = _errs33 === errors;
                     } else {
                       var valid0 = true;
                     }
@@ -445,7 +557,7 @@ function validate790(
         }
       }
     } else {
-      validate790.errors = [
+      validate803.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -456,7 +568,7 @@ function validate790(
       return false;
     }
   }
-  validate790.errors = vErrors;
+  validate803.errors = vErrors;
   return errors === 0;
 }
-export { validate790 };
+export { validate803 };

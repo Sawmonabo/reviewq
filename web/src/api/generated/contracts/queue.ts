@@ -7,6 +7,7 @@ import type {
   Disposition,
   ErrorDto,
   EventCursorDto,
+  FocusedLaunch,
   GitShaDto,
   HostProviderDto,
   MergeRequestIidDto,
@@ -124,6 +125,9 @@ export interface MergeRequestRow {
   coverage: Coverage | null;
   draft: boolean;
   focusSessionKey: SessionKeyDto | null;
+  focusedLaunch: FocusedLaunch | null;
+  focusedProvider: HostProviderDto | null;
+  focusedReportReviewedSha: GitShaDto | null;
   focusedRunId: RunIdDto | null;
   fullMrReviewedSha: GitShaDto | null;
   hasAgentQuestions: boolean;
@@ -289,6 +293,9 @@ export interface RunCard {
   coverage: Coverage | null;
   draft: boolean;
   focusSessionKey: SessionKeyDto | null;
+  focusedLaunch: FocusedLaunch | null;
+  focusedProvider: HostProviderDto | null;
+  focusedReportReviewedSha: GitShaDto | null;
   focusedRunId: RunIdDto | null;
   fullMrReviewedSha: GitShaDto | null;
   hasAgentQuestions: boolean;

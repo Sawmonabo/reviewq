@@ -3,7 +3,8 @@
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    Page, ResourceIdDto, ReviewIdDto, RunIdDto, SafeCountDto, SessionKeyDto, UtcTimestampDto,
+    MergeRequestIidDto, Page, ResourceIdDto, ReviewIdDto, RunIdDto, SafeCountDto, SessionKeyDto,
+    TicketKeyDto, UtcTimestampDto,
 };
 
 #[derive(Clone, Copy, Default, Deserialize, Serialize)]
@@ -78,6 +79,23 @@ pub struct NotificationPage {
     pub page: Page<Notification>,
     #[serde(flatten)]
     pub counts: UnreadCounts,
+    #[cfg_attr(feature = "schema", schemars(length(max = 100)))]
+    pub review_contexts: Vec<ReviewContext>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct ReviewContext {
+    pub review_id: ReviewIdDto,
+    pub title: String,
+    pub project_path: String,
+    pub iid: MergeRequestIidDto,
+    #[cfg_attr(feature = "schema", schemars(length(max = 16)))]
+    pub ticket_keys: Vec<TicketKeyDto>,
+    pub our_comments: SafeCountDto,
+    pub unread_replies: SafeCountDto,
+    pub personal_approval: Option<bool>,
 }
 
 #[derive(Debug, Serialize)]

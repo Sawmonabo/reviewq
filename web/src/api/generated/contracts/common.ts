@@ -148,6 +148,14 @@ export interface NamedUpstreamId {
   [k: string]: unknown;
 }
 
+export interface FocusedLaunch {
+  observedEffort: string | null;
+  observedModel: string | null;
+  requestedEffort: string | null;
+  requestedModel: string | null;
+  [k: string]: unknown;
+}
+
 export interface CompactTicket {
   key: TicketKeyDto;
   title: string;

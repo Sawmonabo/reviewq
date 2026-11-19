@@ -32,6 +32,7 @@ use crate::{SqliteStore, StoreError};
 mod archive;
 mod cached;
 mod filters;
+mod focus;
 mod lookup;
 mod management;
 mod sprints;
@@ -278,7 +279,9 @@ fn overview(
         "SELECT {ITEM_COLUMNS} {ITEM_FROM} WHERE r.review_id=?1"
     ))?;
     let mut rows = statement.query([review_id.as_str()])?;
-    let item = queue_item(rows.next()?.ok_or(AppError::NotFound)?)?;
+    let mut item = queue_item(rows.next()?.ok_or(AppError::NotFound)?)?;
+    drop(rows);
+    focus::hydrate(connection, std::iter::once(&mut item))?;
 
     let (time, id) = after.as_ref().map_or((i64::MAX, "~"), |position| {
         (position.started_at_ms, position.run_id.as_str())
@@ -584,6 +587,9 @@ fn queue_item(row: &Row<'_>) -> Result<QueueItem, StoreError> {
                 .as_deref()
                 .map(parse)
                 .transpose()?,
+            focused_provider: None,
+            focused_launch: None,
+            focused_report_reviewed_sha: None,
             full_mr_reviewed_sha: row
                 .get::<_, Option<String>>(30)?
                 .as_deref()

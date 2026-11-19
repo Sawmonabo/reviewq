@@ -24,7 +24,8 @@ export async function declarationModules(generated, header, features) {
   for (const declaration of source.statements) {
     const name = declaration.name.text;
     const usedBy = dependencies.get(name);
-    const feature = features[name] ?? (name === "Contracts" ? "registry" : uniqueOwner(name, usedBy));
+    const feature =
+      features[name] ?? (name === "Contracts" ? "registry" : uniqueOwner(name, usedBy));
     if (!groups.has(feature)) {
       groups.set(feature, { file: feature, declarations: [], imports: new Map() });
     }
@@ -32,7 +33,9 @@ export async function declarationModules(generated, header, features) {
     owners.set(name, group);
     group.declarations.push(declaration);
   }
-  const modules = Array.from(groups.values()).sort((left, right) => left.file.localeCompare(right.file));
+  const modules = Array.from(groups.values()).sort((left, right) =>
+    left.file.localeCompare(right.file),
+  );
   for (const group of modules) {
     for (const declaration of group.declarations) {
       for (const name of references.get(declaration.name.text)) {
@@ -48,7 +51,8 @@ export async function declarationModules(generated, header, features) {
   return [
     [
       "contracts.ts",
-      header + modules.map(({ file }) => 'export type * from "./contracts/' + file + '.js";').join("\n"),
+      header +
+        modules.map(({ file }) => 'export type * from "./contracts/' + file + '.js";').join("\n"),
     ],
     ...modules.map(({ file, imports, declarations }) => [
       "contracts/" + file + ".ts",
@@ -83,7 +87,12 @@ function referencedFeatures(references, roots) {
     visitDefinition(root);
 
     function visitDefinition(name) {
-      if (!references.has(name) || visited.has(name) || (name !== root && Object.hasOwn(roots, name))) return;
+      if (
+        !references.has(name) ||
+        visited.has(name) ||
+        (name !== root && Object.hasOwn(roots, name))
+      )
+        return;
       visited.add(name);
       const usedBy = owners.get(name) ?? new Set();
       usedBy.add(feature);

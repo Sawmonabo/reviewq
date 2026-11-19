@@ -144,6 +144,7 @@ fn cards(
     } else {
         None
     };
+    super::focus::hydrate(db, selected.iter_mut().map(|item| &mut item.review))?;
     Ok(RunCards {
         items: selected,
         next,
