@@ -19,7 +19,6 @@ import { useResource } from "../../../hooks/useResource";
 import { safeUrl } from "../../../lib/presentation";
 import { savedValue, saveValue } from "../../../lib/view-preferences";
 import { DiscussionThread } from "../DiscussionThread";
-import { discussionStatus } from "../discussion-status";
 import { Approvals } from "./Approvals";
 import { PatchDocumentView } from "./PatchDocumentView";
 import "./changes.css";
@@ -100,8 +99,7 @@ export default function Changes({
   const picker = useRef<HTMLDetailsElement>(null);
   const filtered = (threads.data?.items ?? []).filter(
     (thread) =>
-      (!involving || thread.ourParticipation) &&
-      (status === "any" || discussionStatus(thread) === status),
+      (!involving || thread.ourParticipation) && (status === "any" || thread.resolution === status),
   );
   const anchors = file ? filtered.filter((thread) => matches(thread, file)) : [];
   const visible =

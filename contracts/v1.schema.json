@@ -2116,6 +2116,15 @@
       "title": "DisconnectSettings",
       "type": "object"
     },
+    "DiscussionResolution": {
+      "enum": [
+        "open",
+        "resolved",
+        "comment",
+        "unknown"
+      ],
+      "type": "string"
+    },
     "Disposition": {
       "enum": [
         "reviewed",
@@ -4522,6 +4531,9 @@
         "outdated": {
           "type": "boolean"
         },
+        "resolution": {
+          "$ref": "#/definitions/DiscussionResolution"
+        },
         "webUrl": {
           "type": "string"
         }
@@ -4532,6 +4544,7 @@
         "outdated",
         "webUrl",
         "ourParticipation",
+        "resolution",
         "notes"
       ],
       "type": "object"

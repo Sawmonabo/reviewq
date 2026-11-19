@@ -1,7 +1,6 @@
 import { lazy, Suspense, useState } from "react";
 import type { PatchDiscussion } from "../../api/generated/contracts";
 import { formatTime, safeUrl } from "../../lib/presentation";
-import { discussionStatus } from "./discussion-status";
 
 const Markdown = lazy(() =>
   import("../../components/markdown/MarkdownContent").then((module) => ({
@@ -22,7 +21,7 @@ export function DiscussionThread({
   const line = thread.anchor?.newLine ?? thread.anchor?.oldLine;
   if (!first) return null;
   const status = { open: "Open", resolved: "Resolved", comment: "Comment", unknown: "Discussion" }[
-    discussionStatus(thread)
+    thread.resolution
   ];
   return (
     <details className="patch-discussion" onToggle={(event) => setOpen(event.currentTarget.open)}>

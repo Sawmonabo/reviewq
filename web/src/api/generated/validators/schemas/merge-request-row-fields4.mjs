@@ -3,7 +3,7 @@ import { func0 } from "../runtime.mjs";
 import { validate295 } from "./compact-ticket.mjs";
 import { validate127 } from "./safe-count-dto.mjs";
 import { validate232 } from "./utc-timestamp-dto.mjs";
-function validate831(
+function validate833(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -40,7 +40,7 @@ function validate831(
               }
             }
           } else {
-            validate831.errors = [
+            validate833.errors = [
               {
                 instancePath: instancePath + "/tickets",
                 schemaPath: "#/properties/tickets/type",
@@ -59,7 +59,7 @@ function validate831(
         if (data.title !== undefined && func0.call(data, "title")) {
           const _errs4 = errors;
           if (typeof data.title !== "string") {
-            validate831.errors = [
+            validate833.errors = [
               {
                 instancePath: instancePath + "/title",
                 schemaPath: "#/properties/title/type",
@@ -122,7 +122,7 @@ function validate831(
         }
       }
     } else {
-      validate831.errors = [
+      validate833.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -133,7 +133,7 @@ function validate831(
       return false;
     }
   }
-  validate831.errors = vErrors;
+  validate833.errors = vErrors;
   return errors === 0;
 }
-export { validate831 };
+export { validate833 };

@@ -4,7 +4,7 @@ import { validate147 } from "./git-sha-dto.mjs";
 import { validate295 } from "./compact-ticket.mjs";
 import { validate127 } from "./safe-count-dto.mjs";
 import { validate232 } from "./utc-timestamp-dto.mjs";
-function validate1110(
+function validate1112(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -62,7 +62,7 @@ function validate1110(
                 }
               }
             } else {
-              validate1110.errors = [
+              validate1112.errors = [
                 {
                   instancePath: instancePath + "/tickets",
                   schemaPath: "#/properties/tickets/type",
@@ -81,7 +81,7 @@ function validate1110(
           if (data.title !== undefined && func0.call(data, "title")) {
             const _errs5 = errors;
             if (typeof data.title !== "string") {
-              validate1110.errors = [
+              validate1112.errors = [
                 {
                   instancePath: instancePath + "/title",
                   schemaPath: "#/properties/title/type",
@@ -148,7 +148,7 @@ function validate1110(
         }
       }
     } else {
-      validate1110.errors = [
+      validate1112.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -159,7 +159,7 @@ function validate1110(
       return false;
     }
   }
-  validate1110.errors = vErrors;
+  validate1112.errors = vErrors;
   return errors === 0;
 }
-export { validate1110 };
+export { validate1112 };

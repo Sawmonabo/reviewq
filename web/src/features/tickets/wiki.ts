@@ -64,17 +64,20 @@ function wikiCode(body: string, options: string | undefined) {
 }
 
 function wikiProse(source: string) {
-  return source
-    .replace(/^h([1-6])\.[ \t]+/gm, (_match, level: string) => `${"#".repeat(Number(level))} `)
-    .replace(
-      /^([*#]+)[ \t]+/gm,
-      (_match, prefix: string) =>
-        `${"  ".repeat(prefix.length - 1)}${prefix.endsWith("#") ? "1." : "-"} `,
-    )
-    .replace(/\[([^|\]\r\n]+)\|(https?:[^\]\r\n]+)\]/g, "[$1]($2)")
-    .replace(/\{\{([^}\r\n]+)\}\}/g, "`$1`")
-    .replace(/^\|\|([^\r\n]*)\|\|$/gm, (_match, cells: string) => {
-      const values = cells.split("||");
-      return `| ${values.join(" | ")} |\n| ${values.map(() => "---").join(" | ")} |`;
-    });
+  return (
+    source
+      // A hash-only marker may be a Markdown heading. Preserve that spelling.
+      .replace(
+        /^((?=[*#]*\*)[*#]+)[ \t]+/gm,
+        (_match, prefix: string) =>
+          `${"  ".repeat(prefix.length - 1)}${prefix.endsWith("#") ? "1." : "-"} `,
+      )
+      .replace(/^h([1-6])\.[ \t]+/gm, (_match, level: string) => `${"#".repeat(Number(level))} `)
+      .replace(/\[([^|\]\r\n]+)\|(https?:[^\]\r\n]+)\]/g, "[$1]($2)")
+      .replace(/\{\{([^}\r\n]+)\}\}/g, "`$1`")
+      .replace(/^\|\|([^\r\n]*)\|\|$/gm, (_match, cells: string) => {
+        const values = cells.split("||");
+        return `| ${values.join(" | ")} |\n| ${values.map(() => "---").join(" | ")} |`;
+      })
+  );
 }

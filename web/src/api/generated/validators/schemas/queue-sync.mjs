@@ -2,8 +2,8 @@
 import { func0 } from "../runtime.mjs";
 import { validate405 } from "./error-dto.mjs";
 import { validate232 } from "./utc-timestamp-dto.mjs";
-import { validate850 } from "./mode.mjs";
-function validate846(
+import { validate852 } from "./mode.mjs";
+function validate848(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -28,7 +28,7 @@ function validate846(
         ((data.error === undefined || !func0.call(data, "error")) &&
           (missing0 = "error"))
       ) {
-        validate846.errors = [
+        validate848.errors = [
           {
             instancePath,
             schemaPath: "#/required",
@@ -41,7 +41,7 @@ function validate846(
         if (data.active !== undefined && func0.call(data, "active")) {
           const _errs1 = errors;
           if (typeof data.active !== "boolean") {
-            validate846.errors = [
+            validate848.errors = [
               {
                 instancePath: instancePath + "/active",
                 schemaPath: "#/properties/active/type",
@@ -110,7 +110,7 @@ function validate846(
                 vErrors.push(err1);
               }
               errors++;
-              validate846.errors = vErrors;
+              validate848.errors = vErrors;
               return false;
             } else {
               errors = _errs4;
@@ -184,7 +184,7 @@ function validate846(
                   vErrors.push(err3);
                 }
                 errors++;
-                validate846.errors = vErrors;
+                validate848.errors = vErrors;
                 return false;
               } else {
                 errors = _errs9;
@@ -258,7 +258,7 @@ function validate846(
                     vErrors.push(err5);
                   }
                   errors++;
-                  validate846.errors = vErrors;
+                  validate848.errors = vErrors;
                   return false;
                 } else {
                   errors = _errs14;
@@ -278,7 +278,7 @@ function validate846(
                 if (data.mode !== undefined && func0.call(data, "mode")) {
                   const _errs18 = errors;
                   if (
-                    !validate850(data.mode, {
+                    !validate852(data.mode, {
                       instancePath: instancePath + "/mode",
                       parentData: data,
                       parentDataProperty: "mode",
@@ -287,8 +287,8 @@ function validate846(
                   ) {
                     vErrors =
                       vErrors === null
-                        ? validate850.errors
-                        : vErrors.concat(validate850.errors);
+                        ? validate852.errors
+                        : vErrors.concat(validate852.errors);
                     errors = vErrors.length;
                   }
                   var valid0 = _errs18 === errors;
@@ -299,7 +299,7 @@ function validate846(
                   if (data.stale !== undefined && func0.call(data, "stale")) {
                     const _errs19 = errors;
                     if (typeof data.stale !== "boolean") {
-                      validate846.errors = [
+                      validate848.errors = [
                         {
                           instancePath: instancePath + "/stale",
                           schemaPath: "#/properties/stale/type",
@@ -320,7 +320,7 @@ function validate846(
         }
       }
     } else {
-      validate846.errors = [
+      validate848.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -331,7 +331,7 @@ function validate846(
       return false;
     }
   }
-  validate846.errors = vErrors;
+  validate848.errors = vErrors;
   return errors === 0;
 }
-export { validate846 };
+export { validate848 };

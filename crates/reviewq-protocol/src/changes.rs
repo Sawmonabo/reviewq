@@ -79,7 +79,18 @@ pub struct PatchDiscussion {
     pub outdated: bool,
     pub web_url: String,
     pub our_participation: bool,
+    pub resolution: DiscussionResolution,
     pub notes: Vec<PatchDiscussionNote>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub enum DiscussionResolution {
+    Open,
+    Resolved,
+    Comment,
+    Unknown,
 }
 
 #[derive(Debug, Serialize)]

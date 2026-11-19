@@ -6,7 +6,7 @@ import { validate25 } from "./checkpoint-id-dto.mjs";
 import { validate265 } from "./focused-launch.mjs";
 import { validate71 } from "./host-provider-dto.mjs";
 import { validate147 } from "./git-sha-dto.mjs";
-function validate807(
+function validate809(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -68,7 +68,7 @@ function validate807(
             vErrors.push(err1);
           }
           errors++;
-          validate807.errors = vErrors;
+          validate809.errors = vErrors;
           return false;
         } else {
           errors = _errs2;
@@ -139,7 +139,7 @@ function validate807(
               vErrors.push(err3);
             }
             errors++;
-            validate807.errors = vErrors;
+            validate809.errors = vErrors;
             return false;
           } else {
             errors = _errs7;
@@ -159,7 +159,7 @@ function validate807(
           if (data.draft !== undefined && func0.call(data, "draft")) {
             const _errs11 = errors;
             if (typeof data.draft !== "boolean") {
-              validate807.errors = [
+              validate809.errors = [
                 {
                   instancePath: instancePath + "/draft",
                   schemaPath: "#/properties/draft/type",
@@ -231,7 +231,7 @@ function validate807(
                   vErrors.push(err5);
                 }
                 errors++;
-                validate807.errors = vErrors;
+                validate809.errors = vErrors;
                 return false;
               } else {
                 errors = _errs14;
@@ -305,7 +305,7 @@ function validate807(
                     vErrors.push(err7);
                   }
                   errors++;
-                  validate807.errors = vErrors;
+                  validate809.errors = vErrors;
                   return false;
                 } else {
                   errors = _errs19;
@@ -379,7 +379,7 @@ function validate807(
                       vErrors.push(err9);
                     }
                     errors++;
-                    validate807.errors = vErrors;
+                    validate809.errors = vErrors;
                     return false;
                   } else {
                     errors = _errs24;
@@ -458,7 +458,7 @@ function validate807(
                         vErrors.push(err11);
                       }
                       errors++;
-                      validate807.errors = vErrors;
+                      validate809.errors = vErrors;
                       return false;
                     } else {
                       errors = _errs29;
@@ -533,7 +533,7 @@ function validate807(
                           vErrors.push(err13);
                         }
                         errors++;
-                        validate807.errors = vErrors;
+                        validate809.errors = vErrors;
                         return false;
                       } else {
                         errors = _errs34;
@@ -557,7 +557,7 @@ function validate807(
         }
       }
     } else {
-      validate807.errors = [
+      validate809.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -568,7 +568,7 @@ function validate807(
       return false;
     }
   }
-  validate807.errors = vErrors;
+  validate809.errors = vErrors;
   return errors === 0;
 }
-export { validate807 };
+export { validate809 };

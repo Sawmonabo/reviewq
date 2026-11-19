@@ -12,6 +12,8 @@ import type {
 
 export type ApprovalWarning = "approvals_unavailable" | "rules_unavailable";
 
+export type DiscussionResolution = "open" | "resolved" | "comment" | "unknown";
+
 export type PatchRevisionDto = string;
 
 export type PatchAvailability =
@@ -84,6 +86,7 @@ export interface PatchDiscussion {
   notes: PatchDiscussionNote[];
   ourParticipation: boolean;
   outdated: boolean;
+  resolution: DiscussionResolution;
   webUrl: string;
   [k: string]: unknown;
 }
