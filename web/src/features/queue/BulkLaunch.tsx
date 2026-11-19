@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { readOverview } from "../../api/client";
 import type {
   HostProviderDto,
+  ReviewOverview,
   RunPrepareRequest,
   RunStartRequest,
 } from "../../api/generated/contracts";
@@ -36,6 +37,7 @@ type Attempt = {
 type Props = {
   readonly mode: LaunchMode;
   readonly targets: readonly LaunchTarget[];
+  readonly openOverview: ReviewOverview | null | undefined;
   readonly settingsRevision: number;
   readonly onSettings: () => void;
   readonly onClose: () => void;
@@ -52,6 +54,7 @@ export default function BulkLaunch(props: Props) {
 function LaunchEditor({
   mode,
   targets: initialTargets,
+  openOverview,
   settingsRevision,
   onSettings,
   onClose,
@@ -112,6 +115,17 @@ function LaunchEditor({
     item.kind === "mr" && item.mrState === "open" ? [item] : [],
   );
   const active = targets[0] ?? (pickMode && !search ? choices[0] : undefined);
+  const knownUrl =
+    targets[0]?.webUrl ??
+    (openOverview && openOverview.review.reviewId === active?.reviewId
+      ? openOverview.webUrl
+      : undefined);
+  const missingUrlId = register && !knownUrl ? active?.reviewId : undefined;
+  const registrationUrl = useResource(`registration-url:${missingUrlId ?? ""}`, async (signal) => {
+    if (!missingUrlId) return { data: undefined, cursor: "" };
+    const { data, cursor } = await readOverview(missingUrlId, signal);
+    return { data: data.webUrl, cursor };
+  });
   const catalogs = useResource(
     `catalog:${settingsRevision}:${provider}:${JSON.stringify(targets.map((target) => target.reviewId))}:${pickMode}`,
     async (signal) => {
@@ -167,7 +181,7 @@ function LaunchEditor({
       });
       const overview = await readOverview(tracked.data.reviewId, controller.signal);
       if (controller.signal.aborted) return;
-      selectTarget(overview.data.review);
+      selectTarget({ ...overview.data.review, webUrl: overview.data.webUrl });
       setUrl("");
       pick.retry();
     } catch (error) {
@@ -471,11 +485,15 @@ function LaunchEditor({
             </select>
           </label>
         )}
+        {registrationUrl.error && (
+          <Notice retry={registrationUrl.retry}>{registrationUrl.error}</Notice>
+        )}
         {register && (
           <RegistrationGuide
             key={JSON.stringify([provider, active?.reviewId])}
             provider={provider}
-            target={active && `${active.projectPath}!${active.iid}`}
+            webUrl={knownUrl ?? registrationUrl.data}
+            selected={Boolean(active)}
             advanced={advanced}
             nativeId={nativeId}
             onAdvanced={setAdvanced}

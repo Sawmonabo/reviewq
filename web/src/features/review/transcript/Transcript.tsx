@@ -593,10 +593,7 @@ export function Transcript({
                       </span>
                       <strong>{role}</strong>
                       {timestamp && (
-                        <HistoryTimestamp
-                          timestamp={timestamp}
-                          delivery={!row.entry?.timestamp}
-                        />
+                        <HistoryTimestamp timestamp={timestamp} delivery={!row.entry?.timestamp} />
                       )}
                       {row.delivery && (
                         <span className="badge">{readable(row.delivery.state)}</span>

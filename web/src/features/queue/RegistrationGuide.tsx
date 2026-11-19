@@ -4,7 +4,8 @@ import { submits } from "../../lib/submit-key";
 
 export function RegistrationGuide({
   provider,
-  target,
+  webUrl,
+  selected,
   advanced,
   nativeId,
   onAdvanced,
@@ -13,7 +14,8 @@ export function RegistrationGuide({
   disabled,
 }: {
   readonly provider: HostProviderDto;
-  readonly target: string | undefined;
+  readonly webUrl: string | undefined;
+  readonly selected: boolean;
   readonly advanced: boolean;
   readonly nativeId: string;
   readonly onAdvanced: (open: boolean) => void;
@@ -23,7 +25,7 @@ export function RegistrationGuide({
 }) {
   const [copy, setCopy] = useState<"copied" | "manual">();
   const agent = provider === "claude" ? "Claude Code" : "Codex";
-  const command = target ? `${provider === "claude" ? "/reviewq" : "$reviewq"} ${target}` : "";
+  const command = webUrl ? `${provider === "claude" ? "/reviewq" : "$reviewq"} ${webUrl}` : "";
 
   async function copyCommand() {
     try {
@@ -42,14 +44,14 @@ export function RegistrationGuide({
           readOnly
           rows={2}
           value={command}
-          placeholder="Choose a merge request"
+          placeholder={selected ? "Waiting for the merge request URL" : "Choose a merge request"}
         />
       </label>
       <button
         type="button"
         className="registration-copy"
         aria-live="polite"
-        disabled={!target || disabled}
+        disabled={!command || disabled}
         onClick={() => void copyCommand()}
       >
         {copy === "copied" ? "Command copied" : "Copy command"}
@@ -79,7 +81,7 @@ export function RegistrationGuide({
             maxLength={200}
             onChange={(event) => onNativeId(event.currentTarget.value)}
             placeholder="Paste the session ID"
-            disabled={disabled || !target}
+            disabled={disabled || !selected}
           />
         </label>
       </details>

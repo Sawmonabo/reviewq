@@ -5,6 +5,7 @@ export type LaunchTarget = {
   readonly title: string;
   readonly projectPath: string;
   readonly iid: string;
+  readonly webUrl?: string;
   readonly sourceSha: string;
   readonly tickets: readonly CompactTicket[];
 };
