@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 use sha2::Digest;
 
 mod bundle;
+mod claude;
 mod files;
 pub(crate) mod paths;
 use crate::{runtime_settings, service};
@@ -29,6 +30,8 @@ pub(crate) struct Release {
     pub store: i64,
     unit: String,
     skill: Option<PathBuf>,
+    #[serde(default)]
+    claude: Option<claude::Registration>,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -75,8 +78,8 @@ pub(crate) fn active(paths: &Paths) -> Result<Release, Failure> {
 pub(crate) async fn install(bundle_path: &Path) -> Result<(), Failure> {
     let bundle = Bundle::read(bundle_path)?;
     let paths = Paths::resolve()?;
-    let settings = runtime_settings::Settings::load(&paths.profile, false)?;
     let _lock = paths.lock()?;
+    let settings = runtime_settings::Settings::load(&paths.profile, false)?;
     let mut inventory = load(&paths)?;
     if inventory.removing {
         return Err("Finish the interrupted uninstall before installing a release.".into());
@@ -86,6 +89,9 @@ pub(crate) async fn install(bundle_path: &Path) -> Result<(), Failure> {
     let unit = service::unit(&paths, &bundle.root.join("packaging/reviewq.service.in"))?;
     let skill = native_command(&paths, "codex", settings.codex_command.as_deref())
         .map(|_| paths.codex_home.join("skills/reviewq"));
+    let claude = native_command(&paths, "claude", settings.claude_command.as_deref())
+        .map(|executable| claude::plan(&paths, &bundle, executable))
+        .transpose()?;
     let next = Release {
         id: bundle.id.clone(),
         binary: bundle
@@ -99,7 +105,11 @@ pub(crate) async fn install(bundle_path: &Path) -> Result<(), Failure> {
         store: bundle.manifest.store,
         unit: bundle::hex(&sha2::Sha256::digest(&unit)),
         skill,
+        claude,
     };
+    if let Some(host) = &next.claude {
+        claude::validate(&paths, &bundle, host).await?;
+    }
     let old = inventory.active.as_ref();
     let pending = match inventory.pending.as_ref() {
         Some(pending) if pending.next == next => pending,
@@ -109,6 +119,7 @@ pub(crate) async fn install(bundle_path: &Path) -> Result<(), Failure> {
         None => {
             files::preflight(&paths, old, None)?;
             files::check_new_skill(old, &next)?;
+            claude::preflight(&paths, old, &next, false).await?;
             let (was_enabled, was_running) = service::state().await?;
             let store_id = if was_running {
                 let previous = old.ok_or("Preserved an unrelated running user service.")?;
@@ -140,6 +151,7 @@ pub(crate) async fn install(bundle_path: &Path) -> Result<(), Failure> {
     let expected_store = pending.store_id.clone();
     let old = inventory.active.as_ref();
     files::preflight(&paths, old, Some(&next))?;
+    claude::preflight(&paths, old, &next, true).await?;
     files::stage(&paths, &bundle)?;
     let result = activate(&paths, old, &next, &unit, expected_store.as_deref()).await;
     let identity = match result {
@@ -170,8 +182,10 @@ pub(crate) async fn install(bundle_path: &Path) -> Result<(), Failure> {
             "Codex unavailable. Set codexCommand in runtime.json and retry install to enable its skill."
         );
     }
-    if native_command(&paths, "claude", settings.claude_command.as_deref()).is_none() {
+    if next.claude.is_none() {
         println!("Claude Code unavailable. Set claudeCommand in runtime.json and retry install.");
+    } else {
+        println!("Use /reload-plugins in open Claude Code sessions to load this release.");
     }
     Ok(())
 }
@@ -191,6 +205,7 @@ async fn activate(
         return Err("The retained data changed during activation.".into());
     }
     files::set(paths, old, next, unit)?;
+    claude::activate(paths, old, next).await?;
     service::reload().await?;
     service::unit_location(paths).await?;
     service::switch("enable").await?;
@@ -218,6 +233,11 @@ async fn rollback(paths: &Paths, previous: &Release, pending: &Activation) -> Re
     }
     probe(paths, previous.store).await?;
     files::set(paths, Some(&pending.next), previous, &unit)?;
+    if previous.claude.is_some() {
+        claude::activate(paths, Some(&pending.next), previous).await?;
+    } else {
+        claude::remove(paths, &pending.next).await?;
+    }
     service::reload().await?;
     service::switch(if pending.was_enabled {
         "enable"
@@ -259,6 +279,7 @@ pub(crate) async fn uninstall() -> Result<(), Failure> {
     if service::state().await?.0 {
         service::switch("disable").await?;
     }
+    claude::remove(&paths, active).await?;
     let conflicts = files::remove(&paths, active, &inventory.known)?;
     service::reload().await?;
     if !conflicts.is_empty() {

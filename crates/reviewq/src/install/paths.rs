@@ -71,7 +71,7 @@ impl Paths {
         ensure_dir(parent(&self.unit)?, false)
     }
 
-    pub(super) fn lock(&self) -> Result<File, Failure> {
+    pub(crate) fn lock(&self) -> Result<File, Failure> {
         ensure_dir(&self.state, true)?;
         let path = self.state.join("install.lock");
         let file = OpenOptions::new()

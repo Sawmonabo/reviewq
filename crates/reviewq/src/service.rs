@@ -122,6 +122,7 @@ pub(crate) async fn ready(
 
 pub(crate) async fn operate(start: bool) -> Result<(), Failure> {
     let paths = Paths::resolve()?;
+    let _lock = paths.lock()?;
     let record = install::active(&paths)?;
     manager().await?;
     unit_location(&paths).await?;
@@ -202,9 +203,18 @@ pub(crate) async fn capture(
     args: &[&str],
     allow_failure: bool,
 ) -> Result<(bool, String), Failure> {
+    let mut command = Command::new(program);
+    command.args(args);
+    output(command, allow_failure).await
+}
+
+pub(crate) async fn output(
+    mut command: Command,
+    allow_failure: bool,
+) -> Result<(bool, String), Failure> {
+    let program = command.as_std().get_program().to_os_string();
     tokio::time::timeout(Duration::from_secs(25), async {
-        let mut child = Command::new(program)
-            .args(args)
+        let mut child = command
             .stdin(Stdio::null())
             .stderr(Stdio::null())
             .stdout(Stdio::piped())
@@ -223,7 +233,7 @@ pub(crate) async fn capture(
         }
         let success = child.wait().await?.success();
         if !success && !allow_failure {
-            let command = Path::new(program)
+            let command = Path::new(&program)
                 .file_name()
                 .unwrap_or_default()
                 .to_string_lossy();
