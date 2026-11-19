@@ -564,6 +564,7 @@ export function App() {
                     overview={overview.data}
                     run={selectedRun}
                     session={firstPageSession ?? activeSession.data ?? undefined}
+                    requestedRun={runId}
                     requestedSession={sessionKey}
                     selectionError={
                       selected.error ?? (firstPageSession ? undefined : activeSession.error)

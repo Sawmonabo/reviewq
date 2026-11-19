@@ -47,6 +47,7 @@ type Props = {
   readonly overview: ReviewOverview;
   readonly run: RunDetail | undefined;
   readonly session: SessionSummary | undefined;
+  readonly requestedRun: string | undefined;
   readonly requestedSession: string | undefined;
   readonly onDefaultRun: () => void;
   readonly selectionError: string | undefined;
@@ -68,6 +69,7 @@ export default function ReviewDrawer({
   run,
   tab,
   session,
+  requestedRun,
   requestedSession,
   onDefaultRun,
   selectionError,
@@ -559,7 +561,11 @@ export default function ReviewDrawer({
       </header>
       <div
         id="review-tabpanel"
-        key={scrollKey ?? activeTab}
+        key={
+          activeTab === "overview"
+            ? `${review.reviewId}/${requestedRun ?? ""}/overview`
+            : (scrollKey ?? activeTab)
+        }
         ref={scrollerRef}
         role="tabpanel"
         aria-labelledby={`review-tab-${activeTab}`}
