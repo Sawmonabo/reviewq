@@ -10,7 +10,7 @@ use crate::events::Snapshot;
 use crate::history::{FilePosition, HistorySession};
 use crate::workflow::ReadyWorkflow;
 
-use super::{DeliveryClaim, HostActivity, ObservedInput};
+use super::{ClaudeContext, DeliveryClaim, HostActivity, ObservedInput};
 
 pub struct ClaudeHeartbeat {
     pub generation: String,
@@ -132,6 +132,8 @@ pub enum ClaudeClassicEvent {
 }
 
 pub trait ClaudeStore: Send + Sync {
+    fn pending_claude_launch(&self, context: ClaudeContext) -> AppFuture<'_, bool>;
+
     fn record_claude_classic(
         &self,
         lead: LeadTarget,

@@ -84,6 +84,7 @@ pub trait NativeHost: Send + Sync {
 
 /// Resolves the companion's identity against the service-selected Claude profile.
 pub trait ClaudeCompanion: Send + Sync {
+    fn accepts_profile(&self, profile: &AbsolutePath) -> bool;
     fn prove(&self, context: ClaudeContext) -> AppFuture<'_, HostProof>;
     fn prove_child(
         &self,

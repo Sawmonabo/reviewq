@@ -76,6 +76,9 @@ impl Claude {
 }
 
 impl ClaudeCompanion for Claude {
+    fn accepts_profile(&self, profile: &AbsolutePath) -> bool {
+        profile == &self.profile
+    }
     fn prove_child(
         &self,
         root: HistorySession,

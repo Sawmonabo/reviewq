@@ -1,3 +1,5 @@
+use std::os::unix::ffi::OsStrExt;
+
 use reviewq_app::access::{Actor, AppError, AppFuture};
 use reviewq_app::events::{ResourceKey, Snapshot};
 use reviewq_app::hosts::{ClaudeHeartbeat, ClaudeHeartbeatResult, ClaudeStore};
@@ -19,6 +21,32 @@ mod delivery;
 mod workflow;
 
 impl ClaudeStore for SqliteStore {
+    fn pending_claude_launch(
+        &self,
+        context: reviewq_app::hosts::ClaudeContext,
+    ) -> AppFuture<'_, bool> {
+        Box::pin(async move {
+            self.read(move |db| {
+                Ok(db.query_row(
+                    "SELECT EXISTS(SELECT 1 FROM launch_attempts l JOIN reviews r USING(review_id)
+                     JOIN configured_projects p ON p.origin=r.origin AND p.project_id=r.project_id
+                     WHERE l.id=?1 AND l.provider='claude' AND l.checkout=?2
+                       AND l.state IN ('pending','confirmed') AND l.created_at_ms>?3
+                       AND (l.profile IS NULL OR l.profile=?4))",
+                    params![
+                        context.session_id.as_str(),
+                        context.cwd.as_path().as_os_str().as_bytes(),
+                        now_ms()?.saturating_sub(30_000),
+                        context.profile.as_path().as_os_str().as_bytes()
+                    ],
+                    |row| row.get(0),
+                )?)
+            })
+            .await
+            .map_err(StoreError::app)
+        })
+    }
+
     fn record_claude_classic(
         &self,
         lead: LeadTarget,

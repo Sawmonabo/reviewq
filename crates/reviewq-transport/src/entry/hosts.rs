@@ -120,6 +120,7 @@ impl ClaudeCommand {
 struct ClaudeRegistration {
     protocol_version: u16,
     registration: Option<ReviewSelection>,
+    pending_launch: bool,
 }
 
 pub(super) async fn claude_registration(
@@ -131,6 +132,11 @@ pub(super) async fn claude_registration(
     protocol(command.protocol_version)?;
     if command.target.is_some() {
         return Err(AppError::InvalidRequest.into());
+    }
+    let context = command.context()?;
+    let companion = entry.claude.as_ref().ok_or(AppError::Unavailable)?;
+    if !companion.accepts_profile(&context.profile) {
+        return Err(AppError::Forbidden.into());
     }
     let registered = match claude::verified_context(&entry, command).await {
         Ok((lead, _)) => Some(
@@ -149,10 +155,13 @@ pub(super) async fn claude_registration(
         ),
         None => (None, *entry.commits.borrow()),
     };
+    let pending_launch =
+        registration.is_none() && entry.store.pending_claude_launch(context).await?;
     Ok(Json(Success {
         data: ClaudeRegistration {
             protocol_version: 1,
             registration,
+            pending_launch,
         },
         cursor: EventCursorDto::new(cursor.get()).ok_or(AppError::Internal)?,
     })

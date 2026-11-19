@@ -26,21 +26,67 @@ pub(crate) enum JobKind {
     Unknown,
 }
 
+pub(super) fn native_command(executable: &Path, profile: &Path, cwd: &Path) -> Command {
+    let mut command = Command::new(executable);
+    command
+        .env_clear()
+        .current_dir(cwd)
+        .env("CLAUDE_CONFIG_DIR", profile)
+        .kill_on_drop(true)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null());
+    for key in [
+        "HOME",
+        "PATH",
+        "USER",
+        "LOGNAME",
+        "SHELL",
+        "LANG",
+        "LC_ALL",
+        "LC_CTYPE",
+        "TERM",
+        "COLORTERM",
+        "TMPDIR",
+        "XDG_RUNTIME_DIR",
+        "XDG_CONFIG_HOME",
+        "XDG_STATE_HOME",
+        "XDG_CACHE_HOME",
+        "XDG_DATA_HOME",
+        "SSH_AUTH_SOCK",
+        "WSL_DISTRO_NAME",
+        "WSL_INTEROP",
+        "DISPLAY",
+        "WAYLAND_DISPLAY",
+        "DBUS_SESSION_BUS_ADDRESS",
+        "HTTP_PROXY",
+        "HTTPS_PROXY",
+        "ALL_PROXY",
+        "NO_PROXY",
+        "http_proxy",
+        "https_proxy",
+        "all_proxy",
+        "no_proxy",
+        "SSL_CERT_FILE",
+        "SSL_CERT_DIR",
+        "NODE_EXTRA_CA_CERTS",
+    ] {
+        if let Some(value) = std::env::var_os(key) {
+            command.env(key, value);
+        }
+    }
+    command
+}
+
 pub(crate) async fn claude_job(
     executable: &Path,
     profile: &Path,
     cwd: &Path,
     session_id: &str,
 ) -> Result<Option<Job>, AppError> {
-    let mut child = Command::new(executable)
+    let mut child = native_command(executable, profile, cwd)
         .args(["agents", "--json", "--all", "--cwd"])
         .arg(cwd)
-        .current_dir(cwd)
-        .env("CLAUDE_CONFIG_DIR", profile)
-        .kill_on_drop(true)
         .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
         .spawn()
         .map_err(|_| AppError::Unavailable)?;
     let output = child.stdout.take().ok_or(AppError::Unavailable)?;

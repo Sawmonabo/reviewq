@@ -1,5 +1,4 @@
 use std::path::{Path, PathBuf};
-use std::process::Stdio;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -49,18 +48,7 @@ impl ClaudeCli {
     }
 
     fn command(&self, checkout: &Path) -> Command {
-        let mut command = Command::new(&self.executable);
-        command
-            .current_dir(checkout)
-            .env("CLAUDE_CONFIG_DIR", self.profile.as_path())
-            .env_remove("CLAUDECODE")
-            .env_remove("CLAUDE_CODE_SESSION_ID")
-            .env_remove("CLAUDE_CODE_CHILD_SESSION")
-            .env_remove("REVIEWQ_CLAUDE_LINKED")
-            .stdout(Stdio::piped())
-            .stderr(Stdio::null())
-            .kill_on_drop(true);
-        command
+        super::jobs::native_command(&self.executable, self.profile.as_path(), checkout)
     }
 
     fn plugin_args(&self, command: &mut Command) {
