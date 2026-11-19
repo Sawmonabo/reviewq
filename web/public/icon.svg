@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
+  <rect width="32" height="32" rx="8" fill="#111215"/>
+  <defs>
+    <g id="reviewq-glyph">
+      <path d="M22.5 17V12a6.5 6.5 0 0 0-13 0v7a6.5 6.5 0 0 0 6.5 6.5h2" fill="none" stroke="#e8e9ed" stroke-width="3" stroke-linecap="square"/>
+      <path d="m17 19 7 7" fill="none" stroke="#8faeff" stroke-width="3" stroke-linecap="square"/>
+    </g>
+  </defs>
+  <path d="M4.5 24V8H9a4.5 4.5 0 0 1 0 9H4.5m4.5 0 5.5 7" fill="none" stroke="#e8e9ed" stroke-width="2.25" stroke-linecap="square"/>
+  <use href="#reviewq-glyph" transform="translate(11.5 4.5) scale(.72)"/>
+</svg>
