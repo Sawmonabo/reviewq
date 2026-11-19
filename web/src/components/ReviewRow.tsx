@@ -1,7 +1,12 @@
 import type { ReactNode } from "react";
+import type { HostProviderDto } from "../api/generated/contracts";
 import type { MergeRequestRow, UnmatchedTicket } from "../api/generated/contracts/queue";
-import { formatActivityTime, providerLabel, reviewReasonLabel } from "../lib/presentation";
+import { formatActivityTime, reviewReasonLabel } from "../lib/presentation";
 import { Icon } from "./Icon";
+
+export function providerLabel(provider: HostProviderDto): string {
+  return provider === "claude" ? "Claude Code" : "Codex";
+}
 
 export function ReviewRow({
   row,

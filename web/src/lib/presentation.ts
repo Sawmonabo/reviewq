@@ -22,10 +22,6 @@ export function readable(value: string): string {
   return words.charAt(0).toUpperCase() + words.slice(1);
 }
 
-export function providerLabel(provider: HostProviderDto): string {
-  return provider === "claude" ? "Claude Code" : "Codex";
-}
-
 const reviewReasons: Readonly<Record<string, string>> = {
   needs_input: "Awaiting input",
   waiting_author: "Waiting on author",
@@ -73,4 +69,3 @@ export function safeUrl(value: string | null | undefined, base?: string): string
 export function describeError(error: unknown): string {
   return error instanceof Error ? error.message : "ReviewQ could not complete the request.";
 }
-import type { HostProviderDto } from "../api/generated/contracts";

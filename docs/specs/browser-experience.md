@@ -1,26 +1,30 @@
 # Browser experience
 
-A reviewer opens a team MR, reads its ticket and changes, talks to the registered lead while it works, and returns to the same passage after a reply. The first integrated build must do that with a populated queue, a long file and real provider-shaped history. Later screens use the same drawer, selected run and delivery receipts. The service owns workflow classifications, provider reads, action outcomes and accepted reports. The browser owns navigation, presentation and unsent edits.
+A reviewer opens a team MR, reads its ticket and changes, talks to the registered lead while it works, and returns to the same passage after a reply. Queue, Runs and Notifications share the review drawer, selected run and delivery receipts. The service owns workflow classifications, provider reads, action outcomes and accepted reports. The browser owns navigation, presentation and unsent edits.
 
 ## Workspace
 
-At desktop width the sidebar stays on the left. Opening an MR divides the remaining width equally between the queue and review. Each pane scrolls independently. Drag the divider, use its arrow keys, or double-click to restore equal widths. Opening another MR starts at equal widths. At phone widths review detail takes the full available width with a visible return control. Closing restores the invoking row and its offset, including after keyboard navigation.
+The sidebar shows the styled word Review followed by the Q glyph from `/icon.svg`, with **Agentic Code reviews** below. The same asset supplies the favicon and the collapsed mark. Review queue and Review runs sit below the brand, with Notifications and Settings at the bottom. Each navigation row has its own icon. The sidebar collapses through its seam handle.
+
+The workspace header shows **Your workspace**, the view heading and **New review** for Queue and Runs. Queue lays out Board, Sprint, Repo, Ownership, Author, State, Hide, Sort and Clear in one compact wrapping strip, followed by the narrower search field. At full width the Review column shows ticket and MR identity, title, provider and next-action badges. Details shows the author or ticket assignee, initials, available update time and the open affordance. At narrower pane widths, Details stacks below the review body.
+
+Opening an MR divides the desktop workspace equally between the list and review. Each pane scrolls independently. Drag the divider, use its arrow keys, or double-click to restore equal widths. Opening another MR starts at equal widths. At phone widths the navigation is horizontal and review detail takes the full available width with a visible return control. Closing restores the invoking row and its offset, including after keyboard navigation.
 
 ```text
-ReviewQ          Review queue                    ENG-41 / !27       Runs ▾  ···  ×
-                 Board ▾  Sprint ▾  Repo ▾        Retain review timestamps
-Review queue     Ownership ▾ Author ▾ ...         Overview   Agent   Findings   Changes
-Review runs      Search reviews                   ────────────────────────────────────
-                 ENG-41   Retain timestamps       Files  ·  General comments  ·  All conversations
-                 !27  Sam Lee · Author            src/clock.rs  ▾      +12  −3
-                 Working    2 comments            18  18   fn read_clock() {
-                 ──────────────────────               19 +     clock.sample()
-                 ENG-58   Improve startup                 ▾ 1 open thread
-Notifications 2  !31  Pat Kim · Author            19  20   }
+ReviewQ               Your workspace                            ENG-41 / !27        Runs ▾  ×
+Agentic Code reviews  Review queue                 New review ▾  Retain review timestamps
+                      Board ▾  Sprint ▾  Repo ▾  Ownership ▾     Overview  Agent  Findings  Changes
+Review queue          Author ▾  State ▾  Hide ▾  Sort ▾  Clear    ──────────────────────────────────
+Review runs           Search ticket or title…                    Files  ·  General comments
+                      Review                       Details       src/clock.rs ▾              +12 −3
+                      ENG-41  parser !27            SL Sam Lee    18  18   fn read_clock() {
+                      Retain review timestamps        Author        19 +     clock.sample()
+                      Codex · Lead working                            ▾  1 open thread
+Notifications 2
 Settings
 ```
 
-The queue’s first reading line identifies the ticket and MR, its second gives the title, and the last identifies the responsible person and next-action reason. In the drawer keep breadcrumb, human title, run selector and tabs above the reading area. On Agent, the selected lead and Send stay visible beside the editable draft. Use the primary button for the current task, e.g. Prepare reviews in selection mode or Send in Agent. Secondary actions belong in named menus. Counts, statuses and people come from the selected resource.
+In the drawer keep the breadcrumb, human title, run selector and tabs above the reading area. On Agent, the selected lead and Send stay visible beside the editable draft. Use the primary button for the current task, such as Prepare reviews in selection mode or Send in Agent. Secondary actions belong in named menus. Counts, statuses and people come from the selected resource.
 
 | Visual token | Implementation value and placement |
 | --- | --- |
@@ -34,13 +38,13 @@ The queue’s first reading line identifies the ticket and MR, its second gives 
 | Surface | What the reviewer can do |
 | --- | --- |
 | Review queue | Filter by board, sprint, repo, ownership, author, state, exclusions and search. Sort matching MR and ticket rows, identify the author or assignee, open a ticket with no matching MR, track an MR by URL, register an existing session or prepare one or more reviews. |
-| Review runs | Browse one card per registered MR using Awaiting input, Working, Waiting and Archived. Pick a lead, including an older one, from the drawer. Closed/merged MRs enter Archived automatically. Archive search, local-date presets/custom dates and board-qualified sprint filters combine. The queue’s Archive state narrows current discovery separately. |
-| Notifications | Switch Unread/All, expand grouped MR events, follow a target, mark individual events read/unread, dismiss them, or bulk act on captured event IDs. The sidebar badge is the unread group count. |
+| Review runs | Underlined Awaiting input, Working, Waiting and Archived tabs show stage counts above the search and one card per registered MR. Cards show the ticket or MR title, run count, next-action reason and available focused-provider, model, effort and report SHA. Label requested settings explicitly when observed settings are unavailable. Pick a lead, including an older one, from the drawer. Closed/merged MRs enter Archived automatically. Archive search, local-date presets/custom dates and board-qualified sprint filters combine. The queue’s Archive state narrows current discovery separately. |
+| Notifications | Switch Unread/All above groups that show the ticket and MR, latest update and time. Expand the group to follow the exact event, mark individual events read/unread, dismiss them, or bulk act on captured event IDs. The sidebar badge is the unread group count. |
 | Overview | Read all linked tickets, Jira comments and structured facts, MR and registration detail, the original review request, actual reported plan, model/effort and working directory. Select a ticket or lead. With no run, prepare or register one. |
 | Changes | Choose one file, read selectable unified code with both line numbers and addition/deletion markers, open a matching inline discussion, read general/earlier threads and inspect approval requirements. Filter participants and status independently of file search. |
 | Agent | Read the selected lead’s live conversation, grouped tools, plan, delivery receipts and actionable requests. Navigate confirmed user prompts, open children’s read-only Conversation and Result, return to the lead, send a follow-up or answer the exact supported request. |
 | Findings | Read an accepted immutable lead report, its finding cards, previous-thread outcomes, figures, source links and verification limits. Switch versions explicitly, jump by section and send feedback with an optional quote/reference to the report’s lead. On a current finding record a local blocking/publication disposition and its reason. Historical dispositions are read-only. |
-| Settings | Open the setup and preferences dialog from any view. Configure connections, team boards, repositories, local checkout/provider defaults, reviewer identities and automation. Return to the same workspace after save or dismissal. |
+| Settings | Open a right-hand sheet from any view. Agents appears first, followed by connections and team settings. Configure team boards, repositories, local checkout/provider defaults, reviewer identities and automation. Save or dismiss the sheet to return to the same workspace. |
 
 ### Opening and restoring a review
 

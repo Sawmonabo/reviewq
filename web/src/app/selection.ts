@@ -1,7 +1,7 @@
 import type { Tab } from "../api/generated/contracts/notifications";
 import { savedValue, saveValue } from "../lib/view-preferences";
 
-export type View = "queue" | "runs" | "notifications";
+type View = "queue" | "runs" | "notifications";
 export type Route = {
   readonly view: View;
   readonly reviewId?: string;

@@ -6,17 +6,12 @@ import { FilterSelect } from "../../components/FilterSelect";
 import { Icon } from "../../components/Icon";
 import { Pagination } from "../../components/Pagination";
 import { Empty, Loading, Notice } from "../../components/PanelState";
-import { ReviewBadges } from "../../components/ReviewRow";
+import { providerLabel, ReviewBadges } from "../../components/ReviewRow";
 import { localDateRange, presets } from "../../features/queue/archive-filters";
 import type { DatePreset } from "../../features/queue/archive-filters";
 import type { Launch, LaunchTarget, OpenReview } from "../../features/queue/types";
 import { useResource } from "../../hooks/useResource";
-import {
-  formatActivityTime,
-  providerLabel,
-  readable,
-  reviewReasonLabel,
-} from "../../lib/presentation";
+import { formatActivityTime, readable, reviewReasonLabel } from "../../lib/presentation";
 import { savedValue, saveValue } from "../../lib/view-preferences";
 import "./runs.css";
 

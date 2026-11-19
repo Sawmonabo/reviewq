@@ -33,7 +33,7 @@ export type QueueFilters = {
   readonly hideInProgress: boolean;
 };
 
-export const defaultFilters: QueueFilters = {
+const defaultFilters: QueueFilters = {
   boardId: "",
   projectId: "",
   sprint: "",
