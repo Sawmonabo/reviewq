@@ -1,6 +1,7 @@
 # Repository rules
 
 - Build ReviewQ from the tracked specifications. Preserve its user-facing appearance and working interactions, and improve concrete bugs or usability problems. Implement for a fresh installation and its own data.
+- For hot paths and durable workflows, compare designs that preserve the user’s result. Trace data ownership, copies, reads, writes, wake-ups and failure recovery in the actual callers. Prefer the simplest design that meets those needs, and distinguish an expected performance benefit from a measured one.
 - Use the [implementation roadmap](docs/plans/roadmap.md) for task ownership and the [dependency decisions](docs/dependency-decisions.md) for first-use package choices.
 - Read the [Rust rules](crates/AGENTS.md) for Cargo, crate, or dependency checker changes. Read the [web rules](web/AGENTS.md) for browser and frontend tooling changes. Apply both for cross-stack work.
 - Implement and merge small reviewed slices in the primary checkout. The lead may add one temporary ReviewQ worktree for a second independent writer. Count paused worktrees. The independent reviewer uses the existing candidate. Before dispatch and merge, compare behavior and callers on accepted main and in both writers’ committed and uncommitted changes. Assign shared functionality once.
