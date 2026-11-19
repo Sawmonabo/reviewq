@@ -9,6 +9,7 @@ import { useDraft } from "../../hooks/useDraft";
 import type { DraftStore } from "../../lib/drafts";
 import { describeError } from "../../lib/presentation";
 import { submits } from "../../lib/submit-key";
+import "./composer.css";
 
 type Attempt = {
   readonly submissionId: string;
@@ -159,75 +160,85 @@ export function Composer({
   }
 
   return (
-    <form
-      className="composer"
-      onSubmit={(event) => {
-        event.preventDefault();
-        void submit();
-      }}
-    >
-      {current && (
-        <div className="spread composer-status" role="status">
-          <span>
-            {current.receipt
-              ? labels[current.receipt.state]
-              : busy
-                ? "Submitting…"
-                : "Delivery unconfirmed"}
-            {current.error && ` · ${current.error}`}
+    <div className={send ? "feedback-composer-shell" : "agent-composer-shell"}>
+      <form
+        className="composer"
+        onSubmit={(event) => {
+          event.preventDefault();
+          void submit();
+        }}
+      >
+        {current && (
+          <div className="spread composer-status" role="status">
+            <span>
+              {current.receipt
+                ? labels[current.receipt.state]
+                : busy
+                  ? "Submitting…"
+                  : "Delivery unconfirmed"}
+              {current.error && ` · ${current.error}`}
+            </span>
+            {unconfirmed && (
+              <button type="button" disabled={busy} onClick={() => void reconcile(current, false)}>
+                Check delivery
+              </button>
+            )}
+            {!current.receipt && current.error && current.dispatch && !disabled && (
+              <button type="button" disabled={busy} onClick={() => void reconcile(current, true)}>
+                Retry same submission
+              </button>
+            )}
+          </div>
+        )}
+        {failure && <Notice>{failure}</Notice>}
+        {rejectedEdit && (
+          <Notice>
+            Draft storage full. Shorten an existing draft or free space before inserting more text.
+          </Notice>
+        )}
+        <label className="sr-only" htmlFor={input}>
+          {label}
+        </label>
+        <textarea
+          id={input}
+          value={composition ?? text}
+          rows={2}
+          placeholder={label}
+          onCompositionStart={(event) => setComposition(event.currentTarget.value)}
+          onCompositionEnd={(event) => {
+            setComposition(undefined);
+            edit(event.currentTarget.value);
+          }}
+          onChange={(event) => {
+            if (composition !== undefined) setComposition(event.currentTarget.value);
+            else edit(event.currentTarget.value);
+          }}
+          onKeyDown={(event) => {
+            if (submits(event.nativeEvent)) {
+              event.preventDefault();
+              void submit();
+            }
+          }}
+        />
+        <div className="composer-bottom">
+          <span className="composer-destination">
+            {targetLabel}
+            <span className="composer-shortcut"> · Enter to send · Shift+Enter for a new line</span>
+            {chars > MAX_MESSAGE &&
+              ` · ${chars.toLocaleString()} / ${MAX_MESSAGE.toLocaleString()} characters`}
           </span>
-          {unconfirmed && (
-            <button type="button" disabled={busy} onClick={() => void reconcile(current, false)}>
-              Check delivery
-            </button>
-          )}
-          {!current.receipt && current.error && current.dispatch && !disabled && (
-            <button type="button" disabled={busy} onClick={() => void reconcile(current, true)}>
-              Retry same submission
-            </button>
-          )}
+          <button
+            type="submit"
+            className="composer-send"
+            aria-label="Send"
+            title="Send"
+            aria-busy={busy}
+            disabled={!available}
+          >
+            <Icon name="send" size={16} />
+          </button>
         </div>
-      )}
-      {failure && <Notice>{failure}</Notice>}
-      {rejectedEdit && (
-        <Notice>
-          Draft storage full. Shorten an existing draft or free space before inserting more text.
-        </Notice>
-      )}
-      <label className="sr-only" htmlFor={input}>
-        {label}
-      </label>
-      <textarea
-        id={input}
-        value={composition ?? text}
-        rows={2}
-        placeholder={label}
-        onCompositionStart={(event) => setComposition(event.currentTarget.value)}
-        onCompositionEnd={(event) => {
-          setComposition(undefined);
-          edit(event.currentTarget.value);
-        }}
-        onChange={(event) => {
-          if (composition !== undefined) setComposition(event.currentTarget.value);
-          else edit(event.currentTarget.value);
-        }}
-        onKeyDown={(event) => {
-          if (submits(event.nativeEvent)) {
-            event.preventDefault();
-            void submit();
-          }
-        }}
-      />
-      <div className="spread">
-        <span className="meta">
-          {targetLabel}
-          {chars > MAX_MESSAGE &&
-            ` · ${chars.toLocaleString()} / ${MAX_MESSAGE.toLocaleString()} characters`}
-        </span>
-        <button type="submit" className="primary button-label" disabled={!available}>
-          <Icon name="send" size={14} /> Send
-        </button>
-      </div>
-    </form>
+      </form>
+    </div>
   );
 }

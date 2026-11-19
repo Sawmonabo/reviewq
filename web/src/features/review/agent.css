@@ -7,41 +7,85 @@
 }
 .agent-heading {
   flex: 0 0 auto;
-  padding: 9px 13px;
   border-bottom: 1px solid var(--line);
-  gap: 4px;
+  min-width: 0;
 }
-.agent-heading select {
-  max-width: min(160px, 37vw);
+.agent-meta {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  min-height: 54px;
+  padding: 13px 27px;
+  color: var(--muted);
+  font-size: 11px;
 }
-.agent-heading .quiet-button {
-  min-height: 24px;
-  padding-block: 1px;
+.agent-model {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 7px;
+  min-width: 0;
 }
-.agent-mark {
-  color: var(--link);
+.agent-model strong {
+  color: var(--text);
+  font-weight: 560;
+}
+.agent-session-menu {
+  position: relative;
+  z-index: 6;
+  flex: 0 0 auto;
+}
+.agent-session-menu > summary {
+  justify-content: center;
+  min-height: 26px;
+  padding: 4px 8px;
+  list-style: none;
+  border: 1px solid var(--strong-line);
+  border-radius: 5px;
+  cursor: pointer;
+  font-size: 10px;
+  color: var(--text);
+}
+.agent-session-options {
+  position: absolute;
+  top: calc(100% + 7px);
+  right: 0;
+  width: min(310px, 75vw);
+  max-height: min(480px, 55vh);
+  padding: 6px;
+  overflow: auto;
+  overscroll-behavior: contain;
+  border: 1px solid var(--strong-line);
+  border-radius: 8px;
+  background: var(--raised);
+  box-shadow: 0 12px 32px #0008;
+}
+.session-menu-option {
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border-color: transparent;
+  font-size: 12px;
+}
+.session-menu-option[aria-current="true"] {
+  background: var(--selected);
+}
+.session-menu-actions {
+  display: grid;
+  gap: 3px;
+  border-top: 1px solid var(--line);
+  margin-top: 4px;
+  padding-top: 4px;
+}
+.session-menu-actions details {
+  padding: 4px 9px;
 }
 .agent-deliveries {
   max-height: 30vh;
   overflow: auto;
   overscroll-behavior: contain;
-}
-.composer {
-  flex: none;
-  display: grid;
-  gap: 6px;
-  padding: 9px 13px;
-  border-top: 1px solid var(--line);
-  background: var(--canvas);
-}
-.composer textarea {
-  width: 100%;
-  min-height: 52px;
-  max-height: 24vh;
-  background: var(--surface);
-}
-.composer-status {
-  font-size: 12px;
+  margin: 8px 23px;
 }
 .native-questions {
   flex: 0 1 auto;
@@ -72,18 +116,46 @@
   position: relative;
 }
 .timeline-controls {
-  flex: none;
+  position: absolute;
+  z-index: 2;
+  inset: 7px 12px auto auto;
   display: flex;
-  flex-wrap: wrap;
   align-items: center;
-  gap: 7px;
-  padding: 6px 13px;
-  border-bottom: 1px solid var(--line);
-  color: var(--muted);
+  gap: 5px;
+  max-width: calc(100% - 24px);
+  opacity: 0;
+  transition: opacity 140ms ease;
+}
+.transcript-shell:hover .timeline-controls,
+.timeline-controls:focus-within,
+.timeline-controls.has-selection {
+  opacity: 1;
 }
 .timeline-controls button {
   min-height: 27px;
-  font-size: 12px;
+  font-size: 11px;
+}
+.timeline-jump {
+  position: absolute;
+  z-index: 2;
+  left: 50%;
+  bottom: 16px;
+  transform: translateX(-50%);
+  padding: 8px 16px;
+  border: 1px solid var(--focus);
+  border-radius: 20px;
+  background: var(--selected);
+  box-shadow: 0 4px 24px #0008;
+  font-size: 11px;
+  white-space: nowrap;
+}
+.timeline-working {
+  padding: 7px 27px 12px;
+  color: var(--muted);
+  font-size: 11px;
+}
+.transcript-shell > .notice {
+  margin: 8px 20px;
 }
 .timeline-viewport {
   flex: 1;
@@ -97,6 +169,7 @@
   position: relative;
   width: 100%;
   min-height: 34px;
+  margin: 15px 0 20px;
 }
 .timeline-entry {
   position: absolute;
@@ -106,7 +179,7 @@
   grid-template-columns: 23px minmax(0, 1fr);
   gap: 9px;
   align-items: start;
-  padding: 8px 15px;
+  padding: 8px 27px;
   min-width: 0;
 }
 .timeline-entry[aria-current="true"] {
@@ -119,8 +192,8 @@
   height: 23px;
   border-radius: 5px;
   border: 1px solid var(--line);
-  color: var(--link);
-  background: var(--raised);
+  color: var(--muted);
+  background: transparent;
 }
 .timeline-entry .message-body {
   padding: 3px 0;
@@ -187,4 +260,22 @@
 .result-panel {
   min-height: 250px;
   height: 100%;
+}
+
+@container review-detail (max-width: 470px) {
+  .agent-meta,
+  .timeline-entry {
+    padding-inline: 17px;
+  }
+  .agent-composer-shell {
+    padding-inline: 14px;
+  }
+  .composer-shortcut {
+    display: none;
+  }
+}
+@media (pointer: coarse) {
+  .timeline-controls {
+    opacity: 1;
+  }
 }

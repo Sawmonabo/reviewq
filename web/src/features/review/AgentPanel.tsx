@@ -1,5 +1,6 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { readRun } from "../../api/client";
+import type { ReactNode } from "react";
 import type { RunDetail, RunStage } from "../../api/generated/contracts";
 import type { SessionSummary } from "../../api/generated/contracts/hosts";
 import { messageHistory } from "../../api/history";
@@ -69,60 +70,48 @@ export default function AgentPanel({
     }
   }
 
+  const model = lead ? (run.launch?.observedModel ?? run.launch?.requestedModel) : null;
+  const effort = lead ? (run.launch?.observedEffort ?? run.launch?.requestedEffort) : null;
   return (
     <div className={`agent-panel ${resultOnly ? "result-panel" : ""}`}>
-      <header className="agent-heading stack">
-        <div className="spread">
-          <div className="actions">
-            <span className="agent-mark">
-              <Icon name="terminal" size={16} />
-            </span>
-            <strong>
-              {readable(session.provider)} {lead ? "lead" : "child"}
+      <header className="agent-heading">
+        <div className="agent-meta">
+          <div className="agent-model">
+            <strong className="button-label">
+              <Icon name="terminal" size={13} />
+              {readable(session.provider)}
             </strong>
-            {state && lead && (
-              <span
-                className={`badge ${state === "working" ? "green" : state === "needs_input" ? "rose" : ""}`}
+            <span aria-hidden="true">/</span>
+            <span>{model ?? "Model not reported"}</span>
+            <span aria-hidden="true">·</span>
+            <span>{effort ?? "Effort not reported"}</span>
+          </div>
+          <SessionPicker run={run} selected={session} onSession={onSession}>
+            <button type="button" className="session-menu-option" onClick={onTerminal}>
+              Open in terminal
+            </button>
+            <ReportedPlan runId={run.runId} sessionKey={session.sessionKey} />
+            {lead && (
+              <button
+                type="button"
+                className="session-menu-option"
+                aria-expanded={messages}
+                onClick={() => setMessages(!messages)}
               >
-                {readable(state)}
-              </span>
+                Delivery history
+              </button>
             )}
-          </div>
-          <div className="actions">
-            <SessionPicker run={run} selected={session} onSession={onSession} />
-            <button
-              type="button"
-              aria-label="Open selected session in terminal"
-              title="Open in terminal"
-              className="icon-button"
-              onClick={onTerminal}
-            >
-              <Icon name="external" size={14} />
-            </button>
-          </div>
-        </div>
-        <div className="actions meta">
-          <ReportedPlan runId={run.runId} sessionKey={session.sessionKey} />
-          {lead && (
-            <button
-              type="button"
-              className="quiet-button"
-              aria-expanded={messages}
-              onClick={() => setMessages(!messages)}
-            >
-              Delivery history
-            </button>
-          )}
-          {turn && (
-            <button
-              type="button"
-              disabled={busy}
-              className="quiet-button"
-              onClick={() => void stop()}
-            >
-              Interrupt
-            </button>
-          )}
+            {turn && (
+              <button
+                type="button"
+                className="session-menu-option"
+                disabled={busy}
+                onClick={() => void stop()}
+              >
+                Interrupt session
+              </button>
+            )}
+          </SessionPicker>
         </div>
         {notice && <Notice>{notice}</Notice>}
         {messages && lead && (
@@ -164,6 +153,7 @@ export default function AgentPanel({
         target={target}
         messages={cursor ? [] : (outbox.data?.items ?? [])}
         resultOnly={resultOnly}
+        working={state === "working"}
         onObservedTurn={setTurn}
       />
       {!resultOnly && (
@@ -178,9 +168,9 @@ export default function AgentPanel({
         <Composer
           store={drafts}
           target={target}
-          label="Message the lead"
+          label="Message the review agent…"
           draftLabel={`Message · ${reviewTitle}`}
-          targetLabel={`To ${readable(session.provider)} lead · ${session.nativeId.slice(0, 12)}`}
+          targetLabel="To lead review"
           draftKey={JSON.stringify(["message", run.reviewId, run.runId, run.leadSessionKey])}
           onAccepted={outbox.retry}
         />
@@ -193,12 +183,16 @@ function SessionPicker({
   run,
   selected,
   onSession,
+  children,
 }: {
   readonly run: RunDetail;
   readonly selected: SessionSummary;
   readonly onSession: Props["onSession"];
+  readonly children: ReactNode;
 }) {
   const [trail, setTrail] = useState<readonly string[]>([]);
+  const [open, setOpen] = useState(false);
+  const control = useRef<HTMLDetailsElement>(null);
   const cursor = trail.at(-1);
   const page = useResource(`session-page:${run.runId}:${cursor ?? ""}`, async (signal) => {
     if (!cursor) return { data: null, cursor: "" };
@@ -208,52 +202,96 @@ function SessionPicker({
     return { data: result.data.sessions, cursor: result.cursor };
   });
   const visible = cursor ? page.data : run.sessions;
-  const children = (visible?.items ?? []).filter((item) => item.sessionKey !== run.leadSessionKey);
-  const selectedChild = selected.sessionKey !== run.leadSessionKey;
-  const chooser =
-    selectedChild || children.length > 0 || Boolean(visible?.nextCursor) || trail.length > 0;
-  if (!chooser) return null;
+  const agents = (visible?.items ?? []).filter((item) => item.sessionKey !== run.leadSessionKey);
+  const isLead = selected.sessionKey === run.leadSessionKey;
+
+  useEffect(() => {
+    if (!open) return;
+    function dismiss(event: PointerEvent) {
+      if (
+        event.target instanceof Node &&
+        control.current &&
+        !control.current.contains(event.target)
+      )
+        control.current.open = false;
+    }
+    document.addEventListener("pointerdown", dismiss);
+    return () => document.removeEventListener("pointerdown", dismiss);
+  }, [open]);
+
+  function choose(key: string | undefined) {
+    if (control.current) control.current.open = false;
+    onSession(key);
+  }
 
   return (
-    <div className="actions">
-      <select
-        aria-label="Choose agent session"
-        value={selectedChild ? selected.sessionKey : ""}
-        onChange={(event) => onSession(event.currentTarget.value || undefined)}
-      >
-        <option value="">Lead conversation</option>
-        {selectedChild && !children.some((item) => item.sessionKey === selected.sessionKey) && (
-          <option value={selected.sessionKey}>
-            {readable(selected.provider)} child · {selected.nativeId.slice(0, 12)}
-          </option>
-        )}
-        {children.map((item) => (
-          <option key={item.sessionKey} value={item.sessionKey}>
-            {readable(item.provider)} child · {item.nativeId.slice(0, 12)}
-          </option>
-        ))}
-      </select>
-      {trail.length > 0 && (
-        <button type="button" onClick={() => setTrail(trail.slice(0, -1))}>
-          Previous agents
-        </button>
+    <details
+      className="agent-session-menu"
+      ref={control}
+      onToggle={(event) => setOpen(event.currentTarget.open)}
+      onKeyDown={(event) => {
+        if (event.key !== "Escape" || !event.currentTarget.open) return;
+        event.preventDefault();
+        event.stopPropagation();
+        event.currentTarget.open = false;
+        event.currentTarget.querySelector("summary")?.focus();
+      }}
+    >
+      <summary className="button-label">
+        <Icon name="terminal" size={11} />
+        {isLead ? "Lead agent" : "Subagent"}
+        <Icon name="chevron" size={11} />
+      </summary>
+      {open && (
+        <div className="agent-session-options">
+          <button
+            type="button"
+            className="session-menu-option"
+            aria-current={isLead || undefined}
+            onClick={() => choose(undefined)}
+          >
+            Lead review
+          </button>
+          {agents.map((item) => (
+            <button
+              type="button"
+              className="session-menu-option"
+              aria-current={item.sessionKey === selected.sessionKey || undefined}
+              key={item.sessionKey}
+              onClick={() => choose(item.sessionKey)}
+            >
+              {readable(item.provider)} subagent · {item.nativeId.slice(0, 12)}
+            </button>
+          ))}
+          {trail.length > 0 && (
+            <button
+              type="button"
+              className="session-menu-option"
+              onClick={() => setTrail(trail.slice(0, -1))}
+            >
+              Previous agents
+            </button>
+          )}
+          {visible?.nextCursor && (
+            <button
+              type="button"
+              className="session-menu-option"
+              onClick={() => {
+                if (visible.nextCursor) setTrail([...trail, visible.nextCursor]);
+              }}
+            >
+              More agents
+            </button>
+          )}
+          {cursor && page.pending && (
+            <span className="meta" role="status">
+              Loading sessions…
+            </span>
+          )}
+          {cursor && page.error && <Notice retry={page.retry}>{page.error}</Notice>}
+          <div className="session-menu-actions">{children}</div>
+        </div>
       )}
-      {visible?.nextCursor && (
-        <button
-          type="button"
-          onClick={() => {
-            if (visible.nextCursor) setTrail([...trail, visible.nextCursor]);
-          }}
-        >
-          More agents
-        </button>
-      )}
-      {cursor && page.pending && (
-        <span className="meta" role="status">
-          Loading sessions…
-        </span>
-      )}
-      {cursor && page.error && <Notice retry={page.retry}>{page.error}</Notice>}
-    </div>
+    </details>
   );
 }

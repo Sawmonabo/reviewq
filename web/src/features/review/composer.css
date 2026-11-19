@@ -1,0 +1,77 @@
+.agent-composer-shell {
+  flex: 0 0 auto;
+  padding: 12px 23px 18px;
+  background: linear-gradient(transparent, var(--canvas) 12px);
+}
+.composer {
+  display: grid;
+  gap: 6px;
+  padding: 13px 13px 10px;
+  border: 1px solid var(--strong-line);
+  border-radius: 20px;
+  background: color-mix(in srgb, var(--raised), var(--canvas) 18%);
+  box-shadow: 0 4px 22px #0002;
+}
+.composer:focus-within {
+  border-color: var(--focus);
+}
+.composer textarea {
+  display: block;
+  width: 100%;
+  min-height: 60px;
+  max-height: 140px;
+  padding: 1px 3px;
+  margin: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  field-sizing: content;
+  resize: none;
+  font-size: 13px;
+  line-height: 1.6;
+}
+.composer textarea:focus-visible {
+  outline: none;
+}
+.composer textarea::placeholder {
+  color: var(--muted);
+}
+.composer-status {
+  font-size: 12px;
+}
+.composer-bottom {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding-left: 4px;
+}
+.composer-destination {
+  min-width: 0;
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+.composer .composer-send {
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 36px;
+  height: 36px;
+  min-height: 36px;
+  margin-left: auto;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: var(--primary);
+  color: var(--primary-text);
+}
+.composer .composer-send:not(:disabled):hover {
+  background: var(--link);
+}
+@media (pointer: coarse) {
+  .composer .composer-send {
+    width: 44px;
+    height: 44px;
+  }
+}

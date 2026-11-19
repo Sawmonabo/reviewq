@@ -31,10 +31,11 @@ type Props = {
   readonly target: SessionAddress;
   readonly messages: readonly MessageHistoryItem[];
   readonly resultOnly: boolean;
+  readonly working: boolean;
   readonly onObservedTurn: (turn: string | undefined) => void;
 };
 
-export function Transcript({ target, messages, resultOnly, onObservedTurn }: Props) {
+export function Transcript({ target, messages, resultOnly, working, onObservedTurn }: Props) {
   const bookmark = `history.${target.runId}.${target.sessionKey}`;
   const [saved] = useState(() => readBookmark(bookmark));
   const [following, setFollowing] = useState(saved?.following ?? true);
@@ -294,29 +295,28 @@ export function Transcript({ target, messages, resultOnly, onObservedTurn }: Pro
       aria-label={resultOnly ? "Latest child output" : "Native conversation"}
     >
       {!resultOnly && (
-        <div className="timeline-controls">
-          <button
-            type="button"
-            disabled={!history.older || history.loading}
-            onClick={() => {
-              setFollowing(false);
-              void history.load("older");
-            }}
-          >
-            Earlier
-          </button>
-          <button
-            type="button"
-            disabled={!history.newer || history.loading}
-            onClick={() => void history.load("newer")}
-          >
-            Later
-          </button>
-          {!following || history.waiting ? (
-            <button type="button" onClick={latest}>
-              {history.waiting ? "New messages available" : "Jump to latest"}
+        <div className={`timeline-controls ${selectedText ? "has-selection" : ""}`}>
+          {history.older && (
+            <button
+              type="button"
+              disabled={!history.older || history.loading}
+              onClick={() => {
+                setFollowing(false);
+                void history.load("older");
+              }}
+            >
+              Earlier
             </button>
-          ) : null}
+          )}
+          {history.newer && (
+            <button
+              type="button"
+              disabled={!history.newer || history.loading}
+              onClick={() => void history.load("newer")}
+            >
+              Later
+            </button>
+          )}
           {selectedText && (
             <>
               <button
@@ -471,7 +471,17 @@ export function Transcript({ target, messages, resultOnly, onObservedTurn }: Pro
             })}
           </div>
         )}
+        {!resultOnly && working && !inProgress && (
+          <p className="timeline-working" role="status">
+            Working…
+          </p>
+        )}
       </div>
+      {!resultOnly && (!following || history.waiting) && (
+        <button type="button" className="timeline-jump" onClick={latest}>
+          {history.waiting ? "New messages available" : "Jump to latest"}
+        </button>
+      )}
     </section>
   );
 }
