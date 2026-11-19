@@ -7,6 +7,13 @@ CREATE TABLE review_source_signals (
     observed_at_ms INTEGER NOT NULL
 ) STRICT, WITHOUT ROWID;
 
+CREATE TABLE review_discovery_due (
+    review_id TEXT PRIMARY KEY REFERENCES review_discoveries(review_id) ON DELETE CASCADE,
+    settings_revision INTEGER NOT NULL,
+    source_sha TEXT NOT NULL,
+    next_due_at_ms INTEGER NOT NULL
+) STRICT, WITHOUT ROWID;
+
 CREATE VIEW review_active_sessions AS
     SELECT s.*, c.seen_at_ms AS companion_at_ms FROM sessions s
     LEFT JOIN claude_companions c USING (session_key)

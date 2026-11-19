@@ -2,7 +2,7 @@ use std::collections::BTreeSet;
 
 use reviewq_app::events::ResourceKey;
 use reviewq_app::sources::WorkflowSnapshot;
-use reviewq_domain::identity::{ReviewId, Revision};
+use reviewq_domain::identity::{GitSha, ReviewId, Revision};
 use reviewq_domain::review_stage::{WorkspaceEvidence, classify_review, queue_state};
 use rusqlite::functions::FunctionFlags;
 use rusqlite::{Connection, params};
@@ -83,36 +83,44 @@ pub(crate) fn observe_source(
         .flat_map(|thread| &thread.notes)
         .filter(|note| reviewers.contains(&note.author))
         .count();
+    observe_signals(
+        tx,
+        review,
+        settings,
+        &source.review.head_sha,
+        source.observed_at_ms,
+        approval,
+        Some(comments as i64),
+    )
+}
+
+pub(crate) fn observe_signals(
+    tx: &mut WriteTx<'_>,
+    review: &ReviewId,
+    settings: Revision,
+    head: &GitSha,
+    observed_at: i64,
+    approval: Option<bool>,
+    comments: Option<i64>,
+) -> Result<(), StoreError> {
     let changed = tx.sql.prepare_cached(
-        "INSERT INTO review_source_signals VALUES (?1,?2,?3,?4,?5,?6)
+        "INSERT INTO review_source_signals VALUES (?1,?2,?3,?4,coalesce(?5,0),?6)
          ON CONFLICT(review_id) DO UPDATE SET settings_revision=excluded.settings_revision,
            source_sha=excluded.source_sha,personal_approval=coalesce(excluded.personal_approval,
              CASE WHEN source_sha=excluded.source_sha AND settings_revision=excluded.settings_revision THEN personal_approval END),
-           our_comments=excluded.our_comments,observed_at_ms=excluded.observed_at_ms
+           our_comments=coalesce(?5,CASE WHEN source_sha=excluded.source_sha AND settings_revision=excluded.settings_revision THEN our_comments END,0),
+           observed_at_ms=excluded.observed_at_ms
          WHERE observed_at_ms<excluded.observed_at_ms
-           AND (settings_revision,source_sha,our_comments,
+           AND (settings_revision,source_sha,CASE WHEN ?5 IS NOT NULL THEN our_comments ELSE 0 END,
                 CASE WHEN excluded.personal_approval IS NOT NULL THEN personal_approval ELSE NULL END)
                IS DISTINCT FROM (excluded.settings_revision,excluded.source_sha,excluded.our_comments,excluded.personal_approval)"
-    )?.execute(params![review.as_str(),settings.as_sqlite_integer(),source.review.head_sha.as_str(),
-        approval,comments as i64,source.observed_at_ms])?;
+    )?.execute(params![review.as_str(),settings.as_sqlite_integer(),head.as_str(),approval,comments,observed_at])?;
     if changed != 0 {
         advance_queue(&tx.sql)?;
         tx.emit(&[
             ResourceKey::Queue,
             ResourceKey::Review(Some(review.clone())),
         ])?;
-    } else {
-        tx.sql
-            .prepare_cached(
-                "UPDATE review_source_signals SET observed_at_ms=?4
-             WHERE (review_id,settings_revision,source_sha)=(?1,?2,?3) AND observed_at_ms<?4-60000",
-            )?
-            .execute(params![
-                review.as_str(),
-                settings.as_sqlite_integer(),
-                source.review.head_sha.as_str(),
-                source.observed_at_ms
-            ])?;
     }
     Ok(())
 }

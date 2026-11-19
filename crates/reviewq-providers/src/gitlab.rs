@@ -74,6 +74,13 @@ impl ReviewSourceReader for GitLab {
         Box::pin(self.read_workflow_snapshot(identity))
     }
 
+    fn discovery_evidence(
+        &self,
+        identity: MrIdentity,
+    ) -> AppFuture<'_, reviewq_app::sources::DiscoveryEvidence> {
+        Box::pin(self.read_discovery_evidence(identity))
+    }
+
     fn trackable_review(
         &self,
         projects: Vec<ConfiguredProject>,

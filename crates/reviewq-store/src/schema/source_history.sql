@@ -1,7 +1,6 @@
 CREATE TABLE source_history_projects (
     origin TEXT NOT NULL,
     project_id INTEGER NOT NULL,
-    settings_revision INTEGER NOT NULL,
     watermark_ms INTEGER NOT NULL,
     valid INTEGER NOT NULL CHECK(valid IN (0,1)),
     PRIMARY KEY(origin, project_id)

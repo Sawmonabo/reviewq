@@ -198,26 +198,43 @@ pub(super) async fn save(
         request.draft.repositories,
         request.draft.additional_reviewer_ids,
     )?;
+    let gitlab_draft = draft(
+        dto::Provider::Gitlab,
+        dto::ConnectionDraft::Gitlab(request.draft.gitlab),
+        request.tokens.gitlab,
+    )?;
+    let jira_draft = draft(
+        dto::Provider::Jira,
+        dto::ConnectionDraft::Jira(request.draft.jira),
+        request.tokens.jira,
+    )?;
+    if let Some(reduced) = app::local_reduction(
+        entry.settings_sources.as_ref(),
+        &saved.value,
+        expected,
+        &gitlab_draft,
+        &jira_draft,
+        &workspace,
+    )? {
+        let stored = entry
+            .store
+            .reduce_workspace(actor, expected, reduced)
+            .await?;
+        entry.refresh_wakeup.notify_one();
+        return Ok(Json(view(stored)?));
+    }
     let (gitlab, jira) = tokio::try_join!(
         app::verify_connection(
             entry.settings_sources.as_ref(),
             &saved.value,
             expected,
-            draft(
-                dto::Provider::Gitlab,
-                dto::ConnectionDraft::Gitlab(request.draft.gitlab),
-                request.tokens.gitlab
-            )?
+            gitlab_draft,
         ),
         app::verify_connection(
             entry.settings_sources.as_ref(),
             &saved.value,
             expected,
-            draft(
-                dto::Provider::Jira,
-                dto::ConnectionDraft::Jira(request.draft.jira),
-                request.tokens.jira
-            )?
+            jira_draft,
         ),
     )?;
     let verified = entry
