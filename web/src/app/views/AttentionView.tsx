@@ -4,7 +4,8 @@ import type { Action } from "../../api/generated/contracts/notifications";
 import { assignNotifications, readNotifications } from "../../api/workspace";
 import { Empty, Loading, Notice } from "../../components/PanelState";
 import { useResource } from "../../hooks/useResource";
-import { describeError, formatTime, readable } from "../../lib/presentation";
+import { describeError, formatActivityTime, readable } from "../../lib/presentation";
+import "./attention.css";
 
 export function AttentionView({
   onOpen,
@@ -89,8 +90,8 @@ export function AttentionView({
 
   return (
     <>
-      <div className="filter-stack">
-        <div className="actions" aria-label="Inbox view">
+      <div className="inbox-summary">
+        <div className="inbox-filters" aria-label="Notification view">
           <button
             type="button"
             aria-pressed={mode === "unread"}
@@ -105,25 +106,13 @@ export function AttentionView({
             disabled={busy}
             onClick={() => changeMode("all")}
           >
-            All updates
+            All
           </button>
-          <span className="meta">
-            {page.data?.unreadEventCount ?? "—"} unread updates · {page.data?.unreadMrCount ?? "—"}{" "}
-            reviews
-          </span>
         </div>
-      </div>
-      {notice && <Notice>{notice}</Notice>}
-      {page.error && <Notice retry={page.retry}>{page.error}</Notice>}
-      {page.pending && <Loading label="Loading inbox…" />}
-      {page.data && !groups.length && (
-        <Empty title={mode === "unread" ? "You’re caught up" : "No notifications yet"} />
-      )}
-      {groups.length > 0 && (
-        <div className="selection-bar actions">
+        <div className="inbox-toolbar">
           {frozen ? (
             <>
-              <strong>{frozen.length} selected</strong>
+              <span>{frozen.length} selected</span>
               <button
                 type="button"
                 disabled={busy || !frozen.length}
@@ -157,68 +146,137 @@ export function AttentionView({
               </button>
             </>
           ) : (
-            <button
-              type="button"
-              onClick={() => {
-                const displayed = [...byId.keys()];
-                setEligible(displayed);
-                setFrozen(displayed);
-              }}
-            >
-              Select displayed updates
-            </button>
+            <>
+              {page.data && (
+                <span>
+                  {mode === "unread" ? page.data.unreadMrCount : groups.length} MRs ·{" "}
+                  {mode === "unread" ? page.data.unreadEventCount : byId.size} notifications
+                </span>
+              )}
+              {groups.length > 0 && (
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => {
+                    setEligible([...byId.keys()]);
+                    setFrozen([]);
+                  }}
+                >
+                  Select
+                </button>
+              )}
+            </>
           )}
         </div>
+      </div>
+      {notice && <Notice>{notice}</Notice>}
+      {page.error && <Notice retry={page.retry}>{page.error}</Notice>}
+      {page.pending && <Loading label="Loading inbox…" />}
+      {page.data && !groups.length && (
+        <Empty title={mode === "unread" ? "You’re caught up" : "No notifications yet"} />
       )}
       <ul className="inbox-list">
         {groups.map(([reviewId, items]) => {
           const latest = items[0];
           if (!latest) return null;
           const unread = items.filter((item) => !item.readAt).length;
+          const mrUpdates = items.filter((item) => item.source === "gitlab").length;
+          const agentUpdates = items.length - mrUpdates;
+          const updates = [
+            mrUpdates > 0 && `${mrUpdates} MR ${mrUpdates === 1 ? "update" : "updates"}`,
+            agentUpdates > 0 &&
+              `${agentUpdates} agent ${agentUpdates === 1 ? "update" : "updates"}`,
+          ]
+            .filter(Boolean)
+            .join(" · ");
+          const selectable = items
+            .filter((item) => eligible.includes(item.id))
+            .map((item) => item.id);
+          const marked = frozen?.filter((id) => selectable.includes(id)) ?? [];
           return (
-            <li key={reviewId} className="surface-card inbox-group">
-              <details>
-                <summary>
-                  <span
-                    className={`inbox-dot ${unread ? "unread" : ""}`}
-                    aria-label={unread ? "Unread" : "Read"}
-                  />
-                  <strong>{latest.label}</strong>
-                  <span className="meta">
-                    {items.length} {items.length === 1 ? "update" : "updates"} ·{" "}
-                    <time dateTime={latest.occurredAt}>{formatTime(latest.occurredAt)}</time>
+            <li
+              key={reviewId}
+              className="inbox-group"
+              data-selected={marked.length > 0 || undefined}
+            >
+              {frozen && (
+                <button
+                  className="inbox-select-group"
+                  type="button"
+                  role="checkbox"
+                  aria-checked={
+                    marked.length === 0
+                      ? false
+                      : marked.length === selectable.length
+                        ? true
+                        : "mixed"
+                  }
+                  disabled={busy || !selectable.length}
+                  onClick={() =>
+                    setFrozen(
+                      marked.length === selectable.length
+                        ? frozen.filter((id) => !selectable.includes(id))
+                        : [...new Set([...frozen, ...selectable])],
+                    )
+                  }
+                >
+                  <span className="row-checkbox" aria-hidden="true">
+                    {marked.length === 0 ? "" : marked.length === selectable.length ? "✓" : "−"}
                   </span>
+                  Select MR
+                </button>
+              )}
+              <button type="button" className="inbox-open" onClick={() => onOpen(latest)}>
+                <div className="inbox-meta">
+                  <span className="inbox-source">{readable(latest.source)}</span>
+                  <span className={unread ? "inbox-unread" : "inbox-source"}>
+                    {unread ? `${unread} unread` : "Read"}
+                  </span>
+                </div>
+                <strong>{latest.label}</strong>
+                <div className="inbox-meta inbox-caption">
+                  <span>{updates}</span>
+                  <time dateTime={latest.occurredAt}>{formatActivityTime(latest.occurredAt)}</time>
+                </div>
+              </button>
+              <details className="inbox-items">
+                <summary>
+                  View {items.length} {items.length === 1 ? "update" : "updates"}
                 </summary>
                 <ul className="inbox-events">
                   {items.map((item) => (
                     <li key={item.id}>
-                      <div className="actions">
-                        {frozen && (
-                          <input
-                            type="checkbox"
-                            aria-label={`Select ${item.label}`}
-                            disabled={busy || !eligible.includes(item.id)}
-                            checked={frozen.includes(item.id)}
-                            onChange={(event) =>
-                              setFrozen(
-                                event.currentTarget.checked
-                                  ? [...frozen, item.id]
-                                  : frozen.filter((id) => id !== item.id),
-                              )
-                            }
-                          />
-                        )}
-                        <button type="button" className="quiet-button" onClick={() => onOpen(item)}>
-                          {item.label}
-                        </button>
-                        <span className="badge">{readable(item.source)}</span>
-                      </div>
-                      <span className="meta">
-                        <time dateTime={item.occurredAt}>{formatTime(item.occurredAt)}</time> ·{" "}
-                        {item.readAt ? "Read" : "Unread"}
-                      </span>
-                      <div className="actions">
+                      {frozen && (
+                        <input
+                          type="checkbox"
+                          aria-label={`Select ${item.label}`}
+                          disabled={busy || !eligible.includes(item.id)}
+                          checked={frozen.includes(item.id)}
+                          onChange={(event) =>
+                            setFrozen(
+                              event.currentTarget.checked
+                                ? [...frozen, item.id]
+                                : frozen.filter((id) => id !== item.id),
+                            )
+                          }
+                        />
+                      )}
+                      <button
+                        type="button"
+                        className="inbox-event-open"
+                        onClick={() => onOpen(item)}
+                      >
+                        <span>
+                          {readable(item.source)} · {readable(item.kind)}
+                        </span>
+                        <strong>{item.label}</strong>
+                        <time dateTime={item.occurredAt}>
+                          {formatActivityTime(item.occurredAt)} · {item.readAt ? "Read" : "Unread"}
+                        </time>
+                      </button>
+                      <div className="actions inbox-event-actions">
                         <button
+                          className="quiet-button"
                           disabled={busy}
                           type="button"
                           onClick={() => void assign(item.readAt ? "unread" : "read", [item.id])}
@@ -226,6 +284,7 @@ export function AttentionView({
                           {item.readAt ? "Mark unread" : "Mark read"}
                         </button>
                         <button
+                          className="quiet-button"
                           disabled={busy}
                           type="button"
                           onClick={() => void assign("dismiss", [item.id])}
