@@ -85,7 +85,46 @@ pub struct DiscussionNote {
     pub resolved: bool,
 }
 
+#[derive(Debug)]
+pub struct ApprovalView {
+    pub head: GitSha,
+    pub observed_at_ms: i64,
+    pub personal_approval: Option<bool>,
+    pub approvals: Option<ApprovalFacts>,
+    pub rules: Option<Vec<ApprovalRule>>,
+}
+
+#[derive(Debug)]
+pub struct ApprovalFacts {
+    pub approved: Option<bool>,
+    pub required: Option<u32>,
+    pub left: Option<u32>,
+    pub approvers: Vec<Approver>,
+}
+
+#[derive(Debug)]
+pub struct Approver {
+    pub id: u64,
+    pub username: Option<String>,
+    pub approved_at_ms: Option<i64>,
+}
+
+#[derive(Debug)]
+pub struct ApprovalRule {
+    pub id: u64,
+    pub name: String,
+    pub approved: bool,
+    pub required: u32,
+}
+
 pub trait ChangeSource: Send + Sync {
+    fn approvals(
+        &self,
+        source: MrIdentity,
+        expected_head: Option<GitSha>,
+        additional_reviewers: Vec<u64>,
+    ) -> AppFuture<'_, ApprovalView>;
+
     fn files(
         &self,
         source: MrIdentity,

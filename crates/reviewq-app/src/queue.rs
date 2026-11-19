@@ -63,6 +63,12 @@ impl SelectedLead {
 pub trait ReviewLookup: Send + Sync {
     fn review_by_mr(&self, actor: Actor, mr: MrIdentity) -> AppFuture<'_, ReviewId>;
 
+    fn authorized_source(
+        &self,
+        actor: Actor,
+        review: ReviewId,
+    ) -> AppFuture<'_, Snapshot<(Revision, MrIdentity)>>;
+
     fn registered_session(
         &self,
         actor: Actor,

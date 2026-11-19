@@ -77,6 +77,12 @@ import type {
   TrackReviewResponse,
 } from "./queue.js";
 
+import type {
+  ApprovalViewResponse,
+  PatchDiscussionsResponse,
+  PatchFileIndexResponse,
+} from "./changes.js";
+
 import type { CurrentActionResponse } from "./actions.js";
 
 import type {
@@ -85,11 +91,6 @@ import type {
   HistoryPageResponse,
   HistoryPlanResponse,
 } from "./history.js";
-
-import type {
-  PatchDiscussionsResponse,
-  PatchFileIndexResponse,
-} from "./changes.js";
 
 import type { RunDetailResponse, TerminalResponse } from "./hosts.js";
 
@@ -116,6 +117,7 @@ export interface Contracts {
   SendMessageRequest: SendMessageRequest;
   TestConnection: TestConnection;
   TrackReviewRequest: TrackReviewRequest;
+  ApprovalViewResponse: ApprovalViewResponse;
   CatalogResponse: CatalogResponse;
   CurrentActionResponse: CurrentActionResponse;
   DeliveryReceiptResponse: DeliveryReceiptResponse;

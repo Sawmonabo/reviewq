@@ -6,8 +6,11 @@ import type {
   PageCursorDto,
   ReviewIdDto,
   SafeCountDto,
+  UpstreamIdDto,
   UtcTimestampDto,
 } from "./common.js";
+
+export type ApprovalWarning = "approvals_unavailable" | "rules_unavailable";
 
 export type PatchRevisionDto = string;
 
@@ -17,6 +20,46 @@ export type PatchAvailability =
 export type FileIdDto = string;
 
 export type PatchETagDto = string;
+
+export interface ApprovalViewResponse {
+  cursor: EventCursorDto;
+  data: ApprovalView;
+  [k: string]: unknown;
+}
+
+export interface ApprovalView {
+  approvals: ApprovalFacts | null;
+  observedAt: UtcTimestampDto;
+  personalApproval: boolean | null;
+  reviewId: ReviewIdDto;
+  rules: ApprovalRule[] | null;
+  sourceSha: GitShaDto;
+  warnings: ApprovalWarning[];
+  [k: string]: unknown;
+}
+
+export interface ApprovalFacts {
+  approved: boolean | null;
+  approvers: Approver[];
+  left: SafeCountDto | null;
+  required: SafeCountDto | null;
+  [k: string]: unknown;
+}
+
+export interface Approver {
+  approvedAt: UtcTimestampDto | null;
+  id: UpstreamIdDto;
+  username: string | null;
+  [k: string]: unknown;
+}
+
+export interface ApprovalRule {
+  approved: boolean;
+  id: UpstreamIdDto;
+  name: string;
+  required: SafeCountDto;
+  [k: string]: unknown;
+}
 
 export interface PatchDiscussionsResponse {
   cursor: EventCursorDto;

@@ -31,6 +31,7 @@ pub struct GitLab {
     headers: header::HeaderMap,
     patches: changes::Leases,
     lease: Option<SourceLease>,
+    account: Option<u64>,
 }
 
 impl ReviewSourceReader for GitLab {
@@ -176,6 +177,7 @@ impl GitLab {
             headers,
             patches: changes::Leases::new(profile),
             lease: None,
+            account: None,
         })
     }
 
@@ -188,6 +190,11 @@ impl GitLab {
 
     pub(crate) fn with_lease(mut self, lease: SourceLease) -> Self {
         self.lease = Some(lease);
+        self
+    }
+
+    pub(crate) fn with_account(mut self, actor: u64) -> Self {
+        self.account = Some(actor);
         self
     }
 

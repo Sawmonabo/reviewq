@@ -60,7 +60,19 @@ impl ConnectionSources for SourceAccounts {
             return Err(AppError::InvalidRequest);
         };
         let token = saved.token.as_ref().ok_or(AppError::Unauthorized)?;
-        Ok(Arc::new(self.gitlab(origin, token)?.with_lease(lease)))
+        let account = saved
+            .account
+            .identity
+            .id
+            .parse::<u64>()
+            .ok()
+            .filter(|id| (1..=i64::MAX as u64).contains(id))
+            .ok_or(AppError::Conflict)?;
+        Ok(Arc::new(
+            self.gitlab(origin, token)?
+                .with_account(account)
+                .with_lease(lease),
+        ))
     }
 
     fn ticket_source(

@@ -18,6 +18,179 @@
       ],
       "type": "string"
     },
+    "ApprovalFacts": {
+      "properties": {
+        "approved": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "approvers": {
+          "items": {
+            "$ref": "#/definitions/Approver"
+          },
+          "type": "array"
+        },
+        "left": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SafeCountDto"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "required": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SafeCountDto"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "approved",
+        "required",
+        "left",
+        "approvers"
+      ],
+      "type": "object"
+    },
+    "ApprovalRule": {
+      "properties": {
+        "approved": {
+          "type": "boolean"
+        },
+        "id": {
+          "$ref": "#/definitions/UpstreamIdDto"
+        },
+        "name": {
+          "type": "string"
+        },
+        "required": {
+          "$ref": "#/definitions/SafeCountDto"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "approved",
+        "required"
+      ],
+      "type": "object"
+    },
+    "ApprovalView": {
+      "properties": {
+        "approvals": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ApprovalFacts"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "observedAt": {
+          "$ref": "#/definitions/UtcTimestampDto"
+        },
+        "personalApproval": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "reviewId": {
+          "$ref": "#/definitions/ReviewIdDto"
+        },
+        "rules": {
+          "items": {
+            "$ref": "#/definitions/ApprovalRule"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "sourceSha": {
+          "$ref": "#/definitions/GitShaDto"
+        },
+        "warnings": {
+          "items": {
+            "$ref": "#/definitions/ApprovalWarning"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "reviewId",
+        "sourceSha",
+        "observedAt",
+        "personalApproval",
+        "approvals",
+        "rules",
+        "warnings"
+      ],
+      "type": "object"
+    },
+    "ApprovalViewResponse": {
+      "description": "The resource and event head from the same authorized snapshot.",
+      "properties": {
+        "cursor": {
+          "$ref": "#/definitions/EventCursorDto"
+        },
+        "data": {
+          "$ref": "#/definitions/ApprovalView"
+        }
+      },
+      "required": [
+        "data",
+        "cursor"
+      ],
+      "title": "ApprovalViewResponse",
+      "type": "object"
+    },
+    "ApprovalWarning": {
+      "enum": [
+        "approvals_unavailable",
+        "rules_unavailable"
+      ],
+      "type": "string"
+    },
+    "Approver": {
+      "properties": {
+        "approvedAt": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/UtcTimestampDto"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "id": {
+          "$ref": "#/definitions/UpstreamIdDto"
+        },
+        "username": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "username",
+        "approvedAt"
+      ],
+      "type": "object"
+    },
     "ArtifactStats": {
       "properties": {
         "byteLength": {
@@ -6461,6 +6634,7 @@
     }
   },
   "x-reviewq-features": {
+    "ApprovalViewResponse": "changes",
     "CatalogRequest": "settings",
     "CatalogResponse": "settings",
     "CurrentActionResponse": "actions",
@@ -6545,6 +6719,7 @@
       "TrackReviewRequest": "#/definitions/TrackReviewRequest"
     },
     "responses": {
+      "ApprovalViewResponse": "#/definitions/ApprovalViewResponse",
       "CatalogResponse": "#/definitions/CatalogResponse",
       "CurrentActionResponse": "#/definitions/CurrentActionResponse",
       "DeliveryReceiptResponse": "#/definitions/DeliveryReceiptResponse",

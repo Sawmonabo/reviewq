@@ -2,9 +2,9 @@
 import { func0 } from "../runtime.mjs";
 import { validate25 } from "./checkpoint-id-dto.mjs";
 import { validate111 } from "./git-sha-dto.mjs";
-import { validate209 } from "./utc-timestamp-dto.mjs";
-import { validate300 } from "./result-kind.mjs";
-function validate296(
+import { validate196 } from "./utc-timestamp-dto.mjs";
+import { validate321 } from "./result-kind.mjs";
+function validate317(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -27,7 +27,7 @@ function validate296(
         ((data.completedAt === undefined || !func0.call(data, "completedAt")) &&
           (missing0 = "completedAt"))
       ) {
-        validate296.errors = [
+        validate317.errors = [
           {
             instancePath,
             schemaPath: "#/required",
@@ -112,7 +112,7 @@ function validate296(
                 vErrors.push(err1);
               }
               errors++;
-              validate296.errors = vErrors;
+              validate317.errors = vErrors;
               return false;
             } else {
               errors = _errs3;
@@ -135,7 +135,7 @@ function validate296(
             ) {
               const _errs7 = errors;
               if (
-                !validate209(data.completedAt, {
+                !validate196(data.completedAt, {
                   instancePath: instancePath + "/completedAt",
                   parentData: data,
                   parentDataProperty: "completedAt",
@@ -144,8 +144,8 @@ function validate296(
               ) {
                 vErrors =
                   vErrors === null
-                    ? validate209.errors
-                    : vErrors.concat(validate209.errors);
+                    ? validate196.errors
+                    : vErrors.concat(validate196.errors);
                 errors = vErrors.length;
               }
               var valid0 = _errs7 === errors;
@@ -156,7 +156,7 @@ function validate296(
               if (data.kind !== undefined && func0.call(data, "kind")) {
                 const _errs8 = errors;
                 if (
-                  !validate300(data.kind, {
+                  !validate321(data.kind, {
                     instancePath: instancePath + "/kind",
                     parentData: data,
                     parentDataProperty: "kind",
@@ -165,8 +165,8 @@ function validate296(
                 ) {
                   vErrors =
                     vErrors === null
-                      ? validate300.errors
-                      : vErrors.concat(validate300.errors);
+                      ? validate321.errors
+                      : vErrors.concat(validate321.errors);
                   errors = vErrors.length;
                 }
                 var valid0 = _errs8 === errors;
@@ -231,7 +231,7 @@ function validate296(
                       vErrors.push(err3);
                     }
                     errors++;
-                    validate296.errors = vErrors;
+                    validate317.errors = vErrors;
                     return false;
                   } else {
                     errors = _errs10;
@@ -275,7 +275,7 @@ function validate296(
         }
       }
     } else {
-      validate296.errors = [
+      validate317.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -286,7 +286,7 @@ function validate296(
       return false;
     }
   }
-  validate296.errors = vErrors;
+  validate317.errors = vErrors;
   return errors === 0;
 }
-export { validate296 };
+export { validate317 };

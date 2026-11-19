@@ -38,11 +38,15 @@ pub(in crate::entry) async fn patch(
         return Err(AppError::InvalidRequest.into());
     }
     let source = read_source(&entry, &actor, &review_id).await?;
-    let provider = entry.source_reader().await?;
+    let provider = source
+        .context
+        .reader
+        .as_ref()
+        .ok_or(AppError::Unavailable)?;
     let patch = provider
         .patch(source.value.clone(), query.revision, query.file_id)
         .await?;
-    check_source(&entry, &actor, &review_id, &source.value).await?;
+    check_source(&entry, &actor, &review_id, &source).await?;
     if patch.file.availability != PatchAvailability::Complete {
         return Err(AppError::Unavailable.into());
     }

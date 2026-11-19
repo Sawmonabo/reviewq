@@ -21,6 +21,7 @@ import type {
   SendMessageRequest,
   TestConnection,
   TrackReviewRequest,
+  ApprovalViewResponse,
   CatalogResponse,
   CurrentActionResponse,
   DeliveryReceiptResponse,
@@ -102,6 +103,9 @@ export function isTestConnection(value: unknown): value is TestConnection;
 export function isTrackReviewRequest(
   value: unknown,
 ): value is TrackReviewRequest;
+export function isApprovalViewResponse(
+  value: unknown,
+): value is ApprovalViewResponse;
 export function isCatalogResponse(value: unknown): value is CatalogResponse;
 export function isCurrentActionResponse(
   value: unknown,
