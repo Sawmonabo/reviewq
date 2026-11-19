@@ -5,7 +5,6 @@ use axum::extract::State;
 use axum::http::HeaderMap;
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use reviewq_app::access::AppError;
-use reviewq_app::decisions::Disposition;
 use reviewq_app::events::Snapshot;
 use reviewq_app::queue::{
     MAX_QUEUE_PAGE, MergeRequestState, PageContext, QueueItem, QueueKey, QueueListItem,
@@ -71,7 +70,7 @@ enum PagePosition {
 }
 
 #[derive(Serialize, Deserialize)]
-struct Context {
+pub(super) struct Context {
     generation: u64,
     authority: [u8; 32],
     limit: u16,
@@ -393,18 +392,23 @@ pub(super) fn project_review(item: &QueueItem) -> Result<MergeRequestRow, AppErr
         MergeRequestState::Closed => MergeRequestStatus::Closed,
         MergeRequestState::Merged => MergeRequestStatus::Merged,
     };
-    let (run_stage, reason_kind) = if item.registered_lead_count == 0 {
-        (None, None)
-    } else if source.state != MergeRequestState::Open {
-        (Some(RunStage::Archived), None)
-    } else if item.pending_native_attention {
-        (Some(RunStage::NeedsInput), Some("agent_attention"))
-    } else if item.pending_source_updates {
-        (Some(RunStage::NeedsInput), Some("discussion_update"))
-    } else if item.pending_report_attention {
-        (Some(RunStage::NeedsInput), Some("report_ready"))
-    } else {
-        (None, None)
+    let signals = &item.signals;
+    let (run_stage, reason_kind) = match signals
+        .stage_reason
+        .as_deref()
+        .and_then(|value| value.split_once('/'))
+    {
+        Some((stage, reason)) => {
+            let stage = match stage {
+                "archived" => RunStage::Archived,
+                "working" => RunStage::Working,
+                "waiting" => RunStage::Waiting,
+                "needs_input" => RunStage::NeedsInput,
+                _ => return Err(AppError::Internal),
+            };
+            (Some(stage), Some(reason.to_owned()))
+        }
+        None => (None, None),
     };
     Ok(MergeRequestRow {
         review_id: ReviewIdDto::new(item.review_id.as_str()).ok_or(AppError::Internal)?,
@@ -435,34 +439,50 @@ pub(super) fn project_review(item: &QueueItem) -> Result<MergeRequestRow, AppErr
             .transpose()?,
         source_sha: GitShaDto::new(source.head_sha.as_str()).ok_or(AppError::Internal)?,
         mr_state,
-        queue_state: if source.state != MergeRequestState::Open {
-            QueueStatus::Archive
-        } else if item.pending_source_updates
-            || item
-                .decision
-                .reviewed_sha
-                .as_ref()
-                .is_some_and(|sha| sha != &source.head_sha)
-        {
-            QueueStatus::Followup
-        } else {
-            match item.decision.disposition {
-                Some(Disposition::Reviewed) => QueueStatus::Reviewed,
-                Some(Disposition::WaitingAuthor) => QueueStatus::WaitingAuthor,
-                Some(Disposition::NeedsReview) | None => QueueStatus::NeedsReview,
-            }
+        queue_state: match signals.queue_state.as_str() {
+            "archive" => QueueStatus::Archive,
+            "needs_review" => QueueStatus::NeedsReview,
+            "followup" => QueueStatus::Followup,
+            "reviewed" => QueueStatus::Reviewed,
+            "waiting_author" => QueueStatus::WaitingAuthor,
+            _ => return Err(AppError::Internal),
         },
         updated_at: UtcTimestampDto::from_unix_milliseconds(source.updated_at_ms)
             .ok_or(AppError::Internal)?,
         draft: source.draft,
-        own: false,
-        our_comments: count(0)?,
-        unread_replies: count(0)?,
-        personal_approval: None,
+        own: signals.own,
+        our_comments: count(signals.our_comments)?,
+        unread_replies: count(signals.unread_replies)?,
+        personal_approval: signals.personal_approval,
         registered_lead_count: count(item.registered_lead_count)?,
         run_stage,
-        reason_kind: reason_kind.map(str::to_owned),
-        has_agent_questions: false,
+        reason_kind,
+        has_agent_questions: signals.has_questions,
+        focused_run_id: signals
+            .run
+            .as_ref()
+            .map(|id| RunIdDto::new(id.as_str()).ok_or(AppError::Internal))
+            .transpose()?,
+        focus_session_key: signals
+            .focus
+            .as_ref()
+            .map(|id| SessionKeyDto::new(id.as_str()).ok_or(AppError::Internal))
+            .transpose()?,
+        full_mr_reviewed_sha: signals
+            .full_mr_reviewed_sha
+            .as_ref()
+            .map(|sha| GitShaDto::new(sha.as_str()).ok_or(AppError::Internal))
+            .transpose()?,
+        coverage: match signals.coverage.as_deref() {
+            Some("full_mr") => Some(reviewq_protocol::reports::Coverage::FullMr),
+            Some("selected_threads") => Some(reviewq_protocol::reports::Coverage::SelectedThreads),
+            None => None,
+            _ => return Err(AppError::Internal),
+        },
+        last_activity_at: signals
+            .run
+            .as_ref()
+            .and_then(|_| UtcTimestampDto::from_unix_milliseconds(signals.last_activity_ms)),
     })
 }
 

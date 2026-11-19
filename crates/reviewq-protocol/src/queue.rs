@@ -10,10 +10,12 @@ use crate::scalar::{
 use crate::{ErrorDto, EventCursorDto, Page, Success, UtcTimestampDto};
 
 mod tracking;
+mod workspace;
 pub use tracking::{
     TicketComment, TicketDetail, TicketDetailResponse, TrackReviewRequest, TrackReviewResponse,
     TrackedReview,
 };
+pub use workspace::{RunCard, RunCards, RunCardsResponse, StageCounts};
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -86,6 +88,11 @@ pub struct MergeRequestRow {
     pub run_stage: Option<RunStage>,
     pub reason_kind: Option<String>,
     pub has_agent_questions: bool,
+    pub focused_run_id: Option<RunIdDto>,
+    pub focus_session_key: Option<SessionKeyDto>,
+    pub full_mr_reviewed_sha: Option<GitShaDto>,
+    pub coverage: Option<crate::reports::Coverage>,
+    pub last_activity_at: Option<UtcTimestampDto>,
 }
 
 #[derive(Debug, Serialize)]
@@ -174,7 +181,7 @@ pub enum QueueStatus {
     Archive,
 }
 
-#[derive(Clone, Copy, Debug, Serialize)]
+#[derive(Clone, Copy, Debug, serde::Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub enum RunStage {

@@ -68,6 +68,10 @@ const schema143 = {
   type: "string",
 };
 const schema154 = {
+  enum: ["pending", "in_progress", "completed"],
+  type: "string",
+};
+const schema158 = {
   enum: ["pending", "confirmed", "rejected", "uncertain"],
   type: "string",
 };
@@ -79,4 +83,5 @@ export {
   schema125,
   schema143,
   schema154,
+  schema158,
 };

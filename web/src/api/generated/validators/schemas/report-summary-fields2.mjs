@@ -4,7 +4,7 @@ import { validate95 } from "./safe-count-dto.mjs";
 import { validate111 } from "./git-sha-dto.mjs";
 import { validate102 } from "./report-hash-dto.mjs";
 import { validate25 } from "./checkpoint-id-dto.mjs";
-function validate735(
+function validate754(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -66,7 +66,7 @@ function validate735(
             vErrors.push(err1);
           }
           errors++;
-          validate735.errors = vErrors;
+          validate754.errors = vErrors;
           return false;
         } else {
           errors = _errs2;
@@ -140,7 +140,7 @@ function validate735(
               vErrors.push(err3);
             }
             errors++;
-            validate735.errors = vErrors;
+            validate754.errors = vErrors;
             return false;
           } else {
             errors = _errs7;
@@ -208,7 +208,7 @@ function validate735(
               ) {
                 const _errs13 = errors;
                 if (typeof data.nativeProvenance !== "boolean") {
-                  validate735.errors = [
+                  validate754.errors = [
                     {
                       instancePath: instancePath + "/nativeProvenance",
                       schemaPath: "#/properties/nativeProvenance/type",
@@ -280,7 +280,7 @@ function validate735(
                       vErrors.push(err5);
                     }
                     errors++;
-                    validate735.errors = vErrors;
+                    validate754.errors = vErrors;
                     return false;
                   } else {
                     errors = _errs16;
@@ -355,7 +355,7 @@ function validate735(
                         vErrors.push(err7);
                       }
                       errors++;
-                      validate735.errors = vErrors;
+                      validate754.errors = vErrors;
                       return false;
                     } else {
                       errors = _errs21;
@@ -403,7 +403,7 @@ function validate735(
         }
       }
     } else {
-      validate735.errors = [
+      validate754.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -414,7 +414,7 @@ function validate735(
       return false;
     }
   }
-  validate735.errors = vErrors;
+  validate754.errors = vErrors;
   return errors === 0;
 }
-export { validate735 };
+export { validate754 };

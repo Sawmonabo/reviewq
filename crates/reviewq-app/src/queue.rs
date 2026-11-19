@@ -11,7 +11,11 @@ use crate::events::Snapshot;
 use crate::sources::SourceSync;
 
 mod tracking;
+mod workspace;
 pub use tracking::{TicketAuthority, TrackReview, TrackedReviewReceipt, TrackingStore};
+pub use workspace::{
+    RunCard, RunCards, RunCardsFilter, RunCardsPosition, StageCounts, WorkspaceQueue,
+};
 
 /// Current provider evidence used to create the compact registered review.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -208,6 +212,23 @@ pub struct QueueItem {
     pub pending_source_updates: bool,
     pub pending_native_attention: bool,
     pub pending_report_attention: bool,
+    pub signals: ReviewSignals,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ReviewSignals {
+    pub own: bool,
+    pub personal_approval: Option<bool>,
+    pub our_comments: u64,
+    pub unread_replies: u64,
+    pub has_questions: bool,
+    pub stage_reason: Option<String>,
+    pub queue_state: String,
+    pub run: Option<RunId>,
+    pub focus: Option<SessionKey>,
+    pub full_mr_reviewed_sha: Option<GitSha>,
+    pub coverage: Option<String>,
+    pub last_activity_ms: i64,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

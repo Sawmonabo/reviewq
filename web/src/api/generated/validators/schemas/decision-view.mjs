@@ -3,7 +3,7 @@ import { func0 } from "../runtime.mjs";
 import { validate116 } from "./disposition.mjs";
 import { validate196 } from "./utc-timestamp-dto.mjs";
 import { validate111 } from "./git-sha-dto.mjs";
-function validate806(
+function validate825(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -20,7 +20,7 @@ function validate806(
         ((data.reviewedAt === undefined || !func0.call(data, "reviewedAt")) &&
           (missing0 = "reviewedAt"))
       ) {
-        validate806.errors = [
+        validate825.errors = [
           {
             instancePath,
             schemaPath: "#/required",
@@ -84,7 +84,7 @@ function validate806(
               vErrors.push(err1);
             }
             errors++;
-            validate806.errors = vErrors;
+            validate825.errors = vErrors;
             return false;
           } else {
             errors = _errs2;
@@ -155,7 +155,7 @@ function validate806(
                 vErrors.push(err3);
               }
               errors++;
-              validate806.errors = vErrors;
+              validate825.errors = vErrors;
               return false;
             } else {
               errors = _errs7;
@@ -229,7 +229,7 @@ function validate806(
                   vErrors.push(err5);
                 }
                 errors++;
-                validate806.errors = vErrors;
+                validate825.errors = vErrors;
                 return false;
               } else {
                 errors = _errs12;
@@ -249,7 +249,7 @@ function validate806(
         }
       }
     } else {
-      validate806.errors = [
+      validate825.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -260,7 +260,7 @@ function validate806(
       return false;
     }
   }
-  validate806.errors = vErrors;
+  validate825.errors = vErrors;
   return errors === 0;
 }
-export { validate806 };
+export { validate825 };

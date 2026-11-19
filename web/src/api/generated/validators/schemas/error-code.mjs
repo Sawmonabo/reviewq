@@ -18,6 +18,7 @@ function validate292(
     return false;
   }
   if (!(
+    data === "ticket_unverified" ||
     data === "invalid_request" ||
     data === "unauthorized" ||
     data === "forbidden" ||

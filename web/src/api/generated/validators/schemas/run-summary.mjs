@@ -3,7 +3,7 @@ import { func0 } from "../runtime.mjs";
 import { validate25 } from "./checkpoint-id-dto.mjs";
 import { validate123 } from "./host-provider-dto.mjs";
 import { validate196 } from "./utc-timestamp-dto.mjs";
-function validate814(
+function validate833(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -23,7 +23,7 @@ function validate814(
         ((data.startedAt === undefined || !func0.call(data, "startedAt")) &&
           (missing0 = "startedAt"))
       ) {
-        validate814.errors = [
+        validate833.errors = [
           {
             instancePath,
             schemaPath: "#/required",
@@ -156,7 +156,7 @@ function validate814(
                     vErrors.push(err1);
                   }
                   errors++;
-                  validate814.errors = vErrors;
+                  validate833.errors = vErrors;
                   return false;
                 } else {
                   errors = _errs5;
@@ -177,7 +177,7 @@ function validate814(
         }
       }
     } else {
-      validate814.errors = [
+      validate833.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -188,7 +188,7 @@ function validate814(
       return false;
     }
   }
-  validate814.errors = vErrors;
+  validate833.errors = vErrors;
   return errors === 0;
 }
-export { validate814 };
+export { validate833 };
