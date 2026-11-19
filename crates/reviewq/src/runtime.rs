@@ -9,10 +9,11 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use reviewq_app::access::Actor;
+use reviewq_app::hosts::{LeadStore, NativeHost, recover_delivery};
 use reviewq_app::sources::{ReviewSourceReader, SourceRefreshStore};
 use reviewq_app::workspace::{WorkspaceConfig, WorkspaceStore};
 use reviewq_domain::session::AbsolutePath;
-use reviewq_providers::GitLab;
+use reviewq_providers::{Codex, GitLab};
 use reviewq_store::SqliteStore;
 use reviewq_transport::{ServiceEndpoint, ServiceIdentity};
 use sha2::{Digest, Sha256};
@@ -105,11 +106,11 @@ pub(crate) async fn serve(profile: PathBuf, options: Serve) -> Result<(), Failur
             {
                 return Err("validation sources must be loopback".into());
             }
-            Some(GitLab::new(origin, None)?)
+            Some(GitLab::new(origin, None, profile.clone())?)
         }
         Some(origin) => {
             let token = std::env::var("REVIEWQ_GITLAB_TOKEN").ok();
-            Some(GitLab::new(origin, token.as_deref())?)
+            Some(GitLab::new(origin, token.as_deref(), profile.clone())?)
         }
         None => None,
     };
@@ -137,7 +138,30 @@ pub(crate) async fn serve(profile: PathBuf, options: Serve) -> Result<(), Failur
         }
     }
     let source = source.map(|source| Arc::new(source) as Arc<dyn ReviewSourceReader>);
-    let router = reviewq_transport::router(store.clone(), source, endpoint.clone(), &web);
+    let host = match (options.codex_bin, options.codex_home) {
+        (Some(executable), Some(home)) => {
+            let metadata = home.canonicalize()?.metadata()?;
+            if metadata.uid() != rustix::process::getuid().as_raw() {
+                return Err("the selected Codex profile must belong to the service user".into());
+            }
+            let settings = options.codex_model.zip(options.codex_effort);
+            Some(Arc::new(Codex::new(executable, home, settings)?) as Arc<dyn NativeHost>)
+        }
+        _ => None,
+    };
+    let sends_allowed = !options.validation && host.is_some();
+    let delivery = host
+        .as_ref()
+        .filter(|_| sends_allowed)
+        .map(|host| tokio::spawn(dispatch_deliveries(store.clone(), host.clone())));
+    let router = reviewq_transport::router(
+        store.clone(),
+        source,
+        host,
+        sends_allowed,
+        endpoint.clone(),
+        &web,
+    );
     publish(&profile, &endpoint)?;
     println!("ReviewQ http://{browser}/");
 
@@ -157,10 +181,28 @@ pub(crate) async fn serve(profile: PathBuf, options: Serve) -> Result<(), Failur
         None => serve_v4.await,
     };
     stop.abort();
+    if let Some(delivery) = delivery {
+        delivery.abort();
+        let _ = delivery.await;
+    }
     fs::remove_file(profile.join(RUNTIME))?;
     store.close(Duration::from_secs(10)).await?;
     result?;
     Ok(())
+}
+
+async fn dispatch_deliveries(store: Arc<dyn LeadStore>, host: Arc<dyn NativeHost>) {
+    let mut after = None;
+    loop {
+        tokio::time::sleep(Duration::from_millis(750)).await;
+        let Ok(batch) = store.recoverable_deliveries(after.take(), 8).await else {
+            continue;
+        };
+        for candidate in batch {
+            after = Some(candidate.cursor.clone());
+            let _ = recover_delivery(store.clone(), host.as_ref(), candidate).await;
+        }
+    }
 }
 
 fn native_listener(port: u16) -> Result<TcpListener, std::io::Error> {

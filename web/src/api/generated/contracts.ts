@@ -146,6 +146,18 @@ export type HistoryCursorDto = string;
  */
 export type SafeCountDto = number;
 /**
+ * An opaque keyset continuation for list resources.
+ */
+export type PageCursorDto = string;
+/**
+ * One opaque, path-safe ReviewQ review ID.
+ */
+export type ReviewIdDto = string;
+/**
+ * An opaque review-bound patch revision, independent of its content hash.
+ */
+export type PatchRevisionDto = string;
+/**
  * A full SHA-1 or SHA-256 Git object name.
  */
 export type GitShaDto = string;
@@ -159,18 +171,6 @@ export type FileIdDto = string;
  * The strong quoted SHA-256 ETag of a complete patch.
  */
 export type PatchETagDto = string;
-/**
- * One opaque, path-safe ReviewQ review ID.
- */
-export type ReviewIdDto = string;
-/**
- * An opaque review-bound patch revision, independent of its content hash.
- */
-export type PatchRevisionDto = string;
-/**
- * An opaque keyset continuation for list resources.
- */
-export type PageCursorDto = string;
 /**
  * A positive upstream numeric identity in a compact projection.
  */
@@ -232,6 +232,7 @@ export interface Contracts {
   DeliveryReceiptResponse: DeliveryReceiptResponse;
   Failure: Failure;
   HistoryPageResponse: HistoryPageResponse;
+  PatchDiscussionsResponse: PatchDiscussionsResponse;
   PatchFileIndexResponse: PatchFileIndexResponse;
   QueuePageResponse: QueuePageResponse;
   ReviewOverviewResponse: ReviewOverviewResponse;
@@ -335,6 +336,49 @@ export interface HistoryEntry {
   parts: HistoryPart[];
   timestamp: UtcTimestampDto | null;
   turnId: HistoryTurnIdDto | null;
+  [k: string]: unknown;
+}
+/**
+ * The resource and event head from the same authorized snapshot.
+ */
+export interface PatchDiscussionsResponse {
+  cursor: EventCursorDto;
+  data: PatchDiscussions;
+  [k: string]: unknown;
+}
+/**
+ * A bounded compact list with a required nullable keyset continuation.
+ */
+export interface PatchDiscussions {
+  /**
+   * @maxItems 100
+   */
+  items: PatchDiscussion[];
+  nextCursor: PageCursorDto | null;
+  reviewId: ReviewIdDto;
+  revision: PatchRevisionDto;
+  [k: string]: unknown;
+}
+export interface PatchDiscussion {
+  anchor: PatchDiscussionAnchor | null;
+  discussionId: string;
+  notes: PatchDiscussionNote[];
+  outdated: boolean;
+  [k: string]: unknown;
+}
+export interface PatchDiscussionAnchor {
+  newLine: SafeCountDto | null;
+  newPath: string;
+  oldLine: SafeCountDto | null;
+  oldPath: string;
+  [k: string]: unknown;
+}
+export interface PatchDiscussionNote {
+  author: string;
+  body: string;
+  createdAt: UtcTimestampDto | null;
+  noteId: string;
+  resolved: boolean;
   [k: string]: unknown;
 }
 /**

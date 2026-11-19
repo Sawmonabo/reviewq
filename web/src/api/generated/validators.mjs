@@ -6,8 +6,9 @@ export { validate34 as isSendMessageRequest } from "./validators/schemas/send-me
 export { validate38 as isDeliveryReceiptResponse } from "./validators/schemas/delivery-receipt-response.mjs";
 export { validate52 as isFailure } from "./validators/schemas/failure.mjs";
 export { validate58 as isHistoryPageResponse } from "./validators/schemas/history-page-response.mjs";
-export { validate84 as isPatchFileIndexResponse } from "./validators/schemas/patch-file-index-response.mjs";
-export { validate107 as isQueuePageResponse } from "./validators/schemas/queue-page-response.mjs";
-export { validate161 as isReviewOverviewResponse } from "./validators/schemas/review-overview-response.mjs";
-export { validate179 as isReviewSelectionResponse } from "./validators/schemas/review-selection-response.mjs";
-export { validate187 as isRunDetailResponse } from "./validators/schemas/run-detail-response.mjs";
+export { validate84 as isPatchDiscussionsResponse } from "./validators/schemas/patch-discussions-response.mjs";
+export { validate101 as isPatchFileIndexResponse } from "./validators/schemas/patch-file-index-response.mjs";
+export { validate123 as isQueuePageResponse } from "./validators/schemas/queue-page-response.mjs";
+export { validate177 as isReviewOverviewResponse } from "./validators/schemas/review-overview-response.mjs";
+export { validate195 as isReviewSelectionResponse } from "./validators/schemas/review-selection-response.mjs";
+export { validate203 as isRunDetailResponse } from "./validators/schemas/run-detail-response.mjs";

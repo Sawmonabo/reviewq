@@ -3,8 +3,6 @@ use std::sync::Arc;
 use axum::Json;
 use axum::extract::State;
 use axum::http::HeaderMap;
-use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
-use hmac::Mac;
 use reviewq_app::access::AppError;
 use reviewq_app::events::Snapshot;
 use reviewq_app::queue::{
@@ -403,30 +401,12 @@ impl PageQuery {
 
 impl ServiceEndpoint {
     fn encode_page(&self, position: PagePosition) -> Result<PageCursorDto, AppError> {
-        let mut bytes = serde_json::to_vec(&position).map_err(|_| AppError::Internal)?;
-        let mut mac = self.cursor_mac();
-        mac.update(b"reviewq-page-v1");
-        mac.update(&bytes);
-        bytes.extend_from_slice(&mac.finalize().into_bytes());
-        PageCursorDto::new(URL_SAFE_NO_PAD.encode(bytes)).ok_or(AppError::Internal)
+        PageCursorDto::new(self.encode_cursor(b"reviewq-page-v1", &position)?)
+            .ok_or(AppError::Internal)
     }
 
     fn decode_page(&self, value: &str) -> Result<PagePosition, AppError> {
-        if value.len() > 8192 {
-            return Err(AppError::CursorExpired);
-        }
-        let bytes = URL_SAFE_NO_PAD
-            .decode(value)
-            .map_err(|_| AppError::CursorExpired)?;
-        let (data, proof) = bytes
-            .split_at_checked(bytes.len().checked_sub(32).ok_or(AppError::CursorExpired)?)
-            .ok_or(AppError::CursorExpired)?;
-        let mut mac = self.cursor_mac();
-        mac.update(b"reviewq-page-v1");
-        mac.update(data);
-        mac.verify_slice(proof)
-            .map_err(|_| AppError::CursorExpired)?;
-        serde_json::from_slice(data).map_err(|_| AppError::CursorExpired)
+        self.decode_cursor(b"reviewq-page-v1", value)
     }
 }
 

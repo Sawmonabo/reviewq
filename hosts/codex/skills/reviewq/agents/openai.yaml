@@ -1,0 +1,6 @@
+interface:
+  display_name: "ReviewQ"
+  short_description: "Open ReviewQ or link this terminal to a merge request"
+  default_prompt: "Open ReviewQ, or link this terminal if I supplied a review target."
+policy:
+  allow_implicit_invocation: false

@@ -5,14 +5,17 @@ use axum::http::{HeaderMap, HeaderValue};
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use hmac::{Hmac, KeyInit, Mac};
 use reviewq_app::access::AppError;
+use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use subtle::ConstantTimeEq;
 
 pub(super) const MAX_CONTROL_AGE: u64 = 15;
 const INSTANCE: &str = "x-reviewq-instance";
 const NONCE: &str = "x-reviewq-nonce";
 const ISSUED: &str = "x-reviewq-issued";
 const PROOF: &str = "x-reviewq-control";
+const BRIDGE: &str = "x-reviewq-native-bridge";
 
 type HmacSha256 = Hmac<Sha256>;
 
@@ -79,6 +82,38 @@ impl ServiceEndpoint {
     }
     pub fn identity(&self) -> &ServiceIdentity {
         &self.identity
+    }
+
+    pub fn bridge_headers(&self) -> Result<HeaderMap, AppError> {
+        let mut headers = HeaderMap::new();
+        put(&mut headers, INSTANCE, &self.instance)?;
+        put(
+            &mut headers,
+            BRIDGE,
+            &URL_SAFE_NO_PAD.encode(self.bridge_key),
+        )?;
+        headers
+            .get_mut(BRIDGE)
+            .ok_or(AppError::Internal)?
+            .set_sensitive(true);
+        Ok(headers)
+    }
+
+    pub(super) fn verify_bridge(&self, headers: &HeaderMap) -> Result<(), AppError> {
+        if headers.get_all(BRIDGE).iter().count() != 1
+            || value(headers, INSTANCE) != Some(self.instance())
+            || value(headers, "host") != Some(self.native.to_string().as_str())
+            || headers.contains_key("origin")
+        {
+            return Err(AppError::Unauthorized);
+        }
+        let key = value(headers, BRIDGE)
+            .and_then(decode)
+            .ok_or(AppError::Unauthorized)?;
+        if !bool::from(self.bridge_key.ct_eq(&key)) {
+            return Err(AppError::Unauthorized);
+        }
+        Ok(())
     }
 
     pub fn is_valid(&self) -> bool {
@@ -200,8 +235,39 @@ impl ServiceEndpoint {
         )
     }
 
-    pub(super) fn cursor_mac(&self) -> HmacSha256 {
-        mac(&self.cursor_key)
+    pub(super) fn encode_cursor<T: Serialize>(
+        &self,
+        scope: &[u8],
+        position: &T,
+    ) -> Result<String, AppError> {
+        let mut bytes = serde_json::to_vec(position).map_err(|_| AppError::Internal)?;
+        let mut mac = mac(&self.cursor_key);
+        mac.update(scope);
+        mac.update(&bytes);
+        bytes.extend_from_slice(&mac.finalize().into_bytes());
+        Ok(URL_SAFE_NO_PAD.encode(bytes))
+    }
+
+    pub(super) fn decode_cursor<T: DeserializeOwned>(
+        &self,
+        scope: &[u8],
+        input: &str,
+    ) -> Result<T, AppError> {
+        if input.len() > 8192 {
+            return Err(AppError::CursorExpired);
+        }
+        let bytes = URL_SAFE_NO_PAD
+            .decode(input)
+            .map_err(|_| AppError::CursorExpired)?;
+        let (data, proof) = bytes
+            .split_at_checked(bytes.len().checked_sub(32).ok_or(AppError::CursorExpired)?)
+            .ok_or(AppError::CursorExpired)?;
+        let mut mac = mac(&self.cursor_key);
+        mac.update(scope);
+        mac.update(data);
+        mac.verify_slice(proof)
+            .map_err(|_| AppError::CursorExpired)?;
+        serde_json::from_slice(data).map_err(|_| AppError::CursorExpired)
     }
 
     #[allow(clippy::too_many_arguments)]

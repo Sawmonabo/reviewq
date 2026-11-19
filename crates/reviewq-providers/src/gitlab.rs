@@ -1,13 +1,17 @@
 use reqwest::{Client, header};
 use reviewq_app::access::{AppError, AppFuture};
 use reviewq_app::queue::{MergeRequestState, ReviewSource};
-use reviewq_app::sources::ReviewSourceReader;
+use reviewq_app::sources::{ReviewResolution, ReviewSourceReader};
 use reviewq_app::workspace::ConfiguredProject;
 use reviewq_domain::identity::{GitLabOrigin, MrIdentity, ProjectId};
 use serde::Deserialize;
+use tokio::sync::Semaphore;
 use url::{Host, Url};
 
 use crate::http;
+
+mod changes;
+mod lookup;
 
 const METADATA_LIMIT: usize = 1024 * 1024;
 const MAX_PROVIDER_PAGES: u32 = 40;
@@ -18,6 +22,8 @@ pub struct GitLab {
     identity: GitLabOrigin,
     http: Client,
     headers: header::HeaderMap,
+    patches: changes::Leases,
+    requests: Semaphore,
 }
 
 impl ReviewSourceReader for GitLab {
@@ -28,6 +34,14 @@ impl ReviewSourceReader for GitLab {
             }
             self.list_reviews(project.project_id).await
         })
+    }
+
+    fn resolve(
+        &self,
+        projects: Vec<ConfiguredProject>,
+        target: String,
+    ) -> AppFuture<'_, ReviewResolution> {
+        Box::pin(self.resolve_target(projects, target))
     }
 }
 
@@ -45,11 +59,13 @@ struct MergeRequest {
     sha: String,
     state: String,
     updated_at: String,
+    source_branch: String,
+    diff_refs: Option<changes::DiffRefs>,
 }
 
 impl GitLab {
     /// Allows HTTP only on numeric loopback without credentials.
-    pub fn new(origin: &str, token: Option<&str>) -> Result<Self, AppError> {
+    pub fn new(origin: &str, token: Option<&str>, profile: PathBuf) -> Result<Self, AppError> {
         let origin = Url::parse(origin).map_err(|_| AppError::InvalidRequest)?;
         let local = match origin.host() {
             Some(Host::Ipv4(ip)) => ip.is_loopback(),
@@ -80,6 +96,8 @@ impl GitLab {
             identity,
             http: http::client(local)?,
             headers,
+            patches: changes::Leases::new(profile),
+            requests: Semaphore::new(4),
         })
     }
 
@@ -93,40 +111,63 @@ impl GitLab {
     /// Reads verified metadata for the configured project before store observation.
     pub async fn list_reviews(&self, project_id: ProjectId) -> Result<Vec<ReviewSource>, AppError> {
         let project = self.project(project_id).await?;
-        let path = format!("api/v4/projects/{project_id}/merge_requests");
         let mut reviews = Vec::new();
         for page in 1..=MAX_PROVIDER_PAGES {
-            let mut url = self.url(&path)?;
-            url.query_pairs_mut()
-                .append_pair("page", &page.to_string())
-                .append_pair("per_page", "100");
-            let (metadata, bytes) = self.get(url, METADATA_LIMIT).await?;
-            let rows: Vec<MergeRequest> =
-                serde_json::from_slice(&bytes).map_err(|_| AppError::Unavailable)?;
+            let (rows, more) = self.merge_requests(project_id, page).await?;
             for row in rows {
                 reviews.push(self.review(project_id, &project.path_with_namespace, row)?);
             }
-            let next = metadata
-                .get("x-next-page")
-                .and_then(|value| value.to_str().ok())
-                .filter(|value| !value.is_empty());
-            match next {
-                None => return Ok(reviews),
-                Some(next) if next.parse::<u32>().ok() == Some(page + 1) => {}
-                _ => return Err(AppError::Unavailable),
+            if !more {
+                return Ok(reviews);
             }
         }
         Err(AppError::PayloadTooLarge)
     }
 
+    async fn merge_requests(
+        &self,
+        project: ProjectId,
+        page: u32,
+    ) -> Result<(Vec<MergeRequest>, bool), AppError> {
+        let mut url = self.url(&format!("api/v4/projects/{project}/merge_requests"))?;
+        url.query_pairs_mut()
+            .append_pair("page", &page.to_string())
+            .append_pair("per_page", "100");
+        let (metadata, bytes) = self.get(url, METADATA_LIMIT).await?;
+        let rows: Vec<MergeRequest> =
+            serde_json::from_slice(&bytes).map_err(|_| AppError::Unavailable)?;
+        if rows.len() > 100 || rows.iter().any(|row| row.project_id != project.get()) {
+            return Err(AppError::Unavailable);
+        }
+        let more = match metadata.get("x-next-page") {
+            None => false,
+            Some(value) if value.is_empty() => false,
+            Some(value) => {
+                if value.to_str().ok().and_then(|value| value.parse().ok()) != Some(page + 1) {
+                    return Err(AppError::Unavailable);
+                }
+                true
+            }
+        };
+        Ok((rows, more))
+    }
+
     async fn project(&self, project_id: ProjectId) -> Result<Project, AppError> {
         let url = self.url(&format!("api/v4/projects/{project_id}"))?;
-        let (_, bytes) = self.get(url, METADATA_LIMIT).await?;
-        let project: Project = serde_json::from_slice(&bytes).map_err(|_| AppError::Unavailable)?;
+        let project = self.project_metadata(url).await?;
         if project.id != project_id.get() {
             return Err(AppError::Conflict);
         }
-        if project.path_with_namespace.is_empty() || project.path_with_namespace.len() > 512 {
+        Ok(project)
+    }
+
+    async fn project_metadata(&self, url: Url) -> Result<Project, AppError> {
+        let (_, bytes) = self.get(url, METADATA_LIMIT).await?;
+        let project: Project = serde_json::from_slice(&bytes).map_err(|_| AppError::Unavailable)?;
+        if project.path_with_namespace.is_empty()
+            || project.path_with_namespace.len() > 512
+            || project.path_with_namespace.chars().any(char::is_control)
+        {
             return Err(AppError::Unavailable);
         }
         Ok(project)
@@ -173,6 +214,12 @@ impl GitLab {
     }
 
     async fn get(&self, url: Url, max: usize) -> Result<(header::HeaderMap, Vec<u8>), AppError> {
+        let _permit = self
+            .requests
+            .acquire()
+            .await
+            .map_err(|_| AppError::Unavailable)?;
         http::bounded_response(&self.http, url, self.headers.clone(), max).await
     }
 }
+use std::path::PathBuf;

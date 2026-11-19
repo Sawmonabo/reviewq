@@ -29,6 +29,8 @@ enum Command {
     Status,
     /// Refresh the queue from configured sources.
     Refresh,
+    /// Link the current Codex terminal to an exact review without opening a browser.
+    Link { target: String },
 }
 
 #[derive(Args)]
@@ -43,6 +45,18 @@ pub(crate) struct Serve {
     pub(crate) gitlab: Option<String>,
     #[arg(long = "project", requires = "gitlab")]
     pub(crate) projects: Vec<ProjectId>,
+    /// Path to the configured Codex executable.
+    #[arg(long, value_name = "FILE", requires = "codex_home")]
+    pub(crate) codex_bin: Option<PathBuf>,
+    /// Directory belonging to the configured running Codex daemon.
+    #[arg(long, value_name = "DIR", requires = "codex_bin")]
+    pub(crate) codex_home: Option<PathBuf>,
+    /// Exact Codex model to send when starting an idle linked turn.
+    #[arg(long, requires_all = ["codex_bin", "codex_effort"])]
+    pub(crate) codex_model: Option<String>,
+    /// Exact Codex reasoning effort paired with the configured model.
+    #[arg(long, requires = "codex_model")]
+    pub(crate) codex_effort: Option<String>,
     #[arg(long, requires = "runtime_root")]
     pub(crate) validation: bool,
     #[arg(long, requires = "validation")]
@@ -80,6 +94,9 @@ async fn execute(options: CommandLine) -> Result<(), Failure> {
         }
         Some(Command::Status) => native_client::status(&runtime::profile(options.profile)?).await,
         Some(Command::Refresh) => native_client::refresh(&runtime::profile(options.profile)?).await,
+        Some(Command::Link { target }) => {
+            native_client::link(&runtime::profile(options.profile)?, target).await
+        }
         Some(Command::Open(open)) => {
             native_client::open(&runtime::profile(options.profile)?, open).await
         }

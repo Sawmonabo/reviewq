@@ -620,6 +620,162 @@
       ],
       "type": "string"
     },
+    "PatchDiscussion": {
+      "properties": {
+        "anchor": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/PatchDiscussionAnchor"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "discussionId": {
+          "type": "string"
+        },
+        "notes": {
+          "items": {
+            "$ref": "#/definitions/PatchDiscussionNote"
+          },
+          "type": "array"
+        },
+        "outdated": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "discussionId",
+        "anchor",
+        "outdated",
+        "notes"
+      ],
+      "type": "object"
+    },
+    "PatchDiscussionAnchor": {
+      "properties": {
+        "newLine": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SafeCountDto"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "newPath": {
+          "type": "string"
+        },
+        "oldLine": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SafeCountDto"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "oldPath": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "oldPath",
+        "newPath",
+        "oldLine",
+        "newLine"
+      ],
+      "type": "object"
+    },
+    "PatchDiscussionNote": {
+      "properties": {
+        "author": {
+          "type": "string"
+        },
+        "body": {
+          "type": "string"
+        },
+        "createdAt": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/UtcTimestampDto"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "noteId": {
+          "type": "string"
+        },
+        "resolved": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "noteId",
+        "author",
+        "body",
+        "createdAt",
+        "resolved"
+      ],
+      "type": "object"
+    },
+    "PatchDiscussions": {
+      "description": "A bounded compact list with a required nullable keyset continuation.",
+      "properties": {
+        "items": {
+          "items": {
+            "$ref": "#/definitions/PatchDiscussion"
+          },
+          "maxItems": 100,
+          "type": "array"
+        },
+        "nextCursor": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/PageCursorDto"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "reviewId": {
+          "$ref": "#/definitions/ReviewIdDto"
+        },
+        "revision": {
+          "$ref": "#/definitions/PatchRevisionDto"
+        }
+      },
+      "required": [
+        "reviewId",
+        "revision",
+        "items",
+        "nextCursor"
+      ],
+      "type": "object"
+    },
+    "PatchDiscussionsResponse": {
+      "description": "The resource and event head from the same authorized snapshot.",
+      "properties": {
+        "cursor": {
+          "$ref": "#/definitions/EventCursorDto"
+        },
+        "data": {
+          "$ref": "#/definitions/PatchDiscussions"
+        }
+      },
+      "required": [
+        "data",
+        "cursor"
+      ],
+      "title": "PatchDiscussionsResponse",
+      "type": "object"
+    },
     "PatchETagDto": {
       "description": "The strong quoted SHA-256 ETag of a complete patch.",
       "pattern": "^\"[0-9a-f]{64}\"$",
@@ -1480,6 +1636,7 @@
       "DeliveryReceiptResponse": "#/definitions/DeliveryReceiptResponse",
       "Failure": "#/definitions/Failure",
       "HistoryPageResponse": "#/definitions/HistoryPageResponse",
+      "PatchDiscussionsResponse": "#/definitions/PatchDiscussionsResponse",
       "PatchFileIndexResponse": "#/definitions/PatchFileIndexResponse",
       "QueuePageResponse": "#/definitions/QueuePageResponse",
       "ReviewOverviewResponse": "#/definitions/ReviewOverviewResponse",

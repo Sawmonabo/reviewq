@@ -10,7 +10,7 @@ use axum::{Json, Router};
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use reviewq_app::access::{Actor, AppError};
 use reviewq_app::events::EventLog;
-use reviewq_app::hosts::LeadStore;
+use reviewq_app::hosts::{LeadStore, NativeHost};
 use reviewq_app::queue::{QueueStore, ReviewLookup};
 use reviewq_app::sources::{ReviewSourceReader, SourceRefreshStore, refresh_queue};
 use reviewq_app::workspace::WorkspaceStore;
@@ -21,8 +21,12 @@ use tokio::sync::{Mutex, watch};
 use tower_http::services::{ServeDir, ServeFile};
 
 mod auth;
+mod changes;
 mod control;
 mod error;
+mod history;
+mod hosts;
+mod messages;
 mod pages;
 
 pub use control::{ControlRequest, ServiceEndpoint, ServiceIdentity};
@@ -45,6 +49,8 @@ type RefreshResult = Option<Result<usize, AppError>>;
 pub(super) struct Entry {
     store: Arc<dyn Store>,
     source: Option<Arc<dyn ReviewSourceReader>>,
+    host: Option<Arc<dyn NativeHost>>,
+    sends_allowed: bool,
     auth: Auth,
     refresh: Mutex<Option<watch::Receiver<RefreshResult>>>,
 }
@@ -81,12 +87,16 @@ struct SessionResult {
 pub fn router(
     store: Arc<dyn Store>,
     source: Option<Arc<dyn ReviewSourceReader>>,
+    host: Option<Arc<dyn NativeHost>>,
+    sends_allowed: bool,
     endpoint: ServiceEndpoint,
     web: &Path,
 ) -> Router {
     let entry = Arc::new(Entry {
         store,
         source,
+        host,
+        sends_allowed,
         auth: Auth::new(endpoint),
         refresh: Mutex::new(None),
     });
@@ -97,7 +107,26 @@ pub fn router(
         .route("/queue/refresh", post(refresh))
         .route("/reviews/resolve", get(pages::resolve))
         .route("/reviews/{review_id}", get(pages::overview))
+        .route("/reviews/{review_id}/changes/files", get(changes::files))
+        .route("/reviews/{review_id}/changes/patch", get(changes::patch))
+        .route(
+            "/reviews/{review_id}/changes/discussions",
+            get(changes::discussions),
+        )
         .route("/runs/{run_id}", get(pages::run))
+        .route("/native/codex/link", post(hosts::link))
+        .route(
+            "/runs/{run_id}/sessions/{session_key}/history/page",
+            get(history::page),
+        )
+        .route(
+            "/runs/{run_id}/sessions/{session_key}/messages",
+            post(messages::send),
+        )
+        .route(
+            "/runs/{run_id}/sessions/{session_key}/messages/{submission_id}",
+            get(messages::get),
+        )
         .fallback(api_not_found)
         .layer(DefaultBodyLimit::max(64 * 1024));
     Router::new()
