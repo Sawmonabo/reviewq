@@ -6,6 +6,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use reviewq_app::access::AppError;
 use reviewq_app::history::{
     FileContentRef, FilePosition, NativeContent, NativeHistoryPage, NativePosition, VisibleEntry,
+    VisiblePart,
 };
 use sha2::{Digest, Sha256};
 
@@ -74,6 +75,24 @@ pub(super) fn page(
                 .take(512)
                 .collect::<String>();
             let pointer = file_position(file, start, complete)?;
+            let parts = record
+                .parts
+                .into_iter()
+                .map(|part| {
+                    let text = readable_prefix(&part.body.picked)?.to_owned();
+                    let content = (part.body.bytes > text.len() as u64).then(|| FileContentRef {
+                        generation: generation.clone(),
+                        entry: record.id.clone(),
+                        part: Some(part.index),
+                        position: pointer.clone(),
+                    });
+                    Ok::<_, AppError>(VisiblePart {
+                        kind: part.kind,
+                        text,
+                        content,
+                    })
+                })
+                .collect::<Result<_, _>>()?;
             entries.push(VisibleEntry {
                 id: record.id.clone(),
                 turn: record.turn,
@@ -81,9 +100,11 @@ pub(super) fn page(
                 kind: record.kind,
                 text,
                 text_bytes: Some(record.bytes),
+                parts,
                 content: Some(FileContentRef {
                     generation: generation.clone(),
                     entry: record.id,
+                    part: None,
                     position: pointer,
                 }),
             });
@@ -149,23 +170,37 @@ pub(super) fn content(
         return Err(AppError::CursorExpired);
     }
     let limit = usize::try_from(limit).map_err(|_| AppError::InvalidRequest)?;
-    let record = records::project(
+    let record = records::project_window(
         source.provider,
         input(file, start, end, cancelled),
         &source.native_id,
         source.root_session.as_ref(),
-        offset,
-        limit,
+        records::Window {
+            start: offset,
+            limit,
+            part: reference.part,
+        },
     )
     .filter(|entry| entry.id == reference.entry)
     .ok_or(AppError::CursorExpired)?;
-    if offset > record.bytes {
+    let (bytes, raw) = match reference.part {
+        Some(index) => {
+            let part = record
+                .parts
+                .into_iter()
+                .find(|part| part.index == index)
+                .ok_or(AppError::CursorExpired)?;
+            (part.body.bytes, part.body.picked)
+        }
+        None => (record.bytes, record.text),
+    };
+    if offset > bytes {
         return Err(AppError::InvalidRequest);
     }
-    let text = readable_prefix(&record.text)?.to_owned();
+    let text = readable_prefix(&raw)?.to_owned();
     let next = offset + text.len() as u64;
     // If a stale or hostile cursor landed inside a Unicode scalar, don't loop on the same offset.
-    if text.is_empty() && next < record.bytes {
+    if text.is_empty() && next < bytes {
         return Err(AppError::CursorExpired);
     }
     verify_position(
@@ -176,7 +211,7 @@ pub(super) fn content(
     Ok(NativeContent {
         generation,
         text,
-        next_offset: (next < record.bytes).then_some(next),
+        next_offset: (next < bytes).then_some(next),
     })
 }
 

@@ -84,15 +84,17 @@ pub(crate) async fn claude(
         "profile": home,
         "target": target,
     }))?;
-    let (linked, message) = if target.is_some() {
+    let (linked, pending_launch, message) = if target.is_some() {
         let linked =
             link_result(bridge(&client, &endpoint, "/api/v1/native/claude/link", body).await?)
                 .await?;
-        (true, link_text(&endpoint, linked, "Claude Code")?)
+        (true, false, link_text(&endpoint, linked, "Claude Code")?)
     } else {
         #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase")]
         struct Registration {
             registration: Option<Linked>,
+            pending_launch: bool,
         }
         let response = bridge(
             &client,
@@ -108,9 +110,20 @@ pub(crate) async fn claude(
         }
         let data = serde_json::from_slice::<Envelope<Registration>>(&bytes)?.data;
         if let Some(linked) = data.registration {
-            (true, format!("ReviewQ · linked to {}", linked.review_id))
+            (
+                true,
+                false,
+                format!("ReviewQ · linked to {}", linked.review_id),
+            )
+        } else if data.pending_launch {
+            (
+                false,
+                true,
+                "ReviewQ is confirming this managed Claude launch.".to_owned(),
+            )
         } else {
             (
+                false,
                 false,
                 "ReviewQ · use /reviewq <merge request or ticket> to link this session.".to_owned(),
             )
@@ -118,7 +131,7 @@ pub(crate) async fn claude(
     };
     println!(
         "{}",
-        serde_json::json!({"linked": linked, "message": message})
+        serde_json::json!({"linked": linked, "pendingLaunch": pending_launch, "message": message})
     );
     Ok(())
 }

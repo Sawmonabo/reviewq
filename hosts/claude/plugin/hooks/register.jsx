@@ -5,6 +5,8 @@ import { currentSettings } from "./settings.js";
 
 const HEARTBEAT_MS = 5000;
 const OFFLINE_MS = 30000;
+const REGISTRATION_RETRY_MS = 400;
+const REGISTRATION_DEADLINE_MS = 12000;
 let session;
 let timer;
 let checking = false;
@@ -68,11 +70,29 @@ async function refresh($, target) {
   if (state === session && await $.session.id() === state.id && !result.error) {
     if (result.linked && !state.linked) childrenChanged(state);
     state.linked = !!result.linked;
+    if (result.pendingLaunch && !state.pendingUntil) {
+      state.pendingUntil = Date.now() + REGISTRATION_DEADLINE_MS;
+    }
+    if (state.linked) state.pendingUntil = undefined;
     await $.env.set("REVIEWQ_CLAUDE_LINKED", state.linked ? state.id : "");
     if (state.linked && !state.lastSeen) state.lastSeen = Date.now();
     $.ui.invalidate("ui.render");
   }
   return result;
+}
+
+function pending(state) {
+  return !!state?.pendingUntil && Date.now() < state.pendingUntil;
+}
+
+async function workflowLead($) {
+  const state = await current($);
+  if (!state.linked) await refresh($);
+  for (let attempts = 0; state === session && !state.linked && pending(state) && attempts < 3; attempts += 1) {
+    await $.clock.sleep(REGISTRATION_RETRY_MS);
+    await refresh($);
+  }
+  return state;
 }
 
 async function heartbeat($, state, allowDelivery = true) {
@@ -113,7 +133,7 @@ function schedule($, delay = 0, registration = false) {
     try {
       const previous = session;
       const state = await current($);
-      if (recheck || state !== previous) {
+      if (recheck || state !== previous || pending(state)) {
         recheck = false;
         await refresh($);
       }
@@ -122,6 +142,7 @@ function schedule($, delay = 0, registration = false) {
       checking = false;
       if (recheck) schedule($, 0);
       else if (session?.linked) schedule($, HEARTBEAT_MS);
+      else if (pending(session)) schedule($, REGISTRATION_RETRY_MS);
     }
   });
 }
@@ -252,8 +273,8 @@ export function register(on) {
   });
 
   on("tool.call", { tool: "mcp__reviewq__report_handoff" }, async ($, event) => {
-    const state = await current($);
-    if (event.agentId || !state.linked || !state.activeTurn) {
+    const state = event.agentId ? undefined : await workflowLead($);
+    if (!state?.linked || !state.activeTurn) {
       return { result: "Link the active lead with /reviewq before handing off a report.", isError: true };
     }
     await heartbeat($, state, false);
@@ -261,8 +282,8 @@ export function register(on) {
   });
 
   on("tool.call", { tool: "mcp__reviewq__review_action" }, async ($, event) => {
-    const state = await current($);
-    if (event.agentId || !state.linked || !state.activeTurn) {
+    const state = event.agentId ? undefined : await workflowLead($);
+    if (!state?.linked || !state.activeTurn) {
       return { result: "A ReviewQ action requires the linked lead and current user turn.", isError: true };
     }
     await heartbeat($, state, false);

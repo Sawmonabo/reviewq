@@ -18,6 +18,7 @@ mod locator;
 mod proof;
 mod reader;
 mod records;
+pub(crate) mod tools;
 mod turn_metadata;
 
 pub(crate) use claude::{claude_anchor, claude_confirm_prompt};

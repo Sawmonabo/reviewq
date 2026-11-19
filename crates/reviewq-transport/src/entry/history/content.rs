@@ -35,6 +35,7 @@ struct Locator {
     session: String,
     generation: String,
     item: String,
+    part: Option<u16>,
     position: Point,
     offset: u64,
 }
@@ -92,6 +93,7 @@ pub(in crate::entry) async fn read_content(
     let proven = FileContentRef {
         generation: reference.generation.clone(),
         entry: parse(&reference.item)?,
+        part: reference.part,
         position: reference.position.clone().into(),
     };
     let (generation, text, next, reset) = match entry
@@ -151,6 +153,7 @@ pub(super) fn reference(
             session: session.to_string(),
             generation: source.generation.clone(),
             item: source.entry.to_string(),
+            part: source.part,
             position: source.position.clone().into(),
             offset: 0,
         },

@@ -69,6 +69,7 @@ pub struct FilePosition {
 pub struct FileContentRef {
     pub generation: String,
     pub entry: NativeInputId,
+    pub part: Option<u16>,
     pub position: FilePosition,
 }
 
@@ -92,6 +93,38 @@ pub enum VisibleKind {
     Assistant,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ToolState {
+    Running,
+    Completed,
+    Failed,
+    Unknown,
+}
+
+#[derive(Clone, Debug)]
+pub enum VisiblePartKind {
+    Text(VisibleKind),
+    ToolCall {
+        call: NativeInputId,
+        name: String,
+        label: &'static str,
+        state: ToolState,
+    },
+    ToolResult {
+        call: NativeInputId,
+        state: ToolState,
+    },
+    Plan,
+    Assignment,
+}
+
+#[derive(Clone, Debug)]
+pub struct VisiblePart {
+    pub kind: VisiblePartKind,
+    pub text: String,
+    pub content: Option<FileContentRef>,
+}
+
 #[derive(Clone, Debug)]
 pub struct VisibleEntry {
     pub id: NativeInputId,
@@ -101,6 +134,7 @@ pub struct VisibleEntry {
     pub text: String,
     pub content: Option<FileContentRef>,
     pub text_bytes: Option<u64>,
+    pub parts: Vec<VisiblePart>,
 }
 
 #[derive(Debug)]
