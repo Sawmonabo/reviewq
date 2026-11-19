@@ -39,6 +39,8 @@ export function RichReport({
       [...new Set([...defaultRangeExtractor(value), ...pinned])].sort((a, b) => a - b),
     [pinned],
   );
+  // Keep the TanStack instance and measured rows local to this unmemoized renderer.
+  // eslint-disable-next-line react-hooks/incompatible-library
   const virtual = useVirtualizer({
     count: blocks.length,
     estimateSize: () => 260,
@@ -116,7 +118,7 @@ export function RichReport({
     }
     const preceding = document.createRange();
     setError(undefined);
-    if (end === start && container && exact.trim()) {
+    if (end === start && container.contains(selected.endContainer) && exact.trim()) {
       preceding.selectNodeContents(container);
       preceding.setEnd(selected.startContainer, selected.startOffset);
       const prefix = preceding.toString();

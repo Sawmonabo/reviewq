@@ -34,6 +34,7 @@ export function useHistory(
   pinned: ReadonlySet<string>,
   beforeUpdate: (position: ReadPosition, anchor?: Anchor) => void,
 ) {
+  const { runId, sessionKey } = target;
   const [pages, setPages] = useState<readonly HistoryPage[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string>();
@@ -167,7 +168,7 @@ export function useHistory(
   });
 
   useEffect(() => {
-    initialize();
+    const firstRead = requestAnimationFrame(() => initialize());
     let stream: EventSource | undefined;
     let retry: number | undefined;
     function close() {
@@ -181,7 +182,7 @@ export function useHistory(
         return;
       }
       if (stream) return;
-      const next = new EventSource(nativeHistoryUrl(target));
+      const next = new EventSource(nativeHistoryUrl({ runId, sessionKey }));
       stream = next;
       next.onopen = () => {
         if (stream === next) setOnline(true);
@@ -195,8 +196,7 @@ export function useHistory(
         next.addEventListener(kind, (event: MessageEvent<string>) => {
           if (stream !== next) return;
           const value = parseEvent(event.data);
-          if (value?.runId === target.runId && value.sessionKey === target.sessionKey)
-            notice(kind, value);
+          if (value?.runId === runId && value.sessionKey === sessionKey) notice(kind, value);
         });
       }
     }
@@ -204,6 +204,7 @@ export function useHistory(
     document.addEventListener("visibilitychange", open);
     window.addEventListener("pagehide", close);
     return () => {
+      cancelAnimationFrame(firstRead);
       const controller = active.current;
       active.current = undefined;
       controller?.abort();
@@ -211,10 +212,12 @@ export function useHistory(
       document.removeEventListener("visibilitychange", open);
       window.removeEventListener("pagehide", close);
     };
-  }, [target.runId, target.sessionKey, bookmark]);
+  }, [runId, sessionKey, bookmark]);
 
   useEffect(() => {
-    catchup();
+    if (!waiting || loading || pinned.size || !following) return;
+    const frame = requestAnimationFrame(() => catchup());
+    return () => cancelAnimationFrame(frame);
   }, [following, loading, pinned.size, waiting]);
 
   return {

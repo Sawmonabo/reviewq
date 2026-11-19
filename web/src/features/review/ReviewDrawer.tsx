@@ -11,6 +11,7 @@ import type {
 import type { Tab } from "../../api/generated/contracts/notifications";
 import {
   cancelRecovery,
+  changeFollowup,
   followupEnrollment,
   readRecovery,
   saveDecision,
@@ -23,8 +24,9 @@ import { Empty, Loading, Notice } from "../../components/PanelState";
 import { useResource } from "../../hooks/useResource";
 import type { DraftStore } from "../../lib/drafts";
 import { describeError, formatTime, readable, safeUrl } from "../../lib/presentation";
-import { ReportedPlan } from "./ReportedPlan";
+import { ReviewOverviewPane } from "./ReviewOverviewPane";
 import { ReviewAttention } from "./ReviewAttention";
+import { ChangesMonitor } from "./changes/ChangesMonitor";
 import "./review.css";
 
 const AgentPanel = lazy(() => import("./AgentPanel"));
@@ -131,6 +133,8 @@ export default function ReviewDrawer({
     },
   );
   const runs = runTrail.length ? otherRuns.data : overview.runs;
+  const monitor = follows.data?.monitor;
+  const monitorLead = overview.runs.items.find((item) => item.runId === monitor?.runId);
   const visibleTabs = child
     ? ([
         ["agent", "Conversation"],
@@ -258,6 +262,36 @@ export default function ReviewDrawer({
       });
       setOutcome({ key: scope, message: `Recovery · ${readable(result.state)}` });
       recovery.retry();
+    } catch (error) {
+      setOutcome({ key: scope, message: describeError(error) });
+    } finally {
+      mutation.current = false;
+      setBusy(false);
+    }
+  }
+
+  async function checkMonitoredChanges() {
+    if (
+      mutation.current ||
+      !canMutate ||
+      monitor?.state !== "enabled" ||
+      review.personalApproval === true
+    )
+      return;
+    mutation.current = true;
+    setBusy(true);
+    try {
+      const result = await changeFollowup(review.reviewId, "review-now", {
+        expectedGeneration: monitor.generation,
+        submissionId: crypto.randomUUID(),
+      });
+      setOutcome({
+        key: scope,
+        message: result.batchId
+          ? "Selected updates queued for the review agent."
+          : `Auto-review · ${readable(result.state)}`,
+      });
+      follows.retry();
     } catch (error) {
       setOutcome({ key: scope, message: describeError(error) });
     } finally {
@@ -519,7 +553,7 @@ export default function ReviewDrawer({
         <PanelBoundary key={activeTab}>
           <Suspense fallback={<Loading label={`Opening ${activeTab}…`} />}>
             {activeTab === "overview" && (
-              <Overview
+              <ReviewOverviewPane
                 overview={overview}
                 run={run}
                 ticket={ticket}
@@ -531,7 +565,16 @@ export default function ReviewDrawer({
               />
             )}
             {activeTab === "changes" && (
-              <Changes key={review.reviewId} reviewId={review.reviewId} webUrl={overview.webUrl} />
+              <Changes key={review.reviewId} reviewId={review.reviewId} webUrl={overview.webUrl}>
+                <ChangesMonitor
+                  enrollment={follows.data}
+                  approved={review.personalApproval}
+                  lead={monitorLead ? readable(monitorLead.provider) : undefined}
+                  canChange={canMutate && !busy}
+                  onEdit={() => onMonitor([review], false)}
+                  onCheck={() => void checkMonitoredChanges()}
+                />
+              </Changes>
             )}
             {activeTab === "agent" &&
               (selected && run && session ? (
@@ -657,159 +700,6 @@ function DrawerSummary({
         <span className="drawer-fact replies">
           {review.unreadReplies === 1 ? "New reply" : "New replies"} · {review.unreadReplies}
         </span>
-      )}
-    </div>
-  );
-}
-
-function Overview({
-  overview,
-  run,
-  ticket,
-  monitor,
-  onLaunch,
-  onSettings,
-  pending,
-  selected,
-}: {
-  readonly overview: ReviewOverview;
-  readonly run: RunDetail | undefined;
-  readonly ticket: ReactNode;
-  readonly monitor: string | undefined;
-  readonly onLaunch: Props["onLaunch"];
-  readonly onSettings: () => void;
-  readonly pending: boolean;
-  readonly selected: boolean;
-}) {
-  const { review } = overview;
-  const source = safeUrl(overview.webUrl);
-  return (
-    <div className="overview stack">
-      {ticket}
-      <section className="overview-review-details stack" aria-label="Review details">
-        <div className="spread">
-          <h3>Review details</h3>
-          <span className="badge">{readable(review.mrState)}</span>
-        </div>
-        <p>
-          <strong>{review.title}</strong>{" "}
-          {source && (
-            <a href={source} target="_blank" rel="noreferrer">
-              GitLab ↗
-            </a>
-          )}
-        </p>
-        <dl className="overview-facts">
-          <div>
-            <dt>Project</dt>
-            <dd>
-              {review.projectPath}!{review.iid}
-            </dd>
-          </div>
-          <div>
-            <dt>Author</dt>
-            <dd>{review.author?.label ?? "Unknown"}</dd>
-          </div>
-          <div>
-            <dt>Source revision</dt>
-            <dd>
-              <code title={review.sourceSha}>{review.sourceSha.slice(0, 12)}</code>
-            </dd>
-          </div>
-          <div>
-            <dt>Reviewed revision</dt>
-            <dd>
-              <code title={overview.decision?.reviewedSha ?? review.fullMrReviewedSha ?? undefined}>
-                {(overview.decision?.reviewedSha ?? review.fullMrReviewedSha)?.slice(0, 12) ??
-                  "Not recorded"}
-              </code>
-            </dd>
-          </div>
-          <div>
-            <dt>Review state</dt>
-            <dd>{readable(overview.decision?.disposition ?? review.queueState)}</dd>
-          </div>
-          <div>
-            <dt>Automated follow-up</dt>
-            <dd>{monitor ? readable(monitor) : "No enrollment"}</dd>
-          </div>
-        </dl>
-      </section>
-      {pending && <Loading label="Resolving selected run…" />}
-      {run ? (
-        <section className="overview-review-details stack" aria-label="Selected run">
-          <h3>Selected run</h3>
-          <dl className="overview-facts">
-            <div>
-              <dt>Run</dt>
-              <dd>
-                <code>{run.runId}</code>
-              </dd>
-            </div>
-            <div>
-              <dt>Lead native session</dt>
-              <dd>
-                <code>{run.leadNativeId}</code>
-              </dd>
-            </div>
-            <div>
-              <dt>Working directory</dt>
-              <dd>
-                <code>{run.leadCwd}</code>
-              </dd>
-            </div>
-            <div>
-              <dt>Model</dt>
-              <dd>{run.launch?.observedModel ?? run.launch?.requestedModel ?? "Unavailable"}</dd>
-            </div>
-            <div>
-              <dt>Effort</dt>
-              <dd>{run.launch?.observedEffort ?? run.launch?.requestedEffort ?? "Unavailable"}</dd>
-            </div>
-            {run.launch && (
-              <div>
-                <dt>Starting revision</dt>
-                <dd>
-                  <code title={run.launch.sourceSha}>{run.launch.sourceSha.slice(0, 12)}</code>
-                </dd>
-              </div>
-            )}
-          </dl>
-          {run.launch && (
-            <details>
-              <summary>Original review request</summary>
-              <pre className="review-request">
-                {run.launch.invocation.kind === "custom"
-                  ? run.launch.invocation.prompt
-                  : `${run.launch.invocation.name} ${run.launch.invocation.args ?? ""}`}
-                {run.launch.context && `\n\n${run.launch.context}`}
-              </pre>
-            </details>
-          )}
-          <ReportedPlan runId={run.runId} sessionKey={run.leadSessionKey} />
-        </section>
-      ) : (
-        selected && (
-          <Empty title="No registered run">
-            <div className="actions">
-              {review.mrState === "open" && (
-                <button
-                  type="button"
-                  className="primary"
-                  onClick={() => onLaunch("prepare", [review])}
-                >
-                  Prepare review
-                </button>
-              )}
-              <button type="button" onClick={() => onLaunch("register", [review])}>
-                Register run
-              </button>
-              <button type="button" onClick={onSettings}>
-                Settings
-              </button>
-            </div>
-          </Empty>
-        )
       )}
     </div>
   );
