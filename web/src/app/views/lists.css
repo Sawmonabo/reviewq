@@ -213,6 +213,20 @@
   letter-spacing: 1px;
   text-transform: uppercase;
 }
+.review-empty {
+  display: grid;
+  justify-items: center;
+  gap: 6px;
+  padding: 45px 20px;
+  color: var(--muted);
+  text-align: center;
+  font-size: 11px;
+}
+.review-empty h3 {
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 500;
+}
 .review-list > li + li,
 .review-items > li + li {
   border-top: 1px solid var(--row-line);
@@ -262,6 +276,15 @@
 }
 .row-foot {
   gap: 12px;
+}
+.provider-pill {
+  padding: 3px 6px;
+  border: 1px solid var(--popup-border);
+  border-radius: 4px;
+  color: var(--avatar-text);
+  font-size: 9px;
+  font-weight: 500;
+  white-space: nowrap;
 }
 .mr-id {
   overflow-wrap: anywhere;
@@ -365,22 +388,33 @@
   [data-review-kind="working"],
   [data-review-kind="lead_working"],
   [data-review-kind="session_working"],
+  [data-review-kind="awaiting_merge"],
   [data-review-kind="reviewed"]
 ) {
   border-color: #354c41;
   background: var(--green-bg);
   color: var(--green);
 }
-.row-tag:is(
-  [data-review-kind="report_ready"],
-  [data-review-kind="followup_pending"],
-  [data-review-kind="waiting_author"]
-) {
+.row-tag:is([data-review-kind="followup_pending"], [data-review-kind="waiting_author"]) {
   border-color: #344765;
   background: var(--selected);
   color: var(--link);
 }
-.row-tag:is([data-review-kind="report_failed"], [data-review-kind="agent_failed"]) {
+.row-tag[data-review-kind="report_ready"] {
+  border-color: var(--report-line);
+  background: var(--report-bg);
+  color: var(--report-text);
+}
+.row-tag[data-review-kind="code_changed"] {
+  border-color: var(--changed-line);
+  background: var(--changed-bg);
+  color: var(--changed-text);
+}
+.row-tag:is(
+  [data-review-kind="report_failed"],
+  [data-review-kind="agent_failed"],
+  [data-review-kind="approval_withdrawn"]
+) {
   border-color: #74453e;
   background: var(--red-bg);
   color: var(--red);

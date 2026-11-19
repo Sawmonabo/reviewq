@@ -1,6 +1,6 @@
 .archive-controls > .filter-control[aria-haspopup="dialog"] {
-  padding-inline: 11px;
-  gap: 9px;
+  padding-inline: 13px;
+  gap: 10px;
 }
 .archive-controls > .filter-control[aria-haspopup="dialog"] > svg:first-child {
   color: var(--muted);

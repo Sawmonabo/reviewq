@@ -277,35 +277,21 @@ export function QueueView({
         </Notice>
       )}
       {list.pending && <Loading label="Loading review queue…" />}
-      {page &&
-        !page.items.length &&
-        (currentSync?.mode !== "connected" ? (
-          <Empty
-            title={
-              currentSync?.mode === "disconnected"
-                ? "Source connections paused"
-                : "Connect your workspace"
-            }
-          >
-            <p>Configure GitLab, Jira and the team scope to discover reviews.</p>
-            <button className="primary" type="button" onClick={onSettings}>
-              Open settings
-            </button>
-          </Empty>
-        ) : (
-          <Empty
-            title={
-              filters.q || filters.authorId || filters.hideInProgress || filters.hideReviewed
-                ? "No matching reviews"
-                : "No reviews in this scope"
-            }
-          >
-            <button type="button" onClick={clear}>
-              Clear filters
-            </button>
-          </Empty>
-        ))}
-      {page && page.items.length > 0 && (
+      {page && !page.items.length && currentSync?.mode !== "connected" && (
+        <Empty
+          title={
+            currentSync?.mode === "disconnected"
+              ? "Source connections paused"
+              : "Connect your workspace"
+          }
+        >
+          <p>Configure GitLab, Jira and the team scope to discover reviews.</p>
+          <button className="primary" type="button" onClick={onSettings}>
+            Open settings
+          </button>
+        </Empty>
+      )}
+      {page && (page.items.length > 0 || currentSync?.mode === "connected") && (
         <section className="review-list" aria-label="Reviews">
           <div className="review-list-head">
             {selecting ? (
@@ -373,6 +359,16 @@ export function QueueView({
               ),
             )}
           </ul>
+          {!page.items.length && (
+            <div className="review-empty" role="status">
+              <h3>
+                {params.scope === "none"
+                  ? "No boards or repositories selected"
+                  : "No reviews match these filters"}
+              </h3>
+              <p>Try changing a filter. New reviews appear automatically.</p>
+            </div>
+          )}
         </section>
       )}
       <Pagination

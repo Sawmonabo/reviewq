@@ -208,7 +208,13 @@
 }
 .workspace-view {
   scrollbar-gutter: stable;
+  scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
   background: var(--workspace-bg);
+}
+.workspace-view.is-scrolling,
+.workspace-view:hover:active {
+  scrollbar-color: var(--scroll-thumb) transparent;
 }
 .workspace-view::-webkit-scrollbar {
   width: 10px;
@@ -216,7 +222,11 @@
 .workspace-view::-webkit-scrollbar-thumb {
   border: 2px solid var(--workspace-bg);
   border-radius: 6px;
-  background: var(--strong-line);
+  background: transparent;
+}
+.workspace-view.is-scrolling::-webkit-scrollbar-thumb,
+.workspace-view::-webkit-scrollbar-thumb:hover {
+  background: var(--scroll-thumb);
 }
 .workspace-view::-webkit-scrollbar-track {
   background: var(--workspace-bg);
@@ -495,7 +505,12 @@
   padding: 8px 12px;
 }
 .workspace-selection .quiet-button {
-  color: var(--muted);
+  padding-inline: 8px;
+  color: var(--ticket-text);
+  font-size: 10px;
+}
+.workspace-selection .primary {
+  font-weight: 500;
 }
 .selection-count {
   color: var(--muted);
@@ -553,7 +568,11 @@
     flex-direction: row;
     gap: 5px;
     scrollbar-width: thin;
+    scrollbar-color: transparent transparent;
     padding-bottom: 4px;
+  }
+  .rail nav:focus-within {
+    scrollbar-color: var(--scroll-thumb) transparent;
   }
   .rail-item,
   .rail-small .rail-item {
@@ -599,5 +618,13 @@
   }
   .drawer-close-phone {
     display: inline;
+  }
+}
+@media (forced-colors: active) {
+  .workspace-view,
+  .workspace-view.is-scrolling,
+  .rail nav,
+  .rail nav:focus-within {
+    scrollbar-color: auto;
   }
 }

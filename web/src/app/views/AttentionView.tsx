@@ -48,6 +48,13 @@ export function AttentionView({
   const contexts = new Map(history?.contexts);
   for (const context of page.data?.reviewContexts ?? []) contexts.set(context.reviewId, context);
   const groups = group([...byId.values()]);
+  const eligibleShown = eligible.filter((id) => byId.has(id));
+  const selected = frozen?.filter((id) => byId.has(id)) ?? [];
+  const selectedIds = new Set(selected);
+  const selectedGroups = groups.filter(([, items]) =>
+    items.some((item) => selectedIds.has(item.id)),
+  ).length;
+  const allSelected = eligibleShown.length > 0 && selected.length === eligibleShown.length;
   const cursor = history ? history.nextCursor : headCursor;
 
   function changeMode(nextMode: "unread" | "all") {
@@ -146,32 +153,47 @@ export function AttentionView({
           </button>
         </div>
         <div className="inbox-toolbar">
+          {page.data && (
+            <span>
+              {mode === "unread" ? page.data.unreadMrCount : groups.length} MRs ·{" "}
+              {mode === "unread" ? page.data.unreadEventCount : byId.size} notifications
+            </span>
+          )}
           {frozen ? (
             <>
-              <span>{frozen.length} selected</span>
               <button
                 type="button"
-                disabled={busy || !frozen.length}
-                onClick={() => void assign("read", frozen)}
+                className="quiet-button"
+                disabled={busy || !eligibleShown.length}
+                onClick={() => setFrozen(allSelected ? [] : eligibleShown)}
+              >
+                {allSelected ? "Clear selection" : "Select all shown"}
+              </button>
+              <span role="status">{selectedGroups} selected</span>
+              <button
+                type="button"
+                disabled={busy || !selected.length}
+                onClick={() => void assign("read", selected)}
               >
                 Mark read
               </button>
               <button
                 type="button"
-                disabled={busy || !frozen.length}
-                onClick={() => void assign("unread", frozen)}
+                disabled={busy || !selected.length}
+                onClick={() => void assign("unread", selected)}
               >
                 Mark unread
               </button>
               <button
                 type="button"
-                disabled={busy || !frozen.length}
-                onClick={() => void assign("dismiss", frozen)}
+                disabled={busy || !selected.length}
+                onClick={() => void assign("dismiss", selected)}
               >
                 Dismiss
               </button>
               <button
                 type="button"
+                className="quiet-button"
                 disabled={busy}
                 onClick={() => {
                   setFrozen(undefined);
@@ -183,12 +205,6 @@ export function AttentionView({
             </>
           ) : (
             <>
-              {page.data && (
-                <span>
-                  {mode === "unread" ? page.data.unreadMrCount : groups.length} MRs ·{" "}
-                  {mode === "unread" ? page.data.unreadEventCount : byId.size} notifications
-                </span>
-              )}
               {groups.length > 0 && (
                 <button
                   type="button"
@@ -296,7 +312,7 @@ export function AttentionView({
                 </summary>
                 <ul className="inbox-events">
                   {items.map((item) => (
-                    <li key={item.id}>
+                    <li key={item.id} data-read={Boolean(item.readAt)}>
                       {frozen && (
                         <input
                           type="checkbox"

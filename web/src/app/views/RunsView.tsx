@@ -469,7 +469,14 @@ function RunRow({
   readonly archiveDetails?: ReactNode;
 }) {
   const reason = row.reasonKind ?? row.runStage;
-  const label = reason ? reviewReasonLabel(reason) : undefined;
+  const label =
+    row.mrState === "merged"
+      ? "Merged"
+      : row.mrState === "closed"
+        ? "Closed"
+        : reason
+          ? reviewReasonLabel(reason)
+          : undefined;
   const launch = row.focusedLaunch;
   const metadata = [
     row.focusedProvider && providerLabel(row.focusedProvider),

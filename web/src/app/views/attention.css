@@ -45,6 +45,11 @@
   padding: 7px 11px;
   font-size: 11px;
 }
+.inbox-toolbar .quiet-button {
+  padding-inline: 4px;
+  font-size: 10px;
+  color: var(--ticket-text);
+}
 .inbox-list,
 .inbox-events {
   margin: 0;
@@ -64,7 +69,7 @@
   border-top: 1px solid var(--row-line);
 }
 .inbox-group[data-selected="true"] {
-  box-shadow: inset 3px 0 var(--focus);
+  box-shadow: inset 3px 0 var(--row-focus);
   background: var(--row-selected);
 }
 .inbox-open {
@@ -172,15 +177,27 @@
   display: block;
   overflow-wrap: anywhere;
 }
-.inbox-event-open span,
-.inbox-event-open time {
-  color: var(--dim-text);
+.inbox-event-open span {
+  color: var(--ticket-text);
   font-size: 10px;
 }
+.inbox-events > li[data-read="true"] .inbox-event-open span,
+.inbox-event-open time {
+  color: var(--muted);
+}
+.inbox-event-open time {
+  font-size: 9px;
+}
 .inbox-event-open strong {
-  margin-block: 3px;
+  margin-block: 5px;
   font-size: 11px;
-  font-weight: 500;
+  font-weight: 400;
+  line-height: 1.8;
+  white-space: pre-wrap;
+}
+.inbox-event-actions {
+  flex: 0 0 auto;
+  gap: 6px;
 }
 .inbox-event-actions button {
   padding-inline: 6px;
@@ -198,6 +215,9 @@
   font-size: 11px;
 }
 @media (max-width: 700px) {
+  .inbox-summary {
+    gap: 7px;
+  }
   .inbox-open,
   .inbox-items > summary,
   .inbox-select-group {
@@ -205,6 +225,9 @@
   }
   .inbox-events > li {
     flex-wrap: wrap;
+  }
+  .inbox-events {
+    padding-inline: 10px;
   }
   .inbox-event-actions {
     margin-left: auto;
