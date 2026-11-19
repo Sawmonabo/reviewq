@@ -351,7 +351,11 @@ fn declaration(input: dto::Handoff, provider: HostProvider) -> Result<Declaratio
                 dto::ReportVerdict::NotSpecified => Verdict::NotSpecified,
             },
             assessments: project_assessments(assessments)?,
-            edits: project_edits(corrects, finding_changes, section_changes)?,
+            edits: project_edits(
+                corrects.map(|correction| *correction),
+                finding_changes,
+                section_changes,
+            )?,
             amends: amends
                 .map(|base| -> Result<_, AppError> {
                     Ok(ReportReference {

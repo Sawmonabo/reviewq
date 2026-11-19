@@ -100,22 +100,21 @@ pub(super) fn complete(
         }
         Err(error) => return Err(error.into()),
     };
-    if let Some(scope) = &scoped {
-        if scope.report_receipt_id != current.receipt
+    if let Some(scope) = &scoped
+        && (scope.report_receipt_id != current.receipt
             || scope.report_hash != current.hash
             || scope.disposition_version != current.disposition_version as u64
             || ((!matches!(work.declaration, Declaration::NeedsInput { .. })
                 || !work.declaration.assessments().is_empty())
-                && !batch::assessments_match(scope, work.declaration.assessments()))
-        {
-            return reject(
-                tx,
-                &work,
-                artifact.as_ref(),
-                "followup_scope_changed",
-                Some(&result),
-            );
-        }
+                && !batch::assessments_match(scope, work.declaration.assessments())))
+    {
+        return reject(
+            tx,
+            &work,
+            artifact.as_ref(),
+            "followup_scope_changed",
+            Some(&result),
+        );
     }
     let notification = match &work.declaration {
         Declaration::Final {
@@ -136,24 +135,23 @@ pub(super) fn complete(
                     Some(&result),
                 );
             }
-            if let Some(scope) = &scoped {
-                if !continuity_verified
+            if let Some(scope) = &scoped
+                && (!continuity_verified
                     || amends.is_some()
                     || edits.correction.is_some()
                     || !batch::edits_match(db, run, scope, edits, work.declaration.assessments())?
-                    || !matches!(revision,RevisionEvidence::Exact(sha) if sha.as_str()==scope.source_sha)
-                {
-                    return reject(
-                        tx,
-                        &work,
-                        Some(captured),
-                        "followup_continuity_unproved",
-                        Some(&result),
-                    );
-                }
+                    || !matches!(revision,RevisionEvidence::Exact(sha) if sha.as_str()==scope.source_sha))
+            {
+                return reject(
+                    tx,
+                    &work,
+                    Some(captured),
+                    "followup_continuity_unproved",
+                    Some(&result),
+                );
             }
-            if let Some(reference) = amends {
-                if !current.complete
+            if let Some(reference) = amends
+                && (!current.complete
                     || !current.semantic_ready
                     || captured.index.is_none()
                     || !current.matches(reference)
@@ -163,16 +161,15 @@ pub(super) fn complete(
                         .is_some_and(|hash| Some(hash) != current.hash.as_ref())
                     || current.hash.as_deref() != Some(captured.hash.as_str())
                     || current.verdict.as_deref() != Some(verdict.to_string().as_str())
-                    || !current.matches_revision(revision)
-                {
-                    return reject(
-                        tx,
-                        &work,
-                        Some(captured),
-                        "report_amendment_continuity_unproved",
-                        Some(&result),
-                    );
-                }
+                    || !current.matches_revision(revision))
+            {
+                return reject(
+                    tx,
+                    &work,
+                    Some(captured),
+                    "report_amendment_continuity_unproved",
+                    Some(&result),
+                );
             }
             if let Some(correction) = &edits.correction
                 && (!continuity_verified

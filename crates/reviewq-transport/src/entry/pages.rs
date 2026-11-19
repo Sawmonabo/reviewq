@@ -222,7 +222,7 @@ pub(super) async fn read_run(
             run_id: parse(&run_id)?,
             session_key: parse(&session_key)?,
         }),
-        _ => return Err(AppError::CursorExpired.into()),
+        _ => return Err(AppError::CursorExpired),
     };
     let Snapshot { value, cursor } = entry.store.read_run(actor, id, after, limit).await?;
     let sessions = value

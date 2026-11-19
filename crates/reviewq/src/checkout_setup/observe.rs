@@ -203,10 +203,7 @@ fn watcher(publish: Arc<Notify>) -> Option<RecommendedWatcher> {
                         .and_then(Path::parent)
                         .is_some_and(|dir| dir.ends_with("worktrees"))
                         && (path.ends_with("index") || path.ends_with("gitdir"))
-            }) =>
-        {
-            ()
-        }
+            }) => {}
         _ => publish.notify_one(),
     })
     .ok()

@@ -62,14 +62,13 @@ impl Jira {
                 if board.board_type == BoardType::Scrum {
                     let current = item.fields.get("sprint");
                     let closed = item.fields.get("closedSprints");
-                    if let Some(sprint) = current.filter(|value| !value.is_null()) {
-                        if let Some(id) = numeric_id(&sprint["id"]).filter(|id| known.contains(id))
-                        {
-                            membership.pairs.insert(SprintPair {
-                                board: board.selection.board_id,
-                                sprint: id,
-                            });
-                        }
+                    if let Some(sprint) = current.filter(|value| !value.is_null())
+                        && let Some(id) = numeric_id(&sprint["id"]).filter(|id| known.contains(id))
+                    {
+                        membership.pairs.insert(SprintPair {
+                            board: board.selection.board_id,
+                            sprint: id,
+                        });
                     }
                     if let Some(closed) = closed.filter(|value| !value.is_null()) {
                         let entries = closed.as_array().ok_or(AppError::Unavailable)?;

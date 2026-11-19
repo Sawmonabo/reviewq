@@ -89,8 +89,10 @@ impl Codex {
                         recovery.episode.clone(),
                         recovery.failed_turn.clone(),
                         recovery.kind,
-                        Some(recovery.account.clone()),
-                        Some(recovery.model_provider.clone()),
+                        (
+                            Some(recovery.account.clone()),
+                            Some(recovery.model_provider.clone()),
+                        ),
                         true,
                     )
                     .await
