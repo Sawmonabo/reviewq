@@ -75,7 +75,35 @@ const schema382 = {
     reviewId: { $ref: "#/definitions/ReviewIdDto" },
   },
 };
-const schema386 = {
+const schema385 = {
+  properties: {
+    file: { $ref: "#/definitions/PatchFile" },
+    nextCursor: {
+      anyOf: [{ $ref: "#/definitions/HistoryCursorDto" }, { type: "null" }],
+    },
+    ordinal: { $ref: "#/definitions/SafeCountDto" },
+    previousCursor: {
+      anyOf: [{ $ref: "#/definitions/HistoryCursorDto" }, { type: "null" }],
+    },
+    settingsRevision: { $ref: "#/definitions/EventCursorDto" },
+    text: {
+      description:
+        "Exact original UTF-8 when the selected complete patch fits the inline limit.",
+      maxLength: 131072,
+      type: ["string", "null"],
+    },
+  },
+  required: [
+    "file",
+    "ordinal",
+    "settingsRevision",
+    "previousCursor",
+    "nextCursor",
+    "text",
+  ],
+  type: "object",
+};
+const schema388 = {
   additionalProperties: false,
   properties: {
     boardId: true,
@@ -107,7 +135,7 @@ const schema386 = {
     { $ref: "#/definitions/BoardScopeFields2" },
   ],
 };
-const schema387 = {
+const schema389 = {
   type: "object",
   properties: {
     boardId: { $ref: "#/definitions/CheckpointIdDto" },
@@ -126,11 +154,11 @@ const schema387 = {
     storyPointsField: { type: ["string", "null"] },
   },
 };
-const schema390 = {
+const schema392 = {
   enum: ["ready", "pending", "cleanup_conflict"],
   type: "string",
 };
-const schema392 = {
+const schema394 = {
   properties: {
     configured: { type: "boolean" },
     identity: { anyOf: [{ $ref: "#/definitions/Identity" }, { type: "null" }] },
@@ -139,7 +167,7 @@ const schema392 = {
   required: ["origin", "configured", "identity"],
   type: "object",
 };
-const schema394 = {
+const schema396 = {
   properties: {
     configured: { type: "boolean" },
     email: { type: ["string", "null"] },
@@ -152,7 +180,7 @@ const schema394 = {
   required: ["site", "email", "tokenType", "configured", "identity"],
   type: "object",
 };
-const schema395 = {
+const schema397 = {
   additionalProperties: false,
   properties: {
     boardSelection: { $ref: "#/definitions/BoardSelection" },
@@ -170,7 +198,7 @@ const schema395 = {
   ],
   type: "object",
 };
-const schema406 = {
+const schema408 = {
   type: "object",
   properties: {
     assignee: { type: ["string", "null"] },
@@ -183,48 +211,6 @@ const schema406 = {
     issueType: { type: ["string", "null"] },
   },
 };
-const schema407 = {
-  type: "object",
-  properties: {
-    items: {
-      items: { $ref: "#/definitions/TicketComment" },
-      maxItems: 100,
-      type: "array",
-    },
-    key: { $ref: "#/definitions/CheckpointIdDto" },
-    labels: { items: { type: "string" }, type: "array" },
-    nextCursor: {
-      anyOf: [{ $ref: "#/definitions/HistoryCursorDto" }, { type: "null" }],
-    },
-    priority: { type: ["string", "null"] },
-    reporter: { type: ["string", "null"] },
-    reporterId: { type: ["string", "null"] },
-    status: { type: ["string", "null"] },
-  },
-};
-const schema408 = {
-  properties: {
-    author: { type: ["string", "null"] },
-    authorId: { type: ["string", "null"] },
-    body: { type: "string" },
-    createdAt: { $ref: "#/definitions/UtcTimestampDto" },
-    id: { $ref: "#/definitions/MergeRequestIidDto" },
-    updatedAt: {
-      anyOf: [{ $ref: "#/definitions/UtcTimestampDto" }, { type: "null" }],
-    },
-    url: { type: "string" },
-  },
-  required: [
-    "id",
-    "url",
-    "author",
-    "authorId",
-    "body",
-    "createdAt",
-    "updatedAt",
-  ],
-  type: "object",
-};
 export {
   schema369,
   schema371,
@@ -232,13 +218,12 @@ export {
   schema374,
   schema376,
   schema382,
-  schema386,
-  schema387,
-  schema390,
+  schema385,
+  schema388,
+  schema389,
   schema392,
   schema394,
-  schema395,
-  schema406,
-  schema407,
+  schema396,
+  schema397,
   schema408,
 };

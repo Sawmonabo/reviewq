@@ -29,6 +29,22 @@ pub struct PatchFileIndex {
     pub page: Page<PatchFile>,
 }
 
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct SelectedPatch {
+    pub file: PatchFile,
+    pub ordinal: SafeCountDto,
+    pub settings_revision: RevisionDto,
+    pub previous_cursor: Option<PageCursorDto>,
+    pub next_cursor: Option<PageCursorDto>,
+    /// Exact original UTF-8 when the selected complete patch fits the inline limit.
+    #[cfg_attr(feature = "schema", schemars(length(max = 131072)))]
+    pub text: Option<String>,
+}
+
+pub type SelectedPatchResponse = Success<SelectedPatch>;
+
 pub type PatchFileIndexResponse = Success<PatchFileIndex>;
 
 #[derive(Debug, Serialize)]

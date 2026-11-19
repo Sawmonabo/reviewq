@@ -97,21 +97,26 @@ impl GitLab {
             return Ok((guessed_page, file.id.clone()));
         }
 
+        // A catalog hint may nominate the wrong REST ordinal. Search ten paths at
+        // a time even when the selection asks for only one result.
+        let search_limit = 10;
         let mut page = 1;
-        while first_ordinal(page, limit).is_ok() {
-            if page == guessed_page {
+        while first_ordinal(page, search_limit).is_ok() {
+            if limit == search_limit && page == guessed_page {
                 page += 1;
                 continue;
             }
-            let first = first_ordinal(page, limit)?;
-            let (body, next) = self.receive_diff_page(source, page, limit).await?;
+            let first = first_ordinal(page, search_limit)?;
+            let (body, next) = self.receive_diff_page(source, page, search_limit).await?;
             let digest = digest.to_owned();
-            let found =
-                tokio::task::spawn_blocking(move || wire::find_file(body, first, limit, &digest))
-                    .await
-                    .map_err(|_| AppError::Unavailable)??;
+            let found = tokio::task::spawn_blocking(move || {
+                wire::find_file(body, first, search_limit, &digest)
+            })
+            .await
+            .map_err(|_| AppError::Unavailable)??;
             if let Some(id) = found {
-                return Ok((page, id));
+                let ordinal = super::ordinal(&id).ok_or(AppError::Unavailable)?;
+                return Ok((1 + (ordinal - 1) / u32::from(limit), id));
             }
             let Some(next) = next else {
                 break;

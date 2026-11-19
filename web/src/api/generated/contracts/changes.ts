@@ -217,3 +217,22 @@ export interface PatchPath {
   oldPath: string;
   [k: string]: unknown;
 }
+
+export interface SelectedPatchResponse {
+  cursor: EventCursorDto;
+  data: SelectedPatch;
+  [k: string]: unknown;
+}
+
+export interface SelectedPatch {
+  file: PatchFile;
+  nextCursor: PageCursorDto | null;
+  ordinal: SafeCountDto;
+  previousCursor: PageCursorDto | null;
+  settingsRevision: RevisionDto;
+  /**
+   * Exact original UTF-8 when the selected complete patch fits the inline limit.
+   */
+  text: string | null;
+  [k: string]: unknown;
+}

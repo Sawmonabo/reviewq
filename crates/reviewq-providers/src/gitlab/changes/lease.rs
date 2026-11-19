@@ -2,7 +2,7 @@ use std::collections::VecDeque;
 use std::fs::File;
 use std::os::unix::fs::FileExt;
 use std::path::PathBuf;
-use std::sync::{Arc, Weak};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use reviewq_app::access::{AppError, AppFuture};
@@ -32,6 +32,12 @@ pub(super) struct IndexKey {
 type Slot = Arc<OnceCell<PatchBytes>>;
 type IndexSlot = OnceCell<SourcePage<PatchFile>>;
 
+struct IndexLease {
+    key: IndexKey,
+    slot: Arc<IndexSlot>,
+    used_at: Instant,
+}
+
 struct Lease {
     key: Key,
     slot: Slot,
@@ -41,7 +47,7 @@ struct Lease {
 pub(in crate::gitlab) struct Leases {
     pub(in crate::gitlab) profile: PathBuf,
     entries: Arc<Mutex<VecDeque<Lease>>>,
-    scans: Mutex<Vec<(IndexKey, Weak<IndexSlot>)>>,
+    scans: Mutex<VecDeque<IndexLease>>,
 }
 
 pub(super) enum Body {
@@ -68,26 +74,50 @@ impl Leases {
         Self {
             profile,
             entries,
-            scans: Mutex::new(Vec::new()),
+            scans: Mutex::new(VecDeque::new()),
         }
     }
 
     pub(super) async fn index(&self, key: IndexKey) -> Result<Arc<IndexSlot>, AppError> {
         let mut scans = self.scans.lock().await;
-        scans.retain(|(_, pending)| pending.strong_count() > 0);
-        if let Some(active) = scans
-            .iter()
-            .find(|(existing, _)| existing == &key)
-            .and_then(|(_, pending)| pending.upgrade())
-        {
-            return Ok(active);
+        // The caller checks the current GitLab refs before every lookup. Retain only
+        // bounded, fully verified REST pages under their original request identity.
+        scans.retain(|scan| {
+            Arc::strong_count(&scan.slot) > 1
+                || (scan.slot.initialized()
+                    && scan.used_at.elapsed() < INACTIVITY
+                    && (scan.key.source != key.source || scan.key.revision == key.revision))
+        });
+        if let Some(position) = scans.iter().position(|scan| scan.key == key) {
+            let mut scan = scans.remove(position).ok_or(AppError::Internal)?;
+            let slot = scan.slot.clone();
+            scan.used_at = Instant::now();
+            scans.push_back(scan);
+            return Ok(slot);
         }
-        if scans.len() >= MAX_LEASES {
-            return Err(AppError::Busy);
+        if scans.len() == MAX_LEASES {
+            let unused = scans
+                .iter()
+                .position(|scan| Arc::strong_count(&scan.slot) == 1);
+            scans.remove(unused.ok_or(AppError::Busy)?);
         }
         let slot = Arc::new(OnceCell::new());
-        scans.push((key, Arc::downgrade(&slot)));
+        scans.push_back(IndexLease {
+            key,
+            slot: slot.clone(),
+            used_at: Instant::now(),
+        });
         Ok(slot)
+    }
+
+    pub(super) async fn leased_patch(&self, key: &Key) -> Option<PatchBytes> {
+        let mut entries = self.entries.lock().await;
+        let lease = entries.iter_mut().find(|entry| {
+            &entry.key == key && (entry.used_at.elapsed() < INACTIVITY || entry.in_use())
+        })?;
+        let patch = lease.slot.get()?.clone();
+        lease.used_at = Instant::now();
+        Some(patch)
     }
 
     pub(super) async fn slot(&self, key: Key) -> Result<Slot, AppError> {
