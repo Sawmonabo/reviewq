@@ -224,12 +224,13 @@ fn monitor_digest(input: &MonitorRequest) -> [u8; 32] {
     }
     let mut digest = Sha256::new();
     hash_field(&mut digest, input.review.as_str().as_bytes());
-    digest.update(
-        input
-            .expected_generation
-            .map_or(0, Revision::get)
-            .to_be_bytes(),
-    );
+    let generation = input.expected_generation.map(Revision::get);
+    digest.update(generation.unwrap_or_default().to_be_bytes());
+    // A zero value alone represents first enrollment. Distinguish an explicitly
+    // supplied zero while keeping fingerprints for existing valid generations.
+    if generation == Some(0) {
+        digest.update(b"explicit-generation-zero");
+    }
     match &input.command {
         MonitorCommand::Configure {
             run,
