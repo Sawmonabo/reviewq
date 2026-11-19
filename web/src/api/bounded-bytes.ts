@@ -17,7 +17,7 @@ export async function readBoundedBytes(response: Response, limit: number): Promi
       if (chunk.done) break;
       if (chunk.value.byteLength > limit - length) {
         await reader.cancel();
-        throw new Error("ReviewQ returned a response larger than requested.");
+        throw new ResponseSizeLimit("ReviewQ returned a response larger than requested.");
       }
       const end = length + chunk.value.byteLength;
       if (end > bytes.byteLength) {
@@ -33,3 +33,5 @@ export async function readBoundedBytes(response: Response, limit: number): Promi
     reader.releaseLock();
   }
 }
+
+export class ResponseSizeLimit extends Error {}

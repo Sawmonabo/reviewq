@@ -1,0 +1,16 @@
+.changes { min-width: 0; }
+.changes-tabs button[aria-pressed="true"] { color: var(--link); background: var(--selected); border-color: var(--strong-line); }
+.approval-card { padding: 9px 12px; }
+.approval-card[open] > summary { margin-bottom: 8px; }
+.patch-toolbar { border-bottom: 1px solid var(--line); padding-block: 7px; overflow-wrap: anywhere; }
+.patch-source { min-width: 0; font-family: var(--mono); font-size: 12px; line-height: 21px; white-space: pre-wrap; overflow-wrap: anywhere; background: var(--surface); border: 1px solid var(--line); border-radius: 5px; tab-size: 4; }
+pre.patch-source { padding: 8px; }
+.patch-row { display: block; position: relative; min-height: 21px; padding-left: 12ch; }
+.patch-row::before { position: absolute; top: 0; left: 0; white-space: pre; width: 11ch; text-align: center; border-right: 1px solid var(--line); color: var(--muted); content: attr(data-old) "   " attr(data-new); user-select: none; }
+.patch-add { color: var(--diff-added); background: var(--diff-added-bg); }
+.patch-delete { color: var(--diff-deleted); background: var(--diff-deleted-bg); }
+.patch-hunk { color: var(--link); background: var(--selected); }
+.patch-thread-slot { display: block; white-space: normal; font-family: Inter, system-ui, sans-serif; user-select: none; }
+.patch-thread-slot .patch-discussion { margin: 6px 9px; }
+.patch-discussion { border: 1px solid var(--line); background: var(--raised); border-radius: 5px; color: var(--text); padding: 7px 9px; min-width: 0; overflow-wrap: anywhere; }
+.discussion-note { margin-top: 7px; border-top: 1px solid var(--line); padding-top: 7px; user-select: text; }
