@@ -2,6 +2,7 @@
 
 pub mod access;
 pub mod changes;
+pub mod decisions;
 pub mod events;
 pub mod history;
 mod labels;

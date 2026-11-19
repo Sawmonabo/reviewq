@@ -1,5 +1,6 @@
 //! Production HTTP routes for review-owned state.
 
+pub(super) mod decisions;
 mod notifications;
 mod reports;
 
@@ -12,6 +13,14 @@ use super::Entry;
 
 pub(super) fn routes() -> Router<Arc<Entry>> {
     Router::new()
+        .route(
+            "/reviews/{review_id}/decisions",
+            axum::routing::post(decisions::save),
+        )
+        .route(
+            "/reviews/{review_id}/checkpoint",
+            axum::routing::post(decisions::checkpoint),
+        )
         .route("/notifications", get(notifications::list))
         .route(
             "/notifications/state",

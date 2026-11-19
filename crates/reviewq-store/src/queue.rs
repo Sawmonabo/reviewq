@@ -21,6 +21,7 @@ use rusqlite::{Connection, OptionalExtension, Row, params};
 use uuid::Uuid;
 
 use crate::connection::WriteTx;
+use crate::decisions;
 use crate::events::snapshot;
 use crate::workspace::{
     ReadScope, actor_key, advance_queue, allow_review, operator, queue_revision, scope,
@@ -30,13 +31,22 @@ use crate::{SqliteStore, StoreError};
 
 const ITEM_COLUMNS: &str =
     "r.review_id, r.origin, r.project_id, r.iid, r.project_path, r.title, r.head_sha, r.state, r.updated_at_ms,
-     (SELECT count(*) FROM runs WHERE runs.review_id=r.review_id)";
+     (SELECT count(*) FROM runs WHERE runs.review_id=r.review_id),
+     coalesce(d.revision, 0), d.disposition, d.reviewed_sha, d.reviewed_at_ms,
+     EXISTS (SELECT 1 FROM notifications n WHERE n.review_id=r.review_id AND n.source='gitlab'
+             AND n.kind IN ('reply', 'edited_reply', 'resolved', 'reopened', 'approval_withdrawn')
+             AND n.ordinal > coalesce((SELECT f.source_ordinal FROM review_handled_frontiers f
+                                        WHERE f.review_id=r.review_id), 0))";
 const SCOPE_PREDICATE: &str =
     "(((?1 = 0 OR ?1 = 1)
        AND EXISTS (SELECT 1 FROM configured_projects c WHERE c.origin=r.origin AND c.project_id=r.project_id)
        AND (EXISTS (SELECT 1 FROM review_discoveries d WHERE d.review_id=r.review_id)
-            OR EXISTS (SELECT 1 FROM runs WHERE runs.review_id=r.review_id)))
-      OR (?1 = 0 AND EXISTS (SELECT 1 FROM runs WHERE runs.review_id=r.review_id))
+            OR EXISTS (SELECT 1 FROM runs WHERE runs.review_id=r.review_id)
+            OR EXISTS (SELECT 1 FROM review_decisions WHERE review_id=r.review_id)
+            OR EXISTS (SELECT 1 FROM notifications WHERE review_id=r.review_id)))
+      OR (?1 = 0 AND (EXISTS (SELECT 1 FROM runs WHERE runs.review_id=r.review_id)
+            OR EXISTS (SELECT 1 FROM review_decisions WHERE review_id=r.review_id)
+            OR EXISTS (SELECT 1 FROM notifications WHERE review_id=r.review_id)))
       OR (?1 = 2 AND r.review_id=?2))";
 
 impl QueueStore for SqliteStore {
@@ -227,7 +237,7 @@ fn queue(
     });
     let total_sql = format!("SELECT count(*) FROM reviews AS r WHERE {SCOPE_PREDICATE}");
     let page_sql = format!(
-        "SELECT {ITEM_COLUMNS} FROM reviews AS r WHERE {SCOPE_PREDICATE}
+        "SELECT {ITEM_COLUMNS} FROM reviews AS r LEFT JOIN review_decisions AS d USING (review_id) WHERE {SCOPE_PREDICATE}
          AND (r.updated_at_ms, r.review_id) < (?3, ?4) ORDER BY r.updated_at_ms DESC, r.review_id DESC LIMIT ?5"
     );
     let total: i64 =
@@ -279,7 +289,7 @@ fn overview(
         return Err(AppError::CursorExpired.into());
     }
     let mut statement = connection.prepare_cached(&format!(
-        "SELECT {ITEM_COLUMNS} FROM reviews AS r WHERE r.review_id=?1"
+        "SELECT {ITEM_COLUMNS} FROM reviews AS r LEFT JOIN review_decisions AS d USING (review_id) WHERE r.review_id=?1"
     ))?;
     let mut rows = statement.query([review_id.as_str()])?;
     let item = queue_item(rows.next()?.ok_or(AppError::NotFound)?)?;
@@ -307,7 +317,7 @@ fn overview(
         runs.pop();
         runs.last().map(|run| RunPosition {
             context,
-            review_id,
+            review_id: review_id.clone(),
             started_at_ms: run.started_at_ms,
             run_id: run.run_id.clone(),
         })
@@ -317,6 +327,7 @@ fn overview(
     Ok(ReviewOverview {
         item,
         settings_revision: settings_revision(connection)?,
+        frontier: decisions::capture_frontier(connection, &review_id, &runs)?,
         runs,
         next_run,
     })
@@ -488,6 +499,8 @@ fn queue_item(row: &Row<'_>) -> Result<QueueItem, StoreError> {
         },
         registered_lead_count: u64::try_from(row.get::<_, i64>(9)?)
             .map_err(|_| AppError::Internal)?,
+        decision: decisions::decode(row, 10)?,
+        pending_source_updates: row.get(14)?,
     })
 }
 

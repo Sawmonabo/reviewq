@@ -3,7 +3,9 @@ use std::sync::Arc;
 use axum::Json;
 use axum::extract::State;
 use axum::http::HeaderMap;
+use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use reviewq_app::access::AppError;
+use reviewq_app::decisions::Disposition;
 use reviewq_app::events::Snapshot;
 use reviewq_app::queue::{
     MAX_QUEUE_PAGE, MergeRequestState, PageContext, QueueItem, QueuePosition, RunPosition,
@@ -18,9 +20,10 @@ use reviewq_protocol::queue::{
     ReviewSelectionResponse, RunSummary,
 };
 use reviewq_protocol::{
-    ErrorCode, ErrorDto, EventCursorDto, GitShaDto, HostProviderDto, MergeRequestIidDto, Page,
-    PageCursorDto, ProjectIdDto, ReviewIdDto, RevisionDto, RunDetail, RunDetailResponse, RunIdDto,
-    SafeCountDto, SessionKeyDto, SessionSummary, Success, UtcTimestampDto,
+    CheckpointIdDto, ErrorCode, ErrorDto, EventCursorDto, GitShaDto, HostProviderDto,
+    MergeRequestIidDto, Page, PageCursorDto, ProjectIdDto, ReviewIdDto, RevisionDto, RunDetail,
+    RunDetailResponse, RunIdDto, SafeCountDto, SessionKeyDto, SessionSummary, Success,
+    UtcTimestampDto,
 };
 use serde::{Deserialize, Serialize};
 
@@ -198,7 +201,10 @@ pub(super) async fn overview(
         }),
         _ => return Err(AppError::CursorExpired.into()),
     };
-    let Snapshot { value, cursor } = entry.store.read_review(actor, id, after, limit).await?;
+    let Snapshot { value, cursor } = entry
+        .store
+        .read_review(actor.clone(), id.clone(), after, limit)
+        .await?;
     let runs = value
         .runs
         .iter()
@@ -223,12 +229,22 @@ pub(super) async fn overview(
             })
         })
         .transpose()?;
+    let checkpoint = URL_SAFE_NO_PAD.encode(super::control::random()?);
+    entry.checkpoints.remember(
+        checkpoint.clone(),
+        actor,
+        id,
+        value.settings_revision,
+        value.frontier,
+    )?;
     let data = ReviewOverview {
         review: project_review(&value.item)?,
-        decision_revision: RevisionDto::new(0).ok_or(AppError::Internal)?,
+        decision_revision: RevisionDto::new(value.item.decision.revision.get())
+            .ok_or(AppError::Internal)?,
+        decision: Some(super::features::decisions::project(&value.item.decision)?),
         settings_revision: RevisionDto::new(value.settings_revision.get())
             .ok_or(AppError::Internal)?,
-        checkpoint_id: None,
+        checkpoint_id: Some(CheckpointIdDto::new(checkpoint).ok_or(AppError::Internal)?),
         runs: Page::new(runs, next).ok_or(AppError::Internal)?,
     };
     Ok(Json(success(data, cursor)?))
@@ -348,10 +364,22 @@ pub(super) fn project_review(item: &QueueItem) -> Result<MergeRequestRow, AppErr
         author: None,
         source_sha: GitShaDto::new(source.head_sha.as_str()).ok_or(AppError::Internal)?,
         mr_state,
-        queue_state: if source.state == MergeRequestState::Open {
-            QueueStatus::NeedsReview
-        } else {
+        queue_state: if source.state != MergeRequestState::Open {
             QueueStatus::Archive
+        } else if item.pending_source_updates
+            || item
+                .decision
+                .reviewed_sha
+                .as_ref()
+                .is_some_and(|sha| sha != &source.head_sha)
+        {
+            QueueStatus::Followup
+        } else {
+            match item.decision.disposition {
+                Some(Disposition::Reviewed) => QueueStatus::Reviewed,
+                Some(Disposition::WaitingAuthor) => QueueStatus::WaitingAuthor,
+                Some(Disposition::NeedsReview) | None => QueueStatus::NeedsReview,
+            }
         },
         updated_at: UtcTimestampDto::from_unix_milliseconds(source.updated_at_ms)
             .ok_or(AppError::Internal)?,

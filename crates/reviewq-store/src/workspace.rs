@@ -97,7 +97,8 @@ pub(crate) fn allow_review(
     let retained = || {
         Ok::<_, StoreError>(connection.query_row(
             "SELECT EXISTS(SELECT 1 FROM runs WHERE review_id=?1)
-                 OR EXISTS(SELECT 1 FROM notifications WHERE review_id=?1)",
+                 OR EXISTS(SELECT 1 FROM notifications WHERE review_id=?1)
+                 OR EXISTS(SELECT 1 FROM review_decisions WHERE review_id=?1)",
             [id.as_str()],
             |row| row.get::<_, bool>(0),
         )?)

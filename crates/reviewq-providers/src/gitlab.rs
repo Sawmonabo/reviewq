@@ -27,6 +27,19 @@ pub struct GitLab {
 }
 
 impl ReviewSourceReader for GitLab {
+    fn review(&self, identity: MrIdentity) -> AppFuture<'_, ReviewSource> {
+        Box::pin(async move {
+            if identity.origin() != &self.identity {
+                return Err(AppError::NotFound);
+            }
+            let project = self.project(identity.project_id()).await?;
+            let mr = self
+                .merge_request(identity.project_id(), identity.iid())
+                .await?;
+            self.review(identity.project_id(), &project.path_with_namespace, mr)
+        })
+    }
+
     fn reviews(&self, project: ConfiguredProject) -> AppFuture<'_, Vec<ReviewSource>> {
         Box::pin(async move {
             if project.origin != self.identity {

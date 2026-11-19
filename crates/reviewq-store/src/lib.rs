@@ -1,6 +1,7 @@
 //! SQLite storage for an owner-only ReviewQ profile.
 
 mod connection;
+mod decisions;
 mod error;
 mod events;
 mod hosts;

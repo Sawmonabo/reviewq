@@ -9,6 +9,7 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use reviewq_app::access::{Actor, AppError};
+use reviewq_app::decisions::{Checkpoints, DecisionStore};
 use reviewq_app::events::EventLog;
 use reviewq_app::hosts::{LeadStore, MessageHistoryStore, NativeHost};
 use reviewq_app::notifications::InboxStore;
@@ -39,10 +40,10 @@ use error::{ApiBytes, ApiError};
 
 /// Shared application ports for one ReviewQ listener pair.
 pub trait Store:
-    WorkspaceStore + QueueStore + ReviewLookup + EventLog + LeadStore + SourceRefreshStore + ReportStore + MessageHistoryStore + InboxStore
+    WorkspaceStore + QueueStore + ReviewLookup + EventLog + LeadStore + SourceRefreshStore + ReportStore + MessageHistoryStore + InboxStore + DecisionStore
 {
 }
-impl<S: WorkspaceStore + QueueStore + ReviewLookup + EventLog + LeadStore + SourceRefreshStore + ReportStore + MessageHistoryStore + InboxStore>
+impl<S: WorkspaceStore + QueueStore + ReviewLookup + EventLog + LeadStore + SourceRefreshStore + ReportStore + MessageHistoryStore + InboxStore + DecisionStore>
     Store for S
 {
 }
@@ -56,6 +57,7 @@ pub(super) struct Entry {
     sends_allowed: bool,
     auth: Auth,
     refresh: Mutex<Option<watch::Receiver<RefreshResult>>>,
+    checkpoints: Checkpoints,
 }
 
 #[derive(Deserialize)]
@@ -102,6 +104,7 @@ pub fn router(
         sends_allowed,
         auth: Auth::new(endpoint),
         refresh: Mutex::new(None),
+        checkpoints: Checkpoints::default(),
     });
     let api = Router::new()
         .route("/status", get(status))
