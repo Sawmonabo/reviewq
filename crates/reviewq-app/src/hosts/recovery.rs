@@ -14,7 +14,7 @@ labels!(RecoveryState {
     Disabled=>"disabled", Waiting=>"waiting", Queued=>"queued", Started=>"started",
     Uncertain=>"uncertain", Cancelled=>"cancelled", Complete=>"complete",
 });
-labels!(InterruptState { Reserved=>"reserved", Interrupted=>"interrupted", Rejected=>"rejected", Uncertain=>"uncertain" });
+labels!(InterruptState { Reserved=>"reserved", Interrupted=>"interrupted", Deferred=>"deferred", Rejected=>"rejected", Uncertain=>"uncertain" });
 
 pub struct Preferences {
     pub revision: Revision,
@@ -91,6 +91,7 @@ pub trait RecoveryStore: Send + Sync {
         actor: Actor,
         run: RunId,
         session: SessionKey,
+        episode_id: String,
         expected: Revision,
     ) -> AppFuture<'_, Snapshot<Episode>>;
     fn due_recovery(&self) -> AppFuture<'_, Vec<Candidate>>;
@@ -119,9 +120,13 @@ pub async fn run_due_recoveries(
     store: &dyn RecoveryStore,
     source: &dyn ReviewSourceReader,
     native: &dyn NativeWorkflowProof,
+    active_settings: Revision,
 ) -> Result<(), crate::access::AppError> {
     use crate::access::AppError;
     for candidate in store.due_recovery().await? {
+        if candidate.settings != active_settings {
+            continue;
+        }
         let live = source.workflow_snapshot(candidate.identity.clone()).await;
         let result = match live {
             Ok(live)

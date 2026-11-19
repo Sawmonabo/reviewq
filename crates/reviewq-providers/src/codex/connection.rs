@@ -187,6 +187,10 @@ impl Connection {
             .map(|_| ())
     }
 
+    pub(super) async fn interrupt(&self, params: Value) -> Result<(), CallError> {
+        self.call("turn/interrupt", params, None).await.map(|_| ())
+    }
+
     pub(super) async fn launch<T: DeserializeOwned>(
         &self,
         method: &'static str,

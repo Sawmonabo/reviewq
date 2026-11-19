@@ -53,7 +53,7 @@ pub(super) async fn run(
             _ = async {
                 let _ = tokio::join!(
                     run_due_followups(store.as_ref(), source.as_ref(), native.as_ref()),
-                    run_due_recoveries(store.as_ref(), source.as_ref(), native.as_ref()),
+                    run_due_recoveries(store.as_ref(),source.as_ref(),native.as_ref(),context.revision),
                     run_due_publications(store.as_ref(), source.as_ref(), native.as_ref()),
                 );
             } => {},

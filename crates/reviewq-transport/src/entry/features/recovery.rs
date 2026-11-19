@@ -81,6 +81,7 @@ async fn cancel(
             actor,
             parse(&run)?,
             parse(&session)?,
+            input.episode_id.as_str().to_owned(),
             reviewq_domain::identity::Revision::try_from(input.expected_revision.get())
                 .map_err(|_| AppError::InvalidRequest)?,
         )
@@ -113,7 +114,7 @@ async fn interrupt(
         let observed = host
             .interrupt_managed(claim.target.clone(), claim.turn.clone())
             .await
-            .unwrap_or(app::InterruptState::Uncertain);
+            .unwrap_or(app::InterruptState::Deferred);
         entry.store.finish_interrupt(claim, observed).await?
     } else if matches!(
         claim.state,
@@ -138,6 +139,7 @@ async fn interrupt(
         state: match state.value {
             app::InterruptState::Interrupted => dto::InterruptState::Interrupted,
             app::InterruptState::Rejected => dto::InterruptState::Rejected,
+            app::InterruptState::Deferred => dto::InterruptState::Deferred,
             _ => dto::InterruptState::Uncertain,
         },
     };

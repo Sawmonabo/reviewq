@@ -22,6 +22,7 @@ pub struct SavePreferences {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct CancelRecovery {
+    pub episode_id: ResourceIdDto,
     pub expected_revision: RevisionDto,
 }
 
@@ -79,6 +80,7 @@ pub struct InterruptReceipt {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub enum InterruptState {
     Interrupted,
+    Deferred,
     Rejected,
     Uncertain,
 }
