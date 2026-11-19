@@ -18,6 +18,7 @@ pub struct HistorySession {
 pub struct HistoryParent {
     pub session_key: SessionKey,
     pub native_id: NativeSessionId,
+    pub root_native_id: Option<NativeSessionId>,
     pub source: Option<AbsolutePath>,
 }
 

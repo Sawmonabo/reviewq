@@ -1,5 +1,6 @@
 import { deliver, finishTurn, observeFirstStep, observeInput, observeTurn, reviewqOrigin } from "./delivery.js";
 import { registerWorkflowTools, reportTurn, stageAction, stageReport } from "./workflow.js";
+import { childrenChanged, reconcileChildren } from "./children.js";
 
 const HEARTBEAT_MS = 5000;
 const OFFLINE_MS = 30000;
@@ -50,6 +51,7 @@ async function current($) {
       generation: Array.from(salt, byte => byte.toString(16).padStart(2, "0")).join(""),
       sequence: 0,
       inputRevision: 0,
+      childSequence: 0,
       linked: false,
       lastSeen: 0,
       label: undefined,
@@ -63,7 +65,9 @@ async function refresh($, target) {
   const state = await current($);
   const result = await invoke($, "registration", state.id, target);
   if (state === session && await $.session.id() === state.id && !result.error) {
+    if (result.linked && !state.linked) childrenChanged(state);
     state.linked = !!result.linked;
+    await $.env.set("REVIEWQ_CLAUDE_LINKED", state.linked ? state.id : "");
     if (state.linked && !state.lastSeen) state.lastSeen = Date.now();
     $.ui.invalidate("ui.render");
   }
@@ -77,6 +81,7 @@ async function heartbeat($, state, allowDelivery = true) {
     phase: state.question ? "blocked" : state.working || state.activeTurn || state.pendingPrompt ? "working" : state.phase ?? null,
     hasQuestions: !!state.question,
     turnId: state.turnId ?? null,
+    step: state.stepIndex ?? null,
     latestPromptId: state.lastPrompt ?? null,
     latestPromptTurnId: state.lastPromptTurn ?? null,
     latestPromptManual: !!state.lastPromptTurn && !!state.lastPromptManual,
@@ -87,7 +92,10 @@ async function heartbeat($, state, allowDelivery = true) {
     if (result.data?.protocolVersion === 1) {
       state.lastSeen = Date.now();
       state.label = result.data.label;
-      if (allowDelivery) await deliver($, invoke, state, result.data.offer);
+      if (allowDelivery) {
+        await deliver($, invoke, state, result.data.offer);
+        await reconcileChildren($, invoke, state);
+      }
     }
     $.ui.invalidate("ui.render");
   }
@@ -151,10 +159,17 @@ export function register(on) {
   });
 
   on("turn.start", async ($, event, next) => {
-    if (event.agentId) return next(event);
+    if (event.agentId) {
+      if (session?.linked) {
+        childrenChanged(session);
+        schedule($);
+      }
+      return next(event);
+    }
     const state = await current($);
     state.turnId = event.turnId;
     state.activeTurn = event.turnId;
+    state.stepIndex = undefined;
     state.lastResponse = undefined;
     state.phase = "working";
     observeTurn(state, event.turnId);
@@ -164,6 +179,7 @@ export function register(on) {
 
   on("turn.step", async function* ($, event, next) {
     if (!event.agentId && session?.turnId === event.turnId) {
+      session.stepIndex = event.index;
       session.model = event.model;
       session.effort = typeof event.effort === "string" ? event.effort : undefined;
       if (event.index === 0) {
@@ -183,6 +199,10 @@ export function register(on) {
 
   on("turn.complete", async ($, event, next) => {
     const result = await next(event);
+    if (event.agentId && session?.linked) {
+      childrenChanged(session);
+      schedule($);
+    }
     if (!event.agentId && session?.turnId === event.turnId) {
       const state = session;
       if (state.linked) {
@@ -194,6 +214,15 @@ export function register(on) {
       finishTurn(session, event.turnId);
       session.question = undefined;
       if (session.linked) schedule($);
+    }
+    return result;
+  });
+
+  on("agent.spawn", async ($, event, next) => {
+    const result = await next(event);
+    if (result.agentId && session?.linked) {
+      childrenChanged(session);
+      schedule($);
     }
     return result;
   });
@@ -251,9 +280,14 @@ export function register(on) {
     }
   });
 
-  on("session.end", ($, event, next) => {
+  on("session.end", async ($, event, next) => {
+    const state = session;
     reset();
     recheck = false;
+    if (state?.linked) {
+      await $.env.set("REVIEWQ_CLAUDE_LINKED", "");
+      await invoke($, "hook", state.id, { classic: { kind: "disconnected", generation: state.generation } });
+    }
     return next(event);
   });
 

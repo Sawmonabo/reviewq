@@ -177,7 +177,7 @@ pub(super) fn verify(
         && let Some(parent) = parent
         && !claude_child_location(
             candidate,
-            parent.native_id.as_str(),
+            claude_root(parent).as_str(),
             identity.native_id().as_str(),
         )
     {
@@ -252,7 +252,7 @@ pub(super) fn verify(
                 native_id: identity.native_id().clone(),
                 fingerprint: fingerprint.finalize().into(),
                 root_session: if provider == HostProvider::Claude {
-                    parent.map(|parent| parent.native_id.clone())
+                    parent.map(|parent| claude_root(parent).clone())
                 } else {
                     None
                 },
@@ -285,7 +285,7 @@ fn identity_matches(
             Some(parent) => {
                 record.sidechain
                     && record.agent.as_deref() == Some(id)
-                    && record.session.as_deref() == Some(parent.native_id.as_str())
+                    && record.session.as_deref() == Some(claude_root(parent).as_str())
             }
             None => {
                 !record.sidechain
@@ -297,6 +297,50 @@ fn identity_matches(
             }
         },
     }
+}
+
+fn claude_root(parent: &HistoryParent) -> &NativeSessionId {
+    parent.root_native_id.as_ref().unwrap_or(&parent.native_id)
+}
+
+pub(crate) fn verified_claude_child(
+    root: &HistorySession,
+    child: &NativeBinding,
+    cancelled: &AtomicBool,
+) -> Result<AbsolutePath, AppError> {
+    let parent = root.binding.identity();
+    let child_identity = child.identity();
+    if root.parent.is_some()
+        || parent.provider() != HostProvider::Claude
+        || child_identity.provider() != HostProvider::Claude
+        || parent.profile() != child_identity.profile()
+        || parent.native_id() == child_identity.native_id()
+    {
+        return Err(AppError::Forbidden);
+    }
+    let id = child_identity.native_id().as_str();
+    if id.is_empty()
+        || id.len() > 128
+        || !id
+            .bytes()
+            .all(|c| c.is_ascii_alphanumeric() || c == b'-' || c == b'_')
+    {
+        return Err(AppError::InvalidRequest);
+    }
+    let path = root.source.as_ref().ok_or(AppError::NotFound)?.as_path();
+    let candidate = path
+        .with_extension("")
+        .join("subagents")
+        .join(format!("agent-{id}.jsonl"));
+    let relation = HistoryParent {
+        session_key: root.target.session_key().clone(),
+        native_id: parent.native_id().clone(),
+        root_native_id: None,
+        source: root.source.clone(),
+    };
+    let source =
+        verify(child, Some(&relation), &candidate, cancelled)?.ok_or(AppError::NotFound)?;
+    AbsolutePath::from_canonical(source.path).map_err(|_| AppError::Forbidden)
 }
 
 fn claude_child_location(path: &Path, parent: &str, id: &str) -> bool {

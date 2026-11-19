@@ -1,9 +1,9 @@
 //! Lifecycle observations from the exact registered Claude companion.
 
 use reviewq_domain::identity::{
-    DeliveryFence, DeliveryId, NativeInputId, NativeTurnId, ReportHash,
+    DeliveryFence, DeliveryId, NativeInputId, NativeSessionId, NativeTurnId, ReportHash,
 };
-use reviewq_domain::session::LeadTarget;
+use reviewq_domain::session::{AbsolutePath, LeadTarget, NativeBinding};
 
 use crate::access::{AppError, AppFuture};
 use crate::events::Snapshot;
@@ -17,6 +17,7 @@ pub struct ClaudeHeartbeat {
     pub sequence: u64,
     pub activity: Option<HostActivity>,
     pub turn: Option<NativeTurnId>,
+    pub step: Option<u64>,
     pub latest_prompt: Option<NativeInputId>,
     pub latest_prompt_turn: Option<NativeTurnId>,
     pub latest_prompt_manual: bool,
@@ -98,7 +99,47 @@ pub trait ClaudeWorkflowStore: Send + Sync {
     fn record_claude_turn(&self, lead: LeadTarget, result: ClaudeTurnResult) -> AppFuture<'_, ()>;
 }
 
+pub struct ClaudeChild {
+    pub generation: String,
+    pub sequence: u64,
+    pub id: NativeSessionId,
+    pub parent: Option<NativeSessionId>,
+    pub cwd: AbsolutePath,
+    pub working: bool,
+}
+
+pub struct ProvenClaudeChild {
+    pub generation: String,
+    pub sequence: u64,
+    pub binding: NativeBinding,
+    pub parent: Option<NativeSessionId>,
+    pub source: AbsolutePath,
+    pub working: bool,
+}
+
+pub enum ClaudeClassicEvent {
+    PermissionPending,
+    Display {
+        turn: NativeTurnId,
+        message: NativeInputId,
+        index: u64,
+        final_chunk: bool,
+    },
+    Stopping,
+    Disconnected {
+        generation: String,
+    },
+}
+
 pub trait ClaudeStore: Send + Sync {
+    fn record_claude_classic(
+        &self,
+        lead: LeadTarget,
+        event: ClaudeClassicEvent,
+    ) -> AppFuture<'_, ()>;
+
+    fn record_claude_child(&self, lead: LeadTarget, child: ProvenClaudeChild) -> AppFuture<'_, ()>;
+
     fn offer_claude_delivery(
         &self,
         lead: LeadTarget,

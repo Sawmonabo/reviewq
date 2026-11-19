@@ -37,7 +37,8 @@ pub(crate) fn history_session(
     let access = scope(connection, actor)?;
     let mut query = connection.prepare_cached(
         "SELECT r.review_id,s.provider,s.profile,s.native_id,s.cwd,s.source_path,
-                p.session_key,p.native_id,p.source_path
+                p.session_key,p.native_id,p.source_path,
+                (SELECT root.native_id FROM sessions root WHERE root.session_key=r.lead_session_key AND root.run_id=r.run_id)
          FROM sessions s JOIN runs r ON r.run_id=s.run_id
          LEFT JOIN sessions p ON p.session_key=s.parent_session_key AND p.run_id=r.run_id
          WHERE s.run_id=?1 AND s.session_key=?2 AND
@@ -61,6 +62,15 @@ pub(crate) fn history_session(
         Some(key) => Some(HistoryParent {
             session_key: parse(&key)?,
             native_id: parse(text(row, 7)?)?,
+            root_native_id: if identity.provider() == reviewq_domain::session::HostProvider::Claude
+            {
+                row.get::<_, Option<String>>(9)?
+                    .as_deref()
+                    .map(parse)
+                    .transpose()?
+            } else {
+                None
+            },
             source: row.get::<_, Option<Vec<u8>>>(8)?.map(path).transpose()?,
         }),
     };

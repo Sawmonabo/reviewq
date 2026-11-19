@@ -151,11 +151,16 @@ fn finish_turn(
             return Err(AppError::Conflict.into());
         }
     }
+    db.execute(
+        "UPDATE claude_companions SET permission_turn_id=NULL
+         WHERE session_key=?1 AND turn_id=?2 AND generation=?3 AND permission_turn_id=?2",
+        params![key, id, result.generation],
+    )?;
     tx.report_changed = written != 0;
     Ok(())
 }
 
-fn ensure_lead(db: &Connection, lead: &LeadTarget) -> Result<(), StoreError> {
+pub(super) fn ensure_lead(db: &Connection, lead: &LeadTarget) -> Result<(), StoreError> {
     let native = lead.binding().identity();
     if native.provider() != HostProvider::Claude
         || lead_for_run(db, lead.run_id())?.as_ref() != Some(lead)

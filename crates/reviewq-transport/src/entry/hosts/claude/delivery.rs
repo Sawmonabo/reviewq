@@ -5,8 +5,10 @@ use axum::extract::State;
 use axum::http::HeaderMap;
 use reviewq_app::access::AppError;
 use reviewq_app::hosts::{
-    ClaudeDeliveryAck, ClaudeDeliveryResult, ClaudeTurnResult, DeliveryWork, ObservedInput,
+    ClaudeChild, ClaudeClassicEvent, ClaudeDeliveryAck, ClaudeDeliveryResult, ClaudeTurnResult,
+    DeliveryWork, ObservedInput,
 };
+use reviewq_domain::session::AbsolutePath;
 use reviewq_protocol::Success;
 use serde::{Deserialize, Serialize};
 
@@ -160,10 +162,50 @@ struct FinalResponse {
 }
 
 #[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct ChildHook {
+    context: ClaudeCommand,
+    child_id: String,
+    generation: String,
+    sequence: u64,
+    parent_id: Option<String>,
+    child_cwd: std::path::PathBuf,
+    working: bool,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ClassicHook {
+    context: ClaudeCommand,
+    classic: Classic,
+}
+
+#[derive(Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+enum Classic {
+    PermissionPending,
+    Display {
+        #[serde(rename = "turnId")]
+        turn_id: String,
+        #[serde(rename = "messageId")]
+        message_id: String,
+        index: u64,
+        #[serde(rename = "finalChunk")]
+        final_chunk: bool,
+    },
+    Stopping,
+    Disconnected {
+        generation: String,
+    },
+}
+
+#[derive(Deserialize)]
 #[serde(untagged)]
 enum Hook {
     Delivery(DeliveryHook),
     Turn(TurnHook),
+    Child(ChildHook),
+    Classic(ClassicHook),
 }
 
 #[derive(Deserialize)]
@@ -192,6 +234,49 @@ pub(super) async fn hook(
     }
     let command = match command {
         Hook::Delivery(delivery) => delivery,
+        Hook::Classic(call) => {
+            let (lead, _) = verified_context(&entry, call.context).await?;
+            let event = match call.classic {
+                Classic::PermissionPending => ClaudeClassicEvent::PermissionPending,
+                Classic::Stopping => ClaudeClassicEvent::Stopping,
+                Classic::Disconnected { generation } => {
+                    ClaudeClassicEvent::Disconnected { generation }
+                }
+                Classic::Display {
+                    turn_id,
+                    message_id,
+                    index,
+                    final_chunk,
+                } => ClaudeClassicEvent::Display {
+                    turn: parse(&turn_id)?,
+                    message: parse(&message_id)?,
+                    index,
+                    final_chunk,
+                },
+            };
+            entry.store.record_claude_classic(lead, event).await?;
+            return Ok(Json(success((), *entry.commits.borrow())?));
+        }
+        Hook::Child(child) => {
+            let (root, history) = verified_context(&entry, child.context).await?;
+            let companion = entry.claude.as_ref().ok_or(AppError::Unavailable)?;
+            let proof = companion
+                .prove_child(
+                    history,
+                    ClaudeChild {
+                        id: parse(&child.child_id)?,
+                        generation: child.generation,
+                        sequence: child.sequence,
+                        parent: child.parent_id.as_deref().map(parse).transpose()?,
+                        cwd: AbsolutePath::from_canonical(child.child_cwd)
+                            .map_err(|_| AppError::InvalidRequest)?,
+                        working: child.working,
+                    },
+                )
+                .await?;
+            entry.store.record_claude_child(root, proof).await?;
+            return Ok(Json(success((), *entry.commits.borrow())?));
+        }
         Hook::Turn(turn) => {
             let (lead, _) = verified_context(&entry, turn.context).await?;
             let response = turn

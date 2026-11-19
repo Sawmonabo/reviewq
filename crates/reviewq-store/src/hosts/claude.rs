@@ -13,10 +13,36 @@ use crate::{SqliteStore, StoreError};
 
 pub(super) const COMPANION_FRESH_MS: i64 = 30_000;
 
+mod child;
+mod classic;
 mod delivery;
 mod workflow;
 
 impl ClaudeStore for SqliteStore {
+    fn record_claude_classic(
+        &self,
+        lead: LeadTarget,
+        event: reviewq_app::hosts::ClaudeClassicEvent,
+    ) -> AppFuture<'_, ()> {
+        Box::pin(async move {
+            self.write(move |tx| classic::record(tx, lead, event))
+                .await
+                .map_err(StoreError::app)
+        })
+    }
+
+    fn record_claude_child(
+        &self,
+        lead: LeadTarget,
+        child: reviewq_app::hosts::ProvenClaudeChild,
+    ) -> AppFuture<'_, ()> {
+        Box::pin(async move {
+            self.write(move |tx| child::record(tx, lead, child))
+                .await
+                .map_err(StoreError::app)
+        })
+    }
+
     fn offer_claude_delivery(
         &self,
         lead: LeadTarget,
@@ -111,27 +137,39 @@ fn heartbeat(
     let key = lead.session_key().as_str();
     let now = now_ms()?;
     let recorded = db.execute(
-        "INSERT INTO claude_companions(session_key,generation,sequence,seen_at_ms,turn_id,latest_prompt_id,model,effort,latest_prompt_turn_id,latest_prompt_manual)
-         VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)
+        "INSERT INTO claude_companions(session_key,generation,sequence,seen_at_ms,turn_id,latest_prompt_id,model,effort,latest_prompt_turn_id,latest_prompt_manual,turn_step)
+         VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)
          ON CONFLICT(session_key) DO UPDATE SET
             generation=excluded.generation, sequence=excluded.sequence, seen_at_ms=excluded.seen_at_ms,
+            permission_turn_id=CASE WHEN generation=excluded.generation AND turn_id IS excluded.turn_id
+              AND coalesce(excluded.turn_step,-1)<=coalesce(permission_step,-1)
+              THEN permission_turn_id ELSE NULL END,
+            turn_step=excluded.turn_step,
             turn_id=excluded.turn_id, latest_prompt_id=excluded.latest_prompt_id,
             model=excluded.model,effort=excluded.effort,
             latest_prompt_turn_id=excluded.latest_prompt_turn_id,latest_prompt_manual=excluded.latest_prompt_manual
          WHERE (generation=excluded.generation AND sequence<excluded.sequence) OR
-               (generation<>excluded.generation AND seen_at_ms<=?11)",
+               (generation<>excluded.generation AND seen_at_ms<=?12)",
         params![key, observation.generation, observation.sequence as i64, now,
             observation.turn.as_ref().map(|value| value.as_str()),
             observation.latest_prompt.as_ref().map(|value| value.as_str()),
             observation.model, observation.effort,
             observation.latest_prompt_turn.as_ref().map(|value| value.as_str()),
-            observation.latest_prompt_manual, now.saturating_sub(COMPANION_FRESH_MS)],
+            observation.latest_prompt_manual, observation.step.map(|value| value as i64), now.saturating_sub(COMPANION_FRESH_MS)],
     )?;
     if recorded == 0 {
         return Err(AppError::StaleRevision.into());
     }
     if let Some(activity) = observation.activity {
-        let (phase, questions) = activity_columns(Some(activity));
+        let permission: bool = db.query_row(
+            "SELECT coalesce(permission_turn_id=turn_id,0) FROM claude_companions WHERE session_key=?1",
+            [key], |row| row.get(0),
+        )?;
+        let (phase, questions) = if permission {
+            (Some("blocked"), true)
+        } else {
+            activity_columns(Some(activity))
+        };
         let changed = db.execute(
             "UPDATE sessions SET host_activity=?2, host_questions=?3
              WHERE session_key=?1 AND (host_activity,host_questions) IS DISTINCT FROM (?2,?3)",

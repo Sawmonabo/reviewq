@@ -4,6 +4,9 @@ CREATE TABLE claude_companions (
     sequence INTEGER NOT NULL CHECK (sequence > 0),
     seen_at_ms INTEGER NOT NULL,
     turn_id TEXT,
+    permission_turn_id TEXT,
+    turn_step INTEGER CHECK(turn_step>=0),
+    permission_step INTEGER,
     latest_prompt_id TEXT,
     latest_prompt_turn_id TEXT,
     latest_prompt_manual INTEGER NOT NULL CHECK (latest_prompt_manual IN (0,1)),
@@ -41,4 +44,19 @@ CREATE TABLE claude_turns (
     recorded_at_ms INTEGER NOT NULL,
     CHECK ((response_id IS NULL) = (response_sha256 IS NULL)),
     PRIMARY KEY(session_key,turn_id)
+) STRICT, WITHOUT ROWID;
+
+CREATE TABLE claude_children (
+    session_key TEXT PRIMARY KEY REFERENCES sessions(session_key),
+    companion_generation TEXT NOT NULL CHECK (length(companion_generation)=32),
+    sequence INTEGER NOT NULL CHECK (sequence>0)
+) STRICT, WITHOUT ROWID;
+
+CREATE TABLE claude_display_events (
+    session_key TEXT NOT NULL REFERENCES claude_companions(session_key),
+    turn_id TEXT NOT NULL,
+    display_id TEXT NOT NULL,
+    first_seen INTEGER NOT NULL DEFAULT 0 CHECK (first_seen IN (0,1)),
+    final_seen INTEGER NOT NULL DEFAULT 0 CHECK (final_seen IN (0,1)),
+    PRIMARY KEY (session_key,turn_id,display_id)
 ) STRICT, WITHOUT ROWID;

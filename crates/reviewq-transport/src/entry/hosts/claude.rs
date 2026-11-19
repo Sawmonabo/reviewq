@@ -34,6 +34,7 @@ struct Heartbeat {
     phase: Option<Phase>,
     has_questions: bool,
     turn_id: Option<String>,
+    step: Option<u64>,
     latest_prompt_id: Option<String>,
     latest_prompt_turn_id: Option<String>,
     latest_prompt_manual: bool,
@@ -79,6 +80,7 @@ async fn heartbeat(
         sequence: command.sequence,
         activity,
         turn: command.turn_id.as_deref().map(parse).transpose()?,
+        step: command.step,
         latest_prompt: command.latest_prompt_id.as_deref().map(parse).transpose()?,
         latest_prompt_turn: command
             .latest_prompt_turn_id
