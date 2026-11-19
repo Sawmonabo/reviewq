@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { ResponseSizeLimit } from "../../../api/bounded-bytes";
 import { ApiResponseError } from "../../../api/client";
@@ -14,13 +14,11 @@ import {
   readPatchFiles,
   readPatchPathCatalog,
   readPatchRevision,
+  readSelectedPatch,
+  takeSelectedPatchPrefetch,
 } from "../../../api/changes";
-import type {
-  PatchDiscussion,
-  PatchFile,
-  PatchFileIndex,
-  PatchPath,
-} from "../../../api/generated/contracts";
+import type { PatchIndex, PatchSelection } from "../../../api/changes";
+import type { PatchDiscussion, PatchFile, PatchPath } from "../../../api/generated/contracts";
 import { FilterSelect } from "../../../components/FilterSelect";
 import { Icon } from "../../../components/Icon";
 import { Pagination } from "../../../components/Pagination";
@@ -35,9 +33,9 @@ import { PatchDocumentView } from "./PatchDocumentView";
 import "./changes.css";
 
 type Boundary = "first" | "last";
-type Position = { readonly revision: string } & (
-  { readonly cursor: string; readonly boundary?: Boundary } | { readonly path: PatchPath }
-);
+type Position =
+  | { readonly revision: string; readonly cursor: string; readonly boundary?: Boundary }
+  | PatchSelection;
 type Tab = "files" | "general" | "all";
 type Status = "any" | "open" | "resolved";
 type Window = { readonly offset: number; readonly etag?: string; readonly last?: boolean };
@@ -60,32 +58,34 @@ export default function Changes({
   const [fileId, setFileId] = useState(() => storedFile(reviewId));
   const [position, setPosition] = useState<Position>();
   const [epoch, setEpoch] = useState(0);
-  const [retained, setRetained] = useState<PatchFileIndex>();
+  const [retained, setRetained] = useState<PatchIndex>();
   const [tab, setTab] = useState<Tab>("files");
   const [fileQuery, setFileQuery] = useState("");
   const [status, setStatus] = useState<Status>("any");
   const [involving, setInvolving] = useState(false);
   const participant = useRef<HTMLSelectElement>(null);
+  const selectionPrefetch = useRef<ReturnType<typeof takeSelectedPatchPrefetch>>(undefined);
+  useEffect(() => () => selectionPrefetch.current?.controller.abort(), []);
   const indexKey = JSON.stringify([reviewId, epoch, position]);
   const index = useResource(indexKey, async (signal) => {
     try {
+      if (position && !("cursor" in position)) {
+        if (!retained) throw new Error("The previous file scope is unavailable.");
+        const candidate = selectionPrefetch.current;
+        selectionPrefetch.current = undefined;
+        const result = await readSelectedPatch(reviewId, signal, position, retained, candidate);
+        const file = result.data.items[0];
+        if (file && !signal.aborted) selectFile(file);
+        return result;
+      }
       const result =
         position || epoch > 0
           ? await readPatchFiles(reviewId, signal, position)
           : await readInitialPatchFiles(reviewId, signal, storedFile(reviewId));
-      if (position && !signal.aborted) {
-        if ("path" in position) {
-          const path = position.path;
-          const selected = result.data.items.find(
-            (file) => file.oldPath === path.oldPath && file.newPath === path.newPath,
-          );
-          if (!selected) throw new Error("The file catalog and patch index disagree.");
-          selectFile(selected);
-        } else if (position.boundary) {
-          const selected =
-            position.boundary === "last" ? result.data.items.at(-1) : result.data.items[0];
-          if (selected) selectFile(selected);
-        }
+      if (position?.boundary && !signal.aborted) {
+        const selected =
+          position.boundary === "last" ? result.data.items.at(-1) : result.data.items[0];
+        if (selected) selectFile(selected);
       }
       return result;
     } catch (error) {
@@ -154,7 +154,7 @@ export default function Changes({
   const file = files.find((entry) => entry.fileId === fileId) ?? files[0];
   const filePosition = file ? files.indexOf(file) : -1;
   const pageNumber = shown?.pageNumber ?? 1;
-  const pageOffset = (pageNumber - 1) * PATCH_FILES_PER_PAGE;
+  const pageOffset = (pageNumber - 1) * (shown?.singleFile ? 1 : PATCH_FILES_PER_PAGE);
   const lastKnownFile = pageOffset + files.length;
   const totalFiles = catalog.data
     ? `${Math.max(catalog.data.count, lastKnownFile)}${catalog.data.partial ? "+" : ""}`
@@ -188,18 +188,19 @@ export default function Changes({
   function movePage(cursor: string | null | undefined, boundary?: Boundary) {
     if (!cursor || !index.data || index.pending) return;
     setRetained(index.data);
-    setPosition({ revision: index.data.revision, cursor, ...(boundary ? { boundary } : {}) });
+    const { revision } = index.data;
+    setPosition(
+      index.data.singleFile
+        ? { revision, selectedCursor: cursor }
+        : { revision, cursor, ...(boundary ? { boundary } : {}) },
+    );
   }
 
   function choosePath(path: PatchPath) {
     if (!index.data || index.pending) return;
-    const found = index.data.items.find(
-      (file) => file.oldPath === path.oldPath && file.newPath === path.newPath,
-    );
-    if (found) {
-      selectFile(found);
-      return;
-    }
+    if (file?.oldPath === path.oldPath && file.newPath === path.newPath) return;
+    selectionPrefetch.current?.controller.abort();
+    selectionPrefetch.current = takeSelectedPatchPrefetch(reviewId, index.data, path);
     setRetained(index.data);
     setPosition({ revision: index.data.revision, path });
   }
@@ -334,6 +335,7 @@ export default function Changes({
                 selected={file}
                 total={totalFiles}
                 pending={index.pending}
+                allowPrefetch={!changed}
                 catalog={catalog}
                 query={fileQuery}
                 onQuery={setFileQuery}

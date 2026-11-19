@@ -1,12 +1,13 @@
 import { decodeUtf8, readBoundedBytes } from "./bounded-bytes";
 import { read, request } from "./client";
-import type { PatchFile, PatchFileIndexResponse, PatchPath } from "./generated/contracts";
+import type { PatchFile, PatchFileIndex, PatchPath } from "./generated/contracts";
 import {
   isApprovalViewResponse,
   isCurrentPatchRevisionResponse,
   isPatchDiscussionsResponse,
   isPatchFileIndexResponse,
   isPatchPathsResponse,
+  isSelectedPatchResponse,
 } from "./generated/validators.mjs";
 
 export const PATCH_WINDOW_BYTES = 64 * 1024;
@@ -15,8 +16,22 @@ export const PATH_MATCHES_PER_PAGE = 60;
 const MAX_RICH_BYTES = 2 * 1024 * 1024;
 const PATH_CACHE_BYTES = 768 * 1024;
 const RETAINED_PATCH_BYTES = 128 * 1024;
-let retainedIndex:
-  { readonly reviewId: string; readonly result: PatchFileIndexResponse } | undefined;
+export type PatchIndex = PatchFileIndex & { readonly singleFile?: true };
+type PatchIndexResult = { readonly cursor: string; readonly data: PatchIndex };
+export type PatchSelection = { readonly revision: string } & (
+  { readonly path: PatchPath } | { readonly selectedCursor: string }
+);
+type RetainedPatch = { readonly identity: string; readonly result: PatchWindow };
+type PreparedSelection = {
+  readonly index: PatchIndexResult;
+  readonly patch: RetainedPatch | undefined;
+};
+type Prefetch = {
+  readonly key: string;
+  readonly controller: AbortController;
+  readonly result: Promise<PreparedSelection>;
+};
+let retainedIndex: { readonly reviewId: string; readonly result: PatchIndexResult } | undefined;
 let retainedCatalog:
   | {
       readonly reviewId: string;
@@ -24,19 +39,19 @@ let retainedCatalog:
       readonly result: Awaited<ReturnType<typeof loadPatchPathCatalog>>;
     }
   | undefined;
-let retainedPatch: { readonly identity: string; readonly result: PatchWindow } | undefined;
+let retainedPatch: RetainedPatch | undefined;
+let prefetched: Prefetch | undefined;
 
 export async function readPatchFiles(
   reviewId: string,
   signal: AbortSignal,
-  position?: { readonly revision: string; readonly cursor?: string; readonly path?: PatchPath },
+  position?: { readonly revision: string; readonly cursor: string },
   preferredFileId?: string,
 ) {
   const query = new URLSearchParams({ limit: String(PATCH_FILES_PER_PAGE) });
   if (position) {
     query.set("revision", position.revision);
-    if (position.cursor) query.set("cursor", position.cursor);
-    if (position.path) query.set("filePathHint", position.path.lookupKey);
+    query.set("cursor", position.cursor);
   }
   if (preferredFileId) query.set("preferredFileId", preferredFileId);
   const result = await read(
@@ -60,7 +75,7 @@ export async function readInitialPatchFiles(
   reviewId: string,
   signal: AbortSignal,
   preferredFileId: string | undefined,
-): Promise<PatchFileIndexResponse> {
+): Promise<PatchIndexResult> {
   const previous = retainedIndex?.reviewId === reviewId ? retainedIndex.result : undefined;
   if (
     previous &&
@@ -82,6 +97,138 @@ export async function readInitialPatchFiles(
     }
   }
   return readPatchFiles(reviewId, signal, undefined, preferredFileId);
+}
+
+export async function readSelectedPatch(
+  reviewId: string,
+  signal: AbortSignal,
+  selection: PatchSelection,
+  previous: PatchIndex,
+  candidate?: Prefetch,
+): Promise<PatchIndexResult> {
+  let prepared: PreparedSelection;
+  if (
+    candidate &&
+    "path" in selection &&
+    candidate.key === prefetchKey(reviewId, previous, selection.path)
+  ) {
+    const abort = () => candidate.controller.abort();
+    signal.addEventListener("abort", abort, { once: true });
+    if (signal.aborted) abort();
+    try {
+      prepared = await candidate.result;
+    } finally {
+      signal.removeEventListener("abort", abort);
+    }
+  } else {
+    candidate?.controller.abort();
+    prepared = await loadSelectedPatch(reviewId, signal, selection, previous);
+  }
+  signal.throwIfAborted();
+  if (prepared.patch) retainedPatch = prepared.patch;
+  retainedIndex = { reviewId, result: prepared.index };
+  return prepared.index;
+}
+
+export function takeSelectedPatchPrefetch(reviewId: string, previous: PatchIndex, path: PatchPath) {
+  if (prefetched?.key !== prefetchKey(reviewId, previous, path)) return;
+  const candidate = prefetched;
+  prefetched = undefined;
+  return candidate;
+}
+
+export function prefetchSelectedPatch(reviewId: string, previous: PatchIndex, path: PatchPath) {
+  prefetched?.controller.abort();
+  const controller = new AbortController();
+  const result = loadSelectedPatch(
+    reviewId,
+    controller.signal,
+    { revision: previous.revision, path },
+    previous,
+  );
+  const read = { key: prefetchKey(reviewId, previous, path), controller, result };
+  prefetched = read;
+  void result.catch(() => {
+    if (prefetched === read) prefetched = undefined;
+  });
+  function cancel() {
+    window.removeEventListener("pagehide", cancel);
+    if (prefetched === read) {
+      prefetched = undefined;
+      controller.abort();
+    }
+  }
+  window.addEventListener("pagehide", cancel);
+  return cancel;
+}
+
+function prefetchKey(reviewId: string, previous: PatchIndex, path: PatchPath) {
+  return JSON.stringify([reviewId, previous.settingsRevision, previous.revision, path.lookupKey]);
+}
+
+async function loadSelectedPatch(
+  reviewId: string,
+  signal: AbortSignal,
+  selection: PatchSelection,
+  previous: PatchIndex,
+): Promise<PreparedSelection> {
+  const { revision } = selection;
+  const query = new URLSearchParams({ revision });
+  if ("path" in selection) query.set("filePathHint", selection.path.lookupKey);
+  else query.set("cursor", selection.selectedCursor);
+  const { cursor, data } = await read(
+    `${changesRoute(reviewId)}/selected?${query}`,
+    isSelectedPatchResponse,
+    signal,
+    1024 * 1024,
+  );
+  const { file } = data;
+  if (
+    file.reviewId !== reviewId ||
+    file.revision !== revision ||
+    previous.revision !== revision ||
+    (previous.settingsRevision != null && data.settingsRevision !== previous.settingsRevision) ||
+    !Number.isSafeInteger(data.ordinal) ||
+    data.ordinal < 1 ||
+    ("path" in selection &&
+      (file.oldPath !== selection.path.oldPath || file.newPath !== selection.path.newPath))
+  ) {
+    throw new Error("The selected file identity changed.");
+  }
+  let patch: RetainedPatch | undefined;
+  if (data.text !== null) {
+    const bytes = new TextEncoder().encode(data.text);
+    if (
+      !isRichPatch(file) ||
+      bytes.length > RETAINED_PATCH_BYTES ||
+      bytes.length !== file.byteLength
+    )
+      throw new Error("The selected patch length changed.");
+    enforcePatchRows(bytes);
+    const hash = await crypto.subtle.digest("SHA-256", bytes);
+    const value = Array.from(new Uint8Array(hash), (byte) => byte.toString(16).padStart(2, "0"));
+    const etag = `"${value.join("")}"`;
+    if (file.patchETag !== etag) throw new Error("The selected patch digest changed.");
+    signal.throwIfAborted();
+    patch = {
+      identity: patchIdentity(file, etag),
+      result: { text: data.text, first: 0, next: bytes.length, total: bytes.length, etag },
+    };
+  }
+  signal.throwIfAborted();
+  const index: PatchIndexResult = {
+    cursor,
+    data: {
+      ...previous,
+      singleFile: true,
+      pageNumber: data.ordinal,
+      items: [file],
+      previousCursor: data.previousCursor,
+      nextCursor: data.nextCursor,
+      settingsRevision: data.settingsRevision,
+    },
+  };
+  return { index, patch };
 }
 
 export async function readPatchPathCatalog(
@@ -219,7 +366,7 @@ export async function readPatch(
 ): Promise<PatchWindow> {
   const headers = new Headers();
   const pinned = file.patchETag ?? window?.etag;
-  const identity = JSON.stringify([file.reviewId, file.revision, file.fileId, pinned]);
+  const identity = patchIdentity(file, pinned);
   if (!window && pinned && retainedPatch?.identity === identity) {
     signal.throwIfAborted();
     return retainedPatch.result;
@@ -315,6 +462,10 @@ function patchRoute(file: PatchFile, download = false): string {
   const query = new URLSearchParams({ fileId: file.fileId, revision: file.revision });
   if (download) query.set("download", "1");
   return `${changesRoute(file.reviewId)}/patch?${query}`;
+}
+
+function patchIdentity(file: PatchFile, etag: string | undefined) {
+  return JSON.stringify([file.reviewId, file.revision, file.fileId, etag]);
 }
 
 export async function readApprovals(reviewId: string, signal: AbortSignal) {

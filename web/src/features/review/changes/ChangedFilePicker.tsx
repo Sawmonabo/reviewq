@@ -2,20 +2,22 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   matchesPatchPath,
   PATH_MATCHES_PER_PAGE,
+  prefetchSelectedPatch,
   readPatchPathMatches,
 } from "../../../api/changes";
-import type { readPatchPathCatalog } from "../../../api/changes";
-import type { PatchFile, PatchFileIndex, PatchPath } from "../../../api/generated/contracts";
+import type { PatchIndex, readPatchPathCatalog } from "../../../api/changes";
+import type { PatchFile, PatchPath } from "../../../api/generated/contracts";
 import { Icon } from "../../../components/Icon";
 import { Loading, Notice } from "../../../components/PanelState";
 import { useResource } from "../../../hooks/useResource";
 
 type Props = {
   readonly reviewId: string;
-  readonly index: PatchFileIndex;
+  readonly index: PatchIndex;
   readonly selected: PatchFile | undefined;
   readonly total: string | undefined;
   readonly pending: boolean;
+  readonly allowPrefetch: boolean;
   readonly query: string;
   readonly catalog: {
     readonly data?: Awaited<ReturnType<typeof readPatchPathCatalog>>["data"] | null;
@@ -34,6 +36,7 @@ export function ChangedFilePicker({
   selected,
   total,
   pending,
+  allowPrefetch,
   query,
   catalog,
   onQuery,
@@ -42,12 +45,21 @@ export function ChangedFilePicker({
   onPage,
 }: Props) {
   const input = useRef<HTMLInputElement>(null);
+  const [open, setOpen] = useState(false);
+  const [focused, setFocused] = useState<string>();
   const [search, setSearch] = useState("");
   const [knownCount, setKnownCount] = useState<{ readonly text: string; readonly count: number }>();
-  const [offset, setOffset] = useState(0);
+  const [pageOffset, setPageOffset] = useState<number>();
   const text = query.toLowerCase();
   const cached = catalog.data?.paths;
-  const needsSearch = Boolean(catalog.data && !cached && text);
+  const browseCatalog = !text && Boolean(index.singleFile && catalog.data);
+  const useCatalog = Boolean(text || browseCatalog);
+  const offset =
+    pageOffset ??
+    (browseCatalog
+      ? Math.floor((index.pageNumber - 1) / PATH_MATCHES_PER_PAGE) * PATH_MATCHES_PER_PAGE
+      : 0);
+  const needsSearch = Boolean(open && catalog.data && !cached && useCatalog);
   useEffect(() => {
     if (!needsSearch) return;
     const timer = window.setTimeout(() => setSearch(text), 180);
@@ -64,7 +76,7 @@ export function ChangedFilePicker({
     },
   );
   const cachedMatches = useMemo(
-    () => (text ? cached?.filter((path) => matchesPatchPath(path, text)) : undefined),
+    () => (text ? cached?.filter((path) => matchesPatchPath(path, text)) : cached),
     [cached, text],
   );
   const result = cachedMatches
@@ -75,14 +87,35 @@ export function ChangedFilePicker({
     : search === text
       ? matches.data
       : undefined;
-  const searching = Boolean(text && !result && !catalog.error && !matches.error);
+  const searching = Boolean(useCatalog && !result && !catalog.error && !matches.error);
   const count = result?.count ?? (knownCount?.text === text ? knownCount.count : 0);
+  const likely =
+    text.trim().length >= 3
+      ? count === 1
+        ? result?.paths[0]
+        : result?.paths.find((path) => path.lookupKey === focused)
+      : undefined;
+  const alreadySelected =
+    likely?.oldPath === selected?.oldPath && likely?.newPath === selected?.newPath;
+  useEffect(() => {
+    if (!open || pending || !allowPrefetch || !likely || alreadySelected) return;
+    let cancel: (() => void) | undefined;
+    const timer = window.setTimeout(() => {
+      cancel = prefetchSelectedPatch(reviewId, index, likely);
+    }, 120);
+    return () => {
+      window.clearTimeout(timer);
+      cancel?.();
+    };
+  }, [open, pending, allowPrefetch, reviewId, index, text, likely, alreadySelected]);
 
   return (
     <details
       className="changed-file-picker"
       onToggle={(event) => {
-        if (event.currentTarget.open) input.current?.focus();
+        const isOpen = event.currentTarget.open;
+        setOpen(isOpen);
+        if (isOpen) input.current?.focus();
       }}
     >
       <summary>
@@ -97,17 +130,18 @@ export function ChangedFilePicker({
           placeholder="Find a file"
           onChange={(event) => {
             onQuery(event.currentTarget.value);
-            setOffset(0);
+            setPageOffset(undefined);
+            setFocused(undefined);
           }}
         />
       </label>
-      {text && (catalog.error || matches.error) && (
+      {useCatalog && (catalog.error || matches.error) && (
         <Notice retry={catalog.error ? catalog.retry : matches.retry}>
           {catalog.error ?? matches.error}
         </Notice>
       )}
       <nav aria-label="Changed files" aria-busy={searching || pending}>
-        {text ? (
+        {useCatalog ? (
           <>
             {searching && <Loading label="Searching changed files…" />}
             {result?.paths.map((path) => (
@@ -119,12 +153,22 @@ export function ChangedFilePicker({
                   undefined
                 }
                 aria-disabled={pending}
+                onFocus={() => setFocused(path.lookupKey)}
+                onBlur={() => setFocused(undefined)}
                 onClick={() => onChoosePath(path)}
               >
+                {selected &&
+                  path.oldPath === selected.oldPath &&
+                  path.newPath === selected.newPath && <FileKind file={selected} abbreviated />}
                 <code>{pathLabel(path)}</code>
+                {selected &&
+                  path.oldPath === selected.oldPath &&
+                  path.newPath === selected.newPath && <DiffCount file={selected} />}
               </button>
             ))}
-            {result && !result.count && <p className="meta">No matching files.</p>}
+            {result && !result.count && (
+              <p className="meta">{text ? "No matching files." : "No changed files."}</p>
+            )}
             {catalog.data?.partial && <p className="meta">GitLab supplied a partial file list.</p>}
           </>
         ) : (
@@ -146,14 +190,17 @@ export function ChangedFilePicker({
           </>
         )}
       </nav>
-      {text
+      {useCatalog
         ? (offset > 0 || count > PATH_MATCHES_PER_PAGE) && (
-            <nav className="pagination" aria-label="File search pages">
+            <nav
+              className="pagination"
+              aria-label={text ? "File search pages" : "Changed file pages"}
+            >
               <button
                 type="button"
                 aria-disabled={searching || offset === 0}
                 onClick={() =>
-                  !searching && offset > 0 && setOffset(offset - PATH_MATCHES_PER_PAGE)
+                  !searching && offset > 0 && setPageOffset(offset - PATH_MATCHES_PER_PAGE)
                 }
               >
                 Previous
@@ -171,7 +218,7 @@ export function ChangedFilePicker({
                 onClick={() =>
                   !searching &&
                   offset + PATH_MATCHES_PER_PAGE < count &&
-                  setOffset(offset + PATH_MATCHES_PER_PAGE)
+                  setPageOffset(offset + PATH_MATCHES_PER_PAGE)
                 }
               >
                 Next
