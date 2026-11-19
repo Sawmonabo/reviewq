@@ -2,9 +2,9 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 
 use reviewq_app::access::AppError;
-use reviewq_app::history::{HistorySession, NativeLiveSignal};
+use reviewq_app::history::{HistorySession, NativeLiveSignal, SourceAnchor};
 use reviewq_domain::identity::{NativeInputId, NativeTurnId};
-use reviewq_domain::session::HostProvider;
+use reviewq_domain::session::{AbsolutePath, HostProvider};
 use serde_json::Value;
 use tokio::sync::broadcast;
 
@@ -18,6 +18,7 @@ const PENDING_DELTAS: usize = 4;
 pub(super) struct Live(Mutex<HashMap<String, Source>>);
 
 struct Source {
+    generation: String,
     send: broadcast::Sender<NativeLiveSignal>,
     item: Option<ActiveItem>,
 }
@@ -32,14 +33,24 @@ impl Codex {
     pub(super) async fn open_history_signals(
         &self,
         source: HistorySession,
+        file: Option<(AbsolutePath, SourceAnchor)>,
+        generation: String,
     ) -> Result<Option<broadcast::Receiver<NativeLiveSignal>>, AppError> {
         let identity = source.binding.identity();
         if identity.provider() != HostProvider::Codex || identity.profile() != &self.profile {
             return Ok(None);
         }
         let thread = self.read_thread(identity.native_id()).await?;
-        if canonical_cwd(thread.cwd).await? != *source.binding.cwd() {
+        if canonical_cwd(thread.cwd.clone()).await? != *source.binding.cwd() {
             return Err(AppError::Conflict);
+        }
+        if let Some((path, anchor)) = file {
+            if thread.path.as_deref() != Some(path.as_path()) || anchor.generation != generation {
+                return Err(AppError::Conflict);
+            }
+            crate::history::verify_codex_live_source(source.binding, path, anchor).await?;
+        } else if self.history_generation(&thread).await? != generation {
+            return Err(AppError::CursorExpired);
         }
         let mut live = self
             .connection
@@ -48,7 +59,14 @@ impl Codex {
             .lock()
             .map_err(|_| AppError::Internal)?;
         live.retain(|_, source| source.send.receiver_count() > 0);
+        if live
+            .get(&thread.id)
+            .is_some_and(|source| source.generation != generation)
+        {
+            live.remove(&thread.id);
+        }
         let source = live.entry(thread.id).or_insert_with(|| Source {
+            generation,
             send: broadcast::channel(PENDING_DELTAS).0,
             item: None,
         });
@@ -123,6 +141,13 @@ impl Live {
         }
         source.reset();
         if item.get("text").and_then(Value::as_str) == Some("")
+            && ["moderation", "delivery", "questions"]
+                .into_iter()
+                .all(|field| {
+                    item.get(field).is_none_or(|value| {
+                        value.is_null() || value.as_array().is_some_and(Vec::is_empty)
+                    })
+                })
             && let (Ok(turn), Ok(entry)) = (turn.parse(), entry.parse())
         {
             source.item = Some(ActiveItem {

@@ -162,12 +162,16 @@ async fn run(
     loop {
         let check = reader.head(session.clone(), previous.clone()).await;
         let mut rpc = None;
+        let mut file_path = None;
         let (current, availability, reset) = match check {
-            Ok(Some(stamp)) => (
-                Some(stamp.anchor),
-                "available",
-                stamp.reset || last_rpc.is_some(),
-            ),
+            Ok(Some(stamp)) => {
+                file_path = Some(stamp.path);
+                (
+                    Some(stamp.anchor),
+                    "available",
+                    stamp.reset || last_rpc.is_some(),
+                )
+            }
             Ok(None)
                 if session.binding.identity().provider()
                     == reviewq_domain::session::HostProvider::Codex
@@ -205,7 +209,13 @@ async fn run(
             Err(AppError::InvalidRequest) => (None, "unsupported", false),
             Err(_) => (None, "disconnected", false),
         };
+        let source_reset = reset;
         let reset = reset || std::mem::take(&mut reset_live);
+        let selected_generation = current
+            .as_ref()
+            .map(|anchor| anchor.generation.clone())
+            .or_else(|| rpc.as_ref().map(|stamp| stamp.generation.clone()));
+        let selected_file = file_path.zip(current.clone());
         let changed = current
             .as_ref()
             .is_some_and(|value| previous.as_ref() != Some(value))
@@ -213,6 +223,11 @@ async fn run(
                 .as_ref()
                 .is_some_and(|value| last_rpc.as_ref() != Some(value));
         let changed_availability = last_availability != Some(availability);
+        if source_reset || changed_availability {
+            live = None;
+            events = None;
+            retry_live = tokio::time::Instant::now();
+        }
         if changed || changed_availability || reset {
             sequence = sequence.saturating_add(1);
             if reset || changed_availability {
@@ -225,15 +240,10 @@ async fn run(
             } else {
                 "changed"
             };
-            let generation = current
-                .as_ref()
-                .or(previous.as_ref())
-                .map(|a| a.generation.clone())
-                .or_else(|| {
-                    rpc.as_ref()
-                        .or(last_rpc.as_ref())
-                        .map(|stamp| stamp.generation.clone())
-                });
+            let generation = selected_generation
+                .clone()
+                .or_else(|| previous.as_ref().map(|anchor| anchor.generation.clone()))
+                .or_else(|| last_rpc.as_ref().map(|stamp| stamp.generation.clone()));
             if publish
                 .send(Some(Update {
                     sequence,
@@ -270,9 +280,14 @@ async fn run(
             && let Some(host) = host.as_ref()
             && session.binding.identity().provider() == reviewq_domain::session::HostProvider::Codex
             && tokio::time::Instant::now() >= retry_live
+            && let Some(generation) = selected_generation
         {
             // Keep the host connection read-only. Starting or resuming a thread is an effect.
-            live = host.history_signals(session.clone()).await.ok().flatten();
+            live = host
+                .history_signals(session.clone(), selected_file, generation)
+                .await
+                .ok()
+                .flatten();
             retry_live = tokio::time::Instant::now() + Duration::from_secs(10);
         }
         let poll = tokio::time::sleep(delay);
