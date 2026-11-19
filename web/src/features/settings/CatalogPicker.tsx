@@ -38,6 +38,8 @@ export function CatalogPicker({
     query: string;
     items: readonly CatalogItem[];
     next: string | null;
+    cursor: string | undefined;
+    previous: readonly (string | undefined)[];
   }>();
   const [error, setError] = useState<{ query: string; message: string }>();
   const [busy, setBusy] = useState(false);
@@ -50,9 +52,19 @@ export function CatalogPicker({
     scope.boardId,
     connectionEpoch,
   ]);
-  const lookup = useEffectEvent((signal: AbortSignal) =>
-    browseCatalog({ ...scope, kind, q, ...(kind === "projects" ? { view } : {}) }, signal),
-  );
+  function readPage(cursor: string | undefined, signal: AbortSignal) {
+    return browseCatalog(
+      {
+        ...scope,
+        kind,
+        q,
+        ...(cursor ? { cursor } : {}),
+        ...(kind === "projects" ? { view } : {}),
+      },
+      signal,
+    );
+  }
+  const lookup = useEffectEvent((signal: AbortSignal) => readPage(undefined, signal));
   const query = JSON.stringify([scopeKey, q, view]);
   const bound = page?.query === query ? page : undefined;
   const visible = bound?.items.filter((item) => !unavailable.includes(item.id));
@@ -74,7 +86,13 @@ export function CatalogPicker({
         void lookup(controller.signal).then(
           ({ data }) => {
             if (!controller.signal.aborted) {
-              setPage({ query, items: data.items, next: data.nextCursor });
+              setPage({
+                query,
+                items: data.items,
+                next: data.nextCursor,
+                cursor: undefined,
+                previous: [],
+              });
               setError(undefined);
               setBusy(false);
             }
@@ -96,23 +114,18 @@ export function CatalogPicker({
     };
   }, [open, forced, scopeKey, q, kind, view, query]);
 
-  async function more() {
-    if (!bound?.next || busy) return;
+  async function movePage(cursor: string | undefined, previous: readonly (string | undefined)[]) {
+    if (busy || !bound) return;
     const controller = new AbortController();
     current.current?.abort();
     current.current = controller;
     setBusy(true);
     try {
-      const { data } = await browseCatalog(
-        { ...scope, kind, q, cursor: bound.next, ...(kind === "projects" ? { view } : {}) },
-        controller.signal,
-      );
-      if (!controller.signal.aborted)
-        setPage({
-          query,
-          items: [...bound.items, ...data.items].slice(0, 400),
-          next: data.nextCursor,
-        });
+      const { data } = await readPage(cursor, controller.signal);
+      if (!controller.signal.aborted) {
+        setPage({ query, items: data.items, next: data.nextCursor, cursor, previous });
+        setError(undefined);
+      }
     } catch (failure) {
       if (!controller.signal.aborted) setError({ query, message: describeError(failure) });
     } finally {
@@ -215,10 +228,25 @@ export function CatalogPicker({
               ))}
             </div>
           )}
-          {bound?.next && bound.items.length < 400 && (
-            <button type="button" disabled={busy || disabled} onClick={() => void more()}>
-              More choices
-            </button>
+          {bound && (bound.next || bound.previous.length > 0) && (
+            <div className="actions">
+              <button
+                type="button"
+                disabled={busy || disabled || !bound.previous.length}
+                onClick={() => void movePage(bound.previous.at(-1), bound.previous.slice(0, -1))}
+              >
+                Previous choices
+              </button>
+              <button
+                type="button"
+                disabled={busy || disabled || !bound.next}
+                onClick={() =>
+                  bound.next && void movePage(bound.next, [...bound.previous, bound.cursor])
+                }
+              >
+                More choices
+              </button>
+            </div>
           )}
         </section>
       )}
