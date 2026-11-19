@@ -51,8 +51,9 @@ impl TicketSourceReader for Jira {
         offset: u32,
         limit: u16,
         order: CommentOrder,
+        first_page: bool,
     ) -> AppFuture<'_, TicketDetail> {
-        Box::pin(self.ticket_detail(key, estimate_fields, offset, limit, order))
+        Box::pin(self.ticket_detail(key, estimate_fields, offset, limit, order, first_page))
     }
 
     fn invalidate_issue_details(&self, key: Option<&TicketKey>) {

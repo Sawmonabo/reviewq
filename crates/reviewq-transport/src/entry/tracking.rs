@@ -151,6 +151,7 @@ pub(super) async fn ticket(
                 CommentOrder::Newest => reviewq_app::sources::CommentOrder::Newest,
                 CommentOrder::Oldest => reviewq_app::sources::CommentOrder::Oldest,
             },
+            position.is_none(),
         )
         .await?;
     if let Some(position) = position {

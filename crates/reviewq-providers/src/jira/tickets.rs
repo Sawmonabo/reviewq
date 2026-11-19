@@ -52,6 +52,7 @@ impl Jira {
         offset: u32,
         limit: u16,
         order: CommentOrder,
+        first_page: bool,
     ) -> Result<TicketDetail, AppError> {
         if !(1..=COMMENTS_PAGE).contains(&limit)
             || estimate_fields
@@ -66,6 +67,7 @@ impl Jira {
             || self.fetch_ticket_detail(key.clone(), estimate_fields.clone(), offset, limit, order);
         // A continuation must check the current issue identity and cursor boundary in Jira.
         let result = if let Some(lease) = &self.lease
+            && first_page
             && offset == 0
         {
             lease.check().await?;
