@@ -1,6 +1,43 @@
 //! Visible native history for one verified lead.
 
-use reviewq_domain::identity::{NativeInputId, NativeTurnId};
+use reviewq_domain::identity::{NativeInputId, NativeSessionId, NativeTurnId, RunId, SessionKey};
+use reviewq_domain::session::{AbsolutePath, NativeBinding, SessionTarget};
+
+use crate::access::{Actor, AppFuture};
+use crate::events::Snapshot;
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct HistorySession {
+    pub target: SessionTarget,
+    pub binding: NativeBinding,
+    pub source: Option<AbsolutePath>,
+    pub parent: Option<HistoryParent>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct HistoryParent {
+    pub session_key: SessionKey,
+    pub native_id: NativeSessionId,
+    pub source: Option<AbsolutePath>,
+}
+
+pub trait HistoryStore: Send + Sync {
+    fn history_session(
+        &self,
+        actor: Actor,
+        run: RunId,
+        session: SessionKey,
+    ) -> AppFuture<'_, Snapshot<HistorySession>>;
+}
+
+pub trait NativeHistoryReader: Send + Sync {
+    fn page(
+        &self,
+        session: HistorySession,
+        position: NativePosition,
+        limit: u16,
+    ) -> AppFuture<'_, Option<NativeHistoryPage>>;
+}
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct NativePosition {
@@ -8,6 +45,8 @@ pub struct NativePosition {
     pub ascending: bool,
     pub skip_turn: Option<NativeTurnId>,
     pub within: Option<TurnWindow>,
+    /// Complete record boundary from the verified native file descriptor.
+    pub file_offset: Option<u64>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -26,10 +65,11 @@ pub enum VisibleKind {
 #[derive(Clone, Debug)]
 pub struct VisibleEntry {
     pub id: NativeInputId,
-    pub turn: NativeTurnId,
+    pub turn: Option<NativeTurnId>,
     pub at_ms: Option<i64>,
     pub kind: VisibleKind,
     pub text: String,
+    pub record_offset: Option<u64>,
 }
 
 #[derive(Debug)]
@@ -45,6 +85,16 @@ impl NativeHistoryPage {
     pub fn older_after_trim(&self, count: usize) -> Option<NativePosition> {
         if count == 0 {
             return self.older.clone();
+        }
+        if let Some(offset) = self
+            .entries
+            .get(count)
+            .and_then(|entry| entry.record_offset)
+        {
+            return Some(NativePosition {
+                file_offset: Some(offset),
+                ..NativePosition::default()
+            });
         }
         let (position, turn, start) = self.within.as_ref()?;
         let mut position = position.clone();

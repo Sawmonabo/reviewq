@@ -10,7 +10,7 @@ use reviewq_domain::session::{
 
 use crate::access::{Actor, AppError, AppFuture};
 use crate::events::Snapshot;
-use crate::history::{NativeHistoryPage, NativePosition};
+use crate::history::{HistorySession, NativeHistoryPage, NativePosition};
 use crate::queue::ReviewSource;
 use crate::sources::{ReviewResolution, ReviewSourceReader};
 use crate::workspace::WorkspaceStore;
@@ -24,11 +24,17 @@ const MAX_SAFE_INTEGER: u64 = 9_007_199_254_740_991;
 pub const MAX_RECOVERY_LIMIT: u16 = 128;
 
 /// Read-only provider proof of the exact native conversation and working directory.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct HostProof {
+    pub binding: NativeBinding,
+    pub source: Option<AbsolutePath>,
+}
+
 pub trait NativeHost: Send + Sync {
-    fn prove(&self, native_id: NativeSessionId) -> AppFuture<'_, NativeBinding>;
+    fn prove(&self, native_id: NativeSessionId) -> AppFuture<'_, HostProof>;
     fn history(
         &self,
-        target: LeadTarget,
+        target: HistorySession,
         position: NativePosition,
         limit: u16,
     ) -> AppFuture<'_, NativeHistoryPage>;
@@ -59,7 +65,10 @@ pub async fn link_codex(
     native_id: NativeSessionId,
     target: String,
 ) -> Result<NativeLink, AppError> {
-    let binding = host.prove(native_id).await?;
+    let HostProof {
+        binding,
+        source: native_source,
+    } = host.prove(native_id).await?;
     let identity = binding.identity();
     if identity.provider() != HostProvider::Codex {
         return Err(AppError::Forbidden);
@@ -88,6 +97,7 @@ pub async fn link_codex(
                 native_id: identity.native_id().clone(),
                 session_key,
                 cwd: binding.cwd().clone(),
+                native_source,
             },
         )
         .await
@@ -103,6 +113,7 @@ pub struct RegisterLead {
     pub native_id: NativeSessionId,
     pub session_key: SessionKey,
     pub cwd: AbsolutePath,
+    pub native_source: Option<AbsolutePath>,
 }
 
 /// A user message admitted to the native outbox.

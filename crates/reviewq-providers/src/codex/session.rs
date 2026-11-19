@@ -1,8 +1,8 @@
 use std::path::PathBuf;
 
 use reviewq_app::access::{AppError, AppFuture};
-use reviewq_app::history::{NativeHistoryPage, NativePosition};
-use reviewq_app::hosts::{DeliveryObservation, DispatchGuard, MessageBody, NativeHost};
+use reviewq_app::history::{HistorySession, NativeHistoryPage, NativePosition};
+use reviewq_app::hosts::{DeliveryObservation, DispatchGuard, HostProof, MessageBody, NativeHost};
 use reviewq_domain::identity::{DeliveryId, NativeSessionId};
 use reviewq_domain::session::{
     AbsolutePath, HostProvider, LeadTarget, NativeBinding, NativeIdentity,
@@ -43,20 +43,29 @@ pub(super) enum ThreadStatus {
 }
 
 impl NativeHost for Codex {
-    fn prove(&self, native_id: NativeSessionId) -> AppFuture<'_, NativeBinding> {
+    fn prove(&self, native_id: NativeSessionId) -> AppFuture<'_, HostProof> {
         Box::pin(async move {
             validate_native_id(&native_id)?;
             let thread = self.read_thread(&native_id).await?;
-            Ok(NativeBinding::new(
+            let cwd = tokio::fs::canonicalize(&thread.cwd)
+                .await
+                .unwrap_or(thread.cwd);
+            let cwd = AbsolutePath::from_canonical(cwd).map_err(|_| AppError::Unavailable)?;
+            let binding = NativeBinding::new(
                 NativeIdentity::new(HostProvider::Codex, self.profile.clone(), native_id),
-                canonical_cwd(thread.cwd).await?,
-            ))
+                cwd,
+            );
+            let source = match thread.path {
+                Some(path) => crate::history::verified_codex_source(binding.clone(), path).await?,
+                None => None,
+            };
+            Ok(HostProof { binding, source })
         })
     }
 
     fn history(
         &self,
-        target: LeadTarget,
+        target: HistorySession,
         position: NativePosition,
         limit: u16,
     ) -> AppFuture<'_, NativeHistoryPage> {
@@ -95,7 +104,10 @@ impl Codex {
         Ok(thread)
     }
 
-    async fn read_thread(&self, native_id: &NativeSessionId) -> Result<Thread, AppError> {
+    pub(super) async fn read_thread(
+        &self,
+        native_id: &NativeSessionId,
+    ) -> Result<Thread, AppError> {
         let found: ThreadRead = self
             .connection
             .read(

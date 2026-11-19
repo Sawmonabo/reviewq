@@ -3,10 +3,10 @@ use std::os::unix::fs::MetadataExt;
 
 use reviewq_app::access::AppError;
 use reviewq_app::history::{
-    NativeHistoryPage, NativePosition, TurnWindow, VisibleEntry, VisibleKind,
+    HistorySession, NativeHistoryPage, NativePosition, TurnWindow, VisibleEntry, VisibleKind,
 };
 use reviewq_domain::identity::NativeTurnId;
-use reviewq_domain::session::LeadTarget;
+use reviewq_domain::session::HostProvider;
 use serde::Deserialize;
 use serde_json::json;
 use sha2::{Digest, Sha256};
@@ -94,14 +94,21 @@ impl Codex {
 
     pub(super) async fn read_history(
         &self,
-        target: LeadTarget,
+        target: HistorySession,
         mut position: NativePosition,
         limit: u16,
     ) -> Result<NativeHistoryPage, AppError> {
         if !(1..=100).contains(&limit) {
             return Err(AppError::InvalidRequest);
         }
-        let thread = self.verified_thread(&target).await?;
+        let identity = target.binding.identity();
+        if identity.profile() != &self.profile || identity.provider() != HostProvider::Codex {
+            return Err(AppError::NotFound);
+        }
+        let thread = self.read_thread(identity.native_id()).await?;
+        if position.file_offset.is_some() {
+            return Err(AppError::CursorExpired);
+        }
         let generation = self.history_generation(&thread).await?;
         let from_tail = position == NativePosition::default();
         let mut turns = self
@@ -230,6 +237,7 @@ fn turn_neighbors(
             ascending: !position.ascending,
             skip_turn: Some(id.clone()),
             within: None,
+            file_offset: None,
         })
     };
     if position.ascending {
@@ -279,10 +287,11 @@ fn visible(
         id.parse()
             .map(|id| VisibleEntry {
                 id,
-                turn: turn.clone(),
+                turn: Some(turn.clone()),
                 at_ms,
                 kind,
                 text,
+                record_offset: None,
             })
             .map_err(|_| AppError::Unavailable),
     )

@@ -2,7 +2,7 @@ use std::path::Path;
 use std::time::Duration;
 
 use reqwest::Client;
-use reviewq_domain::identity::{NativeSessionId, ReviewId, RunId};
+use reviewq_domain::identity::{NativeSessionId, ReviewId, RunId, SessionKey};
 use reviewq_transport::{ServiceEndpoint, ServiceIdentity};
 use serde::Deserialize;
 
@@ -88,9 +88,7 @@ pub(crate) async fn link(profile: &Path, target: String) -> Result<(), Failure> 
     let linked = serde_json::from_slice::<Envelope<Linked>>(&bytes)?.data;
     let review: ReviewId = linked.review_id.parse()?;
     let run: RunId = linked.run_id.parse()?;
-    if linked.lead_session_key != native.as_str() {
-        return Err("The service returned a different native lead.".into());
-    }
+    let _: SessionKey = linked.lead_session_key.parse()?;
     let mut url = reqwest::Url::parse(&format!("http://{}/", endpoint.browser()))?;
     url.query_pairs_mut()
         .append_pair("reviewId", review.as_str())

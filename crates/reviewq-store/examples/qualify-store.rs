@@ -100,6 +100,7 @@ async fn setup(
                 native_id: "fixture-active".parse()?,
                 session_key: "fixture-active".parse()?,
                 cwd: absolute(&root.join("alpha")),
+                native_source: None,
             },
         )
         .await?

@@ -509,7 +509,7 @@ fn state_label(state: MergeRequestState) -> &'static str {
     }
 }
 
-fn provider(label: &str) -> Result<HostProvider, StoreError> {
+pub(crate) fn provider(label: &str) -> Result<HostProvider, StoreError> {
     match label {
         "codex" => Ok(HostProvider::Codex),
         "claude" => Ok(HostProvider::Claude),
@@ -517,7 +517,7 @@ fn provider(label: &str) -> Result<HostProvider, StoreError> {
     }
 }
 
-fn path(bytes: Vec<u8>) -> Result<AbsolutePath, StoreError> {
+pub(crate) fn path(bytes: Vec<u8>) -> Result<AbsolutePath, StoreError> {
     AbsolutePath::from_canonical(OsString::from_vec(bytes).into())
         .map_err(|_| AppError::Internal.into())
 }

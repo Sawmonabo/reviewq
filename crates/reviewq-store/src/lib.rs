@@ -3,6 +3,7 @@
 mod connection;
 mod error;
 mod events;
+mod history;
 mod hosts;
 mod queue;
 mod refresh;

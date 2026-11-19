@@ -80,6 +80,7 @@ CREATE TABLE sessions (
     profile BLOB NOT NULL,
     native_id TEXT NOT NULL,
     cwd BLOB NOT NULL,
+    source_path BLOB,
     parent_session_key TEXT CHECK (parent_session_key <> session_key),
     UNIQUE (run_id, session_key),
     UNIQUE (provider, profile, native_id),

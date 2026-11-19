@@ -1220,6 +1220,7 @@ dependencies = [
  "reqwest",
  "reviewq-app",
  "reviewq-domain",
+ "rustix",
  "serde",
  "serde_json",
  "sha2",

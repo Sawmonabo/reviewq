@@ -164,11 +164,16 @@ fn register(
         .optional()?;
     if let Some(run) = existing {
         let target = lead_for_run(&tx.sql, &parse(&run)?)?.ok_or(AppError::Conflict)?;
-        if target.session_key() != &input.session_key
-            || target.binding() != &binding
+        if target.binding() != &binding
             || identity_for_review(&tx.sql, target.review_id())? != input.review.identity
         {
             return Err(AppError::Conflict.into());
+        }
+        if let Some(source) = &input.native_source {
+            tx.sql.execute(
+                "UPDATE sessions SET source_path=?2 WHERE session_key=?1 AND source_path IS NOT ?2",
+                params![target.session_key().as_str(), bytes(source)],
+            )?;
         }
         return snapshot(&tx.sql, target);
     }
@@ -193,15 +198,16 @@ fn register(
         params![run_id.as_str(), review_id.as_str(), input.session_key.as_str(), now_ms()?],
     )?;
     tx.sql.execute(
-        "INSERT INTO sessions(session_key, run_id, provider, profile, native_id, cwd)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        "INSERT INTO sessions(session_key, run_id, provider, profile, native_id, cwd, source_path)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
         params![
             input.session_key.as_str(),
             run_id.as_str(),
             provider_label(native.provider()),
             bytes(native.profile()),
             native.native_id().as_str(),
-            bytes(binding.cwd())
+            bytes(binding.cwd()),
+            input.native_source.as_ref().map(bytes)
         ],
     )?;
     advance_queue(&tx.sql)?;

@@ -10,6 +10,7 @@ use axum::{Json, Router};
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use reviewq_app::access::{Actor, AppError};
 use reviewq_app::events::EventLog;
+use reviewq_app::history::{HistoryStore, NativeHistoryReader};
 use reviewq_app::hosts::{LeadStore, NativeHost};
 use reviewq_app::queue::{QueueStore, ReviewLookup};
 use reviewq_app::sources::{ReviewSourceReader, SourceRefreshStore, refresh_queue};
@@ -36,11 +37,24 @@ use error::{ApiBytes, ApiError};
 
 /// Shared application ports for one ReviewQ listener pair.
 pub trait Store:
-    WorkspaceStore + QueueStore + ReviewLookup + EventLog + LeadStore + SourceRefreshStore
+    WorkspaceStore
+    + QueueStore
+    + ReviewLookup
+    + EventLog
+    + LeadStore
+    + HistoryStore
+    + SourceRefreshStore
 {
 }
-impl<S: WorkspaceStore + QueueStore + ReviewLookup + EventLog + LeadStore + SourceRefreshStore>
-    Store for S
+impl<
+    S: WorkspaceStore
+        + QueueStore
+        + ReviewLookup
+        + EventLog
+        + LeadStore
+        + HistoryStore
+        + SourceRefreshStore,
+> Store for S
 {
 }
 
@@ -50,6 +64,7 @@ pub(super) struct Entry {
     store: Arc<dyn Store>,
     source: Option<Arc<dyn ReviewSourceReader>>,
     host: Option<Arc<dyn NativeHost>>,
+    file_history: Arc<dyn NativeHistoryReader>,
     sends_allowed: bool,
     auth: Auth,
     refresh: Mutex<Option<watch::Receiver<RefreshResult>>>,
@@ -88,6 +103,7 @@ pub fn router(
     store: Arc<dyn Store>,
     source: Option<Arc<dyn ReviewSourceReader>>,
     host: Option<Arc<dyn NativeHost>>,
+    file_history: Arc<dyn NativeHistoryReader>,
     sends_allowed: bool,
     endpoint: ServiceEndpoint,
     web: &Path,
@@ -96,6 +112,7 @@ pub fn router(
         store,
         source,
         host,
+        file_history,
         sends_allowed,
         auth: Auth::new(endpoint),
         refresh: Mutex::new(None),

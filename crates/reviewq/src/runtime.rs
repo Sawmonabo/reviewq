@@ -13,7 +13,7 @@ use reviewq_app::hosts::{LeadStore, NativeHost, recover_delivery};
 use reviewq_app::sources::{ReviewSourceReader, SourceRefreshStore};
 use reviewq_app::workspace::{WorkspaceConfig, WorkspaceStore};
 use reviewq_domain::session::AbsolutePath;
-use reviewq_providers::{Codex, GitLab};
+use reviewq_providers::{Codex, FileHistory, GitLab};
 use reviewq_store::SqliteStore;
 use reviewq_transport::{ServiceEndpoint, ServiceIdentity};
 use sha2::{Digest, Sha256};
@@ -158,6 +158,7 @@ pub(crate) async fn serve(profile: PathBuf, options: Serve) -> Result<(), Failur
         store.clone(),
         source,
         host,
+        Arc::new(FileHistory::default()),
         sends_allowed,
         endpoint.clone(),
         &web,

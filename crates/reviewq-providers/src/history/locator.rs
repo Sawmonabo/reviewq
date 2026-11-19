@@ -1,0 +1,292 @@
+use std::fs::{self, File};
+use std::io::{self, Read};
+use std::os::unix::fs::MetadataExt;
+use std::path::{Component, Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
+
+use reviewq_app::access::AppError;
+use reviewq_app::history::{HistoryParent, HistorySession};
+use reviewq_domain::identity::NativeSessionId;
+use reviewq_domain::session::{AbsolutePath, HostProvider, NativeBinding};
+use rustix::fs::{self as secure, Mode, OFlags, ResolveFlags};
+use serde_json::Value;
+use sha2::{Digest, Sha256};
+
+use super::file;
+
+const MAX_DISCOVERY_ENTRIES: usize = 16_384;
+const MAX_IDENTITY_RECORD: u64 = 64 * 1024;
+
+pub(super) struct Source {
+    pub file: File,
+    pub provider: HostProvider,
+    pub native_id: NativeSessionId,
+    pub fingerprint: [u8; 32],
+}
+
+pub(crate) async fn verified_codex_source(
+    binding: NativeBinding,
+    path: PathBuf,
+) -> Result<Option<AbsolutePath>, AppError> {
+    tokio::task::spawn_blocking(move || {
+        let cancelled = AtomicBool::new(false);
+        if verify(&binding, None, &path, &cancelled)?.is_none() {
+            return Ok(None);
+        }
+        AbsolutePath::from_canonical(path)
+            .map(Some)
+            .map_err(|_| AppError::Forbidden)
+    })
+    .await
+    .map_err(|_| AppError::Unavailable)?
+}
+
+pub(super) fn locate(
+    session: &HistorySession,
+    cancelled: &AtomicBool,
+) -> Result<Option<Source>, AppError> {
+    if let Some(path) = &session.source {
+        return verify(
+            &session.binding,
+            session.parent.as_ref(),
+            path.as_path(),
+            cancelled,
+        )?
+        .ok_or(AppError::NotFound)
+        .map(Some);
+    }
+    let identity = session.binding.identity();
+    let profile = identity.profile().as_path();
+    let native = identity.native_id().as_str();
+    let child = session.parent.as_ref();
+    let (roots, depth, suffix) = match identity.provider() {
+        HostProvider::Codex => (
+            vec![profile.join("sessions"), profile.join("archived_sessions")],
+            3,
+            format!("-{native}.jsonl"),
+        ),
+        HostProvider::Claude if child.is_none() => {
+            (vec![profile.join("projects")], 1, format!("{native}.jsonl"))
+        }
+        HostProvider::Claude => return Ok(None),
+    };
+    let mut budget = MAX_DISCOVERY_ENTRIES;
+    let mut match_source = None;
+    for root in roots {
+        visit(&root, depth, &mut budget, cancelled, &mut |path| {
+            let name = path
+                .file_name()
+                .and_then(|part| part.to_str())
+                .unwrap_or_default();
+            let named = match identity.provider() {
+                HostProvider::Codex => name.starts_with("rollout-") && name.ends_with(&suffix),
+                HostProvider::Claude => name == suffix,
+            };
+            if named && let Some(source) = verify(&session.binding, child, path, cancelled)? {
+                if match_source.is_some() {
+                    return Err(AppError::Conflict);
+                }
+                match_source = Some(source);
+            }
+            Ok(())
+        })?;
+    }
+    Ok(match_source)
+}
+
+fn visit(
+    path: &Path,
+    depth: usize,
+    budget: &mut usize,
+    cancelled: &AtomicBool,
+    observe: &mut impl FnMut(&Path) -> Result<(), AppError>,
+) -> Result<(), AppError> {
+    let directory = match fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.is_dir() => fs::read_dir(path).map_err(fs_error)?,
+        Ok(_) => return Err(AppError::Forbidden),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(fs_error(error)),
+    };
+    for item in directory {
+        if cancelled.load(Ordering::Relaxed) {
+            return Err(AppError::Unavailable);
+        }
+        *budget = budget.checked_sub(1).ok_or(AppError::Busy)?;
+        let item = item.map_err(fs_error)?;
+        let class = item.file_type().map_err(fs_error)?;
+        if depth > 0 && class.is_dir() {
+            visit(&item.path(), depth - 1, budget, cancelled, observe)?;
+        } else if class.is_file() {
+            observe(&item.path())?;
+        }
+    }
+    Ok(())
+}
+
+fn verify(
+    binding: &NativeBinding,
+    parent: Option<&HistoryParent>,
+    candidate: &Path,
+    cancelled: &AtomicBool,
+) -> Result<Option<Source>, AppError> {
+    let identity = binding.identity();
+    let root = identity.profile().as_path();
+    let rel = candidate
+        .strip_prefix(root)
+        .map_err(|_| AppError::Forbidden)?;
+    let mut components = rel.components();
+    let first = components.next();
+    let expected_folder = match identity.provider() {
+        HostProvider::Codex => {
+            matches!(first, Some(Component::Normal(name)) if name == "sessions" || name == "archived_sessions")
+        }
+        HostProvider::Claude => {
+            matches!(first, Some(Component::Normal(name)) if name == "projects")
+        }
+    };
+    if !expected_folder
+        || !components
+            .clone()
+            .all(|part| matches!(part, Component::Normal(_)))
+    {
+        return Err(AppError::Forbidden);
+    }
+    if identity.provider() == HostProvider::Claude
+        && let Some(parent) = parent
+        && !claude_child_location(
+            candidate,
+            parent.native_id.as_str(),
+            identity.native_id().as_str(),
+        )
+    {
+        return Err(AppError::Forbidden);
+    }
+    let root = secure::openat2(
+        secure::CWD,
+        root,
+        OFlags::RDONLY | OFlags::DIRECTORY | OFlags::CLOEXEC,
+        Mode::empty(),
+        ResolveFlags::NO_SYMLINKS | ResolveFlags::NO_MAGICLINKS,
+    )
+    .map(File::from)
+    .map_err(|error| fs_error(error.into()))?;
+    let file = match secure::openat2(
+        &root,
+        rel,
+        OFlags::RDONLY | OFlags::CLOEXEC | OFlags::NONBLOCK,
+        Mode::empty(),
+        ResolveFlags::BENEATH | ResolveFlags::NO_SYMLINKS | ResolveFlags::NO_MAGICLINKS,
+    ) {
+        Ok(fd) => File::from(fd),
+        Err(rustix::io::Errno::NOENT) => return Ok(None),
+        Err(error) => return Err(fs_error(error.into())),
+    };
+    let owner = rustix::process::getuid().as_raw();
+    let metadata = file.metadata().map_err(fs_error)?;
+    if !metadata.is_file()
+        || metadata.uid() != owner
+        || root.metadata().map_err(fs_error)?.uid() != owner
+    {
+        return Err(AppError::Forbidden);
+    }
+    let mut budget = 4 * MAX_IDENTITY_RECORD;
+    let mut offset = 0;
+    let header_records = if identity.provider() == HostProvider::Codex {
+        1
+    } else {
+        64
+    };
+    for _ in 0..header_records {
+        if offset == metadata.len() {
+            break;
+        }
+        let max = metadata.len().min(offset + MAX_IDENTITY_RECORD);
+        let end = file::next_line(&file, offset, max, &mut budget, cancelled)?;
+        let mut bytes = Vec::new();
+        file::input(&file, offset, end, cancelled)
+            .read_to_end(&mut bytes)
+            .map_err(fs_error)?;
+        if !bytes.ends_with(b"\n") {
+            return Ok(None);
+        }
+        offset = end;
+        let Ok(value) = serde_json::from_slice::<Value>(&bytes) else {
+            continue;
+        };
+        if identity_matches(&value, binding, parent)? {
+            return Ok(Some(Source {
+                file,
+                provider: identity.provider(),
+                native_id: identity.native_id().clone(),
+                fingerprint: Sha256::digest(bytes).into(),
+            }));
+        }
+    }
+    Ok(None)
+}
+
+fn identity_matches(
+    value: &Value,
+    binding: &NativeBinding,
+    parent: Option<&HistoryParent>,
+) -> Result<bool, AppError> {
+    let identity = binding.identity();
+    let id = identity.native_id().as_str();
+    match identity.provider() {
+        HostProvider::Codex => {
+            if value.get("type").and_then(Value::as_str) != Some("session_meta") {
+                return Ok(false);
+            }
+            let meta = value.get("payload").ok_or(AppError::Forbidden)?;
+            let found = meta
+                .pointer("/source/subagent/thread_spawn/parent_thread_id")
+                .and_then(Value::as_str);
+            let expected = parent.map(|parent| parent.native_id.as_str());
+            let cwd = meta.get("cwd").and_then(Value::as_str).map(Path::new);
+            Ok(meta.get("id").and_then(Value::as_str) == Some(id)
+                && found == expected
+                && cwd.is_some_and(|path| {
+                    path == binding.cwd().as_path()
+                        || path.canonicalize().ok().as_deref() == Some(binding.cwd().as_path())
+                }))
+        }
+        HostProvider::Claude => {
+            let found = value.get("sessionId").and_then(Value::as_str);
+            let sidechain = value
+                .get("isSidechain")
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
+            let agent = value.get("agentId").and_then(Value::as_str);
+            match parent {
+                Some(parent) => {
+                    Ok(sidechain && agent == Some(id) && found == Some(parent.native_id.as_str()))
+                }
+                None => Ok(!sidechain && found == Some(id)),
+            }
+        }
+    }
+}
+
+fn claude_child_location(path: &Path, parent: &str, id: &str) -> bool {
+    path.file_name().and_then(|part| part.to_str()) == Some(&format!("agent-{id}.jsonl"))
+        && path
+            .parent()
+            .and_then(Path::file_name)
+            .is_some_and(|name| name == "subagents")
+        && path
+            .parent()
+            .and_then(Path::parent)
+            .and_then(Path::file_name)
+            .is_some_and(|name| name == parent)
+}
+
+fn fs_error(error: io::Error) -> AppError {
+    match error.raw_os_error() {
+        Some(18 | 40) => AppError::Forbidden,
+        _ => match error.kind() {
+            io::ErrorKind::NotFound => AppError::NotFound,
+            io::ErrorKind::PermissionDenied => AppError::Forbidden,
+            _ => AppError::Unavailable,
+        },
+    }
+}

@@ -5,7 +5,7 @@ use axum::http::{HeaderMap, header};
 use axum::response::{IntoResponse, Response};
 use reviewq_app::access::{Actor, AppError};
 use reviewq_app::history::{
-    NativeHistoryPage, NativePosition, TurnWindow, VisibleEntry, VisibleKind,
+    HistorySession, NativeHistoryPage, NativePosition, TurnWindow, VisibleEntry, VisibleKind,
 };
 use reviewq_domain::identity::{EventCursor, RunId, SessionKey};
 use reviewq_protocol::history::{
@@ -41,6 +41,7 @@ struct Cursor {
     ascending: bool,
     skip_turn: Option<String>,
     within: Option<Within>,
+    file_offset: Option<u64>,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -92,16 +93,15 @@ pub(super) async fn read(
     }
     let lead = entry
         .store
-        .lookup_lead(actor.clone(), run.clone(), session.clone())
+        .history_session(actor.clone(), run.clone(), session.clone())
         .await?;
-    let host = entry.host.as_ref().ok_or(AppError::Unavailable)?;
     let position = cursor
         .as_ref()
         .map(Cursor::native_position)
         .transpose()?
         .unwrap_or_default();
     let mut reset = false;
-    let history = host.history(lead.value.clone(), position, limit).await;
+    let history = native_page(entry, lead.value.clone(), position, limit).await;
     let history = match history {
         Ok(page)
             if cursor
@@ -112,17 +112,33 @@ pub(super) async fn read(
         }
         Ok(_) | Err(AppError::CursorExpired) if cursor.is_some() => {
             reset = true;
-            host.history(lead.value, NativePosition::default(), limit)
-                .await?
+            native_page(entry, lead.value, NativePosition::default(), limit).await?
         }
         Err(error) => return Err(error),
         Ok(page) => page,
     };
     entry
         .store
-        .lookup_lead(actor, run.clone(), session.clone())
+        .history_session(actor, run.clone(), session.clone())
         .await?;
     encode(endpoint, &run, &session, lead.cursor, limit, history, reset)
+}
+
+async fn native_page(
+    entry: &Entry,
+    session: HistorySession,
+    position: NativePosition,
+    limit: u16,
+) -> Result<NativeHistoryPage, AppError> {
+    if let Some(page) = entry
+        .file_history
+        .page(session.clone(), position.clone(), limit)
+        .await?
+    {
+        return Ok(page);
+    }
+    let host = entry.host.as_ref().ok_or(AppError::Unavailable)?;
+    host.history(session, position, limit).await
 }
 
 fn encode(
@@ -192,7 +208,11 @@ fn encode_entry(entry: &VisibleEntry) -> Result<HistoryEntry, AppError> {
     };
     Ok(HistoryEntry {
         entry_id: HistoryEntryIdDto::new(entry.id.as_str()).ok_or(AppError::Internal)?,
-        turn_id: Some(HistoryTurnIdDto::new(entry.turn.as_str()).ok_or(AppError::Internal)?),
+        turn_id: entry
+            .turn
+            .as_ref()
+            .map(|turn| HistoryTurnIdDto::new(turn.as_str()).ok_or(AppError::Internal))
+            .transpose()?,
         timestamp: entry
             .at_ms
             .and_then(UtcTimestampDto::from_unix_milliseconds),
@@ -214,6 +234,7 @@ impl Cursor {
             generation: generation.into(),
             limit,
             native: position.cursor,
+            file_offset: position.file_offset,
             ascending: position.ascending,
             skip_turn: position.skip_turn.map(|id| id.to_string()),
             within: position.within.map(|item| Within {
@@ -229,6 +250,7 @@ impl Cursor {
         Ok(NativePosition {
             cursor: self.native.clone(),
             ascending: self.ascending,
+            file_offset: self.file_offset,
             skip_turn: self.skip_turn.as_deref().map(parse).transpose()?,
             within: self
                 .within
