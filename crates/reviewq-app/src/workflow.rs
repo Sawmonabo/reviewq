@@ -51,7 +51,46 @@ pub trait ReportContent: Send + Sync {
     fn verify_unchanged(&self) -> AppFuture<'_, ()>;
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ReadyWorkflow {
+    pub model: String,
+    pub effort: String,
+    pub latest_user_entry_id: Option<NativeInputId>,
+    pub latest_user_turn_id: Option<NativeTurnId>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum WorkflowHold {
+    ProviderUnavailable,
+    ActiveWork,
+    PendingNativeInput,
+    UnknownSettings,
+    MissingCompanion,
+}
+
+impl WorkflowHold {
+    pub fn reason(self) -> &'static str {
+        match self {
+            Self::ProviderUnavailable => "native_provider_unavailable",
+            Self::ActiveWork => "native_work_active",
+            Self::PendingNativeInput => "native_input_required",
+            Self::UnknownSettings => "native_settings_unproved",
+            Self::MissingCompanion => "native_companion_unavailable",
+        }
+    }
+}
+
+pub enum WorkflowReadiness {
+    Ready(ReadyWorkflow),
+    Held(WorkflowHold),
+}
+
 pub trait NativeWorkflowProof: Send + Sync {
+    /// Proves current idle eligibility and exact effective settings without starting or resuming a turn.
+    fn dispatch_readiness(&self, _lead: LeadTarget) -> AppFuture<'_, WorkflowReadiness> {
+        Box::pin(async { Ok(WorkflowReadiness::Held(WorkflowHold::ProviderUnavailable)) })
+    }
+
     /// Resolve and verify an actual active lead tool from the selected native source.
     fn verify_active_call(
         &self,
