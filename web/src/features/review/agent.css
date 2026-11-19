@@ -169,28 +169,34 @@
   overflow: auto;
   padding: 0 23px;
 }
+.native-questions:has(.question-form) {
+  padding-inline: 0;
+}
 .question-form {
-  padding: 0 12px 9px;
-  border: 1px solid var(--strong-line);
-  border-radius: 10px;
-  background: var(--surface);
+  padding: 0 20px 12px;
+  border-block-start: 1px solid light-dark(var(--control-hover-line), #514636);
+  border-block-end: 1px solid var(--line);
+  background: light-dark(var(--amber-bg), #171611);
 }
 .question-form:has([hidden]) {
   padding-bottom: 0;
 }
 .question-form fieldset {
-  padding: 7px 4px;
-  margin: 0;
+  padding: 0;
+  margin: 0 0 12px;
   min-width: 0;
   border: 0;
 }
 .question-form legend {
+  margin-bottom: 7px;
+  color: light-dark(var(--text), #e2ded6);
   font-size: 12px;
   font-weight: 600;
+  overflow-wrap: anywhere;
 }
 .question-form fieldset > p {
-  font-size: 12px;
-  color: var(--muted);
+  font-size: 11px;
+  color: light-dark(var(--muted), #b8b5ae);
 }
 .question-heading,
 .question-actions {
@@ -208,13 +214,19 @@
   color: var(--muted);
   font-size: 10px;
 }
+.question-heading {
+  min-height: 42px;
+}
 .question-heading button {
   display: inline-flex;
   align-items: center;
   padding-inline: 0 4px;
+  border: 0;
+  background: transparent;
   gap: 5px;
-  color: var(--link);
-  font-size: 11px;
+  color: var(--amber);
+  font-size: 12px;
+  font-weight: 600;
   flex-shrink: 0;
 }
 .question-heading button[aria-expanded="false"] svg {
@@ -226,24 +238,31 @@
 }
 .question-option {
   display: flex;
-  align-items: flex-start;
+  align-items: baseline;
   min-width: 0;
-  gap: 8px;
-  padding: 7px 9px;
+  gap: 9px;
+  padding: 8px 10px;
+  border: 1px solid light-dark(var(--control-line), #39372f);
+  border-radius: 4px;
   text-align: start;
-  font-size: 12px;
-  background: transparent;
+  font-size: 11px;
+  color: light-dark(var(--text), #d4d1ca);
+  background: light-dark(var(--raised), #1d1c17);
+}
+.question-option strong {
+  font-weight: 500;
+  overflow-wrap: anywhere;
 }
 .question-option:disabled {
   opacity: 1;
 }
 .question-option[aria-checked="true"] {
-  background: var(--selected);
-  border-color: var(--focus);
+  background: light-dark(var(--selected), #30291e);
+  border-color: light-dark(var(--focus), #9e875f);
 }
 .question-option .choice-mark {
   flex-shrink: 0;
-  color: var(--link);
+  color: var(--amber);
 }
 .question-option small {
   display: block;
