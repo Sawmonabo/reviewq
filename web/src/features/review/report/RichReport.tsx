@@ -48,6 +48,21 @@ export function RichReport({
   const blocks = reader.groups;
 
   const [focused, setFocused] = useState<number>();
+  const [navigation, setNavigation] = useState<{
+    index: number;
+    phase: "hover" | "pressed" | "jump";
+  }>();
+  const hoverTimer = useRef<number | undefined>(undefined);
+  useEffect(() => () => window.clearTimeout(hoverTimer.current), []);
+  const destination = navigation?.index;
+  // A section title may occupy its entire group, followed immediately by a card or table.
+  const nextGroup =
+    destination !== undefined && destination + 1 < blocks.length ? destination + 1 : undefined;
+  const stage = navigation?.phase === "jump";
+  const destinationReady =
+    destination !== undefined &&
+    Boolean(reader.prepared(destination)) &&
+    (nextGroup === undefined || Boolean(reader.prepared(nextGroup)));
   const openDetails = useRef(new Set<number>());
 
   const navigationAfter = Math.max(
@@ -71,9 +86,13 @@ export function RichReport({
       const indexes = new Set([...defaultRangeExtractor(value), ...pinned]);
       if (restoreIndex >= 0) indexes.add(restoreIndex);
       if (focused !== undefined) indexes.add(focused);
+      if (stage && destination !== undefined) {
+        indexes.add(destination);
+        if (nextGroup !== undefined) indexes.add(nextGroup);
+      }
       return [...indexes].sort((a, b) => a - b);
     },
-    [pinned, restoreIndex, focused],
+    [pinned, restoreIndex, focused, stage, destination, nextGroup],
   );
   // The measured rows and virtualizer stay inside this renderer.
   // eslint-disable-next-line react-hooks/incompatible-library
@@ -92,21 +111,32 @@ export function RichReport({
   const firstVisible = virtual.range?.startIndex ?? 0;
   const lastVisible = virtual.range?.endIndex ?? 0;
   const seeking = restoreIndex >= 0 && (restoreIndex < firstVisible || restoreIndex > lastVisible);
+  const targetIndexes =
+    destination === undefined
+      ? []
+      : nextGroup === undefined
+        ? [destination]
+        : [destination, nextGroup];
+  const visible = !seeking
+    ? items
+        .filter((item) => item.index >= firstVisible && item.index <= lastVisible)
+        .map((item) => item.index)
+    : [];
+  const nearby = !seeking
+    ? items
+        .filter((item) => item.index >= firstVisible - 3 && item.index <= lastVisible + 3)
+        .map((item) => item.index)
+    : [];
+  const urgent = navigation?.phase === "jump" || navigation?.phase === "pressed";
   const wanted = !reader.prepare
     ? ""
     : [
         ...new Set([
           ...(restoreIndex >= 0 ? [restoreIndex] : []),
-          ...(!seeking
-            ? items
-                .filter((item) => item.index >= firstVisible && item.index <= lastVisible)
-                .map((item) => item.index)
-            : []),
-          ...(!seeking
-            ? items
-                .filter((item) => item.index >= firstVisible - 3 && item.index <= lastVisible + 3)
-                .map((item) => item.index)
-            : []),
+          ...(urgent ? targetIndexes : []),
+          ...visible,
+          ...(!urgent ? targetIndexes : []),
+          ...nearby,
         ]),
       ].join(",");
   useReportPreparation(reader, wanted, [...pinned, focused].join(","), host, onFallback);
@@ -209,8 +239,59 @@ export function RichReport({
     return () => document.removeEventListener("selectionchange", capture);
   }, [blocks, host, reader, usesVirtual]);
 
+  useEffect(() => {
+    if (!stage || destinationReady || !scroll) return;
+    const events = new AbortController();
+    const cancel = () => {
+      window.clearTimeout(hoverTimer.current);
+      setNavigation(undefined);
+    };
+    for (const name of ["wheel", "touchmove", "pointerdown", "keydown"])
+      scroll.addEventListener(name, cancel, { signal: events.signal, passive: true });
+    return () => events.abort();
+  }, [stage, destinationReady, scroll]);
+
+  useLayoutEffect(() => {
+    if (!stage || destination === undefined || !destinationReady || !host || !scroll) return;
+    const row = blockElement(host, destination);
+    if (!row) return;
+    // Both the destination and its following group have committed real, measured
+    // content. Until now the user stays at the complete passage they came from.
+    scroll.scrollTop += row.getBoundingClientRect().top - scroll.getBoundingClientRect().top;
+    return restoreBookmark(host, scroll, { top: scroll.scrollTop, inset: 0 }, destination, () =>
+      setNavigation(undefined),
+    );
+  }, [stage, destination, destinationReady, host, scroll]);
+
+  function hint(index: number, priority: "hover" | "pressed", immediate: boolean) {
+    if (!reader.prepare) return;
+    window.clearTimeout(hoverTimer.current);
+    function start() {
+      setNavigation((current) =>
+        current?.phase === "jump" || (current?.index === index && current.phase === "pressed")
+          ? current
+          : { index, phase: priority },
+      );
+    }
+    if (immediate) start();
+    else hoverTimer.current = window.setTimeout(start, 65);
+  }
+
+  function leave(index: number) {
+    window.clearTimeout(hoverTimer.current);
+    setNavigation((current) =>
+      current?.index === index && current.phase !== "jump" ? undefined : current,
+    );
+  }
+
   function jump(index: number) {
     if (!host || !scroll) return;
+    window.clearTimeout(hoverTimer.current);
+    setRestored(true);
+    if (reader.prepare) {
+      setNavigation({ index, phase: "jump" });
+      return;
+    }
     if (usesVirtual) virtual.scrollToIndex(index, { align: "start" });
     else {
       const row = blockElement(host, index);
@@ -303,6 +384,20 @@ export function RichReport({
                 type="button"
                 className="quiet-button"
                 key={target}
+                onPointerMove={(event) => {
+                  if (event.pointerType !== "touch" && (event.movementX || event.movementY))
+                    hint(target, "hover", false);
+                }}
+                onPointerLeave={(event) => {
+                  if (event.pointerType !== "touch") leave(target);
+                }}
+                onPointerCancel={() => leave(target)}
+                onFocus={() => hint(target, "hover", true)}
+                onBlur={() => leave(target)}
+                onPointerDown={(event) => {
+                  if (event.button === 0 && event.isPrimary) hint(target, "pressed", true);
+                }}
+                aria-busy={(stage && target === destination && !destinationReady) || undefined}
                 onClick={() => jump(target)}
               >
                 {label}

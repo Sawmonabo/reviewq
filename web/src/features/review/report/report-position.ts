@@ -75,7 +75,8 @@ export function finishReading(element: Element | null, signal: AbortSignal) {
   function held() {
     const selection = getSelection();
     return (
-      host.contains(document.activeElement) ||
+      (host.contains(document.activeElement) &&
+        !document.activeElement?.matches(".report-section-nav button[aria-busy=true]")) ||
       Boolean(
         selection?.rangeCount &&
         !selection.isCollapsed &&

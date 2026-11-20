@@ -26,7 +26,7 @@ export type ReaderDocument = {
     indexes: readonly number[],
     signal: AbortSignal,
     publish: () => void,
-    current: () => boolean,
+    current: (preparing?: number) => boolean,
     pinned: readonly number[],
   ) => Promise<void>;
 };
@@ -163,7 +163,7 @@ export function indexedDocument(
     indexes: readonly number[],
     signal: AbortSignal,
     publish: () => void,
-    current: () => boolean,
+    current: (preparing?: number) => boolean,
     pinned: readonly number[],
   ) {
     // Native selection and keyboard focus retain only trees that are already on
@@ -209,6 +209,7 @@ export function indexedDocument(
     for (const index of indexes) {
       if (!admitted.has(index)) continue;
       if (prepared.has(index)) continue;
+      if (!current(index)) return;
       const group = groups[index]!;
       for (let first = group.first; first <= group.last; first++) {
         if (raw.has(first)) continue;

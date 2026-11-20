@@ -27,12 +27,12 @@ export function useReportPreparation(
     if (!prepare) return;
     let latest: readonly number[] = [];
     let active: AbortController | undefined;
-    let working: readonly number[] = [];
+    let preparing: number | undefined;
     let closed = false;
     async function run() {
       while (!closed && latest.length) {
         const plan = latest;
-        working = plan;
+        preparing = undefined;
         const controller = new AbortController();
         active = controller;
         try {
@@ -40,7 +40,10 @@ export function useReportPreparation(
             plan,
             controller.signal,
             () => publish((n) => n + 1),
-            () => plan === latest,
+            (index) => {
+              if (index !== undefined) preparing = index;
+              return plan === latest;
+            },
             pinned(),
           );
         } catch {
@@ -53,7 +56,7 @@ export function useReportPreparation(
     update.current = (value) => {
       latest = value ? value.split(",").map(Number) : [];
       if (!active) void run();
-      else if (!working.some((index) => latest.includes(index))) active.abort();
+      else if (preparing !== undefined && !latest.includes(preparing)) active.abort();
     };
     return () => {
       closed = true;
