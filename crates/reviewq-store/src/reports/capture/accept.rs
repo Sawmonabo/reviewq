@@ -24,7 +24,7 @@ pub(super) fn complete(
     artifact: Option<CapturedArtifact>,
     continuity_verified: bool,
     resolved: Vec<ReportFailureAddress>,
-) -> Result<(), StoreError> {
+) -> Result<bool, StoreError> {
     let db = &tx.sql;
     let stage = ensure_claim(db, &work)?;
     let run = work.call.lead.run_id().as_str();
@@ -37,7 +37,8 @@ pub(super) fn complete(
             artifact.as_ref(),
             "report_workspace_changed",
             Some(&result),
-        );
+        )
+        .map(|()| false);
     }
     if let Some(hold) =
         crate::hosts::unresolved_workflow_input(db, &work.call.lead, &work.call.turn_id)?
@@ -47,7 +48,7 @@ pub(super) fn complete(
                 "UPDATE report_handoffs SET due_at_ms=?2 WHERE receipt_id=?1",
                 params![receipt, time.saturating_add(super::RECHECK_MS)],
             )?;
-            return Ok(());
+            return Ok(false);
         }
         return reject(
             tx,
@@ -55,7 +56,8 @@ pub(super) fn complete(
             artifact.as_ref(),
             "workflow_turn_start_unproved",
             Some(&result),
-        );
+        )
+        .map(|()| false);
     }
     let current = head(db, run)?;
     let base = db.query_row(
@@ -87,7 +89,8 @@ pub(super) fn complete(
             artifact.as_ref(),
             "report_base_changed",
             Some(&result),
-        );
+        )
+        .map(|()| false);
     }
     let scoped = match batch::manifest(db, &work).map_err(StoreError::app) {
         Ok(value) => value,
@@ -98,7 +101,8 @@ pub(super) fn complete(
                 artifact.as_ref(),
                 "followup_binding_changed",
                 Some(&result),
-            );
+            )
+            .map(|()| false);
         }
         Err(error) => return Err(error.into()),
     };
@@ -116,7 +120,8 @@ pub(super) fn complete(
             artifact.as_ref(),
             "followup_scope_changed",
             Some(&result),
-        );
+        )
+        .map(|()| false);
     }
     let notification = match &work.declaration {
         Declaration::Final {
@@ -135,7 +140,8 @@ pub(super) fn complete(
                     Some(captured),
                     "report_semantic_evidence_invalid",
                     Some(&result),
-                );
+                )
+                .map(|()| false);
             }
             if let Some(scope) = &scoped
                 && (!continuity_verified
@@ -150,7 +156,8 @@ pub(super) fn complete(
                     Some(captured),
                     "followup_continuity_unproved",
                     Some(&result),
-                );
+                )
+                .map(|()| false);
             }
             if let Some(reference) = amends
                 && (!current.complete
@@ -171,7 +178,8 @@ pub(super) fn complete(
                     Some(captured),
                     "report_amendment_continuity_unproved",
                     Some(&result),
-                );
+                )
+                .map(|()| false);
             }
             if let Some(correction) = &edits.correction
                 && (!continuity_verified
@@ -185,7 +193,8 @@ pub(super) fn complete(
                     Some(captured),
                     "report_correction_continuity_unproved",
                     Some(&result),
-                );
+                )
+                .map(|()| false);
             }
             if (scoped.is_some() || edits.correction.is_some())
                 && edits::overrides_user_blocking(
@@ -202,7 +211,8 @@ pub(super) fn complete(
                     Some(captured),
                     "report_user_disposition_conflict",
                     Some(&result),
-                );
+                )
+                .map(|()| false);
             }
             let preserve_attention = amends.is_some()
                 || edits
@@ -258,7 +268,8 @@ pub(super) fn complete(
                     artifact.as_ref(),
                     "report_unchanged_evidence_mismatch",
                     Some(&result),
-                );
+                )
+                .map(|()| false);
             }
             if let Some(staged) = stage {
                 db.execute(
@@ -311,7 +322,8 @@ pub(super) fn complete(
     if !matches!(work.declaration, Declaration::NeedsInput { .. }) {
         crate::hosts::recovery::complete_turn(tx, &work.call.lead, &work.call.turn_id)?;
     }
-    emit(tx, &work, time, notification)
+    emit(tx, &work, time, notification)?;
+    Ok(matches!(work.declaration, Declaration::Final { .. }))
 }
 
 pub(super) fn reject(

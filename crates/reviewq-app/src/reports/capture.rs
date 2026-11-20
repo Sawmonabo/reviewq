@@ -1,6 +1,8 @@
 use std::sync::Arc;
 
-use reviewq_domain::identity::{GitSha, MrIdentity, ReceiptId, ReportHash, Revision, SessionKey};
+use reviewq_domain::identity::{
+    GitSha, MrIdentity, ReceiptId, ReportHash, Revision, RunId, SessionKey,
+};
 use reviewq_domain::session::{AbsolutePath, LeadTarget};
 use sha2::{Digest, Sha256};
 
@@ -12,6 +14,7 @@ use crate::workflow::{
     ReportCompletion, ReportContent, ReportFailureAddress,
 };
 
+use super::display::{self, DisplayIndex};
 use super::index;
 use super::{ArtifactStats, Descriptor, FindingConclusion, ReportEdits, ReportReference, Verdict};
 
@@ -219,12 +222,21 @@ pub trait ReportCaptureStore: Send + Sync {
         call: NativeCall,
     ) -> AppFuture<'_, Vec<ReportFailureAddress>>;
 
+    /// Returns whether a new immutable report version was accepted.
     fn accept_report(
         &self,
         work: ReportWork,
         result_entry: reviewq_domain::identity::NativeInputId,
         artifact: Option<CapturedArtifact>,
         resolved: Vec<ReportFailureAddress>,
+    ) -> AppFuture<'_, bool>;
+
+    /// Optionally cache display metadata after confirming the immutable accepted version.
+    fn save_display_index(
+        &self,
+        run: RunId,
+        reference: ReportReference,
+        index: DisplayIndex,
     ) -> AppFuture<'_, ()>;
 
     fn reject_report(
@@ -333,8 +345,8 @@ async fn reconcile_one(
             )
             .await;
     }
-    let artifact = match source {
-        None => None,
+    let (artifact, display_source) = match source {
+        None => (None, None),
         Some(source) => {
             let content = match content(files, &work.call, source, &evidence).await {
                 Ok(content) => content,
@@ -354,22 +366,23 @@ async fn reconcile_one(
             if install {
                 store.begin_artifact(work.clone()).await?;
             }
-            let captured = match read_source(store, &work, content.as_ref(), install).await {
-                Ok(captured) => captured,
-                Err(AppError::Unavailable | AppError::Busy) => {
-                    return store.defer_report(work).await;
-                }
-                Err(_) => {
-                    return store
-                        .reject_report(
-                            work,
-                            None,
-                            "native_report_source_invalid",
-                            Some(evidence.result_entry_id),
-                        )
-                        .await;
-                }
-            };
+            let (captured, display_source) =
+                match read_source(store, &work, content.as_ref(), install).await {
+                    Ok(captured) => captured,
+                    Err(AppError::Unavailable | AppError::Busy) => {
+                        return store.defer_report(work).await;
+                    }
+                    Err(_) => {
+                        return store
+                            .reject_report(
+                                work,
+                                None,
+                                "native_report_source_invalid",
+                                Some(evidence.result_entry_id),
+                            )
+                            .await;
+                    }
+                };
             if let Source::File {
                 hash: Some(hash), ..
             } = source
@@ -385,7 +398,7 @@ async fn reconcile_one(
                     )
                     .await;
             }
-            Some(captured)
+            (Some(captured), display_source)
         }
     };
     let resolved = if matches!(&work.declaration, Declaration::Final {
@@ -404,9 +417,21 @@ async fn reconcile_one(
     } else {
         Vec::new()
     };
-    store
+    let run = work.call.lead.run_id().clone();
+    let reference = artifact.as_ref().map(|captured| ReportReference {
+        receipt_id: work.acknowledgement.receipt_id.clone(),
+        hash: captured.hash.clone(),
+    });
+    let accepted = store
         .accept_report(work, evidence.result_entry_id, artifact, resolved)
-        .await
+        .await?;
+    if accepted && let Some(reference) = reference {
+        let index = display::build(display_source).await;
+        if let Err(error) = store.save_display_index(run, reference, index).await {
+            eprintln!("ReviewQ could not retain the report display index ({error}).");
+        }
+    }
+    Ok(())
 }
 
 async fn content(
@@ -426,7 +451,7 @@ async fn read_source(
     work: &ReportWork,
     source: &dyn ReportContent,
     install: bool,
-) -> Result<CapturedArtifact, AppError> {
+) -> Result<(CapturedArtifact, Option<String>), AppError> {
     let total = source.byte_length();
     if total == 0 || total > i64::MAX as u64 {
         return Err(AppError::InvalidRequest);
@@ -492,26 +517,36 @@ async fn read_source(
     if persisted != total || !has_content {
         return Err(AppError::InvalidRequest);
     }
-    let (index, semantic_failure) = match index_source {
-        Some(source) => match tokio::task::spawn_blocking(move || index::parse(&source)).await {
-            Ok(Ok(index)) => (index, false),
-            Ok(Err(_)) | Err(_) => (None, true),
-        },
-        None => (None, false),
-    };
     let (line_count, max_line_bytes) = count.finish();
-    Ok(CapturedArtifact {
-        hash: ReportHash::from_sha256(hash.finalize().into()),
-        stats: ArtifactStats {
-            byte_length: total,
-            total_code_points: scalars,
-            line_count,
-            max_line_bytes,
-            complete: true,
+    let stats = ArtifactStats {
+        byte_length: total,
+        total_code_points: scalars,
+        line_count,
+        max_line_bytes,
+        complete: true,
+    };
+    let display_admitted = stats.require_markdown_budget().is_ok();
+    let (index, semantic_failure, display_source) = match index_source {
+        Some(source) => match tokio::task::spawn_blocking(move || {
+            let index = index::parse(&source)?;
+            Ok::<_, AppError>((index, display_admitted.then_some(source)))
+        })
+        .await
+        {
+            Ok(Ok((index, source))) => (index, false, source),
+            Ok(Err(_)) | Err(_) => (None, true, None),
         },
-        index,
-        semantic_failure,
-    })
+        None => (None, false, None),
+    };
+    Ok((
+        CapturedArtifact {
+            hash: ReportHash::from_sha256(hash.finalize().into()),
+            stats,
+            index,
+            semantic_failure,
+        },
+        display_source,
+    ))
 }
 
 #[derive(Default)]

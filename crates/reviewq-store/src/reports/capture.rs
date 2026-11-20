@@ -5,13 +5,15 @@ use std::path::PathBuf;
 use reviewq_app::access::{AppError, AppFuture};
 use reviewq_app::events::{ResourceKey, Snapshot};
 use reviewq_app::reports::{
-    AcceptedReport, ArtifactChunk, CapturedArtifact, Declaration, HandoffReceipt,
+    AcceptedReport, ArtifactChunk, CapturedArtifact, Declaration, DisplayIndex, HandoffReceipt,
     ReportCaptureStore, ReportReference, ReportWork, RevisionEvidence, Source,
 };
 use reviewq_app::workflow::{
     ExpectedAcknowledgement, NativeCall, ReportFailureAddress, WorkflowTool,
 };
-use reviewq_domain::identity::{MrIdentity, NativeInputId, ReportHash, Revision, SessionKey};
+use reviewq_domain::identity::{
+    MrIdentity, NativeInputId, ReportHash, Revision, RunId, SessionKey,
+};
 use reviewq_domain::session::{AbsolutePath, LeadTarget};
 use rusqlite::{Connection, OptionalExtension, Row, params};
 use uuid::Uuid;
@@ -262,7 +264,7 @@ impl ReportCaptureStore for SqliteStore {
         result_entry: NativeInputId,
         mut artifact: Option<CapturedArtifact>,
         resolved: Vec<ReportFailureAddress>,
-    ) -> AppFuture<'_, ()> {
+    ) -> AppFuture<'_, bool> {
         Box::pin(async move {
             let continuity_verified = edits::verify(self, &work, artifact.as_mut()).await?;
             self.write(move |tx| {
@@ -277,6 +279,19 @@ impl ReportCaptureStore for SqliteStore {
             })
             .await
             .map_err(StoreError::app)
+        })
+    }
+
+    fn save_display_index(
+        &self,
+        run: RunId,
+        reference: ReportReference,
+        index: DisplayIndex,
+    ) -> AppFuture<'_, ()> {
+        Box::pin(async move {
+            self.cache_report_display(run, reference, index)
+                .await
+                .map_err(StoreError::app)
         })
     }
 

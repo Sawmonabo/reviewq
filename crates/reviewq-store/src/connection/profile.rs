@@ -100,11 +100,17 @@ impl Profile {
     }
 
     pub(super) fn publish(&self, staged: &Path) -> Result<(), StoreError> {
+        self.publish_sibling(staged, "")
+    }
+
+    pub(super) fn publish_sibling(&self, staged: &Path, suffix: &str) -> Result<(), StoreError> {
+        let mut destination = self.name.clone();
+        destination.push(suffix);
         fs::renameat_with(
             fs::CWD,
             staged,
             &self.directory,
-            &self.name,
+            &destination,
             RenameFlags::NOREPLACE,
         )?;
         self.directory.sync_all()?;
