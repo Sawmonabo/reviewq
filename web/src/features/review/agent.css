@@ -327,6 +327,7 @@
   color: light-dark(var(--text), #e5ebff);
   box-shadow: 0 4px 24px #0009;
   font-size: 11px;
+  line-height: 15px;
   white-space: nowrap;
 }
 .timeline-jump:enabled:hover {

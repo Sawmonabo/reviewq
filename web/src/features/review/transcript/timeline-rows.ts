@@ -27,13 +27,14 @@ export function timelineRows(
   const confirmed = new Map(
     messages.flatMap((item) => (item.nativeEntryId ? [[item.nativeEntryId, item] as const] : [])),
   );
+  const loadedIds = new Set(entries.map((entry) => entry.entryId));
   const first = entries.find((entry) => entry.timestamp)?.timestamp;
   let last: string | null | undefined;
   for (let i = entries.length - 1; i >= 0 && !last; i--) last = entries[i]?.timestamp;
   const pending = messages
     .filter(
       (item) =>
-        !item.nativeEntryId &&
+        (!item.nativeEntryId || !loadedIds.has(item.nativeEntryId)) &&
         (!older || (first && item.createdAt >= first)) &&
         (!newer || (last && item.createdAt <= last)),
     )
