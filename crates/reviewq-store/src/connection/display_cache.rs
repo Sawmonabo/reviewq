@@ -1,12 +1,14 @@
 //! Optional display metadata lives beside the authoritative database.
 
+mod window;
+
+pub(super) use window::Builds;
+
 use std::path::PathBuf;
 use std::time::Duration;
 
 use reviewq_app::access::AppError;
-use reviewq_app::reports::{
-    DISPLAY_INDEX_FORMAT, DisplayBlockKind, DisplayFallback, DisplayIndex, ReportReference,
-};
+use reviewq_app::reports::{DisplayBlockKind, DisplayFallback, DisplayIndex, ReportReference};
 use reviewq_domain::identity::RunId;
 use rusqlite::{Connection, OpenFlags, OptionalExtension, TransactionBehavior, params};
 use uuid::Uuid;
@@ -61,7 +63,7 @@ impl SqliteStore {
         &self,
         run: RunId,
         reference: ReportReference,
-        index: DisplayIndex,
+        source: Option<String>,
     ) -> Result<(), StoreError> {
         let hash = reference.hash;
         let confirmed_hash = hash.clone();
@@ -81,23 +83,12 @@ impl SqliteStore {
                 Ok((artifact_id, profile.clone()))
             })
             .await?;
-        let store_id = self.identity().store_id;
-        tokio::task::spawn_blocking(move || {
-            let mut cache = open(&profile, store_id)?;
-            publish(
-                &mut cache,
-                &artifact_id,
-                hash.as_str(),
-                DISPLAY_INDEX_FORMAT,
-                index,
-            )
-        })
-        .await
-        .map_err(|_| AppError::Internal)?
+        self.build_captured_index(profile, artifact_id, hash, source)
+            .await
     }
 }
 
-fn open(profile: &Profile, store_id: Uuid) -> Result<Connection, StoreError> {
+fn open(profile: &Profile, store_id: Uuid, create: bool) -> Result<Option<Connection>, StoreError> {
     let mut path = profile.path().as_os_str().to_os_string();
     path.push(SUFFIX);
     let path = PathBuf::from(path);
@@ -108,6 +99,9 @@ fn open(profile: &Profile, store_id: Uuid) -> Result<Connection, StoreError> {
         || profile.file(".findings-display-shm")?.is_some()
     {
         return Err(AppError::Conflict.into());
+    }
+    if !exists && !create {
+        return Ok(None);
     }
     let connection = if exists {
         Connection::open_with_flags(&path, WRITE_FLAGS)?
@@ -127,11 +121,16 @@ fn open(profile: &Profile, store_id: Uuid) -> Result<Connection, StoreError> {
         tx.commit()?;
         drop(connection);
         file.sync_all()?;
-        profile.publish_sibling(&stage.database, SUFFIX)?;
+        if let Err(error) = profile.publish_sibling(&stage.database, SUFFIX)
+            && profile.file(SUFFIX)?.is_none()
+        {
+            return Err(error);
+        }
+        // The other build lane can win the first publication. Verify its cache below.
         Connection::open_with_flags(&path, WRITE_FLAGS)?
     };
     configure(&connection, store_id)?;
-    Ok(connection)
+    Ok(Some(connection))
 }
 
 fn configure(connection: &Connection, store_id: Uuid) -> Result<(), StoreError> {
@@ -239,5 +238,7 @@ fn fallback_label(reason: DisplayFallback) -> &'static str {
         DisplayFallback::UnsupportedSource => "unsupported_source",
         DisplayFallback::InvalidBoundary => "invalid_boundary",
         DisplayFallback::ParserFailed => "parser_failed",
+        DisplayFallback::IncompleteSource => "incomplete_source",
+        DisplayFallback::CacheUnavailable => "cache_unavailable",
     }
 }

@@ -74,6 +74,7 @@ import type {
   ReportSectionResponse,
   ReportViewResponse,
   ReportViewedResponse,
+  ReportWindowResponse,
   ReviewDecisionResponse,
   ReviewOverviewResponse,
   ReviewSelectionResponse,
@@ -276,6 +277,9 @@ export function isReportViewResponse(
 export function isReportViewedResponse(
   value: unknown,
 ): value is ReportViewedResponse;
+export function isReportWindowResponse(
+  value: unknown,
+): value is ReportWindowResponse;
 export function isReviewDecisionResponse(
   value: unknown,
 ): value is ReviewDecisionResponse;

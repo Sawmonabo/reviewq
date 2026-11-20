@@ -7,9 +7,9 @@ mod mutations;
 use reviewq_app::access::{Actor, ActorScope, AppError, AppFuture};
 use reviewq_app::events::Snapshot;
 use reviewq_app::reports::{
-    ArtifactStats, CandidateReport, ContextRequest, MAX_REPORT_PAGE, MAX_SECTION_SCALARS,
-    ReportContext, ReportDelivery, ReportHistory, ReportPosition, ReportReference, ReportSection,
-    ReportStore, ReportSummary, ReportView,
+    ArtifactStats, CandidateReport, ContextRequest, DisplayWindow, DisplayWindowPosition,
+    MAX_REPORT_PAGE, MAX_SECTION_SCALARS, ReportContext, ReportDelivery, ReportHistory,
+    ReportPosition, ReportReference, ReportSection, ReportStore, ReportSummary, ReportView,
 };
 use reviewq_domain::identity::{ReceiptId, ReportHash, RunId};
 use rusqlite::{Connection, OptionalExtension, Row, params};
@@ -19,9 +19,9 @@ use crate::queue::{identity_for_review, lead_for_run, parse, text};
 use crate::workspace::{allow_review, scope};
 use crate::{SqliteStore, StoreError};
 
-struct Version {
-    summary: ReportSummary,
-    artifact_id: String,
+pub(crate) struct Version {
+    pub(crate) summary: ReportSummary,
+    pub(crate) artifact_id: String,
 }
 
 struct SectionSource<'a> {
@@ -75,6 +75,20 @@ impl ReportStore for SqliteStore {
             })
             .await
             .map_err(StoreError::app)
+        })
+    }
+
+    fn read_report_window(
+        &self,
+        actor: Actor,
+        run: RunId,
+        report: ReportReference,
+        position: DisplayWindowPosition,
+    ) -> AppFuture<'_, Snapshot<DisplayWindow>> {
+        Box::pin(async move {
+            self.report_display_window(actor, run, report, position)
+                .await
+                .map_err(StoreError::app)
         })
     }
 
@@ -344,7 +358,7 @@ fn read_delivery(
         .transpose()
 }
 
-fn version(
+pub(crate) fn version(
     connection: &Connection,
     run: &RunId,
     receipt: &ReceiptId,
@@ -412,24 +426,74 @@ fn decode_stats(row: &Row<'_>, start: usize) -> Result<ArtifactStats, StoreError
     })
 }
 
-fn read_markdown(connection: &Connection, version: &Version) -> Result<String, StoreError> {
+pub(crate) fn read_markdown(
+    connection: &Connection,
+    version: &Version,
+) -> Result<String, StoreError> {
     let stats = &version.summary.stats;
     stats.require_markdown_budget()?;
-    let mut result = Vec::with_capacity(stats.byte_length as usize);
-    let mut statement = connection
-        .prepare_cached("SELECT raw FROM artifact_chunks WHERE artifact_id=?1 ORDER BY ordinal")?;
-    let mut rows = statement.query([&version.artifact_id])?;
-    while let Some(row) = rows.next()? {
-        let raw = raw(row, 0)?;
-        if result.len() + raw.len() > stats.byte_length as usize {
-            return Err(AppError::Internal.into());
-        }
-        result.extend_from_slice(raw);
-    }
-    if result.len() as u64 != stats.byte_length {
+    let range = read_artifact_bytes(connection, &version.artifact_id, 0, stats.byte_length)?;
+    String::from_utf8(range.bytes).map_err(|_| AppError::Internal.into())
+}
+
+pub(crate) struct ArtifactBytes {
+    pub(crate) bytes: Vec<u8>,
+    pub(crate) first_scalar: Option<u64>,
+}
+
+/// Copy only a byte range, using the leading chunk's indexed byte key for both coordinates.
+pub(crate) fn read_artifact_bytes(
+    connection: &Connection,
+    artifact: &str,
+    start: u64,
+    end: u64,
+) -> Result<ArtifactBytes, StoreError> {
+    if start > end {
         return Err(AppError::Internal.into());
     }
-    String::from_utf8(result).map_err(|_| AppError::Internal.into())
+    let mut result = Vec::with_capacity((end - start) as usize);
+    if start == end {
+        return Ok(ArtifactBytes {
+            bytes: result,
+            first_scalar: None,
+        });
+    }
+    let mut first_scalar = None;
+    let mut statement = connection.prepare_cached(
+        "SELECT byte_start, scalar_start, raw FROM artifact_chunks
+         WHERE artifact_id=?1 AND byte_start >= (
+             SELECT byte_start FROM artifact_chunks WHERE artifact_id=?1 AND byte_start<=?2
+             ORDER BY byte_start DESC LIMIT 1
+         ) AND byte_start<?3 ORDER BY byte_start",
+    )?;
+    let mut rows = statement.query(params![artifact, start as i64, end as i64])?;
+    let mut next = start;
+    while let Some(row) = rows.next()? {
+        let offset = read_count(row, 0)?;
+        let bytes = raw(row, 2)?;
+        let skip = next.checked_sub(offset).ok_or(AppError::Internal)?;
+        // Only the first chunk may start before the next expected byte.
+        if skip >= bytes.len() as u64 || (!result.is_empty() && skip != 0) {
+            return Err(AppError::Internal.into());
+        }
+        if result.is_empty() {
+            let chunk_scalar = read_count(row, 1)?;
+            // A byte address inside an encoded scalar is not a valid block start.
+            first_scalar = str::from_utf8(&bytes[..skip as usize])
+                .ok()
+                .and_then(|prefix| chunk_scalar.checked_add(prefix.chars().count() as u64));
+        }
+        let take = (end - next).min(bytes.len() as u64 - skip);
+        result.extend_from_slice(&bytes[skip as usize..(skip + take) as usize]);
+        next += take;
+    }
+    if next != end {
+        return Err(AppError::Internal.into());
+    }
+    Ok(ArtifactBytes {
+        bytes: result,
+        first_scalar,
+    })
 }
 
 fn section(

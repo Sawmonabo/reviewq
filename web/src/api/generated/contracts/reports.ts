@@ -65,6 +65,42 @@ export type SemanticIndex = "ready" | "source_only";
 export type Verdict =
   "approve" | "request_changes" | "blocked" | "not_specified";
 
+export type DisplayResult =
+  | {
+      /**
+       * @minItems 1
+       * @maxItems 32
+       */
+      blocks: [DisplayBlock, ...DisplayBlock[]];
+      nextCursor: PageCursorDto | null;
+      previousCursor: PageCursorDto | null;
+      state: "ready";
+      totalBlocks: SafeCountDto;
+      [k: string]: unknown;
+    }
+  | {
+      state: "building";
+      [k: string]: unknown;
+    }
+  | {
+      reason: DisplayFallback;
+      state: "fallback";
+      [k: string]: unknown;
+    };
+
+export type DisplayBlockKind =
+  "paragraph" | "heading" | "block_quote" | "code" | "list" | "rule" | "table";
+
+export type DisplayFallback =
+  | "document_budget"
+  | "parser_budget"
+  | "document_context"
+  | "unsupported_source"
+  | "invalid_boundary"
+  | "parser_failed"
+  | "incomplete_source"
+  | "cache_unavailable";
+
 export interface ReportDispositionRequest {
   disposition: DispositionPatch;
   expectedVersion: RevisionDto;
@@ -270,5 +306,28 @@ export interface ViewedReceipt {
   previousReceiptId: ResourceIdDto | null;
   receiptId: ResourceIdDto;
   renderedBatchId: ResourceIdDto | null;
+  [k: string]: unknown;
+}
+
+export interface ReportWindowResponse {
+  cursor: EventCursorDto;
+  data: ReportWindow;
+  [k: string]: unknown;
+}
+
+export interface ReportWindow {
+  indexFormat: SafeCountDto;
+  report: ReportSummary;
+  result: DisplayResult;
+  [k: string]: unknown;
+}
+
+export interface DisplayBlock {
+  byteEnd: SafeCountDto;
+  byteStart: SafeCountDto;
+  headingLevel: SafeCountDto | null;
+  kind: DisplayBlockKind;
+  markdown: string;
+  scalarStart: SafeCountDto;
   [k: string]: unknown;
 }

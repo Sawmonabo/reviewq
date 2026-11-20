@@ -2319,6 +2319,148 @@
       ],
       "type": "string"
     },
+    "DisplayBlock": {
+      "properties": {
+        "byteEnd": {
+          "$ref": "#/definitions/SafeCountDto"
+        },
+        "byteStart": {
+          "$ref": "#/definitions/SafeCountDto"
+        },
+        "headingLevel": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SafeCountDto"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "kind": {
+          "$ref": "#/definitions/DisplayBlockKind"
+        },
+        "markdown": {
+          "type": "string"
+        },
+        "scalarStart": {
+          "$ref": "#/definitions/SafeCountDto"
+        }
+      },
+      "required": [
+        "byteStart",
+        "byteEnd",
+        "scalarStart",
+        "kind",
+        "headingLevel",
+        "markdown"
+      ],
+      "type": "object"
+    },
+    "DisplayBlockKind": {
+      "enum": [
+        "paragraph",
+        "heading",
+        "block_quote",
+        "code",
+        "list",
+        "rule",
+        "table"
+      ],
+      "type": "string"
+    },
+    "DisplayFallback": {
+      "enum": [
+        "document_budget",
+        "parser_budget",
+        "document_context",
+        "unsupported_source",
+        "invalid_boundary",
+        "parser_failed",
+        "incomplete_source",
+        "cache_unavailable"
+      ],
+      "type": "string"
+    },
+    "DisplayResult": {
+      "oneOf": [
+        {
+          "properties": {
+            "blocks": {
+              "items": {
+                "$ref": "#/definitions/DisplayBlock"
+              },
+              "maxItems": 32,
+              "minItems": 1,
+              "type": "array"
+            },
+            "nextCursor": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/PageCursorDto"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "previousCursor": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/PageCursorDto"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "state": {
+              "const": "ready",
+              "type": "string"
+            },
+            "totalBlocks": {
+              "$ref": "#/definitions/SafeCountDto"
+            }
+          },
+          "required": [
+            "state",
+            "totalBlocks",
+            "blocks",
+            "previousCursor",
+            "nextCursor"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "state": {
+              "const": "building",
+              "type": "string"
+            }
+          },
+          "required": [
+            "state"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "reason": {
+              "$ref": "#/definitions/DisplayFallback"
+            },
+            "state": {
+              "const": "fallback",
+              "type": "string"
+            }
+          },
+          "required": [
+            "state",
+            "reason"
+          ],
+          "type": "object"
+        }
+      ]
+    },
     "Disposition": {
       "enum": [
         "reviewed",
@@ -7066,6 +7208,42 @@
       "title": "ReportViewedResponse",
       "type": "object"
     },
+    "ReportWindow": {
+      "properties": {
+        "indexFormat": {
+          "$ref": "#/definitions/SafeCountDto"
+        },
+        "report": {
+          "$ref": "#/definitions/ReportSummary"
+        },
+        "result": {
+          "$ref": "#/definitions/DisplayResult"
+        }
+      },
+      "required": [
+        "report",
+        "indexFormat",
+        "result"
+      ],
+      "type": "object"
+    },
+    "ReportWindowResponse": {
+      "description": "The resource and event head from the same authorized snapshot.",
+      "properties": {
+        "cursor": {
+          "$ref": "#/definitions/EventCursorDto"
+        },
+        "data": {
+          "$ref": "#/definitions/ReportWindow"
+        }
+      },
+      "required": [
+        "data",
+        "cursor"
+      ],
+      "title": "ReportWindowResponse",
+      "type": "object"
+    },
     "RepositoryBinding": {
       "additionalProperties": false,
       "properties": {
@@ -9792,6 +9970,7 @@
     "ReportViewResponse": "reports",
     "ReportViewedRequest": "reports",
     "ReportViewedResponse": "reports",
+    "ReportWindowResponse": "reports",
     "ResetEvent": "common",
     "ReviewCheckpointRequest": "decisions",
     "ReviewDecisionRequest": "decisions",
@@ -9896,6 +10075,7 @@
       "ReportSectionResponse": "#/definitions/ReportSectionResponse",
       "ReportViewResponse": "#/definitions/ReportViewResponse",
       "ReportViewedResponse": "#/definitions/ReportViewedResponse",
+      "ReportWindowResponse": "#/definitions/ReportWindowResponse",
       "ReviewDecisionResponse": "#/definitions/ReviewDecisionResponse",
       "ReviewOverviewResponse": "#/definitions/ReviewOverviewResponse",
       "ReviewSelectionResponse": "#/definitions/ReviewSelectionResponse",

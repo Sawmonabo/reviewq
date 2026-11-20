@@ -84,6 +84,7 @@ import type {
   ReportViewResponse,
   ReportViewedRequest,
   ReportViewedResponse,
+  ReportWindowResponse,
 } from "./reports.js";
 
 import type {
@@ -205,6 +206,7 @@ export interface Contracts {
   ReportSectionResponse: ReportSectionResponse;
   ReportViewResponse: ReportViewResponse;
   ReportViewedResponse: ReportViewedResponse;
+  ReportWindowResponse: ReportWindowResponse;
   ReviewDecisionResponse: ReviewDecisionResponse;
   ReviewOverviewResponse: ReviewOverviewResponse;
   ReviewSelectionResponse: ReviewSelectionResponse;

@@ -101,6 +101,10 @@ pub(super) fn routes() -> Router<Arc<Entry>> {
             get(reports::version),
         )
         .route(
+            "/runs/{run_id}/report/versions/{receipt}/window",
+            get(reports::read_window),
+        )
+        .route(
             "/runs/{run_id}/report/versions/{receipt}/source",
             get(reports::source),
         )

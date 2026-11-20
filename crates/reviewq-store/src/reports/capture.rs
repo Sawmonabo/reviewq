@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use reviewq_app::access::{AppError, AppFuture};
 use reviewq_app::events::{ResourceKey, Snapshot};
 use reviewq_app::reports::{
-    AcceptedReport, ArtifactChunk, CapturedArtifact, Declaration, DisplayIndex, HandoffReceipt,
+    AcceptedReport, ArtifactChunk, CapturedArtifact, Declaration, HandoffReceipt,
     ReportCaptureStore, ReportReference, ReportWork, RevisionEvidence, Source,
 };
 use reviewq_app::workflow::{
@@ -282,14 +282,14 @@ impl ReportCaptureStore for SqliteStore {
         })
     }
 
-    fn save_display_index(
+    fn index_captured_source(
         &self,
         run: RunId,
         reference: ReportReference,
-        index: DisplayIndex,
+        source: Option<String>,
     ) -> AppFuture<'_, ()> {
         Box::pin(async move {
-            self.cache_report_display(run, reference, index)
+            self.cache_report_display(run, reference, source)
                 .await
                 .map_err(StoreError::app)
         })

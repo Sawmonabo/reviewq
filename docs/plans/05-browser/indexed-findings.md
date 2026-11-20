@@ -8,7 +8,7 @@ Today the browser admits a report by size, fetches its entire Markdown and runs 
 
 When a new report is accepted, the Rust capture worker passes the same validated source buffer used for semantic indexing to the pinned display parser. It stores block kinds, original UTF-8 byte ranges and starting Unicode scalar offsets in a bounded optional cache. Capturing original bytes and semantic evidence remains authoritative. A failed cache write leaves the accepted report readable. This first path reuses the already assembled, size-admitted buffer. The parser cuts it in whole-line windows. [Capture](../../../crates/reviewq-app/src/reports/capture.rs) · [Cutter](../../../crates/reviewq-app/src/reports/display/cutter.rs) · [Cache](../../../crates/reviewq-store/src/connection/display_cache.rs)
 
-The Findings screen still uses the existing whole-document reader. Reading an index on demand for existing reports, the version-bound window API, global reference handling, table row windows and React integration remain to be implemented. The cutter records a fallback for reference definitions, raw HTML and ambiguous list boundaries. For example, moving a line containing only `*` into its own browser parse can turn paragraph text into an empty list. The whole-document reader preserves that context. Sanitized output and interaction parity still need verification in the integrated reader.
+The version-bound window API serves bounded source blocks and a verified report summary. Cache misses schedule one on-demand build at a time from eligible sealed chunks. A capture and an opening request for the same artifact share a build claim. The Findings screen still uses the existing whole-document reader. Global presentation facts, reference handling, table row windows and React integration are later steps. The cutter records a fallback for reference definitions, raw HTML and ambiguous list boundaries. For example, moving a line containing only `*` into its own browser parse can turn paragraph text into an empty list. The whole-document reader preserves that context. Sanitized output and interaction parity still need verification in the integrated reader.
 
 ## What to reuse
 
@@ -42,7 +42,17 @@ The index supplies structural information the visible window cannot discover on 
 
 ## Read contract
 
-Extend the existing versioned report route family and its generated TypeScript validators. The names below are proposed contract shapes. Keep one report reader in the app, one SQLite range query path, and one mapping in transport. [Rust protocol](../../../crates/reviewq-protocol/src/reports.rs) · [HTTP mapping](../../../crates/reviewq-transport/src/entry/features/reports.rs) · [Browser adapter](../../../web/src/api/reports.ts)
+### Source block windows
+
+Use `GET /api/v1/runs/{runId}/report/versions/{receiptId}/window?sha256={digest}` for the first batch. Supply either `byteOffset` for an original UTF-8 byte position or a returned `cursor` for an adjacent batch. Byte ranges are half-open. An anchor in leading blank space resolves to the first authored block, exactly the document byte length resolves to the final block, and an anchor past the document returns a range error. The original block interval includes its indentation and intervening whitespace. Use the source reader for leading blank bytes before the first authored block.
+
+The response carries the report summary, index format and result state. A ready result includes the total number of blocks and an ascending batch of up to 32. Each block carries its original byte start and end, starting Unicode scalar offset, kind, optional heading level and exact Markdown. A batch normally fits 64 KiB of source. If the next complete block is larger, its own batch may use the existing 1 MiB source envelope. JSON is capped at 7 MiB. Previous and next cursors bind the run, receipt, digest, format, source-block range and direction. Cache eviction may temporarily return a building state for a continuation.
+
+A building result lets the reader retry the same bounds. A known unsupported document or unavailable cache returns a fallback reason. A cache miss for another artifact can return busy while the single worker is occupied. The existing report context endpoints supply semantic findings and dispositions. [Window handler](../../../crates/reviewq-transport/src/entry/features/reports/window.rs) · [Window store](../../../crates/reviewq-store/src/connection/display_cache/window.rs)
+
+### Planned extensions
+
+The table describes the intended complete read contract. Extend the versioned report route family and its generated TypeScript validators as the remaining operations land. Keep one report reader in the app, one SQLite range query path, and one mapping in transport. [Rust protocol](../../../crates/reviewq-protocol/src/reports.rs) · [HTTP mapping](../../../crates/reviewq-transport/src/entry/features/reports.rs) · [Browser adapter](../../../web/src/api/reports.ts)
 
 | Operation | Result |
 | --- | --- |

@@ -1,5 +1,8 @@
 mod handoff;
 mod mutations;
+mod window;
+
+pub(super) use window::read as read_window;
 
 pub(super) use handoff::{accepted, handoff, handoff_status};
 

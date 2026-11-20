@@ -35,6 +35,7 @@ struct Workers {
 }
 
 pub struct SqliteStore {
+    display_builds: Arc<display_cache::Builds>,
     identity: StoreIdentity,
     workers: Mutex<Workers>,
     wakeup: watch::Sender<EventCursor>,
@@ -68,6 +69,7 @@ impl SqliteStore {
             let reader = Worker::start(reader, profile.clone(), false)?;
             let writer = Worker::start(writer, profile, true)?;
             Ok(Self {
+                display_builds: Arc::new(display_cache::Builds::default()),
                 identity,
                 workers: Mutex::new(Workers { reader, writer }),
                 wakeup,

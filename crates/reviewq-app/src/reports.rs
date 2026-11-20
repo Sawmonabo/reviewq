@@ -7,6 +7,8 @@ mod revision;
 
 pub use display::{
     DISPLAY_INDEX_FORMAT, DisplayBlock, DisplayBlockKind, DisplayFallback, DisplayIndex,
+    DisplayWindow, DisplayWindowBlock, DisplayWindowPosition, DisplayWindowState,
+    build_display_index,
 };
 
 pub use revision::{
@@ -248,6 +250,13 @@ pub trait ReportStore: Send + Sync {
         receipt: Option<ReceiptId>,
         markdown: bool,
     ) -> AppFuture<'_, Snapshot<ReportView>>;
+    fn read_report_window(
+        &self,
+        actor: Actor,
+        run: RunId,
+        report: ReportReference,
+        position: DisplayWindowPosition,
+    ) -> AppFuture<'_, Snapshot<DisplayWindow>>;
     fn read_report_history(
         &self,
         actor: Actor,

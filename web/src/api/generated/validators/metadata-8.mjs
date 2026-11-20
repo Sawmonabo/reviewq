@@ -12,7 +12,32 @@ const schema331 = {
   required: ["report", "delivery"],
   type: "object",
 };
-const schema347 = {
+const schema339 = {
+  enum: [
+    "paragraph",
+    "heading",
+    "block_quote",
+    "code",
+    "list",
+    "rule",
+    "table",
+  ],
+  type: "string",
+};
+const schema342 = {
+  enum: [
+    "document_budget",
+    "parser_budget",
+    "document_context",
+    "unsupported_source",
+    "invalid_boundary",
+    "parser_failed",
+    "incomplete_source",
+    "cache_unavailable",
+  ],
+  type: "string",
+};
+const schema356 = {
   properties: {
     leadName: { type: ["string", "null"] },
     leadSessionKey: { $ref: "#/definitions/CheckpointIdDto" },
@@ -25,7 +50,7 @@ const schema347 = {
   required: ["runId", "leadSessionKey", "provider", "leadName", "startedAt"],
   type: "object",
 };
-const schema356 = {
+const schema365 = {
   type: "object",
   properties: {
     author: {
@@ -48,37 +73,4 @@ const schema356 = {
     focusedLeadName: { type: ["string", "null"] },
   },
 };
-const schema358 = {
-  type: "object",
-  properties: {
-    ourComments: { $ref: "#/definitions/SafeCountDto" },
-    own: { type: "boolean" },
-    personalApproval: { type: ["boolean", "null"] },
-    projectId: { $ref: "#/definitions/MergeRequestIidDto" },
-    projectPath: { type: "string" },
-    queueState: { $ref: "#/definitions/QueueStatus" },
-    reasonKind: { type: ["string", "null"] },
-    registeredLeadCount: { $ref: "#/definitions/SafeCountDto" },
-  },
-};
-const schema364 = {
-  properties: {
-    defaultEffort: { type: ["string", "null"] },
-    efforts: { items: { type: "string" }, type: "array" },
-    id: { type: "string" },
-    isDefault: { type: "boolean" },
-    label: { type: "string" },
-  },
-  required: ["id", "label", "isDefault", "defaultEffort", "efforts"],
-  type: "object",
-};
-const schema365 = {
-  properties: {
-    description: { type: ["string", "null"] },
-    name: { type: "string" },
-    path: { type: "string" },
-  },
-  required: ["name", "path"],
-  type: "object",
-};
-export { schema331, schema347, schema356, schema358, schema364, schema365 };
+export { schema331, schema339, schema342, schema356, schema365 };

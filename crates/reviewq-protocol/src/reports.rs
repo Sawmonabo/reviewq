@@ -111,6 +111,68 @@ pub struct ReportView {
     pub markdown: Option<String>,
 }
 
+wire_enum!(DisplayBlockKind {
+    Paragraph,
+    Heading,
+    BlockQuote,
+    Code,
+    List,
+    Rule,
+    Table
+});
+wire_enum!(DisplayFallback {
+    DocumentBudget,
+    ParserBudget,
+    DocumentContext,
+    UnsupportedSource,
+    InvalidBoundary,
+    ParserFailed,
+    IncompleteSource,
+    CacheUnavailable,
+});
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct DisplayBlock {
+    pub byte_start: SafeCountDto,
+    pub byte_end: SafeCountDto,
+    pub scalar_start: SafeCountDto,
+    pub kind: DisplayBlockKind,
+    pub heading_level: Option<SafeCountDto>,
+    pub markdown: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(
+    tag = "state",
+    rename_all = "snake_case",
+    rename_all_fields = "camelCase"
+)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub enum DisplayResult {
+    Ready {
+        total_blocks: SafeCountDto,
+        #[cfg_attr(feature = "schema", schemars(length(min = 1, max = 32)))]
+        blocks: Vec<DisplayBlock>,
+        previous_cursor: Option<crate::PageCursorDto>,
+        next_cursor: Option<crate::PageCursorDto>,
+    },
+    Building,
+    Fallback {
+        reason: DisplayFallback,
+    },
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct ReportWindow {
+    pub report: ReportSummary,
+    pub index_format: SafeCountDto,
+    pub result: DisplayResult,
+}
+
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]

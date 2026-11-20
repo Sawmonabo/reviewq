@@ -44,6 +44,8 @@ pub enum DisplayFallback {
     UnsupportedSource,
     InvalidBoundary,
     ParserFailed,
+    IncompleteSource,
+    CacheUnavailable,
 }
 
 struct BlockStart {

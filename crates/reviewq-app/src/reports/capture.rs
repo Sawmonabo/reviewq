@@ -14,7 +14,6 @@ use crate::workflow::{
     ReportCompletion, ReportContent, ReportFailureAddress,
 };
 
-use super::display::{self, DisplayIndex};
 use super::index;
 use super::{ArtifactStats, Descriptor, FindingConclusion, ReportEdits, ReportReference, Verdict};
 
@@ -231,12 +230,12 @@ pub trait ReportCaptureStore: Send + Sync {
         resolved: Vec<ReportFailureAddress>,
     ) -> AppFuture<'_, bool>;
 
-    /// Optionally cache display metadata after confirming the immutable accepted version.
-    fn save_display_index(
+    /// Optionally index the validated capture buffer after committing the accepted version.
+    fn index_captured_source(
         &self,
         run: RunId,
         reference: ReportReference,
-        index: DisplayIndex,
+        source: Option<String>,
     ) -> AppFuture<'_, ()>;
 
     fn reject_report(
@@ -425,11 +424,13 @@ async fn reconcile_one(
     let accepted = store
         .accept_report(work, evidence.result_entry_id, artifact, resolved)
         .await?;
-    if accepted && let Some(reference) = reference {
-        let index = display::build(display_source).await;
-        if let Err(error) = store.save_display_index(run, reference, index).await {
-            eprintln!("ReviewQ could not retain the report display index ({error}).");
-        }
+    if accepted
+        && let Some(reference) = reference
+        && let Err(error) = store
+            .index_captured_source(run, reference, display_source)
+            .await
+    {
+        eprintln!("ReviewQ could not retain the report display index ({error}).");
     }
     Ok(())
 }
