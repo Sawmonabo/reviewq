@@ -1,0 +1,6 @@
+ReviewQ adapts finished-body Markdown block cutting from AI Sidekicks.
+Copyright 2026 AI Sidekicks contributors. Licensed under Apache-2.0.
+Source: https://github.com/Sawmonabo/ai-sidekicks/blob/85975b3d8475b9d4c3a31d4bc4de4c5baaf3b42d/crates/sidekicks-session/src/transcript/block_cut.rs
+
+The adaptation operates on original report bytes and records block kinds,
+Unicode scalar offsets and fallbacks for context-dependent Markdown.
