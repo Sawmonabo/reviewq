@@ -7,7 +7,6 @@ import {
   isPatchDiscussionsResponse,
   isPatchFileIndexResponse,
   isPatchPathsResponse,
-  isSelectedPatchResponse,
 } from "./generated/validators.mjs";
 
 export const PATCH_WINDOW_BYTES = 64 * 1024;
@@ -15,22 +14,11 @@ export const PATCH_FILES_PER_PAGE = 10;
 export const PATH_MATCHES_PER_PAGE = 60;
 const MAX_RICH_BYTES = 2 * 1024 * 1024;
 const PATH_CACHE_BYTES = 768 * 1024;
-const RETAINED_PATCH_BYTES = 128 * 1024;
-export type PatchIndex = PatchFileIndex & { readonly singleFile?: true };
+export type PatchIndex = PatchFileIndex;
 type PatchIndexResult = { readonly cursor: string; readonly data: PatchIndex };
-export type PatchSelection = { readonly revision: string } & (
-  { readonly path: PatchPath } | { readonly selectedCursor: string }
+type FileIndexPosition = { readonly revision: string } & (
+  { readonly cursor: string } | { readonly path: PatchPath }
 );
-type RetainedPatch = { readonly identity: string; readonly result: PatchWindow };
-type PreparedSelection = {
-  readonly index: PatchIndexResult;
-  readonly patch: RetainedPatch | undefined;
-};
-type Prefetch = {
-  readonly key: string;
-  readonly controller: AbortController;
-  readonly result: Promise<PreparedSelection>;
-};
 let retainedIndex: { readonly reviewId: string; readonly result: PatchIndexResult } | undefined;
 let retainedCatalog:
   | {
@@ -39,19 +27,18 @@ let retainedCatalog:
       readonly result: Awaited<ReturnType<typeof loadPatchPathCatalog>>;
     }
   | undefined;
-let retainedPatch: RetainedPatch | undefined;
-let prefetched: Prefetch | undefined;
 
 export async function readPatchFiles(
   reviewId: string,
   signal: AbortSignal,
-  position?: { readonly revision: string; readonly cursor: string },
+  position?: FileIndexPosition,
   preferredFileId?: string,
 ) {
   const query = new URLSearchParams({ limit: String(PATCH_FILES_PER_PAGE) });
   if (position) {
     query.set("revision", position.revision);
-    query.set("cursor", position.cursor);
+    if ("cursor" in position) query.set("cursor", position.cursor);
+    else query.set("filePathHint", position.path.lookupKey);
   }
   if (preferredFileId) query.set("preferredFileId", preferredFileId);
   const result = await read(
@@ -62,12 +49,17 @@ export async function readPatchFiles(
   const { data } = result;
   if (
     (position && data.revision !== position.revision) ||
+    (position &&
+      "path" in position &&
+      !data.items.some(
+        (file) => file.oldPath === position.path.oldPath && file.newPath === position.path.newPath,
+      )) ||
     data.items.some((item) => item.reviewId !== reviewId || item.revision !== data.revision)
   ) {
     throw new Error("The selected patch index changed.");
   }
   signal.throwIfAborted();
-  retainedIndex = { reviewId, result };
+  if (!position) retainedIndex = { reviewId, result };
   return result;
 }
 
@@ -97,138 +89,6 @@ export async function readInitialPatchFiles(
     }
   }
   return readPatchFiles(reviewId, signal, undefined, preferredFileId);
-}
-
-export async function readSelectedPatch(
-  reviewId: string,
-  signal: AbortSignal,
-  selection: PatchSelection,
-  previous: PatchIndex,
-  candidate?: Prefetch,
-): Promise<PatchIndexResult> {
-  let prepared: PreparedSelection;
-  if (
-    candidate &&
-    "path" in selection &&
-    candidate.key === prefetchKey(reviewId, previous, selection.path)
-  ) {
-    const abort = () => candidate.controller.abort();
-    signal.addEventListener("abort", abort, { once: true });
-    if (signal.aborted) abort();
-    try {
-      prepared = await candidate.result;
-    } finally {
-      signal.removeEventListener("abort", abort);
-    }
-  } else {
-    candidate?.controller.abort();
-    prepared = await loadSelectedPatch(reviewId, signal, selection, previous);
-  }
-  signal.throwIfAborted();
-  if (prepared.patch) retainedPatch = prepared.patch;
-  retainedIndex = { reviewId, result: prepared.index };
-  return prepared.index;
-}
-
-export function takeSelectedPatchPrefetch(reviewId: string, previous: PatchIndex, path: PatchPath) {
-  if (prefetched?.key !== prefetchKey(reviewId, previous, path)) return;
-  const candidate = prefetched;
-  prefetched = undefined;
-  return candidate;
-}
-
-export function prefetchSelectedPatch(reviewId: string, previous: PatchIndex, path: PatchPath) {
-  prefetched?.controller.abort();
-  const controller = new AbortController();
-  const result = loadSelectedPatch(
-    reviewId,
-    controller.signal,
-    { revision: previous.revision, path },
-    previous,
-  );
-  const read = { key: prefetchKey(reviewId, previous, path), controller, result };
-  prefetched = read;
-  void result.catch(() => {
-    if (prefetched === read) prefetched = undefined;
-  });
-  function cancel() {
-    window.removeEventListener("pagehide", cancel);
-    if (prefetched === read) {
-      prefetched = undefined;
-      controller.abort();
-    }
-  }
-  window.addEventListener("pagehide", cancel);
-  return cancel;
-}
-
-function prefetchKey(reviewId: string, previous: PatchIndex, path: PatchPath) {
-  return JSON.stringify([reviewId, previous.settingsRevision, previous.revision, path.lookupKey]);
-}
-
-async function loadSelectedPatch(
-  reviewId: string,
-  signal: AbortSignal,
-  selection: PatchSelection,
-  previous: PatchIndex,
-): Promise<PreparedSelection> {
-  const { revision } = selection;
-  const query = new URLSearchParams({ revision });
-  if ("path" in selection) query.set("filePathHint", selection.path.lookupKey);
-  else query.set("cursor", selection.selectedCursor);
-  const { cursor, data } = await read(
-    `${changesRoute(reviewId)}/selected?${query}`,
-    isSelectedPatchResponse,
-    signal,
-    1024 * 1024,
-  );
-  const { file } = data;
-  if (
-    file.reviewId !== reviewId ||
-    file.revision !== revision ||
-    previous.revision !== revision ||
-    (previous.settingsRevision != null && data.settingsRevision !== previous.settingsRevision) ||
-    !Number.isSafeInteger(data.ordinal) ||
-    data.ordinal < 1 ||
-    ("path" in selection &&
-      (file.oldPath !== selection.path.oldPath || file.newPath !== selection.path.newPath))
-  ) {
-    throw new Error("The selected file identity changed.");
-  }
-  let patch: RetainedPatch | undefined;
-  if (data.text !== null) {
-    const bytes = new TextEncoder().encode(data.text);
-    if (
-      !isRichPatch(file) ||
-      bytes.length > RETAINED_PATCH_BYTES ||
-      bytes.length !== file.byteLength
-    )
-      throw new Error("The selected patch length changed.");
-    enforcePatchRows(bytes);
-    const hash = await crypto.subtle.digest("SHA-256", bytes);
-    const value = Array.from(new Uint8Array(hash), (byte) => byte.toString(16).padStart(2, "0"));
-    const etag = `"${value.join("")}"`;
-    if (file.patchETag !== etag) throw new Error("The selected patch digest changed.");
-    signal.throwIfAborted();
-    patch = {
-      identity: patchIdentity(file, etag),
-      result: { text: data.text, first: 0, next: bytes.length, total: bytes.length, etag },
-    };
-  }
-  signal.throwIfAborted();
-  const index: PatchIndexResult = {
-    cursor,
-    data: {
-      ...previous,
-      singleFile: true,
-      pageNumber: data.ordinal,
-      items: [file],
-      previousCursor: data.previousCursor,
-      nextCursor: data.nextCursor,
-      settingsRevision: data.settingsRevision,
-    },
-  };
-  return { index, patch };
 }
 
 export async function readPatchPathCatalog(
@@ -366,11 +226,6 @@ export async function readPatch(
 ): Promise<PatchWindow> {
   const headers = new Headers();
   const pinned = file.patchETag ?? window?.etag;
-  const identity = patchIdentity(file, pinned);
-  if (!window && pinned && retainedPatch?.identity === identity) {
-    signal.throwIfAborted();
-    return retainedPatch.result;
-  }
   if (pinned) headers.set("If-Match", pinned);
   const offset = window?.offset ?? 0;
   const bounded = window === undefined ? MAX_RICH_BYTES : PATCH_WINDOW_BYTES;
@@ -406,7 +261,6 @@ export async function readPatch(
       total: bytes.length,
       etag,
     };
-    retainedPatch = bytes.length <= RETAINED_PATCH_BYTES ? { identity, result } : undefined;
     return result;
   }
   const [first, end, total] = contentRange(response);
@@ -462,10 +316,6 @@ function patchRoute(file: PatchFile, download = false): string {
   const query = new URLSearchParams({ fileId: file.fileId, revision: file.revision });
   if (download) query.set("download", "1");
   return `${changesRoute(file.reviewId)}/patch?${query}`;
-}
-
-function patchIdentity(file: PatchFile, etag: string | undefined) {
-  return JSON.stringify([file.reviewId, file.revision, file.fileId, etag]);
 }
 
 export async function readApprovals(reviewId: string, signal: AbortSignal) {
