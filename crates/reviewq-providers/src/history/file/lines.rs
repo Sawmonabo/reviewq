@@ -1,11 +1,11 @@
 use std::fs::File;
 use std::io::{self, Read};
 use std::os::unix::fs::FileExt;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::AtomicBool;
 
 use reviewq_app::access::AppError;
 
-use super::{BLOCK, FileInput, block_size, io_error};
+use super::{BLOCK, FileInput, block_size, check_read_cancelled, io_error};
 
 /// Reuse a native byte buffer between adjacent short records without retaining decoded bodies.
 pub(in crate::history) struct Lines<'a> {
@@ -84,12 +84,7 @@ impl<'a> Lines<'a> {
                 cancel: self.cancel,
             }
         } else {
-            Input::File(FileInput {
-                file: self.file,
-                offset: start,
-                end,
-                cancel: self.cancel,
-            })
+            Input::File(FileInput::new(self.file, start, end, self.cancel))
         }
     }
 
@@ -118,9 +113,7 @@ impl Read for Input<'_> {
     fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
         match self {
             Self::Buffered { bytes, cancel } => {
-                if cancel.load(Ordering::Relaxed) {
-                    return Err(io::Error::other("native history read cancelled"));
-                }
+                check_read_cancelled(cancel)?;
                 bytes.read(buffer)
             }
             Self::File(file) => file.read(buffer),

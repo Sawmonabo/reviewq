@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::fs::File;
-use std::io::{self, Read};
+use std::io::{self, BufReader, Read};
 use std::os::unix::fs::{FileExt, MetadataExt};
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -553,34 +553,66 @@ pub(super) fn input<'a>(
     end: u64,
     cancel: &'a AtomicBool,
 ) -> impl Read + 'a {
-    FileInput {
-        file,
-        offset: start,
-        end,
-        cancel,
-    }
+    FileInput::new(file, start, end, cancel)
 }
 
 struct FileInput<'a> {
-    file: &'a File,
-    offset: u64,
-    end: u64,
+    bytes: BufReader<FileRange<'a>>,
     cancel: &'a AtomicBool,
+}
+
+impl<'a> FileInput<'a> {
+    fn new(file: &'a File, start: u64, end: u64, cancel: &'a AtomicBool) -> Self {
+        // Struson does not buffer its underlying reader. Amortize its small reads
+        // without buffering the whole native record or passing its signed end.
+        let capacity = (end - start).min(8 * 1024) as usize;
+        Self {
+            bytes: BufReader::with_capacity(
+                capacity,
+                FileRange {
+                    file,
+                    offset: start,
+                    end,
+                },
+            ),
+            cancel,
+        }
+    }
 }
 
 impl Read for FileInput<'_> {
     fn read(&mut self, output: &mut [u8]) -> io::Result<usize> {
-        if self.cancel.load(Ordering::Relaxed) {
-            return Err(io::Error::other("native history read cancelled"));
-        }
+        check_read_cancelled(self.cancel)?;
+        self.bytes.read(output)
+    }
+}
+
+struct FileRange<'a> {
+    file: &'a File,
+    offset: u64,
+    end: u64,
+}
+
+impl Read for FileRange<'_> {
+    fn read(&mut self, output: &mut [u8]) -> io::Result<usize> {
         let limit = (self.end - self.offset).min(output.len() as u64) as usize;
+        if limit == 0 {
+            return Ok(0);
+        }
         let amount = self.file.read_at(&mut output[..limit], self.offset)?;
-        if amount == 0 && limit > 0 {
+        if amount == 0 {
             return Err(io::ErrorKind::UnexpectedEof.into());
         }
         self.offset += amount as u64;
         Ok(amount)
     }
+}
+
+fn check_read_cancelled(cancel: &AtomicBool) -> io::Result<()> {
+    if cancel.load(Ordering::Relaxed) {
+        return Err(io::Error::other("native history read cancelled"));
+    }
+    Ok(())
 }
 
 fn io_error(error: io::Error) -> AppError {
@@ -589,6 +621,33 @@ fn io_error(error: io::Error) -> AppError {
         io::ErrorKind::PermissionDenied => AppError::Forbidden,
         io::ErrorKind::UnexpectedEof => AppError::CursorExpired,
         _ => AppError::Unavailable,
+    }
+}
+
+#[cfg(test)]
+mod input_tests {
+    use std::io::{Read, Write};
+
+    use super::{AtomicBool, FileInput, Ordering};
+
+    #[test]
+    fn stops_at_the_record_end_and_checks_cancel_before_serving_buffered_bytes() {
+        let mut file = tempfile::tempfile().unwrap();
+        file.write_all(b"before record after").unwrap();
+        let cancel = AtomicBool::new(false);
+        let mut selected = FileInput::new(&file, 7, 13, &cancel);
+        let mut first = [0];
+        selected.read_exact(&mut first).unwrap();
+        assert_eq!(first, [b'r']);
+        cancel.store(true, Ordering::Relaxed);
+        assert!(selected.read_exact(&mut first).is_err());
+
+        let running = AtomicBool::new(false);
+        let mut record = Vec::new();
+        FileInput::new(&file, 7, 13, &running)
+            .read_to_end(&mut record)
+            .unwrap();
+        assert_eq!(record, b"record");
     }
 }
 
