@@ -84,7 +84,13 @@ impl SqliteStore {
         let store_id = self.identity().store_id;
         tokio::task::spawn_blocking(move || {
             let mut cache = open(&profile, store_id)?;
-            publish(&mut cache, &artifact_id, hash.as_str(), index)
+            publish(
+                &mut cache,
+                &artifact_id,
+                hash.as_str(),
+                DISPLAY_INDEX_FORMAT,
+                index,
+            )
         })
         .await
         .map_err(|_| AppError::Internal)?
@@ -160,13 +166,15 @@ fn publish(
     connection: &mut Connection,
     artifact_id: &str,
     hash: &str,
+    index_format: u32,
     index: DisplayIndex,
 ) -> Result<(), StoreError> {
     let time = crate::events::now_ms()?;
     let tx = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    // Entries from other formats remain available through a rollback.
     tx.execute(
-        "DELETE FROM display_entries WHERE published_at_ms < ?1 OR index_format <> ?2",
-        params![time.saturating_sub(MAX_AGE_MS), DISPLAY_INDEX_FORMAT],
+        "DELETE FROM display_entries WHERE published_at_ms < ?1",
+        [time.saturating_sub(MAX_AGE_MS)],
     )?;
     let (blocks, fallback) = match index {
         DisplayIndex::Indexed(blocks) => (blocks, None),
@@ -180,12 +188,12 @@ fn publish(
          ) AND NOT EXISTS (
              SELECT 1 FROM display_entries WHERE artifact_id=?2 AND sha256=?3 AND index_format=?4
          )",
-        params![CACHE_ENTRIES - 1, artifact_id, hash, DISPLAY_INDEX_FORMAT],
+        params![CACHE_ENTRIES - 1, artifact_id, hash, index_format],
     )?;
     let inserted = tx.execute(
         "INSERT INTO display_entries(artifact_id,sha256,index_format,published_at_ms,span_count,fallback)
          VALUES(?1,?2,?3,?4,?5,?6) ON CONFLICT(artifact_id,sha256,index_format) DO NOTHING",
-        params![artifact_id, hash, DISPLAY_INDEX_FORMAT, time, i64::try_from(blocks.len()).map_err(|_| AppError::Internal)?, fallback],
+        params![artifact_id, hash, index_format, time, i64::try_from(blocks.len()).map_err(|_| AppError::Internal)?, fallback],
     )?;
     if inserted == 1 {
         let id = tx.last_insert_rowid();
