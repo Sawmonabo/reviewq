@@ -1,101 +1,180 @@
+import type { PatchDiscussion, PatchPath } from "../../../api/generated/contracts";
 import { savedValue, saveValue } from "../../../lib/view-preferences";
-import type { PatchDocument } from "./patch-document";
 
-type Position = { readonly top: number; readonly line?: string; readonly inset?: number };
+export type PatchLine = {
+  readonly side: "new" | "old";
+  readonly number: number;
+  readonly inset: number;
+};
+type Bookmark = { readonly fileId: string; readonly inset: number; readonly line?: PatchLine };
 
-function readPosition(key: string): Position {
-  const value = savedValue(key);
-  if (typeof value === "number" && Number.isFinite(value)) return { top: Math.max(0, value) };
-  if (typeof value !== "object" || !value || !("top" in value)) return { top: 0 };
-  const { top } = value;
-  if (typeof top !== "number" || !Number.isFinite(top) || top < 0) return { top: 0 };
+export function storedFile(reviewId: string): string | undefined {
+  const value = savedValue(`changes.file.${reviewId}`);
+  return typeof value === "string" ? value : undefined;
+}
+
+export function storedPatch(reviewId: string, revision: string): Bookmark | undefined {
+  const value = savedValue(`changes.position.${reviewId}`);
   if (
-    "line" in value &&
-    typeof value.line === "string" &&
-    /^(new|old):\d+$/.test(value.line) &&
+    value &&
+    typeof value === "object" &&
+    "revision" in value &&
+    value.revision === revision &&
+    "fileId" in value &&
+    typeof value.fileId === "string" &&
     "inset" in value &&
     typeof value.inset === "number" &&
     Number.isFinite(value.inset)
   ) {
-    return { top, line: value.line, inset: value.inset };
+    const line = "line" in value ? readLine(value.line) : undefined;
+    return { fileId: value.fileId, inset: Math.max(0, value.inset), ...(line && { line }) };
   }
-  return { top };
+  const fileId = storedFile(reviewId);
+  if (!fileId) return;
+  const legacy = savedValue(`patch.scroll.${reviewId}.${revision}.${fileId}`);
+  if (
+    typeof legacy !== "object" ||
+    !legacy ||
+    !("line" in legacy) ||
+    typeof legacy.line !== "string"
+  )
+    return;
+  const [side, number] = legacy.line.split(":");
+  const line = readLine({
+    side,
+    number: Number(number),
+    inset: "inset" in legacy ? legacy.inset : 0,
+  });
+  if (line) return { fileId, inset: 0, line };
 }
 
-function positionAt(patch: PatchDocument, scroller: HTMLElement): Position {
-  const top = scroller.scrollTop;
-  const bounds = scroller.getBoundingClientRect();
-  const point = document.elementsFromPoint(bounds.left + scroller.clientWidth / 2, bounds.top + 1);
-  for (const element of point) {
-    if (element.parentElement !== patch.host) continue;
-    let row: Element | null = element;
-    if (row.classList.contains("patch-thread-slot")) row = row.previousElementSibling;
-    while (row && !row.hasAttribute("data-line")) row = row.nextElementSibling;
-    const line = row?.getAttribute("data-line");
-    if (line && row) return { top, line, inset: row.getBoundingClientRect().top - bounds.top };
-    break;
-  }
-  return { top };
+export function storePatch(reviewId: string, revision: string, position: Bookmark) {
+  saveValue(`changes.file.${reviewId}`, position.fileId);
+  saveValue(`changes.position.${reviewId}`, { revision, ...position });
 }
 
-export function bindPatchPosition(patch: PatchDocument, scroller: HTMLElement, key: string) {
-  const saved = readPosition(key);
-  const row = saved.line ? patch.line(saved.line) : undefined;
-  const inset = saved.inset ?? 0;
-  let contentTop: number | undefined;
-  let restoring = Boolean(row);
-  const observer = new ResizeObserver(align);
-  const events = new AbortController();
-  const options = { signal: events.signal, passive: true } as const;
+export function lineAt(
+  file: HTMLElement,
+  scroll: HTMLElement,
+  toolbar: number,
+): PatchLine | undefined {
+  const bounds = scroll.getBoundingClientRect();
+  const top = bounds.top + toolbar;
+  for (const element of document.elementsFromPoint(bounds.left + scroll.clientWidth / 2, top + 1)) {
+    if (!file.contains(element)) continue;
+    const row =
+      element.closest<HTMLElement>(".patch-row") ??
+      element.closest(".patch-thread-slot")?.previousElementSibling;
+    if (!(row instanceof HTMLElement)) continue;
+    const side = row.dataset.new === undefined ? "old" : "new";
+    const number = Number(row.dataset[side]);
+    if (Number.isSafeInteger(number))
+      return { side, number, inset: row.getBoundingClientRect().top - top };
+  }
+}
+
+export function alignPatch(
+  file: HTMLElement,
+  scroll: HTMLElement,
+  toolbar: number,
+  inset: number,
+  line: PatchLine | undefined,
+  done: () => void,
+) {
+  let frame = requestAnimationFrame(align);
+  let lastTop: number | undefined;
+  let landed = false;
+  const observer = new ResizeObserver(schedule);
+  const mutation = new MutationObserver(schedule);
+  observer.observe(file);
+  scroll.addEventListener("scroll", schedule, { passive: true });
+  mutation.observe(file, {
+    childList: true,
+    subtree: true,
+    attributes: true,
+    attributeFilter: ["data-patch-prepared"],
+  });
+  const signals = new AbortController();
+  for (const event of ["wheel", "touchstart", "pointerdown", "keydown"])
+    scroll.addEventListener(event, cancel, { signal: signals.signal, passive: true });
+
+  function schedule() {
+    cancelAnimationFrame(frame);
+    frame = requestAnimationFrame(align);
+  }
+  function align() {
+    const top = scroll.getBoundingClientRect().top + toolbar;
+    const row = line && file.querySelector<HTMLElement>(`[data-${line.side}="${line.number}"]`);
+    const waiting = Boolean(
+      line && file.querySelector(".patch-waiting, .patch-rich:not([data-patch-prepared])"),
+    );
+    if (row && line) {
+      const insetNow = row.getBoundingClientRect().top - top;
+      const documentTop = scroll.scrollTop + insetNow;
+      if (
+        lastTop !== undefined &&
+        Math.abs(documentTop - lastTop) < 0.5 &&
+        Math.abs(insetNow - line.inset) > 1
+      ) {
+        cancel();
+        return;
+      }
+      lastTop = documentTop;
+      if (Math.abs(insetNow - line.inset) > 0.5) scroll.scrollTop += insetNow - line.inset;
+      if (!landed) {
+        landed = true;
+        done();
+      }
+    } else if (!landed) {
+      const offset = Math.min(inset, Math.max(0, file.offsetHeight - 30));
+      scroll.scrollTop += file.getBoundingClientRect().top - top + offset;
+      if (!waiting) cancel();
+    }
+  }
+  function cancel() {
+    release();
+    if (!landed) {
+      landed = true;
+      done();
+    }
+  }
   function release() {
-    restoring = false;
+    cancelAnimationFrame(frame);
+    signals.abort();
+    scroll.removeEventListener("scroll", schedule);
+    mutation.disconnect();
     observer.disconnect();
   }
+  return release;
+}
 
-  function align() {
-    if (!restoring || !row) return;
-    const rowInset = row.getBoundingClientRect().top - scroller.getBoundingClientRect().top;
-    const nextTop = scroller.scrollTop + rowInset;
-    const distance = rowInset - inset;
-    // Find and focus can scroll without pointer or key events in this pane.
-    // A stationary row in the document means the reader moved independently.
-    if (
-      contentTop !== undefined &&
-      Math.abs(contentTop - nextTop) <= 0.5 &&
-      Math.abs(distance) > 1
-    ) {
-      release();
-      return;
-    }
-    contentTop = nextTop;
-    if (Math.abs(distance) > 0.5) scroller.scrollTop += distance;
-  }
+export function matchingFile(
+  thread: PatchDiscussion,
+  file: Pick<PatchPath, "oldPath" | "newPath">,
+) {
+  return (
+    !thread.outdated &&
+    thread.anchor !== null &&
+    thread.anchor.positionType === "text" &&
+    thread.anchor.oldPath === file.oldPath &&
+    thread.anchor.newPath === file.newPath &&
+    (thread.anchor.newLine !== null || thread.anchor.oldLine !== null)
+  );
+}
 
-  scroller.scrollTop = saved.top;
-  align();
-  if (row) {
-    // Portals above the reading position can finish after the patch text mounts.
-    observer.observe(patch.host);
-    const panel = patch.host.closest(".selected-patch");
-    if (panel) observer.observe(panel);
-    for (const event of ["wheel", "touchstart", "pointerdown", "keydown"]) {
-      scroller.addEventListener(event, release, options);
-    }
-  }
-
-  let last = saved;
-  const capture = () => {
-    if (!patch.host.isConnected || scroller.clientHeight === 0) return;
-    align();
-    last = positionAt(patch, scroller);
-  };
-  const persist = () => saveValue(key, last);
-  scroller.addEventListener("scroll", capture, options);
-  scroller.addEventListener("scrollend", persist, options);
-  window.addEventListener("pagehide", persist, options);
-  return () => {
-    events.abort();
-    release();
-    persist();
-  };
+function readLine(value: unknown): PatchLine | undefined {
+  if (
+    value &&
+    typeof value === "object" &&
+    "side" in value &&
+    (value.side === "new" || value.side === "old") &&
+    "number" in value &&
+    typeof value.number === "number" &&
+    Number.isSafeInteger(value.number) &&
+    value.number >= 0 &&
+    "inset" in value &&
+    typeof value.inset === "number" &&
+    Number.isFinite(value.inset)
+  )
+    return { side: value.side, number: value.number, inset: value.inset };
 }

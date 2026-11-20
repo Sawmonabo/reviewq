@@ -2,7 +2,6 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   matchesPatchPath,
   PATH_MATCHES_PER_PAGE,
-  prefetchSelectedPatch,
   readPatchPathMatches,
 } from "../../../api/changes";
 import type { PatchIndex, readPatchPathCatalog } from "../../../api/changes";
@@ -17,7 +16,6 @@ type Props = {
   readonly selected: PatchFile | undefined;
   readonly total: string | undefined;
   readonly pending: boolean;
-  readonly allowPrefetch: boolean;
   readonly query: string;
   readonly catalog: {
     readonly data?: Awaited<ReturnType<typeof readPatchPathCatalog>>["data"] | null;
@@ -36,7 +34,6 @@ export function ChangedFilePicker({
   selected,
   total,
   pending,
-  allowPrefetch,
   query,
   catalog,
   onQuery,
@@ -46,19 +43,13 @@ export function ChangedFilePicker({
 }: Props) {
   const input = useRef<HTMLInputElement>(null);
   const [open, setOpen] = useState(false);
-  const [focused, setFocused] = useState<string>();
   const [search, setSearch] = useState("");
   const [knownCount, setKnownCount] = useState<{ readonly text: string; readonly count: number }>();
   const [pageOffset, setPageOffset] = useState<number>();
   const text = query.toLowerCase();
   const cached = catalog.data?.paths;
-  const browseCatalog = !text && Boolean(index.singleFile && catalog.data);
-  const useCatalog = Boolean(text || browseCatalog);
-  const offset =
-    pageOffset ??
-    (browseCatalog
-      ? Math.floor((index.pageNumber - 1) / PATH_MATCHES_PER_PAGE) * PATH_MATCHES_PER_PAGE
-      : 0);
+  const useCatalog = Boolean(text);
+  const offset = pageOffset ?? 0;
   const needsSearch = Boolean(open && catalog.data && !cached && useCatalog);
   useEffect(() => {
     if (!needsSearch) return;
@@ -89,26 +80,6 @@ export function ChangedFilePicker({
       : undefined;
   const searching = Boolean(useCatalog && !result && !catalog.error && !matches.error);
   const count = result?.count ?? (knownCount?.text === text ? knownCount.count : 0);
-  const likely =
-    text.trim().length >= 3
-      ? count === 1
-        ? result?.paths[0]
-        : result?.paths.find((path) => path.lookupKey === focused)
-      : undefined;
-  const alreadySelected =
-    likely?.oldPath === selected?.oldPath && likely?.newPath === selected?.newPath;
-  useEffect(() => {
-    if (!open || pending || !allowPrefetch || !likely || alreadySelected) return;
-    let cancel: (() => void) | undefined;
-    const timer = window.setTimeout(() => {
-      cancel = prefetchSelectedPatch(reviewId, index, likely);
-    }, 120);
-    return () => {
-      window.clearTimeout(timer);
-      cancel?.();
-    };
-  }, [open, pending, allowPrefetch, reviewId, index, text, likely, alreadySelected]);
-
   return (
     <details
       className="changed-file-picker"
@@ -131,7 +102,6 @@ export function ChangedFilePicker({
           onChange={(event) => {
             onQuery(event.currentTarget.value);
             setPageOffset(undefined);
-            setFocused(undefined);
           }}
         />
       </label>
@@ -153,8 +123,6 @@ export function ChangedFilePicker({
                   undefined
                 }
                 aria-disabled={pending}
-                onFocus={() => setFocused(path.lookupKey)}
-                onBlur={() => setFocused(undefined)}
                 onClick={() => onChoosePath(path)}
               >
                 {selected &&
@@ -169,7 +137,6 @@ export function ChangedFilePicker({
             {result && !result.count && (
               <p className="meta">{text ? "No matching files." : "No changed files."}</p>
             )}
-            {catalog.data?.partial && <p className="meta">GitLab supplied a partial file list.</p>}
           </>
         ) : (
           <>
@@ -190,6 +157,9 @@ export function ChangedFilePicker({
           </>
         )}
       </nav>
+      {catalog.data?.partial && (
+        <p className="meta file-picker-coverage">GitLab supplied a partial file list.</p>
+      )}
       {useCatalog
         ? (offset > 0 || count > PATH_MATCHES_PER_PAGE) && (
             <nav

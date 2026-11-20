@@ -4,6 +4,50 @@
   min-width: 0;
   grid-template-columns: minmax(0, 1fr);
 }
+.file-stream {
+  min-width: 0;
+}
+.changes .discussion-list {
+  overflow-anchor: none;
+}
+.file-stream-controls {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 8px;
+  padding-block: 4px 8px;
+  background: var(--surface);
+  overflow-anchor: none;
+}
+.file-stream-controls .patch-arrows {
+  align-self: start;
+  margin-top: 6px;
+}
+.file-stream-list {
+  position: relative;
+}
+.file-stream-slot {
+  position: absolute;
+  top: 0;
+  width: 100%;
+  padding-bottom: 11px;
+}
+.file-stream-slot:has(.patch-waiting) > .selected-patch {
+  min-height: calc(var(--file-estimate) - 11px);
+}
+.file-stream-loading {
+  padding: 12px;
+}
+.patch-block[style] {
+  content-visibility: auto;
+  contain-intrinsic-block-size: auto var(--patch-block-height);
+}
+.patch-block-deferred {
+  min-height: var(--patch-block-height);
+}
 .patch-toolbar {
   border-bottom: 1px solid var(--line);
   padding-block: 7px;
@@ -219,6 +263,9 @@ pre.patch-source {
   width: 12px;
   color: var(--link);
   font-size: 10px;
+}
+.changed-file-picker .file-picker-coverage {
+  padding: 6px 9px;
 }
 .changed-file-picker .pagination {
   padding: 6px 9px;
