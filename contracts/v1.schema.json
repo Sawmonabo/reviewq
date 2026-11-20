@@ -2345,12 +2345,16 @@
         },
         "scalarStart": {
           "$ref": "#/definitions/SafeCountDto"
+        },
+        "utf16Start": {
+          "$ref": "#/definitions/SafeCountDto"
         }
       },
       "required": [
         "byteStart",
         "byteEnd",
         "scalarStart",
+        "utf16Start",
         "kind",
         "headingLevel",
         "markdown"
@@ -2374,6 +2378,7 @@
         "document_budget",
         "parser_budget",
         "document_context",
+        "layout_budget",
         "unsupported_source",
         "invalid_boundary",
         "parser_failed",
@@ -2381,6 +2386,77 @@
         "cache_unavailable"
       ],
       "type": "string"
+    },
+    "DisplayLayout": {
+      "properties": {
+        "blocks": {
+          "items": {
+            "$ref": "#/definitions/DisplayLayoutBlock"
+          },
+          "maxItems": 512,
+          "minItems": 1,
+          "type": "array"
+        },
+        "byteLength": {
+          "$ref": "#/definitions/SafeCountDto"
+        },
+        "scalarLength": {
+          "$ref": "#/definitions/SafeCountDto"
+        },
+        "utf16Length": {
+          "$ref": "#/definitions/SafeCountDto"
+        }
+      },
+      "required": [
+        "byteLength",
+        "scalarLength",
+        "utf16Length",
+        "blocks"
+      ],
+      "type": "object"
+    },
+    "DisplayLayoutBlock": {
+      "properties": {
+        "byteEnd": {
+          "$ref": "#/definitions/SafeCountDto"
+        },
+        "byteStart": {
+          "$ref": "#/definitions/SafeCountDto"
+        },
+        "headingLevel": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SafeCountDto"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "headingMarkdown": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "kind": {
+          "$ref": "#/definitions/DisplayBlockKind"
+        },
+        "scalarStart": {
+          "$ref": "#/definitions/SafeCountDto"
+        },
+        "utf16Start": {
+          "$ref": "#/definitions/SafeCountDto"
+        }
+      },
+      "required": [
+        "byteStart",
+        "byteEnd",
+        "scalarStart",
+        "utf16Start",
+        "kind"
+      ],
+      "type": "object"
     },
     "DisplayResult": {
       "oneOf": [
@@ -2393,6 +2469,16 @@
               "maxItems": 32,
               "minItems": 1,
               "type": "array"
+            },
+            "layout": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/DisplayLayout"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             },
             "nextCursor": {
               "anyOf": [

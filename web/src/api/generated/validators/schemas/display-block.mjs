@@ -18,6 +18,8 @@ function validate1130(
           (missing0 = "byteEnd")) ||
         ((data.scalarStart === undefined || !func0.call(data, "scalarStart")) &&
           (missing0 = "scalarStart")) ||
+        ((data.utf16Start === undefined || !func0.call(data, "utf16Start")) &&
+          (missing0 = "utf16Start")) ||
         ((data.kind === undefined || !func0.call(data, "kind")) &&
           (missing0 = "kind")) ||
         ((data.headingLevel === undefined ||
@@ -216,6 +218,31 @@ function validate1130(
                     var valid0 = _errs11 === errors;
                   } else {
                     var valid0 = true;
+                  }
+                  if (valid0) {
+                    if (
+                      data.utf16Start !== undefined &&
+                      func0.call(data, "utf16Start")
+                    ) {
+                      const _errs12 = errors;
+                      if (
+                        !validate127(data.utf16Start, {
+                          instancePath: instancePath + "/utf16Start",
+                          parentData: data,
+                          parentDataProperty: "utf16Start",
+                          rootData,
+                        })
+                      ) {
+                        vErrors =
+                          vErrors === null
+                            ? validate127.errors
+                            : vErrors.concat(validate127.errors);
+                        errors = vErrors.length;
+                      }
+                      var valid0 = _errs12 === errors;
+                    } else {
+                      var valid0 = true;
+                    }
                   }
                 }
               }

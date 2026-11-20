@@ -6,19 +6,30 @@ pub use cutter::{DisplayBlock, DisplayBlockKind, DisplayFallback};
 
 use super::ReportSummary;
 
-pub const DISPLAY_INDEX_FORMAT: u32 = 1;
+pub const DISPLAY_INDEX_FORMAT: u32 = 2;
+pub const MAX_DISPLAY_BLOCKS: usize = 512;
+pub const MAX_DISPLAY_HEADING_BYTES: usize = 1024;
+pub const MAX_DISPLAY_HEADINGS_BYTES: usize = 16 * 1024;
 
 pub enum DisplayIndex {
-    Indexed(Vec<DisplayBlock>),
+    Indexed(DisplayLayout),
     Fallback(DisplayFallback),
 }
 
-/// Jump by original UTF-8 byte offset, or move on either side of a returned block.
+/// Jump by byte offset, move on either side of a returned block, or read an exact span range.
 #[derive(Clone, Copy)]
 pub enum DisplayWindowPosition {
-    AtByte(u64),
+    AtByte { offset: u64, with_layout: bool },
+    Exact { from: u64, to: u64 },
     Before(u32),
     After(u32),
+}
+
+pub struct DisplayLayout {
+    pub byte_length: u32,
+    pub scalar_length: u32,
+    pub utf16_length: u32,
+    pub blocks: Vec<DisplayBlock>,
 }
 
 pub struct DisplayWindow {
@@ -34,6 +45,7 @@ pub enum DisplayWindowState {
         blocks: Vec<DisplayWindowBlock>,
         previous: Option<u32>,
         next: Option<u32>,
+        layout: Option<DisplayLayout>,
     },
 }
 
@@ -46,7 +58,7 @@ pub struct DisplayWindowBlock {
 /// Run this operation on a blocking worker.
 pub fn build_display_index(source: &str) -> DisplayIndex {
     match cutter::cut(source) {
-        Ok(blocks) => DisplayIndex::Indexed(blocks),
+        Ok(layout) => DisplayIndex::Indexed(layout),
         Err(reason) => DisplayIndex::Fallback(reason),
     }
 }

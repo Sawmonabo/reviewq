@@ -7,8 +7,8 @@ mod revision;
 
 pub use display::{
     DISPLAY_INDEX_FORMAT, DisplayBlock, DisplayBlockKind, DisplayFallback, DisplayIndex,
-    DisplayWindow, DisplayWindowBlock, DisplayWindowPosition, DisplayWindowState,
-    build_display_index,
+    DisplayLayout, DisplayWindow, DisplayWindowBlock, DisplayWindowPosition, DisplayWindowState,
+    MAX_DISPLAY_BLOCKS, MAX_DISPLAY_HEADING_BYTES, MAX_DISPLAY_HEADINGS_BYTES, build_display_index,
 };
 
 pub use revision::{

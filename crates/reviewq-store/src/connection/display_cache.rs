@@ -1,5 +1,6 @@
 //! Optional display metadata lives beside the authoritative database.
 
+mod layout;
 mod window;
 
 pub(super) use window::Builds;
@@ -8,7 +9,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use reviewq_app::access::AppError;
-use reviewq_app::reports::{DisplayBlockKind, DisplayFallback, DisplayIndex, ReportReference};
+use reviewq_app::reports::{DisplayFallback, DisplayIndex, ReportReference};
 use reviewq_domain::identity::RunId;
 use rusqlite::{Connection, OpenFlags, OptionalExtension, TransactionBehavior, params};
 use uuid::Uuid;
@@ -17,9 +18,9 @@ use super::profile::Profile;
 use super::staging::{self, Stage};
 use crate::{SqliteStore, StoreError};
 
-const SUFFIX: &str = ".findings-display";
+const SUFFIX: &str = ".findings-display-v2";
 const APPLICATION_ID: i64 = 0x5256_4644;
-const SCHEMA_VERSION: i64 = 1;
+const SCHEMA_VERSION: i64 = 2;
 const PAGE_BYTES: i64 = 4096;
 // Keep the database at or below 16 MiB. A pending DELETE journal is also bounded by that page count.
 const MAX_PAGES: i64 = 4096;
@@ -40,7 +41,10 @@ CREATE TABLE display_entries (
     sha256 TEXT NOT NULL CHECK (length(sha256)=64),
     index_format INTEGER NOT NULL CHECK (index_format>0),
     published_at_ms INTEGER NOT NULL,
-    span_count INTEGER NOT NULL CHECK (span_count>=0),
+    span_count INTEGER NOT NULL CHECK (span_count BETWEEN 0 AND 512),
+    byte_length INTEGER NOT NULL CHECK (byte_length BETWEEN 0 AND 1048576),
+    scalar_length INTEGER NOT NULL CHECK (scalar_length BETWEEN 0 AND byte_length),
+    utf16_length INTEGER NOT NULL CHECK (utf16_length BETWEEN scalar_length AND byte_length),
     fallback TEXT,
     CHECK ((fallback IS NULL) = (span_count>0)),
     UNIQUE (artifact_id, sha256, index_format)
@@ -51,8 +55,11 @@ CREATE TABLE display_spans (
     byte_start INTEGER NOT NULL CHECK (byte_start>=0),
     byte_end INTEGER NOT NULL CHECK (byte_end>byte_start),
     scalar_start INTEGER NOT NULL CHECK (scalar_start BETWEEN 0 AND byte_start),
+    utf16_start INTEGER NOT NULL CHECK (utf16_start BETWEEN scalar_start AND byte_start),
     kind TEXT NOT NULL,
     heading_level INTEGER CHECK (heading_level BETWEEN 1 AND 6),
+    heading_markdown TEXT CHECK (length(CAST(heading_markdown AS BLOB))<=1024),
+    checksum BLOB NOT NULL CHECK (length(checksum)=32),
     CHECK ((kind='heading')=(heading_level IS NOT NULL)),
     PRIMARY KEY (entry_id, byte_start)
 ) STRICT, WITHOUT ROWID;
@@ -93,10 +100,10 @@ fn open(profile: &Profile, store_id: Uuid, create: bool) -> Result<Option<Connec
     path.push(SUFFIX);
     let path = PathBuf::from(path);
     let exists = profile.file(SUFFIX)?.is_some();
-    let journal = profile.file(".findings-display-journal")?;
+    let journal = profile.file(&format!("{SUFFIX}-journal"))?;
     if (!exists && journal.is_some())
-        || profile.file(".findings-display-wal")?.is_some()
-        || profile.file(".findings-display-shm")?.is_some()
+        || profile.file(&format!("{SUFFIX}-wal"))?.is_some()
+        || profile.file(&format!("{SUFFIX}-shm"))?.is_some()
     {
         return Err(AppError::Conflict.into());
     }
@@ -170,15 +177,24 @@ fn publish(
 ) -> Result<(), StoreError> {
     let time = crate::events::now_ms()?;
     let tx = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
-    // Entries from other formats remain available through a rollback.
     tx.execute(
         "DELETE FROM display_entries WHERE published_at_ms < ?1",
         [time.saturating_sub(MAX_AGE_MS)],
     )?;
-    let (blocks, fallback) = match index {
-        DisplayIndex::Indexed(blocks) => (blocks, None),
-        DisplayIndex::Fallback(reason) => (Vec::new(), Some(fallback_label(reason))),
+    let (layout, span_count, fallback) = match index {
+        DisplayIndex::Indexed(layout) => {
+            let span_count = layout.blocks.len() as u32;
+            (Some(layout), span_count, None)
+        }
+        DisplayIndex::Fallback(reason) => (None, 0, Some(fallback_label(reason))),
     };
+    let (bytes, scalars, utf16) = layout.as_ref().map_or((0, 0, 0), |layout| {
+        (
+            layout.byte_length,
+            layout.scalar_length,
+            layout.utf16_length,
+        )
+    });
     // Make room before writing spans, while retaining the current entry on
     // an idempotent publish. A write failure rolls back the eviction as well.
     tx.execute(
@@ -190,44 +206,17 @@ fn publish(
         params![CACHE_ENTRIES - 1, artifact_id, hash, index_format],
     )?;
     let inserted = tx.execute(
-        "INSERT INTO display_entries(artifact_id,sha256,index_format,published_at_ms,span_count,fallback)
-         VALUES(?1,?2,?3,?4,?5,?6) ON CONFLICT(artifact_id,sha256,index_format) DO NOTHING",
-        params![artifact_id, hash, index_format, time, i64::try_from(blocks.len()).map_err(|_| AppError::Internal)?, fallback],
+        "INSERT INTO display_entries(artifact_id,sha256,index_format,published_at_ms,span_count,byte_length,scalar_length,utf16_length,fallback)
+         VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9) ON CONFLICT(artifact_id,sha256,index_format) DO NOTHING",
+        params![artifact_id, hash, index_format, time, span_count, bytes, scalars, utf16, fallback],
     )?;
-    if inserted == 1 {
-        let id = tx.last_insert_rowid();
-        {
-            let mut insert = tx.prepare_cached(
-                "INSERT INTO display_spans(entry_id,byte_start,byte_end,scalar_start,kind,heading_level)
-                 VALUES(?1,?2,?3,?4,?5,?6)",
-            )?;
-            for block in blocks {
-                let (kind, heading_level) = block_label(block.kind);
-                insert.execute(params![
-                    id,
-                    block.byte_start,
-                    block.byte_end,
-                    block.scalar_start,
-                    kind,
-                    heading_level,
-                ])?;
-            }
-        }
+    if inserted == 1
+        && let Some(layout) = layout
+    {
+        layout::write_spans(&tx, tx.last_insert_rowid(), hash, layout.blocks)?;
     }
     tx.commit()?;
     Ok(())
-}
-
-fn block_label(kind: DisplayBlockKind) -> (&'static str, Option<u8>) {
-    match kind {
-        DisplayBlockKind::Paragraph => ("paragraph", None),
-        DisplayBlockKind::Heading(level) => ("heading", Some(level)),
-        DisplayBlockKind::BlockQuote => ("block_quote", None),
-        DisplayBlockKind::Code => ("code", None),
-        DisplayBlockKind::List => ("list", None),
-        DisplayBlockKind::Rule => ("rule", None),
-        DisplayBlockKind::Table => ("table", None),
-    }
 }
 
 fn fallback_label(reason: DisplayFallback) -> &'static str {
@@ -235,6 +224,7 @@ fn fallback_label(reason: DisplayFallback) -> &'static str {
         DisplayFallback::DocumentBudget => "document_budget",
         DisplayFallback::ParserBudget => "parser_budget",
         DisplayFallback::DocumentContext => "document_context",
+        DisplayFallback::LayoutBudget => "layout_budget",
         DisplayFallback::UnsupportedSource => "unsupported_source",
         DisplayFallback::InvalidBoundary => "invalid_boundary",
         DisplayFallback::ParserFailed => "parser_failed",

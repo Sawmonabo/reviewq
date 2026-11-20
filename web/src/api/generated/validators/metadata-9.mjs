@@ -2,6 +2,29 @@
 const schema367 = {
   type: "object",
   properties: {
+    author: {
+      anyOf: [{ $ref: "#/definitions/NamedUpstreamId" }, { type: "null" }],
+    },
+    coverage: { anyOf: [{ $ref: "#/definitions/Coverage" }, { type: "null" }] },
+    currentDisposition: {
+      anyOf: [{ $ref: "#/definitions/Disposition" }, { type: "null" }],
+    },
+    draft: { type: "boolean" },
+    focusSessionKey: {
+      anyOf: [{ $ref: "#/definitions/CheckpointIdDto" }, { type: "null" }],
+    },
+    focusedActivity: {
+      anyOf: [{ $ref: "#/definitions/FocusedActivity" }, { type: "null" }],
+    },
+    focusedLaunch: {
+      anyOf: [{ $ref: "#/definitions/FocusedLaunch" }, { type: "null" }],
+    },
+    focusedLeadName: { type: ["string", "null"] },
+  },
+};
+const schema369 = {
+  type: "object",
+  properties: {
     ourComments: { $ref: "#/definitions/SafeCountDto" },
     own: { type: "boolean" },
     personalApproval: { type: ["boolean", "null"] },
@@ -12,7 +35,7 @@ const schema367 = {
     registeredLeadCount: { $ref: "#/definitions/SafeCountDto" },
   },
 };
-const schema373 = {
+const schema375 = {
   properties: {
     defaultEffort: { type: ["string", "null"] },
     efforts: { items: { type: "string" }, type: "array" },
@@ -23,7 +46,7 @@ const schema373 = {
   required: ["id", "label", "isDefault", "defaultEffort", "efforts"],
   type: "object",
 };
-const schema374 = {
+const schema376 = {
   properties: {
     description: { type: ["string", "null"] },
     name: { type: "string" },
@@ -32,7 +55,7 @@ const schema374 = {
   required: ["name", "path"],
   type: "object",
 };
-const schema378 = {
+const schema380 = {
   properties: {
     context: { type: ["string", "null"] },
     invocation: { $ref: "#/definitions/Invocation" },
@@ -55,7 +78,7 @@ const schema378 = {
   ],
   type: "object",
 };
-const schema380 = {
+const schema382 = {
   additionalProperties: false,
   properties: {
     args: { type: ["string", "null"] },
@@ -66,7 +89,7 @@ const schema380 = {
   required: ["kind", "name", "path", "args"],
   type: "object",
 };
-const schema382 = {
+const schema384 = {
   properties: {
     effort: { type: ["string", "null"] },
     model: { type: ["string", "null"] },
@@ -79,7 +102,7 @@ const schema382 = {
   required: ["name", "status", "startedAt", "model", "effort"],
   type: "object",
 };
-const schema383 = {
+const schema385 = {
   properties: {
     input: {
       anyOf: [{ $ref: "#/definitions/RequestInput" }, { type: "null" }],
@@ -91,11 +114,11 @@ const schema383 = {
   required: ["requestedModel", "requestedEffort", "skillName", "input"],
   type: "object",
 };
-const schema385 = {
+const schema387 = {
   enum: ["review_request", "skill_arguments"],
   type: "string",
 };
-const schema391 = {
+const schema393 = {
   type: "object",
   properties: {
     checkout: { type: "string" },
@@ -108,7 +131,7 @@ const schema391 = {
     reviewId: { $ref: "#/definitions/ReviewIdDto" },
   },
 };
-const schema394 = {
+const schema396 = {
   properties: {
     file: { $ref: "#/definitions/PatchFile" },
     nextCursor: {
@@ -136,7 +159,7 @@ const schema394 = {
   ],
   type: "object",
 };
-const schema397 = {
+const schema399 = {
   additionalProperties: false,
   properties: {
     boardId: true,
@@ -168,7 +191,7 @@ const schema397 = {
     { $ref: "#/definitions/BoardScopeFields2" },
   ],
 };
-const schema398 = {
+const schema400 = {
   type: "object",
   properties: {
     boardId: { $ref: "#/definitions/CheckpointIdDto" },
@@ -187,11 +210,11 @@ const schema398 = {
     storyPointsField: { type: ["string", "null"] },
   },
 };
-const schema401 = {
+const schema403 = {
   enum: ["ready", "pending", "cleanup_conflict"],
   type: "string",
 };
-const schema403 = {
+const schema405 = {
   properties: {
     configured: { type: "boolean" },
     identity: { anyOf: [{ $ref: "#/definitions/Identity" }, { type: "null" }] },
@@ -200,7 +223,7 @@ const schema403 = {
   required: ["origin", "configured", "identity"],
   type: "object",
 };
-const schema405 = {
+const schema407 = {
   properties: {
     configured: { type: "boolean" },
     email: { type: ["string", "null"] },
@@ -213,7 +236,7 @@ const schema405 = {
   required: ["site", "email", "tokenType", "configured", "identity"],
   type: "object",
 };
-const schema406 = {
+const schema408 = {
   additionalProperties: false,
   properties: {
     boardSelection: { $ref: "#/definitions/BoardSelection" },
@@ -233,19 +256,20 @@ const schema406 = {
 };
 export {
   schema367,
-  schema373,
-  schema374,
-  schema378,
+  schema369,
+  schema375,
+  schema376,
   schema380,
   schema382,
-  schema383,
+  schema384,
   schema385,
-  schema391,
-  schema394,
-  schema397,
-  schema398,
-  schema401,
+  schema387,
+  schema393,
+  schema396,
+  schema399,
+  schema400,
   schema403,
   schema405,
-  schema406,
+  schema407,
+  schema408,
 };

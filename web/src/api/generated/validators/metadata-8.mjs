@@ -24,11 +24,27 @@ const schema339 = {
   ],
   type: "string",
 };
-const schema342 = {
+const schema341 = {
+  properties: {
+    byteEnd: { $ref: "#/definitions/SafeCountDto" },
+    byteStart: { $ref: "#/definitions/SafeCountDto" },
+    headingLevel: {
+      anyOf: [{ $ref: "#/definitions/SafeCountDto" }, { type: "null" }],
+    },
+    headingMarkdown: { type: ["string", "null"] },
+    kind: { $ref: "#/definitions/DisplayBlockKind" },
+    scalarStart: { $ref: "#/definitions/SafeCountDto" },
+    utf16Start: { $ref: "#/definitions/SafeCountDto" },
+  },
+  required: ["byteStart", "byteEnd", "scalarStart", "utf16Start", "kind"],
+  type: "object",
+};
+const schema344 = {
   enum: [
     "document_budget",
     "parser_budget",
     "document_context",
+    "layout_budget",
     "unsupported_source",
     "invalid_boundary",
     "parser_failed",
@@ -37,7 +53,7 @@ const schema342 = {
   ],
   type: "string",
 };
-const schema356 = {
+const schema358 = {
   properties: {
     leadName: { type: ["string", "null"] },
     leadSessionKey: { $ref: "#/definitions/CheckpointIdDto" },
@@ -50,27 +66,4 @@ const schema356 = {
   required: ["runId", "leadSessionKey", "provider", "leadName", "startedAt"],
   type: "object",
 };
-const schema365 = {
-  type: "object",
-  properties: {
-    author: {
-      anyOf: [{ $ref: "#/definitions/NamedUpstreamId" }, { type: "null" }],
-    },
-    coverage: { anyOf: [{ $ref: "#/definitions/Coverage" }, { type: "null" }] },
-    currentDisposition: {
-      anyOf: [{ $ref: "#/definitions/Disposition" }, { type: "null" }],
-    },
-    draft: { type: "boolean" },
-    focusSessionKey: {
-      anyOf: [{ $ref: "#/definitions/CheckpointIdDto" }, { type: "null" }],
-    },
-    focusedActivity: {
-      anyOf: [{ $ref: "#/definitions/FocusedActivity" }, { type: "null" }],
-    },
-    focusedLaunch: {
-      anyOf: [{ $ref: "#/definitions/FocusedLaunch" }, { type: "null" }],
-    },
-    focusedLeadName: { type: ["string", "null"] },
-  },
-};
-export { schema331, schema339, schema342, schema356, schema365 };
+export { schema331, schema339, schema341, schema344, schema358 };

@@ -5,16 +5,21 @@
 //! Copyright 2026 AI Sidekicks contributors
 //! SPDX-License-Identifier: Apache-2.0
 //! The source stays verbatim. ReviewQ uses the pinned parser's native offset events,
-//! records block kinds and scalar coordinates, and leaves unsafe cuts to the full reader.
+//! records block kinds and original source coordinates, and leaves unsafe cuts to the full reader.
 
 use satteri_pulldown_cmark::{Event, Options, Parser, Tag};
 
+use super::{
+    DisplayLayout, MAX_DISPLAY_BLOCKS, MAX_DISPLAY_HEADING_BYTES, MAX_DISPLAY_HEADINGS_BYTES,
+};
 use crate::reports::MAX_MARKDOWN_LINE_BYTES;
 
 const CUT_WINDOW_BYTES: usize = 64 * 1024;
 const SETTLE_LAG_BLOCKS: usize = 2;
-const MAX_EVENTS: usize = 60_000;
-const MAX_DEPTH: usize = 128;
+const MAX_EVENTS: usize = 12_000;
+const MAX_DEPTH: usize = 48;
+const MAX_TABLE_ROWS: usize = 128;
+const MAX_BROWSER_NODES: usize = 60_000;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum DisplayBlockKind {
@@ -27,13 +32,15 @@ pub enum DisplayBlockKind {
     Table,
 }
 
-/// Half-open original UTF-8 byte range and the matching original Unicode scalar start.
-#[derive(Debug, Eq, PartialEq)]
+/// Half-open original UTF-8 byte range and the matching scalar and UTF-16 starts.
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct DisplayBlock {
     pub byte_start: u32,
     pub byte_end: u32,
     pub scalar_start: u32,
+    pub utf16_start: u32,
     pub kind: DisplayBlockKind,
+    pub heading_markdown: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -41,6 +48,7 @@ pub enum DisplayFallback {
     DocumentBudget,
     ParserBudget,
     DocumentContext,
+    LayoutBudget,
     UnsupportedSource,
     InvalidBoundary,
     ParserFailed,
@@ -52,9 +60,14 @@ struct BlockStart {
     byte: usize,
     kind: DisplayBlockKind,
     events: usize,
+    heading_end: Option<usize>,
+    table_rows: usize,
+    table_cells: usize,
+    expected_cells: usize,
+    literal_markers: usize,
 }
 
-pub(super) fn cut(source: &str) -> Result<Vec<DisplayBlock>, DisplayFallback> {
+pub(super) fn cut(source: &str) -> Result<DisplayLayout, DisplayFallback> {
     // The parser strips a leading BOM on each parse. Bare CR and NUL also need
     // special browser handling. Keep those inputs on the existing reader.
     if source.contains(['\u{feff}', '\0'])
@@ -82,8 +95,10 @@ pub(super) fn cut(source: &str) -> Result<Vec<DisplayBlock>, DisplayFallback> {
     // Nonfinal windows defer the last two children while more source is available.
     let mut blocks = Vec::new();
     let mut from = 0;
-    let mut scalar_at_from = 0;
+    let mut coordinate = Coordinate::default();
+    let mut heading_bytes = 0;
     let mut total_events = 0;
+    let mut browser_nodes = 1;
     while from < source.len() {
         let mut window_bytes = CUT_WINDOW_BYTES;
         loop {
@@ -104,7 +119,6 @@ pub(super) fn cut(source: &str) -> Result<Vec<DisplayBlock>, DisplayFallback> {
                 continue;
             }
             let mut previous_end = 0;
-            let mut scalar = scalar_at_from;
             for (index, start) in candidates[..keep].iter().enumerate() {
                 let end = candidates
                     .get(index + 1)
@@ -112,32 +126,88 @@ pub(super) fn cut(source: &str) -> Result<Vec<DisplayBlock>, DisplayFallback> {
                 if start.byte < previous_end || start.byte >= end {
                     return Err(DisplayFallback::InvalidBoundary);
                 }
+                let bytes = end - start.byte;
+                if blocks.len() == MAX_DISPLAY_BLOCKS
+                    || bytes > CUT_WINDOW_BYTES
+                    || start.table_rows > MAX_TABLE_ROWS
+                {
+                    return Err(DisplayFallback::LayoutBudget);
+                }
                 // An ordered marker other than 1 can open a list in an
                 // isolated slice even when it could not interrupt a paragraph.
                 let first_line = window[start.byte..end].lines().next().unwrap_or_default();
                 if !blocks.is_empty() && context_sensitive_marker(first_line).is_some() {
                     return Err(DisplayFallback::DocumentContext);
                 }
-                scalar += window[previous_end..start.byte].chars().count() as u32;
+                let heading_markdown = if let Some(heading_end) = start.heading_end {
+                    let heading = window
+                        .get(start.byte..heading_end)
+                        .filter(|_| heading_end <= end)
+                        .ok_or(DisplayFallback::InvalidBoundary)?;
+                    heading_bytes += heading.len();
+                    if heading.len() > MAX_DISPLAY_HEADING_BYTES
+                        || heading_bytes > MAX_DISPLAY_HEADINGS_BYTES
+                    {
+                        return Err(DisplayFallback::LayoutBudget);
+                    }
+                    Some(heading.to_owned())
+                } else {
+                    None
+                };
+                coordinate.advance(&window[previous_end..start.byte]);
                 blocks.push(DisplayBlock {
                     byte_start: (from + start.byte) as u32,
                     byte_end: (from + end) as u32,
-                    scalar_start: scalar,
+                    scalar_start: coordinate.scalar,
+                    utf16_start: coordinate.utf16,
                     kind: start.kind,
+                    heading_markdown,
                 });
-                scalar += window[start.byte..end].chars().count() as u32;
+                coordinate.advance(&window[start.byte..end]);
                 previous_end = end;
                 total_events += start.events;
-                if total_events > MAX_EVENTS {
+                browser_nodes += start.browser_nodes();
+                if total_events > MAX_EVENTS || browser_nodes > MAX_BROWSER_NODES {
                     return Err(DisplayFallback::ParserBudget);
                 }
             }
             from += previous_end;
-            scalar_at_from = scalar;
             break;
         }
     }
-    Ok(blocks)
+    if blocks.is_empty() {
+        return Err(DisplayFallback::InvalidBoundary);
+    }
+    Ok(DisplayLayout {
+        byte_length: source.len() as u32,
+        scalar_length: coordinate.scalar,
+        utf16_length: coordinate.utf16,
+        blocks,
+    })
+}
+
+impl BlockStart {
+    fn browser_nodes(&self) -> usize {
+        // Budget for elements and whitespace introduced when converting Markdown
+        // to HTML, potential GFM literal links, and ragged table cell padding.
+        let missing_cells = self.expected_cells.saturating_sub(self.table_cells);
+        2 + 4 * (self.events + self.literal_markers) + 2 * missing_cells
+    }
+}
+
+#[derive(Default)]
+struct Coordinate {
+    scalar: u32,
+    utf16: u32,
+}
+
+impl Coordinate {
+    fn advance(&mut self, source: &str) {
+        for ch in source.chars() {
+            self.scalar += 1;
+            self.utf16 += ch.len_utf16() as u32;
+        }
+    }
 }
 
 enum Marker {
@@ -195,10 +265,29 @@ fn parse_window(window: &str) -> Result<Vec<BlockStart>, DisplayFallback> {
     }
     let mut blocks = Vec::new();
     let mut depth = 0_usize;
+    let mut table_columns = 0;
     for (event_count, (event, range)) in parser.into_offset_iter().enumerate() {
         if event_count == MAX_EVENTS {
             return Err(DisplayFallback::ParserBudget);
         }
+        let table_row = matches!(event, Event::Start(Tag::TableRow));
+        if let Event::Start(Tag::Table(columns)) = &event {
+            table_columns = columns.len();
+        }
+        let expected_cells = if table_row || matches!(event, Event::Start(Tag::TableHead)) {
+            table_columns
+        } else {
+            0
+        };
+        let table_cell = matches!(event, Event::Start(Tag::TableCell));
+        let literal_markers = if let Event::Text(value) = &event {
+            value
+                .bytes()
+                .filter(|byte| matches!(byte, b'@' | b':' | b'.'))
+                .count()
+        } else {
+            0
+        };
         let kind = match event {
             Event::Start(Tag::FootnoteDefinition(_) | Tag::HtmlBlock)
             | Event::FootnoteReference(_)
@@ -240,10 +329,19 @@ fn parse_window(window: &str) -> Result<Vec<BlockStart>, DisplayFallback> {
                 byte,
                 kind,
                 events: 0,
+                heading_end: matches!(kind, DisplayBlockKind::Heading(1..=3)).then_some(range.end),
+                table_rows: 0,
+                table_cells: 0,
+                expected_cells: 0,
+                literal_markers: 0,
             });
         }
         if let Some(block) = blocks.last_mut() {
             block.events += 1;
+            block.table_rows += usize::from(table_row);
+            block.table_cells += usize::from(table_cell);
+            block.expected_cells += expected_cells;
+            block.literal_markers += literal_markers;
         }
     }
     if depth != 0 {

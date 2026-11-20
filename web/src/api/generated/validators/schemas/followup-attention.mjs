@@ -2,7 +2,7 @@
 import { func0 } from "../runtime.mjs";
 import { validate25 } from "./checkpoint-id-dto.mjs";
 import { validate232 } from "./utc-timestamp-dto.mjs";
-function validate1165(
+function validate1179(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -21,7 +21,7 @@ function validate1165(
         ((data.completedAt === undefined || !func0.call(data, "completedAt")) &&
           (missing0 = "completedAt"))
       ) {
-        validate1165.errors = [
+        validate1179.errors = [
           {
             instancePath,
             schemaPath: "#/required",
@@ -130,7 +130,7 @@ function validate1165(
                   vErrors.push(err1);
                 }
                 errors++;
-                validate1165.errors = vErrors;
+                validate1179.errors = vErrors;
                 return false;
               } else {
                 errors = _errs4;
@@ -172,7 +172,7 @@ function validate1165(
         }
       }
     } else {
-      validate1165.errors = [
+      validate1179.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -183,7 +183,7 @@ function validate1165(
       return false;
     }
   }
-  validate1165.errors = vErrors;
+  validate1179.errors = vErrors;
   return errors === 0;
 }
-export { validate1165 };
+export { validate1179 };

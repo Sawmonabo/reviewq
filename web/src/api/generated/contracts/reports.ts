@@ -72,6 +72,7 @@ export type DisplayResult =
        * @maxItems 32
        */
       blocks: [DisplayBlock, ...DisplayBlock[]];
+      layout?: DisplayLayout | null;
       nextCursor: PageCursorDto | null;
       previousCursor: PageCursorDto | null;
       state: "ready";
@@ -95,6 +96,7 @@ export type DisplayFallback =
   | "document_budget"
   | "parser_budget"
   | "document_context"
+  | "layout_budget"
   | "unsupported_source"
   | "invalid_boundary"
   | "parser_failed"
@@ -329,5 +331,29 @@ export interface DisplayBlock {
   kind: DisplayBlockKind;
   markdown: string;
   scalarStart: SafeCountDto;
+  utf16Start: SafeCountDto;
+  [k: string]: unknown;
+}
+
+export interface DisplayLayout {
+  /**
+   * @minItems 1
+   * @maxItems 512
+   */
+  blocks: [DisplayLayoutBlock, ...DisplayLayoutBlock[]];
+  byteLength: SafeCountDto;
+  scalarLength: SafeCountDto;
+  utf16Length: SafeCountDto;
+  [k: string]: unknown;
+}
+
+export interface DisplayLayoutBlock {
+  byteEnd: SafeCountDto;
+  byteStart: SafeCountDto;
+  headingLevel?: SafeCountDto | null;
+  headingMarkdown?: string | null;
+  kind: DisplayBlockKind;
+  scalarStart: SafeCountDto;
+  utf16Start: SafeCountDto;
   [k: string]: unknown;
 }

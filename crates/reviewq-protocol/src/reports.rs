@@ -124,6 +124,7 @@ wire_enum!(DisplayFallback {
     DocumentBudget,
     ParserBudget,
     DocumentContext,
+    LayoutBudget,
     UnsupportedSource,
     InvalidBoundary,
     ParserFailed,
@@ -138,9 +139,36 @@ pub struct DisplayBlock {
     pub byte_start: SafeCountDto,
     pub byte_end: SafeCountDto,
     pub scalar_start: SafeCountDto,
+    pub utf16_start: SafeCountDto,
     pub kind: DisplayBlockKind,
     pub heading_level: Option<SafeCountDto>,
     pub markdown: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct DisplayLayoutBlock {
+    pub byte_start: SafeCountDto,
+    pub byte_end: SafeCountDto,
+    pub scalar_start: SafeCountDto,
+    pub utf16_start: SafeCountDto,
+    pub kind: DisplayBlockKind,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub heading_level: Option<SafeCountDto>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub heading_markdown: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct DisplayLayout {
+    pub byte_length: SafeCountDto,
+    pub scalar_length: SafeCountDto,
+    pub utf16_length: SafeCountDto,
+    #[cfg_attr(feature = "schema", schemars(length(min = 1, max = 512)))]
+    pub blocks: Vec<DisplayLayoutBlock>,
 }
 
 #[derive(Debug, Serialize)]
@@ -157,6 +185,8 @@ pub enum DisplayResult {
         blocks: Vec<DisplayBlock>,
         previous_cursor: Option<crate::PageCursorDto>,
         next_cursor: Option<crate::PageCursorDto>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        layout: Option<DisplayLayout>,
     },
     Building,
     Fallback {
