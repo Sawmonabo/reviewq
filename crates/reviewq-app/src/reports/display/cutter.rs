@@ -64,11 +64,17 @@ pub(super) fn cut(source: &str) -> Result<Vec<DisplayBlock>, DisplayFallback> {
     {
         return Err(DisplayFallback::UnsupportedSource);
     }
-    if source.split('\n').any(|line| {
-        line.len() > MAX_MARKDOWN_LINE_BYTES
+    for line in source.split('\n') {
+        if line.len() > MAX_MARKDOWN_LINE_BYTES
             && line.encode_utf16().count() > MAX_MARKDOWN_LINE_BYTES
-    }) {
-        return Err(DisplayFallback::DocumentBudget);
+        {
+            return Err(DisplayFallback::DocumentBudget);
+        }
+        // Empty markers can change the interpretation of their own container
+        // or its neighbors, including when the block starts the document.
+        if matches!(context_sensitive_marker(line), Some(Marker::Empty)) {
+            return Err(DisplayFallback::DocumentContext);
+        }
     }
     // The caller has applied the report byte, line and line-width envelope.
     // Nonfinal windows defer the last two children while more source is available.
@@ -104,6 +110,12 @@ pub(super) fn cut(source: &str) -> Result<Vec<DisplayBlock>, DisplayFallback> {
                 if start.byte < previous_end || start.byte >= end {
                     return Err(DisplayFallback::InvalidBoundary);
                 }
+                // An ordered marker other than 1 can open a list in an
+                // isolated slice even when it could not interrupt a paragraph.
+                let first_line = window[start.byte..end].lines().next().unwrap_or_default();
+                if !blocks.is_empty() && context_sensitive_marker(first_line).is_some() {
+                    return Err(DisplayFallback::DocumentContext);
+                }
                 scalar += window[previous_end..start.byte].chars().count() as u32;
                 blocks.push(DisplayBlock {
                     byte_start: (from + start.byte) as u32,
@@ -124,6 +136,35 @@ pub(super) fn cut(source: &str) -> Result<Vec<DisplayBlock>, DisplayFallback> {
         }
     }
     Ok(blocks)
+}
+
+enum Marker {
+    Empty,
+    NoninitialOrdered,
+}
+
+fn context_sensitive_marker(mut line: &str) -> Option<Marker> {
+    line = line.trim_ascii();
+    while let Some(quoted) = line.strip_prefix('>') {
+        line = quoted.trim_ascii_start();
+    }
+    let marker_end = line.find([' ', '\t']).unwrap_or(line.len());
+    let (marker, content) = line.split_at(marker_end);
+    match marker.as_bytes() {
+        [b'*' | b'+' | b'-'] if content.is_empty() => Some(Marker::Empty),
+        [number @ .., b'.' | b')']
+            if (1..=9).contains(&number.len()) && number.iter().all(u8::is_ascii_digit) =>
+        {
+            if content.is_empty() {
+                Some(Marker::Empty)
+            } else if number != b"1" {
+                Some(Marker::NoninitialOrdered)
+            } else {
+                None
+            }
+        }
+        _ => None,
+    }
 }
 
 fn window_end(source: &str, from: usize, bytes: usize) -> Result<usize, DisplayFallback> {
