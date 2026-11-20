@@ -108,6 +108,10 @@ export function RichReport({
   });
 
   const items = virtual.getVirtualItems();
+  const destinationSize = stage
+    ? items.find((item) => item.index === destination)?.size
+    : undefined;
+  const nextSize = stage ? items.find((item) => item.index === nextGroup)?.size : undefined;
   const firstVisible = virtual.range?.startIndex ?? 0;
   const lastVisible = virtual.range?.endIndex ?? 0;
   const seeking = restoreIndex >= 0 && (restoreIndex < firstVisible || restoreIndex > lastVisible);
@@ -262,13 +266,36 @@ export function RichReport({
     if (!stage || destination === undefined || !destinationReady || !host || !scroll) return;
     const row = blockElement(host, destination);
     if (!row) return;
-    // Both the destination and its following group have committed real, measured
-    // content. Until now the user stays at the complete passage they came from.
+    // The staged rows can still have the measured size of their loading boxes.
+    // Commit their actual sizes so later rows cannot overlap the destination.
+    if (usesVirtual) {
+      const next = nextGroup === undefined ? undefined : blockElement(host, nextGroup);
+      if (nextGroup !== undefined && !next) return;
+      const height = Math.round(row.getBoundingClientRect().height);
+      const nextHeight = next ? Math.round(next.getBoundingClientRect().height) : undefined;
+      if (destinationSize !== height || nextSize !== nextHeight) {
+        virtual.resizeItem(destination, height);
+        if (nextGroup !== undefined && nextHeight !== undefined)
+          virtual.resizeItem(nextGroup, nextHeight);
+        return;
+      }
+    }
     scroll.scrollTop += row.getBoundingClientRect().top - scroll.getBoundingClientRect().top;
     return restoreBookmark(host, scroll, { top: scroll.scrollTop, inset: 0 }, destination, () =>
       setNavigation(undefined),
     );
-  }, [stage, destination, destinationReady, host, scroll]);
+  }, [
+    stage,
+    destination,
+    destinationReady,
+    nextGroup,
+    destinationSize,
+    nextSize,
+    usesVirtual,
+    virtual,
+    host,
+    scroll,
+  ]);
 
   function hint(index: number, priority: "hover" | "pressed", immediate: boolean) {
     if (!reader.prepare) return;
