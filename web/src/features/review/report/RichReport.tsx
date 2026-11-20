@@ -1,5 +1,6 @@
 import { defaultRangeExtractor, useVirtualizer } from "@tanstack/react-virtual";
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import type { RootContent } from "hast";
 import type { ReportSummary } from "../../../api/generated/contracts/reports";
 import { MarkdownTree } from "../../../components/markdown/MarkdownContent";
 import { bookmarkAt, readBookmark, restoreBookmark } from "./report-position";
@@ -246,7 +247,7 @@ export function RichReport({
               </span>
             )}
           </div>
-          <MarkdownTree tree={{ type: "root", children: [...finding.header] }} />
+          <AuthoredContent nodes={finding.header} />
         </header>
         {finding.fields.length > 0 && (
           <dl className="report-finding-fields">
@@ -258,7 +259,7 @@ export function RichReport({
               >
                 <dt>{label}</dt>
                 <dd>
-                  <MarkdownTree tree={{ type: "root", children: [...nodes] }} />
+                  <AuthoredContent nodes={nodes} />
                 </dd>
               </div>
             ))}
@@ -292,7 +293,7 @@ export function RichReport({
           )
         ) : (
           <div className="report-authored">
-            <MarkdownTree tree={{ type: "root", children: [...block.nodes] }} />
+            <AuthoredContent nodes={block.nodes} />
           </div>
         )}
         {index === navigationAfter && sections.length > 0 && (
@@ -407,6 +408,14 @@ export function RichReport({
     </section>
   );
 }
+
+const AuthoredContent = memo(function AuthoredContent({
+  nodes,
+}: {
+  readonly nodes: readonly RootContent[];
+}) {
+  return <MarkdownTree tree={{ type: "root", children: [...nodes] }} />;
+});
 
 function blockElement(root: HTMLElement, index: number) {
   return root.querySelector<HTMLElement>(`[data-report-block="${index}"]`);
