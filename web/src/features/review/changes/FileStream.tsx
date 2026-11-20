@@ -153,8 +153,15 @@ export function FileStream({
     scrollPaddingStart: geometry.toolbar,
   });
   useLayoutEffect(() => {
-    list.shouldAdjustScrollPositionOnItemSizeChange = (item, _delta, virtualizer) =>
-      item.end <= (virtualizer.scrollOffset ?? 0) + geometry.toolbar;
+    list.shouldAdjustScrollPositionOnItemSizeChange = (item, delta, virtualizer) => {
+      const slot = virtualizer.elementsCache.get(item.key);
+      if (slot instanceof HTMLElement && slot.dataset.sourceAnchorHeight !== undefined) {
+        const height = Number(slot.dataset.sourceAnchorHeight);
+        delete slot.dataset.sourceAnchorHeight;
+        if (item.size + delta === height) return true;
+      }
+      return item.end <= (virtualizer.scrollOffset ?? 0) + geometry.toolbar;
+    };
   }, [geometry.toolbar, list]);
   const offset = list.scrollOffset ?? 0;
   const leading = list.getVirtualItemForOffset(Math.max(0, offset + geometry.toolbar));

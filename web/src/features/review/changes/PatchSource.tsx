@@ -38,11 +38,7 @@ export function PatchSource({ file, position, entrySide }: Props) {
   }
   const [failure, setFailure] = useState<{ readonly move: Move; readonly message: string }>();
   const adjustment = useRef<
-    | { readonly range: Range; readonly top: number }
-    | { readonly bottom: number }
-    | "start"
-    | "end"
-    | undefined
+    { readonly range: Range; readonly top: number } | "neighbor" | "start" | "end" | undefined
   >(undefined);
   const head = pages[0];
   const tail = pages.at(-1);
@@ -52,6 +48,11 @@ export function PatchSource({ file, position, entrySide }: Props) {
       const element = pre.current;
       const scroll = element?.closest<HTMLElement>(".drawer-body");
       const backwards = target.direction === "before";
+      if (target.direction && reentry.current) {
+        // A file jump left this partial window before its adjacent read finished.
+        setMove(undefined);
+        return;
+      }
       if (target.direction && element && scroll && head && tail) {
         if (backwards ? page.next !== head.first : page.first !== tail.next)
           throw new Error("The adjacent patch range changed.");
@@ -74,20 +75,13 @@ export function PatchSource({ file, position, entrySide }: Props) {
         }
         setPages(backwards ? [page, ...pages.slice(0, 2)] : [...pages.slice(-2), page]);
       } else {
-        const boundary = element?.getBoundingClientRect().bottom;
-        if (
-          target.entry === "end" &&
-          element &&
-          scroll &&
-          boundary !== undefined &&
-          boundary > sourceReadingTop(element, scroll) &&
-          element.getBoundingClientRect().top < scroll.getBoundingClientRect().bottom
-        )
-          adjustment.current = { bottom: boundary };
-        else
-          adjustment.current = element?.closest(".selected-patch")?.contains(document.activeElement)
-            ? target.land
-            : undefined;
+        adjustment.current =
+          target.entry === "end"
+            ? "neighbor"
+            : element?.closest(".selected-patch")?.contains(document.activeElement)
+              ? target.land
+              : undefined;
+        if (target.entry === reentry.current) reentry.current = undefined;
         setPages(loaded);
       }
       setFailure(undefined);
@@ -145,9 +139,12 @@ export function PatchSource({ file, position, entrySide }: Props) {
         element.getBoundingClientRect().bottom - scroll.getBoundingClientRect().bottom;
     else if (pending === "start")
       scroll.scrollTop += element.getBoundingClientRect().top - sourceReadingTop(element, scroll);
-    else if ("bottom" in pending)
-      scroll.scrollTop += element.getBoundingClientRect().bottom - pending.bottom;
-    else scroll.scrollTop += pending.range.getBoundingClientRect().top - pending.top;
+    else if (pending === "neighbor") {
+      // The outer virtualizer moves the following file when this slot's new
+      // measured height arrives. Give that measurement sole scroll ownership.
+      const slot = element.closest<HTMLElement>(".file-stream-slot");
+      if (slot) slot.dataset.sourceAnchorHeight = String(slot.offsetHeight);
+    } else scroll.scrollTop += pending.range.getBoundingClientRect().top - pending.top;
     lastScroll.current = scroll.scrollTop;
   }, [pages]);
 
@@ -155,7 +152,7 @@ export function PatchSource({ file, position, entrySide }: Props) {
   const approach = useEffectEvent((backwards: boolean) => {
     const element = pre.current;
     const scroll = element?.closest<HTMLElement>(".drawer-body");
-    if (!element || !scroll || !head || !tail || move || failure) return;
+    if (!element || !scroll || !head || !tail || failure) return;
     const box = element.getBoundingClientRect();
     const view = scroll.getBoundingClientRect();
     const ahead = scroll.clientHeight * 2;
@@ -167,16 +164,22 @@ export function PatchSource({ file, position, entrySide }: Props) {
       if (close && (backwards ? tail.next < tail.total : head.first > 0)) {
         const selection = getSelection();
         if (!selection?.isCollapsed && selection?.containsNode(element, true)) return;
-        setMove({
-          range: backwards ? { last: true, etag: head.etag } : { offset: 0, etag: head.etag },
-          entry: side,
-        });
-        reentry.current = undefined;
+        if (move?.entry !== side)
+          setMove({
+            range: backwards ? { last: true, etag: head.etag } : { offset: 0, etag: head.etag },
+            entry: side,
+          });
         return;
       }
       if (close) reentry.current = undefined;
     }
-    if (box.bottom < view.top || box.top > view.bottom) return;
+    if (
+      move ||
+      (side && backwards !== (side === "end")) ||
+      box.bottom < view.top ||
+      box.top > view.bottom
+    )
+      return;
     if (
       backwards
         ? head.first === 0 || view.top - box.top > ahead
@@ -200,28 +203,33 @@ export function PatchSource({ file, position, entrySide }: Props) {
       const box = element.getBoundingClientRect();
       const top = sourceReadingTop(element, scroll);
       const bottom = scroll.getBoundingClientRect().bottom;
-      const entry = move?.entry ?? failure?.move.entry ?? reentry.current;
-      const approachingEntry =
-        entry === (backwards ? "end" : "start") &&
-        (backwards ? tail.next !== tail.total : head.first !== 0);
-      let remaining: number;
-      if (approachingEntry) {
-        // Stay on the neighboring file until the correct end of this source is ready.
-        if (backwards ? box.top + delta >= bottom : box.bottom + delta <= top) return;
-        remaining = backwards ? top - (box.bottom + delta) : box.top + delta - bottom;
-      } else {
-        if (backwards ? head.first === 0 : tail.next === tail.total) return;
-        // Constrain only a gesture that started inside this source.
-        if (box.bottom + delta <= top || box.top + delta >= bottom) return;
-        const retry =
-          failure?.move.direction === (backwards ? "before" : "after")
-            ? backwards
-              ? element.previousElementSibling
-              : element.nextElementSibling
-            : null;
-        const edge = retry?.getBoundingClientRect() ?? box;
-        remaining = backwards ? top - (edge.top + delta) : edge.bottom + delta - bottom;
+      const pendingEntry = move?.entry ?? failure?.move.entry;
+      const entry = pendingEntry ?? reentry.current;
+      if (
+        entry &&
+        (pendingEntry || backwards === (entry === "end")) &&
+        (entry === "end" ? tail.next !== tail.total : head.first !== 0)
+      ) {
+        // A resize elsewhere can change scrollTop during the read. Keep the
+        // actual source boundary outside the viewport until it has the right bytes.
+        const correction = entry === "end" ? box.bottom - top : box.top - bottom;
+        if (
+          entry === "end" ? box.top < bottom && correction > 0 : box.bottom > top && correction < 0
+        )
+          scroll.scrollTop += correction;
+        return;
       }
+      if (backwards ? head.first === 0 : tail.next === tail.total) return;
+      // Constrain only a gesture that started inside this source.
+      if (box.bottom + delta <= top || box.top + delta >= bottom) return;
+      const retry =
+        failure?.move.direction === (backwards ? "before" : "after")
+          ? backwards
+            ? element.previousElementSibling
+            : element.nextElementSibling
+          : null;
+      const edge = retry?.getBoundingClientRect() ?? box;
+      const remaining = backwards ? top - (edge.top + delta) : edge.bottom + delta - bottom;
       if (Math.abs(delta) > Math.max(0, remaining))
         scroll.scrollTop = previous + Math.sign(delta) * Math.max(0, remaining);
     },
