@@ -15,6 +15,18 @@ const MAX_CACHED_PREVIEWS = 2;
 const MARKER_HEIGHT = 12;
 const RAIL_INSETS = 28;
 
+function fitPromptGroups(groups: readonly PromptGroup[], capacity: number) {
+  if (groups.length <= capacity) return groups;
+  const fitted: PromptGroup[] = [];
+  for (let i = 0; i < capacity; i++) {
+    const first = groups[Math.floor((i * groups.length) / capacity)]!;
+    const last = groups[Math.floor(((i + 1) * groups.length) / capacity) - 1]!;
+    // The first group's signed cursor can page through the combined ordinal range.
+    fitted.push({ ...first, last: last.last });
+  }
+  return fitted;
+}
+
 export function PromptNavigator({
   target,
   generation,
@@ -40,19 +52,13 @@ export function PromptNavigator({
 }) {
   const rail = useRef<HTMLDivElement>(null);
   const previewCache = useRef(new Map<string, PreviewPage>());
-  const [capacity, setCapacity] = useState<number>();
-  const [requested, setRequested] = useState(false);
+  const [capacity, setCapacity] = useState(1);
   const [activation, setActivation] = useState<string>();
   const [visible, setVisible] = useState(false);
   const [pinned, setPinned] = useState(false);
   const [jumped, setJumped] = useState<Pick<PromptPreview, "entryId" | "ordinal">>();
   const [windows, setWindows] = useState<readonly string[]>([]);
   const [selected, setSelected] = useState<PreviewPath>();
-  useEffect(() => {
-    const request = window.requestIdleCallback(() => setRequested(true), { timeout: 400 });
-    return () => window.cancelIdleCallback(request);
-  }, []);
-
   useEffect(() => {
     const host = rail.current;
     if (!host) return;
@@ -66,7 +72,6 @@ export function PromptNavigator({
       if (previous === count) return;
       previous = count;
       setCapacity(count);
-      setWindows([]);
       setSelected(undefined);
       setActivation(undefined);
     });
@@ -77,21 +82,20 @@ export function PromptNavigator({
   const scope = `${target.runId}:${target.sessionKey}:${generation}`;
   const overviewCursor = windows.at(-1);
   const overview = useResource(
-    `prompts:${scope}:${requested}:${capacity ?? ""}:${overviewCursor ?? ""}`,
+    `prompts:${scope}:${visible}:${overviewCursor ?? ""}`,
     async (signal) => {
-      if (!requested || !capacity) return { data: null, cursor: "" };
-      const result = await historyPrompts(
-        target,
-        overviewCursor ? { overviewCursor } : { maxGroups: capacity },
-        signal,
-      );
+      if (!visible) return { data: null, cursor: "" };
+      // The default overview uses the service's verified sparse index at every rail size.
+      const result = await historyPrompts(target, overviewCursor ? { overviewCursor } : {}, signal);
       if (result.data.generation !== generation) throw new Error("Message positions changed.");
       return result;
     },
-    requested ? [{ kind: "history", id: target.sessionKey }] : [],
+    visible ? [{ kind: "history", id: target.sessionKey }] : [],
   );
   const overviewPage = overview.data?.kind === "overview" ? overview.data : undefined;
-  const groups = overviewPage?.groups ?? [];
+  const groups = fitPromptGroups(overviewPage?.groups ?? [], capacity);
+  const firstOrdinal = groups[0]?.first ?? 1;
+  const shownCount = (groups.at(-1)?.last ?? firstOrdinal) - firstOrdinal + 1;
   const jumpRank = jumped && promptOffsets.get(jumped.entryId);
   const base = !hasOlder
     ? 0
@@ -114,30 +118,28 @@ export function PromptNavigator({
     (pinned ? (current ?? groups.at(-1)) : undefined);
   const previewPages = group?.cursor === selected?.group ? (selected?.pages ?? []) : [];
   const previewCursor = previewPages.at(-1) ?? group?.cursor;
-  const previews = useResource(
-    `prompt-preview:${scope}:${visible ? (previewCursor ?? "") : ""}`,
-    async (signal) => {
-      if (!visible || !previewCursor || !group) return { data: null, cursor: "" };
-      const cached = previewCache.current.get(previewCursor);
-      if (cached) return { data: cached, cursor: "" };
-      const limit = Math.min(MAX_PREVIEW_ITEMS, group.last - group.first + 1);
-      const result = await historyPrompts(target, { cursor: previewCursor, limit }, signal);
-      signal.throwIfAborted();
-      if (
-        result.data.generation !== generation ||
-        result.data.reset ||
-        result.data.kind !== "previews"
-      )
-        throw new Error("Message positions changed. Reopen the conversation to refresh them.");
-      const cache = previewCache.current;
-      cache.set(previewCursor, result.data);
-      if (cache.size > MAX_CACHED_PREVIEWS) {
-        const oldest = cache.keys().next().value;
-        if (oldest !== undefined) cache.delete(oldest);
-      }
-      return { data: result.data, cursor: result.cursor };
-    },
-  );
+  const limit = group ? Math.min(MAX_PREVIEW_ITEMS, group.last - group.first + 1) : 0;
+  const previewKey = visible && previewCursor ? `${limit}:${previewCursor}` : "";
+  const previews = useResource(`prompt-preview:${scope}:${previewKey}`, async (signal) => {
+    if (!previewKey || !previewCursor) return { data: null, cursor: "" };
+    const cached = previewCache.current.get(previewKey);
+    if (cached) return { data: cached, cursor: "" };
+    const result = await historyPrompts(target, { cursor: previewCursor, limit }, signal);
+    signal.throwIfAborted();
+    if (
+      result.data.generation !== generation ||
+      result.data.reset ||
+      result.data.kind !== "previews"
+    )
+      throw new Error("Message positions changed. Reopen the conversation to refresh them.");
+    const cache = previewCache.current;
+    cache.set(previewKey, result.data);
+    if (cache.size > MAX_CACHED_PREVIEWS) {
+      const oldest = cache.keys().next().value;
+      if (oldest !== undefined) cache.delete(oldest);
+    }
+    return { data: result.data, cursor: result.cursor };
+  });
   const page = previews.data?.kind === "previews" ? previews.data : undefined;
   const items = page?.items.filter(
     (item) => group && group.first <= item.ordinal && item.ordinal <= group.last,
@@ -155,7 +157,6 @@ export function PromptNavigator({
   }
 
   function open() {
-    setRequested(true);
     setVisible(true);
   }
 
@@ -266,8 +267,8 @@ export function PromptNavigator({
                   : `Messages ${marker.first} to ${marker.last}`
               }
               style={{
-                height: `min(${MARKER_HEIGHT}px, ${((marker.last - marker.first + 1) / Math.max(1, overviewPage?.total ?? 1)) * 100}%)`,
-                top: `${((marker.first + marker.last - 1) / 2 / Math.max(1, overviewPage?.total ?? 1)) * 100}%`,
+                height: `min(${MARKER_HEIGHT}px, ${((marker.last - marker.first + 1) / shownCount) * 100}%)`,
+                top: `${((marker.first - firstOrdinal + (marker.last - marker.first + 1) / 2) / shownCount) * 100}%`,
               }}
               tabIndex={visible ? 0 : -1}
               onPointerEnter={() => choose(marker)}
