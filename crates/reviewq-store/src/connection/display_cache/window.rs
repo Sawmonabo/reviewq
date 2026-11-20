@@ -408,9 +408,9 @@ struct CacheEntry {
 }
 
 fn cache_entry(connection: &Connection, key: &IndexKey) -> Result<Option<CacheEntry>, StoreError> {
-    Ok(connection
+    let found = connection
         .query_row(
-            "SELECT id, span_count, fallback, byte_length, scalar_length, utf16_length
+            "SELECT id, span_count, fallback, byte_length, scalar_length, utf16_length, checksum
              FROM display_entries
              WHERE artifact_id=?1 AND sha256=?2 AND index_format=?3 AND published_at_ms>=?4",
             params![
@@ -420,17 +420,35 @@ fn cache_entry(connection: &Connection, key: &IndexKey) -> Result<Option<CacheEn
                 now_ms()?.saturating_sub(MAX_AGE_MS)
             ],
             |row| {
-                Ok(CacheEntry {
-                    id: row.get(0)?,
-                    span_count: row.get(1)?,
-                    fallback: row.get(2)?,
-                    byte_length: row.get(3)?,
-                    scalar_length: row.get(4)?,
-                    utf16_length: row.get(5)?,
-                })
+                Ok((
+                    CacheEntry {
+                        id: row.get(0)?,
+                        span_count: row.get(1)?,
+                        fallback: row.get(2)?,
+                        byte_length: row.get(3)?,
+                        scalar_length: row.get(4)?,
+                        utf16_length: row.get(5)?,
+                    },
+                    row.get::<_, Vec<u8>>(6)?,
+                ))
             },
         )
-        .optional()?)
+        .optional()?;
+    let Some((entry, checksum)) = found else {
+        return Ok(None);
+    };
+    let lengths = [
+        entry.span_count,
+        entry.byte_length,
+        entry.scalar_length,
+        entry.utf16_length,
+    ];
+    if layout::header_checksum(key.hash.as_str(), lengths, entry.fallback.as_deref()).as_slice()
+        != checksum.as_slice()
+    {
+        return Err(AppError::Internal.into());
+    }
+    Ok(Some(entry))
 }
 
 fn cache_window(

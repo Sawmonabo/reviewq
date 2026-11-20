@@ -10,6 +10,21 @@ use crate::StoreError;
 pub(super) const WINDOW_BYTES: u32 = 64 * 1024;
 pub(super) const SPAN_COLUMNS: &str = "byte_start, byte_end, scalar_start, utf16_start, kind, heading_level, heading_markdown, checksum";
 
+pub(super) fn header_checksum(
+    report_hash: &str,
+    lengths: [u32; 4],
+    fallback: Option<&str>,
+) -> [u8; 32] {
+    let mut hash = Sha256::new()
+        .chain_update(b"findings-header-v2\0")
+        .chain_update(report_hash.as_bytes());
+    for length in lengths {
+        hash.update(length.to_le_bytes());
+    }
+    hash.update(fallback.unwrap_or("").as_bytes());
+    hash.finalize().into()
+}
+
 pub(super) fn write_spans(
     connection: &Connection,
     id: i64,

@@ -46,6 +46,7 @@ CREATE TABLE display_entries (
     scalar_length INTEGER NOT NULL CHECK (scalar_length BETWEEN 0 AND byte_length),
     utf16_length INTEGER NOT NULL CHECK (utf16_length BETWEEN scalar_length AND byte_length),
     fallback TEXT,
+    checksum BLOB NOT NULL CHECK (length(checksum)=32),
     CHECK ((fallback IS NULL) = (span_count>0)),
     UNIQUE (artifact_id, sha256, index_format)
 ) STRICT;
@@ -195,6 +196,7 @@ fn publish(
             layout.utf16_length,
         )
     });
+    let checksum = layout::header_checksum(hash, [span_count, bytes, scalars, utf16], fallback);
     // Make room before writing spans, while retaining the current entry on
     // an idempotent publish. A write failure rolls back the eviction as well.
     tx.execute(
@@ -206,9 +208,9 @@ fn publish(
         params![CACHE_ENTRIES - 1, artifact_id, hash, index_format],
     )?;
     let inserted = tx.execute(
-        "INSERT INTO display_entries(artifact_id,sha256,index_format,published_at_ms,span_count,byte_length,scalar_length,utf16_length,fallback)
-         VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9) ON CONFLICT(artifact_id,sha256,index_format) DO NOTHING",
-        params![artifact_id, hash, index_format, time, span_count, bytes, scalars, utf16, fallback],
+        "INSERT INTO display_entries(artifact_id,sha256,index_format,published_at_ms,span_count,byte_length,scalar_length,utf16_length,fallback,checksum)
+         VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10) ON CONFLICT(artifact_id,sha256,index_format) DO NOTHING",
+        params![artifact_id, hash, index_format, time, span_count, bytes, scalars, utf16, fallback, checksum.as_slice()],
     )?;
     if inserted == 1
         && let Some(layout) = layout
