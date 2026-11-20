@@ -2,25 +2,24 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
-use axum::http::{HeaderMap, HeaderValue, header};
+use axum::http::{HeaderMap, header};
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use reviewq_app::access::{Actor, AppError};
 use subtle::ConstantTimeEq;
 
+use super::browser_sessions::BrowserSessions;
 use super::control::{ControlRequest, MAX_CONTROL_AGE, ServiceEndpoint, decode, random, value};
 
 const MAX_NONCES: usize = 1024;
 const MAX_TICKETS: usize = 128;
-const MAX_SESSIONS: usize = 128;
 const TICKET_AGE: Duration = Duration::from_secs(60);
-const SESSION_AGE: Duration = Duration::from_secs(12 * 60 * 60);
 
 pub(super) struct Auth {
     pub(super) endpoint: ServiceEndpoint,
     pub(super) origin: String,
     browser_host: String,
     native_host: String,
-    cookie: String,
+    pub(super) browser: BrowserSessions,
     state: Mutex<AuthState>,
 }
 
@@ -28,25 +27,18 @@ pub(super) struct Auth {
 struct AuthState {
     nonces: HashMap<[u8; 32], Instant>,
     tickets: HashMap<[u8; 32], Instant>,
-    sessions: HashMap<[u8; 32], Session>,
-}
-
-struct Session {
-    csrf: [u8; 32],
-    expires: Instant,
 }
 
 impl Auth {
-    pub(super) fn new(endpoint: ServiceEndpoint) -> Self {
+    pub(super) fn new(endpoint: ServiceEndpoint, browser: BrowserSessions) -> Self {
         let browser_host = endpoint.browser().to_string();
         let native_host = endpoint.native().to_string();
-        let cookie = format!("reviewq_{}", endpoint.instance());
         Self {
             origin: format!("http://{browser_host}"),
             browser_host,
             native_host,
             endpoint,
-            cookie,
+            browser,
             state: Mutex::default(),
         }
     }
@@ -61,9 +53,10 @@ impl Auth {
     }
 
     pub(super) fn check_origin(&self, headers: &HeaderMap) -> Result<(), AppError> {
-        (value(headers, "origin") == Some(&self.origin))
-            .then_some(())
-            .ok_or(AppError::Forbidden)
+        (value(headers, "host") == Some(&self.browser_host)
+            && value(headers, "origin") == Some(&self.origin))
+        .then_some(())
+        .ok_or(AppError::Forbidden)
     }
 
     pub(super) fn control<'a>(
@@ -105,42 +98,16 @@ impl Auth {
         Ok(URL_SAFE_NO_PAD.encode(ticket))
     }
 
-    pub(super) fn redeem(&self, ticket: &str) -> Result<(String, HeaderValue), AppError> {
+    pub(super) fn consume_ticket(&self, ticket: &str) -> Result<(), AppError> {
         let ticket = decode(ticket).ok_or(AppError::Unauthorized)?;
-        let mut state = self.state.lock().map_err(|_| AppError::Internal)?;
-        let now = Instant::now();
-        if state
+        self.state
+            .lock()
+            .map_err(|_| AppError::Internal)?
             .tickets
-            .get(&ticket)
-            .is_none_or(|expiry| *expiry <= now)
-        {
-            return Err(AppError::Unauthorized);
-        }
-        state.sessions.retain(|_, session| session.expires > now);
-        if state.sessions.len() >= MAX_SESSIONS {
-            return Err(AppError::Busy);
-        }
-        let session = random()?;
-        let csrf = random()?;
-        if state.sessions.contains_key(&session) {
-            return Err(AppError::Internal);
-        }
-        let cookie = format!(
-            "{}={}; Path=/api/v1; HttpOnly; SameSite=Strict",
-            self.cookie,
-            URL_SAFE_NO_PAD.encode(session)
-        );
-        let mut cookie = HeaderValue::from_str(&cookie).map_err(|_| AppError::Internal)?;
-        cookie.set_sensitive(true);
-        state.sessions.insert(
-            session,
-            Session {
-                csrf,
-                expires: now + SESSION_AGE,
-            },
-        );
-        state.tickets.remove(&ticket);
-        Ok((URL_SAFE_NO_PAD.encode(csrf), cookie))
+            .remove(&ticket)
+            .filter(|expiry| *expiry > Instant::now())
+            .map(|_| ())
+            .ok_or(AppError::Unauthorized)
     }
 
     pub(super) fn browser_actor(
@@ -162,24 +129,9 @@ impl Auth {
     }
 
     pub(super) fn csrf(&self, headers: &HeaderMap) -> Result<[u8; 32], AppError> {
-        let cookie = value(headers, "cookie").ok_or(AppError::Unauthorized)?;
-        let mut candidates = cookie.split(';').filter_map(|entry| {
-            let (key, value) = entry.trim().split_once('=')?;
-            (key == self.cookie).then_some(value)
-        });
-        let token = candidates
-            .next()
-            .and_then(decode)
-            .ok_or(AppError::Unauthorized)?;
-        if candidates.next().is_some() {
+        if value(headers, "host") != Some(&self.browser_host) {
             return Err(AppError::Unauthorized);
         }
-        let state = self.state.lock().map_err(|_| AppError::Internal)?;
-        state
-            .sessions
-            .get(&token)
-            .filter(|session| session.expires > Instant::now())
-            .map(|session| session.csrf)
-            .ok_or(AppError::Unauthorized)
+        self.browser.csrf(headers)
     }
 }
