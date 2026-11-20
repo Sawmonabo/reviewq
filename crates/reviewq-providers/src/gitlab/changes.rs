@@ -4,7 +4,7 @@ use std::sync::Arc;
 use reviewq_app::access::{AppError, AppFuture};
 use reviewq_app::changes::{
     ApprovalView, ChangeSource, Discussion, PatchBytes, PatchFile, PatchFileSelection,
-    PatchPathCursor, PatchPathPage, PatchRevision, SourcePage,
+    PatchPageEdge, PatchPathCursor, PatchPathPage, PatchRevision, SourcePage,
 };
 use reviewq_domain::identity::{GitSha, MrIdentity};
 use serde::Deserialize;
@@ -55,6 +55,7 @@ impl ChangeSource for GitLab {
         page: u32,
         limit: u16,
         selected_file: Option<PatchFileSelection>,
+        edge: Option<PatchPageEdge>,
     ) -> AppFuture<'_, SourcePage<PatchFile>> {
         Box::pin(async move {
             if !(1..=10).contains(&limit) {
@@ -138,7 +139,7 @@ impl ChangeSource for GitLab {
                     })
                 })
                 .await?;
-            Ok(indexed.page.clone())
+            indexed.for_reader(edge)
         })
     }
 

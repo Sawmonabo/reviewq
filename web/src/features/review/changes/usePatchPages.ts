@@ -38,6 +38,9 @@ export function usePatchPages(reviewId: string, initial: PatchIndex, pinned: rea
       const { cursor, data } = await readPatchFiles(reviewId, controller.signal, {
         revision: initial.revision,
         ...lookup,
+        ...("page" in lookup && {
+          previewEdge: pages.has(lookup.page - 1) ? ("start" as const) : ("end" as const),
+        }),
       });
       controller.signal.throwIfAborted();
       if (

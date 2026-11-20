@@ -4,8 +4,13 @@ import { ExpandedOutput } from "./ExpandedOutput";
 import { ToolHeading } from "./ToolActivity";
 import { groupParts, openKey } from "./tool-activity";
 import type { ToolCatalog } from "./tool-activity";
-import { MarkdownContent } from "../../../components/markdown/MarkdownContent";
+import {
+  MarkdownContent,
+  MarkdownSource,
+  MarkdownTree,
+} from "../../../components/markdown/MarkdownContent";
 import { inlineProseReference } from "./useInlineProse";
+import type { InlineProse } from "./useInlineProse";
 
 type Props = {
   readonly target: SessionAddress;
@@ -15,7 +20,7 @@ type Props = {
   readonly reference: string | undefined;
   readonly onReference: (reference: string | undefined) => void;
   readonly expanded: ReadonlySet<string>;
-  readonly prose: ReadonlyMap<string, string | null>;
+  readonly prose: ReadonlyMap<string, InlineProse | null>;
   readonly toggle: (key: string, open: boolean) => void;
   readonly extra?: { readonly items: readonly HistoryPart[]; readonly next: string | null };
   readonly onMoreParts: (cursor: string) => void;
@@ -86,7 +91,7 @@ export function EntryBody({
       <div className="stack" key={key}>
         {(!part.contentRef || reference !== part.contentRef) &&
           (formatted ? (
-            <MarkdownContent source={complete ?? part.text} />
+            <Prose complete={complete || undefined} preview={part.text} />
           ) : (
             <pre className="tool-output-line">{part.text}</pre>
           ))}
@@ -129,4 +134,16 @@ export function EntryBody({
       )}
     </>
   );
+}
+
+function Prose({
+  complete,
+  preview,
+}: {
+  readonly complete: InlineProse | undefined;
+  readonly preview: string;
+}) {
+  if (complete?.kind === "prepared") return <MarkdownTree tree={complete.tree} />;
+  if (complete?.kind === "formatting-limit") return <MarkdownSource source={complete.text} />;
+  return <MarkdownContent source={complete?.text ?? preview} />;
 }

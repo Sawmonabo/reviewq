@@ -1,4 +1,5 @@
 /.agents/tmp/
+/.worktrees/
 /target/
 **/node_modules/
 **/dist/

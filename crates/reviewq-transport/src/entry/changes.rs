@@ -6,7 +6,7 @@ use axum::http::HeaderMap;
 use reviewq_app::access::{Actor, AppError};
 use reviewq_app::changes::{
     Discussion, DiscussionAnchor, DiscussionLine, DiscussionPosition, DiscussionResolution,
-    PatchAvailability, PatchFile, PatchFileSelection,
+    PatchAvailability, PatchFile, PatchFileSelection, PatchPageEdge,
 };
 use reviewq_app::queue::ReviewSource;
 use reviewq_app::settings::ActiveSource;
@@ -43,6 +43,7 @@ pub(super) struct ChangeQuery {
     cursor: Option<String>,
     preferred_file_id: Option<String>,
     file_path_hint: Option<String>,
+    preview_edge: Option<String>,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -111,6 +112,12 @@ pub(super) async fn files(
     {
         return Err(AppError::InvalidRequest.into());
     }
+    let edge = match query.preview_edge.as_deref() {
+        None => None,
+        Some("start") if query.cursor.is_some() => Some(PatchPageEdge::Start),
+        Some("end") if query.cursor.is_some() => Some(PatchPageEdge::End),
+        Some(_) => return Err(AppError::InvalidRequest.into()),
+    };
     let (limit, page, revision) = query.position(
         &entry.auth.endpoint,
         FILE_CURSOR,
@@ -130,6 +137,7 @@ pub(super) async fn files(
             page,
             limit,
             selected,
+            edge,
         )
         .await?;
     check_source(&entry, &actor, &review_id, &source).await?;
@@ -177,7 +185,10 @@ pub(super) async fn discussions(
     Path(review): Path<String>,
     Query(query): Query<ChangeQuery>,
 ) -> Result<Json<dto::PatchDiscussionsResponse>, ApiError> {
-    if query.preferred_file_id.is_some() || query.file_path_hint.is_some() {
+    if query.preferred_file_id.is_some()
+        || query.file_path_hint.is_some()
+        || query.preview_edge.is_some()
+    {
         return Err(AppError::InvalidRequest.into());
     }
     let actor = entry.auth.browser_actor(&headers, false)?;
@@ -391,6 +402,7 @@ fn file_metadata(
         additions: line_changes.and_then(|changes| SafeCountDto::new(changes.additions as u64)),
         deletions: line_changes.and_then(|changes| SafeCountDto::new(changes.deletions as u64)),
         patch_etag,
+        preview: file.preview,
     })
 }
 

@@ -15,9 +15,11 @@ export function MarkdownContent({
   readonly base?: string | undefined;
 }) {
   const tree = useMemo(() => parseMarkdown(source, base), [source, base]);
-  return tree ? (
-    <MarkdownTree tree={tree} />
-  ) : (
+  return tree ? <MarkdownTree tree={tree} /> : <MarkdownSource source={source} />;
+}
+
+export function MarkdownSource({ source }: { readonly source: string }) {
+  return (
     <details className="surface-card">
       <summary>Markdown source · formatting limit</summary>
       <pre className="prose-source">{source.slice(0, 65_536)}</pre>

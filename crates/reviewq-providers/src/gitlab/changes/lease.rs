@@ -6,7 +6,9 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use reviewq_app::access::{AppError, AppFuture};
-use reviewq_app::changes::{PatchBytes, PatchContent, PatchFile, PatchFileSelection, SourcePage};
+use reviewq_app::changes::{
+    PatchBytes, PatchContent, PatchFile, PatchFileSelection, PatchPageEdge, SourcePage,
+};
 use reviewq_domain::identity::MrIdentity;
 use tokio::sync::{Mutex, OnceCell};
 
@@ -33,6 +35,43 @@ type Slot = Arc<OnceCell<PatchBytes>>;
 pub(super) struct IndexedPage {
     pub page: SourcePage<PatchFile>,
     pub small: Vec<(usize, Arc<Body>)>,
+}
+
+impl IndexedPage {
+    pub(super) fn for_reader(
+        &self,
+        edge: Option<PatchPageEdge>,
+    ) -> Result<SourcePage<PatchFile>, AppError> {
+        let mut page = self.page.clone();
+        let Some(edge) = edge else { return Ok(page) };
+        // Use only bytes from this verified scan. Preparing adjacent files never performs I/O.
+        let mut available = 64 * 1024;
+        let len = page.items.len();
+        for (index, body) in &self.small {
+            let distance = match edge {
+                PatchPageEdge::Start => *index,
+                PatchPageEdge::End => len - 1 - index,
+            };
+            let file = &mut page.items[*index];
+            if distance >= 3
+                || !file
+                    .metrics
+                    .as_ref()
+                    .is_some_and(|m| m.max_line_bytes <= 16 * 1024 && m.line_count <= 20_000)
+            {
+                continue;
+            }
+            if let Body::Memory(bytes) = body.as_ref()
+                && !bytes.is_empty()
+                && bytes.len() <= available
+            {
+                let value = std::str::from_utf8(bytes).map_err(|_| AppError::Unavailable)?;
+                file.preview = Some(value.to_owned());
+                available -= bytes.len();
+            }
+        }
+        Ok(page)
+    }
 }
 
 type IndexSlot = OnceCell<IndexedPage>;

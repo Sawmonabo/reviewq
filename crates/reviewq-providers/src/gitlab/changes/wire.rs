@@ -195,6 +195,7 @@ fn read_item(
             deleted: info.deleted.ok_or(AppError::Unavailable)?,
             availability,
             metrics: complete.then_some(metrics),
+            preview: None,
         },
         if complete { data } else { None },
     ))

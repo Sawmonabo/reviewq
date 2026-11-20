@@ -24,6 +24,7 @@ impl GitLab {
                 ordinal,
                 1,
                 hint.map(PatchFileSelection::PathHint),
+                None,
             )
             .await?;
         let file = page.items.into_iter().next().ok_or(AppError::NotFound)?;

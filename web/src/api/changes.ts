@@ -17,8 +17,10 @@ const PATH_CACHE_BYTES = 768 * 1024;
 export type PatchIndex = PatchFileIndex;
 type PatchIndexResult = { readonly cursor: string; readonly data: PatchIndex };
 type FileIndexPosition = { readonly revision: string } & (
-  { readonly cursor: string } | { readonly path: PatchPath }
+  { readonly cursor: string; readonly previewEdge?: "start" | "end" } | { readonly path: PatchPath }
 );
+// Keep bodies from only the most recent requested page edge, outside the metadata cache.
+let pageBodies = new WeakMap<PatchFile, string>();
 let retainedIndex: { readonly reviewId: string; readonly result: PatchIndexResult } | undefined;
 let retainedCatalog:
   | {
@@ -37,8 +39,10 @@ export async function readPatchFiles(
   const query = new URLSearchParams({ limit: String(PATCH_FILES_PER_PAGE) });
   if (position) {
     query.set("revision", position.revision);
-    if ("cursor" in position) query.set("cursor", position.cursor);
-    else query.set("filePathHint", position.path.lookupKey);
+    if ("cursor" in position) {
+      query.set("cursor", position.cursor);
+      if (position.previewEdge) query.set("previewEdge", position.previewEdge);
+    } else query.set("filePathHint", position.path.lookupKey);
   }
   if (preferredFileId) query.set("preferredFileId", preferredFileId);
   const result = await read(
@@ -59,8 +63,33 @@ export async function readPatchFiles(
     throw new Error("The selected patch index changed.");
   }
   signal.throwIfAborted();
-  if (!position) retainedIndex = { reviewId, result };
-  return result;
+  pageBodies = new WeakMap();
+  let bytesAvailable = 64 * 1024;
+  let admitted = 0;
+  const items = data.items.map((item) => {
+    if (item.preview === undefined || item.preview === null) return item;
+    const { preview, ...file } = item;
+    const bytes = file.byteLength;
+    if (
+      !position ||
+      !("previewEdge" in position) ||
+      !position.previewEdge ||
+      !isRichPatch(file) ||
+      bytes === null ||
+      bytes > 32 * 1024 ||
+      bytes > bytesAvailable ||
+      admitted >= 3 ||
+      new TextEncoder().encode(preview).length !== bytes
+    )
+      throw new Error("The selected patch preview exceeded its bounds.");
+    admitted++;
+    pageBodies.set(file, preview);
+    bytesAvailable -= bytes;
+    return file;
+  });
+  const page = { cursor: result.cursor, data: { ...data, items } };
+  if (!position) retainedIndex = { reviewId, result: page };
+  return page;
 }
 
 export async function readInitialPatchFiles(
@@ -228,6 +257,25 @@ export async function readPatch(
   signal: AbortSignal,
   window?: PatchRange,
 ): Promise<PatchWindow> {
+  const preview = pageBodies.get(file);
+  if (preview !== undefined && !window && file.patchETag && file.byteLength !== null) {
+    const bytes = new TextEncoder().encode(preview);
+    const digest = await crypto.subtle.digest("SHA-256", bytes);
+    signal.throwIfAborted();
+    const hex = Array.from(new Uint8Array(digest), (byte) =>
+      byte.toString(16).padStart(2, "0"),
+    ).join("");
+    if (file.patchETag !== `"${hex}"`) throw new Error("The patch preview digest changed.");
+    enforcePatchRows(bytes);
+    pageBodies.delete(file);
+    return {
+      text: preview,
+      first: 0,
+      next: bytes.length,
+      total: bytes.length,
+      etag: file.patchETag,
+    };
+  }
   const headers = new Headers();
   const pinned = file.patchETag ?? window?.etag;
   if (pinned) headers.set("If-Match", pinned);
