@@ -387,6 +387,7 @@ fn patch_index(revision: &str, head: &str, etag: Option<&str>) -> PatchFileIndex
                 additions: Some(count(1)),
                 deletions: Some(count(0)),
                 patch_etag: etag.and_then(PatchETagDto::new),
+                preview: None,
             }],
             None,
         )

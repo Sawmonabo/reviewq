@@ -75,6 +75,13 @@ pub enum PatchAvailability {
     ProviderLimited,
 }
 
+/// Edge of a verified file page the reader will enter while scrolling.
+#[derive(Clone, Copy, Debug)]
+pub enum PatchPageEdge {
+    Start,
+    End,
+}
+
 #[derive(Clone, Debug)]
 pub struct PatchFile {
     pub id: String,
@@ -85,6 +92,8 @@ pub struct PatchFile {
     pub deleted: bool,
     pub availability: PatchAvailability,
     pub metrics: Option<PatchMetrics>,
+    /// Original UTF-8 projected only for an explicitly requested page edge.
+    pub preview: Option<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -257,6 +266,7 @@ pub trait ChangeSource: Send + Sync {
         page: u32,
         limit: u16,
         selected_file: Option<PatchFileSelection>,
+        edge: Option<PatchPageEdge>,
     ) -> AppFuture<'_, SourcePage<PatchFile>>;
 
     fn selected(

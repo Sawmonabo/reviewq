@@ -24,6 +24,28 @@ const schema254 = {
   enum: ["complete", "incomplete", "binary", "provider_limited", "missing"],
   type: "string",
 };
+const schema255 = {
+  type: "object",
+  properties: {
+    maxLineBytes: {
+      anyOf: [{ $ref: "#/definitions/SafeCountDto" }, { type: "null" }],
+    },
+    newPath: { type: "string" },
+    oldPath: { type: "string" },
+    patchETag: {
+      anyOf: [{ $ref: "#/definitions/PatchETagDto" }, { type: "null" }],
+    },
+    preview: {
+      description:
+        "Whole original text from this same verified file-page response.",
+      maxLength: 32768,
+      type: ["string", "null"],
+    },
+    renamed: { type: "boolean" },
+    reviewId: { $ref: "#/definitions/ReviewIdDto" },
+    revision: { $ref: "#/definitions/CheckpointIdDto" },
+  },
+};
 const schema264 = {
   enum: ["native", "async"],
   title: "QuestionAnswerResponseMode",
@@ -63,4 +85,12 @@ const schema281 = {
     focusedLeadName: { type: ["string", "null"] },
   },
 };
-export { schema246, schema248, schema254, schema264, schema268, schema281 };
+export {
+  schema246,
+  schema248,
+  schema254,
+  schema255,
+  schema264,
+  schema268,
+  schema281,
+};

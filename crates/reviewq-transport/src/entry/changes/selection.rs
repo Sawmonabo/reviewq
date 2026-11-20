@@ -26,6 +26,7 @@ pub(in crate::entry) async fn selected(
         || query.revision.is_none()
         || query.preferred_file_id.is_some()
         || query.limit.is_some()
+        || query.preview_edge.is_some()
         || query
             .file_path_hint
             .as_ref()

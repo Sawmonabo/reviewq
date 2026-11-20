@@ -184,6 +184,10 @@ export interface PatchFile {
   newPath: string;
   oldPath: string;
   patchETag: PatchETagDto | null;
+  /**
+   * Whole original text from this same verified file-page response.
+   */
+  preview?: string | null;
   renamed: boolean;
   reviewId: ReviewIdDto;
   revision: PatchRevisionDto;
