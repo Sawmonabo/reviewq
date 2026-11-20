@@ -196,21 +196,32 @@ export function PatchSource({ file, position, entrySide }: Props) {
   const keepSourceEdge = useEffectEvent(
     (element: HTMLElement, scroll: HTMLElement, previous: number, delta: number) => {
       const backwards = delta < 0;
-      if (!head || !tail || (backwards ? head.first === 0 : tail.next === tail.total)) return;
+      if (!head || !tail) return;
       const box = element.getBoundingClientRect();
       const top = sourceReadingTop(element, scroll);
       const bottom = scroll.getBoundingClientRect().bottom;
-      // Only constrain a gesture that came from this patch. A file-picker jump
-      // and scrolling a different mounted file both own their natural positions.
-      if (box.bottom + delta <= top || box.top + delta >= bottom) return;
-      const retry =
-        failure?.move.direction === (backwards ? "before" : "after")
-          ? backwards
-            ? element.previousElementSibling
-            : element.nextElementSibling
-          : null;
-      const edge = retry?.getBoundingClientRect() ?? box;
-      const remaining = backwards ? top - (edge.top + delta) : edge.bottom + delta - bottom;
+      const entry = move?.entry ?? failure?.move.entry ?? reentry.current;
+      const approachingEntry =
+        entry === (backwards ? "end" : "start") &&
+        (backwards ? tail.next !== tail.total : head.first !== 0);
+      let remaining: number;
+      if (approachingEntry) {
+        // Stay on the neighboring file until the correct end of this source is ready.
+        if (backwards ? box.top + delta >= bottom : box.bottom + delta <= top) return;
+        remaining = backwards ? top - (box.bottom + delta) : box.top + delta - bottom;
+      } else {
+        if (backwards ? head.first === 0 : tail.next === tail.total) return;
+        // Constrain only a gesture that started inside this source.
+        if (box.bottom + delta <= top || box.top + delta >= bottom) return;
+        const retry =
+          failure?.move.direction === (backwards ? "before" : "after")
+            ? backwards
+              ? element.previousElementSibling
+              : element.nextElementSibling
+            : null;
+        const edge = retry?.getBoundingClientRect() ?? box;
+        remaining = backwards ? top - (edge.top + delta) : edge.bottom + delta - bottom;
+      }
       if (Math.abs(delta) > Math.max(0, remaining))
         scroll.scrollTop = previous + Math.sign(delta) * Math.max(0, remaining);
     },
@@ -225,19 +236,26 @@ export function PatchSource({ file, position, entrySide }: Props) {
     let backwards: boolean | undefined;
     const onScroll = () => {
       const delta = scroll.scrollTop - lastScroll.current;
-      if (delta) {
+      if (delta && readerGesture) {
         backwards = delta < 0;
-        if (readerGesture) keepSourceEdge(element, scroll, lastScroll.current, delta);
+        keepSourceEdge(element, scroll, lastScroll.current, delta);
         approach(backwards);
       }
       lastScroll.current = scroll.scrollTop;
     };
     const onSelection = () => {
-      if (backwards !== undefined && getSelection()?.isCollapsed) approach(backwards);
+      if (readerGesture && backwards !== undefined && getSelection()?.isCollapsed)
+        approach(backwards);
     };
     const onWheel = (event: WheelEvent) => {
       readerGesture = true;
-      if (event.deltaY) approach(event.deltaY < 0);
+      if (event.deltaY) {
+        backwards = event.deltaY < 0;
+        approach(backwards);
+      }
+    };
+    const onTouch = () => {
+      readerGesture = true;
     };
     const onPointer = (event: PointerEvent) => {
       readerGesture =
@@ -255,12 +273,14 @@ export function PatchSource({ file, position, entrySide }: Props) {
     const options = { passive: true, signal: signals.signal };
     scroll.addEventListener("scroll", onScroll, options);
     scroll.addEventListener("wheel", onWheel, options);
+    scroll.addEventListener("touchmove", onTouch, options);
     document.addEventListener("pointerdown", onPointer, options);
     document.addEventListener("keydown", onKey, options);
     document.addEventListener("selectionchange", onSelection, options);
     return () => signals.abort();
   }, [hasPages]);
 
+  const failedAtEnd = failure?.move.direction === "after" || failure?.move.entry === "end";
   const notice = failure && (
     <Notice
       retry={() => {
@@ -305,7 +325,7 @@ export function PatchSource({ file, position, entrySide }: Props) {
             </div>
             <p className="meta">Browser Find searches the displayed source range.</p>
           </div>
-          {failure?.move.direction !== "after" && notice}
+          {!failedAtEnd && notice}
           {head.total === 0 ? (
             <Empty title="This file has an empty patch" />
           ) : (
@@ -334,7 +354,7 @@ export function PatchSource({ file, position, entrySide }: Props) {
           )}
         </>
       )}
-      {failure?.move.direction === "after" && notice}
+      {failedAtEnd && notice}
     </>
   );
 }
