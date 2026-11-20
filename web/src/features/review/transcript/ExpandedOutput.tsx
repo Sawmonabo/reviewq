@@ -43,7 +43,12 @@ export function ExpandedOutput({
         throw new Error("The requested native output range is unavailable.");
       }
       return {
-        data: { text: data.text, nextCursor: data.nextCursor, nextOffset: data.offset + bytes },
+        data: {
+          text: data.text,
+          complete: data.offset === 0 && data.complete && !data.nextCursor,
+          nextCursor: data.nextCursor,
+          nextOffset: data.offset + bytes,
+        },
         cursor: "",
       };
     },
@@ -73,7 +78,7 @@ export function ExpandedOutput({
         {range.pending && <Loading label="Reading native output…" />}
         {range.error && <Notice retry={range.retry}>{range.error}</Notice>}
         {range.data &&
-          (format === "markdown" ? (
+          (format === "markdown" && range.data.complete ? (
             <MarkdownContent source={range.data.text} />
           ) : (
             <pre className="tool-output-line" aria-label="Native output text">
