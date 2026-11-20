@@ -3,7 +3,6 @@ import { ResponseSizeLimit } from "../../../api/bounded-bytes";
 import {
   downloadPatchUrl,
   isRichPatch,
-  PATCH_WINDOW_BYTES,
   PatchFormattingLimit,
   readPatch,
 } from "../../../api/changes";
@@ -14,9 +13,8 @@ import { useResource } from "../../../hooks/useResource";
 import { DiscussionThread } from "../DiscussionThread";
 import { DiffCount, FileKind } from "./ChangedFilePicker";
 import { PatchDocumentView } from "./PatchDocumentView";
-import type { PatchLine } from "./patch-position";
-
-type Window = { readonly offset: number; readonly etag?: string; readonly last?: boolean };
+import { PatchSource } from "./PatchSource";
+import type { PatchLine, SourcePosition } from "./patch-position";
 
 export const FilePatch = memo(function FilePatch({
   file,
@@ -26,6 +24,8 @@ export const FilePatch = memo(function FilePatch({
   admitted,
   visible,
   priorityLine,
+  sourcePosition,
+  enterFromEnd,
 }: {
   readonly file: PatchFile;
   readonly threads: readonly PatchDiscussion[];
@@ -34,6 +34,8 @@ export const FilePatch = memo(function FilePatch({
   readonly admitted: boolean;
   readonly visible: boolean;
   readonly priorityLine: PatchLine | undefined;
+  readonly sourcePosition: SourcePosition | "start" | undefined;
+  readonly enterFromEnd: boolean;
 }) {
   return (
     <section
@@ -79,6 +81,8 @@ export const FilePatch = memo(function FilePatch({
           threads={threads}
           visible={visible}
           priorityLine={priorityLine}
+          sourcePosition={sourcePosition}
+          enterFromEnd={enterFromEnd}
         />
       ) : (
         <div className="patch-waiting" aria-hidden="true" />
@@ -89,46 +93,56 @@ export const FilePatch = memo(function FilePatch({
   );
 });
 
-function PatchContents({
-  file,
-  threads,
-  visible,
-  priorityLine,
-}: {
+type ContentsProps = {
   readonly file: PatchFile;
   readonly threads: readonly PatchDiscussion[];
   readonly visible: boolean;
   readonly priorityLine: PatchLine | undefined;
-}) {
-  const [sourceMode, setSourceMode] = useState(!isRichPatch(file));
-  const [window, setWindow] = useState<Window>({ offset: 0 });
-  const [back, setBack] = useState<readonly Window[]>([]);
+  readonly sourcePosition: SourcePosition | "start" | undefined;
+  readonly enterFromEnd: boolean;
+};
+
+function PatchContents(props: ContentsProps) {
+  const [overLimit, setOverLimit] = useState(false);
+  if (overLimit || !isRichPatch(props.file))
+    return (
+      <>
+        <PatchSource
+          file={props.file}
+          position={props.sourcePosition}
+          enterFromEnd={props.enterFromEnd}
+        />
+        {props.threads.map((thread) => (
+          <DiscussionThread key={thread.discussionId} thread={thread} />
+        ))}
+      </>
+    );
+  return <RichPatch {...props} onLimit={() => setOverLimit(true)} />;
+}
+
+function RichPatch({
+  file,
+  threads,
+  visible,
+  priorityLine,
+  onLimit,
+}: ContentsProps & { readonly onLimit: () => void }) {
   const [seen, setSeen] = useState(visible);
   if (visible && !seen) setSeen(true);
-  const patch = useResource(
-    JSON.stringify([file.revision, file.fileId, sourceMode, window]),
-    async (signal) => {
-      try {
-        return { cursor: "", data: await readPatch(file, signal, sourceMode ? window : undefined) };
-      } catch (error) {
-        if (
-          !sourceMode &&
-          !signal.aborted &&
-          (error instanceof PatchFormattingLimit || error instanceof ResponseSizeLimit)
-        )
-          setSourceMode(true);
-        throw error;
-      }
-    },
-  );
+  const patch = useResource(JSON.stringify([file.revision, file.fileId]), async (signal) => {
+    try {
+      return { cursor: "", data: await readPatch(file, signal) };
+    } catch (error) {
+      if (
+        !signal.aborted &&
+        (error instanceof PatchFormattingLimit || error instanceof ResponseSizeLimit)
+      )
+        onLimit();
+      throw error;
+    }
+  });
   const body = patch.data;
   const ready = Boolean(body && (seen || (file.lineCount ?? 0) <= 128));
-
-  function navigate(target: Window) {
-    setBack((items) => [...items, window].slice(-12));
-    setWindow(target);
-  }
-
   return (
     <>
       {patch.error && <Notice retry={patch.retry}>{patch.error}</Notice>}
@@ -138,71 +152,11 @@ function PatchContents({
         </div>
       )}
       {body?.text === "" && <Empty title="This file has an empty patch" />}
-      {body &&
-        ready &&
-        (sourceMode ? (
-          <>
-            <div className="surface-card stack">
-              <div className="spread">
-                <strong>Large patch · source view</strong>
-                <span className="meta">
-                  Bytes {body.first + 1}–{body.next} of {body.total}
-                </span>
-              </div>
-              <div className="actions">
-                <button
-                  type="button"
-                  disabled={!body.first}
-                  onClick={() => navigate({ offset: 0, etag: body.etag })}
-                >
-                  Start
-                </button>
-                <button
-                  type="button"
-                  disabled={!body.first}
-                  onClick={() => {
-                    const previous = back.at(-1);
-                    setBack(back.slice(0, -1));
-                    setWindow(
-                      previous
-                        ? { ...previous, etag: body.etag }
-                        : {
-                            offset: Math.max(0, body.first - PATCH_WINDOW_BYTES + 4),
-                            etag: body.etag,
-                          },
-                    );
-                  }}
-                >
-                  Previous
-                </button>
-                <button
-                  type="button"
-                  disabled={body.next >= body.total}
-                  onClick={() => navigate({ offset: body.next, etag: body.etag })}
-                >
-                  Next
-                </button>
-                <button
-                  type="button"
-                  disabled={body.next >= body.total}
-                  onClick={() => navigate({ offset: 0, last: true, etag: body.etag })}
-                >
-                  End
-                </button>
-              </div>
-              <p className="meta">
-                Browser Find searches the displayed source range. A window can begin or end
-                mid-line.
-              </p>
-            </div>
-            <pre className="patch-source" tabIndex={0} aria-label="Patch source range">
-              {body.text}
-            </pre>
-          </>
-        ) : (
-          <PatchDocumentView text={body.text} discussions={threads} priorityLine={priorityLine} />
-        ))}
-      {(sourceMode || (!body && patch.error)) &&
+      {body && ready && (
+        <PatchDocumentView text={body.text} discussions={threads} priorityLine={priorityLine} />
+      )}
+      {!body &&
+        patch.error &&
         threads.map((thread) => <DiscussionThread key={thread.discussionId} thread={thread} />)}
     </>
   );

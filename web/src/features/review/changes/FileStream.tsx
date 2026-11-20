@@ -20,11 +20,12 @@ import {
   alignPatch,
   lineAt,
   matchingFile,
+  sourceAt,
   storedFile,
   storedPatch,
   storePatch,
 } from "./patch-position";
-import type { PatchLine } from "./patch-position";
+import type { PatchLine, SourcePosition } from "./patch-position";
 import { pageAt, pageStart, usePatchPages } from "./usePatchPages";
 
 type Props = {
@@ -49,6 +50,7 @@ type Jump = {
   readonly inset: number;
   readonly focus: boolean;
   readonly line?: PatchLine;
+  readonly source?: SourcePosition;
 };
 const MAX_ACTIVE_PATCHES = 8;
 const MAX_ACTIVE_BYTES = 4 * 1024 * 1024;
@@ -81,13 +83,17 @@ export function FileStream({
     const file = initial.items.findIndex(
       (entry) => entry.fileId === (saved?.fileId ?? storedFile(reviewId)),
     );
-    if (file < 0 || (!saved?.inset && !saved?.line && initial.pageNumber === 1 && file === 0))
+    if (
+      file < 0 ||
+      (!saved?.inset && !saved?.line && !saved?.source && initial.pageNumber === 1 && file === 0)
+    )
       return;
     return {
       index: pageStart(initial.pageNumber) + file,
       inset: saved?.inset ?? 0,
       focus: false,
       ...(saved?.line && { line: saved.line }),
+      ...(saved?.source && { source: saved.source }),
     };
   });
   const scroller = host?.closest<HTMLElement>(".drawer-body") ?? null;
@@ -219,6 +225,7 @@ export function FileStream({
         geometry.toolbar,
         jump.inset,
         jump.line,
+        jump.source,
         () => {
           if (jump.focus)
             file.querySelector<HTMLElement>(".patch-file-title")?.focus({ preventScroll: true });
@@ -244,10 +251,12 @@ export function FileStream({
       const inset =
         scroller.getBoundingClientRect().top + geometry.toolbar - item.getBoundingClientRect().top;
       const line = lineAt(item, scroller, geometry.toolbar);
+      const source = sourceAt(item, scroller, geometry.toolbar);
       storePatch(reviewId, initial.revision, {
         fileId: active.fileId,
         inset: Math.max(0, inset),
         ...(line && { line }),
+        ...(source && { source }),
       });
     }
   });
@@ -454,12 +463,14 @@ export function FileStream({
             >
               {file ? (
                 <FilePatch
-                  key={file.fileId}
+                  key={JSON.stringify([file.revision, file.fileId, file.patchETag])}
                   file={file}
                   threads={anchors.get(item.index) ?? EMPTY_THREADS}
                   source={source}
                   position={item.index + 1}
                   admitted={wanted.has(item.index)}
+                  enterFromEnd={item.index < viewportFirst && item.index !== jump?.index}
+                  sourcePosition={item.index === jump?.index ? (jump.source ?? "start") : undefined}
                   priorityLine={item.index === jump?.index ? jump.line : undefined}
                   visible={
                     (item.index >= viewportFirst && item.index <= last) ||
@@ -514,7 +525,9 @@ function admitPatches(
     if (admitted.size >= MAX_ACTIVE_PATCHES) break;
     const file = files.get(ordinal);
     if (!file || admitted.has(ordinal) || file.availability !== "complete") continue;
-    const size = isRichPatch(file) ? (file.byteLength ?? MAX_ACTIVE_BYTES) : PATCH_WINDOW_BYTES;
+    const size = isRichPatch(file)
+      ? (file.byteLength ?? MAX_ACTIVE_BYTES)
+      : Math.min(file.byteLength ?? Infinity, PATCH_WINDOW_BYTES * 4);
     if (bytes + size > MAX_ACTIVE_BYTES) continue;
     if (
       !(ordinal >= first && ordinal <= last) &&

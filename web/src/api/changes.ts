@@ -219,20 +219,27 @@ export type PatchWindow = {
   readonly etag: string;
 };
 
+export type PatchRange = { readonly etag?: string } & (
+  { readonly offset: number } | { readonly before: number } | { readonly last: true }
+);
+
 export async function readPatch(
   file: PatchFile,
   signal: AbortSignal,
-  window?: { readonly offset: number; readonly etag?: string; readonly last?: boolean },
+  window?: PatchRange,
 ): Promise<PatchWindow> {
   const headers = new Headers();
   const pinned = file.patchETag ?? window?.etag;
   if (pinned) headers.set("If-Match", pinned);
-  const offset = window?.offset ?? 0;
+  const before = window && "before" in window ? window.before : undefined;
+  const offset =
+    window && "offset" in window ? window.offset : Math.max(0, (before ?? 0) - PATCH_WINDOW_BYTES);
+  const suffix = window && "last" in window;
   const bounded = window === undefined ? MAX_RICH_BYTES : PATCH_WINDOW_BYTES;
   if (window)
     headers.set(
       "Range",
-      window.last ? `bytes=-${bounded}` : `bytes=${offset}-${offset + bounded - 1}`,
+      suffix ? `bytes=-${bounded}` : `bytes=${offset}-${(before ?? offset + bounded) - 1}`,
     );
   const response = await request(patchRoute(file), { headers, signal });
   const etag = response.headers.get("ETag");
@@ -265,16 +272,20 @@ export async function readPatch(
   }
   const [first, end, total] = contentRange(response);
   if (
-    first !== (window.last ? Math.max(0, total - bounded) : offset) ||
-    end !== Math.min(total, first + bounded) ||
+    first !== (suffix ? Math.max(0, total - bounded) : offset) ||
+    end !== (before ?? Math.min(total, first + bounded)) ||
     (file.byteLength !== null && total !== file.byteLength)
   ) {
+    await response.body?.cancel();
     throw new Error("The selected patch range changed.");
   }
   const bytes = await readBoundedBytes(response, bounded);
   if (bytes.length !== end - first) throw new Error("The selected patch range was incomplete.");
   let leading = 0;
   while (leading < 3 && isContinuation(bytes[leading])) leading++;
+  // A backwards read can start inside a CRLF. Keep the LF for the
+  // preceding range so the pair stays in one text node.
+  if ((suffix || before !== undefined) && first > 0 && bytes[leading] === 10) leading++;
   let next = bytes.length;
   if (end < total) {
     next--;
@@ -283,6 +294,10 @@ export async function readPatch(
     const width = firstByte < 0x80 ? 1 : firstByte < 0xe0 ? 2 : firstByte < 0xf0 ? 3 : 4;
     if (next + width <= bytes.length) next = bytes.length;
   }
+  if (before === undefined && end < total && bytes[next - 1] === 13) next--;
+  if (before !== undefined && first + next !== before)
+    throw new Error("The selected patch boundary changed.");
+  signal.throwIfAborted();
   return {
     text: decodeUtf8(bytes.subarray(leading, next)),
     first: first + leading,

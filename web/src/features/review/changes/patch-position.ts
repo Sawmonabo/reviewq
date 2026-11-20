@@ -1,12 +1,23 @@
 import type { PatchDiscussion, PatchPath } from "../../../api/generated/contracts";
 import { savedValue, saveValue } from "../../../lib/view-preferences";
 
+export type SourcePosition = {
+  readonly first: number;
+  readonly byte: number;
+  readonly etag: string;
+  readonly inset: number;
+};
 export type PatchLine = {
   readonly side: "new" | "old";
   readonly number: number;
   readonly inset: number;
 };
-type Bookmark = { readonly fileId: string; readonly inset: number; readonly line?: PatchLine };
+type Bookmark = {
+  readonly fileId: string;
+  readonly inset: number;
+  readonly line?: PatchLine;
+  readonly source?: SourcePosition;
+};
 
 export function storedFile(reviewId: string): string | undefined {
   const value = savedValue(`changes.file.${reviewId}`);
@@ -27,7 +38,13 @@ export function storedPatch(reviewId: string, revision: string): Bookmark | unde
     Number.isFinite(value.inset)
   ) {
     const line = "line" in value ? readLine(value.line) : undefined;
-    return { fileId: value.fileId, inset: Math.max(0, value.inset), ...(line && { line }) };
+    const source = "source" in value ? readSource(value.source) : undefined;
+    return {
+      fileId: value.fileId,
+      inset: Math.max(0, value.inset),
+      ...(line && { line }),
+      ...(source && { source }),
+    };
   }
   const fileId = storedFile(reviewId);
   if (!fileId) return;
@@ -79,6 +96,7 @@ export function alignPatch(
   toolbar: number,
   inset: number,
   line: PatchLine | undefined,
+  source: SourcePosition | undefined,
   done: () => void,
 ) {
   let frame = requestAnimationFrame(align);
@@ -105,22 +123,26 @@ export function alignPatch(
   function align() {
     const top = scroll.getBoundingClientRect().top + toolbar;
     const row = line && file.querySelector<HTMLElement>(`[data-${line.side}="${line.number}"]`);
+    const location = source && sourceRect(file, source);
+    const target = location ?? (row && row.getBoundingClientRect());
+    const targetInset = source?.inset ?? line?.inset;
     const waiting = Boolean(
-      line && file.querySelector(".patch-waiting, .patch-rich:not([data-patch-prepared])"),
+      (line || source) &&
+      file.querySelector(".patch-waiting, .patch-rich:not([data-patch-prepared])"),
     );
-    if (row && line) {
-      const insetNow = row.getBoundingClientRect().top - top;
+    if (target && targetInset !== undefined) {
+      const insetNow = target.top - top;
       const documentTop = scroll.scrollTop + insetNow;
       if (
         lastTop !== undefined &&
         Math.abs(documentTop - lastTop) < 0.5 &&
-        Math.abs(insetNow - line.inset) > 1
+        Math.abs(insetNow - targetInset) > 1
       ) {
         cancel();
         return;
       }
       lastTop = documentTop;
-      if (Math.abs(insetNow - line.inset) > 0.5) scroll.scrollTop += insetNow - line.inset;
+      if (Math.abs(insetNow - targetInset) > 0.5) scroll.scrollTop += insetNow - targetInset;
       if (!landed) {
         landed = true;
         done();
@@ -177,4 +199,93 @@ function readLine(value: unknown): PatchLine | undefined {
     Number.isFinite(value.inset)
   )
     return { side: value.side, number: value.number, inset: value.inset };
+}
+
+function readSource(value: unknown): SourcePosition | undefined {
+  if (
+    value &&
+    typeof value === "object" &&
+    "etag" in value &&
+    typeof value.etag === "string" &&
+    /^"[0-9a-f]{64}"$/.test(value.etag) &&
+    "first" in value &&
+    typeof value.first === "number" &&
+    Number.isSafeInteger(value.first) &&
+    value.first >= 0 &&
+    "byte" in value &&
+    typeof value.byte === "number" &&
+    Number.isSafeInteger(value.byte) &&
+    value.byte >= value.first &&
+    "inset" in value &&
+    typeof value.inset === "number" &&
+    Number.isFinite(value.inset)
+  )
+    return { first: value.first, byte: value.byte, etag: value.etag, inset: value.inset };
+}
+
+export function sourceAt(
+  file: HTMLElement,
+  scroll: HTMLElement,
+  toolbar: number,
+): SourcePosition | undefined {
+  const pre = file.querySelector<HTMLElement>("pre[data-patch-etag]");
+  if (!pre?.dataset.patchEtag) return;
+  const top = scroll.getBoundingClientRect().top + toolbar;
+  const box = pre.getBoundingClientRect();
+  const sample = sourceReadingTop(pre, scroll) + 1;
+  if (sample < box.top || sample >= box.bottom) return;
+  const position = document.caretPositionFromPoint(box.left + 10, sample);
+  const node = position?.offsetNode;
+  const span = node?.parentElement;
+  if (
+    !position ||
+    !(node instanceof Text) ||
+    !span?.hasAttribute("data-source-start") ||
+    !pre.contains(span)
+  )
+    return;
+  const index = position.offset;
+  const range = document.createRange();
+  range.setStart(node, index);
+  range.collapse(true);
+  const first = Number(pre.querySelector<HTMLElement>("[data-source-start]")?.dataset.sourceStart);
+  const byte =
+    Number(span.dataset.sourceStart) + new TextEncoder().encode(node.data.slice(0, index)).length;
+  return {
+    first,
+    byte,
+    etag: pre.dataset.patchEtag,
+    inset: range.getBoundingClientRect().top - top,
+  };
+}
+
+export function sourceReadingTop(pre: HTMLElement, scroll: HTMLElement) {
+  const controls = pre.closest(".file-stream")?.querySelector(".file-stream-controls");
+  return Math.max(
+    scroll.getBoundingClientRect().top,
+    controls?.getBoundingClientRect().bottom ?? 0,
+  );
+}
+
+function sourceRect(file: HTMLElement, source: SourcePosition) {
+  const pre = file.querySelector<HTMLElement>("pre[data-patch-etag]");
+  if (pre?.dataset.patchEtag !== source.etag) return;
+  const span = [...pre.querySelectorAll<HTMLElement>("[data-source-start]")]
+    .reverse()
+    .find((entry) => Number(entry.dataset.sourceStart) <= source.byte);
+  const node = span?.firstChild;
+  if (!(node instanceof Text)) return;
+  let bytes = Number(span?.dataset.sourceStart);
+  let index = 0;
+  for (const scalar of node.data) {
+    if (bytes >= source.byte) break;
+    const code = scalar.codePointAt(0)!;
+    bytes += code < 0x80 ? 1 : code < 0x800 ? 2 : code < 0x10000 ? 3 : 4;
+    index += scalar.length;
+  }
+  if (bytes !== source.byte) return;
+  const range = document.createRange();
+  range.setStart(node, index);
+  range.collapse(true);
+  return range.getBoundingClientRect();
 }
