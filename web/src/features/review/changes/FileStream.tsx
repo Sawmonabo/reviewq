@@ -469,7 +469,13 @@ export function FileStream({
                   source={source}
                   position={item.index + 1}
                   admitted={wanted.has(item.index)}
-                  enterFromEnd={item.index < viewportFirst && item.index !== jump?.index}
+                  entrySide={
+                    item.index < (jump?.index ?? viewportFirst)
+                      ? "end"
+                      : item.index > (jump?.index ?? last)
+                        ? "start"
+                        : undefined
+                  }
                   sourcePosition={item.index === jump?.index ? (jump.source ?? "start") : undefined}
                   priorityLine={item.index === jump?.index ? jump.line : undefined}
                   visible={

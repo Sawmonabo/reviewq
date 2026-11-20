@@ -25,7 +25,7 @@ export const FilePatch = memo(function FilePatch({
   visible,
   priorityLine,
   sourcePosition,
-  enterFromEnd,
+  entrySide,
 }: {
   readonly file: PatchFile;
   readonly threads: readonly PatchDiscussion[];
@@ -35,7 +35,7 @@ export const FilePatch = memo(function FilePatch({
   readonly visible: boolean;
   readonly priorityLine: PatchLine | undefined;
   readonly sourcePosition: SourcePosition | "start" | undefined;
-  readonly enterFromEnd: boolean;
+  readonly entrySide: "start" | "end" | undefined;
 }) {
   return (
     <section
@@ -82,7 +82,7 @@ export const FilePatch = memo(function FilePatch({
           visible={visible}
           priorityLine={priorityLine}
           sourcePosition={sourcePosition}
-          enterFromEnd={enterFromEnd}
+          entrySide={entrySide}
         />
       ) : (
         <div className="patch-waiting" aria-hidden="true" />
@@ -99,7 +99,7 @@ type ContentsProps = {
   readonly visible: boolean;
   readonly priorityLine: PatchLine | undefined;
   readonly sourcePosition: SourcePosition | "start" | undefined;
-  readonly enterFromEnd: boolean;
+  readonly entrySide: "start" | "end" | undefined;
 };
 
 function PatchContents(props: ContentsProps) {
@@ -110,7 +110,7 @@ function PatchContents(props: ContentsProps) {
         <PatchSource
           file={props.file}
           position={props.sourcePosition}
-          enterFromEnd={props.enterFromEnd}
+          entrySide={props.entrySide}
         />
         {props.threads.map((thread) => (
           <DiscussionThread key={thread.discussionId} thread={thread} />
