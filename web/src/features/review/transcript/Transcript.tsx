@@ -97,6 +97,7 @@ export function Transcript({ target, provider, child, messages, working }: Props
   );
   const selectionState = useRef({ hasText: false, ids: new Set<string>() });
   const scrollIntent = useRef<"head" | "tail" | "scrollbar" | undefined>(undefined);
+  const pageLead = useRef(160);
   const touchY = useRef<number | undefined>(undefined);
   const readingPosition = useRef<TimelineBookmark | undefined>(undefined);
   const written = useRef(saved);
@@ -229,12 +230,20 @@ export function Transcript({ target, provider, child, messages, working }: Props
       const saved = anchor.current;
       const focus = toolFocus.current?.entryId === saved.id ? toolFocus.current : undefined;
       const exactEntry = Boolean(focus || saved.toolEntry);
-      const index = entries.findIndex(
+      let index = entries.findIndex(
         (entry) => (exactEntry ? entry.id : historyId(entry)) === saved.id,
       );
-      if (index < 0) return;
+      if (index < 0 && !exactEntry) {
+        // Prepending may extend a collapsed group and change its first entry.
+        index = entries.findIndex(
+          (row) => row.kind === "tool-run" && row.members.includes(saved.id),
+        );
+      }
+      const targetRow = entries[index];
+      if (!targetRow) return;
+      const targetId = exactEntry ? saved.id : historyId(targetRow);
       const container = viewport.current;
-      const selector = `[${exactEntry ? "data-entry" : "data-native-entry"}="${CSS.escape(saved.id)}"]`;
+      const selector = `[${exactEntry ? "data-entry" : "data-native-entry"}="${CSS.escape(targetId)}"]`;
       if (!container?.querySelector(selector)) list.scrollToIndex(index, { align: "start" });
       const frame = requestAnimationFrame(() => {
         if (!container?.isConnected || anchor.current !== saved) return;
@@ -357,6 +366,20 @@ export function Transcript({ target, provider, child, messages, working }: Props
     if (anchor.current?.reopenPages !== undefined) anchor.current = undefined;
   }
 
+  function approachEdge(host: HTMLDivElement, direction: "head" | "tail" | "scrollbar") {
+    if (history.loading) return;
+    const lead = pinned.size ? 160 : pageLead.current;
+    if (direction !== "tail" && history.older && host.scrollTop < lead) {
+      void history.load("older");
+    } else if (
+      direction !== "head" &&
+      history.newer &&
+      host.scrollHeight - host.clientHeight - host.scrollTop < lead
+    ) {
+      void history.load("newer");
+    }
+  }
+
   function recordScroll() {
     const host = viewport.current;
     if (!host) return;
@@ -365,38 +388,29 @@ export function Transcript({ target, provider, child, messages, working }: Props
     let nextFollowing = following;
     if (intent) {
       nextFollowing = intent !== "head" && nearEnd && !history.newer;
-      if (intent !== "tail" && host.scrollTop < 160 && history.older && !history.loading) {
-        void history.load("older");
-      } else if (intent !== "head" && nearEnd && history.newer && !history.loading) {
-        void history.load("newer");
-      }
+      approachEdge(host, intent);
       setFollowing(nextFollowing);
     }
     const position = historyBookmark(host, history.generation, nextFollowing);
     if (position) readingPosition.current = position;
   }
 
-  function gesture(up: boolean) {
+  function gesture(up: boolean, distance?: number) {
     leaveReopen();
     const host = viewport.current;
     if (!host) return;
     scrollIntent.current = up ? "head" : "tail";
-    if (up && host.scrollTop > 0 && (following || requestedLatest.current)) {
+    pageLead.current = Math.max(
+      160,
+      Math.min(host.clientHeight * 3, (distance ?? host.clientHeight) * 3),
+    );
+    history.cancelOpposite(up);
+    if (up && (host.scrollTop > 0 || history.older) && (following || requestedLatest.current)) {
       requestedLatest.current = false;
       list.cancelScroll();
       setFollowing(false);
     }
-    if (history.loading) return;
-    if (up && host.scrollTop < 160 && history.older) {
-      setFollowing(false);
-      void history.load("older");
-    } else if (
-      !up &&
-      host.scrollHeight - host.clientHeight - host.scrollTop < 160 &&
-      history.newer
-    ) {
-      void history.load("newer");
-    }
+    approachEdge(host, up ? "head" : "tail");
   }
 
   function clear() {
@@ -542,7 +556,15 @@ export function Transcript({ target, provider, child, messages, working }: Props
         tabIndex={0}
         onScroll={recordScroll}
         onWheel={(event) => {
-          if (event.deltaY && !event.ctrlKey) gesture(event.deltaY < 0);
+          if (event.deltaY && !event.ctrlKey) {
+            const unit =
+              event.deltaMode === 2
+                ? event.currentTarget.clientHeight
+                : event.deltaMode === 1
+                  ? 16
+                  : 1;
+            gesture(event.deltaY < 0, Math.abs(event.deltaY) * unit);
+          }
         }}
         onTouchStart={(event) => {
           touchY.current = event.touches.length === 1 ? event.touches[0]?.clientY : undefined;
@@ -552,12 +574,13 @@ export function Transcript({ target, provider, child, messages, working }: Props
           const current = event.touches.length === 1 ? event.touches[0]?.clientY : undefined;
           touchY.current = current;
           if (previous !== undefined && current !== undefined && current !== previous)
-            gesture(current > previous);
+            gesture(current > previous, Math.abs(current - previous));
         }}
         onPointerDown={(event) => {
           const box = event.currentTarget.getBoundingClientRect();
           if (event.target === event.currentTarget && box.right - event.clientX < 17) {
             leaveReopen();
+            pageLead.current = event.currentTarget.clientHeight;
             scrollIntent.current = "scrollbar";
           }
         }}
@@ -575,8 +598,9 @@ export function Transcript({ target, provider, child, messages, working }: Props
             ["PageUp", "ArrowUp", "Home"].includes(event.key) ||
             (event.key === " " && event.shiftKey)
           )
-            gesture(true);
-          else if (["PageDown", "ArrowDown", "End", " "].includes(event.key)) gesture(false);
+            gesture(true, event.key === "ArrowUp" ? 40 : undefined);
+          else if (["PageDown", "ArrowDown", "End", " "].includes(event.key))
+            gesture(false, event.key === "ArrowDown" ? 40 : undefined);
         }}
       >
         {!entries.length &&

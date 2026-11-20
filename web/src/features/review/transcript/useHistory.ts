@@ -1,4 +1,4 @@
-import { useEffect, useEffectEvent, useRef, useState } from "react";
+import { useEffect, useEffectEvent, useLayoutEffect, useRef, useState } from "react";
 import { observeSnapshot } from "../../../api/events";
 import type { HistoryPage } from "../../../api/generated/contracts";
 import { historyPage, nativeHistoryUrl } from "../../../api/history";
@@ -43,12 +43,27 @@ export function useHistory(
   const [updated, setUpdated] = useState<number>();
   const [waiting, setWaiting] = useState(false);
   const [live, setLive] = useState<Provisional>();
-  const active = useRef<AbortController | undefined>(undefined);
+  const active = useRef<{ controller: AbortController; position: ReadPosition } | undefined>(
+    undefined,
+  );
+  const currentView = useRef({ beforeUpdate, pinned });
+  useLayoutEffect(() => {
+    currentView.current = { beforeUpdate, pinned };
+  }, [beforeUpdate, pinned]);
   const pending = useRef(false);
   const resetTo = useRef<Anchor | undefined>(undefined);
   const first = pages[0];
   const last = pages.at(-1);
   const generation = last?.generation;
+
+  function cancelOpposite(up: boolean) {
+    const request = active.current;
+    if (request?.position === (up ? "newer" : "older")) {
+      request.controller.abort();
+      active.current = undefined;
+      setLoading(false);
+    }
+  }
 
   async function load(position: ReadPosition, wanted?: Anchor, background = false) {
     if (position === "latest" && !background) resetTo.current = undefined;
@@ -67,20 +82,24 @@ export function useHistory(
     if ((position === "older" || position === "newer") && !cursor) return;
     const adjacent = position === "older" || position === "newer";
     const evict = position === "older" ? last : first;
-    if (
-      pinned.size &&
-      (!adjacent ||
-        (pages.length >= PAGE_LIMIT && evict?.items.some((item) => pinned.has(item.entryId))))
-    ) {
+    function held(replace: boolean) {
+      const protectedIds = currentView.current.pinned;
+      if (!protectedIds.size) return false;
+      if (
+        !replace &&
+        (pages.length < PAGE_LIMIT || !evict?.items.some((item) => protectedIds.has(item.entryId)))
+      )
+        return false;
       if (position === "around") resetTo.current = wanted;
       pending.current = true;
       setWaiting(true);
-      return;
+      return true;
     }
-    active.current?.abort();
+    if (held(!adjacent)) return;
+    active.current?.controller.abort();
     if (requestedJump) resetTo.current = undefined;
     const controller = new AbortController();
-    active.current = controller;
+    active.current = { controller, position };
     pending.current = false;
     setLoading(true);
     try {
@@ -95,13 +114,15 @@ export function useHistory(
       );
       if (controller.signal.aborted) return;
       const { data, cursor: eventCursor } = response;
-      beforeUpdate(position, wanted);
+      const replacing = data.reset || !adjacent || data.generation !== generation;
+      if (held(replacing)) return;
+      currentView.current.beforeUpdate(position, wanted);
       observeSnapshot(eventCursor);
       setAvailability(data.availability);
       setUpdated(Date.now());
       setError(undefined);
       setWaiting(pending.current);
-      if (data.reset || !adjacent || data.generation !== generation) {
+      if (replacing) {
         setPages([data]);
         setLive(undefined);
       } else if (position === "older") {
@@ -113,7 +134,7 @@ export function useHistory(
     } catch (failure) {
       if (!controller.signal.aborted) setError(describeError(failure));
     } finally {
-      if (active.current === controller) {
+      if (active.current?.controller === controller) {
         active.current = undefined;
         setLoading(false);
       }
@@ -226,7 +247,7 @@ export function useHistory(
     window.addEventListener("pagehide", close);
     return () => {
       window.clearTimeout(firstRead);
-      const controller = active.current;
+      const controller = active.current?.controller;
       active.current = undefined;
       controller?.abort();
       close();
@@ -253,6 +274,7 @@ export function useHistory(
     updated,
     live,
     generation,
+    cancelOpposite,
     load,
   };
 }
