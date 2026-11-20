@@ -87,8 +87,11 @@ export function finishReading(element: Element | null, signal: AbortSignal) {
   if (!held()) return;
   return new Promise<void>((resolve) => {
     const events = new AbortController();
+    const busy = new MutationObserver(check);
+    busy.observe(host, { subtree: true, attributes: true, attributeFilter: ["aria-busy"] });
     function check() {
       if (!signal.aborted && host.isConnected && held()) return;
+      busy.disconnect();
       events.abort();
       signal.removeEventListener("abort", check);
       resolve();
