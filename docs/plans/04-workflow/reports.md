@@ -4,6 +4,8 @@
 
 ## Deliverables and boundaries
 
+For the proposed display index over accepted artifacts, including chunk reuse, publication, recovery and receipt-bound reads, see [Indexed Markdown for accepted Findings](../05-browser/indexed-findings.md#capture-storage-and-recovery). The existing semantic index continues to govern report acceptance and revision evidence.
+
 | Files | Responsibility |
 |---|---|
 | `crates/reviewq-domain/src/report.rs` | Validated ReportSource, ReviewedRevision, Verdict, ReportIdentity, ReportCoverage, FindingChange, Disposition, ReportDelivery and Candidate. Encode file/response, final/unchanged/needs_input, complete_mr/thread_followup, and amendment/correction variants so incompatible combinations fail. Keep wire serde and Markdown libraries outside domain. |

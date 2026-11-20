@@ -4,6 +4,8 @@
 
 ## Files and contracts
 
+The proposed [indexed Findings reader](indexed-findings.md) replaces the whole-document opening path described below for eligible indexed reports. It defines opening at a bookmark, fetching nearby content, displaying long tables and qualifying the integrated reader. The whole-document path remains the reference for formatting and interaction parity.
+
 Extend `web/src/features/review/ReviewDrawer.tsx` and `review/changes/{Changes.tsx,patch-document.ts}` under `features/`. Own `features/review/{Findings,Followups,DiscussionThread}.tsx`, `features/Tickets.tsx`, their private styles, and typed review/ticket read adapters under `web/src/api/`. SHELL composes `Tickets` into the review drawer and the standalone unmatched-ticket place. Within review, Changes and Followups share DiscussionThread. CHATUI supplies AgentPanel and the report-aware Composer. Consume their accepted props.
 
 | Consumer | Input and behavior |
