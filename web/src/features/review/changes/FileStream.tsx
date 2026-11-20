@@ -39,6 +39,7 @@ type Props = {
   readonly webUrl: string;
   readonly query: string;
   readonly onQuery: (value: string) => void;
+  readonly onLoadedAnchors: (threads: ReadonlySet<string> | undefined) => void;
   readonly restore: boolean;
   readonly onReload: () => void;
 };
@@ -62,6 +63,7 @@ export function FileStream({
   webUrl,
   query,
   onQuery,
+  onLoadedAnchors,
   restore,
   onReload,
 }: Props) {
@@ -113,6 +115,14 @@ export function FileStream({
     }
     return entries;
   }, [files, threads]);
+  useEffect(() => {
+    const ids = new Set<string>();
+    for (const matched of anchors.values())
+      for (const thread of matched) ids.add(thread.discussionId);
+    onLoadedAnchors(ids);
+  }, [anchors, onLoadedAnchors]);
+  useEffect(() => () => onLoadedAnchors(undefined), [onLoadedAnchors]);
+
   const rangeExtractor = useCallback(
     (range: Parameters<typeof defaultRangeExtractor>[0]) => {
       const items = new Set([

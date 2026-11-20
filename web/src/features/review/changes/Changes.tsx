@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { ApiResponseError } from "../../../api/client";
 import {
@@ -24,6 +24,7 @@ import "./changes.css";
 type Tab = "files" | "general" | "all";
 type Status = "any" | "open" | "resolved";
 const MAX_EMPTY_DISCUSSION_PAGES = 4;
+const EMPTY_DISCUSSIONS: readonly PatchDiscussion[] = [];
 const tabs = [
   ["files", "Files"],
   ["general", "General comments"],
@@ -41,6 +42,7 @@ export default function Changes({
 }) {
   const [epoch, setEpoch] = useState(0);
   const [query, setQuery] = useState("");
+  const [loadedAnchors, setLoadedAnchors] = useState<ReadonlySet<string>>();
   const [tab, setTab] = useState<Tab>("files");
   const [status, setStatus] = useState<Status>("any");
   const [involving, setInvolving] = useState(false);
@@ -112,8 +114,10 @@ export default function Changes({
     },
     [{ kind: "discussions", id: reviewId }],
   );
-  const filtered = (threads.data?.items ?? []).filter((thread) =>
-    matchesFilters(thread, status, involving),
+  const discussionItems = threads.data?.items ?? EMPTY_DISCUSSIONS;
+  const filtered = useMemo(
+    () => discussionItems.filter((thread) => matchesFilters(thread, status, involving)),
+    [discussionItems, status, involving],
   );
   const knownFiles = shown ? (shown.pageNumber - 1) * PATCH_FILES_PER_PAGE + shown.items.length : 0;
   const totalFiles = catalog.data
@@ -128,6 +132,7 @@ export default function Changes({
       : tab === "files"
         ? filtered.filter(
             (thread) =>
+              !loadedAnchors?.has(thread.discussionId) &&
               !catalog.data?.paths?.some((path) => matchingFile(thread, path)) &&
               !shown?.items.some((file) => matchingFile(thread, file)),
           )
@@ -259,6 +264,7 @@ export default function Changes({
           webUrl={webUrl}
           query={query}
           onQuery={setQuery}
+          onLoadedAnchors={setLoadedAnchors}
           restore={epoch === 0}
           onReload={refreshIndex}
         />
