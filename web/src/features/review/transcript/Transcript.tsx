@@ -39,7 +39,11 @@ import { MarkdownContent } from "../../../components/markdown/MarkdownContent";
 import { useHistory } from "./useHistory";
 import { useInlineProse } from "./useInlineProse";
 
-type Position = ReadingAnchor & { readonly reopenPages?: number; readonly jump?: boolean };
+type Position = ReadingAnchor & {
+  readonly reopenPages?: number;
+  readonly jump?: boolean;
+  readonly adjacent?: "read" | "adjusting";
+};
 const SCROLL_IDLE_MS = 160;
 const MAX_REOPEN_PAGES = 4;
 type ExtraParts = {
@@ -126,7 +130,8 @@ export function Transcript({ target, provider, child, messages, working }: Props
           jump: true,
         };
     } else if (position !== "latest" && !following && anchor.current?.reopenPages === undefined) {
-      anchor.current = visibleAnchor(viewport.current);
+      const reading = visibleAnchor(viewport.current);
+      anchor.current = reading && (extend ? { ...reading, adjacent: "read" } : reading);
     }
   });
   const historyEntries = useMemo(() => entriesIn(history.pages), [history.pages]);
@@ -175,6 +180,15 @@ export function Transcript({ target, provider, child, messages, working }: Props
   const rangeExtractor = useCallback(
     (range: Parameters<typeof defaultRangeExtractor>[0]) => {
       const indexes = new Set(defaultRangeExtractor(range));
+      const reading = anchor.current;
+      if (reading?.adjacent) {
+        const index = readingIndex(entries, reading);
+        if (index >= 0 && !indexes.has(index)) {
+          const endIndex = Math.min(entries.length - 1, index + range.endIndex - range.startIndex);
+          for (const nearby of defaultRangeExtractor({ ...range, startIndex: index, endIndex }))
+            indexes.add(nearby);
+        }
+      }
       if (pinned.size)
         entries.forEach((entry, index) => {
           if (pinned.has(historyId(entry))) indexes.add(index);
@@ -192,6 +206,8 @@ export function Transcript({ target, provider, child, messages, working }: Props
     count: entries.length,
     getScrollElement: () => viewport.current,
     getItemKey: rowKey,
+    // Resolve retained row keys against the new window before mounting its visible range.
+    anchorTo: "end",
     estimateSize: (index) =>
       entries[index]?.kind === "tool-run" ? 35 : entries[index]?.kind === "read-pack" ? 55 : 95,
     paddingStart: history.older ? 40 : 0,
@@ -253,19 +269,37 @@ export function Transcript({ target, provider, child, messages, working }: Props
       const saved = anchor.current;
       const focus = toolFocus.current?.entryId === saved.id ? toolFocus.current : undefined;
       const exactEntry = Boolean(focus || saved.toolEntry);
-      let index = entries.findIndex(
-        (entry) => (exactEntry ? entry.id : historyId(entry)) === saved.id,
-      );
-      if (index < 0 && !exactEntry) {
-        // Prepending may extend a collapsed group and change its first entry.
-        index = entries.findIndex(
-          (row) => row.kind === "tool-run" && row.members.includes(saved.id),
-        );
-      }
+      const index = readingIndex(entries, saved, exactEntry);
       const targetRow = entries[index];
+      const container = viewport.current;
+      if (saved.adjacent) {
+        // A page can remove the head button or insert children between a group header
+        // and a focused tool. Correct only the inset the keyed virtualizer didn't preserve.
+        const row =
+          targetRow && container?.querySelector(`[data-entry="${CSS.escape(targetRow.id)}"]`);
+        if (!container || !row) {
+          anchor.current = undefined;
+          return;
+        }
+        const delta =
+          row.getBoundingClientRect().top - container.getBoundingClientRect().top - saved.offset;
+        if (Math.abs(delta) > 1) {
+          anchor.current = { ...saved, adjacent: "adjusting" };
+          list.scrollToOffset(container.scrollTop + delta);
+        } else if (saved.adjacent === "read") {
+          anchor.current = undefined;
+          return;
+        }
+        // Inserted rows can settle at different heights after their first measurement.
+        // Only this displaced reading position stays active until layout settles or new input.
+        const held = anchor.current;
+        const settled = window.setTimeout(() => {
+          if (anchor.current === held) anchor.current = undefined;
+        }, SCROLL_IDLE_MS);
+        return () => window.clearTimeout(settled);
+      }
       if (!targetRow) return;
       const targetId = exactEntry ? saved.id : historyId(targetRow);
-      const container = viewport.current;
       const selector = `[${exactEntry ? "data-entry" : "data-native-entry"}="${CSS.escape(targetId)}"]`;
       if (!container?.querySelector(selector)) list.scrollToIndex(index, { align: "start" });
       const frame = requestAnimationFrame(() => {
@@ -386,7 +420,8 @@ export function Transcript({ target, provider, child, messages, working }: Props
   }, [bookmark]);
 
   function leaveReopen() {
-    if (anchor.current?.reopenPages !== undefined) anchor.current = undefined;
+    if (anchor.current?.reopenPages !== undefined || anchor.current?.adjacent)
+      anchor.current = undefined;
   }
 
   function approachEdge(host: HTMLDivElement, direction: "head" | "tail" | "scrollbar") {
@@ -600,6 +635,7 @@ export function Transcript({ target, provider, child, messages, working }: Props
             gesture(current > previous, Math.abs(current - previous));
         }}
         onPointerDown={(event) => {
+          if (anchor.current?.adjacent) anchor.current = undefined;
           const box = event.currentTarget.getBoundingClientRect();
           if (event.target === event.currentTarget && box.right - event.clientX < 17) {
             leaveReopen();
@@ -608,6 +644,7 @@ export function Transcript({ target, provider, child, messages, working }: Props
           }
         }}
         onKeyDown={(event) => {
+          if (anchor.current?.adjacent) anchor.current = undefined;
           if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey) return;
           if (event.key === "End" && !event.shiftKey && event.target === event.currentTarget) {
             event.preventDefault();
@@ -828,6 +865,13 @@ export function Transcript({ target, provider, child, messages, working }: Props
       )}
     </section>
   );
+}
+
+function readingIndex(entries: readonly VisibleRow[], saved: Position, exact = saved.toolEntry) {
+  const index = entries.findIndex((row) => (exact ? row.id : historyId(row)) === saved.id);
+  if (index >= 0 || (exact && !saved.adjacent)) return index;
+  // A retained native entry can become part of a differently keyed collapsed group.
+  return entries.findIndex((row) => row.kind === "tool-run" && row.members.includes(saved.id));
 }
 
 function historyId(row: VisibleRow) {
