@@ -22,7 +22,7 @@ mod selection;
 mod wire;
 
 pub(super) use lease::Leases;
-use lease::{IndexKey, Key};
+use lease::{IndexKey, IndexedPage, Key};
 
 const MAX_PATCH_FILES: u32 = 10_000;
 const MAX_DIFF_RESPONSE: usize = 32 * 1024 * 1024;
@@ -127,15 +127,18 @@ impl ChangeSource for GitLab {
                             })
                             .await;
                     }
-                    Ok(SourcePage {
-                        revision: current,
-                        items: scan.files,
-                        page,
-                        next_page: next,
+                    Ok(IndexedPage {
+                        page: SourcePage {
+                            revision: current,
+                            items: scan.files,
+                            page,
+                            next_page: next,
+                        },
+                        small: scan.small,
                     })
                 })
                 .await?;
-            Ok(indexed.clone())
+            Ok(indexed.page.clone())
         })
     }
 
@@ -168,14 +171,15 @@ impl ChangeSource for GitLab {
         Box::pin(async move {
             let ordinal = ordinal(&file).ok_or(AppError::InvalidRequest)?;
             let current = self.patch_revision(&source, Some(&revision)).await?;
-            let slot = self
-                .patches
-                .slot(Key {
-                    source: source.clone(),
-                    revision,
-                    file: file.clone(),
-                })
-                .await?;
+            let key = Key {
+                source: source.clone(),
+                revision,
+                file: file.clone(),
+            };
+            if let Some(patch) = self.patches.indexed_patch(&key).await {
+                return Ok(patch);
+            }
+            let slot = self.patches.slot(key).await?;
             let patch = slot
                 .get_or_try_init(|| async {
                     let (scan, _) = self

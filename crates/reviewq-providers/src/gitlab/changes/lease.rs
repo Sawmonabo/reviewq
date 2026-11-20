@@ -30,7 +30,12 @@ pub(super) struct IndexKey {
 }
 
 type Slot = Arc<OnceCell<PatchBytes>>;
-type IndexSlot = OnceCell<SourcePage<PatchFile>>;
+pub(super) struct IndexedPage {
+    pub page: SourcePage<PatchFile>,
+    pub small: Vec<(usize, Arc<Body>)>,
+}
+
+type IndexSlot = OnceCell<IndexedPage>;
 
 struct IndexLease {
     key: IndexKey,
@@ -47,7 +52,7 @@ struct Lease {
 pub(in crate::gitlab) struct Leases {
     pub(in crate::gitlab) profile: PathBuf,
     entries: Arc<Mutex<VecDeque<Lease>>>,
-    scans: Mutex<VecDeque<IndexLease>>,
+    scans: Arc<Mutex<VecDeque<IndexLease>>>,
 }
 
 pub(super) enum Body {
@@ -58,7 +63,9 @@ pub(super) enum Body {
 impl Leases {
     pub(in crate::gitlab) fn new(profile: PathBuf) -> Self {
         let entries = Arc::new(Mutex::new(VecDeque::<Lease>::new()));
+        let scans = Arc::new(Mutex::new(VecDeque::<IndexLease>::new()));
         let expiry = Arc::downgrade(&entries);
+        let scan_expiry = Arc::downgrade(&scans);
         tokio::spawn(async move {
             loop {
                 tokio::time::sleep(Duration::from_secs(3)).await;
@@ -69,12 +76,17 @@ impl Leases {
                     .lock()
                     .await
                     .retain(|entry| entry.used_at.elapsed() < INACTIVITY || entry.in_use());
+                if let Some(scans) = scan_expiry.upgrade() {
+                    scans.lock().await.retain(|scan| {
+                        scan.used_at.elapsed() < INACTIVITY || Arc::strong_count(&scan.slot) > 1
+                    });
+                }
             }
         });
         Self {
             profile,
             entries,
-            scans: Mutex::new(VecDeque::new()),
+            scans,
         }
     }
 
@@ -108,6 +120,31 @@ impl Leases {
             used_at: Instant::now(),
         });
         Ok(slot)
+    }
+
+    // An index page already verified the neighboring bytes against the same refs.
+    pub(super) async fn indexed_patch(&self, key: &Key) -> Option<PatchBytes> {
+        let scans = self.scans.lock().await;
+        for scan in scans.iter().rev().filter(|scan| {
+            scan.key.source == key.source
+                && scan.key.revision == key.revision
+                && scan.used_at.elapsed() < INACTIVITY
+        }) {
+            let Some(index) = scan.slot.get() else {
+                continue;
+            };
+            for (ordinal, body) in &index.small {
+                let file = &index.page.items[*ordinal];
+                if file.id == key.file {
+                    return Some(PatchBytes {
+                        revision: index.page.revision.clone(),
+                        file: file.clone(),
+                        body: body.clone(),
+                    });
+                }
+            }
+        }
+        None
     }
 
     pub(super) async fn leased_patch(&self, key: &Key) -> Option<PatchBytes> {

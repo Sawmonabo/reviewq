@@ -1,6 +1,7 @@
 use std::fs::File;
 use std::io::{Read, Write};
 use std::path::Path;
+use std::sync::Arc;
 
 use super::lease::{Body, MEMORY_LIMIT};
 use super::paths::matches_digest;
@@ -13,6 +14,15 @@ use struson::reader::{JsonReader, JsonStreamReader};
 
 mod stats;
 use stats::DiffStats;
+
+const SMALL_PATCH_BYTES: usize = 32 * 1024;
+const SMALL_PATCHES_PER_PAGE_BYTES: usize = 128 * 1024;
+
+#[derive(Clone, Copy)]
+enum Retain {
+    Selected,
+    Small(usize),
+}
 
 #[derive(Default)]
 struct Diff {
@@ -29,6 +39,7 @@ struct Diff {
 pub(super) struct DiffPage {
     pub files: Vec<PatchFile>,
     pub selected: Option<(PatchFile, Body)>,
+    pub small: Vec<(usize, Arc<Body>)>,
 }
 
 pub(super) fn decode(
@@ -44,25 +55,41 @@ pub(super) fn decode(
     let preferred_index = preferred.and_then(super::ordinal);
     let mut files = Vec::new();
     let mut selected = None;
+    let mut small = Vec::new();
+    let mut remaining = SMALL_PATCHES_PER_PAGE_BYTES;
     while reader.has_next().map_err(invalid)? {
         if files.len() >= usize::from(limit) {
             return Err(AppError::Unavailable);
         }
         let index = first + files.len() as u32;
-        let retain =
+        let primary =
             preferred_index.map_or(select_default && selected.is_none(), |value| value == index);
+        let retain = if primary {
+            Retain::Selected
+        } else {
+            Retain::Small(remaining.min(SMALL_PATCH_BYTES))
+        };
         let (file, body) = read_item(&mut reader, profile, index, retain)?;
-        if file.availability == PatchAvailability::Complete
-            && preferred.is_none_or(|required| required == file.id)
-            && let Some(body) = body
-        {
-            selected = Some((file.clone(), body));
+        if let Some(body) = body {
+            if primary && preferred.is_none_or(|required| required == file.id) {
+                selected = Some((file.clone(), body));
+            } else if !primary
+                && let Body::Memory(bytes) = &body
+                && bytes.capacity() <= remaining
+            {
+                remaining -= bytes.capacity();
+                small.push((files.len(), Arc::new(body)));
+            }
         }
         files.push(file);
     }
     reader.end_array().map_err(invalid)?;
     reader.consume_trailing_whitespace().map_err(invalid)?;
-    Ok(DiffPage { files, selected })
+    Ok(DiffPage {
+        files,
+        selected,
+        small,
+    })
 }
 
 pub(super) fn find_file(
@@ -113,7 +140,7 @@ fn read_item(
     reader: &mut JsonStreamReader<ResponseReader>,
     profile: &Path,
     ordinal: u32,
-    retain: bool,
+    retain: Retain,
 ) -> Result<(PatchFile, Option<Body>), AppError> {
     let mut info = Diff::default();
     let mut payload = None;
@@ -238,7 +265,7 @@ impl BodyScan {
 fn body(
     mut reader: impl Read,
     profile: &Path,
-    retain: bool,
+    retain: Retain,
 ) -> Result<(PatchMetrics, Option<Body>, bool), AppError> {
     let mut scan = BodyScan {
         length: 0,
@@ -252,6 +279,7 @@ fn body(
     // Read loop below uses fixed-sized blocks even for a multi-megabyte JSON string.
     let mut buffer = [0; 64 * 1024];
     let mut prefix = Vec::new();
+    let mut keep = !matches!(retain, Retain::Small(0));
     let mut file: Option<File> = None;
     let mut identification = Vec::new();
     loop {
@@ -265,7 +293,11 @@ fn body(
             identification.extend_from_slice(&chunk[..copy]);
         }
         scan.inspect(chunk);
-        if retain {
+        if keep && matches!(retain, Retain::Small(limit) if scan.length > limit) {
+            keep = false;
+            prefix = Vec::new();
+        }
+        if keep {
             if file.is_none() && scan.length > MEMORY_LIMIT {
                 let mut body = private_file(profile).map_err(|_| AppError::Internal)?;
                 body.write_all(&prefix).map_err(|_| AppError::Internal)?;
@@ -281,7 +313,7 @@ fn body(
     }
     let binary = identification.starts_with(b"Binary files ")
         || identification.starts_with(b"GIT binary patch");
-    let data = retain.then(|| file.map_or(Body::Memory(prefix), |file| Body::File(file.into())));
+    let data = keep.then(|| file.map_or(Body::Memory(prefix), |file| Body::File(file.into())));
     Ok((scan.finish(), data, binary))
 }
 
