@@ -293,7 +293,7 @@ export default function Findings({ run, drafts, reviewTitle, webUrl, followup, o
       {report && (
         <article className="stack" aria-label="Accepted findings">
           <ReportDocument
-            key={report.receiptId}
+            key={JSON.stringify([report.receiptId, report.sha256])}
             run={run}
             report={report}
             current={chosen === latestId}

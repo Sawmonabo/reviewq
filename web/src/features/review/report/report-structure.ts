@@ -41,15 +41,11 @@ export function reportStructure(
   source: string,
   summary: ReportHeader,
   changes: ReadonlyMap<string, AcceptedFindingChange> | null | undefined,
+  body?: { readonly previousThreads: boolean },
 ): readonly RootContent[] {
   const article = nodes.filter((node) => node.type !== "text" || node.value.trim());
   const output: RootContent[] = [];
-  const firstSection = article.findIndex(
-    (node) =>
-      node.type === "element" &&
-      (/^h[23]$/.test(node.tagName) || node.tagName === "table") &&
-      !authoredVerdict(node),
-  );
+  const firstSection = body ? 0 : article.findIndex(startsReportBody);
   const introEnd = firstSection < 0 ? article.length : firstSection;
   const introduction = article.slice(0, introEnd);
   const hasAuthoredVerdict = introduction.some(
@@ -60,7 +56,7 @@ export function reportStructure(
   );
   let addedVerdict = false;
   let addedCounts = false;
-  let previousThreads = false;
+  let previousThreads = body?.previousThreads ?? false;
 
   function addSummary() {
     if (!addedVerdict && !hasAuthoredVerdict && summary.verdict !== "not_specified") {
@@ -88,7 +84,7 @@ export function reportStructure(
     }
     const next = article[index + 1];
     const previous = article[index - 1];
-    if (index === introEnd) addSummary();
+    if (!body && index === introEnd) addSummary();
     if (index < introEnd) {
       const recognized = authoredVerdict(node);
       if (recognized) {
@@ -151,11 +147,22 @@ export function reportStructure(
         continue;
       }
     }
-    if (node.tagName === "h2") previousThreads = threadSections.test(reportText(node).trim());
+    if (node.tagName === "h2") previousThreads = isThreadSection(reportText(node).trim());
     output.push(node.tagName === "table" ? reportTable(node, previousThreads, changes) : node);
   }
   if (firstSection < 0) addSummary();
   return output;
+}
+
+export function startsReportBody(node: RootContent) {
+  return (
+    node.type === "element" &&
+    (/^h[23]$/.test(node.tagName) || node.tagName === "table") &&
+    !authoredVerdict(node)
+  );
+}
+export function isThreadSection(label: string) {
+  return threadSections.test(label);
 }
 
 function authoredVerdict(node: Element):

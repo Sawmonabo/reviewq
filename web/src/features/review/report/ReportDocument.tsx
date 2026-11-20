@@ -1,7 +1,14 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { RunDetail } from "../../../api/generated/contracts";
 import type { QuoteRef, ReportSummary } from "../../../api/generated/contracts/reports";
-import { reportContext, reportDownload, reportFeedback, reportView } from "../../../api/reports";
+import {
+  reportContext,
+  reportDownload,
+  reportFeedback,
+  resolveReportQuote,
+  reportView,
+  reportWindow,
+} from "../../../api/reports";
 import { ActionMenu } from "../../../components/ActionMenu";
 import { Icon } from "../../../components/Icon";
 import { Empty, Loading, Notice } from "../../../components/PanelState";
@@ -14,6 +21,8 @@ import { Composer } from "../Composer";
 import { ReportDetails } from "./ReportDetails";
 import { ReportSource } from "./ReportSource";
 import { RichReport } from "./RichReport";
+import { finishReading, readBookmark } from "./report-position";
+import { canWindowReport, wholeDocument, indexedDocument } from "./report-reader";
 import type { AcceptedFindingChange } from "./report-structure";
 import { useVisibleContent } from "./useVisibleContent";
 
@@ -65,33 +74,45 @@ export default function ReportDocument({
     report.byteLength <= 1024 * 1024 &&
     report.lineCount <= 10_000 &&
     report.maxLineBytes <= 16_384;
-  const body = useResource(`report-body:${run.runId}:${report.receiptId}:${admitted}`, (signal) =>
-    admitted
-      ? reportView(run.runId, signal, report.receiptId, "markdown")
-      : Promise.resolve({ data: null, cursor: "" }),
+  const bookmark = `findings.position.${run.runId}.${report.receiptId}.${report.sha256}`;
+  const full = useRef(false);
+  const body = useResource(
+    JSON.stringify(["accepted-document", run.runId, report.receiptId, report.sha256]),
+    async (signal) => {
+      if (!admitted) return { cursor: "", data: null };
+      const position = readBookmark(bookmark);
+      const result = await loadReport(
+        run.runId,
+        report,
+        safeUrl(webUrl),
+        position,
+        full.current,
+        signal,
+      );
+      // The immutable receipt can refresh its accepted outcomes or formatting.
+      // A selection made while that response was in flight still belongs to the live DOM.
+      await finishReading(reader.current?.querySelector(".report-blocks") ?? null, signal);
+      signal.throwIfAborted();
+      return result;
+    },
   );
-  const changes = useResource(`report-outcomes:${run.runId}:${report.receiptId}`, (signal) =>
-    admitted && report.changeCount
-      ? acceptedChanges(run.runId, report, signal)
-      : Promise.resolve({ data: null, cursor: "" }),
-  );
-  const markdown = body.data?.report?.sha256 === report.sha256 ? body.data?.markdown : undefined;
-  const base = safeUrl(webUrl);
-  const tree = useMemo(() => {
-    if (typeof markdown !== "string") return;
-    try {
-      return parseMarkdown(markdown, base);
-    } catch {
-      return undefined;
-    }
-  }, [markdown, base]);
-  const formattingFailure = Boolean(typeof markdown === "string" && !tree);
+  const displayed = body.data;
+  const resolving = useRef<AbortController | undefined>(undefined);
+  useEffect(() => () => resolving.current?.abort(), [quoteKey]);
+  const formattingFailure = Boolean(displayed?.formattingFailure);
   const sourceMode = source || !admitted || formattingFailure || Boolean(body.error);
+  function fallback() {
+    if (!full.current) {
+      full.current = true;
+      body.retry();
+    }
+  }
   const target = { runId: run.runId, sessionKey: run.leadSessionKey };
   useVisibleContent(
     reader,
-    !sourceMode && !changes.pending && tree ? report.receiptId : undefined,
+    !sourceMode && displayed?.reader ? report.receiptId : undefined,
     onRendered,
+    ".report-authored",
   );
 
   function focusFeedback() {
@@ -105,6 +126,8 @@ export default function ReportDocument({
   }
 
   function writeQuote(next?: Quote) {
+    resolving.current?.abort();
+    resolving.current = undefined;
     const saved = drafts.set(quoteKey, quoteLabel, next ? JSON.stringify(next) : "");
     if (!saved) setFeedbackNotice("Draft storage full. Free space before editing the quote.");
     return saved;
@@ -120,21 +143,37 @@ export default function ReportDocument({
     if (focus) focusFeedback();
   }
 
-  function verifyPassage() {
+  async function verifyPassage() {
     const text = quote?.text;
     if (!text?.trim() || quote?.reference) return;
-    const offset = markdown?.indexOf(text) ?? -1;
-    if (typeof markdown !== "string" || offset < 0) {
-      setFeedbackNotice("Select an exact passage in the report or original source.");
+    if ([...text].length > 12_000) {
+      setFeedbackNotice("Select a non-empty quote up to 12,000 characters.");
       return;
     }
-    if (markdown.indexOf(text, offset + 1) !== -1) {
-      setFeedbackNotice(
-        "This passage appears more than once. Select the intended occurrence in the report.",
+    resolving.current?.abort();
+    const controller = new AbortController();
+    resolving.current = controller;
+    function currentDraft() {
+      return (
+        !controller.signal.aborted &&
+        drafts.getSnapshot().entries.find((entry) => entry.key === quoteKey)?.text === quoteDraft
       );
-      return;
     }
-    capture(text, [...markdown.slice(0, offset)].length, false);
+    try {
+      const result = await resolveReportQuote(run.runId, report, text, controller.signal);
+      if (!currentDraft()) return;
+      if (result.state === "unique") capture(text, result.offset, false);
+      else
+        setFeedbackNotice(
+          result.state === "ambiguous"
+            ? "This passage appears more than once. Select the intended occurrence in the report."
+            : "Select an exact passage in the report or original source.",
+        );
+    } catch {
+      if (currentDraft()) setFeedbackNotice("Could not check this passage. Try again.");
+    } finally {
+      if (resolving.current === controller) resolving.current = undefined;
+    }
   }
 
   function openSource(offset = 0) {
@@ -151,8 +190,8 @@ export default function ReportDocument({
     <>
       <div className="report-reader" ref={reader}>
         {notice && <Notice>{notice}</Notice>}
-        {!sourceMode && changes.error && (
-          <Notice retry={changes.retry}>Accepted finding outcomes are unavailable.</Notice>
+        {!sourceMode && displayed?.outcomeError && (
+          <Notice retry={body.retry}>Accepted finding outcomes are unavailable.</Notice>
         )}
         {sourceMode ? (
           <ReportSource
@@ -173,15 +212,14 @@ export default function ReportDocument({
             onQuote={capture}
             onRendered={onRendered}
           />
-        ) : body.pending || changes.pending ? (
+        ) : body.pending ? (
           <Loading label="Loading accepted report…" />
-        ) : tree && typeof markdown === "string" ? (
+        ) : displayed?.reader ? (
           <RichReport
-            tree={tree}
-            source={markdown}
+            document={displayed.reader}
             report={report}
-            changes={changes.data}
-            bookmark={`findings.position.${run.runId}.${report.receiptId}.${report.sha256}`}
+            onFallback={fallback}
+            bookmark={bookmark}
             onQuote={capture}
             onSource={(offset) => {
               openSource(offset);
@@ -288,7 +326,7 @@ export default function ReportDocument({
                 type="button"
                 className="quiet-button"
                 disabled={!quote.text.trim()}
-                onClick={verifyPassage}
+                onClick={() => void verifyPassage()}
               >
                 Attach passage
               </button>
@@ -339,6 +377,88 @@ export default function ReportDocument({
       </section>
     </>
   );
+}
+
+async function loadReport(
+  runId: string,
+  report: ReportSummary,
+  base: string | undefined,
+  position: ReturnType<typeof readBookmark>,
+  full: boolean,
+  signal: AbortSignal,
+) {
+  const eligible = !full && canWindowReport(report);
+  const [outcomes, entry] = await Promise.all([
+    report.changeCount
+      ? acceptedChanges(runId, report, signal)
+          .then((result) => ({ changes: result.data, error: false }))
+          .catch(() => {
+            signal.throwIfAborted();
+            return { changes: undefined, error: true };
+          })
+      : Promise.resolve({ changes: undefined, error: false }),
+    eligible
+      ? reportWindow(runId, report, signal, {
+          layout: true,
+          ...(position?.byte !== undefined && { byteOffset: position.byte }),
+        })
+          .then((result) => ({ window: result.data.result, cursor: result.cursor }))
+          .catch(() => {
+            signal.throwIfAborted();
+            return undefined;
+          })
+      : reportView(runId, signal, report.receiptId, "markdown").then((result) => ({
+          body: result.data,
+          cursor: result.cursor,
+        })),
+  ]);
+  signal.throwIfAborted();
+  if (entry && "window" in entry && entry.window.state === "ready" && entry.window.layout) {
+    try {
+      const reader = indexedDocument(
+        runId,
+        report,
+        entry.window,
+        outcomes.changes,
+        base,
+        position?.offset,
+      );
+      return {
+        cursor: entry.cursor,
+        data: {
+          reader,
+          formattingFailure: false,
+          outcomeError: outcomes.error,
+        },
+      };
+    } catch {
+      signal.throwIfAborted();
+    }
+  }
+  const response =
+    entry && "body" in entry
+      ? { cursor: entry.cursor, data: entry.body }
+      : await reportView(runId, signal, report.receiptId, "markdown");
+  signal.throwIfAborted();
+  const markdown =
+    response.data.report?.sha256 === report.sha256 ? response.data.markdown : undefined;
+  let tree;
+  try {
+    if (typeof markdown === "string") tree = parseMarkdown(markdown, base);
+  } catch {
+    tree = undefined;
+  }
+  return {
+    cursor: response.cursor,
+    data: {
+      reader:
+        tree && typeof markdown === "string"
+          ? wholeDocument(markdown, tree, report, outcomes.changes)
+          : undefined,
+      formattingFailure: typeof markdown === "string" && !tree,
+      outcomeError: outcomes.error,
+    },
+  };
 }
 
 function scrollWithinDrawer(element: HTMLElement) {

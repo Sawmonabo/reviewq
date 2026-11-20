@@ -14,9 +14,7 @@ type AuthoredFinding = {
   readonly header: readonly RootContent[];
   readonly fields: readonly Field[];
 };
-export type ReportBlock = {
-  readonly sourceOrder: number;
-  readonly offset: number;
+export type ReportBlock = GroupPosition & {
   readonly end: number;
   readonly nodes: readonly RootContent[];
   readonly name?: string;
@@ -27,98 +25,145 @@ const findingHeading = /^(F-\d{1,16})(?=$|[\s:.–—-])\s*(?:[·:.–—-]\s*)?
 const fieldName =
   /^(Issue|Why it matters|Confirmed|Proposed comment|Location|Evidence|Suggested fix)(?=\s*(?:[:.—]|$))/i;
 
-export function reportBlocks(
-  tree: Root,
-  source: string,
-  report: ReportSummary,
-  changes: ReadonlyMap<string, AcceptedFindingChange> | null | undefined,
-): ReportBlock[] {
-  const blocks: {
-    offset: number;
-    nodes: RootContent[];
-    name?: string;
-    findingGroup: boolean;
-  }[] = [];
-  let current = blocks.at(-1);
+export type GroupPosition = {
+  readonly sourceOrder: number;
+  readonly offset: number;
+  readonly name?: string;
+  readonly findingId?: string;
+};
+
+export function groupReportItems<T>(
+  items: readonly T[],
+  describe: (item: T) => {
+    readonly level?: number;
+    readonly label?: string;
+    readonly offset?: number;
+  },
+) {
+  const groups: { offset: number; items: T[]; name?: string; findingId?: string }[] = [];
+  let current = groups.at(-1);
   let hasSection = false;
-  for (const node of reportStructure(tree.children, source, report, changes)) {
+  for (const item of items) {
+    const { level, label, offset } = describe(item);
     const heading =
-      node.type === "element" && (hasSection ? /^h[1-3]$/ : /^h[2-3]$/).test(node.tagName)
-        ? text(node).trim()
-        : "";
+      level !== undefined && level >= (hasSection ? 1 : 2) && level <= 3 ? label : undefined;
     if (
       !current ||
       heading ||
-      (!current.findingGroup && current.nodes.length >= 24 && node.position?.start.offset != null)
+      (!current.findingId && current.items.length >= 24 && offset !== undefined)
     ) {
+      const id = heading && level === 3 ? findingHeading.exec(heading)?.[1] : undefined;
       current = {
-        offset: node.position?.start.offset ?? -1,
-        findingGroup: Boolean(
-          heading &&
-          node.type === "element" &&
-          node.tagName === "h3" &&
-          findingHeading.test(heading),
-        ),
-        nodes: [],
-        ...(heading && node.type === "element" && node.tagName === "h2" ? { name: heading } : {}),
+        offset: offset ?? -1,
+        items: [],
+        ...(heading && level === 2 && { name: heading }),
+        ...(id && { findingId: id }),
       };
-      blocks.push(current);
+      groups.push(current);
     }
     if (heading) hasSection = true;
-    if (current.offset < 0 && node.position?.start.offset !== undefined)
-      current.offset = node.position.start.offset;
-    current.nodes.push(node);
+    if (current.offset < 0 && offset !== undefined) current.offset = offset;
+    current.items.push(item);
   }
-  const rendered = blocks.map((block, index) => {
-    const finding = authoredFinding(block.nodes, source, changes);
-    return {
-      ...block,
-      sourceOrder: index,
-      nodes: finding ? [] : annotate(block.nodes),
-      end: blocks[index + 1]?.offset ?? source.length,
-      ...(finding ? { finding } : {}),
-    };
-  });
-  const retired = rendered.filter((block) => isRetired(block.finding?.change));
-  if (!retired.length) return rendered;
-  const active = rendered.filter((block) => !isRetired(block.finding?.change));
+  return groups;
+}
+
+export function inDisplayOrder<T extends GroupPosition>(
+  groups: readonly T[],
+  changes: ReadonlyMap<string, AcceptedFindingChange> | null | undefined,
+) {
+  const retired = groups.filter(
+    (group) => group.findingId && isRetired(changes?.get(group.findingId)),
+  );
+  if (!retired.length) return groups;
+  const active = groups.filter((group) => !retired.includes(group));
   const previous = active.findIndex(
-    (block) =>
-      block.name &&
+    (group) =>
+      group.name &&
       /^(?:(?:our )?previous threads|prior(?: review)? threads|discussion outcomes)$/i.test(
-        block.name,
+        group.name,
       ),
   );
   const next =
     previous < 0
       ? -1
-      : active.findIndex((block, index) => index > previous && (block.name || block.finding));
+      : active.findIndex((group, index) => index > previous && (group.name || group.findingId));
   active.splice(next < 0 ? active.length : next, 0, ...retired);
   return active;
 }
 
-export function selectionSource(
-  range: Range,
+export function reportBlocks(
+  tree: Root,
   source: string,
-  start: ReportBlock,
-  end: ReportBlock,
-): { readonly offset: number; readonly text: string } | undefined {
-  if (!range.toString().trim()) return;
-  const from = sourcePoint(source, range, "start");
-  const to = sourcePoint(source, range, "end");
+  report: ReportSummary,
+  changes: ReadonlyMap<string, AcceptedFindingChange> | null | undefined,
+  body?: { readonly previousThreads: boolean },
+): readonly ReportBlock[] {
+  const groups = groupReportItems(
+    reportStructure(tree.children, source, report, changes, body),
+    (node) => {
+      const level =
+        node.type === "element" && /^h[1-3]$/.test(node.tagName)
+          ? Number(node.tagName[1])
+          : undefined;
+      return {
+        ...(level && { level, label: text(node).trim() }),
+        ...(node.position?.start.offset !== undefined && { offset: node.position.start.offset }),
+      };
+    },
+  );
+  return inDisplayOrder(
+    groups.map((group, index) => {
+      const finding = authoredFinding(group.items, source, changes);
+      return {
+        offset: group.offset,
+        sourceOrder: index,
+        end: groups[index + 1]?.offset ?? source.length,
+        nodes: finding ? [] : annotate(group.items),
+        ...(group.name && { name: group.name }),
+        ...(finding && { finding, findingId: finding.id }),
+      };
+    }),
+    changes,
+  );
+}
 
+export type ReportText = { readonly text: string; readonly utf16: number; readonly scalar: number };
+export type PreparedGroup = { readonly block: ReportBlock; readonly source: ReportText };
+
+export function selectionSource(range: Range, groups: readonly PreparedGroup[]) {
+  const start = groups[0],
+    end = groups.at(-1);
+  if (!start || !end || !range.toString().trim()) return;
+  const from = sourcePoint(start.source.text, range, "start");
+  const to = sourcePoint(end.source.text, range, "end");
+  if (from === undefined || to === undefined || from < start.block.offset || to > end.block.end)
+    return;
+  const slices = [...new Set(groups.map((group) => group.source))];
   if (
-    from !== undefined &&
-    to !== undefined &&
-    start.offset >= 0 &&
-    start.offset <= from &&
-    from < to &&
-    to <= end.end
-  ) {
-    const exact = source.slice(from, to);
-    const trimmed = exact.trim();
-    if (trimmed) return { offset: from + exact.indexOf(trimmed), text: trimmed };
-  }
+    !slices.every(
+      (slice, i) => i === 0 || slices[i - 1]!.utf16 + slices[i - 1]!.text.length === slice.utf16,
+    )
+  )
+    return;
+  const exact =
+    slices.length === 1
+      ? start.source.text.slice(from, to)
+      : [
+          start.source.text.slice(from),
+          ...slices.slice(1, -1).map((slice) => slice.text),
+          end.source.text.slice(0, to),
+        ].join("");
+  const text = exact.trim();
+  if (!text) return;
+  return {
+    text,
+    offset: scalarOffset(start.source, from) + [...exact.slice(0, exact.indexOf(text))].length,
+  };
+}
+
+export function scalarOffset(slice: ReportText, local: number) {
+  return slice.scalar + [...slice.text.slice(0, Math.max(0, local))].length;
 }
 
 function sourcePoint(source: string, range: Range, boundary: "start" | "end") {

@@ -1,20 +1,20 @@
 import { defaultRangeExtractor, useVirtualizer } from "@tanstack/react-virtual";
-import type { Root } from "hast";
-import { useCallback, useEffect, useLayoutEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { ReportSummary } from "../../../api/generated/contracts/reports";
 import { MarkdownTree } from "../../../components/markdown/MarkdownContent";
-import { savedValue, saveValue } from "../../../lib/view-preferences";
+import { bookmarkAt, readBookmark, restoreBookmark } from "./report-position";
+import { saveValue } from "../../../lib/view-preferences";
 import {
   parentElement,
-  reportBlocks,
+  scalarOffset,
   reportParagraphQuote,
   selectionSource,
 } from "./report-presentation";
-import type { ReportBlock } from "./report-presentation";
+import type { PreparedGroup, ReportBlock } from "./report-presentation";
 import { isRetired, outcomeLabels } from "./report-structure";
-import type { AcceptedFindingChange } from "./report-structure";
+import type { ReaderDocument } from "./report-reader";
+import { useReportPreparation } from "./useReportPreparation";
 
-type Bookmark = { readonly top: number; readonly offset?: number; readonly inset?: number };
 type Quote = { readonly text: string; readonly offset: number };
 type Selection = {
   readonly quote?: Quote;
@@ -23,18 +23,16 @@ type Selection = {
 };
 
 export function RichReport({
-  tree,
-  source,
+  document: reader,
+  onFallback,
   report,
-  changes,
   bookmark,
   onQuote,
   onSource,
 }: {
-  readonly tree: Root;
-  readonly source: string;
+  readonly document: ReaderDocument;
+  readonly onFallback: () => void;
   readonly report: ReportSummary;
-  readonly changes: ReadonlyMap<string, AcceptedFindingChange> | null | undefined;
   readonly bookmark: string;
   readonly onQuote: (text: string, offset: number) => void;
   readonly onSource: (offset: number) => void;
@@ -46,15 +44,19 @@ export function RichReport({
   const [selection, setSelection] = useState<Selection>();
   const [saved] = useState(() => readBookmark(bookmark));
   const [restored, setRestored] = useState(!saved);
-  const blocks = useMemo(
-    () => reportBlocks(tree, source, report, changes),
-    [tree, source, report, changes],
+  const blocks = reader.groups;
+
+  const [focused, setFocused] = useState<number>();
+  const openDetails = useRef(new Set<number>());
+
+  const navigationAfter = Math.max(
+    0,
+    blocks.findIndex((block) => block.name || block.findingId) - 1,
   );
-  const navigationAfter = Math.max(0, blocks.findIndex((block) => block.name || block.finding) - 1);
   const sections = blocks.flatMap((block, index) =>
-    block.name && !block.finding ? [{ index, label: block.name }] : [],
+    block.name && !block.findingId ? [{ index, label: block.name }] : [],
   );
-  const usesVirtual = blocks.length > 17;
+  const usesVirtual = Boolean(reader.prepare) || blocks.length > 17;
   const restoreIndex =
     !restored && saved?.offset !== undefined
       ? blocks.findIndex((block) => block.offset === saved.offset)
@@ -67,21 +69,46 @@ export function RichReport({
     (value: Parameters<typeof defaultRangeExtractor>[0]) => {
       const indexes = new Set([...defaultRangeExtractor(value), ...pinned]);
       if (restoreIndex >= 0) indexes.add(restoreIndex);
+      if (focused !== undefined) indexes.add(focused);
       return [...indexes].sort((a, b) => a - b);
     },
-    [pinned, restoreIndex],
+    [pinned, restoreIndex, focused],
   );
   // The measured rows and virtualizer stay inside this renderer.
   // eslint-disable-next-line react-hooks/incompatible-library
   const virtual = useVirtualizer({
     count: usesVirtual ? blocks.length : 0,
     estimateSize: () => 230,
+    initialRect: { width: window.innerWidth, height: window.innerHeight },
     getScrollElement: () => scroll,
     getItemKey: (index) => `${index}:${blocks[index]?.offset ?? -1}`,
     scrollMargin: margin,
     overscan: 3,
     rangeExtractor: range,
   });
+
+  const items = virtual.getVirtualItems();
+  const firstVisible = virtual.range?.startIndex ?? 0;
+  const lastVisible = virtual.range?.endIndex ?? 0;
+  const seeking = restoreIndex >= 0 && (restoreIndex < firstVisible || restoreIndex > lastVisible);
+  const wanted = !reader.prepare
+    ? ""
+    : [
+        ...new Set([
+          ...(restoreIndex >= 0 ? [restoreIndex] : []),
+          ...(!seeking
+            ? items
+                .filter((item) => item.index >= firstVisible && item.index <= lastVisible)
+                .map((item) => item.index)
+            : []),
+          ...(!seeking
+            ? items
+                .filter((item) => item.index >= firstVisible - 3 && item.index <= lastVisible + 3)
+                .map((item) => item.index)
+            : []),
+        ]),
+      ].join(",");
+  useReportPreparation(reader, wanted, [...pinned, focused].join(","), host, onFallback);
 
   useLayoutEffect(() => {
     if (!host || !scroll || !usesVirtual) return;
@@ -104,37 +131,20 @@ export function RichReport({
     };
   }, [host, scroll, usesVirtual]);
 
+  const restoreReady = restoreIndex < 0 || Boolean(reader.prepared(restoreIndex));
   useLayoutEffect(() => {
-    if (!host || !scroll || restored || !saved) return;
-    const element = host;
-    const container = scroll;
-    const position = saved;
-    let frame = requestAnimationFrame(restore);
-    let attempts = 0;
-    function restore() {
-      const row = restoreIndex >= 0 ? blockElement(element, restoreIndex) : undefined;
-      if (row && position.inset !== undefined) {
-        container.scrollTop +=
-          row.getBoundingClientRect().top - container.getBoundingClientRect().top - position.inset;
-      } else if (restoreIndex >= 0 && usesVirtual) {
-        virtual.scrollToIndex(restoreIndex, { align: "start" });
-      } else {
-        container.scrollTop = position.top;
-      }
-      if (++attempts < 3) frame = requestAnimationFrame(restore);
-      else setRestored(true);
-    }
-    return () => cancelAnimationFrame(frame);
-  }, [host, scroll, restored, saved, restoreIndex, usesVirtual, virtual]);
+    if (!host || !scroll || restored || !saved || !restoreReady) return;
+    return restoreBookmark(host, scroll, saved, restoreIndex, () => setRestored(true));
+  }, [host, scroll, restored, saved, restoreIndex, restoreReady]);
 
   useEffect(() => {
     if (!host || !scroll || !restored) return;
     const element = host;
     const container = scroll;
-    let last = bookmarkAt(element, container);
+    let last = bookmarkAt(element, container, reader);
     let timer: number | undefined;
     function record() {
-      last = bookmarkAt(element, container);
+      last = bookmarkAt(element, container, reader);
       if (timer !== undefined) window.clearTimeout(timer);
       timer = window.setTimeout(commit, 180);
     }
@@ -149,7 +159,7 @@ export function RichReport({
       if (timer !== undefined) window.clearTimeout(timer);
       commit();
     };
-  }, [bookmark, host, scroll, restored]);
+  }, [bookmark, host, scroll, restored, reader]);
 
   useEffect(() => {
     if (!host) return;
@@ -176,9 +186,15 @@ export function RichReport({
       const inSourceOrder = blocks
         .slice(first, last + 1)
         .every((block, index) => block.sourceOrder === start.sourceOrder + index);
-      const exact = inSourceOrder ? selectionSource(selected, source, start, end) : undefined;
+      const groups = blocks.slice(first, last + 1).map((_, i) => reader.prepared(first + i));
+      const firstGroup = groups[0];
+      if (!firstGroup) return;
+      const exact =
+        inSourceOrder && groups.every((group): group is PreparedGroup => Boolean(group))
+          ? selectionSource(selected, groups)
+          : undefined;
       setSelection({
-        fallback: Math.max(0, start.offset),
+        fallback: scalarOffset(firstGroup.source, firstGroup.block.offset),
         ...(exact ? { quote: exact } : {}),
       });
       if (usesVirtual) {
@@ -190,7 +206,7 @@ export function RichReport({
     }
     document.addEventListener("selectionchange", capture);
     return () => document.removeEventListener("selectionchange", capture);
-  }, [blocks, host, source, usesVirtual]);
+  }, [blocks, host, reader, usesVirtual]);
 
   function jump(index: number) {
     if (!host || !scroll) return;
@@ -254,7 +270,14 @@ export function RichReport({
       <>
         {finding ? (
           retired ? (
-            <details className="report-retired-finding">
+            <details
+              className="report-retired-finding"
+              open={openDetails.current.has(index)}
+              onToggle={(event) => {
+                if (event.currentTarget.open) openDetails.current.add(index);
+                else openDetails.current.delete(index);
+              }}
+            >
               <summary>
                 <strong>
                   {finding.id} · {outcome}
@@ -290,11 +313,31 @@ export function RichReport({
     );
   }
 
+  function renderPrepared(index: number) {
+    const group = reader.prepared(index);
+    return group ? (
+      renderBlock(group.block, index)
+    ) : (
+      <div
+        className="report-preparing"
+        aria-busy="true"
+        style={{ minHeight: virtual.measurementsCache[index]?.size ?? 230 }}
+      />
+    );
+  }
+
   return (
     <section className="rich-report" aria-label="Formatted accepted report">
       <div
         className="report-blocks"
         ref={setRoot}
+        onFocusCapture={(event) => {
+          const row = event.target.closest<HTMLElement>("[data-report-block]");
+          setFocused(row ? Number(row.dataset.reportBlock) : undefined);
+        }}
+        onBlurCapture={(event) => {
+          if (!event.currentTarget.contains(event.relatedTarget)) setFocused(undefined);
+        }}
         onPointerDown={() => {
           setSelection((current) => (current?.paragraph ? undefined : current));
         }}
@@ -307,17 +350,19 @@ export function RichReport({
           )
             return;
           const paragraph = target.closest<HTMLElement>("p[data-report-paragraph-start]");
-          const block = paragraph ? blocks[blockIndex(paragraph)] : undefined;
-          if (!paragraph || !block) return;
-          const quote = reportParagraphQuote(paragraph, source, block);
+          const group = paragraph ? reader.prepared(blockIndex(paragraph)) : undefined;
+          const block = group?.block;
+          if (!paragraph || !block || !group) return;
+          const quote = reportParagraphQuote(paragraph, group.source.text, block);
           if (!quote) return;
-          setSelection({ quote, fallback: quote.offset, paragraph: true });
+          const offset = scalarOffset(group.source, quote.offset);
+          setSelection({ quote: { text: quote.text, offset }, fallback: offset, paragraph: true });
           if (usesVirtual) setPinned([blockIndex(paragraph)]);
         }}
         style={usesVirtual ? { height: virtual.getTotalSize(), position: "relative" } : undefined}
       >
         {usesVirtual
-          ? virtual.getVirtualItems().map((item) => {
+          ? items.map((item) => {
               const block = blocks[item.index];
               if (!block) return null;
               return (
@@ -333,13 +378,13 @@ export function RichReport({
                     transform: `translateY(${item.start - margin}px)`,
                   }}
                 >
-                  {renderBlock(block, item.index)}
+                  {renderPrepared(item.index)}
                 </div>
               );
             })
           : blocks.map((block, index) => (
               <div key={index} data-report-block={index} data-report-offset={block.offset}>
-                {renderBlock(block, index)}
+                {renderPrepared(index)}
               </div>
             ))}
       </div>
@@ -351,8 +396,8 @@ export function RichReport({
             onPointerDown={(event) => event.preventDefault()}
             onClick={() =>
               selection.quote
-                ? onQuote(selection.quote.text, [...source.slice(0, selection.quote.offset)].length)
-                : onSource([...source.slice(0, selection.fallback)].length)
+                ? onQuote(selection.quote.text, selection.quote.offset)
+                : onSource(selection.fallback)
             }
           >
             Comment on selected finding
@@ -371,47 +416,4 @@ function blockIndex(node: Node) {
   const author = parentElement(node)?.closest(".report-authored");
   const value = author?.closest<HTMLElement>("[data-report-block]")?.dataset.reportBlock;
   return value === undefined ? -1 : Number(value);
-}
-
-function bookmarkAt(host: HTMLElement, scroll: HTMLElement): Bookmark {
-  const top = scroll.scrollTop;
-  const frame = scroll.getBoundingClientRect();
-  for (const row of host.querySelectorAll<HTMLElement>("[data-report-offset]")) {
-    const bounds = row.getBoundingClientRect();
-    const offset = Number(row.dataset.reportOffset);
-    if (
-      bounds.bottom > frame.top &&
-      bounds.top < frame.bottom &&
-      Number.isSafeInteger(offset) &&
-      offset >= 0
-    ) {
-      return { top, offset, inset: bounds.top - frame.top };
-    }
-  }
-  return { top };
-}
-
-function readBookmark(key: string): Bookmark | undefined {
-  const item = savedValue(key);
-  if (
-    !item ||
-    typeof item !== "object" ||
-    !("top" in item) ||
-    typeof item.top !== "number" ||
-    !Number.isFinite(item.top) ||
-    item.top < 0
-  )
-    return;
-  if (
-    "offset" in item &&
-    typeof item.offset === "number" &&
-    Number.isSafeInteger(item.offset) &&
-    item.offset >= 0 &&
-    "inset" in item &&
-    typeof item.inset === "number" &&
-    Number.isFinite(item.inset)
-  ) {
-    return { top: item.top, offset: item.offset, inset: item.inset };
-  }
-  return { top: item.top };
 }

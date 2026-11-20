@@ -2,16 +2,20 @@ import { queryString, read, write } from "./client";
 import type {
   ReportDispositionRequest,
   ReportFeedbackRequest,
+  ReportQuoteResolveRequest,
   ReportViewedRequest,
+  ReportSummary,
 } from "./generated/contracts";
 import {
   isDeliveryReceiptResponse,
   isReportContextResponse,
   isReportDispositionResponse,
   isReportHistoryResponse,
+  isReportQuoteResolveResponse,
   isReportSectionResponse,
   isReportViewResponse,
   isReportViewedResponse,
+  isReportWindowResponse,
 } from "./generated/validators.mjs";
 import { verifyReceipt } from "./history";
 import type { SessionAddress } from "./history";
@@ -30,6 +34,56 @@ export async function reportView(
   );
   if (receipt && result.data.report?.receiptId !== receipt)
     throw new Error("The displayed report version changed.");
+  return result;
+}
+
+export async function reportWindow(
+  runId: string,
+  report: ReportSummary,
+  signal: AbortSignal,
+  range: { readonly byteOffset?: number; readonly byteEnd?: number; readonly layout?: boolean },
+) {
+  const result = await read(
+    `${versionPath(runId, report.receiptId)}/window${queryString({ sha256: report.sha256, ...range })}`,
+    isReportWindowResponse,
+    signal,
+    640 * 1024,
+  );
+  const returned = result.data.report;
+  if (
+    result.data.indexFormat !== 2 ||
+    returned.receiptId !== report.receiptId ||
+    returned.sha256 !== report.sha256 ||
+    returned.byteLength !== report.byteLength ||
+    returned.totalCodePoints !== report.totalCodePoints
+  )
+    throw new Error("The displayed report window changed.");
+  return result;
+}
+
+export async function resolveReportQuote(
+  runId: string,
+  report: ReportSummary,
+  text: string,
+  signal: AbortSignal,
+) {
+  const body: ReportQuoteResolveRequest = { sha256: report.sha256, text };
+  const { data } = await write(
+    `${versionPath(runId, report.receiptId)}/quote/resolve`,
+    "POST",
+    body,
+    isReportQuoteResolveResponse,
+    signal,
+  );
+  const result = data.result;
+  if (
+    data.receiptId !== report.receiptId ||
+    data.sha256 !== report.sha256 ||
+    (result.state === "unique" &&
+      (result.length !== [...text].length ||
+        result.offset + result.length > report.totalCodePoints))
+  )
+    throw new Error("The passage does not match this report version.");
   return result;
 }
 
