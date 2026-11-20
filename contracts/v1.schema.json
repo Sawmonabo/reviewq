@@ -6363,6 +6363,58 @@
       ],
       "type": "object"
     },
+    "QuoteResolution": {
+      "oneOf": [
+        {
+          "properties": {
+            "state": {
+              "const": "missing",
+              "type": "string"
+            }
+          },
+          "required": [
+            "state"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "state": {
+              "const": "ambiguous",
+              "type": "string"
+            }
+          },
+          "required": [
+            "state"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "length": {
+              "$ref": "#/definitions/SafeCountDto"
+            },
+            "offset": {
+              "$ref": "#/definitions/SafeCountDto"
+            },
+            "state": {
+              "const": "unique",
+              "type": "string"
+            },
+            "unit": {
+              "$ref": "#/definitions/QuoteUnit"
+            }
+          },
+          "required": [
+            "state",
+            "offset",
+            "length",
+            "unit"
+          ],
+          "type": "object"
+        }
+      ]
+    },
     "QuoteUnit": {
       "enum": [
         "unicode_codepoints"
@@ -6963,6 +7015,40 @@
       "title": "ReportHistoryResponse",
       "type": "object"
     },
+    "ReportQuoteResolveRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "sha256": {
+          "$ref": "#/definitions/ReportHashDto"
+        },
+        "text": {
+          "$ref": "#/definitions/MessageTextDto"
+        }
+      },
+      "required": [
+        "sha256",
+        "text"
+      ],
+      "title": "ReportQuoteResolveRequest",
+      "type": "object"
+    },
+    "ReportQuoteResolveResponse": {
+      "description": "The resource and event head from the same authorized snapshot.",
+      "properties": {
+        "cursor": {
+          "$ref": "#/definitions/EventCursorDto"
+        },
+        "data": {
+          "$ref": "#/definitions/ResolvedQuote"
+        }
+      },
+      "required": [
+        "data",
+        "cursor"
+      ],
+      "title": "ReportQuoteResolveResponse",
+      "type": "object"
+    },
     "ReportReference": {
       "properties": {
         "receiptId": {
@@ -7455,6 +7541,25 @@
         "stream_lag"
       ],
       "type": "string"
+    },
+    "ResolvedQuote": {
+      "properties": {
+        "receiptId": {
+          "$ref": "#/definitions/ResourceIdDto"
+        },
+        "result": {
+          "$ref": "#/definitions/QuoteResolution"
+        },
+        "sha256": {
+          "$ref": "#/definitions/ReportHashDto"
+        }
+      },
+      "required": [
+        "receiptId",
+        "sha256",
+        "result"
+      ],
+      "type": "object"
     },
     "ResourceIdDto": {
       "description": "The public ID carried by a resource invalidation, interpreted by its kind.",
@@ -10060,6 +10165,8 @@
     "ReportDispositionResponse": "reports",
     "ReportFeedbackRequest": "reports",
     "ReportHistoryResponse": "reports",
+    "ReportQuoteResolveRequest": "reports",
+    "ReportQuoteResolveResponse": "reports",
     "ReportSectionResponse": "reports",
     "ReportViewResponse": "reports",
     "ReportViewedRequest": "reports",
@@ -10111,6 +10218,7 @@
       "RegisterSessionRequest": "#/definitions/RegisterSessionRequest",
       "ReportDispositionRequest": "#/definitions/ReportDispositionRequest",
       "ReportFeedbackRequest": "#/definitions/ReportFeedbackRequest",
+      "ReportQuoteResolveRequest": "#/definitions/ReportQuoteResolveRequest",
       "ReportViewedRequest": "#/definitions/ReportViewedRequest",
       "ReviewCheckpointRequest": "#/definitions/ReviewCheckpointRequest",
       "ReviewDecisionRequest": "#/definitions/ReviewDecisionRequest",
@@ -10166,6 +10274,7 @@
       "ReportContextResponse": "#/definitions/ReportContextResponse",
       "ReportDispositionResponse": "#/definitions/ReportDispositionResponse",
       "ReportHistoryResponse": "#/definitions/ReportHistoryResponse",
+      "ReportQuoteResolveResponse": "#/definitions/ReportQuoteResolveResponse",
       "ReportSectionResponse": "#/definitions/ReportSectionResponse",
       "ReportViewResponse": "#/definitions/ReportViewResponse",
       "ReportViewedResponse": "#/definitions/ReportViewedResponse",

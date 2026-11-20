@@ -3,9 +3,9 @@ import { func0 } from "../runtime.mjs";
 import { validate25 } from "./checkpoint-id-dto.mjs";
 import { validate48 } from "./history-cursor-dto.mjs";
 import { validate127 } from "./safe-count-dto.mjs";
-import { validate527 } from "./history-text.mjs";
-import { validate232 } from "./utc-timestamp-dto.mjs";
-function validate544(
+import { validate530 } from "./history-text.mjs";
+import { validate235 } from "./utc-timestamp-dto.mjs";
+function validate547(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -26,7 +26,7 @@ function validate544(
         ((data.locator === undefined || !func0.call(data, "locator")) &&
           (missing0 = "locator"))
       ) {
-        validate544.errors = [
+        validate547.errors = [
           {
             instancePath,
             schemaPath: "#/required",
@@ -102,7 +102,7 @@ function validate544(
               if (data.text !== undefined && func0.call(data, "text")) {
                 const _errs4 = errors;
                 if (
-                  !validate527(data.text, {
+                  !validate530(data.text, {
                     instancePath: instancePath + "/text",
                     parentData: data,
                     parentDataProperty: "text",
@@ -111,8 +111,8 @@ function validate544(
                 ) {
                   vErrors =
                     vErrors === null
-                      ? validate527.errors
-                      : vErrors.concat(validate527.errors);
+                      ? validate530.errors
+                      : vErrors.concat(validate530.errors);
                   errors = vErrors.length;
                 }
                 var valid0 = _errs4 === errors;
@@ -130,7 +130,7 @@ function validate544(
                   let valid1 = false;
                   const _errs7 = errors;
                   if (
-                    !validate232(data4, {
+                    !validate235(data4, {
                       instancePath: instancePath + "/timestamp",
                       parentData: data,
                       parentDataProperty: "timestamp",
@@ -139,8 +139,8 @@ function validate544(
                   ) {
                     vErrors =
                       vErrors === null
-                        ? validate232.errors
-                        : vErrors.concat(validate232.errors);
+                        ? validate235.errors
+                        : vErrors.concat(validate235.errors);
                     errors = vErrors.length;
                   }
                   var _valid0 = _errs7 === errors;
@@ -177,7 +177,7 @@ function validate544(
                       vErrors.push(err1);
                     }
                     errors++;
-                    validate544.errors = vErrors;
+                    validate547.errors = vErrors;
                     return false;
                   } else {
                     errors = _errs6;
@@ -199,7 +199,7 @@ function validate544(
         }
       }
     } else {
-      validate544.errors = [
+      validate547.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -210,7 +210,7 @@ function validate544(
       return false;
     }
   }
-  validate544.errors = vErrors;
+  validate547.errors = vErrors;
   return errors === 0;
 }
-export { validate544 };
+export { validate547 };

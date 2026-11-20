@@ -26,6 +26,7 @@ use reviewq_domain::identity::{GitSha, ReceiptId, ReportHash, Revision, RunId};
 
 use crate::access::{Actor, AppError, AppFuture};
 use crate::events::Snapshot;
+use crate::hosts::MessageBody;
 
 pub const MAX_REPORT_PAGE: u16 = 50;
 pub const MAX_SECTION_SCALARS: u32 = 12_000;
@@ -242,6 +243,12 @@ pub struct CandidateReport {
     pub section: ReportSection,
 }
 
+pub enum QuoteResolution {
+    Missing,
+    Ambiguous,
+    Unique { offset: u64, length: u64 },
+}
+
 pub trait ReportStore: Send + Sync {
     fn read_report(
         &self,
@@ -257,6 +264,13 @@ pub trait ReportStore: Send + Sync {
         report: ReportReference,
         position: DisplayWindowPosition,
     ) -> AppFuture<'_, Snapshot<DisplayWindow>>;
+    fn resolve_report_quote(
+        &self,
+        actor: Actor,
+        run: RunId,
+        report: ReportReference,
+        text: MessageBody,
+    ) -> AppFuture<'_, Snapshot<QuoteResolution>>;
     fn read_report_history(
         &self,
         actor: Actor,

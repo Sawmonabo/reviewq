@@ -205,6 +205,9 @@ fn main() -> Result<(), Box<dyn Error>> {
         .response::<Success<reports::DispositionReceipt>>("reports", "ReportDispositionResponse")?;
     registry.request::<reports::ViewedRequest>("reports", "ReportViewedRequest")?;
     registry.response::<Success<reports::ViewedReceipt>>("reports", "ReportViewedResponse")?;
+    registry.request::<reports::QuoteResolveRequest>("reports", "ReportQuoteResolveRequest")?;
+    registry
+        .response::<Success<reports::ResolvedQuote>>("reports", "ReportQuoteResolveResponse")?;
 
     let mut output = io::stdout().lock();
     serde_json::to_writer_pretty(

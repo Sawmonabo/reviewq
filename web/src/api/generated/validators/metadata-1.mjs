@@ -105,11 +105,11 @@ const schema51 = {
   type: "string",
 };
 const schema55 = { enum: ["unicode_codepoints"], type: "string" };
-const schema62 = {
+const schema63 = {
   enum: ["reviewed", "waiting_author", "needs_review"],
   type: "string",
 };
-const schema64 = {
+const schema65 = {
   additionalProperties: false,
   properties: {
     context: { type: ["string", "null"] },
@@ -128,7 +128,7 @@ const schema64 = {
   title: "RunPrepareRequest",
   type: "object",
 };
-const schema66 = {
+const schema67 = {
   additionalProperties: false,
   properties: {
     args: { type: ["string", "null"] },
@@ -138,34 +138,6 @@ const schema66 = {
   },
   required: ["kind", "name"],
   type: "object",
-};
-const schema68 = {
-  additionalProperties: false,
-  properties: {
-    context: true,
-    effort: true,
-    expectedSettingsRevision: true,
-    invocation: true,
-    model: true,
-    provider: true,
-    reviewId: true,
-    sourceSha: true,
-    submissionId: true,
-  },
-  required: [
-    "reviewId",
-    "provider",
-    "expectedSettingsRevision",
-    "sourceSha",
-    "submissionId",
-    "invocation",
-  ],
-  title: "RunStartRequest",
-  type: "object",
-  allOf: [
-    { $ref: "#/definitions/RunStartRequestFields1" },
-    { $ref: "#/definitions/RunStartRequestFields2" },
-  ],
 };
 export {
   schema11,
@@ -183,8 +155,7 @@ export {
   schema50,
   schema51,
   schema55,
-  schema62,
-  schema64,
-  schema66,
-  schema68,
+  schema63,
+  schema65,
+  schema67,
 };

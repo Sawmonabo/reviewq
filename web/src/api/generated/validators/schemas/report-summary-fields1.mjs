@@ -2,10 +2,10 @@
 import { func0 } from "../runtime.mjs";
 import { validate25 } from "./checkpoint-id-dto.mjs";
 import { validate127 } from "./safe-count-dto.mjs";
-import { validate232 } from "./utc-timestamp-dto.mjs";
-import { validate261 } from "./coverage.mjs";
-import { validate147 } from "./git-sha-dto.mjs";
-function validate1065(
+import { validate235 } from "./utc-timestamp-dto.mjs";
+import { validate264 } from "./coverage.mjs";
+import { validate150 } from "./git-sha-dto.mjs";
+function validate1068(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -61,7 +61,7 @@ function validate1065(
           if (data.capturedAt !== undefined && func0.call(data, "capturedAt")) {
             const _errs3 = errors;
             if (
-              !validate232(data.capturedAt, {
+              !validate235(data.capturedAt, {
                 instancePath: instancePath + "/capturedAt",
                 parentData: data,
                 parentDataProperty: "capturedAt",
@@ -70,8 +70,8 @@ function validate1065(
             ) {
               vErrors =
                 vErrors === null
-                  ? validate232.errors
-                  : vErrors.concat(validate232.errors);
+                  ? validate235.errors
+                  : vErrors.concat(validate235.errors);
               errors = vErrors.length;
             }
             var valid0 = _errs3 === errors;
@@ -136,7 +136,7 @@ function validate1065(
                   vErrors.push(err1);
                 }
                 errors++;
-                validate1065.errors = vErrors;
+                validate1068.errors = vErrors;
                 return false;
               } else {
                 errors = _errs5;
@@ -156,7 +156,7 @@ function validate1065(
               if (data.complete !== undefined && func0.call(data, "complete")) {
                 const _errs9 = errors;
                 if (typeof data.complete !== "boolean") {
-                  validate1065.errors = [
+                  validate1068.errors = [
                     {
                       instancePath: instancePath + "/complete",
                       schemaPath: "#/properties/complete/type",
@@ -177,7 +177,7 @@ function validate1065(
                 ) {
                   const _errs11 = errors;
                   if (
-                    !validate261(data.coverage, {
+                    !validate264(data.coverage, {
                       instancePath: instancePath + "/coverage",
                       parentData: data,
                       parentDataProperty: "coverage",
@@ -186,8 +186,8 @@ function validate1065(
                   ) {
                     vErrors =
                       vErrors === null
-                        ? validate261.errors
-                        : vErrors.concat(validate261.errors);
+                        ? validate264.errors
+                        : vErrors.concat(validate264.errors);
                     errors = vErrors.length;
                   }
                   var valid0 = _errs11 === errors;
@@ -205,7 +205,7 @@ function validate1065(
                     let valid2 = false;
                     const _errs14 = errors;
                     if (
-                      !validate147(data6, {
+                      !validate150(data6, {
                         instancePath: instancePath + "/coverageSourceSha",
                         parentData: data,
                         parentDataProperty: "coverageSourceSha",
@@ -214,8 +214,8 @@ function validate1065(
                     ) {
                       vErrors =
                         vErrors === null
-                          ? validate147.errors
-                          : vErrors.concat(validate147.errors);
+                          ? validate150.errors
+                          : vErrors.concat(validate150.errors);
                       errors = vErrors.length;
                     }
                     var _valid1 = _errs14 === errors;
@@ -253,7 +253,7 @@ function validate1065(
                         vErrors.push(err3);
                       }
                       errors++;
-                      validate1065.errors = vErrors;
+                      validate1068.errors = vErrors;
                       return false;
                     } else {
                       errors = _errs13;
@@ -280,7 +280,7 @@ function validate1065(
                       let valid3 = false;
                       const _errs19 = errors;
                       if (
-                        !validate147(data7, {
+                        !validate150(data7, {
                           instancePath: instancePath + "/coverageTargetSha",
                           parentData: data,
                           parentDataProperty: "coverageTargetSha",
@@ -289,8 +289,8 @@ function validate1065(
                       ) {
                         vErrors =
                           vErrors === null
-                            ? validate147.errors
-                            : vErrors.concat(validate147.errors);
+                            ? validate150.errors
+                            : vErrors.concat(validate150.errors);
                         errors = vErrors.length;
                       }
                       var _valid2 = _errs19 === errors;
@@ -328,7 +328,7 @@ function validate1065(
                           vErrors.push(err5);
                         }
                         errors++;
-                        validate1065.errors = vErrors;
+                        validate1068.errors = vErrors;
                         return false;
                       } else {
                         errors = _errs18;
@@ -352,7 +352,7 @@ function validate1065(
         }
       }
     } else {
-      validate1065.errors = [
+      validate1068.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -363,7 +363,7 @@ function validate1065(
       return false;
     }
   }
-  validate1065.errors = vErrors;
+  validate1068.errors = vErrors;
   return errors === 0;
 }
-export { validate1065 };
+export { validate1068 };

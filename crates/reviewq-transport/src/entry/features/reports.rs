@@ -1,7 +1,9 @@
 mod handoff;
 mod mutations;
+mod quote;
 mod window;
 
+pub(super) use quote::resolve as resolve_quote;
 pub(super) use window::read as read_window;
 
 pub(super) use handoff::{accepted, handoff, handoff_status};

@@ -2,10 +2,10 @@
 import { func0 } from "../runtime.mjs";
 import { validate48 } from "./history-cursor-dto.mjs";
 import { validate25 } from "./checkpoint-id-dto.mjs";
-import { validate568 } from "./history-part.mjs";
+import { validate571 } from "./history-part.mjs";
 import { validate127 } from "./safe-count-dto.mjs";
-import { validate232 } from "./utc-timestamp-dto.mjs";
-function validate565(
+import { validate235 } from "./utc-timestamp-dto.mjs";
+function validate568(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -24,7 +24,7 @@ function validate565(
         ((data.parts === undefined || !func0.call(data, "parts")) &&
           (missing0 = "parts"))
       ) {
-        validate565.errors = [
+        validate568.errors = [
           {
             instancePath,
             schemaPath: "#/required",
@@ -86,7 +86,7 @@ function validate565(
                   for (let i0 = 0; i0 < len0; i0++) {
                     const _errs5 = errors;
                     if (
-                      !validate568(data2[i0], {
+                      !validate571(data2[i0], {
                         instancePath: instancePath + "/parts/" + i0,
                         parentData: data2,
                         parentDataProperty: i0,
@@ -95,8 +95,8 @@ function validate565(
                     ) {
                       vErrors =
                         vErrors === null
-                          ? validate568.errors
-                          : vErrors.concat(validate568.errors);
+                          ? validate571.errors
+                          : vErrors.concat(validate571.errors);
                       errors = vErrors.length;
                     }
                     var valid1 = _errs5 === errors;
@@ -105,7 +105,7 @@ function validate565(
                     }
                   }
                 } else {
-                  validate565.errors = [
+                  validate568.errors = [
                     {
                       instancePath: instancePath + "/parts",
                       schemaPath: "#/properties/parts/type",
@@ -179,7 +179,7 @@ function validate565(
                     let valid2 = false;
                     const _errs10 = errors;
                     if (
-                      !validate232(data6, {
+                      !validate235(data6, {
                         instancePath: instancePath + "/timestamp",
                         parentData: data,
                         parentDataProperty: "timestamp",
@@ -188,8 +188,8 @@ function validate565(
                     ) {
                       vErrors =
                         vErrors === null
-                          ? validate232.errors
-                          : vErrors.concat(validate232.errors);
+                          ? validate235.errors
+                          : vErrors.concat(validate235.errors);
                       errors = vErrors.length;
                     }
                     var _valid0 = _errs10 === errors;
@@ -226,7 +226,7 @@ function validate565(
                         vErrors.push(err1);
                       }
                       errors++;
-                      validate565.errors = vErrors;
+                      validate568.errors = vErrors;
                       return false;
                     } else {
                       errors = _errs9;
@@ -300,7 +300,7 @@ function validate565(
                           vErrors.push(err3);
                         }
                         errors++;
-                        validate565.errors = vErrors;
+                        validate568.errors = vErrors;
                         return false;
                       } else {
                         errors = _errs14;
@@ -324,7 +324,7 @@ function validate565(
         }
       }
     } else {
-      validate565.errors = [
+      validate568.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -335,7 +335,7 @@ function validate565(
       return false;
     }
   }
-  validate565.errors = vErrors;
+  validate568.errors = vErrors;
   return errors === 0;
 }
-export { validate565 };
+export { validate568 };

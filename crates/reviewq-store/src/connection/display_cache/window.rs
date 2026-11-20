@@ -21,7 +21,7 @@ use super::layout::{self, SPAN_COLUMNS, WINDOW_BYTES};
 use super::{MAX_AGE_MS, open, publish};
 use crate::connection::profile::Profile;
 use crate::events::{now_ms, snapshot};
-use crate::reports::{self, Version, authorize_run, read_artifact_bytes, read_markdown};
+use crate::reports::{Version, authorized_version, read_artifact_bytes, read_markdown};
 use crate::{SqliteStore, StoreError};
 
 const MAX_WINDOW_READS: usize = 8;
@@ -329,20 +329,6 @@ fn build_and_publish(
         DISPLAY_INDEX_FORMAT,
         index,
     )
-}
-
-fn authorized_version(
-    connection: &Connection,
-    actor: &Actor,
-    run: &RunId,
-    reference: &ReportReference,
-) -> Result<Version, StoreError> {
-    authorize_run(connection, actor, run)?;
-    let version = reports::version(connection, run, &reference.receipt_id)?;
-    if version.summary.reference.hash != reference.hash {
-        return Err(AppError::PreconditionFailed.into());
-    }
-    Ok(version)
 }
 
 fn validate_position(position: DisplayWindowPosition, byte_length: u64) -> Result<(), StoreError> {

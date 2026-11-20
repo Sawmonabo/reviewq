@@ -56,6 +56,10 @@ Format 2 admits complete tables that fit a bounded block and contain at most 128
 
 A building result lets the reader retry the same bounds. A known unsupported document or unavailable cache returns a fallback reason. A cache miss for another artifact can return busy while the single worker is occupied. The existing report context endpoints supply semantic findings and dispositions. [Window handler](../../../crates/reviewq-transport/src/entry/features/reports/window.rs) · [Window store](../../../crates/reviewq-store/src/connection/display_cache/window.rs)
 
+### Resolve a pasted passage
+
+Send a browser-authenticated `POST /api/v1/runs/{runId}/report/versions/{receiptId}/quote/resolve` with `sha256` and exact `text` in the JSON body. The read-only operation checks CSRF, the accepted version and the 12,000-scalar quote limit. It scans the sealed source within the rich source envelope and carries a bounded UTF-8 suffix across chunk boundaries. It stops after the second match, including an overlap with the first. The result binds the receipt and digest and returns `missing`, `ambiguous`, or `unique` with the absolute `offset`, `length` and `unicode_codepoints` unit. Feedback submission still verifies the supplied source text and range against the same version.
+
 ### Planned extensions
 
 The table describes the intended complete read contract. Extend the versioned report route family and its generated TypeScript validators as the remaining operations land. Keep one report reader in the app, one SQLite range query path, and one mapping in transport. [Rust protocol](../../../crates/reviewq-protocol/src/reports.rs) · [HTTP mapping](../../../crates/reviewq-transport/src/entry/features/reports.rs) · [Browser adapter](../../../web/src/api/reports.ts)

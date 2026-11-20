@@ -2,7 +2,7 @@
 import { func0 } from "../runtime.mjs";
 import { validate25 } from "./checkpoint-id-dto.mjs";
 import { validate137 } from "./message-text-dto.mjs";
-function validate217(
+function validate220(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -18,7 +18,7 @@ function validate217(
         ((data.text === undefined || !func0.call(data, "text")) &&
           (missing0 = "text"))
       ) {
-        validate217.errors = [
+        validate220.errors = [
           {
             instancePath,
             schemaPath: "#/required",
@@ -31,7 +31,7 @@ function validate217(
         const _errs1 = errors;
         for (const key0 of Object.keys(data)) {
           if (!(key0 === "submissionId" || key0 === "text")) {
-            validate217.errors = [
+            validate220.errors = [
               {
                 instancePath,
                 schemaPath: "#/additionalProperties",
@@ -92,7 +92,7 @@ function validate217(
         }
       }
     } else {
-      validate217.errors = [
+      validate220.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -103,7 +103,7 @@ function validate217(
       return false;
     }
   }
-  validate217.errors = vErrors;
+  validate220.errors = vErrors;
   return errors === 0;
 }
-export { validate217 };
+export { validate220 };

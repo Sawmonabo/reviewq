@@ -2,7 +2,7 @@
 import { func0 } from "../runtime.mjs";
 import { validate127 } from "./safe-count-dto.mjs";
 import { validate69 } from "./merge-request-iid-dto.mjs";
-function validate241(
+function validate244(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -24,7 +24,7 @@ function validate241(
           !func0.call(data, "approvedCount")) &&
           (missing0 = "approvedCount"))
       ) {
-        validate241.errors = [
+        validate244.errors = [
           {
             instancePath,
             schemaPath: "#/required",
@@ -37,7 +37,7 @@ function validate241(
         if (data.approved !== undefined && func0.call(data, "approved")) {
           const _errs1 = errors;
           if (typeof data.approved !== "boolean") {
-            validate241.errors = [
+            validate244.errors = [
               {
                 instancePath: instancePath + "/approved",
                 schemaPath: "#/properties/approved/type",
@@ -109,7 +109,7 @@ function validate241(
                 vErrors.push(err1);
               }
               errors++;
-              validate241.errors = vErrors;
+              validate244.errors = vErrors;
               return false;
             } else {
               errors = _errs4;
@@ -150,7 +150,7 @@ function validate241(
               if (data.name !== undefined && func0.call(data, "name")) {
                 const _errs9 = errors;
                 if (typeof data.name !== "string") {
-                  validate241.errors = [
+                  validate244.errors = [
                     {
                       instancePath: instancePath + "/name",
                       schemaPath: "#/properties/name/type",
@@ -194,7 +194,7 @@ function validate241(
         }
       }
     } else {
-      validate241.errors = [
+      validate244.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -205,7 +205,7 @@ function validate241(
       return false;
     }
   }
-  validate241.errors = vErrors;
+  validate244.errors = vErrors;
   return errors === 0;
 }
-export { validate241 };
+export { validate244 };

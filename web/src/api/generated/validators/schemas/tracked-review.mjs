@@ -2,8 +2,8 @@
 import { func0 } from "../runtime.mjs";
 import { validate69 } from "./merge-request-iid-dto.mjs";
 import { validate114 } from "./review-id-dto.mjs";
-import { validate147 } from "./git-sha-dto.mjs";
-function validate1447(
+import { validate150 } from "./git-sha-dto.mjs";
+function validate1467(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -22,7 +22,7 @@ function validate1447(
         ((data.sourceSha === undefined || !func0.call(data, "sourceSha")) &&
           (missing0 = "sourceSha"))
       ) {
-        validate1447.errors = [
+        validate1467.errors = [
           {
             instancePath,
             schemaPath: "#/required",
@@ -101,7 +101,7 @@ function validate1447(
               ) {
                 const _errs4 = errors;
                 if (
-                  !validate147(data.sourceSha, {
+                  !validate150(data.sourceSha, {
                     instancePath: instancePath + "/sourceSha",
                     parentData: data,
                     parentDataProperty: "sourceSha",
@@ -110,8 +110,8 @@ function validate1447(
                 ) {
                   vErrors =
                     vErrors === null
-                      ? validate147.errors
-                      : vErrors.concat(validate147.errors);
+                      ? validate150.errors
+                      : vErrors.concat(validate150.errors);
                   errors = vErrors.length;
                 }
                 var valid0 = _errs4 === errors;
@@ -123,7 +123,7 @@ function validate1447(
         }
       }
     } else {
-      validate1447.errors = [
+      validate1467.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -134,7 +134,7 @@ function validate1447(
       return false;
     }
   }
-  validate1447.errors = vErrors;
+  validate1467.errors = vErrors;
   return errors === 0;
 }
-export { validate1447 };
+export { validate1467 };

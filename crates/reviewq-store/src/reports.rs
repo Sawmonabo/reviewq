@@ -3,13 +3,16 @@
 mod capture;
 mod context;
 mod mutations;
+mod quote;
 
 use reviewq_app::access::{Actor, ActorScope, AppError, AppFuture};
 use reviewq_app::events::Snapshot;
+use reviewq_app::hosts::MessageBody;
 use reviewq_app::reports::{
     ArtifactStats, CandidateReport, ContextRequest, DisplayWindow, DisplayWindowPosition,
-    MAX_REPORT_PAGE, MAX_SECTION_SCALARS, ReportContext, ReportDelivery, ReportHistory,
-    ReportPosition, ReportReference, ReportSection, ReportStore, ReportSummary, ReportView,
+    MAX_REPORT_PAGE, MAX_SECTION_SCALARS, QuoteResolution, ReportContext, ReportDelivery,
+    ReportHistory, ReportPosition, ReportReference, ReportSection, ReportStore, ReportSummary,
+    ReportView,
 };
 use reviewq_domain::identity::{ReceiptId, ReportHash, RunId};
 use rusqlite::{Connection, OptionalExtension, Row, params};
@@ -89,6 +92,23 @@ impl ReportStore for SqliteStore {
             self.report_display_window(actor, run, report, position)
                 .await
                 .map_err(StoreError::app)
+        })
+    }
+
+    fn resolve_report_quote(
+        &self,
+        actor: Actor,
+        run: RunId,
+        report: ReportReference,
+        text: MessageBody,
+    ) -> AppFuture<'_, Snapshot<QuoteResolution>> {
+        Box::pin(async move {
+            self.read(move |tx| {
+                let version = authorized_version(tx, &actor, &run, &report)?;
+                snapshot(tx, quote::resolve(tx, &version, text.as_str())?)
+            })
+            .await
+            .map_err(StoreError::app)
         })
     }
 
@@ -356,6 +376,20 @@ fn read_delivery(
             })
         })
         .transpose()
+}
+
+pub(crate) fn authorized_version(
+    connection: &Connection,
+    actor: &Actor,
+    run: &RunId,
+    reference: &ReportReference,
+) -> Result<Version, StoreError> {
+    authorize_run(connection, actor, run)?;
+    let version = version(connection, run, &reference.receipt_id)?;
+    if version.summary.reference.hash != reference.hash {
+        return Err(AppError::PreconditionFailed.into());
+    }
+    Ok(version)
 }
 
 pub(crate) fn version(

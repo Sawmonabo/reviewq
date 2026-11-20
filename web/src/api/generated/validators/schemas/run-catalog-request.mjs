@@ -2,7 +2,7 @@
 import { func0 } from "../runtime.mjs";
 import { validate71 } from "./host-provider-dto.mjs";
 import { validate114 } from "./review-id-dto.mjs";
-function validate158(
+function validate161(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -17,7 +17,7 @@ function validate158(
         ((data.provider === undefined || !func0.call(data, "provider")) &&
           (missing0 = "provider"))
       ) {
-        validate158.errors = [
+        validate161.errors = [
           {
             instancePath,
             schemaPath: "#/required",
@@ -30,7 +30,7 @@ function validate158(
         const _errs1 = errors;
         for (const key0 of Object.keys(data)) {
           if (!(key0 === "provider" || key0 === "reviewId")) {
-            validate158.errors = [
+            validate161.errors = [
               {
                 instancePath,
                 schemaPath: "#/additionalProperties",
@@ -88,7 +88,7 @@ function validate158(
         }
       }
     } else {
-      validate158.errors = [
+      validate161.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -99,7 +99,7 @@ function validate158(
       return false;
     }
   }
-  validate158.errors = vErrors;
+  validate161.errors = vErrors;
   return errors === 0;
 }
-export { validate158 };
+export { validate161 };

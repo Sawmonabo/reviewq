@@ -352,7 +352,7 @@ pub struct ViewedReceipt {
     pub rendered_batch_id: Option<ResourceIdDto>,
 }
 
-#[derive(Debug, serde::Deserialize)]
+#[derive(Debug, Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub enum QuoteUnit {
@@ -366,6 +366,36 @@ pub struct QuoteRef {
     pub offset: SafeCountDto,
     pub length: SafeCountDto,
     pub unit: QuoteUnit,
+}
+
+#[derive(Debug, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct QuoteResolveRequest {
+    pub sha256: ReportHashDto,
+    pub text: crate::MessageTextDto,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(tag = "state", rename_all = "snake_case")]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub enum QuoteResolution {
+    Missing,
+    Ambiguous,
+    Unique {
+        offset: SafeCountDto,
+        length: SafeCountDto,
+        unit: QuoteUnit,
+    },
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct ResolvedQuote {
+    pub receipt_id: ResourceIdDto,
+    pub sha256: ReportHashDto,
+    pub result: QuoteResolution,
 }
 
 #[derive(Debug, serde::Deserialize)]

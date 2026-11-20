@@ -65,6 +65,23 @@ export type SemanticIndex = "ready" | "source_only";
 export type Verdict =
   "approve" | "request_changes" | "blocked" | "not_specified";
 
+export type QuoteResolution =
+  | {
+      state: "missing";
+      [k: string]: unknown;
+    }
+  | {
+      state: "ambiguous";
+      [k: string]: unknown;
+    }
+  | {
+      length: SafeCountDto;
+      offset: SafeCountDto;
+      state: "unique";
+      unit: QuoteUnit;
+      [k: string]: unknown;
+    };
+
 export type DisplayResult =
   | {
       /**
@@ -130,6 +147,11 @@ export interface QuoteRef {
   length: SafeCountDto;
   offset: SafeCountDto;
   unit: QuoteUnit;
+}
+
+export interface ReportQuoteResolveRequest {
+  sha256: ReportHashDto;
+  text: MessageTextDto;
 }
 
 export interface ReportViewedRequest {
@@ -263,6 +285,19 @@ export interface ReportSummary {
   sha256: ReportHashDto;
   totalCodePoints: SafeCountDto;
   verdict: Verdict;
+  [k: string]: unknown;
+}
+
+export interface ReportQuoteResolveResponse {
+  cursor: EventCursorDto;
+  data: ResolvedQuote;
+  [k: string]: unknown;
+}
+
+export interface ResolvedQuote {
+  receiptId: ResourceIdDto;
+  result: QuoteResolution;
+  sha256: ReportHashDto;
   [k: string]: unknown;
 }
 

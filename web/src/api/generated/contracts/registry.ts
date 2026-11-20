@@ -80,6 +80,8 @@ import type {
   ReportDispositionResponse,
   ReportFeedbackRequest,
   ReportHistoryResponse,
+  ReportQuoteResolveRequest,
+  ReportQuoteResolveResponse,
   ReportSectionResponse,
   ReportViewResponse,
   ReportViewedRequest,
@@ -150,6 +152,7 @@ export interface Contracts {
   RegisterSessionRequest: RegisterSessionRequest;
   ReportDispositionRequest: ReportDispositionRequest;
   ReportFeedbackRequest: ReportFeedbackRequest;
+  ReportQuoteResolveRequest: ReportQuoteResolveRequest;
   ReportViewedRequest: ReportViewedRequest;
   ReviewCheckpointRequest: ReviewCheckpointRequest;
   ReviewDecisionRequest: ReviewDecisionRequest;
@@ -203,6 +206,7 @@ export interface Contracts {
   ReportContextResponse: ReportContextResponse;
   ReportDispositionResponse: ReportDispositionResponse;
   ReportHistoryResponse: ReportHistoryResponse;
+  ReportQuoteResolveResponse: ReportQuoteResolveResponse;
   ReportSectionResponse: ReportSectionResponse;
   ReportViewResponse: ReportViewResponse;
   ReportViewedResponse: ReportViewedResponse;

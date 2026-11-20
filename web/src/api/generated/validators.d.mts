@@ -18,6 +18,7 @@ import type {
   RegisterSessionRequest,
   ReportDispositionRequest,
   ReportFeedbackRequest,
+  ReportQuoteResolveRequest,
   ReportViewedRequest,
   ReviewCheckpointRequest,
   ReviewDecisionRequest,
@@ -71,6 +72,7 @@ import type {
   ReportContextResponse,
   ReportDispositionResponse,
   ReportHistoryResponse,
+  ReportQuoteResolveResponse,
   ReportSectionResponse,
   ReportViewResponse,
   ReportViewedResponse,
@@ -131,6 +133,9 @@ export function isReportDispositionRequest(
 export function isReportFeedbackRequest(
   value: unknown,
 ): value is ReportFeedbackRequest;
+export function isReportQuoteResolveRequest(
+  value: unknown,
+): value is ReportQuoteResolveRequest;
 export function isReportViewedRequest(
   value: unknown,
 ): value is ReportViewedRequest;
@@ -268,6 +273,9 @@ export function isReportDispositionResponse(
 export function isReportHistoryResponse(
   value: unknown,
 ): value is ReportHistoryResponse;
+export function isReportQuoteResolveResponse(
+  value: unknown,
+): value is ReportQuoteResolveResponse;
 export function isReportSectionResponse(
   value: unknown,
 ): value is ReportSectionResponse;
