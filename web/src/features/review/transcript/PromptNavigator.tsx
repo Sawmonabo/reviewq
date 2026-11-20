@@ -12,6 +12,8 @@ type PreviewPath = { readonly group: string; readonly pages: readonly string[] }
 type PreviewPage = Extract<HistoryNavigation, { kind: "previews" }>;
 const MAX_PREVIEW_ITEMS = 24;
 const MAX_CACHED_PREVIEWS = 2;
+const MARKER_HEIGHT = 12;
+const RAIL_INSETS = 28;
 
 export function PromptNavigator({
   target,
@@ -38,6 +40,7 @@ export function PromptNavigator({
 }) {
   const rail = useRef<HTMLDivElement>(null);
   const previewCache = useRef(new Map<string, PreviewPage>());
+  const [capacity, setCapacity] = useState<number>();
   const [requested, setRequested] = useState(false);
   const [activation, setActivation] = useState<string>();
   const [visible, setVisible] = useState(false);
@@ -50,13 +53,38 @@ export function PromptNavigator({
     return () => window.cancelIdleCallback(request);
   }, []);
 
+  useEffect(() => {
+    const host = rail.current;
+    if (!host) return;
+    let previous = 0;
+    const observer = new ResizeObserver(([entry]) => {
+      if (!entry) return;
+      const count = Math.max(
+        1,
+        Math.min(64, Math.floor((entry.contentRect.height - RAIL_INSETS) / MARKER_HEIGHT)),
+      );
+      if (previous === count) return;
+      previous = count;
+      setCapacity(count);
+      setWindows([]);
+      setSelected(undefined);
+      setActivation(undefined);
+    });
+    observer.observe(host);
+    return () => observer.disconnect();
+  }, []);
+
   const scope = `${target.runId}:${target.sessionKey}:${generation}`;
   const overviewCursor = windows.at(-1);
   const overview = useResource(
-    `prompts:${scope}:${requested}:${overviewCursor ?? ""}`,
+    `prompts:${scope}:${requested}:${capacity ?? ""}:${overviewCursor ?? ""}`,
     async (signal) => {
-      if (!requested) return { data: null, cursor: "" };
-      const result = await historyPrompts(target, overviewCursor ? { overviewCursor } : {}, signal);
+      if (!requested || !capacity) return { data: null, cursor: "" };
+      const result = await historyPrompts(
+        target,
+        overviewCursor ? { overviewCursor } : { maxGroups: capacity },
+        signal,
+      );
       if (result.data.generation !== generation) throw new Error("Message positions changed.");
       return result;
     },
@@ -238,6 +266,7 @@ export function PromptNavigator({
                   : `Messages ${marker.first} to ${marker.last}`
               }
               style={{
+                height: `min(${MARKER_HEIGHT}px, ${((marker.last - marker.first + 1) / Math.max(1, overviewPage?.total ?? 1)) * 100}%)`,
                 top: `${((marker.first + marker.last - 1) / 2 / Math.max(1, overviewPage?.total ?? 1)) * 100}%`,
               }}
               tabIndex={visible ? 0 : -1}
