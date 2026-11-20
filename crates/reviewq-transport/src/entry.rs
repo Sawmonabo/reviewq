@@ -39,6 +39,7 @@ use tokio::sync::{Notify, Semaphore, watch};
 use tower_http::services::{ServeDir, ServeFile};
 
 mod auth;
+mod browser_sessions;
 mod changes;
 mod checkout;
 mod control;
@@ -61,6 +62,7 @@ mod terminal;
 mod tracking;
 mod workspace;
 
+pub use browser_sessions::{BrowserSessionGrants, BrowserSessions};
 pub use control::{BridgeDescriptor, ControlRequest, ServiceEndpoint, ServiceIdentity};
 
 use auth::Auth;
@@ -202,6 +204,7 @@ pub enum StartupState {
 /// Runtime-owned listener identity and commit/shutdown signals.
 pub struct ServiceRuntime<'a> {
     pub endpoint: ServiceEndpoint,
+    pub browser_sessions: BrowserSessions,
     pub web: &'a Path,
     pub retained_assets: Option<&'a Path>,
     pub sends_allowed: bool,
@@ -251,7 +254,7 @@ pub fn router(
         shutdown: runtime.shutdown,
         startup: runtime.startup.clone(),
         event_slots: Arc::new(Semaphore::new(32)),
-        auth: Auth::new(runtime.endpoint),
+        auth: Auth::new(runtime.endpoint, runtime.browser_sessions),
         checkpoints: Checkpoints::default(),
     });
     let web = runtime.web;
@@ -547,7 +550,11 @@ async fn start_session(
         SessionRequest::Redeem { ticket } => {
             entry.auth.check_origin(&headers)?;
             let cursor = entry.head().await?;
-            let (csrf_token, cookie) = entry.auth.redeem(&ticket)?;
+            entry.auth.consume_ticket(&ticket)?;
+            let (csrf_token, cookie) =
+                tokio::task::spawn_blocking(move || entry.auth.browser.issue(&headers))
+                    .await
+                    .map_err(|_| AppError::Internal)??;
             let mut result = Json(Success {
                 data: SessionResult { csrf_token },
                 cursor,

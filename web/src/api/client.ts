@@ -116,11 +116,23 @@ export async function write<T>(
 }
 
 export async function request(path: string, options: RequestInit = {}): Promise<Response> {
-  const token = await requireSession();
+  const active = requireSession();
+  const token = await active;
   const headers = new Headers(options.headers);
-  if (options.method && options.method !== "GET") headers.set("X-ReviewQ-CSRF", token);
-  const response = await fetch(`/api/v1${path}`, { ...options, headers });
-  if (response.status === 401) session = undefined;
+  const reading = !options.method || options.method === "GET" || options.method === "HEAD";
+  if (!reading) headers.set("X-ReviewQ-CSRF", token);
+  const url = `/api/v1${path}`;
+  let response = await fetch(url, { ...options, headers });
+  if (response.status === 401) {
+    if (session === active) session = undefined;
+    if (reading) {
+      options.signal?.throwIfAborted();
+      const reopened = requireSession();
+      await reopened;
+      response = await fetch(url, { ...options, headers });
+      if (response.status === 401 && session === reopened) session = undefined;
+    }
+  }
   if (!response.ok) throw await apiError(response);
   return response;
 }
@@ -169,7 +181,7 @@ async function bootstrapSession(): Promise<string> {
     window.history.replaceState(window.history.state, "", url);
   }
   const ticket = openingTicket;
-  const response = await fetch(
+  let response = await fetch(
     "/api/v1/session",
     ticket === undefined
       ? undefined
@@ -179,9 +191,13 @@ async function bootstrapSession(): Promise<string> {
           body: JSON.stringify({ mode: "redeem", ticket }),
         },
   );
-  if (response.status === 401) {
+  if (response.status === 401 && ticket !== undefined) {
+    // A spent launch link can still open a review in an authorized browser.
     openingTicket = undefined;
-    throw new Error("Open ReviewQ with the launcher to start a session.");
+    response = await fetch("/api/v1/session", { cache: "no-store" });
+  }
+  if (response.status === 401) {
+    throw new Error("This browser needs a ReviewQ session. Open the launcher, then retry here.");
   }
   if (!response.ok) throw await apiError(response);
   openingTicket = undefined;

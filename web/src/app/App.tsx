@@ -601,9 +601,7 @@ export function App() {
                       </button>
                     </div>
                     {overview.error ? (
-                      <Notice retry={overview.retry}>
-                        {overview.error} <code>{reviewId}</code>
-                      </Notice>
+                      <Notice retry={overview.retry}>{overview.error}</Notice>
                     ) : drawerModule.error ? (
                       <Notice retry={drawerModule.retry}>{drawerModule.error}</Notice>
                     ) : (

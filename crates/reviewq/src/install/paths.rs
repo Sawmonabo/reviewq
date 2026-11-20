@@ -156,7 +156,7 @@ pub(super) fn read_json<T: DeserializeOwned>(path: &Path) -> Result<Option<T>, F
     Ok(Some(serde_json::from_slice(&bytes)?))
 }
 
-pub(super) fn write_json<T: Serialize>(path: &Path, value: &T) -> Result<(), Failure> {
+pub(crate) fn write_json<T: Serialize>(path: &Path, value: &T) -> Result<(), Failure> {
     let mut bytes = serde_json::to_vec(value)?;
     bytes.push(b'\n');
     atomic_file(path, &bytes, exists(path)?)
@@ -174,7 +174,7 @@ pub(super) fn private(file: &File, path: &Path) -> Result<(), Failure> {
     Ok(())
 }
 
-pub(super) fn exists(path: &Path) -> Result<bool, Failure> {
+pub(crate) fn exists(path: &Path) -> Result<bool, Failure> {
     match path.symlink_metadata() {
         Ok(_) => Ok(true),
         Err(error) if error.kind() == ErrorKind::NotFound => Ok(false),

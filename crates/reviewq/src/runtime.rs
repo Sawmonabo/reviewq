@@ -33,6 +33,7 @@ use tokio::sync::watch;
 
 use crate::{cli::Serve, install, runtime_settings};
 
+mod browser_sessions;
 mod desktop;
 mod http;
 mod workflow;
@@ -327,6 +328,7 @@ pub(crate) async fn serve(profile: PathBuf, options: Serve) -> Result<(), Failur
                 report_files: report_files.clone(),
             },
             endpoint: endpoint.clone(),
+            browser_sessions: browser_sessions::open(&profile, &endpoint)?,
             web: &web,
             retained_assets: retained_assets.as_deref(),
             commits: store.subscribe(),
@@ -711,7 +713,7 @@ fn private_file(path: &Path) -> Result<File, Failure> {
         || meta.nlink() != 1
         || meta.mode() & 0o777 != 0o600
     {
-        return Err("expected an owner-only service descriptor".into());
+        return Err("expected an owner-only regular file".into());
     }
     Ok(file)
 }
