@@ -6,6 +6,7 @@ export function useReportPreparation(
   reader: ReaderDocument,
   wanted: string,
   pinKey: string,
+  holdViewport: boolean,
   host: HTMLElement | null,
   fallback: () => void,
 ) {
@@ -18,8 +19,16 @@ export function useReportPreparation(
     const selection = getSelection();
     const range =
       selection?.rangeCount && !selection.isCollapsed ? selection.getRangeAt(0) : undefined;
+    // Keep the actual reading surface until an explicitly requested destination
+    // commits. The cache exempts only sources it has already prepared.
+    const frame = holdViewport ? host.closest(".drawer-body")?.getBoundingClientRect() : undefined;
     return [...host.querySelectorAll<HTMLElement>("[data-report-block]")]
-      .filter((row) => row.contains(document.activeElement) || range?.intersectsNode(row))
+      .filter((row) => {
+        if (row.contains(document.activeElement) || range?.intersectsNode(row)) return true;
+        if (!frame) return false;
+        const box = row.getBoundingClientRect();
+        return box.top < frame.bottom && box.bottom > frame.top;
+      })
       .map((row) => Number(row.dataset.reportBlock));
   });
   useEffect(() => {
@@ -64,7 +73,7 @@ export function useReportPreparation(
       update.current = undefined;
     };
   }, [reader]);
-  useEffect(() => update.current?.(wanted), [reader, wanted, pinKey]);
+  useEffect(() => update.current?.(wanted), [reader, wanted, pinKey, holdViewport]);
 
   useEffect(() => {
     if (failure !== reader || !host) return;

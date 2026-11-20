@@ -139,7 +139,14 @@ export function RichReport({
           ...nearby,
         ]),
       ].join(",");
-  useReportPreparation(reader, wanted, [...pinned, focused].join(","), host, onFallback);
+  useReportPreparation(
+    reader,
+    wanted,
+    [...pinned, focused].join(","),
+    urgent && (!stage || !destinationReady),
+    host,
+    onFallback,
+  );
 
   useLayoutEffect(() => {
     if (!host || !scroll || !usesVirtual) return;
