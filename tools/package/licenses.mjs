@@ -17,7 +17,7 @@ function cargoPackages(metadata, application) {
     .filter((pkg) => pkg.source && visited.has(pkg.id))
     .map((pkg) => ({
       ecosystem: "cargo", name: pkg.name, version: pkg.version, license: pkg.license,
-      root: dirname(pkg.manifest_path), explicit: pkg.license_file,
+      root: dirname(pkg.manifest_path), explicit: pkg.license_file, git: pkg.source.startsWith("git+"),
     }));
 }
 
@@ -41,18 +41,33 @@ function nodePackages(root, run) {
   return packages;
 }
 
+function licenseFiles(root) {
+  return readdirSync(root).sort()
+    .filter((file) => /^(?:licen[cs]e|copying|copyright|notice)(?:[.-]|$)/i.test(file))
+    .map((file) => [file, join(root, file)])
+    .filter(([, path]) => lstatSync(path).isFile());
+}
+
 export function notices(metadata, application, root, output, run) {
   mkdirSync(output, { mode: 0o700 });
-  const packages = [...cargoPackages(metadata, application), ...nodePackages(root, run)];
+  const packages = [
+    ...cargoPackages(metadata, application),
+    ...nodePackages(root, run),
+    { ecosystem: "source", name: "ai-sidekicks-block-cutter",
+      version: "85975b3d8475b9d4c3a31d4bc4de4c5baaf3b42d", license: "Apache-2.0",
+      root: join(root, "crates/reviewq-app/src/reports/display") },
+  ];
   const entries = new Map();
   for (const pkg of packages) {
     const name = `${pkg.ecosystem}-${pkg.name.replaceAll("/", "-")}-${pkg.version}`;
     if (!/^[A-Za-z0-9._@+-]+$/.test(name)) throw new Error("Invalid dependency identity");
     if (entries.has(name)) continue;
-    const found = new Map(readdirSync(pkg.root).sort()
-      .filter((file) => /^(?:licen[cs]e|copying|copyright|notice)(?:[.-]|$)/i.test(file))
-      .map((file) => [file, join(pkg.root, file)])
-      .filter(([, path]) => lstatSync(path).isFile()));
+    const found = new Map(licenseFiles(pkg.root));
+    // Git workspace members can inherit the license at the checkout root.
+    if (pkg.git && !pkg.explicit && found.size === 0) {
+      const checkout = run("git", ["rev-parse", "--show-toplevel"], pkg.root);
+      for (const [file, path] of licenseFiles(checkout)) found.set(file, path);
+    }
     if (pkg.explicit) found.set(basename(pkg.explicit), join(pkg.root, pkg.explicit));
     const texts = [];
     for (const [file, from] of found) {
