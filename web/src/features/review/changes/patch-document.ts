@@ -29,7 +29,9 @@ export function mountPatchDocument(host: HTMLDivElement, text: string): PatchDoc
   const root = document.createDocumentFragment();
   const grouped = rows.length > ROWS_PER_BLOCK * 2;
   const scroller = grouped ? host.closest<HTMLElement>(".drawer-body") : null;
+  const initialBlocks: HTMLElement[] = [];
   let frame = 0;
+  let visibilityFrame = 0;
   let next = 0;
   const observer = grouped
     ? new IntersectionObserver(prepareVisible, {
@@ -77,7 +79,11 @@ export function mountPatchDocument(host: HTMLDivElement, text: string): PatchDoc
       const block = blocks[index];
       const top = contentTop + index * blockHeight;
       if (!block?.rows || top >= viewportBottom) break;
-      if (top + block.rows.length * ROW_HEIGHT > viewportTop) build(block);
+      if (top + block.rows.length * ROW_HEIGHT > viewportTop) {
+        build(block);
+        block.element.style.contentVisibility = "visible";
+        initialBlocks.push(block.element);
+      }
     }
   }
 
@@ -107,6 +113,13 @@ export function mountPatchDocument(host: HTMLDivElement, text: string): PatchDoc
   }
 
   function prepareNext() {
+    if (initialBlocks.length && !visibilityFrame) {
+      // Give the seeded rows their first frame before the browser can skip their layout.
+      visibilityFrame = requestAnimationFrame(() => {
+        for (const block of initialBlocks) block.style.removeProperty("content-visibility");
+        initialBlocks.length = 0;
+      });
+    }
     // Bounded DOM work per frame. Once prepared, native Find can search every
     // block, including those Chromium has skipped for layout and paint.
     for (let prepared = 0; next < blocks.length && prepared < 4; next++) {
@@ -146,6 +159,7 @@ export function mountPatchDocument(host: HTMLDivElement, text: string): PatchDoc
     },
     release() {
       cancelAnimationFrame(frame);
+      cancelAnimationFrame(visibilityFrame);
       observer?.disconnect();
       host.replaceChildren();
       delete host.dataset.patchPrepared;
