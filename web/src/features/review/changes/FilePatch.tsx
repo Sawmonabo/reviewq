@@ -34,7 +34,7 @@ export const FilePatch = memo(function FilePatch({
   readonly admitted: boolean;
   readonly visible: boolean;
   readonly priorityLine: PatchLine | undefined;
-  readonly sourcePosition: SourcePosition | "start" | undefined;
+  readonly sourcePosition: SourcePosition | "start" | "away" | undefined;
   readonly entrySide: "start" | "end" | undefined;
 }) {
   return (
@@ -98,7 +98,7 @@ type ContentsProps = {
   readonly threads: readonly PatchDiscussion[];
   readonly visible: boolean;
   readonly priorityLine: PatchLine | undefined;
-  readonly sourcePosition: SourcePosition | "start" | undefined;
+  readonly sourcePosition: SourcePosition | "start" | "away" | undefined;
   readonly entrySide: "start" | "end" | undefined;
 };
 

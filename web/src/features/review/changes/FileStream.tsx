@@ -483,7 +483,13 @@ export function FileStream({
                         ? "start"
                         : undefined
                   }
-                  sourcePosition={item.index === jump?.index ? (jump.source ?? "start") : undefined}
+                  sourcePosition={
+                    jump
+                      ? item.index === jump.index
+                        ? (jump.source ?? "start")
+                        : "away"
+                      : undefined
+                  }
                   priorityLine={item.index === jump?.index ? jump.line : undefined}
                   visible={
                     (item.index >= viewportFirst && item.index <= last) ||

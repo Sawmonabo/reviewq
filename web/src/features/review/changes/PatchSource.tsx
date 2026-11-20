@@ -15,7 +15,7 @@ type Move = {
 };
 type Props = {
   readonly file: PatchFile;
-  readonly position: SourcePosition | "start" | undefined;
+  readonly position: SourcePosition | "start" | "away" | undefined;
   readonly entrySide: "start" | "end" | undefined;
 };
 
@@ -25,18 +25,28 @@ export function PatchSource({ file, position, entrySide }: Props) {
   const reentry = useRef(entrySide);
   useLayoutEffect(() => {
     if (entrySide) reentry.current = entrySide;
-    if (position) reentry.current = undefined;
+    if (position && position !== "away") reentry.current = undefined;
   }, [entrySide, position]);
   const [pages, setPages] = useState<readonly PatchWindow[]>([]);
   const [move, setMove] = useState<Move | undefined>(() =>
     openingMove(file, position, entrySide === "end"),
   );
+  const [failure, setFailure] = useState<{
+    readonly move: Move;
+    readonly message: string;
+    readonly ready?: PatchWindow[];
+  }>();
   const [previousPosition, setPreviousPosition] = useState(position);
   if (previousPosition !== position) {
     setPreviousPosition(position);
-    if (position) setMove(openingMove(file, position, false));
+    if (position === "away" && pages.length) {
+      setMove(undefined);
+      setFailure(undefined);
+    } else if (position && position !== "away") {
+      setFailure(undefined);
+      setMove(openingMove(file, position, false));
+    }
   }
-  const [failure, setFailure] = useState<{ readonly move: Move; readonly message: string }>();
   const adjustment = useRef<
     { readonly range: Range; readonly top: number } | "neighbor" | "start" | "end" | undefined
   >(undefined);
@@ -48,17 +58,20 @@ export function PatchSource({ file, position, entrySide }: Props) {
       const element = pre.current;
       const scroll = element?.closest<HTMLElement>(".drawer-body");
       const backwards = target.direction === "before";
-      if (target.direction && reentry.current) {
-        // A file jump left this partial window before its adjacent read finished.
-        setMove(undefined);
-        return;
-      }
       if (target.direction && element && scroll && head && tail) {
         if (backwards ? page.next !== head.first : page.first !== tail.next)
           throw new Error("The adjacent patch range changed.");
         const dropped = pages.length === 3 ? (backwards ? tail : head) : undefined;
         const span = dropped && element.querySelector(`[data-source-start="${dropped.first}"]`);
         if (span && heldOrVisible(span, scroll)) {
+          if (failure?.move === target && !failure.ready)
+            setFailure({
+              move: target,
+              ready: loaded,
+              message: selected(span)
+                ? "Clear the selection to continue reading."
+                : "Scroll past this text to continue reading.",
+            });
           setMove(undefined);
           return;
         }
@@ -73,6 +86,7 @@ export function PatchSource({ file, position, entrySide }: Props) {
           if (anchor)
             adjustment.current = { range: anchor, top: anchor.getBoundingClientRect().top };
         }
+        reentry.current = undefined;
         setPages(backwards ? [page, ...pages.slice(0, 2)] : [...pages.slice(-2), page]);
       } else {
         adjustment.current =
@@ -109,7 +123,7 @@ export function PatchSource({ file, position, entrySide }: Props) {
     }
     return result;
   });
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!move) return;
     const controller = new AbortController();
     void read(move, controller.signal).then(
@@ -148,6 +162,9 @@ export function PatchSource({ file, position, entrySide }: Props) {
     lastScroll.current = scroll.scrollTop;
   }, [pages]);
 
+  const resumeHeld = useEffectEvent(() => {
+    if (failure?.ready) finishPage(failure.move, failure.ready);
+  });
   const hasPages = Boolean(head);
   const approach = useEffectEvent((backwards: boolean) => {
     const element = pre.current;
@@ -162,8 +179,7 @@ export function PatchSource({ file, position, entrySide }: Props) {
         ? box.bottom >= view.top - ahead && box.bottom <= view.bottom + ahead
         : box.top <= view.bottom + ahead && box.top >= view.top - ahead;
       if (close && (backwards ? tail.next < tail.total : head.first > 0)) {
-        const selection = getSelection();
-        if (!selection?.isCollapsed && selection?.containsNode(element, true)) return;
+        if (selected(element)) return;
         if (move?.entry !== side)
           setMove({
             range: backwards ? { last: true, etag: head.etag } : { offset: 0, etag: head.etag },
@@ -244,6 +260,7 @@ export function PatchSource({ file, position, entrySide }: Props) {
     let backwards: boolean | undefined;
     const onScroll = () => {
       const delta = scroll.scrollTop - lastScroll.current;
+      if (delta) resumeHeld();
       if (delta && readerGesture) {
         backwards = delta < 0;
         keepSourceEdge(element, scroll, lastScroll.current, delta);
@@ -252,6 +269,7 @@ export function PatchSource({ file, position, entrySide }: Props) {
       lastScroll.current = scroll.scrollTop;
     };
     const onSelection = () => {
+      resumeHeld();
       if (readerGesture && backwards !== undefined && getSelection()?.isCollapsed)
         approach(backwards);
     };
@@ -288,15 +306,19 @@ export function PatchSource({ file, position, entrySide }: Props) {
     return () => signals.abort();
   }, [hasPages]);
 
+  function seek(land: "start" | "end") {
+    if (!head) return;
+    setFailure(undefined);
+    reentry.current = undefined;
+    const range =
+      land === "start" ? { offset: 0, etag: head.etag } : { last: true as const, etag: head.etag };
+    setMove({ range, land });
+  }
+
   const failedAtEnd = failure?.move.direction === "after" || failure?.move.entry === "end";
   const notice = failure && (
-    <Notice
-      retry={() => {
-        setFailure(undefined);
-        setMove(failure.move);
-      }}
-    >
-      {failure.message}
+    <Notice {...(!move && !failure.ready && { retry: () => setMove(failure.move) })}>
+      {move ? "Retrying the patch range…" : failure.message}
     </Notice>
   );
 
@@ -318,16 +340,10 @@ export function PatchSource({ file, position, entrySide }: Props) {
               </span>
             </div>
             <div className="actions">
-              <button
-                type="button"
-                onClick={() => setMove({ range: { offset: 0, etag: head.etag }, land: "start" })}
-              >
+              <button type="button" onClick={() => seek("start")}>
                 Start
               </button>
-              <button
-                type="button"
-                onClick={() => setMove({ range: { last: true, etag: head.etag }, land: "end" })}
-              >
+              <button type="button" onClick={() => seek("end")}>
                 End
               </button>
             </div>
@@ -368,14 +384,20 @@ export function PatchSource({ file, position, entrySide }: Props) {
 }
 
 function openingMove(file: PatchFile, position: Props["position"], entrySide: boolean): Move {
-  if (position && position !== "start" && (!file.patchETag || position.etag === file.patchETag))
+  if (typeof position === "object" && (!file.patchETag || position.etag === file.patchETag))
     return { range: { offset: position.first, etag: position.etag }, byte: position.byte };
-  return { range: !position && entrySide ? { last: true } : { offset: 0 } };
+  return {
+    range: (!position || position === "away") && entrySide ? { last: true } : { offset: 0 },
+  };
+}
+
+function selected(element: Element) {
+  const selection = getSelection();
+  return Boolean(selection && !selection.isCollapsed && selection.containsNode(element, true));
 }
 
 function heldOrVisible(span: Element, scroll: HTMLElement) {
-  const selection = getSelection();
-  if (selection && !selection.isCollapsed && selection.containsNode(span, true)) return true;
+  if (selected(span)) return true;
   const box = span.getBoundingClientRect();
   const view = scroll.getBoundingClientRect();
   return box.bottom > view.top && box.top < view.bottom;
