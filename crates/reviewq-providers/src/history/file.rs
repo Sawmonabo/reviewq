@@ -48,7 +48,7 @@ pub(super) fn page(
     };
     let mut offset = initial;
     let mut entries = Vec::with_capacity(usize::from(limit));
-    let mut tool_proof = ToolProof::new();
+    let mut tool_proof = ToolProof::new(file, cancelled);
     let mut lines = Lines::new(file, cancelled);
     for _ in 0..MAX_RECORDS {
         if cancelled.load(Ordering::Relaxed) {
@@ -73,7 +73,7 @@ pub(super) fn page(
             0,
             2_052,
         ) {
-            tool_proof.redact(source, start, &mut record, cancelled);
+            tool_proof.redact(source, start, &mut record);
             let text = readable_prefix(&record.text)?
                 .chars()
                 .take(512)
@@ -217,7 +217,7 @@ pub(super) fn parts(
     )
     .filter(|record| record.id == reference.entry)
     .ok_or(AppError::CursorExpired)?;
-    ToolProof::new().redact(source, start, &mut record, cancelled);
+    ToolProof::new(&source.file, cancelled).redact(source, start, &mut record);
     let parts = visible_parts(
         record.parts,
         &reference.generation,
@@ -308,7 +308,7 @@ pub(super) fn content_source(
     )
     .filter(|record| record.id == reference.entry)
     .ok_or(AppError::CursorExpired)?;
-    ToolProof::new().redact(source, start, &mut record, cancelled);
+    ToolProof::new(&source.file, cancelled).redact(source, start, &mut record);
     let (bytes, field) = if let Some(index) = reference.part {
         let part = record
             .parts
@@ -343,26 +343,22 @@ pub(super) fn content_source(
     Ok(ContentSource { end, bytes, field })
 }
 
-struct ToolProof {
+struct ToolProof<'a> {
     parents: HashMap<NativeInputId, Vec<(NativeInputId, String)>>,
     budget: u64,
+    lines: Lines<'a>,
 }
 
-impl ToolProof {
-    fn new() -> Self {
+impl<'a> ToolProof<'a> {
+    fn new(file: &'a File, cancel: &'a AtomicBool) -> Self {
         Self {
             parents: HashMap::new(),
             budget: 4 * 1024 * 1024,
+            lines: Lines::new(file, cancel),
         }
     }
 
-    fn redact(
-        &mut self,
-        source: &Source,
-        start: u64,
-        record: &mut records::Record,
-        cancel: &AtomicBool,
-    ) {
+    fn redact(&mut self, source: &Source, start: u64, record: &mut records::Record) {
         if source.provider != HostProvider::Claude
             || !record
                 .parts
@@ -373,7 +369,8 @@ impl ToolProof {
         }
         let calls = record.claude_tool_parent.as_ref().map(|parent| {
             self.parents.entry(parent.clone()).or_insert_with(|| {
-                tool_parent(source, start, parent, &mut self.budget, cancel).unwrap_or_default()
+                tool_parent(source, start, parent, &mut self.budget, &mut self.lines)
+                    .unwrap_or_default()
             })
         });
         record.parts.retain(|part| {
@@ -396,16 +393,16 @@ fn tool_parent(
     mut end: u64,
     parent: &NativeInputId,
     budget: &mut u64,
-    cancel: &AtomicBool,
+    lines: &mut Lines<'_>,
 ) -> Option<Vec<(NativeInputId, String)>> {
     for _ in 0..128 {
         if end == 0 || *budget == 0 {
             break;
         }
-        let start = end_of_line(&source.file, end - 1, budget, cancel).ok()?;
+        let start = lines.previous(end - 1, budget).ok()?;
         if let Some(candidate) = records::project(
             HostProvider::Claude,
-            input(&source.file, start, end, cancel),
+            lines.input(start, end),
             &source.native_id,
             source.root_session.as_ref(),
             0,

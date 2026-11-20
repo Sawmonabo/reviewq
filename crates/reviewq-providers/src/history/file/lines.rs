@@ -1,7 +1,7 @@
 use std::fs::File;
 use std::io::{self, Read};
 use std::os::unix::fs::FileExt;
-use std::sync::atomic::AtomicBool;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use reviewq_app::access::AppError;
 
@@ -79,7 +79,10 @@ impl<'a> Lines<'a> {
 
     pub(in crate::history) fn input(&self, start: u64, end: u64) -> impl Read + '_ {
         if self.contains(start) && end <= self.at + self.length as u64 {
-            Input::Buffered(&self.buffer[(start - self.at) as usize..(end - self.at) as usize])
+            Input::Buffered {
+                bytes: &self.buffer[(start - self.at) as usize..(end - self.at) as usize],
+                cancel: self.cancel,
+            }
         } else {
             Input::File(FileInput {
                 file: self.file,
@@ -105,13 +108,21 @@ impl<'a> Lines<'a> {
 }
 
 enum Input<'a> {
-    Buffered(&'a [u8]),
+    Buffered {
+        bytes: &'a [u8],
+        cancel: &'a AtomicBool,
+    },
     File(FileInput<'a>),
 }
 impl Read for Input<'_> {
     fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
         match self {
-            Self::Buffered(bytes) => bytes.read(buffer),
+            Self::Buffered { bytes, cancel } => {
+                if cancel.load(Ordering::Relaxed) {
+                    return Err(io::Error::other("native history read cancelled"));
+                }
+                bytes.read(buffer)
+            }
             Self::File(file) => file.read(buffer),
         }
     }
