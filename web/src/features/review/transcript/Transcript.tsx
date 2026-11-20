@@ -184,12 +184,14 @@ export function Transcript({ target, provider, child, messages, working }: Props
     [entries, pinned],
   );
 
+  const rowKey = useCallback((index: number) => entries[index]?.id ?? index, [entries]);
+
   // Keep scroll measurements and the TanStack instance within this component.
   // eslint-disable-next-line react-hooks/incompatible-library
   const list = useVirtualizer({
     count: entries.length,
     getScrollElement: () => viewport.current,
-    getItemKey: (index) => entries[index]?.id ?? index,
+    getItemKey: rowKey,
     estimateSize: (index) =>
       entries[index]?.kind === "tool-run" ? 35 : entries[index]?.kind === "read-pack" ? 55 : 95,
     paddingStart: history.older ? 40 : 0,
@@ -197,6 +199,14 @@ export function Transcript({ target, provider, child, messages, working }: Props
     overscan: 7,
     rangeExtractor,
   });
+
+  useEffect(() => {
+    // Heights belong to the retained pages. Keep measurements for pinned and overlapping rows.
+    const retained = new Set(entries.map((row) => row.id));
+    for (const key of list.itemSizeCache.keys()) {
+      if (typeof key !== "string" || !retained.has(key)) list.itemSizeCache.delete(key);
+    }
+  }, [entries, list]);
 
   const prompts = useMemo(() => promptRanks(entries), [entries]);
   const virtualRows = list.getVirtualItems();
