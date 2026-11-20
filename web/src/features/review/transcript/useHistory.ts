@@ -32,7 +32,7 @@ export function useHistory(
   bookmark: string,
   following: boolean,
   pinned: ReadonlySet<string>,
-  beforeUpdate: (position: ReadPosition, anchor?: Anchor) => void,
+  beforeUpdate: (position: ReadPosition, anchor: Anchor | undefined, extend: boolean) => void,
 ) {
   const { runId, sessionKey } = target;
   const [pages, setPages] = useState<readonly HistoryPage[]>([]);
@@ -116,7 +116,7 @@ export function useHistory(
       const { data, cursor: eventCursor } = response;
       const replacing = data.reset || !adjacent || data.generation !== generation;
       if (held(replacing)) return;
-      currentView.current.beforeUpdate(position, wanted);
+      currentView.current.beforeUpdate(position, wanted, !replacing);
       observeSnapshot(eventCursor);
       setAvailability(data.availability);
       setUpdated(Date.now());

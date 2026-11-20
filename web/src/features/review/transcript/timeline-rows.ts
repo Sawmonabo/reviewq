@@ -23,6 +23,7 @@ export function timelineRows(
   older: boolean,
   newer: boolean,
   streaming: boolean,
+  groupKeys: ReadonlySet<string>,
 ): VisibleRow[] {
   const confirmed = new Map(
     messages.flatMap((item) => (item.nativeEntryId ? [[item.nativeEntryId, item] as const] : [])),
@@ -52,6 +53,7 @@ export function timelineRows(
       expandedCalls,
       older && start === 0,
       (newer || streaming) && end === entries.length,
+      groupKeys,
     )) {
       const delivery = row.kind === "native" ? confirmed.get(row.id) : undefined;
       rows.push(row.kind === "native" && delivery ? { ...row, delivery } : row);

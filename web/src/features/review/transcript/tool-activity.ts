@@ -90,6 +90,7 @@ export function activityRows(
   expandedCalls: ReadonlySet<string>,
   clippedStart: boolean,
   clippedEnd: boolean,
+  groupKeys: ReadonlySet<string>,
 ): ActivityRow[] {
   const rows: ActivityRow[] = [];
   for (let index = 0; index < entries.length;) {
@@ -108,7 +109,9 @@ export function activityRows(
       end += 1;
     }
     const run = entries.slice(index, end);
-    const id = `tools:${first.entryId}`;
+    const anchorId =
+      run.find((item) => groupKeys.has(`tools:${item.entryId}`))?.entryId ?? first.entryId;
+    const id = `tools:${anchorId}`;
     const clipped = (index === 0 && clippedStart) || (end === entries.length && clippedEnd);
     const summary = summarize(run, known, clipped);
     if (summary.count > 1) {
@@ -123,8 +126,8 @@ export function activityRows(
                 (part) => isTool(part) && expandedCalls.has(openKey(entry.entryId, part.callId)),
               ),
             );
-      rows.push({ kind: "tool-run", id, anchorId: first.entryId, members, summary, open });
-      if (open) rows.push(...expandedRows(run, known, expandedReads, clipped));
+      rows.push({ kind: "tool-run", id, anchorId, members, summary, open });
+      if (open) rows.push(...expandedRows(run, known, expandedReads, clipped, groupKeys));
     } else {
       rows.push(...run.map((entry) => native(entry)));
     }
@@ -191,6 +194,7 @@ function expandedRows(
   known: ToolCatalog,
   expandedReads: ReadonlySet<string>,
   clipped: boolean,
+  groupKeys: ReadonlySet<string>,
 ) {
   const rows: ActivityRow[] = [];
   for (let index = 0; index < run.length;) {
@@ -209,7 +213,9 @@ function expandedRows(
       end += 1;
     }
     const reads = run.slice(index, end);
-    const id = `reads:${first.entryId}`;
+    const anchorId =
+      reads.find((item) => groupKeys.has(`reads:${item.entryId}`))?.entryId ?? first.entryId;
+    const id = `reads:${anchorId}`;
     const summary = summarize(reads, known, clipped && (index === 0 || end === run.length));
     const part = first.parts.find(isTool);
     if (part && summary.count > 1 && !reads.some((entry) => expandedReads.has(entry.entryId))) {
@@ -225,7 +231,7 @@ function expandedRows(
       rows.push({
         kind: "read-pack",
         id,
-        anchorId: first.entryId,
+        anchorId,
         first: { entryId: first.entryId, callId: part.callId },
         files: [...files.values()],
         summary,

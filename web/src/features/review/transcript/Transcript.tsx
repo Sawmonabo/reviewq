@@ -65,6 +65,7 @@ export function Transcript({ target, provider, child, messages, working }: Props
   const [following, setFollowing] = useState(saved?.following ?? true);
   const [pinned, setPinned] = useState<ReadonlySet<string>>(() => new Set());
   const [selectedText, setSelectedText] = useState(false);
+  const [groupKeys, setGroupKeys] = useState<ReadonlySet<string>>(() => new Set());
   const [actionNotice, setActionNotice] = useState<string>();
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(
     () =>
@@ -105,7 +106,17 @@ export function Transcript({ target, provider, child, messages, working }: Props
   const activeLatest = useRef(false);
   const toolFocus = useRef<ReadTarget | undefined>(undefined);
 
-  const history = useHistory(target, bookmark, following, pinned, (position, wanted) => {
+  const history = useHistory(target, bookmark, following, pinned, (position, wanted, extend) => {
+    // Keep mounted group controls across a prepend or append that extends their native span.
+    setGroupKeys(
+      new Set(
+        extend
+          ? entries
+              .filter((row) => row.kind === "tool-run" || row.kind === "read-pack")
+              .map((row) => row.id)
+          : [],
+      ),
+    );
     if (position === "around" && wanted) {
       if (wanted.locator || anchor.current?.id !== wanted.entryId)
         anchor.current = {
@@ -130,7 +141,7 @@ export function Transcript({ target, provider, child, messages, working }: Props
     streamed && streamed.entryId === history.live?.entryId && !canonical.has(streamed.entryId)
       ? streamed
       : undefined;
-  const entries = useMemo(() => {
+  const entries: VisibleRow[] = useMemo(() => {
     const rows = timelineRows(
       historyEntries,
       knownTools,
@@ -141,6 +152,7 @@ export function Transcript({ target, provider, child, messages, working }: Props
       history.older,
       history.newer,
       Boolean(inProgress),
+      groupKeys,
     );
     if (following && inProgress)
       rows.push({ kind: "live", id: inProgress.entryId, provisional: inProgress.text });
@@ -150,6 +162,7 @@ export function Transcript({ target, provider, child, messages, working }: Props
     expandedReads,
     expandedRuns,
     following,
+    groupKeys,
     history.generation,
     history.newer,
     history.older,
