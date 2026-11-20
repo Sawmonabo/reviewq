@@ -1,8 +1,13 @@
 //! Review reports, immutable source reads and finding projections.
 
 mod capture;
+mod display;
 mod index;
 mod revision;
+
+pub use display::{
+    DISPLAY_INDEX_FORMAT, DisplayBlock, DisplayBlockKind, DisplayFallback, DisplayIndex,
+};
 
 pub use revision::{
     Correction, CorrectionKind, EvidenceReference, EvidenceTarget, FindingEdit, ReportEdits,
@@ -22,6 +27,7 @@ use crate::events::Snapshot;
 
 pub const MAX_REPORT_PAGE: u16 = 50;
 pub const MAX_SECTION_SCALARS: u32 = 12_000;
+const MAX_MARKDOWN_LINE_BYTES: usize = 16 * 1024;
 
 use crate::labels::labels;
 
@@ -72,7 +78,7 @@ impl ArtifactStats {
     pub fn require_markdown_budget(&self) -> Result<(), AppError> {
         if self.byte_length > 1024 * 1024
             || self.line_count > 10_000
-            || self.max_line_bytes > 16 * 1024
+            || self.max_line_bytes > MAX_MARKDOWN_LINE_BYTES as u64
         {
             return Err(AppError::PayloadTooLarge);
         }

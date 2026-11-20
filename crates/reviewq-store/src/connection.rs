@@ -13,6 +13,7 @@ use tokio::sync::{mpsc, oneshot, watch};
 use crate::StoreError;
 
 mod database;
+mod display_cache;
 mod profile;
 mod staging;
 mod wal;
@@ -21,7 +22,7 @@ pub use database::StoreIdentity;
 
 const QUEUE_CAPACITY: usize = 64;
 
-type Job = Box<dyn FnOnce(&mut Connection, &profile::Profile) + Send>;
+type Job = Box<dyn FnOnce(&mut Connection, &Arc<profile::Profile>) + Send>;
 
 struct Worker {
     sender: Option<mpsc::Sender<Job>>,
@@ -221,7 +222,9 @@ impl SqliteStore {
     async fn submit<T, F>(&self, write: bool, f: F) -> Result<T, StoreError>
     where
         T: Send + 'static,
-        F: FnOnce(&mut Connection, &profile::Profile) -> Result<T, StoreError> + Send + 'static,
+        F: FnOnce(&mut Connection, &Arc<profile::Profile>) -> Result<T, StoreError>
+            + Send
+            + 'static,
     {
         let (response, receiver) = oneshot::channel();
         {

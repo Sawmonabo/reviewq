@@ -2,6 +2,8 @@
 
 The service opens one profile database at `$XDG_DATA_HOME/reviewq/reviewq.sqlite3` (default `~/.local/share/reviewq/reviewq.sqlite3`). A validation runtime resolves a separate absolute path inside its own root. STORE owns the driver, schema, transaction executor and store-open probe. Feature adapters in `reviewq-store` implement the application’s typed operations. [STORE brief](../plans/01-foundation/storage.md) · [Profile and activation](operations.md)
 
+Accepted Findings can also have a disposable sibling cache named `<database>.findings-display`. It holds derived spans or a fallback reason, keyed by sealed artifact, SHA-256 and display-format version. It stores no authored report bodies. The cache uses a separate SQLite application ID and is bound to the authoritative store identity. A missing or unusable cache cannot prevent opening the profile or accepting a report. The database file is capped at 16 MiB. Retention removes old entries on publication, with up to 32 retained index entries across formats and a 30-day age threshold. A rollback can reopen the authoritative database independently. [Indexed Findings](../plans/05-browser/indexed-findings.md#implemented-scope)
+
 ## Open and close
 
 1. Resolve a private local filesystem directory owned by the current user (0700), require a regular private file (0600), reject symlink/hard-link and unsafe existing parents targeted by the operation. Apply a private creation mask before SQLite can create the database, WAL, shared-memory or temporary files. Leave unrelated user directories untouched. Refuse a network-mounted WAL deployment. Use a service lock scoped to the resolved database/profile.
