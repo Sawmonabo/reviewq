@@ -1,8 +1,7 @@
-import { useState } from "react";
 import type { PlanTask } from "../../api/generated/contracts/history";
 import { readPlan } from "../../api/review";
 import { MarkdownContent } from "../../components/markdown/MarkdownContent";
-import { Loading, Notice } from "../../components/PanelState";
+import { Notice } from "../../components/PanelState";
 import { useResource } from "../../hooks/useResource";
 import "./reported-plan.css";
 
@@ -12,20 +11,6 @@ type Props = {
 };
 
 export function ReportedPlan({ runId, sessionKey }: Props) {
-  const [open, setOpen] = useState(false);
-  return (
-    <details onToggle={(event) => setOpen(event.currentTarget.open)}>
-      <summary>Reported plan</summary>
-      {open && <PlanDetails runId={runId} sessionKey={sessionKey} />}
-    </details>
-  );
-}
-
-export function OverviewPlan({ runId, sessionKey }: Props) {
-  return <PlanDetails runId={runId} sessionKey={sessionKey} inline />;
-}
-
-function PlanDetails({ runId, sessionKey, inline = false }: Props & { readonly inline?: boolean }) {
   const plan = useResource(
     `plan:${runId}:${sessionKey}`,
     (signal) => readPlan(runId, sessionKey, signal),
@@ -36,12 +21,11 @@ function PlanDetails({ runId, sessionKey, inline = false }: Props & { readonly i
   const native = text && !normalized ? readNativePlan(text) : undefined;
   const tasks = normalized ?? native?.tasks;
   const prose = normalized ? undefined : native ? native.explanation : text;
-  if (inline && !plan.error && !prose && !tasks?.length) return null;
+  if (!plan.error && !prose && !tasks?.length) return null;
   return (
     <div className="stack">
-      {inline && <h3>Agent plan</h3>}
+      {prose || tasks?.length ? <h3>Agent plan</h3> : null}
       {plan.error && <Notice retry={plan.retry}>{plan.error}</Notice>}
-      {!inline && plan.pending && <Loading label="Loading reported plan…" />}
       {prose && <MarkdownContent source={prose} />}
       {tasks?.length ? (
         <ol className="reported-plan" role="list">
@@ -65,11 +49,7 @@ function PlanDetails({ runId, sessionKey, inline = false }: Props & { readonly i
             </li>
           ))}
         </ol>
-      ) : (
-        !inline &&
-        plan.data &&
-        !prose && <p className="meta">No plan was reported by this session.</p>
-      )}
+      ) : null}
     </div>
   );
 }

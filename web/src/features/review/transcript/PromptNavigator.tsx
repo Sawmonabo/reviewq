@@ -11,18 +11,28 @@ import "./prompt-navigator.css";
 type PreviewPath = { readonly group: string; readonly pages: readonly string[] };
 type PreviewPage = Extract<HistoryNavigation, { kind: "previews" }>;
 const MAX_PREVIEW_ITEMS = 24;
-const MAX_CACHED_PREVIEWS = 4;
+const MAX_CACHED_PREVIEWS = 2;
 
 export function PromptNavigator({
   target,
   generation,
   following,
+  rank,
+  promptOffsets,
+  windowCount,
+  hasOlder,
+  hasNewer,
   onJump,
   onReturnFocus,
 }: {
   readonly target: SessionAddress;
   readonly generation: string;
   readonly following: boolean;
+  readonly rank: number;
+  readonly promptOffsets: ReadonlyMap<string, number>;
+  readonly windowCount: number;
+  readonly hasOlder: boolean;
+  readonly hasNewer: boolean;
   readonly onJump: (id: string, locator: string) => void;
   readonly onReturnFocus: () => void;
 }) {
@@ -32,7 +42,7 @@ export function PromptNavigator({
   const [activation, setActivation] = useState<string>();
   const [visible, setVisible] = useState(false);
   const [pinned, setPinned] = useState(false);
-  const [activeOrdinal, setActiveOrdinal] = useState<number>();
+  const [jumped, setJumped] = useState<Pick<PromptPreview, "entryId" | "ordinal">>();
   const [windows, setWindows] = useState<readonly string[]>([]);
   const [selected, setSelected] = useState<PreviewPath>();
   useEffect(() => {
@@ -54,13 +64,26 @@ export function PromptNavigator({
   );
   const overviewPage = overview.data?.kind === "overview" ? overview.data : undefined;
   const groups = overviewPage?.groups ?? [];
-  const location = following && overviewPage?.complete ? overviewPage.total : activeOrdinal;
+  const jumpRank = jumped && promptOffsets.get(jumped.entryId);
+  const base = !hasOlder
+    ? 0
+    : !hasNewer && overviewPage?.complete
+      ? overviewPage.total - windowCount
+      : jumped && jumpRank !== undefined
+        ? jumped.ordinal - jumpRank
+        : undefined;
+  const location =
+    following && overviewPage?.complete
+      ? overviewPage.total
+      : base !== undefined
+        ? base + rank
+        : undefined;
   const current = groups.find(
     (group) => location !== undefined && group.first <= location && location <= group.last,
   );
   const group =
     groups.find((item) => item.cursor === selected?.group) ??
-    (visible ? (current ?? groups.at(-1)) : undefined);
+    (pinned ? (current ?? groups.at(-1)) : undefined);
   const previewPages = group?.cursor === selected?.group ? (selected?.pages ?? []) : [];
   const previewCursor = previewPages.at(-1) ?? group?.cursor;
   const previews = useResource(
@@ -96,6 +119,7 @@ export function PromptNavigator({
   const empty = overviewPage?.total === 0 && overviewPage.complete;
 
   function close(restoreFocus = false) {
+    setSelected(undefined);
     setActivation(undefined);
     setPinned(false);
     setVisible(false);
@@ -116,7 +140,7 @@ export function PromptNavigator({
   }
 
   function jump(item: PromptPreview) {
-    setActiveOrdinal(item.ordinal);
+    setJumped({ entryId: item.entryId, ordinal: item.ordinal });
     onJump(item.entryId, item.locator);
     close(true);
   }
@@ -149,26 +173,6 @@ export function PromptNavigator({
       ref={rail}
       onPointerEnter={(event) => {
         if (event.pointerType !== "touch") open();
-      }}
-      onPointerMove={(event) => {
-        if (event.pointerType === "touch" || pinned || !overviewPage || !groups.length) return;
-        const track = event.currentTarget.querySelector(".message-navigator-rail");
-        if (
-          !track ||
-          (event.target !== event.currentTarget && !track.contains(event.target as Node))
-        )
-          return;
-        const box = track.getBoundingClientRect();
-        if (!box.height) return;
-        const ordinal = Math.min(
-          overviewPage.total,
-          Math.max(
-            1,
-            Math.floor(((event.clientY - box.top) / box.height) * overviewPage.total) + 1,
-          ),
-        );
-        const marker = groups.find((item) => item.first <= ordinal && ordinal <= item.last);
-        if (marker) choose(marker);
       }}
       onPointerLeave={() => {
         if (!pinned && !rail.current?.contains(document.activeElement)) close();
@@ -235,7 +239,6 @@ export function PromptNavigator({
               }
               style={{
                 top: `${((marker.first + marker.last - 1) / 2 / Math.max(1, overviewPage?.total ?? 1)) * 100}%`,
-                height: `min(12px, ${((marker.last - marker.first + 1) / Math.max(1, overviewPage?.total ?? 1)) * 100}%)`,
               }}
               tabIndex={visible ? 0 : -1}
               onPointerEnter={() => choose(marker)}

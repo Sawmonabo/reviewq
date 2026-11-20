@@ -1,7 +1,7 @@
 .timeline-entry.tool-entry {
   padding-bottom: 0;
 }
-.timeline-entry.tool-entry + .timeline-entry:not(.tool-entry) {
+.timeline-entry[data-after-tools] {
   padding-top: 23px;
 }
 .timeline-entry[data-tool-member] {

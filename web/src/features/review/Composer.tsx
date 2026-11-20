@@ -9,6 +9,7 @@ import { useDraft } from "../../hooks/useDraft";
 import type { DraftStore } from "../../lib/drafts";
 import { describeError } from "../../lib/presentation";
 import { submits } from "../../lib/submit-key";
+import { deliveryLabels } from "./delivery-labels";
 import "./composer.css";
 
 type Attempt = {
@@ -19,13 +20,6 @@ type Attempt = {
   readonly error?: string;
 };
 const attempts = new WeakMap<DraftStore, Map<string, Attempt>>();
-const labels = {
-  queued: "Queued",
-  dispatching: "Delivering",
-  started: "Delivered",
-  uncertain: "Delivery uncertain",
-  rejected: "Rejected",
-} as const;
 const MAX_MESSAGE = 12_000;
 
 type Props = {
@@ -180,7 +174,7 @@ export function Composer({
           <div className="spread composer-status" role="status">
             <span>
               {current.receipt
-                ? labels[current.receipt.state]
+                ? deliveryLabels[current.receipt.state]
                 : busy
                   ? "Submitting…"
                   : "Delivery unconfirmed"}

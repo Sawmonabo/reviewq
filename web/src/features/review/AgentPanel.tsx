@@ -9,8 +9,8 @@ import { Notice } from "../../components/PanelState";
 import { useResource } from "../../hooks/useResource";
 import type { DraftStore } from "../../lib/drafts";
 import { formatActivityTime, formatTime, readable } from "../../lib/presentation";
+import { deliveryLabels } from "./delivery-labels";
 import { Composer } from "./Composer";
-import { InterruptSession } from "./InterruptSession";
 import { ReportedPlan } from "./ReportedPlan";
 import { NativeQuestions } from "./transcript/NativeQuestions";
 import { ProviderMark } from "./transcript/ProviderMark";
@@ -26,6 +26,8 @@ type Props = {
   readonly drafts: DraftStore;
   readonly onSession: (key: string | undefined) => void;
   readonly onTerminal: () => void;
+  readonly deliveriesOpen: boolean;
+  readonly leadHasReport: boolean;
 };
 
 export default function AgentPanel({
@@ -37,18 +39,12 @@ export default function AgentPanel({
   drafts,
   onSession,
   onTerminal,
+  deliveriesOpen,
+  leadHasReport,
 }: Props) {
   const target = { runId: run.runId, sessionKey: session.sessionKey };
   const lead = session.sessionKey === run.leadSessionKey;
 
-  const {
-    open: toolsOpen,
-    control: toolsRef,
-    close: closeTools,
-    keydown: onToolsKeyDown,
-    sync: syncTools,
-  } = useSessionMenu();
-  const [messages, setMessages] = useState(false);
   const [cursor, setCursor] = useState<string>();
   const deliveryKeys = [
     { kind: "session", id: session.sessionKey },
@@ -64,9 +60,9 @@ export default function AgentPanel({
     deliveryKeys,
   );
   const priorDeliveries = useResource(
-    `earlier-deliveries:${run.runId}:${session.sessionKey}:${cursor ?? ""}`,
+    `earlier-deliveries:${run.runId}:${session.sessionKey}:${deliveriesOpen ? (cursor ?? "") : ""}`,
     (signal) =>
-      lead && cursor
+      lead && deliveriesOpen && cursor
         ? messageHistory(target, cursor, signal)
         : Promise.resolve({ data: null, cursor: "" }),
   );
@@ -98,57 +94,20 @@ export default function AgentPanel({
             <span aria-hidden="true">·</span>
             <span>{effort ?? "Effort not reported"}</span>
           </div>
-          <div className="agent-tools">
-            {(!lead ||
-              run.sessions.nextCursor ||
-              run.sessions.items.some((item) => item.sessionKey !== run.leadSessionKey)) && (
-              <SessionPicker
-                run={run}
-                selected={session}
-                state={state}
-                {...(startedAt ? { startedAt } : {})}
-                onSession={onSession}
-              />
-            )}
-            <details
-              className="agent-session-menu agent-session-tools"
-              ref={toolsRef}
-              onToggle={syncTools}
-              onKeyDown={onToolsKeyDown}
-            >
-              <summary className="button-label" aria-label="Session tools">
-                <Icon name="more" size={14} />
-              </summary>
-              {toolsOpen && (
-                <div className="agent-session-options session-menu-actions">
-                  <ReportedPlan runId={run.runId} sessionKey={session.sessionKey} />
-                  {lead && (
-                    <button
-                      type="button"
-                      className="session-menu-option"
-                      aria-expanded={messages}
-                      onClick={() => {
-                        closeTools(true);
-                        setMessages(!messages);
-                      }}
-                    >
-                      Delivery history
-                    </button>
-                  )}
-                  {lead && run.launch && run.launch.state !== "rejected" && (
-                    <InterruptSession
-                      runId={run.runId}
-                      nativeId={run.leadNativeId}
-                      sessionKey={session.sessionKey}
-                      className="session-menu-option"
-                    />
-                  )}
-                </div>
-              )}
-            </details>
-          </div>
+          {(!lead ||
+            run.sessions.nextCursor ||
+            run.sessions.items.some((item) => item.sessionKey !== run.leadSessionKey)) && (
+            <SessionPicker
+              run={run}
+              selected={session}
+              state={state}
+              leadHasReport={leadHasReport}
+              {...(startedAt ? { startedAt } : {})}
+              onSession={onSession}
+            />
+          )}
         </div>
-        {messages && lead && (
+        {deliveriesOpen && lead && (
           <section className="agent-deliveries surface-card stack" aria-label="Delivery history">
             {deliveryPage.error && <Notice retry={deliveryPage.retry}>{deliveryPage.error}</Notice>}
             {deliveryPage.pending && <p className="meta">Loading deliveries…</p>}
@@ -159,7 +118,7 @@ export default function AgentPanel({
               <div className="stack" key={item.messageId}>
                 <div className="spread">
                   <span className="badge">
-                    {readable(item.state)} · {readable(item.purpose)}
+                    {deliveryLabels[item.state]} · {readable(item.purpose)}
                   </span>
                   <time className="meta" dateTime={item.updatedAt}>
                     {formatTime(item.updatedAt)}
@@ -190,7 +149,10 @@ export default function AgentPanel({
         provider={session.provider}
         child={!lead}
         messages={outbox.data?.items ?? []}
-        working={lead && state === "working"}
+        working={
+          ["working", "running"].includes(session.metadata.status ?? "") ||
+          (lead && !session.metadata.status && state === "working")
+        }
       />
       {session.provider === "codex" && (
         <NativeQuestions
@@ -223,11 +185,13 @@ function SessionPicker({
   run,
   selected,
   state,
+  leadHasReport,
   startedAt,
   onSession,
 }: {
   readonly run: RunDetail;
   readonly selected: SessionSummary;
+  readonly leadHasReport: boolean;
   readonly state: RunStage | null;
   readonly startedAt?: string;
   readonly onSession: Props["onSession"];
@@ -249,7 +213,11 @@ function SessionPicker({
   const visible = cursor ? page.data : run.sessions;
   const agents = (visible?.items ?? []).filter((item) => item.sessionKey !== run.leadSessionKey);
   const isLead = selected.sessionKey === run.leadSessionKey;
-  const leadStatus = state ?? run.leadMetadata.status;
+  const nativeStatus = run.leadMetadata.status;
+  const leadStatus =
+    leadHasReport && ["idle", "stopped", "completed"].includes(nativeStatus ?? "")
+      ? "report_ready"
+      : (nativeStatus ?? (state === "working" ? "working" : "unknown"));
   const leadStarted = run.leadMetadata.startedAt ?? startedAt;
   const count =
     trail.length || visible?.nextCursor
@@ -363,6 +331,7 @@ function SessionPicker({
             </span>
           )}
           {cursor && page.error && <Notice retry={page.retry}>{page.error}</Notice>}
+          {!isLead && <ReportedPlan runId={run.runId} sessionKey={selected.sessionKey} />}
         </div>
       )}
     </details>
@@ -373,6 +342,9 @@ function sessionStatus(status: string) {
   const labels: Readonly<Record<string, string>> = {
     needs_input: "Awaiting input",
     not_loaded: "Not available",
+    unknown: "Not available",
+    report_ready: "Response ready",
+    system_error: "Failed",
     running: "Working",
   };
   return labels[status] ?? readable(status);

@@ -85,8 +85,9 @@ export function toolCatalog(entries: readonly HistoryEntry[]) {
 export function activityRows(
   entries: readonly HistoryEntry[],
   known: ToolCatalog,
-  expandedRuns: ReadonlySet<string>,
+  expandedRuns: ReadonlyMap<string, boolean>,
   expandedReads: ReadonlySet<string>,
+  expandedCalls: ReadonlySet<string>,
   clippedStart: boolean,
   clippedEnd: boolean,
 ): ActivityRow[] {
@@ -112,7 +113,16 @@ export function activityRows(
     const summary = summarize(run, known, clipped);
     if (summary.count > 1) {
       const members = run.map((entry) => entry.entryId);
-      const open = members.some((entryId) => expandedRuns.has(entryId));
+      const override = members.find((entryId) => expandedRuns.has(entryId));
+      const open =
+        override !== undefined
+          ? expandedRuns.get(override) === true
+          : summary.running > 0 ||
+            run.some((entry) =>
+              entry.parts.some(
+                (part) => isTool(part) && expandedCalls.has(openKey(entry.entryId, part.callId)),
+              ),
+            );
       rows.push({ kind: "tool-run", id, anchorId: first.entryId, members, summary, open });
       if (open) rows.push(...expandedRows(run, known, expandedReads, clipped));
     } else {

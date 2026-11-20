@@ -5,7 +5,7 @@ import { Empty, Loading } from "../../components/PanelState";
 import { readable } from "../../lib/presentation";
 import { InterruptSession } from "./InterruptSession";
 import { NativeReviewInput } from "./NativeReviewInput";
-import { OverviewPlan } from "./ReportedPlan";
+import { ReportedPlan } from "./ReportedPlan";
 
 const queueLabels: Readonly<Record<string, string>> = {
   needs_review: "Needs review",
@@ -159,7 +159,7 @@ export function ReviewOverviewPane({
                 />
               )
             )}
-            <OverviewPlan runId={run.runId} sessionKey={run.leadSessionKey} />
+            <ReportedPlan runId={run.runId} sessionKey={run.leadSessionKey} />
             {selected && launch && launch.state !== "rejected" && (
               <InterruptSession
                 key={run.leadSessionKey}

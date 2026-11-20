@@ -79,7 +79,6 @@ export function useHistory(
     }
     active.current?.abort();
     if (requestedJump) resetTo.current = undefined;
-    if (!adjacent) beforeUpdate(position, wanted);
     const controller = new AbortController();
     active.current = controller;
     pending.current = false;
@@ -96,7 +95,7 @@ export function useHistory(
       );
       if (controller.signal.aborted) return;
       const { data, cursor: eventCursor } = response;
-      if (adjacent) beforeUpdate(position, wanted);
+      beforeUpdate(position, wanted);
       observeSnapshot(eventCursor);
       setAvailability(data.availability);
       setUpdated(Date.now());

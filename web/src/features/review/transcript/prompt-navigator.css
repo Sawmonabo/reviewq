@@ -47,7 +47,6 @@
 }
 .message-navigator .message-navigator-reveal {
   position: absolute;
-  z-index: 1;
   inset: 0 0 auto auto;
   width: 26px;
   height: 28px;
@@ -62,6 +61,7 @@
   background: var(--raised);
 }
 .message-navigator-reveal:focus-visible {
+  z-index: 1;
   opacity: 1;
 }
 .message-navigator[data-visible="true"]::after {

@@ -86,6 +86,7 @@ export default function ReviewDrawer({
 }: Props) {
   const { review } = overview;
   const [runTrail, setRunTrail] = useState<readonly string[]>([]);
+  const [deliveryScope, setDeliveryScope] = useState<string>();
   const [busy, setBusy] = useState(false);
   const mutation = useRef(false);
   const [outcome, setOutcome] = useState<{ key: string; message: string; terminal?: string }>();
@@ -404,6 +405,15 @@ export default function ReviewDrawer({
                   disabled: !source,
                   trailing: <Icon name="external" size={12} />,
                 },
+                ...(activeTab === "agent" && selected && run && session && !child
+                  ? [
+                      {
+                        label:
+                          deliveryScope === scope ? "Hide delivery history" : "Delivery history",
+                        run: () => setDeliveryScope(deliveryScope === scope ? undefined : scope),
+                      },
+                    ]
+                  : []),
                 ...(review.mrState === "open"
                   ? [
                       {
@@ -669,6 +679,10 @@ export default function ReviewDrawer({
                   state={review.focusSessionKey === run.leadSessionKey ? review.runStage : null}
                   drafts={drafts}
                   onSession={onSession}
+                  deliveriesOpen={deliveryScope === scope}
+                  leadHasReport={
+                    review.focusedRunId === run.runId && Boolean(review.focusedReportReviewedSha)
+                  }
                   onTerminal={() => void commandFor("open")}
                 />
               ) : selectionPending ? (

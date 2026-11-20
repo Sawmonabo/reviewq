@@ -9,13 +9,14 @@ import {
   useRef,
   useState,
 } from "react";
-import type { HistoryEntry, HistoryPart } from "../../../api/generated/contracts";
+import type { HistoryPart } from "../../../api/generated/contracts";
 import type { HostProviderDto } from "../../../api/generated/contracts/common";
 import type { MessageHistoryItem } from "../../../api/generated/contracts/delivery";
 import { historyParts } from "../../../api/history";
 import type { SessionAddress } from "../../../api/history";
 import { Empty, Loading, Notice } from "../../../components/PanelState";
 import { describeError, formatTime, readable } from "../../../lib/presentation";
+import { deliveryLabels } from "../delivery-labels";
 import { EntryBody } from "./EntryBody";
 import {
   entriesIn,
@@ -31,13 +32,14 @@ import { ProviderMark } from "./ProviderMark";
 import { PromptNavigator } from "./PromptNavigator";
 import { HistoryTimestamp } from "./HistoryTimestamp";
 import { FileReadPack, ToolRunHeader } from "./ToolActivity";
-import { activityRows, openKey, toolCatalog, toolOnly } from "./tool-activity";
-import type { ReadPack, ReadTarget, ToolRun } from "./tool-activity";
+import { openKey, toolCatalog, toolOnly } from "./tool-activity";
+import type { ReadTarget, ToolRun } from "./tool-activity";
+import { promptRanks, timelineRows, type VisibleRow } from "./timeline-rows";
 import { MarkdownContent } from "../../../components/markdown/MarkdownContent";
 import { useHistory } from "./useHistory";
 import { useInlineProse } from "./useInlineProse";
 
-type Position = ReadingAnchor & { readonly reopenPages?: number };
+type Position = ReadingAnchor & { readonly reopenPages?: number; readonly jump?: boolean };
 const SCROLL_IDLE_MS = 160;
 const MAX_REOPEN_PAGES = 4;
 type ExtraParts = {
@@ -48,15 +50,6 @@ type ExtraParts = {
   readonly next: string | null;
 };
 type OutputSelection = { readonly entryId: string; readonly reference: string };
-type MessageRow = {
-  readonly kind: "native" | "live" | "delivery";
-  readonly id: string;
-  readonly entry?: HistoryEntry;
-  readonly delivery?: MessageHistoryItem;
-  readonly provisional?: string;
-  readonly grouped?: boolean;
-};
-type Visible = MessageRow | ToolRun | ReadPack;
 type Props = {
   readonly target: SessionAddress;
   readonly provider: HostProviderDto;
@@ -79,8 +72,11 @@ export function Transcript({ target, provider, child, messages, working }: Props
         saved && !saved.following && saved.callId ? [openKey(saved.entryId, saved.callId)] : [],
       ),
   );
-  const [expandedRuns, setExpandedRuns] = useState<ReadonlySet<string>>(
-    () => new Set(saved && !saved.following && saved.toolEntry !== false ? [saved.entryId] : []),
+  const [expandedRuns, setExpandedRuns] = useState<ReadonlyMap<string, boolean>>(
+    () =>
+      new Map(
+        saved && !saved.following && saved.toolEntry !== false ? [[saved.entryId, true]] : [],
+      ),
   );
   const [expandedReads, setExpandedReads] = useState<ReadonlySet<string>>(
     () => new Set(saved && !saved.following && saved.toolEntry !== false ? [saved.entryId] : []),
@@ -90,12 +86,12 @@ export function Transcript({ target, provider, child, messages, working }: Props
   const partsRequest = useRef<AbortController | undefined>(undefined);
   const viewport = useRef<HTMLDivElement>(null);
   const anchor = useRef<Position | undefined>(
-    saved
+    saved && !saved.following
       ? {
           id: saved.entryId,
           offset: saved.offset,
           toolEntry: saved.toolEntry ?? true,
-          ...(!saved.following ? { reopenPages: 0 } : {}),
+          reopenPages: 0,
         }
       : undefined,
   );
@@ -110,8 +106,14 @@ export function Transcript({ target, provider, child, messages, working }: Props
 
   const history = useHistory(target, bookmark, following, pinned, (position, wanted) => {
     if (position === "around" && wanted) {
-      if (anchor.current?.id !== wanted.entryId) anchor.current = { id: wanted.entryId, offset: 0 };
-    } else if (position !== "latest" && anchor.current?.reopenPages === undefined) {
+      if (wanted.locator || anchor.current?.id !== wanted.entryId)
+        anchor.current = {
+          id: wanted.entryId,
+          offset: wanted.locator ? 24 : 0,
+          reopenPages: 0,
+          jump: true,
+        };
+    } else if (position !== "latest" && !following && anchor.current?.reopenPages === undefined) {
       anchor.current = visibleAnchor(viewport.current);
     }
   });
@@ -127,40 +129,29 @@ export function Transcript({ target, provider, child, messages, working }: Props
     streamed && streamed.entryId === history.live?.entryId && !canonical.has(streamed.entryId)
       ? streamed
       : undefined;
-  const clippedStart = Boolean(history.older);
-  const clippedEnd = Boolean(history.newer || inProgress);
-  const entries = useMemo<Visible[]>(() => {
-    const deliveries = new Map(
-      messages.flatMap((delivery) =>
-        delivery.nativeEntryId ? [[delivery.nativeEntryId, delivery] as const] : [],
-      ),
-    );
-    const rows: Visible[] = activityRows(
+  const entries = useMemo(() => {
+    const rows = timelineRows(
       historyEntries,
       knownTools,
       expandedRuns,
       expandedReads,
-      clippedStart,
-      clippedEnd,
-    ).map((row) => {
-      if (row.kind !== "native") return row;
-      const delivery = deliveries.get(row.id);
-      return delivery ? { ...row, delivery } : row;
-    });
+      expanded,
+      history.generation ? messages : [],
+      history.older,
+      history.newer,
+      Boolean(inProgress),
+    );
     if (following && inProgress)
       rows.push({ kind: "live", id: inProgress.entryId, provisional: inProgress.text });
-    for (const delivery of messages.slice().reverse()) {
-      if (delivery.nativeEntryId && canonical.has(delivery.nativeEntryId)) continue;
-      rows.push({ kind: "delivery", id: `delivery:${delivery.messageId}`, delivery });
-    }
     return rows;
   }, [
-    canonical,
-    clippedEnd,
-    clippedStart,
+    expanded,
     expandedReads,
     expandedRuns,
     following,
+    history.generation,
+    history.newer,
+    history.older,
     historyEntries,
     inProgress,
     knownTools,
@@ -187,10 +178,13 @@ export function Transcript({ target, provider, child, messages, working }: Props
     getItemKey: (index) => entries[index]?.id ?? index,
     estimateSize: (index) =>
       entries[index]?.kind === "tool-run" ? 35 : entries[index]?.kind === "read-pack" ? 55 : 95,
+    paddingStart: history.older ? 40 : 0,
+    paddingEnd: history.newer ? 40 : 0,
     overscan: 7,
     rangeExtractor,
   });
 
+  const prompts = useMemo(() => promptRanks(entries), [entries]);
   const virtualRows = list.getVirtualItems();
   const windowHeight = list.scrollRect?.height ?? 0;
   const windowTop = following
@@ -224,9 +218,10 @@ export function Transcript({ target, provider, child, messages, working }: Props
     void history.load(direction);
   });
 
+  const contentHeight = list.getTotalSize();
   useLayoutEffect(() => {
     if (!entries.length) return;
-    if (following || requestedLatest.current) {
+    if (requestedLatest.current || (following && !anchor.current)) {
       list.scrollToIndex(entries.length - 1, { align: "end" });
       requestedLatest.current = false;
       anchor.current = undefined;
@@ -239,30 +234,27 @@ export function Transcript({ target, provider, child, messages, working }: Props
       );
       if (index < 0) return;
       const container = viewport.current;
-      list.scrollToIndex(index, { align: "start" });
+      const selector = `[${exactEntry ? "data-entry" : "data-native-entry"}="${CSS.escape(saved.id)}"]`;
+      if (!container?.querySelector(selector)) list.scrollToIndex(index, { align: "start" });
       const frame = requestAnimationFrame(() => {
         if (!container?.isConnected || anchor.current !== saved) return;
-        const displayed = [...container.querySelectorAll<HTMLElement>("[data-entry]")];
-        const row = displayed.find((item) =>
-          exactEntry ? item.dataset.entry === saved.id : item.dataset.nativeEntry === saved.id,
-        );
-        if (row) {
-          list.cancelScroll();
-          const wanted =
-            container.scrollTop +
-            row.getBoundingClientRect().top -
-            container.getBoundingClientRect().top -
-            saved.offset;
-          const max = container.scrollHeight - container.clientHeight;
-          container.scrollTop = wanted;
-          // The surrounding page or late inline prose can change the
-          // scroll bounds. Keep the target until it fits or the reader moves.
-          if (saved.reopenPages !== undefined && (wanted > max + 1 || wanted < -1)) {
-            extendReopen(saved, wanted < 0 ? "older" : "newer");
-            return;
-          }
+        const row = container.querySelector<HTMLElement>(selector);
+        if (!row) return;
+        list.cancelScroll();
+        const wanted =
+          container.scrollTop +
+          row.getBoundingClientRect().top -
+          container.getBoundingClientRect().top -
+          saved.offset;
+        const max = container.scrollHeight - container.clientHeight;
+        if (Math.abs(wanted - container.scrollTop) > 1) container.scrollTop = wanted;
+        // The surrounding page or late inline prose can change the
+        // scroll bounds. Keep the target until it fits or the reader moves.
+        if (saved.reopenPages !== undefined && (wanted > max + 1 || wanted < -1)) {
+          extendReopen(saved, wanted < 0 ? "older" : "newer");
+          return;
         }
-        anchor.current = undefined;
+        if (!saved.jump) anchor.current = undefined;
         if (focus && toolFocus.current === focus) {
           const tool = [...(row?.querySelectorAll<HTMLElement>("[data-tool-call]") ?? [])].find(
             (item) => item.dataset.toolCall === focus.callId,
@@ -273,7 +265,7 @@ export function Transcript({ target, provider, child, messages, working }: Props
       });
       return () => cancelAnimationFrame(frame);
     }
-  }, [entries, following, list, prose]);
+  }, [entries, following, list, prose, contentHeight]);
 
   useEffect(() => {
     const host = viewport.current;
@@ -317,7 +309,7 @@ export function Transcript({ target, provider, child, messages, working }: Props
   }, []);
 
   const savePosition = useEffectEvent((host: HTMLDivElement | null) => {
-    if (anchor.current?.reopenPages !== undefined) return;
+    if (anchor.current?.reopenPages !== undefined && !anchor.current.jump) return;
     const current = historyBookmark(host, history.generation, following);
     const previous = readingPosition.current;
     const position =
@@ -341,13 +333,20 @@ export function Transcript({ target, provider, child, messages, working }: Props
       window.clearTimeout(timer);
       timer = window.setTimeout(flush, SCROLL_IDLE_MS);
     }
-    host?.addEventListener("scrollend", settle);
+    const showThumb = () => host?.classList.add("is-scrolling");
+    const hideThumb = () => {
+      host?.classList.remove("is-scrolling");
+      settle();
+    };
+    host?.addEventListener("scroll", showThumb, { passive: true });
+    host?.addEventListener("scrollend", hideThumb);
     host?.addEventListener("wheel", settle, { passive: true });
     host?.addEventListener("touchmove", settle, { passive: true });
     window.addEventListener("pagehide", flush);
     return () => {
       flush();
-      host?.removeEventListener("scrollend", settle);
+      host?.removeEventListener("scroll", showThumb);
+      host?.removeEventListener("scrollend", hideThumb);
       host?.removeEventListener("wheel", settle);
       host?.removeEventListener("touchmove", settle);
       window.removeEventListener("pagehide", flush);
@@ -366,7 +365,9 @@ export function Transcript({ target, provider, child, messages, working }: Props
     let nextFollowing = following;
     if (intent) {
       nextFollowing = intent !== "head" && nearEnd && !history.newer;
-      if (intent !== "head" && nearEnd && history.newer && !history.loading) {
+      if (intent !== "tail" && host.scrollTop < 160 && history.older && !history.loading) {
+        void history.load("older");
+      } else if (intent !== "head" && nearEnd && history.newer && !history.loading) {
         void history.load("newer");
       }
       setFollowing(nextFollowing);
@@ -462,13 +463,19 @@ export function Transcript({ target, provider, child, messages, working }: Props
   }
 
   function expandRun(run: ToolRun) {
-    anchor.current = visibleAnchor(viewport.current);
-    setFollowing(false);
+    const host = viewport.current;
+    const header = host?.querySelector<HTMLElement>(`[data-entry="${CSS.escape(run.id)}"]`);
+    if (host && header)
+      anchor.current = {
+        id: run.id,
+        toolEntry: true,
+        offset: header.getBoundingClientRect().top - host.getBoundingClientRect().top,
+      };
     setExpandedRuns((known) => {
-      if (!run.open) return toggleKey(known, run.anchorId, true);
-      const next = new Set(known);
+      const next = new Map(known);
       for (const id of run.members) next.delete(id);
-      return next;
+      next.set(run.anchorId, !run.open);
+      return next.size > 160 ? new Map([...next].slice(-160)) : next;
     });
   }
 
@@ -482,55 +489,31 @@ export function Transcript({ target, provider, child, messages, working }: Props
         active && host ? active.getBoundingClientRect().top - host.getBoundingClientRect().top : 0,
     };
     toolFocus.current = at;
-    setFollowing(false);
     setExpandedReads((known) => toggleKey(known, at.entryId, true));
     setExpanded((known) => toggleKey(known, openKey(at.entryId, at.callId), true));
   }
 
   return (
     <section className="transcript-shell" aria-label="Native conversation">
-      <div className={`timeline-controls ${selectedText ? "has-selection" : ""}`}>
-        {history.older && (
+      {selectedText && (
+        <div className="timeline-controls">
           <button
             type="button"
-            disabled={!history.older || history.loading}
             onClick={() => {
-              setFollowing(false);
-              void history.load("older");
+              const value = getSelection()?.toString();
+              if (value)
+                void navigator.clipboard
+                  .writeText(value)
+                  .catch((failure: unknown) => setActionNotice(describeError(failure)));
             }}
           >
-            Earlier
+            Copy selection
           </button>
-        )}
-        {history.newer && (
-          <button
-            type="button"
-            disabled={!history.newer || history.loading}
-            onClick={() => void history.load("newer")}
-          >
-            Later
+          <button type="button" onClick={clear}>
+            Clear selection
           </button>
-        )}
-        {selectedText && (
-          <>
-            <button
-              type="button"
-              onClick={() => {
-                const value = getSelection()?.toString();
-                if (value)
-                  void navigator.clipboard
-                    .writeText(value)
-                    .catch((failure: unknown) => setActionNotice(describeError(failure)));
-              }}
-            >
-              Copy selection
-            </button>
-            <button type="button" onClick={clear}>
-              Clear selection
-            </button>
-          </>
-        )}
-      </div>
+        </div>
+      )}
       {actionNotice && <Notice>{actionNotice}</Notice>}
       {history.error && (
         <Notice retry={() => void history.load("latest")}>
@@ -553,6 +536,8 @@ export function Transcript({ target, provider, child, messages, working }: Props
       )}
       <div
         className="timeline-viewport"
+        aria-label="Conversation history"
+        role="region"
         ref={viewport}
         tabIndex={0}
         onScroll={recordScroll}
@@ -602,6 +587,19 @@ export function Transcript({ target, provider, child, messages, working }: Props
           ))}
         {entries.length > 0 && (
           <div className="timeline-spacer" style={{ height: list.getTotalSize() }}>
+            {history.older && (
+              <button
+                className="timeline-boundary older"
+                type="button"
+                disabled={history.loading}
+                onClick={() => {
+                  setFollowing(false);
+                  void history.load("older");
+                }}
+              >
+                Show earlier entries
+              </button>
+            )}
             {virtualRows.map((item) => {
               const row = entries[item.index];
               if (!row) return null;
@@ -626,6 +624,10 @@ export function Transcript({ target, provider, child, messages, working }: Props
                 );
               }
               const justTools = row.entry && toolOnly(row.entry);
+              const previous = entries[item.index - 1];
+              const followsTool =
+                previous &&
+                ("anchorId" in previous || (previous.entry && toolOnly(previous.entry)));
               const assignment = Boolean(
                 child &&
                 row.entry?.parts.length &&
@@ -655,6 +657,7 @@ export function Transcript({ target, provider, child, messages, working }: Props
                   data-entry={row.id}
                   data-native-entry={row.kind === "delivery" ? undefined : row.id}
                   data-tool-member={row.grouped ? "" : undefined}
+                  data-after-tools={followsTool && !justTools ? "" : undefined}
                   key={row.id}
                   className={`timeline-entry ${justTools ? "tool-entry" : assignment || user ? "user-entry" : "agent-entry"}`}
                   style={{ transform: `translateY(${item.start}px)` }}
@@ -679,7 +682,9 @@ export function Transcript({ target, provider, child, messages, working }: Props
                         <HistoryTimestamp timestamp={timestamp} delivery={!row.entry?.timestamp} />
                       )}
                       {row.delivery && (
-                        <span className="badge">{readable(row.delivery.state)}</span>
+                        <span className="delivery-status" data-state={row.delivery.state}>
+                          {deliveryLabels[row.delivery.state]}
+                        </span>
                       )}
                       {row.provisional !== undefined && (
                         <span className="badge green">Working</span>
@@ -688,8 +693,20 @@ export function Transcript({ target, provider, child, messages, working }: Props
                   )}
                   <div className="message-body stack">
                     {row.provisional !== undefined && <MarkdownContent source={row.provisional} />}
-                    {row.delivery && !row.entry && <MarkdownContent source={row.delivery.text} />}
-                    {row.entry && history.generation && (
+                    {row.delivery && (
+                      <div className="timeline-delivery">
+                        {row.delivery.attachment?.quote && (
+                          <blockquote>
+                            <MarkdownContent source={row.delivery.attachment.quote} />
+                          </blockquote>
+                        )}
+                        <MarkdownContent source={row.delivery.text} />
+                        {row.delivery.outcomeDetail && (
+                          <small className="meta">{row.delivery.outcomeDetail}</small>
+                        )}
+                      </div>
+                    )}
+                    {row.entry && !row.delivery && history.generation && (
                       <EntryBody
                         key={history.generation}
                         target={target}
@@ -714,9 +731,19 @@ export function Transcript({ target, provider, child, messages, working }: Props
                 </article>
               );
             })}
+            {history.newer && (
+              <button
+                className="timeline-boundary newer"
+                type="button"
+                disabled={history.loading}
+                onClick={() => void history.load("newer")}
+              >
+                Show newer entries
+              </button>
+            )}
           </div>
         )}
-        {working && !inProgress && (
+        {working && history.generation && !history.newer && (
           <p className="timeline-working" role="status">
             <span className="timeline-working-dots" aria-hidden="true">
               <i />
@@ -733,6 +760,11 @@ export function Transcript({ target, provider, child, messages, working }: Props
           target={target}
           generation={history.generation}
           following={following}
+          rank={prompts.ranks[list.getVirtualItemForOffset(windowTop)?.index ?? 0] ?? 0}
+          promptOffsets={prompts.offsets}
+          windowCount={prompts.count}
+          hasOlder={history.older}
+          hasNewer={history.newer}
           onReturnFocus={() => viewport.current?.focus({ preventScroll: true })}
           onJump={(id, locator) => {
             leaveReopen();
@@ -751,7 +783,7 @@ export function Transcript({ target, provider, child, messages, working }: Props
   );
 }
 
-function historyId(row: Visible) {
+function historyId(row: VisibleRow) {
   return "anchorId" in row ? row.anchorId : row.id;
 }
 
