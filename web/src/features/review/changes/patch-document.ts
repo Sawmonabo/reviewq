@@ -28,11 +28,12 @@ export function mountPatchDocument(host: HTMLDivElement, text: string): PatchDoc
   const newLines = new Uint32Array(rows.length);
   const root = document.createDocumentFragment();
   const grouped = rows.length > ROWS_PER_BLOCK * 2;
+  const scroller = grouped ? host.closest<HTMLElement>(".drawer-body") : null;
   let frame = 0;
   let next = 0;
   const observer = grouped
     ? new IntersectionObserver(prepareVisible, {
-        root: host.closest(".drawer-body"),
+        root: scroller,
         rootMargin: "300px 0px",
       })
     : undefined;
@@ -45,17 +46,39 @@ export function mountPatchDocument(host: HTMLDivElement, text: string): PatchDoc
     if (grouped) element.style.setProperty("--patch-block-height", `${part.length * ROW_HEIGHT}px`);
     blocks.push({ element, rows: part });
     root.append(element);
-    observer?.observe(element);
   }
   rows.forEach((row, ordinal) => {
     if (row.oldLine !== undefined) oldLines[ordinal] = row.oldLine + 1;
     if (row.newLine !== undefined) newLines[ordinal] = row.newLine + 1;
   });
-  host.replaceChildren(root);
-  if (grouped) frame = requestAnimationFrame(prepareNext);
-  else {
+  if (observer) {
+    fillVisibleBlocks();
+    for (const block of blocks) if (block.rows) observer.observe(block.element);
+    frame = requestAnimationFrame(prepareNext);
+  } else {
     blocks.forEach(build);
     host.dataset.patchPrepared = "";
+  }
+  host.replaceChildren(root);
+
+  function fillVisibleBlocks() {
+    const scrollTop = scroller ? scroller.getBoundingClientRect().top + scroller.clientTop : 0;
+    const viewportBottom =
+      scrollTop + (scroller?.clientHeight ?? document.documentElement.clientHeight);
+    const controls = host.closest(".file-stream")?.querySelector(".file-stream-controls");
+    const viewportTop = Math.max(scrollTop, controls?.getBoundingClientRect().bottom ?? scrollTop);
+    if (viewportTop >= viewportBottom) return;
+    const contentTop = host.getBoundingClientRect().top + host.clientTop;
+    const blockHeight = ROWS_PER_BLOCK * ROW_HEIGHT;
+    const first = Math.max(0, Math.floor((viewportTop - contentTop) / blockHeight));
+    // Deferred blocks still have their estimated height. Fill the part of this
+    // estimate in view without waiting for the observer or the next frame.
+    for (let index = first; index < first + 2; index++) {
+      const block = blocks[index];
+      const top = contentTop + index * blockHeight;
+      if (!block?.rows || top >= viewportBottom) break;
+      if (top + block.rows.length * ROW_HEIGHT > viewportTop) build(block);
+    }
   }
 
   function build(block: Block) {
