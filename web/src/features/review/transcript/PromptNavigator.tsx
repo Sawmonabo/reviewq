@@ -8,7 +8,7 @@ import { useResource } from "../../../hooks/useResource";
 import { HistoryTimestamp } from "./HistoryTimestamp";
 import "./prompt-navigator.css";
 
-type PreviewPath = { readonly group: string; readonly pages: readonly string[] };
+type PreviewPath = { readonly group: string; readonly pages?: readonly string[] };
 type PreviewPage = Extract<HistoryNavigation, { kind: "previews" }>;
 const MAX_PREVIEW_ITEMS = 24;
 const MAX_CACHED_PREVIEWS = 2;
@@ -116,7 +116,9 @@ export function PromptNavigator({
   const group =
     groups.find((item) => item.cursor === selected?.group) ??
     (pinned ? (current ?? groups.at(-1)) : undefined);
-  const previewPages = group?.cursor === selected?.group ? (selected?.pages ?? []) : [];
+  // An empty saved trail keeps the pager mounted while returning to its first page.
+  const pageTrail = group?.cursor === selected?.group ? selected?.pages : undefined;
+  const previewPages = pageTrail ?? [];
   const previewCursor = previewPages.at(-1) ?? group?.cursor;
   const limit = group ? Math.min(MAX_PREVIEW_ITEMS, group.last - group.first + 1) : 0;
   const previewKey = visible && previewCursor ? `${limit}:${previewCursor}` : "";
@@ -146,6 +148,7 @@ export function PromptNavigator({
   );
   const last = items?.at(-1);
   const nextPreview = group && (!last || last.ordinal < group.last) ? page?.nextCursor : null;
+  const canGoBack = !previews.pending && previewPages.length > 0;
   const empty = overviewPage?.total === 0 && overviewPage.complete;
 
   function close(restoreFocus = false) {
@@ -163,7 +166,7 @@ export function PromptNavigator({
   function choose(group: PromptGroup) {
     if (selected?.group !== group.cursor) {
       setActivation(undefined);
-      setSelected({ group: group.cursor, pages: [] });
+      setSelected({ group: group.cursor });
     }
     open();
   }
@@ -324,21 +327,22 @@ export function PromptNavigator({
                 ))}
               </ol>
             )}
-            {(previewPages.length > 0 || nextPreview) && group && (
+            {(pageTrail !== undefined || nextPreview) && group && (
               <div className="message-navigator-paging">
                 <button
                   type="button"
                   className="quiet-button"
-                  disabled={!previewPages.length}
-                  onClick={() => setSelected({ group: group.cursor, pages: [] })}
+                  aria-disabled={!canGoBack}
+                  onClick={() => canGoBack && setSelected({ group: group.cursor, pages: [] })}
                 >
                   First
                 </button>
                 <button
                   type="button"
                   className="quiet-button"
-                  disabled={!previewPages.length}
+                  aria-disabled={!canGoBack}
                   onClick={() =>
+                    canGoBack &&
                     setSelected({ group: group.cursor, pages: previewPages.slice(0, -1) })
                   }
                 >
@@ -347,7 +351,7 @@ export function PromptNavigator({
                 <button
                   type="button"
                   className="quiet-button"
-                  disabled={!nextPreview}
+                  aria-disabled={!nextPreview}
                   onClick={() =>
                     nextPreview &&
                     setSelected({ group: group.cursor, pages: [...previewPages, nextPreview] })
