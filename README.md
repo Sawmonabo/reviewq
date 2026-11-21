@@ -24,15 +24,18 @@ The installer prints the runtime configuration path and reports missing native p
 
 ## Develop
 
-Use cargo-nextest, rustfmt and Clippy for checks. The browser suite uses the Chromium build that matches the locked Playwright version. Install the locked web dependencies and run the web development server from the repository root.
+Install the locked browser dependencies once. The development URL serves the current checkout through Vite. Saving browser code or applying a branch change there uses hot module replacement when possible. The installed ReviewQ URL serves its packaged release until the next installation.
 
 ```sh
 make web-install
-cargo run --locked -p reviewq -- --version
-pnpm --dir web run dev
+pnpm --dir web run dev --profile "$PWD/.agents/tmp/reviewq-dev-profile"
 ```
 
-The dev server prints its loopback URL and uses port 5173 by default. Set `REVIEWQ_WEB_PORT=0` to select an available port. Run the checks from a second terminal.
+The runner prints its loopback frontend URL and uses port 5173 by default. Set `REVIEWQ_WEB_PORT=0` to bind an available port. Run without `--profile` for browser-only development. With an explicit separate profile, the same URL also proxies the Rust API. Save Rust sources or merge a branch that changes them to rebuild the checkout's backend. The current backend keeps serving during the build and stays available if compilation fails. After a successful build the runner restarts its backend against the same profile and browser port. Press Enter in an interactive terminal for a fresh sign-in link. Ctrl+C stops the development processes.
+
+Use `--backend-port 8790 --native-port 8791` to select fixed backend ports and reuse the browser session across runner launches. The backend selects available loopback ports by default. The native port can change on restart unless explicitly fixed. Add `--read-only` to limit the frontend to reads, normal sign-in and report quote lookup. Add `--validation` for a disposable runtime with background provider polling and native actions disabled. Use a separate profile for development, with its own SQLite state. Stop an existing daemon for that profile before starting the runner.
+
+Run checks from a second terminal. Use cargo-nextest, rustfmt and Clippy. The browser suite uses the Chromium build that matches the locked Playwright version.
 
 ```sh
 make check
