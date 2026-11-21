@@ -89,6 +89,15 @@ impl NativeHost for Codex {
         Box::pin(self.read_item_content(target, reference, offset, limit))
     }
 
+    fn history_document(
+        &self,
+        target: HistorySession,
+        reference: reviewq_app::history::RpcContentRef,
+        query: reviewq_app::history::document::Query,
+    ) -> AppFuture<'_, reviewq_app::history::document::Window> {
+        Box::pin(self.read_item_document(target, reference, query))
+    }
+
     fn history_stamp(
         &self,
         target: HistorySession,

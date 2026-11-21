@@ -237,6 +237,46 @@ pub struct HistoryContent {
 
 pub type HistoryContentResponse = Success<HistoryContent>;
 
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct HistoryDocument {
+    pub run_id: RunIdDto,
+    pub session_key: SessionKeyDto,
+    pub entry_id: HistoryEntryIdDto,
+    pub generation: HistoryGenerationDto,
+    pub sha256: crate::scalar::ReportHashDto,
+    pub index_format: SafeCountDto,
+    pub byte_length: SafeCountDto,
+    pub byte_start: SafeCountDto,
+    pub byte_end: SafeCountDto,
+    pub previous_byte: Option<SafeCountDto>,
+    pub next_byte: Option<SafeCountDto>,
+    pub result: HistoryDocumentResult,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(
+    tag = "state",
+    rename_all = "snake_case",
+    rename_all_fields = "camelCase"
+)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub enum HistoryDocumentResult {
+    Ready {
+        #[cfg_attr(feature = "schema", schemars(length(min = 1, max = 32)))]
+        blocks: Vec<crate::reports::DisplayBlock>,
+    },
+    Source {
+        reason: crate::reports::DisplayFallback,
+        markdown: HistoryText,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        display: Option<crate::reports::DocumentDisplay>,
+    },
+}
+
+pub type HistoryDocumentResponse = Success<HistoryDocument>;
+
 /// Ordered visible blocks from the selected native conversation.
 #[derive(Debug, Serialize)]
 #[serde(
@@ -255,6 +295,8 @@ pub enum HistoryPart {
         content_ref: Option<HistoryCursorDto>,
         #[serde(skip_serializing_if = "Option::is_none")]
         display: Option<crate::reports::DocumentDisplay>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        text_bytes: Option<SafeCountDto>,
     },
     AssistantText {
         #[serde(skip_serializing_if = "Option::is_none")]
@@ -265,6 +307,8 @@ pub enum HistoryPart {
         content_ref: Option<HistoryCursorDto>,
         #[serde(skip_serializing_if = "Option::is_none")]
         display: Option<crate::reports::DocumentDisplay>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        text_bytes: Option<SafeCountDto>,
     },
     ToolCall {
         #[serde(skip_serializing_if = "Option::is_none")]
@@ -294,6 +338,8 @@ pub enum HistoryPart {
         content_ref: Option<HistoryCursorDto>,
         #[serde(skip_serializing_if = "Option::is_none")]
         display: Option<crate::reports::DocumentDisplay>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        text_bytes: Option<SafeCountDto>,
     },
     Assignment {
         #[serde(skip_serializing_if = "Option::is_none")]
@@ -303,6 +349,8 @@ pub enum HistoryPart {
         content_ref: Option<HistoryCursorDto>,
         #[serde(skip_serializing_if = "Option::is_none")]
         display: Option<crate::reports::DocumentDisplay>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        text_bytes: Option<SafeCountDto>,
     },
 }
 

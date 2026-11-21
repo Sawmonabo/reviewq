@@ -97,6 +97,32 @@ const schema177 = {
   enum: ["default", "left", "center", "right"],
   type: "string",
 };
+const schema195 = {
+  enum: [
+    "paragraph",
+    "heading",
+    "block_quote",
+    "code",
+    "list",
+    "rule",
+    "table",
+  ],
+  type: "string",
+};
+const schema197 = {
+  enum: [
+    "document_budget",
+    "parser_budget",
+    "document_context",
+    "layout_budget",
+    "unsupported_source",
+    "invalid_boundary",
+    "parser_failed",
+    "incomplete_source",
+    "cache_unavailable",
+  ],
+  type: "string",
+};
 export {
   schema156,
   schema158,
@@ -106,4 +132,6 @@ export {
   schema163,
   schema173,
   schema177,
+  schema195,
+  schema197,
 };

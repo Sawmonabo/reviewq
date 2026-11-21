@@ -2,6 +2,9 @@
 
 import type {
   Coverage,
+  DisplayBlock,
+  DisplayBlockKind,
+  DisplayFallback,
   DocumentDisplay,
   EventCursorDto,
   FindingConclusion,
@@ -106,20 +109,6 @@ export type DisplayResult =
       state: "fallback";
       [k: string]: unknown;
     };
-
-export type DisplayBlockKind =
-  "paragraph" | "heading" | "block_quote" | "code" | "list" | "rule" | "table";
-
-export type DisplayFallback =
-  | "document_budget"
-  | "parser_budget"
-  | "document_context"
-  | "layout_budget"
-  | "unsupported_source"
-  | "invalid_boundary"
-  | "parser_failed"
-  | "incomplete_source"
-  | "cache_unavailable";
 
 export interface ReportDispositionRequest {
   disposition: DispositionPatch;
@@ -358,18 +347,6 @@ export interface ReportWindow {
   indexFormat: SafeCountDto;
   report: ReportSummary;
   result: DisplayResult;
-  [k: string]: unknown;
-}
-
-export interface DisplayBlock {
-  byteEnd: SafeCountDto;
-  byteStart: SafeCountDto;
-  display?: DocumentDisplay | null;
-  headingLevel: SafeCountDto | null;
-  kind: DisplayBlockKind;
-  markdown: string;
-  scalarStart: SafeCountDto;
-  utf16Start: SafeCountDto;
   [k: string]: unknown;
 }
 

@@ -120,6 +120,10 @@ fn main() -> Result<(), Box<dyn Error>> {
         "HistoryPartPageResponse",
     )?;
     registry.response::<HistoryContentResponse>("history", "HistoryContentResponse")?;
+    registry.response::<reviewq_protocol::history::HistoryDocumentResponse>(
+        "history",
+        "HistoryDocumentResponse",
+    )?;
     registry.response::<reviewq_protocol::history::search::HistorySearchResponse>(
         "history",
         "HistorySearchResponse",

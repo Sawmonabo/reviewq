@@ -1,4 +1,7 @@
+use std::time::{Duration, Instant};
+
 use reviewq_app::access::AppError;
+use reviewq_app::history::document::{Index, MAX_INDEX_BYTES, Query, SourcePages, Window};
 use reviewq_app::history::{
     ContentReference, HistorySession, NativeContent, NativeHistoryPage, NativePlan, NativePosition,
     RpcContentRef, VisibleEntry, VisiblePartKind,
@@ -10,6 +13,12 @@ use sha2::{Digest, Sha256};
 
 use super::Codex;
 use super::history::{Item, visible};
+
+pub(super) struct PreparedDocument {
+    index: Index,
+    hash: ReportHash,
+    touched: Instant,
+}
 
 pub(super) struct ItemWindow<'a> {
     pub(super) forward: bool,
@@ -95,36 +104,7 @@ impl Codex {
         if !(4..=65_536).contains(&limit) {
             return Err(AppError::InvalidRequest);
         }
-        let thread = self.bound_history_thread(&session).await?;
-        let generation = self.history_generation(&thread).await?;
-        if generation != reference.generation {
-            return Err(AppError::CursorExpired);
-        }
-        let item = self
-            .exact_item(&thread.id, &reference.turn, &reference.entry)
-            .await?;
-        let entry = visible(
-            item.item,
-            &reference.turn,
-            item.started_at_ms,
-            item.completed_at_ms,
-        )
-        .transpose()?
-        .filter(|entry| entry.id == reference.entry)
-        .ok_or(AppError::CursorExpired)?;
-        let text = match reference.part {
-            Some(index) => {
-                &entry
-                    .parts
-                    .get(usize::from(index))
-                    .ok_or(AppError::CursorExpired)?
-                    .text
-            }
-            None => &entry.text,
-        };
-        if digest(text) != reference.hash {
-            return Err(AppError::CursorExpired);
-        }
+        let (generation, text) = self.read_item_text(session, reference, false).await?;
         let start = usize::try_from(offset).map_err(|_| AppError::InvalidRequest)?;
         if start > text.len() || !text.is_char_boundary(start) {
             return Err(AppError::InvalidRequest);
@@ -135,6 +115,104 @@ impl Codex {
             text: text[start..end].to_owned(),
             next_offset: (end < text.len()).then_some(end as u64),
         })
+    }
+
+    pub(super) async fn read_item_document(
+        &self,
+        session: HistorySession,
+        reference: RpcContentRef,
+        query: Query,
+    ) -> Result<Window, AppError> {
+        let hash = reference.hash.clone();
+        if query
+            .expected
+            .as_ref()
+            .is_some_and(|expected| *expected != hash)
+        {
+            return Err(AppError::CursorExpired);
+        }
+        let (_, text) = self.read_item_text(session, reference, true).await?;
+        let mut cache = self.document.clone().lock_owned().await;
+        tokio::task::spawn_blocking(move || {
+            if cache.as_ref().is_none_or(|cached| {
+                cached.hash != hash || cached.touched.elapsed() >= Duration::from_secs(30)
+            }) {
+                let mut pages = SourcePages::default();
+                pages.push(&text);
+                *cache = Some(PreparedDocument {
+                    index: Index::new(
+                        hash.clone(),
+                        pages,
+                        (text.len() <= MAX_INDEX_BYTES).then_some(text.as_str()),
+                    ),
+                    hash,
+                    touched: Instant::now(),
+                });
+            }
+            let cached = cache.as_mut().ok_or(AppError::Internal)?;
+            cached.touched = Instant::now();
+            cached.index.read(query, |range| {
+                Ok(text
+                    .as_bytes()
+                    .get(range.start as usize..range.end as usize)
+                    .ok_or(AppError::CursorExpired)?
+                    .to_vec())
+            })
+        })
+        .await
+        .map_err(|_| AppError::Unavailable)?
+    }
+
+    async fn read_item_text(
+        &self,
+        session: HistorySession,
+        reference: RpcContentRef,
+        settled: bool,
+    ) -> Result<(String, String), AppError> {
+        let thread = self.bound_history_thread(&session).await?;
+        let generation = self.history_generation(&thread).await?;
+        if generation != reference.generation {
+            return Err(AppError::CursorExpired);
+        }
+        let item = self
+            .exact_item(&thread.id, &reference.turn, &reference.entry)
+            .await?;
+        if settled
+            && item.completed_at_ms.is_none()
+            && !matches!(item.item, Item::UserMessage { .. })
+        {
+            return Err(AppError::NotFound);
+        }
+        let mut entry = visible(
+            item.item,
+            &reference.turn,
+            item.started_at_ms,
+            item.completed_at_ms,
+        )
+        .transpose()?
+        .filter(|entry| entry.id == reference.entry)
+        .ok_or(AppError::CursorExpired)?;
+        let text = if let Some(index) = reference.part {
+            let part = entry
+                .parts
+                .get_mut(usize::from(index))
+                .ok_or(AppError::CursorExpired)?;
+            if settled
+                && !matches!(
+                    part.kind,
+                    VisiblePartKind::Text(_) | VisiblePartKind::Plan | VisiblePartKind::Assignment
+                )
+            {
+                return Err(AppError::NotFound);
+            }
+            std::mem::take(&mut part.text)
+        } else {
+            entry.text
+        };
+        if digest(&text) != reference.hash {
+            return Err(AppError::CursorExpired);
+        }
+        Ok((generation, text))
     }
 
     pub(super) async fn exact_item(

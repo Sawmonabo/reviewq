@@ -16,6 +16,7 @@ import {
 } from "../../../../api/history";
 import type { SessionAddress } from "../../../../api/history";
 import { parseMarkdown } from "../../../../components/markdown/parse-markdown";
+import { completeDocument, documentTree } from "../document";
 
 const changed = "This occurrence is no longer available in the conversation.";
 const highlightName = "reviewq-transcript-match";
@@ -42,10 +43,28 @@ export async function prepareDestination(
     throw new Error(changed);
   const { entryId, generation, locator, contentRef, contentCursor, nativeIndex, partsCursor } =
     destination;
-  const [page, content] = await Promise.all([
+  async function readBody() {
+    const prepared =
+      destination.markdown && destination.offset === 0 && (destination.outputBytes ?? 0) >= 8 * 1024
+        ? await completeDocument(target, entryId, generation, contentRef, signal)
+        : undefined;
+    const content =
+      prepared?.content ??
+      (await historyContent(
+        target,
+        entryId,
+        generation,
+        contentRef,
+        contentCursor ?? undefined,
+        signal,
+      ));
+    return { content, window: prepared?.window };
+  }
+  const [page, body] = await Promise.all([
     historyPage(target, { aroundId: entryId, locator }, signal),
-    historyContent(target, entryId, generation, contentRef, contentCursor ?? undefined, signal),
+    readBody(),
   ]);
+  const { content } = body;
   const entry = page.data.items.find((row) => row.entryId === entryId);
   if (
     !entry ||
@@ -54,7 +73,11 @@ export async function prepareDestination(
     content.offset !== destination.offset
   )
     throw new Error(changed);
-  const tree = destination.markdown ? parseMarkdown(content.text) : undefined;
+  const tree = destination.markdown
+    ? body.window
+      ? documentTree(body.window, content.text)
+      : parseMarkdown(content.text)
+    : undefined;
   if (destination.markdown && (!tree || !content.complete)) throw new Error(changed);
   if (!positions(tree ? markdownText(tree) : content.text, destination)) throw new Error(changed);
   let extra;

@@ -49,6 +49,8 @@ pub struct HistorySearchDestination {
     pub native_index: Option<SafeCountDto>,
     pub tool_call_id: Option<HistoryEntryIdDto>,
     pub offset: SafeCountDto,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub output_bytes: Option<SafeCountDto>,
     pub start_utf16: SafeCountDto,
     pub end_utf16: SafeCountDto,
     pub markdown: bool,

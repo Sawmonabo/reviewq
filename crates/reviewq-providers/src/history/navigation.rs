@@ -455,6 +455,7 @@ pub(super) fn plan(source: &Source, cancel: &AtomicBool) -> Result<NativePlan, A
                     VisiblePart {
                         native_index: part.index,
                         kind: part.kind,
+                        text_bytes: part.body.bytes,
                         text,
                         content,
                     },

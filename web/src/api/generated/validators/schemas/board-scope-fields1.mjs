@@ -2,8 +2,8 @@
 import { func0 } from "../runtime.mjs";
 import { validate25 } from "./checkpoint-id-dto.mjs";
 import { validate69 } from "./merge-request-iid-dto.mjs";
-import { schema442 } from "../metadata-10.mjs";
-function validate1532(
+import { schema450 } from "../metadata-11.mjs";
+function validate1568(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -35,7 +35,7 @@ function validate1532(
         if (data.enabled !== undefined && func0.call(data, "enabled")) {
           const _errs2 = errors;
           if (typeof data.enabled !== "boolean") {
-            validate1532.errors = [
+            validate1568.errors = [
               {
                 instancePath: instancePath + "/enabled",
                 schemaPath: "#/properties/enabled/type",
@@ -63,7 +63,7 @@ function validate1532(
                 for (let i0 = 0; i0 < len0; i0++) {
                   const _errs6 = errors;
                   if (typeof data2[i0] !== "string") {
-                    validate1532.errors = [
+                    validate1568.errors = [
                       {
                         instancePath: instancePath + "/jiraProjectKeys/" + i0,
                         schemaPath: "#/properties/jiraProjectKeys/items/type",
@@ -79,7 +79,7 @@ function validate1532(
                   }
                 }
               } else {
-                validate1532.errors = [
+                validate1568.errors = [
                   {
                     instancePath: instancePath + "/jiraProjectKeys",
                     schemaPath: "#/properties/jiraProjectKeys/type",
@@ -98,7 +98,7 @@ function validate1532(
             if (data.name !== undefined && func0.call(data, "name")) {
               const _errs8 = errors;
               if (typeof data.name !== "string") {
-                validate1532.errors = [
+                validate1568.errors = [
                   {
                     instancePath: instancePath + "/name",
                     schemaPath: "#/properties/name/type",
@@ -145,7 +145,7 @@ function validate1532(
                       }
                     }
                   } else {
-                    validate1532.errors = [
+                    validate1568.errors = [
                       {
                         instancePath: instancePath + "/projectIds",
                         schemaPath: "#/properties/projectIds/type",
@@ -194,7 +194,7 @@ function validate1532(
                         }
                       }
                     } else {
-                      validate1532.errors = [
+                      validate1568.errors = [
                         {
                           instancePath: instancePath + "/reviewStatusIds",
                           schemaPath: "#/properties/reviewStatusIds/type",
@@ -241,13 +241,13 @@ function validate1532(
                       let data10 = data.storyPointsField;
                       const _errs17 = errors;
                       if (typeof data10 !== "string" && data10 !== null) {
-                        validate1532.errors = [
+                        validate1568.errors = [
                           {
                             instancePath: instancePath + "/storyPointsField",
                             schemaPath: "#/properties/storyPointsField/type",
                             keyword: "type",
                             params: {
-                              type: schema442.properties.storyPointsField.type,
+                              type: schema450.properties.storyPointsField.type,
                             },
                           },
                         ];
@@ -265,7 +265,7 @@ function validate1532(
         }
       }
     } else {
-      validate1532.errors = [
+      validate1568.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -276,7 +276,7 @@ function validate1532(
       return false;
     }
   }
-  validate1532.errors = vErrors;
+  validate1568.errors = vErrors;
   return errors === 0;
 }
-export { validate1532 };
+export { validate1568 };

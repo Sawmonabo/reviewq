@@ -127,6 +127,7 @@ import type { CurrentActionResponse } from "./actions.js";
 
 import type {
   HistoryContentResponse,
+  HistoryDocumentResponse,
   HistoryNavigationResponse,
   HistoryPageResponse,
   HistoryPartPageResponse,
@@ -186,6 +187,7 @@ export interface Contracts {
   FollowupPreferencesResponse: FollowupPreferencesResponse;
   FollowupResultsResponse: FollowupResultsResponse;
   HistoryContentResponse: HistoryContentResponse;
+  HistoryDocumentResponse: HistoryDocumentResponse;
   HistoryNavigationResponse: HistoryNavigationResponse;
   HistoryPageResponse: HistoryPageResponse;
   HistoryPartPageResponse: HistoryPartPageResponse;

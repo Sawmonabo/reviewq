@@ -31,11 +31,11 @@ pub(in crate::entry) struct ContentQuery {
 }
 
 #[derive(Clone, Deserialize, Eq, PartialEq, Serialize)]
-struct Locator {
+pub(super) struct Locator {
     run: String,
     session: String,
-    generation: String,
-    item: String,
+    pub(super) generation: String,
+    pub(super) item: String,
     part: Option<u16>,
     position: Position,
     offset: u64,
@@ -46,6 +46,45 @@ struct Locator {
 enum Position {
     File { point: Point },
     Rpc { turn: String, hash: String },
+}
+
+impl Locator {
+    pub(super) fn decode(
+        endpoint: &ServiceEndpoint,
+        token: &str,
+        run: &RunId,
+        session: &SessionKey,
+    ) -> Result<Self, AppError> {
+        let reference: Self = endpoint.decode_cursor(TOKEN, token)?;
+        if reference.run != run.as_str()
+            || reference.session != session.as_str()
+            || reference.offset != 0
+        {
+            return Err(AppError::CursorExpired);
+        }
+        Ok(reference)
+    }
+
+    pub(super) fn source(&self) -> Result<ContentReference, AppError> {
+        let entry = parse(&self.item)?;
+        let generation = self.generation.clone();
+        let part = self.part;
+        Ok(match &self.position {
+            Position::File { point } => ContentReference::File(FileContentRef {
+                generation,
+                entry,
+                part,
+                position: point.clone().into(),
+            }),
+            Position::Rpc { turn, hash } => ContentReference::Rpc(RpcContentRef {
+                generation,
+                entry,
+                part,
+                turn: parse(turn)?,
+                hash: parse(hash)?,
+            }),
+        })
+    }
 }
 
 pub(in crate::entry) async fn content(
@@ -73,6 +112,7 @@ pub(in crate::entry) async fn content(
                 run,
                 session,
                 source,
+                window: None,
             },
             result.data.text.as_str(),
             diagrams::client_font(&headers).as_ref(),
@@ -90,13 +130,7 @@ pub(in crate::entry) async fn read_content(
     limit: u32,
 ) -> Result<HistoryContentResponse, AppError> {
     let endpoint = &entry.auth.endpoint;
-    let reference: Locator = endpoint.decode_cursor(TOKEN, &input.reference)?;
-    if reference.run != run.as_str()
-        || reference.session != session.as_str()
-        || reference.offset != 0
-    {
-        return Err(AppError::CursorExpired);
-    }
+    let reference = Locator::decode(endpoint, &input.reference, &run, &session)?;
     let offset = if let Some(cursor) = input.cursor {
         let mut next: Locator = endpoint.decode_cursor(TOKEN, &cursor)?;
         let offset = next.offset;
@@ -112,40 +146,19 @@ pub(in crate::entry) async fn read_content(
         .store
         .history_session(actor.clone(), run.clone(), session.clone())
         .await?;
-    let result = match &reference.position {
-        Position::File { point } => {
+    let result = match reference.source()? {
+        ContentReference::File(verified) => {
             entry
                 .file_history
-                .content(
-                    source.value.clone(),
-                    FileContentRef {
-                        generation: reference.generation.clone(),
-                        entry: parse(&reference.item)?,
-                        part: reference.part,
-                        position: point.clone().into(),
-                    },
-                    offset,
-                    limit,
-                )
+                .content(source.value.clone(), verified, offset, limit)
                 .await
         }
-        Position::Rpc { turn, hash } => {
+        ContentReference::Rpc(verified) => {
             entry
                 .host
                 .as_ref()
                 .ok_or(AppError::Unavailable)?
-                .history_content(
-                    source.value.clone(),
-                    RpcContentRef {
-                        generation: reference.generation.clone(),
-                        entry: parse(&reference.item)?,
-                        part: reference.part,
-                        turn: parse(turn)?,
-                        hash: parse(hash)?,
-                    },
-                    offset,
-                    limit,
-                )
+                .history_content(source.value.clone(), verified, offset, limit)
                 .await
         }
     };

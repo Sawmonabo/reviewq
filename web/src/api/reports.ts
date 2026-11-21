@@ -43,7 +43,12 @@ export async function reportWindow(
   runId: string,
   report: ReportSummary,
   signal: AbortSignal,
-  range: { readonly byteOffset?: number; readonly byteEnd?: number; readonly layout?: boolean },
+  range: {
+    readonly byteOffset?: number;
+    readonly byteEnd?: number;
+    readonly tableByteEnd?: number;
+    readonly layout?: boolean;
+  },
 ) {
   const result = await read(
     `${versionPath(runId, report.receiptId)}/window${queryString({ sha256: report.sha256, ...range })}`,

@@ -19,9 +19,11 @@ mod claude;
 mod claude_workflow;
 mod codex_report;
 mod content;
+mod documents;
 mod file;
 mod identity;
 mod locator;
+mod native_string;
 mod navigation;
 mod proof;
 mod questions;
@@ -52,6 +54,7 @@ pub struct FileHistory {
     large_records: Arc<Mutex<search::LargeRecords>>,
     search_index: Option<Arc<search::Acceleration>>,
     streams: content::Streams,
+    documents: documents::Documents,
 }
 
 impl Default for FileHistory {
@@ -63,6 +66,7 @@ impl Default for FileHistory {
             large_records: Arc::default(),
             search_index: None,
             streams: content::Streams::default(),
+            documents: documents::Documents::default(),
         }
     }
 }
@@ -297,6 +301,25 @@ impl NativeHistoryReader for FileHistory {
             self.streams
                 .read(key, reference, source, offset, limit as usize)
                 .await
+        })
+    }
+
+    fn document(
+        &self,
+        session: HistorySession,
+        reference: FileContentRef,
+        query: reviewq_app::history::document::Query,
+    ) -> AppFuture<'_, reviewq_app::history::document::Window> {
+        Box::pin(async move {
+            let slot = self
+                .documents
+                .slot(session.target.clone(), reference.clone())?;
+            let mut slot = slot.lock_owned().await;
+            self.inspect(session, move |source, cancel| {
+                documents::read(&mut slot, &source, &reference, query, cancel)
+            })
+            .await?
+            .ok_or(AppError::NotFound)
         })
     }
 

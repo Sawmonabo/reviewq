@@ -29,9 +29,11 @@ const DEFAULT_JUMP_LIMIT: u16 = 10;
 const DEFAULT_PAGE_BYTES: usize = 64 * 1024;
 
 mod content;
+mod document;
 mod drawing_hints;
 mod explore;
 pub(super) use content::{ContentQuery, content, read_content};
+pub(super) use document::{document, drawing_source};
 mod live;
 mod parts;
 mod result;
@@ -532,12 +534,14 @@ fn encode_entry(
             text,
             content_ref: None,
             display: None,
+            text_bytes: None,
         },
         VisibleKind::Assistant => HistoryPart::AssistantText {
             native_index: None,
             text,
             content_ref: None,
             display: None,
+            text_bytes: None,
         },
     };
     let next = entry
@@ -622,12 +626,20 @@ fn visible_part(
             text,
             content_ref,
             display: None,
+            text_bytes: part
+                .content
+                .as_ref()
+                .and_then(|_| SafeCountDto::new(part.text_bytes)),
         },
         VisiblePartKind::Text(VisibleKind::Assistant) => HistoryPart::AssistantText {
             native_index: SafeCountDto::new(u64::from(part.native_index)),
             text,
             content_ref,
             display: None,
+            text_bytes: part
+                .content
+                .as_ref()
+                .and_then(|_| SafeCountDto::new(part.text_bytes)),
         },
         VisiblePartKind::ToolCall {
             call,
@@ -655,12 +667,20 @@ fn visible_part(
             text,
             content_ref,
             display: None,
+            text_bytes: part
+                .content
+                .as_ref()
+                .and_then(|_| SafeCountDto::new(part.text_bytes)),
         },
         VisiblePartKind::Assignment => HistoryPart::Assignment {
             native_index: SafeCountDto::new(u64::from(part.native_index)),
             text,
             content_ref,
             display: None,
+            text_bytes: part
+                .content
+                .as_ref()
+                .and_then(|_| SafeCountDto::new(part.text_bytes)),
         },
     })
 }

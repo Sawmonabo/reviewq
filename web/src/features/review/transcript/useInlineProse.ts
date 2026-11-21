@@ -5,6 +5,7 @@ import type { DocumentDisplay } from "../../../api/generated/contracts/common";
 import { historyContent } from "../../../api/history";
 import type { SessionAddress } from "../../../api/history";
 import { parseMarkdown } from "../../../components/markdown/parse-markdown";
+import { completeDocument, documentTree } from "./document";
 
 const MAX_INLINE_BYTES = 64 * 1024;
 const MAX_NEARBY_REFERENCES = 6;
@@ -21,17 +22,24 @@ export type InlineProse = { readonly display?: DocumentDisplay | null | undefine
   | { readonly kind: "prepared"; readonly tree: Root }
 );
 
-type Address = { readonly entryId: string; readonly reference: string };
+type Address = { readonly entryId: string; readonly reference: string; readonly bytes: number };
 type Cache = {
   readonly scope: string;
   readonly entries: ReadonlyMap<string, InlineProse | null>;
 };
 
+function proseBytes(entry: HistoryEntry, part: HistoryPart) {
+  return "textBytes" in part && typeof part.textBytes === "number"
+    ? part.textBytes
+    : (entry.textBytes ?? 0);
+}
+
 export function inlineProseReference(entry: HistoryEntry, part: HistoryPart) {
+  const bytes = proseBytes(entry, part);
   if (
     (part.kind !== "assistant_text" && part.kind !== "user_prompt" && part.kind !== "assignment") ||
-    !entry.textBytes ||
-    entry.textBytes > MAX_INLINE_BYTES
+    !bytes ||
+    bytes > MAX_INLINE_BYTES
   )
     return undefined;
   return (
@@ -64,7 +72,7 @@ export function useInlineProse(
         entry.parts.flatMap((part) => {
           const reference = inlineProseReference(entry, part);
           return reference && reference !== openReference
-            ? [{ entryId: entry.entryId, reference }]
+            ? [{ entryId: entry.entryId, reference, bytes: proseBytes(entry, part) }]
             : [];
         }),
       )
@@ -105,7 +113,8 @@ export function useInlineProse(
     }
     function fill() {
       if (document.hidden) return;
-      for (const { entryId, reference } of addresses) {
+      let canPrepare = !hasPreparation() && !preparing.current;
+      for (const { entryId, reference, bytes: expectedBytes } of addresses) {
         if (requests.size >= MAX_REQUESTS) break;
         if (known.has(reference) || requests.has(reference)) continue;
         const controller = new AbortController();
@@ -128,15 +137,33 @@ export function useInlineProse(
             return { scope, entries };
           });
         }
-        void historyContent(
-          { runId, sessionKey },
-          entryId,
-          sourceGeneration,
-          reference,
-          undefined,
-          controller.signal,
-        ).then(
-          (data) => {
+        const bodyTarget = { runId, sessionKey };
+        const near = canPrepare && expectedBytes >= PREPARE_MIN_BYTES;
+        if (near) canPrepare = false;
+        const load = async () => {
+          const prepared = near
+            ? await completeDocument(
+                bodyTarget,
+                entryId,
+                sourceGeneration,
+                reference,
+                controller.signal,
+              )
+            : undefined;
+          const data =
+            prepared?.content ??
+            (await historyContent(
+              bodyTarget,
+              entryId,
+              sourceGeneration,
+              reference,
+              undefined,
+              controller.signal,
+            ));
+          return { data, window: prepared?.window };
+        };
+        void load().then(
+          ({ data, window: settled }) => {
             if (controller.signal.aborted) return;
             const bytes = encoder.encode(data.text).length;
             if (
@@ -176,7 +203,9 @@ export function useInlineProse(
                 save(source);
                 return;
               }
-              const tree = parseMarkdown(source.text);
+              const tree = settled
+                ? documentTree(settled, source.text)
+                : parseMarkdown(source.text);
               save(
                 tree
                   ? { kind: "prepared", tree, display: source.display }

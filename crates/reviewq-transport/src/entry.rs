@@ -45,6 +45,7 @@ mod checkout;
 mod control;
 mod control_ops;
 mod diagrams;
+mod document_display;
 mod error;
 mod events;
 mod features;
@@ -368,6 +369,10 @@ pub fn router(
         .route(
             "/runs/{run_id}/sessions/{session_key}/history/content",
             get(history::content),
+        )
+        .route(
+            "/runs/{run_id}/sessions/{session_key}/history/content/window",
+            get(history::document),
         )
         .route(
             "/runs/{run_id}/sessions/{session_key}/messages",

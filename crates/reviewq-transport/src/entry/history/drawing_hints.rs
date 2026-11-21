@@ -36,7 +36,8 @@ impl InlineDisplay<'_> {
             let reference = part
                 .and_then(|part| part.content.as_ref())
                 .or(entry.content.as_ref());
-            if entry.text_bytes.is_some_and(|bytes| bytes <= 64 * 1024) {
+            let bytes = part.map(|part| part.text_bytes).or(entry.text_bytes);
+            if bytes.is_some_and(|bytes| bytes <= 64 * 1024) {
                 self.enrich(projected, false, |_| reference.cloned());
             }
             return;
@@ -101,6 +102,7 @@ impl InlineDisplay<'_> {
                 run: self.run.to_string(),
                 session: self.session.to_string(),
                 source: reference.as_str().to_owned(),
+                window: None,
             };
             *display = if complete {
                 diagrams::observe(self.entry, self.actor, owner, text, self.font.as_ref())
