@@ -280,7 +280,7 @@ pub(super) fn preview(mut entry: VisibleEntry, generation: &str) -> VisibleEntry
     entry
 }
 
-fn digest(value: &str) -> ReportHash {
+pub(super) fn digest(value: &str) -> ReportHash {
     ReportHash::from_sha256(Sha256::digest(value.as_bytes()).into())
 }
 

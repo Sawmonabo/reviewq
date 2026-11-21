@@ -27,6 +27,7 @@ pub(super) use index::Acceleration;
 pub(super) use large::LargeRecords;
 
 const RECORDS_PER_PAGE: usize = 64;
+const PARTS_PER_PAGE: usize = 64;
 const BYTES_PER_PAGE: u64 = 2 * 1024 * 1024;
 const DECODE_BLOCK: usize = 16 * 1024;
 const BODY_STEP: u64 = 512 * 1024;
@@ -298,6 +299,8 @@ fn match_record(
     if query.reverse {
         bodies.reverse();
     }
+    let mut repeated_bytes = 0;
+    let mut parts = 0;
     for body in bodies {
         let key = body.key();
         if if query.reverse {
@@ -307,6 +310,7 @@ fn match_record(
         } {
             continue;
         }
+        check_cancel(cancel)?;
         let point = SearchPoint {
             record: at.record,
             part: key,
@@ -326,12 +330,13 @@ fn match_record(
             0
         };
         let available = MAX_SEARCH_HITS - output.hits.len();
-        if available == 0 {
+        if available == 0 || parts == PARTS_PER_PAGE {
             return Ok(Some(SearchPoint {
                 byte: boundary,
                 ..point
             }));
         }
+        parts += 1;
         let mut matches = Matches {
             query: &query.literal,
             reverse: query.reverse,
@@ -380,7 +385,23 @@ fn match_record(
             matches.scan_native(&source.file, native, cancel)?;
         } else if let Some(staged) = window.staged.as_ref().filter(|staged| staged.key == key) {
             matches.scan_body(&staged.file, cancel)?;
+        } else if let Some(decoded) = body
+            .native_string
+            .as_ref()
+            .filter(|_| body.bytes <= CONTENT_BYTES)
+            .and_then(|span| native_string::field_range(at.record..window.end, span).ok())
+            .and_then(|field| native_string::small(&source.file, field, body.bytes).ok())
+        {
+            matches.bytes = decoded.into_bytes();
+            matches.complete_body()?;
         } else {
+            if repeated_bytes >= 16 * 1024 * 1024 {
+                return Ok(Some(SearchPoint {
+                    byte: boundary,
+                    ..point
+                }));
+            }
+            repeated_bytes += window.end - at.record;
             let projected = records::stream_body(
                 source.provider,
                 lines.input(at.record, window.end),
@@ -396,16 +417,7 @@ fn match_record(
                     output.partial = true;
                     continue;
                 }
-                if body.markdown {
-                    let text = file::readable_prefix(&matches.bytes)?;
-                    if let Some(display) = displayed_markdown(text) {
-                        matches.collect(&display, true);
-                    } else {
-                        matches.partial = true;
-                    }
-                } else {
-                    matches.flush_matches(true)?;
-                }
+                matches.complete_body()?;
             }
         }
         if query.reverse && matches.hits.len() == available {
@@ -444,6 +456,20 @@ struct Matches<'a> {
 }
 
 impl Matches<'_> {
+    fn complete_body(&mut self) -> Result<(), AppError> {
+        if self.body.markdown {
+            let text = file::readable_prefix(&self.bytes)?;
+            if let Some(display) = displayed_markdown(text) {
+                self.collect(&display, true);
+            } else {
+                self.partial = true;
+            }
+        } else {
+            self.flush_matches(true)?;
+        }
+        Ok(())
+    }
+
     fn select_window(&mut self) -> std::ops::Range<u64> {
         let boundary = self.boundary.min(self.body.bytes);
         self.range = if self.reverse {

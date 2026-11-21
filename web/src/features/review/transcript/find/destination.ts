@@ -259,7 +259,13 @@ export function holdOccurrence(
   let frame = 0;
   let inset: number | undefined;
   const deadline = performance.now() + 1200;
-  const observer = new ResizeObserver(schedule);
+  const observer = new ResizeObserver(() => {
+    if (inset === undefined) return schedule();
+    // Layout settled after the selected range was already visible. Correct its inset
+    // within this delivery, before the browser paints the shifted content.
+    cancelAnimationFrame(frame);
+    paint();
+  });
   observer.observe(view);
   const spacer = view.querySelector(".timeline-spacer");
   if (spacer) observer.observe(spacer);

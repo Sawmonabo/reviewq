@@ -4,6 +4,7 @@ use super::FileContentRef;
 use crate::reading::Literal;
 
 pub mod index;
+pub mod rpc;
 
 pub const MAX_SEARCH_HITS: usize = 16;
 
@@ -34,9 +35,9 @@ pub struct SearchCursor {
 }
 
 #[derive(Debug)]
-pub struct SearchHit {
-    pub reference: FileContentRef,
-    pub point: SearchPoint,
+pub struct SearchHit<Reference = FileContentRef, Position = SearchPoint> {
+    pub reference: Reference,
+    pub point: Position,
     pub tool_call: Option<NativeInputId>,
     pub before: String,
     pub matched: String,

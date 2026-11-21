@@ -1,4 +1,5 @@
 use std::fs::File;
+use std::ops::Range;
 use std::os::unix::fs::FileExt;
 use std::sync::atomic::AtomicBool;
 
@@ -7,6 +8,68 @@ use reviewq_app::access::AppError;
 use super::{Body, RecordWindow, check_cancel};
 
 const BLOCK_BYTES: usize = 32 * 1024;
+
+pub(super) fn field_range(
+    record: Range<u64>,
+    relative: &Range<u64>,
+) -> Result<Range<u64>, AppError> {
+    let first = record
+        .start
+        .checked_add(relative.start)
+        .ok_or(AppError::CursorExpired)?;
+    let last = record
+        .start
+        .checked_add(relative.end)
+        .ok_or(AppError::CursorExpired)?;
+    if last > record.end || last.saturating_sub(first) < 2 {
+        return Err(AppError::CursorExpired);
+    }
+    Ok(first..last)
+}
+
+pub(super) fn small(file: &File, field: Range<u64>, bytes: u64) -> Result<String, AppError> {
+    let length = field.end - field.start;
+    if length > bytes.saturating_mul(6).saturating_add(2) || bytes > 65_536 {
+        return Err(AppError::CursorExpired);
+    }
+    let mut raw = vec![0; length as usize];
+    file.read_exact_at(&mut raw, field.start)
+        .map_err(|_| AppError::Unavailable)?;
+    let decoded = serde_json::from_slice::<String>(&raw).map_err(|_| AppError::CursorExpired)?;
+    if decoded.len() as u64 != bytes {
+        return Err(AppError::CursorExpired);
+    }
+    Ok(decoded)
+}
+
+pub(super) fn visit(
+    file: &File,
+    field: Range<u64>,
+    mut consume: impl FnMut(&str) -> Result<(), AppError>,
+) -> Result<(), AppError> {
+    check_quotes(file, &field)?;
+    let mut start = field.start + 1;
+    let end = field.end - 1;
+    let mut scratch = Vec::new();
+    while start < end {
+        let (next, text) = decode(file, start, end, &mut scratch)?;
+        consume(&text)?;
+        start = next;
+    }
+    Ok(())
+}
+
+fn check_quotes(file: &File, field: &Range<u64>) -> Result<(), AppError> {
+    let mut quote = [0];
+    for at in [field.start, field.end - 1] {
+        file.read_exact_at(&mut quote, at)
+            .map_err(|_| AppError::Unavailable)?;
+        if quote[0] != b'"' {
+            return Err(AppError::CursorExpired);
+        }
+    }
+    Ok(())
+}
 
 pub(super) struct NativeString {
     pub(super) key: u16,
@@ -29,21 +92,10 @@ impl NativeString {
         let Some(field) = &body.native_string else {
             return Ok(None);
         };
-        let first = record.position.offset + field.start;
-        let last = record.position.offset + field.end;
-        if first + 2 > last || last > record.end {
-            return Err(AppError::CursorExpired);
-        }
-        let mut quote = [0];
-        for at in [first, last - 1] {
-            file.read_exact_at(&mut quote, at)
-                .map_err(|_| AppError::Unavailable)?;
-            if quote[0] != b'"' {
-                return Err(AppError::CursorExpired);
-            }
-        }
-        let end = last - 1;
-        let mut source = first + 1;
+        let field = field_range(record.position.offset..record.end, field)?;
+        check_quotes(file, &field)?;
+        let end = field.end - 1;
+        let mut source = field.start + 1;
         let mut decoded = 0;
         let mut points = Vec::new();
         let mut scratch = Vec::new();

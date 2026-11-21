@@ -5,7 +5,9 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use reviewq_app::access::{AppError, admits_disk_scratch};
-use reviewq_app::history::search::index::{CandidateIndex, CandidateWriter, SearchIndex};
+use reviewq_app::history::search::index::{
+    CandidateIndex, CandidateWriter, IndexProof, SearchIndex,
+};
 use reviewq_domain::session::AbsolutePath;
 use rusqlite::{Connection, OpenFlags, OptionalExtension, params};
 
@@ -37,8 +39,7 @@ struct Slot {
 }
 
 struct Published {
-    key: [u8; 32],
-    end: u64,
+    proof: IndexProof,
     stage: Stage,
 }
 
@@ -78,7 +79,7 @@ impl SearchIndex for Indexes {
             let mut slot = self.slot.lock().ok()?;
             expire(&mut slot);
             let (used, ready) = slot.ready.as_mut()?;
-            if ready.key != key {
+            if ready.proof.observation != key {
                 return None;
             }
             *used = Instant::now();
@@ -97,28 +98,60 @@ impl SearchIndex for Indexes {
         }))
     }
 
-    fn writer(&self, key: [u8; 32]) -> Result<Box<dyn CandidateWriter>, AppError> {
-        let claim = {
+    fn proof(&self, source: [u8; 32]) -> Option<IndexProof> {
+        let mut slot = self.slot.lock().ok()?;
+        expire(&mut slot);
+        slot.ready
+            .as_ref()
+            .map(|(_, ready)| ready.proof)
+            .filter(|proof| proof.source == source)
+    }
+
+    fn writer(
+        &self,
+        key: [u8; 32],
+        reuse: Option<IndexProof>,
+    ) -> Result<Box<dyn CandidateWriter>, AppError> {
+        let (claim, retained) = {
             let mut slot = self.slot.lock().map_err(|_| AppError::Unavailable)?;
             expire(&mut slot);
             if slot.building
-                || slot
-                    .ready
-                    .as_ref()
-                    .is_some_and(|(_, ready)| ready.key == key || Arc::strong_count(ready) > 1)
+                || slot.ready.as_ref().is_some_and(|(_, ready)| {
+                    Arc::strong_count(ready) > 1
+                        || (ready.proof.observation == key && reuse != Some(ready.proof))
+                })
             {
                 return Err(AppError::Busy);
             }
+            if reuse.is_some_and(|expected| {
+                slot.ready.as_ref().map(|(_, ready)| ready.proof) != Some(expected)
+            }) {
+                return Err(AppError::CursorExpired);
+            }
             // Retain at most one database, including every open reader and build.
-            slot.ready.take();
+            let prior = slot.ready.take();
+            let retained = if reuse.is_some() {
+                Some(
+                    Arc::try_unwrap(prior.ok_or(AppError::CursorExpired)?.1)
+                        .map_err(|_| AppError::Busy)?,
+                )
+            } else {
+                None
+            };
             slot.building = true;
-            Claim(self.slot.clone())
+            (Claim(self.slot.clone()), retained)
         };
-        let path = AbsolutePath::from_canonical(self.profile.clone())
-            .map_err(|_| AppError::Unavailable)?;
-        let profile = Profile::resolve(&path).map_err(|_| AppError::Unavailable)?;
-        let stage = Stage::new(&profile).map_err(|_| AppError::Unavailable)?;
-        let file = staging::create_private(&stage.database).map_err(|_| AppError::Unavailable)?;
+        let (stage, covered) = if let Some(retained) = retained {
+            (retained.stage, retained.proof.covered_through)
+        } else {
+            let path = AbsolutePath::from_canonical(self.profile.clone())
+                .map_err(|_| AppError::Unavailable)?;
+            let profile = Profile::resolve(&path).map_err(|_| AppError::Unavailable)?;
+            let stage = Stage::new(&profile).map_err(|_| AppError::Unavailable)?;
+            staging::create_private(&stage.database).map_err(|_| AppError::Unavailable)?;
+            (stage, 0)
+        };
+        let file = std::fs::File::open(&stage.database).map_err(|_| AppError::Unavailable)?;
         let fs = rustix::fs::fstatfs(&file)
             .map_err(|_| AppError::Unavailable)?
             .f_type as u64;
@@ -140,20 +173,30 @@ impl SearchIndex for Indexes {
         let pages: i64 = db
             .pragma_query_value(None, "max_page_count", |row| row.get(0))
             .map_err(error)?;
-        if mode != "memory" || pages != MAX_PAGES {
+        let page_size: i64 = db
+            .pragma_query_value(None, "page_size", |row| row.get(0))
+            .map_err(error)?;
+        if mode != "memory" || pages != MAX_PAGES || page_size != PAGE_BYTES {
             return Err(AppError::Unavailable);
         }
         db.execute_batch("PRAGMA cache_size=-2048; PRAGMA temp_store=MEMORY;")
             .map_err(error)?;
-        db.execute_batch(SCHEMA).map_err(error)?;
+        if reuse.is_none() {
+            db.execute_batch(SCHEMA).map_err(error)?;
+        }
+        let next_row = db
+            .query_row("SELECT COALESCE(MAX(rowid)+1,1) FROM locators", [], |row| {
+                row.get(0)
+            })
+            .map_err(error)?;
         Ok(Box::new(Build {
             key,
             claim,
             stage,
             db,
-            next_row: 1,
+            next_row,
             pending: None,
-            covered: 0,
+            covered,
         }))
     }
 }
@@ -179,6 +222,10 @@ struct Build {
 }
 
 impl CandidateWriter for Build {
+    fn covered_through(&self) -> u64 {
+        self.covered
+    }
+
     fn begin_record(&mut self, start: u64) -> Result<(), AppError> {
         if self.pending.is_some() || self.covered != start {
             return Err(AppError::Internal);
@@ -226,7 +273,7 @@ impl CandidateWriter for Build {
         Ok(())
     }
 
-    fn publish(self: Box<Self>) -> Result<(), AppError> {
+    fn publish(self: Box<Self>, proof: IndexProof) -> Result<(), AppError> {
         let Self {
             key,
             claim,
@@ -235,19 +282,15 @@ impl CandidateWriter for Build {
             covered,
             ..
         } = *self;
+        if proof.observation != key || proof.covered_through != covered {
+            return Err(AppError::Internal);
+        }
         if !db.is_autocommit() {
             db.execute_batch("ROLLBACK").map_err(error)?;
         }
         db.close().map_err(|(_, problem)| error(problem))?;
         let mut slot = claim.0.lock().map_err(|_| AppError::Unavailable)?;
-        slot.ready = Some((
-            Instant::now(),
-            Arc::new(Published {
-                key,
-                end: covered,
-                stage,
-            }),
-        ));
+        slot.ready = Some((Instant::now(), Arc::new(Published { proof, stage })));
         Ok(())
     }
 }
@@ -260,7 +303,7 @@ struct Lookup {
 
 impl CandidateIndex for Lookup {
     fn covered_through(&self) -> u64 {
-        self.published.end
+        self.published.proof.covered_through
     }
 
     fn next(&self, record: u64, reverse: bool) -> Result<Option<u64>, AppError> {

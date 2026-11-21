@@ -10,6 +10,7 @@ pub use markdown::{MAX_DISCUSSION_TEXT_SOURCE_BYTES, discussion_text, displayed_
 
 const MAX_LITERAL_BYTES: usize = 256;
 
+#[derive(Clone)]
 pub struct Literal(String);
 
 impl Literal {

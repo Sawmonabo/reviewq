@@ -123,8 +123,19 @@ impl Codex {
     pub(super) async fn read_history(
         &self,
         target: HistorySession,
+        position: NativePosition,
+        limit: u16,
+    ) -> Result<NativeHistoryPage, AppError> {
+        self.read_history_projected(target, position, limit, true)
+            .await
+    }
+
+    pub(super) async fn read_history_projected(
+        &self,
+        target: HistorySession,
         mut position: NativePosition,
         limit: u16,
+        previews: bool,
     ) -> Result<NativeHistoryPage, AppError> {
         if !(1..=100).contains(&limit) {
             return Err(AppError::InvalidRequest);
@@ -198,7 +209,13 @@ impl Codex {
             .into_iter()
             .filter_map(|item| {
                 visible(item.item, &id, item.started_at_ms, item.completed_at_ms).map(|entry| {
-                    entry.map(|entry| super::history_reads::preview(entry, &generation))
+                    entry.map(|entry| {
+                        if previews {
+                            super::history_reads::preview(entry, &generation)
+                        } else {
+                            entry
+                        }
+                    })
                 })
             })
             .collect::<Result<Vec<_>, AppError>>()?;

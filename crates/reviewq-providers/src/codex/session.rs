@@ -96,6 +96,14 @@ impl NativeHost for Codex {
         Box::pin(self.read_history_stamp(target))
     }
 
+    fn history_search(
+        &self,
+        target: HistorySession,
+        input: reviewq_app::history::search::rpc::RpcSearchQuery,
+    ) -> AppFuture<'_, reviewq_app::history::search::rpc::RpcSearchPage> {
+        Box::pin(self.search_rpc_history(target, input))
+    }
+
     fn history_signals(
         &self,
         target: HistorySession,

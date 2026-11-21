@@ -4,10 +4,14 @@ use axum::Json;
 use axum::extract::State;
 use axum::http::HeaderMap;
 use reviewq_app::access::AppError;
+use reviewq_app::history::search::rpc::{RpcSearchPage, RpcSearchPoint, RpcSearchQuery};
 use reviewq_app::history::search::{
-    HistorySearch, SearchCursor, SearchHit, SearchPoint, SourceObservation,
+    HistorySearch, SearchCursor, SearchHit, SearchPage, SearchPoint, SourceObservation,
 };
-use reviewq_app::history::{ContentReference, FileContentRef, HistoryBookmark};
+use reviewq_app::history::{
+    ContentReference, FileContentRef, HistoryBookmark, HistorySession, NativeRpcStamp,
+    RpcContentRef,
+};
 use reviewq_app::reading::Literal;
 use reviewq_domain::identity::{RunId, SessionKey};
 use reviewq_protocol::history::search::{
@@ -22,12 +26,12 @@ use reviewq_protocol::{
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use super::{Entry, Point, ServiceEndpoint, content, explore, parts};
+use super::{Cursor, Entry, Point, ServiceEndpoint, content, explore, parts};
 use crate::entry::error::{ApiError, ApiPath as Path, ApiQuery as Query};
 use crate::entry::pages::{parse, success};
 
-const PAGE_TOKEN: &[u8] = b"reviewq-history-search-page-v1";
-const HIT_TOKEN: &[u8] = b"reviewq-history-search-hit-v1";
+const PAGE_TOKEN: &[u8] = b"reviewq-history-search-page-v2";
+const HIT_TOKEN: &[u8] = b"reviewq-history-search-hit-v2";
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -71,21 +75,35 @@ struct Continuation {
     target: Target,
     query: [u8; 32],
     reverse: bool,
-    high_water: u64,
-    version: [u8; 32],
-    record: u64,
-    part: u16,
-    byte: u64,
+    position: Position,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(tag = "source", rename_all = "snake_case")]
+enum Position {
+    File {
+        high_water: u64,
+        version: [u8; 32],
+        record: u64,
+        part: u16,
+        byte: u64,
+    },
+    Rpc {
+        page: Box<Cursor>,
+        tail: Option<String>,
+        item: Option<String>,
+        part: u16,
+        byte: u64,
+    },
 }
 
 #[derive(Serialize, Deserialize)]
 struct Hit {
     target: Target,
-    version: [u8; 32],
     generation: String,
     entry: String,
     part: Option<u16>,
-    point: Point,
+    source: HitSource,
     tool: Option<String>,
     offset: u64,
     start: u64,
@@ -93,6 +111,215 @@ struct Hit {
     markdown: bool,
     matched: String,
     ordinal: u64,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(tag = "source", rename_all = "snake_case")]
+enum HitSource {
+    File {
+        version: [u8; 32],
+        point: Point,
+    },
+    Rpc {
+        turn: String,
+        hash: String,
+        anchor: Box<Cursor>,
+        tail: Option<String>,
+    },
+}
+
+struct SearchScope<'a> {
+    endpoint: &'a ServiceEndpoint,
+    run: &'a RunId,
+    session: &'a SessionKey,
+    query: [u8; 32],
+    reverse: bool,
+}
+
+impl SearchScope<'_> {
+    fn cursor(&self, position: Position, reverse: bool) -> Result<HistoryCursorDto, AppError> {
+        seal(
+            self.endpoint,
+            PAGE_TOKEN,
+            &Continuation {
+                target: Target::new(self.run, self.session),
+                query: self.query,
+                reverse,
+                position,
+            },
+        )
+    }
+
+    fn rpc_position(&self, point: RpcSearchPoint, stamp: &NativeRpcStamp) -> Position {
+        Position::Rpc {
+            page: Box::new(self.rpc_anchor(point.page, &stamp.generation)),
+            tail: stamp.tail.clone(),
+            item: point.entry.map(|entry| entry.to_string()),
+            part: point.part,
+            byte: point.byte,
+        }
+    }
+
+    fn rpc_anchor(&self, page: reviewq_app::history::NativePosition, generation: &str) -> Cursor {
+        Cursor::new(self.run, self.session, generation, (32, 64 * 1024), page)
+    }
+
+    fn open(&self, input: &str) -> Result<Position, AppError> {
+        let saved: Continuation = self.endpoint.decode_cursor(PAGE_TOKEN, input)?;
+        saved.target.require(self.run, self.session)?;
+        if saved.query != self.query || saved.reverse != self.reverse {
+            return Err(AppError::CursorExpired);
+        }
+        Ok(saved.position)
+    }
+
+    fn page(
+        &self,
+        generation: Option<String>,
+        availability: HistoryAvailability,
+        hits: Vec<HistorySearchHit>,
+        next_cursor: Option<HistoryCursorDto>,
+    ) -> Result<HistorySearchPage, AppError> {
+        Ok(HistorySearchPage {
+            run_id: RunIdDto::new(self.run.as_str()).ok_or(AppError::Internal)?,
+            session_key: SessionKeyDto::new(self.session.as_str()).ok_or(AppError::Internal)?,
+            generation: generation
+                .map(|value| HistoryGenerationDto::new(value).ok_or(AppError::Internal))
+                .transpose()?,
+            availability,
+            hits,
+            next_cursor,
+        })
+    }
+
+    fn hit<R, P>(
+        &self,
+        found: SearchHit<R, P>,
+        origin: HitIdentity,
+        cursors: (HistoryCursorDto, HistoryCursorDto),
+    ) -> Result<HistorySearchHit, AppError> {
+        let signed = Hit {
+            target: Target::new(self.run, self.session),
+            generation: origin.generation,
+            entry: origin.entry,
+            part: origin.part,
+            source: origin.source,
+            tool: found.tool_call.map(|call| call.to_string()),
+            offset: found.output_offset,
+            start: found.start_utf16,
+            end: found.end_utf16,
+            markdown: found.markdown,
+            matched: found.matched.clone(),
+            ordinal: found.ordinal,
+        };
+        Ok(HistorySearchHit {
+            hit: seal(self.endpoint, HIT_TOKEN, &signed)?,
+            entry_id: HistoryEntryIdDto::new(signed.entry).ok_or(AppError::Internal)?,
+            before: text(found.before)?,
+            matched: text(found.matched)?,
+            after: text(found.after)?,
+            before_cursor: cursors.0,
+            after_cursor: cursors.1,
+        })
+    }
+
+    fn file(&self, page: SearchPage) -> Result<HistorySearchPage, AppError> {
+        let wire = |point: SearchPoint, reverse| {
+            self.cursor(
+                Position::File {
+                    high_water: page.observation.high_water,
+                    version: page.observation.version,
+                    record: point.record,
+                    part: point.part,
+                    byte: point.byte,
+                },
+                reverse,
+            )
+        };
+        let hits = page
+            .hits
+            .into_iter()
+            .map(|found| {
+                let reference = &found.reference;
+                let origin = HitIdentity {
+                    generation: reference.generation.clone(),
+                    entry: reference.entry.to_string(),
+                    part: reference.part,
+                    source: HitSource::File {
+                        version: page.observation.version,
+                        point: reference.position.clone().into(),
+                    },
+                };
+                let point = found.point;
+                let cursors = (
+                    wire(point, true)?,
+                    wire(
+                        SearchPoint {
+                            byte: point.byte + 1,
+                            ..point
+                        },
+                        false,
+                    )?,
+                );
+                self.hit(found, origin, cursors)
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        self.page(
+            Some(page.generation),
+            availability(page.partial),
+            hits,
+            page.next
+                .map(|point| wire(point, self.reverse))
+                .transpose()?,
+        )
+    }
+
+    fn rpc(&self, page: RpcSearchPage) -> Result<HistorySearchPage, AppError> {
+        let stamp = &page.observation;
+        let wire =
+            |point: RpcSearchPoint, reverse| self.cursor(self.rpc_position(point, stamp), reverse);
+        let hits = page
+            .hits
+            .into_iter()
+            .map(|found| {
+                let reference = &found.reference;
+                let origin = HitIdentity {
+                    generation: reference.generation.clone(),
+                    entry: reference.entry.to_string(),
+                    part: reference.part,
+                    source: HitSource::Rpc {
+                        turn: reference.turn.to_string(),
+                        hash: reference.hash.to_string(),
+                        anchor: Box::new(
+                            self.rpc_anchor(found.point.page.clone(), &reference.generation),
+                        ),
+                        tail: stamp.tail.clone(),
+                    },
+                };
+                let before = found.point.clone();
+                let after = RpcSearchPoint {
+                    byte: found.point.byte + 1,
+                    ..found.point.clone()
+                };
+                self.hit(found, origin, (wire(before, true)?, wire(after, false)?))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        self.page(
+            Some(stamp.generation.clone()),
+            availability(page.partial),
+            hits,
+            page.next
+                .map(|point| wire(point, self.reverse))
+                .transpose()?,
+        )
+    }
+}
+
+struct HitIdentity {
+    generation: String,
+    entry: String,
+    part: Option<u16>,
+    source: HitSource,
 }
 
 pub(super) async fn read(
@@ -105,99 +332,135 @@ pub(super) async fn read(
     let run: RunId = parse(&run)?;
     let session: SessionKey = parse(&session)?;
     let literal = Literal::new(&input.q).ok_or(AppError::InvalidRequest)?;
-    let query: [u8; 32] = Sha256::digest(literal.folded()).into();
-    let endpoint = &entry.auth.endpoint;
+    let scope = SearchScope {
+        endpoint: &entry.auth.endpoint,
+        run: &run,
+        session: &session,
+        query: Sha256::digest(literal.folded()).into(),
+        reverse: input.reverse,
+    };
     let from = input
         .cursor
-        .map(|value| {
-            let saved: Continuation = endpoint.decode_cursor(PAGE_TOKEN, &value)?;
-            saved.target.require(&run, &session)?;
-            if saved.query != query || saved.reverse != input.reverse {
-                return Err(AppError::CursorExpired);
-            }
-            Ok(SearchCursor {
-                observation: SourceObservation {
-                    high_water: saved.high_water,
-                    version: saved.version,
-                },
-                point: SearchPoint {
-                    record: saved.record,
-                    part: saved.part,
-                    byte: saved.byte,
-                },
-            })
-        })
+        .as_deref()
+        .map(|token| scope.open(token))
         .transpose()?;
     let current = entry
         .store
         .history_session(actor.clone(), run.clone(), session.clone())
         .await?;
-    let page = entry
-        .file_history
-        .search(
-            current.value.clone(),
-            HistorySearch {
-                literal,
-                from,
-                reverse: input.reverse,
-            },
-        )
-        .await?;
-    let confirmed = entry
-        .store
-        .history_session(actor, run.clone(), session.clone())
-        .await?;
+    let page = read_authorized(&entry, &scope, current.value.clone(), literal, from).await?;
+    let confirmed = entry.store.history_session(actor, run, session).await?;
     if current.value != confirmed.value {
         return Err(AppError::CursorExpired.into());
     }
-    let (generation, availability, hits, next_cursor) = if let Some(page) = page {
-        let cursor = |point: SearchPoint, reverse| {
-            seal(
-                endpoint,
-                PAGE_TOKEN,
-                &Continuation {
-                    target: Target::new(&run, &session),
-                    query,
+    Ok(Json(success(page, current.cursor)?))
+}
+
+async fn read_authorized(
+    entry: &Entry,
+    scope: &SearchScope<'_>,
+    target: HistorySession,
+    literal: Literal,
+    from: Option<Position>,
+) -> Result<HistorySearchPage, AppError> {
+    let reverse = scope.reverse;
+    let rpc = match from {
+        Some(Position::File {
+            high_water,
+            version,
+            record,
+            part,
+            byte,
+        }) => {
+            let from = Some(SearchCursor {
+                observation: SourceObservation {
+                    high_water,
+                    version,
+                },
+                point: SearchPoint { record, part, byte },
+            });
+            let page = entry
+                .file_history
+                .search(
+                    target,
+                    HistorySearch {
+                        literal,
+                        from,
+                        reverse,
+                    },
+                )
+                .await?
+                .ok_or(AppError::CursorExpired)?;
+            return scope.file(page);
+        }
+        Some(Position::Rpc {
+            page,
+            tail,
+            item,
+            part,
+            byte,
+        }) => {
+            if entry
+                .file_history
+                .head(target.clone(), None)
+                .await?
+                .is_some()
+            {
+                return Err(AppError::CursorExpired);
+            }
+            Some((
+                NativeRpcStamp {
+                    generation: page.generation.clone(),
+                    tail,
+                },
+                RpcSearchPoint {
+                    page: page.native_position()?,
+                    entry: item.as_deref().map(parse).transpose()?,
+                    part,
+                    byte,
+                },
+            ))
+        }
+        None => {
+            if let Some(page) = entry
+                .file_history
+                .search(
+                    target.clone(),
+                    HistorySearch {
+                        literal: literal.clone(),
+                        from: None,
+                        reverse,
+                    },
+                )
+                .await?
+            {
+                return scope.file(page);
+            }
+            None
+        }
+    };
+    let from_rpc = rpc.is_some();
+    if let Some(host) = entry.host.as_ref() {
+        match host
+            .history_search(
+                target,
+                RpcSearchQuery {
+                    literal,
+                    from: rpc,
                     reverse,
-                    high_water: page.observation.high_water,
-                    version: page.observation.version,
-                    record: point.record,
-                    part: point.part,
-                    byte: point.byte,
                 },
             )
-        };
-        let hits = page
-            .hits
-            .into_iter()
-            .map(|hit| encode_hit(endpoint, &run, &session, &page.observation, hit, &cursor))
-            .collect::<Result<Vec<_>, _>>()?;
-        (
-            Some(HistoryGenerationDto::new(page.generation).ok_or(AppError::Internal)?),
-            if page.partial {
-                HistoryAvailability::Partial
-            } else {
-                HistoryAvailability::Available
-            },
-            hits,
-            page.next
-                .map(|next| cursor(next, input.reverse))
-                .transpose()?,
-        )
-    } else {
-        (None, HistoryAvailability::Unavailable, Vec::new(), None)
-    };
-    Ok(Json(success(
-        HistorySearchPage {
-            run_id: RunIdDto::new(run.as_str()).ok_or(AppError::Internal)?,
-            session_key: SessionKeyDto::new(session.as_str()).ok_or(AppError::Internal)?,
-            generation,
-            availability,
-            hits,
-            next_cursor,
-        },
-        current.cursor,
-    )?))
+            .await
+        {
+            Ok(page) => return scope.rpc(page),
+            Err(AppError::Unavailable | AppError::NotFound) if !from_rpc => (),
+            Err(error) => return Err(error),
+        }
+    }
+    if from_rpc {
+        return Err(AppError::CursorExpired);
+    }
+    scope.page(None, HistoryAvailability::Unavailable, Vec::new(), None)
 }
 
 pub(super) async fn locate(
@@ -212,24 +475,11 @@ pub(super) async fn locate(
     let endpoint = &entry.auth.endpoint;
     let hit: Hit = endpoint.decode_cursor(HIT_TOKEN, &input.hit)?;
     hit.target.require(&run, &session)?;
-    let observation = SourceObservation {
-        high_water: hit.point.high_water,
-        version: hit.version,
-    };
-    let reference = FileContentRef {
-        generation: hit.generation,
-        entry: parse(&hit.entry)?,
-        part: hit.part,
-        position: hit.point.into(),
-    };
     let current = entry
         .store
         .history_session(actor.clone(), run.clone(), session.clone())
         .await?;
-    entry
-        .file_history
-        .confirm_search_hit(current.value.clone(), observation, reference.clone())
-        .await?;
+    let (source, bookmark) = verify_hit(&entry, current.value.clone(), &hit).await?;
     let confirmed = entry
         .store
         .history_session(actor, run.clone(), session.clone())
@@ -241,39 +491,34 @@ pub(super) async fn locate(
         endpoint,
         &run,
         &session,
-        &reference.generation,
-        &reference.entry,
-        &HistoryBookmark::File(reference.position.clone()),
+        &hit.generation,
+        &parse(&hit.entry)?,
+        &bookmark,
     )?;
-    let parts_cursor = reference
-        .part
-        .map(|part| {
+    let parts_cursor = source
+        .file()
+        .and_then(|reference| reference.part.map(|index| (reference, index)))
+        .map(|(reference, part)| {
             let mut entry = reference.clone();
             entry.part = None;
             parts::cursor(endpoint, &run, &session, &entry, part)
         })
         .transpose()?;
-    let source = ContentReference::File(reference);
     let content_ref = content::reference(endpoint, &run, &session, &source)?;
     let content_cursor = (hit.offset > 0)
         .then(|| content::ranged_reference(endpoint, &run, &session, &source, hit.offset))
         .transpose()?;
-    let reference = source.file().ok_or(AppError::Internal)?;
     Ok(Json(success(
         HistorySearchDestination {
             run_id: RunIdDto::new(run.as_str()).ok_or(AppError::Internal)?,
             session_key: SessionKeyDto::new(session.as_str()).ok_or(AppError::Internal)?,
             entry_id: HistoryEntryIdDto::new(hit.entry).ok_or(AppError::Internal)?,
-            generation: HistoryGenerationDto::new(reference.generation.as_str())
-                .ok_or(AppError::Internal)?,
+            generation: HistoryGenerationDto::new(hit.generation).ok_or(AppError::Internal)?,
             locator,
             content_ref,
             content_cursor,
             parts_cursor,
-            native_index: reference
-                .part
-                .map(|index| count(u64::from(index)))
-                .transpose()?,
+            native_index: hit.part.map(|index| count(u64::from(index))).transpose()?,
             tool_call_id: hit
                 .tool
                 .map(|tool| HistoryEntryIdDto::new(tool).ok_or(AppError::Internal))
@@ -289,44 +534,78 @@ pub(super) async fn locate(
     )?))
 }
 
-fn encode_hit(
-    endpoint: &ServiceEndpoint,
-    run: &RunId,
-    session: &SessionKey,
-    observation: &SourceObservation,
-    found: SearchHit,
-    cursor: &impl Fn(SearchPoint, bool) -> Result<HistoryCursorDto, AppError>,
-) -> Result<HistorySearchHit, AppError> {
-    let signed = Hit {
-        target: Target::new(run, session),
-        version: observation.version,
-        generation: found.reference.generation,
-        entry: found.reference.entry.to_string(),
-        part: found.reference.part,
-        point: found.reference.position.into(),
-        tool: found.tool_call.map(|call| call.to_string()),
-        offset: found.output_offset,
-        start: found.start_utf16,
-        end: found.end_utf16,
-        markdown: found.markdown,
-        matched: found.matched.clone(),
-        ordinal: found.ordinal,
-    };
-    Ok(HistorySearchHit {
-        hit: seal(endpoint, HIT_TOKEN, &signed)?,
-        entry_id: HistoryEntryIdDto::new(signed.entry).ok_or(AppError::Internal)?,
-        before: text(found.before)?,
-        matched: text(found.matched)?,
-        after: text(found.after)?,
-        before_cursor: cursor(found.point, true)?,
-        after_cursor: cursor(
-            SearchPoint {
-                byte: found.point.byte + 1,
-                ..found.point
-            },
-            false,
-        )?,
-    })
+async fn verify_hit(
+    entry: &Entry,
+    target: HistorySession,
+    hit: &Hit,
+) -> Result<(ContentReference, HistoryBookmark), AppError> {
+    match &hit.source {
+        HitSource::File { version, point } => {
+            let observation = SourceObservation {
+                high_water: point.high_water,
+                version: *version,
+            };
+            let reference = FileContentRef {
+                generation: hit.generation.clone(),
+                entry: parse(&hit.entry)?,
+                part: hit.part,
+                position: point.clone().into(),
+            };
+            entry
+                .file_history
+                .confirm_search_hit(target, observation, reference.clone())
+                .await?;
+            let bookmark = HistoryBookmark::File(reference.position.clone());
+            Ok((ContentReference::File(reference), bookmark))
+        }
+        HitSource::Rpc {
+            turn,
+            hash,
+            anchor,
+            tail,
+        } => {
+            if entry
+                .file_history
+                .head(target.clone(), None)
+                .await?
+                .is_some()
+            {
+                return Err(AppError::CursorExpired);
+            }
+            let host = entry.host.as_ref().ok_or(AppError::Unavailable)?;
+            let expected = NativeRpcStamp {
+                generation: hit.generation.clone(),
+                tail: tail.clone(),
+            };
+            if host.history_stamp(target.clone()).await? != expected {
+                return Err(AppError::CursorExpired);
+            }
+            let reference = RpcContentRef {
+                generation: hit.generation.clone(),
+                entry: parse(&hit.entry)?,
+                part: hit.part,
+                turn: parse(turn)?,
+                hash: parse(hash)?,
+            };
+            host.history_content(target.clone(), reference.clone(), hit.offset, 4)
+                .await?;
+            if host.history_stamp(target).await? != expected {
+                return Err(AppError::CursorExpired);
+            }
+            Ok((
+                ContentReference::Rpc(reference),
+                HistoryBookmark::Rpc(anchor.native_position()?),
+            ))
+        }
+    }
+}
+
+fn availability(partial: bool) -> HistoryAvailability {
+    if partial {
+        HistoryAvailability::Partial
+    } else {
+        HistoryAvailability::Available
+    }
 }
 
 fn seal(
