@@ -1,0 +1,8 @@
+ReviewQ adapts Agent Overflow's standalone Markdown boundary detector at
+cba52327fe1e8ad2b43097b884a3c96d0c40aa52.
+https://github.com/randalmurphal/agent-overflow/tree/cba52327fe1e8ad2b43097b884a3c96d0c40aa52/frontend/src/lib/markdown/boundary
+
+Agent Overflow integrates the boundary algorithm from Incremark.
+https://github.com/kingshuaishuai/incremark
+
+LICENSE-agent-overflow and LICENSE-incremark contain the applicable MIT notices.

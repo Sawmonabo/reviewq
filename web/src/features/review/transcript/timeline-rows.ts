@@ -3,12 +3,14 @@ import type { MessageHistoryItem } from "../../../api/generated/contracts/delive
 import { activityRows } from "./tool-activity";
 import type { ReadPack, ToolCatalog, ToolRun } from "./tool-activity";
 
+export type ProvisionalReply = { readonly turnId: string; readonly text: string };
+
 type MessageRow = {
   readonly kind: "native" | "live" | "delivery";
   readonly id: string;
   readonly entry?: HistoryEntry;
   readonly delivery?: MessageHistoryItem;
-  readonly provisional?: string;
+  readonly provisional?: ProvisionalReply;
   readonly grouped?: boolean;
 };
 export type VisibleRow = MessageRow | ToolRun | ReadPack;

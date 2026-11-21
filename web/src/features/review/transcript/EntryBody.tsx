@@ -1,20 +1,19 @@
+import { useState } from "react";
 import type { HistoryEntry, HistoryPart } from "../../../api/generated/contracts";
 import type { SessionAddress } from "../../../api/history";
 import { ExpandedOutput } from "./ExpandedOutput";
 import { ToolHeading } from "./ToolActivity";
 import { groupParts, openKey } from "./tool-activity";
 import type { ToolCatalog } from "./tool-activity";
-import {
-  MarkdownContent,
-  MarkdownSource,
-  MarkdownTree,
-} from "../../../components/markdown/MarkdownContent";
+import { MarkdownContent } from "../../../components/markdown/MarkdownContent";
+import type { ProvisionalReply } from "./timeline-rows";
 import { inlineProseReference } from "./useInlineProse";
 import type { InlineProse } from "./useInlineProse";
 
 type Props = {
   readonly target: SessionAddress;
-  readonly entry: HistoryEntry;
+  readonly entry: HistoryEntry | undefined;
+  readonly provisional: ProvisionalReply | undefined;
   readonly knownTools: ToolCatalog;
   readonly generation: string;
   readonly reference: string | undefined;
@@ -28,6 +27,7 @@ type Props = {
 
 export function EntryBody({
   entry,
+  provisional,
   knownTools,
   target,
   generation,
@@ -39,19 +39,19 @@ export function EntryBody({
   extra,
   onMoreParts,
 }: Props) {
-  const next = extra ? extra.next : entry.partsCursor;
-  const sourceParts = [...entry.parts, ...(extra?.items ?? [])];
-  const parts = groupParts(entry, sourceParts, knownTools);
+  const next = extra ? extra.next : entry?.partsCursor;
+  const sourceParts = [...(entry?.parts ?? []), ...(extra?.items ?? [])];
+  const parts = entry ? groupParts(entry, sourceParts, knownTools) : [];
   const wholeEntry =
-    entry.contentRef && !sourceParts.some((part) => part.contentRef === entry.contentRef)
+    entry?.contentRef && !sourceParts.some((part) => part.contentRef === entry.contentRef)
       ? entry.contentRef
       : undefined;
   const entryFormat = parts.some((group) => group.kind === "prose") ? "markdown" : "text";
   const singlePart = sourceParts.length === 1 ? sourceParts[0] : undefined;
-  const singleRef = singlePart && inlineProseReference(entry, singlePart);
+  const singleRef = entry && singlePart && inlineProseReference(entry, singlePart);
   const wholeIsInline = singleRef && !reference && prose.get(singleRef) != null;
 
-  function disclosure(ref: string, format: "markdown" | "text", entire = false) {
+  function disclosure(entryId: string, ref: string, format: "markdown" | "text", entire = false) {
     const open = reference === ref;
     return (
       <div className="stack">
@@ -74,7 +74,7 @@ export function EntryBody({
             key={ref}
             target={target}
             generation={generation}
-            entryId={entry.entryId}
+            entryId={entryId}
             reference={ref}
             format={format}
           />
@@ -83,29 +83,34 @@ export function EntryBody({
     );
   }
 
-  function value(part: HistoryPart, key: string) {
+  function value(current: HistoryEntry, part: HistoryPart, key: string) {
     const formatted = part.kind !== "tool_call" && part.kind !== "tool_result";
-    const inlineRef = inlineProseReference(entry, part);
+    const inlineRef = inlineProseReference(current, part);
     const complete = inlineRef && !reference ? prose.get(inlineRef) : undefined;
+    const sameReply = part === singlePart && part.kind === "assistant_text" && !next;
     return (
       <div className="stack" key={key}>
         {(!part.contentRef || reference !== part.contentRef) &&
           (formatted ? (
-            <Prose complete={complete || undefined} preview={part.text} />
+            <Prose
+              key={sameReply ? current.turnId : undefined}
+              complete={complete || undefined}
+              preview={part.text}
+              waiting={Boolean(sameReply && inlineRef && !reference && complete === undefined)}
+            />
           ) : (
             <pre className="tool-output-line">{part.text}</pre>
           ))}
         {part.contentRef &&
           complete == null &&
-          disclosure(part.contentRef, formatted ? "markdown" : "text")}
+          disclosure(current.entryId, part.contentRef, formatted ? "markdown" : "text")}
       </div>
     );
   }
 
-  return (
-    <>
-      {parts.map((group, index) => {
-        if (group.kind === "prose") return value(group.part, `part:${index}`);
+  const body = entry
+    ? parts.map((group, index) => {
+        if (group.kind === "prose") return value(entry, group.part, `part:${index}`);
         const key = openKey(entry.entryId, group.callId);
         const open = expanded.has(key);
         return (
@@ -120,13 +125,26 @@ export function EntryBody({
             </summary>
             {open && (
               <div className="tool-content stack">
-                {group.parts.map((item, ordinal) => value(item, `tool:${ordinal}`))}
+                {group.parts.map((item, ordinal) => value(entry, item, `tool:${ordinal}`))}
               </div>
             )}
           </details>
         );
-      })}
-      {wholeEntry && !wholeIsInline && disclosure(wholeEntry, entryFormat, true)}
+      })
+    : provisional
+      ? [
+          <div className="stack" key="part:0">
+            <Prose key={provisional.turnId} preview={provisional.text} provisional />
+          </div>,
+        ]
+      : [];
+  return (
+    <>
+      {body}
+      {entry &&
+        wholeEntry &&
+        !wholeIsInline &&
+        disclosure(entry.entryId, wholeEntry, entryFormat, true)}
       {next && (
         <button className="quiet-button" type="button" onClick={() => onMoreParts(next)}>
           More parts
@@ -139,11 +157,36 @@ export function EntryBody({
 function Prose({
   complete,
   preview,
+  provisional = false,
+  waiting = false,
 }: {
-  readonly complete: InlineProse | undefined;
+  readonly complete?: InlineProse | undefined;
   readonly preview: string;
+  readonly provisional?: boolean;
+  readonly waiting?: boolean;
 }) {
-  if (complete?.kind === "prepared") return <MarkdownTree tree={complete.tree} />;
-  if (complete?.kind === "formatting-limit") return <MarkdownSource source={complete.text} />;
-  return <MarkdownContent source={complete?.text ?? preview} />;
+  const [lastPreview, setLastPreview] = useState<string>();
+  // Native pages can expose a clipped prefix before the same item's complete part arrives.
+  const held = waiting && lastPreview?.startsWith(preview) ? lastPreview : undefined;
+  const snapshot = provisional ? preview : held;
+  if (lastPreview !== snapshot) setLastPreview(snapshot);
+
+  return (
+    <>
+      {complete?.kind === "prepared" ? (
+        <MarkdownContent tree={complete.tree} />
+      ) : (
+        <MarkdownContent
+          source={complete?.text ?? held ?? preview}
+          provisional={provisional || held !== undefined}
+          formattingLimit={complete?.kind === "formatting-limit"}
+        />
+      )}
+      {held !== undefined && (
+        <p className="meta" role="status">
+          Live preview · Loading complete reply…
+        </p>
+      )}
+    </>
+  );
 }

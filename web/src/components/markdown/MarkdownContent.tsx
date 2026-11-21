@@ -1,24 +1,48 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import { Fragment, jsx, jsxs } from "react/jsx-runtime";
 import { toJsxRuntime } from "hast-util-to-jsx-runtime";
 import type { Element, Root } from "hast";
+import { prepareLiveMarkdown, type LiveMarkdown } from "./live/blocks";
 import MermaidDiagram from "./MermaidDiagram";
 import { parseMarkdown } from "./parse-markdown";
 import "./markdown.css";
 
-export function MarkdownContent({
-  source,
-  base,
-}: {
-  readonly source: string;
-  readonly base?: string | undefined;
-}) {
-  const tree = useMemo(() => parseMarkdown(source, base), [source, base]);
-  return tree ? <MarkdownTree tree={tree} /> : <MarkdownSource source={source} />;
+type MarkdownContentProps =
+  | { readonly tree: Root }
+  | {
+      readonly source: string;
+      readonly base?: string | undefined;
+      readonly provisional?: boolean;
+      readonly formattingLimit?: boolean;
+    };
+
+export function MarkdownContent(props: MarkdownContentProps) {
+  const { source, base, provisional, formattingLimit } = "source" in props ? props : {};
+  const prepared = "tree" in props ? props.tree : undefined;
+  const canonical = useMemo(
+    () =>
+      source !== undefined && !provisional && !formattingLimit
+        ? parseMarkdown(source, base)
+        : prepared,
+    [source, base, provisional, formattingLimit, prepared],
+  );
+  const [live, setLive] = useState<LiveMarkdown>();
+  let tree = canonical;
+  if (provisional && !formattingLimit && source !== undefined) {
+    const current =
+      live?.source === source && live.base === base
+        ? live
+        : prepareLiveMarkdown(source, base, live);
+    if (current !== live) setLive(current);
+    tree = current.tree;
+  } else if (live) {
+    setLive(undefined);
+  }
+  return tree ? <MarkdownTree tree={tree} /> : <MarkdownSource source={source ?? ""} />;
 }
 
-export function MarkdownSource({ source }: { readonly source: string }) {
+function MarkdownSource({ source }: { readonly source: string }) {
   return (
     <details className="surface-card">
       <summary>Markdown source · formatting limit</summary>

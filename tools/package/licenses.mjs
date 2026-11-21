@@ -56,6 +56,9 @@ export function notices(metadata, application, root, output, run) {
     { ecosystem: "source", name: "ai-sidekicks-block-cutter",
       version: "85975b3d8475b9d4c3a31d4bc4de4c5baaf3b42d", license: "Apache-2.0",
       root: join(root, "crates/reviewq-app/src/reports/display") },
+    { ecosystem: "source", name: "agent-overflow-markdown-boundary",
+      version: "cba52327fe1e8ad2b43097b884a3c96d0c40aa52", license: "MIT",
+      root: join(root, "web/src/components/markdown/boundary") },
   ];
   const entries = new Map();
   for (const pkg of packages) {
