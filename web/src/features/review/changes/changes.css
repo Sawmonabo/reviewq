@@ -108,8 +108,14 @@ pre.patch-source {
 ::highlight(reviewq-patch-hunk) {
   color: var(--link);
 }
-::highlight(reviewq-patch-syntax) {
+::highlight(reviewq-patch-syntax-keyword) {
   color: light-dark(#60488d, #c7b3f5);
+}
+::highlight(reviewq-patch-syntax-string) {
+  color: light-dark(#255699, #b7d1fe);
+}
+::highlight(reviewq-patch-syntax-comment) {
+  color: light-dark(#506171, #a5b0bc);
 }
 @media (max-width: 760px) {
   .patch-rich {

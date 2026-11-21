@@ -1,6 +1,8 @@
 import type { PatchRow } from "./patch-rows";
 
 const ROW_HEIGHT = 21;
+const SYNTAX =
+  /\/\/.*|"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|\b(?:as|async|await|break|class|const|else|export|false|fn|for|from|function|if|import|let|match|new|private|pub|readonly|return|true|type|undefined|use|void)\b/g;
 const paint = new Map<string, Highlight>();
 
 export function setPatchMatch(ranges: readonly Range[]) {
@@ -34,11 +36,11 @@ export function keepSplitMatch(text: Text, offset: number) {
   };
 }
 
+type PaintedRange = { readonly highlight: Highlight; readonly range: AbstractRange };
+
 export type PatchDecoration = {
   readonly element: HTMLElement;
-  readonly range: AbstractRange;
-  readonly syntax: readonly AbstractRange[];
-  readonly kind: PatchRow["kind"];
+  readonly colors: readonly PaintedRange[];
 };
 
 export function decoratePatchRow(
@@ -48,7 +50,6 @@ export function decoratePatchRow(
   to: number,
   text: string,
 ): PatchDecoration {
-  const range = staticRange(node, from, to);
   const element = document.createElement("span");
   element.className = `patch-row patch-${row.kind}`;
   if (row.old !== undefined) element.dataset.old = String(row.old);
@@ -64,18 +65,25 @@ export function decoratePatchRow(
         .join(", "),
     );
   }
-  highlight(`reviewq-patch-${row.kind}`)?.add(range);
-  const syntax: AbstractRange[] = [];
+  const colors: PaintedRange[] = [];
+  if (row.kind !== "context")
+    addColor(colors, highlight(`reviewq-patch-${row.kind}`), node, from, to);
   if (row.old !== undefined || row.new !== undefined) {
-    for (const token of text.matchAll(
-      /\/\/.*|"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|\b(?:as|async|await|const|else|export|fn|for|if|import|let|match|private|pub|readonly|return|type|use)\b/g,
-    )) {
-      const piece = staticRange(node, from + token.index, from + token.index + token[0].length);
-      syntax.push(piece);
-      highlight("reviewq-patch-syntax")?.add(piece);
+    for (const token of text.matchAll(SYNTAX)) {
+      const first = token[0][0];
+      const kind =
+        first === "/" ? "comment" : first === "'" || first === '"' ? "string" : "keyword";
+      const start = from + token.index;
+      addColor(
+        colors,
+        highlight(`reviewq-patch-syntax-${kind}`, 1),
+        node,
+        start,
+        start + token[0].length,
+      );
     }
   }
-  return { element, range, syntax, kind: row.kind };
+  return { element, colors };
 }
 
 export function positionPatchRow(element: HTMLElement, top: number, height: number) {
@@ -84,8 +92,7 @@ export function positionPatchRow(element: HTMLElement, top: number, height: numb
 }
 
 export function releasePatchDecoration(decoration: PatchDecoration) {
-  paint.get(`reviewq-patch-${decoration.kind}`)?.delete(decoration.range);
-  for (const token of decoration.syntax) paint.get("reviewq-patch-syntax")?.delete(token);
+  for (const { highlight, range } of decoration.colors) highlight.delete(range);
   decoration.element.remove();
 }
 
@@ -93,6 +100,19 @@ export function releasePatchMatch(host: HTMLElement) {
   const active = CSS.highlights?.get("reviewq-patch-match");
   if (!active) return;
   for (const range of active) if (host.contains(range.startContainer)) active.delete(range);
+}
+
+function addColor(
+  colors: PaintedRange[],
+  highlight: Highlight | undefined,
+  node: Text,
+  from: number,
+  to: number,
+) {
+  if (!highlight) return;
+  const range = staticRange(node, from, to);
+  highlight.add(range);
+  colors.push({ highlight, range });
 }
 
 function staticRange(node: Text, from: number, to: number) {
@@ -110,12 +130,12 @@ function staticRange(node: Text, from: number, to: number) {
   return range;
 }
 
-function highlight(name: string) {
+function highlight(name: string, priority = 0) {
   if (typeof CSS.highlights === "undefined" || typeof Highlight === "undefined") return;
   let current = paint.get(name);
   if (!current) {
     current = new Highlight();
-    if (name === "reviewq-patch-syntax") current.priority = 1;
+    current.priority = priority;
     paint.set(name, current);
     CSS.highlights.set(name, current);
   }
