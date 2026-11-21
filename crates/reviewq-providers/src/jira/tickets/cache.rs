@@ -4,7 +4,7 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant};
 
 use reviewq_app::access::AppError;
-use reviewq_app::sources::{CommentOrder, TicketComment, TicketDetail};
+use reviewq_app::sources::{CommentOrder, TicketComment, TicketCommentPage, TicketOpening};
 use reviewq_domain::identity::TicketKey;
 use tokio::sync::OnceCell;
 
@@ -31,22 +31,24 @@ struct Entry {
 }
 
 struct Cached {
-    detail: TicketDetail,
+    detail: TicketOpening,
     expires: Instant,
     bytes: usize,
 }
 
 impl Cache {
-    pub(in crate::jira) async fn read<F>(
+    pub(in crate::jira) async fn read<F, Check>(
         &self,
         ticket: TicketKey,
         estimate_fields: Vec<String>,
         limit: u16,
         order: CommentOrder,
         fetch: impl FnOnce() -> F,
-    ) -> Result<TicketDetail, AppError>
+        recheck: impl FnOnce(u64) -> Check,
+    ) -> Result<TicketOpening, AppError>
     where
-        F: Future<Output = Result<TicketDetail, AppError>>,
+        F: Future<Output = Result<TicketOpening, AppError>>,
+        Check: Future<Output = Result<TicketCommentPage, AppError>>,
     {
         let Some(load) = self.slot(Key {
             ticket,
@@ -56,6 +58,8 @@ impl Cache {
         }) else {
             return fetch().await;
         };
+        // Requests coalesced on the initial read share its live Jira authorization.
+        let reused = load.initialized();
         let cached = load
             .get_or_try_init(|| async {
                 let expires = Instant::now() + LIFETIME;
@@ -69,7 +73,15 @@ impl Cache {
             })
             .await?;
         self.trim();
-        Ok(cached.detail.clone())
+        if reused {
+            let comments = recheck(cached.detail.comments.issue).await?;
+            Ok(TicketOpening {
+                detail: cached.detail.detail.clone(),
+                comments,
+            })
+        } else {
+            Ok(cached.detail.clone())
+        }
     }
 
     pub(in crate::jira) fn clear(&self) {
@@ -124,11 +136,13 @@ impl Cache {
     }
 }
 
-fn retained_bytes(detail: &TicketDetail) -> usize {
+fn retained_bytes(opening: &TicketOpening) -> usize {
+    let detail = &opening.detail;
+    let comments = &opening.comments;
     size_of::<Cached>()
         + detail.identity.key.as_str().len()
         + detail.identity.title.capacity()
-        + detail.url.capacity()
+        + comments.url.capacity()
         + [
             &detail.status,
             &detail.priority,
@@ -150,9 +164,9 @@ fn retained_bytes(detail: &TicketDetail) -> usize {
                     + list.iter().map(String::capacity).sum::<usize>()
             })
             .sum::<usize>()
-        + detail.comments.capacity() * size_of::<TicketComment>()
-        + detail
-            .comments
+        + comments.items.capacity() * size_of::<TicketComment>()
+        + comments
+            .items
             .iter()
             .map(|comment| {
                 comment.body.capacity()

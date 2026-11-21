@@ -2,7 +2,7 @@
 import { func0 } from "../runtime.mjs";
 import { validate1469 } from "./identity.mjs";
 import { validate53 } from "./provider.mjs";
-function validate1537(
+function validate1548(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -17,7 +17,7 @@ function validate1537(
         ((data.identity === undefined || !func0.call(data, "identity")) &&
           (missing0 = "identity"))
       ) {
-        validate1537.errors = [
+        validate1548.errors = [
           {
             instancePath,
             schemaPath: "#/required",
@@ -71,7 +71,7 @@ function validate1537(
         }
       }
     } else {
-      validate1537.errors = [
+      validate1548.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -82,7 +82,7 @@ function validate1537(
       return false;
     }
   }
-  validate1537.errors = vErrors;
+  validate1548.errors = vErrors;
   return errors === 0;
 }
-export { validate1537 };
+export { validate1548 };

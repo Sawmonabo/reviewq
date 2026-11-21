@@ -89,6 +89,7 @@ import type {
   SelectedPatchResponse,
   SettingsResponse,
   TerminalResponse,
+  TicketCommentsResponse,
   TicketDetailResponse,
   TrackReviewResponse,
   VerifiedConnectionResponse,
@@ -318,6 +319,9 @@ export function isSelectedPatchResponse(
 ): value is SelectedPatchResponse;
 export function isSettingsResponse(value: unknown): value is SettingsResponse;
 export function isTerminalResponse(value: unknown): value is TerminalResponse;
+export function isTicketCommentsResponse(
+  value: unknown,
+): value is TicketCommentsResponse;
 export function isTicketDetailResponse(
   value: unknown,
 ): value is TicketDetailResponse;

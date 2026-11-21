@@ -152,38 +152,6 @@ const schema431 = {
   type: "object",
 };
 const schema442 = {
-  type: "object",
-  properties: {
-    assignee: { type: ["string", "null"] },
-    assigneeId: { type: ["string", "null"] },
-    commentCount: { $ref: "#/definitions/SafeCountDto" },
-    components: { items: { type: "string" }, type: "array" },
-    description: { type: ["string", "null"] },
-    estimate: { format: "double", minimum: 0, type: ["number", "null"] },
-    fetchedAt: { $ref: "#/definitions/UtcTimestampDto" },
-    issueType: { type: ["string", "null"] },
-  },
-};
-const schema443 = {
-  type: "object",
-  properties: {
-    items: {
-      items: { $ref: "#/definitions/TicketComment" },
-      maxItems: 100,
-      type: "array",
-    },
-    key: { $ref: "#/definitions/CheckpointIdDto" },
-    labels: { items: { type: "string" }, type: "array" },
-    nextCursor: {
-      anyOf: [{ $ref: "#/definitions/HistoryCursorDto" }, { type: "null" }],
-    },
-    priority: { type: ["string", "null"] },
-    reporter: { type: ["string", "null"] },
-    reporterId: { type: ["string", "null"] },
-    status: { type: ["string", "null"] },
-  },
-};
-const schema444 = {
   properties: {
     author: { type: ["string", "null"] },
     authorId: { type: ["string", "null"] },
@@ -206,6 +174,50 @@ const schema444 = {
   ],
   type: "object",
 };
+const schema445 = {
+  type: "object",
+  properties: {
+    assignee: { type: ["string", "null"] },
+    assigneeId: { type: ["string", "null"] },
+    commentCount: { $ref: "#/definitions/SafeCountDto" },
+    commentScope: { $ref: "#/definitions/HistoryCursorDto" },
+    components: { items: { type: "string" }, type: "array" },
+    description: { type: ["string", "null"] },
+    estimate: { format: "double", minimum: 0, type: ["number", "null"] },
+    fetchedAt: { $ref: "#/definitions/UtcTimestampDto" },
+  },
+};
+const schema446 = {
+  type: "object",
+  properties: {
+    issueType: { type: ["string", "null"] },
+    items: {
+      items: { $ref: "#/definitions/TicketComment" },
+      maxItems: 100,
+      type: "array",
+    },
+    key: { $ref: "#/definitions/CheckpointIdDto" },
+    labels: { items: { type: "string" }, type: "array" },
+    nextCursor: {
+      anyOf: [{ $ref: "#/definitions/HistoryCursorDto" }, { type: "null" }],
+    },
+    priority: { type: ["string", "null"] },
+    reporter: { type: ["string", "null"] },
+    reporterId: { type: ["string", "null"] },
+  },
+};
+const schema447 = {
+  type: "object",
+  properties: {
+    status: { type: ["string", "null"] },
+    title: { type: "string" },
+    updatedAt: {
+      anyOf: [{ $ref: "#/definitions/UtcTimestampDto" }, { type: "null" }],
+    },
+    url: { type: "string" },
+    warnings: { items: { type: "string" }, type: "array" },
+  },
+};
 export {
   schema408,
   schema410,
@@ -218,6 +230,7 @@ export {
   schema430,
   schema431,
   schema442,
-  schema443,
-  schema444,
+  schema445,
+  schema446,
+  schema447,
 };

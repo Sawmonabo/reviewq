@@ -10015,6 +10015,66 @@
       ],
       "type": "object"
     },
+    "TicketComments": {
+      "description": "A bounded compact list with a required nullable keyset continuation.",
+      "properties": {
+        "commentCount": {
+          "$ref": "#/definitions/SafeCountDto"
+        },
+        "commentScope": {
+          "$ref": "#/definitions/PageCursorDto"
+        },
+        "fetchedAt": {
+          "$ref": "#/definitions/UtcTimestampDto"
+        },
+        "items": {
+          "items": {
+            "$ref": "#/definitions/TicketComment"
+          },
+          "maxItems": 100,
+          "type": "array"
+        },
+        "key": {
+          "$ref": "#/definitions/TicketKeyDto"
+        },
+        "nextCursor": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/PageCursorDto"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "key",
+        "commentScope",
+        "commentCount",
+        "fetchedAt",
+        "items",
+        "nextCursor"
+      ],
+      "type": "object"
+    },
+    "TicketCommentsResponse": {
+      "description": "The resource and event head from the same authorized snapshot.",
+      "properties": {
+        "cursor": {
+          "$ref": "#/definitions/EventCursorDto"
+        },
+        "data": {
+          "$ref": "#/definitions/TicketComments"
+        }
+      },
+      "required": [
+        "data",
+        "cursor"
+      ],
+      "title": "TicketCommentsResponse",
+      "type": "object"
+    },
     "TicketDetail": {
       "description": "A bounded compact list with a required nullable keyset continuation.",
       "properties": {
@@ -10032,6 +10092,9 @@
         },
         "commentCount": {
           "$ref": "#/definitions/SafeCountDto"
+        },
+        "commentScope": {
+          "$ref": "#/definitions/PageCursorDto"
         },
         "components": {
           "items": {
@@ -10153,6 +10216,7 @@
         "updatedAt",
         "fetchedAt",
         "warnings",
+        "commentScope",
         "commentCount",
         "items",
         "nextCursor"
@@ -10520,6 +10584,7 @@
     "SettingsResponse": "settings",
     "TerminalResponse": "hosts",
     "TestConnection": "settings",
+    "TicketCommentsResponse": "tickets",
     "TicketDetailResponse": "tickets",
     "TrackReviewRequest": "queue",
     "TrackReviewResponse": "queue",
@@ -10619,6 +10684,7 @@
       "SelectedPatchResponse": "#/definitions/SelectedPatchResponse",
       "SettingsResponse": "#/definitions/SettingsResponse",
       "TerminalResponse": "#/definitions/TerminalResponse",
+      "TicketCommentsResponse": "#/definitions/TicketCommentsResponse",
       "TicketDetailResponse": "#/definitions/TicketDetailResponse",
       "TrackReviewResponse": "#/definitions/TrackReviewResponse",
       "VerifiedConnectionResponse": "#/definitions/VerifiedConnectionResponse"
