@@ -1,5 +1,5 @@
 import { useEffect, useId, useMemo, useRef, useState } from "react";
-import type { KeyboardEvent, ReactNode } from "react";
+import type { KeyboardEvent, ReactNode, RefObject } from "react";
 import { PATH_MATCHES_PER_PAGE, readPatchPathMatches } from "../../../api/changes";
 import type { PatchIndex, readPatchPathCatalog } from "../../../api/changes";
 import type { PatchFile, PatchPath, PatchSearchMatch } from "../../../api/generated/contracts";
@@ -46,43 +46,118 @@ type Entry = {
   readonly choose: () => void;
 };
 
-export function ChangedFilePicker({
-  reviewId,
-  index,
-  files,
-  selected,
-  position,
-  total,
-  pending,
-  catalog,
-  navigation,
-  onOpen,
-  onChooseFile,
-  onChoosePath,
-  onChooseMatch,
-}: Props) {
+export function ChangedFilePicker(props: Props) {
+  const { selected, position, total, pending, navigation, onOpen } = props;
   const id = useId();
-  const dialog = useRef<HTMLDialogElement>(null);
   const trigger = useRef<HTMLButtonElement>(null);
+  const [opening, setOpening] = useState<{ fileId: string | undefined }>();
+  const fileName = selected
+    ? splitPath(selected.newPath).name
+    : pending
+      ? "Loading files…"
+      : "Changed files";
+  const ordinal = total ? `${position} of ${total}` : `File ${position}`;
+
+  return (
+    <nav
+      className="changes-file-nav"
+      aria-label="Changed file navigation"
+      onKeyDown={(event) => {
+        if (event.target instanceof Element && event.target.closest("dialog")) return;
+        if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+        event.preventDefault();
+        navigation.onStep(event.key === "ArrowLeft" ? -1 : 1);
+      }}
+    >
+      <button
+        type="button"
+        className="changes-picker-trigger"
+        ref={trigger}
+        aria-haspopup="dialog"
+        aria-controls={opening ? id : undefined}
+        aria-expanded={Boolean(opening)}
+        aria-label="Choose a changed file"
+        aria-describedby={`${id}-position`}
+        title={selected?.newPath}
+        onClick={() => {
+          onOpen();
+          setOpening({ fileId: selected?.fileId });
+        }}
+      >
+        <Icon name="file" size={13} />
+        <span className="changes-current-name" aria-hidden="true">
+          {fileName}
+        </span>
+        <span className="changes-picker-position" aria-hidden="true">
+          {ordinal}
+          <Icon name="chevron" size={12} />
+        </span>
+      </button>
+      <span id={`${id}-position`} hidden>
+        {selected?.newPath} · {ordinal}
+      </span>
+      {(["Previous", "Next"] as const).map((label) => {
+        const previous = label === "Previous";
+        const available = previous ? navigation.previous : navigation.next;
+        return (
+          <button
+            key={label}
+            type="button"
+            className="changes-file-step"
+            aria-label={`${label} file`}
+            aria-keyshortcuts={previous ? "ArrowLeft" : "ArrowRight"}
+            aria-disabled={!available}
+            title={`${label} file (${previous ? "←" : "→"} when focused here)`}
+            onClick={() => available && navigation.onStep(previous ? -1 : 1)}
+          >
+            <Icon name={previous ? "chevronLeft" : "chevronRight"} size={14} />
+          </button>
+        );
+      })}
+      {opening && (
+        <FileDialog
+          id={id}
+          trigger={trigger}
+          visibleFileId={opening.fileId}
+          onClose={() => setOpening(undefined)}
+          picker={props}
+        />
+      )}
+    </nav>
+  );
+}
+
+function FileDialog({
+  id,
+  trigger,
+  visibleFileId,
+  onClose,
+  picker,
+}: {
+  readonly id: string;
+  readonly trigger: RefObject<HTMLButtonElement | null>;
+  readonly visibleFileId: string | undefined;
+  readonly onClose: () => void;
+  readonly picker: Props;
+}) {
+  const { reviewId, index, files, selected, catalog, onChooseFile, onChoosePath, onChooseMatch } =
+    picker;
+  const dialog = useRef<HTMLDialogElement>(null);
   const input = useRef<HTMLInputElement>(null);
   const results = useRef<HTMLDivElement>(null);
-  const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [search, setSearch] = useState("");
-  const [visibleFileId, setVisibleFileId] = useState<string>();
   const [offset, setOffset] = useState(0);
   const [suggested, setSuggested] = useState<string>();
   const text = query.trim();
   const cached = catalog.data?.paths;
-  const needsCatalogScan = Boolean(open && catalog.data && !cached);
+  const needsCatalogScan = Boolean(catalog.data && !cached);
   useEffect(() => {
-    if (!open) return;
     const timer = window.setTimeout(() => setSearch(query), 180);
     return () => window.clearTimeout(timer);
-  }, [open, query]);
+  }, [query]);
 
   useEffect(() => {
-    if (!open) return;
     const anchor = trigger.current;
     const element = dialog.current;
     if (!anchor || !element) return;
@@ -133,7 +208,7 @@ export function ChangedFilePicker({
       scroller?.removeEventListener("scroll", place);
       if (element.open) element.close();
     };
-  }, [open]);
+  }, [trigger]);
 
   const scanned = useResource(
     JSON.stringify(["file-search", reviewId, index.revision, needsCatalogScan, search, offset]),
@@ -190,7 +265,7 @@ export function ChangedFilePicker({
     if (group) group.push(entry);
     else groups.set(entry.folder, [entry]);
   }
-  const canSearch = Boolean(open && text && new TextEncoder().encode(query).length <= 256);
+  const canSearch = Boolean(text && new TextEncoder().encode(query).length <= 256);
   const readingCode = canSearch && search === query;
   const code = usePatchSearch(reviewId, index.revision, readingCode ? search : "", visibleFileId);
   const matches = readingCode ? code.items : [];
@@ -229,16 +304,9 @@ export function ChangedFilePicker({
     if (noMatches) resultsSummary.push("0 matches");
   }
   if (catalog.data?.partial) resultsSummary.push("Partial GitLab file list");
-  const fileName = selected
-    ? splitPath(selected.newPath).name
-    : pending
-      ? "Loading files…"
-      : "Changed files";
-  const ordinal = total ? `${position} of ${total}` : `File ${position}`;
-
   function close() {
     if (dialog.current?.open) dialog.current.close();
-    setOpen(false);
+    onClose();
   }
 
   function choose(entry: Entry) {
@@ -284,307 +352,242 @@ export function ChangedFilePicker({
   }
 
   return (
-    <nav
-      className="changes-file-nav"
-      aria-label="Changed file navigation"
-      onKeyDown={(event) => {
-        if (event.target instanceof Node && dialog.current?.contains(event.target)) return;
-        if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
-        event.preventDefault();
-        navigation.onStep(event.key === "ArrowLeft" ? -1 : 1);
+    <dialog
+      id={id}
+      className="changes-picker-dialog"
+      ref={dialog}
+      aria-labelledby={`${id}-heading`}
+      onClose={onClose}
+      onKeyDown={move}
+      onClick={(event) => {
+        if (event.target === dialog.current) {
+          const box = dialog.current.getBoundingClientRect();
+          if (
+            event.clientX < box.left ||
+            event.clientX > box.right ||
+            event.clientY < box.top ||
+            event.clientY > box.bottom
+          )
+            close();
+        }
       }}
     >
-      <button
-        type="button"
-        className="changes-picker-trigger"
-        ref={trigger}
-        aria-haspopup="dialog"
-        aria-controls={id}
-        aria-expanded={open}
-        aria-label="Choose a changed file"
-        aria-describedby={`${id}-position`}
-        title={selected?.newPath}
-        onClick={() => {
-          onOpen();
-          setVisibleFileId(selected?.fileId);
-          setQuery("");
-          setSearch("");
-          code.reset();
-          setSuggested(undefined);
-          setOffset(0);
-          setOpen(true);
-        }}
-      >
-        <Icon name="file" size={13} />
-        <span className="changes-current-name" aria-hidden="true">
-          {fileName}
-        </span>
-        <span className="changes-picker-position" aria-hidden="true">
-          {ordinal}
-          <Icon name="chevron" size={12} />
-        </span>
-      </button>
-      <span id={`${id}-position`} hidden>
-        {selected?.newPath} · {ordinal}
-      </span>
-      {(["Previous", "Next"] as const).map((label) => {
-        const previous = label === "Previous";
-        const available = previous ? navigation.previous : navigation.next;
-        return (
-          <button
-            key={label}
-            type="button"
-            className="changes-file-step"
-            aria-label={`${label} file`}
-            aria-keyshortcuts={previous ? "ArrowLeft" : "ArrowRight"}
-            aria-disabled={!available}
-            title={`${label} file (${previous ? "←" : "→"} when focused here)`}
-            onClick={() => available && navigation.onStep(previous ? -1 : 1)}
-          >
-            <Icon name={previous ? "chevronLeft" : "chevronRight"} size={14} />
-          </button>
-        );
-      })}
-      <dialog
-        id={id}
-        className="changes-picker-dialog"
-        ref={dialog}
-        aria-labelledby={`${id}-heading`}
-        onClose={close}
-        onKeyDown={move}
-        onClick={(event) => {
-          if (event.target === dialog.current) {
-            const box = dialog.current.getBoundingClientRect();
-            if (
-              event.clientX < box.left ||
-              event.clientX > box.right ||
-              event.clientY < box.top ||
-              event.clientY > box.bottom
-            )
-              close();
-          }
-        }}
-      >
-        <header className="changes-picker-heading">
-          <h2 id={`${id}-heading`}>Changed files</h2>
-          <button
-            type="button"
-            className="changes-picker-close"
-            aria-label="Close changed files"
-            title="Close (Escape)"
-            onClick={close}
-          >
-            <Icon name="close" size={16} />
-          </button>
-        </header>
-        <label className="changes-picker-search">
-          <Icon name="search" size={14} />
-          <input
-            ref={input}
-            aria-label="Search filenames or code in this diff"
-            aria-controls={`${id}-results`}
-            value={query}
-            placeholder="Search filenames or code"
-            autoComplete="off"
-            spellCheck={false}
-            onChange={(event) => {
-              setQuery(event.currentTarget.value);
-              code.reset();
-              page(0);
-            }}
-          />
-        </label>
-        <div
-          ref={results}
-          id={`${id}-results`}
-          className="changes-picker-results"
-          role="region"
-          aria-label="Matching files and code"
+      <header className="changes-picker-heading">
+        <h2 id={`${id}-heading`}>Changed files</h2>
+        <button
+          type="button"
+          className="changes-picker-close"
+          aria-label="Close changed files"
+          title="Close (Escape)"
+          onClick={close}
         >
-          {catalog.error && <Notice retry={catalog.retry}>{catalog.error}</Notice>}
-          {scanned.error && <Notice retry={scanned.retry}>{scanned.error}</Notice>}
-          {!!entries.length && (
-            <div className="changes-picker-grid changes-picker-columns" aria-hidden="true">
-              <span className="changes-picker-path">File</span>
-              <span className="changes-picker-kind">Change</span>
-              <span className="plus">Added</span>
-              <span className="minus">Removed</span>
-            </div>
-          )}
-          {[...groups].map(([folder, items]) => (
-            <div key={folder}>
-              <p className="changes-picker-grid changes-picker-folder">
-                <Icon name="folder" size={13} />
-                <span className="changes-picker-path">
-                  <Marked
-                    text={folder || "Root"}
-                    ranges={items[0]?.marks.filter(([start]) => start < folder.length) ?? []}
-                  />
-                </span>
-              </p>
-              <ul className="changes-picker-list">
-                {items.map((entry) => (
-                  <li key={entry.key}>
-                    <button
-                      type="button"
-                      className="changes-picker-grid changes-picker-file"
-                      data-option={entry.key}
-                      data-suggested={entry.key === active || undefined}
-                      aria-current={entry.selected || undefined}
-                      title={entry.path}
-                      aria-label={entry.path}
-                      onFocus={() => setSuggested(entry.key)}
-                      onClick={() => choose(entry)}
-                    >
-                      <Icon name="file" size={13} />
-                      <code>
-                        <Marked
-                          text={entry.name}
-                          ranges={entry.marks
-                            .filter(([, end]) => end > entry.cut)
-                            .map(([start, end]) => [
-                              Math.max(0, start - entry.cut),
-                              end - entry.cut,
-                            ])}
-                        />
-                      </code>
-                      {entry.file && (
-                        <>
-                          <span className="changes-picker-kind" data-kind={fileKind(entry.file)}>
-                            {fileKind(entry.file)}
-                          </span>
-                          <DiffCount file={entry.file} />
-                        </>
-                      )}
-                      <span className="changes-picker-check">
-                        {entry.selected && <Icon name="check" size={13} />}
-                      </span>
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          ))}
-          {open && needsCatalogScan && (search.trim() !== text || scanned.pending) && (
-            <Loading label="Searching changed files…" />
-          )}
-          {!!text && (
-            <>
-              {!!matches.length && <p className="changes-code-heading">Code in this diff</p>}
-              {[...codeGroups].map(([path, hits]) => (
-                <div key={path}>
-                  <p className="changes-code-file">{path}</p>
-                  <ul className="changes-picker-list">
-                    {hits.map((hit) => {
-                      const side = hit.side === "old" ? "Old" : "New";
-                      const key = matchKey(hit);
-                      return (
-                        <li key={key}>
-                          <button
-                            type="button"
-                            className="changes-code-choice"
-                            data-option={key}
-                            data-suggested={key === active || undefined}
-                            aria-label={`${path}, ${side} ${hit.line}, ${hit.snippet}`}
-                            onFocus={() => setSuggested(key)}
-                            onClick={() => {
-                              close();
-                              onChooseMatch(
-                                hit,
-                                hit.snippet.slice(hit.highlightStart, hit.highlightEnd),
-                              );
-                            }}
-                          >
-                            <span className="changes-code-location">
-                              {side} {hit.line}
-                            </span>
-                            <code>
-                              <Marked
-                                text={hit.snippet}
-                                ranges={[[hit.highlightStart, hit.highlightEnd]]}
-                              />
-                            </code>
-                          </button>
-                        </li>
-                      );
-                    })}
-                  </ul>
-                </div>
-              ))}
-              {!canSearch && (
-                <p className="changes-picker-empty">Code queries can be up to 256 bytes.</p>
-              )}
-              {canSearch && (!readingCode || code.pending) && (
-                <Loading label="Searching diff code…" />
-              )}
-              {readingCode && code.error && <Notice retry={code.retry}>{code.error}</Notice>}
-              {readingCode && code.data?.coverage === "limited" && (
-                <p className="changes-picker-empty">
-                  Search coverage is limited by the available GitLab patch.
-                </p>
-              )}
-              {noMatches && <p className="changes-picker-empty">No matching files or code.</p>}
-              {readingCode && code.exhausted && (
-                <p className="changes-picker-empty">No more code matches.</p>
-              )}
-              {readingCode && code.hasPrevious && (
-                <button
-                  type="button"
-                  className="changes-clear"
-                  disabled={code.pending}
-                  onClick={() => {
-                    setSuggested(undefined);
-                    code.previous();
-                  }}
-                >
-                  Previous code matches
-                </button>
-              )}
-              {readingCode && code.data?.nextCursor && (
-                <button
-                  type="button"
-                  className="changes-clear"
-                  onClick={() => {
-                    setSuggested(undefined);
-                    code.more();
-                  }}
-                >
-                  {matches.length ? "More code matches" : "Continue searching code"}
-                </button>
-              )}
-            </>
-          )}
-        </div>
-        {(offset > 0 || count > PATH_MATCHES_PER_PAGE) && (
-          <nav className="pagination" aria-label="File search pages">
-            <button
-              type="button"
-              disabled={offset === 0}
-              onClick={() => page(offset - PATH_MATCHES_PER_PAGE)}
-            >
-              Previous
-            </button>
-            <span className="meta">
-              {offset + 1}–{offset + entries.length} of {count}
-            </span>
-            <button
-              type="button"
-              disabled={offset + PATH_MATCHES_PER_PAGE >= count}
-              onClick={() => page(offset + PATH_MATCHES_PER_PAGE)}
-            >
-              Next
-            </button>
-          </nav>
+          <Icon name="close" size={16} />
+        </button>
+      </header>
+      <label className="changes-picker-search">
+        <Icon name="search" size={14} />
+        <input
+          ref={input}
+          aria-label="Search filenames or code in this diff"
+          aria-controls={`${id}-results`}
+          value={query}
+          placeholder="Search filenames or code"
+          autoComplete="off"
+          spellCheck={false}
+          onChange={(event) => {
+            setQuery(event.currentTarget.value);
+            code.reset();
+            page(0);
+          }}
+        />
+      </label>
+      <div
+        ref={results}
+        id={`${id}-results`}
+        className="changes-picker-results"
+        role="region"
+        aria-label="Matching files and code"
+      >
+        {catalog.error && <Notice retry={catalog.retry}>{catalog.error}</Notice>}
+        {scanned.error && <Notice retry={scanned.retry}>{scanned.error}</Notice>}
+        {!!entries.length && (
+          <div className="changes-picker-grid changes-picker-columns" aria-hidden="true">
+            <span className="changes-picker-path">File</span>
+            <span className="changes-picker-kind">Change</span>
+            <span className="plus">Added</span>
+            <span className="minus">Removed</span>
+          </div>
         )}
-        <footer className="changes-picker-footer">
-          <span role="status">{resultsSummary.join(" · ")}</span>
-          <span>
-            <kbd>↑</kbd>
-            <kbd>↓</kbd> Move <kbd>Enter</kbd> Jump
+        {[...groups].map(([folder, items]) => (
+          <div key={folder}>
+            <p className="changes-picker-grid changes-picker-folder">
+              <Icon name="folder" size={13} />
+              <span className="changes-picker-path">
+                <Marked
+                  text={folder || "Root"}
+                  ranges={items[0]?.marks.filter(([start]) => start < folder.length) ?? []}
+                />
+              </span>
+            </p>
+            <ul className="changes-picker-list">
+              {items.map((entry) => (
+                <li key={entry.key}>
+                  <button
+                    type="button"
+                    className="changes-picker-grid changes-picker-file"
+                    data-option={entry.key}
+                    data-suggested={entry.key === active || undefined}
+                    aria-current={entry.selected || undefined}
+                    title={entry.path}
+                    aria-label={entry.path}
+                    onFocus={() => setSuggested(entry.key)}
+                    onClick={() => choose(entry)}
+                  >
+                    <Icon name="file" size={13} />
+                    <code>
+                      <Marked
+                        text={entry.name}
+                        ranges={entry.marks
+                          .filter(([, end]) => end > entry.cut)
+                          .map(([start, end]) => [Math.max(0, start - entry.cut), end - entry.cut])}
+                      />
+                    </code>
+                    {entry.file && (
+                      <>
+                        <span className="changes-picker-kind" data-kind={fileKind(entry.file)}>
+                          {fileKind(entry.file)}
+                        </span>
+                        <DiffCount file={entry.file} />
+                      </>
+                    )}
+                    <span className="changes-picker-check">
+                      {entry.selected && <Icon name="check" size={13} />}
+                    </span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ))}
+        {needsCatalogScan && (search.trim() !== text || scanned.pending) && (
+          <Loading label="Searching changed files…" />
+        )}
+        {!!text && (
+          <>
+            {!!matches.length && <p className="changes-code-heading">Code in this diff</p>}
+            {[...codeGroups].map(([path, hits]) => (
+              <div key={path}>
+                <p className="changes-code-file">{path}</p>
+                <ul className="changes-picker-list">
+                  {hits.map((hit) => {
+                    const side = hit.side === "old" ? "Old" : "New";
+                    const key = matchKey(hit);
+                    return (
+                      <li key={key}>
+                        <button
+                          type="button"
+                          className="changes-code-choice"
+                          data-option={key}
+                          data-suggested={key === active || undefined}
+                          aria-label={`${path}, ${side} ${hit.line}, ${hit.snippet}`}
+                          onFocus={() => setSuggested(key)}
+                          onClick={() => {
+                            close();
+                            onChooseMatch(
+                              hit,
+                              hit.snippet.slice(hit.highlightStart, hit.highlightEnd),
+                            );
+                          }}
+                        >
+                          <span className="changes-code-location">
+                            {side} {hit.line}
+                          </span>
+                          <code>
+                            <Marked
+                              text={hit.snippet}
+                              ranges={[[hit.highlightStart, hit.highlightEnd]]}
+                            />
+                          </code>
+                        </button>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </div>
+            ))}
+            {!canSearch && (
+              <p className="changes-picker-empty">Code queries can be up to 256 bytes.</p>
+            )}
+            {canSearch && (!readingCode || code.pending) && (
+              <Loading label="Searching diff code…" />
+            )}
+            {readingCode && code.error && <Notice retry={code.retry}>{code.error}</Notice>}
+            {readingCode && code.data?.coverage === "limited" && (
+              <p className="changes-picker-empty">
+                Search coverage is limited by the available GitLab patch.
+              </p>
+            )}
+            {noMatches && <p className="changes-picker-empty">No matching files or code.</p>}
+            {readingCode && code.exhausted && (
+              <p className="changes-picker-empty">No more code matches.</p>
+            )}
+            {readingCode && code.hasPrevious && (
+              <button
+                type="button"
+                className="changes-clear"
+                disabled={code.pending}
+                onClick={() => {
+                  setSuggested(undefined);
+                  code.previous();
+                }}
+              >
+                Previous code matches
+              </button>
+            )}
+            {readingCode && code.data?.nextCursor && (
+              <button
+                type="button"
+                className="changes-clear"
+                onClick={() => {
+                  setSuggested(undefined);
+                  code.more();
+                }}
+              >
+                {matches.length ? "More code matches" : "Continue searching code"}
+              </button>
+            )}
+          </>
+        )}
+      </div>
+      {(offset > 0 || count > PATH_MATCHES_PER_PAGE) && (
+        <nav className="pagination" aria-label="File search pages">
+          <button
+            type="button"
+            disabled={offset === 0}
+            onClick={() => page(offset - PATH_MATCHES_PER_PAGE)}
+          >
+            Previous
+          </button>
+          <span className="meta">
+            {offset + 1}–{offset + entries.length} of {count}
           </span>
-        </footer>
-      </dialog>
-    </nav>
+          <button
+            type="button"
+            disabled={offset + PATH_MATCHES_PER_PAGE >= count}
+            onClick={() => page(offset + PATH_MATCHES_PER_PAGE)}
+          >
+            Next
+          </button>
+        </nav>
+      )}
+      <footer className="changes-picker-footer">
+        <span role="status">{resultsSummary.join(" · ")}</span>
+        <span>
+          <kbd>↑</kbd>
+          <kbd>↓</kbd> Move <kbd>Enter</kbd> Jump
+        </span>
+      </footer>
+    </dialog>
   );
 }
 
