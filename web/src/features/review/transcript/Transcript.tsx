@@ -79,6 +79,7 @@ export function Transcript({ target, provider, child, messages, working }: Props
   const bookmark = `history.${target.runId}.${target.sessionKey}`;
   const [saved] = useState(() => readBookmark(bookmark));
   const [following, setFollowing] = useState(saved?.following ?? true);
+  const followBeforeFind = useRef<boolean | undefined>(undefined);
   const [pinned, setPinned] = useState<ReadonlySet<string>>(() => new Set());
   const [selectedText, setSelectedText] = useState(false);
   const [groupKeys, setGroupKeys] = useState<ReadonlySet<string>>(() => new Set());
@@ -470,6 +471,7 @@ export function Transcript({ target, provider, child, messages, working }: Props
   }
 
   function gesture(up: boolean, distance?: number) {
+    followBeforeFind.current = undefined;
     leaveReopen();
     const host = viewport.current;
     if (!host) return;
@@ -495,6 +497,7 @@ export function Transcript({ target, provider, child, messages, working }: Props
   }
 
   function latest() {
+    followBeforeFind.current = undefined;
     leaveReopen();
     clear();
     setFollowing(true);
@@ -584,6 +587,7 @@ export function Transcript({ target, provider, child, messages, working }: Props
   function openFound({ page, output: found, extra }: PreparedDestination) {
     const { entryId, generation, locator, contentRef, toolCallId } = found.destination;
     if (!history.openPrepared(page, { entryId, locator })) return false;
+    followBeforeFind.current = undefined;
     setFollowing(false);
     setFoundOutput(found);
     setOutput({ entryId, reference: contentRef });
@@ -602,17 +606,20 @@ export function Transcript({ target, provider, child, messages, working }: Props
         target={target}
         viewport={viewport}
         onOpen={() => {
+          followBeforeFind.current = following;
           const reading = visibleAnchor(viewport.current);
           anchor.current = reading && { ...reading, jump: true };
           list.cancelScroll();
           requestedLatest.current = false;
           setFollowing(false);
         }}
-        onClose={leaveReopen}
-        onChoose={openFound}
-        onReveal={() => {
-          anchor.current = undefined;
+        onClose={() => {
+          leaveReopen();
+          if (followBeforeFind.current) setFollowing(true);
+          followBeforeFind.current = undefined;
         }}
+        onChoose={openFound}
+        onReveal={leaveReopen}
       />
       {selectedText && <HistorySelection onClear={clear} onError={setActionNotice} />}
       {actionNotice && <Notice>{actionNotice}</Notice>}
@@ -649,6 +656,7 @@ export function Transcript({ target, provider, child, messages, working }: Props
           if (anchor.current?.adjacent) anchor.current = undefined;
           const box = event.currentTarget.getBoundingClientRect();
           if (event.target === event.currentTarget && box.right - event.clientX < 17) {
+            followBeforeFind.current = undefined;
             leaveReopen();
             pageLead.current = event.currentTarget.clientHeight;
             scrollIntent.current = "scrollbar";
@@ -873,6 +881,7 @@ export function Transcript({ target, provider, child, messages, working }: Props
           hasNewer={history.newer}
           onReturnFocus={() => viewport.current?.focus({ preventScroll: true })}
           onJump={(id, locator) => {
+            followBeforeFind.current = undefined;
             leaveReopen();
             setFollowing(false);
             void history.load("around", { entryId: id, locator });
