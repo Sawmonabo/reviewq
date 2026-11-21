@@ -1,4 +1,3 @@
-import type { Ref } from "react";
 import { Icon } from "./Icon";
 
 type Option = { readonly value: string; readonly label: string; readonly disabled?: boolean };
@@ -9,7 +8,6 @@ export function FilterSelect({
   value,
   options,
   onChange,
-  selectRef,
   disabled = false,
 }: {
   readonly label: string;
@@ -17,7 +15,6 @@ export function FilterSelect({
   readonly value: string;
   readonly options: readonly Option[];
   readonly onChange: (value: string) => void;
-  readonly selectRef?: Ref<HTMLSelectElement>;
   readonly disabled?: boolean;
 }) {
   const shown = (options.find((option) => option.value === value) ?? options[0])?.label;
@@ -29,7 +26,6 @@ export function FilterSelect({
       </span>
       <Icon name="chevron" size={12} />
       <select
-        ref={selectRef}
         aria-label={accessibleLabel}
         value={value}
         disabled={disabled}

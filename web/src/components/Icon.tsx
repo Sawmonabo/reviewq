@@ -23,6 +23,8 @@ const paths = {
   external: "M13 4h7v7m0-7-9 9 M10 5H5v14h14v-5",
   download: "M12 4v10m-4-4 4 4 4-4M5 16v4h14v-4",
   check: "m5 12 4 4L19 6",
+  filters:
+    "M3 7h7m4 0h7M3 17h11m4 0h3 M14 7a2 2 0 1 1-4 0 2 2 0 1 1 4 0Z M18 17a2 2 0 1 1-4 0 2 2 0 1 1 4 0Z",
   clearFilters: "M3 4h18l-7 7v1M10 11 3 4m7 7v8l4-2m2-3 5 5m0-5-5 5",
   warning: "m12 3 10 17H2zm0 6v5m0 3h.01",
   send: "M12 20V4m-6 6 6-6 6 6",

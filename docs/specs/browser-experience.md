@@ -81,7 +81,7 @@ Typing part of a filename, abbreviated filename letters or a literal code fragme
 
 A jump belongs to one review, its exact GitLab diff revision and a verified file ID. Use the old side for deletions and the new side for additions and shared context. Lines are one-based. For a code match, `hunk` is the UTF-8 byte offset of its hunk header. `sourceStart` and `sourceEnd` are the half-open byte range of the matched text in the original unified patch, counting row prefixes and original line endings. `highlightStart` and `highlightEnd` are UTF-16 offsets into the returned snippet, suitable for JavaScript string slicing. For example, in a deleted line containing the same word twice after an emoji, choosing the second result highlights only the second occurrence on the old side. A new wheel, touch, keyboard or scrollbar navigation cancels a pending jump. Keep the current code visible while the destination loads.
 
-The closed button shows the basename, current file position (for example, “3 of 12”) and trailing caret on one line. Align the caret vertically with the filename. Show folder context in the open picker and the full path on hover. Keep the conversation filters independent of the file query.
+The closed button shows the basename, current file position (for example, “3 of 12”) and trailing caret on one line. Align the caret vertically with the filename. Show folder context in the open picker and the full path on hover. Place a single Filters button beside the Changes views. It shows the active filter count and opens the participant and resolution choices together. Applying or resetting a choice preserves the file query.
 
 ### Full document and bounded source modes
 

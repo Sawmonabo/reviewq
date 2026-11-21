@@ -10,12 +10,13 @@ import {
   readPatchRevision,
 } from "../../../api/changes";
 import type { PatchDiscussion } from "../../../api/generated/contracts";
-import { FilterSelect } from "../../../components/FilterSelect";
 import { Icon } from "../../../components/Icon";
 import { Pagination } from "../../../components/Pagination";
 import { Loading, Notice } from "../../../components/PanelState";
 import { useResource } from "../../../hooks/useResource";
 import { Approvals } from "./Approvals";
+import { ConversationFilters, DEFAULT_FILTERS } from "./ConversationFilters";
+import type { ConversationFilterValues } from "./ConversationFilters";
 import { ChangesThread, ChangesThreadExpansion } from "./ChangesThread";
 import { FileStream } from "./FileStream";
 import { OtherDiscussions } from "./OtherDiscussions";
@@ -26,12 +27,11 @@ import "./changes.css";
 import "./navigation.css";
 
 type Tab = "files" | "general" | "all";
-type Status = "any" | "open" | "resolved";
 const DISCUSSIONS_PER_PAGE = 30;
 const tabs = [
-  ["files", "Files"],
-  ["general", "General comments"],
-  ["all", "All conversations"],
+  ["files", "Files", "Files"],
+  ["general", "General comments", "General"],
+  ["all", "All conversations", "Conversations"],
 ] as const;
 
 export default function Changes({
@@ -53,9 +53,9 @@ export default function Changes({
   }>();
   const [loadedAnchors, setLoadedAnchors] = useState<ReadonlySet<string>>();
   const [tab, setTab] = useState<Tab>("files");
-  const [status, setStatus] = useState<Status>("any");
-  const [involving, setInvolving] = useState(false);
-  const participant = useRef<HTMLSelectElement>(null);
+  const [filters, setFilters] = useState(DEFAULT_FILTERS);
+  const { status, involving } = filters;
+  const filterButton = useRef<HTMLButtonElement>(null);
   const index = useResource(JSON.stringify([reviewId, epoch]), async (signal) => {
     try {
       return epoch > 0
@@ -163,12 +163,10 @@ export default function Changes({
     setEpoch((value) => value + 1);
   }
 
-  function clearConversationFilters() {
-    setInvolving(false);
-    setStatus("any");
+  function changeFilters(next: ConversationFilterValues) {
+    setFilters(next);
     setThreadPage(0);
     setThreadTrail([]);
-    participant.current?.focus({ preventScroll: true });
   }
 
   if (index.pending && !shown && !index.error) return <Loading label="Loading changes…" />;
@@ -198,75 +196,34 @@ export default function Changes({
           </Notice>
         )}
         <header className="changes-header" ref={toolbar}>
-          <div className="thread-filters" role="group" aria-label="Conversation filters">
-            <span className="changes-filter-title" aria-hidden="true">
-              Conversation filters
-            </span>
-            <FilterSelect
-              label="Show"
-              accessibleLabel="Conversation participants"
-              selectRef={participant}
-              value={involving ? "mine" : "all"}
-              options={[
-                { value: "all", label: "Everyone" },
-                { value: "mine", label: "Involving you" },
-              ]}
-              onChange={(value) => {
-                setInvolving(value === "mine");
-                setThreadPage(0);
-                setThreadTrail([]);
-              }}
-            />
-            <FilterSelect
-              label="Status"
-              accessibleLabel="Conversation status"
-              value={status}
-              options={[
-                { value: "any", label: "Any status" },
-                { value: "open", label: "Open only" },
-                { value: "resolved", label: "Resolved only" },
-              ]}
-              onChange={(value) => {
-                setStatus(value as Status);
-                setThreadPage(0);
-                setThreadTrail([]);
-              }}
-            />
-            {filtering && (
+          <div className="changes-tabs" role="group" aria-label="Changes view">
+            {tabs.map(([id, label, compactLabel]) => (
               <button
+                key={id}
                 type="button"
-                className="changes-clear"
-                aria-label="Clear conversation filters"
-                onClick={clearConversationFilters}
+                aria-pressed={tab === id}
+                aria-label={[label, counts[id]].filter(Boolean).join(" ")}
+                title={label}
+                onClick={() => {
+                  if (tab === id) return;
+                  setThreadJump(undefined);
+                  setTab(id);
+                  setThreadPage(0);
+                  setThreadTrail([]);
+                }}
               >
-                Clear
+                <span className="changes-tab-label">{label}</span>
+                <span className="changes-tab-short" aria-hidden="true">
+                  {compactLabel}
+                </span>
+                {counts[id] && <small className="changes-count">{counts[id]}</small>}
               </button>
-            )}
+            ))}
           </div>
-          <div className="changes-navigation">
-            <div className="changes-tabs" role="group" aria-label="Changes view">
-              {tabs.map(([id, label]) => (
-                <button
-                  key={id}
-                  type="button"
-                  aria-pressed={tab === id}
-                  onClick={() => {
-                    if (tab === id) return;
-                    setThreadJump(undefined);
-                    setTab(id);
-                    setThreadPage(0);
-                    setThreadTrail([]);
-                  }}
-                >
-                  {label}
-                  {counts[id] && <small className="changes-count">{counts[id]}</small>}
-                </button>
-              ))}
-            </div>
-            {tab === "files" && shown && (
-              <div className="changes-navigation-slot" ref={setNavigation} />
-            )}
-          </div>
+          <ConversationFilters value={filters} onChange={changeFilters} trigger={filterButton} />
+          {tab === "files" && shown && (
+            <div className="changes-navigation-slot" ref={setNavigation} />
+          )}
         </header>
         {index.error && <Notice retry={index.retry}>{index.error}</Notice>}
         {tab === "files" && shown && (
@@ -323,7 +280,13 @@ export default function Changes({
                 {filtering && <p className="meta">Try changing your filters.</p>}
               </div>
               {filtering && (
-                <button type="button" onClick={clearConversationFilters}>
+                <button
+                  type="button"
+                  onClick={() => {
+                    changeFilters(DEFAULT_FILTERS);
+                    filterButton.current?.focus({ preventScroll: true });
+                  }}
+                >
                   Clear filters
                 </button>
               )}
@@ -397,7 +360,11 @@ function discussionCount(count: number, partial: boolean) {
   return partial ? `${count}+` : String(count);
 }
 
-function matchesFilters(thread: PatchDiscussion, status: Status, involving: boolean) {
+function matchesFilters(
+  thread: PatchDiscussion,
+  status: ConversationFilterValues["status"],
+  involving: boolean,
+) {
   return (
     (!involving || thread.ourParticipation) && (status === "any" || thread.resolution === status)
   );

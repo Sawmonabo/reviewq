@@ -1,29 +1,3 @@
-.thread-filters {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 7px;
-  min-width: 0;
-  margin-top: 1px;
-}
-.changes-filter-title {
-  color: var(--muted);
-  font-size: 11px;
-  margin-inline-end: 4px;
-}
-
-.thread-filters .select-filter {
-  min-inline-size: 12.5em;
-  min-height: 29px;
-  height: 29px;
-  gap: 4px;
-  padding-inline: 7px 3px;
-  background: light-dark(var(--control), #15151b);
-}
-.thread-filters .filter-label {
-  margin-inline-end: 1px;
-  font-size: 11px;
-}
 .changes-clear {
   border: 1px solid light-dark(var(--control-line), #414457);
   border-radius: 5px;
@@ -40,56 +14,58 @@
   position: sticky;
   top: 0;
   z-index: 2;
-  display: grid;
-  gap: 7px;
-  padding: 8px 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 0;
   border-block: 1px solid var(--line);
   background: light-dark(var(--surface), #0c0c10);
 }
 .changes-navigation-slot {
   min-width: 0;
-}
-.changes-navigation {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 9px;
+  margin-inline-start: auto;
+  flex: 0 1 auto;
 }
 .changes-tabs {
   display: flex;
   align-items: center;
-  gap: 3px;
-  flex: 0 0 auto;
+  gap: 2px;
 }
 .changes-tabs > button {
-  display: flex;
+  position: relative;
+  display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 5px;
-  border: 1px solid transparent;
-  border-radius: 5px;
+  gap: 4px;
+  padding: 0 6px;
+  border: 0;
   min-height: 34px;
   background: transparent;
-  padding: 0 7px;
+  color: var(--muted);
   font-size: 11px;
   white-space: nowrap;
-  color: var(--muted);
 }
 .changes-tabs > button:hover {
   background: var(--raised);
   color: var(--text);
 }
 .changes-tabs > button[aria-pressed="true"] {
-  background: light-dark(var(--selected), #1e202b);
-  border-color: #292c3d;
-  color: light-dark(var(--text), #edf0ff);
+  color: var(--text);
 }
-.changes-tabs > button small {
+.changes-tabs > button[aria-pressed="true"]::after {
+  content: "";
+  position: absolute;
+  inset: auto 6px 0;
+  height: 2px;
+  background: var(--link);
+}
+.changes-tabs small {
   color: var(--muted);
   font-size: 10px;
+  font-variant-numeric: tabular-nums;
 }
-.changes-tabs > button[aria-pressed="true"] small {
-  color: light-dark(var(--link), #b5c1f2);
+.changes-tabs .changes-tab-short {
+  display: none;
 }
 .changes-file-nav {
   display: grid;
@@ -395,29 +371,21 @@
   color: light-dark(var(--text), #c4cade);
   border-radius: 3px;
 }
-@container review-detail (max-width: 640px) {
-  .changes-navigation {
-    flex-wrap: wrap;
-    gap: 6px 8px;
+@container review-detail (max-width: 700px) {
+  .changes-tabs .changes-tab-label {
+    display: none;
   }
-  .changes-tabs > button {
-    padding-inline: 5px;
-    gap: 4px;
-  }
-  .changes-navigation-slot {
-    flex: 1 1 215px;
-  }
-  .changes-file-nav {
-    margin-inline-start: auto;
+  .changes-tabs .changes-tab-short {
+    display: inline;
   }
 }
-@container review-detail (max-width: 528px) {
-  .changes-tabs,
-  .changes-navigation-slot {
-    flex: 1 1 100%;
+@container review-detail (max-width: 560px) {
+  .changes-header {
+    flex-wrap: wrap;
+    gap: 3px 6px;
   }
-  .changes-tabs > button {
-    flex: 1 1 auto;
+  .changes-navigation-slot {
+    flex: 1 0 100%;
   }
   .changes-file-nav {
     max-width: none;
@@ -426,10 +394,6 @@
 @media (max-width: 760px) {
   .changes-header {
     padding: 3px 0 7px;
-    gap: 5px;
-  }
-  .changes-filter-title {
-    display: none;
   }
   .changes-picker-dialog {
     inset: auto 0 var(--dialog-keyboard-inset, 0px);
@@ -463,7 +427,6 @@
   .changes-tabs > button,
   .changes-picker-file,
   .changes-picker-search,
-  .thread-filters .select-filter,
   .changes-picker-close,
   .changes-clear {
     min-height: 44px;
@@ -485,7 +448,9 @@
   }
 }
 @media (forced-colors: active) {
-  .changes-tabs > button[aria-pressed="true"],
+  .changes-tabs > button[aria-pressed="true"]::after {
+    background: Highlight;
+  }
   .changes-picker-file[aria-current="true"] {
     border-color: Highlight;
   }
