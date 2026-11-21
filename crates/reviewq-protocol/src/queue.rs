@@ -19,8 +19,8 @@ pub use archive::{
 };
 pub use sprints::{LoadSprintsRequest, LoadSprintsResponse, LoadedSprints, SprintPair};
 pub use tracking::{
-    TicketComment, TicketDetail, TicketDetailResponse, TrackReviewRequest, TrackReviewResponse,
-    TrackedReview,
+    TicketComment, TicketComments, TicketCommentsResponse, TicketDetail, TicketDetailResponse,
+    TrackReviewRequest, TrackReviewResponse, TrackedReview,
 };
 pub use workspace::{RunCard, RunCards, RunCardsResponse, StageCounts};
 

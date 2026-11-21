@@ -89,6 +89,7 @@ export { validate1472 as isRunPreviewResponse } from "./validators/schemas/run-p
 export { validate1485 as isSelectedPatchResponse } from "./validators/schemas/selected-patch-response.mjs";
 export { validate1494 as isSettingsResponse } from "./validators/schemas/settings-response.mjs";
 export { validate1536 as isTerminalResponse } from "./validators/schemas/terminal-response.mjs";
-export { validate1554 as isTicketDetailResponse } from "./validators/schemas/ticket-detail-response.mjs";
-export { validate1574 as isTrackReviewResponse } from "./validators/schemas/track-review-response.mjs";
-export { validate1582 as isVerifiedConnectionResponse } from "./validators/schemas/verified-connection-response.mjs";
+export { validate1554 as isTicketCommentsResponse } from "./validators/schemas/ticket-comments-response.mjs";
+export { validate1568 as isTicketDetailResponse } from "./validators/schemas/ticket-detail-response.mjs";
+export { validate1585 as isTrackReviewResponse } from "./validators/schemas/track-review-response.mjs";
+export { validate1593 as isVerifiedConnectionResponse } from "./validators/schemas/verified-connection-response.mjs";

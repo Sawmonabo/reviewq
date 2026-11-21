@@ -136,7 +136,10 @@ import type {
   HistorySearchResponse,
 } from "./history.js";
 
-import type { TicketDetailResponse } from "./tickets.js";
+import type {
+  TicketCommentsResponse,
+  TicketDetailResponse,
+} from "./tickets.js";
 
 export interface Contracts {
   InvalidateEvent: InvalidateEvent;
@@ -229,6 +232,7 @@ export interface Contracts {
   SelectedPatchResponse: SelectedPatchResponse;
   SettingsResponse: SettingsResponse;
   TerminalResponse: TerminalResponse;
+  TicketCommentsResponse: TicketCommentsResponse;
   TicketDetailResponse: TicketDetailResponse;
   TrackReviewResponse: TrackReviewResponse;
   VerifiedConnectionResponse: VerifiedConnectionResponse;

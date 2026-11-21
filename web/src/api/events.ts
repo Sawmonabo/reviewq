@@ -1,9 +1,11 @@
 import type { ResourceKeyDto } from "./generated/contracts";
 import { isInvalidateEvent, isResetEvent } from "./generated/validators.mjs";
 
+type RefreshReason = "invalidate" | "reset" | "visible";
+
 type Listener = {
   readonly keys: readonly ResourceKeyDto[];
-  readonly notify: () => void;
+  readonly notify: (reason: RefreshReason) => void;
   snapshot?: string;
   delivered?: string;
 };
@@ -13,7 +15,7 @@ let cursor: string | undefined;
 let replayFrom: string | undefined;
 let reconnect: number | undefined;
 
-export function watchResources(keys: readonly ResourceKeyDto[], notify: () => void) {
+export function watchResources(keys: readonly ResourceKeyDto[], notify: Listener["notify"]) {
   const listener: Listener = { keys, notify };
   listeners.add(listener);
   return {
@@ -45,7 +47,7 @@ export function startWorkspaceEvents(): () => void {
     } else {
       replayFrom ??= cursor;
       if (replayFrom !== undefined) replay();
-      for (const listener of listeners) listener.notify();
+      for (const listener of listeners) listener.notify("visible");
     }
   }
   document.addEventListener("visibilitychange", visibility);
@@ -93,7 +95,7 @@ function replay() {
         )
       ) {
         entry.delivered = event.lastEventId;
-        entry.notify();
+        entry.notify("invalidate");
       }
     }
   });
@@ -104,7 +106,7 @@ function replay() {
     for (const entry of listeners) {
       delete entry.snapshot;
       delete entry.delivered;
-      entry.notify();
+      entry.notify("reset");
     }
   });
 }

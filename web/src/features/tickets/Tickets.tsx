@@ -1,12 +1,10 @@
-import { useMemo, useState } from "react";
+import { memo, useMemo, useState } from "react";
 import { MarkdownContent } from "../../components/markdown/MarkdownContent";
-import { readTicket } from "../../api/tickets";
-import type { TicketCommentOrder } from "../../api/tickets";
 import type { TicketComment } from "../../api/generated/contracts";
 import { Loading, Notice } from "../../components/PanelState";
-import { useResource } from "../../hooks/useResource";
 import { formatActivityTime, safeUrl } from "../../lib/presentation";
 import { savedValue, saveValue } from "../../lib/view-preferences";
+import { useTicket } from "./useTicket";
 import { jiraWiki } from "./wiki";
 import "./tickets.css";
 
@@ -43,31 +41,14 @@ export default function Tickets({ keys }: { readonly keys: readonly string[] }) 
 }
 
 function TicketDetail({ ticketKey }: { readonly ticketKey: string }) {
-  const [order, setOrder] = useState<TicketCommentOrder>("newest");
-  const [trail, setTrail] = useState<readonly string[]>([]);
-  const cursor = trail.at(-1);
-  const detail = useResource(
-    `ticket:${ticketKey}`,
-    async (signal) => {
-      const response = await readTicket(ticketKey, order, cursor, signal);
-      return { ...response, data: { ticket: response.data, order, cursor } };
-    },
-    [{ kind: "ticket", id: ticketKey }],
-  );
-  const loaded = detail.data;
-  if (!loaded)
-    return detail.error ? (
-      <Notice retry={() => selectPage([])}>{detail.error}</Notice>
+  const { ticket, order, trail, switching, error, select, retry } = useTicket(ticketKey);
+  if (!ticket)
+    return error ? (
+      <Notice retry={retry}>{error}</Notice>
     ) : (
       <Loading label={`Loading ${ticketKey}…`} />
     );
-  const ticket = loaded.ticket;
   const url = safeUrl(ticket.url);
-  const switching = loaded.order !== order || loaded.cursor !== cursor;
-  function selectPage(next: readonly string[]) {
-    setTrail(next);
-    detail.retry();
-  }
   return (
     <>
       <header className="ticket-heading">
@@ -155,24 +136,23 @@ function TicketDetail({ ticketKey }: { readonly ticketKey: string }) {
             <select
               aria-label="Sort ticket comments"
               value={order}
-              onChange={(event) => {
-                setOrder(event.currentTarget.value === "oldest" ? "oldest" : "newest");
-                selectPage([]);
-              }}
+              onChange={(event) =>
+                select(event.currentTarget.value === "oldest" ? "oldest" : "newest", [])
+              }
             >
               <option value="newest">Newest first</option>
               <option value="oldest">Oldest first</option>
             </select>
           </label>
         </header>
-        {detail.error && <Notice retry={() => selectPage([])}>{detail.error}</Notice>}
-        {switching && !detail.error && (
+        {error && <Notice retry={retry}>{error}</Notice>}
+        {switching && !error && (
           <p role="status" className="sr-only">
             Loading comments.
           </p>
         )}
         {!ticket.items.length && <p className="meta">No comments yet.</p>}
-        <div className="ticket-comment-list" aria-busy={switching && !detail.error}>
+        <div className="ticket-comment-list" aria-busy={switching && !error}>
           {ticket.items.map((comment) => (
             <CommentCard key={comment.id} comment={comment} base={url} />
           ))}
@@ -183,7 +163,7 @@ function TicketDetail({ ticketKey }: { readonly ticketKey: string }) {
               type="button"
               aria-disabled={switching || trail.length === 0}
               onClick={() => {
-                if (!switching && trail.length) selectPage(trail.slice(0, -1));
+                if (!switching && trail.length) select(order, trail.slice(0, -1));
               }}
             >
               Previous comments
@@ -192,7 +172,7 @@ function TicketDetail({ ticketKey }: { readonly ticketKey: string }) {
               type="button"
               aria-disabled={switching || !ticket.nextCursor}
               onClick={() => {
-                if (!switching && ticket.nextCursor) selectPage([...trail, ticket.nextCursor]);
+                if (!switching && ticket.nextCursor) select(order, [...trail, ticket.nextCursor]);
               }}
             >
               More comments
@@ -213,7 +193,7 @@ function TicketDetail({ ticketKey }: { readonly ticketKey: string }) {
   );
 }
 
-function TicketMarkdown({
+const TicketMarkdown = memo(function TicketMarkdown({
   body,
   base,
 }: {
@@ -222,7 +202,7 @@ function TicketMarkdown({
 }) {
   const markdown = useMemo(() => jiraWiki(body), [body]);
   return <MarkdownContent source={markdown} base={base} />;
-}
+});
 
 function CommentCard({
   comment,

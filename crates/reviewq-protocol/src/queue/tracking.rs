@@ -4,6 +4,7 @@ use super::{
     GitShaDto, MergeRequestIidDto, Page, ProjectIdDto, ReviewIdDto, RevisionDto, Success,
     TicketKeyDto, UpstreamIdDto, UtcTimestampDto,
 };
+use crate::{PageCursorDto, SafeCountDto};
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -47,7 +48,20 @@ pub struct TicketDetail {
     pub updated_at: Option<UtcTimestampDto>,
     pub fetched_at: UtcTimestampDto,
     pub warnings: Vec<&'static str>,
-    pub comment_count: crate::SafeCountDto,
+    pub comment_scope: PageCursorDto,
+    pub comment_count: SafeCountDto,
+    #[serde(flatten)]
+    pub comments: Page<TicketComment>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct TicketComments {
+    pub key: TicketKeyDto,
+    pub comment_scope: PageCursorDto,
+    pub comment_count: SafeCountDto,
+    pub fetched_at: UtcTimestampDto,
     #[serde(flatten)]
     pub comments: Page<TicketComment>,
 }
@@ -66,3 +80,4 @@ pub struct TicketComment {
 }
 
 pub type TicketDetailResponse = Success<TicketDetail>;
+pub type TicketCommentsResponse = Success<TicketComments>;

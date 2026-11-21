@@ -16,7 +16,10 @@ pub use project_history::{
 };
 pub(crate) use scope::issues as scoped_issues;
 pub use scope::{MatchedReview, ScopedIssue, ScopedMatch, ScopedSprint, SourceObservation};
-pub use tickets::{CommentOrder, TicketComment, TicketDetail, TicketIdentity, UnverifiedTrack};
+pub use tickets::{
+    CommentOrder, TicketComment, TicketCommentPage, TicketDetail, TicketIdentity, TicketOpening,
+    UnverifiedTrack,
+};
 
 /// Reads verified provider metadata outside the store transaction.
 pub trait ReviewSourceReader: ChangeSource {
@@ -106,11 +109,17 @@ pub trait TicketSourceReader: Send + Sync {
         &self,
         key: TicketKey,
         estimate_fields: Vec<String>,
+        limit: u16,
+        order: CommentOrder,
+    ) -> AppFuture<'_, TicketOpening>;
+    fn issue_comments(
+        &self,
+        key: TicketKey,
+        expected_issue: u64,
         offset: u32,
         limit: u16,
         order: CommentOrder,
-        first_page: bool,
-    ) -> AppFuture<'_, TicketDetail>;
+    ) -> AppFuture<'_, TicketCommentPage>;
     fn invalidate_issue_details(&self, key: Option<&TicketKey>);
     fn sprints(
         &self,

@@ -77,6 +77,10 @@ fn main() -> Result<(), Box<dyn Error>> {
         "tickets",
         "TicketDetailResponse",
     )?;
+    registry.response::<reviewq_protocol::queue::TicketCommentsResponse>(
+        "tickets",
+        "TicketCommentsResponse",
+    )?;
 
     registry.response::<RunDetailResponse>("hosts", "RunDetailResponse")?;
     registry.response::<reviewq_protocol::TerminalResponse>("hosts", "TerminalResponse")?;

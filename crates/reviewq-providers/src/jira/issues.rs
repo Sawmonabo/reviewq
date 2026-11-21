@@ -2,8 +2,8 @@ use std::collections::HashSet;
 
 use reviewq_app::access::{AppError, AppFuture};
 use reviewq_app::sources::{
-    CommentOrder, ScopedSprint, ScopedTicket, SprintPage, TicketDetail, TicketIdentity, TicketPage,
-    TicketSourceReader,
+    CommentOrder, ScopedSprint, ScopedTicket, SprintPage, TicketCommentPage, TicketIdentity,
+    TicketOpening, TicketPage, TicketSourceReader,
 };
 use reviewq_domain::identity::TicketKey;
 use reviewq_domain::settings::{BoardScope, BoardType};
@@ -48,12 +48,21 @@ impl TicketSourceReader for Jira {
         &self,
         key: TicketKey,
         estimate_fields: Vec<String>,
+        limit: u16,
+        order: CommentOrder,
+    ) -> AppFuture<'_, TicketOpening> {
+        Box::pin(self.ticket_detail(key, estimate_fields, limit, order))
+    }
+
+    fn issue_comments(
+        &self,
+        key: TicketKey,
+        expected_issue: u64,
         offset: u32,
         limit: u16,
         order: CommentOrder,
-        first_page: bool,
-    ) -> AppFuture<'_, TicketDetail> {
-        Box::pin(self.ticket_detail(key, estimate_fields, offset, limit, order, first_page))
+    ) -> AppFuture<'_, TicketCommentPage> {
+        Box::pin(self.authorized_comments(key, expected_issue, offset, limit, order))
     }
 
     fn invalidate_issue_details(&self, key: Option<&TicketKey>) {

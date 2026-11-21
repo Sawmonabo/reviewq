@@ -20,10 +20,14 @@ pub enum CommentOrder {
 }
 
 #[derive(Clone)]
+pub struct TicketOpening {
+    pub detail: TicketDetail,
+    pub comments: TicketCommentPage,
+}
+
+#[derive(Clone)]
 pub struct TicketDetail {
     pub identity: TicketIdentity,
-    pub id: u64,
-    pub url: String,
     pub status: Option<String>,
     pub priority: Option<String>,
     pub assignee: Option<String>,
@@ -36,10 +40,16 @@ pub struct TicketDetail {
     pub description: Option<String>,
     pub estimate: Option<f64>,
     pub updated_at_ms: Option<i64>,
-    pub fetched_at_ms: i64,
     pub warning: Option<&'static str>,
-    pub comments: Vec<TicketComment>,
-    pub comment_count: u32,
+}
+
+#[derive(Clone)]
+pub struct TicketCommentPage {
+    pub issue: u64,
+    pub url: String,
+    pub fetched_at_ms: i64,
+    pub items: Vec<TicketComment>,
+    pub total: u32,
     pub next_offset: Option<u32>,
 }
 

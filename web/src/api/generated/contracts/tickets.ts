@@ -9,6 +9,36 @@ import type {
   UtcTimestampDto,
 } from "./common.js";
 
+export interface TicketCommentsResponse {
+  cursor: EventCursorDto;
+  data: TicketComments;
+  [k: string]: unknown;
+}
+
+export interface TicketComments {
+  commentCount: SafeCountDto;
+  commentScope: PageCursorDto;
+  fetchedAt: UtcTimestampDto;
+  /**
+   * @maxItems 100
+   */
+  items: TicketComment[];
+  key: TicketKeyDto;
+  nextCursor: PageCursorDto | null;
+  [k: string]: unknown;
+}
+
+export interface TicketComment {
+  author: string | null;
+  authorId: string | null;
+  body: string;
+  createdAt: UtcTimestampDto;
+  id: UpstreamIdDto;
+  updatedAt: UtcTimestampDto | null;
+  url: string;
+  [k: string]: unknown;
+}
+
 export interface TicketDetailResponse {
   cursor: EventCursorDto;
   data: TicketDetail;
@@ -19,6 +49,7 @@ export interface TicketDetail {
   assignee: string | null;
   assigneeId: string | null;
   commentCount: SafeCountDto;
+  commentScope: PageCursorDto;
   components: string[];
   description: string | null;
   estimate: number | null;
@@ -39,16 +70,5 @@ export interface TicketDetail {
   updatedAt: UtcTimestampDto | null;
   url: string;
   warnings: string[];
-  [k: string]: unknown;
-}
-
-export interface TicketComment {
-  author: string | null;
-  authorId: string | null;
-  body: string;
-  createdAt: UtcTimestampDto;
-  id: UpstreamIdDto;
-  updatedAt: UtcTimestampDto | null;
-  url: string;
   [k: string]: unknown;
 }

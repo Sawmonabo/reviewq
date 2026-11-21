@@ -1,7 +1,9 @@
 use std::collections::HashSet;
 
 use reviewq_app::access::AppError;
-use reviewq_app::sources::{CommentOrder, TicketComment, TicketDetail, TicketIdentity};
+use reviewq_app::sources::{
+    CommentOrder, TicketComment, TicketCommentPage, TicketDetail, TicketIdentity, TicketOpening,
+};
 use reviewq_domain::identity::TicketKey;
 use serde::Deserialize;
 use serde_json::Value;
@@ -33,12 +35,6 @@ struct Comment {
     updated: Option<String>,
 }
 
-struct CommentPage {
-    comments: Vec<TicketComment>,
-    total: u32,
-    next_offset: Option<u32>,
-}
-
 impl Jira {
     pub(super) async fn ticket_identity(&self, key: TicketKey) -> Result<TicketIdentity, AppError> {
         let (identity, _, _) = self.ticket(key, "summary,project".into()).await?;
@@ -49,11 +45,9 @@ impl Jira {
         &self,
         key: TicketKey,
         mut estimate_fields: Vec<String>,
-        offset: u32,
         limit: u16,
         order: CommentOrder,
-        first_page: bool,
-    ) -> Result<TicketDetail, AppError> {
+    ) -> Result<TicketOpening, AppError> {
         if !(1..=COMMENTS_PAGE).contains(&limit)
             || estimate_fields
                 .iter()
@@ -63,51 +57,42 @@ impl Jira {
         }
         estimate_fields.sort_unstable();
         estimate_fields.dedup();
-        let fetch =
-            || self.fetch_ticket_detail(key.clone(), estimate_fields.clone(), offset, limit, order);
-        // A continuation must check the current issue identity and cursor boundary in Jira.
-        let result = if let Some(lease) = &self.lease
-            && first_page
-            && offset == 0
-        {
+        let fetch = || self.fetch_ticket_detail(key.clone(), estimate_fields.clone(), limit, order);
+        let result = if let Some(lease) = &self.lease {
             lease.check().await?;
             let result = self
                 .ticket_cache
-                .read(key.clone(), estimate_fields.clone(), limit, order, fetch)
+                .read(
+                    key.clone(),
+                    estimate_fields.clone(),
+                    limit,
+                    order,
+                    fetch,
+                    |issue| self.authorized_comments(key.clone(), issue, 0, limit, order),
+                )
                 .await;
             lease.check().await?;
             result
         } else {
             fetch().await
         };
-        if matches!(
-            result,
-            Err(AppError::Forbidden
-                | AppError::NotFound
-                | AppError::Conflict
-                | AppError::CursorExpired)
-        ) {
-            self.ticket_cache.remove(&key);
-        }
-        result
+        self.invalidate_on_denial(&key, result)
     }
 
     async fn fetch_ticket_detail(
         &self,
         key: TicketKey,
         estimate_fields: Vec<String>,
-        offset: u32,
         limit: u16,
         order: CommentOrder,
-    ) -> Result<TicketDetail, AppError> {
+    ) -> Result<TicketOpening, AppError> {
         let fields = std::iter::once(
             "summary,project,status,priority,assignee,reporter,issuetype,labels,components,description,updated",
         )
-            .chain(estimate_fields.iter().map(String::as_str))
-            .collect::<Vec<_>>()
-            .join(",");
+        .chain(estimate_fields.iter().map(String::as_str))
+        .collect::<Vec<_>>()
+        .join(",");
         let (identity, id, fields) = self.ticket(key, fields).await?;
-        let fetched_at_ms = jiff::Timestamp::now().as_millisecond();
         let updated_at_ms = match &fields["updated"] {
             Value::Null => None,
             Value::String(updated) => Some(time(updated)?),
@@ -120,15 +105,11 @@ impl Jira {
             _ => return Err(AppError::Unavailable),
         };
         let (estimate, warning) = estimate(&fields, &estimate_fields);
-        let page = self.ticket_comments(id, offset, limit, order).await?;
-        let url = self
-            .site
-            .join(&format!("browse/{}", identity.key))
-            .map_err(|_| AppError::Internal)?;
-        Ok(TicketDetail {
+        let comments = self
+            .ticket_comments(&identity.key, id, 0, limit, order)
+            .await?;
+        let detail = TicketDetail {
             identity,
-            id,
-            url: url.into(),
             status: optional_label(&fields["status"], "name")?,
             priority: optional_label(&fields["priority"], "name")?,
             assignee: optional_label(&fields["assignee"], "displayName")?,
@@ -141,12 +122,47 @@ impl Jira {
             description,
             estimate,
             updated_at_ms,
-            fetched_at_ms,
             warning,
-            comments: page.comments,
-            comment_count: page.total,
-            next_offset: page.next_offset,
-        })
+        };
+        Ok(TicketOpening { detail, comments })
+    }
+
+    pub(super) async fn authorized_comments(
+        &self,
+        key: TicketKey,
+        expected_issue: u64,
+        offset: u32,
+        limit: u16,
+        order: CommentOrder,
+    ) -> Result<TicketCommentPage, AppError> {
+        // Jira checks issue access on both reads and applies comment visibility on the second.
+        let result = async {
+            let (issue, _) = self.ticket_fields(&key, "project".into()).await?;
+            if issue != expected_issue {
+                return Err(AppError::CursorExpired);
+            }
+            self.ticket_comments(&key, issue, offset, limit, order)
+                .await
+        }
+        .await;
+        self.invalidate_on_denial(&key, result)
+    }
+
+    fn invalidate_on_denial<T>(
+        &self,
+        key: &TicketKey,
+        result: Result<T, AppError>,
+    ) -> Result<T, AppError> {
+        if matches!(
+            result,
+            Err(AppError::Forbidden
+                | AppError::NotFound
+                | AppError::Conflict
+                | AppError::CursorExpired)
+        ) {
+            self.ticket_cache.remove(key);
+        }
+        result
     }
 
     async fn ticket(
@@ -154,6 +170,19 @@ impl Jira {
         key: TicketKey,
         fields: String,
     ) -> Result<(TicketIdentity, u64, Value), AppError> {
+        let (id, fields) = self.ticket_fields(&key, fields).await?;
+        let title = safe_label(
+            fields["summary"].as_str().ok_or(AppError::Unavailable)?,
+            4096,
+        )?;
+        Ok((TicketIdentity { key, title }, id, fields))
+    }
+
+    async fn ticket_fields(
+        &self,
+        key: &TicketKey,
+        fields: String,
+    ) -> Result<(u64, Value), AppError> {
         if !valid_issue_key(key.as_str()) {
             return Err(AppError::InvalidRequest);
         }
@@ -172,20 +201,20 @@ impl Jira {
             return Err(AppError::Conflict);
         }
         let id = numeric_id(&item["id"]).ok_or(AppError::Unavailable)?;
-        let title = safe_label(
-            fields["summary"].as_str().ok_or(AppError::Unavailable)?,
-            4096,
-        )?;
-        Ok((TicketIdentity { key, title }, id, fields))
+        Ok((id, fields))
     }
 
     async fn ticket_comments(
         &self,
+        key: &TicketKey,
         issue: u64,
         offset: u32,
         limit: u16,
         order: CommentOrder,
-    ) -> Result<CommentPage, AppError> {
+    ) -> Result<TicketCommentPage, AppError> {
+        if !(1..=COMMENTS_PAGE).contains(&limit) {
+            return Err(AppError::InvalidRequest);
+        }
         let ordering = match order {
             CommentOrder::Newest => "-created",
             CommentOrder::Oldest => "created",
@@ -243,8 +272,15 @@ impl Jira {
                 updated_at_ms: item.updated.as_deref().map(time).transpose()?,
             });
         }
-        Ok(CommentPage {
-            comments,
+        let url = self
+            .site
+            .join(&format!("browse/{key}"))
+            .map_err(|_| AppError::Internal)?;
+        Ok(TicketCommentPage {
+            issue,
+            url: url.into(),
+            fetched_at_ms: jiff::Timestamp::now().as_millisecond(),
+            items: comments,
             total: page.total,
             next_offset: (end < page.total).then_some(end),
         })
