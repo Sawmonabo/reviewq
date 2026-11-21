@@ -414,10 +414,10 @@ function FileDialog({
         <Icon name="search" size={14} />
         <input
           ref={input}
-          aria-label="Search filenames or code in this diff"
+          aria-label="Search filenames, code or discussion notes"
           aria-controls={`${id}-results`}
           value={query}
-          placeholder="Search filenames or code"
+          placeholder="Search filenames, code or notes"
           autoComplete="off"
           spellCheck={false}
           onChange={(event) => {
