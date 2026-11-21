@@ -40,7 +40,7 @@ pub(super) async fn project_page(items: &[PatchDiscussion]) -> Option<Vec<PatchD
             if let Some(text) = discussion_text(&body) {
                 let item = PatchDiscussionText { note_id, text };
                 let size = serde_json::to_string(&item).ok()?.len();
-                if bytes + size + 1 <= MAX_WIRE_BYTES {
+                if bytes + size < MAX_WIRE_BYTES {
                     bytes += size + 1;
                     items.push(item);
                 }
