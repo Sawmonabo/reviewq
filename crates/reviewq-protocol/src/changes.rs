@@ -105,7 +105,7 @@ pub struct PatchFile {
     pub patch_etag: Option<PatchETagDto>,
     /// Whole original text from this same verified file-page response.
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[cfg_attr(feature = "schema", schemars(length(max = 32768)))]
+    #[cfg_attr(feature = "schema", schemars(length(max = 131072)))]
     pub preview: Option<String>,
 }
 

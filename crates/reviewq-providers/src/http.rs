@@ -9,6 +9,7 @@ use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use tokio::time::{Instant, sleep_until, timeout_at};
 
 mod buffer;
+mod stream;
 pub(crate) use buffer::{ResponseReader, private_file};
 
 const DEADLINE: Duration = Duration::from_secs(30);

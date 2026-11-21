@@ -6,8 +6,7 @@ use axum::extract::State;
 use axum::http::{HeaderMap, HeaderName, HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use reviewq_app::access::AppError;
-use reviewq_app::changes::PatchAvailability;
-use reviewq_app::changes::PatchContent;
+use reviewq_app::changes::{PatchAvailability, PatchContent, PatchRange, PatchRead};
 use serde::Deserialize;
 
 use super::{
@@ -43,8 +42,24 @@ pub(in crate::entry) async fn patch(
         .reader
         .as_ref()
         .ok_or(AppError::Unavailable)?;
+    let read = if headers.contains_key(header::RANGE) {
+        let mut ranges = headers.get_all(header::RANGE).iter();
+        let range = ranges.next().and_then(|value| value.to_str().ok());
+        PatchRead::Range(
+            range
+                .filter(|_| ranges.next().is_none())
+                .and_then(byte_range),
+        )
+    } else {
+        PatchRead::Full
+    };
     let patch = provider
-        .patch(source.value.identity.clone(), query.revision, query.file_id)
+        .patch(
+            source.value.identity.clone(),
+            query.revision,
+            query.file_id,
+            read,
+        )
         .await?;
     check_source(&entry, &actor, &review_id, &source).await?;
     if patch.file.availability != PatchAvailability::Complete {
@@ -91,14 +106,11 @@ pub(in crate::entry) async fn patch(
         return Ok((StatusCode::NOT_MODIFIED, result).into_response());
     }
     let length = metrics.byte_length;
-    if headers.contains_key(header::RANGE) {
-        let range = headers
-            .get(header::RANGE)
-            .and_then(|value| value.to_str().ok());
-        let requested = range.and_then(|raw| byte_range(raw, length));
-        if let Some(requested) =
-            requested.filter(|_| headers.get_all(header::RANGE).iter().count() == 1)
-        {
+    if let PatchRead::Range(range) = read {
+        if let Some(requested) = range.and_then(|range| range.resolve(length)) {
+            if !patch.body.covers(requested.start, requested.len()) {
+                return Err(AppError::Unavailable.into());
+            }
             put(
                 &mut result,
                 header::CONTENT_RANGE,
@@ -123,6 +135,9 @@ pub(in crate::entry) async fn patch(
             &format!("bytes */{length}"),
         )?;
         return Ok(error);
+    }
+    if !patch.body.covers(0, length) {
+        return Err(AppError::Unavailable.into());
     }
     put(&mut result, header::CONTENT_LENGTH, &length.to_string())?;
     Ok((result, stream(patch.body, 0..length)).into_response())
@@ -162,10 +177,7 @@ fn etag_match(headers: &HeaderMap, name: HeaderName, etag: &str, weak: bool) -> 
         })
 }
 
-fn byte_range(value: &str, length: usize) -> Option<Range<usize>> {
-    if length == 0 {
-        return None;
-    }
+fn byte_range(value: &str) -> Option<PatchRange> {
     let (first, last) = value.strip_prefix("bytes=")?.split_once('-')?;
     let integer = |raw: &str| -> Option<usize> {
         if raw.is_empty() || !raw.bytes().all(|byte| byte.is_ascii_digit()) {
@@ -174,16 +186,15 @@ fn byte_range(value: &str, length: usize) -> Option<Range<usize>> {
         raw.parse().ok()
     };
     if first.is_empty() {
-        let suffix = integer(last)?;
-        return (suffix != 0).then_some(length.saturating_sub(suffix)..length);
+        return Some(PatchRange::Suffix(integer(last)?));
     }
     let start = integer(first)?;
-    let end = if last.is_empty() {
-        length
+    let last = if last.is_empty() {
+        None
     } else {
-        integer(last)?.saturating_add(1).min(length)
+        Some(integer(last)?)
     };
-    (start < end).then_some(start..end)
+    Some(PatchRange::From { start, last })
 }
 
 fn put(headers: &mut HeaderMap, name: HeaderName, value: &str) -> Result<(), AppError> {

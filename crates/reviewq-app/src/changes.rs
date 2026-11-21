@@ -1,6 +1,6 @@
 //! Revision-bound source reads for a selected merge request.
 
-use std::sync::Arc;
+use std::{ops::Range, sync::Arc};
 
 use reviewq_domain::identity::{GitSha, MrIdentity};
 
@@ -119,7 +119,34 @@ pub struct PatchBytes {
 }
 
 pub trait PatchContent: Send + Sync {
+    fn covers(&self, offset: usize, length: usize) -> bool;
+
     fn read(&self, offset: usize, length: usize) -> AppFuture<'_, Vec<u8>>;
+}
+
+#[derive(Clone, Copy)]
+pub enum PatchRead {
+    Full,
+    Range(Option<PatchRange>),
+}
+
+#[derive(Clone, Copy)]
+pub enum PatchRange {
+    From { start: usize, last: Option<usize> },
+    Suffix(usize),
+}
+
+impl PatchRange {
+    pub fn resolve(self, length: usize) -> Option<Range<usize>> {
+        let (start, end) = match self {
+            Self::From { start, last } => (
+                start,
+                last.map_or(length, |last| last.saturating_add(1).min(length)),
+            ),
+            Self::Suffix(suffix) => (length.saturating_sub(suffix), length),
+        };
+        (start < end).then_some(start..end)
+    }
 }
 
 #[derive(Debug)]
@@ -290,6 +317,7 @@ pub trait ChangeSource: Send + Sync {
         source: MrIdentity,
         revision: String,
         file: String,
+        read: PatchRead,
     ) -> AppFuture<'_, PatchBytes>;
 
     fn discussions(
