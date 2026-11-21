@@ -16,6 +16,7 @@ use reviewq_protocol::{
 use serde::{Deserialize, Serialize};
 
 use super::{Entry, Point, ServiceEndpoint};
+use crate::entry::diagrams::{self, Owner};
 use crate::entry::error::{ApiError, ApiPath as Path, ApiQuery as Query};
 use crate::entry::pages::{parse, success};
 
@@ -54,15 +55,28 @@ pub(in crate::entry) async fn content(
     Query(input): Query<ContentQuery>,
 ) -> Result<Json<HistoryContentResponse>, ApiError> {
     let actor = entry.auth.browser_actor(&headers, false)?;
-    let result = read_content(
+    let source = input.reference.clone();
+    let mut result = read_content(
         &entry,
-        actor,
+        actor.clone(),
         parse(&run)?,
         parse(&session)?,
         input,
         64 * 1024,
     )
     .await?;
+    if result.data.complete && result.data.offset.get() == 0 && !result.data.reset {
+        result.data.display = diagrams::observe(
+            &entry,
+            &actor,
+            Owner::Native {
+                run,
+                session,
+                source,
+            },
+            result.data.text.as_str(),
+        );
+    }
     Ok(Json(result))
 }
 
@@ -172,6 +186,7 @@ pub(in crate::entry) async fn read_content(
             complete: next_cursor.is_none() && !reset,
             next_cursor,
             reset,
+            display: None,
         },
         source.cursor,
     )

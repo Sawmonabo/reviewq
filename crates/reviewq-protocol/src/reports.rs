@@ -109,6 +109,27 @@ pub struct ReportView {
     pub delivery: Option<ReportDelivery>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub markdown: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub display: Option<DocumentDisplay>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct DrawingHint {
+    pub reference: crate::PageCursorDto,
+    pub source_sha256: ReportHashDto,
+    pub recipe: String,
+    pub font: ReportHashDto,
+}
+
+/// Optional derivatives of the accompanying verified Markdown.
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct DocumentDisplay {
+    #[cfg_attr(feature = "schema", schemars(length(min = 1, max = 8)))]
+    pub drawings: Vec<DrawingHint>,
 }
 
 wire_enum!(DisplayBlockKind {
@@ -143,6 +164,8 @@ pub struct DisplayBlock {
     pub kind: DisplayBlockKind,
     pub heading_level: Option<SafeCountDto>,
     pub markdown: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub display: Option<DocumentDisplay>,
 }
 
 #[derive(Debug, Serialize)]

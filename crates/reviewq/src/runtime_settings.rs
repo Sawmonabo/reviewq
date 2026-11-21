@@ -17,6 +17,7 @@ pub(crate) struct Settings {
     pub desktop_notifications: bool,
     pub claude_command: Option<String>,
     pub codex_command: Option<String>,
+    pub chromium_command: Option<String>,
     pub wsl_distribution: Option<String>,
 }
 
@@ -28,6 +29,7 @@ impl Default for Settings {
             desktop_notifications: true,
             claude_command: None,
             codex_command: None,
+            chromium_command: None,
             wsl_distribution: None,
         }
     }
@@ -111,7 +113,9 @@ impl Settings {
                         && !value.starts_with('-')
                         && !value.chars().any(char::is_control)
                 }),
-                "claudeCommand" | "codexCommand" => value.as_str().is_some_and(valid_command),
+                "claudeCommand" | "codexCommand" | "chromiumCommand" => {
+                    value.as_str().is_some_and(valid_command)
+                }
                 _ => return Err(invalid("unexpected property")),
             };
             if !valid {

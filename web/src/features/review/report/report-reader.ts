@@ -1,3 +1,4 @@
+import type { DocumentDisplay, DrawingHint } from "../../../api/generated/contracts/common";
 import { reportWindow } from "../../../api/reports";
 import type {
   DisplayBlock,
@@ -48,6 +49,7 @@ export function wholeDocument(
   tree: NonNullable<ReturnType<typeof parseMarkdown>>,
   report: ReportSummary,
   changes: Changes,
+  display: DocumentDisplay | null | undefined,
 ): ReaderDocument {
   const groups = reportBlocks(tree, source, report, changes);
   const slice = { text: source, utf16: 0, scalar: 0 };
@@ -55,7 +57,7 @@ export function wholeDocument(
     groups,
     prepared: (index) => {
       const block = groups[index];
-      return block ? { block, source: slice } : undefined;
+      return block ? { block, source: slice, drawings: display?.drawings } : undefined;
     },
   };
 }
@@ -93,7 +95,7 @@ export function indexedDocument(
   for (const [index, group] of groups.entries())
     for (let i = group.first; i <= group.last; i++) owners[i] = index;
   const byStart = new Map(spans.map((span, index) => [span.byteStart, index]));
-  const raw = new Map<number, string>();
+  const raw = new Map<number, DisplayBlock>();
   const prepared = new Map<number, PreparedGroup>();
   let previousPins = new Set<number>();
 
@@ -112,7 +114,7 @@ export function indexedDocument(
         utf8.encode(block.markdown).length !== span.byteEnd - span.byteStart
       )
         throw new Error("The displayed report span changed.");
-      raw.set(index, block.markdown);
+      raw.set(index, block);
     }
   }
 
@@ -120,10 +122,13 @@ export function indexedDocument(
     if (prepared.has(index)) return true;
     const group = groups[index]!;
     const parts: string[] = [];
+    const drawings = new Map<string, DrawingHint>();
     for (let i = group.first; i <= group.last; i++) {
-      const text = raw.get(i);
-      if (text === undefined) return false;
-      parts.push(text);
+      const part = raw.get(i);
+      if (!part) return false;
+      parts.push(part.markdown);
+      for (const drawing of part.display?.drawings ?? [])
+        drawings.set(drawing.sourceSha256, drawing);
     }
     const text = parts.join("");
     const tree = parseMarkdown(text, base);
@@ -147,6 +152,7 @@ export function indexedDocument(
     prepared.set(index, {
       block,
       source: { text, utf16: first.utf16Start, scalar: first.scalarStart },
+      drawings: drawings.size ? [...drawings.values()] : undefined,
     });
     for (let i = group.first; i <= group.last; i++) raw.delete(i);
     return true;

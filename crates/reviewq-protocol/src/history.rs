@@ -230,6 +230,8 @@ pub struct HistoryContent {
     pub next_cursor: Option<HistoryCursorDto>,
     pub complete: bool,
     pub reset: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub display: Option<crate::reports::DocumentDisplay>,
 }
 
 pub type HistoryContentResponse = Success<HistoryContent>;
@@ -247,11 +249,15 @@ pub enum HistoryPart {
         text: HistoryText,
         #[serde(skip_serializing_if = "Option::is_none")]
         content_ref: Option<HistoryCursorDto>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        display: Option<crate::reports::DocumentDisplay>,
     },
     AssistantText {
         text: HistoryText,
         #[serde(skip_serializing_if = "Option::is_none")]
         content_ref: Option<HistoryCursorDto>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        display: Option<crate::reports::DocumentDisplay>,
     },
     ToolCall {
         call_id: HistoryEntryIdDto,
@@ -270,10 +276,14 @@ pub enum HistoryPart {
     Plan {
         text: HistoryText,
         content_ref: Option<HistoryCursorDto>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        display: Option<crate::reports::DocumentDisplay>,
     },
     Assignment {
         text: HistoryText,
         content_ref: Option<HistoryCursorDto>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        display: Option<crate::reports::DocumentDisplay>,
     },
 }
 
@@ -296,6 +306,10 @@ pub struct HistoryText(
 );
 
 impl HistoryText {
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
     pub fn new(value: impl Into<Box<str>>) -> Option<Self> {
         let value = value.into();
         (value.len() <= MAX_HISTORY_TEXT_BYTES).then_some(Self(value))

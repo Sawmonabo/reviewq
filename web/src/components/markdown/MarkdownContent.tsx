@@ -3,20 +3,22 @@ import type { ReactNode } from "react";
 import { Fragment, jsx, jsxs } from "react/jsx-runtime";
 import { toJsxRuntime } from "hast-util-to-jsx-runtime";
 import type { Element, Root } from "hast";
-import { DiagramCacheContext } from "./diagram-cache";
+import type { DocumentDisplay } from "../../api/generated/contracts/common";
+import { DiagramCacheContext, DiagramDisplayContext } from "./diagram-cache";
 import { prepareLiveMarkdown, type LiveMarkdown } from "./live/blocks";
 import MermaidDiagram from "./MermaidDiagram";
 import { parseMarkdown } from "./parse-markdown";
 import "./markdown.css";
 
-type MarkdownContentProps =
+type MarkdownContentProps = { readonly display?: DocumentDisplay | null | undefined } & (
   | { readonly tree: Root }
   | {
       readonly source: string;
       readonly base?: string | undefined;
       readonly provisional?: boolean;
       readonly formattingLimit?: boolean;
-    };
+    }
+);
 
 const ProvisionalMarkdown = createContext(false);
 
@@ -43,7 +45,9 @@ export function MarkdownContent(props: MarkdownContentProps) {
     setLive(undefined);
   }
   return tree ? (
-    <MarkdownTree tree={tree} provisional={provisional ?? false} />
+    <DiagramDisplayContext value={provisional ? undefined : props.display?.drawings}>
+      <MarkdownTree tree={tree} provisional={provisional ?? false} />
+    </DiagramDisplayContext>
   ) : (
     <MarkdownSource source={source ?? ""} />
   );

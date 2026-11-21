@@ -2,6 +2,7 @@
 
 import type {
   Coverage,
+  DocumentDisplay,
   EventCursorDto,
   FindingConclusion,
   GitShaDto,
@@ -328,6 +329,7 @@ export interface ReportViewResponse {
 
 export interface ReportView {
   delivery: ReportDelivery | null;
+  display?: DocumentDisplay | null;
   markdown?: string | null;
   report: ReportSummary | null;
   [k: string]: unknown;
@@ -362,6 +364,7 @@ export interface ReportWindow {
 export interface DisplayBlock {
   byteEnd: SafeCountDto;
   byteStart: SafeCountDto;
+  display?: DocumentDisplay | null;
   headingLevel: SafeCountDto | null;
   kind: DisplayBlockKind;
   markdown: string;

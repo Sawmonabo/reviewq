@@ -377,6 +377,7 @@ pub(super) async fn transcript(
                     direction,
                 },
                 budget,
+                None,
             )
             .await?;
             let mut value: Value =

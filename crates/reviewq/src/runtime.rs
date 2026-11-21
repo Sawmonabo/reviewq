@@ -15,7 +15,7 @@ use reviewq_app::launch::{
     LaunchStore, NativeLauncher, NativeLaunchers, NativeModelReader, NativeModels,
 };
 use reviewq_app::notifications::DesktopStore;
-use reviewq_app::reports::reconcile_reports;
+use reviewq_app::reports::{DrawingRenderer, reconcile_reports};
 use reviewq_app::settings::{NativeSkillReader, NativeSkills, RuntimeSources};
 use reviewq_app::sources::{ReviewSourceReader, SourceRefreshStore};
 use reviewq_app::workspace::{WorkspaceConfig, WorkspaceStore};
@@ -35,6 +35,7 @@ use crate::{cli::Serve, install, runtime_settings};
 
 mod browser_sessions;
 mod desktop;
+mod diagram;
 mod http;
 mod workflow;
 
@@ -332,6 +333,12 @@ pub(crate) async fn serve(profile: PathBuf, options: Serve) -> Result<(), Failur
             browser_sessions,
             web: &web,
             retained_assets: retained_assets.as_deref(),
+            drawing_renderer: settings
+                .chromium_command
+                .as_deref()
+                .and_then(runtime_settings::executable)
+                .and_then(|executable| diagram::Chromium::open(executable, &web, &profile))
+                .map(|browser| Arc::new(browser) as Arc<dyn DrawingRenderer>),
             commits: store.subscribe(),
             shutdown: wait.clone(),
             startup,

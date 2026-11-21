@@ -15,6 +15,7 @@ use reviewq_protocol::reports as dto;
 use serde::{Deserialize, Serialize};
 
 use super::{cursor, summary};
+use crate::entry::diagrams::{self, Owner};
 use crate::entry::error::{ApiPath as Path, ApiQuery as Query};
 use crate::entry::pages::{count, parse, success};
 use crate::entry::{ApiError, Entry};
@@ -77,7 +78,7 @@ pub(in crate::entry) async fn read(
     };
     let stored = entry
         .store
-        .read_report_window(actor, run, report, position)
+        .read_report_window(actor.clone(), run.clone(), report.clone(), position)
         .await?;
     let result = match stored.value.state {
         DisplayWindowState::Ready {
@@ -92,7 +93,15 @@ pub(in crate::entry) async fn read(
                 total_blocks: count(u64::from(total_blocks))?,
                 blocks: blocks
                     .into_iter()
-                    .map(project_block)
+                    .map(|block| {
+                        let display = diagrams::observe(
+                            &entry,
+                            &actor,
+                            Owner::report(&run, &report),
+                            &block.markdown,
+                        );
+                        project_block(block, display)
+                    })
                     .collect::<Result<_, _>>()?,
                 previous_cursor: previous.map(WindowCursor::Before).map(token).transpose()?,
                 next_cursor: next.map(WindowCursor::After).map(token).transpose()?,
@@ -119,7 +128,10 @@ pub(in crate::entry) async fn read(
     Ok(([(header::CONTENT_TYPE, "application/json")], bytes).into_response())
 }
 
-fn project_block(block: DisplayWindowBlock) -> Result<dto::DisplayBlock, AppError> {
+fn project_block(
+    block: DisplayWindowBlock,
+    display: Option<dto::DocumentDisplay>,
+) -> Result<dto::DisplayBlock, AppError> {
     let (kind, heading_level) = project_kind(block.span.kind)?;
     Ok(dto::DisplayBlock {
         byte_start: count(u64::from(block.span.byte_start))?,
@@ -129,6 +141,7 @@ fn project_block(block: DisplayWindowBlock) -> Result<dto::DisplayBlock, AppErro
         kind,
         heading_level,
         markdown: block.markdown,
+        display,
     })
 }
 

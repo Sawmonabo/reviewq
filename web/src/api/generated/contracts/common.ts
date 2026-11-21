@@ -184,3 +184,52 @@ export interface ErrorDto {
   retryable: boolean;
   [k: string]: unknown;
 }
+
+export interface DocumentDisplay {
+  /**
+   * @minItems 1
+   * @maxItems 8
+   */
+  drawings:
+    | [DrawingHint]
+    | [DrawingHint, DrawingHint]
+    | [DrawingHint, DrawingHint, DrawingHint]
+    | [DrawingHint, DrawingHint, DrawingHint, DrawingHint]
+    | [DrawingHint, DrawingHint, DrawingHint, DrawingHint, DrawingHint]
+    | [
+        DrawingHint,
+        DrawingHint,
+        DrawingHint,
+        DrawingHint,
+        DrawingHint,
+        DrawingHint,
+      ]
+    | [
+        DrawingHint,
+        DrawingHint,
+        DrawingHint,
+        DrawingHint,
+        DrawingHint,
+        DrawingHint,
+        DrawingHint,
+      ]
+    | [
+        DrawingHint,
+        DrawingHint,
+        DrawingHint,
+        DrawingHint,
+        DrawingHint,
+        DrawingHint,
+        DrawingHint,
+        DrawingHint,
+      ];
+  [k: string]: unknown;
+}
+
+export interface DrawingHint {
+  font: ReportHashDto;
+  recipe: string;
+  reference: PageCursorDto;
+  sourceSha256: ReportHashDto;
+  [k: string]: unknown;
+}

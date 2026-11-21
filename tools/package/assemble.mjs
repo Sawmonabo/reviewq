@@ -95,11 +95,13 @@ function validateClaude(marketplace) {
 }
 
 function checkWeb(web, inventory) {
-  const index = readFileSync(join(web, "index.html"), "utf8");
-  if (!/<script\b[^>]*type="module"/.test(index)) throw new Error("Missing production module entry");
-  for (const [, reference] of index.matchAll(/\b(?:src|href)="(\/[^"]+)"/g)) {
-    if (!inventory.has(reference.slice(1).split(/[?#]/, 1)[0])) {
-      throw new Error(`Missing web entry reference ${reference}`);
+  for (const entry of ["index.html", "diagram-producer.html"]) {
+    const index = readFileSync(join(web, entry), "utf8");
+    if (!/<script\b[^>]*type="module"/.test(index)) throw new Error(`Missing production module entry ${entry}`);
+    for (const [, reference] of index.matchAll(/\b(?:src|href)="(\/[^"]+)"/g)) {
+      if (!inventory.has(reference.slice(1).split(/[?#]/, 1)[0])) {
+        throw new Error(`Missing web entry reference ${reference}`);
+      }
     }
   }
   for (const path of inventory) {

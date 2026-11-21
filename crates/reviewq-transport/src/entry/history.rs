@@ -21,6 +21,7 @@ use serde::{Deserialize, Serialize};
 
 use super::error::{ApiPath as Path, ApiQuery as Query};
 use super::{ApiError, Entry, ServiceEndpoint};
+use drawing_hints::InlineDisplay;
 
 const CURSOR: &[u8] = b"reviewq-native-history-v1";
 const DEFAULT_PAGE_LIMIT: u16 = 30;
@@ -28,6 +29,7 @@ const DEFAULT_JUMP_LIMIT: u16 = 10;
 const DEFAULT_PAGE_BYTES: usize = 64 * 1024;
 
 mod content;
+mod drawing_hints;
 mod explore;
 pub(super) use content::{ContentQuery, content, read_content};
 mod live;
@@ -138,6 +140,7 @@ pub(super) async fn page(
         super::pages::parse(&session)?,
         query,
         budget,
+        Some(&entry),
     )
     .await?;
     Ok(([(header::CONTENT_TYPE, "application/json")], body).into_response())
@@ -150,6 +153,7 @@ pub(super) async fn read(
     session: SessionKey,
     query: HistoryQuery,
     byte_limit: usize,
+    drawing_entry: Option<&Arc<Entry>>,
 ) -> Result<Vec<u8>, AppError> {
     let limit = query.limit.unwrap_or(DEFAULT_PAGE_LIMIT);
     if !(1..=100).contains(&limit) {
@@ -166,6 +170,18 @@ pub(super) async fn read(
         return Err(AppError::InvalidRequest);
     }
     let endpoint = &entry.auth.endpoint;
+    let display = drawing_entry.map(|entry| InlineDisplay {
+        entry,
+        actor: &actor,
+        run: &run,
+        session: &session,
+    });
+    let projection = Projection {
+        endpoint,
+        run: &run,
+        session: &session,
+        display,
+    };
     let cursor = query
         .cursor
         .as_deref()
@@ -232,10 +248,9 @@ pub(super) async fn read(
             ),
             Err(error) => return Err(error),
         };
-        bind_observed_turns(entry, actor, lead.value, &mut result).await?;
+        bind_observed_turns(entry, actor.clone(), lead.value, &mut result).await?;
         return encode(
-            endpoint,
-            (&run, &session),
+            &projection,
             lead.cursor,
             (limit, byte_limit),
             result,
@@ -260,10 +275,9 @@ pub(super) async fn read(
         Err(error) => return Err(error),
         Ok(page) => page,
     };
-    bind_observed_turns(entry, actor, lead.value, &mut history).await?;
+    bind_observed_turns(entry, actor.clone(), lead.value, &mut history).await?;
     encode(
-        endpoint,
-        (&run, &session),
+        &projection,
         lead.cursor,
         (limit, byte_limit),
         history,
@@ -392,15 +406,22 @@ enum Trim<'a> {
     Around(&'a NativeInputId),
 }
 
+struct Projection<'a> {
+    endpoint: &'a ServiceEndpoint,
+    run: &'a RunId,
+    session: &'a SessionKey,
+    display: Option<InlineDisplay<'a>>,
+}
+
 fn encode(
-    endpoint: &ServiceEndpoint,
-    (run, session): (&RunId, &SessionKey),
+    projection: &Projection<'_>,
     event: EventCursor,
     budget: (u16, usize),
     history: NativeHistoryPage,
     reset: bool,
     trim: Trim<'_>,
 ) -> Result<Vec<u8>, AppError> {
+    let (endpoint, run, session) = (projection.endpoint, projection.run, projection.session);
     let cursor = |position: Option<NativePosition>| {
         position
             .map(|position| {
@@ -432,7 +453,7 @@ fn encode(
                     .iter()
                     .skip(first)
                     .take(last - first)
-                    .map(|entry| encode_entry(endpoint, run, session, entry, part_limit))
+                    .map(|entry| encode_entry(projection, entry, &history.generation, part_limit))
                     .collect::<Result<Vec<_>, _>>()?,
                 cursor(history.older_after_trim(first))?,
                 cursor(history.newer_after_trim(last))?,
@@ -483,26 +504,28 @@ fn encode(
 }
 
 fn encode_entry(
-    endpoint: &ServiceEndpoint,
-    run: &RunId,
-    session: &SessionKey,
+    projection: &Projection<'_>,
     entry: &VisibleEntry,
+    generation: &str,
     part_limit: usize,
 ) -> Result<HistoryEntry, AppError> {
+    let (endpoint, run, session) = (projection.endpoint, projection.run, projection.session);
     let end = entry
         .text
         .char_indices()
         .nth(512)
         .map_or(entry.text.len(), |(offset, _)| offset);
     let text = HistoryText::new(&entry.text[..end]).ok_or(AppError::Internal)?;
-    let part = match entry.kind {
+    let mut part = match entry.kind {
         VisibleKind::User => HistoryPart::UserPrompt {
             text,
             content_ref: None,
+            display: None,
         },
         VisibleKind::Assistant => HistoryPart::AssistantText {
             text,
             content_ref: None,
+            display: None,
         },
     };
     let next = entry
@@ -533,13 +556,24 @@ fn encode_entry(
             .at_ms
             .and_then(UtcTimestampDto::from_unix_milliseconds),
         parts: if entry.parts.is_empty() {
+            if end == entry.text.len()
+                && let Some(display) = &projection.display
+            {
+                display.entry(&mut part, entry, generation, None);
+            }
             vec![part]
         } else {
             entry
                 .parts
                 .iter()
                 .take(part_limit)
-                .map(|part| visible_part(endpoint, run, session, part))
+                .map(|part| {
+                    let mut projected = visible_part(endpoint, run, session, part)?;
+                    if let Some(display) = &projection.display {
+                        display.entry(&mut projected, entry, generation, Some(part));
+                    }
+                    Ok(projected)
+                })
                 .collect::<Result<_, _>>()?
         },
         content_ref: entry
@@ -571,10 +605,16 @@ fn visible_part(
         ToolState::Unknown => HistoryToolState::Unknown,
     };
     Ok(match &part.kind {
-        VisiblePartKind::Text(VisibleKind::User) => HistoryPart::UserPrompt { text, content_ref },
-        VisiblePartKind::Text(VisibleKind::Assistant) => {
-            HistoryPart::AssistantText { text, content_ref }
-        }
+        VisiblePartKind::Text(VisibleKind::User) => HistoryPart::UserPrompt {
+            text,
+            content_ref,
+            display: None,
+        },
+        VisiblePartKind::Text(VisibleKind::Assistant) => HistoryPart::AssistantText {
+            text,
+            content_ref,
+            display: None,
+        },
         VisiblePartKind::ToolCall {
             call,
             name,
@@ -594,8 +634,16 @@ fn visible_part(
             text,
             content_ref,
         },
-        VisiblePartKind::Plan => HistoryPart::Plan { text, content_ref },
-        VisiblePartKind::Assignment => HistoryPart::Assignment { text, content_ref },
+        VisiblePartKind::Plan => HistoryPart::Plan {
+            text,
+            content_ref,
+            display: None,
+        },
+        VisiblePartKind::Assignment => HistoryPart::Assignment {
+            text,
+            content_ref,
+            display: None,
+        },
     })
 }
 

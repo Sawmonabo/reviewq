@@ -2,8 +2,8 @@
 import { func0 } from "../runtime.mjs";
 import { validate25 } from "./checkpoint-id-dto.mjs";
 import { validate48 } from "./history-cursor-dto.mjs";
-import { validate571 } from "./history-part.mjs";
-function validate619(
+import { validate578 } from "./history-part.mjs";
+function validate630(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -20,7 +20,7 @@ function validate619(
         ((data.nextCursor === undefined || !func0.call(data, "nextCursor")) &&
           (missing0 = "nextCursor"))
       ) {
-        validate619.errors = [
+        validate630.errors = [
           {
             instancePath,
             schemaPath: "#/required",
@@ -105,7 +105,7 @@ function validate619(
                 vErrors.push(err1);
               }
               errors++;
-              validate619.errors = vErrors;
+              validate630.errors = vErrors;
               return false;
             } else {
               errors = _errs3;
@@ -132,7 +132,7 @@ function validate619(
                   for (let i0 = 0; i0 < len0; i0++) {
                     const _errs9 = errors;
                     if (
-                      !validate571(data2[i0], {
+                      !validate578(data2[i0], {
                         instancePath: instancePath + "/parts/" + i0,
                         parentData: data2,
                         parentDataProperty: i0,
@@ -141,8 +141,8 @@ function validate619(
                     ) {
                       vErrors =
                         vErrors === null
-                          ? validate571.errors
-                          : vErrors.concat(validate571.errors);
+                          ? validate578.errors
+                          : vErrors.concat(validate578.errors);
                       errors = vErrors.length;
                     }
                     var valid2 = _errs9 === errors;
@@ -151,7 +151,7 @@ function validate619(
                     }
                   }
                 } else {
-                  validate619.errors = [
+                  validate630.errors = [
                     {
                       instancePath: instancePath + "/parts",
                       schemaPath: "#/properties/parts/type",
@@ -170,7 +170,7 @@ function validate619(
         }
       }
     } else {
-      validate619.errors = [
+      validate630.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -181,7 +181,7 @@ function validate619(
       return false;
     }
   }
-  validate619.errors = vErrors;
+  validate630.errors = vErrors;
   return errors === 0;
 }
-export { validate619 };
+export { validate630 };

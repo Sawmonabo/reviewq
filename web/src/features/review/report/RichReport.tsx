@@ -2,6 +2,7 @@ import { defaultRangeExtractor, useVirtualizer } from "@tanstack/react-virtual";
 import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { RootContent } from "hast";
 import type { ReportSummary } from "../../../api/generated/contracts/reports";
+import { DiagramDisplayContext } from "../../../components/markdown/diagram-cache";
 import { MarkdownTree } from "../../../components/markdown/MarkdownContent";
 import { bookmarkAt, readBookmark, restoreBookmark } from "./report-position";
 import { saveValue } from "../../../lib/view-preferences";
@@ -446,7 +447,9 @@ export function RichReport({
   function renderPrepared(index: number) {
     const group = reader.prepared(index);
     return group ? (
-      renderBlock(group.block, index)
+      <DiagramDisplayContext value={group.drawings}>
+        {renderBlock(group.block, index)}
+      </DiagramDisplayContext>
     ) : (
       <div
         className="report-preparing"

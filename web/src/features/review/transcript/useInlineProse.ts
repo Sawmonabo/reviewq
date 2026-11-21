@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { Root } from "hast";
 import type { HistoryEntry, HistoryPart } from "../../../api/generated/contracts";
+import type { DocumentDisplay } from "../../../api/generated/contracts/common";
 import { historyContent } from "../../../api/history";
 import type { SessionAddress } from "../../../api/history";
 import { parseMarkdown } from "../../../components/markdown/parse-markdown";
@@ -15,9 +16,10 @@ const PREPARE_TIMEOUT_MS = 300;
 const empty: ReadonlyMap<string, InlineProse | null> = new Map();
 const encoder = new TextEncoder();
 
-export type InlineProse =
+export type InlineProse = { readonly display?: DocumentDisplay | null | undefined } & (
   | { readonly kind: "source" | "formatting-limit"; readonly text: string }
-  | { readonly kind: "prepared"; readonly tree: Root };
+  | { readonly kind: "prepared"; readonly tree: Root }
+);
 
 type Address = { readonly entryId: string; readonly reference: string };
 type Cache = {
@@ -146,7 +148,7 @@ export function useInlineProse(
               save(null);
               return;
             }
-            const source = { kind: "source", text: data.text } as const;
+            const source = { kind: "source", text: data.text, display: data.display } as const;
             if (
               bytes < PREPARE_MIN_BYTES ||
               preparing.current ||
@@ -175,7 +177,11 @@ export function useInlineProse(
                 return;
               }
               const tree = parseMarkdown(source.text);
-              save(tree ? { kind: "prepared", tree } : { ...source, kind: "formatting-limit" });
+              save(
+                tree
+                  ? { kind: "prepared", tree, display: source.display }
+                  : { ...source, kind: "formatting-limit" },
+              );
             }
             function cancelPreparation() {
               window.cancelIdleCallback(idle);

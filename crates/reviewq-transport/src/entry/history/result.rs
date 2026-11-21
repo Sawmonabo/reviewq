@@ -14,7 +14,8 @@ use reviewq_protocol::{
 
 use crate::entry::pages::{parse, success};
 
-use super::{ApiError, Entry, Path, encode_entry};
+use super::drawing_hints::InlineDisplay;
+use super::{ApiError, Entry, Path, Projection, encode_entry};
 
 pub(super) async fn read(
     State(entry): State<Arc<Entry>>,
@@ -52,21 +53,32 @@ pub(super) async fn read(
     };
     if entry
         .store
-        .history_session(actor, run.clone(), session.clone())
+        .history_session(actor.clone(), run.clone(), session.clone())
         .await?
         .value
         != source.value
     {
         return Err(AppError::CursorExpired.into());
     }
+    let projection = Projection {
+        endpoint: &entry.auth.endpoint,
+        run: &run,
+        session: &session,
+        display: Some(InlineDisplay {
+            entry: &entry,
+            actor: &actor,
+            run: &run,
+            session: &session,
+        }),
+    };
     let (generation, availability, response) = match result {
         Some(result) => (
-            Some(HistoryGenerationDto::new(result.generation).ok_or(AppError::Internal)?),
+            Some(HistoryGenerationDto::new(result.generation.as_str()).ok_or(AppError::Internal)?),
             HistoryAvailability::Available,
             result
                 .entry
                 .as_ref()
-                .map(|response| encode_entry(&entry.auth.endpoint, &run, &session, response, 1))
+                .map(|response| encode_entry(&projection, response, &result.generation, 1))
                 .transpose()?,
         ),
         None => (None, HistoryAvailability::Unavailable, None),

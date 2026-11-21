@@ -45,6 +45,7 @@ export function ExpandedOutput({
       return {
         data: {
           text: data.text,
+          display: data.display,
           complete: data.offset === 0 && data.complete && !data.nextCursor,
           nextCursor: data.nextCursor,
           nextOffset: data.offset + bytes,
@@ -79,7 +80,7 @@ export function ExpandedOutput({
         {range.error && <Notice retry={range.retry}>{range.error}</Notice>}
         {range.data &&
           (format === "markdown" && range.data.complete ? (
-            <MarkdownContent source={range.data.text} />
+            <MarkdownContent source={range.data.text} display={range.data.display} />
           ) : (
             <pre className="tool-output-line" aria-label="Native output text">
               {range.data.text}

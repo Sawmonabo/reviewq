@@ -2327,6 +2327,16 @@
         "byteStart": {
           "$ref": "#/definitions/SafeCountDto"
         },
+        "display": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/DocumentDisplay"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "headingLevel": {
           "anyOf": [
             {
@@ -2599,6 +2609,46 @@
         "receiptId",
         "userDispositionVersion",
         "finding"
+      ],
+      "type": "object"
+    },
+    "DocumentDisplay": {
+      "description": "Optional derivatives of the accompanying verified Markdown.",
+      "properties": {
+        "drawings": {
+          "items": {
+            "$ref": "#/definitions/DrawingHint"
+          },
+          "maxItems": 8,
+          "minItems": 1,
+          "type": "array"
+        }
+      },
+      "required": [
+        "drawings"
+      ],
+      "type": "object"
+    },
+    "DrawingHint": {
+      "properties": {
+        "font": {
+          "$ref": "#/definitions/ReportHashDto"
+        },
+        "recipe": {
+          "type": "string"
+        },
+        "reference": {
+          "$ref": "#/definitions/PageCursorDto"
+        },
+        "sourceSha256": {
+          "$ref": "#/definitions/ReportHashDto"
+        }
+      },
+      "required": [
+        "reference",
+        "sourceSha256",
+        "recipe",
+        "font"
       ],
       "type": "object"
     },
@@ -3235,6 +3285,16 @@
         "complete": {
           "type": "boolean"
         },
+        "display": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/DocumentDisplay"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "entryId": {
           "$ref": "#/definitions/HistoryEntryIdDto"
         },
@@ -3556,6 +3616,16 @@
                 }
               ]
             },
+            "display": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/DocumentDisplay"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "kind": {
               "const": "user_prompt",
               "type": "string"
@@ -3576,6 +3646,16 @@
               "anyOf": [
                 {
                   "$ref": "#/definitions/HistoryCursorDto"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "display": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/DocumentDisplay"
                 },
                 {
                   "type": "null"
@@ -3686,6 +3766,16 @@
                 }
               ]
             },
+            "display": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/DocumentDisplay"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "kind": {
               "const": "plan",
               "type": "string"
@@ -3707,6 +3797,16 @@
               "anyOf": [
                 {
                   "$ref": "#/definitions/HistoryCursorDto"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "display": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/DocumentDisplay"
                 },
                 {
                   "type": "null"
@@ -7624,6 +7724,16 @@
           "anyOf": [
             {
               "$ref": "#/definitions/ReportDelivery"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "display": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/DocumentDisplay"
             },
             {
               "type": "null"

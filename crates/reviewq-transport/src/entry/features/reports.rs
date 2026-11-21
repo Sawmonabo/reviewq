@@ -32,6 +32,7 @@ use reviewq_protocol::{
 };
 use serde::{Deserialize, Serialize};
 
+use crate::entry::diagrams::{self, Owner};
 use crate::entry::error::{ApiPath as Path, ApiQuery as Query};
 use crate::entry::pages::{count, parse, success};
 use crate::entry::{ApiError, Entry};
@@ -147,9 +148,30 @@ async fn view(
     let actor = entry.auth.browser_actor(&headers, false)?;
     let stored = entry
         .store
-        .read_report(actor, run, receipt, matches!(view, View::Markdown))
+        .read_report(
+            actor.clone(),
+            run.clone(),
+            receipt,
+            matches!(view, View::Markdown),
+        )
         .await?;
-    Ok(Json(success(project_view(stored.value)?, stored.cursor)?))
+    let display = stored
+        .value
+        .report
+        .as_ref()
+        .filter(|report| report.stats.complete)
+        .zip(stored.value.markdown.as_deref())
+        .and_then(|(report, markdown)| {
+            diagrams::observe(
+                &entry,
+                &actor,
+                Owner::report(&run, &report.reference),
+                markdown,
+            )
+        });
+    let mut body = project_view(stored.value)?;
+    body.display = display;
+    Ok(Json(success(body, stored.cursor)?))
 }
 
 pub(in crate::entry) fn project_view(value: app::ReportView) -> Result<dto::ReportView, AppError> {
@@ -157,6 +179,7 @@ pub(in crate::entry) fn project_view(value: app::ReportView) -> Result<dto::Repo
         report: value.report.map(summary).transpose()?,
         delivery: value.delivery.map(delivery).transpose()?,
         markdown: value.markdown,
+        display: None,
     })
 }
 

@@ -10,6 +10,10 @@ export default defineConfig({
   plugins: [react()],
   build: {
     rolldownOptions: {
+      input: {
+        app: fileURLToPath(new URL("./index.html", import.meta.url)),
+        drawing: fileURLToPath(new URL("./diagram-producer.html", import.meta.url)),
+      },
       treeshake: {
         moduleSideEffects: [
           {

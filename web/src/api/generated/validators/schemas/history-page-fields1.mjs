@@ -2,10 +2,10 @@
 import { func0 } from "../runtime.mjs";
 import { validate520 } from "./history-availability.mjs";
 import { validate25 } from "./checkpoint-id-dto.mjs";
-import { validate568 } from "./history-entry.mjs";
+import { validate575 } from "./history-entry.mjs";
 import { validate48 } from "./history-cursor-dto.mjs";
 import { validate127 } from "./safe-count-dto.mjs";
-function validate565(
+function validate572(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -61,7 +61,7 @@ function validate565(
             if (errors === _errs3) {
               if (Array.isArray(data2)) {
                 if (data2.length > 100) {
-                  validate565.errors = [
+                  validate572.errors = [
                     {
                       instancePath: instancePath + "/items",
                       schemaPath: "#/properties/items/maxItems",
@@ -76,7 +76,7 @@ function validate565(
                   for (let i0 = 0; i0 < len0; i0++) {
                     const _errs5 = errors;
                     if (
-                      !validate568(data2[i0], {
+                      !validate575(data2[i0], {
                         instancePath: instancePath + "/items/" + i0,
                         parentData: data2,
                         parentDataProperty: i0,
@@ -85,8 +85,8 @@ function validate565(
                     ) {
                       vErrors =
                         vErrors === null
-                          ? validate568.errors
-                          : vErrors.concat(validate568.errors);
+                          ? validate575.errors
+                          : vErrors.concat(validate575.errors);
                       errors = vErrors.length;
                     }
                     var valid1 = _errs5 === errors;
@@ -96,7 +96,7 @@ function validate565(
                   }
                 }
               } else {
-                validate565.errors = [
+                validate572.errors = [
                   {
                     instancePath: instancePath + "/items",
                     schemaPath: "#/properties/items/type",
@@ -169,7 +169,7 @@ function validate565(
                   vErrors.push(err1);
                 }
                 errors++;
-                validate565.errors = vErrors;
+                validate572.errors = vErrors;
                 return false;
               } else {
                 errors = _errs7;
@@ -243,7 +243,7 @@ function validate565(
                     vErrors.push(err3);
                   }
                   errors++;
-                  validate565.errors = vErrors;
+                  validate572.errors = vErrors;
                   return false;
                 } else {
                   errors = _errs12;
@@ -263,7 +263,7 @@ function validate565(
                 if (data.reset !== undefined && func0.call(data, "reset")) {
                   const _errs16 = errors;
                   if (typeof data.reset !== "boolean") {
-                    validate565.errors = [
+                    validate572.errors = [
                       {
                         instancePath: instancePath + "/reset",
                         schemaPath: "#/properties/reset/type",
@@ -330,7 +330,7 @@ function validate565(
         }
       }
     } else {
-      validate565.errors = [
+      validate572.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -341,7 +341,7 @@ function validate565(
       return false;
     }
   }
-  validate565.errors = vErrors;
+  validate572.errors = vErrors;
   return errors === 0;
 }
-export { validate565 };
+export { validate572 };

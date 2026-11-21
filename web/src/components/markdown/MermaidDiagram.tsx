@@ -1,5 +1,6 @@
 import { useContext, useEffectEvent, useId, useLayoutEffect, useRef, useState } from "react";
-import { DiagramCacheContext, reusableDiagram } from "./diagram-cache";
+import { completedDiagram } from "./completed-diagram";
+import { DiagramCacheContext, DiagramDisplayContext } from "./diagram-cache";
 import { eligibleDiagram, parseDiagram, renderDiagram } from "./mermaid";
 import { useDiagramViewport } from "./useDiagramViewport";
 
@@ -34,6 +35,7 @@ export default function MermaidDiagram({
   readonly provisional: boolean;
 }) {
   const cache = useContext(DiagramCacheContext);
+  const display = useContext(DiagramDisplayContext);
   const id = useId().replace(/[^a-zA-Z0-9_-]/g, "");
   const [drawing, setDrawing] = useState<Drawing>();
   const [failedSource, setFailedSource] = useState<string>();
@@ -68,23 +70,15 @@ export default function MermaidDiagram({
 
   const prepare = useEffectEvent(async (state: Rendering, revision: Revision) => {
     const { source, provisional } = revision;
-    const theme = document.documentElement.dataset.theme ?? "";
     const renderId = `reviewq-diagram-${crypto.randomUUID()}`;
-    const saved = cache?.diagram;
-    const hit = saved?.source === source && saved.theme === theme ? saved : undefined;
     try {
-      const svg = hit
-        ? hit.svg.replaceAll(hit.id, renderId)
-        : await renderDiagram(renderId, source);
+      const { root, size } = provisional
+        ? parseDiagram(await renderDiagram(renderId, source))
+        : await completedDiagram(renderId, source, display, cache);
       const current = state.requested;
       // A completed live draw is useful while this fence is still live. The same
       // serial renderer will prepare the newest queued source on its next turn.
       if (state.closed || (current !== revision && !(current?.provisional && provisional))) return;
-      const { root, size } = parseDiagram(svg);
-      if (cache && !hit) {
-        const reusable = reusableDiagram(root, renderId, svg.length);
-        if (reusable) cache.diagram = { source, theme, id: renderId, svg: reusable };
-      }
       setDrawing({ source, provisional, size, svg: document.importNode(root, true) });
       setFailedSource(undefined);
     } catch {
