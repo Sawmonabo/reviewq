@@ -1,4 +1,5 @@
-import { defaultRangeExtractor, useVirtualizer } from "@tanstack/react-virtual";
+import { useVirtualizer } from "@tanstack/react-virtual";
+import type { defaultRangeExtractor } from "@tanstack/react-virtual";
 import {
   useCallback,
   useDeferredValue,

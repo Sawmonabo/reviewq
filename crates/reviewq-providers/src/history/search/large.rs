@@ -127,10 +127,7 @@ impl StagedBody {
         let kind = rustix::fs::fstatfs(&file)
             .map_err(|_| AppError::Unavailable)?
             .f_type as u64;
-        if !matches!(
-            kind,
-            0xef53 | 0x5846_5342 | 0x9123_683e | 0xf2f5_2010 | 0x2fc1_2fc1
-        ) {
+        if !admits_disk_scratch(kind) {
             return Err(AppError::Unavailable);
         }
         let mut writer = BoundedBody {
