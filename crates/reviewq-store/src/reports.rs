@@ -215,6 +215,40 @@ impl ReportStore for SqliteStore {
         })
     }
 
+    fn read_report_bytes(
+        &self,
+        actor: Actor,
+        run: RunId,
+        report: ReportReference,
+        bytes: std::ops::Range<u64>,
+    ) -> AppFuture<'_, Snapshot<reviewq_app::reports::ReportSourceRange>> {
+        Box::pin(async move {
+            if bytes.start >= bytes.end || bytes.end - bytes.start > 64 * 1024 {
+                return Err(AppError::InvalidRequest);
+            }
+            self.read(move |tx| {
+                let version = authorized_version(tx, &actor, &run, &report)?;
+                if !version.summary.stats.complete || bytes.end > version.summary.stats.byte_length
+                {
+                    return Err(AppError::CursorExpired.into());
+                }
+                let part = read_artifact_bytes(tx, &version.artifact_id, bytes.start, bytes.end)?;
+                let scalar_start = part.first_scalar.ok_or(AppError::CursorExpired)?;
+                let markdown =
+                    String::from_utf8(part.bytes).map_err(|_| AppError::CursorExpired)?;
+                snapshot(
+                    tx,
+                    reviewq_app::reports::ReportSourceRange {
+                        markdown,
+                        scalar_start,
+                    },
+                )
+            })
+            .await
+            .map_err(StoreError::app)
+        })
+    }
+
     fn read_report_chunk(
         &self,
         actor: Actor,

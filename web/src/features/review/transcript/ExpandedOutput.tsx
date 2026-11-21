@@ -20,11 +20,13 @@ type Props = {
   readonly reference: string;
   readonly format: "markdown" | "text";
   readonly found?: FoundOutput;
+  readonly onReadRange?: ((element: HTMLElement) => boolean) | undefined;
 };
 
 export function ExpandedOutput(props: Props) {
   const source = <SourceOutput {...props} />;
-  if (props.format !== "markdown" || props.found?.content) return source;
+  if (!props.found?.document && (props.format !== "markdown" || props.found?.content))
+    return source;
   return (
     <NativeDocument
       key={props.reference}
@@ -34,6 +36,7 @@ export function ExpandedOutput(props: Props) {
       reference={props.reference}
       fallback={source}
       prepared={props.found?.document}
+      onReadRange={props.onReadRange}
     />
   );
 }

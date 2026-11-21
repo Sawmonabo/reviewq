@@ -20,6 +20,7 @@ import { formatTime, readable, safeUrl } from "../../../lib/presentation";
 import { Composer } from "../Composer";
 import { ReportDetails } from "./ReportDetails";
 import { ReportSource } from "./ReportSource";
+import { ReportTable } from "./ReportTable";
 import { RichReport } from "./RichReport";
 import { finishReading, readBookmark } from "./report-position";
 import { canWindowReport, wholeDocument, indexedDocument } from "./report-reader";
@@ -52,6 +53,7 @@ export default function ReportDocument({
 }: Props) {
   const [source, setSource] = useState(false);
   const [sourceOffset, setSourceOffset] = useState(0);
+  const [tableSource, setTableSource] = useState<{ sha256: string; byte: number }>();
   const [notice, setNotice] = useState<string>();
   const [feedbackNotice, setFeedbackNotice] = useState<string>();
   const [context, setContext] = useState<"findings" | "changes" | "sections">();
@@ -176,6 +178,12 @@ export default function ReportDocument({
     }
   }
 
+  const tryTable =
+    !source &&
+    (!admitted || formattingFailure) &&
+    report.complete &&
+    report.byteLength >= 8 * 1024 &&
+    report.byteLength <= 32 * 1024 * 1024;
   function openSource(offset = 0) {
     setSourceOffset(offset);
     setSource(true);
@@ -186,6 +194,26 @@ export default function ReportDocument({
       });
   }
 
+  const sourceView = (
+    <ReportSource
+      runId={run.runId}
+      report={report}
+      requestedOffset={sourceOffset}
+      reason={
+        !admitted
+          ? report.semanticIndex === "source_only"
+            ? "Semantic index unavailable · Original source"
+            : "Large report · source view"
+          : formattingFailure
+            ? "Report formatting limit · Original source"
+            : body.error
+              ? "Formatted report unavailable · Original source"
+              : "Original Markdown"
+      }
+      onQuote={capture}
+      onRendered={onRendered}
+    />
+  );
   return (
     <>
       <div className="report-reader" ref={reader}>
@@ -194,24 +222,23 @@ export default function ReportDocument({
           <Notice retry={body.retry}>Accepted finding outcomes are unavailable.</Notice>
         )}
         {sourceMode ? (
-          <ReportSource
-            runId={run.runId}
-            report={report}
-            requestedOffset={sourceOffset}
-            reason={
-              !admitted
-                ? report.semanticIndex === "source_only"
-                  ? "Semantic index unavailable · Original source"
-                  : "Large report · source view"
-                : formattingFailure
-                  ? "Report formatting limit · Original source"
-                  : body.error
-                    ? "Formatted report unavailable · Original source"
-                    : "Original Markdown"
-            }
-            onQuote={capture}
-            onRendered={onRendered}
-          />
+          tryTable ? (
+            <ReportTable
+              runId={run.runId}
+              report={report}
+              base={safeUrl(webUrl)}
+              opening={tableSource?.sha256 === report.sha256 ? tableSource.byte : 0}
+              onSource={(offset, byte) => {
+                setTableSource({ sha256: report.sha256, byte });
+                openSource(offset);
+              }}
+              onQuote={capture}
+              onRendered={onRendered}
+              fallback={sourceView}
+            />
+          ) : (
+            sourceView
+          )
         ) : body.pending ? (
           <Loading label="Loading accepted report…" />
         ) : displayed?.reader ? (
@@ -235,7 +262,7 @@ export default function ReportDocument({
         )}
       </div>
       <div className="report-source-tools spread">
-        {admitted && (
+        {(admitted || (source && tableSource?.sha256 === report.sha256)) && (
           <button
             type="button"
             className="quiet-button"
@@ -245,7 +272,11 @@ export default function ReportDocument({
               else openSource();
             }}
           >
-            {source ? "Read formatted report" : "Read original source"}
+            {source
+              ? admitted
+                ? "Read formatted report"
+                : "Return to table rows"
+              : "Read original source"}
           </button>
         )}
         <ActionMenu

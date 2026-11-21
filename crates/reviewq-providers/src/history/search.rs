@@ -10,8 +10,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use reviewq_app::access::AppError;
 use reviewq_app::history::search::{
-    DocumentMatch, HistorySearch, MAX_SEARCH_HITS, SearchHit, SearchPage, SearchPoint,
-    SourceObservation,
+    DocumentMatch, DocumentMatchMode, HistorySearch, MAX_SEARCH_HITS, SearchHit, SearchPage,
+    SearchPoint, SourceObservation,
 };
 use reviewq_app::history::{FileContentRef, FilePosition, VisiblePartKind};
 use reviewq_app::reading::{FoldedText, Literal, TextMatch, displayed_markdown};
@@ -398,9 +398,7 @@ fn match_record(
             partial: false,
             stopped: false,
         };
-        if body.document() {
-            document::scan(&mut matches, &reader)?;
-        } else {
+        if !body.document() || !document::scan(&mut matches, &reader)? {
             scan_body(
                 &mut matches,
                 &mut reader,
@@ -747,8 +745,12 @@ impl Matches<'_> {
     }
 
     fn hit(&self, text: &str, span: TextMatch, point: SearchPoint, matched: &str) -> SearchHit {
-        let markdown = self.body.markdown || self.document.is_some();
-        let ranged = !markdown && self.body.bytes > CONTENT_BYTES;
+        let markdown = self.body.markdown
+            || self
+                .document
+                .as_ref()
+                .is_some_and(|proof| proof.mode != DocumentMatchMode::Source);
+        let ranged = self.document.is_none() && !markdown && self.body.bytes > CONTENT_BYTES;
         let before = &text[..span.start.byte];
         let from = before.char_indices().rev().nth(31).map_or(0, |(at, _)| at);
         SearchHit {

@@ -40,7 +40,15 @@ pub struct SearchCursor {
 pub struct DocumentMatch {
     pub hash: ReportHash,
     pub byte_start: u64,
-    pub canonical: bool,
+    pub mode: DocumentMatchMode,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum DocumentMatchMode {
+    Window,
+    Canonical,
+    TableBody,
+    Source,
 }
 
 #[derive(Debug)]

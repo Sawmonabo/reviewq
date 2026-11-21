@@ -4,7 +4,7 @@ import { validate127 } from "./safe-count-dto.mjs";
 import { validate150 } from "./git-sha-dto.mjs";
 import { validate134 } from "./report-hash-dto.mjs";
 import { validate25 } from "./checkpoint-id-dto.mjs";
-function validate1300(
+function validate1310(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -66,7 +66,7 @@ function validate1300(
             vErrors.push(err1);
           }
           errors++;
-          validate1300.errors = vErrors;
+          validate1310.errors = vErrors;
           return false;
         } else {
           errors = _errs2;
@@ -140,7 +140,7 @@ function validate1300(
               vErrors.push(err3);
             }
             errors++;
-            validate1300.errors = vErrors;
+            validate1310.errors = vErrors;
             return false;
           } else {
             errors = _errs7;
@@ -208,7 +208,7 @@ function validate1300(
               ) {
                 const _errs13 = errors;
                 if (typeof data.nativeProvenance !== "boolean") {
-                  validate1300.errors = [
+                  validate1310.errors = [
                     {
                       instancePath: instancePath + "/nativeProvenance",
                       schemaPath: "#/properties/nativeProvenance/type",
@@ -280,7 +280,7 @@ function validate1300(
                       vErrors.push(err5);
                     }
                     errors++;
-                    validate1300.errors = vErrors;
+                    validate1310.errors = vErrors;
                     return false;
                   } else {
                     errors = _errs16;
@@ -355,7 +355,7 @@ function validate1300(
                         vErrors.push(err7);
                       }
                       errors++;
-                      validate1300.errors = vErrors;
+                      validate1310.errors = vErrors;
                       return false;
                     } else {
                       errors = _errs21;
@@ -403,7 +403,7 @@ function validate1300(
         }
       }
     } else {
-      validate1300.errors = [
+      validate1310.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -414,7 +414,7 @@ function validate1300(
       return false;
     }
   }
-  validate1300.errors = vErrors;
+  validate1310.errors = vErrors;
   return errors === 0;
 }
-export { validate1300 };
+export { validate1310 };

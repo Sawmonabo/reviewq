@@ -1,5 +1,6 @@
 import { queryString, read, write } from "./client";
 import { drawingFontHeaders } from "./drawing-font";
+import { validateTablePage } from "./table-page";
 import type {
   ReportDispositionRequest,
   ReportFeedbackRequest,
@@ -14,6 +15,7 @@ import {
   isReportHistoryResponse,
   isReportQuoteResolveResponse,
   isReportSectionResponse,
+  isReportTableResponse,
   isReportViewResponse,
   isReportViewedResponse,
   isReportWindowResponse,
@@ -66,6 +68,50 @@ export async function reportWindow(
     returned.totalCodePoints !== report.totalCodePoints
   )
     throw new Error("The displayed report window changed.");
+  return result;
+}
+
+export async function reportTable(
+  runId: string,
+  report: ReportSummary,
+  byteOffset: number,
+  signal: AbortSignal,
+) {
+  const result = await read(
+    `${versionPath(runId, report.receiptId)}/table${queryString({ sha256: report.sha256, byteOffset })}`,
+    isReportTableResponse,
+    signal,
+    256 * 1024,
+  );
+  if (result.data.receiptId !== report.receiptId || result.data.sha256 !== report.sha256)
+    throw new Error("The displayed report version changed.");
+  const { range, tableStart, tableEnd } = result.data;
+  if (range) {
+    if (
+      tableStart === null ||
+      tableEnd === null ||
+      tableStart >= tableEnd ||
+      tableEnd > report.byteLength ||
+      range.byteStart >= range.byteEnd ||
+      range.byteEnd > report.byteLength ||
+      range.scalarStart > report.totalCodePoints ||
+      (range.previousByte !== null && range.previousByte >= range.byteStart) ||
+      (range.nextByte !== null && range.nextByte !== range.byteEnd)
+    )
+      throw new Error("The table range does not match the report.");
+    const bytes = range.byteEnd - range.byteStart;
+    if (range.content.kind === "table") {
+      if (range.byteStart < tableStart || range.byteEnd > tableEnd)
+        throw new Error("The source range crosses the table boundary.");
+      validateTablePage(range.content.page, bytes);
+    } else if (
+      bytes > 65_536 ||
+      new TextEncoder().encode(range.content.markdown).length !== bytes ||
+      (range.byteStart !== tableEnd && range.byteEnd !== tableStart)
+    ) {
+      throw new Error("The Markdown range does not match the report.");
+    }
+  }
   return result;
 }
 

@@ -1,4 +1,4 @@
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use super::{HistoryAvailability, HistoryText};
 use crate::reports::ReportHashDto;
@@ -41,7 +41,17 @@ pub type HistorySearchResponse = Success<HistorySearchPage>;
 pub struct HistorySearchDocument {
     pub sha256: ReportHashDto,
     pub byte_start: SafeCountDto,
-    pub canonical: bool,
+    pub mode: HistorySearchDocumentMode,
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub enum HistorySearchDocumentMode {
+    Window,
+    Canonical,
+    TableBody,
+    Source,
 }
 
 #[derive(Serialize)]

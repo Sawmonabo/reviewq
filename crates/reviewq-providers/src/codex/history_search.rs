@@ -1,12 +1,12 @@
 use std::collections::VecDeque;
 
 use reviewq_app::access::AppError;
-use reviewq_app::history::document::{MAX_INDEX_BYTES, Query as DocumentQuery};
-use reviewq_app::history::search::document::project;
+use reviewq_app::history::document::{Position, Query as DocumentQuery};
+use reviewq_app::history::search::document::{occurrences, project};
 use reviewq_app::history::search::rpc::{
     RpcSearchEntry, RpcSearchPage, RpcSearchPoint, RpcSearchQuery,
 };
-use reviewq_app::history::search::{DocumentMatch, MAX_SEARCH_HITS, SearchHit};
+use reviewq_app::history::search::{DocumentMatch, DocumentMatchMode, MAX_SEARCH_HITS, SearchHit};
 use reviewq_app::history::{
     HistorySession, NativePosition, RpcContentRef, VisibleEntry, VisibleKind, VisiblePartKind,
 };
@@ -222,13 +222,17 @@ async fn search_entry(
         };
         let mut document = None;
         let mut next_window = None;
-        let projected = if body.markdown && body.text.len() > 65_536 {
-            if body.text.len() > MAX_INDEX_BYTES
-                || (entry.kind != VisibleKind::User && entry.at_ms.is_none())
-            {
-                output.partial = true;
-                continue;
-            }
+        let mut markdown = body.markdown;
+        let projected = if markdown
+            && body.text.len() > 65_536
+            && entry.kind != VisibleKind::User
+            && entry.at_ms.is_none()
+        {
+            // The native window requires a completed item. Its literal output
+            // remains readable through the original scoped content operation.
+            markdown = false;
+            None
+        } else if markdown && body.text.len() > 65_536 {
             let offset = point.window.unwrap_or_else(|| {
                 if reverse {
                     body.text.len() as u64 - 1
@@ -242,48 +246,56 @@ async fn search_entry(
                         body.text.to_owned(),
                         reference.hash.clone(),
                         DocumentQuery {
-                            offset,
+                            position: Position::AtByte(offset),
                             expected: Some(reference.hash.clone()),
                         },
+                        true,
                     )
                     .await?,
             );
-            if point
-                .window
-                .is_some_and(|at| at != projection.proof.byte_start)
-            {
-                return Err(AppError::CursorExpired);
-            }
-            point.window = Some(projection.proof.byte_start);
-            document = Some(projection.proof);
-            next_window = if reverse {
-                projection.previous
+            if projection.literal_body {
+                markdown = false;
+                None
             } else {
-                projection.next
-            };
-            projection.text
-        } else if body.markdown {
+                if point
+                    .window
+                    .is_some_and(|at| at != projection.proof.byte_start)
+                {
+                    return Err(AppError::CursorExpired);
+                }
+                point.window = Some(projection.proof.byte_start);
+                markdown = projection.proof.mode != DocumentMatchMode::Source;
+                document = Some(projection.proof);
+                next_window = if reverse {
+                    projection.previous
+                } else {
+                    projection.next
+                };
+                projection.text
+            }
+        } else if markdown {
             displayed_markdown(body.text)
         } else {
             None
         };
-        if body.markdown && projected.is_none() {
+        let text = if let Some(projected) = projected.as_deref() {
+            projected
+        } else if markdown || document.is_some() {
             output.partial = true;
-        }
-        let text = if body.markdown {
-            projected.as_deref().unwrap_or_default()
+            ""
         } else {
             body.text
         };
+        let ranged = !markdown && document.is_none() && body.text.len() > 65_536;
         let mut matcher = RpcMatches {
             point,
             reference,
             literal,
             available,
             reverse,
-            markdown: body.markdown,
+            markdown,
             document,
-            ranged: !body.markdown && body.text.len() > 65_536,
+            ranged,
             output_bytes: body.text.len() as u64,
             tool: body.tool,
             hits: VecDeque::new(),
@@ -348,6 +360,21 @@ struct RpcMatches<'a> {
 
 impl RpcMatches<'_> {
     fn collect(&mut self, text: &str) -> bool {
+        if self.document.is_some() {
+            let (matches, partial) = occurrences(
+                text,
+                self.literal,
+                self.point.byte,
+                self.reverse,
+                self.available,
+            );
+            for span in matches {
+                let found = &text[span.start.byte..span.end.byte];
+                self.hits
+                    .push_back(self.witness(text, found, span, span.start.byte as u64, 0));
+            }
+            return partial;
+        }
         let mut partial = false;
         let mut byte = 0;
         let mut utf16 = 0;

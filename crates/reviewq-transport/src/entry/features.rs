@@ -105,6 +105,10 @@ pub(super) fn routes() -> Router<Arc<Entry>> {
             get(reports::read_window),
         )
         .route(
+            "/runs/{run_id}/report/versions/{receipt}/table",
+            get(reports::read_table),
+        )
+        .route(
             "/runs/{run_id}/report/versions/{receipt}/quote/resolve",
             axum::routing::post(reports::resolve_quote).layer(DefaultBodyLimit::max(160 * 1024)),
         )

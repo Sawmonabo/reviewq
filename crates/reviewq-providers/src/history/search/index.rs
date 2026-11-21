@@ -437,6 +437,7 @@ fn cover_document(
             reference,
             offset,
             work.cancel,
+            false,
         ) {
             Ok(projection) => projection,
             Err(AppError::NotFound | AppError::Busy | AppError::Unavailable) => {
@@ -446,7 +447,7 @@ fn cover_document(
             Err(error) => return Err(error),
         };
         work.check()?;
-        if projection.proof.canonical {
+        if projection.needs_context || projection.literal_body {
             return Ok(false);
         }
         let Some(text) = projection.text.filter(|text| !text.contains('\0')) else {

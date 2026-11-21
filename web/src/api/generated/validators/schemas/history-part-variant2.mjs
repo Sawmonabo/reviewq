@@ -4,7 +4,7 @@ import { validate48 } from "./history-cursor-dto.mjs";
 import { validate586 } from "./document-display.mjs";
 import { validate127 } from "./safe-count-dto.mjs";
 import { validate621 } from "./history-text.mjs";
-function validate709(
+function validate717(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -19,7 +19,7 @@ function validate709(
         ((data.text === undefined || !func0.call(data, "text")) &&
           (missing0 = "text"))
       ) {
-        validate709.errors = [
+        validate717.errors = [
           {
             instancePath,
             schemaPath: "#/required",
@@ -83,7 +83,7 @@ function validate709(
               vErrors.push(err1);
             }
             errors++;
-            validate709.errors = vErrors;
+            validate717.errors = vErrors;
             return false;
           } else {
             errors = _errs2;
@@ -154,7 +154,7 @@ function validate709(
                 vErrors.push(err3);
               }
               errors++;
-              validate709.errors = vErrors;
+              validate717.errors = vErrors;
               return false;
             } else {
               errors = _errs7;
@@ -175,7 +175,7 @@ function validate709(
               let data2 = data.kind;
               const _errs11 = errors;
               if (typeof data2 !== "string") {
-                validate709.errors = [
+                validate717.errors = [
                   {
                     instancePath: instancePath + "/kind",
                     schemaPath: "#/properties/kind/type",
@@ -186,7 +186,7 @@ function validate709(
                 return false;
               }
               if ("assistant_text" !== data2) {
-                validate709.errors = [
+                validate717.errors = [
                   {
                     instancePath: instancePath + "/kind",
                     schemaPath: "#/properties/kind/const",
@@ -303,7 +303,7 @@ function validate709(
                         vErrors.push(err5);
                       }
                       errors++;
-                      validate709.errors = vErrors;
+                      validate717.errors = vErrors;
                       return false;
                     } else {
                       errors = _errs16;
@@ -326,7 +326,7 @@ function validate709(
         }
       }
     } else {
-      validate709.errors = [
+      validate717.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -337,7 +337,7 @@ function validate709(
       return false;
     }
   }
-  validate709.errors = vErrors;
+  validate717.errors = vErrors;
   return errors === 0;
 }
-export { validate709 };
+export { validate717 };

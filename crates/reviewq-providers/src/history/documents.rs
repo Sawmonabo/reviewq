@@ -152,7 +152,7 @@ fn prepare(
         decoded = Some(Vec::with_capacity(bytes as usize));
     }
     let mut hash = Sha256::new();
-    let mut pages = SourcePages::default();
+    let mut pages = SourcePages::for_bytes(bytes);
     let mut fields = Vec::with_capacity(values.len());
     let mut start = 0;
     for (length, span) in values {

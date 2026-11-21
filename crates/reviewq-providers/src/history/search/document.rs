@@ -2,9 +2,10 @@ use std::sync::atomic::AtomicBool;
 
 use reviewq_app::access::AppError;
 use reviewq_app::history::FileContentRef;
-use reviewq_app::history::document::{MAX_INDEX_BYTES, Query};
+use reviewq_app::history::document::{Position, Query, WindowResult};
 use reviewq_app::history::search::SearchPoint;
-use reviewq_app::history::search::document::{Projection, project};
+use reviewq_app::history::search::document::{Projection, occurrences, project};
+use reviewq_app::reading::table::paged::MAX_INDEXED_BYTES;
 use reviewq_domain::session::SessionTarget;
 
 use crate::history::documents::{self, Documents};
@@ -15,10 +16,9 @@ use super::{MatchSource, Matches};
 pub(super) fn scan(
     matches: &mut Matches<'_>,
     reader: &MatchSource<'_, '_>,
-) -> Result<(), AppError> {
-    if matches.body.bytes > MAX_INDEX_BYTES as u64 {
-        matches.partial = true;
-        return Ok(());
+) -> Result<bool, AppError> {
+    if matches.body.bytes > MAX_INDEXED_BYTES {
+        return Ok(false);
     }
     let offset = matches.point.window.unwrap_or_else(|| {
         if matches.reverse {
@@ -34,14 +34,18 @@ pub(super) fn scan(
         &matches.reference,
         offset,
         reader.cancel,
+        true,
     ) {
         Ok(projection) => projection,
         Err(AppError::NotFound) => {
             matches.partial = true;
-            return Ok(());
+            return Ok(true);
         }
         Err(error) => return Err(error),
     };
+    if projection.literal_body {
+        return Ok(false);
+    }
     if matches
         .point
         .window
@@ -52,7 +56,33 @@ pub(super) fn scan(
     matches.point.window = Some(projection.proof.byte_start);
     matches.document = Some(projection.proof);
     if let Some(text) = projection.text {
-        matches.collect(&text, true);
+        let (hits, partial) = occurrences(
+            &text,
+            matches.query,
+            matches.boundary,
+            matches.reverse,
+            matches.available,
+        );
+        matches.partial |= partial;
+        for span in hits {
+            let point = SearchPoint {
+                byte: span.start.byte as u64,
+                ..matches.point
+            };
+            let witness = &text[span.start.byte..span.end.byte];
+            matches
+                .hits
+                .push_back(matches.hit(&text, span, point, witness));
+        }
+        if !matches.reverse
+            && matches.hits.len() == matches.available
+            && let Some(hit) = matches.hits.back()
+        {
+            matches.next = Some(SearchPoint {
+                byte: hit.point.byte + 1,
+                ..hit.point
+            });
+        }
     } else {
         matches.partial = true;
     }
@@ -69,7 +99,7 @@ pub(super) fn scan(
             ..matches.point
         });
     }
-    Ok(())
+    Ok(true)
 }
 
 pub(super) fn read(
@@ -79,18 +109,40 @@ pub(super) fn read(
     reference: &FileContentRef,
     offset: u64,
     cancel: &AtomicBool,
+    include_context: bool,
 ) -> Result<Projection, AppError> {
     let handle = documents.slot(owner.clone(), reference.clone())?;
     let mut cached = handle.try_lock_owned().map_err(|_| AppError::Busy)?;
-    documents::read(
+    let window = documents::read(
         &mut cached,
         source,
         reference,
         Query {
-            offset,
+            position: Position::AtByte(offset),
             expected: None,
         },
         cancel,
-    )
-    .map(project)
+    )?;
+    if include_context
+        && matches!(
+            window.result,
+            WindowResult::Source {
+                canonical: true,
+                ..
+            }
+        )
+    {
+        return documents::read(
+            &mut cached,
+            source,
+            reference,
+            Query {
+                position: Position::Canonical,
+                expected: Some(window.hash),
+            },
+            cancel,
+        )
+        .map(project);
+    }
+    Ok(project(window))
 }

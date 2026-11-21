@@ -3598,6 +3598,16 @@
         },
         "sha256": {
           "$ref": "#/definitions/ReportHashDto"
+        },
+        "tableStart": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SafeCountDto"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "required": [
@@ -3658,6 +3668,28 @@
         },
         {
           "properties": {
+            "page": {
+              "$ref": "#/definitions/TablePage"
+            },
+            "state": {
+              "const": "table",
+              "type": "string"
+            }
+          },
+          "required": [
+            "state",
+            "page"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "canonical": {
+              "type": [
+                "boolean",
+                "null"
+              ]
+            },
             "display": {
               "anyOf": [
                 {
@@ -4524,8 +4556,8 @@
         "byteStart": {
           "$ref": "#/definitions/SafeCountDto"
         },
-        "canonical": {
-          "type": "boolean"
+        "mode": {
+          "$ref": "#/definitions/HistorySearchDocumentMode"
         },
         "sha256": {
           "$ref": "#/definitions/ReportHashDto"
@@ -4534,9 +4566,18 @@
       "required": [
         "sha256",
         "byteStart",
-        "canonical"
+        "mode"
       ],
       "type": "object"
+    },
+    "HistorySearchDocumentMode": {
+      "enum": [
+        "window",
+        "canonical",
+        "table_body",
+        "source"
+      ],
+      "type": "string"
     },
     "HistorySearchHit": {
       "properties": {
@@ -8436,6 +8477,152 @@
       ],
       "type": "object"
     },
+    "ReportTable": {
+      "properties": {
+        "range": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ReportTableRange"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "receiptId": {
+          "$ref": "#/definitions/ResourceIdDto"
+        },
+        "sha256": {
+          "$ref": "#/definitions/ReportHashDto"
+        },
+        "tableEnd": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SafeCountDto"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "tableStart": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SafeCountDto"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "receiptId",
+        "sha256",
+        "tableStart",
+        "tableEnd",
+        "range"
+      ],
+      "type": "object"
+    },
+    "ReportTableContent": {
+      "oneOf": [
+        {
+          "properties": {
+            "kind": {
+              "const": "table",
+              "type": "string"
+            },
+            "page": {
+              "$ref": "#/definitions/TablePage"
+            }
+          },
+          "required": [
+            "kind",
+            "page"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "kind": {
+              "const": "markdown",
+              "type": "string"
+            },
+            "markdown": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "markdown"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "ReportTableRange": {
+      "properties": {
+        "byteEnd": {
+          "$ref": "#/definitions/SafeCountDto"
+        },
+        "byteStart": {
+          "$ref": "#/definitions/SafeCountDto"
+        },
+        "content": {
+          "$ref": "#/definitions/ReportTableContent"
+        },
+        "nextByte": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SafeCountDto"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "previousByte": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SafeCountDto"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "scalarStart": {
+          "$ref": "#/definitions/SafeCountDto"
+        }
+      },
+      "required": [
+        "byteStart",
+        "byteEnd",
+        "scalarStart",
+        "previousByte",
+        "nextByte",
+        "content"
+      ],
+      "type": "object"
+    },
+    "ReportTableResponse": {
+      "description": "The resource and event head from the same authorized snapshot.",
+      "properties": {
+        "cursor": {
+          "$ref": "#/definitions/EventCursorDto"
+        },
+        "data": {
+          "$ref": "#/definitions/ReportTable"
+        }
+      },
+      "required": [
+        "data",
+        "cursor"
+      ],
+      "title": "ReportTableResponse",
+      "type": "object"
+    },
     "ReportView": {
       "properties": {
         "delivery": {
@@ -10745,6 +10932,49 @@
         }
       ]
     },
+    "TablePage": {
+      "properties": {
+        "firstRow": {
+          "$ref": "#/definitions/SafeCountDto"
+        },
+        "header": {
+          "type": "string"
+        },
+        "headerInSource": {
+          "type": "boolean"
+        },
+        "markdown": {
+          "type": "string"
+        },
+        "rowCount": {
+          "$ref": "#/definitions/SafeCountDto"
+        },
+        "totalRows": {
+          "$ref": "#/definitions/SafeCountDto"
+        },
+        "widths": {
+          "items": {
+            "format": "uint8",
+            "maximum": 255,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "maxItems": 16,
+          "minItems": 1,
+          "type": "array"
+        }
+      },
+      "required": [
+        "header",
+        "headerInSource",
+        "widths",
+        "firstRow",
+        "rowCount",
+        "totalRows",
+        "markdown"
+      ],
+      "type": "object"
+    },
     "Target": {
       "properties": {
         "bodySha256": {
@@ -11526,6 +11756,7 @@
     "ReportQuoteResolveRequest": "reports",
     "ReportQuoteResolveResponse": "reports",
     "ReportSectionResponse": "reports",
+    "ReportTableResponse": "reports",
     "ReportViewResponse": "reports",
     "ReportViewedRequest": "reports",
     "ReportViewedResponse": "reports",
@@ -11642,6 +11873,7 @@
       "ReportHistoryResponse": "#/definitions/ReportHistoryResponse",
       "ReportQuoteResolveResponse": "#/definitions/ReportQuoteResolveResponse",
       "ReportSectionResponse": "#/definitions/ReportSectionResponse",
+      "ReportTableResponse": "#/definitions/ReportTableResponse",
       "ReportViewResponse": "#/definitions/ReportViewResponse",
       "ReportViewedResponse": "#/definitions/ReportViewedResponse",
       "ReportWindowResponse": "#/definitions/ReportWindowResponse",

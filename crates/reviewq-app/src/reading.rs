@@ -7,6 +7,7 @@ use unicode_segmentation::UnicodeSegmentation;
 mod markdown;
 pub mod table;
 
+pub(crate) use markdown::displayed_document;
 pub use markdown::{MAX_DISCUSSION_TEXT_SOURCE_BYTES, discussion_text, displayed_markdown};
 
 const MAX_LITERAL_BYTES: usize = 256;
@@ -91,7 +92,10 @@ impl FoldedText {
         self.boundaries[boundary].original
     }
 
-    pub fn occurrences<'a>(&'a self, query: &'a Literal) -> impl Iterator<Item = TextMatch> + 'a {
+    pub fn occurrences<'a>(
+        &'a self,
+        query: &'a Literal,
+    ) -> impl DoubleEndedIterator<Item = TextMatch> + 'a {
         self.boundaries.iter().filter_map(move |start| {
             self.text[start.folded..]
                 .starts_with(query.folded())

@@ -10,6 +10,7 @@ import type {
   HistorySearchHit,
 } from "../../../../api/generated/contracts/history";
 import {
+  canonicalHistoryMarkdown,
   historyContent,
   historyDocument,
   historyPage,
@@ -33,7 +34,8 @@ const highlightName = "reviewq-transcript-match";
 export type FindDocument = {
   readonly window: HistoryDocument;
   readonly source: string;
-  readonly tree: Root;
+  readonly tree: Root | undefined;
+  readonly whole: boolean;
 };
 
 export type FoundOutput = {
@@ -61,7 +63,7 @@ export async function prepareDestination(
     destination;
   async function readBody(): Promise<FoundOutput> {
     if (destination.document) {
-      const { byteStart, sha256 } = destination.document;
+      const { byteStart, sha256, mode } = destination.document;
       const { data: window } = await historyDocument(
         target,
         entryId,
@@ -72,14 +74,25 @@ export async function prepareDestination(
       );
       if (window.byteStart !== byteStart || window.sha256 !== sha256) throw new Error(changed);
       const source = documentSource(window);
-      const tree = documentTree(window, source);
-      if (!tree || !positions(markdownText(tree), destination)) throw new Error(changed);
-      return { destination, document: { window, source, tree } };
+      const whole = mode === "canonical";
+      let tree;
+      if (whole) {
+        if (window.result.state !== "source" || !window.result.canonical) throw new Error(changed);
+        tree = parseMarkdown(await canonicalHistoryMarkdown(target, contentRef, window, signal));
+      } else if (mode !== "source") {
+        tree = documentTree(window, source);
+      }
+      if (mode !== "source" && !tree) throw new Error(changed);
+      if (mode === "table_body" && window.result.state !== "table") throw new Error(changed);
+      const text = tree ? markdownText(tree, mode === "table_body") : source;
+      if (!positions(text, destination)) throw new Error(changed);
+      return { destination, document: { window, source, tree, whole } };
     }
-    const prepared =
+    const settled =
       destination.markdown && destination.offset === 0 && (destination.outputBytes ?? 0) >= 8 * 1024
         ? await completeDocument(target, entryId, generation, contentRef, signal)
         : undefined;
+    const prepared = settled === "paged" ? undefined : settled;
     const content =
       prepared?.content ??
       (await historyContent(
@@ -126,7 +139,8 @@ export async function prepareDestination(
 function revealOccurrence(view: HTMLElement, match: HistorySearchDestination, inset?: number) {
   const row = view.querySelector('[data-native-entry="' + CSS.escape(match.entryId) + '"]');
   const body = row?.querySelector<HTMLElement>("[data-find-body]");
-  const range = body && nativeRange(body, match);
+  const scope = match.document?.mode === "table_body" ? body?.querySelector("tbody") : body;
+  const range = scope && nativeRange(scope, match);
   if (!body || !range) return;
   revealDetails(range.startContainer, body);
   revealDetails(range.endContainer, body);

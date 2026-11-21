@@ -136,7 +136,10 @@ pub struct DocumentDisplay {
 }
 
 mod table;
-pub use table::{PreparedTable, TableColumn, TableInline};
+pub use table::{
+    PreparedTable, ReportTable, ReportTableContent, ReportTableRange, ReportTableResponse,
+    TableColumn, TableInline, TablePage,
+};
 
 wire_enum!(DisplayBlockKind {
     Paragraph,

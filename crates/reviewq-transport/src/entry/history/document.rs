@@ -6,7 +6,7 @@ use axum::response::{IntoResponse, Response};
 use reviewq_app::access::{Actor, AppError};
 use reviewq_app::events::Snapshot;
 use reviewq_app::history::ContentReference;
-use reviewq_app::history::document::{Query as DocumentQuery, Window, WindowResult};
+use reviewq_app::history::document::{Position, Query as DocumentQuery, Window, WindowResult};
 use reviewq_app::reports::{DISPLAY_INDEX_FORMAT, DisplayBlockKind};
 use reviewq_domain::identity::{ReportHash, RunId, SessionKey};
 use reviewq_protocol::history::{HistoryDocument, HistoryDocumentResult, HistoryText};
@@ -16,7 +16,7 @@ use serde::Deserialize;
 
 use crate::entry::diagrams::{self, Owner};
 use crate::entry::document_display::{
-    MAX_WINDOW_JSON_BYTES, project_block, project_fallback, remove_tables,
+    MAX_WINDOW_JSON_BYTES, project_block, project_fallback, project_table, remove_tables,
 };
 use crate::entry::error::{ApiError, ApiPath as Path, ApiQuery as Query};
 use crate::entry::pages::{count, parse, success};
@@ -56,7 +56,7 @@ pub(in crate::entry) async fn document(
         address,
         &reference,
         DocumentQuery {
-            offset,
+            position: Position::AtByte(offset),
             expected: query.sha256.as_deref().map(parse).transpose()?,
         },
     )
@@ -65,6 +65,7 @@ pub(in crate::entry) async fn document(
         hash,
         bytes,
         byte_length,
+        table_start,
         previous,
         next,
         result,
@@ -111,7 +112,15 @@ pub(in crate::entry) async fn document(
             }
             HistoryDocumentResult::Ready { blocks: output }
         }
-        WindowResult::Source { reason, markdown } => {
+        WindowResult::Table(page) => HistoryDocumentResult::Table {
+            page: project_table(page)?,
+        },
+        WindowResult::Canonical(_) => return Err(AppError::Internal.into()),
+        WindowResult::Source {
+            reason,
+            markdown,
+            canonical,
+        } => {
             let display = (bytes.start == 0 && bytes.end == byte_length)
                 .then(|| {
                     diagrams::observe(&entry, &actor, drawing_owner(0), &markdown, font.as_ref())
@@ -119,6 +128,7 @@ pub(in crate::entry) async fn document(
                 .flatten();
             HistoryDocumentResult::Source {
                 reason: project_fallback(reason),
+                canonical: canonical.then_some(true),
                 markdown: HistoryText::new(markdown).ok_or(AppError::Internal)?,
                 display,
             }
@@ -134,6 +144,7 @@ pub(in crate::entry) async fn document(
             sha256: ReportHashDto::new(hash.as_str()).ok_or(AppError::Internal)?,
             index_format: count(u64::from(DISPLAY_INDEX_FORMAT))?,
             byte_length: count(byte_length)?,
+            table_start: table_start.map(count).transpose()?,
             byte_start: count(bytes.start)?,
             byte_end: count(bytes.end)?,
             previous_byte: previous.map(count).transpose()?,
@@ -162,6 +173,56 @@ pub(in crate::entry) async fn document(
         .into_response())
 }
 
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(in crate::entry) struct MarkdownQuery {
+    #[serde(rename = "ref")]
+    reference: String,
+    sha256: String,
+}
+
+pub(in crate::entry) async fn markdown(
+    State(entry): State<Arc<Entry>>,
+    headers: HeaderMap,
+    Path((run, session)): Path<(String, String)>,
+    Query(query): Query<MarkdownQuery>,
+) -> Result<Response, ApiError> {
+    let actor = entry.auth.browser_actor(&headers, false)?;
+    let address = (parse(&run)?, parse(&session)?);
+    let reference = Locator::decode(
+        &entry.auth.endpoint,
+        &query.reference,
+        &address.0,
+        &address.1,
+    )?;
+    let verified = read(
+        &entry,
+        actor,
+        address,
+        &reference,
+        DocumentQuery {
+            position: Position::Canonical,
+            expected: Some(parse(&query.sha256)?),
+        },
+    )
+    .await?;
+    let window = verified.value;
+    let WindowResult::Canonical(markdown) = window.result else {
+        return Err(AppError::Internal.into());
+    };
+    let etag = format!("\"{}\"", window.hash);
+    Ok((
+        [
+            (header::CONTENT_TYPE, "text/markdown; charset=utf-8"),
+            (header::CACHE_CONTROL, "private, no-store"),
+            (header::X_CONTENT_TYPE_OPTIONS, "nosniff"),
+            (header::ETAG, etag.as_str()),
+        ],
+        markdown,
+    )
+        .into_response())
+}
+
 pub(in crate::entry) async fn drawing_source(
     entry: &Entry,
     actor: Actor,
@@ -178,7 +239,7 @@ pub(in crate::entry) async fn drawing_source(
         (run, session),
         &reference,
         DocumentQuery {
-            offset,
+            position: Position::AtByte(offset),
             expected: Some(expected),
         },
     )

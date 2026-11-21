@@ -17,7 +17,15 @@ const MAX_NODES: usize = 60_000;
 
 /// Text of one admitted Markdown body. Unknown display constructs have no certified projection.
 pub fn displayed_markdown(source: &str) -> Option<String> {
-    if source.len() > 65_536
+    reader_text(source, 65_536)
+}
+
+pub(crate) fn displayed_document(source: &str) -> Option<String> {
+    reader_text(source, crate::history::document::MAX_INDEX_BYTES)
+}
+
+fn reader_text(source: &str, limit: usize) -> Option<String> {
+    if source.len() > limit
         || source
             .split_terminator('\n')
             .enumerate()

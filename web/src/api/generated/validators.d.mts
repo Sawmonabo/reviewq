@@ -81,6 +81,7 @@ import type {
   ReportHistoryResponse,
   ReportQuoteResolveResponse,
   ReportSectionResponse,
+  ReportTableResponse,
   ReportViewResponse,
   ReportViewedResponse,
   ReportWindowResponse,
@@ -308,6 +309,9 @@ export function isReportQuoteResolveResponse(
 export function isReportSectionResponse(
   value: unknown,
 ): value is ReportSectionResponse;
+export function isReportTableResponse(
+  value: unknown,
+): value is ReportTableResponse;
 export function isReportViewResponse(
   value: unknown,
 ): value is ReportViewResponse;

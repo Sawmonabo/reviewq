@@ -8,7 +8,8 @@ use reviewq_app::history::search::rpc::{
     RpcSearchEntry, RpcSearchPage, RpcSearchPoint, RpcSearchQuery,
 };
 use reviewq_app::history::search::{
-    HistorySearch, SearchCursor, SearchHit, SearchPage, SearchPoint, SourceObservation,
+    DocumentMatchMode, HistorySearch, SearchCursor, SearchHit, SearchPage, SearchPoint,
+    SourceObservation,
 };
 use reviewq_app::history::{
     ContentReference, FileContentRef, HistoryBookmark, HistorySession, NativeRpcStamp,
@@ -18,7 +19,7 @@ use reviewq_app::reading::Literal;
 use reviewq_domain::identity::{RunId, SessionKey};
 use reviewq_protocol::history::search::{
     HistorySearchDestination, HistorySearchDestinationResponse, HistorySearchDocument,
-    HistorySearchHit, HistorySearchPage, HistorySearchResponse,
+    HistorySearchDocumentMode, HistorySearchHit, HistorySearchPage, HistorySearchResponse,
 };
 use reviewq_protocol::history::{HistoryAvailability, HistoryText};
 use reviewq_protocol::reports::ReportHashDto;
@@ -142,7 +143,7 @@ struct Hit {
 struct Document {
     sha256: String,
     byte_start: u64,
-    canonical: bool,
+    mode: HistorySearchDocumentMode,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -250,7 +251,12 @@ impl SearchScope<'_> {
             document: found.document.map(|proof| Document {
                 sha256: proof.hash.to_string(),
                 byte_start: proof.byte_start,
-                canonical: proof.canonical,
+                mode: match proof.mode {
+                    DocumentMatchMode::Window => HistorySearchDocumentMode::Window,
+                    DocumentMatchMode::Canonical => HistorySearchDocumentMode::Canonical,
+                    DocumentMatchMode::TableBody => HistorySearchDocumentMode::TableBody,
+                    DocumentMatchMode::Source => HistorySearchDocumentMode::Source,
+                },
             }),
             matched: found.matched.clone(),
             ordinal: found.ordinal,
@@ -583,7 +589,7 @@ pub(super) async fn locate(
                     Ok::<_, AppError>(HistorySearchDocument {
                         sha256: ReportHashDto::new(doc.sha256).ok_or(AppError::Internal)?,
                         byte_start: count(doc.byte_start)?,
-                        canonical: doc.canonical,
+                        mode: doc.mode,
                     })
                 })
                 .transpose()?,

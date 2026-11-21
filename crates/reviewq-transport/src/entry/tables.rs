@@ -1,12 +1,16 @@
 use std::collections::VecDeque;
+use std::future::Future;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use reviewq_app::access::AppError;
+use reviewq_app::reading::table::paged::{self, Index};
 use reviewq_app::reading::table::{self, Column, Inline, MIN_TABLE_BYTES};
 use reviewq_app::reports::{DisplayBlockKind, DisplayIndex, build_display_index};
+use reviewq_domain::identity::ReportHash;
 use reviewq_protocol::reports::{DocumentDisplay, PreparedTable, TableColumn, TableInline};
 use sha2::{Digest, Sha256};
-use tokio::sync::Semaphore;
+use tokio::sync::{Mutex as AsyncMutex, Semaphore, mpsc};
 
 const MAX_ENTRIES: usize = 4;
 const RETENTION: Duration = Duration::from_secs(30);
@@ -25,12 +29,21 @@ type Entries = VecDeque<(Key, Option<Arc<PreparedTable>>, Instant)>;
 pub(super) struct Cache {
     entries: Arc<Mutex<Entries>>,
     producer: Arc<Semaphore>,
+    pages: Arc<AsyncMutex<Option<IndexedTable>>>,
+}
+
+struct IndexedTable {
+    hash: ReportHash,
+    at: Instant,
+    index: Option<Arc<Index>>,
 }
 
 impl Cache {
     pub(super) fn new() -> Self {
         let entries = Arc::new(Mutex::new(Entries::new()));
         let expire = Arc::downgrade(&entries);
+        let pages: Arc<AsyncMutex<Option<IndexedTable>>> = Arc::default();
+        let expire_pages = Arc::downgrade(&pages);
         tokio::spawn(async move {
             loop {
                 tokio::time::sleep(Duration::from_secs(5)).await;
@@ -40,12 +53,86 @@ impl Cache {
                 if let Ok(mut entries) = entries.lock() {
                     entries.retain(|(_, _, at)| at.elapsed() < RETENTION);
                 }
+                if let Some(pages) = expire_pages.upgrade()
+                    && let Ok(mut current) = pages.try_lock()
+                    && current
+                        .as_ref()
+                        .is_some_and(|item| item.at.elapsed() >= RETENTION)
+                {
+                    *current = None;
+                }
             }
         });
         Self {
             entries,
             producer: Arc::new(Semaphore::new(1)),
+            pages,
         }
+    }
+
+    /// The caller has authorized these immutable report bytes and rechecks the
+    /// receipt while resolving each chunk. The retained index holds only spans.
+    pub(super) async fn ranges<F>(
+        &self,
+        hash: ReportHash,
+        bytes: u64,
+        mut read_chunk: impl FnMut(u64) -> F + Send,
+    ) -> Result<Option<Arc<Index>>, AppError>
+    where
+        F: Future<Output = Result<Option<Vec<u8>>, AppError>> + Send,
+    {
+        if !(MIN_TABLE_BYTES as u64..=paged::MAX_INDEXED_BYTES).contains(&bytes) {
+            return Ok(None);
+        }
+        let mut cache = self.pages.lock().await;
+        if let Some(page) = cache
+            .as_mut()
+            .filter(|page| page.hash == hash && page.at.elapsed() < RETENTION)
+        {
+            page.at = Instant::now();
+            return Ok(page.index.clone());
+        }
+        let (input, mut chunks) = mpsc::channel::<Vec<u8>>(2);
+        let expected = hash.clone();
+        let worker = tokio::task::spawn_blocking(move || {
+            let mut builder = paged::Builder::default();
+            let mut digest = Sha256::new();
+            let mut seen = 0;
+            while let Some(raw) = chunks.blocking_recv() {
+                let text = std::str::from_utf8(&raw).map_err(|_| AppError::Internal)?;
+                seen += raw.len() as u64;
+                digest.update(&raw);
+                builder.push(text);
+                if builder.declined() {
+                    return Ok(None);
+                }
+            }
+            if seen != bytes || ReportHash::from_sha256(digest.finalize().into()) != expected {
+                return Err(AppError::CursorExpired);
+            }
+            Ok(builder.finish().map(Arc::new))
+        });
+        let mut sent = 0;
+        let mut ordinal = 0;
+        while sent < bytes {
+            let chunk = read_chunk(ordinal).await?.ok_or(AppError::CursorExpired)?;
+            if chunk.is_empty() || sent + chunk.len() as u64 > bytes {
+                return Err(AppError::CursorExpired);
+            }
+            sent += chunk.len() as u64;
+            if input.send(chunk).await.is_err() {
+                break;
+            }
+            ordinal += 1;
+        }
+        drop(input);
+        let index = worker.await.map_err(|_| AppError::Unavailable)??;
+        *cache = Some(IndexedTable {
+            hash,
+            at: Instant::now(),
+            index: index.clone(),
+        });
+        Ok(index)
     }
 
     /// The caller supplies bytes from a verified, individually bounded Markdown block.

@@ -4,7 +4,7 @@ import { validate621 } from "./history-text.mjs";
 import { validate127 } from "./safe-count-dto.mjs";
 import { validate48 } from "./history-cursor-dto.mjs";
 import { validate25 } from "./checkpoint-id-dto.mjs";
-function validate812(
+function validate822(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -87,7 +87,7 @@ function validate812(
               vErrors.push(err1);
             }
             errors++;
-            validate812.errors = vErrors;
+            validate822.errors = vErrors;
             return false;
           } else {
             errors = _errs3;
@@ -203,7 +203,7 @@ function validate812(
                     vErrors.push(err3);
                   }
                   errors++;
-                  validate812.errors = vErrors;
+                  validate822.errors = vErrors;
                   return false;
                 } else {
                   errors = _errs10;
@@ -277,7 +277,7 @@ function validate812(
                       vErrors.push(err5);
                     }
                     errors++;
-                    validate812.errors = vErrors;
+                    validate822.errors = vErrors;
                     return false;
                   } else {
                     errors = _errs15;
@@ -346,7 +346,7 @@ function validate812(
         }
       }
     } else {
-      validate812.errors = [
+      validate822.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -357,7 +357,7 @@ function validate812(
       return false;
     }
   }
-  validate812.errors = vErrors;
+  validate822.errors = vErrors;
   return errors === 0;
 }
-export { validate812 };
+export { validate822 };

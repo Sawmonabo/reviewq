@@ -39,11 +39,11 @@ function pieces<T>(root: T, describe: (item: T) => Display<T> | undefined): Piec
   return result;
 }
 
-export function markdownText(root: Root) {
+export function markdownText(root: Root, tableBody = false) {
   return pieces<Root | RootContent>(root, (node) => {
     if (node.type === "root") return { tag: "root", children: node.children };
     if (node.type === "text") return { text: node.value };
-    if (node.type !== "element") return;
+    if (node.type !== "element" || (tableBody && node.tagName === "thead")) return;
     if (
       node.tagName === "pre" &&
       node.children.some(

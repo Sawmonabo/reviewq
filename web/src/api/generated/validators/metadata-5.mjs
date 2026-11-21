@@ -15,7 +15,20 @@ const schema215 = {
   ],
   type: "string",
 };
-const schema217 = {
+const schema218 = {
+  properties: {
+    canonical: { type: ["boolean", "null"] },
+    display: {
+      anyOf: [{ $ref: "#/definitions/DocumentDisplay" }, { type: "null" }],
+    },
+    markdown: { $ref: "#/definitions/HistoryText" },
+    reason: { $ref: "#/definitions/DisplayFallback" },
+    state: { const: "source", type: "string" },
+  },
+  required: ["state", "reason", "markdown"],
+  type: "object",
+};
+const schema219 = {
   enum: [
     "document_budget",
     "parser_budget",
@@ -29,12 +42,8 @@ const schema217 = {
   ],
   type: "string",
 };
-const schema233 = {
+const schema235 = {
   enum: ["running", "completed", "failed", "unknown"],
   type: "string",
 };
-const schema244 = {
-  enum: ["pending", "in_progress", "completed"],
-  type: "string",
-};
-export { schema197, schema215, schema217, schema233, schema244 };
+export { schema197, schema215, schema218, schema219, schema235 };

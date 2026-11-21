@@ -20,6 +20,7 @@ type Props = {
   readonly generation: string;
   readonly reference: string | undefined;
   readonly onReference: (reference: string | undefined) => void;
+  readonly onReadRange: (element: HTMLElement) => boolean;
   readonly expanded: ReadonlySet<string>;
   readonly prose: ReadonlyMap<string, InlineProse | null>;
   readonly toggle: (key: string, open: boolean) => void;
@@ -36,6 +37,7 @@ export function EntryBody({
   generation,
   reference,
   onReference,
+  onReadRange,
   expanded,
   prose,
   toggle,
@@ -91,6 +93,7 @@ export function EntryBody({
             entryId={entryId}
             reference={ref}
             format={format}
+            onReadRange={onReadRange}
             {...(match ? { found: match } : {})}
           />
         )}

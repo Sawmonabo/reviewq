@@ -335,7 +335,7 @@ function stripPrefix(heading: Element, length: number, source: string): RootCont
   ];
 }
 
-function annotate(nodes: readonly RootContent[]) {
+export function annotate(nodes: readonly RootContent[]) {
   return nodes.map(annotateNode);
 }
 

@@ -248,6 +248,8 @@ pub struct HistoryDocument {
     pub sha256: crate::scalar::ReportHashDto,
     pub index_format: SafeCountDto,
     pub byte_length: SafeCountDto,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub table_start: Option<SafeCountDto>,
     pub byte_start: SafeCountDto,
     pub byte_end: SafeCountDto,
     pub previous_byte: Option<SafeCountDto>,
@@ -267,8 +269,13 @@ pub enum HistoryDocumentResult {
         #[cfg_attr(feature = "schema", schemars(length(min = 1, max = 32)))]
         blocks: Vec<crate::reports::DisplayBlock>,
     },
+    Table {
+        page: crate::reports::TablePage,
+    },
     Source {
         reason: crate::reports::DisplayFallback,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        canonical: Option<bool>,
         markdown: HistoryText,
         #[serde(skip_serializing_if = "Option::is_none")]
         display: Option<crate::reports::DocumentDisplay>,

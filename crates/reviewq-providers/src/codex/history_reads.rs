@@ -1,7 +1,9 @@
 use std::time::{Duration, Instant};
 
 use reviewq_app::access::AppError;
-use reviewq_app::history::document::{Index, MAX_INDEX_BYTES, Query, SourcePages, Window};
+use reviewq_app::history::document::{
+    Index, MAX_INDEX_BYTES, Position, Query, SourcePages, Window, WindowResult,
+};
 use reviewq_app::history::{
     ContentReference, HistorySession, NativeContent, NativeHistoryPage, NativePlan, NativePosition,
     RpcContentRef, VisibleEntry, VisiblePartKind,
@@ -132,7 +134,7 @@ impl Codex {
             return Err(AppError::CursorExpired);
         }
         let (_, text) = self.read_item_text(session, reference, true).await?;
-        self.project_item_document(text, hash, query).await
+        self.project_item_document(text, hash, query, false).await
     }
 
     pub(super) async fn project_item_document(
@@ -140,13 +142,14 @@ impl Codex {
         text: String,
         hash: ReportHash,
         query: Query,
+        include_context: bool,
     ) -> Result<Window, AppError> {
         let mut cache = self.document.clone().lock_owned().await;
         tokio::task::spawn_blocking(move || {
             if cache.as_ref().is_none_or(|cached| {
                 cached.hash != hash || cached.touched.elapsed() >= Duration::from_secs(30)
             }) {
-                let mut pages = SourcePages::default();
+                let mut pages = SourcePages::for_bytes(text.len() as u64);
                 pages.push(&text);
                 *cache = Some(PreparedDocument {
                     index: Index::new(
@@ -160,13 +163,32 @@ impl Codex {
             }
             let cached = cache.as_mut().ok_or(AppError::Internal)?;
             cached.touched = Instant::now();
-            cached.index.read(query, |range| {
+            let source = |range: std::ops::Range<u64>| {
                 Ok(text
                     .as_bytes()
                     .get(range.start as usize..range.end as usize)
                     .ok_or(AppError::CursorExpired)?
                     .to_vec())
-            })
+            };
+            let window = cached.index.read(query, source)?;
+            if include_context
+                && matches!(
+                    window.result,
+                    WindowResult::Source {
+                        canonical: true,
+                        ..
+                    }
+                )
+            {
+                return cached.index.read(
+                    Query {
+                        position: Position::Canonical,
+                        expected: Some(window.hash),
+                    },
+                    source,
+                );
+            }
+            Ok(window)
         })
         .await
         .map_err(|_| AppError::Unavailable)?

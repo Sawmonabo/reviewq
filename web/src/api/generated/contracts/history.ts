@@ -12,6 +12,7 @@ import type {
   RunIdDto,
   SafeCountDto,
   SessionKeyDto,
+  TablePage,
   UtcTimestampDto,
 } from "./common.js";
 
@@ -32,6 +33,12 @@ export type HistoryDocumentResult =
       [k: string]: unknown;
     }
   | {
+      page: TablePage;
+      state: "table";
+      [k: string]: unknown;
+    }
+  | {
+      canonical?: boolean | null;
       display?: DocumentDisplay | null;
       markdown: HistoryText;
       reason: DisplayFallback;
@@ -128,6 +135,9 @@ export type HistoryToolState = "running" | "completed" | "failed" | "unknown";
 
 export type PlanTaskStatus = "pending" | "in_progress" | "completed";
 
+export type HistorySearchDocumentMode =
+  "window" | "canonical" | "table_body" | "source";
+
 export interface HistoryContentResponse {
   cursor: EventCursorDto;
   data: HistoryContent;
@@ -168,6 +178,7 @@ export interface HistoryDocument {
   runId: RunIdDto;
   sessionKey: SessionKeyDto;
   sha256: ReportHashDto;
+  tableStart?: SafeCountDto | null;
   [k: string]: unknown;
 }
 
@@ -321,7 +332,7 @@ export interface HistorySearchDestination {
 
 export interface HistorySearchDocument {
   byteStart: SafeCountDto;
-  canonical: boolean;
+  mode: HistorySearchDocumentMode;
   sha256: ReportHashDto;
   [k: string]: unknown;
 }
