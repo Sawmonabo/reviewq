@@ -28,6 +28,7 @@ type Props = {
     readonly next: boolean;
     readonly onStep: (direction: -1 | 1) => void;
   };
+  readonly onOpen: () => void;
   readonly onChooseFile: (file: PatchFile) => void;
   readonly onChoosePath: (path: PatchPath) => void;
   readonly onChooseMatch: (match: PatchSearchMatch, query: string) => void;
@@ -55,6 +56,7 @@ export function ChangedFilePicker({
   pending,
   catalog,
   navigation,
+  onOpen,
   onChooseFile,
   onChoosePath,
   onChooseMatch,
@@ -86,10 +88,17 @@ export function ChangedFilePicker({
     if (!anchor || !element) return;
     function place() {
       if (!anchor || !element) return;
+      const viewport = window.visualViewport;
+      const height = viewport?.height ?? window.innerHeight;
       const box = anchor.getBoundingClientRect();
       const header = anchor.closest(".changes-header")?.getBoundingClientRect();
       const width = Math.min(414, window.innerWidth - 24);
       const spaceBelow = window.innerHeight - box.bottom - 18;
+      element.style.setProperty("--dialog-visible-height", `${height}px`);
+      element.style.setProperty(
+        "--dialog-keyboard-inset",
+        `${Math.max(0, window.innerHeight - height - (viewport?.offsetTop ?? 0))}px`,
+      );
       const above = spaceBelow < 260 && box.top > spaceBelow;
       element.style.setProperty(
         "--dialog-left",
@@ -109,6 +118,8 @@ export function ChangedFilePicker({
     const observer = new ResizeObserver(place);
     observer.observe(anchor);
     window.addEventListener("resize", place);
+    window.visualViewport?.addEventListener("resize", place);
+    window.visualViewport?.addEventListener("scroll", place);
     const scroller = anchor.closest(".drawer-body");
     scroller?.addEventListener("scroll", place, { passive: true });
     place();
@@ -117,6 +128,8 @@ export function ChangedFilePicker({
     return () => {
       observer.disconnect();
       window.removeEventListener("resize", place);
+      window.visualViewport?.removeEventListener("resize", place);
+      window.visualViewport?.removeEventListener("scroll", place);
       scroller?.removeEventListener("scroll", place);
       if (element.open) element.close();
     };
@@ -180,7 +193,7 @@ export function ChangedFilePicker({
   const canSearch = Boolean(open && text && new TextEncoder().encode(query).length <= 256);
   const readingCode = canSearch && search === query;
   const code = usePatchSearch(reviewId, index.revision, readingCode ? search : "", visibleFileId);
-  const matches = readingCode ? (code.data?.items ?? []) : [];
+  const matches = readingCode ? code.items : [];
   const codeGroups = new Map<string, PatchSearchMatch[]>();
   for (const match of matches) {
     const path = match.side === "old" ? match.oldPath : match.newPath;
@@ -203,6 +216,7 @@ export function ChangedFilePicker({
   const ordinal = total ? `${position} of ${total}` : `File ${position}`;
 
   function close() {
+    if (dialog.current?.open) dialog.current.close();
     setOpen(false);
   }
 
@@ -212,6 +226,12 @@ export function ChangedFilePicker({
   }
 
   function move(event: KeyboardEvent<HTMLDialogElement>) {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      event.stopPropagation();
+      close();
+      return;
+    }
     if (event.key !== "ArrowDown" && event.key !== "ArrowUp" && event.key !== "Enter") return;
     if (event.key === "Enter" && event.target !== input.current) return;
     const options = [
@@ -264,6 +284,7 @@ export function ChangedFilePicker({
         aria-describedby={`${id}-position`}
         title={selected?.newPath}
         onClick={() => {
+          onOpen();
           setVisibleFileId(selected?.fileId);
           setQuery("");
           setSearch("");
@@ -483,6 +504,22 @@ export function ChangedFilePicker({
               )}
               {readingCode && code.data?.coverage === "complete" && !matches.length && (
                 <p className="changes-picker-empty">No matching code.</p>
+              )}
+              {readingCode && code.exhausted && (
+                <p className="changes-picker-empty">No more code matches.</p>
+              )}
+              {readingCode && code.hasPrevious && (
+                <button
+                  type="button"
+                  className="changes-clear"
+                  disabled={code.pending}
+                  onClick={() => {
+                    setSuggested(undefined);
+                    code.previous();
+                  }}
+                >
+                  Previous code matches
+                </button>
               )}
               {readingCode && code.data?.nextCursor && (
                 <button

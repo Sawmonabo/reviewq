@@ -258,7 +258,7 @@ export function FileStream({
       childList: true,
       subtree: true,
       attributes: true,
-      attributeFilter: ["data-patch-prepared"],
+      attributeFilter: ["data-patch-prepared", "data-source-seek"],
     });
     schedule();
     return () => {
@@ -273,6 +273,7 @@ export function FileStream({
         if (requested !== generation.current || !file?.isConnected) return;
         if (file.querySelector(".patch-waiting, .patch-rich:not([data-patch-prepared])")) return;
         const rich = file.querySelector<HTMLElement>(".patch-rich");
+        if (jump?.source && !rich && file.querySelector("[data-source-seek='pending']")) return;
         const line = jump?.line && rich && patchDocument(rich)?.line(jump.line);
         const row = line?.element;
         const source = jump?.source && sourceRect(file, jump.source);
@@ -491,7 +492,7 @@ export function FileStream({
       return file.oldPath === path.oldPath && file.newPath === path.newPath;
     };
     for (const [ordinal, file] of files)
-      if (matches(file)) {
+      if (matches(file) && (!match || file.patchETag === match.match.patchETag)) {
         openTarget(ordinal, file);
         return;
       }
@@ -503,6 +504,10 @@ export function FileStream({
     function openTarget(ordinal: number, file: PatchFile) {
       if (!match) {
         goTo(ordinal, true, line);
+        return;
+      }
+      if (file.patchETag !== match.match.patchETag) {
+        setNavigationError("The patch changed since this match. Search again.");
         return;
       }
       const source = file.patchETag
@@ -566,6 +571,7 @@ export function FileStream({
               next: first + 1 < count,
               onStep: (direction) => void goToOrdinal(first + direction),
             }}
+            onOpen={beginNavigation}
             onChooseFile={chooseFile}
             onChoosePath={(path) => void chooseTarget({ path })}
             onChooseMatch={(match, query) =>

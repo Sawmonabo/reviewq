@@ -88,7 +88,7 @@ export type ThreadJump = (
   | { readonly fileId: string }
   | { readonly path: PatchPath }
   | { readonly paths: Pick<PatchPath, "oldPath" | "newPath"> }
-) & { readonly line: PatchLine };
+) & { readonly line: PatchLine; readonly thread: PatchDiscussion };
 
 export function threadLine(thread: PatchDiscussion): PatchLine | undefined {
   const anchor = thread.anchor;

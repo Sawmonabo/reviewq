@@ -12,6 +12,28 @@ export function setPatchMatch(ranges: readonly Range[]) {
   } else CSS.highlights.delete("reviewq-patch-match");
 }
 
+export function keepSplitMatch(text: Text, offset: number) {
+  const active = CSS.highlights?.get("reviewq-patch-match");
+  if (!active) return undefined;
+  const positions = [...active].map((range) => ({
+    start: range.startContainer,
+    from: range.startOffset,
+    end: range.endContainer,
+    to: range.endOffset,
+  }));
+  return (tail: Text) => {
+    const ranges = positions.map(({ start, from, end, to }) => {
+      const range = new Range();
+      const moveStart = start === text && from >= offset;
+      const moveEnd = end === text && to >= offset;
+      range.setStart(moveStart ? tail : start, moveStart ? from - offset : from);
+      range.setEnd(moveEnd ? tail : end, moveEnd ? to - offset : to);
+      return range;
+    });
+    setPatchMatch(ranges);
+  };
+}
+
 export type PatchDecoration = {
   readonly element: HTMLElement;
   readonly range: Range;

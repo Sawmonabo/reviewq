@@ -45,7 +45,18 @@ export function PatchSource({ file, position, entrySide }: Props) {
       setFailure(undefined);
     } else if (position && position !== "away") {
       setFailure(undefined);
-      setMove(openingMove(file, position, false));
+      const first = pages[0];
+      const last = pages.at(-1);
+      if (
+        typeof position === "object" &&
+        first &&
+        last &&
+        first.etag === position.etag &&
+        first.first <= position.byte &&
+        last.next >= (position.end ?? position.byte + 1)
+      )
+        setMove(undefined);
+      else setMove(openingMove(file, position, false));
     }
   }
   const adjustment = useRef<
@@ -366,8 +377,9 @@ export function PatchSource({ file, position, entrySide }: Props) {
               tabIndex={0}
               ref={pre}
               data-patch-etag={head.etag}
+              data-source-seek={move?.byte !== undefined ? "pending" : undefined}
               aria-label="Patch source"
-              aria-busy={Boolean(move?.direction)}
+              aria-busy={Boolean(move?.direction || move?.byte !== undefined)}
               onCopy={(event) => {
                 const selection = getSelection();
                 if (!selection?.rangeCount || selection.isCollapsed) return;

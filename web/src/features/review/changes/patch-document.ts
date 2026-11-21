@@ -1,4 +1,9 @@
-import { decoratePatchRow, positionPatchRow, releasePatchDecoration } from "./patch-decoration";
+import {
+  decoratePatchRow,
+  keepSplitMatch,
+  positionPatchRow,
+  releasePatchDecoration,
+} from "./patch-decoration";
 import type { PatchDecoration } from "./patch-decoration";
 import { indexAtByte, patchRows } from "./patch-rows";
 
@@ -232,6 +237,10 @@ export function mountPatchDocument(host: HTMLDivElement, source: string): PatchD
         : undefined;
     const first = ordinal + 1;
     const split = rows[first]!.start - rows[segment.first]!.start;
+    const reading = activeRange;
+    const readingOffset =
+      reading?.range.startContainer === segment.text ? reading.range.startOffset : undefined;
+    const restoreMatch = keepSplitMatch(segment.text, split);
     removeDecorations(segment, true);
     const tail = segment.text.splitText(split);
     const next = createSegment(first, segment.end, tail);
@@ -258,11 +267,13 @@ export function mountPatchDocument(host: HTMLDivElement, source: string): PatchD
         moveFocus ? focusOffset - split : focusOffset,
       );
     }
-    if (
-      activeRange?.range.startContainer === segment.text &&
-      activeRange.range.startOffset >= split
-    )
-      rememberReading();
+    if (reading && readingOffset !== undefined && readingOffset >= split) {
+      const range = new Range();
+      range.setStart(tail, readingOffset - split);
+      range.collapse(true);
+      activeRange = { ...reading, range };
+    }
+    restoreMatch?.(tail);
     requestDecoration();
   }
 

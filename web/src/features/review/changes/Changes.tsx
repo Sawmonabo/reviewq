@@ -46,6 +46,10 @@ export default function Changes({
   const [navigation, setNavigation] = useState<HTMLDivElement | null>(null);
   const toolbar = useRef<HTMLDivElement>(null);
   const [threadJump, setThreadJump] = useState<ThreadJump>();
+  const [extraInline, setExtraInline] = useState<{
+    readonly revision: string;
+    readonly thread: PatchDiscussion;
+  }>();
   const [loadedAnchors, setLoadedAnchors] = useState<ReadonlySet<string>>();
   const [tab, setTab] = useState<Tab>("files");
   const [status, setStatus] = useState<Status>("any");
@@ -114,6 +118,16 @@ export default function Changes({
       ? `${knownFiles}${shown.nextCursor ? "+" : ""}`
       : undefined;
   const general = filtered.filter(isGeneral);
+  const requestedInline = extraInline?.revision === revision ? extraInline?.thread : undefined;
+  const inline = useMemo(
+    () =>
+      requestedInline &&
+      matchesFilters(requestedInline, status, involving) &&
+      !threads.items.some((item) => item.discussionId === requestedInline.discussionId)
+        ? [...filtered, requestedInline]
+        : filtered,
+    [filtered, involving, requestedInline, status, threads.items],
+  );
   const visible =
     tab === "files"
       ? filtered.filter(
@@ -140,6 +154,7 @@ export default function Changes({
     setThreadPage(0);
     setThreadTrail([]);
     setThreadJump(undefined);
+    setExtraInline(undefined);
     setEpoch((value) => value + 1);
   }
 
@@ -259,7 +274,7 @@ export default function Changes({
             reviewId={reviewId}
             initial={shown}
             catalog={catalog}
-            threads={filtered}
+            threads={inline}
             webUrl={webUrl}
             toolbar={toolbar}
             navigation={navigation}
@@ -321,10 +336,16 @@ export default function Changes({
             const target: ThreadJump | undefined =
               line && anchor
                 ? file
-                  ? { fileId: file.fileId, line }
+                  ? { fileId: file.fileId, line, thread }
                   : path
-                    ? { path, line }
-                    : { paths: { oldPath: anchor.oldPath, newPath: anchor.newPath }, line }
+                    ? { path, line, thread }
+                    : catalog.data?.paths && !catalog.data.partial
+                      ? undefined
+                      : {
+                          paths: { oldPath: anchor.oldPath, newPath: anchor.newPath },
+                          line,
+                          thread,
+                        }
                 : undefined;
             return (
               <div key={thread.discussionId} className="changes-conversation">
@@ -337,6 +358,7 @@ export default function Changes({
                     type="button"
                     className="changes-clear"
                     onClick={() => {
+                      if (revision) setExtraInline({ revision, thread: target.thread });
                       setThreadJump(target);
                       setTab("files");
                     }}
