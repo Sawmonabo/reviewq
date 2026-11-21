@@ -68,13 +68,29 @@ export function mountPatchDocument(host: HTMLDivElement, source: string): PatchD
   const scroller = host.closest<HTMLElement>(".drawer-body");
   const controls = host.closest(".changes")?.querySelector(".changes-header");
   const root = document.createDocumentFragment();
-  const decorated = new Set<Segment>();
+  const watched = new Set<Segment>();
   const geometryRange = new Range();
   let backwards = false;
   let previousOffset = scroller?.scrollTop ?? 0;
   let activeRange:
     { readonly range: Range; readonly inset: number; readonly offset: number } | undefined;
   let frame = 0;
+
+  const observer = new IntersectionObserver(
+    (entries) => {
+      for (const entry of entries) {
+        const segment = byElement.get(entry.target as HTMLElement);
+        if (!segment) continue;
+        if (entry.isIntersecting) watched.add(segment);
+        else {
+          watched.delete(segment);
+          removeDecorations(segment);
+        }
+      }
+      requestDecoration();
+    },
+    { root: scroller, rootMargin: `${AHEAD_PX}px 0px` },
+  );
 
   const resize = new ResizeObserver(() => {
     const anchor = activeRange;
@@ -107,14 +123,12 @@ export function mountPatchDocument(host: HTMLDivElement, source: string): PatchD
     if (row.new !== undefined) newLines.set(row.new, ordinal);
   });
   host.replaceChildren(root);
+  for (const segment of segments) observer.observe(segment.element);
   resize.observe(host);
-  const stream = host.closest(".file-stream-list");
-  if (stream) resize.observe(stream);
   scroller?.addEventListener("scroll", onScroll, { passive: true });
   window.addEventListener("resize", requestDecoration);
   rememberReading();
   host.dataset.patchPrepared = "";
-  requestDecoration();
 
   const handle: PatchDocument = {
     line(line) {
@@ -192,11 +206,12 @@ export function mountPatchDocument(host: HTMLDivElement, source: string): PatchD
     },
     release() {
       cancelAnimationFrame(frame);
+      observer.disconnect();
       resize.disconnect();
       scroller?.removeEventListener("scroll", onScroll);
       window.removeEventListener("resize", requestDecoration);
       releasePatchMatch(host);
-      for (const segment of decorated) removeDecorations(segment, true);
+      for (const segment of segments) removeDecorations(segment, true);
       if (documents.get(host) === handle) {
         documents.delete(host);
         host.replaceChildren();
@@ -251,6 +266,7 @@ export function mountPatchDocument(host: HTMLDivElement, source: string): PatchD
     const location = segments.indexOf(segment);
     segments.splice(location + 1, 0, next);
     segment.element.after(next.element);
+    observer.observe(next.element);
     segment.layout = undefined;
     // Moving the split Text to its new wrapper retargets a DOM Selection to
     // the old parent. Reapply its original direction and source boundaries.
@@ -390,7 +406,6 @@ export function mountPatchDocument(host: HTMLDivElement, source: string): PatchD
       source.slice(row.start, end),
     );
     segment.decorations.set(ordinal, decoration);
-    decorated.add(segment);
     parent.append(decoration.element);
     return decoration;
   }
@@ -401,11 +416,10 @@ export function mountPatchDocument(host: HTMLDivElement, source: string): PatchD
       releasePatchDecoration(decoration);
       segment.decorations.delete(ordinal);
     }
-    if (!segment.decorations.size) decorated.delete(segment);
   }
 
   function requestDecoration() {
-    if (frame || !segments.length) return;
+    if (frame || !watched.size) return;
     frame = requestAnimationFrame(() => {
       frame = 0;
       const view = scroller?.getBoundingClientRect();
@@ -414,31 +428,16 @@ export function mountPatchDocument(host: HTMLDivElement, source: string): PatchD
         (backwards ? AHEAD_PX : BEHIND_PX);
       const bottom = (view?.bottom ?? window.innerHeight) + (backwards ? BEHIND_PX : AHEAD_PX);
 
-      const file = host.getBoundingClientRect();
-      if (file.bottom <= top || file.top >= bottom) {
-        for (const segment of decorated) removeDecorations(segment);
-        return;
-      }
-
-      // The blocks follow source order in the native layout, including gaps
-      // from threads. A binary search finds the first block below the edge.
-      let low = 0;
-      let high = segments.length;
-      while (low < high) {
-        const middle = (low + high) >>> 1;
-        if (segments[middle]!.element.getBoundingClientRect().bottom <= top) low = middle + 1;
-        else high = middle;
-      }
-
-      // Read the near blocks before changing or positioning their decorations.
-      const measurements = [];
-      let style: TextStyle | undefined;
-      for (let index = low; index < segments.length; index++) {
-        const segment = segments[index]!;
+      // Read each block's layout before adding children or styling any markers.
+      const reading = [...watched];
+      const firstSegment = reading[0];
+      if (!firstSegment) return;
+      const style = textStyle(firstSegment);
+      const measurements = reading.map((segment) => {
         const bounds = segment.element.getBoundingClientRect();
-        if (bounds.top >= bottom) break;
         const length = segment.end - segment.first;
-        style ??= textStyle(segment);
+        if (bounds.bottom <= top || bounds.top >= bottom)
+          return { segment, layout: undefined, positions: [], from: segment.end, to: segment.end };
         const layout = blockLayout(segment, bounds, style);
         const first = rowAtOffset(segment, length, bounds, top - bounds.top, layout);
         const last = Math.min(
@@ -448,17 +447,14 @@ export function mountPatchDocument(host: HTMLDivElement, source: string): PatchD
         const positions: number[] = [];
         for (let index = first; index <= last; index++)
           positions.push(blockRowTop(segment, index, bounds, layout));
-        measurements.push({
+        return {
           segment,
           layout,
           positions,
           from: segment.first + first,
           to: segment.first + last,
-        });
-      }
-      for (const segment of decorated) {
-        if (!measurements.some((entry) => entry.segment === segment)) removeDecorations(segment);
-      }
+        };
+      });
       for (const { segment, layout, positions, from, to } of measurements) {
         const changed = segment.positioned !== layout;
         for (const [ordinal, decoration] of segment.decorations) {
