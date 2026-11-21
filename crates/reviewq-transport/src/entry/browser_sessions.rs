@@ -1,44 +1,40 @@
-//! Installation-scoped browser grants. Bearer tokens never enter the saved ledger.
-use std::collections::HashMap;
-use std::sync::{Mutex, RwLock};
+//! Stateless browser grants bound to one profile, store and origin.
 
 use axum::http::{HeaderMap, HeaderValue, header};
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
+use hmac::{Hmac, Mac};
 use reviewq_app::access::AppError;
-use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use super::control::{ServiceEndpoint, decode, random, unix_seconds};
+use super::control::{ServiceEndpoint, mac, random, unix_seconds};
 
-const MAX_SESSIONS: usize = 128;
 const SESSION_SECONDS: u64 = 12 * 60 * 60;
+const EXPIRY_BYTES: usize = 8;
+const PAYLOAD_BYTES: usize = EXPIRY_BYTES + 32;
+const SIGNED_BYTES: usize = PAYLOAD_BYTES + 32;
+const ENCODED_BYTES: usize = (8 * SIGNED_BYTES).div_ceil(6);
+const SESSION_DOMAIN: &[u8] = b"reviewq-browser-session-v1";
+const CSRF_DOMAIN: &[u8] = b"reviewq-browser-csrf-v2";
 
-#[derive(Clone, Deserialize, Serialize)]
-#[serde(deny_unknown_fields)]
-pub struct BrowserSessionGrants {
-    scope: String,
-    expires: HashMap<String, u64>,
-}
-
-type Save = dyn Fn(&BrowserSessionGrants) -> Result<(), AppError> + Send + Sync;
-
+/// Signs and verifies browser sessions for a single installation.
 pub struct BrowserSessions {
+    key: [u8; 32],
+    scope: [u8; 32],
     cookie: String,
-    grants: RwLock<BrowserSessionGrants>,
-    save: Box<Save>,
-    issuance: Mutex<()>,
 }
+
+pub(super) struct BrowserSession([u8; PAYLOAD_BYTES]);
 
 impl BrowserSessions {
-    pub fn restore(
+    /// Bind the owner-private signing key to the opened profile, store and browser endpoint.
+    pub fn new(
         endpoint: &ServiceEndpoint,
         directory_id: (u64, u64),
         database_id: (u64, u64),
-        stored: Option<BrowserSessionGrants>,
-        save: impl Fn(&BrowserSessionGrants) -> Result<(), AppError> + Send + Sync + 'static,
+        key: [u8; 32],
     ) -> Result<Self, AppError> {
         let identity = endpoint.identity();
-        let scope = serde_json::to_vec(&(
+        let binding = serde_json::to_vec(&(
             &identity.profile_id,
             &identity.store_id,
             endpoint.browser(),
@@ -46,109 +42,90 @@ impl BrowserSessions {
             database_id,
         ))
         .map_err(|_| AppError::Internal)?;
-        let scope = URL_SAFE_NO_PAD.encode(digest(b"reviewq-browser-scope-v1", &scope));
-        let cookie = format!("reviewq_{scope}");
-        let mut grants = stored
-            .filter(|saved| {
-                saved.scope == scope
-                    && saved.expires.len() <= MAX_SESSIONS
-                    && saved.expires.keys().all(|key| decode(key).is_some())
-            })
-            .unwrap_or_else(|| BrowserSessionGrants {
-                scope,
-                expires: HashMap::new(),
-            });
-        let now = unix_seconds()?;
-        grants.expires.retain(|_, expiry| valid(*expiry, now));
-        Ok(Self {
-            cookie,
-            grants: RwLock::new(grants),
-            save: Box::new(save),
-            issuance: Mutex::new(()),
-        })
+        let scope = Sha256::new()
+            .chain_update(b"reviewq-browser-scope-v1")
+            .chain_update([0])
+            .chain_update(binding)
+            .finalize()
+            .into();
+        let cookie = format!("reviewq_{}", URL_SAFE_NO_PAD.encode(scope));
+        Ok(Self { key, scope, cookie })
     }
 
-    fn token(&self, headers: &HeaderMap) -> Option<[u8; 32]> {
-        let mut values = headers
+    pub(super) fn verify(&self, headers: &HeaderMap) -> Result<BrowserSession, AppError> {
+        self.authorized(headers, unix_seconds()?)
+            .ok_or(AppError::Unauthorized)
+    }
+
+    pub(super) fn csrf(&self, session: &BrowserSession) -> [u8; 32] {
+        self.proof(CSRF_DOMAIN, &session.0)
+            .finalize()
+            .into_bytes()
+            .into()
+    }
+
+    pub(super) fn issue(
+        &self,
+        headers: &HeaderMap,
+    ) -> Result<([u8; 32], Option<HeaderValue>), AppError> {
+        let now = unix_seconds()?;
+        if let Some(session) = self.authorized(headers, now) {
+            return Ok((self.csrf(&session), None));
+        }
+
+        let expiry = now.checked_add(SESSION_SECONDS).ok_or(AppError::Internal)?;
+        let mut payload = [0; PAYLOAD_BYTES];
+        payload[..EXPIRY_BYTES].copy_from_slice(&expiry.to_be_bytes());
+        payload[EXPIRY_BYTES..].copy_from_slice(&random()?);
+
+        let signature = self.proof(SESSION_DOMAIN, &payload).finalize().into_bytes();
+        let mut signed = [0; SIGNED_BYTES];
+        signed[..PAYLOAD_BYTES].copy_from_slice(&payload);
+        signed[PAYLOAD_BYTES..].copy_from_slice(&signature);
+        let mut cookie = HeaderValue::from_str(&format!(
+            "{}={}; Path=/api/v1; HttpOnly; SameSite=Strict",
+            self.cookie,
+            URL_SAFE_NO_PAD.encode(signed)
+        ))
+        .map_err(|_| AppError::Internal)?;
+        cookie.set_sensitive(true);
+        Ok((self.csrf(&BrowserSession(payload)), Some(cookie)))
+    }
+
+    fn authorized(&self, headers: &HeaderMap, now: u64) -> Option<BrowserSession> {
+        let mut cookies = headers
             .get_all(header::COOKIE)
             .iter()
             .filter_map(|value| value.to_str().ok())
             .flat_map(|cookie| cookie.split(';'))
             .filter_map(|item| item.trim().split_once('='))
             .filter_map(|(name, value)| (name == self.cookie).then_some(value));
-        let token = decode(values.next()?)?;
-        values.next().is_none().then_some(token)
+        let encoded = cookies.next()?;
+        if encoded.len() != ENCODED_BYTES || cookies.next().is_some() {
+            return None;
+        }
+        let mut signed = [0; SIGNED_BYTES];
+        if URL_SAFE_NO_PAD.decode_slice(encoded, &mut signed).ok()? != SIGNED_BYTES {
+            return None;
+        }
+        let (payload, signature) = signed.split_at(PAYLOAD_BYTES);
+        let payload: [u8; PAYLOAD_BYTES] = payload.try_into().ok()?;
+        let expiry = u64::from_be_bytes(*payload.first_chunk()?);
+        if expiry <= now || expiry - now > SESSION_SECONDS {
+            return None;
+        }
+        self.proof(SESSION_DOMAIN, &payload)
+            .verify_slice(signature)
+            .ok()?;
+        Some(BrowserSession(payload))
     }
 
-    fn authorized(&self, headers: &HeaderMap, now: u64) -> Result<Option<[u8; 32]>, AppError> {
-        let Some(token) = self.token(headers) else {
-            return Ok(None);
-        };
-        let grants = self.grants.read().map_err(|_| AppError::Internal)?;
-        Ok(grants
-            .expires
-            .get(&verifier(&token))
-            .copied()
-            .filter(|expiry| valid(*expiry, now))
-            .map(|_| token))
+    fn proof(&self, domain: &[u8], payload: &[u8; PAYLOAD_BYTES]) -> Hmac<Sha256> {
+        let mut proof = mac(&self.key);
+        proof.update(domain);
+        proof.update(&[0]);
+        proof.update(&self.scope);
+        proof.update(payload);
+        proof
     }
-
-    pub(super) fn csrf(&self, headers: &HeaderMap) -> Result<[u8; 32], AppError> {
-        let token = self
-            .authorized(headers, unix_seconds()?)?
-            .ok_or(AppError::Unauthorized)?;
-        Ok(digest(b"reviewq-browser-csrf-v1", &token))
-    }
-
-    // The blocking pool serializes durable updates. Readers use the previous snapshot
-    // while the new one is being written.
-    pub(super) fn issue(&self, headers: &HeaderMap) -> Result<(String, HeaderValue), AppError> {
-        let _issuance = self.issuance.lock().map_err(|_| AppError::Internal)?;
-        let now = unix_seconds()?;
-        let token = if let Some(existing) = self.authorized(headers, now)? {
-            existing
-        } else {
-            let mut next = self.grants.read().map_err(|_| AppError::Internal)?.clone();
-            next.expires.retain(|_, expiry| valid(*expiry, now));
-            if next.expires.len() >= MAX_SESSIONS {
-                return Err(AppError::Busy);
-            }
-            let token = random()?;
-            let expiry = now.checked_add(SESSION_SECONDS).ok_or(AppError::Internal)?;
-            if next.expires.insert(verifier(&token), expiry).is_some() {
-                return Err(AppError::Internal);
-            }
-            (self.save)(&next)?;
-            *self.grants.write().map_err(|_| AppError::Internal)? = next;
-            token
-        };
-        let mut cookie = HeaderValue::from_str(&format!(
-            "{}={}; Path=/api/v1; HttpOnly; SameSite=Strict",
-            self.cookie,
-            URL_SAFE_NO_PAD.encode(token)
-        ))
-        .map_err(|_| AppError::Internal)?;
-        cookie.set_sensitive(true);
-        Ok((
-            URL_SAFE_NO_PAD.encode(digest(b"reviewq-browser-csrf-v1", &token)),
-            cookie,
-        ))
-    }
-}
-
-fn valid(expiry: u64, now: u64) -> bool {
-    expiry > now && expiry - now <= SESSION_SECONDS
-}
-
-fn verifier(token: &[u8; 32]) -> String {
-    URL_SAFE_NO_PAD.encode(digest(b"reviewq-browser-grant-v1", token))
-}
-
-fn digest(domain: &'static [u8], value: &[u8]) -> [u8; 32] {
-    Sha256::new()
-        .chain_update(domain)
-        .chain_update([0])
-        .chain_update(value)
-        .finalize()
-        .into()
 }

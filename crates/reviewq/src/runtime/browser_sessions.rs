@@ -1,37 +1,26 @@
-//! Owner-private storage for the browser's bounded authorization ledger.
+//! Installation-local signing authority for browser cookies.
+
 use std::fs;
-use std::io::Read;
+use std::io::{ErrorKind, Read};
 use std::os::unix::fs::MetadataExt;
 use std::path::Path;
 
-use reviewq_app::access::AppError;
-use reviewq_transport::{BrowserSessionGrants, BrowserSessions, ServiceEndpoint};
+use reviewq_transport::{BrowserSessions, ServiceEndpoint};
 
 use super::{Failure, private_file};
 use crate::install::paths;
 
+const KEY_FILE: &str = "browser-session.key";
+
 pub(super) fn open(profile: &Path, endpoint: &ServiceEndpoint) -> Result<BrowserSessions, Failure> {
-    let profile = profile.to_owned();
-    let database = profile.join("reviewq.sqlite3");
-    let file = profile.join("browser-sessions.json");
-    let directory_id = file_id(&profile)?;
-    let database_id = file_id(&database)?;
-    let saved = load(&file)?;
-    let save = move |grants: &BrowserSessionGrants| -> Result<(), Failure> {
-        if file_id(&profile)? != directory_id || file_id(&database)? != database_id {
-            return Err("browser session profile changed".into());
-        }
-        if paths::exists(&file)? {
-            private_file(&file)?;
-        }
-        paths::write_json(&file, grants)
-    };
-    Ok(BrowserSessions::restore(
+    let directory_id = file_id(profile)?;
+    let database_id = file_id(&profile.join("reviewq.sqlite3"))?;
+    let key = load_key(&profile.join(KEY_FILE))?;
+    Ok(BrowserSessions::new(
         endpoint,
         directory_id,
         database_id,
-        saved,
-        move |grants| save(grants).map_err(|_| AppError::Internal),
+        key,
     )?)
 }
 
@@ -40,18 +29,24 @@ fn file_id(path: &Path) -> Result<(u64, u64), Failure> {
     Ok((metadata.dev(), metadata.ino()))
 }
 
-fn load(path: &Path) -> Result<Option<BrowserSessionGrants>, Failure> {
+fn load_key(path: &Path) -> Result<[u8; 32], Failure> {
+    let mut key = [0; 32];
     if !paths::exists(path)? {
-        return Ok(None);
+        getrandom::fill(&mut key)
+            .map_err(|_| "Could not generate the browser session signing key.")?;
+        if let Err(error) = paths::atomic_file(path, &key, false)
+            && !error
+                .downcast_ref::<tempfile::PersistError>()
+                .is_some_and(|persist| persist.error.kind() == ErrorKind::AlreadyExists)
+        {
+            return Err(error);
+        }
     }
-    let mut bytes = Vec::new();
-    // 128 encoded SHA-256 verifiers and their deadlines fit within 16 KiB.
-    const LIMIT: u64 = 16 * 1024;
-    private_file(path)?
-        .take(LIMIT + 1)
-        .read_to_end(&mut bytes)?;
-    if bytes.len() as u64 > LIMIT {
-        return Ok(None);
+
+    let mut file = private_file(path)?;
+    if file.metadata()?.len() != key.len() as u64 {
+        return Err("Invalid browser session signing key length.".into());
     }
-    Ok(serde_json::from_slice(&bytes).ok())
+    file.read_exact(&mut key)?;
+    Ok(key)
 }

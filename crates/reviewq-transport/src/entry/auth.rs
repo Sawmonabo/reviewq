@@ -7,7 +7,7 @@ use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use reviewq_app::access::{Actor, AppError};
 use subtle::ConstantTimeEq;
 
-use super::browser_sessions::BrowserSessions;
+use super::browser_sessions::{BrowserSession, BrowserSessions};
 use super::control::{ControlRequest, MAX_CONTROL_AGE, ServiceEndpoint, decode, random, value};
 
 const MAX_NONCES: usize = 1024;
@@ -115,13 +115,13 @@ impl Auth {
         headers: &HeaderMap,
         mutation: bool,
     ) -> Result<Actor, AppError> {
-        let csrf = self.csrf(headers)?;
+        let session = self.browser_session(headers)?;
         if mutation {
             self.check_origin(headers)?;
             let supplied = value(headers, "x-reviewq-csrf")
                 .and_then(decode)
                 .ok_or(AppError::Forbidden)?;
-            if !bool::from(csrf.ct_eq(&supplied)) {
+            if !bool::from(self.browser.csrf(&session).ct_eq(&supplied)) {
                 return Err(AppError::Forbidden);
             }
         }
@@ -129,9 +129,13 @@ impl Auth {
     }
 
     pub(super) fn csrf(&self, headers: &HeaderMap) -> Result<[u8; 32], AppError> {
+        Ok(self.browser.csrf(&self.browser_session(headers)?))
+    }
+
+    fn browser_session(&self, headers: &HeaderMap) -> Result<BrowserSession, AppError> {
         if value(headers, "host") != Some(&self.browser_host) {
             return Err(AppError::Unauthorized);
         }
-        self.browser.csrf(headers)
+        self.browser.verify(headers)
     }
 }

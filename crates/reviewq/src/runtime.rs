@@ -144,6 +144,7 @@ pub(crate) async fn serve(profile: PathBuf, options: Serve) -> Result<(), Failur
             store_schema: identity.format,
         },
     )?;
+    let browser_sessions = browser_sessions::open(&profile, &endpoint)?;
     let network = Arc::new(SourceNetwork::new()?);
     let settings_sources = Arc::new(SourceAccounts::new(
         network.clone(),
@@ -328,7 +329,7 @@ pub(crate) async fn serve(profile: PathBuf, options: Serve) -> Result<(), Failur
                 report_files: report_files.clone(),
             },
             endpoint: endpoint.clone(),
-            browser_sessions: browser_sessions::open(&profile, &endpoint)?,
+            browser_sessions,
             web: &web,
             retained_assets: retained_assets.as_deref(),
             commits: store.subscribe(),

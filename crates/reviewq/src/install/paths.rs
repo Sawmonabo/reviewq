@@ -182,7 +182,7 @@ pub(crate) fn exists(path: &Path) -> Result<bool, Failure> {
     }
 }
 
-pub(super) fn atomic_file(path: &Path, bytes: &[u8], replace: bool) -> Result<(), Failure> {
+pub(crate) fn atomic_file(path: &Path, bytes: &[u8], replace: bool) -> Result<(), Failure> {
     let directory = parent(path)?;
     let mut stage = tempfile::Builder::new()
         .prefix(".reviewq-write.")

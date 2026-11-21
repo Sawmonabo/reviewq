@@ -62,7 +62,7 @@ mod terminal;
 mod tracking;
 mod workspace;
 
-pub use browser_sessions::{BrowserSessionGrants, BrowserSessions};
+pub use browser_sessions::BrowserSessions;
 pub use control::{BridgeDescriptor, ControlRequest, ServiceEndpoint, ServiceIdentity};
 
 use auth::Auth;
@@ -506,10 +506,7 @@ async fn session(
 ) -> Result<Json<Success<SessionResult>>, ApiError> {
     let csrf = URL_SAFE_NO_PAD.encode(entry.auth.csrf(&headers)?);
     let body = SessionResult { csrf_token: csrf };
-    Ok(Json(Success {
-        data: body,
-        cursor: entry.head().await?,
-    }))
+    Ok(Json(pages::success(body, *entry.commits.borrow())?))
 }
 
 async fn start_session(
@@ -534,11 +531,10 @@ async fn start_session(
                 .ok_or(AppError::InvalidRequest)?
                 .as_str();
             let proof = entry.auth.control("POST", target, &headers, &bytes)?;
-            let cursor = entry.head().await?;
-            let response = Success {
-                data: serde_json::json!({"ticket": entry.auth.launch()?}),
-                cursor,
-            };
+            let response = pages::success(
+                serde_json::json!({"ticket": entry.auth.launch()?}),
+                *entry.commits.borrow(),
+            )?;
             let body = serde_json::to_vec(&response).map_err(|_| AppError::Internal)?;
             let mut response_headers = HeaderMap::new();
             response_headers.insert(header::CONTENT_TYPE, "application/json".parse().unwrap());
@@ -550,18 +546,18 @@ async fn start_session(
         }
         SessionRequest::Redeem { ticket } => {
             entry.auth.check_origin(&headers)?;
-            let cursor = entry.head().await?;
             entry.auth.consume_ticket(&ticket)?;
-            let (csrf_token, cookie) =
-                tokio::task::spawn_blocking(move || entry.auth.browser.issue(&headers))
-                    .await
-                    .map_err(|_| AppError::Internal)??;
-            let mut result = Json(Success {
-                data: SessionResult { csrf_token },
-                cursor,
-            })
+            let (csrf, cookie) = entry.auth.browser.issue(&headers)?;
+            let mut result = Json(pages::success(
+                SessionResult {
+                    csrf_token: URL_SAFE_NO_PAD.encode(csrf),
+                },
+                *entry.commits.borrow(),
+            )?)
             .into_response();
-            result.headers_mut().insert(header::SET_COOKIE, cookie);
+            if let Some(cookie) = cookie {
+                result.headers_mut().insert(header::SET_COOKIE, cookie);
+            }
             Ok(result)
         }
     }
