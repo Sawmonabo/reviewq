@@ -11,6 +11,14 @@ use sha2::{Digest, Sha256};
 use super::Codex;
 use super::history::{Item, visible};
 
+pub(super) struct ItemWindow<'a> {
+    pub(super) forward: bool,
+    pub(super) cursor: Option<&'a str>,
+    pub(super) anchor: Option<&'a NativeInputId>,
+    pub(super) limit: u16,
+    pub(super) defer: bool,
+}
+
 impl Codex {
     pub(super) async fn item_page(
         &self,
@@ -21,22 +29,47 @@ impl Codex {
         anchor: Option<&NativeInputId>,
         limit: u16,
     ) -> Result<ItemPage, AppError> {
+        self.read_item_window(
+            thread,
+            turn,
+            ItemWindow {
+                forward,
+                cursor,
+                anchor,
+                limit,
+                defer: false,
+            },
+        )
+        .await
+    }
+
+    pub(super) async fn read_item_window(
+        &self,
+        thread: &str,
+        turn: &NativeTurnId,
+        window: ItemWindow<'_>,
+    ) -> Result<ItemPage, AppError> {
+        let ItemWindow {
+            forward,
+            cursor,
+            anchor,
+            limit,
+            defer,
+        } = window;
         if cursor.is_some() && anchor.is_some() {
             return Err(AppError::CursorExpired);
         }
         let cursor = cursor
             .map(|value| json!(value))
             .or_else(|| anchor.map(|item| json!({"type":"item","itemId":item.as_str()})));
-        let page: ItemPage = self
-            .connection
-            .read(
-                "thread/items/list",
-                json!({
-                    "threadId":thread,"turnId":turn.as_str(),"cursor":cursor,
-                    "sortDirection":if forward {"asc"} else {"desc"},"limit":limit,
-                }),
-            )
-            .await?;
+        let mut params = json!({
+            "threadId":thread,"turnId":turn.as_str(),"cursor":cursor,
+            "sortDirection":if forward {"asc"} else {"desc"},"limit":limit,
+        });
+        if defer {
+            params["deferOutput"] = json!({"commandExecution":true,"mcpToolCall":true});
+        }
+        let page: ItemPage = self.connection.read("thread/items/list", params).await?;
         if page.data.len() > usize::from(limit)
             || page.data.iter().any(|item| item.turn_id != turn.as_str())
             || [&page.next_cursor, &page.backwards_cursor]
@@ -134,7 +167,16 @@ impl Codex {
         limit: u16,
     ) -> Result<NativeHistoryPage, AppError> {
         if let Some((position, generation)) = anchor {
-            let mut page = self.read_history(session, position, 32).await?;
+            let mut limit_in = 32;
+            let mut page = loop {
+                match self
+                    .read_history(session.clone(), position.clone(), limit_in)
+                    .await
+                {
+                    Err(AppError::Unavailable) if limit_in > 1 => limit_in /= 2,
+                    result => break result?,
+                }
+            };
             let index = page
                 .entries
                 .iter()
@@ -174,6 +216,7 @@ impl Codex {
     pub(super) async fn read_history_stamp(
         &self,
         session: HistorySession,
+        find: bool,
     ) -> Result<reviewq_app::history::NativeRpcStamp, AppError> {
         let thread = self.bound_history_thread(&session).await?;
         let generation = self.history_generation(&thread).await?;
@@ -185,16 +228,31 @@ impl Codex {
             });
         };
         let id = turn.id.parse().map_err(|_| AppError::Unavailable)?;
-        let latest = self
-            .item_page(&thread.id, &id, false, None, None, 1)
-            .await?;
+        let (latest, gap) = match self.item_page(&thread.id, &id, false, None, None, 1).await {
+            Err(AppError::Unavailable) if find => {
+                let window = ItemWindow {
+                    forward: false,
+                    cursor: None,
+                    anchor: None,
+                    limit: 1,
+                    defer: true,
+                };
+                match self.read_item_window(&thread.id, &id, window).await {
+                    Ok(page) => (Some(page), true),
+                    Err(AppError::Unavailable | AppError::NotFound) => (None, true),
+                    Err(error) => return Err(error),
+                }
+            }
+            latest => (Some(latest?), false),
+        };
         let visible = latest
-            .data
             .into_iter()
+            .flat_map(|page| page.data)
             .find_map(|item| visible(item.item, &id, item.started_at_ms, item.completed_at_ms))
             .transpose()?;
         let tail = if let Some(item) = visible {
             let mut hash = Sha256::new();
+            hash.update([u8::from(gap)]);
             for field in [
                 turn.id.as_str(),
                 turn.status.as_str(),
@@ -210,7 +268,12 @@ impl Codex {
             }
             ReportHash::from_sha256(hash.finalize().into()).to_string()
         } else {
-            format!("{}:{}", turn.id, turn.status)
+            format!(
+                "{}:{}:{}",
+                turn.id,
+                turn.status,
+                if gap { "unavailable" } else { "empty" }
+            )
         };
         Ok(reviewq_app::history::NativeRpcStamp {
             generation,
@@ -293,6 +356,8 @@ struct ItemResponse {
 pub(super) struct ItemEntry {
     turn_id: String,
     pub(super) item: Item,
+    #[serde(default)]
+    pub(super) output_deferred: bool,
     pub(super) started_at_ms: Option<i64>,
     pub(super) completed_at_ms: Option<i64>,
 }

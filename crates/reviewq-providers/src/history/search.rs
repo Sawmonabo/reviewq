@@ -2,7 +2,8 @@
 
 use std::collections::VecDeque;
 use std::fs::{self, Metadata};
-use std::io::{self, Write};
+use std::io::{self, Read, Write};
+use std::ops::Range;
 use std::os::unix::fs::{FileExt, MetadataExt};
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -18,7 +19,8 @@ use sha2::{Digest, Sha256};
 
 use super::file::{self, Lines, ToolProof};
 use super::locator::Source;
-use super::records::{self, BodyField, Record};
+use super::records::{self, BodyField, NativeValue, Record};
+use super::tools::stream_value;
 
 mod index;
 mod large;
@@ -128,6 +130,7 @@ pub(super) fn read(
             }
         };
         if let Some(mut window) = prepared {
+            output.partial |= window.record.next_part.is_some();
             next = match_record(
                 MatchSource {
                     source,
@@ -225,12 +228,35 @@ struct Body {
     tool_call: Option<NativeInputId>,
     markdown: bool,
     bytes: u64,
-    native_string: Option<std::ops::Range<u64>>,
+    native_value: Option<NativeValue>,
 }
 
 impl Body {
     fn key(&self) -> u16 {
         self.part.map_or(0, |index| index + 1)
+    }
+
+    fn source_range(&self, record: Range<u64>) -> Result<Option<NativeValue>, AppError> {
+        self.native_value
+            .as_ref()
+            .map(|value| {
+                let start = record
+                    .start
+                    .checked_add(value.span.start)
+                    .ok_or(AppError::CursorExpired)?;
+                let end = record
+                    .start
+                    .checked_add(value.span.end)
+                    .ok_or(AppError::CursorExpired)?;
+                if start >= end || end > record.end {
+                    return Err(AppError::CursorExpired);
+                }
+                Ok(NativeValue {
+                    span: start..end,
+                    string: value.string,
+                })
+            })
+            .transpose()
     }
 }
 
@@ -242,7 +268,7 @@ fn bodies(source: &Source, record: &Record) -> Result<Vec<Body>, AppError> {
             tool_call: None,
             markdown: record.bytes <= CONTENT_BYTES,
             bytes: record.bytes,
-            native_string: record.native_string.clone(),
+            native_value: record.native_value.clone(),
         }]);
     }
     record
@@ -261,7 +287,7 @@ fn bodies(source: &Source, record: &Record) -> Result<Vec<Body>, AppError> {
                 markdown: tool_call.is_none() && part.body.bytes <= CONTENT_BYTES,
                 tool_call,
                 bytes: part.body.bytes,
-                native_string: part.body.native_string.clone(),
+                native_value: part.body.native_value.clone(),
             })
         })
         .collect()
@@ -337,6 +363,8 @@ fn match_record(
             }));
         }
         parts += 1;
+        let span = at.record..window.end;
+        let field = body.source_range(span.clone())?;
         let mut matches = Matches {
             query: &query.literal,
             reverse: query.reverse,
@@ -355,16 +383,22 @@ fn match_record(
             stopped: false,
         };
         if body.bytes > CONTENT_BYTES
-            && body.native_string.is_some()
+            && field.as_ref().is_some_and(|field| field.string)
             && window
                 .native
                 .as_ref()
                 .is_none_or(|native| native.key != key)
         {
-            window.native =
-                native_string::NativeString::prepare(&source.file, window, &body, cancel)
-                    .ok()
-                    .flatten();
+            window.native = field.as_ref().and_then(|field| {
+                native_string::NativeString::prepare(
+                    &source.file,
+                    field.span.clone(),
+                    key,
+                    body.bytes,
+                    cancel,
+                )
+                .ok()
+            });
             check_cancel(cancel)?;
         }
         let native = window.native.as_ref().filter(|native| native.key == key);
@@ -377,7 +411,9 @@ fn match_record(
                 .is_none_or(|staged| staged.key != key)
         {
             window.staged.take();
-            window.staged = large.stage(source, window, &body, cancel).ok();
+            window.staged = large
+                .stage(source, window, &body, field.as_ref(), cancel)
+                .ok();
             window.stage_unavailable = window.staged.is_none();
             check_cancel(cancel)?;
         }
@@ -385,12 +421,12 @@ fn match_record(
             matches.scan_native(&source.file, native, cancel)?;
         } else if let Some(staged) = window.staged.as_ref().filter(|staged| staged.key == key) {
             matches.scan_body(&staged.file, cancel)?;
-        } else if let Some(decoded) = body
-            .native_string
+        } else if let Some(decoded) = field
             .as_ref()
-            .filter(|_| body.bytes <= CONTENT_BYTES)
-            .and_then(|span| native_string::field_range(at.record..window.end, span).ok())
-            .and_then(|field| native_string::small(&source.file, field, body.bytes).ok())
+            .filter(|field| field.string && body.bytes <= CONTENT_BYTES)
+            .and_then(|field| {
+                native_string::small(&source.file, field.span.clone(), body.bytes).ok()
+            })
         {
             matches.bytes = decoded.into_bytes();
             matches.complete_body()?;
@@ -401,19 +437,26 @@ fn match_record(
                     ..point
                 }));
             }
-            repeated_bytes += window.end - at.record;
-            let projected = records::stream_body(
-                source.provider,
-                lines.input(at.record, window.end),
-                &source.native_id,
-                source.root_session.as_ref(),
-                body.field.clone(),
-                &mut matches,
-            );
+            let input = if let Some(field) = field {
+                field.span
+            } else {
+                span
+            };
+            repeated_bytes += input.end - input.start;
+            let projected = if body.native_value.is_some() {
+                stream_value(lines.input(input.start, input.end), &mut matches)
+                    .is_ok_and(|bytes| bytes == body.bytes)
+            } else {
+                project_body(
+                    source,
+                    &window.record.id,
+                    &body,
+                    lines.input(input.start, input.end),
+                    &mut matches,
+                )
+            };
             if matches.next.is_none() && !matches.stopped {
-                if !projected.is_some_and(|current| current.id == window.record.id)
-                    || matches.decoded + matches.bytes.len() as u64 != body.bytes
-                {
+                if !projected || matches.decoded + matches.bytes.len() as u64 != body.bytes {
                     output.partial = true;
                     continue;
                 }
@@ -435,6 +478,24 @@ fn match_record(
         }
     }
     Ok(None)
+}
+
+fn project_body(
+    source: &Source,
+    record: &NativeInputId,
+    body: &Body,
+    input: impl Read,
+    output: &mut dyn Write,
+) -> bool {
+    records::stream_body(
+        source.provider,
+        input,
+        &source.native_id,
+        source.root_session.as_ref(),
+        body.field.clone(),
+        output,
+    )
+    .is_some_and(|current| &current.id == record)
 }
 
 struct Matches<'a> {

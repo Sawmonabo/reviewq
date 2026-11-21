@@ -32,6 +32,7 @@ export function useHistory(
   bookmark: string,
   following: boolean,
   pinned: ReadonlySet<string>,
+  focusedDiagram: string | undefined,
   beforeUpdate: (position: ReadPosition, anchor: Anchor | undefined, extend: boolean) => void,
 ) {
   const { runId, sessionKey } = target;
@@ -46,11 +47,12 @@ export function useHistory(
   const active = useRef<{ controller: AbortController; position: ReadPosition } | undefined>(
     undefined,
   );
-  const currentView = useRef({ beforeUpdate, pinned });
+  const currentView = useRef({ beforeUpdate, pinned, focusedDiagram });
   useLayoutEffect(() => {
-    currentView.current = { beforeUpdate, pinned };
-  }, [beforeUpdate, pinned]);
+    currentView.current = { beforeUpdate, pinned, focusedDiagram };
+  }, [beforeUpdate, pinned, focusedDiagram]);
   const pending = useRef(false);
+  const resetWhileFocused = useRef(false);
   const resetTo = useRef<Anchor | undefined>(undefined);
   const first = pages[0];
   const last = pages.at(-1);
@@ -83,6 +85,11 @@ export function useHistory(
     return true;
   }
 
+  function sameLiveDiagram(entryId: string | undefined) {
+    const { focusedDiagram } = currentView.current;
+    return entryId !== undefined && focusedDiagram === entryId;
+  }
+
   async function load(position: ReadPosition, wanted?: Anchor, background = false) {
     if (position === "latest" && !background) resetTo.current = undefined;
     const requestedJump =
@@ -100,9 +107,13 @@ export function useHistory(
     if ((position === "older" || position === "newer") && !cursor) return;
     const adjacent = position === "older" || position === "newer";
     const evict = position === "older" ? last : first;
-    function held(replace: boolean) {
+    function held(replace: boolean, refreshed?: HistoryPage) {
       const protectedIds = currentView.current.pinned;
       if (!protectedIds.size) return false;
+      if (background && sameLiveDiagram(live?.entryId) && !resetWhileFocused.current) {
+        if (!refreshed || (!refreshed.reset && refreshed.generation === generation)) return false;
+        resetWhileFocused.current = true;
+      }
       if (
         !replace &&
         (pages.length < PAGE_LIMIT || !evict?.items.some((item) => protectedIds.has(item.entryId)))
@@ -114,6 +125,7 @@ export function useHistory(
       return true;
     }
     if (held(!adjacent)) return;
+    resetWhileFocused.current = false;
     active.current?.controller.abort();
     if (requestedJump) resetTo.current = undefined;
     const controller = new AbortController();
@@ -133,7 +145,7 @@ export function useHistory(
       if (controller.signal.aborted) return;
       const { data, cursor: eventCursor } = response;
       const replacing = data.reset || !adjacent || data.generation !== generation;
-      if (held(replacing)) return;
+      if (held(replacing, data)) return;
       currentView.current.beforeUpdate(position, wanted, !replacing);
       observeSnapshot(eventCursor);
       setAvailability(data.availability);
@@ -142,7 +154,16 @@ export function useHistory(
       setWaiting(pending.current);
       if (replacing) {
         setPages([data]);
-        setLive(undefined);
+        setLive((current) =>
+          background &&
+          current &&
+          sameLiveDiagram(current.entryId) &&
+          !data.reset &&
+          data.generation === generation &&
+          !data.items.some((item) => item.entryId === current.entryId)
+            ? current
+            : undefined,
+        );
       } else if (position === "older") {
         setPages((items) => [data, ...items].slice(0, PAGE_LIMIT));
       } else {
@@ -168,17 +189,10 @@ export function useHistory(
 
   const notice = useEffectEvent((kind: string, value: Record<string, unknown>) => {
     if (kind === "delta") {
-      if (
-        !isDelta(value) ||
-        value.generation !== generation ||
-        !following ||
-        pinned.size ||
-        value.block !== 0
-      ) {
-        if (!following || pinned.size) {
-          pending.current = true;
-          setWaiting(true);
-        }
+      if (!isDelta(value) || value.generation !== generation || value.block !== 0) return;
+      if (!sameLiveDiagram(value.entryId) && (!following || pinned.size)) {
+        pending.current = true;
+        setWaiting(true);
         return;
       }
       const bytes = utf8.encode(value.text).length;
@@ -196,7 +210,10 @@ export function useHistory(
       return;
     }
     if (typeof value.availability === "string") setAvailability(value.availability);
-    if (!following || pinned.size) {
+    if (
+      (resetWhileFocused.current || !sameLiveDiagram(live?.entryId)) &&
+      (!following || pinned.size)
+    ) {
       pending.current = true;
       setWaiting(true);
       return;
@@ -205,9 +222,10 @@ export function useHistory(
   });
 
   const catchup = useEffectEvent(() => {
-    if (pinned.size || !waiting || loading) return;
+    const diagram = !resetWhileFocused.current && sameLiveDiagram(live?.entryId);
+    if ((!diagram && pinned.size) || !waiting || loading) return;
     const wanted = resetTo.current;
-    if (!wanted && !following) return;
+    if (!wanted && !following && !diagram) return;
     resetTo.current = undefined;
     void load(wanted ? "around" : "latest", wanted, !wanted);
   });
@@ -275,10 +293,10 @@ export function useHistory(
   }, [runId, sessionKey, bookmark]);
 
   useEffect(() => {
-    if (!waiting || loading || pinned.size) return;
+    if (!waiting || loading) return;
     const frame = requestAnimationFrame(() => catchup());
     return () => cancelAnimationFrame(frame);
-  }, [following, loading, pinned.size, waiting]);
+  }, [following, loading, pinned.size, focusedDiagram, waiting]);
 
   return {
     pages,

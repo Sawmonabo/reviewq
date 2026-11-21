@@ -19,7 +19,7 @@ pub(super) struct Record {
     pub final_response: bool,
     pub text: Vec<u8>,
     pub bytes: u64,
-    pub native_string: Option<std::ops::Range<u64>>,
+    pub native_value: Option<NativeValue>,
     pub parts: Vec<Part>,
     pub claude_tool_parent: Option<NativeInputId>,
     pub claude_tool_calls: Vec<(NativeInputId, String)>,
@@ -83,7 +83,13 @@ impl BodySink<'_> {
 pub(super) struct Text {
     pub bytes: u64,
     pub picked: Vec<u8>,
-    pub native_string: Option<std::ops::Range<u64>>,
+    pub native_value: Option<NativeValue>,
+}
+
+#[derive(Clone)]
+pub(super) struct NativeValue {
+    pub span: std::ops::Range<u64>,
+    pub string: bool,
 }
 
 #[derive(Default)]
@@ -290,7 +296,7 @@ fn project_to(
         final_response: item.final_response,
         text: item.text.picked,
         bytes: item.text.bytes,
-        native_string: item.text.native_string,
+        native_value: item.text.native_value,
         parts: item.parts,
         claude_tool_parent: item.claude_tool_parent,
         claude_tool_calls: item.tool_calls,
@@ -630,8 +636,8 @@ fn block<R: Read>(
         Some("Text" | "text" | "input_text" | "output_text") => {
             if plain.bytes > 0 {
                 item.text_blocks.push(index);
-                item.text.native_string = if item.text.bytes == 0 {
-                    plain.native_string.clone()
+                item.text.native_value = if item.text.bytes == 0 {
+                    plain.native_value.clone()
                 } else {
                     None
                 };
@@ -740,7 +746,10 @@ pub(super) fn capture<R: Read>(
     }
     drop(stream);
     if let (Some(start), Some(end)) = (quoted_start, reader.current_position(false).data_pos) {
-        result.native_string = Some(start..end);
+        result.native_value = Some(NativeValue {
+            span: start..end,
+            string: true,
+        });
     }
     Ok(result)
 }

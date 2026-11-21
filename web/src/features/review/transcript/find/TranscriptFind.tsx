@@ -46,6 +46,7 @@ export function TranscriptFind({
   const [page, setPage] = useState<ResultPage>();
   const [active, setActive] = useState<HistorySearchHit>();
   const [pending, setPending] = useState(false);
+  const [partial, setPartial] = useState(false);
   const [notice, setNotice] = useState<string>();
   const [reload, setReload] = useState(0);
 
@@ -72,6 +73,7 @@ export function TranscriptFind({
     setActive(undefined);
     setNotice(undefined);
     setPending(false);
+    setPartial(false);
     requestAnimationFrame(() => {
       const target =
         invokedByButton.current && button.current
@@ -145,6 +147,7 @@ export function TranscriptFind({
         (result) => {
           if (request.signal.aborted) return;
           setPage(result);
+          if (result.availability === "partial") setPartial(true);
           setPending(false);
         },
         (failure: unknown) => {
@@ -178,6 +181,7 @@ export function TranscriptFind({
     setActive(undefined);
     setPage(undefined);
     setPending(Boolean(value));
+    setPartial(false);
     setQuery(value);
   }
 
@@ -224,10 +228,13 @@ export function TranscriptFind({
     try {
       const cursor = active ? (reverse ? active.beforeCursor : active.afterCursor) : undefined;
       let result = await readMatches(target, query, reverse, cursor, request.signal);
+      request.signal.throwIfAborted();
+      if (result.availability === "partial") setPartial(true);
       if (cursor && !result.hits.length && !result.nextCursor) {
         result = await readMatches(target, query, reverse, undefined, request.signal);
       }
       request.signal.throwIfAborted();
+      if (result.availability === "partial") setPartial(true);
       if (result.hits.length) {
         const hit = result.hits[0];
         setPage(reverse ? { ...result, hits: [...result.hits].reverse() } : result);
@@ -238,7 +245,6 @@ export function TranscriptFind({
     }
   }
 
-  const partial = page?.availability === "partial";
   return (
     <div
       ref={root}

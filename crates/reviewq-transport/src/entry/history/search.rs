@@ -4,7 +4,9 @@ use axum::Json;
 use axum::extract::State;
 use axum::http::HeaderMap;
 use reviewq_app::access::AppError;
-use reviewq_app::history::search::rpc::{RpcSearchPage, RpcSearchPoint, RpcSearchQuery};
+use reviewq_app::history::search::rpc::{
+    RpcSearchEntry, RpcSearchPage, RpcSearchPoint, RpcSearchQuery,
+};
 use reviewq_app::history::search::{
     HistorySearch, SearchCursor, SearchHit, SearchPage, SearchPoint, SourceObservation,
 };
@@ -91,10 +93,27 @@ enum Position {
     Rpc {
         page: Box<Cursor>,
         tail: Option<String>,
-        item: Option<String>,
+        item: Option<RpcEntryAnchor>,
         part: u16,
         byte: u64,
     },
+}
+
+#[derive(Serialize, Deserialize)]
+struct RpcEntryAnchor {
+    id: String,
+    hash: String,
+    page_size: u16,
+}
+
+impl RpcEntryAnchor {
+    fn open(self) -> Result<RpcSearchEntry, AppError> {
+        Ok(RpcSearchEntry {
+            id: parse(&self.id)?,
+            hash: parse(&self.hash)?,
+            page_size: self.page_size,
+        })
+    }
 }
 
 #[derive(Serialize, Deserialize)]
@@ -154,7 +173,11 @@ impl SearchScope<'_> {
         Position::Rpc {
             page: Box::new(self.rpc_anchor(point.page, &stamp.generation)),
             tail: stamp.tail.clone(),
-            item: point.entry.map(|entry| entry.to_string()),
+            item: point.entry.map(|entry| RpcEntryAnchor {
+                id: entry.id.to_string(),
+                hash: entry.hash.to_string(),
+                page_size: entry.page_size,
+            }),
             part: point.part,
             byte: point.byte,
         }
@@ -415,7 +438,7 @@ async fn read_authorized(
                 },
                 RpcSearchPoint {
                     page: page.native_position()?,
-                    entry: item.as_deref().map(parse).transpose()?,
+                    entry: item.map(RpcEntryAnchor::open).transpose()?,
                     part,
                     byte,
                 },
@@ -577,7 +600,7 @@ async fn verify_hit(
                 generation: hit.generation.clone(),
                 tail: tail.clone(),
             };
-            if host.history_stamp(target.clone()).await? != expected {
+            if host.history_search_stamp(target.clone()).await? != expected {
                 return Err(AppError::CursorExpired);
             }
             let reference = RpcContentRef {
@@ -589,7 +612,7 @@ async fn verify_hit(
             };
             host.history_content(target.clone(), reference.clone(), hit.offset, 4)
                 .await?;
-            if host.history_stamp(target).await? != expected {
+            if host.history_search_stamp(target).await? != expected {
                 return Err(AppError::CursorExpired);
             }
             Ok((

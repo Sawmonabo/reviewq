@@ -5,27 +5,9 @@ use std::sync::atomic::AtomicBool;
 
 use reviewq_app::access::AppError;
 
-use super::{Body, RecordWindow, check_cancel};
+use super::check_cancel;
 
 const BLOCK_BYTES: usize = 32 * 1024;
-
-pub(super) fn field_range(
-    record: Range<u64>,
-    relative: &Range<u64>,
-) -> Result<Range<u64>, AppError> {
-    let first = record
-        .start
-        .checked_add(relative.start)
-        .ok_or(AppError::CursorExpired)?;
-    let last = record
-        .start
-        .checked_add(relative.end)
-        .ok_or(AppError::CursorExpired)?;
-    if last > record.end || last.saturating_sub(first) < 2 {
-        return Err(AppError::CursorExpired);
-    }
-    Ok(first..last)
-}
 
 pub(super) fn small(file: &File, field: Range<u64>, bytes: u64) -> Result<String, AppError> {
     let length = field.end - field.start;
@@ -85,14 +67,11 @@ struct Point {
 impl NativeString {
     pub(super) fn prepare(
         file: &File,
-        record: &RecordWindow,
-        body: &Body,
+        field: Range<u64>,
+        key: u16,
+        bytes: u64,
         cancel: &AtomicBool,
-    ) -> Result<Option<Self>, AppError> {
-        let Some(field) = &body.native_string else {
-            return Ok(None);
-        };
-        let field = field_range(record.position.offset..record.end, field)?;
+    ) -> Result<Self, AppError> {
         check_quotes(file, &field)?;
         let end = field.end - 1;
         let mut source = field.start + 1;
@@ -106,14 +85,10 @@ impl NativeString {
             decoded += text.len() as u64;
             source = next;
         }
-        if decoded != body.bytes {
+        if decoded != bytes {
             return Err(AppError::CursorExpired);
         }
-        Ok(Some(Self {
-            key: body.key(),
-            end,
-            points,
-        }))
+        Ok(Self { key, end, points })
     }
 
     pub(super) fn read(

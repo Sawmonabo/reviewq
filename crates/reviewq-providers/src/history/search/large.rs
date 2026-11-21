@@ -8,7 +8,7 @@ use reviewq_app::access::{AppError, admits_disk_scratch};
 use reviewq_app::history::search::SourceObservation;
 use reviewq_domain::session::SessionTarget;
 
-use super::{Body, RecordWindow, Source, file, records};
+use super::{Body, NativeValue, RecordWindow, Source, file, project_body, stream_value};
 
 pub(super) const RECORD_BYTES: u64 = 128 * 1024;
 const MAX_STAGED_BYTES: u64 = file::READ_BUDGET;
@@ -85,12 +85,13 @@ impl LargeRecords {
         source: &Source,
         window: &RecordWindow,
         body: &Body,
+        field: Option<&NativeValue>,
         cancel: &AtomicBool,
     ) -> Result<StagedBody, AppError> {
         let directory = self.directory.as_deref().ok_or(AppError::Unavailable)?;
         // Release the preceding record before reserving another active body.
         self.retained.take();
-        StagedBody::build(directory, source, window, body, cancel)
+        StagedBody::build(directory, source, window, body, field, cancel)
     }
 }
 
@@ -114,6 +115,7 @@ impl StagedBody {
         source: &Source,
         window: &RecordWindow,
         body: &Body,
+        field: Option<&NativeValue>,
         cancel: &AtomicBool,
     ) -> Result<Self, AppError> {
         if body.bytes > MAX_STAGED_BYTES {
@@ -134,15 +136,19 @@ impl StagedBody {
             output: BufWriter::new(&file),
             remaining: body.bytes,
         };
-        let projected = records::stream_body(
-            source.provider,
-            file::input(&source.file, window.position.offset, window.end, cancel),
-            &source.native_id,
-            source.root_session.as_ref(),
-            body.field.clone(),
-            &mut writer,
-        );
-        if !projected.is_some_and(|record| record.id == window.record.id) || writer.remaining != 0 {
+        let projected = if let Some(field) = field {
+            let input = file::input(&source.file, field.span.start, field.span.end, cancel);
+            stream_value(input, &mut writer).is_ok_and(|bytes| bytes == body.bytes)
+        } else {
+            project_body(
+                source,
+                &window.record.id,
+                body,
+                file::input(&source.file, window.position.offset, window.end, cancel),
+                &mut writer,
+            )
+        };
+        if !projected || writer.remaining != 0 {
             return Err(AppError::Unavailable);
         }
         writer.flush().map_err(|_| AppError::Unavailable)?;

@@ -15,8 +15,8 @@ use reviewq_domain::session::SessionTarget;
 use sha2::{Digest, Sha256};
 
 use super::{
-    Body, DECODE_BLOCK, Lines, Source, ToolProof, bodies, check_cancel, file, native_string,
-    records, verify_observation,
+    Body, DECODE_BLOCK, Lines, NativeValue, Source, ToolProof, bodies, check_cancel, file,
+    native_string, project_body, records, stream_value, verify_observation,
 };
 
 const MIN_SOURCE_BYTES: u64 = 1024 * 1024;
@@ -315,16 +315,13 @@ fn index_record(
     let certified = if let Ok(Some(mut record)) = record {
         visibility.redact(source, span.start, &mut record);
         let mut left = MAX_RECORD_WORK - bytes;
-        let mut certified = true;
+        let mut certified = record.next_part.is_none();
         if let Ok(bodies) = bodies(source, &record) {
             for body in bodies {
-                let native = body
-                    .native_string
-                    .as_ref()
-                    .and_then(|field| native_string::field_range(span.clone(), field).ok());
+                let native = body.source_range(span.clone())?;
                 let cost = native
                     .as_ref()
-                    .map_or(bytes, |field| field.end - field.start);
+                    .map_or(bytes, |field| field.span.end - field.span.start);
                 let Some(remaining) = left.checked_sub(cost) else {
                     certified = false;
                     break;
@@ -381,7 +378,7 @@ struct BodyProjection<'a> {
     record: &'a reviewq_domain::identity::NativeInputId,
     span: Range<u64>,
     body: Body,
-    native: Option<Range<u64>>,
+    native: Option<NativeValue>,
 }
 
 impl BodyProjection<'_> {
@@ -395,42 +392,39 @@ impl BodyProjection<'_> {
             total: 0,
             eligible: true,
         };
-        let decoded = if let Some(field) = self.native {
-            if self.body.bytes <= super::CONTENT_BYTES {
-                match native_string::small(&self.source.file, field, self.body.bytes) {
-                    Ok(text) => sink.write_all(text.as_bytes()).is_ok(),
-                    Err(_) => false,
-                }
-            } else {
-                native_string::visit(&self.source.file, field, |text| {
+        let projected = match self.native {
+            Some(field) if field.string => {
+                native_string::visit(&self.source.file, field.span, |text| {
                     work.check()?;
                     sink.write_all(text.as_bytes())
                         .map_err(|_| AppError::Unavailable)
                 })
                 .is_ok()
             }
-        } else {
-            let input = work.guard(file::input(
-                &self.source.file,
-                self.span.start,
-                self.span.end,
-                work.cancel,
-            ));
-            records::stream_body(
-                self.source.provider,
-                input,
-                &self.source.native_id,
-                self.source.root_session.as_ref(),
-                self.body.field,
-                &mut sink,
-            )
-            .is_some_and(|record| &record.id == self.record)
+            Some(field) => {
+                let input = work.guard(file::input(
+                    &self.source.file,
+                    field.span.start,
+                    field.span.end,
+                    work.cancel,
+                ));
+                stream_value(input, &mut sink).is_ok_and(|bytes| bytes == self.body.bytes)
+            }
+            None => {
+                let input = work.guard(file::input(
+                    &self.source.file,
+                    self.span.start,
+                    self.span.end,
+                    work.cancel,
+                ));
+                project_body(self.source, self.record, &self.body, input, &mut sink)
+            }
         };
         if let Some(error) = sink.error {
             return Err(error);
         }
         work.check()?;
-        if !decoded || sink.total != self.body.bytes {
+        if !projected || sink.total != self.body.bytes {
             return Ok(false);
         }
         if mark {

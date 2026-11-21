@@ -84,6 +84,8 @@ export function Transcript({ target, provider, child, messages, working }: Props
   const followBeforeFind = useRef<boolean | undefined>(undefined);
   const [pinned, setPinned] = useState<ReadonlySet<string>>(() => new Set());
   const [selectedText, setSelectedText] = useState(false);
+  const [diagramFocus, setDiagramFocus] = useState<string>();
+  const focusedDiagram = !selectedText && pinned.size === 1 ? diagramFocus : undefined;
   const [groupKeys, setGroupKeys] = useState<ReadonlySet<string>>(() => new Set());
   const [actionNotice, setActionNotice] = useState<string>();
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(
@@ -118,7 +120,10 @@ export function Transcript({ target, provider, child, messages, working }: Props
         }
       : undefined,
   );
-  const selectionState = useRef({ hasText: false, ids: new Set<string>() });
+  const selectionState = useRef<{ hasText: boolean; ids: Set<string>; diagram?: string }>({
+    hasText: false,
+    ids: new Set(),
+  });
   const scrollIntent = useRef<"head" | "tail" | "scrollbar" | undefined>(undefined);
   const pageLead = useRef(160);
   const touchY = useRef<number | undefined>(undefined);
@@ -128,30 +133,47 @@ export function Transcript({ target, provider, child, messages, working }: Props
   const activeLatest = useRef(false);
   const toolFocus = useRef<ReadTarget | undefined>(undefined);
 
-  const history = useHistory(target, bookmark, following, pinned, (position, wanted, extend) => {
-    // Keep mounted group controls across a prepend or append that extends their native span.
-    setGroupKeys(
-      new Set(
-        extend
-          ? entries
-              .filter((row) => row.kind === "tool-run" || row.kind === "read-pack")
-              .map((row) => row.id)
-          : [],
-      ),
-    );
-    if (position === "around" && wanted) {
-      if (wanted.locator || anchor.current?.id !== wanted.entryId)
-        anchor.current = {
-          id: wanted.entryId,
-          offset: wanted.locator ? 24 : 0,
-          reopenPages: 0,
-          jump: true,
-        };
-    } else if (position !== "latest" && !following && anchor.current?.reopenPages === undefined) {
-      const reading = visibleAnchor(viewport.current);
-      anchor.current = reading && (extend ? { ...reading, adjacent: "read" } : reading);
-    }
-  });
+  const history = useHistory(
+    target,
+    bookmark,
+    following,
+    pinned,
+    focusedDiagram,
+    (position, wanted, extend) => {
+      // Keep mounted group controls across a prepend or append that extends their native span.
+      setGroupKeys(
+        new Set(
+          extend
+            ? entries
+                .filter((row) => row.kind === "tool-run" || row.kind === "read-pack")
+                .map((row) => row.id)
+            : [],
+        ),
+      );
+      if (position === "around" && wanted) {
+        if (wanted.locator || anchor.current?.id !== wanted.entryId)
+          anchor.current = {
+            id: wanted.entryId,
+            offset: wanted.locator ? 24 : 0,
+            reopenPages: 0,
+            jump: true,
+          };
+      } else if (focusedDiagram && (position === "latest" || position === "newer")) {
+        const host = viewport.current;
+        const row = host?.querySelector(`[data-native-entry="${CSS.escape(focusedDiagram)}"]`);
+        if (host && row)
+          anchor.current = {
+            id: focusedDiagram,
+            offset: row.getBoundingClientRect().top - host.getBoundingClientRect().top,
+            toolEntry: true,
+            adjacent: "read",
+          };
+      } else if (position !== "latest" && !following && anchor.current?.reopenPages === undefined) {
+        const reading = visibleAnchor(viewport.current);
+        anchor.current = reading && (extend ? { ...reading, adjacent: "read" } : reading);
+      }
+    },
+  );
   const historyEntries = useMemo(() => entriesIn(history.pages), [history.pages]);
   const knownTools = useMemo(() => toolCatalog(historyEntries), [historyEntries]);
   useEffect(() => () => partsRequest.current?.abort(), [history.generation]);
@@ -209,7 +231,7 @@ export function Transcript({ target, provider, child, messages, working }: Props
     getScrollElement: () => viewport.current,
     getItemKey: rowKey,
     // Resolve retained row keys against the new window before mounting its visible range.
-    anchorTo: "end",
+    anchorTo: focusedDiagram ? "start" : "end",
     estimateSize: (index) =>
       entries[index]?.kind === "tool-run" ? 35 : entries[index]?.kind === "read-pack" ? 55 : 95,
     paddingStart: history.older ? 40 : 0,
@@ -244,7 +266,7 @@ export function Transcript({ target, provider, child, messages, working }: Props
     target,
     history.generation,
     following ? nearby.reverse() : nearby,
-    selectedText || pinned.size > 0,
+    selectedText || (pinned.size > 0 && !focusedDiagram),
     output?.reference,
   );
 
@@ -263,7 +285,7 @@ export function Transcript({ target, provider, child, messages, working }: Props
   const contentHeight = list.getTotalSize();
   useLayoutEffect(() => {
     if (!entries.length) return;
-    if (requestedLatest.current || (following && !anchor.current)) {
+    if (requestedLatest.current || (following && !anchor.current && !focusedDiagram)) {
       list.scrollToIndex(entries.length - 1, { align: "end" });
       requestedLatest.current = false;
       anchor.current = undefined;
@@ -333,7 +355,7 @@ export function Transcript({ target, provider, child, messages, working }: Props
       });
       return () => cancelAnimationFrame(frame);
     }
-  }, [entries, following, list, prose, contentHeight]);
+  }, [entries, following, list, prose, contentHeight, focusedDiagram]);
 
   useEffect(() => {
     const host = viewport.current;
@@ -352,18 +374,27 @@ export function Transcript({ target, provider, child, messages, working }: Props
               ids.add(node.dataset.nativeEntry);
           }
       }
-      const focused = document.activeElement?.closest<HTMLElement>("[data-native-entry]");
-      if (focused?.dataset.nativeEntry && host.contains(focused))
-        ids.add(focused.dataset.nativeEntry);
+      const active = document.activeElement;
+      const focused = active?.closest<HTMLElement>("[data-native-entry]");
+      const id = focused && host.contains(focused) ? focused.dataset.nativeEntry : undefined;
+      if (id) ids.add(id);
       const previous = selectionState.current;
+      const diagram =
+        id &&
+        (previous.diagram === id || focused?.hasAttribute("data-live-entry")) &&
+        active?.closest(".mermaid-figure")
+          ? id
+          : undefined;
       if (
         previous.hasText !== hasText ||
+        previous.diagram !== diagram ||
         previous.ids.size !== ids.size ||
         [...ids].some((id) => !previous.ids.has(id))
       ) {
-        selectionState.current = { hasText, ids };
+        selectionState.current = { hasText, ids, ...(diagram ? { diagram } : {}) };
         setPinned(ids);
         setSelectedText(hasText);
+        setDiagramFocus(diagram);
       }
     }
     document.addEventListener("selectionchange", updatePins);
@@ -481,6 +512,7 @@ export function Transcript({ target, provider, child, messages, working }: Props
   function clear() {
     if (selectedText) getSelection()?.removeAllRanges();
     setSelectedText(false);
+    setDiagramFocus(undefined);
     setPinned(new Set());
     selectionState.current = { hasText: false, ids: new Set() };
   }
@@ -755,6 +787,7 @@ export function Transcript({ target, provider, child, messages, working }: Props
                   data-index={item.index}
                   data-entry={row.id}
                   data-native-entry={row.kind === "delivery" ? undefined : row.id}
+                  data-live-entry={row.kind === "live" ? "" : undefined}
                   data-tool-member={row.grouped ? "" : undefined}
                   data-after-tools={followsTool && !justTools ? "" : undefined}
                   key={row.id}

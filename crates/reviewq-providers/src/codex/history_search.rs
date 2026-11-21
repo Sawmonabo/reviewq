@@ -1,13 +1,16 @@
 use std::collections::VecDeque;
 
 use reviewq_app::access::AppError;
-use reviewq_app::history::search::rpc::{RpcSearchPage, RpcSearchPoint, RpcSearchQuery};
+use reviewq_app::history::search::rpc::{
+    RpcSearchEntry, RpcSearchPage, RpcSearchPoint, RpcSearchQuery,
+};
 use reviewq_app::history::search::{MAX_SEARCH_HITS, SearchHit};
 use reviewq_app::history::{
     HistorySession, NativePosition, RpcContentRef, VisibleEntry, VisiblePartKind,
 };
 use reviewq_app::reading::{FoldedText, Literal, TextMatch, displayed_markdown};
-use reviewq_domain::identity::NativeInputId;
+use reviewq_domain::identity::{NativeInputId, ReportHash};
+use sha2::{Digest, Sha256};
 use tokio::sync::Semaphore;
 
 use super::{Codex, history_reads::digest};
@@ -23,7 +26,7 @@ impl Codex {
         query: RpcSearchQuery,
     ) -> Result<RpcSearchPage, AppError> {
         let _slot = READS.try_acquire().map_err(|_| AppError::Busy)?;
-        let observation = self.read_history_stamp(session.clone()).await?;
+        let observation = self.read_history_stamp(session.clone(), true).await?;
         let at = if let Some((saved, position)) = query.from {
             if saved != observation {
                 return Err(AppError::CursorExpired);
@@ -35,9 +38,20 @@ impl Codex {
                 ..NativePosition::default()
             })
         };
-        let page = self
-            .read_history_projected(session.clone(), at.page.clone(), INPUT_ITEMS, false)
-            .await?;
+        let mut limit = at
+            .entry
+            .as_ref()
+            .map_or(INPUT_ITEMS, |entry| entry.page_size);
+        let projected = loop {
+            let result = self
+                .read_history_projected(session.clone(), at.page.clone(), limit, false)
+                .await;
+            match result {
+                Err(AppError::Unavailable) if at.entry.is_none() && limit > 1 => limit /= 2,
+                result => break result?,
+            }
+        };
+        let page = projected.page;
         if page.generation != observation.generation {
             return Err(AppError::CursorExpired);
         }
@@ -48,10 +62,10 @@ impl Codex {
         let start = at
             .entry
             .as_ref()
-            .map(|id| {
+            .map(|entry| {
                 entries
                     .iter()
-                    .position(|item| &item.id == id)
+                    .position(|item| item.id == entry.id)
                     .ok_or(AppError::CursorExpired)
             })
             .transpose()?
@@ -68,17 +82,22 @@ impl Codex {
             observation,
             hits: Vec::with_capacity(MAX_SEARCH_HITS),
             next: continuation.map(at_page),
-            partial: false,
+            partial: projected.partial,
         };
         for entry in &entries[start..] {
-            if let Some(next) =
-                search_entry(entry, &at, &query.literal, query.reverse, &mut output)?
-            {
+            if let Some(next) = search_entry(
+                entry,
+                &at,
+                limit,
+                &query.literal,
+                query.reverse,
+                &mut output,
+            )? {
                 output.next = Some(next);
                 break;
             }
         }
-        if self.read_history_stamp(session).await? != output.observation {
+        if self.read_history_stamp(session, true).await? != output.observation {
             return Err(AppError::CursorExpired);
         }
         Ok(output)
@@ -110,6 +129,7 @@ impl Body<'_> {
 fn search_entry(
     entry: &VisibleEntry,
     at: &RpcSearchPoint,
+    page_size: u16,
     literal: &Literal,
     reverse: bool,
     output: &mut RpcSearchPage,
@@ -144,7 +164,15 @@ fn search_entry(
     if reverse {
         bodies.reverse();
     }
-    let same_entry = at.entry.as_ref() == Some(&entry.id);
+    let witness = RpcSearchEntry {
+        id: entry.id.clone(),
+        hash: visible_digest(entry),
+        page_size,
+    };
+    let same_entry = at.entry.as_ref().is_some_and(|saved| saved.id == entry.id);
+    if same_entry && at.entry.as_ref() != Some(&witness) {
+        return Err(AppError::CursorExpired);
+    }
     for body in bodies {
         let key = body.key();
         if same_entry
@@ -165,7 +193,7 @@ fn search_entry(
         };
         let point = RpcSearchPoint {
             page: at.page.clone(),
-            entry: Some(entry.id.clone()),
+            entry: Some(witness.clone()),
             part: key,
             byte: boundary,
         };
@@ -231,6 +259,17 @@ fn search_entry(
         }
     }
     Ok(None)
+}
+
+fn visible_digest(entry: &VisibleEntry) -> ReportHash {
+    let mut hash = Sha256::new();
+    let fields = std::iter::once(entry.text.as_str())
+        .chain(entry.parts.iter().map(|part| part.text.as_str()));
+    for text in fields {
+        hash.update((text.len() as u64).to_be_bytes());
+        hash.update(text.as_bytes());
+    }
+    ReportHash::from_sha256(hash.finalize().into())
 }
 
 struct RpcMatches<'a> {
