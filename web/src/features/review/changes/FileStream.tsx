@@ -296,16 +296,20 @@ export function FileStream({
         setPatchMatch(confirmedMatch ? ranges : []);
         if (code && !confirmedMatch)
           setNavigationError("The match is outside the available patch.");
-        const top =
-          scroll.getBoundingClientRect().top + (toolbar.current?.offsetHeight ?? geometry.toolbar);
-        if (target)
-          scroll.scrollTop += target.top - top - (jump?.source?.inset ?? jump?.line?.inset ?? 0);
-        else {
-          const inset = Math.min(jump?.inset ?? 0, Math.max(0, file.offsetHeight - 30));
-          scroll.scrollTop += file.getBoundingClientRect().top - top + inset;
-          if (jump?.focus && !code && (jump.line || jump.source))
-            setNavigationError("This line is outside the available patch.");
-        }
+        const viewTop = scroll.getBoundingClientRect().top;
+        const readingTop = () =>
+          Math.max(viewTop, toolbar.current?.getBoundingClientRect().bottom ?? viewTop);
+        const inset = target
+          ? -(jump?.focus ? 5 : (jump?.source?.inset ?? jump?.line?.inset ?? 0))
+          : Math.min(jump?.inset ?? 0, Math.max(0, file.offsetHeight - 30));
+        const before = scroll.scrollTop;
+        const destination = (target?.top ?? file.getBoundingClientRect().top) + inset;
+        scroll.scrollTop += destination - readingTop();
+        // The header can move from its natural position to sticky during landing.
+        const residual = destination - (scroll.scrollTop - before) - readingTop();
+        if (Math.abs(residual) > 0.5) scroll.scrollTop += residual;
+        if (!target && jump?.focus && !code && (jump.line || jump.source))
+          setNavigationError("This line is outside the available patch.");
         if (jump?.focus) {
           const focus =
             row ||
@@ -361,10 +365,11 @@ export function FileStream({
       return;
     const item = host.querySelector<HTMLElement>(`[data-file-position="${first + 1}"]`);
     if (item && !item.querySelector(".patch-waiting")) {
-      const inset =
-        scroller.getBoundingClientRect().top + geometry.toolbar - item.getBoundingClientRect().top;
-      const line = lineAt(item, scroller, geometry.toolbar);
-      const source = sourceAt(item, scroller, geometry.toolbar);
+      const viewTop = scroller.getBoundingClientRect().top;
+      const top = Math.max(viewTop, toolbar.current?.getBoundingClientRect().bottom ?? viewTop);
+      const inset = top - item.getBoundingClientRect().top;
+      const line = lineAt(item, scroller, top - viewTop);
+      const source = sourceAt(item, scroller, top - viewTop);
       storePatch(reviewId, initial.revision, {
         fileId: active.fileId,
         inset: Math.max(0, inset),
