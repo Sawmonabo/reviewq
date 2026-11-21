@@ -1,5 +1,5 @@
 use reviewq_app::access::AppError;
-use reviewq_app::changes::{ChangeSource, PatchFileSelection, SelectedPatch};
+use reviewq_app::changes::{ChangeSource, PatchFileSelection, PatchPagePreview, SelectedPatch};
 use reviewq_domain::identity::MrIdentity;
 
 use super::GitLab;
@@ -22,12 +22,13 @@ impl GitLab {
                 ordinal,
                 1,
                 hint.map(PatchFileSelection::PathHint),
-                None,
+                Some(PatchPagePreview::Selected),
             )
             .await?;
-        let file = page.items.into_iter().next().ok_or(AppError::NotFound)?;
-        let mut text = None;
-        if let Some(metrics) = &file.metrics
+        let mut file = page.items.into_iter().next().ok_or(AppError::NotFound)?;
+        let mut text = file.preview.take();
+        if text.is_none()
+            && let Some(metrics) = &file.metrics
             && metrics.byte_length <= INLINE_LIMIT
             && metrics.line_count <= 20_000
             && metrics.max_line_bytes <= 16 * 1024

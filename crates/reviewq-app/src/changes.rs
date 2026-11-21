@@ -53,6 +53,53 @@ pub struct PatchPathPage {
     pub partial: bool,
 }
 
+pub struct PatchSearchRequest {
+    pub revision: String,
+    pub query: String,
+    pub visible_file: Option<String>,
+    pub cursor: Option<PatchSearchCursor>,
+}
+
+#[derive(Clone)]
+pub struct PatchSearchCursor {
+    /// Zero denotes the optional visible file pass.
+    pub page: u32,
+    pub ordinal: u32,
+    pub offset: usize,
+    pub file_id: Option<String>,
+    pub etag: Option<String>,
+    pub checked_visible: bool,
+    pub partial: bool,
+    pub narrow: bool,
+}
+
+pub struct PatchSearchPage {
+    pub revision: PatchRevision,
+    pub items: Vec<PatchSearchMatch>,
+    pub next: Option<PatchSearchCursor>,
+    pub partial: bool,
+}
+
+#[derive(Clone, Copy)]
+pub enum PatchSide {
+    Old,
+    New,
+}
+
+pub struct PatchSearchMatch {
+    pub file_id: String,
+    pub old_path: String,
+    pub new_path: String,
+    pub side: PatchSide,
+    pub line: u32,
+    pub hunk: usize,
+    pub source_start: usize,
+    pub source_end: usize,
+    pub snippet: String,
+    pub highlight_start: usize,
+    pub highlight_end: usize,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum PatchFileSelection {
     Exact(String),
@@ -75,9 +122,10 @@ pub enum PatchAvailability {
     ProviderLimited,
 }
 
-/// Edge of a verified file page the reader will enter while scrolling.
+/// Optional original bytes from this verified file page.
 #[derive(Clone, Copy, Debug)]
-pub enum PatchPageEdge {
+pub enum PatchPagePreview {
+    Selected,
     Start,
     End,
 }
@@ -293,7 +341,7 @@ pub trait ChangeSource: Send + Sync {
         page: u32,
         limit: u16,
         selected_file: Option<PatchFileSelection>,
-        edge: Option<PatchPageEdge>,
+        preview: Option<PatchPagePreview>,
     ) -> AppFuture<'_, SourcePage<PatchFile>>;
 
     fn selected(
@@ -319,6 +367,12 @@ pub trait ChangeSource: Send + Sync {
         file: String,
         read: PatchRead,
     ) -> AppFuture<'_, PatchBytes>;
+
+    fn search(
+        &self,
+        source: MrIdentity,
+        request: PatchSearchRequest,
+    ) -> AppFuture<'_, PatchSearchPage>;
 
     fn discussions(
         &self,

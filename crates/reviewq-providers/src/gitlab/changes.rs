@@ -4,7 +4,8 @@ use std::sync::Arc;
 use reviewq_app::access::{AppError, AppFuture};
 use reviewq_app::changes::{
     ApprovalView, ChangeSource, Discussion, PatchBytes, PatchFile, PatchFileSelection,
-    PatchPageEdge, PatchPathCursor, PatchPathPage, PatchRead, PatchRevision, SourcePage,
+    PatchPagePreview, PatchPathCursor, PatchPathPage, PatchRead, PatchRevision, PatchSearchPage,
+    PatchSearchRequest, SourcePage,
 };
 use reviewq_domain::identity::{GitSha, MrIdentity};
 use serde::Deserialize;
@@ -15,9 +16,11 @@ use super::{GitLab, next_page};
 use crate::http::Response;
 
 mod approvals;
+mod content;
 mod discussions;
 mod lease;
 mod paths;
+mod search;
 mod selection;
 mod wire;
 
@@ -54,7 +57,7 @@ impl ChangeSource for GitLab {
         page: u32,
         limit: u16,
         selected_file: Option<PatchFileSelection>,
-        edge: Option<PatchPageEdge>,
+        preview: Option<PatchPagePreview>,
     ) -> AppFuture<'_, SourcePage<PatchFile>> {
         Box::pin(async move {
             if !(1..=10).contains(&limit) {
@@ -91,7 +94,8 @@ impl ChangeSource for GitLab {
                         revision: current.id.clone(),
                         preferred: selected.map(str::to_owned),
                         default: page == 1 || limit == 1,
-                        read: PatchRead::Full,
+                        read: PatchRead::Range(None),
+                        policy: wire::BodyPolicy::Lease,
                     };
                     let (mut scan, mut next) = self.scan_diffs(page, limit, &selection).await?;
                     let mut page = page;
@@ -131,8 +135,7 @@ impl ChangeSource for GitLab {
                             .await
                     {
                         let body = Arc::new(body);
-                        if selected_file.is_some()
-                            && let Body::Memory(bytes) = body.as_ref()
+                        if let Body::Memory(bytes) = body.as_ref()
                             && !bytes.is_empty()
                             && bytes.len() <= INLINE_LIMIT
                             && file.metrics.as_ref().is_some_and(|metrics| {
@@ -141,7 +144,7 @@ impl ChangeSource for GitLab {
                             && let Some(index) =
                                 scan.files.iter().position(|item| item.id == file.id)
                         {
-                            selected = Some((index, body.clone()));
+                            selected = Some((index, Arc::downgrade(&body)));
                         }
                         let _ = slot
                             .get_or_init(|| async {
@@ -165,7 +168,7 @@ impl ChangeSource for GitLab {
                     })
                 })
                 .await?;
-            indexed.for_reader(edge)
+            indexed.for_reader(preview)
         })
     }
 
@@ -196,52 +199,7 @@ impl ChangeSource for GitLab {
         file: String,
         read: PatchRead,
     ) -> AppFuture<'_, PatchBytes> {
-        Box::pin(async move {
-            let ordinal = ordinal(&file).ok_or(AppError::InvalidRequest)?;
-            let current = self.patch_revision(&source, Some(&revision)).await?;
-            let key = Key {
-                source: source.clone(),
-                revision,
-                file: file.clone(),
-            };
-            if let Some(patch) = self.patches.indexed_patch(&key).await {
-                return Ok(patch);
-            }
-            let slot = self.patches.slot(key).await?;
-            let mut fallback = None;
-            let result = slot
-                .get_or_try_init(|| async {
-                    let selection = wire::Selection {
-                        source: source.clone(),
-                        revision: current.id.clone(),
-                        preferred: Some(file.clone()),
-                        default: false,
-                        read,
-                    };
-                    let (scan, _) = self.scan_diffs(ordinal, 1, &selection).await?;
-                    let (metadata, body) = match scan.selected {
-                        Some(selected) => selected,
-                        None if scan.files.iter().any(|row| row.id == file) => {
-                            return Err(AppError::Unavailable);
-                        }
-                        None => return Err(AppError::NotFound),
-                    };
-                    self.patch_revision(&source, Some(&current.id)).await?;
-                    let is_window = matches!(body, Body::Window { .. });
-                    let patch = PatchBytes {
-                        revision: current,
-                        file: metadata,
-                        body: Arc::new(body),
-                    };
-                    if is_window {
-                        fallback = Some(patch);
-                        return Err(AppError::Unavailable);
-                    }
-                    Ok(patch)
-                })
-                .await;
-            result.cloned().or_else(|failure| fallback.ok_or(failure))
-        })
+        Box::pin(self.read_patch(source, revision, file, read))
     }
 
     fn discussions(
@@ -253,6 +211,14 @@ impl ChangeSource for GitLab {
     ) -> AppFuture<'_, SourcePage<Discussion>> {
         Box::pin(self.discussion_page(source, revision, page, limit))
     }
+
+    fn search(
+        &self,
+        source: MrIdentity,
+        request: PatchSearchRequest,
+    ) -> AppFuture<'_, PatchSearchPage> {
+        Box::pin(self.search_patches(source, request))
+    }
 }
 
 impl GitLab {
@@ -261,6 +227,16 @@ impl GitLab {
         source: &MrIdentity,
         expected: Option<&str>,
     ) -> Result<PatchRevision, AppError> {
+        self.diff_state(source, expected)
+            .await
+            .map(|(revision, _)| revision)
+    }
+
+    async fn diff_state(
+        &self,
+        source: &MrIdentity,
+        expected: Option<&str>,
+    ) -> Result<(PatchRevision, Option<u32>), AppError> {
         if source.origin() != &self.identity {
             return Err(AppError::NotFound);
         }
@@ -269,7 +245,18 @@ impl GitLab {
             .await?;
         let source_head = row.head_sha()?;
         let refs = row.diff_refs.ok_or(AppError::Unavailable)?;
-        revision_from_refs(source, refs, source_head, expected)
+        let count = row.changes_count.and_then(|value| {
+            if let Some(raw) = value.as_str() {
+                let count: u32 = raw.strip_suffix('+').unwrap_or(raw).parse().ok()?;
+                Some(count.saturating_add(u32::from(raw.ends_with('+'))))
+            } else {
+                value.as_u64()?.try_into().ok()
+            }
+        });
+        Ok((
+            revision_from_refs(source, refs, source_head, expected)?,
+            count,
+        ))
     }
 
     async fn read_diff_rows<T: DeserializeOwned>(

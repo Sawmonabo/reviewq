@@ -4,8 +4,8 @@ import { validate807 } from "./patch-file.mjs";
 import { validate48 } from "./history-cursor-dto.mjs";
 import { validate127 } from "./safe-count-dto.mjs";
 import { validate35 } from "./event-cursor-dto.mjs";
-import { schema403 } from "../metadata-9.mjs";
-function validate1378(
+import { schema410 } from "../metadata-10.mjs";
+function validate1402(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -30,7 +30,7 @@ function validate1378(
         ((data.text === undefined || !func0.call(data, "text")) &&
           (missing0 = "text"))
       ) {
-        validate1378.errors = [
+        validate1402.errors = [
           {
             instancePath,
             schemaPath: "#/required",
@@ -115,7 +115,7 @@ function validate1378(
                 vErrors.push(err1);
               }
               errors++;
-              validate1378.errors = vErrors;
+              validate1402.errors = vErrors;
               return false;
             } else {
               errors = _errs3;
@@ -210,7 +210,7 @@ function validate1378(
                     vErrors.push(err3);
                   }
                   errors++;
-                  validate1378.errors = vErrors;
+                  validate1402.errors = vErrors;
                   return false;
                 } else {
                   errors = _errs9;
@@ -255,12 +255,12 @@ function validate1378(
                     let data5 = data.text;
                     const _errs14 = errors;
                     if (typeof data5 !== "string" && data5 !== null) {
-                      validate1378.errors = [
+                      validate1402.errors = [
                         {
                           instancePath: instancePath + "/text",
                           schemaPath: "#/properties/text/type",
                           keyword: "type",
-                          params: { type: schema403.properties.text.type },
+                          params: { type: schema410.properties.text.type },
                         },
                       ];
                       return false;
@@ -268,7 +268,7 @@ function validate1378(
                     if (errors === _errs14) {
                       if (typeof data5 === "string") {
                         if (func81(data5) > 131072) {
-                          validate1378.errors = [
+                          validate1402.errors = [
                             {
                               instancePath: instancePath + "/text",
                               schemaPath: "#/properties/text/maxLength",
@@ -291,7 +291,7 @@ function validate1378(
         }
       }
     } else {
-      validate1378.errors = [
+      validate1402.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -302,7 +302,7 @@ function validate1378(
       return false;
     }
   }
-  validate1378.errors = vErrors;
+  validate1402.errors = vErrors;
   return errors === 0;
 }
-export { validate1378 };
+export { validate1402 };
