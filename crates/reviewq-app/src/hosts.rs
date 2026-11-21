@@ -102,6 +102,21 @@ pub trait NativeHost: QuestionsPort + Send + Sync {
         Box::pin(async { Err(AppError::Unavailable) })
     }
 
+    fn history_search_stamp(
+        &self,
+        target: HistorySession,
+    ) -> AppFuture<'_, crate::history::NativeRpcStamp> {
+        self.history_stamp(target)
+    }
+
+    fn history_search(
+        &self,
+        _target: HistorySession,
+        _input: crate::history::search::rpc::RpcSearchQuery,
+    ) -> AppFuture<'_, crate::history::search::rpc::RpcSearchPage> {
+        Box::pin(async { Err(AppError::Unavailable) })
+    }
+
     fn history_signals(
         &self,
         _target: HistorySession,

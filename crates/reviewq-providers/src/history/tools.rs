@@ -5,7 +5,8 @@ use reviewq_app::history::ToolState;
 use struson::reader::{JsonReader, JsonStreamReader, ValueType};
 use struson::writer::{JsonStreamWriter, JsonWriter};
 
-use super::records::{Text, Window, capture, invalid};
+use super::reader::NameBudget;
+use super::records::{NativeValue, Text, Window, capture, invalid};
 
 pub(super) const MAX_NATIVE_PARTS: u16 = 32;
 const AUX_PREVIEW_BYTES: usize = 256;
@@ -41,15 +42,40 @@ pub(super) fn body<R: Read>(
             Ok(Text::default())
         }
         _ => {
+            let start = reader.current_position(false).data_pos;
             let mut writer = JsonStreamWriter::new(Slice {
                 window,
                 text: Text::default(),
                 output,
             });
             reader.transfer_to(&mut writer).map_err(invalid)?;
-            Ok(writer.finish_document().map_err(invalid)?.text)
+            let mut text = writer.finish_document().map_err(invalid)?.text;
+            if let (Some(start), Some(end)) = (start, reader.current_position(false).data_pos) {
+                text.native_value = Some(NativeValue {
+                    span: start..end,
+                    string: false,
+                });
+            }
+            Ok(text)
         }
     }
+}
+
+/// Project the exact value selected by the verified native record, with the same
+/// JSON writer used to render and count its visible body.
+pub(super) fn stream_value(input: impl Read, output: &mut dyn Write) -> Result<u64, AppError> {
+    let mut reader = JsonStreamReader::new(NameBudget::new(input));
+    let text = body(
+        &mut reader,
+        Window {
+            start: 0,
+            limit: 0,
+            part: None,
+        },
+        Some(output),
+    )?;
+    reader.consume_trailing_whitespace().map_err(invalid)?;
+    Ok(text.bytes)
 }
 
 struct Slice<'a> {

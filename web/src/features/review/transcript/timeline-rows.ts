@@ -1,5 +1,7 @@
+import { defaultRangeExtractor } from "@tanstack/react-virtual";
 import type { HistoryEntry } from "../../../api/generated/contracts";
 import type { MessageHistoryItem } from "../../../api/generated/contracts/delivery";
+import type { ReadingAnchor } from "./history-window";
 import { activityRows } from "./tool-activity";
 import type { ReadPack, ToolCatalog, ToolRun } from "./tool-activity";
 
@@ -88,4 +90,62 @@ export function promptRanks(rows: readonly VisibleRow[]) {
     return count;
   });
   return { count, offsets, ranks };
+}
+
+export function readingIndex(
+  entries: readonly VisibleRow[],
+  saved: ReadingAnchor & { readonly adjacent?: string },
+  exact = saved.toolEntry,
+) {
+  const index = entries.findIndex((row) => (exact ? row.id : historyId(row)) === saved.id);
+  if (index >= 0 || (exact && !saved.adjacent)) return index;
+  // A retained native entry can become part of a differently keyed collapsed group.
+  return entries.findIndex((row) => row.kind === "tool-run" && row.members.includes(saved.id));
+}
+
+export function historyId(row: VisibleRow) {
+  return "anchorId" in row ? row.anchorId : row.id;
+}
+
+export function toggleKey(known: ReadonlySet<string>, key: string, open: boolean) {
+  if (known.has(key) === open) return known;
+  const next = new Set(known);
+  if (open) next.add(key);
+  else next.delete(key);
+  return next.size > 160 ? new Set([...next].slice(-160)) : next;
+}
+
+export function openToolRun(
+  rows: readonly VisibleRow[],
+  known: ReadonlyMap<string, boolean>,
+  entryId: string,
+) {
+  const containing = rows.find((row) => row.kind === "tool-run" && row.members.includes(entryId));
+  const next = new Map(known);
+  if (containing?.kind === "tool-run") for (const member of containing.members) next.delete(member);
+  next.set(entryId, true);
+  return new Map([...next].slice(-160));
+}
+
+export function transcriptRangeIndexes(
+  range: Parameters<typeof defaultRangeExtractor>[0],
+  entries: readonly VisibleRow[],
+  pinned: ReadonlySet<string>,
+  reading: (ReadingAnchor & { readonly adjacent?: string }) | undefined,
+  findEntry: string | undefined,
+) {
+  const indexes = new Set(defaultRangeExtractor(range));
+  if (reading?.adjacent) {
+    const index = readingIndex(entries, reading);
+    if (index >= 0 && !indexes.has(index)) {
+      const endIndex = Math.min(entries.length - 1, index + range.endIndex - range.startIndex);
+      for (const nearby of defaultRangeExtractor({ ...range, startIndex: index, endIndex }))
+        indexes.add(nearby);
+    }
+  }
+  if (pinned.size || findEntry)
+    entries.forEach((entry, index) => {
+      if (pinned.has(historyId(entry)) || entry.id === findEntry) indexes.add(index);
+    });
+  return [...indexes].sort((left, right) => left - right);
 }

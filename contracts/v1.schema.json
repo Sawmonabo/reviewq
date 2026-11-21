@@ -3630,6 +3630,9 @@
               "const": "user_prompt",
               "type": "string"
             },
+            "nativeIndex": {
+              "$ref": "#/definitions/SafeCountDto"
+            },
             "text": {
               "$ref": "#/definitions/HistoryText"
             }
@@ -3666,6 +3669,9 @@
               "const": "assistant_text",
               "type": "string"
             },
+            "nativeIndex": {
+              "$ref": "#/definitions/SafeCountDto"
+            },
             "text": {
               "$ref": "#/definitions/HistoryText"
             }
@@ -3700,6 +3706,9 @@
             },
             "name": {
               "type": "string"
+            },
+            "nativeIndex": {
+              "$ref": "#/definitions/SafeCountDto"
             },
             "state": {
               "$ref": "#/definitions/HistoryToolState"
@@ -3737,6 +3746,9 @@
             "kind": {
               "const": "tool_result",
               "type": "string"
+            },
+            "nativeIndex": {
+              "$ref": "#/definitions/SafeCountDto"
             },
             "state": {
               "$ref": "#/definitions/HistoryToolState"
@@ -3780,6 +3792,9 @@
               "const": "plan",
               "type": "string"
             },
+            "nativeIndex": {
+              "$ref": "#/definitions/SafeCountDto"
+            },
             "text": {
               "$ref": "#/definitions/HistoryText"
             }
@@ -3816,6 +3831,9 @@
             "kind": {
               "const": "assignment",
               "type": "string"
+            },
+            "nativeIndex": {
+              "$ref": "#/definitions/SafeCountDto"
             },
             "text": {
               "$ref": "#/definitions/HistoryText"
@@ -3999,6 +4017,223 @@
         "cursor"
       ],
       "title": "HistoryResultResponse",
+      "type": "object"
+    },
+    "HistorySearchDestination": {
+      "properties": {
+        "contentCursor": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/HistoryCursorDto"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "contentRef": {
+          "$ref": "#/definitions/HistoryCursorDto"
+        },
+        "endUtf16": {
+          "$ref": "#/definitions/SafeCountDto"
+        },
+        "entryId": {
+          "$ref": "#/definitions/HistoryEntryIdDto"
+        },
+        "generation": {
+          "$ref": "#/definitions/HistoryGenerationDto"
+        },
+        "locator": {
+          "$ref": "#/definitions/HistoryCursorDto"
+        },
+        "markdown": {
+          "type": "boolean"
+        },
+        "matched": {
+          "$ref": "#/definitions/HistoryText"
+        },
+        "nativeIndex": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SafeCountDto"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "offset": {
+          "$ref": "#/definitions/SafeCountDto"
+        },
+        "ordinal": {
+          "$ref": "#/definitions/SafeCountDto"
+        },
+        "partsCursor": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/HistoryCursorDto"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "runId": {
+          "$ref": "#/definitions/RunIdDto"
+        },
+        "sessionKey": {
+          "$ref": "#/definitions/SessionKeyDto"
+        },
+        "startUtf16": {
+          "$ref": "#/definitions/SafeCountDto"
+        },
+        "toolCallId": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/HistoryEntryIdDto"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "runId",
+        "sessionKey",
+        "entryId",
+        "generation",
+        "locator",
+        "contentRef",
+        "contentCursor",
+        "partsCursor",
+        "nativeIndex",
+        "toolCallId",
+        "offset",
+        "startUtf16",
+        "endUtf16",
+        "markdown",
+        "matched",
+        "ordinal"
+      ],
+      "type": "object"
+    },
+    "HistorySearchDestinationResponse": {
+      "description": "The resource and event head from the same authorized snapshot.",
+      "properties": {
+        "cursor": {
+          "$ref": "#/definitions/EventCursorDto"
+        },
+        "data": {
+          "$ref": "#/definitions/HistorySearchDestination"
+        }
+      },
+      "required": [
+        "data",
+        "cursor"
+      ],
+      "title": "HistorySearchDestinationResponse",
+      "type": "object"
+    },
+    "HistorySearchHit": {
+      "properties": {
+        "after": {
+          "$ref": "#/definitions/HistoryText"
+        },
+        "afterCursor": {
+          "$ref": "#/definitions/HistoryCursorDto"
+        },
+        "before": {
+          "$ref": "#/definitions/HistoryText"
+        },
+        "beforeCursor": {
+          "$ref": "#/definitions/HistoryCursorDto"
+        },
+        "entryId": {
+          "$ref": "#/definitions/HistoryEntryIdDto"
+        },
+        "hit": {
+          "$ref": "#/definitions/HistoryCursorDto"
+        },
+        "matched": {
+          "$ref": "#/definitions/HistoryText"
+        }
+      },
+      "required": [
+        "entryId",
+        "hit",
+        "before",
+        "matched",
+        "after",
+        "beforeCursor",
+        "afterCursor"
+      ],
+      "type": "object"
+    },
+    "HistorySearchPage": {
+      "properties": {
+        "availability": {
+          "$ref": "#/definitions/HistoryAvailability"
+        },
+        "generation": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/HistoryGenerationDto"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "hits": {
+          "items": {
+            "$ref": "#/definitions/HistorySearchHit"
+          },
+          "maxItems": 16,
+          "type": "array"
+        },
+        "nextCursor": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/HistoryCursorDto"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "runId": {
+          "$ref": "#/definitions/RunIdDto"
+        },
+        "sessionKey": {
+          "$ref": "#/definitions/SessionKeyDto"
+        }
+      },
+      "required": [
+        "runId",
+        "sessionKey",
+        "generation",
+        "availability",
+        "hits",
+        "nextCursor"
+      ],
+      "type": "object"
+    },
+    "HistorySearchResponse": {
+      "description": "The resource and event head from the same authorized snapshot.",
+      "properties": {
+        "cursor": {
+          "$ref": "#/definitions/EventCursorDto"
+        },
+        "data": {
+          "$ref": "#/definitions/HistorySearchPage"
+        }
+      },
+      "required": [
+        "data",
+        "cursor"
+      ],
+      "title": "HistorySearchResponse",
       "type": "object"
     },
     "HistoryText": {
@@ -10635,6 +10870,8 @@
     "HistoryPartPageResponse": "history",
     "HistoryPlanResponse": "history",
     "HistoryResultResponse": "history",
+    "HistorySearchDestinationResponse": "history",
+    "HistorySearchResponse": "history",
     "InterruptRequest": "recovery",
     "InterruptResponse": "recovery",
     "InterruptTargetResponse": "recovery",
@@ -10755,6 +10992,8 @@
       "HistoryPartPageResponse": "#/definitions/HistoryPartPageResponse",
       "HistoryPlanResponse": "#/definitions/HistoryPlanResponse",
       "HistoryResultResponse": "#/definitions/HistoryResultResponse",
+      "HistorySearchDestinationResponse": "#/definitions/HistorySearchDestinationResponse",
+      "HistorySearchResponse": "#/definitions/HistorySearchResponse",
       "InterruptResponse": "#/definitions/InterruptResponse",
       "InterruptTargetResponse": "#/definitions/InterruptTargetResponse",
       "LaunchReceiptResponse": "#/definitions/LaunchReceiptResponse",

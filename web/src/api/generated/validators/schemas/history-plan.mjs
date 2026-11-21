@@ -2,9 +2,9 @@
 import { func0 } from "../runtime.mjs";
 import { validate520 } from "./history-availability.mjs";
 import { validate25 } from "./checkpoint-id-dto.mjs";
-import { validate640 } from "./plan-entry.mjs";
-import { validate646 } from "./plan-task.mjs";
-function validate637(
+import { validate646 } from "./plan-entry.mjs";
+import { validate652 } from "./plan-task.mjs";
+function validate643(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -26,7 +26,7 @@ function validate637(
         ((data.plan === undefined || !func0.call(data, "plan")) &&
           (missing0 = "plan"))
       ) {
-        validate637.errors = [
+        validate643.errors = [
           {
             instancePath,
             schemaPath: "#/required",
@@ -88,7 +88,7 @@ function validate637(
               let valid1 = false;
               const _errs5 = errors;
               if (
-                !validate640(data2, {
+                !validate646(data2, {
                   instancePath: instancePath + "/plan",
                   parentData: data,
                   parentDataProperty: "plan",
@@ -97,8 +97,8 @@ function validate637(
               ) {
                 vErrors =
                   vErrors === null
-                    ? validate640.errors
-                    : vErrors.concat(validate640.errors);
+                    ? validate646.errors
+                    : vErrors.concat(validate646.errors);
                 errors = vErrors.length;
               }
               var _valid0 = _errs5 === errors;
@@ -135,7 +135,7 @@ function validate637(
                   vErrors.push(err1);
                 }
                 errors++;
-                validate637.errors = vErrors;
+                validate643.errors = vErrors;
                 return false;
               } else {
                 errors = _errs4;
@@ -207,7 +207,7 @@ function validate637(
                         for (let i0 = 0; i0 < len0; i0++) {
                           const _errs12 = errors;
                           if (
-                            !validate646(data5[i0], {
+                            !validate652(data5[i0], {
                               instancePath: instancePath + "/tasks/" + i0,
                               parentData: data5,
                               parentDataProperty: i0,
@@ -216,8 +216,8 @@ function validate637(
                           ) {
                             vErrors =
                               vErrors === null
-                                ? validate646.errors
-                                : vErrors.concat(validate646.errors);
+                                ? validate652.errors
+                                : vErrors.concat(validate652.errors);
                             errors = vErrors.length;
                           }
                           var valid2 = _errs12 === errors;
@@ -226,7 +226,7 @@ function validate637(
                           }
                         }
                       } else {
-                        validate637.errors = [
+                        validate643.errors = [
                           {
                             instancePath: instancePath + "/tasks",
                             schemaPath: "#/properties/tasks/type",
@@ -248,7 +248,7 @@ function validate637(
         }
       }
     } else {
-      validate637.errors = [
+      validate643.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -259,7 +259,7 @@ function validate637(
       return false;
     }
   }
-  validate637.errors = vErrors;
+  validate643.errors = vErrors;
   return errors === 0;
 }
-export { validate637 };
+export { validate643 };

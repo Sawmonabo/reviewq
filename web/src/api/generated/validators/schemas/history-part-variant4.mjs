@@ -2,9 +2,10 @@
 import { func0 } from "../runtime.mjs";
 import { validate25 } from "./checkpoint-id-dto.mjs";
 import { validate48 } from "./history-cursor-dto.mjs";
-import { validate592 } from "./history-tool-state.mjs";
+import { validate127 } from "./safe-count-dto.mjs";
+import { validate595 } from "./history-tool-state.mjs";
 import { validate537 } from "./history-text.mjs";
-function validate596(
+function validate599(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -25,7 +26,7 @@ function validate596(
         ((data.contentRef === undefined || !func0.call(data, "contentRef")) &&
           (missing0 = "contentRef"))
       ) {
-        validate596.errors = [
+        validate599.errors = [
           {
             instancePath,
             schemaPath: "#/required",
@@ -110,7 +111,7 @@ function validate596(
                 vErrors.push(err1);
               }
               errors++;
-              validate596.errors = vErrors;
+              validate599.errors = vErrors;
               return false;
             } else {
               errors = _errs3;
@@ -131,7 +132,7 @@ function validate596(
               let data2 = data.kind;
               const _errs7 = errors;
               if (typeof data2 !== "string") {
-                validate596.errors = [
+                validate599.errors = [
                   {
                     instancePath: instancePath + "/kind",
                     schemaPath: "#/properties/kind/type",
@@ -142,7 +143,7 @@ function validate596(
                 return false;
               }
               if ("tool_result" !== data2) {
-                validate596.errors = [
+                validate599.errors = [
                   {
                     instancePath: instancePath + "/kind",
                     schemaPath: "#/properties/kind/const",
@@ -157,20 +158,23 @@ function validate596(
               var valid0 = true;
             }
             if (valid0) {
-              if (data.state !== undefined && func0.call(data, "state")) {
+              if (
+                data.nativeIndex !== undefined &&
+                func0.call(data, "nativeIndex")
+              ) {
                 const _errs9 = errors;
                 if (
-                  !validate592(data.state, {
-                    instancePath: instancePath + "/state",
+                  !validate127(data.nativeIndex, {
+                    instancePath: instancePath + "/nativeIndex",
                     parentData: data,
-                    parentDataProperty: "state",
+                    parentDataProperty: "nativeIndex",
                     rootData,
                   })
                 ) {
                   vErrors =
                     vErrors === null
-                      ? validate592.errors
-                      : vErrors.concat(validate592.errors);
+                      ? validate127.errors
+                      : vErrors.concat(validate127.errors);
                   errors = vErrors.length;
                 }
                 var valid0 = _errs9 === errors;
@@ -178,25 +182,47 @@ function validate596(
                 var valid0 = true;
               }
               if (valid0) {
-                if (data.text !== undefined && func0.call(data, "text")) {
+                if (data.state !== undefined && func0.call(data, "state")) {
                   const _errs10 = errors;
                   if (
-                    !validate537(data.text, {
-                      instancePath: instancePath + "/text",
+                    !validate595(data.state, {
+                      instancePath: instancePath + "/state",
                       parentData: data,
-                      parentDataProperty: "text",
+                      parentDataProperty: "state",
                       rootData,
                     })
                   ) {
                     vErrors =
                       vErrors === null
-                        ? validate537.errors
-                        : vErrors.concat(validate537.errors);
+                        ? validate595.errors
+                        : vErrors.concat(validate595.errors);
                     errors = vErrors.length;
                   }
                   var valid0 = _errs10 === errors;
                 } else {
                   var valid0 = true;
+                }
+                if (valid0) {
+                  if (data.text !== undefined && func0.call(data, "text")) {
+                    const _errs11 = errors;
+                    if (
+                      !validate537(data.text, {
+                        instancePath: instancePath + "/text",
+                        parentData: data,
+                        parentDataProperty: "text",
+                        rootData,
+                      })
+                    ) {
+                      vErrors =
+                        vErrors === null
+                          ? validate537.errors
+                          : vErrors.concat(validate537.errors);
+                      errors = vErrors.length;
+                    }
+                    var valid0 = _errs11 === errors;
+                  } else {
+                    var valid0 = true;
+                  }
                 }
               }
             }
@@ -204,7 +230,7 @@ function validate596(
         }
       }
     } else {
-      validate596.errors = [
+      validate599.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -215,7 +241,7 @@ function validate596(
       return false;
     }
   }
-  validate596.errors = vErrors;
+  validate599.errors = vErrors;
   return errors === 0;
 }
-export { validate596 };
+export { validate599 };

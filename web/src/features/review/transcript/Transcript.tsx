@@ -1,4 +1,5 @@
-import { defaultRangeExtractor, useVirtualizer } from "@tanstack/react-virtual";
+import { useVirtualizer } from "@tanstack/react-virtual";
+import type { defaultRangeExtractor } from "@tanstack/react-virtual";
 import {
   useCallback,
   useDeferredValue,
@@ -15,9 +16,13 @@ import type { MessageHistoryItem } from "../../../api/generated/contracts/delive
 import { historyParts } from "../../../api/history";
 import type { SessionAddress } from "../../../api/history";
 import { Empty, Loading, Notice } from "../../../components/PanelState";
-import { describeError, formatTime, readable } from "../../../lib/presentation";
+import { describeError, readable } from "../../../lib/presentation";
 import { deliveryLabels } from "../delivery-labels";
 import { EntryBody } from "./EntryBody";
+import { HistorySelection } from "./HistorySelection";
+import { HistoryStatus } from "./HistoryStatus";
+import { TranscriptFind } from "./find/TranscriptFind";
+import type { FoundOutput, PreparedDestination } from "./find/destination";
 import {
   entriesIn,
   historyBookmark,
@@ -34,7 +39,16 @@ import { HistoryTimestamp } from "./HistoryTimestamp";
 import { FileReadPack, ToolRunHeader } from "./ToolActivity";
 import { openKey, toolCatalog, toolOnly } from "./tool-activity";
 import type { ReadTarget, ToolRun } from "./tool-activity";
-import { promptRanks, timelineRows, type VisibleRow } from "./timeline-rows";
+import {
+  historyId,
+  openToolRun,
+  promptRanks,
+  transcriptRangeIndexes,
+  readingIndex,
+  timelineRows,
+  toggleKey,
+  type VisibleRow,
+} from "./timeline-rows";
 import { MarkdownContent } from "../../../components/markdown/MarkdownContent";
 import { useHistory } from "./useHistory";
 import { useInlineProse } from "./useInlineProse";
@@ -67,8 +81,11 @@ export function Transcript({ target, provider, child, messages, working }: Props
   const bookmark = `history.${target.runId}.${target.sessionKey}`;
   const [saved] = useState(() => readBookmark(bookmark));
   const [following, setFollowing] = useState(saved?.following ?? true);
+  const followBeforeFind = useRef<boolean | undefined>(undefined);
   const [pinned, setPinned] = useState<ReadonlySet<string>>(() => new Set());
   const [selectedText, setSelectedText] = useState(false);
+  const [diagramFocus, setDiagramFocus] = useState<string>();
+  const focusedDiagram = !selectedText && pinned.size === 1 ? diagramFocus : undefined;
   const [groupKeys, setGroupKeys] = useState<ReadonlySet<string>>(() => new Set());
   const [actionNotice, setActionNotice] = useState<string>();
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(
@@ -87,6 +104,9 @@ export function Transcript({ target, provider, child, messages, working }: Props
     () => new Set(saved && !saved.following && saved.toolEntry !== false ? [saved.entryId] : []),
   );
   const [output, setOutput] = useState<OutputSelection>();
+  const [foundOutput, setFoundOutput] = useState<FoundOutput>();
+  const [findAnchorEntry, setFindAnchorEntry] = useState<string>();
+  const releaseFindAnchor = useCallback(() => setFindAnchorEntry(undefined), []);
   const [extraParts, setExtraParts] = useState<ExtraParts>();
   const partsRequest = useRef<AbortController | undefined>(undefined);
   const viewport = useRef<HTMLDivElement>(null);
@@ -100,7 +120,10 @@ export function Transcript({ target, provider, child, messages, working }: Props
         }
       : undefined,
   );
-  const selectionState = useRef({ hasText: false, ids: new Set<string>() });
+  const selectionState = useRef<{ hasText: boolean; ids: Set<string>; diagram?: string }>({
+    hasText: false,
+    ids: new Set(),
+  });
   const scrollIntent = useRef<"head" | "tail" | "scrollbar" | undefined>(undefined);
   const pageLead = useRef(160);
   const touchY = useRef<number | undefined>(undefined);
@@ -110,30 +133,47 @@ export function Transcript({ target, provider, child, messages, working }: Props
   const activeLatest = useRef(false);
   const toolFocus = useRef<ReadTarget | undefined>(undefined);
 
-  const history = useHistory(target, bookmark, following, pinned, (position, wanted, extend) => {
-    // Keep mounted group controls across a prepend or append that extends their native span.
-    setGroupKeys(
-      new Set(
-        extend
-          ? entries
-              .filter((row) => row.kind === "tool-run" || row.kind === "read-pack")
-              .map((row) => row.id)
-          : [],
-      ),
-    );
-    if (position === "around" && wanted) {
-      if (wanted.locator || anchor.current?.id !== wanted.entryId)
-        anchor.current = {
-          id: wanted.entryId,
-          offset: wanted.locator ? 24 : 0,
-          reopenPages: 0,
-          jump: true,
-        };
-    } else if (position !== "latest" && !following && anchor.current?.reopenPages === undefined) {
-      const reading = visibleAnchor(viewport.current);
-      anchor.current = reading && (extend ? { ...reading, adjacent: "read" } : reading);
-    }
-  });
+  const history = useHistory(
+    target,
+    bookmark,
+    following,
+    pinned,
+    focusedDiagram,
+    (position, wanted, extend) => {
+      // Keep mounted group controls across a prepend or append that extends their native span.
+      setGroupKeys(
+        new Set(
+          extend
+            ? entries
+                .filter((row) => row.kind === "tool-run" || row.kind === "read-pack")
+                .map((row) => row.id)
+            : [],
+        ),
+      );
+      if (position === "around" && wanted) {
+        if (wanted.locator || anchor.current?.id !== wanted.entryId)
+          anchor.current = {
+            id: wanted.entryId,
+            offset: wanted.locator ? 24 : 0,
+            reopenPages: 0,
+            jump: true,
+          };
+      } else if (focusedDiagram && (position === "latest" || position === "newer")) {
+        const host = viewport.current;
+        const row = host?.querySelector(`[data-native-entry="${CSS.escape(focusedDiagram)}"]`);
+        if (host && row)
+          anchor.current = {
+            id: focusedDiagram,
+            offset: row.getBoundingClientRect().top - host.getBoundingClientRect().top,
+            toolEntry: true,
+            adjacent: "read",
+          };
+      } else if (position !== "latest" && !following && anchor.current?.reopenPages === undefined) {
+        const reading = visibleAnchor(viewport.current);
+        anchor.current = reading && (extend ? { ...reading, adjacent: "read" } : reading);
+      }
+    },
+  );
   const historyEntries = useMemo(() => entriesIn(history.pages), [history.pages]);
   const knownTools = useMemo(() => toolCatalog(historyEntries), [historyEntries]);
   useEffect(() => () => partsRequest.current?.abort(), [history.generation]);
@@ -177,24 +217,9 @@ export function Transcript({ target, provider, child, messages, working }: Props
   ]);
 
   const rangeExtractor = useCallback(
-    (range: Parameters<typeof defaultRangeExtractor>[0]) => {
-      const indexes = new Set(defaultRangeExtractor(range));
-      const reading = anchor.current;
-      if (reading?.adjacent) {
-        const index = readingIndex(entries, reading);
-        if (index >= 0 && !indexes.has(index)) {
-          const endIndex = Math.min(entries.length - 1, index + range.endIndex - range.startIndex);
-          for (const nearby of defaultRangeExtractor({ ...range, startIndex: index, endIndex }))
-            indexes.add(nearby);
-        }
-      }
-      if (pinned.size)
-        entries.forEach((entry, index) => {
-          if (pinned.has(historyId(entry))) indexes.add(index);
-        });
-      return [...indexes].sort((left, right) => left - right);
-    },
-    [entries, pinned],
+    (range: Parameters<typeof defaultRangeExtractor>[0]) =>
+      transcriptRangeIndexes(range, entries, pinned, anchor.current, findAnchorEntry),
+    [entries, pinned, findAnchorEntry],
   );
 
   const rowKey = useCallback((index: number) => entries[index]?.id ?? index, [entries]);
@@ -206,7 +231,7 @@ export function Transcript({ target, provider, child, messages, working }: Props
     getScrollElement: () => viewport.current,
     getItemKey: rowKey,
     // Resolve retained row keys against the new window before mounting its visible range.
-    anchorTo: "end",
+    anchorTo: focusedDiagram ? "start" : "end",
     estimateSize: (index) =>
       entries[index]?.kind === "tool-run" ? 35 : entries[index]?.kind === "read-pack" ? 55 : 95,
     paddingStart: history.older ? 40 : 0,
@@ -241,7 +266,7 @@ export function Transcript({ target, provider, child, messages, working }: Props
     target,
     history.generation,
     following ? nearby.reverse() : nearby,
-    selectedText || pinned.size > 0,
+    selectedText || (pinned.size > 0 && !focusedDiagram),
     output?.reference,
   );
 
@@ -260,7 +285,7 @@ export function Transcript({ target, provider, child, messages, working }: Props
   const contentHeight = list.getTotalSize();
   useLayoutEffect(() => {
     if (!entries.length) return;
-    if (requestedLatest.current || (following && !anchor.current)) {
+    if (requestedLatest.current || (following && !anchor.current && !focusedDiagram)) {
       list.scrollToIndex(entries.length - 1, { align: "end" });
       requestedLatest.current = false;
       anchor.current = undefined;
@@ -330,7 +355,7 @@ export function Transcript({ target, provider, child, messages, working }: Props
       });
       return () => cancelAnimationFrame(frame);
     }
-  }, [entries, following, list, prose, contentHeight]);
+  }, [entries, following, list, prose, contentHeight, focusedDiagram]);
 
   useEffect(() => {
     const host = viewport.current;
@@ -349,18 +374,27 @@ export function Transcript({ target, provider, child, messages, working }: Props
               ids.add(node.dataset.nativeEntry);
           }
       }
-      const focused = document.activeElement?.closest<HTMLElement>("[data-native-entry]");
-      if (focused?.dataset.nativeEntry && host.contains(focused))
-        ids.add(focused.dataset.nativeEntry);
+      const active = document.activeElement;
+      const focused = active?.closest<HTMLElement>("[data-native-entry]");
+      const id = focused && host.contains(focused) ? focused.dataset.nativeEntry : undefined;
+      if (id) ids.add(id);
       const previous = selectionState.current;
+      const diagram =
+        id &&
+        (previous.diagram === id || focused?.hasAttribute("data-live-entry")) &&
+        active?.closest(".mermaid-figure")
+          ? id
+          : undefined;
       if (
         previous.hasText !== hasText ||
+        previous.diagram !== diagram ||
         previous.ids.size !== ids.size ||
         [...ids].some((id) => !previous.ids.has(id))
       ) {
-        selectionState.current = { hasText, ids };
+        selectionState.current = { hasText, ids, ...(diagram ? { diagram } : {}) };
         setPinned(ids);
         setSelectedText(hasText);
+        setDiagramFocus(diagram);
       }
     }
     document.addEventListener("selectionchange", updatePins);
@@ -419,7 +453,11 @@ export function Transcript({ target, provider, child, messages, working }: Props
   }, [bookmark]);
 
   function leaveReopen() {
-    if (anchor.current?.reopenPages !== undefined || anchor.current?.adjacent)
+    if (
+      anchor.current?.jump ||
+      anchor.current?.reopenPages !== undefined ||
+      anchor.current?.adjacent
+    )
       anchor.current = undefined;
   }
 
@@ -453,6 +491,7 @@ export function Transcript({ target, provider, child, messages, working }: Props
   }
 
   function gesture(up: boolean, distance?: number) {
+    followBeforeFind.current = undefined;
     leaveReopen();
     const host = viewport.current;
     if (!host) return;
@@ -473,11 +512,13 @@ export function Transcript({ target, provider, child, messages, working }: Props
   function clear() {
     if (selectedText) getSelection()?.removeAllRanges();
     setSelectedText(false);
+    setDiagramFocus(undefined);
     setPinned(new Set());
     selectionState.current = { hasText: false, ids: new Set() };
   }
 
   function latest() {
+    followBeforeFind.current = undefined;
     leaveReopen();
     clear();
     setFollowing(true);
@@ -564,47 +605,48 @@ export function Transcript({ target, provider, child, messages, working }: Props
     setExpanded((known) => toggleKey(known, openKey(at.entryId, at.callId), true));
   }
 
+  function openFound({ page, output: found, extra }: PreparedDestination) {
+    const { entryId, generation, locator, contentRef, toolCallId } = found.destination;
+    if (!history.openPrepared(page, { entryId, locator })) return false;
+    followBeforeFind.current = undefined;
+    setFollowing(false);
+    setFoundOutput(found);
+    setFindAnchorEntry(entryId);
+    setOutput({ entryId, reference: contentRef });
+    if (extra) setExtraParts({ entryId, generation, pages: 1, ...extra });
+    if (toolCallId) {
+      setExpanded((known) => toggleKey(known, openKey(entryId, toolCallId), true));
+      setExpandedReads((known) => toggleKey(known, entryId, true));
+      setExpandedRuns((known) => openToolRun(entries, known, entryId));
+    }
+    return true;
+  }
+
   return (
     <section className="transcript-shell" aria-label="Native conversation">
-      {selectedText && (
-        <div className="timeline-controls">
-          <button
-            type="button"
-            onClick={() => {
-              const value = getSelection()?.toString();
-              if (value)
-                void navigator.clipboard
-                  .writeText(value)
-                  .catch((failure: unknown) => setActionNotice(describeError(failure)));
-            }}
-          >
-            Copy selection
-          </button>
-          <button type="button" onClick={clear}>
-            Clear selection
-          </button>
-        </div>
-      )}
+      <TranscriptFind
+        target={target}
+        viewport={viewport}
+        onOpen={() => {
+          followBeforeFind.current = following;
+          const reading = visibleAnchor(viewport.current);
+          anchor.current = reading && { ...reading, jump: true };
+          list.cancelScroll();
+          requestedLatest.current = false;
+          setFollowing(false);
+        }}
+        onClose={() => {
+          leaveReopen();
+          if (followBeforeFind.current) setFollowing(true);
+          followBeforeFind.current = undefined;
+        }}
+        onChoose={openFound}
+        onReveal={leaveReopen}
+        onRelease={releaseFindAnchor}
+      />
+      {selectedText && <HistorySelection onClear={clear} onError={setActionNotice} />}
       {actionNotice && <Notice>{actionNotice}</Notice>}
-      {history.error && (
-        <Notice retry={() => void history.load("latest")}>
-          {history.error}
-          {history.updated && ` · Last confirmed ${formatTime(history.updated)}`}
-        </Notice>
-      )}
-      {!history.online && (
-        <Notice>
-          Live updates paused
-          {history.updated ? ` · Last confirmed ${formatTime(history.updated)}` : ""}.
-        </Notice>
-      )}
-      {history.availability && history.availability !== "available" && (
-        <Notice>
-          {history.availability === "partial"
-            ? "Only part of this conversation is available."
-            : `Native history · ${readable(history.availability)}`}
-        </Notice>
-      )}
+      <HistoryStatus history={history} onRetry={() => void history.load("latest")} />
       <div
         className="timeline-viewport"
         aria-label="Conversation history"
@@ -637,6 +679,7 @@ export function Transcript({ target, provider, child, messages, working }: Props
           if (anchor.current?.adjacent) anchor.current = undefined;
           const box = event.currentTarget.getBoundingClientRect();
           if (event.target === event.currentTarget && box.right - event.clientX < 17) {
+            followBeforeFind.current = undefined;
             leaveReopen();
             pageLead.current = event.currentTarget.clientHeight;
             scrollIntent.current = "scrollbar";
@@ -733,12 +776,18 @@ export function Transcript({ target, provider, child, messages, working }: Props
                       : "You"
                   : providerName;
               const timestamp = row.entry?.timestamp ?? row.delivery?.createdAt;
+              const found =
+                foundOutput?.destination.entryId === row.id &&
+                foundOutput.destination.generation === history.generation
+                  ? foundOutput
+                  : undefined;
               return (
                 <article
                   ref={list.measureElement}
                   data-index={item.index}
                   data-entry={row.id}
                   data-native-entry={row.kind === "delivery" ? undefined : row.id}
+                  data-live-entry={row.kind === "live" ? "" : undefined}
                   data-tool-member={row.grouped ? "" : undefined}
                   data-after-tools={followsTool && !justTools ? "" : undefined}
                   key={row.id}
@@ -782,34 +831,40 @@ export function Transcript({ target, provider, child, messages, working }: Props
                             <MarkdownContent source={row.delivery.attachment.quote} />
                           </blockquote>
                         )}
-                        <MarkdownContent source={row.delivery.text} />
+                        {!found && <MarkdownContent source={row.delivery.text} />}
                         {row.delivery.outcomeDetail && (
                           <small className="meta">{row.delivery.outcomeDetail}</small>
                         )}
                       </div>
                     )}
-                    {(row.entry || row.provisional) && !row.delivery && history.generation && (
-                      <EntryBody
-                        key={history.generation}
-                        target={target}
-                        generation={history.generation}
-                        entry={row.entry}
-                        provisional={row.provisional}
-                        knownTools={knownTools}
-                        expanded={expanded}
-                        prose={prose}
-                        toggle={(key, open) => setExpanded((known) => toggleKey(known, key, open))}
-                        reference={output?.entryId === row.id ? output.reference : undefined}
-                        {...(extraParts?.generation === history.generation &&
-                        extraParts.entryId === row.id
-                          ? { extra: extraParts }
-                          : {})}
-                        onMoreParts={(cursor) => void moreParts(row.id, cursor)}
-                        onReference={(reference) =>
-                          setOutput(reference ? { entryId: row.id, reference } : undefined)
-                        }
-                      />
-                    )}
+                    {(row.entry || row.provisional) &&
+                      (!row.delivery || found) &&
+                      history.generation && (
+                        <EntryBody
+                          key={history.generation}
+                          target={target}
+                          generation={history.generation}
+                          entry={row.entry}
+                          provisional={row.provisional}
+                          knownTools={knownTools}
+                          expanded={expanded}
+                          prose={prose}
+                          toggle={(key, open) =>
+                            setExpanded((known) => toggleKey(known, key, open))
+                          }
+                          reference={output?.entryId === row.id ? output.reference : undefined}
+                          {...(extraParts?.generation === history.generation &&
+                          extraParts.entryId === row.id
+                            ? { extra: extraParts }
+                            : {})}
+                          onMoreParts={(cursor) => void moreParts(row.id, cursor)}
+                          {...(found ? { found } : {})}
+                          onReference={(reference) => {
+                            setFoundOutput(undefined);
+                            setOutput(reference ? { entryId: row.id, reference } : undefined);
+                          }}
+                        />
+                      )}
                   </div>
                 </article>
               );
@@ -850,6 +905,7 @@ export function Transcript({ target, provider, child, messages, working }: Props
           hasNewer={history.newer}
           onReturnFocus={() => viewport.current?.focus({ preventScroll: true })}
           onJump={(id, locator) => {
+            followBeforeFind.current = undefined;
             leaveReopen();
             setFollowing(false);
             void history.load("around", { entryId: id, locator });
@@ -864,23 +920,4 @@ export function Transcript({ target, provider, child, messages, working }: Props
       )}
     </section>
   );
-}
-
-function readingIndex(entries: readonly VisibleRow[], saved: Position, exact = saved.toolEntry) {
-  const index = entries.findIndex((row) => (exact ? row.id : historyId(row)) === saved.id);
-  if (index >= 0 || (exact && !saved.adjacent)) return index;
-  // A retained native entry can become part of a differently keyed collapsed group.
-  return entries.findIndex((row) => row.kind === "tool-run" && row.members.includes(saved.id));
-}
-
-function historyId(row: VisibleRow) {
-  return "anchorId" in row ? row.anchorId : row.id;
-}
-
-function toggleKey(known: ReadonlySet<string>, key: string, open: boolean) {
-  if (known.has(key) === open) return known;
-  const next = new Set(known);
-  if (open) next.add(key);
-  else next.delete(key);
-  return next.size > 160 ? new Set([...next].slice(-160)) : next;
 }

@@ -194,6 +194,7 @@ fn emit_history_and_receipt(output: &Path) -> Result<(), Box<dyn Error>> {
             content_ref: None,
             text_bytes: None,
             parts: vec![HistoryPart::AssistantText {
+                native_index: None,
                 text: HistoryText::new("Ready.").unwrap(),
                 content_ref: None,
                 display: None,
@@ -271,6 +272,7 @@ fn user_entry(entry: &str, text: String) -> HistoryEntry {
         content_ref: None,
         text_bytes: None,
         parts: vec![HistoryPart::UserPrompt {
+            native_index: None,
             text: HistoryText::new(text).unwrap(),
             content_ref: None,
             display: None,

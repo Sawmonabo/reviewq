@@ -15,6 +15,7 @@ use crate::scalar::{
 /// Encoded JSON budget for one history page.
 pub const MAX_HISTORY_PAGE_BYTES: usize = 256 * 1024;
 mod navigation;
+pub mod search;
 pub use navigation::*;
 
 const MAX_HISTORY_TEXT_BYTES: usize = 64 * 1024;
@@ -246,6 +247,9 @@ pub type HistoryContentResponse = Success<HistoryContent>;
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub enum HistoryPart {
     UserPrompt {
+        #[serde(skip_serializing_if = "Option::is_none")]
+        #[cfg_attr(feature = "schema", schemars(with = "SafeCountDto"))]
+        native_index: Option<SafeCountDto>,
         text: HistoryText,
         #[serde(skip_serializing_if = "Option::is_none")]
         content_ref: Option<HistoryCursorDto>,
@@ -253,6 +257,9 @@ pub enum HistoryPart {
         display: Option<crate::reports::DocumentDisplay>,
     },
     AssistantText {
+        #[serde(skip_serializing_if = "Option::is_none")]
+        #[cfg_attr(feature = "schema", schemars(with = "SafeCountDto"))]
+        native_index: Option<SafeCountDto>,
         text: HistoryText,
         #[serde(skip_serializing_if = "Option::is_none")]
         content_ref: Option<HistoryCursorDto>,
@@ -260,6 +267,9 @@ pub enum HistoryPart {
         display: Option<crate::reports::DocumentDisplay>,
     },
     ToolCall {
+        #[serde(skip_serializing_if = "Option::is_none")]
+        #[cfg_attr(feature = "schema", schemars(with = "SafeCountDto"))]
+        native_index: Option<SafeCountDto>,
         call_id: HistoryEntryIdDto,
         name: String,
         label: &'static str,
@@ -268,18 +278,27 @@ pub enum HistoryPart {
         content_ref: Option<HistoryCursorDto>,
     },
     ToolResult {
+        #[serde(skip_serializing_if = "Option::is_none")]
+        #[cfg_attr(feature = "schema", schemars(with = "SafeCountDto"))]
+        native_index: Option<SafeCountDto>,
         call_id: HistoryEntryIdDto,
         state: HistoryToolState,
         text: HistoryText,
         content_ref: Option<HistoryCursorDto>,
     },
     Plan {
+        #[serde(skip_serializing_if = "Option::is_none")]
+        #[cfg_attr(feature = "schema", schemars(with = "SafeCountDto"))]
+        native_index: Option<SafeCountDto>,
         text: HistoryText,
         content_ref: Option<HistoryCursorDto>,
         #[serde(skip_serializing_if = "Option::is_none")]
         display: Option<crate::reports::DocumentDisplay>,
     },
     Assignment {
+        #[serde(skip_serializing_if = "Option::is_none")]
+        #[cfg_attr(feature = "schema", schemars(with = "SafeCountDto"))]
+        native_index: Option<SafeCountDto>,
         text: HistoryText,
         content_ref: Option<HistoryCursorDto>,
         #[serde(skip_serializing_if = "Option::is_none")]

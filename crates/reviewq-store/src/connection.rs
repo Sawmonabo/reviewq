@@ -15,6 +15,7 @@ use crate::StoreError;
 mod database;
 mod display_cache;
 mod profile;
+mod search_index;
 mod staging;
 mod wal;
 
@@ -36,6 +37,7 @@ struct Workers {
 
 pub struct SqliteStore {
     display_builds: Arc<display_cache::Builds>,
+    search_indexes: Arc<search_index::Indexes>,
     identity: StoreIdentity,
     workers: Mutex<Workers>,
     wakeup: watch::Sender<EventCursor>,
@@ -67,9 +69,11 @@ impl SqliteStore {
             let (projection_wakeup, _) = watch::channel(());
             let profile = Arc::new(profile);
             let reader = Worker::start(reader, profile.clone(), false)?;
+            let search_indexes = Arc::new(search_index::Indexes::new(&profile));
             let writer = Worker::start(writer, profile, true)?;
             Ok(Self {
                 display_builds: Arc::new(display_cache::Builds::default()),
+                search_indexes,
                 identity,
                 workers: Mutex::new(Workers { reader, writer }),
                 wakeup,
@@ -92,6 +96,12 @@ impl SqliteStore {
 
     pub fn identity(&self) -> &StoreIdentity {
         &self.identity
+    }
+
+    pub fn history_search_index(
+        &self,
+    ) -> Arc<dyn reviewq_app::history::search::index::SearchIndex> {
+        self.search_indexes.clone()
     }
 
     /// Latest commit hint. Consumers recover missed events from the durable journal.

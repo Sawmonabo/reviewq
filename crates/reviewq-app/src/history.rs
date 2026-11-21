@@ -9,6 +9,8 @@ use crate::access::{Actor, AppFuture};
 use crate::events::Snapshot;
 use crate::hosts::{ObservedAsyncQuestion, QuestionForm};
 
+pub mod search;
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct HistorySession {
     pub target: SessionTarget,
@@ -127,6 +129,19 @@ pub trait NativeHistoryReader: Send + Sync {
         offset: u64,
         limit: u32,
     ) -> AppFuture<'_, NativeContent>;
+
+    fn search(
+        &self,
+        session: HistorySession,
+        query: search::HistorySearch,
+    ) -> AppFuture<'_, Option<search::SearchPage>>;
+
+    fn confirm_search_hit(
+        &self,
+        session: HistorySession,
+        observation: search::SourceObservation,
+        reference: FileContentRef,
+    ) -> AppFuture<'_, ()>;
 }
 
 /// Read-only live evidence for a selected native source. Durable pages remain authoritative.

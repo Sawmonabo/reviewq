@@ -2,7 +2,7 @@
 import { func0 } from "../runtime.mjs";
 import { validate35 } from "./event-cursor-dto.mjs";
 import { validate150 } from "./git-sha-dto.mjs";
-function validate1446(
+function validate1493(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -56,7 +56,7 @@ function validate1446(
         }
       }
     } else {
-      validate1446.errors = [
+      validate1493.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -67,7 +67,7 @@ function validate1446(
       return false;
     }
   }
-  validate1446.errors = vErrors;
+  validate1493.errors = vErrors;
   return errors === 0;
 }
-export { validate1446 };
+export { validate1493 };

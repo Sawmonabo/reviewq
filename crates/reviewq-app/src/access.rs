@@ -10,6 +10,15 @@ use reviewq_domain::session::NativeIdentity;
 /// A future returned by an async adapter port.
 pub type AppFuture<'a, T> = Pin<Box<dyn Future<Output = Result<T, AppError>> + Send + 'a>>;
 
+/// Linux filesystem types admitted for large disposable disk-backed reader files.
+pub fn admits_disk_scratch(filesystem: u64) -> bool {
+    // ext, XFS, Btrfs, F2FS and ZFS.
+    matches!(
+        filesystem,
+        0xef53 | 0x5846_5342 | 0x9123_683e | 0xf2f5_2010 | 0x2fc1_2fc1
+    )
+}
+
 /// Stable authority for idempotency and scope checks. This contains no credentials.
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub enum ActorScope {

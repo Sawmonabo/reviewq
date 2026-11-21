@@ -198,6 +198,16 @@ pub(super) fn reference(
     session: &SessionKey,
     source: &ContentReference,
 ) -> Result<HistoryCursorDto, AppError> {
+    ranged_reference(endpoint, run, session, source, 0)
+}
+
+pub(super) fn ranged_reference(
+    endpoint: &ServiceEndpoint,
+    run: &RunId,
+    session: &SessionKey,
+    source: &ContentReference,
+    offset: u64,
+) -> Result<HistoryCursorDto, AppError> {
     let (generation, item, part, position) = match source {
         ContentReference::File(source) => (
             &source.generation,
@@ -226,7 +236,7 @@ pub(super) fn reference(
             item: item.to_string(),
             part,
             position,
-            offset: 0,
+            offset,
         },
     )
 }

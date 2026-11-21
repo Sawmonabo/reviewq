@@ -19,6 +19,7 @@ pub(super) struct Record {
     pub final_response: bool,
     pub text: Vec<u8>,
     pub bytes: u64,
+    pub native_value: Option<NativeValue>,
     pub parts: Vec<Part>,
     pub claude_tool_parent: Option<NativeInputId>,
     pub claude_tool_calls: Vec<(NativeInputId, String)>,
@@ -55,6 +56,7 @@ struct BodySink<'a> {
     field: BodyField,
     target: Option<&'a mut dyn Write>,
     parts_from: u16,
+    parts_limit: u16,
 }
 
 impl BodySink<'_> {
@@ -81,6 +83,13 @@ impl BodySink<'_> {
 pub(super) struct Text {
     pub bytes: u64,
     pub picked: Vec<u8>,
+    pub native_value: Option<NativeValue>,
+}
+
+#[derive(Clone)]
+pub(super) struct NativeValue {
+    pub span: std::ops::Range<u64>,
+    pub string: bool,
 }
 
 #[derive(Default)]
@@ -150,8 +159,11 @@ pub(super) fn project_window(
             field: BodyField::Text,
             target: None,
             parts_from: 0,
+            parts_limit: MAX_NATIVE_PARTS,
         },
     )
+    .ok()
+    .flatten()
 }
 
 pub(super) fn stream_body(
@@ -176,8 +188,11 @@ pub(super) fn stream_body(
             field,
             target: Some(output),
             parts_from: 0,
+            parts_limit: MAX_NATIVE_PARTS,
         },
     )
+    .ok()
+    .flatten()
 }
 
 pub(super) fn project_parts(
@@ -201,6 +216,35 @@ pub(super) fn project_parts(
             field: BodyField::Text,
             target: None,
             parts_from: first,
+            parts_limit: MAX_NATIVE_PARTS,
+        },
+    )
+    .ok()
+    .flatten()
+}
+
+/// Keep bounded field identities and lengths, without retaining body bytes.
+pub(super) fn project_search(
+    provider: HostProvider,
+    input: impl Read,
+    native: &NativeSessionId,
+    root_session: Option<&NativeSessionId>,
+) -> Result<Option<Record>, AppError> {
+    project_to(
+        provider,
+        input,
+        native,
+        root_session,
+        Window {
+            start: 0,
+            limit: 0,
+            part: None,
+        },
+        &mut BodySink {
+            field: BodyField::Text,
+            target: None,
+            parts_from: 0,
+            parts_limit: 16_384,
         },
     )
 }
@@ -212,24 +256,29 @@ fn project_to(
     root_session: Option<&NativeSessionId>,
     window: Window,
     output: &mut BodySink<'_>,
-) -> Option<Record> {
+) -> Result<Option<Record>, AppError> {
     let mut reader = JsonStreamReader::new(NameBudget::new(input));
     let result = match provider {
         HostProvider::Codex => codex(&mut reader, native, window, output),
         HostProvider::Claude => claude(&mut reader, native, root_session, window, output),
     };
-    let (mut item, kind, at_ms, turn) = result.ok()??;
-    reader.consume_trailing_whitespace().ok()?;
-    let id = item.id?.parse().ok()?;
+    let Some((mut item, kind, at_ms, turn)) = result? else {
+        return Ok(None);
+    };
+    reader.consume_trailing_whitespace().map_err(invalid)?;
+    let id = item
+        .id
+        .ok_or(AppError::Unavailable)?
+        .parse()
+        .map_err(invalid)?;
     if item.text.bytes == 0 && item.parts.is_empty() && item.next_part.is_none() {
-        return None;
+        return Ok(None);
     }
     if output.parts_from == 0
         && item.next_part.is_none()
-        && item
-            .parts
-            .iter()
-            .all(|part| matches!(part.kind, VisiblePartKind::Text(_)))
+        && item.parts.iter().all(|part| {
+            part.index < MAX_NATIVE_PARTS && matches!(part.kind, VisiblePartKind::Text(_))
+        })
     {
         item.parts.clear();
     } else {
@@ -239,7 +288,7 @@ fn project_to(
             }
         }
     }
-    Some(Record {
+    Ok(Some(Record {
         id,
         turn: turn.and_then(|value| value.parse().ok()),
         at_ms,
@@ -247,6 +296,7 @@ fn project_to(
         final_response: item.final_response,
         text: item.text.picked,
         bytes: item.text.bytes,
+        native_value: item.text.native_value,
         parts: item.parts,
         claude_tool_parent: item.claude_tool_parent,
         claude_tool_calls: item.tool_calls,
@@ -254,7 +304,7 @@ fn project_to(
         result_field: item.result_field,
         text_blocks: item.text_blocks,
         next_part: item.next_part,
-    })
+    }))
 }
 
 type Projection = Option<(Message, VisibleKind, Option<i64>, Option<String>)>;
@@ -530,7 +580,7 @@ fn block<R: Read>(
     let mut error = false;
     let mut plain = Text::default();
     let mut body = Text::default();
-    let retained = (output.parts_from..output.parts_from.saturating_add(MAX_NATIVE_PARTS))
+    let retained = (output.parts_from..output.parts_from.saturating_add(output.parts_limit))
         .contains(&index)
         || window.part == Some(index)
         || matches!(output.field,BodyField::TextBlock(at)|BodyField::InputBlock(at)|BodyField::ResultBlock(at) if index==at);
@@ -586,6 +636,11 @@ fn block<R: Read>(
         Some("Text" | "text" | "input_text" | "output_text") => {
             if plain.bytes > 0 {
                 item.text_blocks.push(index);
+                item.text.native_value = if item.text.bytes == 0 {
+                    plain.native_value.clone()
+                } else {
+                    None
+                };
             }
             item.text.bytes = item
                 .text
@@ -657,6 +712,8 @@ pub(super) fn capture<R: Read>(
     origin: u64,
     mut output: Option<&mut dyn Write>,
 ) -> Result<Text, AppError> {
+    reader.peek().map_err(invalid)?;
+    let quoted_start = reader.current_position(false).data_pos;
     let mut stream = reader.next_string_reader().map_err(invalid)?;
     let mut result = Text::default();
     let mut buffer = [0; 16 * 1024];
@@ -667,7 +724,7 @@ pub(super) fn capture<R: Read>(
     loop {
         let size = stream.read(&mut buffer).map_err(invalid)?;
         if size == 0 {
-            return Ok(result);
+            break;
         }
         if let Some(output) = output.as_mut() {
             output.write_all(&buffer[..size]).map_err(invalid)?;
@@ -687,6 +744,14 @@ pub(super) fn capture<R: Read>(
         }
         result.bytes += size as u64;
     }
+    drop(stream);
+    if let (Some(start), Some(end)) = (quoted_start, reader.current_position(false).data_pos) {
+        result.native_value = Some(NativeValue {
+            span: start..end,
+            string: true,
+        });
+    }
+    Ok(result)
 }
 
 pub(super) fn string<R: Read>(

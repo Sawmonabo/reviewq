@@ -12,6 +12,7 @@ use serde_json::json;
 use sha2::{Digest, Sha256};
 
 use super::Codex;
+use super::history_reads::ItemWindow;
 use super::session::Thread;
 
 #[derive(Deserialize)]
@@ -90,6 +91,11 @@ pub(super) enum Content {
     Other,
 }
 
+pub(super) struct ProjectedHistory {
+    pub(super) page: NativeHistoryPage,
+    pub(super) partial: bool,
+}
+
 impl Codex {
     pub(super) async fn turns(
         &self,
@@ -123,9 +129,22 @@ impl Codex {
     pub(super) async fn read_history(
         &self,
         target: HistorySession,
-        mut position: NativePosition,
+        position: NativePosition,
         limit: u16,
     ) -> Result<NativeHistoryPage, AppError> {
+        Ok(self
+            .read_history_projected(target, position, limit, true)
+            .await?
+            .page)
+    }
+
+    pub(super) async fn read_history_projected(
+        &self,
+        target: HistorySession,
+        mut position: NativePosition,
+        limit: u16,
+        previews: bool,
+    ) -> Result<ProjectedHistory, AppError> {
         if !(1..=100).contains(&limit) {
             return Err(AppError::InvalidRequest);
         }
@@ -162,12 +181,15 @@ impl Codex {
                 .await?;
         }
         let Some(turn) = turns.data.pop() else {
-            return Ok(NativeHistoryPage {
-                generation,
-                entries: Vec::new(),
-                older: None,
-                newer: None,
-                within: None,
+            return Ok(ProjectedHistory {
+                page: NativeHistoryPage {
+                    generation,
+                    entries: Vec::new(),
+                    older: None,
+                    newer: None,
+                    within: None,
+                },
+                partial: false,
             });
         };
         let id: NativeTurnId = turn.id.parse().map_err(|_| AppError::Unavailable)?;
@@ -179,26 +201,59 @@ impl Codex {
         let forward = in_turn
             .as_ref()
             .map_or(position.ascending, |window| window.forward);
-        let mut items = self
-            .item_page(
-                &thread.id,
-                &id,
-                forward,
-                in_turn
-                    .as_ref()
-                    .and_then(|window| window.item_cursor.as_deref()),
-                in_turn
-                    .as_ref()
-                    .and_then(|window| window.item_anchor.as_ref()),
-                limit.min(32),
-            )
-            .await?;
+        let cursor = in_turn
+            .as_ref()
+            .and_then(|window| window.item_cursor.as_deref());
+        let anchor = in_turn
+            .as_ref()
+            .and_then(|window| window.item_anchor.as_ref());
+        let mut items = match self
+            .item_page(&thread.id, &id, forward, cursor, anchor, limit.min(32))
+            .await
+        {
+            Err(AppError::Unavailable) if !previews && limit == 1 => {
+                // Metadata-only tool paging can supply the next exact cursor even
+                // when the individually requested saved tool output exceeds the wire cap.
+                let window = ItemWindow {
+                    forward,
+                    cursor,
+                    anchor,
+                    limit,
+                    defer: true,
+                };
+                match self.read_item_window(&thread.id, &id, window).await {
+                    Ok(items) => items,
+                    Err(AppError::Unavailable | AppError::NotFound) => {
+                        return Ok(ProjectedHistory {
+                            page: NativeHistoryPage {
+                                generation,
+                                entries: Vec::new(),
+                                older,
+                                newer,
+                                within: Some((position, id)),
+                            },
+                            partial: true,
+                        });
+                    }
+                    Err(error) => return Err(error),
+                }
+            }
+            items => items?,
+        };
+        let partial = items.data.iter().any(|item| item.output_deferred);
         let mut entries = items
             .data
             .into_iter()
+            .filter(|item| !item.output_deferred)
             .filter_map(|item| {
                 visible(item.item, &id, item.started_at_ms, item.completed_at_ms).map(|entry| {
-                    entry.map(|entry| super::history_reads::preview(entry, &generation))
+                    entry.map(|entry| {
+                        if previews {
+                            super::history_reads::preview(entry, &generation)
+                        } else {
+                            entry
+                        }
+                    })
                 })
             })
             .collect::<Result<Vec<_>, AppError>>()?;
@@ -219,12 +274,15 @@ impl Codex {
             older = next.or(older);
             newer = backwards.or(newer);
         }
-        Ok(NativeHistoryPage {
-            generation,
-            entries,
-            older,
-            newer,
-            within: Some((position, id)),
+        Ok(ProjectedHistory {
+            page: NativeHistoryPage {
+                generation,
+                entries,
+                older,
+                newer,
+                within: Some((position, id)),
+            },
+            partial,
         })
     }
 

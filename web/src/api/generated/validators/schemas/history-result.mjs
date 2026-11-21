@@ -2,9 +2,9 @@
 import { func0 } from "../runtime.mjs";
 import { validate520 } from "./history-availability.mjs";
 import { validate575 } from "./history-entry.mjs";
-import { validate656 } from "./child-result-failure.mjs";
+import { validate662 } from "./child-result-failure.mjs";
 import { validate25 } from "./checkpoint-id-dto.mjs";
-function validate653(
+function validate659(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -26,7 +26,7 @@ function validate653(
         ((data.entry === undefined || !func0.call(data, "entry")) &&
           (missing0 = "entry"))
       ) {
-        validate653.errors = [
+        validate659.errors = [
           {
             instancePath,
             schemaPath: "#/required",
@@ -114,7 +114,7 @@ function validate653(
                 vErrors.push(err1);
               }
               errors++;
-              validate653.errors = vErrors;
+              validate659.errors = vErrors;
               return false;
             } else {
               errors = _errs3;
@@ -138,7 +138,7 @@ function validate653(
               let valid2 = false;
               const _errs9 = errors;
               if (
-                !validate656(data2, {
+                !validate662(data2, {
                   instancePath: instancePath + "/failure",
                   parentData: data,
                   parentDataProperty: "failure",
@@ -147,8 +147,8 @@ function validate653(
               ) {
                 vErrors =
                   vErrors === null
-                    ? validate656.errors
-                    : vErrors.concat(validate656.errors);
+                    ? validate662.errors
+                    : vErrors.concat(validate662.errors);
                 errors = vErrors.length;
               }
               var _valid1 = _errs9 === errors;
@@ -185,7 +185,7 @@ function validate653(
                   vErrors.push(err3);
                 }
                 errors++;
-                validate653.errors = vErrors;
+                validate659.errors = vErrors;
                 return false;
               } else {
                 errors = _errs8;
@@ -259,7 +259,7 @@ function validate653(
                     vErrors.push(err5);
                   }
                   errors++;
-                  validate653.errors = vErrors;
+                  validate659.errors = vErrors;
                   return false;
                 } else {
                   errors = _errs13;
@@ -327,7 +327,7 @@ function validate653(
         }
       }
     } else {
-      validate653.errors = [
+      validate659.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -338,7 +338,7 @@ function validate653(
       return false;
     }
   }
-  validate653.errors = vErrors;
+  validate659.errors = vErrors;
   return errors === 0;
 }
-export { validate653 };
+export { validate659 };

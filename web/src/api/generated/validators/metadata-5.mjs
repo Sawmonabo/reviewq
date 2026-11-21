@@ -3,15 +3,15 @@ const schema204 = {
   enum: ["pending", "in_progress", "completed"],
   type: "string",
 };
-const schema210 = {
+const schema217 = {
   enum: ["interrupted", "deferred", "rejected", "uncertain"],
   type: "string",
 };
-const schema216 = {
+const schema223 = {
   enum: ["pending", "confirmed", "rejected", "uncertain"],
   type: "string",
 };
-const schema223 = {
+const schema230 = {
   type: "object",
   properties: {
     attachment: {
@@ -32,7 +32,7 @@ const schema223 = {
     purpose: { $ref: "#/definitions/RecordedPurpose" },
   },
 };
-const schema224 = {
+const schema231 = {
   properties: {
     currentReceiptId: {
       anyOf: [{ $ref: "#/definitions/CheckpointIdDto" }, { type: "null" }],
@@ -57,7 +57,7 @@ const schema224 = {
   ],
   type: "object",
 };
-const schema225 = {
+const schema232 = {
   enum: [
     "user",
     "report_feedback",
@@ -67,11 +67,11 @@ const schema225 = {
   ],
   type: "string",
 };
-const schema227 = {
+const schema234 = {
   enum: ["queued", "dispatching", "started", "rejected", "uncertain"],
   type: "string",
 };
-const schema231 = {
+const schema238 = {
   type: "object",
   properties: {
     desktopReason: { type: ["string", "null"] },
@@ -88,62 +88,18 @@ const schema231 = {
     occurredAt: { $ref: "#/definitions/UtcTimestampDto" },
   },
 };
-const schema233 = {
+const schema240 = {
   enum: ["changes", "agent", "findings", "overview"],
   type: "string",
 };
-const schema235 = {
-  type: "object",
-  properties: {
-    iid: { $ref: "#/definitions/MergeRequestIidDto" },
-    ourComments: { $ref: "#/definitions/SafeCountDto" },
-    personalApproval: { type: ["boolean", "null"] },
-    projectPath: { type: "string" },
-    reviewId: { $ref: "#/definitions/ReviewIdDto" },
-    ticketKeys: {
-      items: { $ref: "#/definitions/CheckpointIdDto" },
-      maxItems: 16,
-      type: "array",
-    },
-    ticketTitle: { type: ["string", "null"] },
-    title: { type: "string" },
-  },
-};
-const schema240 = {
-  description:
-    "A bounded compact list with a required nullable keyset continuation.",
-  properties: {
-    items: {
-      items: { $ref: "#/definitions/PatchDiscussion" },
-      maxItems: 100,
-      type: "array",
-    },
-    nextCursor: {
-      anyOf: [{ $ref: "#/definitions/HistoryCursorDto" }, { type: "null" }],
-    },
-    reviewId: { $ref: "#/definitions/ReviewIdDto" },
-    revision: { $ref: "#/definitions/CheckpointIdDto" },
-    textProjections: {
-      description:
-        "Optional searchable plain text from notes in this same response.",
-      items: { $ref: "#/definitions/PatchDiscussionText" },
-      maxItems: 64,
-      type: ["array", "null"],
-    },
-  },
-  required: ["reviewId", "revision", "items", "nextCursor"],
-  type: "object",
-};
 export {
   schema204,
-  schema210,
-  schema216,
+  schema217,
   schema223,
-  schema224,
-  schema225,
-  schema227,
+  schema230,
   schema231,
-  schema233,
-  schema235,
+  schema232,
+  schema234,
+  schema238,
   schema240,
 };

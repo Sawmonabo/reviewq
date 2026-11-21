@@ -1,9 +1,11 @@
 //! Bounded reads of proven native persistence, independent of a running host.
 
-use std::sync::Arc;
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 
 use reviewq_app::access::{AppError, AppFuture};
+use reviewq_app::history::search::{HistorySearch, SearchPage, SourceObservation};
 use reviewq_app::history::{
     FileContentRef, HistorySession, NativeContent, NativeFinalResponse, NativeHead,
     NativeHistoryPage, NativeHistoryReader, NativeNavigation, NativePlan, NativePosition,
@@ -25,6 +27,7 @@ mod proof;
 mod questions;
 mod reader;
 mod records;
+mod search;
 mod task_plan;
 pub(crate) mod tools;
 mod turn_metadata;
@@ -44,6 +47,10 @@ pub(crate) use turn_metadata::{
 
 pub struct FileHistory {
     reads: Arc<Semaphore>,
+    searches: Semaphore,
+    pending_searches: Semaphore,
+    large_records: Arc<Mutex<search::LargeRecords>>,
+    search_index: Option<Arc<search::Acceleration>>,
     streams: content::Streams,
 }
 
@@ -51,6 +58,10 @@ impl Default for FileHistory {
     fn default() -> Self {
         Self {
             reads: Arc::new(Semaphore::new(4)),
+            searches: Semaphore::new(1),
+            pending_searches: Semaphore::new(4),
+            large_records: Arc::default(),
+            search_index: None,
             streams: content::Streams::default(),
         }
     }
@@ -65,6 +76,35 @@ impl Drop for Cancel {
 }
 
 impl FileHistory {
+    pub fn with_search_index(
+        mut self,
+        index: Arc<dyn reviewq_app::history::search::index::SearchIndex>,
+    ) -> Self {
+        self.search_index = Some(Arc::new(search::Acceleration::new(index)));
+        self
+    }
+
+    /// Keep an active large display body seekable in the private service profile.
+    pub fn with_search_profile(directory: PathBuf) -> Self {
+        let large_records = Arc::new(Mutex::new(search::LargeRecords::new(directory)));
+        let owner = Arc::downgrade(&large_records);
+        tokio::spawn(async move {
+            loop {
+                tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                let Some(records) = owner.upgrade() else {
+                    break;
+                };
+                if let Ok(mut records) = records.try_lock() {
+                    records.expire();
+                }
+            }
+        });
+        Self {
+            large_records,
+            ..Self::default()
+        }
+    }
+
     fn inspect<T: Send + 'static>(
         &self,
         session: HistorySession,
@@ -257,6 +297,47 @@ impl NativeHistoryReader for FileHistory {
             self.streams
                 .read(key, reference, source, offset, limit as usize)
                 .await
+        })
+    }
+
+    fn search(
+        &self,
+        session: HistorySession,
+        query: HistorySearch,
+    ) -> AppFuture<'_, Option<SearchPage>> {
+        Box::pin(async move {
+            let _pending = self
+                .pending_searches
+                .try_acquire()
+                .map_err(|_| AppError::Busy)?;
+            let _slot = self
+                .searches
+                .acquire()
+                .await
+                .map_err(|_| AppError::Unavailable)?;
+            let owner = session.target.clone();
+            let large = self.large_records.clone();
+            let index = self.search_index.clone();
+            self.inspect(session, move |source, stop| {
+                let mut large = large.try_lock().map_err(|_| AppError::Busy)?;
+                search::read(&source, &owner, query, stop, &mut large, index.as_deref())
+            })
+            .await
+        })
+    }
+
+    fn confirm_search_hit(
+        &self,
+        session: HistorySession,
+        observation: SourceObservation,
+        reference: FileContentRef,
+    ) -> AppFuture<'_, ()> {
+        Box::pin(async move {
+            self.inspect(session, move |source, _| {
+                search::confirm(&source, &observation, &reference)
+            })
+            .await?
+            .ok_or(AppError::CursorExpired)
         })
     }
 }

@@ -50,6 +50,7 @@ export type HistoryPart =
       contentRef?: HistoryCursorDto | null;
       display?: DocumentDisplay | null;
       kind: "user_prompt";
+      nativeIndex?: SafeCountDto;
       text: HistoryText;
       [k: string]: unknown;
     }
@@ -57,6 +58,7 @@ export type HistoryPart =
       contentRef?: HistoryCursorDto | null;
       display?: DocumentDisplay | null;
       kind: "assistant_text";
+      nativeIndex?: SafeCountDto;
       text: HistoryText;
       [k: string]: unknown;
     }
@@ -66,6 +68,7 @@ export type HistoryPart =
       kind: "tool_call";
       label: string;
       name: string;
+      nativeIndex?: SafeCountDto;
       state: HistoryToolState;
       text: HistoryText;
       [k: string]: unknown;
@@ -74,6 +77,7 @@ export type HistoryPart =
       callId: HistoryEntryIdDto;
       contentRef: HistoryCursorDto | null;
       kind: "tool_result";
+      nativeIndex?: SafeCountDto;
       state: HistoryToolState;
       text: HistoryText;
       [k: string]: unknown;
@@ -82,6 +86,7 @@ export type HistoryPart =
       contentRef: HistoryCursorDto | null;
       display?: DocumentDisplay | null;
       kind: "plan";
+      nativeIndex?: SafeCountDto;
       text: HistoryText;
       [k: string]: unknown;
     }
@@ -89,6 +94,7 @@ export type HistoryPart =
       contentRef: HistoryCursorDto | null;
       display?: DocumentDisplay | null;
       kind: "assignment";
+      nativeIndex?: SafeCountDto;
       text: HistoryText;
       [k: string]: unknown;
     };
@@ -235,5 +241,216 @@ export interface ChildResultFailure {
   completedAt: UtcTimestampDto;
   followedByLeadReport: boolean;
   turnId: HistoryTurnIdDto;
+  [k: string]: unknown;
+}
+
+export interface HistorySearchDestinationResponse {
+  cursor: EventCursorDto;
+  data: HistorySearchDestination;
+  [k: string]: unknown;
+}
+
+export interface HistorySearchDestination {
+  contentCursor: HistoryCursorDto | null;
+  contentRef: HistoryCursorDto;
+  endUtf16: SafeCountDto;
+  entryId: HistoryEntryIdDto;
+  generation: HistoryGenerationDto;
+  locator: HistoryCursorDto;
+  markdown: boolean;
+  matched: HistoryText;
+  nativeIndex: SafeCountDto | null;
+  offset: SafeCountDto;
+  ordinal: SafeCountDto;
+  partsCursor: HistoryCursorDto | null;
+  runId: RunIdDto;
+  sessionKey: SessionKeyDto;
+  startUtf16: SafeCountDto;
+  toolCallId: HistoryEntryIdDto | null;
+  [k: string]: unknown;
+}
+
+export interface HistorySearchResponse {
+  cursor: EventCursorDto;
+  data: HistorySearchPage;
+  [k: string]: unknown;
+}
+
+export interface HistorySearchPage {
+  availability: HistoryAvailability;
+  generation: HistoryGenerationDto | null;
+  /**
+   * @maxItems 16
+   */
+  hits:
+    | []
+    | [HistorySearchHit]
+    | [HistorySearchHit, HistorySearchHit]
+    | [HistorySearchHit, HistorySearchHit, HistorySearchHit]
+    | [HistorySearchHit, HistorySearchHit, HistorySearchHit, HistorySearchHit]
+    | [
+        HistorySearchHit,
+        HistorySearchHit,
+        HistorySearchHit,
+        HistorySearchHit,
+        HistorySearchHit,
+      ]
+    | [
+        HistorySearchHit,
+        HistorySearchHit,
+        HistorySearchHit,
+        HistorySearchHit,
+        HistorySearchHit,
+        HistorySearchHit,
+      ]
+    | [
+        HistorySearchHit,
+        HistorySearchHit,
+        HistorySearchHit,
+        HistorySearchHit,
+        HistorySearchHit,
+        HistorySearchHit,
+        HistorySearchHit,
+      ]
+    | [
+        HistorySearchHit,
+        HistorySearchHit,
+        HistorySearchHit,
+        HistorySearchHit,
+        HistorySearchHit,
+        HistorySearchHit,
+        HistorySearchHit,
+        HistorySearchHit,
+      ]
+    | [
+        HistorySearchHit,
+        HistorySearchHit,
+        HistorySearchHit,
+        HistorySearchHit,
+        HistorySearchHit,
+        HistorySearchHit,
+        HistorySearchHit,
+        HistorySearchHit,
+        HistorySearchHit,
+      ]
+    | [
+        HistorySearchHit,
+        HistorySearchHit,
+        HistorySearchHit,
+        HistorySearchHit,
+        HistorySearchHit,
+        HistorySearchHit,
+        HistorySearchHit,
+        HistorySearchHit,
+        HistorySearchHit,
+        HistorySearchHit,
+      ]
+    | [
+        HistorySearchHit,
+        HistorySearchHit,
+        HistorySearchHit,
+        HistorySearchHit,
+        HistorySearchHit,
+        HistorySearchHit,
+        HistorySearchHit,
+        HistorySearchHit,
+        HistorySearchHit,
+        HistorySearchHit,
+        HistorySearchHit,
+      ]
+    | [
+        HistorySearchHit,
+        HistorySearchHit,
+        HistorySearchHit,
+        HistorySearchHit,
+        HistorySearchHit,
+        HistorySearchHit,
+        HistorySearchHit,
+        HistorySearchHit,
+        HistorySearchHit,
+        HistorySearchHit,
+        HistorySearchHit,
+        HistorySearchHit,
+      ]
+    | [
+        HistorySearchHit,
+        HistorySearchHit,
+        HistorySearchHit,
+        HistorySearchHit,
+        HistorySearchHit,
+        HistorySearchHit,
+        HistorySearchHit,
+        HistorySearchHit,
+        HistorySearchHit,
+        HistorySearchHit,
+        HistorySearchHit,
+        HistorySearchHit,
+        HistorySearchHit,
+      ]
+    | [
+        HistorySearchHit,
+        HistorySearchHit,
+        HistorySearchHit,
+        HistorySearchHit,
+        HistorySearchHit,
+        HistorySearchHit,
+        HistorySearchHit,
+        HistorySearchHit,
+        HistorySearchHit,
+        HistorySearchHit,
+        HistorySearchHit,
+        HistorySearchHit,
+        HistorySearchHit,
+        HistorySearchHit,
+      ]
+    | [
+        HistorySearchHit,
+        HistorySearchHit,
+        HistorySearchHit,
+        HistorySearchHit,
+        HistorySearchHit,
+        HistorySearchHit,
+        HistorySearchHit,
+        HistorySearchHit,
+        HistorySearchHit,
+        HistorySearchHit,
+        HistorySearchHit,
+        HistorySearchHit,
+        HistorySearchHit,
+        HistorySearchHit,
+        HistorySearchHit,
+      ]
+    | [
+        HistorySearchHit,
+        HistorySearchHit,
+        HistorySearchHit,
+        HistorySearchHit,
+        HistorySearchHit,
+        HistorySearchHit,
+        HistorySearchHit,
+        HistorySearchHit,
+        HistorySearchHit,
+        HistorySearchHit,
+        HistorySearchHit,
+        HistorySearchHit,
+        HistorySearchHit,
+        HistorySearchHit,
+        HistorySearchHit,
+        HistorySearchHit,
+      ];
+  nextCursor: HistoryCursorDto | null;
+  runId: RunIdDto;
+  sessionKey: SessionKeyDto;
+  [k: string]: unknown;
+}
+
+export interface HistorySearchHit {
+  after: HistoryText;
+  afterCursor: HistoryCursorDto;
+  before: HistoryText;
+  beforeCursor: HistoryCursorDto;
+  entryId: HistoryEntryIdDto;
+  hit: HistoryCursorDto;
+  matched: HistoryText;
   [k: string]: unknown;
 }
