@@ -4,6 +4,7 @@ import type { SessionAddress } from "../../../api/history";
 import { MarkdownContent } from "../../../components/markdown/MarkdownContent";
 import { Loading, Notice } from "../../../components/PanelState";
 import { useResource } from "../../../hooks/useResource";
+import type { FindDocument } from "./find/destination";
 import { documentDisplay, documentSource, documentTree, unavailableWindow } from "./document";
 
 export function NativeDocument({
@@ -12,15 +13,18 @@ export function NativeDocument({
   generation,
   reference,
   fallback,
+  prepared,
 }: {
   readonly target: SessionAddress;
   readonly entryId: string;
   readonly generation: string;
   readonly reference: string;
   readonly fallback: React.ReactNode;
+  readonly prepared?: FindDocument | undefined;
 }) {
   const [position, setPosition] = useState<{ byteOffset: number; sha256?: string }>({
-    byteOffset: 0,
+    byteOffset: prepared?.window.byteStart ?? 0,
+    ...(prepared ? { sha256: prepared.window.sha256 } : {}),
   });
   const [showSource, setShowSource] = useState(false);
   const [blocked, setBlocked] = useState(false);
@@ -30,6 +34,9 @@ export function NativeDocument({
     `document:${target.runId}:${target.sessionKey}:${generation}:${reference}:${position.byteOffset}`,
     async (signal) => {
       try {
+        if (prepared && position.byteOffset === prepared.window.byteStart) {
+          return { data: foundWindow(prepared), cursor: "" };
+        }
         const { data, cursor } = await historyDocument(
           target,
           entryId,
@@ -55,7 +62,7 @@ export function NativeDocument({
       }
     },
   );
-  const [shown, setShown] = useState(range.data);
+  const [shown, setShown] = useState(() => (prepared ? foundWindow(prepared) : range.data));
   useEffect(() => {
     const next = range.data;
     if (next === undefined) return;
@@ -88,7 +95,14 @@ export function NativeDocument({
 
   return (
     <div className="output-reader stack">
-      <div ref={output} tabIndex={-1} aria-label="Native output">
+      <div
+        ref={output}
+        tabIndex={-1}
+        aria-label="Native output"
+        data-find-body={
+          prepared && !showSource && data?.byteStart === prepared.window.byteStart ? "" : undefined
+        }
+      >
         {!shown && range.pending && <Loading label="Reading native output…" />}
         {range.error && <Notice retry={range.retry}>{range.error}</Notice>}
         {shown &&
@@ -187,6 +201,17 @@ export function NativeDocument({
       )}
     </div>
   );
+}
+
+function foundWindow({ window, tree, source }: FindDocument) {
+  const { result, ...range } = window;
+  return {
+    range,
+    source,
+    display: documentDisplay(window),
+    tree,
+    sourceOnly: result.state === "source",
+  };
 }
 
 function selectionIn(output: HTMLElement | null) {

@@ -54,7 +54,7 @@ pub struct FileHistory {
     large_records: Arc<Mutex<search::LargeRecords>>,
     search_index: Option<Arc<search::Acceleration>>,
     streams: content::Streams,
-    documents: documents::Documents,
+    documents: Arc<documents::Documents>,
 }
 
 impl Default for FileHistory {
@@ -66,7 +66,7 @@ impl Default for FileHistory {
             large_records: Arc::default(),
             search_index: None,
             streams: content::Streams::default(),
-            documents: documents::Documents::default(),
+            documents: Arc::default(),
         }
     }
 }
@@ -341,9 +341,18 @@ impl NativeHistoryReader for FileHistory {
             let owner = session.target.clone();
             let large = self.large_records.clone();
             let index = self.search_index.clone();
+            let documents = self.documents.clone();
             self.inspect(session, move |source, stop| {
                 let mut large = large.try_lock().map_err(|_| AppError::Busy)?;
-                search::read(&source, &owner, query, stop, &mut large, index.as_deref())
+                search::read(
+                    &source,
+                    &owner,
+                    query,
+                    stop,
+                    &mut large,
+                    &documents,
+                    index.as_deref(),
+                )
             })
             .await
         })

@@ -1,6 +1,7 @@
 import type { Root } from "hast";
 import type {
   HistoryContent,
+  HistoryDocument,
   HistoryPageResponse,
   HistoryPart,
 } from "../../../../api/generated/contracts";
@@ -10,6 +11,7 @@ import type {
 } from "../../../../api/generated/contracts/history";
 import {
   historyContent,
+  historyDocument,
   historyPage,
   historyParts,
   historySearchDestination,
@@ -23,16 +25,23 @@ import {
   revealAcross,
   revealDetails,
 } from "../../../../components/markdown/reading-range";
-import { completeDocument, documentTree } from "../document";
+import { completeDocument, documentSource, documentTree } from "../document";
 
 const changed = "This occurrence is no longer available in the conversation.";
 const highlightName = "reviewq-transcript-match";
 
+export type FindDocument = {
+  readonly window: HistoryDocument;
+  readonly source: string;
+  readonly tree: Root;
+};
+
 export type FoundOutput = {
   readonly destination: HistorySearchDestination;
-  readonly content: HistoryContent;
-  readonly tree?: Root;
-};
+} & (
+  | { readonly content: HistoryContent; readonly tree?: Root; readonly document?: never }
+  | { readonly document: FindDocument; readonly content?: never; readonly tree?: never }
+);
 
 export type PreparedDestination = {
   readonly page: HistoryPageResponse;
@@ -50,7 +59,23 @@ export async function prepareDestination(
     throw new Error(changed);
   const { entryId, generation, locator, contentRef, contentCursor, nativeIndex, partsCursor } =
     destination;
-  async function readBody() {
+  async function readBody(): Promise<FoundOutput> {
+    if (destination.document) {
+      const { byteStart, sha256 } = destination.document;
+      const { data: window } = await historyDocument(
+        target,
+        entryId,
+        generation,
+        contentRef,
+        { byteOffset: byteStart, sha256 },
+        signal,
+      );
+      if (window.byteStart !== byteStart || window.sha256 !== sha256) throw new Error(changed);
+      const source = documentSource(window);
+      const tree = documentTree(window, source);
+      if (!tree || !positions(markdownText(tree), destination)) throw new Error(changed);
+      return { destination, document: { window, source, tree } };
+    }
     const prepared =
       destination.markdown && destination.offset === 0 && (destination.outputBytes ?? 0) >= 8 * 1024
         ? await completeDocument(target, entryId, generation, contentRef, signal)
@@ -65,28 +90,22 @@ export async function prepareDestination(
         contentCursor ?? undefined,
         signal,
       ));
-    return { content, window: prepared?.window };
+    if (content.offset !== destination.offset) throw new Error(changed);
+    const tree = destination.markdown
+      ? prepared?.window
+        ? documentTree(prepared.window, content.text)
+        : parseMarkdown(content.text)
+      : undefined;
+    if (destination.markdown && (!tree || !content.complete)) throw new Error(changed);
+    if (!positions(tree ? markdownText(tree) : content.text, destination)) throw new Error(changed);
+    return { destination, content, ...(tree ? { tree } : {}) };
   }
-  const [page, body] = await Promise.all([
+  const [page, output] = await Promise.all([
     historyPage(target, { aroundId: entryId, locator }, signal),
     readBody(),
   ]);
-  const { content } = body;
   const entry = page.data.items.find((row) => row.entryId === entryId);
-  if (
-    !entry ||
-    page.data.generation !== generation ||
-    page.data.reset ||
-    content.offset !== destination.offset
-  )
-    throw new Error(changed);
-  const tree = destination.markdown
-    ? body.window
-      ? documentTree(body.window, content.text)
-      : parseMarkdown(content.text)
-    : undefined;
-  if (destination.markdown && (!tree || !content.complete)) throw new Error(changed);
-  if (!positions(tree ? markdownText(tree) : content.text, destination)) throw new Error(changed);
+  if (!entry || page.data.generation !== generation || page.data.reset) throw new Error(changed);
   let extra;
   if (nativeIndex !== null && !entry.parts.some((part) => part.nativeIndex === nativeIndex)) {
     if (!partsCursor) throw new Error(changed);
@@ -99,7 +118,7 @@ export async function prepareDestination(
   await historySearchDestination(target, hit.hit, signal);
   return {
     page,
-    output: { destination, content, ...(tree ? { tree } : {}) },
+    output,
     ...(extra ? { extra } : {}),
   };
 }

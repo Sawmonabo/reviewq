@@ -300,6 +300,7 @@ export interface HistorySearchDestinationResponse {
 export interface HistorySearchDestination {
   contentCursor: HistoryCursorDto | null;
   contentRef: HistoryCursorDto;
+  document?: HistorySearchDocument | null;
   endUtf16: SafeCountDto;
   entryId: HistoryEntryIdDto;
   generation: HistoryGenerationDto;
@@ -315,6 +316,13 @@ export interface HistorySearchDestination {
   sessionKey: SessionKeyDto;
   startUtf16: SafeCountDto;
   toolCallId: HistoryEntryIdDto | null;
+  [k: string]: unknown;
+}
+
+export interface HistorySearchDocument {
+  byteStart: SafeCountDto;
+  canonical: boolean;
+  sha256: ReportHashDto;
   [k: string]: unknown;
 }
 

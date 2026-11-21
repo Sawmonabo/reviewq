@@ -1,8 +1,9 @@
-use reviewq_domain::identity::NativeInputId;
+use reviewq_domain::identity::{NativeInputId, ReportHash};
 
 use super::FileContentRef;
 use crate::reading::Literal;
 
+pub mod document;
 pub mod index;
 pub mod rpc;
 
@@ -25,6 +26,7 @@ pub struct SourceObservation {
 pub struct SearchPoint {
     pub record: u64,
     pub part: u16,
+    pub window: Option<u64>,
     pub byte: u64,
 }
 
@@ -32,6 +34,13 @@ pub struct SearchPoint {
 pub struct SearchCursor {
     pub observation: SourceObservation,
     pub point: SearchPoint,
+}
+
+#[derive(Clone, Debug)]
+pub struct DocumentMatch {
+    pub hash: ReportHash,
+    pub byte_start: u64,
+    pub canonical: bool,
 }
 
 #[derive(Debug)]
@@ -47,6 +56,7 @@ pub struct SearchHit<Reference = FileContentRef, Position = SearchPoint> {
     pub start_utf16: u64,
     pub end_utf16: u64,
     pub markdown: bool,
+    pub document: Option<DocumentMatch>,
     pub ordinal: u64,
 }
 

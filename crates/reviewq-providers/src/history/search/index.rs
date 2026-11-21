@@ -6,6 +6,8 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use reviewq_app::access::AppError;
+use reviewq_app::history::FileContentRef;
+use reviewq_app::history::document::MAX_INDEX_BYTES;
 use reviewq_app::history::search::index::{
     CandidateIndex, CandidateWriter, IndexProof, SearchIndex,
 };
@@ -15,8 +17,8 @@ use reviewq_domain::session::SessionTarget;
 use sha2::{Digest, Sha256};
 
 use super::{
-    Body, DECODE_BLOCK, Lines, NativeValue, Source, ToolProof, bodies, check_cancel, file,
-    native_string, project_body, records, stream_value, verify_observation,
+    Body, DECODE_BLOCK, Documents, Lines, NativeValue, Source, ToolProof, bodies, check_cancel,
+    document, file, native_string, project_body, records, stream_value, verify_observation,
 };
 
 const MIN_SOURCE_BYTES: u64 = 1024 * 1024;
@@ -54,6 +56,7 @@ impl Acceleration {
         owner: &SessionTarget,
         observation: &SourceObservation,
         query: &HistorySearch,
+        documents: &Arc<Documents>,
     ) -> Option<Box<dyn CandidateIndex>> {
         let bytes = observation.high_water;
         let source_key = scope(source, owner)?;
@@ -110,18 +113,22 @@ impl Acceleration {
                 };
                 let store = self.store.clone();
                 let observation = observation.clone();
+                let owner = owner.clone();
+                let documents = documents.clone();
                 let stop = Arc::new(AtomicBool::new(false));
                 interest.attempted = Some(Instant::now());
                 interest.build = Some(stop.clone());
                 tokio::task::spawn_blocking(move || {
-                    let _ = build(
-                        &copied,
-                        &observation,
-                        source_key,
-                        key,
-                        store.as_ref(),
-                        &stop,
-                    );
+                    if let Ok(generation) = file::generation(&copied) {
+                        let source = IndexedSource {
+                            native: &copied,
+                            owner: &owner,
+                            observation: &observation,
+                            generation: &generation,
+                            documents: &documents,
+                        };
+                        let _ = build(source, source_key, key, store.as_ref(), &stop);
+                    }
                     stop.store(true, Ordering::Relaxed);
                 });
             }
@@ -142,7 +149,7 @@ impl Drop for Acceleration {
 
 fn scope(source: &Source, owner: &SessionTarget) -> Option<[u8; 32]> {
     let mut digest = Sha256::new();
-    digest.update(b"reviewq-reading-fts5-trigram-v2\0");
+    digest.update(b"reviewq-reading-fts5-trigram-v3\0");
     for field in [owner.run_id().as_str(), owner.session_key().as_str()] {
         digest.update((field.len() as u64).to_be_bytes());
         digest.update(field.as_bytes());
@@ -205,14 +212,23 @@ impl<R: Read> Read for Guarded<'_, R> {
     }
 }
 
+struct IndexedSource<'a> {
+    native: &'a Source,
+    owner: &'a SessionTarget,
+    observation: &'a SourceObservation,
+    generation: &'a str,
+    documents: &'a Documents,
+}
+
 fn build(
-    source: &Source,
-    observation: &SourceObservation,
+    indexed: IndexedSource<'_>,
     scope: [u8; 32],
     key: [u8; 32],
     store: &dyn SearchIndex,
     stop: &AtomicBool,
 ) -> Result<(), AppError> {
+    let source = indexed.native;
+    let observation = indexed.observation;
     // Leave room for visibility proof lookbacks and overlapping escape-safe reads.
     let mut work = Budget {
         left: MAX_INPUT_BYTES - 8 * 1024 * 1024,
@@ -256,7 +272,7 @@ fn build(
         };
         let mut with_record = prefix.clone();
         match index_record(
-            source,
+            &indexed,
             &lines,
             &mut proof,
             start..end,
@@ -284,7 +300,7 @@ fn build(
 }
 
 fn index_record(
-    source: &Source,
+    indexed: &IndexedSource<'_>,
     lines: &Lines<'_>,
     visibility: &mut ToolProof<'_>,
     span: Range<u64>,
@@ -292,6 +308,7 @@ fn index_record(
     index: &mut dyn CandidateWriter,
     prefix: &mut Sha256,
 ) -> Result<(), AppError> {
+    let source = indexed.native;
     let bytes = span.end - span.start;
     work.charge(bytes)?;
     let mut input = Hashing {
@@ -319,15 +336,39 @@ fn index_record(
         if let Ok(bodies) = bodies(source, &record) {
             for body in bodies {
                 let native = body.source_range(span.clone())?;
-                let cost = native
-                    .as_ref()
-                    .map_or(bytes, |field| field.span.end - field.span.start);
+                let cost = if body.document() {
+                    if body.bytes > MAX_INDEX_BYTES as u64 {
+                        certified = false;
+                        continue;
+                    }
+                    // Line discovery and field proof reread at most the record,
+                    // followed by one sparse pass over the selected value(s).
+                    3 * bytes
+                } else {
+                    native
+                        .as_ref()
+                        .map_or(bytes, |field| field.span.end - field.span.start)
+                };
                 let Some(remaining) = left.checked_sub(cost) else {
                     certified = false;
                     break;
                 };
                 work.charge(cost)?;
                 left = remaining;
+                if body.document() {
+                    let reference = FileContentRef {
+                        generation: indexed.generation.to_owned(),
+                        entry: record.id.clone(),
+                        part: body.part,
+                        position: file::file_position(
+                            &source.file,
+                            span.start,
+                            indexed.observation.high_water,
+                        )?,
+                    };
+                    certified &= cover_document(indexed, &reference, index, work, &mut left)?;
+                    continue;
+                }
                 let projection = BodyProjection {
                     source,
                     record: &record.id,
@@ -370,6 +411,58 @@ impl<R: Read> Read for Hashing<'_, R> {
         let size = self.read.read(bytes)?;
         self.hash.update(&bytes[..size]);
         Ok(size)
+    }
+}
+
+fn cover_document(
+    source: &IndexedSource<'_>,
+    reference: &FileContentRef,
+    index: &mut dyn CandidateWriter,
+    work: &mut Budget<'_>,
+    left: &mut u64,
+) -> Result<bool, AppError> {
+    let mut offset = 0;
+    loop {
+        // A window may decode part of both enclosing escape-safe checkpoints.
+        let window_cost = 2 * 32 * 1024;
+        let Some(remaining) = left.checked_sub(window_cost) else {
+            return Ok(false);
+        };
+        work.charge(window_cost)?;
+        *left = remaining;
+        let projection = match document::read(
+            source.documents,
+            source.owner,
+            source.native,
+            reference,
+            offset,
+            work.cancel,
+        ) {
+            Ok(projection) => projection,
+            Err(AppError::NotFound | AppError::Busy | AppError::Unavailable) => {
+                work.check()?;
+                return Ok(false);
+            }
+            Err(error) => return Err(error),
+        };
+        work.check()?;
+        if projection.proof.canonical {
+            return Ok(false);
+        }
+        let Some(text) = projection.text.filter(|text| !text.contains('\0')) else {
+            return Ok(false);
+        };
+        if !text.is_empty() {
+            let folded = FoldedText::new(&text);
+            index.folded_chunk(folded.as_str())?;
+        }
+        let Some(next) = projection.next else {
+            return Ok(true);
+        };
+        if next <= offset {
+            return Ok(false);
+        }
+        offset = next;
     }
 }
 

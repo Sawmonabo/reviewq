@@ -15,6 +15,7 @@ pub struct RpcSearchPoint {
     pub page: NativePosition,
     pub entry: Option<RpcSearchEntry>,
     pub part: u16,
+    pub window: Option<u64>,
     pub byte: u64,
 }
 

@@ -5,11 +5,13 @@ use std::fs::{self, Metadata};
 use std::io::{self, Read, Write};
 use std::ops::Range;
 use std::os::unix::fs::{FileExt, MetadataExt};
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use reviewq_app::access::AppError;
 use reviewq_app::history::search::{
-    HistorySearch, MAX_SEARCH_HITS, SearchHit, SearchPage, SearchPoint, SourceObservation,
+    DocumentMatch, HistorySearch, MAX_SEARCH_HITS, SearchHit, SearchPage, SearchPoint,
+    SourceObservation,
 };
 use reviewq_app::history::{FileContentRef, FilePosition, VisiblePartKind};
 use reviewq_app::reading::{FoldedText, Literal, TextMatch, displayed_markdown};
@@ -17,11 +19,13 @@ use reviewq_domain::identity::NativeInputId;
 use reviewq_domain::session::SessionTarget;
 use sha2::{Digest, Sha256};
 
+use super::documents::Documents;
 use super::file::{self, Lines, ToolProof};
 use super::locator::Source;
 use super::records::{self, BodyField, NativeValue, Record};
 use super::tools::stream_value;
 
+mod document;
 mod index;
 mod large;
 use super::native_string;
@@ -41,6 +45,7 @@ pub(super) fn read(
     query: HistorySearch,
     cancel: &AtomicBool,
     large: &mut LargeRecords,
+    documents: &Arc<Documents>,
     acceleration: Option<&Acceleration>,
 ) -> Result<SearchPage, AppError> {
     let mut budget = file::READ_BUDGET;
@@ -56,8 +61,9 @@ pub(super) fn read(
         return Err(AppError::CursorExpired);
     }
     let mut lines = Lines::new(&source.file, cancel);
-    let mut index = acceleration
-        .and_then(|acceleration| acceleration.use_index(source, owner, &observation, &query));
+    let mut index = acceleration.and_then(|acceleration| {
+        acceleration.use_index(source, owner, &observation, &query, documents)
+    });
     let mut proof = ToolProof::new(&source.file, cancel);
     let mut next = match &query.from {
         Some(cursor) => Some(cursor.point),
@@ -134,9 +140,11 @@ pub(super) fn read(
             next = match_record(
                 MatchSource {
                     source,
+                    owner,
                     lines: &lines,
                     cancel,
                     large,
+                    documents,
                 },
                 &mut window,
                 at,
@@ -183,12 +191,14 @@ fn first(record: u64, reverse: bool) -> SearchPoint {
         SearchPoint {
             record,
             part: u16::MAX,
+            window: None,
             byte: u64::MAX,
         }
     } else {
         SearchPoint {
             record,
             part: 0,
+            window: None,
             byte: 0,
         }
     }
@@ -237,6 +247,10 @@ struct Body {
 impl Body {
     fn key(&self) -> u16 {
         self.part.map_or(0, |index| index + 1)
+    }
+
+    fn document(&self) -> bool {
+        self.tool_call.is_none() && self.bytes > CONTENT_BYTES
     }
 
     fn source_range(&self, record: Range<u64>) -> Result<Option<NativeValue>, AppError> {
@@ -307,24 +321,21 @@ struct RecordWindow {
 
 struct MatchSource<'a, 'b> {
     source: &'a Source,
+    owner: &'a SessionTarget,
     lines: &'a Lines<'b>,
     cancel: &'a AtomicBool,
     large: &'a mut LargeRecords,
+    documents: &'a Documents,
 }
 
 fn match_record(
-    MatchSource {
-        source,
-        lines,
-        cancel,
-        large,
-    }: MatchSource<'_, '_>,
+    mut reader: MatchSource<'_, '_>,
     window: &mut RecordWindow,
     at: SearchPoint,
     query: &HistorySearch,
     output: &mut SearchPage,
 ) -> Result<Option<SearchPoint>, AppError> {
-    let mut bodies = bodies(source, &window.record)?;
+    let mut bodies = bodies(reader.source, &window.record)?;
     if query.reverse {
         bodies.reverse();
     }
@@ -339,10 +350,11 @@ fn match_record(
         } {
             continue;
         }
-        check_cancel(cancel)?;
+        check_cancel(reader.cancel)?;
         let point = SearchPoint {
             record: at.record,
             part: key,
+            window: if at.part == key { at.window } else { None },
             byte: 0,
         };
         let reference = FileContentRef {
@@ -373,6 +385,7 @@ fn match_record(
             reverse: query.reverse,
             reference,
             body: &body,
+            document: None,
             point,
             boundary,
             range: 0..u64::MAX,
@@ -385,86 +398,17 @@ fn match_record(
             partial: false,
             stopped: false,
         };
-        if body.bytes > CONTENT_BYTES
-            && field.as_ref().is_some_and(|field| field.string)
-            && window
-                .native
-                .as_ref()
-                .is_none_or(|native| native.key != key)
-        {
-            window.native = field.as_ref().and_then(|field| {
-                native_string::NativeString::prepare(
-                    &source.file,
-                    field.span.clone(),
-                    key,
-                    body.bytes,
-                    cancel,
-                )
-                .ok()
-            });
-            check_cancel(cancel)?;
-        }
-        let native = window.native.as_ref().filter(|native| native.key == key);
-        if native.is_none()
-            && body.bytes > CONTENT_BYTES
-            && !window.stage_unavailable
-            && window
-                .staged
-                .as_ref()
-                .is_none_or(|staged| staged.key != key)
-        {
-            window.staged.take();
-            window.staged = large
-                .stage(source, window, &body, field.as_ref(), cancel)
-                .ok();
-            window.stage_unavailable = window.staged.is_none();
-            check_cancel(cancel)?;
-        }
-        if let Some(native) = native {
-            matches.scan_native(&source.file, native, cancel)?;
-        } else if let Some(staged) = window.staged.as_ref().filter(|staged| staged.key == key) {
-            matches.scan_body(&staged.file, cancel)?;
-        } else if let Some(decoded) = field
-            .as_ref()
-            .filter(|field| field.string && body.bytes <= CONTENT_BYTES)
-            .and_then(|field| {
-                native_string::small(&source.file, field.span.clone(), body.bytes).ok()
-            })
-        {
-            matches.bytes = decoded.into_bytes();
-            matches.complete_body()?;
+        if body.document() {
+            document::scan(&mut matches, &reader)?;
         } else {
-            if repeated_bytes >= 16 * 1024 * 1024 {
-                return Ok(Some(SearchPoint {
-                    byte: boundary,
-                    ..point
-                }));
-            }
-            let input = if let Some(field) = field {
-                field.span
-            } else {
-                span
-            };
-            repeated_bytes += input.end - input.start;
-            let projected = if body.native_value.is_some() {
-                stream_value(lines.input(input.start, input.end), &mut matches)
-                    .is_ok_and(|bytes| bytes == body.bytes)
-            } else {
-                project_body(
-                    source,
-                    &window.record.id,
-                    &body,
-                    lines.input(input.start, input.end),
-                    &mut matches,
-                )
-            };
-            if matches.next.is_none() && !matches.stopped {
-                if !projected || matches.decoded + matches.bytes.len() as u64 != body.bytes {
-                    output.partial = true;
-                    continue;
-                }
-                matches.complete_body()?;
-            }
+            scan_body(
+                &mut matches,
+                &mut reader,
+                window,
+                span,
+                field,
+                &mut repeated_bytes,
+            )?;
         }
         if query.reverse && matches.hits.len() == available {
             let earliest = matches.hits.front().ok_or(AppError::Internal)?.point;
@@ -481,6 +425,106 @@ fn match_record(
         }
     }
     Ok(None)
+}
+
+fn scan_body(
+    matches: &mut Matches<'_>,
+    reader: &mut MatchSource<'_, '_>,
+    window: &mut RecordWindow,
+    span: Range<u64>,
+    field: Option<NativeValue>,
+    repeated_bytes: &mut u64,
+) -> Result<(), AppError> {
+    let MatchSource {
+        source,
+        lines,
+        large,
+        cancel,
+        ..
+    } = reader;
+    let body = matches.body;
+    let key = body.key();
+    if body.bytes > CONTENT_BYTES
+        && field.as_ref().is_some_and(|field| field.string)
+        && window
+            .native
+            .as_ref()
+            .is_none_or(|native| native.key != key)
+    {
+        window.native = field.as_ref().and_then(|field| {
+            native_string::NativeString::prepare(
+                &source.file,
+                field.span.clone(),
+                key,
+                body.bytes,
+                cancel,
+            )
+            .ok()
+        });
+        check_cancel(cancel)?;
+    }
+    let native = window.native.as_ref().filter(|native| native.key == key);
+    if native.is_none()
+        && body.bytes > CONTENT_BYTES
+        && !window.stage_unavailable
+        && window
+            .staged
+            .as_ref()
+            .is_none_or(|staged| staged.key != key)
+    {
+        window.staged.take();
+        window.staged = large
+            .stage(source, window, body, field.as_ref(), cancel)
+            .ok();
+        window.stage_unavailable = window.staged.is_none();
+        check_cancel(cancel)?;
+    }
+    if let Some(native) = native {
+        matches.scan_native(&source.file, native, cancel)?;
+    } else if let Some(staged) = window.staged.as_ref().filter(|staged| staged.key == key) {
+        matches.scan_body(&staged.file, cancel)?;
+    } else if let Some(decoded) = field
+        .as_ref()
+        .filter(|field| field.string && body.bytes <= CONTENT_BYTES)
+        .and_then(|field| native_string::small(&source.file, field.span.clone(), body.bytes).ok())
+    {
+        matches.bytes = decoded.into_bytes();
+        matches.complete_body()?;
+    } else {
+        if *repeated_bytes >= 16 * 1024 * 1024 {
+            matches.next = Some(SearchPoint {
+                byte: matches.boundary,
+                ..matches.point
+            });
+            return Ok(());
+        }
+        let input = if let Some(field) = field {
+            field.span
+        } else {
+            span
+        };
+        *repeated_bytes += input.end - input.start;
+        let projected = if body.native_value.is_some() {
+            stream_value(lines.input(input.start, input.end), matches)
+                .is_ok_and(|bytes| bytes == body.bytes)
+        } else {
+            project_body(
+                source,
+                &window.record.id,
+                body,
+                lines.input(input.start, input.end),
+                matches,
+            )
+        };
+        if matches.next.is_none() && !matches.stopped {
+            if !projected || matches.decoded + matches.bytes.len() as u64 != body.bytes {
+                matches.partial = true;
+                return Ok(());
+            }
+            matches.complete_body()?;
+        }
+    }
+    Ok(())
 }
 
 fn project_body(
@@ -506,6 +550,7 @@ struct Matches<'a> {
     reverse: bool,
     reference: FileContentRef,
     body: &'a Body,
+    document: Option<DocumentMatch>,
     point: SearchPoint,
     boundary: u64,
     range: std::ops::Range<u64>,
@@ -702,7 +747,8 @@ impl Matches<'_> {
     }
 
     fn hit(&self, text: &str, span: TextMatch, point: SearchPoint, matched: &str) -> SearchHit {
-        let ranged = !self.body.markdown && self.body.bytes > CONTENT_BYTES;
+        let markdown = self.body.markdown || self.document.is_some();
+        let ranged = !markdown && self.body.bytes > CONTENT_BYTES;
         let before = &text[..span.start.byte];
         let from = before.char_indices().rev().nth(31).map_or(0, |(at, _)| at);
         SearchHit {
@@ -724,8 +770,9 @@ impl Matches<'_> {
             } else {
                 self.start_utf16 + span.end.utf16 as u64
             },
-            markdown: self.body.markdown,
-            ordinal: if self.body.markdown {
+            markdown,
+            document: self.document.clone(),
+            ordinal: if markdown {
                 before
                     .char_indices()
                     .filter(|(start, _)| text[*start..].starts_with(matched))

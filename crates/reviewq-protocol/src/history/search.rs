@@ -1,6 +1,7 @@
 use serde::Serialize;
 
 use super::{HistoryAvailability, HistoryText};
+use crate::reports::ReportHashDto;
 use crate::{
     HistoryCursorDto, HistoryEntryIdDto, HistoryGenerationDto, RunIdDto, SafeCountDto,
     SessionKeyDto, Success,
@@ -37,6 +38,15 @@ pub type HistorySearchResponse = Success<HistorySearchPage>;
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct HistorySearchDocument {
+    pub sha256: ReportHashDto,
+    pub byte_start: SafeCountDto,
+    pub canonical: bool,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct HistorySearchDestination {
     pub run_id: RunIdDto,
     pub session_key: SessionKeyDto,
@@ -51,6 +61,8 @@ pub struct HistorySearchDestination {
     pub offset: SafeCountDto,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub output_bytes: Option<SafeCountDto>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub document: Option<HistorySearchDocument>,
     pub start_utf16: SafeCountDto,
     pub end_utf16: SafeCountDto,
     pub markdown: bool,

@@ -1,12 +1,14 @@
 use std::collections::VecDeque;
 
 use reviewq_app::access::AppError;
+use reviewq_app::history::document::{MAX_INDEX_BYTES, Query as DocumentQuery};
+use reviewq_app::history::search::document::project;
 use reviewq_app::history::search::rpc::{
     RpcSearchEntry, RpcSearchPage, RpcSearchPoint, RpcSearchQuery,
 };
-use reviewq_app::history::search::{MAX_SEARCH_HITS, SearchHit};
+use reviewq_app::history::search::{DocumentMatch, MAX_SEARCH_HITS, SearchHit};
 use reviewq_app::history::{
-    HistorySession, NativePosition, RpcContentRef, VisibleEntry, VisiblePartKind,
+    HistorySession, NativePosition, RpcContentRef, VisibleEntry, VisibleKind, VisiblePartKind,
 };
 use reviewq_app::reading::{FoldedText, Literal, TextMatch, displayed_markdown};
 use reviewq_domain::identity::{NativeInputId, ReportHash};
@@ -86,13 +88,16 @@ impl Codex {
         };
         for entry in &entries[start..] {
             if let Some(next) = search_entry(
+                self,
                 entry,
                 &at,
                 limit,
                 &query.literal,
                 query.reverse,
                 &mut output,
-            )? {
+            )
+            .await?
+            {
                 output.next = Some(next);
                 break;
             }
@@ -109,6 +114,7 @@ fn at_page(page: NativePosition) -> RpcSearchPoint {
         page,
         entry: None,
         part: 0,
+        window: None,
         byte: 0,
     }
 }
@@ -126,7 +132,8 @@ impl Body<'_> {
     }
 }
 
-fn search_entry(
+async fn search_entry(
+    codex: &Codex,
     entry: &VisibleEntry,
     at: &RpcSearchPoint,
     page_size: u16,
@@ -191,29 +198,21 @@ fn search_entry(
         } else {
             0
         };
-        let point = RpcSearchPoint {
+        let mut point = RpcSearchPoint {
             page: at.page.clone(),
             entry: Some(witness.clone()),
             part: key,
+            window: if same_entry && key == at.part {
+                at.window
+            } else {
+                None
+            },
             byte: boundary,
         };
         let available = MAX_SEARCH_HITS - output.hits.len();
         if available == 0 {
             return Ok(Some(point));
         }
-        let markdown = body.markdown && body.text.len() <= 65_536;
-        let projected = if markdown {
-            match displayed_markdown(body.text) {
-                Some(display) => Some(display),
-                None => {
-                    output.partial = true;
-                    continue;
-                }
-            }
-        } else {
-            None
-        };
-        let text = projected.as_deref().unwrap_or(body.text);
         let reference = RpcContentRef {
             generation: output.observation.generation.clone(),
             turn: turn.clone(),
@@ -221,14 +220,70 @@ fn search_entry(
             part: body.part,
             hash: digest(body.text),
         };
+        let mut document = None;
+        let mut next_window = None;
+        let projected = if body.markdown && body.text.len() > 65_536 {
+            if body.text.len() > MAX_INDEX_BYTES
+                || (entry.kind != VisibleKind::User && entry.at_ms.is_none())
+            {
+                output.partial = true;
+                continue;
+            }
+            let offset = point.window.unwrap_or_else(|| {
+                if reverse {
+                    body.text.len() as u64 - 1
+                } else {
+                    0
+                }
+            });
+            let projection = project(
+                codex
+                    .project_item_document(
+                        body.text.to_owned(),
+                        reference.hash.clone(),
+                        DocumentQuery {
+                            offset,
+                            expected: Some(reference.hash.clone()),
+                        },
+                    )
+                    .await?,
+            );
+            if point
+                .window
+                .is_some_and(|at| at != projection.proof.byte_start)
+            {
+                return Err(AppError::CursorExpired);
+            }
+            point.window = Some(projection.proof.byte_start);
+            document = Some(projection.proof);
+            next_window = if reverse {
+                projection.previous
+            } else {
+                projection.next
+            };
+            projection.text
+        } else if body.markdown {
+            displayed_markdown(body.text)
+        } else {
+            None
+        };
+        if body.markdown && projected.is_none() {
+            output.partial = true;
+        }
+        let text = if body.markdown {
+            projected.as_deref().unwrap_or_default()
+        } else {
+            body.text
+        };
         let mut matcher = RpcMatches {
             point,
             reference,
             literal,
             available,
             reverse,
-            markdown,
-            ranged: !markdown && body.text.len() > 65_536,
+            markdown: body.markdown,
+            document,
+            ranged: !body.markdown && body.text.len() > 65_536,
             output_bytes: body.text.len() as u64,
             tool: body.tool,
             hits: VecDeque::new(),
@@ -248,7 +303,11 @@ fn search_entry(
             }
             Some(point)
         } else {
-            None
+            next_window.map(|window| RpcSearchPoint {
+                window: Some(window),
+                byte: if reverse { u64::MAX } else { 0 },
+                ..matcher.point.clone()
+            })
         };
         if reverse {
             output.hits.extend(matcher.hits.into_iter().rev());
@@ -280,6 +339,7 @@ struct RpcMatches<'a> {
     available: usize,
     reverse: bool,
     markdown: bool,
+    document: Option<DocumentMatch>,
     ranged: bool,
     output_bytes: u64,
     tool: Option<&'a NativeInputId>,
@@ -386,6 +446,7 @@ impl RpcMatches<'_> {
                 utf16 + span.end.utf16 as u64
             },
             markdown: self.markdown,
+            document: self.document.clone(),
             ordinal: if self.markdown {
                 before
                     .char_indices()

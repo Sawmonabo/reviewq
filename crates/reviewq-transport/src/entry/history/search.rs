@@ -17,10 +17,11 @@ use reviewq_app::history::{
 use reviewq_app::reading::Literal;
 use reviewq_domain::identity::{RunId, SessionKey};
 use reviewq_protocol::history::search::{
-    HistorySearchDestination, HistorySearchDestinationResponse, HistorySearchHit,
-    HistorySearchPage, HistorySearchResponse,
+    HistorySearchDestination, HistorySearchDestinationResponse, HistorySearchDocument,
+    HistorySearchHit, HistorySearchPage, HistorySearchResponse,
 };
 use reviewq_protocol::history::{HistoryAvailability, HistoryText};
+use reviewq_protocol::reports::ReportHashDto;
 use reviewq_protocol::{
     HistoryCursorDto, HistoryEntryIdDto, HistoryGenerationDto, RunIdDto, SafeCountDto,
     SessionKeyDto,
@@ -32,8 +33,8 @@ use super::{Cursor, Entry, Point, ServiceEndpoint, content, explore, parts};
 use crate::entry::error::{ApiError, ApiPath as Path, ApiQuery as Query};
 use crate::entry::pages::{parse, success};
 
-const PAGE_TOKEN: &[u8] = b"reviewq-history-search-page-v2";
-const HIT_TOKEN: &[u8] = b"reviewq-history-search-hit-v2";
+const PAGE_TOKEN: &[u8] = b"reviewq-history-search-page-v3";
+const HIT_TOKEN: &[u8] = b"reviewq-history-search-hit-v3";
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -88,6 +89,7 @@ enum Position {
         version: [u8; 32],
         record: u64,
         part: u16,
+        window: Option<u64>,
         byte: u64,
     },
     Rpc {
@@ -95,6 +97,7 @@ enum Position {
         tail: Option<String>,
         item: Option<RpcEntryAnchor>,
         part: u16,
+        window: Option<u64>,
         byte: u64,
     },
 }
@@ -130,8 +133,16 @@ struct Hit {
     start: u64,
     end: u64,
     markdown: bool,
+    document: Option<Document>,
     matched: String,
     ordinal: u64,
+}
+
+#[derive(Serialize, Deserialize)]
+struct Document {
+    sha256: String,
+    byte_start: u64,
+    canonical: bool,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -181,6 +192,7 @@ impl SearchScope<'_> {
                 page_size: entry.page_size,
             }),
             part: point.part,
+            window: point.window,
             byte: point.byte,
         }
     }
@@ -235,6 +247,11 @@ impl SearchScope<'_> {
             start: found.start_utf16,
             end: found.end_utf16,
             markdown: found.markdown,
+            document: found.document.map(|proof| Document {
+                sha256: proof.hash.to_string(),
+                byte_start: proof.byte_start,
+                canonical: proof.canonical,
+            }),
             matched: found.matched.clone(),
             ordinal: found.ordinal,
         };
@@ -257,6 +274,7 @@ impl SearchScope<'_> {
                     version: page.observation.version,
                     record: point.record,
                     part: point.part,
+                    window: point.window,
                     byte: point.byte,
                 },
                 reverse,
@@ -396,6 +414,7 @@ async fn read_authorized(
             version,
             record,
             part,
+            window,
             byte,
         }) => {
             let from = Some(SearchCursor {
@@ -403,7 +422,12 @@ async fn read_authorized(
                     high_water,
                     version,
                 },
-                point: SearchPoint { record, part, byte },
+                point: SearchPoint {
+                    record,
+                    part,
+                    window,
+                    byte,
+                },
             });
             let page = entry
                 .file_history
@@ -424,6 +448,7 @@ async fn read_authorized(
             tail,
             item,
             part,
+            window,
             byte,
         }) => {
             if entry
@@ -443,6 +468,7 @@ async fn read_authorized(
                     page: page.native_position()?,
                     entry: item.map(RpcEntryAnchor::open).transpose()?,
                     part,
+                    window,
                     byte,
                 },
             ))
@@ -551,6 +577,16 @@ pub(super) async fn locate(
                 .transpose()?,
             offset: count(hit.offset)?,
             output_bytes: hit.output_bytes.map(count).transpose()?,
+            document: hit
+                .document
+                .map(|doc| {
+                    Ok::<_, AppError>(HistorySearchDocument {
+                        sha256: ReportHashDto::new(doc.sha256).ok_or(AppError::Internal)?,
+                        byte_start: count(doc.byte_start)?,
+                        canonical: doc.canonical,
+                    })
+                })
+                .transpose()?,
             start_utf16: count(hit.start)?,
             end_utf16: count(hit.end)?,
             markdown: hit.markdown,

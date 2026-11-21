@@ -7,7 +7,7 @@ import { validate299 } from "./run-stage.mjs";
 import { validate150 } from "./git-sha-dto.mjs";
 import { validate305 } from "./compact-ticket.mjs";
 import { validate127 } from "./safe-count-dto.mjs";
-function validate1495(
+function validate1499(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -47,7 +47,7 @@ function validate1495(
               }
             }
           } else {
-            validate1495.errors = [
+            validate1499.errors = [
               {
                 instancePath: instancePath + "/registeredProviders",
                 schemaPath: "#/properties/registeredProviders/type",
@@ -113,7 +113,7 @@ function validate1495(
                   }
                 }
               } else {
-                validate1495.errors = [
+                validate1499.errors = [
                   {
                     instancePath: instancePath + "/runIds",
                     schemaPath: "#/properties/runIds/type",
@@ -183,7 +183,7 @@ function validate1495(
                   vErrors.push(err1);
                 }
                 errors++;
-                validate1495.errors = vErrors;
+                validate1499.errors = vErrors;
                 return false;
               } else {
                 errors = _errs9;
@@ -253,7 +253,7 @@ function validate1495(
                         }
                       }
                     } else {
-                      validate1495.errors = [
+                      validate1499.errors = [
                         {
                           instancePath: instancePath + "/tickets",
                           schemaPath: "#/properties/tickets/type",
@@ -272,7 +272,7 @@ function validate1495(
                   if (data.title !== undefined && func0.call(data, "title")) {
                     const _errs17 = errors;
                     if (typeof data.title !== "string") {
-                      validate1495.errors = [
+                      validate1499.errors = [
                         {
                           instancePath: instancePath + "/title",
                           schemaPath: "#/properties/title/type",
@@ -318,7 +318,7 @@ function validate1495(
         }
       }
     } else {
-      validate1495.errors = [
+      validate1499.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -329,7 +329,7 @@ function validate1495(
       return false;
     }
   }
-  validate1495.errors = vErrors;
+  validate1499.errors = vErrors;
   return errors === 0;
 }
-export { validate1495 };
+export { validate1499 };

@@ -81,7 +81,11 @@ export function EntryBody({
         </button>
         {open && (
           <ExpandedOutput
-            key={match ? ref + ":" + match.destination.offset : ref}
+            key={
+              match
+                ? ref + ":" + (match.destination.document?.byteStart ?? match.destination.offset)
+                : ref
+            }
             target={target}
             generation={generation}
             entryId={entryId}

@@ -4398,6 +4398,16 @@
         "contentRef": {
           "$ref": "#/definitions/HistoryCursorDto"
         },
+        "document": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/HistorySearchDocument"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "endUtf16": {
           "$ref": "#/definitions/SafeCountDto"
         },
@@ -4507,6 +4517,25 @@
         "cursor"
       ],
       "title": "HistorySearchDestinationResponse",
+      "type": "object"
+    },
+    "HistorySearchDocument": {
+      "properties": {
+        "byteStart": {
+          "$ref": "#/definitions/SafeCountDto"
+        },
+        "canonical": {
+          "type": "boolean"
+        },
+        "sha256": {
+          "$ref": "#/definitions/ReportHashDto"
+        }
+      },
+      "required": [
+        "sha256",
+        "byteStart",
+        "canonical"
+      ],
       "type": "object"
     },
     "HistorySearchHit": {

@@ -1,6 +1,7 @@
 import { useRef, useState } from "react";
 import { historyContent } from "../../../api/history";
 import type { SessionAddress } from "../../../api/history";
+import type { HistoryContent } from "../../../api/generated/contracts";
 import { Loading, Notice } from "../../../components/PanelState";
 import { useResource } from "../../../hooks/useResource";
 import { MarkdownContent } from "../../../components/markdown/MarkdownContent";
@@ -23,7 +24,7 @@ type Props = {
 
 export function ExpandedOutput(props: Props) {
   const source = <SourceOutput {...props} />;
-  if (props.format !== "markdown" || props.found) return source;
+  if (props.format !== "markdown" || props.found?.content) return source;
   return (
     <NativeDocument
       key={props.reference}
@@ -32,6 +33,7 @@ export function ExpandedOutput(props: Props) {
       entryId={props.entryId}
       reference={props.reference}
       fallback={source}
+      prepared={props.found?.document}
     />
   );
 }
@@ -49,7 +51,7 @@ function SourceOutput({ target, entryId, generation, reference, format, found }:
   const [blocked, setBlocked] = useState(false);
   const output = useRef<HTMLDivElement>(null);
   const position = path.at(-1) ?? start;
-  const prepared = opening?.offset === position.offset ? found : undefined;
+  const prepared = opening?.offset === position.offset && found?.content ? found : undefined;
   const initialRange = prepared && outputRange(prepared.content);
   const range = useResource(
     `output:${target.runId}:${target.sessionKey}:${generation}:${reference}:${position.offset}`,
@@ -153,7 +155,7 @@ function SourceOutput({ target, entryId, generation, reference, format, found }:
   );
 }
 
-function outputRange(data: FoundOutput["content"]) {
+function outputRange(data: HistoryContent) {
   return {
     text: data.text,
     display: data.display,

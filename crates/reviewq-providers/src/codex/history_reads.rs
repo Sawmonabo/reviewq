@@ -132,6 +132,15 @@ impl Codex {
             return Err(AppError::CursorExpired);
         }
         let (_, text) = self.read_item_text(session, reference, true).await?;
+        self.project_item_document(text, hash, query).await
+    }
+
+    pub(super) async fn project_item_document(
+        &self,
+        text: String,
+        hash: ReportHash,
+        query: Query,
+    ) -> Result<Window, AppError> {
         let mut cache = self.document.clone().lock_owned().await;
         tokio::task::spawn_blocking(move || {
             if cache.as_ref().is_none_or(|cached| {
