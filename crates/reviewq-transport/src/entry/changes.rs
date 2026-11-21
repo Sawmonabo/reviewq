@@ -123,7 +123,7 @@ pub(super) async fn files(
         (None, Some(1)) if query.cursor.is_none() => Some(PatchPagePreview::Selected),
         (Some("start"), None) if query.cursor.is_some() => Some(PatchPagePreview::Start),
         (Some("end"), None) if query.cursor.is_some() => Some(PatchPagePreview::End),
-        Some(_) => return Err(AppError::InvalidRequest.into()),
+        _ => return Err(AppError::InvalidRequest.into()),
     };
     let (limit, page, revision) = query.position(
         &entry.auth.endpoint,
