@@ -131,7 +131,7 @@
   border-radius: 5px 0 0 5px;
   color: light-dark(var(--text), #e7ebff);
 }
-.changes-picker-trigger > .changes-picker-glyph {
+.changes-picker-trigger > svg:first-child {
   color: var(--link);
 }
 .changes-picker-position {
@@ -163,69 +163,6 @@
 .changes-file-nav .changes-file-step[aria-disabled="true"] {
   color: #63677a;
   cursor: default;
-}
-.changes-picker-glyph {
-  display: inline-block;
-  flex: 0 0 13px;
-  width: 13px;
-  height: 14px;
-  position: relative;
-  color: inherit;
-}
-.changes-picker-glyph::before,
-.changes-picker-glyph::after {
-  content: "";
-  position: absolute;
-}
-.changes-picker-glyph.file::before {
-  inset: 1px 2px 1px 2px;
-  border: 1px solid;
-  border-radius: 2px;
-}
-.changes-picker-glyph.file::after {
-  width: 5px;
-  height: 3px;
-  left: 4px;
-  top: 5px;
-  border-block: 1px solid;
-}
-.changes-picker-glyph.folder::before {
-  inset: 4px 0 1px;
-  border: 1px solid;
-  border-radius: 2px;
-}
-.changes-picker-glyph.folder::after {
-  width: 6px;
-  height: 3px;
-  left: 1px;
-  top: 2px;
-  border: 1px solid;
-  border-bottom: 0;
-  border-radius: 2px 2px 0 0;
-}
-.changes-picker-glyph:is(.left, .right)::before {
-  width: 6px;
-  height: 6px;
-  top: 4px;
-  left: 4px;
-  border-right: 1.5px solid;
-  border-bottom: 1.5px solid;
-}
-.changes-picker-glyph.left::before {
-  transform: rotate(135deg);
-}
-.changes-picker-glyph.right::before {
-  left: 2px;
-  transform: rotate(-45deg);
-}
-.changes-picker-glyph.check::before {
-  width: 9px;
-  height: 5px;
-  top: 4px;
-  left: 2px;
-  transform: rotate(-45deg);
-  border-left: 1.5px solid;
-  border-bottom: 1.5px solid;
 }
 .changes-picker-dialog {
   --picker-gutter: 12px;
@@ -357,7 +294,7 @@
 .changes-picker-folder .changes-picker-path {
   grid-column: 2 / -1;
 }
-.changes-picker-folder .changes-picker-glyph {
+.changes-picker-folder > svg {
   color: #8f9cc0;
 }
 .changes-picker-file {
@@ -381,10 +318,10 @@
   background: light-dark(var(--selected), #252b44);
   border-color: #3d486d;
 }
-.changes-picker-file .changes-picker-glyph {
+.changes-picker-file > svg {
   color: #a4afd2;
 }
-.changes-picker-file .changes-picker-glyph.check {
+.changes-picker-check > svg {
   color: #b9c9ff;
 }
 .changes-picker-file code {
@@ -555,13 +492,12 @@
   }
 }
 
-.changes-picker-results mark,
-.changes mark[data-search-match] {
+.changes-picker-results mark {
   color: #fff1ba;
   background: #584522;
   border-radius: 2px;
 }
-::highlight(picker-match) {
+::highlight(reviewq-patch-match) {
   color: #17140b;
   background-color: #ffd881;
 }

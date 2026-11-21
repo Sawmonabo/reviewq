@@ -16,6 +16,10 @@ const paths = {
   branch:
     "M7 6v12M7 15c0-4 10-2 10-8 M9 4a2 2 0 1 0-4 0 2 2 0 0 0 4 0Z M9 20a2 2 0 1 0-4 0 2 2 0 0 0 4 0Z M19 5a2 2 0 1 0-4 0 2 2 0 0 0 4 0Z",
   chevron: "m6 9 6 6 6-6",
+  chevronLeft: "m14 6-6 6 6 6",
+  chevronRight: "m10 6 6 6-6 6",
+  file: "M6 3h12a1 1 0 0 1 1 1v16a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1Zm3 6h6m-6 5h6",
+  folder: "M3 8V5h8l3 3h7v12H3V8Zm0 0h11",
   external: "M13 4h7v7m0-7-9 9 M10 5H5v14h14v-5",
   download: "M12 4v10m-4-4 4 4 4-4M5 16v4h14v-4",
   check: "m5 12 4 4L19 6",

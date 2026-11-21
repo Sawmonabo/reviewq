@@ -6,11 +6,16 @@ import { formatActivityTime, safeUrl } from "../../lib/presentation";
 export function DiscussionThread({
   thread,
   outside = false,
+  expanded,
+  onExpanded,
 }: {
   readonly thread: PatchDiscussion;
   readonly outside?: boolean;
+  readonly expanded?: boolean | undefined;
+  readonly onExpanded?: (open: boolean) => void;
 }) {
-  const [open, setOpen] = useState(() => thread.resolution !== "resolved");
+  const [localOpen, setLocalOpen] = useState(() => thread.resolution !== "resolved");
+  const open = expanded ?? localOpen;
   const first = thread.notes[0];
   const source = safeUrl(thread.webUrl);
   const line = thread.anchor?.newLine ?? thread.anchor?.oldLine;
@@ -32,8 +37,13 @@ export function DiscussionThread({
   return (
     <details
       className="patch-discussion"
+      data-discussion-id={thread.discussionId}
       open={open}
-      onToggle={(event) => setOpen(event.currentTarget.open)}
+      onToggle={(event) => {
+        const next = event.currentTarget.open;
+        if (onExpanded) onExpanded(next);
+        else setLocalOpen(next);
+      }}
     >
       <summary>
         <span className="discussion-heading">

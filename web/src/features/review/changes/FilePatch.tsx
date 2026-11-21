@@ -10,11 +10,11 @@ import type { PatchDiscussion, PatchFile } from "../../../api/generated/contract
 import { Icon } from "../../../components/Icon";
 import { Empty, Loading, Notice } from "../../../components/PanelState";
 import { useResource } from "../../../hooks/useResource";
-import { DiscussionThread } from "../DiscussionThread";
 import { DiffCount, FileKind } from "./ChangedFilePicker";
+import { ChangesThread } from "./ChangesThread";
 import { PatchDocumentView } from "./PatchDocumentView";
 import { PatchSource } from "./PatchSource";
-import type { PatchLine, SourcePosition } from "./patch-position";
+import type { SourcePosition } from "./patch-position";
 
 export const FilePatch = memo(function FilePatch({
   file,
@@ -23,7 +23,6 @@ export const FilePatch = memo(function FilePatch({
   position,
   admitted,
   visible,
-  priorityLine,
   sourcePosition,
   entrySide,
 }: {
@@ -33,7 +32,6 @@ export const FilePatch = memo(function FilePatch({
   readonly position: number;
   readonly admitted: boolean;
   readonly visible: boolean;
-  readonly priorityLine: PatchLine | undefined;
   readonly sourcePosition: SourcePosition | "start" | "away" | undefined;
   readonly entrySide: "start" | "end" | undefined;
 }) {
@@ -80,7 +78,6 @@ export const FilePatch = memo(function FilePatch({
           file={file}
           threads={threads}
           visible={visible}
-          priorityLine={priorityLine}
           sourcePosition={sourcePosition}
           entrySide={entrySide}
         />
@@ -88,7 +85,9 @@ export const FilePatch = memo(function FilePatch({
         <div className="patch-waiting" aria-hidden="true" />
       )}
       {file.availability !== "complete" &&
-        threads.map((thread) => <DiscussionThread key={thread.discussionId} thread={thread} />)}
+        threads.map((thread) => (
+          <ChangesThread key={thread.discussionId} thread={thread} outside />
+        ))}
     </section>
   );
 });
@@ -97,7 +96,6 @@ type ContentsProps = {
   readonly file: PatchFile;
   readonly threads: readonly PatchDiscussion[];
   readonly visible: boolean;
-  readonly priorityLine: PatchLine | undefined;
   readonly sourcePosition: SourcePosition | "start" | "away" | undefined;
   readonly entrySide: "start" | "end" | undefined;
 };
@@ -113,7 +111,7 @@ function PatchContents(props: ContentsProps) {
           entrySide={props.entrySide}
         />
         {props.threads.map((thread) => (
-          <DiscussionThread key={thread.discussionId} thread={thread} />
+          <ChangesThread key={thread.discussionId} thread={thread} outside />
         ))}
       </>
     );
@@ -124,7 +122,6 @@ function RichPatch({
   file,
   threads,
   visible,
-  priorityLine,
   onLimit,
 }: ContentsProps & { readonly onLimit: () => void }) {
   const [seen, setSeen] = useState(visible);
@@ -152,12 +149,12 @@ function RichPatch({
         </div>
       )}
       {body?.text === "" && <Empty title="This file has an empty patch" />}
-      {body && ready && (
-        <PatchDocumentView text={body.text} discussions={threads} priorityLine={priorityLine} />
-      )}
+      {body && ready && <PatchDocumentView text={body.text} discussions={threads} />}
       {!body &&
         patch.error &&
-        threads.map((thread) => <DiscussionThread key={thread.discussionId} thread={thread} />)}
+        threads.map((thread) => (
+          <ChangesThread key={thread.discussionId} thread={thread} outside />
+        ))}
     </>
   );
 }

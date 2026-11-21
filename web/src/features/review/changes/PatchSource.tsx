@@ -8,7 +8,8 @@ import type { SourcePosition } from "./patch-position";
 
 type Move = {
   readonly range: PatchRange;
-  readonly byte?: number;
+  readonly byte?: number | undefined;
+  readonly end?: number | undefined;
   readonly direction?: "before" | "after";
   readonly entry?: "start" | "end";
   readonly land?: "start" | "end";
@@ -39,7 +40,7 @@ export function PatchSource({ file, position, entrySide }: Props) {
   const [previousPosition, setPreviousPosition] = useState(position);
   if (previousPosition !== position) {
     setPreviousPosition(position);
-    if (position === "away" && pages.length) {
+    if ((position === "away" || (!position && move?.byte !== undefined)) && pages.length) {
       setMove(undefined);
       setFailure(undefined);
     } else if (position && position !== "away") {
@@ -114,7 +115,7 @@ export function PatchSource({ file, position, entrySide }: Props) {
     // Restore the same wrapping context for a bookmark inside a giant physical line.
     while (
       target.byte !== undefined &&
-      tail.next <= target.byte &&
+      tail.next < (target.end ?? target.byte + 1) &&
       tail.next < tail.total &&
       result.length < 3
     ) {
@@ -298,6 +299,13 @@ export function PatchSource({ file, position, entrySide }: Props) {
     const signals = new AbortController();
     const options = { passive: true, signal: signals.signal };
     scroll.addEventListener("scroll", onScroll, options);
+    scroll.addEventListener(
+      "scrollend",
+      () => {
+        readerGesture = false;
+      },
+      options,
+    );
     scroll.addEventListener("wheel", onWheel, options);
     scroll.addEventListener("touchmove", onTouch, options);
     document.addEventListener("pointerdown", onPointer, options);
@@ -385,7 +393,11 @@ export function PatchSource({ file, position, entrySide }: Props) {
 
 function openingMove(file: PatchFile, position: Props["position"], entrySide: boolean): Move {
   if (typeof position === "object" && (!file.patchETag || position.etag === file.patchETag))
-    return { range: { offset: position.first, etag: position.etag }, byte: position.byte };
+    return {
+      range: { offset: position.first, etag: position.etag },
+      byte: position.byte,
+      end: position.end,
+    };
   return {
     range: (!position || position === "away") && entrySide ? { last: true } : { offset: 0 },
   };

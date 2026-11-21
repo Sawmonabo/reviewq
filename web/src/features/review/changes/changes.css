@@ -26,13 +26,6 @@
 .file-stream-loading {
   padding: 12px;
 }
-.patch-block[style] {
-  content-visibility: auto;
-  contain-intrinsic-block-size: auto var(--patch-block-height);
-}
-.patch-block-deferred {
-  min-height: var(--patch-block-height);
-}
 .patch-toolbar {
   border-bottom: 1px solid var(--line);
   padding-block: 7px;
@@ -53,35 +46,78 @@
 pre.patch-source {
   padding: 8px;
 }
-.patch-row {
-  display: block;
-  position: relative;
-  min-height: 21px;
-  padding-left: 12ch;
+.patch-rich {
+  --patch-gutter: 68px;
+  isolation: isolate;
+  font-size: 11px;
 }
-.patch-row::before {
+.patch-block {
+  position: relative;
+  min-width: 0;
+}
+.patch-block-text {
+  position: relative;
+  z-index: 1;
+  padding-inline: var(--patch-gutter) 7px;
+}
+.patch-row {
   position: absolute;
-  top: 0;
-  left: 0;
-  white-space: pre;
-  width: 11ch;
-  text-align: center;
-  border-right: 1px solid var(--line);
-  color: var(--muted);
-  content: attr(data-old) "   " attr(data-new);
+  inset-inline: 0;
+  pointer-events: none;
   user-select: none;
 }
-.patch-add {
-  color: var(--diff-added);
+.patch-row:focus-visible {
+  z-index: 2;
+  outline: 2px solid var(--focus);
+  outline-offset: -2px;
+}
+.patch-row[data-old]::before,
+.patch-row[data-new]::after {
+  position: absolute;
+  top: 0;
+  inline-size: calc(var(--patch-gutter) / 2);
+  padding-inline-end: 7px;
+  text-align: end;
+  color: var(--muted);
+  user-select: none;
+}
+.patch-row[data-old]::before {
+  inset-inline-start: 0;
+  content: attr(data-old);
+}
+.patch-row[data-new]::after {
+  inset-inline-start: calc(var(--patch-gutter) / 2);
+  border-inline-end: 1px solid var(--line);
+  content: attr(data-new);
+}
+.patch-row.patch-add {
   background: var(--diff-added-bg);
 }
-.patch-delete {
-  color: var(--diff-deleted);
+.patch-row.patch-delete {
   background: var(--diff-deleted-bg);
 }
-.patch-hunk {
-  color: var(--link);
+.patch-row.patch-hunk {
   background: var(--selected);
+}
+::highlight(reviewq-patch-add) {
+  color: var(--diff-added);
+}
+::highlight(reviewq-patch-delete) {
+  color: var(--diff-deleted);
+}
+::highlight(reviewq-patch-hunk) {
+  color: var(--link);
+}
+::highlight(reviewq-patch-syntax) {
+  color: light-dark(#60488d, #c7b3f5);
+}
+@media (max-width: 760px) {
+  .patch-rich {
+    --patch-gutter: 52px;
+  }
+}
+.drawer-body:has(.file-stream) {
+  overflow-anchor: none;
 }
 .patch-thread-slot {
   display: block;

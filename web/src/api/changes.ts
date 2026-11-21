@@ -21,8 +21,9 @@ type FileIndexPosition = { readonly revision: string } & (
   | { readonly path: PatchPath }
   | { readonly fileId: string }
 );
-// Keep bodies from only the most recent requested page edge, outside the metadata cache.
-let pageBodies = new WeakMap<PatchFile, string>();
+// A background edge read cannot discard a selected body awaiting its first paint.
+let selectedPreview: { readonly file: PatchFile; readonly text: string } | undefined;
+let edgePreviews = new WeakMap<PatchFile, string>();
 let retainedIndex: { readonly reviewId: string; readonly result: PatchIndexResult } | undefined;
 let retainedCatalog:
   | {
@@ -48,6 +49,8 @@ export async function readPatchFiles(
     else query.set("preferredFileId", position.fileId);
   }
   if (preferredFileId) query.set("preferredFileId", preferredFileId);
+  const includeSelected = !position || !("cursor" in position);
+  if (includeSelected) query.set("includeSelectedPreview", "1");
   const result = await read(
     `${changesRoute(reviewId)}/files?${query}`,
     isPatchFileIndexResponse,
@@ -69,33 +72,42 @@ export async function readPatchFiles(
     throw new Error("The selected patch index changed.");
   }
   signal.throwIfAborted();
-  pageBodies = new WeakMap();
+  if (includeSelected) selectedPreview = undefined;
+  else edgePreviews = new WeakMap();
+  const selectedId = includeSelected
+    ? (preferredFileId ??
+      (position && "fileId" in position
+        ? position.fileId
+        : position && "path" in position
+          ? data.items.find(
+              (item) =>
+                item.oldPath === position.path.oldPath && item.newPath === position.path.newPath,
+            )?.fileId
+          : data.items.find((item) => item.availability === "complete")?.fileId))
+    : undefined;
   let bytesAvailable = 64 * 1024;
   let admitted = 0;
   const items = data.items.map((item) => {
     if (item.preview === undefined || item.preview === null) return item;
     const { preview, ...file } = item;
     const bytes = file.byteLength;
-    const selected =
-      file.fileId === preferredFileId ||
-      (position && "fileId" in position && file.fileId === position.fileId) ||
-      (position &&
-        "path" in position &&
-        file.oldPath === position.path.oldPath &&
-        file.newPath === position.path.newPath);
+    const selected = includeSelected && file.fileId === selectedId;
     const edge = position && "previewEdge" in position && position.previewEdge;
     if (
       !isRichPatch(file) ||
       bytes === null ||
       (selected
-        ? bytes > 128 * 1024
+        ? bytes > 128 * 1024 || admitted > 0
         : !edge || bytes > 32 * 1024 || bytes > bytesAvailable || admitted >= 3) ||
       new TextEncoder().encode(preview).length !== bytes
     )
       throw new Error("The selected patch preview exceeded its bounds.");
     admitted++;
-    pageBodies.set(file, preview);
-    bytesAvailable -= bytes;
+    if (selected) selectedPreview = { file, text: preview };
+    else {
+      edgePreviews.set(file, preview);
+      bytesAvailable -= bytes;
+    }
     return file;
   });
   const page = { cursor: result.cursor, data: { ...data, items } };
@@ -175,11 +187,27 @@ export async function readPatchPathMatches(
   return { cursor: result.cursor, data: { count, paths } };
 }
 
+export async function locatePatchPath(
+  reviewId: string,
+  revision: string,
+  target: Pick<PatchPath, "oldPath" | "newPath">,
+  signal: AbortSignal,
+) {
+  let selected: PatchPath | undefined;
+  await scanPatchPaths(reviewId, revision, signal, (path) => {
+    if (path.oldPath !== target.oldPath || path.newPath !== target.newPath) return;
+    selected = path;
+    return true;
+  });
+  signal.throwIfAborted();
+  return selected;
+}
+
 async function scanPatchPaths(
   reviewId: string,
   revision: string,
   signal: AbortSignal,
-  visit: (path: PatchPath) => void,
+  visit: (path: PatchPath) => void | boolean,
 ) {
   const query = new URLSearchParams({ revision });
   let count = 0;
@@ -193,8 +221,8 @@ async function scanPatchPaths(
       throw new Error("The selected file catalog changed.");
     }
     count += data.items.length;
-    data.items.forEach(visit);
-    if (!data.nextCursor) return { cursor, data: { count, partial: data.partial } };
+    const found = data.items.some((path) => visit(path) === true);
+    if (found || !data.nextCursor) return { cursor, data: { count, partial: data.partial } };
     query.set("cursor", data.nextCursor);
   }
   throw new Error("ReviewQ could not finish reading the file catalog.");
@@ -264,7 +292,7 @@ export async function readPatch(
   signal: AbortSignal,
   window?: PatchRange,
 ): Promise<PatchWindow> {
-  const preview = pageBodies.get(file);
+  const preview = selectedPreview?.file === file ? selectedPreview.text : edgePreviews.get(file);
   if (preview !== undefined && !window && file.patchETag && file.byteLength !== null) {
     const bytes = new TextEncoder().encode(preview);
     const digest = await crypto.subtle.digest("SHA-256", bytes);
@@ -274,7 +302,8 @@ export async function readPatch(
     ).join("");
     if (file.patchETag !== `"${hex}"`) throw new Error("The patch preview digest changed.");
     enforcePatchRows(bytes);
-    pageBodies.delete(file);
+    if (selectedPreview?.file === file) selectedPreview = undefined;
+    edgePreviews.delete(file);
     return {
       text: preview,
       first: 0,

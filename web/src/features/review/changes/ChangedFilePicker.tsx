@@ -2,12 +2,13 @@ import { useEffect, useId, useMemo, useRef, useState } from "react";
 import type { KeyboardEvent, ReactNode } from "react";
 import { PATH_MATCHES_PER_PAGE, readPatchPathMatches } from "../../../api/changes";
 import type { PatchIndex, readPatchPathCatalog } from "../../../api/changes";
-import type { PatchFile, PatchPath } from "../../../api/generated/contracts";
+import type { PatchFile, PatchPath, PatchSearchMatch } from "../../../api/generated/contracts";
 import { Icon } from "../../../components/Icon";
 import { Loading, Notice } from "../../../components/PanelState";
 import { useResource } from "../../../hooks/useResource";
 import { pathMatch, splitPath } from "./file-search";
 import type { MatchRange } from "./file-search";
+import { usePatchSearch } from "./usePatchSearch";
 
 type Props = {
   readonly reviewId: string;
@@ -29,6 +30,7 @@ type Props = {
   };
   readonly onChooseFile: (file: PatchFile) => void;
   readonly onChoosePath: (path: PatchPath) => void;
+  readonly onChooseMatch: (match: PatchSearchMatch, query: string) => void;
 };
 
 type Entry = {
@@ -55,6 +57,7 @@ export function ChangedFilePicker({
   navigation,
   onChooseFile,
   onChoosePath,
+  onChooseMatch,
 }: Props) {
   const id = useId();
   const dialog = useRef<HTMLDialogElement>(null);
@@ -64,6 +67,7 @@ export function ChangedFilePicker({
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [search, setSearch] = useState("");
+  const [visibleFileId, setVisibleFileId] = useState<string>();
   const [offset, setOffset] = useState(0);
   const [suggested, setSuggested] = useState<string>();
   const text = query.trim();
@@ -71,9 +75,9 @@ export function ChangedFilePicker({
   const needsCatalogScan = Boolean(open && catalog.data && !cached);
   useEffect(() => {
     if (!open) return;
-    const timer = window.setTimeout(() => setSearch(text), 180);
+    const timer = window.setTimeout(() => setSearch(query), 180);
     return () => window.clearTimeout(timer);
-  }, [open, text]);
+  }, [open, query]);
 
   useEffect(() => {
     if (!open) return;
@@ -126,7 +130,7 @@ export function ChangedFilePicker({
             reviewId,
             index.revision,
             signal,
-            (path) => Boolean(findPath(path, search)),
+            (path) => Boolean(findPath(path, search.trim())),
             offset,
           )
         : Promise.resolve({ data: null, cursor: "" }),
@@ -140,7 +144,7 @@ export function ChangedFilePicker({
         count: cachedMatches.length,
         paths: cachedMatches.slice(offset, offset + PATH_MATCHES_PER_PAGE),
       }
-    : search === text
+    : search.trim() === text
       ? scanned.data
       : undefined;
   const byPath = new Map([...files.values()].map((file) => [pathKey(file), file]));
@@ -173,7 +177,23 @@ export function ChangedFilePicker({
     if (group) group.push(entry);
     else groups.set(entry.folder, [entry]);
   }
-  const active = suggested ?? entries.find((entry) => entry.selected)?.key ?? entries[0]?.key;
+  const canSearch = Boolean(open && text && new TextEncoder().encode(query).length <= 256);
+  const readingCode = canSearch && search === query;
+  const code = usePatchSearch(reviewId, index.revision, readingCode ? search : "", visibleFileId);
+  const matches = readingCode ? (code.data?.items ?? []) : [];
+  const codeGroups = new Map<string, PatchSearchMatch[]>();
+  for (const match of matches) {
+    const path = match.side === "old" ? match.oldPath : match.newPath;
+    const group = codeGroups.get(path);
+    if (group) group.push(match);
+    else codeGroups.set(path, [match]);
+  }
+  const firstMatch = matches[0];
+  const active =
+    suggested ??
+    (!text ? entries.find((entry) => entry.selected)?.key : undefined) ??
+    entries[0]?.key ??
+    (firstMatch && matchKey(firstMatch));
   const count = found?.count ?? entries.length;
   const fileName = selected
     ? splitPath(selected.newPath).name
@@ -244,14 +264,16 @@ export function ChangedFilePicker({
         aria-describedby={`${id}-position`}
         title={selected?.newPath}
         onClick={() => {
+          setVisibleFileId(selected?.fileId);
           setQuery("");
           setSearch("");
+          code.reset();
           setSuggested(undefined);
           setOffset(0);
           setOpen(true);
         }}
       >
-        <span className="changes-picker-glyph file" aria-hidden="true" />
+        <Icon name="file" size={13} />
         <span className="changes-current-name" aria-hidden="true">
           {fileName}
         </span>
@@ -277,10 +299,7 @@ export function ChangedFilePicker({
             title={`${label} file (${previous ? "←" : "→"} when focused here)`}
             onClick={() => available && navigation.onStep(previous ? -1 : 1)}
           >
-            <span
-              className={`changes-picker-glyph ${previous ? "left" : "right"}`}
-              aria-hidden="true"
-            />
+            <Icon name={previous ? "chevronLeft" : "chevronRight"} size={14} />
           </button>
         );
       })}
@@ -313,7 +332,7 @@ export function ChangedFilePicker({
             title="Close (Escape)"
             onClick={close}
           >
-            ×
+            <Icon name="close" size={16} />
           </button>
         </header>
         <label className="changes-picker-search">
@@ -328,6 +347,7 @@ export function ChangedFilePicker({
             spellCheck={false}
             onChange={(event) => {
               setQuery(event.currentTarget.value);
+              code.reset();
               page(0);
             }}
           />
@@ -352,7 +372,7 @@ export function ChangedFilePicker({
           {[...groups].map(([folder, items]) => (
             <div key={folder}>
               <p className="changes-picker-grid changes-picker-folder">
-                <span className="changes-picker-glyph folder" aria-hidden="true" />
+                <Icon name="folder" size={13} />
                 <span className="changes-picker-path">
                   <Marked
                     text={folder || "Root"}
@@ -374,7 +394,7 @@ export function ChangedFilePicker({
                       onFocus={() => setSuggested(entry.key)}
                       onClick={() => choose(entry)}
                     >
-                      <span className="changes-picker-glyph file" aria-hidden="true" />
+                      <Icon name="file" size={13} />
                       <code>
                         <Marked
                           text={entry.name}
@@ -395,9 +415,7 @@ export function ChangedFilePicker({
                         </>
                       )}
                       <span className="changes-picker-check">
-                        {entry.selected && (
-                          <span className="changes-picker-glyph check" aria-hidden="true" />
-                        )}
+                        {entry.selected && <Icon name="check" size={13} />}
                       </span>
                     </button>
                   </li>
@@ -405,11 +423,80 @@ export function ChangedFilePicker({
               </ul>
             </div>
           ))}
-          {open && needsCatalogScan && (search !== text || scanned.pending) && (
+          {open && needsCatalogScan && (search.trim() !== text || scanned.pending) && (
             <Loading label="Searching changed files…" />
           )}
-          {!entries.length && (found || catalog.error) && (
+          {!!text && !entries.length && !matches.length && (found || catalog.error) && (
             <p className="changes-picker-empty">No matching files.</p>
+          )}
+          {!!text && (
+            <>
+              <p className="changes-code-heading">Code in this diff</p>
+              {[...codeGroups].map(([path, hits]) => (
+                <div key={path}>
+                  <p className="changes-code-file">{path}</p>
+                  <ul className="changes-picker-list">
+                    {hits.map((hit) => {
+                      const side = hit.side === "old" ? "Old" : "New";
+                      const key = matchKey(hit);
+                      return (
+                        <li key={key}>
+                          <button
+                            type="button"
+                            className="changes-code-choice"
+                            data-option={key}
+                            data-suggested={key === active || undefined}
+                            aria-label={`${path}, ${side} ${hit.line}, ${hit.snippet}`}
+                            onFocus={() => setSuggested(key)}
+                            onClick={() => {
+                              close();
+                              onChooseMatch(hit, search);
+                            }}
+                          >
+                            <span className="changes-code-location">
+                              {side} {hit.line}
+                            </span>
+                            <code>
+                              <Marked
+                                text={hit.snippet}
+                                ranges={[[hit.highlightStart, hit.highlightEnd]]}
+                              />
+                            </code>
+                          </button>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                </div>
+              ))}
+              {!canSearch && (
+                <p className="changes-picker-empty">Code queries can be up to 256 bytes.</p>
+              )}
+              {canSearch && (!readingCode || code.pending) && (
+                <Loading label="Searching diff code…" />
+              )}
+              {readingCode && code.error && <Notice retry={code.retry}>{code.error}</Notice>}
+              {readingCode && code.data?.coverage === "limited" && (
+                <p className="changes-picker-empty">
+                  Search coverage is limited by the available GitLab patch.
+                </p>
+              )}
+              {readingCode && code.data?.coverage === "complete" && !matches.length && (
+                <p className="changes-picker-empty">No matching code.</p>
+              )}
+              {readingCode && code.data?.nextCursor && (
+                <button
+                  type="button"
+                  className="changes-clear"
+                  onClick={() => {
+                    setSuggested(undefined);
+                    code.more();
+                  }}
+                >
+                  {matches.length ? "More code matches" : "Continue searching code"}
+                </button>
+              )}
+            </>
           )}
         </div>
         {(offset > 0 || count > PATH_MATCHES_PER_PAGE) && (
@@ -436,6 +523,8 @@ export function ChangedFilePicker({
         <footer className="changes-picker-footer">
           <span role="status">
             {count} {count === 1 ? "file" : "files"}
+            {text &&
+              ` · ${matches.length} code ${matches.length === 1 ? "match" : "matches"}${code.data?.nextCursor ? "+" : ""}`}
             {catalog.data?.partial && " · Partial GitLab file list"}
           </span>
           <span>
@@ -469,6 +558,10 @@ function Marked({
       {text.slice(end)}
     </>
   );
+}
+
+function matchKey(match: PatchSearchMatch) {
+  return `match:${match.fileId}:${match.sourceStart}:${match.sourceEnd}`;
 }
 
 function findPath(path: Pick<PatchPath, "oldPath" | "newPath">, text: string) {

@@ -12,16 +12,24 @@ import type { CSSProperties, RefObject } from "react";
 import { createPortal } from "react-dom";
 import { isRichPatch, PATCH_WINDOW_BYTES } from "../../../api/changes";
 import type { PatchIndex, readPatchPathCatalog } from "../../../api/changes";
-import type { PatchDiscussion, PatchFile, PatchPath } from "../../../api/generated/contracts";
+import type {
+  PatchDiscussion,
+  PatchFile,
+  PatchPath,
+  PatchSearchMatch,
+} from "../../../api/generated/contracts";
 import { Empty, Notice } from "../../../components/PanelState";
 import { safeUrl } from "../../../lib/presentation";
 import { ChangedFilePicker } from "./ChangedFilePicker";
 import { FilePatch } from "./FilePatch";
+import { setPatchMatch } from "./patch-decoration";
+import { patchDocument } from "./patch-document";
 import {
   lineAt,
   matchingFile,
   sourceAt,
   sourceRect,
+  sourceRanges,
   storedFile,
   storedPatch,
   storePatch,
@@ -54,7 +62,9 @@ type Jump = {
   readonly focus: boolean;
   readonly line?: PatchLine | undefined;
   readonly source?: SourcePosition | undefined;
+  readonly match?: CodeTarget | undefined;
 };
+type CodeTarget = { readonly match: PatchSearchMatch; readonly query: string };
 const MAX_ACTIVE_PATCHES = 8;
 const MAX_ACTIVE_BYTES = 4 * 1024 * 1024;
 const MAX_AHEAD_BYTES = 256 * 1024;
@@ -76,10 +86,12 @@ export function FileStream({
 }: Props) {
   const [host, setHost] = useState<HTMLDivElement | null>(null);
   const [geometry, setGeometry] = useState({ margin: 0, toolbar: 0 });
+  const visibleOrdinals = useRef<readonly number[]>([]);
   const [pinned, setPinned] = useState<readonly number[]>([]);
-  const index = usePatchPages(reviewId, initial, pinned);
+  const index = usePatchPages(reviewId, initial, pinned, visibleOrdinals);
   const generation = useRef(0);
   const [navigationError, setNavigationError] = useState<string>();
+  useEffect(() => () => setPatchMatch([]), []);
   const [landed, setLanded] = useState<{ readonly index: number; readonly offset: number }>();
   const [jump, setJump] = useState<Jump | undefined>(() => {
     if (!restore || threadJump) return;
@@ -179,6 +191,9 @@ export function FileStream({
     landed && Math.abs(landed.offset - offset) <= 1 && files.has(landed.index)
       ? landed.index
       : viewportFirst;
+  useLayoutEffect(() => {
+    visibleOrdinals.current = [viewportFirst, last, ...(jump ? [jump.index] : [])];
+  }, [viewportFirst, last, jump]);
   const active = files.get(first);
   const shown = index.pages.get(pageAt(first)) ?? initial;
   const virtual = list.getVirtualItems();
@@ -257,11 +272,29 @@ export function FileStream({
       frame = requestAnimationFrame(() => {
         if (requested !== generation.current || !file?.isConnected) return;
         if (file.querySelector(".patch-waiting, .patch-rich:not([data-patch-prepared])")) return;
-        const row =
-          jump?.line &&
-          file.querySelector<HTMLElement>(`[data-${jump.line.side}="${jump.line.number}"]`);
+        const rich = file.querySelector<HTMLElement>(".patch-rich");
+        const line = jump?.line && rich && patchDocument(rich)?.line(jump.line);
+        const row = line?.element;
         const source = jump?.source && sourceRect(file, jump.source);
-        const target = source || (row && row.getBoundingClientRect());
+        const code = jump?.match;
+        const match =
+          code &&
+          rich &&
+          patchDocument(rich)?.match({
+            line: { side: code.match.side, number: code.match.line },
+            hunk: code.match.hunk,
+            start: code.match.sourceStart,
+            end: code.match.sourceEnd,
+          });
+        const rawMatches =
+          code && jump.source ? sourceRanges(file, jump.source, code.match.sourceEnd) : [];
+        const ranges = match ? [match] : rawMatches;
+        const confirmedMatch =
+          code && ranges.map((range) => range.toString()).join("") === code.query;
+        const target = (confirmedMatch && ranges[0]?.getClientRects()[0]) || source || line?.rect;
+        setPatchMatch(confirmedMatch ? ranges : []);
+        if (code && !confirmedMatch)
+          setNavigationError("The match is outside the available patch.");
         const top =
           scroll.getBoundingClientRect().top + (toolbar.current?.offsetHeight ?? geometry.toolbar);
         if (target)
@@ -269,11 +302,14 @@ export function FileStream({
         else {
           const inset = Math.min(jump?.inset ?? 0, Math.max(0, file.offsetHeight - 30));
           scroll.scrollTop += file.getBoundingClientRect().top - top + inset;
-          if (jump?.focus && (jump.line || jump.source))
+          if (jump?.focus && !code && (jump.line || jump.source))
             setNavigationError("This line is outside the available patch.");
         }
         if (jump?.focus) {
-          const focus = row || file.querySelector<HTMLElement>(".patch-file-title");
+          const focus =
+            row ||
+            (confirmedMatch && file.querySelector<HTMLElement>("pre[data-patch-etag]")) ||
+            file.querySelector<HTMLElement>(".patch-file-title");
           if (focus) {
             focus.tabIndex = -1;
             focus.focus({ preventScroll: true });
@@ -304,7 +340,7 @@ export function FileStream({
     index.cancelManual();
     setJump(undefined);
   });
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!scroller) return;
     const signals = new AbortController();
     const options = { signal: signals.signal, passive: true };
@@ -441,34 +477,60 @@ export function FileStream({
   }
 
   async function chooseTarget(
-    target: { readonly path: PatchPath } | { readonly fileId: string },
+    target:
+      | { readonly path: PatchPath }
+      | { readonly fileId: string }
+      | { readonly paths: Pick<PatchPath, "oldPath" | "newPath"> },
     line?: PatchLine,
+    match?: CodeTarget,
   ) {
     const command = beginNavigation();
-    const matches = (file: PatchFile) =>
-      "fileId" in target
-        ? file.fileId === target.fileId
-        : file.oldPath === target.path.oldPath && file.newPath === target.path.newPath;
+    const matches = (file: PatchFile) => {
+      if ("fileId" in target) return file.fileId === target.fileId;
+      const path = "path" in target ? target.path : target.paths;
+      return file.oldPath === path.oldPath && file.newPath === path.newPath;
+    };
     for (const [ordinal, file] of files)
       if (matches(file)) {
-        goTo(ordinal, true, line);
+        openTarget(ordinal, file);
         return;
       }
     const page = await index.load(target, true);
     if (!page || generation.current !== command) return;
     const offset = page.items.findIndex(matches);
-    if (offset >= 0) goTo(pageStart(page.pageNumber) + offset, true, line);
+    if (offset >= 0) openTarget(pageStart(page.pageNumber) + offset, page.items[offset]!);
+
+    function openTarget(ordinal: number, file: PatchFile) {
+      if (!match) {
+        goTo(ordinal, true, line);
+        return;
+      }
+      const source = file.patchETag
+        ? {
+            byte: match.match.sourceStart,
+            end: match.match.sourceEnd,
+            first: Math.max(0, match.match.sourceStart - 8192),
+            etag: file.patchETag,
+            inset: 0,
+          }
+        : undefined;
+      setJump({ index: ordinal, inset: 0, focus: true, line, source, match });
+    }
   }
 
   const chooseThread = useEffectEvent((target: ThreadJump) => {
     onThreadJump(undefined);
     void chooseTarget(target, target.line);
   });
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!threadJump) return;
-    const frame = requestAnimationFrame(() => chooseThread(threadJump));
+    const command = generation.current;
+    const frame = requestAnimationFrame(() => {
+      if (command === generation.current) chooseThread(threadJump);
+      else onThreadJump(undefined);
+    });
     return () => cancelAnimationFrame(frame);
-  }, [threadJump]);
+  }, [onThreadJump, threadJump]);
 
   async function goToOrdinal(ordinal: number) {
     if (ordinal < 0 || ordinal >= count) return;
@@ -506,6 +568,13 @@ export function FileStream({
             }}
             onChooseFile={chooseFile}
             onChoosePath={(path) => void chooseTarget({ path })}
+            onChooseMatch={(match, query) =>
+              void chooseTarget(
+                { fileId: match.fileId },
+                { side: match.side, number: match.line, inset: 0 },
+                { match, query },
+              )
+            }
           />,
           navigation,
         )}
@@ -568,7 +637,6 @@ export function FileStream({
                         : "away"
                       : undefined
                   }
-                  priorityLine={item.index === jump?.index ? jump.line : undefined}
                   visible={
                     (item.index >= viewportFirst && item.index <= last) ||
                     item.index === jump?.index

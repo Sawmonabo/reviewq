@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { PATCH_FILES_PER_PAGE, readPatchFiles } from "../../../api/changes";
+import { locatePatchPath, PATCH_FILES_PER_PAGE, readPatchFiles } from "../../../api/changes";
 import type { PatchIndex } from "../../../api/changes";
 import { observeSnapshot } from "../../../api/events";
 import type { PatchPath } from "../../../api/generated/contracts";
@@ -9,9 +9,15 @@ const RETAINED_PAGES = 5;
 type Lookup =
   | { readonly page: number; readonly cursor: string }
   | { readonly path: PatchPath }
-  | { readonly fileId: string };
+  | { readonly fileId: string }
+  | { readonly paths: Pick<PatchPath, "oldPath" | "newPath"> };
 
-export function usePatchPages(reviewId: string, initial: PatchIndex, pinned: readonly number[]) {
+export function usePatchPages(
+  reviewId: string,
+  initial: PatchIndex,
+  pinned: readonly number[],
+  visible: { readonly current: readonly number[] },
+) {
   const pinnedPages = useRef(new Set<number>());
   useEffect(() => {
     pinnedPages.current = new Set(pinned.map(pageAt));
@@ -38,9 +44,16 @@ export function usePatchPages(reviewId: string, initial: PatchIndex, pinned: rea
     setPending(true);
     setError(undefined);
     try {
+      const path =
+        "paths" in lookup
+          ? await locatePatchPath(reviewId, initial.revision, lookup.paths, controller.signal)
+          : undefined;
+      if ("paths" in lookup && !path)
+        throw new Error("This file is outside the available changes.");
+      const target = "paths" in lookup ? { path: path! } : lookup;
       const { cursor, data } = await readPatchFiles(reviewId, controller.signal, {
         revision: initial.revision,
-        ...lookup,
+        ...target,
         ...("page" in lookup && {
           previewEdge: pages.has(lookup.page - 1) ? ("start" as const) : ("end" as const),
         }),
@@ -62,7 +75,12 @@ export function usePatchPages(reviewId: string, initial: PatchIndex, pinned: rea
         retained.set(data.pageNumber, data);
         if (retained.size > RETAINED_PAGES) {
           const distant = [...retained.keys()]
-            .filter((page) => !pinnedPages.current.has(page))
+            .filter(
+              (page) =>
+                page !== data.pageNumber &&
+                !pinnedPages.current.has(page) &&
+                !visible.current.some((ordinal) => pageAt(ordinal) === page),
+            )
             .sort((a, b) => Math.abs(b - data.pageNumber) - Math.abs(a - data.pageNumber));
           for (const page of distant.slice(0, retained.size - RETAINED_PAGES))
             retained.delete(page);
