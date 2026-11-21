@@ -114,6 +114,10 @@ export function useDiagramViewport(size: Size | undefined) {
   }
 
   const resize = useEffectEvent(measure);
+  const resizeDrawing = useEffectEvent(() => {
+    if (!automatic.current && canvas.current && size) apply(canvas.current, size, scale.current);
+    measure();
+  });
   const wheel = useEffectEvent((event: WheelEvent) => {
     if (!event.deltaY || !(event.ctrlKey || event.metaKey)) return;
     event.preventDefault();
@@ -125,8 +129,7 @@ export function useDiagramViewport(size: Size | undefined) {
     const target = surface.current;
     const viewport = node?.parentElement;
     if (!node || !target || !viewport || !size) return;
-    automatic.current = true;
-    resize();
+    resizeDrawing();
     const observer = new ResizeObserver(() => resize());
     observer.observe(node);
     const onResize = () => resize();

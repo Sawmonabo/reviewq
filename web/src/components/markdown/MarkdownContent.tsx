@@ -1,8 +1,9 @@
-import { useMemo, useState } from "react";
+import { createContext, useContext, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import { Fragment, jsx, jsxs } from "react/jsx-runtime";
 import { toJsxRuntime } from "hast-util-to-jsx-runtime";
 import type { Element, Root } from "hast";
+import { DiagramCacheContext } from "./diagram-cache";
 import { prepareLiveMarkdown, type LiveMarkdown } from "./live/blocks";
 import MermaidDiagram from "./MermaidDiagram";
 import { parseMarkdown } from "./parse-markdown";
@@ -16,6 +17,8 @@ type MarkdownContentProps =
       readonly provisional?: boolean;
       readonly formattingLimit?: boolean;
     };
+
+const ProvisionalMarkdown = createContext(false);
 
 export function MarkdownContent(props: MarkdownContentProps) {
   const { source, base, provisional, formattingLimit } = "source" in props ? props : {};
@@ -39,7 +42,11 @@ export function MarkdownContent(props: MarkdownContentProps) {
   } else if (live) {
     setLive(undefined);
   }
-  return tree ? <MarkdownTree tree={tree} /> : <MarkdownSource source={source ?? ""} />;
+  return tree ? (
+    <MarkdownTree tree={tree} provisional={provisional ?? false} />
+  ) : (
+    <MarkdownSource source={source ?? ""} />
+  );
 }
 
 function MarkdownSource({ source }: { readonly source: string }) {
@@ -52,19 +59,27 @@ function MarkdownSource({ source }: { readonly source: string }) {
   );
 }
 
-export function MarkdownTree({ tree }: { readonly tree: Root }) {
+export function MarkdownTree({
+  tree,
+  provisional = false,
+}: {
+  readonly tree: Root;
+  readonly provisional?: boolean;
+}) {
   return (
     <div className="prose">
-      {toJsxRuntime(tree, {
-        Fragment,
-        jsx,
-        jsxs,
-        passNode: true,
-        components: {
-          pre: CodeBlock,
-          table: MarkdownTable,
-        },
-      })}
+      <ProvisionalMarkdown value={provisional}>
+        {toJsxRuntime(tree, {
+          Fragment,
+          jsx,
+          jsxs,
+          passNode: true,
+          components: {
+            pre: CodeBlock,
+            table: MarkdownTable,
+          },
+        })}
+      </ProvisionalMarkdown>
     </div>
   );
 }
@@ -90,6 +105,8 @@ function CodeBlock({
   readonly node?: Element | undefined;
   readonly children?: ReactNode;
 }) {
+  const provisional = useContext(ProvisionalMarkdown);
+  const scope = useContext(DiagramCacheContext)?.scope ?? "";
   const child = node?.children[0];
   if (
     child?.type === "element" &&
@@ -98,7 +115,13 @@ function CodeBlock({
     child.properties.className.includes("language-mermaid")
   ) {
     const source = child.children.map((item) => (item.type === "text" ? item.value : "")).join("");
-    return <MermaidDiagram source={source} />;
+    return (
+      <MermaidDiagram
+        key={JSON.stringify([scope, node?.position?.start.offset])}
+        source={source}
+        provisional={provisional}
+      />
+    );
   }
   return <pre>{children}</pre>;
 }

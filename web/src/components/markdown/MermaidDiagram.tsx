@@ -1,18 +1,52 @@
-import type Mermaid from "mermaid";
-import { useContext, useEffect, useId, useState } from "react";
+import { useContext, useEffectEvent, useId, useLayoutEffect, useRef, useState } from "react";
 import { DiagramCacheContext, reusableDiagram } from "./diagram-cache";
+import { eligibleDiagram, parseDiagram, renderDiagram } from "./mermaid";
 import { useDiagramViewport } from "./useDiagramViewport";
 
-let engine: Promise<typeof Mermaid> | undefined;
+type Drawing = {
+  readonly source: string;
+  readonly provisional: boolean;
+  readonly svg: SVGSVGElement;
+  readonly size: { readonly width: number; readonly height: number };
+};
 
-export default function MermaidDiagram({ source }: { readonly source: string }) {
+type Revision = {
+  readonly source: string;
+  readonly provisional: boolean;
+  readonly eligible: boolean;
+};
+type Rendering = {
+  inView: boolean;
+  closed: boolean;
+  running: boolean;
+  requested?: Revision;
+  attempted?: Revision;
+  timer: number | undefined;
+};
+
+const LIVE_RENDER_INTERVAL_MS = 48;
+
+export default function MermaidDiagram({
+  source,
+  provisional,
+}: {
+  readonly source: string;
+  readonly provisional: boolean;
+}) {
   const cache = useContext(DiagramCacheContext);
   const id = useId().replace(/[^a-zA-Z0-9_-]/g, "");
-  const [result, setResult] = useState<{
-    source: string;
-    size: { width: number; height: number } | null;
-  }>();
-  const size = result?.source === source ? result.size : undefined;
+  const [drawing, setDrawing] = useState<Drawing>();
+  const [failedSource, setFailedSource] = useState<string>();
+  const [sourceOpen, setSourceOpen] = useState<boolean>();
+  const figure = useRef<HTMLElement>(null);
+  const rendering = useRef<Rendering | undefined>(undefined);
+  if (drawing?.source === source && drawing.provisional && !provisional)
+    setDrawing({ ...drawing, provisional: false });
+  const displayed =
+    drawing && (drawing.source === source || provisional || drawing.provisional)
+      ? drawing
+      : undefined;
+  const size = displayed?.size;
   const {
     frame,
     canvas,
@@ -28,91 +62,109 @@ export default function MermaidDiagram({ source }: { readonly source: string }) 
     toggleTouchPan,
     onKeyDown,
     gestures,
-  } = useDiagramViewport(size ?? undefined);
-  const eligible =
-    source.length <= 30_000 &&
-    (source.match(/-->|---|==>|-.->|->>/g) ?? []).length <= 500 &&
-    !/^\s*(?:%%\{|---)/.test(source) &&
-    !/\bclick\s|https?:|@import|url\s*\(/i.test(source);
-  useEffect(() => {
-    const host = frame.current;
-    const target = canvas.current;
-    if (!eligible || !host || !target) return;
-    let active = true;
-    const renderNearby = (entries: IntersectionObserverEntry[]) => {
-      if (!entries.some((entry) => entry.isIntersecting)) return;
-      observer.disconnect();
-      const theme = document.documentElement.dataset.theme ?? "";
-      const renderId = `reviewq-diagram-${crypto.randomUUID()}`;
-      const saved = cache?.diagram;
-      const hit = saved?.source === source && saved.theme === theme ? saved : undefined;
-      const render = async () => {
-        if (hit) return hit.svg.replaceAll(hit.id, renderId);
-        engine ??= import("mermaid").then(({ default: mermaid }) => {
-          mermaid.initialize({
-            startOnLoad: false,
-            securityLevel: "strict",
-            htmlLabels: false,
-            suppressErrorRendering: true,
-            maxTextSize: 30_000,
-            maxEdges: 500,
-            theme: "base",
-            look: "classic",
-            themeVariables: {
-              darkMode: true,
-              background: "#0b0c10",
-              primaryColor: "#1c2330",
-              primaryTextColor: "#e0e5ef",
-              primaryBorderColor: "#657894",
-              lineColor: "#8c9db7",
-              secondaryColor: "#23222d",
-              tertiaryColor: "#141820",
-              noteBkgColor: "#242735",
-              noteTextColor: "#e0e5ef",
-              noteBorderColor: "#657894",
-              fontFamily: "Inter, Segoe UI, sans-serif",
-              fontSize: "14px",
-            },
-          });
-          return mermaid;
+  } = useDiagramViewport(size);
+  const eligible = eligibleDiagram(source);
+  const settled = useEffectEvent(() => drawing?.source === source || failedSource === source);
+
+  const prepare = useEffectEvent(async (state: Rendering, revision: Revision) => {
+    const { source, provisional } = revision;
+    const theme = document.documentElement.dataset.theme ?? "";
+    const renderId = `reviewq-diagram-${crypto.randomUUID()}`;
+    const saved = cache?.diagram;
+    const hit = saved?.source === source && saved.theme === theme ? saved : undefined;
+    try {
+      const svg = hit
+        ? hit.svg.replaceAll(hit.id, renderId)
+        : await renderDiagram(renderId, source);
+      const current = state.requested;
+      // A completed live draw is useful while this fence is still live. The same
+      // serial renderer will prepare the newest queued source on its next turn.
+      if (state.closed || (current !== revision && !(current?.provisional && provisional))) return;
+      const { root, size } = parseDiagram(svg);
+      if (cache && !hit) {
+        const reusable = reusableDiagram(root, renderId, svg.length);
+        if (reusable) cache.diagram = { source, theme, id: renderId, svg: reusable };
+      }
+      setDrawing({ source, provisional, size, svg: document.importNode(root, true) });
+      setFailedSource(undefined);
+    } catch {
+      if (!state.closed && state.requested === revision) setFailedSource(source);
+    }
+  });
+
+  const schedule = useEffectEvent(function schedule(state: Rendering) {
+    if (
+      state.closed ||
+      !state.inView ||
+      state.running ||
+      state.timer !== undefined ||
+      !state.requested?.eligible ||
+      state.requested === state.attempted
+    )
+      return;
+    state.timer = window.setTimeout(
+      () => {
+        state.timer = undefined;
+        const revision = state.requested;
+        if (state.closed || !state.inView || !revision?.eligible || revision === state.attempted)
+          return;
+        state.attempted = revision;
+        state.running = true;
+        void prepare(state, revision).finally(() => {
+          state.running = false;
+          schedule(state);
         });
-        return (await (await engine).render(renderId, source)).svg;
-      };
-      void render()
-        .then((svg) => {
-          if (!active) return;
-          const parsed = new DOMParser().parseFromString(svg, "image/svg+xml");
-          const root = parsed.documentElement;
-          if (!(root instanceof SVGSVGElement)) throw new Error("Invalid diagram");
-          const { width, height } = root.viewBox.baseVal;
-          if (!Number.isFinite(width) || width <= 0 || !Number.isFinite(height) || height <= 0)
-            throw new Error("Invalid diagram size");
-          for (const unsafe of parsed.querySelectorAll("script, foreignObject, image, a"))
-            unsafe.remove();
-          if (cache && !hit) {
-            const reusable = reusableDiagram(root, renderId, svg.length);
-            if (reusable) cache.diagram = { source, theme, id: renderId, svg: reusable };
-          }
-          target.replaceChildren(document.importNode(root, true));
-          setResult({ source, size: { width, height } });
-        })
-        .catch(() => {
-          if (active) setResult({ source, size: null });
-        });
-    };
-    const observer = new IntersectionObserver(renderNearby, { scrollMargin: "120px 0px" });
+      },
+      state.requested.provisional ? LIVE_RENDER_INTERVAL_MS : 0,
+    );
+  });
+
+  useLayoutEffect(() => {
+    const host = figure.current;
+    if (!host) return;
+    const state: Rendering = { inView: false, closed: false, running: false, timer: undefined };
+    rendering.current = state;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        state.inView = entries.some((entry) => entry.isIntersecting);
+        schedule(state);
+      },
+      { scrollMargin: "120px 0px" },
+    );
     observer.observe(host);
     return () => {
-      active = false;
+      state.closed = true;
+      rendering.current = undefined;
       observer.disconnect();
-      target.replaceChildren();
+      window.clearTimeout(state.timer);
     };
-  }, [eligible, source, frame, canvas, cache]);
+  }, []);
 
-  const idle = eligible && size === undefined;
-  const failed = !eligible || size === null;
+  useLayoutEffect(() => {
+    const state = rendering.current;
+    if (!state) return;
+    const revision = { source, provisional, eligible };
+    state.requested = revision;
+    if (settled()) state.attempted = revision;
+    schedule(state);
+  }, [source, provisional, eligible]);
+
+  useLayoutEffect(() => {
+    // Swap the prepared drawing and its viewport dimensions in the same commit.
+    const target = canvas.current;
+    if (target && target.firstChild !== (displayed?.svg ?? null)) {
+      if (displayed) target.replaceChildren(displayed.svg);
+      else target.replaceChildren();
+    }
+  }, [canvas, displayed, eligible]);
+
+  const failed = !eligible || failedSource === source;
+  const idle = eligible && !displayed && !failed;
+  const lastPreview = displayed && displayed.source !== source && failed && !provisional;
+  const openSource =
+    sourceOpen ?? ((!displayed && (failed || provisional)) || Boolean(lastPreview));
   return (
-    <figure className="mermaid-figure" aria-labelledby={`diagram-caption-${id}`}>
+    <figure ref={figure} className="mermaid-figure" aria-labelledby={`diagram-caption-${id}`}>
       <figcaption id={`diagram-caption-${id}`}>
         <span>
           Diagram<small className="diagram-hint">Drag to pan · Ctrl/⌘ + scroll to zoom</small>
@@ -158,12 +210,12 @@ export default function MermaidDiagram({ source }: { readonly source: string }) 
           Rendering diagram…
         </p>
       )}
-      {failed && (
+      {failed && !displayed && (
         <p className="diagram-loading" role="status">
           This diagram could not be rendered. Its source is available below.
         </p>
       )}
-      {eligible && (
+      {(eligible || size) && (
         <div className="diagram-viewport">
           <div
             className="diagram-gesture-surface"
@@ -185,8 +237,20 @@ export default function MermaidDiagram({ source }: { readonly source: string }) 
           </div>
         </div>
       )}
-      <details className="diagram-source" open={failed}>
-        <summary>Diagram source</summary>
+      {lastPreview && (
+        <p className="diagram-loading" role="status">
+          The final source could not be rendered. The drawing is the last valid preview.
+        </p>
+      )}
+      <details className="diagram-source" open={openSource}>
+        <summary
+          onClick={(event) => {
+            event.preventDefault();
+            setSourceOpen(!openSource);
+          }}
+        >
+          Diagram source
+        </summary>
         <pre>{source}</pre>
       </details>
     </figure>
