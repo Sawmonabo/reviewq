@@ -441,8 +441,14 @@ export function FileStream({
     };
   }, [host, scroller]);
 
+  const pastFiles = offset + geometry.toolbar >= geometry.margin + list.getTotalSize();
   const fetchNearby = useEffectEvent(() => {
     if (index.pending || index.error || !scroller || !count || jump) return;
+    if (
+      scroller.hasAttribute("data-reading-discussions") ||
+      (pastFiles && scroller.querySelector(".discussion-list .changes-conversation"))
+    )
+      return;
     const start = viewportFirst;
     const finish = last;
     const before = pageStart(pageAt(start)) - 1;
@@ -470,6 +476,7 @@ export function FileStream({
     index.pending,
     jump,
     last,
+    pastFiles,
     scroller,
   ]);
 
