@@ -145,14 +145,20 @@ impl GitLab {
                 if personal.anchor.is_none()
                     && let Some(parent) = &personal.parent
                 {
-                    let row: UpstreamDiscussion =
-                        self.read_note(&source, "discussions", Some(parent)).await?;
-                    if &row.id != parent {
-                        return Err(AppError::CursorExpired);
+                    match self
+                        .read_note::<UpstreamDiscussion>(&source, "discussions", Some(parent))
+                        .await
+                    {
+                        Ok(row) if &row.id == parent => {
+                            if let Some(thread) = project(row, &source, &revision)? {
+                                personal.anchor = thread.anchor;
+                                personal.outdated = thread.outdated;
+                            }
+                        }
+                        Ok(_) => return Err(AppError::CursorExpired),
+                        Err(AppError::NotFound | AppError::PayloadTooLarge) => {}
+                        Err(error) => return Err(error),
                     }
-                    let thread = project(row, &source, &revision)?.ok_or(AppError::NotFound)?;
-                    personal.anchor = thread.anchor;
-                    personal.outdated = thread.outdated;
                 }
                 DiscussionTarget::Draft(personal)
             }

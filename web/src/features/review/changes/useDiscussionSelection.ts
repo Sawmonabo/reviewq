@@ -40,16 +40,23 @@ export function useDiscussionSelection(
     if (!selected || !revision || selected.value.revision !== revision) return;
     const controller = new AbortController();
     recheck.current = controller;
+    function clearConfirmed() {
+      if (controller.signal.aborted) return;
+      highlightNote();
+      setSelected(undefined);
+    }
     void readDiscussionDestination(reviewId, revision, selected.hit, controller.signal, true).then(
-      (result) => {
-        if (!controller.signal.aborted) listener.current?.snapshot(result.cursor);
+      ({ data, cursor }) => {
+        if (controller.signal.aborted) return;
+        listener.current?.snapshot(cursor);
+        const previous = selected.value.thread;
+        if (
+          data.thread.outdated !== previous.outdated ||
+          JSON.stringify(data.thread.anchor) !== JSON.stringify(previous.anchor)
+        )
+          clearConfirmed();
       },
-      () => {
-        if (!controller.signal.aborted) {
-          highlightNote();
-          setSelected(undefined);
-        }
-      },
+      clearConfirmed,
     );
   });
 
