@@ -93,9 +93,9 @@ export type ThreadJump = (
 export function threadLine(thread: PatchDiscussion): PatchLine | undefined {
   const anchor = thread.anchor;
   if (thread.outdated || anchor?.positionType !== "text") return;
-  const end = anchor.range?.end;
-  const next = end?.newLine ?? anchor.newLine;
-  const old = end?.oldLine ?? anchor.oldLine;
+  const end = anchor.range?.end ?? anchor;
+  const next = end.newLine;
+  const old = end.oldLine;
   if (next != null) return { side: "new", number: next, inset: 0 };
   if (old != null) return { side: "old", number: old, inset: 0 };
 }
@@ -110,7 +110,7 @@ export function matchingFile(
     thread.anchor.positionType === "text" &&
     thread.anchor.oldPath === file.oldPath &&
     thread.anchor.newPath === file.newPath &&
-    (thread.anchor.newLine !== null || thread.anchor.oldLine !== null)
+    threadLine(thread) !== undefined
   );
 }
 

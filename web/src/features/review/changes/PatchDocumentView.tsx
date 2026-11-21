@@ -4,6 +4,7 @@ import type { PatchDiscussion } from "../../../api/generated/contracts";
 import { ChangesThread } from "./ChangesThread";
 import { mountPatchDocument } from "./patch-document";
 import type { PatchDocument } from "./patch-document";
+import { threadLine } from "./patch-position";
 
 type Props = {
   readonly text: string;
@@ -54,18 +55,15 @@ function ThreadPortal({
   readonly thread: PatchDiscussion;
 }) {
   const [slot, setSlot] = useState<HTMLElement | null>();
-  const end = thread.anchor?.range?.end;
-  const endNew = end?.newLine ?? thread.anchor?.newLine;
-  const endOld = end?.oldLine ?? thread.anchor?.oldLine;
+  const position = threadLine(thread);
+  const side = position?.side;
+  const line = position?.number;
   const attach = useCallback(
     (marker: HTMLSpanElement | null) => {
       if (!marker) return;
-      const target =
-        (endNew != null ? patch.anchor("new", endNew) : undefined) ??
-        (endOld != null ? patch.anchor("old", endOld) : undefined);
-      setSlot(target ?? null);
+      setSlot(side !== undefined && line !== undefined ? (patch.anchor(side, line) ?? null) : null);
     },
-    [patch, endNew, endOld],
+    [patch, side, line],
   );
   return (
     <>
