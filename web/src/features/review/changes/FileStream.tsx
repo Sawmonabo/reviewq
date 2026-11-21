@@ -37,6 +37,8 @@ import {
   storePatch,
 } from "./patch-position";
 import type { PatchLine, SourcePosition, ThreadJump } from "./patch-position";
+import { createPatchReadQueue } from "./patch/read-queue";
+import { usePatchScroll } from "./patch/usePatchScroll";
 import { pageAt, pageStart, usePatchPages } from "./usePatchPages";
 
 type Props = {
@@ -87,6 +89,7 @@ export function FileStream({
   onReload,
 }: Props) {
   const [host, setHost] = useState<HTMLDivElement | null>(null);
+  const [readPatch] = useState(createPatchReadQueue);
   const [geometry, setGeometry] = useState({ margin: 0, toolbar: 0 });
   const visibleOrdinals = useRef<readonly number[]>([]);
   const [pinned, setPinned] = useState<readonly number[]>([]);
@@ -116,6 +119,7 @@ export function FileStream({
     };
   });
   const scroller = host?.closest<HTMLElement>(".drawer-body") ?? null;
+  const patchScroll = usePatchScroll(host, scroller, toolbar);
   const end = pageStart(index.tail.pageNumber) + index.tail.length;
   const count = index.tail.nextCursor
     ? Math.max(end, pageStart(index.tail.pageNumber + 1)) + 1
@@ -250,6 +254,12 @@ export function FileStream({
   useLayoutEffect(() => {
     if (!jump || !host || !scroller || !files.has(jump.index)) return;
     const scroll = scroller;
+    if (files.get(jump.index)?.availability === "complete" && !wanted.has(jump.index)) {
+      setNavigationError("Clear the current selection to open another patch.");
+      setJump(undefined);
+      setFileNavigation(scroll, false);
+      return;
+    }
     const file = host.querySelector<HTMLElement>(`[data-file-position="${jump.index + 1}"]`);
     if (!file) return;
     const requested = generation.current;
@@ -316,10 +326,10 @@ export function FileStream({
           : Math.min(jump?.inset ?? 0, Math.max(0, file.offsetHeight - 30));
         const before = scroll.scrollTop;
         const destination = (target?.top ?? file.getBoundingClientRect().top) + inset;
-        scroll.scrollTop += destination - readingTop();
+        patchScroll.move(scroll.scrollTop + destination - readingTop());
         // The header can move from its natural position to sticky during landing.
         const residual = destination - (scroll.scrollTop - before) - readingTop();
-        if (Math.abs(residual) > 0.5) scroll.scrollTop += residual;
+        if (Math.abs(residual) > 0.5) patchScroll.move(scroll.scrollTop + residual);
         // A distant seek changes which neighboring files the virtualizer measures.
         // Confirm the glyph against the updated viewport before handing keyboard focus to it.
         if (target && jump?.focus && Math.abs(scroll.scrollTop - before) > 1) {
@@ -343,7 +353,7 @@ export function FileStream({
         setFileNavigation(scroll, false);
       });
     }
-  }, [files, geometry.toolbar, host, jump, scroller, toolbar, virtual]);
+  }, [files, geometry.toolbar, host, jump, patchScroll, scroller, toolbar, virtual, wanted]);
 
   const cancelNavigation = useEffectEvent((event: Event) => {
     if (!event.isTrusted) return;
@@ -676,6 +686,8 @@ export function FileStream({
                 <FilePatch
                   key={JSON.stringify([file.revision, file.fileId, file.patchETag])}
                   file={file}
+                  read={readPatch}
+                  scroll={patchScroll}
                   threads={anchors.get(item.index) ?? EMPTY_THREADS}
                   source={source}
                   onSourceChanged={onReload}
@@ -748,17 +760,23 @@ function admitPatches(
     (_, n) => first + n,
   );
   const ahead = backwards ? [first - 1, first - 2, last + 1] : [last + 1, last + 2, first - 1];
-  const candidates = [...pinned, ...(jump === undefined ? [] : [jump]), ...visible, ...ahead];
+  const candidates = [
+    ...pinned,
+    first,
+    ...(jump === undefined ? [] : [jump]),
+    ...visible,
+    ...ahead,
+  ];
   const admitted = new Set<number>();
   let bytes = 0;
   for (const ordinal of candidates) {
     if (admitted.size >= MAX_ACTIVE_PATCHES) break;
     const file = files.get(ordinal);
     if (!file || admitted.has(ordinal) || file.availability !== "complete") continue;
-    const rangeBytes = file.patchETag ? PATCH_SOURCE_WINDOW_BYTES : PATCH_WINDOW_BYTES;
+    const rangeBytes = file.patchETag ? PATCH_SOURCE_WINDOW_BYTES * 8 : PATCH_WINDOW_BYTES * 4;
     const size = isRichPatch(file)
       ? (file.byteLength ?? MAX_ACTIVE_BYTES)
-      : Math.min(file.byteLength ?? Infinity, rangeBytes * 4);
+      : Math.min(file.byteLength ?? Infinity, rangeBytes);
     if (bytes + size > MAX_ACTIVE_BYTES) continue;
     if (
       !(ordinal >= first && ordinal <= last) &&

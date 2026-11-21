@@ -1,21 +1,25 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { createPortal } from "react-dom";
-import type { PatchDiscussion, PatchFile, PatchSourceRow } from "../../../api/generated/contracts";
-import { ChangesThread } from "./ChangesThread";
+import type { PatchDiscussion, PatchFile } from "../../../api/generated/contracts";
+import { ChangesThread, useExpandedChangesThread } from "./ChangesThread";
+import { discussionPreview } from "./discussion-preview";
 import { mountPatchDocument } from "./patch-document";
 import type { PatchDocument } from "./patch-document";
 import { threadLine } from "./patch-position";
+import type { PatchRow } from "./patch-rows";
+import { createThreadViewport } from "./patch/thread-viewport";
 
 type Props = {
   readonly file: PatchFile;
   readonly text: string;
   readonly discussions: readonly PatchDiscussion[];
-  readonly fragments?: readonly PatchSourceRow[] | undefined;
+  readonly fragments?: readonly PatchRow[] | undefined;
 };
 
 export function PatchDocumentView({ file, text, discussions, fragments }: Props) {
   const { oldPath, newPath, created, deleted } = file;
   const [patch, setPatch] = useState<PatchDocument>();
+  const [observe] = useState(createThreadViewport);
   const mount = useCallback(
     (host: HTMLDivElement | null) => {
       if (!host) return;
@@ -41,7 +45,7 @@ export function PatchDocumentView({ file, text, discussions, fragments }: Props)
     <>
       {patch &&
         anchored.map((thread) => (
-          <ThreadPortal key={thread.discussionId} patch={patch} thread={thread} />
+          <ThreadPortal key={thread.discussionId} patch={patch} thread={thread} observe={observe} />
         ))}
       <div
         ref={mount}
@@ -66,11 +70,18 @@ export function PatchDocumentView({ file, text, discussions, fragments }: Props)
 function ThreadPortal({
   patch,
   thread,
+  observe,
 }: {
   readonly patch: PatchDocument;
   readonly thread: PatchDiscussion;
+  readonly observe: ReturnType<typeof createThreadViewport>;
 }) {
   const [slot, setSlot] = useState<HTMLElement | null>();
+  const [near, setNear] = useState(false);
+  const expanded = useExpandedChangesThread(thread.discussionId);
+  useEffect(() => {
+    if (slot) return observe(slot, setNear);
+  }, [observe, slot]);
   const position = threadLine(thread);
   const side = position?.side;
   const line = position?.number;
@@ -84,7 +95,14 @@ function ThreadPortal({
   return (
     <>
       <span ref={attach} hidden />
-      {slot && createPortal(<ChangesThread thread={thread} />, slot)}
+      {slot &&
+        createPortal(
+          <ChangesThread
+            thread={thread}
+            previewNote={near || expanded ? undefined : discussionPreview}
+          />,
+          slot,
+        )}
       {slot === null && <ChangesThread thread={thread} outside />}
     </>
   );

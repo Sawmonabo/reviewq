@@ -1,10 +1,16 @@
 import { useCallback, useEffect, useEffectEvent, useLayoutEffect, useRef, useState } from "react";
-import { PatchSourceChanged, readPatch, readPatchSource } from "../../../api/changes";
-import type { PatchRange, PatchSourceTarget, PatchWindow } from "../../../api/changes";
+import { PatchSourceChanged } from "../../../api/changes";
+import type { PatchRange } from "../../../api/changes";
 import { ApiResponseError } from "../../../api/client";
-import type { PatchDiscussion, PatchFile, PatchSourceRow } from "../../../api/generated/contracts";
+import type { PatchDiscussion, PatchFile } from "../../../api/generated/contracts";
 import { Empty, Loading, Notice } from "../../../components/PanelState";
 import { PatchDocumentView } from "./PatchDocumentView";
+import { copyPatchRange } from "./patch/copy-range";
+import { createPatchLookahead, sourceTargetKey } from "./patch/lookahead";
+import type { PatchReadQueue } from "./patch/read-queue";
+import { readSourcePage } from "./patch/source-page";
+import type { SourcePage } from "./patch/source-page";
+import type { PatchScroll } from "./patch/usePatchScroll";
 import { patchDocument } from "./patch-document";
 import { sourceReadingTop } from "./patch-position";
 import type { PatchLine, SourcePosition } from "./patch-position";
@@ -15,16 +21,16 @@ type Move = {
   readonly byte?: number | undefined;
   readonly end?: number | undefined;
   readonly line?: PatchLine | undefined;
+  readonly predictedRow?: number | undefined;
+  readonly explicit?: boolean;
   readonly direction?: "before" | "after";
   readonly entry?: "start" | "end";
   readonly land?: "start" | "end";
 };
-type SourcePage = PatchWindow & {
-  readonly rows?: readonly PatchSourceRow[];
-  readonly continuesLine?: boolean;
-};
 type Props = {
   readonly file: PatchFile;
+  readonly read: PatchReadQueue;
+  readonly scroll: PatchScroll;
   readonly threads: readonly PatchDiscussion[];
   readonly position: SourcePosition | "start" | "away" | undefined;
   readonly line: PatchLine | undefined;
@@ -32,7 +38,16 @@ type Props = {
   readonly onSourceChanged: () => void;
 };
 
-export function PatchSource({ file, threads, position, line, entrySide, onSourceChanged }: Props) {
+export function PatchSource({
+  file,
+  read: queued,
+  scroll: patchScroll,
+  threads,
+  position,
+  line,
+  entrySide,
+  onSourceChanged,
+}: Props) {
   const pre = useRef<HTMLElement>(null);
   const attach = useCallback((element: HTMLElement | null) => {
     pre.current = element;
@@ -44,6 +59,13 @@ export function PatchSource({ file, threads, position, line, entrySide, onSource
     if (position && position !== "away") reentry.current = undefined;
   }, [entrySide, position]);
   const [pages, setPages] = useState<readonly SourcePage[]>([]);
+  const [lookahead] = useState(createPatchLookahead);
+  const [heldPages, setHeldPages] = useState<readonly SourcePage[]>([]);
+  const [copyError, setCopyError] = useState(false);
+  const copying = useRef<AbortController | undefined>(undefined);
+  useEffect(() => () => copying.current?.abort(), []);
+  useEffect(() => () => lookahead.clear(), [lookahead]);
+  const direction = useRef(entrySide === "end");
   const [move, setMove] = useState<Move | undefined>(() =>
     openingMove(file, position, line, entrySide === "end"),
   );
@@ -57,11 +79,10 @@ export function PatchSource({ file, threads, position, line, entrySide, onSource
   if (previousPosition !== position || previousLine !== line) {
     setPreviousPosition(position);
     setPreviousLine(line);
-    if (
-      (position === "away" || (!position && (move?.byte !== undefined || move?.line))) &&
-      pages.length
-    ) {
-      setMove(undefined);
+    if (move?.explicit && (!position || position === "away")) {
+      setMove(
+        pages.length ? undefined : openingMove(file, undefined, undefined, entrySide === "end"),
+      );
       setFailure(undefined);
     } else if (position && position !== "away") {
       setFailure(undefined);
@@ -79,11 +100,24 @@ export function PatchSource({ file, threads, position, line, entrySide, onSource
       else setMove(openingMove(file, position, line, false));
     }
   }
-  const adjustment = useRef<
-    { readonly range: Range; readonly top: number } | "neighbor" | "start" | "end" | undefined
-  >(undefined);
+  const adjustment = useRef<"neighbor" | "start" | "end" | undefined>(undefined);
   const head = pages[0];
   const tail = pages.at(-1);
+  const replacePages = (next: readonly SourcePage[]) => {
+    const element = pre.current;
+    patchScroll.preserve();
+    const previous = new Map([...pages, ...heldPages].map((page) => [pageKey(page), page]));
+    const loaded = next.map((page) => previous.get(pageKey(page)) ?? page);
+    if (element && head?.rows) {
+      const included = new Set(loaded.map(pageKey));
+      const held = [...previous.values()].filter((page) => {
+        const span = pageElement(element, page);
+        return !included.has(pageKey(page)) && span && heldEndpoint(span);
+      });
+      setHeldPages(held);
+    } else setHeldPages([]);
+    setPages(loaded);
+  };
   const finishPage = useEffectEvent((target: Move, loaded: SourcePage[]) => {
     const page = loaded[0]!;
     try {
@@ -94,8 +128,8 @@ export function PatchSource({ file, threads, position, line, entrySide, onSource
         if (backwards ? page.next !== head.first : page.first !== tail.next)
           throw new Error("The adjacent patch range changed.");
         const dropped = pages.length === 3 ? (backwards ? tail : head) : undefined;
-        const span = dropped && element.querySelector(`[data-source-start="${dropped.first}"]`);
-        if (span && heldOrVisible(span, scroll)) {
+        const span = dropped && pageElement(element, dropped);
+        if (span && (visiblePage(span, scroll) || (!head.rows && selected(span)))) {
           if (failure?.move === target && !failure.ready)
             setFailure({
               move: target,
@@ -107,19 +141,8 @@ export function PatchSource({ file, threads, position, line, entrySide, onSource
           setMove(undefined);
           return;
         }
-        // The browser keeps the same text nodes and selection while the edge moves.
-        // Correct the outer scroll by the actual reflow of a surviving character.
-        if (backwards || dropped) {
-          const anchor = readingRange(
-            element,
-            scroll,
-            backwards ? head.first : (pages[1] ?? tail).first,
-          );
-          if (anchor)
-            adjustment.current = { range: anchor, top: anchor.getBoundingClientRect().top };
-        }
         reentry.current = undefined;
-        setPages(backwards ? [page, ...pages.slice(0, 2)] : [...pages.slice(-2), page]);
+        replacePages(backwards ? [page, ...pages.slice(0, 2)] : [...pages.slice(-2), page]);
       } else {
         adjustment.current =
           target.entry === "end"
@@ -128,7 +151,7 @@ export function PatchSource({ file, threads, position, line, entrySide, onSource
               ? target.land
               : undefined;
         if (target.entry === reentry.current) reentry.current = undefined;
-        setPages(loaded);
+        replacePages(loaded);
       }
       setFailure(undefined);
     } catch (error) {
@@ -141,21 +164,35 @@ export function PatchSource({ file, threads, position, line, entrySide, onSource
   });
 
   const read = useEffectEvent(async (target: Move, signal: AbortSignal) => {
-    const result = [await readSourcePage(file, signal, target.range, target.line)];
+    const load = (range: PatchRange, line?: PatchLine) =>
+      lookahead.measure(() =>
+        queued(signal, "foreground", () => readSourcePage(file, signal, range, line)),
+      );
+    if (target.explicit || target.land || target.entry) lookahead.clear();
+    let prepared = target.direction && (await lookahead.take(target.range, signal));
+    if (!prepared && target.predictedRow !== undefined && file.patchETag) {
+      const predicted = await lookahead.take(
+        { row: target.predictedRow, etag: file.patchETag },
+        signal,
+      );
+      if (predicted && "offset" in target.range && predicted.first === target.range.offset)
+        prepared = predicted;
+    }
+    const result = [prepared || (await load(target.range, target.line))];
     let tail = result[0]!;
     const first = tail.rows?.[0];
-    if (target.line && first && first.sourceEnd < first.rowEnd)
-      return [await readSourcePage(file, signal, { before: first.rowEnd, etag: tail.etag })];
+    if (target.line && first && first.byteEnd < first.rowEnd)
+      return [await load({ before: first.rowEnd, etag: tail.etag })];
     // Restore the same wrapping context for a bookmark inside a giant physical line.
     if (target.byte !== undefined && target.byte < tail.first)
-      return [await readSourcePage(file, signal, { offset: target.byte, etag: tail.etag })];
+      return [await load({ offset: target.byte, etag: tail.etag })];
     while (
       target.byte !== undefined &&
       tail.next < (target.end ?? target.byte + 1) &&
       tail.next < tail.total &&
       result.length < 3
     ) {
-      tail = await readSourcePage(file, signal, { offset: tail.next, etag: tail.etag });
+      tail = await load({ offset: tail.next, etag: tail.etag });
       result.push(tail);
     }
     if (
@@ -163,7 +200,7 @@ export function PatchSource({ file, threads, position, line, entrySide, onSource
       tail.next < (target.end ?? target.byte + 1) &&
       tail.next < tail.total
     )
-      return [await readSourcePage(file, signal, { offset: target.byte, etag: tail.etag })];
+      return [await load({ offset: target.byte, etag: tail.etag })];
     return result;
   });
   const sourceChanged = useEffectEvent(onSourceChanged);
@@ -199,39 +236,45 @@ export function PatchSource({ file, threads, position, line, entrySide, onSource
     const scroll = element?.closest<HTMLElement>(".drawer-body");
     const pending = adjustment.current;
     adjustment.current = undefined;
-    if (!element || !scroll || !pending) return;
+    if (!element || !scroll) return;
+    if (!pending) patchScroll.reconcile();
     if (pending === "end")
-      scroll.scrollTop +=
-        element.getBoundingClientRect().bottom - scroll.getBoundingClientRect().bottom;
+      patchScroll.move(
+        scroll.scrollTop +
+          element.getBoundingClientRect().bottom -
+          scroll.getBoundingClientRect().bottom,
+      );
     else if (pending === "start")
-      scroll.scrollTop += element.getBoundingClientRect().top - sourceReadingTop(element, scroll);
+      patchScroll.move(
+        scroll.scrollTop + element.getBoundingClientRect().top - sourceReadingTop(element, scroll),
+      );
     else if (pending === "neighbor") {
       // The outer virtualizer moves the following file when this slot's new
       // measured height arrives. Give that measurement sole scroll ownership.
       const slot = element.closest<HTMLElement>(".file-stream-slot");
       if (slot) slot.dataset.sourceAnchorHeight = String(slot.offsetHeight);
-    } else scroll.scrollTop += pending.range.getBoundingClientRect().top - pending.top;
+    }
     lastScroll.current = scroll.scrollTop;
-  }, [pages]);
+  }, [pages, patchScroll]);
 
   const resumeHeld = useEffectEvent(() => {
     if (failure?.ready) finishPage(failure.move, failure.ready);
   });
   const hasPages = Boolean(head);
-  const approach = useEffectEvent((backwards: boolean) => {
+  const approach = useEffectEvent((backwards: boolean, travel = 0, prepareOnly = false) => {
     const element = pre.current;
     const scroll = element?.closest<HTMLElement>(".drawer-body");
     if (!element || !scroll || !head || !tail || failure) return;
     const box = element.getBoundingClientRect();
     const view = scroll.getBoundingClientRect();
-    const ahead = scroll.clientHeight * 2;
+    const ahead = lookahead.distance(scroll.clientHeight);
     const side = reentry.current;
     if (side && backwards === (side === "end")) {
       const close = backwards
         ? box.bottom >= view.top - ahead && box.bottom <= view.bottom + ahead
         : box.top <= view.bottom + ahead && box.top >= view.top - ahead;
       if (close && (backwards ? tail.next < tail.total : head.first > 0)) {
-        if (selected(element)) return;
+        if (prepareOnly || (!head.rows && selected(element))) return;
         if (move?.entry !== side)
           setMove({
             range: backwards ? { last: true, etag: head.etag } : { offset: 0, etag: head.etag },
@@ -241,28 +284,52 @@ export function PatchSource({ file, threads, position, line, entrySide, onSource
       }
       if (close) reentry.current = undefined;
     }
-    if (
-      move ||
-      (side && backwards !== (side === "end")) ||
-      box.bottom < view.top ||
-      box.top > view.bottom
-    )
+    if ((side && backwards !== (side === "end")) || box.bottom < view.top || box.top > view.bottom)
       return;
-    if (
-      backwards
-        ? head.first === 0 || view.top - box.top > ahead
-        : tail.next >= tail.total || box.bottom - view.bottom > ahead
-    )
+    const before = { before: head.first, etag: head.etag };
+    const after = { offset: tail.next, etag: tail.etag };
+    const canBefore =
+      head.first > 0 && view.top - box.top <= (backwards ? ahead : scroll.clientHeight);
+    const canAfter =
+      tail.next < tail.total &&
+      box.bottom - view.bottom <= (backwards ? scroll.clientHeight : ahead);
+    const primary = backwards ? before : after;
+    const reserve = backwards ? after : before;
+    const wantPrimary = backwards ? canBefore : canAfter;
+    const wantReserve = backwards ? canAfter : canBefore;
+    if (head.rows && !move?.explicit && !move?.land) {
+      const targets = [
+        ...(wantPrimary ? [primary] : []),
+        ...(wantReserve ? [reserve] : []),
+        ...(!backwards &&
+        canAfter &&
+        !tail.continuesLine &&
+        tail.nextRow !== undefined &&
+        tail.nextRow + 128 < (file.lineCount ?? 0)
+          ? [{ row: tail.nextRow + 128, etag: tail.etag }]
+          : []),
+      ];
+      const loadingKey = move ? sourceTargetKey(move.range) : undefined;
+      lookahead.prepare(
+        targets.filter((target) => sourceTargetKey(target) !== loadingKey),
+        (target, signal) => queued(signal, "ahead", () => readSourcePage(file, signal, target)),
+      );
+    }
+    const room = backwards ? view.top - box.top : box.bottom - view.bottom;
+    if (prepareOnly || move || !wantPrimary || room > scroll.clientHeight + Math.abs(travel))
       return;
     const dropped = pages.length === 3 ? (backwards ? tail : head) : undefined;
-    const span = dropped && element.querySelector(`[data-source-start="${dropped.first}"]`);
-    if (span && heldOrVisible(span, scroll)) return;
-    setMove(
-      backwards
-        ? { range: { before: head.first, etag: head.etag }, direction: "before" }
-        : { range: { offset: tail.next, etag: tail.etag }, direction: "after" },
-    );
+    const span = dropped && pageElement(element, dropped);
+    if (span && (visiblePage(span, scroll) || (!head.rows && selected(span)))) return;
+    setMove({
+      range: primary,
+      direction: backwards ? "before" : "after",
+      predictedRow: backwards || tail.continuesLine ? undefined : tail.nextRow,
+    });
   });
+  useEffect(() => {
+    approach(direction.current, 0, true);
+  }, [pages]);
 
   const keepSourceEdge = useEffectEvent(
     (element: HTMLElement, scroll: HTMLElement, previous: number, delta: number) => {
@@ -284,7 +351,7 @@ export function PatchSource({ file, threads, position, line, entrySide, onSource
         if (
           entry === "end" ? box.top < bottom && correction > 0 : box.bottom > top && correction < 0
         )
-          scroll.scrollTop += correction;
+          patchScroll.move(scroll.scrollTop + correction);
         return;
       }
       if (backwards ? head.first === 0 : tail.next === tail.total) return;
@@ -299,7 +366,24 @@ export function PatchSource({ file, threads, position, line, entrySide, onSource
       const edge = retry?.getBoundingClientRect() ?? box;
       const remaining = backwards ? top - (edge.top + delta) : edge.bottom + delta - bottom;
       if (Math.abs(delta) > Math.max(0, remaining))
-        scroll.scrollTop = previous + Math.sign(delta) * Math.max(0, remaining);
+        patchScroll.move(previous + Math.sign(delta) * Math.max(0, remaining));
+    },
+  );
+
+  const clampWheel = useEffectEvent(
+    (event: WheelEvent, element: HTMLElement, scroll: HTMLElement, delta: number) => {
+      if (!head?.rows || !tail || !event.cancelable || event.defaultPrevented || event.ctrlKey)
+        return;
+      const backwards = delta < 0;
+      if (backwards ? head.first === 0 : tail.next === tail.total) return;
+      const box = element.getBoundingClientRect();
+      const top = sourceReadingTop(element, scroll);
+      const bottom = scroll.getBoundingClientRect().bottom;
+      if (box.bottom <= top || box.top >= bottom) return;
+      const remaining = Math.max(0, backwards ? top - box.top : box.bottom - bottom);
+      if (Math.abs(delta) <= remaining) return;
+      event.preventDefault();
+      if (remaining > 0) patchScroll.move(scroll.scrollTop + Math.sign(delta) * remaining);
     },
   );
 
@@ -310,36 +394,63 @@ export function PatchSource({ file, threads, position, line, entrySide, onSource
     lastScroll.current = scroll.scrollTop;
     let readerGesture = false;
     let backwards: boolean | undefined;
+    let wheelDirection: boolean | undefined;
     const onScroll = () => {
       const delta = scroll.scrollTop - lastScroll.current;
+      const reverse = delta < 0;
       if (delta) resumeHeld();
-      if (delta && readerGesture) {
-        backwards = delta < 0;
+      if (
+        delta &&
+        readerGesture &&
+        !patchScroll.moved(scroll.scrollTop) &&
+        (wheelDirection === undefined || wheelDirection === reverse)
+      ) {
+        backwards = reverse;
+        direction.current = backwards;
+        lookahead.motion(delta);
         keepSourceEdge(element, scroll, lastScroll.current, delta);
-        approach(backwards);
+        approach(backwards, delta);
       }
       lastScroll.current = scroll.scrollTop;
     };
     const onSelection = () => {
       resumeHeld();
+      setHeldPages((current) => {
+        const held = current.filter((page) => {
+          const span = pageElement(element, page);
+          return span && heldEndpoint(span);
+        });
+        return held.length === current.length ? current : held;
+      });
       if (readerGesture && backwards !== undefined && getSelection()?.isCollapsed)
         approach(backwards);
     };
     const onWheel = (event: WheelEvent) => {
+      if (event.ctrlKey) return;
       readerGesture = true;
       if (event.deltaY) {
         backwards = event.deltaY < 0;
-        approach(backwards);
+        wheelDirection = backwards;
+        direction.current = backwards;
+        const delta =
+          event.deltaY *
+          (event.deltaMode === 1 ? 21 : event.deltaMode === 2 ? scroll.clientHeight : 1);
+        lookahead.motion(delta);
+        approach(backwards, delta);
+        clampWheel(event, element, scroll, delta);
       }
     };
     const onTouch = () => {
       readerGesture = true;
+      wheelDirection = undefined;
     };
     const onPointer = (event: PointerEvent) => {
+      wheelDirection = undefined;
       readerGesture =
         event.target === scroll || (event.target instanceof Node && element.contains(event.target));
     };
     const onKey = (event: KeyboardEvent) => {
+      wheelDirection = undefined;
       readerGesture =
         ["ArrowDown", "ArrowUp", "PageDown", "PageUp", "Home", "End", " "].includes(event.key) &&
         !(
@@ -354,16 +465,18 @@ export function PatchSource({ file, threads, position, line, entrySide, onSource
       "scrollend",
       () => {
         readerGesture = false;
+        wheelDirection = undefined;
       },
       options,
     );
-    scroll.addEventListener("wheel", onWheel, options);
+    scroll.addEventListener("wheel", onWheel, { signal: signals.signal, passive: false });
     scroll.addEventListener("touchmove", onTouch, options);
     document.addEventListener("pointerdown", onPointer, options);
     document.addEventListener("keydown", onKey, options);
     document.addEventListener("selectionchange", onSelection, options);
+    document.addEventListener("focusin", onSelection, options);
     return () => signals.abort();
-  }, [hasPages]);
+  }, [hasPages, lookahead, patchScroll]);
 
   function seek(land: "start" | "end") {
     if (!head) return;
@@ -376,6 +489,7 @@ export function PatchSource({ file, threads, position, line, entrySide, onSource
 
   const failedAtEnd = failure?.move.direction === "after" || failure?.move.entry === "end";
   const seeking = move && position && position !== "away" ? "pending" : undefined;
+  const retained = [...heldPages, ...pages].sort((a, b) => a.first - b.first);
   const notice = failure && (
     <Notice {...(!move && !failure.ready && { retry: () => setMove(failure.move) })}>
       {move ? "Retrying the patch range…" : failure.message}
@@ -443,14 +557,44 @@ export function PatchSource({ file, threads, position, line, entrySide, onSource
                 const from = sourceByte(range.startContainer, range.startOffset);
                 const to = sourceByte(range.endContainer, range.endOffset);
                 if (from === undefined || to === undefined) return;
-                const text = copyLoadedPages(pages, from, to);
-                if (text === undefined) return;
-                event.clipboardData.setData("text/plain", text);
+                if (to <= from) return;
                 event.preventDefault();
+                copying.current?.abort();
+                setCopyError(false);
+                const text = copyLoadedPages(retained, from, to);
+                if (text !== undefined) {
+                  event.clipboardData.setData("text/plain", text);
+                  return;
+                }
+                const controller = new AbortController();
+                copying.current = controller;
+                if (typeof ClipboardItem === "undefined" || !navigator.clipboard) {
+                  setCopyError(true);
+                  return;
+                }
+                const payload = copyPatchRange(file, from, to, controller.signal, queued);
+                const failed = () => {
+                  if (controller.signal.aborted) return;
+                  controller.abort();
+                  setCopyError(true);
+                };
+                void payload.catch(failed);
+                try {
+                  void navigator.clipboard
+                    .write([new ClipboardItem({ "text/plain": payload })])
+                    .catch(failed);
+                } catch {
+                  failed();
+                }
               }}
             >
-              {pages.map((page) => (
-                <div key={page.first} data-source-start={page.first}>
+              {retained.map((page) => (
+                <div
+                  key={pageKey(page)}
+                  data-source-start={page.first}
+                  data-source-end={page.next}
+                  className={heldPages.includes(page) ? "patch-window-held" : undefined}
+                >
                   <PatchDocumentView
                     file={file}
                     text={page.text}
@@ -479,47 +623,24 @@ export function PatchSource({ file, threads, position, line, entrySide, onSource
               }}
             >
               {pages.map((page) => (
-                <span key={page.first} data-source-start={page.first}>
+                <span
+                  key={pageKey(page)}
+                  data-source-start={page.first}
+                  data-source-end={page.next}
+                >
                   {page.text}
                 </span>
               ))}
             </pre>
+          )}
+          {copyError && (
+            <Notice>The selected source could not be copied. Try copying again.</Notice>
           )}
         </>
       )}
       {failedAtEnd && notice}
     </>
   );
-}
-
-async function readSourcePage(
-  file: PatchFile,
-  signal: AbortSignal,
-  range: PatchRange,
-  line?: PatchLine,
-): Promise<SourcePage> {
-  if (!file.patchETag) return readPatch(file, signal, range);
-  if (range.etag && range.etag !== file.patchETag)
-    throw new Error("The selected patch validator changed.");
-  const target: PatchSourceTarget = line
-    ? { side: line.side, line: line.number }
-    : "offset" in range
-      ? { byte: range.offset }
-      : "before" in range
-        ? { before: range.before }
-        : { last: true };
-  const page = await readPatchSource(file, signal, target);
-  const first = page.rows[0];
-  const last = page.rows.at(-1);
-  return {
-    text: page.rows.map((row) => row.text).join(""),
-    first: first?.sourceStart ?? page.totalBytes,
-    next: last?.sourceEnd ?? page.totalBytes,
-    total: page.totalBytes,
-    etag: page.patchETag,
-    rows: page.rows,
-    continuesLine: page.next !== null && page.next.row === last?.row,
-  };
 }
 
 function openingMove(
@@ -533,10 +654,12 @@ function openingMove(
       range: { offset: position.first, etag: position.etag },
       byte: position.byte,
       end: position.end,
+      explicit: true,
     };
   return {
     range: (!position || position === "away") && entrySide ? { last: true } : { offset: 0 },
     line,
+    explicit: position === "start",
   };
 }
 
@@ -545,34 +668,30 @@ function selected(element: Element) {
   return Boolean(selection && !selection.isCollapsed && selection.containsNode(element, true));
 }
 
-function heldOrVisible(span: Element, scroll: HTMLElement) {
-  if (selected(span)) return true;
+function pageKey(page: SourcePage) {
+  return `${page.first}:${page.next}`;
+}
+
+function pageElement(host: HTMLElement, page: SourcePage) {
+  return host.querySelector(`[data-source-start="${page.first}"][data-source-end="${page.next}"]`);
+}
+
+function visiblePage(span: Element, scroll: HTMLElement) {
   const box = span.getBoundingClientRect();
   const view = scroll.getBoundingClientRect();
   return box.bottom > view.top && box.top < view.bottom;
 }
 
-function readingRange(pre: HTMLElement, scroll: HTMLElement, fallback: number) {
-  const top = sourceReadingTop(pre, scroll);
-  const box = pre.getBoundingClientRect();
-  if (box.bottom <= top || box.top >= scroll.getBoundingClientRect().bottom) return;
-  for (const rich of pre.querySelectorAll<HTMLElement>(".patch-rich")) {
-    const patch = patchDocument(rich);
-    const reading = patch?.readingSource(top);
-    if (reading) return patch?.sourceRange(reading.byte);
-  }
-  const point = document.caretPositionFromPoint(box.left + 10, Math.max(box.top + 10, top + 1));
-  const range = document.createRange();
-  if (point?.offsetNode instanceof Text && pre.contains(point.offsetNode))
-    range.setStart(point.offsetNode, point.offset);
-  else {
-    const page = pre.querySelector(`[data-source-start="${fallback}"]`);
-    const node = page?.querySelector(".patch-block-text")?.firstChild ?? page?.firstChild;
-    if (!(node instanceof Text)) return;
-    range.setStart(node, 0);
-  }
-  range.collapse(true);
-  return range;
+function heldEndpoint(element: Element) {
+  const selection = getSelection();
+  return (
+    element.contains(document.activeElement) ||
+    Boolean(
+      selection &&
+      !selection.isCollapsed &&
+      (element.contains(selection.anchorNode) || element.contains(selection.focusNode)),
+    )
+  );
 }
 
 function sourceByte(node: Node, offset: number) {

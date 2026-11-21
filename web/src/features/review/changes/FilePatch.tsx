@@ -16,10 +16,14 @@ import { splitPath } from "./file-search";
 import { PatchDocumentView } from "./PatchDocumentView";
 import { PatchSource } from "./PatchSource";
 import type { PatchLine, SourcePosition } from "./patch-position";
+import type { PatchReadQueue } from "./patch/read-queue";
+import type { PatchScroll } from "./patch/usePatchScroll";
 import "./patch.css";
 
 export const FilePatch = memo(function FilePatch({
   file,
+  read,
+  scroll,
   threads,
   source,
   position,
@@ -31,6 +35,8 @@ export const FilePatch = memo(function FilePatch({
   onSourceChanged,
 }: {
   readonly file: PatchFile;
+  readonly read: PatchReadQueue;
+  readonly scroll: PatchScroll;
   readonly threads: readonly PatchDiscussion[];
   readonly source: string | undefined;
   readonly position: number;
@@ -93,6 +99,8 @@ export const FilePatch = memo(function FilePatch({
       ) : admitted ? (
         <PatchContents
           file={file}
+          read={read}
+          scroll={scroll}
           threads={threads}
           visible={visible}
           sourcePosition={sourcePosition}
@@ -123,6 +131,8 @@ function PatchPathText({ path }: { readonly path: string }) {
 
 type ContentsProps = {
   readonly file: PatchFile;
+  readonly read: PatchReadQueue;
+  readonly scroll: PatchScroll;
   readonly threads: readonly PatchDiscussion[];
   readonly visible: boolean;
   readonly sourcePosition: SourcePosition | "start" | "away" | undefined;
@@ -138,6 +148,8 @@ function PatchContents(props: ContentsProps) {
       <>
         <PatchSource
           file={props.file}
+          read={props.read}
+          scroll={props.scroll}
           threads={props.threads}
           position={props.sourcePosition}
           line={props.sourceLine}
@@ -155,6 +167,7 @@ function PatchContents(props: ContentsProps) {
 
 function RichPatch({
   file,
+  read,
   threads,
   visible,
   onLimit,
@@ -163,7 +176,10 @@ function RichPatch({
   if (visible && !seen) setSeen(true);
   const patch = useResource(JSON.stringify([file.revision, file.fileId]), async (signal) => {
     try {
-      return { cursor: "", data: await readPatch(file, signal) };
+      return {
+        cursor: "",
+        data: await read(signal, visible ? "foreground" : "ahead", () => readPatch(file, signal)),
+      };
     } catch (error) {
       if (
         !signal.aborted &&

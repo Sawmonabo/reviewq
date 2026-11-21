@@ -1,8 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { patchDiscussionText } from "../../../api/changes";
-import type { PatchDiscussion, PatchDiscussionNote } from "../../../api/generated/contracts";
-import { projectMarkdownText } from "../../../components/markdown/parse-markdown";
+import type { PatchDiscussion } from "../../../api/generated/contracts";
 import { ChangesThread } from "./ChangesThread";
+import { discussionPreview } from "./discussion-preview";
 
 type CompactNotes = "all" | ReadonlySet<string>;
 type ReadingAnchor = { viewport: Element; target: Element | Range; top: number };
@@ -10,7 +9,6 @@ type ReadingAnchor = { viewport: Element; target: Element | Range; top: number }
 export const FILE_NAVIGATION = "data-file-navigation";
 export const FILE_NAVIGATION_CHANGE = "reviewq-file-navigation-change";
 
-const previews = new WeakMap<PatchDiscussionNote, string>();
 const INPUT_SETTLE_MS = 120;
 const SCROLL_KEYS = new Set([
   "ArrowUp",
@@ -195,7 +193,7 @@ export function OtherDiscussions({ threads }: { readonly threads: readonly Patch
             thread={thread}
             outside={!thread.outdated && Boolean(thread.anchor)}
             previewNote={(note) =>
-              compact === "all" || compact.has(note.noteId) ? discussionText(note) : undefined
+              compact === "all" || compact.has(note.noteId) ? discussionPreview(note) : undefined
             }
           />
         </div>
@@ -259,12 +257,4 @@ function restoreAnchor({ target, viewport, top }: ReadingAnchor): boolean {
   const delta = rect.top - viewport.getBoundingClientRect().top - top;
   if (Math.abs(delta) >= 1) viewport.scrollTop += delta;
   return true;
-}
-
-function discussionText(note: PatchDiscussionNote): string {
-  const retained = patchDiscussionText(note) ?? previews.get(note);
-  if (retained !== undefined) return retained;
-  const text = projectMarkdownText(note.body);
-  previews.set(note, text);
-  return text;
 }

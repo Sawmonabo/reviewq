@@ -37,6 +37,7 @@ export function ChangesThread({
   readonly onJump?: (() => void) | undefined;
 }) {
   const expansion = useContext(threadExpansion);
+  const expanded = expansion?.state.get(thread.discussionId) ?? thread.resolution !== "resolved";
   return (
     <DiscussionThread
       thread={thread}
@@ -44,8 +45,14 @@ export function ChangesThread({
       previewNote={previewNote}
       presentation="changes"
       onJump={onJump}
-      expanded={expansion?.state.get(thread.discussionId) ?? thread.resolution !== "resolved"}
-      onExpanded={(open) => expansion?.update(thread.discussionId, open)}
+      expanded={expanded}
+      onExpanded={(open) => {
+        if (expanded !== open) expansion?.update(thread.discussionId, open);
+      }}
     />
   );
+}
+
+export function useExpandedChangesThread(id: string) {
+  return useContext(threadExpansion)?.state.get(id) === true;
 }

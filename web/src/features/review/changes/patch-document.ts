@@ -1,4 +1,4 @@
-import type { PatchFile, PatchSourceRow } from "../../../api/generated/contracts";
+import type { PatchFile } from "../../../api/generated/contracts";
 import {
   decoratePatchRow,
   keepSplitMatch,
@@ -7,7 +7,7 @@ import {
   releasePatchMatch,
 } from "./patch-decoration";
 import type { PatchDecoration } from "./patch-decoration";
-import { indexAtByte, patchRows, patchSourceRows, utf8Length } from "./patch-rows";
+import { indexAtByte, patchRows, utf8Length } from "./patch-rows";
 import type { PatchRow } from "./patch-rows";
 
 const ROWS_PER_BLOCK = 96;
@@ -72,11 +72,11 @@ export function mountPatchDocument(
   host: HTMLDivElement,
   source: string,
   file: Pick<PatchFile, "oldPath" | "newPath" | "created" | "deleted">,
-  fragments?: readonly PatchSourceRow[],
+  fragments?: readonly PatchRow[],
 ): PatchDocument {
-  const rows = fragments ? patchSourceRows(fragments) : patchRows(source);
+  const rows = fragments ?? patchRows(source);
   const headers =
-    (!fragments || fragments[0]?.sourceStart === 0) && "onbeforematch" in HTMLElement.prototype
+    (!fragments || fragments[0]?.byte === 0) && "onbeforematch" in HTMLElement.prototype
       ? duplicateHeaders(rows, source, file)
       : -1;
   // A patch with many tiny hunks still needs compact text blocks for native Find.
@@ -99,8 +99,6 @@ export function mountPatchDocument(
   const geometryRange = new Range();
   let backwards = false;
   let previousOffset = scroller?.scrollTop ?? 0;
-  let activeRange:
-    { readonly range: Range; readonly inset: number; readonly offset: number } | undefined;
   let frame = 0;
 
   const observer = new IntersectionObserver(
@@ -112,6 +110,8 @@ export function mountPatchDocument(
         else {
           watched.delete(segment);
           removeDecorations(segment);
+          segment.layout = undefined;
+          segment.positioned = undefined;
         }
       }
       requestDecoration();
@@ -119,21 +119,7 @@ export function mountPatchDocument(
     { root: scroller, rootMargin: `${AHEAD_PX}px 0px` },
   );
 
-  const resize = new ResizeObserver(() => {
-    const anchor = activeRange;
-    if (
-      anchor &&
-      scroller &&
-      Math.abs(scroller.scrollTop - anchor.offset) < 1 &&
-      anchor.range.startContainer.isConnected
-    ) {
-      const box = host.getBoundingClientRect();
-      const delta = anchor.range.getBoundingClientRect().top - box.top - anchor.inset;
-      if (Math.abs(delta) > 0.5) scroller.scrollTop += delta;
-    }
-    requestDecoration();
-    rememberReading();
-  });
+  const resize = new ResizeObserver(requestDecoration);
 
   for (let start = 0; start < rows.length;) {
     const fileHeaders = start === headers;
@@ -169,7 +155,6 @@ export function mountPatchDocument(
   resize.observe(host);
   scroller?.addEventListener("scroll", onScroll, { passive: true });
   window.addEventListener("resize", requestDecoration);
-  rememberReading();
   host.dataset.patchPrepared = "";
 
   const handle: PatchDocument = {
@@ -329,9 +314,6 @@ export function mountPatchDocument(
         : undefined;
     const first = ordinal + 1;
     const split = rows[first]!.start - rows[segment.first]!.start;
-    const reading = activeRange;
-    const readingOffset =
-      reading?.range.startContainer === segment.text ? reading.range.startOffset : undefined;
     const restoreMatch = keepSplitMatch(segment.text, split);
     removeDecorations(segment, true);
     const tail = segment.text.splitText(split);
@@ -358,12 +340,6 @@ export function mountPatchDocument(
         moveFocus ? tail : focus,
         moveFocus ? focusOffset - split : focusOffset,
       );
-    }
-    if (reading && readingOffset !== undefined && readingOffset >= split) {
-      const range = new Range();
-      range.setStart(tail, readingOffset - split);
-      range.collapse(true);
-      activeRange = { ...reading, range };
     }
     restoreMatch?.(tail);
     requestDecoration();
@@ -596,22 +572,6 @@ export function mountPatchDocument(
       previousOffset = current;
     }
     requestDecoration();
-    rememberReading();
-  }
-
-  function rememberReading() {
-    if (!scroller) return;
-    const bounds = host.getBoundingClientRect();
-    const view = scroller.getBoundingClientRect();
-    const top = Math.max(view.top, controls?.getBoundingClientRect().bottom ?? view.top);
-    const sample = caret(top + 2);
-    activeRange = sample
-      ? {
-          range: sample.range,
-          inset: sample.range.getBoundingClientRect().top - bounds.top,
-          offset: scroller.scrollTop,
-        }
-      : undefined;
   }
 }
 
