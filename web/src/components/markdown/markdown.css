@@ -113,31 +113,58 @@
   border-radius: 4px;
   font: inherit;
 }
-.diagram-controls button:not(:disabled):hover {
+.diagram-controls button:not(:disabled):hover,
+.diagram-controls button[aria-pressed="true"] {
   border-color: #44394e;
   background: #211b27;
+}
+.diagram-touch-pan {
+  display: none;
+}
+@media (any-pointer: coarse) {
+  .diagram-touch-pan {
+    display: inline-block;
+  }
 }
 .diagram-loading {
   padding: 9px 12px;
   color: #a59bae;
   font-size: 11px;
 }
+.diagram-viewport {
+  position: relative;
+  background: #0b0c10;
+}
+.diagram-viewport:has(.diagram-frame:focus-visible) {
+  outline: 2px solid var(--focus);
+  outline-offset: 3px;
+}
 .diagram-frame {
+  position: relative;
   contain: inline-size;
   overflow: auto;
   max-height: min(360px, 45vh);
   padding: 8px;
-  overscroll-behavior: contain;
   overflow-anchor: none;
-  background: #0b0c10;
-  cursor: grab;
-  touch-action: none;
   user-select: none;
 }
-.diagram-frame:active {
+.diagram-gesture-surface {
+  position: absolute;
+  top: 0;
+  padding: 8px;
+  overflow: hidden;
+  overflow-anchor: none;
+  cursor: grab;
+  user-select: none;
+}
+.diagram-gesture-surface[data-touch-pan] {
+  touch-action: none;
+}
+.diagram-gesture-surface:active {
   cursor: grabbing;
 }
-.diagram-art {
+.diagram-art,
+.diagram-extent {
   margin-inline: auto;
 }
 .diagram-art svg {

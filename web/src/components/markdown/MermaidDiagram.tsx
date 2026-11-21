@@ -13,8 +13,22 @@ export default function MermaidDiagram({ source }: { readonly source: string }) 
     size: { width: number; height: number } | null;
   }>();
   const size = result?.source === source ? result.size : undefined;
-  const { frame, canvas, zoom, minimum, zoomIn, zoomOut, reset, fit, gestures } =
-    useDiagramViewport(size ?? undefined);
+  const {
+    frame,
+    canvas,
+    surface,
+    extent,
+    zoom,
+    minimum,
+    zoomIn,
+    zoomOut,
+    reset,
+    fit,
+    touchPan,
+    toggleTouchPan,
+    onKeyDown,
+    gestures,
+  } = useDiagramViewport(size ?? undefined);
   const eligible =
     source.length <= 30_000 &&
     (source.match(/-->|---|==>|-.->|->>/g) ?? []).length <= 500 &&
@@ -101,7 +115,7 @@ export default function MermaidDiagram({ source }: { readonly source: string }) 
     <figure className="mermaid-figure" aria-labelledby={`diagram-caption-${id}`}>
       <figcaption id={`diagram-caption-${id}`}>
         <span>
-          Diagram<small className="diagram-hint">Drag to pan · Scroll to zoom</small>
+          Diagram<small className="diagram-hint">Drag to pan · Ctrl/⌘ + scroll to zoom</small>
         </span>
         {size && (
           <div className="diagram-controls" aria-label="Diagram zoom">
@@ -127,6 +141,15 @@ export default function MermaidDiagram({ source }: { readonly source: string }) 
             <button type="button" onClick={fit} aria-label="Fit diagram to panel">
               Fit
             </button>
+            <button
+              type="button"
+              className="diagram-touch-pan"
+              aria-label="Pan diagram"
+              aria-pressed={touchPan}
+              onClick={toggleTouchPan}
+            >
+              Pan
+            </button>
           </div>
         )}
       </figcaption>
@@ -141,14 +164,25 @@ export default function MermaidDiagram({ source }: { readonly source: string }) 
         </p>
       )}
       {eligible && (
-        <div
-          ref={frame}
-          className="diagram-frame"
-          tabIndex={size ? 0 : -1}
-          aria-label="Mermaid diagram"
-          {...gestures}
-        >
-          <div ref={canvas} className="diagram-art" hidden={!size} />
+        <div className="diagram-viewport">
+          <div
+            className="diagram-gesture-surface"
+            ref={surface}
+            hidden={!size}
+            data-touch-pan={touchPan || undefined}
+            {...gestures}
+          >
+            <div ref={canvas} className="diagram-art" />
+          </div>
+          <div
+            ref={frame}
+            className="diagram-frame"
+            tabIndex={size ? 0 : -1}
+            aria-label="Mermaid diagram"
+            onKeyDown={onKeyDown}
+          >
+            <div ref={extent} className="diagram-extent" hidden={!size} aria-hidden="true" />
+          </div>
         </div>
       )}
       <details className="diagram-source" open={failed}>
