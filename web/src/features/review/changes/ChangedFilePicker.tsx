@@ -46,6 +46,8 @@ type Entry = {
   readonly choose: () => void;
 };
 
+const SEARCH_QUIET_MS = 60;
+
 export function ChangedFilePicker(props: Props) {
   const { selected, position, total, pending, navigation, onOpen } = props;
   const id = useId();
@@ -146,16 +148,19 @@ function FileDialog({
   const input = useRef<HTMLInputElement>(null);
   const results = useRef<HTMLDivElement>(null);
   const [query, setQuery] = useState("");
-  const [search, setSearch] = useState("");
+  const [search, setSearch] = useState<string | undefined>("");
   const [offset, setOffset] = useState(0);
   const [suggested, setSuggested] = useState<string>();
   const text = query.trim();
+  const searchReady = search === query;
   const cached = catalog.data?.paths;
   const needsCatalogScan = Boolean(catalog.data && !cached);
+  const scanQuery = needsCatalogScan && searchReady ? text : undefined;
   useEffect(() => {
-    const timer = window.setTimeout(() => setSearch(query), 180);
+    if (searchReady) return;
+    const timer = window.setTimeout(() => setSearch(query), SEARCH_QUIET_MS);
     return () => window.clearTimeout(timer);
-  }, [query]);
+  }, [query, searchReady]);
 
   useEffect(() => {
     const anchor = trigger.current;
@@ -211,14 +216,14 @@ function FileDialog({
   }, [trigger]);
 
   const scanned = useResource(
-    JSON.stringify(["file-search", reviewId, index.revision, needsCatalogScan, search, offset]),
+    JSON.stringify(["file-search", reviewId, index.revision, scanQuery, offset]),
     (signal) =>
-      needsCatalogScan
+      scanQuery !== undefined
         ? readPatchPathMatches(
             reviewId,
             index.revision,
             signal,
-            (path) => Boolean(findPath(path, search.trim())),
+            (path) => Boolean(findPath(path, scanQuery)),
             offset,
           )
         : Promise.resolve({ data: null, cursor: "" }),
@@ -232,7 +237,7 @@ function FileDialog({
         count: cachedMatches.length,
         paths: cachedMatches.slice(offset, offset + PATH_MATCHES_PER_PAGE),
       }
-    : search.trim() === text
+    : scanQuery !== undefined
       ? scanned.data
       : undefined;
   const byPath = new Map([...files.values()].map((file) => [pathKey(file), file]));
@@ -266,8 +271,8 @@ function FileDialog({
     else groups.set(entry.folder, [entry]);
   }
   const canSearch = Boolean(text && new TextEncoder().encode(query).length <= 256);
-  const readingCode = canSearch && search === query;
-  const code = usePatchSearch(reviewId, index.revision, readingCode ? search : "", visibleFileId);
+  const readingCode = canSearch && searchReady;
+  const code = usePatchSearch(reviewId, index.revision, readingCode ? query : "", visibleFileId);
   const matches = readingCode ? code.items : [];
   const codeGroups = new Map<string, PatchSearchMatch[]>();
   for (const match of matches) {
@@ -396,6 +401,7 @@ function FileDialog({
           spellCheck={false}
           onChange={(event) => {
             setQuery(event.currentTarget.value);
+            setSearch(undefined);
             code.reset();
             page(0);
           }}
@@ -469,7 +475,7 @@ function FileDialog({
             </ul>
           </div>
         ))}
-        {needsCatalogScan && (search.trim() !== text || scanned.pending) && (
+        {needsCatalogScan && (scanQuery === undefined || scanned.pending) && (
           <Loading label="Searching changed files…" />
         )}
         {!!text && (

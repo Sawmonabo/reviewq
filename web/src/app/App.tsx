@@ -536,7 +536,9 @@ export function App() {
                   selectedReview={reviewId}
                   selecting={selecting}
                   onSelect={chooseReviewSelection}
-                  onReview={openReview}
+                  onReview={(id, exactRun) =>
+                    openReview(id, exactRun, route.tab === "agent" ? "agent" : "overview")
+                  }
                   onLaunch={menuLaunch}
                   onMonitor={monitor}
                 />
