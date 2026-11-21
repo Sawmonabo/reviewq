@@ -272,6 +272,11 @@ export function FileStream({
       frame = requestAnimationFrame(() => {
         if (requested !== generation.current || !file?.isConnected) return;
         if (file.querySelector(".patch-waiting, .patch-rich:not([data-patch-prepared])")) return;
+        // A newly pinned file can paint beyond its estimated slot before ResizeObserver
+        // commits the real size. Scrolling there early can push the sticky header out of its parent.
+        const slot = file.parentElement;
+        const placement = virtual.find((item) => item.index === jump?.index);
+        if (slot && placement && Math.abs(slot.offsetHeight - placement.size) > 1) return;
         const rich = file.querySelector<HTMLElement>(".patch-rich");
         if (jump?.source && !rich && file.querySelector("[data-source-seek='pending']")) return;
         const line = jump?.line && rich && patchDocument(rich)?.line(jump.line);
@@ -293,7 +298,6 @@ export function FileStream({
         const confirmedMatch =
           code && ranges.map((range) => range.toString()).join("") === code.query;
         const target = (confirmedMatch && ranges[0]?.getClientRects()[0]) || source || line?.rect;
-        setPatchMatch(confirmedMatch ? ranges : []);
         if (code && !confirmedMatch)
           setNavigationError("The match is outside the available patch.");
         const viewTop = scroll.getBoundingClientRect().top;
@@ -308,6 +312,13 @@ export function FileStream({
         // The header can move from its natural position to sticky during landing.
         const residual = destination - (scroll.scrollTop - before) - readingTop();
         if (Math.abs(residual) > 0.5) scroll.scrollTop += residual;
+        // A distant seek changes which neighboring files the virtualizer measures.
+        // Confirm the glyph against the updated viewport before handing keyboard focus to it.
+        if (target && jump?.focus && Math.abs(scroll.scrollTop - before) > 1) {
+          schedule();
+          return;
+        }
+        setPatchMatch(confirmedMatch ? ranges : []);
         if (!target && jump?.focus && !code && (jump.line || jump.source))
           setNavigationError("This line is outside the available patch.");
         if (jump?.focus) {
