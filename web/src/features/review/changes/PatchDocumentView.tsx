@@ -1,6 +1,6 @@
 import { useCallback, useState } from "react";
 import { createPortal } from "react-dom";
-import type { PatchDiscussion, PatchFile } from "../../../api/generated/contracts";
+import type { PatchDiscussion, PatchFile, PatchSourceRow } from "../../../api/generated/contracts";
 import { ChangesThread } from "./ChangesThread";
 import { mountPatchDocument } from "./patch-document";
 import type { PatchDocument } from "./patch-document";
@@ -10,31 +10,45 @@ type Props = {
   readonly file: PatchFile;
   readonly text: string;
   readonly discussions: readonly PatchDiscussion[];
+  readonly fragments?: readonly PatchSourceRow[] | undefined;
 };
 
-export function PatchDocumentView({ file, text, discussions }: Props) {
+export function PatchDocumentView({ file, text, discussions, fragments }: Props) {
   const { oldPath, newPath, created, deleted } = file;
   const [patch, setPatch] = useState<PatchDocument>();
   const mount = useCallback(
     (host: HTMLDivElement | null) => {
       if (!host) return;
-      const rendered = mountPatchDocument(host, text, { oldPath, newPath, created, deleted });
+      const rendered = mountPatchDocument(
+        host,
+        text,
+        { oldPath, newPath, created, deleted },
+        fragments,
+      );
       setPatch(rendered);
       return rendered.release;
     },
-    [oldPath, newPath, created, deleted, text],
+    [oldPath, newPath, created, deleted, text, fragments],
   );
+  const anchored =
+    fragments && patch
+      ? discussions.filter((thread) => {
+          const line = threadLine(thread);
+          return line && patch.hasAnchor(line.side, line.number);
+        })
+      : discussions;
   return (
     <>
       {patch &&
-        discussions.map((thread) => (
+        anchored.map((thread) => (
           <ThreadPortal key={thread.discussionId} patch={patch} thread={thread} />
         ))}
       <div
         ref={mount}
         className="patch-source patch-rich"
-        tabIndex={0}
-        aria-label="Selectable unified patch"
+        data-patch-etag={file.patchETag}
+        tabIndex={fragments ? undefined : 0}
+        aria-label={fragments ? undefined : "Selectable unified patch"}
         onCopy={(event) => {
           const selection = getSelection();
           if (!selection?.rangeCount || selection.isCollapsed) return;

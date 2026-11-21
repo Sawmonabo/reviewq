@@ -1,3 +1,5 @@
+import type { PatchSourceRow } from "../../../api/generated/contracts";
+
 const HUNK = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/;
 
 type RowKind = "context" | "add" | "delete" | "hunk";
@@ -5,6 +7,9 @@ export type PatchRow = {
   readonly start: number;
   readonly end: number;
   readonly byte: number;
+  readonly byteEnd: number;
+  readonly rowStart: number;
+  readonly rowEnd: number;
   readonly hunk: number | undefined;
   readonly kind: RowKind;
   readonly old: number | undefined;
@@ -36,18 +41,47 @@ export function patchRows(text: string) {
       if (marker === "-") kind = "delete";
       if (marker === "+") kind = "add";
     }
+    const byteEnd = byte + utf8Length(physical);
     result.push({
       start,
       end: start + physical.length,
       byte,
+      byteEnd,
+      rowStart: byte,
+      rowEnd: byteEnd,
       hunk,
       kind,
       old: oldLine,
       new: newLine,
     });
-    byte += utf8Length(physical);
+    byte = byteEnd;
   }
   return result;
+}
+
+export function patchSourceRows(source: readonly PatchSourceRow[]): PatchRow[] {
+  let start = 0;
+  return source.map((row) => {
+    const end = start + row.text.length;
+    let kind: RowKind = "context";
+    if (row.hunk === row.rowStart) kind = "hunk";
+    else if (row.oldLine === null && row.newLine !== null) kind = "add";
+    else if (row.newLine === null && row.oldLine !== null) kind = "delete";
+    const result = {
+      start,
+      end,
+      byte: row.sourceStart,
+      byteEnd: row.sourceEnd,
+      rowStart: row.rowStart,
+      rowEnd: row.rowEnd,
+      hunk: row.hunk ?? undefined,
+      kind,
+      old: row.oldLine ?? undefined,
+      new: row.newLine ?? undefined,
+    };
+    start = end;
+    return result;
+  });
 }
 
 export function utf8Length(text: string) {

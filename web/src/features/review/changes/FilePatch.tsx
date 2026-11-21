@@ -15,7 +15,7 @@ import { ChangesThread } from "./ChangesThread";
 import { splitPath } from "./file-search";
 import { PatchDocumentView } from "./PatchDocumentView";
 import { PatchSource } from "./PatchSource";
-import type { SourcePosition } from "./patch-position";
+import type { PatchLine, SourcePosition } from "./patch-position";
 import "./patch.css";
 
 export const FilePatch = memo(function FilePatch({
@@ -26,6 +26,7 @@ export const FilePatch = memo(function FilePatch({
   admitted,
   visible,
   sourcePosition,
+  sourceLine,
   entrySide,
   onSourceChanged,
 }: {
@@ -36,6 +37,7 @@ export const FilePatch = memo(function FilePatch({
   readonly admitted: boolean;
   readonly visible: boolean;
   readonly sourcePosition: SourcePosition | "start" | "away" | undefined;
+  readonly sourceLine: PatchLine | undefined;
   readonly entrySide: "start" | "end" | undefined;
   readonly onSourceChanged: () => void;
 }) {
@@ -94,6 +96,7 @@ export const FilePatch = memo(function FilePatch({
           threads={threads}
           visible={visible}
           sourcePosition={sourcePosition}
+          sourceLine={sourceLine}
           entrySide={entrySide}
           onSourceChanged={onSourceChanged}
         />
@@ -123,6 +126,7 @@ type ContentsProps = {
   readonly threads: readonly PatchDiscussion[];
   readonly visible: boolean;
   readonly sourcePosition: SourcePosition | "start" | "away" | undefined;
+  readonly sourceLine: PatchLine | undefined;
   readonly entrySide: "start" | "end" | undefined;
   readonly onSourceChanged: () => void;
 };
@@ -134,13 +138,16 @@ function PatchContents(props: ContentsProps) {
       <>
         <PatchSource
           file={props.file}
+          threads={props.threads}
           position={props.sourcePosition}
+          line={props.sourceLine}
           entrySide={props.entrySide}
           onSourceChanged={props.onSourceChanged}
         />
-        {props.threads.map((thread) => (
-          <ChangesThread key={thread.discussionId} thread={thread} outside />
-        ))}
+        {!props.file.patchETag &&
+          props.threads.map((thread) => (
+            <ChangesThread key={thread.discussionId} thread={thread} outside />
+          ))}
       </>
     );
   return <RichPatch {...props} onLimit={() => setOverLimit(true)} />;

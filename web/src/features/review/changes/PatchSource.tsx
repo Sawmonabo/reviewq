@@ -1,30 +1,42 @@
-import { useEffect, useEffectEvent, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useEffectEvent, useLayoutEffect, useRef, useState } from "react";
 import { PatchSourceChanged, readPatch, readPatchSource } from "../../../api/changes";
 import type { PatchRange, PatchSourceTarget, PatchWindow } from "../../../api/changes";
 import { ApiResponseError } from "../../../api/client";
-import type { PatchFile } from "../../../api/generated/contracts";
+import type { PatchDiscussion, PatchFile, PatchSourceRow } from "../../../api/generated/contracts";
 import { Empty, Loading, Notice } from "../../../components/PanelState";
+import { PatchDocumentView } from "./PatchDocumentView";
+import { patchDocument } from "./patch-document";
 import { sourceReadingTop } from "./patch-position";
-import type { SourcePosition } from "./patch-position";
+import type { PatchLine, SourcePosition } from "./patch-position";
+import { indexAtByte } from "./patch-rows";
 
 type Move = {
   readonly range: PatchRange;
   readonly byte?: number | undefined;
   readonly end?: number | undefined;
+  readonly line?: PatchLine | undefined;
   readonly direction?: "before" | "after";
   readonly entry?: "start" | "end";
   readonly land?: "start" | "end";
 };
-type SourcePage = PatchWindow & { readonly continuesLine?: boolean };
+type SourcePage = PatchWindow & {
+  readonly rows?: readonly PatchSourceRow[];
+  readonly continuesLine?: boolean;
+};
 type Props = {
   readonly file: PatchFile;
+  readonly threads: readonly PatchDiscussion[];
   readonly position: SourcePosition | "start" | "away" | undefined;
+  readonly line: PatchLine | undefined;
   readonly entrySide: "start" | "end" | undefined;
   readonly onSourceChanged: () => void;
 };
 
-export function PatchSource({ file, position, entrySide, onSourceChanged }: Props) {
-  const pre = useRef<HTMLPreElement>(null);
+export function PatchSource({ file, threads, position, line, entrySide, onSourceChanged }: Props) {
+  const pre = useRef<HTMLElement>(null);
+  const attach = useCallback((element: HTMLElement | null) => {
+    pre.current = element;
+  }, []);
   const lastScroll = useRef(0);
   const reentry = useRef(entrySide);
   useLayoutEffect(() => {
@@ -33,7 +45,7 @@ export function PatchSource({ file, position, entrySide, onSourceChanged }: Prop
   }, [entrySide, position]);
   const [pages, setPages] = useState<readonly SourcePage[]>([]);
   const [move, setMove] = useState<Move | undefined>(() =>
-    openingMove(file, position, entrySide === "end"),
+    openingMove(file, position, line, entrySide === "end"),
   );
   const [failure, setFailure] = useState<{
     readonly move: Move;
@@ -41,9 +53,14 @@ export function PatchSource({ file, position, entrySide, onSourceChanged }: Prop
     readonly ready?: SourcePage[];
   }>();
   const [previousPosition, setPreviousPosition] = useState(position);
-  if (previousPosition !== position) {
+  const [previousLine, setPreviousLine] = useState(line);
+  if (previousPosition !== position || previousLine !== line) {
     setPreviousPosition(position);
-    if ((position === "away" || (!position && move?.byte !== undefined)) && pages.length) {
+    setPreviousLine(line);
+    if (
+      (position === "away" || (!position && (move?.byte !== undefined || move?.line))) &&
+      pages.length
+    ) {
       setMove(undefined);
       setFailure(undefined);
     } else if (position && position !== "away") {
@@ -59,7 +76,7 @@ export function PatchSource({ file, position, entrySide, onSourceChanged }: Prop
         last.next >= (position.end ?? position.byte + 1)
       )
         setMove(undefined);
-      else setMove(openingMove(file, position, false));
+      else setMove(openingMove(file, position, line, false));
     }
   }
   const adjustment = useRef<
@@ -124,9 +141,14 @@ export function PatchSource({ file, position, entrySide, onSourceChanged }: Prop
   });
 
   const read = useEffectEvent(async (target: Move, signal: AbortSignal) => {
-    const result = [await readSourcePage(file, signal, target.range)];
+    const result = [await readSourcePage(file, signal, target.range, target.line)];
     let tail = result[0]!;
+    const first = tail.rows?.[0];
+    if (target.line && first && first.sourceEnd < first.rowEnd)
+      return [await readSourcePage(file, signal, { before: first.rowEnd, etag: tail.etag })];
     // Restore the same wrapping context for a bookmark inside a giant physical line.
+    if (target.byte !== undefined && target.byte < tail.first)
+      return [await readSourcePage(file, signal, { offset: target.byte, etag: tail.etag })];
     while (
       target.byte !== undefined &&
       tail.next < (target.end ?? target.byte + 1) &&
@@ -353,6 +375,7 @@ export function PatchSource({ file, position, entrySide, onSourceChanged }: Prop
   }
 
   const failedAtEnd = failure?.move.direction === "after" || failure?.move.entry === "end";
+  const seeking = move && position && position !== "away" ? "pending" : undefined;
   const notice = failure && (
     <Notice {...(!move && !failure.ready && { retry: () => setMove(failure.move) })}>
       {move ? "Retrying the patch range…" : failure.message}
@@ -371,7 +394,7 @@ export function PatchSource({ file, position, entrySide, onSourceChanged }: Prop
         <>
           <div className="surface-card stack">
             <div className="spread">
-              <strong>Large patch · source view</strong>
+              <strong>{head.rows ? "Large patch" : "Large patch · source view"}</strong>
               <span className="meta">
                 Bytes {head.first + 1}–{tail.next} of {tail.total}
               </span>
@@ -396,18 +419,54 @@ export function PatchSource({ file, position, entrySide, onSourceChanged }: Prop
                 </button>
               )}
             </div>
-            <p className="meta">Browser Find searches the displayed source range.</p>
+            <p className="meta">
+              Browser Find searches the displayed range. Changes Find searches all available source.
+            </p>
           </div>
           {!failedAtEnd && notice}
           {head.total === 0 ? (
             <Empty title="This file has an empty patch" />
+          ) : head.rows ? (
+            <div
+              className="patch-source-window"
+              tabIndex={0}
+              ref={attach}
+              data-source-seek={seeking}
+              aria-label="Selectable unified patch"
+              aria-busy={Boolean(move)}
+              onCopy={(event) => {
+                if (event.defaultPrevented) return;
+                const selection = getSelection();
+                if (!selection?.rangeCount || selection.isCollapsed) return;
+                const range = selection.getRangeAt(0);
+                if (!event.currentTarget.contains(range.commonAncestorContainer)) return;
+                const from = sourceByte(range.startContainer, range.startOffset);
+                const to = sourceByte(range.endContainer, range.endOffset);
+                if (from === undefined || to === undefined) return;
+                const text = copyLoadedPages(pages, from, to);
+                if (text === undefined) return;
+                event.clipboardData.setData("text/plain", text);
+                event.preventDefault();
+              }}
+            >
+              {pages.map((page) => (
+                <div key={page.first} data-source-start={page.first}>
+                  <PatchDocumentView
+                    file={file}
+                    text={page.text}
+                    discussions={threads}
+                    fragments={page.rows}
+                  />
+                </div>
+              ))}
+            </div>
           ) : (
             <pre
               className="patch-source"
               tabIndex={0}
-              ref={pre}
+              ref={attach}
               data-patch-etag={head.etag}
-              data-source-seek={move?.byte !== undefined ? "pending" : undefined}
+              data-source-seek={seeking}
               aria-label="Patch source"
               aria-busy={Boolean(move?.direction || move?.byte !== undefined)}
               onCopy={(event) => {
@@ -437,12 +496,14 @@ async function readSourcePage(
   file: PatchFile,
   signal: AbortSignal,
   range: PatchRange,
+  line?: PatchLine,
 ): Promise<SourcePage> {
   if (!file.patchETag) return readPatch(file, signal, range);
   if (range.etag && range.etag !== file.patchETag)
     throw new Error("The selected patch validator changed.");
-  const target: PatchSourceTarget =
-    "offset" in range
+  const target: PatchSourceTarget = line
+    ? { side: line.side, line: line.number }
+    : "offset" in range
       ? { byte: range.offset }
       : "before" in range
         ? { before: range.before }
@@ -456,11 +517,17 @@ async function readSourcePage(
     next: last?.sourceEnd ?? page.totalBytes,
     total: page.totalBytes,
     etag: page.patchETag,
+    rows: page.rows,
     continuesLine: page.next !== null && page.next.row === last?.row,
   };
 }
 
-function openingMove(file: PatchFile, position: Props["position"], entrySide: boolean): Move {
+function openingMove(
+  file: PatchFile,
+  position: Props["position"],
+  line: PatchLine | undefined,
+  entrySide: boolean,
+): Move {
   if (typeof position === "object" && (!file.patchETag || position.etag === file.patchETag))
     return {
       range: { offset: position.first, etag: position.etag },
@@ -469,6 +536,7 @@ function openingMove(file: PatchFile, position: Props["position"], entrySide: bo
     };
   return {
     range: (!position || position === "away") && entrySide ? { last: true } : { offset: 0 },
+    line,
   };
 }
 
@@ -488,15 +556,42 @@ function readingRange(pre: HTMLElement, scroll: HTMLElement, fallback: number) {
   const top = sourceReadingTop(pre, scroll);
   const box = pre.getBoundingClientRect();
   if (box.bottom <= top || box.top >= scroll.getBoundingClientRect().bottom) return;
+  for (const rich of pre.querySelectorAll<HTMLElement>(".patch-rich")) {
+    const patch = patchDocument(rich);
+    const reading = patch?.readingSource(top);
+    if (reading) return patch?.sourceRange(reading.byte);
+  }
   const point = document.caretPositionFromPoint(box.left + 10, Math.max(box.top + 10, top + 1));
   const range = document.createRange();
   if (point?.offsetNode instanceof Text && pre.contains(point.offsetNode))
     range.setStart(point.offsetNode, point.offset);
   else {
-    const node = pre.querySelector(`[data-source-start="${fallback}"]`)?.firstChild;
-    if (!node) return;
+    const page = pre.querySelector(`[data-source-start="${fallback}"]`);
+    const node = page?.querySelector(".patch-block-text")?.firstChild ?? page?.firstChild;
+    if (!(node instanceof Text)) return;
     range.setStart(node, 0);
   }
   range.collapse(true);
   return range;
+}
+
+function sourceByte(node: Node, offset: number) {
+  const host = node.parentElement?.closest<HTMLElement>(".patch-rich");
+  return host ? patchDocument(host)?.sourceByte(node, offset) : undefined;
+}
+
+function copyLoadedPages(pages: readonly SourcePage[], from: number, to: number) {
+  const parts: string[] = [];
+  let next = from;
+  for (const page of pages) {
+    if (page.next <= next) continue;
+    if (page.first > next) break;
+    const end = Math.min(page.next, to);
+    const startIndex = indexAtByte(page.text, next - page.first);
+    const endIndex = indexAtByte(page.text, end - page.first);
+    if (startIndex === undefined || endIndex === undefined) return;
+    parts.push(page.text.slice(startIndex, endIndex));
+    if (end === to) return parts.join("");
+    next = end;
+  }
 }

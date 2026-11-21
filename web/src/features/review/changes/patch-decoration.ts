@@ -68,7 +68,7 @@ export function decoratePatchRow(
   const colors: PaintedRange[] = [];
   if (row.kind !== "context")
     addColor(colors, highlight(`reviewq-patch-${row.kind}`), node, from, to);
-  if (row.kind === "add" || row.kind === "delete") {
+  if ((row.kind === "add" || row.kind === "delete") && row.byte === row.rowStart) {
     // Paint the source sign in the center of its gutter without moving the text or selection.
     addColor(colors, highlight(`reviewq-patch-${row.kind}-sign`, 1), node, from, from + 1);
   }

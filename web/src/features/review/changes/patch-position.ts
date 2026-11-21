@@ -1,6 +1,7 @@
 import type { PatchDiscussion, PatchPath } from "../../../api/generated/contracts";
 import { savedValue, saveValue } from "../../../lib/view-preferences";
 import { patchDocument } from "./patch-document";
+import type { PatchDocument } from "./patch-document";
 import { indexAtByte, utf8Length } from "./patch-rows";
 
 export type SourcePosition = {
@@ -80,8 +81,26 @@ export function lineAt(
   toolbar: number,
 ): PatchLine | undefined {
   const top = scroll.getBoundingClientRect().top + toolbar;
-  const rich = file.querySelector<HTMLElement>(".patch-rich");
-  return rich ? patchDocument(rich)?.readingLine(top) : undefined;
+  for (const rich of file.querySelectorAll<HTMLElement>(".patch-rich")) {
+    const line = patchDocument(rich)?.readingLine(top);
+    if (line) return line;
+  }
+}
+
+export function patchLineTarget(file: HTMLElement, line: PatchLine) {
+  for (const rich of file.querySelectorAll<HTMLElement>(".patch-rich")) {
+    const target = patchDocument(rich)?.line(line);
+    if (target) return target;
+  }
+}
+
+export function patchMatchRanges(file: HTMLElement, match: Parameters<PatchDocument["match"]>[0]) {
+  const ranges: Range[] = [];
+  for (const rich of file.querySelectorAll<HTMLElement>(".patch-rich")) {
+    const range = patchDocument(rich)?.match(match);
+    if (range) ranges.push(range);
+  }
+  return ranges;
 }
 
 export type ThreadJump = (
@@ -169,9 +188,16 @@ export function sourceAt(
   scroll: HTMLElement,
   toolbar: number,
 ): SourcePosition | undefined {
+  const top = scroll.getBoundingClientRect().top + toolbar;
+  for (const rich of file.querySelectorAll<HTMLElement>(".patch-rich[data-patch-etag]")) {
+    const page = rich.closest<HTMLElement>("[data-source-start]");
+    if (!page || !rich.dataset.patchEtag) continue;
+    const reading = patchDocument(rich)?.readingSource(top);
+    if (reading)
+      return { ...reading, first: Number(page.dataset.sourceStart), etag: rich.dataset.patchEtag };
+  }
   const pre = file.querySelector<HTMLElement>("pre[data-patch-etag]");
   if (!pre?.dataset.patchEtag) return;
-  const top = scroll.getBoundingClientRect().top + toolbar;
   const box = pre.getBoundingClientRect();
   const sample = sourceReadingTop(pre, scroll) + 1;
   if (sample < box.top || sample >= box.bottom) return;
@@ -211,6 +237,11 @@ export function sourceReadingTop(pre: HTMLElement, scroll: HTMLElement) {
 }
 
 export function sourceRect(file: HTMLElement, source: SourcePosition) {
+  for (const rich of file.querySelectorAll<HTMLElement>(".patch-rich[data-patch-etag]")) {
+    if (rich.dataset.patchEtag !== source.etag) continue;
+    const range = patchDocument(rich)?.sourceRange(source.byte);
+    if (range) return range.getBoundingClientRect();
+  }
   const range = sourceRanges(file, source, source.byte)[0];
   return range?.getBoundingClientRect();
 }

@@ -129,6 +129,10 @@ pre.patch-source {
   line-height: 19px;
   text-indent: 0;
 }
+.patch-continuation-block .patch-block-text {
+  padding-inline-start: var(--patch-gutter);
+  text-indent: 0;
+}
 .patch-file-headers .patch-block-text {
   color: var(--muted);
 }

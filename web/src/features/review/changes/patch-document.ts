@@ -1,4 +1,4 @@
-import type { PatchFile } from "../../../api/generated/contracts";
+import type { PatchFile, PatchSourceRow } from "../../../api/generated/contracts";
 import {
   decoratePatchRow,
   keepSplitMatch,
@@ -7,7 +7,7 @@ import {
   releasePatchMatch,
 } from "./patch-decoration";
 import type { PatchDecoration } from "./patch-decoration";
-import { indexAtByte, patchRows } from "./patch-rows";
+import { indexAtByte, patchRows, patchSourceRows, utf8Length } from "./patch-rows";
 import type { PatchRow } from "./patch-rows";
 
 const ROWS_PER_BLOCK = 96;
@@ -51,6 +51,12 @@ export type PatchDocument = {
   ) => { readonly element: HTMLElement; readonly rect: DOMRect } | undefined;
   readonly match: (match: Match) => Range | undefined;
   readonly readingLine: (top: number) => (Line & { readonly inset: number }) | undefined;
+  readonly readingSource: (
+    top: number,
+  ) => { readonly byte: number; readonly inset: number } | undefined;
+  readonly sourceRange: (byte: number) => Range | undefined;
+  readonly sourceByte: (node: Node, offset: number) => number | undefined;
+  readonly hasAnchor: (side: Line["side"], number: number) => boolean;
   readonly anchor: (side: Line["side"], number: number) => HTMLElement | undefined;
   readonly copy: (range: Range) => string | undefined;
   readonly release: () => void;
@@ -66,10 +72,13 @@ export function mountPatchDocument(
   host: HTMLDivElement,
   source: string,
   file: Pick<PatchFile, "oldPath" | "newPath" | "created" | "deleted">,
+  fragments?: readonly PatchSourceRow[],
 ): PatchDocument {
-  const rows = patchRows(source);
+  const rows = fragments ? patchSourceRows(fragments) : patchRows(source);
   const headers =
-    "onbeforematch" in HTMLElement.prototype ? duplicateHeaders(rows, source, file) : -1;
+    (!fragments || fragments[0]?.sourceStart === 0) && "onbeforematch" in HTMLElement.prototype
+      ? duplicateHeaders(rows, source, file)
+      : -1;
   // A patch with many tiny hunks still needs compact text blocks for native Find.
   let hunkBudget = Math.ceil(rows.length / ROWS_PER_BLOCK) + EXTRA_HUNK_BLOCKS;
   for (const row of rows) {
@@ -129,8 +138,9 @@ export function mountPatchDocument(
   for (let start = 0; start < rows.length;) {
     const fileHeaders = start === headers;
     const hunk = separateHunks && rows[start]!.kind === "hunk";
+    const continuation = rows[start]!.byte !== rows[start]!.rowStart;
     let end = start + (fileHeaders ? 2 : 1);
-    if (!fileHeaders && !hunk) {
+    if (!fileHeaders && !hunk && !continuation) {
       const limit = Math.min(start + ROWS_PER_BLOCK, rows.length);
       while (end < limit && end !== headers && !(separateHunks && rows[end]!.kind === "hunk"))
         end++;
@@ -145,6 +155,7 @@ export function mountPatchDocument(
       segment.element.setAttribute("hidden", "until-found");
     }
     if (hunk) segment.element.classList.add("patch-hunk-block");
+    if (continuation) segment.element.classList.add("patch-continuation-block");
     segments.push(segment);
     root.append(segment.element);
     start = end;
@@ -187,15 +198,16 @@ export function mountPatchDocument(
         !row ||
         ordinal === undefined ||
         row.hunk !== match.hunk ||
-        match.start <= row.byte ||
+        match.start <= row.rowStart ||
+        match.end > row.rowEnd ||
         match.end <= match.start
       )
         return;
       const original = source.slice(row.start, row.end).replace(/\r?\n$/, "");
-      const from = indexAtByte(original, match.start - row.byte);
-      const to = indexAtByte(original, match.end - row.byte);
+      const from = indexAtByte(original, Math.max(0, match.start - row.byte));
+      const to = indexAtByte(original, Math.min(row.byteEnd, match.end) - row.byte);
       const segment = segmentAt(ordinal);
-      if (from === undefined || to === undefined || !segment) return;
+      if (from === undefined || to === undefined || from >= to || !segment) return;
       const offset = row.start - rows[segment.first]!.start;
       const range = new Range();
       range.setStart(segment.text, offset + from);
@@ -216,9 +228,40 @@ export function mountPatchDocument(
         inset: point.range.getBoundingClientRect().top - top,
       };
     },
+    readingSource(top) {
+      const point = caret(top + 1);
+      if (!point) return;
+      const row = rows[point.ordinal]!;
+      return {
+        byte: row.byte + utf8Length(source.slice(row.start, row.start + point.column)),
+        inset: point.range.getBoundingClientRect().top - top,
+      };
+    },
+    sourceRange(byte) {
+      if (!rows.length || byte < rows[0]!.byte || byte > rows.at(-1)!.byteEnd) return;
+      const ordinal = rowAt(byte, "byte");
+      const row = rows[ordinal]!;
+      const column = indexAtByte(source.slice(row.start, row.end), byte - row.byte);
+      const segment = segmentAt(ordinal);
+      if (column === undefined || !segment) return;
+      const range = new Range();
+      range.setStart(segment.text, row.start - rows[segment.first]!.start + column);
+      range.collapse(true);
+      return range;
+    },
+    sourceByte(node, offset) {
+      const location = textOffset(node, offset);
+      if (location === undefined) return;
+      const row = rows[rowAt(location, "start")]!;
+      return row.byte + utf8Length(source.slice(row.start, location));
+    },
+    hasAnchor(side, number) {
+      const ordinal = rowNumber(side, number);
+      return ordinal !== undefined && rows[ordinal]!.byteEnd === rows[ordinal]!.rowEnd;
+    },
     anchor(side, number) {
       const ordinal = rowNumber(side, number);
-      if (ordinal === undefined) return;
+      if (ordinal === undefined || rows[ordinal]!.byteEnd !== rows[ordinal]!.rowEnd) return;
       const known = anchors.get(ordinal);
       if (known) return known;
       const segment = segmentAt(ordinal);
@@ -328,6 +371,17 @@ export function mountPatchDocument(
 
   function rowNumber(side: Line["side"], line: number) {
     return (side === "old" ? oldLines : newLines).get(line);
+  }
+
+  function rowAt(position: number, key: "byte" | "start") {
+    let low = 0;
+    let high = rows.length;
+    while (low + 1 < high) {
+      const middle = (low + high) >>> 1;
+      if (rows[middle]![key] <= position) low = middle;
+      else high = middle;
+    }
+    return low;
   }
 
   function segmentAt(ordinal: number) {
@@ -528,17 +582,11 @@ export function mountPatchDocument(
     if (!position || !(position.offsetNode instanceof Text)) return;
     const location = textOffset(position.offsetNode, position.offset);
     if (location === undefined) return;
-    let low = 0;
-    let high = rows.length;
-    while (low + 1 < high) {
-      const middle = (low + high) >>> 1;
-      if (rows[middle]!.start <= location) low = middle;
-      else high = middle;
-    }
+    const ordinal = rowAt(location, "start");
     const range = new Range();
     range.setStart(position.offsetNode, position.offset);
     range.collapse(true);
-    return { ordinal: low, column: location - rows[low]!.start, range };
+    return { ordinal, column: location - rows[ordinal]!.start, range };
   }
 
   function onScroll() {

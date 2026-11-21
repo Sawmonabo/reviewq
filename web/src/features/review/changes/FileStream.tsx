@@ -24,10 +24,11 @@ import { ChangedFilePicker } from "./ChangedFilePicker";
 import { FilePatch } from "./FilePatch";
 import { FILE_NAVIGATION, FILE_NAVIGATION_CHANGE } from "./OtherDiscussions";
 import { setPatchMatch } from "./patch-decoration";
-import { patchDocument } from "./patch-document";
 import {
   lineAt,
   matchingFile,
+  patchLineTarget,
+  patchMatchRanges,
   sourceAt,
   sourceRect,
   sourceRanges,
@@ -279,29 +280,34 @@ export function FileStream({
         const slot = file.parentElement;
         const placement = virtual.find((item) => item.index === jump?.index);
         if (slot && placement && Math.abs(slot.offsetHeight - placement.size) > 1) return;
-        const rich = file.querySelector<HTMLElement>(".patch-rich");
-        if (jump?.source && !rich && file.querySelector("[data-source-seek='pending']")) return;
-        const line = jump?.line && rich && patchDocument(rich)?.line(jump.line);
+        if (file.querySelector("[data-source-seek='pending']")) return;
+        const line = jump?.line && patchLineTarget(file, jump.line);
         const row = line?.element;
         const source = jump?.source && sourceRect(file, jump.source);
         const code = jump?.match;
-        const match =
-          code &&
-          rich &&
-          patchDocument(rich)?.match({
-            line: { side: code.match.side, number: code.match.line },
-            hunk: code.match.hunk,
-            start: code.match.sourceStart,
-            end: code.match.sourceEnd,
-          });
-        const rawMatches =
-          code && jump.source ? sourceRanges(file, jump.source, code.match.sourceEnd) : [];
-        const ranges = match ? [match] : rawMatches;
+        const ranges = code
+          ? patchMatchRanges(file, {
+              line: { side: code.match.side, number: code.match.line },
+              hunk: code.match.hunk,
+              start: code.match.sourceStart,
+              end: code.match.sourceEnd,
+            })
+          : [];
+        if (!ranges.length && code && jump.source)
+          ranges.push(...sourceRanges(file, jump.source, code.match.sourceEnd));
         const confirmedMatch =
           code && ranges.map((range) => range.toString()).join("") === code.query;
         const target = (confirmedMatch && ranges[0]?.getClientRects()[0]) || source || line?.rect;
-        if (code && !confirmedMatch)
-          setNavigationError("The match is outside the available patch.");
+        if ((code && !confirmedMatch) || (!target && jump?.focus && (jump.line || jump.source))) {
+          setNavigationError(
+            code
+              ? "The match is outside the available patch."
+              : "This line is outside the available patch.",
+          );
+          setJump(undefined);
+          setFileNavigation(scroll, false);
+          return;
+        }
         const viewTop = scroll.getBoundingClientRect().top;
         const readingTop = () =>
           Math.max(viewTop, toolbar.current?.getBoundingClientRect().bottom ?? viewTop);
@@ -321,12 +327,11 @@ export function FileStream({
           return;
         }
         setPatchMatch(confirmedMatch ? ranges : []);
-        if (!target && jump?.focus && !code && (jump.line || jump.source))
-          setNavigationError("This line is outside the available patch.");
         if (jump?.focus) {
           const focus =
             row ||
-            (confirmedMatch && file.querySelector<HTMLElement>("pre[data-patch-etag]")) ||
+            (confirmedMatch &&
+              file.querySelector<HTMLElement>(".patch-source-window, pre[data-patch-etag]")) ||
             file.querySelector<HTMLElement>(".patch-file-title");
           if (focus) {
             focus.tabIndex = -1;
@@ -690,6 +695,7 @@ export function FileStream({
                         : "away"
                       : undefined
                   }
+                  sourceLine={item.index === jump?.index ? jump.line : undefined}
                   visible={
                     (item.index >= viewportFirst && item.index <= last) ||
                     item.index === jump?.index
