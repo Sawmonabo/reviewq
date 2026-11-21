@@ -36,12 +36,19 @@ export function keepSplitMatch(text: Text, offset: number) {
 
 export type PatchDecoration = {
   readonly element: HTMLElement;
-  readonly range: Range;
-  readonly syntax: readonly Range[];
+  readonly range: AbstractRange;
+  readonly syntax: readonly AbstractRange[];
   readonly kind: PatchRow["kind"];
 };
 
-export function decoratePatchRow(row: PatchRow, range: Range): PatchDecoration {
+export function decoratePatchRow(
+  row: PatchRow,
+  node: Text,
+  from: number,
+  to: number,
+  text: string,
+): PatchDecoration {
+  const range = staticRange(node, from, to);
   const element = document.createElement("span");
   element.className = `patch-row patch-${row.kind}`;
   if (row.old !== undefined) element.dataset.old = String(row.old);
@@ -58,15 +65,12 @@ export function decoratePatchRow(row: PatchRow, range: Range): PatchDecoration {
     );
   }
   highlight(`reviewq-patch-${row.kind}`)?.add(range);
-  const syntax: Range[] = [];
+  const syntax: AbstractRange[] = [];
   if (row.old !== undefined || row.new !== undefined) {
-    const text = range.toString();
     for (const token of text.matchAll(
       /\/\/.*|"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|\b(?:as|async|await|const|else|export|fn|for|if|import|let|match|private|pub|readonly|return|type|use)\b/g,
     )) {
-      const piece = new Range();
-      piece.setStart(range.startContainer, range.startOffset + token.index);
-      piece.setEnd(range.startContainer, range.startOffset + token.index + token[0].length);
+      const piece = staticRange(node, from + token.index, from + token.index + token[0].length);
       syntax.push(piece);
       highlight("reviewq-patch-syntax")?.add(piece);
     }
@@ -83,6 +87,27 @@ export function releasePatchDecoration(decoration: PatchDecoration) {
   paint.get(`reviewq-patch-${decoration.kind}`)?.delete(decoration.range);
   for (const token of decoration.syntax) paint.get("reviewq-patch-syntax")?.delete(token);
   decoration.element.remove();
+}
+
+export function releasePatchMatch(host: HTMLElement) {
+  const active = CSS.highlights?.get("reviewq-patch-match");
+  if (!active) return;
+  for (const range of active) if (host.contains(range.startContainer)) active.delete(range);
+}
+
+function staticRange(node: Text, from: number, to: number) {
+  if (typeof StaticRange === "function") {
+    return new StaticRange({
+      startContainer: node,
+      endContainer: node,
+      startOffset: from,
+      endOffset: to,
+    });
+  }
+  const range = new Range();
+  range.setStart(node, from);
+  range.setEnd(node, to);
+  return range;
 }
 
 function highlight(name: string) {

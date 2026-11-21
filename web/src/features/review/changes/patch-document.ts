@@ -3,18 +3,21 @@ import {
   keepSplitMatch,
   positionPatchRow,
   releasePatchDecoration,
+  releasePatchMatch,
 } from "./patch-decoration";
 import type { PatchDecoration } from "./patch-decoration";
 import { indexAtByte, patchRows } from "./patch-rows";
 
 const ROWS_PER_BLOCK = 96;
-const NEARBY_PX = 280;
+const AHEAD_PX = 240;
+const BEHIND_PX = 100;
 
 type Segment = {
   readonly element: HTMLDivElement;
   readonly text: Text;
   readonly first: number;
   end: number;
+  tops: readonly number[] | undefined;
   readonly decorations: Map<number, PatchDecoration>;
 };
 type Line = {
@@ -58,7 +61,9 @@ export function mountPatchDocument(host: HTMLDivElement, source: string): PatchD
   const controls = host.closest(".changes")?.querySelector(".changes-header");
   const root = document.createDocumentFragment();
   const watched = new Set<Segment>();
-  const dirty = new Set<Segment>();
+  const geometryRange = new Range();
+  let backwards = false;
+  let previousOffset = scroller?.scrollTop ?? 0;
   let activeRange:
     { readonly range: Range; readonly inset: number; readonly offset: number } | undefined;
   let width = host.clientWidth;
@@ -69,18 +74,15 @@ export function mountPatchDocument(host: HTMLDivElement, source: string): PatchD
       for (const entry of entries) {
         const segment = byElement.get(entry.target as HTMLElement);
         if (!segment) continue;
-        if (entry.isIntersecting) {
-          watched.add(segment);
-          dirty.add(segment);
-        } else {
+        if (entry.isIntersecting) watched.add(segment);
+        else {
           watched.delete(segment);
-          dirty.delete(segment);
           removeDecorations(segment);
         }
       }
       requestDecoration();
     },
-    { root: scroller, rootMargin: `${NEARBY_PX}px 0px` },
+    { root: scroller, rootMargin: `${AHEAD_PX}px 0px` },
   );
 
   const resize = new ResizeObserver(() => {
@@ -97,9 +99,9 @@ export function mountPatchDocument(host: HTMLDivElement, source: string): PatchD
     }
     if (width !== host.clientWidth) {
       width = host.clientWidth;
-      for (const segment of watched) dirty.add(segment);
-      requestDecoration();
+      for (const segment of segments) segment.tops = undefined;
     }
+    requestDecoration();
     rememberReading();
   });
 
@@ -120,7 +122,7 @@ export function mountPatchDocument(host: HTMLDivElement, source: string): PatchD
   host.replaceChildren(root);
   for (const segment of segments) observer.observe(segment.element);
   resize.observe(host);
-  scroller?.addEventListener("scroll", rememberReading, { passive: true });
+  scroller?.addEventListener("scroll", onScroll, { passive: true });
   rememberReading();
   host.dataset.patchPrepared = "";
 
@@ -200,7 +202,8 @@ export function mountPatchDocument(host: HTMLDivElement, source: string): PatchD
       cancelAnimationFrame(frame);
       observer.disconnect();
       resize.disconnect();
-      scroller?.removeEventListener("scroll", rememberReading);
+      scroller?.removeEventListener("scroll", onScroll);
+      releasePatchMatch(host);
       for (const segment of segments) removeDecorations(segment, true);
       if (documents.get(host) === handle) {
         documents.delete(host);
@@ -219,7 +222,7 @@ export function mountPatchDocument(host: HTMLDivElement, source: string): PatchD
     body.className = "patch-block-text";
     body.append(text);
     element.append(body);
-    const segment = { element, text, first, end, decorations: new Map<number, PatchDecoration>() };
+    const segment: Segment = { element, text, first, end, tops: undefined, decorations: new Map() };
     byElement.set(element, segment);
     return segment;
   }
@@ -249,7 +252,7 @@ export function mountPatchDocument(host: HTMLDivElement, source: string): PatchD
     segments.splice(location + 1, 0, next);
     segment.element.after(next.element);
     observer.observe(next.element);
-    if (watched.has(segment)) dirty.add(segment);
+    segment.tops = undefined;
     // Moving the split Text to its new wrapper retargets a DOM Selection to
     // the old parent. Reapply its original direction and source boundaries.
     if (
@@ -289,20 +292,20 @@ export function mountPatchDocument(host: HTMLDivElement, source: string): PatchD
     const row = rows[ordinal]!;
     const offset = rows[segment.first]!.start;
     const start = row.start - offset;
-    let end = row.end - offset;
-    if (source[row.end - 1] === "\n") {
-      end--;
-      if (source[row.end - 2] === "\r") end--;
-    }
-    const range = new Range();
+    const end = contentEnd(row.end) - offset;
     if (column === undefined) {
-      range.setStart(segment.text, start);
-      range.setEnd(segment.text, end);
+      geometryRange.setStart(segment.text, start);
+      geometryRange.setEnd(segment.text, end);
     } else {
-      range.setStart(segment.text, Math.min(start + column, end));
-      range.collapse(true);
+      geometryRange.setStart(segment.text, Math.min(start + column, end));
+      geometryRange.collapse(true);
     }
-    return range;
+    return geometryRange;
+  }
+
+  function contentEnd(end: number) {
+    if (source[end - 1] !== "\n") return end;
+    return source[end - 2] === "\r" ? end - 2 : end - 1;
   }
 
   function rowTop(segment: Segment, ordinal: number) {
@@ -314,7 +317,16 @@ export function mountPatchDocument(host: HTMLDivElement, source: string): PatchD
     ordinal: number,
     parent: HTMLElement | DocumentFragment,
   ) {
-    const decoration = decoratePatchRow(rows[ordinal]!, rowRange(segment, ordinal));
+    const row = rows[ordinal]!;
+    const base = rows[segment.first]!.start;
+    const end = contentEnd(row.end);
+    const decoration = decoratePatchRow(
+      row,
+      segment.text,
+      row.start - base,
+      end - base,
+      source.slice(row.start, end),
+    );
     segment.decorations.set(ordinal, decoration);
     parent.append(decoration.element);
     return decoration;
@@ -329,33 +341,57 @@ export function mountPatchDocument(host: HTMLDivElement, source: string): PatchD
   }
 
   function requestDecoration() {
-    if (frame || !dirty.size) return;
+    if (frame || !watched.size) return;
     frame = requestAnimationFrame(() => {
       frame = 0;
-      // Read all positions before attaching decorations or writing styles.
-      const measurements = [...dirty].map((segment) => {
+      const view = scroller?.getBoundingClientRect();
+      const top =
+        Math.max(view?.top ?? 0, controls?.getBoundingClientRect().bottom ?? 0) -
+        (backwards ? AHEAD_PX : BEHIND_PX);
+      const bottom = (view?.bottom ?? window.innerHeight) + (backwards ? BEHIND_PX : AHEAD_PX);
+
+      // Read each block's layout before adding children or styling any markers.
+      const measurements = [...watched].map((segment) => {
         const bounds = segment.element.getBoundingClientRect();
-        const tops: number[] = [];
-        for (let ordinal = segment.first; ordinal < segment.end; ordinal++)
-          tops.push(rowTop(segment, ordinal));
-        tops.push(bounds.bottom);
-        return { segment, top: bounds.top, tops };
-      });
-      dirty.clear();
-      for (const { segment, top, tops } of measurements) {
-        const additions = document.createDocumentFragment();
-        for (let index = 0; index + 1 < tops.length; index++) {
-          const ordinal = segment.first + index;
-          const start = tops[index]!;
-          const decoration =
-            segment.decorations.get(ordinal) ?? addDecoration(segment, ordinal, additions);
-          positionPatchRow(
-            decoration.element,
-            Math.max(0, start - top - 3),
-            tops[index + 1]! - start,
-          );
+        let tops = segment.tops;
+        const changed = tops === undefined;
+        if (!tops) {
+          const positions: number[] = [];
+          for (let ordinal = segment.first; ordinal < segment.end; ordinal++)
+            positions.push(Math.max(0, rowTop(segment, ordinal) - bounds.top - 3));
+          positions.push(bounds.height);
+          tops = positions;
+          segment.tops = tops;
         }
-        segment.element.append(additions);
+        const first = tops.findIndex((position, index) => index > 0 && bounds.top + position > top);
+        const last = tops.findIndex((position) => bounds.top + position >= bottom);
+        return {
+          segment,
+          changed,
+          tops,
+          from: first > 0 ? segment.first + first - 1 : segment.end,
+          to: last >= 0 ? segment.first + last : segment.end,
+        };
+      });
+      for (const { segment, changed, tops, from, to } of measurements) {
+        for (const [ordinal, decoration] of segment.decorations) {
+          if ((ordinal >= from && ordinal < to) || decoration.element === document.activeElement)
+            continue;
+          releasePatchDecoration(decoration);
+          segment.decorations.delete(ordinal);
+        }
+        let additions: DocumentFragment | undefined;
+        for (let ordinal = from; ordinal < to; ordinal++) {
+          const index = ordinal - segment.first;
+          const existing = segment.decorations.get(ordinal);
+          if (existing && !changed) continue;
+          const decoration =
+            existing ??
+            addDecoration(segment, ordinal, (additions ??= document.createDocumentFragment()));
+          const start = tops[index]!;
+          positionPatchRow(decoration.element, start, tops[index + 1]! - start);
+        }
+        if (additions) segment.element.append(additions);
       }
     });
   }
@@ -385,6 +421,16 @@ export function mountPatchDocument(host: HTMLDivElement, source: string): PatchD
     range.setStart(position.offsetNode, position.offset);
     range.collapse(true);
     return { ordinal: low, column: location - rows[low]!.start, range };
+  }
+
+  function onScroll() {
+    if (scroller) {
+      const current = scroller.scrollTop;
+      if (current !== previousOffset) backwards = current < previousOffset;
+      previousOffset = current;
+    }
+    requestDecoration();
+    rememberReading();
   }
 
   function rememberReading() {
