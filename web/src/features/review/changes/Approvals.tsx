@@ -30,7 +30,9 @@ export function Approvals({
   const stale = Boolean(
     value && (approvals.error || (displayedSha && value.sourceSha !== displayedSha)),
   );
-  const label = approvals.pending ? "Checking…" : status.label;
+  const label = approvals.pending
+    ? "Checking approvals…"
+    : `Approvals ${status.label.toLowerCase()}`;
 
   return (
     <div
@@ -51,7 +53,7 @@ export function Approvals({
         className={`button-label approval-summary ${status.met && !stale ? "approval-met" : ""}`}
         aria-haspopup="dialog"
         aria-expanded={open}
-        aria-label={`Approvals: ${label}${stale ? " · Stale" : ""}`}
+        aria-label={`${label}${stale ? " · Stale" : ""}`}
         popoverTarget={popoverId}
         onKeyDown={(event) => {
           if (event.key === "ArrowDown" && !open) {
@@ -60,12 +62,11 @@ export function Approvals({
           }
         }}
       >
-        {status.met && status.label !== "Not required" && <Icon name="check" size={14} />}
+        {status.met && !stale && <Icon name="check" size={14} />}
         <span>
-          Approvals {label}
+          {label}
           {stale && " · Stale"}
         </span>
-        <Icon name="chevron" size={11} />
       </button>
       <section
         id={popoverId}
@@ -74,7 +75,7 @@ export function Approvals({
         aria-label="Approval requirements"
         tabIndex={-1}
         popover="auto"
-        className="stack approval-popup"
+        className="stack changes-popover approval-popup"
         onToggle={(event) => {
           const shown = event.newState === "open";
           setOpen(shown);

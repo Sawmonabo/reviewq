@@ -1,0 +1,217 @@
+.selected-patch {
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid light-dark(var(--strong-line), #3e404e);
+  border-radius: 7px;
+  background: light-dark(var(--surface), #111116);
+}
+.patch-toolbar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: start;
+  column-gap: 6px;
+  min-height: 59px;
+  padding: 10px 13px;
+  border-bottom: 1px solid light-dark(var(--line), #2a2a33);
+  background: light-dark(var(--raised), #17171c);
+}
+.patch-file-title {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.patch-file-title h3 {
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.5;
+}
+.patch-file-title code {
+  font-size: inherit;
+}
+.patch-folder {
+  color: light-dark(var(--muted), #a5a6b4);
+  font-weight: 430;
+}
+.patch-file-kind {
+  display: block;
+  margin-top: 2px;
+  color: light-dark(var(--muted), #a5a6b4);
+  font-size: 11px;
+  line-height: 18px;
+}
+.patch-toolbar .diff-count {
+  grid-column: 3;
+  display: inline-flex;
+  gap: 6px;
+  padding-top: 2px;
+  font: 11px/1.5 var(--mono);
+}
+.patch-toolbar .diff-count .plus {
+  color: light-dark(var(--green), #a4d2ba);
+}
+.patch-toolbar .diff-count .minus {
+  color: light-dark(var(--rose), #edacb7);
+}
+.patch-links:not([hidden]) {
+  grid-column: 2;
+  align-self: center;
+  display: flex;
+}
+.patch-links > a {
+  display: inline-grid;
+  place-items: center;
+  min-width: 24px;
+  min-height: 24px;
+  border-radius: 3px;
+  color: light-dark(var(--muted), #a5a6b4);
+}
+.patch-links > a:hover {
+  background: var(--hover);
+  color: var(--link);
+}
+@media (pointer: coarse) {
+  .patch-toolbar {
+    padding-block: 7px;
+    align-items: center;
+  }
+  .patch-toolbar .diff-count {
+    align-self: start;
+  }
+  .patch-links > a {
+    min-width: 44px;
+    min-height: 44px;
+  }
+}
+.selected-patch > :is(.notice, .surface-card, .patch-discussion) {
+  margin: 8px;
+}
+.patch-source {
+  min-width: 0;
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 21px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  tab-size: 4;
+}
+.patch-source:focus-visible {
+  outline-offset: -2px;
+}
+pre.patch-source {
+  padding: 8px;
+}
+.patch-rich {
+  --patch-gutter: 85px;
+  --patch-number-width: 34px;
+  --patch-number-padding: 7px;
+  isolation: isolate;
+  color: light-dark(var(--text), #d9dbe6);
+  font-size: 11px;
+}
+.patch-block {
+  position: relative;
+  min-width: 0;
+}
+.patch-block-text {
+  position: relative;
+  z-index: 1;
+  padding-inline: calc(var(--patch-gutter) - 1ch) 7px;
+}
+@supports (text-indent: -1ch each-line) {
+  .patch-block-text {
+    padding-inline-start: var(--patch-gutter);
+    text-indent: -1ch each-line;
+  }
+}
+.patch-hunk-block .patch-block-text {
+  padding-block: 4px;
+  padding-inline-start: var(--patch-gutter);
+  line-height: 19px;
+  text-indent: 0;
+}
+.patch-file-headers .patch-block-text {
+  color: var(--muted);
+}
+.patch-row {
+  position: absolute;
+  inset-inline: 0;
+  pointer-events: none;
+  user-select: none;
+}
+.patch-row:focus {
+  z-index: 2;
+  outline: 2px solid var(--focus);
+  outline-offset: -2px;
+}
+.patch-row[data-old]::before,
+.patch-row:is([data-old], [data-new])::after {
+  position: absolute;
+  inset-block: 0;
+  inline-size: var(--patch-number-width);
+  padding-inline-end: var(--patch-number-padding);
+  text-align: end;
+  color: light-dark(var(--muted), #a4a9ba);
+}
+.patch-row[data-old]::before {
+  inset-inline-start: 0;
+  content: attr(data-old);
+}
+.patch-row:is([data-old], [data-new])::after {
+  inset-inline-start: var(--patch-number-width);
+  border-inline-end: 1px solid light-dark(var(--line), #ffffff13);
+  content: attr(data-new);
+}
+.patch-block:has(+ .patch-thread-slot:not(:empty)) > .patch-row[data-segment-end]::before,
+.patch-block:has(+ .patch-thread-slot:not(:empty)) > .patch-row[data-segment-end]::after {
+  color: light-dark(var(--amber), #f0d9a5);
+}
+.patch-row.patch-add {
+  background: light-dark(var(--diff-added-bg), #172b22);
+}
+.patch-row.patch-delete {
+  background: light-dark(var(--diff-deleted-bg), #301e27);
+}
+.patch-row.patch-hunk {
+  background: light-dark(var(--selected), #1d2237);
+}
+::highlight(reviewq-patch-add) {
+  color: light-dark(var(--diff-added), #c9e6d3);
+}
+::highlight(reviewq-patch-delete) {
+  color: light-dark(var(--diff-deleted), #f0c7ce);
+}
+::highlight(reviewq-patch-hunk) {
+  color: light-dark(var(--link), #bdc9f8);
+}
+::highlight(reviewq-patch-syntax-keyword) {
+  color: light-dark(#60488d, #c7b3f5);
+}
+::highlight(reviewq-patch-syntax-string) {
+  color: light-dark(#255699, #b7d1fe);
+}
+::highlight(reviewq-patch-syntax-comment) {
+  color: light-dark(#506171, #a5b0bc);
+}
+.patch-thread-slot:not(:empty) {
+  padding: 8px 10px 8px 30px;
+  background: light-dark(var(--surface), #131319);
+  white-space: normal;
+  font-family: Inter, system-ui, sans-serif;
+  user-select: none;
+}
+.patch-thread-slot .patch-discussion {
+  margin: 0;
+  border-inline-start: 2px solid light-dark(var(--focus), #8277a5);
+}
+@media (max-width: 760px) {
+  .patch-toolbar {
+    padding-inline: 9px;
+  }
+  .patch-rich {
+    --patch-gutter: 67px;
+    --patch-number-width: 26px;
+    --patch-number-padding: 4px;
+  }
+  .patch-thread-slot:not(:empty) {
+    padding-inline: 7px;
+  }
+}

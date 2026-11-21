@@ -208,6 +208,27 @@ export function ChangedFilePicker({
     entries[0]?.key ??
     (firstMatch && matchKey(firstMatch));
   const count = found?.count ?? entries.length;
+  const noMatches =
+    count === 0 &&
+    matches.length === 0 &&
+    Boolean(
+      found &&
+      readingCode &&
+      !code.pending &&
+      code.data?.coverage === "complete" &&
+      !code.data.nextCursor,
+    );
+  const resultsSummary = [];
+  if (!text) resultsSummary.push(`${count} ${count === 1 ? "file" : "files"}`);
+  else {
+    if (count) resultsSummary.push(`${count} ${count === 1 ? "path" : "paths"}`);
+    if (matches.length) {
+      const amount = `${matches.length}${code.data?.nextCursor ? "+" : ""}`;
+      resultsSummary.push(`${amount} code ${amount === "1" ? "match" : "matches"}`);
+    }
+    if (noMatches) resultsSummary.push("0 matches");
+  }
+  if (catalog.data?.partial) resultsSummary.push("Partial GitLab file list");
   const fileName = selected
     ? splitPath(selected.newPath).name
     : pending
@@ -447,12 +468,9 @@ export function ChangedFilePicker({
           {open && needsCatalogScan && (search.trim() !== text || scanned.pending) && (
             <Loading label="Searching changed files…" />
           )}
-          {!!text && !entries.length && !matches.length && (found || catalog.error) && (
-            <p className="changes-picker-empty">No matching files.</p>
-          )}
           {!!text && (
             <>
-              <p className="changes-code-heading">Code in this diff</p>
+              {!!matches.length && <p className="changes-code-heading">Code in this diff</p>}
               {[...codeGroups].map(([path, hits]) => (
                 <div key={path}>
                   <p className="changes-code-file">{path}</p>
@@ -505,9 +523,7 @@ export function ChangedFilePicker({
                   Search coverage is limited by the available GitLab patch.
                 </p>
               )}
-              {readingCode && code.data?.coverage === "complete" && !matches.length && (
-                <p className="changes-picker-empty">No matching code.</p>
-              )}
+              {noMatches && <p className="changes-picker-empty">No matching files or code.</p>}
               {readingCode && code.exhausted && (
                 <p className="changes-picker-empty">No more code matches.</p>
               )}
@@ -561,12 +577,7 @@ export function ChangedFilePicker({
           </nav>
         )}
         <footer className="changes-picker-footer">
-          <span role="status">
-            {count} {count === 1 ? "file" : "files"}
-            {text &&
-              ` · ${matches.length} code ${matches.length === 1 ? "match" : "matches"}${code.data?.nextCursor ? "+" : ""}`}
-            {catalog.data?.partial && " · Partial GitLab file list"}
-          </span>
+          <span role="status">{resultsSummary.join(" · ")}</span>
           <span>
             <kbd>↑</kbd>
             <kbd>↓</kbd> Move <kbd>Enter</kbd> Jump

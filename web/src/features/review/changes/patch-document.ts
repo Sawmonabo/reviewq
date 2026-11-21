@@ -1,3 +1,4 @@
+import type { PatchFile } from "../../../api/generated/contracts";
 import {
   decoratePatchRow,
   keepSplitMatch,
@@ -7,8 +8,10 @@ import {
 } from "./patch-decoration";
 import type { PatchDecoration } from "./patch-decoration";
 import { indexAtByte, patchRows } from "./patch-rows";
+import type { PatchRow } from "./patch-rows";
 
 const ROWS_PER_BLOCK = 96;
+const EXTRA_HUNK_BLOCKS = 32;
 const AHEAD_PX = 240;
 const BEHIND_PX = 100;
 
@@ -16,6 +19,7 @@ type BlockLayout = {
   readonly width: number;
   readonly height: number;
   readonly lineHeight: number;
+  readonly textInset: number;
   readonly positions: number | Float64Array;
 };
 type TextStyle = { readonly lineHeight: number; readonly inlinePadding: number };
@@ -58,8 +62,22 @@ export function patchDocument(host: HTMLElement) {
   return documents.get(host);
 }
 
-export function mountPatchDocument(host: HTMLDivElement, source: string): PatchDocument {
+export function mountPatchDocument(
+  host: HTMLDivElement,
+  source: string,
+  file: Pick<PatchFile, "oldPath" | "newPath" | "created" | "deleted">,
+): PatchDocument {
   const rows = patchRows(source);
+  const headers =
+    "onbeforematch" in HTMLElement.prototype ? duplicateHeaders(rows, source, file) : -1;
+  // A patch with many tiny hunks still needs compact text blocks for native Find.
+  let hunkBudget = Math.ceil(rows.length / ROWS_PER_BLOCK) + EXTRA_HUNK_BLOCKS;
+  for (const row of rows) {
+    if (row.kind !== "hunk") continue;
+    hunkBudget -= 1;
+    if (hunkBudget < 0) break;
+  }
+  const separateHunks = hunkBudget >= 0;
   const segments: Segment[] = [];
   const byElement = new Map<HTMLElement, Segment>();
   const oldLines = new Map<number, number>();
@@ -108,15 +126,28 @@ export function mountPatchDocument(host: HTMLDivElement, source: string): PatchD
     rememberReading();
   });
 
-  for (let start = 0; start < rows.length; start += ROWS_PER_BLOCK) {
-    const end = Math.min(start + ROWS_PER_BLOCK, rows.length);
+  for (let start = 0; start < rows.length;) {
+    const fileHeaders = start === headers;
+    const hunk = separateHunks && rows[start]!.kind === "hunk";
+    let end = start + (fileHeaders ? 2 : 1);
+    if (!fileHeaders && !hunk) {
+      const limit = Math.min(start + ROWS_PER_BLOCK, rows.length);
+      while (end < limit && end !== headers && !(separateHunks && rows[end]!.kind === "hunk"))
+        end++;
+    }
     const segment = createSegment(
       start,
       end,
       document.createTextNode(source.slice(rows[start]!.start, rows[end - 1]!.end)),
     );
+    if (fileHeaders) {
+      segment.element.classList.add("patch-file-headers");
+      segment.element.setAttribute("hidden", "until-found");
+    }
+    if (hunk) segment.element.classList.add("patch-hunk-block");
     segments.push(segment);
     root.append(segment.element);
+    start = end;
   }
   rows.forEach((row, ordinal) => {
     if (row.old !== undefined) oldLines.set(row.old, ordinal);
@@ -346,20 +377,22 @@ export function mountPatchDocument(host: HTMLDivElement, source: string): PatchD
     )
       return previous;
     const length = segment.end - segment.first;
+    const uniform = lineHeight > 0 && Math.abs(bounds.height - length * lineHeight) < 0.5;
     const layout = {
       width,
       height: bounds.height,
       lineHeight,
-      positions:
-        lineHeight > 0 && Math.abs(bounds.height - length * lineHeight) < 0.5
-          ? lineHeight
-          : new Float64Array(length).fill(Number.NaN),
+      textInset: uniform
+        ? 0
+        : rowRange(segment, segment.first, 0).getBoundingClientRect().top - bounds.top,
+      positions: uniform ? lineHeight : new Float64Array(length).fill(Number.NaN),
     };
     segment.layout = layout;
     return layout;
   }
 
   function blockRowTop(segment: Segment, index: number, bounds: DOMRect, layout: BlockLayout) {
+    if (index === 0) return 0;
     if (index === segment.end - segment.first) return bounds.height;
     const { positions } = layout;
     if (typeof positions === "number") return index * positions;
@@ -368,7 +401,7 @@ export function mountPatchDocument(host: HTMLDivElement, source: string): PatchD
     // Wrapped text still uses its native geometry. Seek the viewport by row
     // and measure only its boundary probes and visible/nearby rows.
     const top = rowRange(segment, segment.first + index, 0).getBoundingClientRect().top;
-    const relative = Math.max(0, top - bounds.top - 3);
+    const relative = Math.max(0, top - bounds.top - layout.textInset);
     positions[index] = relative;
     return relative;
   }
@@ -405,6 +438,7 @@ export function mountPatchDocument(host: HTMLDivElement, source: string): PatchD
       end - base,
       source.slice(row.start, end),
     );
+    if (ordinal + 1 === segment.end) decoration.element.dataset.segmentEnd = "";
     segment.decorations.set(ordinal, decoration);
     parent.append(decoration.element);
     return decoration;
@@ -531,4 +565,20 @@ export function mountPatchDocument(host: HTMLDivElement, source: string): PatchD
         }
       : undefined;
   }
+}
+
+function duplicateHeaders(
+  rows: readonly PatchRow[],
+  source: string,
+  file: Pick<PatchFile, "oldPath" | "newPath" | "created" | "deleted">,
+): number {
+  const firstHunk = rows.findIndex((row) => row.kind === "hunk");
+  if (firstHunk < 2) return -1;
+  const oldRow = rows[firstHunk - 2]!;
+  const newRow = rows[firstHunk - 1]!;
+  const oldHeader = source.slice(oldRow.start, oldRow.end).replace(/\r?\n$/, "");
+  const newHeader = source.slice(newRow.start, newRow.end).replace(/\r?\n$/, "");
+  const oldPath = file.created ? "/dev/null" : `a/${file.oldPath}`;
+  const newPath = file.deleted ? "/dev/null" : `b/${file.newPath}`;
+  return oldHeader === `--- ${oldPath}` && newHeader === `+++ ${newPath}` ? firstHunk - 2 : -1;
 }

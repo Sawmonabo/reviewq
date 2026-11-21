@@ -30,6 +30,8 @@ const SettingsPane = lazy(() => import("../features/settings/SettingsPane"));
 const BulkLaunch = lazy(() => import("../features/queue/BulkLaunch"));
 const MonitorPane = lazy(() => import("../features/review/followups/MonitorPane"));
 
+const REVIEW_LIST_PERCENT = 47;
+
 const views = [
   { view: "queue", label: "Review queue" },
   { view: "runs", label: "Review runs" },
@@ -49,7 +51,7 @@ export function App() {
   const [route, setRoute] = useState(readRoute);
   const [split, setSplit] = useState(() => {
     const saved = savedValue("split");
-    return typeof saved === "number" && Number.isFinite(saved) ? saved : 50;
+    return typeof saved === "number" && Number.isFinite(saved) ? saved : REVIEW_LIST_PERCENT;
   });
   const [railSmall, setRailSmall] = useState(savedValue("rail") === true);
   const [theme, setTheme] = useState(savedValue("theme") === "light" ? "light" : "dark");
@@ -247,7 +249,7 @@ export function App() {
     };
   }, [route.view]);
   useEffect(() => {
-    if (opened && window.matchMedia("(max-width: 700px)").matches) drawer.current?.focus();
+    if (opened && window.matchMedia("(max-width: 760px)").matches) drawer.current?.focus();
   }, [opened]);
 
   function move(next: Route) {
@@ -261,7 +263,7 @@ export function App() {
     }
     if (next.reviewId !== reviewId) {
       resolvedRun.current = undefined;
-      if (next.reviewId) resize(50);
+      if (next.reviewId) resize(REVIEW_LIST_PERCENT);
     }
     if (
       next.view !== route.view ||

@@ -1,0 +1,169 @@
+.patch-discussion {
+  border: 1px solid var(--line);
+  background: var(--raised);
+  border-radius: 5px;
+  color: var(--text);
+  padding: 7px 9px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.discussion-heading {
+  display: inline-flex;
+  align-items: baseline;
+  max-width: calc(100% - 15px);
+  min-width: 0;
+  gap: 7px;
+}
+.discussion-subject {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.discussion-heading small {
+  white-space: nowrap;
+  color: var(--muted);
+}
+.discussion-location {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin-top: 8px;
+  color: var(--muted);
+  font-size: 11px;
+}
+.discussion-note-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+.discussion-note-meta .avatar {
+  width: 22px;
+  height: 22px;
+}
+.discussion-note {
+  margin-top: 7px;
+  border-top: 1px solid var(--line);
+  padding-top: 7px;
+  user-select: text;
+}
+
+.patch-discussion[data-presentation="changes"] {
+  border-color: light-dark(var(--strong-line), #383949);
+  border-radius: 6px;
+  padding: 9px 12px;
+  background: light-dark(var(--raised), #191921);
+  font-size: 12px;
+  line-height: 1.45;
+}
+.patch-discussion[data-presentation="changes"] summary::marker {
+  color: var(--muted);
+}
+.patch-discussion[data-presentation="changes"] .discussion-heading {
+  display: inline;
+}
+.patch-discussion[data-presentation="changes"] .discussion-subject {
+  font-weight: 600;
+  white-space: normal;
+}
+.patch-discussion[data-presentation="changes"] .discussion-heading small {
+  margin-inline-start: 5px;
+  font-size: 10px;
+}
+.discussion-status {
+  margin-inline: 3px 6px;
+  color: light-dark(var(--muted), #a5a6b4);
+  font-size: 10px;
+  font-weight: 570;
+}
+.patch-discussion[data-resolution="open"] .discussion-status {
+  color: light-dark(var(--amber), #ebd098);
+}
+.patch-discussion[data-resolution="resolved"] .discussion-status {
+  color: light-dark(var(--green), #a4d2ba);
+}
+.patch-discussion[data-resolution="comment"] .discussion-status {
+  color: light-dark(var(--link), #b4c2ff);
+}
+.patch-discussion[data-presentation="changes"] .discussion-location {
+  align-items: center;
+  gap: 4px 9px;
+  margin-block: 7px;
+}
+.patch-discussion[data-presentation="changes"] .discussion-location code {
+  min-width: 0;
+  font-size: inherit;
+}
+.discussion-line {
+  color: light-dark(var(--text), #ccd4ee);
+  white-space: nowrap;
+}
+.discussion-jump {
+  margin-inline-start: auto;
+  min-height: 28px;
+  padding: 0 8px;
+  border-color: light-dark(var(--strong-line), #414457);
+  background: light-dark(var(--raised), #1b1d29);
+  color: light-dark(var(--text), #d9dff6);
+  font-size: 11px;
+}
+@media (pointer: coarse) {
+  .discussion-jump {
+    min-height: 44px;
+  }
+}
+.patch-discussion[data-presentation="changes"] .discussion-note {
+  position: relative;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 2px;
+  min-width: 0;
+  margin: 0;
+  padding: 6px 0 6px 31px;
+  border-color: light-dark(var(--line), #30313d);
+}
+.patch-discussion[data-presentation="changes"] > .discussion-note:first-of-type {
+  margin-block-start: 2px;
+}
+.patch-discussion[data-presentation="changes"] .discussion-note:last-child {
+  padding-block-end: 1px;
+}
+.patch-discussion[data-presentation="changes"] .discussion-note-meta {
+  gap: 2px 5px;
+  color: light-dark(var(--text), #dadcef);
+  font-size: 11px;
+}
+.patch-discussion[data-presentation="changes"] .discussion-note-meta .meta {
+  font-size: 10px;
+}
+.discussion-note-link {
+  display: inline-grid;
+  place-items: center;
+  min-width: 16px;
+  min-height: 15px;
+  border-radius: 3px;
+  color: var(--muted);
+}
+.discussion-note-link:hover {
+  color: var(--link);
+}
+.patch-discussion[data-presentation="changes"] .discussion-note-meta .avatar {
+  position: absolute;
+  inset-block-start: 6px;
+  inset-inline-start: 0;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  color: light-dark(var(--link), #d3dafa);
+  background: light-dark(var(--selected), #303447);
+  font: 10px/1 var(--mono);
+}
+.patch-discussion[data-presentation="changes"] .discussion-note > .prose {
+  min-width: 0;
+  color: light-dark(var(--text), #dddeea);
+  font-size: 12px;
+  line-height: 1.45;
+}
+.discussion-note-preview {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}

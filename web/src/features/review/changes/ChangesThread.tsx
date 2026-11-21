@@ -29,10 +29,12 @@ export function ChangesThread({
   thread,
   outside = false,
   previewNote,
+  onJump,
 }: {
   readonly thread: PatchDiscussion;
   readonly outside?: boolean;
   readonly previewNote?: ((note: PatchDiscussionNote) => string | undefined) | undefined;
+  readonly onJump?: (() => void) | undefined;
 }) {
   const expansion = useContext(threadExpansion);
   return (
@@ -40,6 +42,8 @@ export function ChangesThread({
       thread={thread}
       outside={outside}
       previewNote={previewNote}
+      presentation="changes"
+      onJump={onJump}
       expanded={expansion?.state.get(thread.discussionId) ?? thread.resolution !== "resolved"}
       onExpanded={(open) => expansion?.update(thread.discussionId, open)}
     />

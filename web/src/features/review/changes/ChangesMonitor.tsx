@@ -1,3 +1,4 @@
+import { useId } from "react";
 import type { Enrollment } from "../../../api/generated/contracts/followups";
 import { readable } from "../../../lib/presentation";
 
@@ -16,6 +17,7 @@ export function ChangesMonitor({
   readonly onEdit: () => void;
   readonly onCheck: () => void;
 }) {
+  const id = useId();
   const monitor = enrollment?.monitor;
   if (!monitor) return null;
   const count = new Set(
@@ -27,31 +29,43 @@ export function ChangesMonitor({
     ({ state }) => state === "pending" || state === "reserved",
   );
   const state = approved
-    ? "off · You approved this MR"
+    ? "off"
     : monitor.state === "enabled"
       ? "on"
       : readable(monitor.state).toLowerCase();
   return (
-    <section className="changes-monitor" aria-label="Automated review">
-      <span>
-        Auto-review {state} · {count} {count === 1 ? "thread" : "threads"} ·{" "}
-        {lead ?? monitor.runId ?? "Assigned lead unavailable"}
-      </span>
-      {canChange && (
-        <>
-          <button type="button" className="quiet-button" onClick={onEdit}>
-            Edit selected threads
-          </button>
-          {monitor.state === "enabled" && !approved && (
-            <button type="button" className="quiet-button" onClick={onCheck}>
-              Review selected updates now
+    <div className="changes-monitor">
+      <button type="button" popoverTarget={id} aria-haspopup="dialog" className="quiet-button">
+        Auto-review {state}
+        {queued && " · Update queued"}
+      </button>
+      <section
+        id={id}
+        popover="auto"
+        role="dialog"
+        aria-label="Automated review"
+        className="changes-popover stack"
+      >
+        <h3>Auto-review {state}</h3>
+        <p>
+          {count} {count === 1 ? "thread" : "threads"} ·{" "}
+          {lead ?? monitor.runId ?? "Assigned lead unavailable"}
+        </p>
+        {approved && <p>You approved this MR.</p>}
+        {queued && <p>Update queued{queued.holdReason && ` · ${readable(queued.holdReason)}`}</p>}
+        {canChange && (
+          <div className="actions">
+            <button type="button" onClick={onEdit} popoverTarget={id} popoverTargetAction="hide">
+              Edit selected threads
             </button>
-          )}
-        </>
-      )}
-      {queued && (
-        <small>Update queued{queued.holdReason && ` · ${readable(queued.holdReason)}`}</small>
-      )}
-    </section>
+            {monitor.state === "enabled" && !approved && (
+              <button type="button" onClick={onCheck} popoverTarget={id} popoverTargetAction="hide">
+                Review selected updates now
+              </button>
+            )}
+          </div>
+        )}
+      </section>
+    </div>
   );
 }

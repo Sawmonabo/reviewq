@@ -12,9 +12,11 @@ import { Empty, Loading, Notice } from "../../../components/PanelState";
 import { useResource } from "../../../hooks/useResource";
 import { DiffCount, FileKind } from "./ChangedFilePicker";
 import { ChangesThread } from "./ChangesThread";
+import { splitPath } from "./file-search";
 import { PatchDocumentView } from "./PatchDocumentView";
 import { PatchSource } from "./PatchSource";
 import type { SourcePosition } from "./patch-position";
+import "./patch.css";
 
 export const FilePatch = memo(function FilePatch({
   file,
@@ -42,35 +44,46 @@ export const FilePatch = memo(function FilePatch({
       data-file-id={file.fileId}
       data-file-position={position}
     >
-      <div className="spread patch-toolbar">
+      <header className="patch-toolbar">
         <div className="patch-file-title" tabIndex={-1}>
-          <strong>
-            <code>{file.renamed ? `${file.oldPath} → ${file.newPath}` : file.newPath}</code>
-          </strong>
-          <div className="actions patch-links">
-            <span className="meta">
-              <FileKind file={file} />
-            </span>
-            <DiffCount file={file} />
-            {file.availability === "complete" && (
-              <a href={downloadPatchUrl(file)} aria-label="Download patch" title="Download patch">
-                <Icon name="download" size={14} />
-              </a>
-            )}
-            {source && (
-              <a
-                href={`${source}/diffs`}
-                target="_blank"
-                rel="noreferrer"
-                aria-label="Open changes in GitLab"
-                title="Open changes in GitLab"
-              >
-                <Icon name="external" size={13} />
-              </a>
-            )}
-          </div>
+          <h3>
+            <code>
+              {file.renamed && (
+                <>
+                  <PatchPathText path={file.oldPath} /> →{" "}
+                </>
+              )}
+              <PatchPathText path={file.newPath} />
+            </code>
+          </h3>
+          <span className="patch-file-kind">
+            <FileKind file={file} />
+          </span>
         </div>
-      </div>
+        <div className="patch-links" hidden={file.availability !== "complete" && !source}>
+          {file.availability === "complete" && (
+            <a
+              href={downloadPatchUrl(file)}
+              aria-label="Download full patch source"
+              title="Download full patch source"
+            >
+              <Icon name="download" size={14} />
+            </a>
+          )}
+          {source && (
+            <a
+              href={`${source}/diffs`}
+              target="_blank"
+              rel="noreferrer"
+              aria-label="Open changes in GitLab"
+              title="Open changes in GitLab"
+            >
+              <Icon name="external" size={13} />
+            </a>
+          )}
+        </div>
+        <DiffCount file={file} />
+      </header>
       {file.availability !== "complete" ? (
         <Notice>{availability(file.availability)}</Notice>
       ) : admitted ? (
@@ -91,6 +104,16 @@ export const FilePatch = memo(function FilePatch({
     </section>
   );
 });
+
+function PatchPathText({ path }: { readonly path: string }) {
+  const { cut, name } = splitPath(path);
+  return (
+    <>
+      {cut > 0 && <span className="patch-folder">{path.slice(0, cut)}</span>}
+      {name}
+    </>
+  );
+}
 
 type ContentsProps = {
   readonly file: PatchFile;
@@ -149,7 +172,7 @@ function RichPatch({
         </div>
       )}
       {body?.text === "" && <Empty title="This file has an empty patch" />}
-      {body && ready && <PatchDocumentView text={body.text} discussions={threads} />}
+      {body && ready && <PatchDocumentView file={file} text={body.text} discussions={threads} />}
       {!body &&
         patch.error &&
         threads.map((thread) => (

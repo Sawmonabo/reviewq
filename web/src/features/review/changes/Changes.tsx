@@ -118,7 +118,11 @@ export default function Changes({
     : shown
       ? `${knownFiles}${shown.nextCursor ? "+" : ""}`
       : undefined;
-  const general = filtered.filter(isGeneral);
+  const counts = {
+    files: totalFiles,
+    general: discussionCount(filtered.filter(isGeneral).length, threads.limited),
+    all: discussionCount(filtered.length, threads.limited),
+  };
   const requestedInline = extraInline?.revision === revision ? extraInline?.thread : undefined;
   const inline = useMemo(
     () =>
@@ -176,14 +180,14 @@ export default function Changes({
           <h3>Changes &amp; conversations</h3>
           <Approvals reviewId={reviewId} displayedSha={shown?.headSha} webUrl={webUrl} />
         </div>
-        {children}
-        {shown && (
-          <div className="diff-revision">
+        <div className="diff-revision">
+          {shown && (
             <span title={`Base ${shown.baseSha}`}>
               Source <code title={shown.headSha}>{shown.headSha.slice(0, 12)}</code>
             </span>
-          </div>
-        )}
+          )}
+          {children}
+        </div>
         {changed && (
           <Notice>
             The source revision changed. The displayed patch remains on{" "}
@@ -255,11 +259,7 @@ export default function Changes({
                   }}
                 >
                   {label}
-                  <small className="changes-count">
-                    {id === "files"
-                      ? totalFiles
-                      : `${id === "general" ? general.length : filtered.length}${threads.limited ? "+" : ""}`}
-                  </small>
+                  {counts[id] && <small className="changes-count">{counts[id]}</small>}
                 </button>
               ))}
             </div>
@@ -353,20 +353,18 @@ export default function Changes({
                   : undefined;
               return (
                 <div key={thread.discussionId} className="changes-conversation">
-                  <ChangesThread thread={thread} />
-                  {tab === "all" && target && (
-                    <button
-                      type="button"
-                      className="changes-clear"
-                      onClick={() => {
-                        if (revision) setExtraInline({ revision, thread: target.thread });
-                        setThreadJump(target);
-                        setTab("files");
-                      }}
-                    >
-                      Jump to line
-                    </button>
-                  )}
+                  <ChangesThread
+                    thread={thread}
+                    onJump={
+                      tab === "all" && target
+                        ? () => {
+                            if (revision) setExtraInline({ revision, thread: target.thread });
+                            setThreadJump(target);
+                            setTab("files");
+                          }
+                        : undefined
+                    }
+                  />
                 </div>
               );
             })}
@@ -392,6 +390,11 @@ export default function Changes({
       </section>
     </ChangesThreadExpansion>
   );
+}
+
+function discussionCount(count: number, partial: boolean) {
+  if (partial && count === 0) return undefined;
+  return partial ? `${count}+` : String(count);
 }
 
 function matchesFilters(thread: PatchDiscussion, status: Status, involving: boolean) {

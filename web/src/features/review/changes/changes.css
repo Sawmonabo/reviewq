@@ -1,6 +1,5 @@
 .changes.stack,
-.changes .discussion-list,
-.changes .discussion-note {
+.changes .discussion-list {
   min-width: 0;
   grid-template-columns: minmax(0, 1fr);
 }
@@ -26,173 +25,20 @@
 .file-stream-loading {
   padding: 12px;
 }
-.patch-toolbar {
-  border-bottom: 1px solid var(--line);
-  padding-block: 7px;
-  overflow-wrap: anywhere;
-}
-.patch-source {
-  min-width: 0;
-  font-family: var(--mono);
-  font-size: 12px;
-  line-height: 21px;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-  background: var(--surface);
-  border: 1px solid var(--line);
-  border-radius: 5px;
-  tab-size: 4;
-}
-pre.patch-source {
-  padding: 8px;
-}
-.patch-rich {
-  --patch-gutter: 68px;
-  isolation: isolate;
-  font-size: 11px;
-}
-.patch-block {
-  position: relative;
-  min-width: 0;
-}
-.patch-block-text {
-  position: relative;
-  z-index: 1;
-  padding-inline: var(--patch-gutter) 7px;
-}
-.patch-row {
-  position: absolute;
-  inset-inline: 0;
-  pointer-events: none;
-  user-select: none;
-}
-.patch-row:focus-visible {
-  z-index: 2;
-  outline: 2px solid var(--focus);
-  outline-offset: -2px;
-}
-.patch-row[data-old]::before,
-.patch-row[data-new]::after {
-  position: absolute;
-  top: 0;
-  inline-size: calc(var(--patch-gutter) / 2);
-  padding-inline-end: 7px;
-  text-align: end;
-  color: var(--muted);
-  user-select: none;
-}
-.patch-row[data-old]::before {
-  inset-inline-start: 0;
-  content: attr(data-old);
-}
-.patch-row[data-new]::after {
-  inset-inline-start: calc(var(--patch-gutter) / 2);
-  border-inline-end: 1px solid var(--line);
-  content: attr(data-new);
-}
-.patch-row.patch-add {
-  background: var(--diff-added-bg);
-}
-.patch-row.patch-delete {
-  background: var(--diff-deleted-bg);
-}
-.patch-row.patch-hunk {
-  background: var(--selected);
-}
-::highlight(reviewq-patch-add) {
-  color: var(--diff-added);
-}
-::highlight(reviewq-patch-delete) {
-  color: var(--diff-deleted);
-}
-::highlight(reviewq-patch-hunk) {
-  color: var(--link);
-}
-::highlight(reviewq-patch-syntax-keyword) {
-  color: light-dark(#60488d, #c7b3f5);
-}
-::highlight(reviewq-patch-syntax-string) {
-  color: light-dark(#255699, #b7d1fe);
-}
-::highlight(reviewq-patch-syntax-comment) {
-  color: light-dark(#506171, #a5b0bc);
-}
-@media (max-width: 760px) {
-  .patch-rich {
-    --patch-gutter: 52px;
-  }
-}
 .drawer-body:has(.file-stream) {
   overflow-anchor: none;
 }
-.patch-thread-slot {
-  display: block;
-  white-space: normal;
-  font-family: Inter, system-ui, sans-serif;
-  user-select: none;
-}
-.patch-thread-slot .patch-discussion {
-  margin: 6px 9px;
-}
-.patch-discussion {
-  border: 1px solid var(--line);
-  background: var(--raised);
-  border-radius: 5px;
-  color: var(--text);
-  padding: 7px 9px;
-  min-width: 0;
-  overflow-wrap: anywhere;
-}
-.discussion-heading {
-  display: inline-flex;
-  align-items: baseline;
-  max-width: calc(100% - 15px);
-  min-width: 0;
-  gap: 7px;
-}
-.discussion-subject {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.discussion-heading small {
-  white-space: nowrap;
-  color: var(--muted);
-}
-.discussion-location {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 7px;
-  margin-top: 8px;
-  color: var(--muted);
-  font-size: 11px;
-}
-.discussion-note-meta {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 7px;
-}
-.discussion-note-meta .avatar {
-  width: 22px;
-  height: 22px;
-}
-.discussion-note {
-  margin-top: 7px;
-  border-top: 1px solid var(--line);
-  padding-top: 7px;
-  user-select: text;
-}
 .changes {
-  container-type: inline-size;
+  --mono: ui-monospace, "SFMono-Regular", Consolas, "Liberation Mono", monospace;
   gap: 0;
 }
 .changes-top {
   display: flex;
+  padding-top: 20px;
   justify-content: space-between;
   align-items: center;
   gap: 9px;
-  margin-bottom: 11px;
+  margin-bottom: 8px;
 }
 .changes-top h3 {
   font-size: 14px;
@@ -201,64 +47,25 @@ pre.patch-source {
 .diff-revision {
   display: flex;
   justify-content: space-between;
+  align-items: baseline;
+  flex-wrap: wrap;
   gap: 8px;
   padding-bottom: 13px;
-  color: var(--muted);
+  color: light-dark(var(--muted), #8b8f9f);
   font-size: 11px;
 }
 .diff-revision code {
   font-size: inherit;
-}
-.selected-patch {
-  border: 1px solid var(--strong-line);
-  border-radius: 6px;
-  overflow: hidden;
-  background: var(--surface);
-}
-.selected-patch .patch-toolbar {
-  background: var(--raised);
-  padding: 12px 14px;
-}
-.patch-file-title {
-  min-width: 0;
-  overflow-wrap: anywhere;
-}
-.patch-toolbar strong code {
-  font-size: 11px;
-  font-weight: 550;
-}
-.patch-toolbar .patch-links {
-  margin-top: 4px;
-  font-size: 10px;
-}
-.patch-toolbar .patch-links .meta {
-  font-size: inherit;
-}
-.patch-links > a {
-  display: inline-grid;
-  place-items: center;
-  min-width: 24px;
-  min-height: 24px;
-}
-@media (pointer: coarse) {
-  .patch-links > a {
-    min-width: 44px;
-    min-height: 44px;
-  }
-}
-.selected-patch .patch-source {
-  border: 0;
-  border-radius: 0;
-}
-.selected-patch > :is(.notice, .surface-card, .patch-discussion) {
-  margin: 8px;
+  margin-inline-start: 3px;
+  color: var(--muted);
 }
 .approval-card {
   flex: 0 0 auto;
 }
 .approval-card > button {
   gap: 6px;
-  padding: 2px 0;
+  min-height: 22px;
+  padding: 0;
   border: 0;
   border-radius: 3px;
   background: transparent;
@@ -279,10 +86,10 @@ pre.patch-source {
     outline-color: light-dark(var(--focus), #8faeff);
   }
 }
-.approval-popup:not(:popover-open) {
+.changes-popover:not(:popover-open) {
   display: none;
 }
-.approval-popup {
+.changes-popover {
   position: fixed;
   inset: auto;
   position-area: block-end span-inline-start;
@@ -304,18 +111,18 @@ pre.patch-source {
   grid-template-columns: minmax(0, 1fr);
 }
 @supports not (position-area: block-end span-inline-start) {
-  .approval-popup {
+  .changes-popover {
     inset: 20% 0 auto;
     margin-inline: auto;
   }
 }
-.approval-popup :is(p, a, .spread) {
+.changes-popover :is(p, a, .spread) {
   font-size: 12px;
 }
 .approval-popup .spread {
   gap: 8px;
 }
-.approval-popup h3 {
+.changes-popover h3 {
   font-size: 13px;
 }
 .approval-people {
@@ -349,10 +156,6 @@ pre.patch-source {
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
 }
-.patch-toolbar .diff-count {
-  margin-inline-start: 9px;
-  font-size: 10px;
-}
 .diff-count > span:first-child,
 .approval-person svg {
   color: var(--green);
@@ -377,35 +180,32 @@ pre.patch-source {
 .discussion-list h3 {
   font-size: 13px;
 }
-.changes-monitor {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 5px 14px;
-  padding-bottom: 12px;
-  border-bottom: 1px solid var(--line);
+.changes-monitor > button {
+  min-height: 0;
+  border: 0;
+  padding: 0;
   font-size: 11px;
   color: var(--muted);
+  background: transparent;
 }
-.changes-monitor button {
-  padding: 3px 0;
-  min-height: 25px;
-  font-size: 11px;
+.changes-monitor > button:hover,
+.approval-summary:hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
 }
-.changes-monitor small {
-  flex: 1 0 100%;
-  font-size: 11px;
+@media (max-width: 760px) {
+  .changes-top {
+    padding-top: 15px;
+    margin-bottom: 4px;
+  }
+  .approval-card > button {
+    font-size: 10px;
+  }
 }
 .approval-card .approval-met {
   color: light-dark(var(--green), #a9cdb7);
 }
 
-.changes-conversation {
-  position: relative;
-}
-.changes-conversation > .changes-clear {
-  margin: 7px 0 0 9px;
-}
 .changes .discussion-list {
   margin-block: 12px;
 }

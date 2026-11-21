@@ -1,26 +1,28 @@
 import { useCallback, useState } from "react";
 import { createPortal } from "react-dom";
-import type { PatchDiscussion } from "../../../api/generated/contracts";
+import type { PatchDiscussion, PatchFile } from "../../../api/generated/contracts";
 import { ChangesThread } from "./ChangesThread";
 import { mountPatchDocument } from "./patch-document";
 import type { PatchDocument } from "./patch-document";
 import { threadLine } from "./patch-position";
 
 type Props = {
+  readonly file: PatchFile;
   readonly text: string;
   readonly discussions: readonly PatchDiscussion[];
 };
 
-export function PatchDocumentView({ text, discussions }: Props) {
+export function PatchDocumentView({ file, text, discussions }: Props) {
+  const { oldPath, newPath, created, deleted } = file;
   const [patch, setPatch] = useState<PatchDocument>();
   const mount = useCallback(
     (host: HTMLDivElement | null) => {
       if (!host) return;
-      const rendered = mountPatchDocument(host, text);
+      const rendered = mountPatchDocument(host, text, { oldPath, newPath, created, deleted });
       setPatch(rendered);
       return rendered.release;
     },
-    [text],
+    [oldPath, newPath, created, deleted, text],
   );
   return (
     <>

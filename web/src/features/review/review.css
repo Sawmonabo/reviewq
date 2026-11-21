@@ -188,13 +188,15 @@
 :root[data-theme="light"] .drawer-surface .drawer-tabs button[aria-selected="true"] {
   color: var(--text);
 }
-.drawer-tab-bar > .select-filter {
+.drawer-header-row > .select-filter {
   flex: 0 1 auto;
-  max-width: 55%;
+  min-width: 0;
+  max-width: min(42%, 195px);
+  margin-inline-start: auto;
   min-height: 29px;
   height: 29px;
 }
-.drawer-tab-bar .filter-value {
+.drawer-header-row .filter-value {
   max-width: 135px;
 }
 .run-pages {
@@ -321,5 +323,60 @@
   }
   .drawer-surface .drawer-tabs {
     gap: 20px;
+  }
+}
+
+/* Keep the file stream close to the title while reserving the tab row for navigation. */
+.drawer-surface[data-tab="changes"] {
+  --reader-padding: 25px;
+  background: light-dark(var(--surface), #0c0c10);
+}
+.drawer-surface[data-tab="changes"] > .drawer-header {
+  padding-inline: var(--reader-padding);
+}
+.drawer-surface[data-tab="changes"] .drawer-header-row {
+  min-height: 40px;
+  padding-top: 12px;
+}
+.drawer-surface[data-tab="changes"] .drawer-heading {
+  padding-block: 10px 0;
+}
+.drawer-surface[data-tab="changes"] .drawer-heading h2 {
+  max-inline-size: 42ch;
+  margin-bottom: 8px;
+  font-size: 21px;
+  line-height: 1.27;
+  font-weight: 630;
+  color: var(--text);
+}
+.drawer-surface[data-tab="changes"] .drawer-tab-bar {
+  margin-top: 9px;
+}
+.drawer-surface[data-tab="changes"] > .drawer-body {
+  padding: 0 var(--reader-padding) 12px;
+  scrollbar-color: var(--strong-line) transparent;
+}
+@media (max-width: 1050px) {
+  .drawer-surface[data-tab="changes"] {
+    --reader-padding: 20px;
+  }
+}
+@media (max-width: 760px) {
+  .drawer-surface[data-tab="changes"] {
+    --reader-padding: 16px;
+  }
+  .drawer-surface[data-tab="changes"] .drawer-header-row {
+    padding-top: 0;
+  }
+  .drawer-surface[data-tab="changes"] .drawer-heading {
+    padding-top: 2px;
+  }
+  .drawer-surface[data-tab="changes"] .drawer-heading h2 {
+    max-inline-size: 29ch;
+    margin-bottom: 5px;
+    font-size: 19px;
+  }
+  .drawer-surface[data-tab="changes"] .drawer-tab-bar {
+    margin-top: 2px;
   }
 }
