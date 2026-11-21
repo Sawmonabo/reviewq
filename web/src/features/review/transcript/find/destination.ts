@@ -190,18 +190,51 @@ function revealDetails(node: Node, body: HTMLElement) {
   }
 }
 
-export function revealOccurrence(view: HTMLElement, match: HistorySearchDestination) {
+function revealAcross(range: Range, body: HTMLElement): boolean {
+  let region =
+    range.commonAncestorContainer instanceof HTMLElement
+      ? range.commonAncestorContainer
+      : range.commonAncestorContainer.parentElement;
+  while (region && body.contains(region)) {
+    const overflow = getComputedStyle(region).overflowX;
+    if (region.scrollWidth > region.clientWidth && (overflow === "auto" || overflow === "scroll")) {
+      const viewport = region.getBoundingClientRect();
+      const left = viewport.left + region.clientLeft;
+      const right = left + region.clientWidth;
+      const place = range.getBoundingClientRect();
+      if (place.left < left || place.right > right) {
+        region.scrollLeft +=
+          place.width >= region.clientWidth || place.left < left
+            ? place.left - left
+            : place.right - right;
+      }
+      const visible = range.getBoundingClientRect();
+      if (
+        visible.left < left - 1 ||
+        visible.left >= right ||
+        (visible.width <= region.clientWidth && visible.right > right + 1)
+      )
+        return false;
+    }
+    region = region.parentElement;
+  }
+  return true;
+}
+
+function revealOccurrence(view: HTMLElement, match: HistorySearchDestination, inset?: number) {
   const row = view.querySelector('[data-native-entry="' + CSS.escape(match.entryId) + '"]');
   const body = row?.querySelector<HTMLElement>("[data-find-body]");
   const range = body && nativeRange(body, match);
-  if (!body || !range) return false;
+  if (!body || !range) return;
   revealDetails(range.startContainer, body);
   revealDetails(range.endContainer, body);
+  if (!revealAcross(range, body)) return;
   const rect = range.getBoundingClientRect();
-  if (!rect.height) return false;
+  if (!rect.height) return;
   const bounds = view.getBoundingClientRect();
-  if (rect.top < bounds.top + 32 || rect.bottom > bounds.bottom - 12) {
-    view.scrollTop += rect.top - bounds.top - bounds.height * 0.32;
+  if (inset !== undefined || rect.top < bounds.top + 32 || rect.bottom > bounds.bottom - 12) {
+    const movement = rect.top - bounds.top - (inset ?? bounds.height * 0.32);
+    if (Math.abs(movement) > 1) view.scrollTop += movement;
   }
   const visible = range.getBoundingClientRect();
   if (
@@ -209,11 +242,57 @@ export function revealOccurrence(view: HTMLElement, match: HistorySearchDestinat
     visible.top >= bounds.bottom ||
     (visible.height <= bounds.height && visible.bottom > bounds.bottom + 1)
   )
-    return false;
+    return;
   if (typeof CSS.highlights !== "undefined" && typeof Highlight !== "undefined") {
     CSS.highlights.set(highlightName, new Highlight(range));
   }
-  return true;
+  return visible.top - bounds.top;
+}
+
+export function holdOccurrence(
+  view: HTMLElement,
+  match: HistorySearchDestination,
+  signal: AbortSignal,
+  onReveal: () => void,
+  onUnavailable: () => void,
+) {
+  let frame = 0;
+  let inset: number | undefined;
+  const deadline = performance.now() + 1200;
+  const observer = new ResizeObserver(schedule);
+  observer.observe(view);
+  const spacer = view.querySelector(".timeline-spacer");
+  if (spacer) observer.observe(spacer);
+  view.addEventListener("scroll", schedule, { passive: true });
+  signal.addEventListener("abort", close, { once: true });
+  schedule();
+
+  function schedule() {
+    if (!frame && !signal.aborted) frame = requestAnimationFrame(paint);
+  }
+
+  function paint() {
+    frame = 0;
+    if (signal.aborted) return;
+    const projected = revealOccurrence(view, match, inset);
+    if (projected !== undefined && inset === undefined) {
+      inset = projected;
+      onReveal();
+    }
+    if (inset !== undefined) return;
+    if (performance.now() < deadline) schedule();
+    else {
+      close();
+      onUnavailable();
+    }
+  }
+
+  function close() {
+    cancelAnimationFrame(frame);
+    observer.disconnect();
+    view.removeEventListener("scroll", schedule);
+    signal.removeEventListener("abort", close);
+  }
 }
 
 export function clearOccurrence() {

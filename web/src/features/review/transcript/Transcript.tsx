@@ -42,6 +42,7 @@ import {
   historyId,
   openToolRun,
   promptRanks,
+  transcriptRangeIndexes,
   readingIndex,
   timelineRows,
   toggleKey,
@@ -101,6 +102,8 @@ export function Transcript({ target, provider, child, messages, working }: Props
   );
   const [output, setOutput] = useState<OutputSelection>();
   const [foundOutput, setFoundOutput] = useState<FoundOutput>();
+  const [findAnchorEntry, setFindAnchorEntry] = useState<string>();
+  const releaseFindAnchor = useCallback(() => setFindAnchorEntry(undefined), []);
   const [extraParts, setExtraParts] = useState<ExtraParts>();
   const partsRequest = useRef<AbortController | undefined>(undefined);
   const viewport = useRef<HTMLDivElement>(null);
@@ -191,24 +194,9 @@ export function Transcript({ target, provider, child, messages, working }: Props
   ]);
 
   const rangeExtractor = useCallback(
-    (range: Parameters<typeof defaultRangeExtractor>[0]) => {
-      const indexes = new Set(defaultRangeExtractor(range));
-      const reading = anchor.current;
-      if (reading?.adjacent) {
-        const index = readingIndex(entries, reading);
-        if (index >= 0 && !indexes.has(index)) {
-          const endIndex = Math.min(entries.length - 1, index + range.endIndex - range.startIndex);
-          for (const nearby of defaultRangeExtractor({ ...range, startIndex: index, endIndex }))
-            indexes.add(nearby);
-        }
-      }
-      if (pinned.size)
-        entries.forEach((entry, index) => {
-          if (pinned.has(historyId(entry))) indexes.add(index);
-        });
-      return [...indexes].sort((left, right) => left - right);
-    },
-    [entries, pinned],
+    (range: Parameters<typeof defaultRangeExtractor>[0]) =>
+      transcriptRangeIndexes(range, entries, pinned, anchor.current, findAnchorEntry),
+    [entries, pinned, findAnchorEntry],
   );
 
   const rowKey = useCallback((index: number) => entries[index]?.id ?? index, [entries]);
@@ -590,6 +578,7 @@ export function Transcript({ target, provider, child, messages, working }: Props
     followBeforeFind.current = undefined;
     setFollowing(false);
     setFoundOutput(found);
+    setFindAnchorEntry(entryId);
     setOutput({ entryId, reference: contentRef });
     if (extra) setExtraParts({ entryId, generation, pages: 1, ...extra });
     if (toolCallId) {
@@ -620,6 +609,7 @@ export function Transcript({ target, provider, child, messages, working }: Props
         }}
         onChoose={openFound}
         onReveal={leaveReopen}
+        onRelease={releaseFindAnchor}
       />
       {selectedText && <HistorySelection onClear={clear} onError={setActionNotice} />}
       {actionNotice && <Notice>{actionNotice}</Notice>}

@@ -9,7 +9,7 @@ import { historySearch } from "../../../../api/history";
 import type { SessionAddress } from "../../../../api/history";
 import { Icon } from "../../../../components/Icon";
 import { describeError } from "../../../../lib/presentation";
-import { clearOccurrence, prepareDestination, revealOccurrence } from "./destination";
+import { clearOccurrence, holdOccurrence, prepareDestination } from "./destination";
 import type { PreparedDestination } from "./destination";
 import "./find.css";
 
@@ -20,10 +20,19 @@ type Props = {
   readonly onClose: () => void;
   readonly onChoose: (destination: PreparedDestination) => boolean;
   readonly onReveal: () => void;
+  readonly onRelease: () => void;
 };
 type ResultPage = Omit<HistorySearchPage, "hits"> & { readonly hits: readonly HistorySearchHit[] };
 
-export function TranscriptFind({ target, viewport, onOpen, onClose, onChoose, onReveal }: Props) {
+export function TranscriptFind({
+  target,
+  viewport,
+  onOpen,
+  onClose,
+  onChoose,
+  onReveal,
+  onRelease,
+}: Props) {
   const { runId, sessionKey } = target;
   const root = useRef<HTMLDivElement>(null);
   const invoker = useRef<HTMLElement | null>(null);
@@ -55,6 +64,7 @@ export function TranscriptFind({ target, viewport, onOpen, onClose, onChoose, on
     reads.current?.abort();
     jumps.current?.abort();
     clearOccurrence();
+    onRelease();
     onClose();
     setOpen(false);
     setQuery("");
@@ -89,6 +99,11 @@ export function TranscriptFind({ target, viewport, onOpen, onClose, onChoose, on
       )
         return;
       const from = event.target instanceof HTMLElement ? event.target : null;
+      if (
+        event.target instanceof Element &&
+        event.target.closest(".mermaid-figure, textarea, [contenteditable=true]")
+      )
+        return;
       if (!root.current?.contains(from) && !viewport.current?.contains(from)) return;
       event.preventDefault();
       if (open) input.current?.focus({ preventScroll: true });
@@ -107,6 +122,7 @@ export function TranscriptFind({ target, viewport, onOpen, onClose, onChoose, on
     const view = viewport.current;
     function interrupt() {
       jumps.current?.abort();
+      onRelease();
     }
     view?.addEventListener("wheel", interrupt, { passive: true });
     view?.addEventListener("touchstart", interrupt, { passive: true });
@@ -118,7 +134,7 @@ export function TranscriptFind({ target, viewport, onOpen, onClose, onChoose, on
       view?.removeEventListener("pointerdown", interrupt);
       view?.removeEventListener("keydown", interrupt);
     };
-  }, [viewport]);
+  }, [viewport, onRelease]);
 
   useEffect(() => {
     if (!open || !query) return;
@@ -157,6 +173,7 @@ export function TranscriptFind({ target, viewport, onOpen, onClose, onChoose, on
     reads.current?.abort();
     jumps.current?.abort();
     clearOccurrence();
+    onRelease();
     setNotice(undefined);
     setActive(undefined);
     setPage(undefined);
@@ -172,20 +189,11 @@ export function TranscriptFind({ target, viewport, onOpen, onClose, onChoose, on
       return;
     }
     setActive(hit);
-    const deadline = performance.now() + 1200;
-    let visibleFrames = 0;
-    function paint() {
-      if (request.signal.aborted) return;
-      const view = viewport.current;
-      if (view && revealOccurrence(view, destination.output.destination)) {
-        if (visibleFrames === 0) onReveal();
-        visibleFrames++;
-        if (visibleFrames >= 3) return;
-      } else visibleFrames = 0;
-      if (performance.now() < deadline) requestAnimationFrame(paint);
-      else if (!visibleFrames) setNotice("The occurrence could not be highlighted.");
-    }
-    requestAnimationFrame(paint);
+    const view = viewport.current;
+    if (view)
+      holdOccurrence(view, destination.output.destination, request.signal, onReveal, () =>
+        setNotice("The occurrence could not be highlighted."),
+      );
   }
 
   async function select(hit: HistorySearchHit) {

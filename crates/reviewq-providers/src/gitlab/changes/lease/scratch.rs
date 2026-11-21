@@ -2,6 +2,7 @@ use std::fs::File;
 use std::path::Path;
 use std::sync::Mutex;
 
+use reviewq_app::access::admits_disk_scratch;
 use reviewq_domain::identity::MrIdentity;
 
 // A decoded selected patch is smaller than its bounded 32 MiB JSON response.
@@ -28,12 +29,12 @@ struct Reservation(ScratchKey);
 impl ScratchFile {
     pub(in crate::gitlab::changes) fn create(profile: &Path, key: ScratchKey) -> Option<Self> {
         let reservation = Reservation::acquire(key)?;
-        if !disk_filesystem(rustix::fs::statfs(profile).ok()?.f_type as u64) {
+        if !admits_disk_scratch(rustix::fs::statfs(profile).ok()?.f_type as u64) {
             return None;
         }
         let file = crate::http::private_file(profile).ok()?;
         // Verify the actual open file, including if its directory moved.
-        if !disk_filesystem(rustix::fs::fstatfs(&file).ok()?.f_type as u64) {
+        if !admits_disk_scratch(rustix::fs::fstatfs(&file).ok()?.f_type as u64) {
             return None;
         }
         Some(Self {
@@ -66,12 +67,4 @@ impl Drop for Reservation {
             entries.swap_remove(index);
         }
     }
-}
-
-fn disk_filesystem(fs: u64) -> bool {
-    // Linux filesystem magic numbers for ext, XFS, Btrfs, F2FS and ZFS.
-    matches!(
-        fs,
-        0xef53 | 0x5846_5342 | 0x9123_683e | 0xf2f5_2010 | 0x2fc1_2fc1
-    )
 }

@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
-use reviewq_app::access::AppError;
+use reviewq_app::access::{AppError, admits_disk_scratch};
 use reviewq_app::history::search::SourceObservation;
 use reviewq_domain::session::SessionTarget;
 
@@ -127,7 +127,6 @@ impl StagedBody {
         let kind = rustix::fs::fstatfs(&file)
             .map_err(|_| AppError::Unavailable)?
             .f_type as u64;
-        // These are the disk-backed Linux filesystems admitted by the selected-patch lease.
         if !matches!(
             kind,
             0xef53 | 0x5846_5342 | 0x9123_683e | 0xf2f5_2010 | 0x2fc1_2fc1

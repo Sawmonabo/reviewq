@@ -1,3 +1,4 @@
+import { defaultRangeExtractor } from "@tanstack/react-virtual";
 import type { HistoryEntry } from "../../../api/generated/contracts";
 import type { MessageHistoryItem } from "../../../api/generated/contracts/delivery";
 import type { ReadingAnchor } from "./history-window";
@@ -124,4 +125,27 @@ export function openToolRun(
   if (containing?.kind === "tool-run") for (const member of containing.members) next.delete(member);
   next.set(entryId, true);
   return new Map([...next].slice(-160));
+}
+
+export function transcriptRangeIndexes(
+  range: Parameters<typeof defaultRangeExtractor>[0],
+  entries: readonly VisibleRow[],
+  pinned: ReadonlySet<string>,
+  reading: (ReadingAnchor & { readonly adjacent?: string }) | undefined,
+  findEntry: string | undefined,
+) {
+  const indexes = new Set(defaultRangeExtractor(range));
+  if (reading?.adjacent) {
+    const index = readingIndex(entries, reading);
+    if (index >= 0 && !indexes.has(index)) {
+      const endIndex = Math.min(entries.length - 1, index + range.endIndex - range.startIndex);
+      for (const nearby of defaultRangeExtractor({ ...range, startIndex: index, endIndex }))
+        indexes.add(nearby);
+    }
+  }
+  if (pinned.size || findEntry)
+    entries.forEach((entry, index) => {
+      if (pinned.has(historyId(entry)) || entry.id === findEntry) indexes.add(index);
+    });
+  return [...indexes].sort((left, right) => left - right);
 }

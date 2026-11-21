@@ -20,7 +20,10 @@ use super::file::{self, Lines, ToolProof};
 use super::locator::Source;
 use super::records::{self, BodyField, Record};
 
+mod index;
 mod large;
+mod native_string;
+pub(super) use index::Acceleration;
 pub(super) use large::LargeRecords;
 
 const RECORDS_PER_PAGE: usize = 64;
@@ -35,6 +38,7 @@ pub(super) fn read(
     query: HistorySearch,
     cancel: &AtomicBool,
     large: &mut LargeRecords,
+    acceleration: Option<&Acceleration>,
 ) -> Result<SearchPage, AppError> {
     let mut budget = file::READ_BUDGET;
     let metadata = source.file.metadata().map_err(|_| AppError::Unavailable)?;
@@ -49,6 +53,8 @@ pub(super) fn read(
         return Err(AppError::CursorExpired);
     }
     let mut lines = Lines::new(&source.file, cancel);
+    let mut index = acceleration
+        .and_then(|acceleration| acceleration.use_index(source, owner, &observation, &query));
     let mut proof = ToolProof::new(&source.file, cancel);
     let mut next = match &query.from {
         Some(cursor) => Some(cursor.point),
@@ -67,7 +73,21 @@ pub(super) fn read(
     };
     let mut scanned = 0;
     for _ in 0..RECORDS_PER_PAGE {
-        let Some(at) = next.take() else { break };
+        let Some(mut at) = next.take() else { break };
+        if let Some(candidates) = index
+            .as_ref()
+            .filter(|index| at.record < index.covered_through())
+        {
+            match candidates.next(at.record, query.reverse) {
+                Ok(Some(candidate)) if candidate != at.record => {
+                    at = first(candidate, query.reverse)
+                }
+                Ok(Some(_)) => (),
+                Ok(None) if query.reverse || candidates.covered_through() == complete => break,
+                Ok(None) => at = first(candidates.covered_through(), query.reverse),
+                Err(_) => index = None,
+            }
+        }
         if at.record >= complete || !file::boundary(&source.file, at.record)? {
             return Err(AppError::CursorExpired);
         }
@@ -94,6 +114,7 @@ pub(super) fn read(
                         record,
                         position,
                         staged: None,
+                        native: None,
                         stage_unavailable: false,
                     })
                 }
@@ -203,6 +224,7 @@ struct Body {
     tool_call: Option<NativeInputId>,
     markdown: bool,
     bytes: u64,
+    native_string: Option<std::ops::Range<u64>>,
 }
 
 impl Body {
@@ -219,6 +241,7 @@ fn bodies(source: &Source, record: &Record) -> Result<Vec<Body>, AppError> {
             tool_call: None,
             markdown: record.bytes <= CONTENT_BYTES,
             bytes: record.bytes,
+            native_string: record.native_string.clone(),
         }]);
     }
     record
@@ -237,6 +260,7 @@ fn bodies(source: &Source, record: &Record) -> Result<Vec<Body>, AppError> {
                 markdown: tool_call.is_none() && part.body.bytes <= CONTENT_BYTES,
                 tool_call,
                 bytes: part.body.bytes,
+                native_string: part.body.native_string.clone(),
             })
         })
         .collect()
@@ -247,6 +271,7 @@ struct RecordWindow {
     record: Record,
     position: FilePosition,
     staged: Option<large::StagedBody>,
+    native: Option<native_string::NativeString>,
     stage_unavailable: bool,
 }
 
@@ -325,6 +350,21 @@ fn match_record(
             stopped: false,
         };
         if body.bytes > CONTENT_BYTES
+            && body.native_string.is_some()
+            && window
+                .native
+                .as_ref()
+                .is_none_or(|native| native.key != key)
+        {
+            window.native =
+                native_string::NativeString::prepare(&source.file, window, &body, cancel)
+                    .ok()
+                    .flatten();
+            check_cancel(cancel)?;
+        }
+        let native = window.native.as_ref().filter(|native| native.key == key);
+        if native.is_none()
+            && body.bytes > CONTENT_BYTES
             && !window.stage_unavailable
             && window
                 .staged
@@ -336,7 +376,9 @@ fn match_record(
             window.stage_unavailable = window.staged.is_none();
             check_cancel(cancel)?;
         }
-        if let Some(staged) = window.staged.as_ref().filter(|staged| staged.key == key) {
+        if let Some(native) = native {
+            matches.scan_native(&source.file, native, cancel)?;
+        } else if let Some(staged) = window.staged.as_ref().filter(|staged| staged.key == key) {
             matches.scan_body(&staged.file, cancel)?;
         } else {
             let projected = records::stream_body(
@@ -402,19 +444,51 @@ struct Matches<'a> {
 }
 
 impl Matches<'_> {
-    fn scan_body(&mut self, file: &std::fs::File, cancel: &AtomicBool) -> Result<(), AppError> {
+    fn select_window(&mut self) -> std::ops::Range<u64> {
         let boundary = self.boundary.min(self.body.bytes);
         self.range = if self.reverse {
             boundary.saturating_sub(BODY_STEP)..boundary
         } else {
             boundary..boundary.saturating_add(BODY_STEP).min(self.body.bytes)
         };
-        let end = self
-            .range
-            .end
-            .saturating_add(CONTENT_BYTES)
-            .min(self.body.bytes);
-        let mut offset = self.range.start.saturating_sub(CONTENT_BYTES);
+        self.range.start.saturating_sub(CONTENT_BYTES)
+            ..self
+                .range
+                .end
+                .saturating_add(CONTENT_BYTES)
+                .min(self.body.bytes)
+    }
+
+    fn scan_native(
+        &mut self,
+        file: &std::fs::File,
+        native: &native_string::NativeString,
+        cancel: &AtomicBool,
+    ) -> Result<(), AppError> {
+        let window = self.select_window();
+        let mut first = true;
+        native.read(
+            file,
+            window.start,
+            window.end,
+            cancel,
+            &mut |offset, text| {
+                if first {
+                    self.decoded = offset;
+                    first = false;
+                }
+                self.bytes.extend_from_slice(text.as_bytes());
+                self.flush_matches(false)?;
+                Ok(self.next.is_none())
+            },
+        )?;
+        self.close_window()
+    }
+
+    fn scan_body(&mut self, file: &std::fs::File, cancel: &AtomicBool) -> Result<(), AppError> {
+        let window = self.select_window();
+        let end = window.end;
+        let mut offset = window.start;
         self.decoded = offset;
         let mut scratch = [0; DECODE_BLOCK];
         while offset < end && self.next.is_none() {
@@ -435,6 +509,10 @@ impl Matches<'_> {
             self.flush_matches(false)?;
             offset += count as u64;
         }
+        self.close_window()
+    }
+
+    fn close_window(&mut self) -> Result<(), AppError> {
         if self.next.is_none() {
             self.flush_matches(true)?;
         }

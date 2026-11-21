@@ -50,6 +50,7 @@ pub struct FileHistory {
     searches: Semaphore,
     pending_searches: Semaphore,
     large_records: Arc<Mutex<search::LargeRecords>>,
+    search_index: Option<Arc<search::Acceleration>>,
     streams: content::Streams,
 }
 
@@ -60,6 +61,7 @@ impl Default for FileHistory {
             searches: Semaphore::new(1),
             pending_searches: Semaphore::new(4),
             large_records: Arc::default(),
+            search_index: None,
             streams: content::Streams::default(),
         }
     }
@@ -74,6 +76,14 @@ impl Drop for Cancel {
 }
 
 impl FileHistory {
+    pub fn with_search_index(
+        mut self,
+        index: Arc<dyn reviewq_app::history::search::index::SearchIndex>,
+    ) -> Self {
+        self.search_index = Some(Arc::new(search::Acceleration::new(index)));
+        self
+    }
+
     /// Keep an active large display body seekable in the private service profile.
     pub fn with_search_profile(directory: PathBuf) -> Self {
         let large_records = Arc::new(Mutex::new(search::LargeRecords::new(directory)));
@@ -307,9 +317,10 @@ impl NativeHistoryReader for FileHistory {
                 .map_err(|_| AppError::Unavailable)?;
             let owner = session.target.clone();
             let large = self.large_records.clone();
+            let index = self.search_index.clone();
             self.inspect(session, move |source, stop| {
                 let mut large = large.try_lock().map_err(|_| AppError::Busy)?;
-                search::read(&source, &owner, query, stop, &mut large)
+                search::read(&source, &owner, query, stop, &mut large, index.as_deref())
             })
             .await
         })

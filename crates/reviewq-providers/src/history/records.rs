@@ -19,6 +19,7 @@ pub(super) struct Record {
     pub final_response: bool,
     pub text: Vec<u8>,
     pub bytes: u64,
+    pub native_string: Option<std::ops::Range<u64>>,
     pub parts: Vec<Part>,
     pub claude_tool_parent: Option<NativeInputId>,
     pub claude_tool_calls: Vec<(NativeInputId, String)>,
@@ -82,6 +83,7 @@ impl BodySink<'_> {
 pub(super) struct Text {
     pub bytes: u64,
     pub picked: Vec<u8>,
+    pub native_string: Option<std::ops::Range<u64>>,
 }
 
 #[derive(Default)]
@@ -288,6 +290,7 @@ fn project_to(
         final_response: item.final_response,
         text: item.text.picked,
         bytes: item.text.bytes,
+        native_string: item.text.native_string,
         parts: item.parts,
         claude_tool_parent: item.claude_tool_parent,
         claude_tool_calls: item.tool_calls,
@@ -627,6 +630,11 @@ fn block<R: Read>(
         Some("Text" | "text" | "input_text" | "output_text") => {
             if plain.bytes > 0 {
                 item.text_blocks.push(index);
+                item.text.native_string = if item.text.bytes == 0 {
+                    plain.native_string.clone()
+                } else {
+                    None
+                };
             }
             item.text.bytes = item
                 .text
@@ -698,6 +706,8 @@ pub(super) fn capture<R: Read>(
     origin: u64,
     mut output: Option<&mut dyn Write>,
 ) -> Result<Text, AppError> {
+    reader.peek().map_err(invalid)?;
+    let quoted_start = reader.current_position(false).data_pos;
     let mut stream = reader.next_string_reader().map_err(invalid)?;
     let mut result = Text::default();
     let mut buffer = [0; 16 * 1024];
@@ -708,7 +718,7 @@ pub(super) fn capture<R: Read>(
     loop {
         let size = stream.read(&mut buffer).map_err(invalid)?;
         if size == 0 {
-            return Ok(result);
+            break;
         }
         if let Some(output) = output.as_mut() {
             output.write_all(&buffer[..size]).map_err(invalid)?;
@@ -728,6 +738,11 @@ pub(super) fn capture<R: Read>(
         }
         result.bytes += size as u64;
     }
+    drop(stream);
+    if let (Some(start), Some(end)) = (quoted_start, reader.current_position(false).data_pos) {
+        result.native_string = Some(start..end);
+    }
+    Ok(result)
 }
 
 pub(super) fn string<R: Read>(

@@ -4,6 +4,8 @@ use html5ever::buffer_queue::BufferQueue;
 use html5ever::tokenizer::{TagKind, Token, TokenSink, TokenSinkResult, Tokenizer, TokenizerOpts};
 use markdown::{ParseOptions, mdast::Node};
 
+mod html;
+
 pub const MAX_DISCUSSION_TEXT_SOURCE_BYTES: usize = 32 * 1024;
 
 const MAX_LINE_BYTES: usize = 16 * 1024;
@@ -22,6 +24,9 @@ pub fn displayed_markdown(source: &str) -> Option<String> {
             .any(|(index, line)| index >= MAX_LINES || !admit_line(line))
     {
         return None;
+    }
+    if source.contains('<') || source.contains("[^") {
+        return html::project(source, MAX_DEPTH, MAX_NODES);
     }
     project(source, true)
 }

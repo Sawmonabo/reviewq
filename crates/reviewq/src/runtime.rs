@@ -311,7 +311,10 @@ pub(crate) async fn serve(profile: PathBuf, options: Serve) -> Result<(), Failur
         store.clone(),
         source.clone(),
         host.clone(),
-        Arc::new(FileHistory::with_search_profile(profile.clone())),
+        Arc::new(
+            FileHistory::with_search_profile(profile.clone())
+                .with_search_index(store.history_search_index()),
+        ),
         reviewq_transport::ServiceRuntime {
             sends_allowed,
             source_poll_interval: (!options.validation)

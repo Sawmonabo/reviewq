@@ -3,6 +3,8 @@ use reviewq_domain::identity::NativeInputId;
 use super::FileContentRef;
 use crate::reading::Literal;
 
+pub mod index;
+
 pub const MAX_SEARCH_HITS: usize = 16;
 
 pub struct HistorySearch {
