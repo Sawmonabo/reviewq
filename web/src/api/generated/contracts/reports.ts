@@ -87,6 +87,18 @@ export type QuoteResolution =
       [k: string]: unknown;
     };
 
+export type ReportTableContent =
+  | {
+      kind: "table";
+      page: TablePage;
+      [k: string]: unknown;
+    }
+  | {
+      kind: "markdown";
+      markdown: string;
+      [k: string]: unknown;
+    };
+
 export type DisplayResult =
   | {
       /**
@@ -321,16 +333,18 @@ export interface ReportTable {
   range: ReportTableRange | null;
   receiptId: ResourceIdDto;
   sha256: ReportHashDto;
+  tableEnd: SafeCountDto | null;
+  tableStart: SafeCountDto | null;
   [k: string]: unknown;
 }
 
 export interface ReportTableRange {
   byteEnd: SafeCountDto;
   byteStart: SafeCountDto;
+  content: ReportTableContent;
   nextByte: SafeCountDto | null;
   previousByte: SafeCountDto | null;
   scalarStart: SafeCountDto;
-  table: TablePage;
   [k: string]: unknown;
 }
 

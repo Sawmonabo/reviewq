@@ -16,8 +16,13 @@ pub const MAX_WINDOW_BYTES: u64 = 64 * 1024;
 const MAX_WINDOW_BLOCKS: usize = 32;
 
 pub struct Query {
-    pub offset: u64,
+    pub position: Position,
     pub expected: Option<ReportHash>,
+}
+
+pub enum Position {
+    AtByte(u64),
+    Canonical,
 }
 
 pub struct Window {
@@ -33,8 +38,10 @@ pub struct Window {
 pub enum WindowResult {
     Ready(Vec<DisplayWindowBlock>),
     Table(TablePage),
+    Canonical(String),
     Source {
         reason: DisplayFallback,
+        canonical: bool,
         markdown: String,
     },
 }
@@ -46,6 +53,7 @@ pub struct Index {
     pages: Vec<Range<usize>>,
     source: SourcePages,
     table: Option<paged::Index>,
+    canonical: bool,
 }
 
 struct Bounds {
@@ -159,6 +167,9 @@ impl Index {
                     .finish()
                     .filter(|index| over_envelope || index.exceeds_node_budget())
             });
+        let canonical = text.is_some_and(|text| !text.is_empty() && !over_envelope)
+            && table.is_none()
+            && matches!(layout, DisplayIndex::Fallback(_));
         Self {
             hash,
             bytes,
@@ -166,6 +177,7 @@ impl Index {
             pages,
             source,
             table,
+            canonical,
         }
     }
 
@@ -174,13 +186,32 @@ impl Index {
         query: Query,
         mut read: impl FnMut(Range<u64>) -> Result<Vec<u8>, AppError>,
     ) -> Result<Window, AppError> {
-        let Query { offset, expected } = query;
+        let Query { position, expected } = query;
         if expected
             .as_ref()
             .is_some_and(|expected| *expected != self.hash)
         {
             return Err(AppError::CursorExpired);
         }
+        let offset = match position {
+            Position::AtByte(offset) => offset,
+            Position::Canonical => {
+                if !self.canonical {
+                    return Err(AppError::InvalidRequest);
+                }
+                let bytes = 0..self.bytes;
+                let markdown = decode(read(bytes.clone())?)?;
+                return Ok(Window {
+                    hash: self.hash.clone(),
+                    byte_length: self.bytes,
+                    table_start: None,
+                    bytes,
+                    previous: None,
+                    next: None,
+                    result: WindowResult::Canonical(markdown),
+                });
+            }
+        };
         if offset > self.bytes {
             return Err(AppError::InvalidRequest);
         }
@@ -248,7 +279,14 @@ impl Index {
             }
         }
         let markdown = decode(read(bounds.bytes.clone())?)?;
-        Ok((bounds, WindowResult::Source { reason, markdown }))
+        Ok((
+            bounds,
+            WindowResult::Source {
+                reason,
+                markdown,
+                canonical: self.canonical,
+            },
+        ))
     }
 
     fn read_page(

@@ -4,6 +4,7 @@ import { reportTable } from "../../../api/reports";
 import type { ReportSummary } from "../../../api/generated/contracts/reports";
 import { Loading, Notice } from "../../../components/PanelState";
 import { MarkdownTree } from "../../../components/markdown/MarkdownContent";
+import { parseMarkdown } from "../../../components/markdown/parse-markdown";
 import { tablePageTree } from "../../../components/markdown/table-page";
 import { useReadingInset } from "../../../hooks/useReadingInset";
 import { useResource } from "../../../hooks/useResource";
@@ -38,14 +39,17 @@ export function ReportTable({
     `table:${runId}:${report.receiptId}:${report.sha256}:${offset}`,
     async (signal) => {
       const { data, cursor } = await reportTable(runId, report, offset, signal);
-      const range = data.range;
-      if (!range) return { data: null, cursor };
-      const native = tablePageTree(range.table, base);
+      const { range, tableStart, tableEnd } = data;
+      if (!range || tableStart === null || tableEnd === null) return { data: null, cursor };
+      const table = range.content.kind === "table" ? range.content.page : undefined;
+      const markdown =
+        range.content.kind === "table" ? range.content.page.markdown : range.content.markdown;
+      const native = table ? tablePageTree(table, base) : parseMarkdown(markdown, base);
       if (!native) return { data: null, cursor };
       await finishReading(content.current, signal);
       signal.throwIfAborted();
       const tree = { ...native, children: annotate(native.children) };
-      return { data: { range, tree }, cursor };
+      return { data: { range, tableStart, tableEnd, table, markdown, tree }, cursor };
     },
   );
   const [shown, setShown] = useState(result.data);
@@ -62,8 +66,8 @@ export function ReportTable({
 
   if (shown === null || (!shown && result.error)) return fallback;
   if (!shown) return <Loading label="Reading table rows…" />;
-  const { range, tree } = shown;
-  const { table } = range;
+  const { range, tree, table, tableStart, tableEnd, markdown } = shown;
+  const introduction = !table && range.byteEnd === tableStart;
 
   function move(next: number | null) {
     if (next === null) return;
@@ -75,53 +79,55 @@ export function ReportTable({
     const selection = getSelection();
     const active = selection?.rangeCount ? selection.getRangeAt(0) : undefined;
     if (!active || !content.current?.contains(active.commonAncestorContainer)) {
-      setNotice("Select a passage in the table first.");
+      setNotice("Select a passage in this page first.");
       return;
     }
     const exact = selectionSource(active, [
       {
-        block: { sourceOrder: 0, offset: 0, end: table.markdown.length, nodes: [] },
-        source: { text: table.markdown, utf16: 0, scalar: range.scalarStart },
+        block: { sourceOrder: 0, offset: 0, end: markdown.length, nodes: [] },
+        source: { text: markdown, utf16: 0, scalar: range.scalarStart },
       },
     ]);
     if (exact) {
       setNotice(undefined);
       onQuote(exact.text, exact.offset);
     } else {
-      setNotice("Select original rows or read the original Markdown to attach a quote.");
+      setNotice("Select original text or read the original Markdown to attach a quote.");
     }
   }
 
   return (
-    <section className="stack" aria-label="Report table rows">
+    <section className="stack" aria-label="Report pages">
       <div ref={anchor} className="actions source-nav" aria-busy={result.pending}>
-        <span className="meta">
-          Rows {table.firstRow + 1}–{table.firstRow + table.rowCount} of {table.totalRows}
-        </span>
-        <button type="button" disabled={range.previousByte === null} onClick={() => move(0)}>
-          First rows
-        </button>
-        <button
-          type="button"
-          disabled={range.previousByte === null}
-          onClick={() => move(range.previousByte)}
-        >
-          Previous rows
-        </button>
-        <button
-          type="button"
-          disabled={range.nextByte === null}
-          onClick={() => move(range.nextByte)}
-        >
-          Next rows
-        </button>
-        <button
-          type="button"
-          disabled={range.nextByte === null}
-          onClick={() => move(report.byteLength)}
-        >
-          Last rows
-        </button>
+        {table && (
+          <span className="meta">
+            Rows {table.firstRow + 1}–{table.firstRow + table.rowCount} of {table.totalRows}
+          </span>
+        )}
+        {!introduction && range.byteStart > tableStart && (
+          <button type="button" onClick={() => move(tableStart)}>
+            First rows
+          </button>
+        )}
+        {range.previousByte !== null && (
+          <button type="button" onClick={() => move(range.previousByte)}>
+            {range.previousByte < tableStart ? "Read introduction" : "Previous rows"}
+          </button>
+        )}
+        {range.nextByte !== null && (
+          <button type="button" onClick={() => move(range.nextByte)}>
+            {introduction
+              ? "Read table rows"
+              : range.nextByte >= tableEnd
+                ? "Continue after table"
+                : "Next rows"}
+          </button>
+        )}
+        {range.byteEnd < tableEnd && (
+          <button type="button" onClick={() => move(tableEnd - 1)}>
+            Last rows
+          </button>
+        )}
         <button type="button" onClick={() => onSource(range.scalarStart, range.byteStart)}>
           Read original source
         </button>

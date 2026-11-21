@@ -61,7 +61,15 @@ pub struct ReportTableRange {
     pub scalar_start: crate::SafeCountDto,
     pub previous_byte: Option<crate::SafeCountDto>,
     pub next_byte: Option<crate::SafeCountDto>,
-    pub table: TablePage,
+    pub content: ReportTableContent,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub enum ReportTableContent {
+    Table { page: TablePage },
+    Markdown { markdown: String },
 }
 
 #[derive(Debug, Serialize)]
@@ -70,6 +78,8 @@ pub struct ReportTableRange {
 pub struct ReportTable {
     pub receipt_id: crate::ResourceIdDto,
     pub sha256: crate::reports::ReportHashDto,
+    pub table_start: Option<crate::SafeCountDto>,
+    pub table_end: Option<crate::SafeCountDto>,
     pub range: Option<ReportTableRange>,
 }
 

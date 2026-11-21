@@ -3,6 +3,7 @@ import { func0 } from "../runtime.mjs";
 import { validate1360 } from "./report-table-range.mjs";
 import { validate25 } from "./checkpoint-id-dto.mjs";
 import { validate134 } from "./report-hash-dto.mjs";
+import { validate127 } from "./safe-count-dto.mjs";
 function validate1359(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
@@ -17,6 +18,10 @@ function validate1359(
           (missing0 = "receiptId")) ||
         ((data.sha256 === undefined || !func0.call(data, "sha256")) &&
           (missing0 = "sha256")) ||
+        ((data.tableStart === undefined || !func0.call(data, "tableStart")) &&
+          (missing0 = "tableStart")) ||
+        ((data.tableEnd === undefined || !func0.call(data, "tableEnd")) &&
+          (missing0 = "tableEnd")) ||
         ((data.range === undefined || !func0.call(data, "range")) &&
           (missing0 = "range"))
       ) {
@@ -141,6 +146,153 @@ function validate1359(
               var valid0 = _errs7 === errors;
             } else {
               var valid0 = true;
+            }
+            if (valid0) {
+              if (data.tableEnd !== undefined && func0.call(data, "tableEnd")) {
+                let data3 = data.tableEnd;
+                const _errs8 = errors;
+                const _errs9 = errors;
+                let valid2 = false;
+                const _errs10 = errors;
+                if (
+                  !validate127(data3, {
+                    instancePath: instancePath + "/tableEnd",
+                    parentData: data,
+                    parentDataProperty: "tableEnd",
+                    rootData,
+                  })
+                ) {
+                  vErrors =
+                    vErrors === null
+                      ? validate127.errors
+                      : vErrors.concat(validate127.errors);
+                  errors = vErrors.length;
+                }
+                var _valid1 = _errs10 === errors;
+                valid2 = valid2 || _valid1;
+                if (!valid2) {
+                  const _errs11 = errors;
+                  if (data3 !== null) {
+                    const err2 = {
+                      instancePath: instancePath + "/tableEnd",
+                      schemaPath: "#/properties/tableEnd/anyOf/1/type",
+                      keyword: "type",
+                      params: { type: "null" },
+                    };
+                    if (vErrors === null) {
+                      vErrors = [err2];
+                    } else {
+                      vErrors.push(err2);
+                    }
+                    errors++;
+                  }
+                  var _valid1 = _errs11 === errors;
+                  valid2 = valid2 || _valid1;
+                }
+                if (!valid2) {
+                  const err3 = {
+                    instancePath: instancePath + "/tableEnd",
+                    schemaPath: "#/properties/tableEnd/anyOf",
+                    keyword: "anyOf",
+                    params: {},
+                  };
+                  if (vErrors === null) {
+                    vErrors = [err3];
+                  } else {
+                    vErrors.push(err3);
+                  }
+                  errors++;
+                  validate1359.errors = vErrors;
+                  return false;
+                } else {
+                  errors = _errs9;
+                  if (vErrors !== null) {
+                    if (_errs9) {
+                      vErrors.length = _errs9;
+                    } else {
+                      vErrors = null;
+                    }
+                  }
+                }
+                var valid0 = _errs8 === errors;
+              } else {
+                var valid0 = true;
+              }
+              if (valid0) {
+                if (
+                  data.tableStart !== undefined &&
+                  func0.call(data, "tableStart")
+                ) {
+                  let data4 = data.tableStart;
+                  const _errs13 = errors;
+                  const _errs14 = errors;
+                  let valid3 = false;
+                  const _errs15 = errors;
+                  if (
+                    !validate127(data4, {
+                      instancePath: instancePath + "/tableStart",
+                      parentData: data,
+                      parentDataProperty: "tableStart",
+                      rootData,
+                    })
+                  ) {
+                    vErrors =
+                      vErrors === null
+                        ? validate127.errors
+                        : vErrors.concat(validate127.errors);
+                    errors = vErrors.length;
+                  }
+                  var _valid2 = _errs15 === errors;
+                  valid3 = valid3 || _valid2;
+                  if (!valid3) {
+                    const _errs16 = errors;
+                    if (data4 !== null) {
+                      const err4 = {
+                        instancePath: instancePath + "/tableStart",
+                        schemaPath: "#/properties/tableStart/anyOf/1/type",
+                        keyword: "type",
+                        params: { type: "null" },
+                      };
+                      if (vErrors === null) {
+                        vErrors = [err4];
+                      } else {
+                        vErrors.push(err4);
+                      }
+                      errors++;
+                    }
+                    var _valid2 = _errs16 === errors;
+                    valid3 = valid3 || _valid2;
+                  }
+                  if (!valid3) {
+                    const err5 = {
+                      instancePath: instancePath + "/tableStart",
+                      schemaPath: "#/properties/tableStart/anyOf",
+                      keyword: "anyOf",
+                      params: {},
+                    };
+                    if (vErrors === null) {
+                      vErrors = [err5];
+                    } else {
+                      vErrors.push(err5);
+                    }
+                    errors++;
+                    validate1359.errors = vErrors;
+                    return false;
+                  } else {
+                    errors = _errs14;
+                    if (vErrors !== null) {
+                      if (_errs14) {
+                        vErrors.length = _errs14;
+                      } else {
+                        vErrors = null;
+                      }
+                    }
+                  }
+                  var valid0 = _errs13 === errors;
+                } else {
+                  var valid0 = true;
+                }
+              }
             }
           }
         }

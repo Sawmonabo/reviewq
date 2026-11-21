@@ -2,8 +2,8 @@
 import { func0 } from "../runtime.mjs";
 import { validate127 } from "./safe-count-dto.mjs";
 import { validate1294 } from "./report-summary.mjs";
-import { validate1390 } from "./display-result.mjs";
-function validate1387(
+import { validate1398 } from "./display-result.mjs";
+function validate1395(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -20,7 +20,7 @@ function validate1387(
         ((data.result === undefined || !func0.call(data, "result")) &&
           (missing0 = "result"))
       ) {
-        validate1387.errors = [
+        validate1395.errors = [
           {
             instancePath,
             schemaPath: "#/required",
@@ -75,7 +75,7 @@ function validate1387(
             if (data.result !== undefined && func0.call(data, "result")) {
               const _errs3 = errors;
               if (
-                !validate1390(data.result, {
+                !validate1398(data.result, {
                   instancePath: instancePath + "/result",
                   parentData: data,
                   parentDataProperty: "result",
@@ -84,8 +84,8 @@ function validate1387(
               ) {
                 vErrors =
                   vErrors === null
-                    ? validate1390.errors
-                    : vErrors.concat(validate1390.errors);
+                    ? validate1398.errors
+                    : vErrors.concat(validate1398.errors);
                 errors = vErrors.length;
               }
               var valid0 = _errs3 === errors;
@@ -96,7 +96,7 @@ function validate1387(
         }
       }
     } else {
-      validate1387.errors = [
+      validate1395.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -107,7 +107,7 @@ function validate1387(
       return false;
     }
   }
-  validate1387.errors = vErrors;
+  validate1395.errors = vErrors;
   return errors === 0;
 }
-export { validate1387 };
+export { validate1395 };

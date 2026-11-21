@@ -100,6 +100,7 @@ export function Transcript({ target, provider, child, messages, working }: Props
     () => new Set(saved && !saved.following && saved.toolEntry !== false ? [saved.entryId] : []),
   );
   const [output, setOutput] = useState<OutputSelection>();
+  const [readingOutput, setReadingOutput] = useState<string>();
   const [foundOutput, setFoundOutput] = useState<FoundOutput>();
   const [findAnchorEntry, setFindAnchorEntry] = useState<string>();
   const releaseFindAnchor = useCallback(() => setFindAnchorEntry(undefined), []);
@@ -222,7 +223,7 @@ export function Transcript({ target, provider, child, messages, working }: Props
     getScrollElement: () => viewport.current,
     getItemKey: rowKey,
     // Resolve retained row keys against the new window before mounting its visible range.
-    anchorTo: focusedDiagram ? "start" : "end",
+    anchorTo: focusedDiagram || (output && readingOutput === output.reference) ? "start" : "end",
     estimateSize: (index) =>
       entries[index]?.kind === "tool-run" ? 35 : entries[index]?.kind === "read-pack" ? 55 : 95,
     paddingStart: history.older ? 40 : 0,
@@ -451,6 +452,7 @@ export function Transcript({ target, provider, child, messages, working }: Props
   }
 
   function latest() {
+    setReadingOutput(undefined);
     followBeforeFind.current = undefined;
     leaveReopen();
     clear();
@@ -542,8 +544,10 @@ export function Transcript({ target, provider, child, messages, working }: Props
     const host = viewport.current;
     const row = element.closest<HTMLElement>("[data-entry]");
     const id = row?.dataset.entry;
-    if ((!following && !requestedLatest.current) || !host || !row || !id || !host.contains(row))
-      return false;
+    const reference = output?.entryId === id ? output?.reference : undefined;
+    if (!host || !row || !id || !reference || !host.contains(row)) return false;
+    if (readingOutput === reference && !following && !requestedLatest.current) return false;
+    setReadingOutput(reference);
     anchor.current = {
       id,
       toolEntry: true,
@@ -766,6 +770,7 @@ export function Transcript({ target, provider, child, messages, working }: Props
                           {...(found ? { found } : {})}
                           onReference={(reference) => {
                             setFoundOutput(undefined);
+                            setReadingOutput(undefined);
                             setOutput(reference ? { entryId: row.id, reference } : undefined);
                           }}
                         />

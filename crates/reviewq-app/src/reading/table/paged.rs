@@ -45,6 +45,8 @@ pub struct Index {
     pub header: String,
     pub widths: Vec<u8>,
     pub rows: u64,
+    introduction: bool,
+    conclusion: bool,
     min_nodes: u64,
     groups: Vec<Group>,
 }
@@ -72,7 +74,42 @@ pub struct RangeInfo {
     pub rows: u64,
 }
 
+pub struct ContextRange {
+    pub bytes: Range<u64>,
+    pub previous: Option<u64>,
+    pub next: Option<u64>,
+}
+
 impl Index {
+    pub fn report_context(&self, offset: u64, length: u64) -> Option<ContextRange> {
+        if self.introduction && offset < self.start {
+            return Some(ContextRange {
+                bytes: 0..self.start,
+                previous: None,
+                next: Some(self.start),
+            });
+        }
+        if self.conclusion && offset >= self.end {
+            return Some(ContextRange {
+                bytes: self.end..length,
+                previous: Some(self.groups.last()?.bytes.start),
+                next: None,
+            });
+        }
+        None
+    }
+
+    pub fn report_group(&self, offset: u64) -> RangeInfo {
+        let mut group = self.group(offset);
+        if self.introduction && group.previous.is_none() {
+            group.previous = Some(0);
+        }
+        if self.conclusion && group.next.is_none() {
+            group.next = Some(self.end);
+        }
+        group
+    }
+
     pub fn exceeds_node_budget(&self) -> bool {
         self.min_nodes > 60_000
     }
@@ -147,7 +184,8 @@ impl Builder {
                 table.flush(self.position)?;
                 Some(table.index)
             }
-            State::After(index, suffix) if suffix.trim().is_empty() || context(&suffix) => {
+            State::After(mut index, suffix) if suffix.trim().is_empty() || context(&suffix) => {
+                index.conclusion = !suffix.trim().is_empty();
                 Some(index)
             }
             _ => None,
@@ -173,6 +211,8 @@ impl Builder {
                             header: head,
                             widths: Vec::new(),
                             rows: 0,
+                            introduction: false,
+                            conclusion: false,
                             min_nodes: 0,
                             groups: Vec::new(),
                         },
@@ -263,6 +303,7 @@ impl Rows {
         }
         if self.index.groups.is_empty() {
             let before = self.prefix.len();
+            self.index.introduction = !self.prefix.trim().is_empty();
             self.prefix.push_str(&joined);
             let DisplayIndex::Indexed(layout) = build_display_index(&self.prefix) else {
                 return None;

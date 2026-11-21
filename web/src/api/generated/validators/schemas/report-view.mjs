@@ -2,9 +2,9 @@
 import { func0 } from "../runtime.mjs";
 import { validate1289 } from "./report-delivery.mjs";
 import { validate586 } from "./document-display.mjs";
-import { schema397 } from "../metadata-9.mjs";
+import { schema400 } from "../metadata-9.mjs";
 import { validate1294 } from "./report-summary.mjs";
-function validate1373(
+function validate1381(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -19,7 +19,7 @@ function validate1373(
         ((data.delivery === undefined || !func0.call(data, "delivery")) &&
           (missing0 = "delivery"))
       ) {
-        validate1373.errors = [
+        validate1381.errors = [
           {
             instancePath,
             schemaPath: "#/required",
@@ -83,7 +83,7 @@ function validate1373(
               vErrors.push(err1);
             }
             errors++;
-            validate1373.errors = vErrors;
+            validate1381.errors = vErrors;
             return false;
           } else {
             errors = _errs2;
@@ -154,7 +154,7 @@ function validate1373(
                 vErrors.push(err3);
               }
               errors++;
-              validate1373.errors = vErrors;
+              validate1381.errors = vErrors;
               return false;
             } else {
               errors = _errs7;
@@ -175,12 +175,12 @@ function validate1373(
               let data2 = data.markdown;
               const _errs11 = errors;
               if (typeof data2 !== "string" && data2 !== null) {
-                validate1373.errors = [
+                validate1381.errors = [
                   {
                     instancePath: instancePath + "/markdown",
                     schemaPath: "#/properties/markdown/type",
                     keyword: "type",
-                    params: { type: schema397.properties.markdown.type },
+                    params: { type: schema400.properties.markdown.type },
                   },
                 ];
                 return false;
@@ -244,7 +244,7 @@ function validate1373(
                     vErrors.push(err5);
                   }
                   errors++;
-                  validate1373.errors = vErrors;
+                  validate1381.errors = vErrors;
                   return false;
                 } else {
                   errors = _errs14;
@@ -265,7 +265,7 @@ function validate1373(
         }
       }
     } else {
-      validate1373.errors = [
+      validate1381.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -276,7 +276,7 @@ function validate1373(
       return false;
     }
   }
-  validate1373.errors = vErrors;
+  validate1381.errors = vErrors;
   return errors === 0;
 }
-export { validate1373 };
+export { validate1381 };

@@ -33,7 +33,7 @@ mod document;
 mod drawing_hints;
 mod explore;
 pub(super) use content::{ContentQuery, content, read_content};
-pub(super) use document::{document, drawing_source};
+pub(super) use document::{document, drawing_source, markdown};
 mod live;
 mod parts;
 mod result;

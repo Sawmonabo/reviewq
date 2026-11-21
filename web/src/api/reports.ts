@@ -85,9 +85,13 @@ export async function reportTable(
   );
   if (result.data.receiptId !== report.receiptId || result.data.sha256 !== report.sha256)
     throw new Error("The displayed report version changed.");
-  const range = result.data.range;
+  const { range, tableStart, tableEnd } = result.data;
   if (range) {
     if (
+      tableStart === null ||
+      tableEnd === null ||
+      tableStart >= tableEnd ||
+      tableEnd > report.byteLength ||
       range.byteStart >= range.byteEnd ||
       range.byteEnd > report.byteLength ||
       range.scalarStart > report.totalCodePoints ||
@@ -95,7 +99,18 @@ export async function reportTable(
       (range.nextByte !== null && range.nextByte !== range.byteEnd)
     )
       throw new Error("The table range does not match the report.");
-    validateTablePage(range.table, range.byteEnd - range.byteStart);
+    const bytes = range.byteEnd - range.byteStart;
+    if (range.content.kind === "table") {
+      if (range.byteStart < tableStart || range.byteEnd > tableEnd)
+        throw new Error("The source range crosses the table boundary.");
+      validateTablePage(range.content.page, bytes);
+    } else if (
+      bytes > 65_536 ||
+      new TextEncoder().encode(range.content.markdown).length !== bytes ||
+      (range.byteStart !== tableEnd && range.byteEnd !== tableStart)
+    ) {
+      throw new Error("The Markdown range does not match the report.");
+    }
   }
   return result;
 }

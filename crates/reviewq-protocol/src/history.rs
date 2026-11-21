@@ -274,6 +274,8 @@ pub enum HistoryDocumentResult {
     },
     Source {
         reason: crate::reports::DisplayFallback,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        canonical: Option<bool>,
         markdown: HistoryText,
         #[serde(skip_serializing_if = "Option::is_none")]
         display: Option<crate::reports::DocumentDisplay>,

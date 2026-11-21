@@ -1,7 +1,9 @@
 import { useEffect, useEffectEvent, useRef, useState } from "react";
-import { historyDocument } from "../../../api/history";
+import type { Root } from "hast";
+import { canonicalHistoryMarkdown, historyDocument } from "../../../api/history";
 import type { SessionAddress } from "../../../api/history";
 import { MarkdownContent } from "../../../components/markdown/MarkdownContent";
+import { parseMarkdown } from "../../../components/markdown/parse-markdown";
 import { Loading, Notice } from "../../../components/PanelState";
 import { useReadingInset } from "../../../hooks/useReadingInset";
 import { useResource } from "../../../hooks/useResource";
@@ -30,6 +32,7 @@ export function NativeDocument({
   const [jump, setJump] = useState("");
   const output = useRef<HTMLDivElement>(null);
   const wanted = useRef(0);
+  const composed = useRef<{ sha256: string; tree: Root | undefined } | undefined>(undefined);
   const range = useResource(
     `document:${target.runId}:${target.sessionKey}:${generation}:${reference}:${position.byteOffset}`,
     async (signal) => {
@@ -46,7 +49,34 @@ export function NativeDocument({
           return { data: null, cursor };
         const source = documentSource(data);
         const display = documentDisplay(data);
-        const tree = documentTree(data, source);
+        let tree = documentTree(data, source);
+        let formatUnavailable = false;
+        let whole = false;
+        if (data.result.state === "source" && data.result.canonical && data.nextByte !== null) {
+          if (composed.current?.sha256 !== data.sha256) {
+            try {
+              const complete = await canonicalHistoryMarkdown(
+                target,
+                reference,
+                data,
+                AbortSignal.any([signal, AbortSignal.timeout(5_000)]),
+              );
+              signal.throwIfAborted();
+              composed.current = { sha256: data.sha256, tree: parseMarkdown(complete) };
+            } catch {
+              signal.throwIfAborted();
+              formatUnavailable = true;
+            }
+          }
+          if (composed.current?.sha256 === data.sha256 && composed.current.tree) {
+            tree = composed.current.tree;
+            whole = true;
+          }
+        } else if (composed.current?.sha256 === data.sha256 && composed.current.tree) {
+          // The last source page has no forward cursor but still belongs to the same document.
+          tree = composed.current.tree;
+          whole = true;
+        }
         const { result, ...range } = data;
         return {
           data: {
@@ -54,6 +84,8 @@ export function NativeDocument({
             source,
             display,
             tree,
+            whole,
+            formatUnavailable,
             sourceOnly: result.state === "source",
             table:
               result.state === "table"
@@ -76,8 +108,8 @@ export function NativeDocument({
   );
   const [shown, setShown] = useState(range.data);
   const remember = useReadingInset(output, shown);
-  const holdReading = useEffectEvent((element: HTMLElement | null, pagedTable: boolean) => {
-    if (element && pagedTable && onReadRange?.(element)) return;
+  const holdReading = useEffectEvent((element: HTMLElement | null, expanded: boolean) => {
+    if (element && expanded && onReadRange?.(element)) return;
     remember(element);
   });
   useEffect(() => {
@@ -93,7 +125,7 @@ export function NativeDocument({
         return;
       const active = document.activeElement;
       if (active && active !== output.current && output.current?.contains(active)) return;
-      if (next) holdReading(output.current, next.table !== undefined);
+      if (next) holdReading(output.current, next.table !== undefined || next.whole);
       setShown(next);
     }
     document.addEventListener("selectionchange", commit, { signal: events.signal });
@@ -118,6 +150,7 @@ export function NativeDocument({
     setPosition({ byteOffset: offset, sha256: data.sha256 });
   }
 
+  const pageControls = !shown?.whole || showSource;
   const navigation = data && (
     <div className="actions output-navigation" aria-busy={range.pending}>
       {shown?.table && (
@@ -126,7 +159,7 @@ export function NativeDocument({
           {shown.table.total}
         </span>
       )}
-      {data.previousByte !== null && (
+      {pageControls && data.previousByte !== null && (
         <>
           <button type="button" className="quiet-button" onClick={() => move(0)}>
             Start of output
@@ -143,7 +176,7 @@ export function NativeDocument({
             Read table rows
           </button>
         )}
-      {data.nextByte !== null && (
+      {pageControls && data.nextByte !== null && (
         <button type="button" className="quiet-button" onClick={() => move(data.nextByte!)}>
           More output
         </button>
@@ -160,7 +193,7 @@ export function NativeDocument({
           {showSource ? "Read formatted output" : "Read source"}
         </button>
       )}
-      {(data.previousByte !== null || data.nextByte !== null) && (
+      {pageControls && (data.previousByte !== null || data.nextByte !== null) && (
         <form
           className="actions"
           onSubmit={(event) => {
@@ -193,6 +226,9 @@ export function NativeDocument({
       <div ref={output} tabIndex={-1} aria-label="Native output">
         {!shown && range.pending && <Loading label="Reading native output…" />}
         {range.error && <Notice retry={range.retry}>{range.error}</Notice>}
+        {shown?.formatUnavailable && (
+          <Notice retry={range.retry}>Formatted output is unavailable.</Notice>
+        )}
         {shown &&
           (!showSource && shown.tree ? (
             <MarkdownContent tree={shown.tree} display={shown.display} />

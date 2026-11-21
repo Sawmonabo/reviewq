@@ -3684,6 +3684,12 @@
         },
         {
           "properties": {
+            "canonical": {
+              "type": [
+                "boolean",
+                "null"
+              ]
+            },
             "display": {
               "anyOf": [
                 {
@@ -8450,14 +8456,72 @@
         },
         "sha256": {
           "$ref": "#/definitions/ReportHashDto"
+        },
+        "tableEnd": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SafeCountDto"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "tableStart": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SafeCountDto"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "required": [
         "receiptId",
         "sha256",
+        "tableStart",
+        "tableEnd",
         "range"
       ],
       "type": "object"
+    },
+    "ReportTableContent": {
+      "oneOf": [
+        {
+          "properties": {
+            "kind": {
+              "const": "table",
+              "type": "string"
+            },
+            "page": {
+              "$ref": "#/definitions/TablePage"
+            }
+          },
+          "required": [
+            "kind",
+            "page"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "kind": {
+              "const": "markdown",
+              "type": "string"
+            },
+            "markdown": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "markdown"
+          ],
+          "type": "object"
+        }
+      ]
     },
     "ReportTableRange": {
       "properties": {
@@ -8466,6 +8530,9 @@
         },
         "byteStart": {
           "$ref": "#/definitions/SafeCountDto"
+        },
+        "content": {
+          "$ref": "#/definitions/ReportTableContent"
         },
         "nextByte": {
           "anyOf": [
@@ -8489,9 +8556,6 @@
         },
         "scalarStart": {
           "$ref": "#/definitions/SafeCountDto"
-        },
-        "table": {
-          "$ref": "#/definitions/TablePage"
         }
       },
       "required": [
@@ -8500,7 +8564,7 @@
         "scalarStart",
         "previousByte",
         "nextByte",
-        "table"
+        "content"
       ],
       "type": "object"
     },

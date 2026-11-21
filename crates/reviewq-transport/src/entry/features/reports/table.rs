@@ -8,7 +8,7 @@ use reviewq_app::reports::ReportReference;
 use reviewq_domain::identity::RunId;
 use reviewq_protocol::ResourceIdDto;
 use reviewq_protocol::reports::{
-    ReportHashDto, ReportTable, ReportTableRange, ReportTableResponse,
+    ReportHashDto, ReportTable, ReportTableContent, ReportTableRange, ReportTableResponse,
 };
 use serde::Deserialize;
 
@@ -55,6 +55,8 @@ pub(in crate::entry) async fn read(
     }
     let mut cursor = authorized.cursor;
     let mut range = None;
+    let mut table_start = None;
+    let mut table_end = None;
     if report.stats.complete
         && let Some(index) = entry
             .tables
@@ -74,25 +76,46 @@ pub(in crate::entry) async fn read(
             )
             .await?
     {
-        let group = index.group(query.byte_offset);
+        table_start = Some(count(index.start)?);
+        table_end = Some(count(index.end)?);
+        let context = index.report_context(query.byte_offset, report.stats.byte_length);
+        let group = context
+            .is_none()
+            .then(|| index.report_group(query.byte_offset));
+        let (bytes, previous, next) = if let Some(context) = context {
+            (context.bytes, context.previous, context.next)
+        } else {
+            let group = group.as_ref().ok_or(AppError::Internal)?;
+            (group.bytes.clone(), group.previous, group.next)
+        };
         let source = entry
             .store
-            .read_report_bytes(actor, run, reference.clone(), group.bytes.clone())
+            .read_report_bytes(actor, run, reference.clone(), bytes.clone())
             .await?;
         cursor = source.cursor;
+        let content = match group {
+            Some(group) => ReportTableContent::Table {
+                page: project_table(index.page(&group, source.value.markdown))?,
+            },
+            None => ReportTableContent::Markdown {
+                markdown: source.value.markdown,
+            },
+        };
         range = Some(ReportTableRange {
-            byte_start: count(group.bytes.start)?,
-            byte_end: count(group.bytes.end)?,
+            byte_start: count(bytes.start)?,
+            byte_end: count(bytes.end)?,
             scalar_start: count(source.value.scalar_start)?,
-            previous_byte: group.previous.map(count).transpose()?,
-            next_byte: group.next.map(count).transpose()?,
-            table: project_table(index.page(&group, source.value.markdown))?,
+            previous_byte: previous.map(count).transpose()?,
+            next_byte: next.map(count).transpose()?,
+            content,
         });
     }
     Ok(Json(success(
         ReportTable {
             receipt_id: ResourceIdDto::new(receipt).ok_or(AppError::Internal)?,
             sha256: ReportHashDto::new(reference.hash.as_str()).ok_or(AppError::Internal)?,
+            table_start,
+            table_end,
             range,
         },
         cursor,

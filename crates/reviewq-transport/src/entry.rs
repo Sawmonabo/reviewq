@@ -386,6 +386,10 @@ pub fn router(
             get(history::document),
         )
         .route(
+            "/runs/{run_id}/sessions/{session_key}/history/content/markdown",
+            get(history::markdown),
+        )
+        .route(
             "/runs/{run_id}/sessions/{session_key}/messages",
             get(messages::list).post(messages::send),
         )

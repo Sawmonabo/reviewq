@@ -38,6 +38,7 @@ export type HistoryDocumentResult =
       [k: string]: unknown;
     }
   | {
+      canonical?: boolean | null;
       display?: DocumentDisplay | null;
       markdown: HistoryText;
       reason: DisplayFallback;

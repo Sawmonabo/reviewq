@@ -59,7 +59,7 @@ const schema382 = {
   enum: ["approve", "request_changes", "blocked", "not_specified"],
   type: "string",
 };
-const schema397 = {
+const schema400 = {
   properties: {
     delivery: {
       anyOf: [{ $ref: "#/definitions/ReportDelivery" }, { type: "null" }],
@@ -75,21 +75,6 @@ const schema397 = {
   required: ["report", "delivery"],
   type: "object",
 };
-const schema405 = {
-  properties: {
-    byteEnd: { $ref: "#/definitions/SafeCountDto" },
-    byteStart: { $ref: "#/definitions/SafeCountDto" },
-    headingLevel: {
-      anyOf: [{ $ref: "#/definitions/SafeCountDto" }, { type: "null" }],
-    },
-    headingMarkdown: { type: ["string", "null"] },
-    kind: { $ref: "#/definitions/DisplayBlockKind" },
-    scalarStart: { $ref: "#/definitions/SafeCountDto" },
-    utf16Start: { $ref: "#/definitions/SafeCountDto" },
-  },
-  required: ["byteStart", "byteEnd", "scalarStart", "utf16Start", "kind"],
-  type: "object",
-};
 export {
   schema366,
   schema369,
@@ -98,6 +83,5 @@ export {
   schema380,
   schema381,
   schema382,
-  schema397,
-  schema405,
+  schema400,
 };

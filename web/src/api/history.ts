@@ -1,4 +1,5 @@
-import { queryString, read, write } from "./client";
+import { decodeUtf8, readBoundedBytes } from "./bounded-bytes";
+import { queryString, read, request, write } from "./client";
 import { drawingFontHeaders } from "./drawing-font";
 import { validateTablePage } from "./table-page";
 import type {
@@ -123,6 +124,29 @@ export async function historyDocument(
     throw new Error("The native source range is incomplete.");
   }
   return result;
+}
+
+export async function canonicalHistoryMarkdown(
+  target: SessionAddress,
+  ref: string,
+  expected: { readonly sha256: string; readonly byteLength: number },
+  signal: AbortSignal,
+) {
+  if (expected.byteLength < 1 || expected.byteLength > 1024 * 1024)
+    throw new Error("The native output exceeds the formatting limit.");
+  const response = await request(
+    `${path(target)}/history/content/markdown${queryString({ ref, sha256: expected.sha256 })}`,
+    { signal },
+  );
+  if (
+    response.headers.get("etag") !== `"${expected.sha256}"` ||
+    response.headers.get("content-type")?.split(";", 1)[0] !== "text/markdown"
+  )
+    throw new Error("The native output source changed. Reopen the entry.");
+  const bytes = await readBoundedBytes(response, expected.byteLength);
+  if (bytes.length !== expected.byteLength)
+    throw new Error("The requested native output was incomplete.");
+  return decodeUtf8(bytes);
 }
 
 export async function historyResult(target: SessionAddress, signal: AbortSignal) {
