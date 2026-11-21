@@ -1,22 +1,12 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import remarkGfm from "remark-gfm";
-import remarkParse from "remark-parse";
-import { unified } from "unified";
 import type { PatchDiscussion, PatchDiscussionNote } from "../../../api/generated/contracts";
+import { projectMarkdownText } from "../../../components/markdown/parse-markdown";
 import { ChangesThread } from "./ChangesThread";
 
 type CompactNotes = "all" | ReadonlySet<string>;
 type ReadingAnchor = { viewport: Element; target: Element | Range; top: number };
-type MarkdownNode = {
-  readonly type: string;
-  readonly value?: string | undefined;
-  readonly alt?: string | null | undefined;
-  readonly children?: readonly MarkdownNode[] | undefined;
-};
 
-const markdown = unified().use(remarkParse).use(remarkGfm);
 const previews = new WeakMap<PatchDiscussionNote, string>();
-const MARKDOWN_SYNTAX = /[*_`~[<>&\\|#]|^(?:[ \t]*[+-]|\d+[.)])[ \t]/m;
 
 export function OtherDiscussions({ threads }: { readonly threads: readonly PatchDiscussion[] }) {
   const group = useRef<HTMLDivElement>(null);
@@ -140,55 +130,9 @@ function readingAnchor(
 }
 
 function discussionText(note: PatchDiscussionNote): string {
-  // Ordinary unformatted notes already have the exact searchable text.
-  if (!MARKDOWN_SYNTAX.test(note.body)) return note.body;
   const retained = previews.get(note);
   if (retained !== undefined) return retained;
-  // Read the semantic text from the existing Markdown parser without building the rich HTML view.
-  let text = note.body;
-  try {
-    text = markdownText(markdown.parse(note.body));
-  } catch (error) {
-    // The original note is still searchable when deeply nested Markdown exceeds the renderer limit.
-    if (!(error instanceof RangeError)) throw error;
-  }
+  const text = projectMarkdownText(note.body);
   previews.set(note, text);
   return text;
-}
-
-function markdownText(node: MarkdownNode, depth = 0): string {
-  if (depth > 128) throw new RangeError("Discussion formatting depth");
-  switch (node.type) {
-    case "definition":
-      return "";
-    case "image":
-    case "imageReference":
-      return node.alt || "Attachment";
-    case "break":
-      return "\n";
-    case "html": {
-      // Template contents remain inert and never enter the page.
-      const template = document.createElement("template");
-      template.innerHTML = node.value ?? "";
-      for (const hidden of template.content.querySelectorAll("script, style, template"))
-        hidden.remove();
-      return template.content.textContent ?? "";
-    }
-    default: {
-      const separator =
-        node.type === "tableRow"
-          ? "\t"
-          : ["root", "list", "listItem", "blockquote", "table"].includes(node.type)
-            ? "\n"
-            : "";
-      return (
-        node.value ??
-        node.children
-          ?.map((child) => markdownText(child, depth + 1))
-          .filter(Boolean)
-          .join(separator) ??
-        ""
-      );
-    }
-  }
 }

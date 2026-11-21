@@ -3,6 +3,8 @@ import { MarkdownContent } from "../../components/markdown/MarkdownContent";
 import type { PatchDiscussion, PatchDiscussionNote } from "../../api/generated/contracts";
 import { formatActivityTime, safeUrl } from "../../lib/presentation";
 
+const CONFIGURED_REVIEWER = "Configured reviewer";
+
 export function DiscussionThread({
   thread,
   outside = false,
@@ -101,6 +103,7 @@ export function DiscussionThread({
                 >
                   <div className="meta">
                     {note.author}
+                    {note.ours && ` · ${CONFIGURED_REVIEWER}`}
                     {note.createdAt && ` · ${formatActivityTime(note.createdAt)}`}
                   </div>
                   {preview}
@@ -119,7 +122,7 @@ export function DiscussionThread({
                     {note.author.slice(0, 2).toUpperCase()}
                   </span>
                   <strong title={note.author}>{note.author}</strong>
-                  {note.ours && <span className="meta">Configured reviewer</span>}
+                  {note.ours && <span className="meta">{CONFIGURED_REVIEWER}</span>}
                   {href ? (
                     <a
                       className="meta"
