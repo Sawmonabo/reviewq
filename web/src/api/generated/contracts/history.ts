@@ -12,6 +12,7 @@ import type {
   RunIdDto,
   SafeCountDto,
   SessionKeyDto,
+  TablePage,
   UtcTimestampDto,
 } from "./common.js";
 
@@ -29,6 +30,11 @@ export type HistoryDocumentResult =
        */
       blocks: [DisplayBlock, ...DisplayBlock[]];
       state: "ready";
+      [k: string]: unknown;
+    }
+  | {
+      page: TablePage;
+      state: "table";
       [k: string]: unknown;
     }
   | {
@@ -168,6 +174,7 @@ export interface HistoryDocument {
   runId: RunIdDto;
   sessionKey: SessionKeyDto;
   sha256: ReportHashDto;
+  tableStart?: SafeCountDto | null;
   [k: string]: unknown;
 }
 

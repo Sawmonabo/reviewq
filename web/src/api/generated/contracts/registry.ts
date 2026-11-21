@@ -83,6 +83,7 @@ import type {
   ReportQuoteResolveRequest,
   ReportQuoteResolveResponse,
   ReportSectionResponse,
+  ReportTableResponse,
   ReportViewResponse,
   ReportViewedRequest,
   ReportViewedResponse,
@@ -221,6 +222,7 @@ export interface Contracts {
   ReportHistoryResponse: ReportHistoryResponse;
   ReportQuoteResolveResponse: ReportQuoteResolveResponse;
   ReportSectionResponse: ReportSectionResponse;
+  ReportTableResponse: ReportTableResponse;
   ReportViewResponse: ReportViewResponse;
   ReportViewedResponse: ReportViewedResponse;
   ReportWindowResponse: ReportWindowResponse;

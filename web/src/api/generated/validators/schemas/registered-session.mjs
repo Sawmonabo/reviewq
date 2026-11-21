@@ -2,9 +2,9 @@
 import { func0 } from "../runtime.mjs";
 import { validate25 } from "./checkpoint-id-dto.mjs";
 import { validate71 } from "./host-provider-dto.mjs";
-import { schema346 } from "../metadata-8.mjs";
+import { schema348 } from "../metadata-8.mjs";
 import { validate114 } from "./review-id-dto.mjs";
-function validate1175(
+function validate1183(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -34,7 +34,7 @@ function validate1175(
           !func0.call(data, "reportGuidance")) &&
           (missing0 = "reportGuidance"))
       ) {
-        validate1175.errors = [
+        validate1183.errors = [
           {
             instancePath,
             schemaPath: "#/required",
@@ -47,7 +47,7 @@ function validate1175(
         if (data.cwd !== undefined && func0.call(data, "cwd")) {
           const _errs1 = errors;
           if (typeof data.cwd !== "string") {
-            validate1175.errors = [
+            validate1183.errors = [
               {
                 instancePath: instancePath + "/cwd",
                 schemaPath: "#/properties/cwd/type",
@@ -134,7 +134,7 @@ function validate1175(
                 ) {
                   const _errs6 = errors;
                   if (typeof data.reportGuidance !== "string") {
-                    validate1175.errors = [
+                    validate1183.errors = [
                       {
                         instancePath: instancePath + "/reportGuidance",
                         schemaPath: "#/properties/reportGuidance/type",
@@ -156,13 +156,13 @@ function validate1175(
                     let data5 = data.reviewCheckout;
                     const _errs8 = errors;
                     if (typeof data5 !== "string" && data5 !== null) {
-                      validate1175.errors = [
+                      validate1183.errors = [
                         {
                           instancePath: instancePath + "/reviewCheckout",
                           schemaPath: "#/properties/reviewCheckout/type",
                           keyword: "type",
                           params: {
-                            type: schema346.properties.reviewCheckout.type,
+                            type: schema348.properties.reviewCheckout.type,
                           },
                         },
                       ];
@@ -229,7 +229,7 @@ function validate1175(
         }
       }
     } else {
-      validate1175.errors = [
+      validate1183.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -240,7 +240,7 @@ function validate1175(
       return false;
     }
   }
-  validate1175.errors = vErrors;
+  validate1183.errors = vErrors;
   return errors === 0;
 }
-export { validate1175 };
+export { validate1183 };

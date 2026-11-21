@@ -150,6 +150,7 @@ export function useInlineProse(
                 controller.signal,
               )
             : undefined;
+          if (prepared === "paged") return undefined;
           const data =
             prepared?.content ??
             (await historyContent(
@@ -163,8 +164,13 @@ export function useInlineProse(
           return { data, window: prepared?.window };
         };
         void load().then(
-          ({ data, window: settled }) => {
+          (loaded) => {
             if (controller.signal.aborted) return;
+            if (!loaded) {
+              save(null);
+              return;
+            }
+            const { data, window: settled } = loaded;
             const bytes = encoder.encode(data.text).length;
             if (
               data.offset !== 0 ||

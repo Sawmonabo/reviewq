@@ -1,5 +1,6 @@
 import { queryString, read, write } from "./client";
 import { drawingFontHeaders } from "./drawing-font";
+import { validateTablePage } from "./table-page";
 import type {
   HistoryContent,
   HistoryNavigation,
@@ -96,6 +97,7 @@ export async function historyDocument(
     byteEnd > byteLength ||
     byteEnd < byteStart ||
     byteEnd - byteStart > MAX_DOCUMENT_WINDOW_BYTES ||
+    (data.tableStart != null && data.tableStart >= byteLength) ||
     !(byteStart <= position.byteOffset && position.byteOffset <= byteEnd) ||
     (nextByte !== null && (nextByte !== byteEnd || nextByte >= byteLength)) ||
     (previousByte !== null && previousByte >= byteStart) ||
@@ -115,6 +117,8 @@ export async function historyDocument(
       byte = block.byteEnd;
     }
     if (byte !== byteEnd) throw new Error("The native document range is incomplete.");
+  } else if (data.result.state === "table") {
+    validateTablePage(data.result.page, byteEnd - byteStart);
   } else if (length.encode(data.result.markdown).length !== byteEnd - byteStart) {
     throw new Error("The native source range is incomplete.");
   }

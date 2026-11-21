@@ -6,8 +6,8 @@ import { validate155 } from "./disposition.mjs";
 import { validate25 } from "./checkpoint-id-dto.mjs";
 import { validate270 } from "./focused-activity.mjs";
 import { validate272 } from "./focused-launch.mjs";
-import { schema328 } from "../metadata-8.mjs";
-function validate1089(
+import { schema330 } from "../metadata-8.mjs";
+function validate1097(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -69,7 +69,7 @@ function validate1089(
             vErrors.push(err1);
           }
           errors++;
-          validate1089.errors = vErrors;
+          validate1097.errors = vErrors;
           return false;
         } else {
           errors = _errs2;
@@ -140,7 +140,7 @@ function validate1089(
               vErrors.push(err3);
             }
             errors++;
-            validate1089.errors = vErrors;
+            validate1097.errors = vErrors;
             return false;
           } else {
             errors = _errs7;
@@ -214,7 +214,7 @@ function validate1089(
                 vErrors.push(err5);
               }
               errors++;
-              validate1089.errors = vErrors;
+              validate1097.errors = vErrors;
               return false;
             } else {
               errors = _errs12;
@@ -234,7 +234,7 @@ function validate1089(
             if (data.draft !== undefined && func0.call(data, "draft")) {
               const _errs16 = errors;
               if (typeof data.draft !== "boolean") {
-                validate1089.errors = [
+                validate1097.errors = [
                   {
                     instancePath: instancePath + "/draft",
                     schemaPath: "#/properties/draft/type",
@@ -306,7 +306,7 @@ function validate1089(
                     vErrors.push(err7);
                   }
                   errors++;
-                  validate1089.errors = vErrors;
+                  validate1097.errors = vErrors;
                   return false;
                 } else {
                   errors = _errs19;
@@ -380,7 +380,7 @@ function validate1089(
                       vErrors.push(err9);
                     }
                     errors++;
-                    validate1089.errors = vErrors;
+                    validate1097.errors = vErrors;
                     return false;
                   } else {
                     errors = _errs24;
@@ -454,7 +454,7 @@ function validate1089(
                         vErrors.push(err11);
                       }
                       errors++;
-                      validate1089.errors = vErrors;
+                      validate1097.errors = vErrors;
                       return false;
                     } else {
                       errors = _errs29;
@@ -478,13 +478,13 @@ function validate1089(
                       let data7 = data.focusedLeadName;
                       const _errs33 = errors;
                       if (typeof data7 !== "string" && data7 !== null) {
-                        validate1089.errors = [
+                        validate1097.errors = [
                           {
                             instancePath: instancePath + "/focusedLeadName",
                             schemaPath: "#/properties/focusedLeadName/type",
                             keyword: "type",
                             params: {
-                              type: schema328.properties.focusedLeadName.type,
+                              type: schema330.properties.focusedLeadName.type,
                             },
                           },
                         ];
@@ -502,7 +502,7 @@ function validate1089(
         }
       }
     } else {
-      validate1089.errors = [
+      validate1097.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -513,7 +513,7 @@ function validate1089(
       return false;
     }
   }
-  validate1089.errors = vErrors;
+  validate1097.errors = vErrors;
   return errors === 0;
 }
-export { validate1089 };
+export { validate1097 };

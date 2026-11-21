@@ -1,5 +1,6 @@
 import { queryString, read, write } from "./client";
 import { drawingFontHeaders } from "./drawing-font";
+import { validateTablePage } from "./table-page";
 import type {
   ReportDispositionRequest,
   ReportFeedbackRequest,
@@ -14,6 +15,7 @@ import {
   isReportHistoryResponse,
   isReportQuoteResolveResponse,
   isReportSectionResponse,
+  isReportTableResponse,
   isReportViewResponse,
   isReportViewedResponse,
   isReportWindowResponse,
@@ -66,6 +68,35 @@ export async function reportWindow(
     returned.totalCodePoints !== report.totalCodePoints
   )
     throw new Error("The displayed report window changed.");
+  return result;
+}
+
+export async function reportTable(
+  runId: string,
+  report: ReportSummary,
+  byteOffset: number,
+  signal: AbortSignal,
+) {
+  const result = await read(
+    `${versionPath(runId, report.receiptId)}/table${queryString({ sha256: report.sha256, byteOffset })}`,
+    isReportTableResponse,
+    signal,
+    256 * 1024,
+  );
+  if (result.data.receiptId !== report.receiptId || result.data.sha256 !== report.sha256)
+    throw new Error("The displayed report version changed.");
+  const range = result.data.range;
+  if (range) {
+    if (
+      range.byteStart >= range.byteEnd ||
+      range.byteEnd > report.byteLength ||
+      range.scalarStart > report.totalCodePoints ||
+      (range.previousByte !== null && range.previousByte >= range.byteStart) ||
+      (range.nextByte !== null && range.nextByte !== range.byteEnd)
+    )
+      throw new Error("The table range does not match the report.");
+    validateTablePage(range.table, range.byteEnd - range.byteStart);
+  }
   return result;
 }
 

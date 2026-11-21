@@ -3,9 +3,9 @@ import { func0 } from "../runtime.mjs";
 import { validate25 } from "./checkpoint-id-dto.mjs";
 import { validate48 } from "./history-cursor-dto.mjs";
 import { validate127 } from "./safe-count-dto.mjs";
-import { validate656 } from "./history-tool-state.mjs";
+import { validate664 } from "./history-tool-state.mjs";
 import { validate557 } from "./history-text.mjs";
-function validate652(
+function validate660(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -30,7 +30,7 @@ function validate652(
         ((data.contentRef === undefined || !func0.call(data, "contentRef")) &&
           (missing0 = "contentRef"))
       ) {
-        validate652.errors = [
+        validate660.errors = [
           {
             instancePath,
             schemaPath: "#/required",
@@ -115,7 +115,7 @@ function validate652(
                 vErrors.push(err1);
               }
               errors++;
-              validate652.errors = vErrors;
+              validate660.errors = vErrors;
               return false;
             } else {
               errors = _errs3;
@@ -136,7 +136,7 @@ function validate652(
               let data2 = data.kind;
               const _errs7 = errors;
               if (typeof data2 !== "string") {
-                validate652.errors = [
+                validate660.errors = [
                   {
                     instancePath: instancePath + "/kind",
                     schemaPath: "#/properties/kind/type",
@@ -147,7 +147,7 @@ function validate652(
                 return false;
               }
               if ("tool_call" !== data2) {
-                validate652.errors = [
+                validate660.errors = [
                   {
                     instancePath: instancePath + "/kind",
                     schemaPath: "#/properties/kind/const",
@@ -165,7 +165,7 @@ function validate652(
               if (data.label !== undefined && func0.call(data, "label")) {
                 const _errs9 = errors;
                 if (typeof data.label !== "string") {
-                  validate652.errors = [
+                  validate660.errors = [
                     {
                       instancePath: instancePath + "/label",
                       schemaPath: "#/properties/label/type",
@@ -183,7 +183,7 @@ function validate652(
                 if (data.name !== undefined && func0.call(data, "name")) {
                   const _errs11 = errors;
                   if (typeof data.name !== "string") {
-                    validate652.errors = [
+                    validate660.errors = [
                       {
                         instancePath: instancePath + "/name",
                         schemaPath: "#/properties/name/type",
@@ -225,7 +225,7 @@ function validate652(
                     if (data.state !== undefined && func0.call(data, "state")) {
                       const _errs14 = errors;
                       if (
-                        !validate656(data.state, {
+                        !validate664(data.state, {
                           instancePath: instancePath + "/state",
                           parentData: data,
                           parentDataProperty: "state",
@@ -234,8 +234,8 @@ function validate652(
                       ) {
                         vErrors =
                           vErrors === null
-                            ? validate656.errors
-                            : vErrors.concat(validate656.errors);
+                            ? validate664.errors
+                            : vErrors.concat(validate664.errors);
                         errors = vErrors.length;
                       }
                       var valid0 = _errs14 === errors;
@@ -272,7 +272,7 @@ function validate652(
         }
       }
     } else {
-      validate652.errors = [
+      validate660.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -283,7 +283,7 @@ function validate652(
       return false;
     }
   }
-  validate652.errors = vErrors;
+  validate660.errors = vErrors;
   return errors === 0;
 }
-export { validate652 };
+export { validate660 };

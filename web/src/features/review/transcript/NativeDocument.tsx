@@ -3,6 +3,7 @@ import { historyDocument } from "../../../api/history";
 import type { SessionAddress } from "../../../api/history";
 import { MarkdownContent } from "../../../components/markdown/MarkdownContent";
 import { Loading, Notice } from "../../../components/PanelState";
+import { useReadingInset } from "../../../hooks/useReadingInset";
 import { useResource } from "../../../hooks/useResource";
 import { documentDisplay, documentSource, documentTree, unavailableWindow } from "./document";
 
@@ -26,6 +27,7 @@ export function NativeDocument({
   const [blocked, setBlocked] = useState(false);
   const [jump, setJump] = useState("");
   const output = useRef<HTMLDivElement>(null);
+  const wanted = useRef(0);
   const range = useResource(
     `document:${target.runId}:${target.sessionKey}:${generation}:${reference}:${position.byteOffset}`,
     async (signal) => {
@@ -38,13 +40,28 @@ export function NativeDocument({
           position,
           signal,
         );
-        if (data.byteLength <= 65_536 && data.nextByte !== null) return { data: null, cursor };
+        if (data.result.state === "ready" && data.byteLength <= 65_536 && data.nextByte !== null)
+          return { data: null, cursor };
         const source = documentSource(data);
         const display = documentDisplay(data);
         const tree = documentTree(data, source);
         const { result, ...range } = data;
         return {
-          data: { range, source, display, tree, sourceOnly: result.state === "source" },
+          data: {
+            range,
+            source,
+            display,
+            tree,
+            sourceOnly: result.state === "source",
+            table:
+              result.state === "table"
+                ? {
+                    first: result.page.firstRow,
+                    count: result.page.rowCount,
+                    total: result.page.totalRows,
+                  }
+                : undefined,
+          },
           cursor,
         };
       } catch (error) {
@@ -56,21 +73,29 @@ export function NativeDocument({
     },
   );
   const [shown, setShown] = useState(range.data);
+  const remember = useReadingInset(output, shown);
   useEffect(() => {
     const next = range.data;
     if (next === undefined) return;
     const events = new AbortController();
     function commit() {
-      if (selectionIn(output.current)) return;
+      if (
+        events.signal.aborted ||
+        wanted.current !== position.byteOffset ||
+        selectionIn(output.current)
+      )
+        return;
       const active = document.activeElement;
       if (active && active !== output.current && output.current?.contains(active)) return;
+      remember(output.current);
       setShown(next);
     }
     document.addEventListener("selectionchange", commit, { signal: events.signal });
     document.addEventListener("focusin", commit, { signal: events.signal });
+    document.addEventListener("focusout", () => queueMicrotask(commit), { signal: events.signal });
     commit();
     return () => events.abort();
-  }, [range.data]);
+  }, [position.byteOffset, range.data, remember]);
   if (shown === null) return fallback;
   const data = shown?.range;
 
@@ -82,12 +107,83 @@ export function NativeDocument({
 
   function move(offset: number) {
     if (!data || !preserveSelection()) return;
+    wanted.current = offset;
     output.current?.focus({ preventScroll: true });
     setPosition({ byteOffset: offset, sha256: data.sha256 });
   }
 
+  const navigation = data && (
+    <div className="actions output-navigation" aria-busy={range.pending}>
+      {shown?.table && (
+        <span className="meta">
+          Rows {shown.table.first + 1}–{shown.table.first + shown.table.count} of{" "}
+          {shown.table.total}
+        </span>
+      )}
+      {data.previousByte !== null && (
+        <>
+          <button type="button" className="quiet-button" onClick={() => move(0)}>
+            Start of output
+          </button>
+          <button type="button" className="quiet-button" onClick={() => move(data.previousByte!)}>
+            Earlier output
+          </button>
+        </>
+      )}
+      {data.tableStart != null &&
+        data.tableStart >= data.byteEnd &&
+        data.tableStart !== data.nextByte && (
+          <button type="button" className="quiet-button" onClick={() => move(data.tableStart!)}>
+            Read table rows
+          </button>
+        )}
+      {data.nextByte !== null && (
+        <button type="button" className="quiet-button" onClick={() => move(data.nextByte!)}>
+          More output
+        </button>
+      )}
+      {shown?.tree && (
+        <button
+          type="button"
+          className="quiet-button"
+          aria-pressed={showSource}
+          onClick={() => {
+            if (preserveSelection()) setShowSource(!showSource);
+          }}
+        >
+          {showSource ? "Read formatted output" : "Read source"}
+        </button>
+      )}
+      {(data.previousByte !== null || data.nextByte !== null) && (
+        <form
+          className="actions"
+          onSubmit={(event) => {
+            event.preventDefault();
+            const offset = Number(jump);
+            if (jump && Number.isSafeInteger(offset) && offset >= 0 && offset <= data.byteLength)
+              move(offset);
+          }}
+        >
+          <label>
+            Source byte
+            <input
+              type="number"
+              min={0}
+              max={data.byteLength}
+              value={jump}
+              onChange={(event) => setJump(event.currentTarget.value)}
+            />
+          </label>
+          <button type="submit" className="quiet-button">
+            Go
+          </button>
+        </form>
+      )}
+    </div>
+  );
   return (
     <div className="output-reader stack">
+      {shown?.table && navigation}
       <div ref={output} tabIndex={-1} aria-label="Native output">
         {!shown && range.pending && <Loading label="Reading native output…" />}
         {range.error && <Notice retry={range.retry}>{range.error}</Notice>}
@@ -99,78 +195,14 @@ export function NativeDocument({
             data &&
             data.byteStart === 0 &&
             data.byteEnd === data.byteLength ? (
-            <MarkdownContent source={shown.source} />
+            <MarkdownContent source={shown.source} formattingLimit />
           ) : (
             <pre className="tool-output-line" aria-label="Native output text">
               {shown.source}
             </pre>
           ))}
       </div>
-      {data && (
-        <div className="actions output-navigation">
-          {data.previousByte !== null && (
-            <>
-              <button type="button" className="quiet-button" onClick={() => move(0)}>
-                Start of output
-              </button>
-              <button
-                type="button"
-                className="quiet-button"
-                onClick={() => move(data.previousByte!)}
-              >
-                Earlier output
-              </button>
-            </>
-          )}
-          {data.nextByte !== null && (
-            <button type="button" className="quiet-button" onClick={() => move(data.nextByte!)}>
-              More output
-            </button>
-          )}
-          {shown?.tree && (
-            <button
-              type="button"
-              className="quiet-button"
-              aria-pressed={showSource}
-              onClick={() => {
-                if (preserveSelection()) setShowSource(!showSource);
-              }}
-            >
-              {showSource ? "Read formatted output" : "Read source"}
-            </button>
-          )}
-          {(data.previousByte !== null || data.nextByte !== null) && (
-            <form
-              className="actions"
-              onSubmit={(event) => {
-                event.preventDefault();
-                const offset = Number(jump);
-                if (
-                  jump &&
-                  Number.isSafeInteger(offset) &&
-                  offset >= 0 &&
-                  offset <= data.byteLength
-                )
-                  move(offset);
-              }}
-            >
-              <label>
-                Source byte
-                <input
-                  type="number"
-                  min={0}
-                  max={data.byteLength}
-                  value={jump}
-                  onChange={(event) => setJump(event.currentTarget.value)}
-                />
-              </label>
-              <button type="submit" className="quiet-button">
-                Go
-              </button>
-            </form>
-          )}
-        </div>
-      )}
+      {!shown?.table && navigation}
       {blocked && (
         <Notice>
           Clear the active text selection to change output ranges.{" "}

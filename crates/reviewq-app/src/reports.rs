@@ -253,6 +253,11 @@ pub enum QuoteResolution {
     Unique { offset: u64, length: u64 },
 }
 
+pub struct ReportSourceRange {
+    pub markdown: String,
+    pub scalar_start: u64,
+}
+
 pub trait ReportStore: Send + Sync {
     fn read_report(
         &self,
@@ -296,6 +301,13 @@ pub trait ReportStore: Send + Sync {
         offset: u64,
         characters: u32,
     ) -> AppFuture<'_, Snapshot<ReportSection>>;
+    fn read_report_bytes(
+        &self,
+        actor: Actor,
+        run: RunId,
+        report: ReportReference,
+        bytes: std::ops::Range<u64>,
+    ) -> AppFuture<'_, Snapshot<ReportSourceRange>>;
     fn read_report_chunk(
         &self,
         actor: Actor,

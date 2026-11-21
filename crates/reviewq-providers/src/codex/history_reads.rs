@@ -137,7 +137,7 @@ impl Codex {
             if cache.as_ref().is_none_or(|cached| {
                 cached.hash != hash || cached.touched.elapsed() >= Duration::from_secs(30)
             }) {
-                let mut pages = SourcePages::default();
+                let mut pages = SourcePages::for_bytes(text.len() as u64);
                 pages.push(&text);
                 *cache = Some(PreparedDocument {
                     index: Index::new(

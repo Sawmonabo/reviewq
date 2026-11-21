@@ -5,6 +5,7 @@ use std::ops::Range;
 use reviewq_domain::identity::ReportHash;
 
 use crate::access::AppError;
+use crate::reading::table::paged::{self, TablePage};
 use crate::reports::{
     ArtifactStats, DisplayFallback, DisplayIndex, DisplayLayout, DisplayWindowBlock,
     build_display_index,
@@ -22,6 +23,7 @@ pub struct Query {
 pub struct Window {
     pub hash: ReportHash,
     pub byte_length: u64,
+    pub table_start: Option<u64>,
     pub bytes: Range<u64>,
     pub previous: Option<u64>,
     pub next: Option<u64>,
@@ -30,6 +32,7 @@ pub struct Window {
 
 pub enum WindowResult {
     Ready(Vec<DisplayWindowBlock>),
+    Table(TablePage),
     Source {
         reason: DisplayFallback,
         markdown: String,
@@ -42,6 +45,7 @@ pub struct Index {
     layout: DisplayIndex,
     pages: Vec<Range<usize>>,
     source: SourcePages,
+    table: Option<paged::Index>,
 }
 
 struct Bounds {
@@ -54,9 +58,19 @@ struct Bounds {
 pub struct SourcePages {
     bytes: u64,
     breaks: Vec<u64>,
+    table: Option<paged::Builder>,
 }
 
 impl SourcePages {
+    pub fn for_bytes(bytes: u64) -> Self {
+        Self {
+            table: (MAX_INDEX_BYTES as u64 + 1..=paged::MAX_INDEXED_BYTES)
+                .contains(&bytes)
+                .then(paged::Builder::default),
+            ..Self::default()
+        }
+    }
+
     pub fn push(&mut self, text: &str) {
         let end = self.bytes + text.len() as u64;
         // Start each page on a UTF-8 scalar and reserve the maximum retreat
@@ -67,6 +81,9 @@ impl SourcePages {
             self.breaks.push(self.bytes + offset as u64);
         }
         self.bytes = end;
+        if let Some(table) = &mut self.table {
+            table.push(text);
+        }
     }
 
     fn page(&self, offset: u64) -> Bounds {
@@ -90,10 +107,11 @@ impl SourcePages {
 }
 
 impl Index {
-    pub fn new(hash: ReportHash, source: SourcePages, text: Option<&str>) -> Self {
+    pub fn new(hash: ReportHash, mut source: SourcePages, text: Option<&str>) -> Self {
         let bytes = source.bytes;
+        let over_envelope = text.is_some_and(|text| !admitted(text));
         let mut layout = text
-            .filter(|text| !text.is_empty() && admitted(text))
+            .filter(|text| !text.is_empty() && !over_envelope)
             .map_or(
                 DisplayIndex::Fallback(DisplayFallback::DocumentBudget),
                 build_display_index,
@@ -119,12 +137,35 @@ impl Index {
                 start = end;
             }
         }
+        let table = source
+            .table
+            .take()
+            .and_then(paged::Builder::finish)
+            .or_else(|| {
+                let text = text?;
+                if !over_envelope
+                    && !matches!(
+                        &layout,
+                        DisplayIndex::Fallback(
+                            DisplayFallback::LayoutBudget | DisplayFallback::ParserBudget
+                        )
+                    )
+                {
+                    return None;
+                }
+                let mut table = paged::Builder::default();
+                table.push(text);
+                table
+                    .finish()
+                    .filter(|index| over_envelope || index.exceeds_node_budget())
+            });
         Self {
             hash,
             bytes,
             layout,
             pages,
             source,
+            table,
         }
     }
 
@@ -147,28 +188,67 @@ impl Index {
             DisplayIndex::Indexed(layout) if !self.pages.is_empty() => {
                 self.read_page(layout, offset, &mut read)?
             }
-            DisplayIndex::Fallback(reason) => {
-                let bounds = self.source.page(offset);
-                let markdown = String::from_utf8(read(bounds.bytes.clone())?)
-                    .map_err(|_| AppError::CursorExpired)?;
-                (
-                    bounds,
-                    WindowResult::Source {
-                        reason: *reason,
-                        markdown,
-                    },
-                )
-            }
+            DisplayIndex::Fallback(reason) => self.read_source(offset, *reason, &mut read)?,
             DisplayIndex::Indexed(_) => return Err(AppError::Unavailable),
         };
         Ok(Window {
             hash: self.hash.clone(),
             byte_length: self.bytes,
+            table_start: self.table.as_ref().map(|table| table.start),
             bytes: bounds.bytes,
             previous: bounds.previous,
             next: bounds.next,
             result,
         })
+    }
+
+    fn read_source(
+        &self,
+        offset: u64,
+        reason: DisplayFallback,
+        read: &mut impl FnMut(Range<u64>) -> Result<Vec<u8>, AppError>,
+    ) -> Result<(Bounds, WindowResult), AppError> {
+        let mut bounds = self.source.page(offset);
+        if let Some(table) = &self.table {
+            let in_table = table.start <= offset && offset < table.end
+                || (offset == self.bytes && table.end == self.bytes);
+            if in_table {
+                let group = table.group(offset);
+                let previous = group.previous.or_else(|| {
+                    table
+                        .start
+                        .checked_sub(1)
+                        .map(|before| self.source.page(before).bytes.start)
+                });
+                let next = group
+                    .next
+                    .or_else(|| (table.end < self.bytes).then_some(table.end));
+                let markdown = decode(read(group.bytes.clone())?)?;
+                let result = WindowResult::Table(table.page(&group, markdown));
+                return Ok((
+                    Bounds {
+                        bytes: group.bytes,
+                        previous,
+                        next,
+                    },
+                    result,
+                ));
+            }
+            if offset < table.start && bounds.bytes.end > table.start {
+                bounds.bytes.end = table.start;
+                bounds.next = Some(table.start);
+            }
+            if offset >= table.end {
+                if bounds.bytes.start <= table.end {
+                    bounds.bytes.start = table.end;
+                    bounds.previous = Some(table.group(table.end).bytes.start);
+                } else if bounds.previous.is_some_and(|previous| previous < table.end) {
+                    bounds.previous = Some(table.end);
+                }
+            }
+        }
+        let markdown = decode(read(bounds.bytes.clone())?)?;
+        Ok((bounds, WindowResult::Source { reason, markdown }))
     }
 
     fn read_page(
@@ -190,7 +270,7 @@ impl Index {
             }
         };
         let bytes = start(page)..u64::from(layout.blocks[indices.end - 1].byte_end);
-        let piece = String::from_utf8(read(bytes.clone())?).map_err(|_| AppError::CursorExpired)?;
+        let piece = decode(read(bytes.clone())?)?;
         let mut blocks = Vec::with_capacity(indices.len());
         for span in &layout.blocks[indices] {
             let from = (u64::from(span.byte_start) - bytes.start) as usize;
@@ -230,9 +310,9 @@ impl Index {
 fn admitted(text: &str) -> bool {
     let mut lines = 0;
     let mut maximum = 0;
-    for line in text.split('\n') {
+    for line in text.split_terminator('\n') {
         lines += 1;
-        maximum = maximum.max(line.len());
+        maximum = maximum.max(line.strip_suffix('\r').unwrap_or(line).len());
     }
     ArtifactStats {
         byte_length: text.len() as u64,
@@ -243,4 +323,8 @@ fn admitted(text: &str) -> bool {
     }
     .require_markdown_budget()
     .is_ok()
+}
+
+fn decode(bytes: Vec<u8>) -> Result<String, AppError> {
+    String::from_utf8(bytes).map_err(|_| AppError::CursorExpired)
 }

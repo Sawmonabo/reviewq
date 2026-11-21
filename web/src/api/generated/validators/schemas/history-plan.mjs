@@ -2,9 +2,9 @@
 import { func0 } from "../runtime.mjs";
 import { validate520 } from "./history-availability.mjs";
 import { validate25 } from "./checkpoint-id-dto.mjs";
-import { validate709 } from "./plan-entry.mjs";
-import { validate715 } from "./plan-task.mjs";
-function validate706(
+import { validate717 } from "./plan-entry.mjs";
+import { validate723 } from "./plan-task.mjs";
+function validate714(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -26,7 +26,7 @@ function validate706(
         ((data.plan === undefined || !func0.call(data, "plan")) &&
           (missing0 = "plan"))
       ) {
-        validate706.errors = [
+        validate714.errors = [
           {
             instancePath,
             schemaPath: "#/required",
@@ -88,7 +88,7 @@ function validate706(
               let valid1 = false;
               const _errs5 = errors;
               if (
-                !validate709(data2, {
+                !validate717(data2, {
                   instancePath: instancePath + "/plan",
                   parentData: data,
                   parentDataProperty: "plan",
@@ -97,8 +97,8 @@ function validate706(
               ) {
                 vErrors =
                   vErrors === null
-                    ? validate709.errors
-                    : vErrors.concat(validate709.errors);
+                    ? validate717.errors
+                    : vErrors.concat(validate717.errors);
                 errors = vErrors.length;
               }
               var _valid0 = _errs5 === errors;
@@ -135,7 +135,7 @@ function validate706(
                   vErrors.push(err1);
                 }
                 errors++;
-                validate706.errors = vErrors;
+                validate714.errors = vErrors;
                 return false;
               } else {
                 errors = _errs4;
@@ -207,7 +207,7 @@ function validate706(
                         for (let i0 = 0; i0 < len0; i0++) {
                           const _errs12 = errors;
                           if (
-                            !validate715(data5[i0], {
+                            !validate723(data5[i0], {
                               instancePath: instancePath + "/tasks/" + i0,
                               parentData: data5,
                               parentDataProperty: i0,
@@ -216,8 +216,8 @@ function validate706(
                           ) {
                             vErrors =
                               vErrors === null
-                                ? validate715.errors
-                                : vErrors.concat(validate715.errors);
+                                ? validate723.errors
+                                : vErrors.concat(validate723.errors);
                             errors = vErrors.length;
                           }
                           var valid2 = _errs12 === errors;
@@ -226,7 +226,7 @@ function validate706(
                           }
                         }
                       } else {
-                        validate706.errors = [
+                        validate714.errors = [
                           {
                             instancePath: instancePath + "/tasks",
                             schemaPath: "#/properties/tasks/type",
@@ -248,7 +248,7 @@ function validate706(
         }
       }
     } else {
-      validate706.errors = [
+      validate714.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -259,7 +259,7 @@ function validate706(
       return false;
     }
   }
-  validate706.errors = vErrors;
+  validate714.errors = vErrors;
   return errors === 0;
 }
-export { validate706 };
+export { validate714 };

@@ -73,6 +73,12 @@
   overflow-x: auto;
   margin: 4px 0 12px;
 }
+.prose .paged-markdown-table {
+  table-layout: fixed;
+}
+.prose .paged-markdown-table :is(th, td) {
+  overflow-wrap: anywhere;
+}
 .mermaid-figure {
   min-width: 0;
   margin: 20px 0;

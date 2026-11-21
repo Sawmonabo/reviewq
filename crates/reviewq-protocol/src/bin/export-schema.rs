@@ -216,6 +216,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     registry.response::<Success<reports::ReportHistory>>("reports", "ReportHistoryResponse")?;
     registry.response::<Success<reports::ReportSection>>("reports", "ReportSectionResponse")?;
     registry.response::<Success<reports::ReportWindow>>("reports", "ReportWindowResponse")?;
+    registry.response::<reports::ReportTableResponse>("reports", "ReportTableResponse")?;
     registry.response::<Success<reports::CandidateReport>>("reports", "ReportCandidateResponse")?;
     registry.response::<Success<reports::ReportContext>>("reports", "ReportContextResponse")?;
     registry.request::<reports::FeedbackRequest>("reports", "ReportFeedbackRequest")?;

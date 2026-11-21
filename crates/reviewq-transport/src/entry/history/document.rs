@@ -16,7 +16,7 @@ use serde::Deserialize;
 
 use crate::entry::diagrams::{self, Owner};
 use crate::entry::document_display::{
-    MAX_WINDOW_JSON_BYTES, project_block, project_fallback, remove_tables,
+    MAX_WINDOW_JSON_BYTES, project_block, project_fallback, project_table, remove_tables,
 };
 use crate::entry::error::{ApiError, ApiPath as Path, ApiQuery as Query};
 use crate::entry::pages::{count, parse, success};
@@ -65,6 +65,7 @@ pub(in crate::entry) async fn document(
         hash,
         bytes,
         byte_length,
+        table_start,
         previous,
         next,
         result,
@@ -111,6 +112,9 @@ pub(in crate::entry) async fn document(
             }
             HistoryDocumentResult::Ready { blocks: output }
         }
+        WindowResult::Table(page) => HistoryDocumentResult::Table {
+            page: project_table(page)?,
+        },
         WindowResult::Source { reason, markdown } => {
             let display = (bytes.start == 0 && bytes.end == byte_length)
                 .then(|| {
@@ -134,6 +138,7 @@ pub(in crate::entry) async fn document(
             sha256: ReportHashDto::new(hash.as_str()).ok_or(AppError::Internal)?,
             index_format: count(u64::from(DISPLAY_INDEX_FORMAT))?,
             byte_length: count(byte_length)?,
+            table_start: table_start.map(count).transpose()?,
             byte_start: count(bytes.start)?,
             byte_end: count(bytes.end)?,
             previous_byte: previous.map(count).transpose()?,

@@ -17,6 +17,20 @@ pub(super) fn remove_tables(blocks: &mut [dto::DisplayBlock]) {
     }
 }
 
+pub(super) fn project_table(
+    page: reviewq_app::reading::table::paged::TablePage,
+) -> Result<dto::TablePage, AppError> {
+    Ok(dto::TablePage {
+        header: page.header,
+        header_in_source: page.header_in_source,
+        widths: page.widths,
+        first_row: count(page.first_row)?,
+        row_count: count(page.row_count)?,
+        total_rows: count(page.total_rows)?,
+        markdown: page.markdown,
+    })
+}
+
 pub(super) fn project_block(
     block: DisplayWindowBlock,
     display: Option<dto::DocumentDisplay>,

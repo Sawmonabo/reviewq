@@ -109,7 +109,7 @@ const schema195 = {
   ],
   type: "string",
 };
-const schema197 = {
+const schema199 = {
   enum: [
     "document_budget",
     "parser_budget",
@@ -133,5 +133,5 @@ export {
   schema173,
   schema177,
   schema195,
-  schema197,
+  schema199,
 };

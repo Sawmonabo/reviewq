@@ -2,7 +2,7 @@
 import { func0 } from "../runtime.mjs";
 import { validate99 } from "./sprint-pair.mjs";
 import { validate35 } from "./event-cursor-dto.mjs";
-function validate812(
+function validate820(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -18,7 +18,7 @@ function validate812(
         ((data.loadedPairs === undefined || !func0.call(data, "loadedPairs")) &&
           (missing0 = "loadedPairs"))
       ) {
-        validate812.errors = [
+        validate820.errors = [
           {
             instancePath,
             schemaPath: "#/required",
@@ -57,7 +57,7 @@ function validate812(
                 }
               }
             } else {
-              validate812.errors = [
+              validate820.errors = [
                 {
                   instancePath: instancePath + "/loadedPairs",
                   schemaPath: "#/properties/loadedPairs/type",
@@ -99,7 +99,7 @@ function validate812(
         }
       }
     } else {
-      validate812.errors = [
+      validate820.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -110,7 +110,7 @@ function validate812(
       return false;
     }
   }
-  validate812.errors = vErrors;
+  validate820.errors = vErrors;
   return errors === 0;
 }
-export { validate812 };
+export { validate820 };

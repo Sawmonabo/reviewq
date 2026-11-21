@@ -17,6 +17,7 @@ import type {
   RevisionDto,
   SafeCountDto,
   SubmissionIdDto,
+  TablePage,
   UtcTimestampDto,
 } from "./common.js";
 
@@ -307,6 +308,29 @@ export interface ReportSection {
   sha256: ReportHashDto;
   text: string;
   totalCodePoints: SafeCountDto;
+  [k: string]: unknown;
+}
+
+export interface ReportTableResponse {
+  cursor: EventCursorDto;
+  data: ReportTable;
+  [k: string]: unknown;
+}
+
+export interface ReportTable {
+  range: ReportTableRange | null;
+  receiptId: ResourceIdDto;
+  sha256: ReportHashDto;
+  [k: string]: unknown;
+}
+
+export interface ReportTableRange {
+  byteEnd: SafeCountDto;
+  byteStart: SafeCountDto;
+  nextByte: SafeCountDto | null;
+  previousByte: SafeCountDto | null;
+  scalarStart: SafeCountDto;
+  table: TablePage;
   [k: string]: unknown;
 }
 

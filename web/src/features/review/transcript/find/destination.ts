@@ -44,10 +44,11 @@ export async function prepareDestination(
   const { entryId, generation, locator, contentRef, contentCursor, nativeIndex, partsCursor } =
     destination;
   async function readBody() {
-    const prepared =
+    const settled =
       destination.markdown && destination.offset === 0 && (destination.outputBytes ?? 0) >= 8 * 1024
         ? await completeDocument(target, entryId, generation, contentRef, signal)
         : undefined;
+    const prepared = settled === "paged" ? undefined : settled;
     const content =
       prepared?.content ??
       (await historyContent(

@@ -3,6 +3,7 @@ import { func0 } from "../runtime.mjs";
 import { validate575 } from "./history-document-result.mjs";
 import { validate25 } from "./checkpoint-id-dto.mjs";
 import { validate134 } from "./report-hash-dto.mjs";
+import { validate127 } from "./safe-count-dto.mjs";
 function validate574(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
@@ -93,6 +94,81 @@ function validate574(
               var valid0 = _errs4 === errors;
             } else {
               var valid0 = true;
+            }
+            if (valid0) {
+              if (
+                data.tableStart !== undefined &&
+                func0.call(data, "tableStart")
+              ) {
+                let data4 = data.tableStart;
+                const _errs5 = errors;
+                const _errs6 = errors;
+                let valid1 = false;
+                const _errs7 = errors;
+                if (
+                  !validate127(data4, {
+                    instancePath: instancePath + "/tableStart",
+                    parentData: data,
+                    parentDataProperty: "tableStart",
+                    rootData,
+                  })
+                ) {
+                  vErrors =
+                    vErrors === null
+                      ? validate127.errors
+                      : vErrors.concat(validate127.errors);
+                  errors = vErrors.length;
+                }
+                var _valid0 = _errs7 === errors;
+                valid1 = valid1 || _valid0;
+                if (!valid1) {
+                  const _errs8 = errors;
+                  if (data4 !== null) {
+                    const err0 = {
+                      instancePath: instancePath + "/tableStart",
+                      schemaPath: "#/properties/tableStart/anyOf/1/type",
+                      keyword: "type",
+                      params: { type: "null" },
+                    };
+                    if (vErrors === null) {
+                      vErrors = [err0];
+                    } else {
+                      vErrors.push(err0);
+                    }
+                    errors++;
+                  }
+                  var _valid0 = _errs8 === errors;
+                  valid1 = valid1 || _valid0;
+                }
+                if (!valid1) {
+                  const err1 = {
+                    instancePath: instancePath + "/tableStart",
+                    schemaPath: "#/properties/tableStart/anyOf",
+                    keyword: "anyOf",
+                    params: {},
+                  };
+                  if (vErrors === null) {
+                    vErrors = [err1];
+                  } else {
+                    vErrors.push(err1);
+                  }
+                  errors++;
+                  validate574.errors = vErrors;
+                  return false;
+                } else {
+                  errors = _errs6;
+                  if (vErrors !== null) {
+                    if (_errs6) {
+                      vErrors.length = _errs6;
+                    } else {
+                      vErrors = null;
+                    }
+                  }
+                }
+                var valid0 = _errs5 === errors;
+              } else {
+                var valid0 = true;
+              }
             }
           }
         }

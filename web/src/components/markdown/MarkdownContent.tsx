@@ -1,5 +1,5 @@
 import { createContext, useContext, useMemo, useState } from "react";
-import type { ReactNode } from "react";
+import type { CSSProperties, ReactNode } from "react";
 import { Fragment, jsx, jsxs } from "react/jsx-runtime";
 import { toJsxRuntime } from "hast-util-to-jsx-runtime";
 import type { Element, Root } from "hast";
@@ -91,13 +91,17 @@ export function MarkdownTree({
 function MarkdownTable({
   children,
   className,
+  style,
 }: {
   readonly children?: ReactNode;
   readonly className?: string;
+  readonly style?: CSSProperties;
 }) {
   return (
     <div className="table-scroll" tabIndex={0}>
-      <table className={className}>{children}</table>
+      <table className={className} style={style}>
+        {children}
+      </table>
     </div>
   );
 }

@@ -2,6 +2,8 @@
 
 use std::ops::Range;
 
+pub mod paged;
+
 use satteri_pulldown_cmark::{Alignment, Event, LinkType, Options, Parser, Tag, TagEnd};
 
 pub const MIN_TABLE_BYTES: usize = 8 * 1024;
@@ -54,7 +56,14 @@ impl Coordinates<'_> {
 
 /// The input is one verified top-level block. Unknown markup stays on the canonical path.
 pub fn prepare_table(source: &str) -> Option<PreparedTable> {
-    if !(MIN_TABLE_BYTES..=MAX_BYTES).contains(&source.len()) || source.contains('\\') {
+    if source.len() < MIN_TABLE_BYTES {
+        return None;
+    }
+    fragment(source)
+}
+
+fn fragment(source: &str) -> Option<PreparedTable> {
+    if source.len() > MAX_BYTES || source.contains('\\') {
         return None;
     }
     let parser = Parser::new_ext(
