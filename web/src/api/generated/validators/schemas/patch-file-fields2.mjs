@@ -207,13 +207,13 @@ function validate817(
                 }
                 if (errors === _errs15) {
                   if (typeof data4 === "string") {
-                    if (func81(data4) > 32768) {
+                    if (func81(data4) > 131072) {
                       validate817.errors = [
                         {
                           instancePath: instancePath + "/preview",
                           schemaPath: "#/properties/preview/maxLength",
                           keyword: "maxLength",
-                          params: { limit: 32768 },
+                          params: { limit: 131072 },
                         },
                       ];
                       return false;

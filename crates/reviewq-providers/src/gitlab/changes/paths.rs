@@ -109,11 +109,9 @@ impl GitLab {
             let first = first_ordinal(page, search_limit)?;
             let (body, next) = self.receive_diff_page(source, page, search_limit).await?;
             let digest = digest.to_owned();
-            let found = tokio::task::spawn_blocking(move || {
-                wire::find_file(body, first, search_limit, &digest)
-            })
-            .await
-            .map_err(|_| AppError::Unavailable)??;
+            let found = body
+                .decode(move |body| wire::find_file(body, first, search_limit, &digest))
+                .await?;
             if let Some(id) = found {
                 let ordinal = super::ordinal(&id).ok_or(AppError::Unavailable)?;
                 return Ok((1 + (ordinal - 1) / u32::from(limit), id));

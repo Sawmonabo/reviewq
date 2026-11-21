@@ -1,5 +1,4 @@
 use std::collections::VecDeque;
-use std::fs::File;
 use std::os::unix::fs::FileExt;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -12,9 +11,13 @@ use reviewq_app::changes::{
 use reviewq_domain::identity::MrIdentity;
 use tokio::sync::{Mutex, OnceCell};
 
+mod scratch;
+pub(super) use scratch::{ScratchFile, ScratchKey};
+
 const MAX_LEASES: usize = 4;
 const INACTIVITY: Duration = Duration::from_secs(30);
 pub(super) const MEMORY_LIMIT: usize = 2 * 1024 * 1024;
+pub(super) const INLINE_LIMIT: usize = 128 * 1024;
 
 #[derive(Eq, PartialEq)]
 pub(super) struct Key {
@@ -35,6 +38,7 @@ type Slot = Arc<OnceCell<PatchBytes>>;
 pub(super) struct IndexedPage {
     pub page: SourcePage<PatchFile>,
     pub small: Vec<(usize, Arc<Body>)>,
+    pub selected: Option<(usize, Arc<Body>)>,
 }
 
 impl IndexedPage {
@@ -43,7 +47,18 @@ impl IndexedPage {
         edge: Option<PatchPageEdge>,
     ) -> Result<SourcePage<PatchFile>, AppError> {
         let mut page = self.page.clone();
-        let Some(edge) = edge else { return Ok(page) };
+        let Some(edge) = edge else {
+            if let Some((index, body)) = &self.selected
+                && let Body::Memory(bytes) = body.as_ref()
+            {
+                page.items[*index].preview = Some(
+                    std::str::from_utf8(bytes)
+                        .map_err(|_| AppError::Unavailable)?
+                        .to_owned(),
+                );
+            }
+            return Ok(page);
+        };
         // Use only bytes from this verified scan. Preparing adjacent files never performs I/O.
         let mut available = 64 * 1024;
         let len = page.items.len();
@@ -96,7 +111,8 @@ pub(in crate::gitlab) struct Leases {
 
 pub(super) enum Body {
     Memory(Vec<u8>),
-    File(Arc<File>),
+    File(Arc<ScratchFile>),
+    Window { start: usize, bytes: Vec<u8> },
 }
 
 impl Leases {
@@ -222,6 +238,30 @@ impl Leases {
         });
         Ok(slot)
     }
+
+    pub(super) async fn prepare(
+        &self,
+        source: &MrIdentity,
+        revision: &str,
+        preferred: Option<u32>,
+    ) {
+        let mut entries = self.entries.lock().await;
+        entries.retain(|entry| {
+            entry.in_use()
+                || (entry.used_at.elapsed() < INACTIVITY
+                    && (entry.key.source != *source || entry.key.revision == revision))
+        });
+        if entries.len() == MAX_LEASES
+            && entries.iter().all(|entry| {
+                entry.key.source != *source
+                    || entry.key.revision != revision
+                    || super::ordinal(&entry.key.file) != preferred
+            })
+            && let Some(unused) = entries.iter().position(|entry| !entry.in_use())
+        {
+            entries.remove(unused);
+        }
+    }
 }
 
 impl Lease {
@@ -235,6 +275,16 @@ impl Lease {
 }
 
 impl PatchContent for Body {
+    fn covers(&self, offset: usize, length: usize) -> bool {
+        match self {
+            Self::Memory(bytes) => length <= bytes.len().saturating_sub(offset),
+            Self::File(_) => true,
+            Self::Window { start, bytes } => offset
+                .checked_sub(*start)
+                .is_some_and(|offset| offset <= bytes.len() && length <= bytes.len() - offset),
+        }
+    }
+
     fn read(&self, offset: usize, length: usize) -> AppFuture<'_, Vec<u8>> {
         Box::pin(async move {
             match self {
@@ -249,12 +299,21 @@ impl PatchContent for Body {
                     let file = owner.clone();
                     tokio::task::spawn_blocking(move || {
                         let mut bytes = vec![0; length];
-                        file.read_exact_at(&mut bytes, offset as u64)
+                        file.file
+                            .read_exact_at(&mut bytes, offset as u64)
                             .map_err(|_| AppError::Unavailable)?;
                         Ok(bytes)
                     })
                     .await
                     .map_err(|_| AppError::Unavailable)?
+                }
+                Self::Window { start, bytes } => {
+                    let first = offset.checked_sub(*start).ok_or(AppError::Internal)?;
+                    let end = first.checked_add(length).ok_or(AppError::Internal)?;
+                    bytes
+                        .get(first..end)
+                        .map(<[u8]>::to_vec)
+                        .ok_or(AppError::Internal)
                 }
             }
         })

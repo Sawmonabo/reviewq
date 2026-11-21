@@ -3,9 +3,7 @@ use reviewq_app::changes::{ChangeSource, PatchFileSelection, SelectedPatch};
 use reviewq_domain::identity::MrIdentity;
 
 use super::GitLab;
-use super::lease::Key;
-
-const INLINE_LIMIT: usize = 128 * 1024;
+use super::lease::{INLINE_LIMIT, Key};
 
 impl GitLab {
     pub(super) async fn selected_patch(

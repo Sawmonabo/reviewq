@@ -38,7 +38,7 @@ const schema256 = {
     preview: {
       description:
         "Whole original text from this same verified file-page response.",
-      maxLength: 32768,
+      maxLength: 131072,
       type: ["string", "null"],
     },
     renamed: { type: "boolean" },

@@ -1,27 +1,37 @@
-use std::fs::File;
 use std::io::{Read, Write};
 use std::path::Path;
 use std::sync::Arc;
 
-use super::lease::{Body, MEMORY_LIMIT};
+use super::lease::{Body, MEMORY_LIMIT, ScratchFile, ScratchKey};
 use super::paths::matches_digest;
 use super::{file_lookup_key, hex, safe_path};
-use crate::http::{ResponseReader, private_file};
+use crate::http::ResponseReader;
 use reviewq_app::access::AppError;
-use reviewq_app::changes::{PatchAvailability, PatchFile, PatchMetrics};
+use reviewq_app::changes::{PatchAvailability, PatchFile, PatchMetrics, PatchRead};
+use reviewq_domain::identity::MrIdentity;
 use sha2::{Digest, Sha256};
 use struson::reader::{JsonReader, JsonStreamReader};
 
 mod stats;
+mod window;
 use stats::DiffStats;
+use window::Capture;
 
 const SMALL_PATCH_BYTES: usize = 32 * 1024;
 const SMALL_PATCHES_PER_PAGE_BYTES: usize = 128 * 1024;
 
-#[derive(Clone, Copy)]
-enum Retain {
-    Selected,
+enum Retain<'a> {
+    Selected(&'a Selection, u32),
     Small(usize),
+}
+
+#[derive(Clone)]
+pub(super) struct Selection {
+    pub source: MrIdentity,
+    pub revision: String,
+    pub preferred: Option<String>,
+    pub default: bool,
+    pub read: PatchRead,
 }
 
 #[derive(Default)]
@@ -47,11 +57,11 @@ pub(super) fn decode(
     profile: &Path,
     first: u32,
     limit: u16,
-    preferred: Option<&str>,
-    select_default: bool,
+    selection: &Selection,
 ) -> Result<DiffPage, AppError> {
     let mut reader = JsonStreamReader::new(wire);
     reader.begin_array().map_err(invalid)?;
+    let preferred = selection.preferred.as_deref();
     let preferred_index = preferred.and_then(super::ordinal);
     let mut files = Vec::new();
     let mut selected = None;
@@ -62,10 +72,11 @@ pub(super) fn decode(
             return Err(AppError::Unavailable);
         }
         let index = first + files.len() as u32;
-        let primary =
-            preferred_index.map_or(select_default && selected.is_none(), |value| value == index);
+        let primary = preferred_index.map_or(selection.default && selected.is_none(), |value| {
+            value == index
+        });
         let retain = if primary {
-            Retain::Selected
+            Retain::Selected(selection, index)
         } else {
             Retain::Small(remaining.min(SMALL_PATCH_BYTES))
         };
@@ -140,7 +151,7 @@ fn read_item(
     reader: &mut JsonStreamReader<ResponseReader>,
     profile: &Path,
     ordinal: u32,
-    retain: Retain,
+    retain: Retain<'_>,
 ) -> Result<(PatchFile, Option<Body>), AppError> {
     let mut info = Diff::default();
     let mut payload = None;
@@ -163,7 +174,7 @@ fn read_item(
             "binary" => info.binary = reader.next_bool().map_err(invalid)?,
             "diff" if payload.is_none() => {
                 let string = reader.next_string_reader().map_err(invalid)?;
-                payload = Some(body(string, profile, retain)?);
+                payload = Some(body(string, profile, &retain)?);
             }
             "old_path" | "new_path" | "renamed_file" | "new_file" | "deleted_file" | "diff" => {
                 return Err(AppError::Unavailable);
@@ -266,7 +277,7 @@ impl BodyScan {
 fn body(
     mut reader: impl Read,
     profile: &Path,
-    retain: Retain,
+    retain: &Retain<'_>,
 ) -> Result<(PatchMetrics, Option<Body>, bool), AppError> {
     let mut scan = BodyScan {
         length: 0,
@@ -281,7 +292,11 @@ fn body(
     let mut buffer = [0; 64 * 1024];
     let mut prefix = Vec::new();
     let mut keep = !matches!(retain, Retain::Small(0));
-    let mut file: Option<File> = None;
+    let mut file = None::<ScratchFile>;
+    let mut capture = match retain {
+        Retain::Selected(selection, _) => Capture::new(selection.read),
+        Retain::Small(_) => Capture::None,
+    };
     let mut identification = Vec::new();
     loop {
         let length = reader.read(&mut buffer).map_err(invalid)?;
@@ -293,28 +308,59 @@ fn body(
             let copy = (16 - identification.len()).min(chunk.len());
             identification.extend_from_slice(&chunk[..copy]);
         }
+        capture.inspect(scan.length, chunk);
         scan.inspect(chunk);
-        if keep && matches!(retain, Retain::Small(limit) if scan.length > limit) {
-            keep = false;
-            prefix = Vec::new();
+        match retain {
+            Retain::Small(limit) if scan.length > *limit => keep = false,
+            Retain::Selected(selection, ordinal)
+                if keep && file.is_none() && scan.length > MEMORY_LIMIT =>
+            {
+                file = ScratchFile::create(
+                    profile,
+                    ScratchKey {
+                        source: selection.source.clone(),
+                        revision: selection.revision.clone(),
+                        ordinal: *ordinal,
+                    },
+                )
+                .and_then(|mut scratch| scratch.file.write_all(&prefix).ok().map(|_| scratch));
+                keep = file.is_some();
+                prefix = Vec::new();
+            }
+            _ => {}
         }
         if keep {
-            if file.is_none() && scan.length > MEMORY_LIMIT {
-                let mut body = private_file(profile).map_err(|_| AppError::Internal)?;
-                body.write_all(&prefix).map_err(|_| AppError::Internal)?;
-                prefix = Vec::new();
-                file = Some(body);
-            }
             if let Some(file) = &mut file {
-                file.write_all(chunk).map_err(|_| AppError::Internal)?;
+                keep = file.file.write_all(chunk).is_ok();
             } else {
+                let limit = match retain {
+                    Retain::Selected(_, _) => MEMORY_LIMIT,
+                    Retain::Small(limit) => *limit,
+                };
+                if prefix.is_empty() {
+                    prefix.reserve_exact(chunk.len());
+                } else if scan.length > prefix.capacity() {
+                    // Geometric growth without crossing the policy boundary.
+                    let capacity = (prefix.capacity() * 2).max(scan.length).min(limit);
+                    prefix.reserve_exact(capacity - prefix.len());
+                }
                 prefix.extend_from_slice(chunk);
             }
+        }
+        if !keep {
+            file = None;
+            prefix = Vec::new();
         }
     }
     let binary = identification.starts_with(b"Binary files ")
         || identification.starts_with(b"GIT binary patch");
-    let data = keep.then(|| file.map_or(Body::Memory(prefix), |file| Body::File(file.into())));
+    let data = if keep {
+        Some(file.map_or(Body::Memory(prefix), |file| Body::File(file.into())))
+    } else if matches!(retain, Retain::Selected(_, _)) {
+        Some(capture.finish(scan.length))
+    } else {
+        None
+    };
     Ok((scan.finish(), data, binary))
 }
 
