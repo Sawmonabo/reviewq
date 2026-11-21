@@ -4,6 +4,8 @@
 
 Pin the accepted design revision before dispatching work. For one assignment read the linked brief, its specifications, the applicable repository rules and the accepted predecessor handoffs. [Architecture](../architecture.md) · [Project layout](../project-layout.md) · [Repository rules](../../AGENTS.md) · [Dependency decisions](../dependency-decisions.md)
 
+The [reader delivery graph](05-browser/reader.md) extends the browser work with continuous rich diffs, scoped search, incremental documents and diagram reuse.
+
 ## Task graph
 
 **Needs** names the accepted local integration revisions required to close this task. Ancestors are implicit. Folder numbers group topics. The lead schedules Rust storage, providers, workers, API and CLI before the browser. A backend consumer can start when its required production interface is available. The Needs column governs acceptance of the complete brief, including its browser work. Every task has one row and one brief.
