@@ -4,7 +4,7 @@ use reviewq_app::access::Actor;
 use reviewq_app::history::{
     ContentReference, FileContentRef, RpcContentRef, VisibleEntry, VisiblePart,
 };
-use reviewq_domain::identity::{RunId, SessionKey};
+use reviewq_domain::identity::{ReportHash, RunId, SessionKey};
 use reviewq_protocol::history::HistoryPart;
 
 use crate::entry::Entry;
@@ -17,6 +17,7 @@ pub(super) struct InlineDisplay<'a> {
     pub actor: &'a Actor,
     pub run: &'a RunId,
     pub session: &'a SessionKey,
+    pub font: Option<ReportHash>,
 }
 
 impl InlineDisplay<'_> {
@@ -102,7 +103,7 @@ impl InlineDisplay<'_> {
                 source: reference.as_str().to_owned(),
             };
             *display = if complete {
-                diagrams::observe(self.entry, self.actor, owner, text)
+                diagrams::observe(self.entry, self.actor, owner, text, self.font.as_ref())
             } else {
                 diagrams::known(self.entry, self.actor, owner, text)
             };

@@ -47,6 +47,7 @@ pub(in crate::entry) async fn read(
     Query(query): Query<WindowQuery>,
 ) -> Result<Response, ApiError> {
     let actor = entry.auth.browser_actor(&headers, false)?;
+    let font = diagrams::client_font(&headers);
     let run: RunId = parse(&run)?;
     let report = ReportReference {
         receipt_id: parse(&receipt)?,
@@ -99,6 +100,7 @@ pub(in crate::entry) async fn read(
                             &actor,
                             Owner::report(&run, &report),
                             &block.markdown,
+                            font.as_ref(),
                         );
                         project_block(block, display)
                     })

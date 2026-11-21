@@ -146,6 +146,7 @@ async fn view(
     view: View,
 ) -> Result<Json<Success<dto::ReportView>>, ApiError> {
     let actor = entry.auth.browser_actor(&headers, false)?;
+    let font = diagrams::client_font(&headers);
     let stored = entry
         .store
         .read_report(
@@ -167,6 +168,7 @@ async fn view(
                 &actor,
                 Owner::report(&run, &report.reference),
                 markdown,
+                font.as_ref(),
             )
         });
     let mut body = project_view(stored.value)?;

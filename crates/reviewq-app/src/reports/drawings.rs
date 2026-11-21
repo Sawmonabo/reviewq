@@ -17,6 +17,7 @@ pub struct DrawingOutput {
 }
 
 pub trait DrawingRenderer: Send + Sync {
+    fn can_draw(&self, font: Option<&ReportHash>) -> bool;
     fn draw(&self, source: String) -> AppFuture<'_, DrawingOutput>;
     fn ready_font(&self, source: &ReportHash) -> Result<Option<ReportHash>, AppError>;
     fn publish(&self, source: ReportHash, drawing: DrawingOutput) -> AppFuture<'_, ()>;

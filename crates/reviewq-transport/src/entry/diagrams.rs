@@ -46,6 +46,7 @@ struct Job {
     owner: Owner,
     source: String,
     hash: ReportHash,
+    font: Option<ReportHash>,
 }
 
 #[derive(Clone, Deserialize, Serialize)]
@@ -112,13 +113,24 @@ impl Cache {
     }
 }
 
+pub(super) fn client_font(headers: &HeaderMap) -> Option<ReportHash> {
+    headers
+        .get("x-reviewq-drawing-font")?
+        .to_str()
+        .ok()?
+        .parse()
+        .ok()
+}
+
 pub(super) fn observe(
     entry: &Arc<Entry>,
     actor: &Actor,
     owner: Owner,
     markdown: &str,
+    font: Option<&ReportHash>,
 ) -> Option<DocumentDisplay> {
-    observe_markdown(entry, actor, owner, markdown, true)
+    let prepare = entry.drawings.renderer.as_ref()?.can_draw(font);
+    observe_markdown(entry, actor, owner, markdown, prepare, font)
 }
 
 pub(super) fn known(
@@ -127,7 +139,7 @@ pub(super) fn known(
     owner: Owner,
     markdown: &str,
 ) -> Option<DocumentDisplay> {
-    observe_markdown(entry, actor, owner, markdown, false)
+    observe_markdown(entry, actor, owner, markdown, false, None)
 }
 
 fn observe_markdown(
@@ -136,6 +148,7 @@ fn observe_markdown(
     owner: Owner,
     markdown: &str,
     prepare: bool,
+    font: Option<&ReportHash>,
 ) -> Option<DocumentDisplay> {
     let renderer = entry.drawings.renderer.as_ref()?.clone();
     let graphs = mermaid_sources(markdown);
@@ -193,6 +206,7 @@ fn observe_markdown(
                 owner: owner.clone(),
                 source,
                 hash,
+                font: font.cloned(),
             });
         }
     }
@@ -211,6 +225,7 @@ async fn build(entry: Arc<Entry>, renderer: Arc<dyn DrawingRenderer>) {
             owner,
             source,
             hash,
+            font,
         } = {
             let Ok(mut state) = entry.drawings.state.lock() else {
                 return;
@@ -223,7 +238,7 @@ async fn build(entry: Arc<Entry>, renderer: Arc<dyn DrawingRenderer>) {
             state.active = Some(job.hash.clone());
             job
         };
-        if !matches!(renderer.ready_font(&hash), Ok(None)) {
+        if !renderer.can_draw(font.as_ref()) || !matches!(renderer.ready_font(&hash), Ok(None)) {
             continue;
         }
         let finished = tokio::select! {

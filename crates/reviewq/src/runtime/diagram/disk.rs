@@ -10,6 +10,7 @@ use reviewq_app::reports::{DRAWING_RECIPE, DrawingOutput, MAX_DRAWING_BYTES};
 use reviewq_domain::identity::ReportHash;
 use sha2::{Digest, Sha256};
 
+const DIRECTORY: &str = "diagram-cache";
 const PREFIX: &str = "drawing-";
 const STAGE: &str = ".drawing-stage-";
 const MAX_FILES: usize = 16;
@@ -58,8 +59,17 @@ impl Key {
 }
 
 impl Disk {
-    pub(super) fn open(profile: &Path) -> Option<Self> {
-        let root = private_directory(profile, "diagram-cache")?;
+    pub(super) fn open(profile: &Path, create: bool) -> Option<Self> {
+        let path = profile.join(DIRECTORY);
+        if create
+            && fs::symlink_metadata(&path).is_err_and(|error| error.kind() == ErrorKind::NotFound)
+        {
+            return Some(Self {
+                root: path,
+                ready: Mutex::new(Vec::new()),
+            });
+        }
+        let root = private_directory(path, false)?;
         let mut ready = Vec::new();
         for item in fs::read_dir(&root).ok()? {
             let item = item.ok()?;
@@ -123,9 +133,10 @@ impl Disk {
             return Ok(());
         }
         trim(&self.root, &mut ready, 1, bytes)?;
+        let root = private_directory(self.root.clone(), true).ok_or(AppError::Unavailable)?;
         let mut stage = tempfile::Builder::new()
             .prefix(STAGE)
-            .tempfile_in(&self.root)
+            .tempfile_in(root)
             .map_err(|_| AppError::Unavailable)?;
         stage
             .write_all(output.svg.as_bytes())
@@ -245,12 +256,13 @@ fn read(path: &Path) -> std::io::Result<(String, SystemTime)> {
     Ok((svg, metadata.modified()?))
 }
 
-pub(super) fn private_directory(profile: &Path, name: &str) -> Option<PathBuf> {
-    let path = profile.join(name);
-    match DirBuilder::new().mode(0o700).create(&path) {
-        Ok(()) => {}
-        Err(error) if error.kind() == ErrorKind::AlreadyExists => {}
-        Err(_) => return None,
+pub(super) fn private_directory(path: PathBuf, create: bool) -> Option<PathBuf> {
+    if create {
+        match DirBuilder::new().mode(0o700).create(&path) {
+            Ok(()) => {}
+            Err(error) if error.kind() == ErrorKind::AlreadyExists => {}
+            Err(_) => return None,
+        }
     }
     let info = fs::symlink_metadata(&path).ok()?;
     (info.is_dir() && private(&info)).then_some(path)

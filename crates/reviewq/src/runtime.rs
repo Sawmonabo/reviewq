@@ -308,6 +308,18 @@ pub(crate) async fn serve(profile: PathBuf, options: Serve) -> Result<(), Failur
         .map(install::Managed::windows_sender)
         .transpose()
         .map(Option::flatten);
+    let chromium = settings
+        .chromium_command
+        .as_deref()
+        .and_then(runtime_settings::executable);
+    let drawing_renderer = {
+        let (web, profile) = (web.clone(), profile.clone());
+        tokio::task::spawn_blocking(move || diagram::Chromium::open(chromium, web, profile))
+            .await
+            .ok()
+            .flatten()
+            .map(|browser| Arc::new(browser) as Arc<dyn DrawingRenderer>)
+    };
     let router = reviewq_transport::router(
         store.clone(),
         source.clone(),
@@ -336,12 +348,7 @@ pub(crate) async fn serve(profile: PathBuf, options: Serve) -> Result<(), Failur
             browser_sessions,
             web: &web,
             retained_assets: retained_assets.as_deref(),
-            drawing_renderer: settings
-                .chromium_command
-                .as_deref()
-                .and_then(runtime_settings::executable)
-                .and_then(|executable| diagram::Chromium::open(executable, &web, &profile))
-                .map(|browser| Arc::new(browser) as Arc<dyn DrawingRenderer>),
+            drawing_renderer,
             commits: store.subscribe(),
             shutdown: wait.clone(),
             startup,

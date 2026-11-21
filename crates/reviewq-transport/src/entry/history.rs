@@ -8,7 +8,7 @@ use reviewq_app::history::{
     FilePosition, HistorySession, NativeHistoryPage, NativePosition, ToolState, TurnWindow,
     VisibleEntry, VisibleKind, VisiblePart, VisiblePartKind,
 };
-use reviewq_domain::identity::{EventCursor, NativeInputId, RunId, SessionKey};
+use reviewq_domain::identity::{EventCursor, NativeInputId, ReportHash, RunId, SessionKey};
 use reviewq_protocol::history::{
     Direction, HistoryAvailability, HistoryEntry, HistoryPage, HistoryPageEncodeError,
     HistoryPageResponse, HistoryPart, HistoryText, HistoryToolState, HistoryWindow,
@@ -149,7 +149,7 @@ pub(super) async fn page(
         super::pages::parse(&session)?,
         query,
         budget,
-        Some(&entry),
+        Some((&entry, super::diagrams::client_font(&headers))),
     )
     .await?;
     Ok(([(header::CONTENT_TYPE, "application/json")], body).into_response())
@@ -162,7 +162,7 @@ pub(super) async fn read(
     session: SessionKey,
     query: HistoryQuery,
     byte_limit: usize,
-    drawing_entry: Option<&Arc<Entry>>,
+    drawing_entry: Option<(&Arc<Entry>, Option<ReportHash>)>,
 ) -> Result<Vec<u8>, AppError> {
     let limit = query.limit.unwrap_or(DEFAULT_PAGE_LIMIT);
     if !(1..=100).contains(&limit) {
@@ -179,11 +179,12 @@ pub(super) async fn read(
         return Err(AppError::InvalidRequest);
     }
     let endpoint = &entry.auth.endpoint;
-    let display = drawing_entry.map(|entry| InlineDisplay {
+    let display = drawing_entry.map(|(entry, font)| InlineDisplay {
         entry,
         actor: &actor,
         run: &run,
         session: &session,
+        font,
     });
     let projection = Projection {
         endpoint,

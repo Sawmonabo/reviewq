@@ -6,7 +6,7 @@ use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use axum::extract::{DefaultBodyLimit, Request, State};
 use axum::http::{HeaderMap, HeaderValue, Method, StatusCode, header};
@@ -26,59 +26,48 @@ use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
 use tower_http::services::{ServeDir, ServeFile};
 
+const JOBS: &str = "diagram-jobs";
+const FONT_OBSERVATION: Duration = Duration::from_secs(120);
 const PAGE: &str = "/diagram-producer.html";
 const REQUEST_BYTES: usize = 256 * 1024;
 const DEADLINE: Duration = Duration::from_secs(12);
 const CSP: &str = "default-src 'none'; script-src 'self'; style-src 'unsafe-inline'; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'";
 
 pub(in crate::runtime) struct Chromium {
-    executable: PathBuf,
+    executable: Option<PathBuf>,
     web: PathBuf,
-    jobs: PathBuf,
+    profile: PathBuf,
+    font: Mutex<Option<(ReportHash, Instant)>>,
     disk: Arc<super::disk::Disk>,
 }
 
 impl Chromium {
     pub(in crate::runtime) fn open(
-        executable: PathBuf,
-        web: &Path,
-        profile: &Path,
+        executable: Option<PathBuf>,
+        web: PathBuf,
+        profile: PathBuf,
     ) -> Option<Self> {
-        if !web.join(&PAGE[1..]).is_file() || !web.join("assets").is_dir() {
-            return None;
-        }
-        let jobs = super::disk::private_directory(profile, "diagram-jobs")?;
-        let disk = Arc::new(super::disk::Disk::open(profile)?);
-        let owner = rustix::process::getuid().as_raw();
-        let info = fs::symlink_metadata(&jobs).ok()?;
-        if !info.is_dir() || info.uid() != owner || info.mode() & 0o077 != 0 {
-            return None;
-        }
-        for item in fs::read_dir(&jobs).ok()? {
-            let item = item.ok()?;
-            let name = item.file_name();
-            if let Some(suffix) = name.to_str().and_then(|name| name.strip_prefix("render-"))
-                && suffix.len() == 12
-                && suffix.bytes().all(|byte| byte.is_ascii_alphanumeric())
-                && item.file_type().ok()?.is_dir()
-                && fs::symlink_metadata(item.path()).ok()?.uid() == owner
-            {
-                fs::remove_dir_all(item.path()).ok()?;
-            }
-        }
+        reclaim_jobs(&profile);
+        let executable =
+            executable.filter(|_| web.join(&PAGE[1..]).is_file() && web.join("assets").is_dir());
+        let disk = Arc::new(super::disk::Disk::open(&profile, executable.is_some())?);
         Some(Self {
             executable,
-            web: web.to_owned(),
-            jobs,
+            web,
+            profile,
+            font: Mutex::new(None),
             disk,
         })
     }
 
     async fn produce(&self, source: String) -> Result<DrawingOutput, AppError> {
+        let executable = self.executable.as_ref().ok_or(AppError::Unavailable)?;
+        let jobs = super::disk::private_directory(self.profile.join(JOBS), true)
+            .ok_or(AppError::Unavailable)?;
         let profile = tempfile::Builder::new()
             .prefix("render-")
             .rand_bytes(12)
-            .tempdir_in(&self.jobs)
+            .tempdir_in(jobs)
             .map_err(|_| AppError::Unavailable)?;
         let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
             .await
@@ -107,7 +96,7 @@ impl Chromium {
         let server = Server(tokio::spawn(async move {
             let _ = axum::serve(listener, router).await;
         }));
-        let mut child = Command::new(&self.executable)
+        let mut child = Command::new(executable)
             .args([
                 "--headless",
                 "--disable-background-networking",
@@ -169,9 +158,47 @@ impl Chromium {
     }
 }
 
+fn reclaim_jobs(profile: &Path) {
+    let Some(jobs) = super::disk::private_directory(profile.join(JOBS), false) else {
+        return;
+    };
+    let Ok(items) = fs::read_dir(&jobs) else {
+        return;
+    };
+    let owner = rustix::process::getuid().as_raw();
+    for item in items.flatten() {
+        let name = item.file_name();
+        if let Some(suffix) = name.to_str().and_then(|name| name.strip_prefix("render-"))
+            && suffix.len() == 12
+            && suffix.bytes().all(|byte| byte.is_ascii_alphanumeric())
+            && fs::symlink_metadata(item.path())
+                .is_ok_and(|info| info.is_dir() && info.uid() == owner)
+        {
+            let _ = fs::remove_dir_all(item.path());
+        }
+    }
+    let _ = fs::remove_dir(jobs);
+}
+
 impl DrawingRenderer for Chromium {
+    fn can_draw(&self, font: Option<&ReportHash>) -> bool {
+        self.executable.is_some()
+            && font.is_none_or(|font| {
+                self.font.lock().is_ok_and(|known| {
+                    known.as_ref().is_none_or(|(current, when)| {
+                        when.elapsed() >= FONT_OBSERVATION || current == font
+                    })
+                })
+            })
+    }
     fn draw(&self, source: String) -> AppFuture<'_, DrawingOutput> {
-        Box::pin(self.produce(source))
+        Box::pin(async move {
+            let output = self.produce(source).await?;
+            if let Ok(mut known) = self.font.lock() {
+                *known = Some((output.font.clone(), Instant::now()));
+            }
+            Ok(output)
+        })
     }
 
     fn ready_font(&self, source: &ReportHash) -> Result<Option<ReportHash>, AppError> {

@@ -69,6 +69,7 @@ pub(super) async fn read(
             actor: &actor,
             run: &run,
             session: &session,
+            font: crate::entry::diagrams::client_font(&headers),
         }),
     };
     let (generation, availability, response) = match result {

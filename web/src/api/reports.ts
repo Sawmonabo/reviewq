@@ -1,4 +1,5 @@
 import { queryString, read, write } from "./client";
+import { drawingFontHeaders } from "./drawing-font";
 import type {
   ReportDispositionRequest,
   ReportFeedbackRequest,
@@ -31,6 +32,7 @@ export async function reportView(
     isReportViewResponse,
     signal,
     view === "markdown" ? 7 * 1024 * 1024 : 64 * 1024,
+    view === "markdown" ? drawingFontHeaders() : undefined,
   );
   if (receipt && result.data.report?.receiptId !== receipt)
     throw new Error("The displayed report version changed.");
@@ -48,6 +50,7 @@ export async function reportWindow(
     isReportWindowResponse,
     signal,
     640 * 1024,
+    drawingFontHeaders(),
   );
   const returned = result.data.report;
   if (

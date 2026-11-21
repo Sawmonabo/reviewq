@@ -1,3 +1,5 @@
+import { rememberDrawingFont } from "../../api/drawing-font";
+
 export const SAVED_DIAGRAM_ID = "reviewq-saved-drawing";
 export const MAX_SAVED_SVG_BYTES = 64 * 1024;
 export const DRAWING_RECIPE = "mermaid-12.2.0-classic-dark-1";
@@ -20,7 +22,10 @@ export async function digestDrawing(source: string) {
 }
 
 export function diagramFontIdentity() {
-  fingerprint ??= measureFont();
+  fingerprint ??= measureFont().then((font) => {
+    rememberDrawingFont(font);
+    return font;
+  });
   return fingerprint;
 }
 

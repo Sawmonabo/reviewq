@@ -75,6 +75,7 @@ pub(in crate::entry) async fn content(
                 source,
             },
             result.data.text.as_str(),
+            diagrams::client_font(&headers).as_ref(),
         );
     }
     Ok(Json(result))
