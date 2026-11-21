@@ -147,6 +147,10 @@ impl PatchContent for RereadPatch {
             }
             let mut window = self.window.lock().await;
             if !window.covers(offset, length) {
+                *window = Body::Window {
+                    start: offset,
+                    bytes: Vec::new(),
+                };
                 let last = (offset + READ_AHEAD_BYTES).min(self.end) - 1;
                 let mut selection = self.selection.clone();
                 selection.read = PatchRead::Range(Some(PatchRange::From {

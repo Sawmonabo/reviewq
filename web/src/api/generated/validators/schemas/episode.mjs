@@ -6,7 +6,7 @@ import { validate235 } from "./utc-timestamp-dto.mjs";
 import { schema302 } from "../metadata-7.mjs";
 import { validate35 } from "./event-cursor-dto.mjs";
 import { validate326 } from "./cancel-recovery-response-state.mjs";
-function validate992(
+function validate993(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -30,7 +30,7 @@ function validate992(
         ((data.reason === undefined || !func0.call(data, "reason")) &&
           (missing0 = "reason"))
       ) {
-        validate992.errors = [
+        validate993.errors = [
           {
             instancePath,
             schemaPath: "#/required",
@@ -163,7 +163,7 @@ function validate992(
                     vErrors.push(err1);
                   }
                   errors++;
-                  validate992.errors = vErrors;
+                  validate993.errors = vErrors;
                   return false;
                 } else {
                   errors = _errs5;
@@ -184,7 +184,7 @@ function validate992(
                   let data4 = data.reason;
                   const _errs9 = errors;
                   if (typeof data4 !== "string" && data4 !== null) {
-                    validate992.errors = [
+                    validate993.errors = [
                       {
                         instancePath: instancePath + "/reason",
                         schemaPath: "#/properties/reason/type",
@@ -251,7 +251,7 @@ function validate992(
         }
       }
     } else {
-      validate992.errors = [
+      validate993.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -262,7 +262,7 @@ function validate992(
       return false;
     }
   }
-  validate992.errors = vErrors;
+  validate993.errors = vErrors;
   return errors === 0;
 }
-export { validate992 };
+export { validate993 };

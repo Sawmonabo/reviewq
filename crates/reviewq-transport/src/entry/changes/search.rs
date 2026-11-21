@@ -9,9 +9,9 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use super::{
-    ApiError, Entry, EventCursorDto, FileIdDto, Page, PageCursorDto, Path, Query, ReviewIdDto,
-    SafeCountDto, Success, check_source, dto, parse_review, patch_revision, read_source,
-    valid_revision,
+    ApiError, Entry, EventCursorDto, FileIdDto, Page, PageCursorDto, PatchETagDto, Path, Query,
+    ReviewIdDto, SafeCountDto, Success, check_source, dto, parse_review, patch_revision,
+    read_source, valid_revision,
 };
 
 const SEARCH_CURSOR: &[u8] = b"reviewq-changes-search-v1";
@@ -152,6 +152,7 @@ fn hit(hit: PatchSearchMatch) -> Result<dto::PatchSearchMatch, AppError> {
     let count = |value: usize| SafeCountDto::new(value as u64).ok_or(AppError::Internal);
     Ok(dto::PatchSearchMatch {
         file_id: FileIdDto::new(hit.file_id).ok_or(AppError::Internal)?,
+        patch_etag: PatchETagDto::new(hit.patch_etag).ok_or(AppError::Internal)?,
         old_path: hit.old_path,
         new_path: hit.new_path,
         side: match hit.side {

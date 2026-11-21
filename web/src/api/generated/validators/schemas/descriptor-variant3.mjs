@@ -2,7 +2,7 @@
 import { func0 } from "../runtime.mjs";
 import { schema320 } from "../metadata-7.mjs";
 import { validate118 } from "./publication.mjs";
-function validate1065(
+function validate1066(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -23,7 +23,7 @@ function validate1065(
         ((data.reason === undefined || !func0.call(data, "reason")) &&
           (missing0 = "reason"))
       ) {
-        validate1065.errors = [
+        validate1066.errors = [
           {
             instancePath,
             schemaPath: "#/required",
@@ -37,7 +37,7 @@ function validate1065(
           let data0 = data.blocking;
           const _errs1 = errors;
           if (typeof data0 !== "boolean" && data0 !== null) {
-            validate1065.errors = [
+            validate1066.errors = [
               {
                 instancePath: instancePath + "/blocking",
                 schemaPath: "#/properties/blocking/type",
@@ -55,7 +55,7 @@ function validate1065(
           if (data.findingId !== undefined && func0.call(data, "findingId")) {
             const _errs3 = errors;
             if (typeof data.findingId !== "string") {
-              validate1065.errors = [
+              validate1066.errors = [
                 {
                   instancePath: instancePath + "/findingId",
                   schemaPath: "#/properties/findingId/type",
@@ -74,7 +74,7 @@ function validate1065(
               let data2 = data.kind;
               const _errs5 = errors;
               if (typeof data2 !== "string") {
-                validate1065.errors = [
+                validate1066.errors = [
                   {
                     instancePath: instancePath + "/kind",
                     schemaPath: "#/properties/kind/type",
@@ -85,7 +85,7 @@ function validate1065(
                 return false;
               }
               if ("disposition" !== data2) {
-                validate1065.errors = [
+                validate1066.errors = [
                   {
                     instancePath: instancePath + "/kind",
                     schemaPath: "#/properties/kind/const",
@@ -157,7 +157,7 @@ function validate1065(
                     vErrors.push(err1);
                   }
                   errors++;
-                  validate1065.errors = vErrors;
+                  validate1066.errors = vErrors;
                   return false;
                 } else {
                   errors = _errs8;
@@ -177,7 +177,7 @@ function validate1065(
                 if (data.reason !== undefined && func0.call(data, "reason")) {
                   const _errs12 = errors;
                   if (typeof data.reason !== "string") {
-                    validate1065.errors = [
+                    validate1066.errors = [
                       {
                         instancePath: instancePath + "/reason",
                         schemaPath: "#/properties/reason/type",
@@ -197,7 +197,7 @@ function validate1065(
         }
       }
     } else {
-      validate1065.errors = [
+      validate1066.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -208,7 +208,7 @@ function validate1065(
       return false;
     }
   }
-  validate1065.errors = vErrors;
+  validate1066.errors = vErrors;
   return errors === 0;
 }
-export { validate1065 };
+export { validate1066 };

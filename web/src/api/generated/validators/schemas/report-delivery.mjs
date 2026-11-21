@@ -2,8 +2,8 @@
 import { func0 } from "../runtime.mjs";
 import { schema326 } from "../metadata-8.mjs";
 import { validate25 } from "./checkpoint-id-dto.mjs";
-import { validate1088 } from "./delivery-state.mjs";
-function validate1086(
+import { validate1089 } from "./delivery-state.mjs";
+function validate1087(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -20,7 +20,7 @@ function validate1086(
         ((data.reason === undefined || !func0.call(data, "reason")) &&
           (missing0 = "reason"))
       ) {
-        validate1086.errors = [
+        validate1087.errors = [
           {
             instancePath,
             schemaPath: "#/required",
@@ -34,7 +34,7 @@ function validate1086(
           let data0 = data.reason;
           const _errs1 = errors;
           if (typeof data0 !== "string" && data0 !== null) {
-            validate1086.errors = [
+            validate1087.errors = [
               {
                 instancePath: instancePath + "/reason",
                 schemaPath: "#/properties/reason/type",
@@ -103,7 +103,7 @@ function validate1086(
                 vErrors.push(err1);
               }
               errors++;
-              validate1086.errors = vErrors;
+              validate1087.errors = vErrors;
               return false;
             } else {
               errors = _errs4;
@@ -123,7 +123,7 @@ function validate1086(
             if (data.state !== undefined && func0.call(data, "state")) {
               const _errs8 = errors;
               if (
-                !validate1088(data.state, {
+                !validate1089(data.state, {
                   instancePath: instancePath + "/state",
                   parentData: data,
                   parentDataProperty: "state",
@@ -132,8 +132,8 @@ function validate1086(
               ) {
                 vErrors =
                   vErrors === null
-                    ? validate1088.errors
-                    : vErrors.concat(validate1088.errors);
+                    ? validate1089.errors
+                    : vErrors.concat(validate1089.errors);
                 errors = vErrors.length;
               }
               var valid0 = _errs8 === errors;
@@ -144,7 +144,7 @@ function validate1086(
         }
       }
     } else {
-      validate1086.errors = [
+      validate1087.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -155,7 +155,7 @@ function validate1086(
       return false;
     }
   }
-  validate1086.errors = vErrors;
+  validate1087.errors = vErrors;
   return errors === 0;
 }
-export { validate1086 };
+export { validate1087 };

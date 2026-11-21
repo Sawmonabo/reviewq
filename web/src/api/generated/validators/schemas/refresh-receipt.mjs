@@ -3,9 +3,9 @@ import { func0 } from "../runtime.mjs";
 import { validate422 } from "./error-dto.mjs";
 import { validate235 } from "./utc-timestamp-dto.mjs";
 import { validate35 } from "./event-cursor-dto.mjs";
-import { validate1007 } from "./refresh-state.mjs";
+import { validate1008 } from "./refresh-state.mjs";
 import { validate127 } from "./safe-count-dto.mjs";
-function validate1002(
+function validate1003(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -29,7 +29,7 @@ function validate1002(
         ((data.error === undefined || !func0.call(data, "error")) &&
           (missing0 = "error"))
       ) {
-        validate1002.errors = [
+        validate1003.errors = [
           {
             instancePath,
             schemaPath: "#/required",
@@ -93,7 +93,7 @@ function validate1002(
               vErrors.push(err1);
             }
             errors++;
-            validate1002.errors = vErrors;
+            validate1003.errors = vErrors;
             return false;
           } else {
             errors = _errs2;
@@ -164,7 +164,7 @@ function validate1002(
                 vErrors.push(err3);
               }
               errors++;
-              validate1002.errors = vErrors;
+              validate1003.errors = vErrors;
               return false;
             } else {
               errors = _errs7;
@@ -229,7 +229,7 @@ function validate1002(
                 if (data.state !== undefined && func0.call(data, "state")) {
                   const _errs13 = errors;
                   if (
-                    !validate1007(data.state, {
+                    !validate1008(data.state, {
                       instancePath: instancePath + "/state",
                       parentData: data,
                       parentDataProperty: "state",
@@ -238,8 +238,8 @@ function validate1002(
                   ) {
                     vErrors =
                       vErrors === null
-                        ? validate1007.errors
-                        : vErrors.concat(validate1007.errors);
+                        ? validate1008.errors
+                        : vErrors.concat(validate1008.errors);
                     errors = vErrors.length;
                   }
                   var valid0 = _errs13 === errors;
@@ -304,7 +304,7 @@ function validate1002(
                         vErrors.push(err5);
                       }
                       errors++;
-                      validate1002.errors = vErrors;
+                      validate1003.errors = vErrors;
                       return false;
                     } else {
                       errors = _errs15;
@@ -327,7 +327,7 @@ function validate1002(
         }
       }
     } else {
-      validate1002.errors = [
+      validate1003.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -338,7 +338,7 @@ function validate1002(
       return false;
     }
   }
-  validate1002.errors = vErrors;
+  validate1003.errors = vErrors;
   return errors === 0;
 }
-export { validate1002 };
+export { validate1003 };

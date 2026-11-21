@@ -5826,6 +5826,9 @@
           "maxLength": 4096,
           "type": "string"
         },
+        "patchETag": {
+          "$ref": "#/definitions/PatchETagDto"
+        },
         "side": {
           "$ref": "#/definitions/PatchSide"
         },
@@ -5842,6 +5845,7 @@
       },
       "required": [
         "fileId",
+        "patchETag",
         "oldPath",
         "newPath",
         "side",

@@ -2,9 +2,9 @@
 import { func0 } from "../runtime.mjs";
 import { validate205 } from "./board-selection.mjs";
 import { schema422 } from "../metadata-10.mjs";
-import { validate1443 } from "./default-skills.mjs";
+import { validate1444 } from "./default-skills.mjs";
 import { validate69 } from "./merge-request-iid-dto.mjs";
-function validate1441(
+function validate1442(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -27,7 +27,7 @@ function validate1441(
           !func0.call(data, "defaultSkills")) &&
           (missing0 = "defaultSkills"))
       ) {
-        validate1441.errors = [
+        validate1442.errors = [
           {
             instancePath,
             schemaPath: "#/required",
@@ -46,7 +46,7 @@ function validate1441(
             key0 === "path" ||
             key0 === "projectId"
           )) {
-            validate1441.errors = [
+            validate1442.errors = [
               {
                 instancePath,
                 schemaPath: "#/additionalProperties",
@@ -87,7 +87,7 @@ function validate1441(
               let data1 = data.checkout;
               const _errs3 = errors;
               if (typeof data1 !== "string" && data1 !== null) {
-                validate1441.errors = [
+                validate1442.errors = [
                   {
                     instancePath: instancePath + "/checkout",
                     schemaPath: "#/properties/checkout/type",
@@ -108,7 +108,7 @@ function validate1441(
               ) {
                 const _errs5 = errors;
                 if (
-                  !validate1443(data.defaultSkills, {
+                  !validate1444(data.defaultSkills, {
                     instancePath: instancePath + "/defaultSkills",
                     parentData: data,
                     parentDataProperty: "defaultSkills",
@@ -117,8 +117,8 @@ function validate1441(
                 ) {
                   vErrors =
                     vErrors === null
-                      ? validate1443.errors
-                      : vErrors.concat(validate1443.errors);
+                      ? validate1444.errors
+                      : vErrors.concat(validate1444.errors);
                   errors = vErrors.length;
                 }
                 var valid0 = _errs5 === errors;
@@ -129,7 +129,7 @@ function validate1441(
                 if (data.path !== undefined && func0.call(data, "path")) {
                   const _errs6 = errors;
                   if (typeof data.path !== "string") {
-                    validate1441.errors = [
+                    validate1442.errors = [
                       {
                         instancePath: instancePath + "/path",
                         schemaPath: "#/properties/path/type",
@@ -174,7 +174,7 @@ function validate1441(
         }
       }
     } else {
-      validate1441.errors = [
+      validate1442.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -185,7 +185,7 @@ function validate1441(
       return false;
     }
   }
-  validate1441.errors = vErrors;
+  validate1442.errors = vErrors;
   return errors === 0;
 }
-export { validate1441 };
+export { validate1442 };

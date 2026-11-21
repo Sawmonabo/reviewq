@@ -2,7 +2,7 @@
 import { func0, func81 } from "../runtime.mjs";
 import { validate25 } from "./checkpoint-id-dto.mjs";
 import { validate127 } from "./safe-count-dto.mjs";
-import { validate857 } from "./patch-side.mjs";
+import { validate819 } from "./patch-etag-dto.mjs";
 function validate851(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
@@ -191,20 +191,23 @@ function validate851(
                     var valid0 = true;
                   }
                   if (valid0) {
-                    if (data.side !== undefined && func0.call(data, "side")) {
+                    if (
+                      data.patchETag !== undefined &&
+                      func0.call(data, "patchETag")
+                    ) {
                       const _errs10 = errors;
                       if (
-                        !validate857(data.side, {
-                          instancePath: instancePath + "/side",
+                        !validate819(data.patchETag, {
+                          instancePath: instancePath + "/patchETag",
                           parentData: data,
-                          parentDataProperty: "side",
+                          parentDataProperty: "patchETag",
                           rootData,
                         })
                       ) {
                         vErrors =
                           vErrors === null
-                            ? validate857.errors
-                            : vErrors.concat(validate857.errors);
+                            ? validate819.errors
+                            : vErrors.concat(validate819.errors);
                         errors = vErrors.length;
                       }
                       var valid0 = _errs10 === errors;
