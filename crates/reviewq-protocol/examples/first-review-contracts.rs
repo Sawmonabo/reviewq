@@ -185,6 +185,7 @@ fn emit_resources(output: &Path) -> Result<(), Box<dyn Error>> {
 }
 
 fn emit_history_and_receipt(output: &Path) -> Result<(), Box<dyn Error>> {
+    let reply = "Ready.";
     let page = history_page(vec![
         HistoryEntry {
             entry_id: HistoryEntryIdDto::new("active-item-0").unwrap(),
@@ -195,9 +196,10 @@ fn emit_history_and_receipt(output: &Path) -> Result<(), Box<dyn Error>> {
             text_bytes: None,
             parts: vec![HistoryPart::AssistantText {
                 native_index: None,
-                text: HistoryText::new("Ready.").unwrap(),
+                text: HistoryText::new(reply).unwrap(),
                 content_ref: None,
                 display: None,
+                text_bytes: Some(count(reply.len() as u64)),
             }],
         },
         user_entry(ENTRY_B, SAME_PROMPT.into()),
@@ -264,6 +266,7 @@ fn history_page(items: Vec<HistoryEntry>) -> HistoryPage {
 }
 
 fn user_entry(entry: &str, text: String) -> HistoryEntry {
+    let text_bytes = count(text.len() as u64);
     HistoryEntry {
         entry_id: HistoryEntryIdDto::new(entry).unwrap(),
         turn_id: Some(HistoryTurnIdDto::new(TURN).unwrap()),
@@ -276,6 +279,7 @@ fn user_entry(entry: &str, text: String) -> HistoryEntry {
             text: HistoryText::new(text).unwrap(),
             content_ref: None,
             display: None,
+            text_bytes: Some(text_bytes),
         }],
     }
 }
