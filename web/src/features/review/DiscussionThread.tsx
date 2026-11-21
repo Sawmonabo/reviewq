@@ -15,6 +15,8 @@ export function DiscussionThread({
   previewNote,
   presentation,
   onJump,
+  selectedNote,
+  draft = false,
 }: {
   readonly thread: PatchDiscussion;
   readonly outside?: boolean;
@@ -23,6 +25,8 @@ export function DiscussionThread({
   readonly previewNote?: ((note: PatchDiscussionNote) => string | undefined) | undefined;
   readonly presentation?: "changes";
   readonly onJump?: (() => void) | undefined;
+  readonly selectedNote?: string | undefined;
+  readonly draft?: boolean | undefined;
 }) {
   const [localOpen, setLocalOpen] = useState(() => thread.resolution !== "resolved");
   const open = expanded ?? localOpen;
@@ -36,9 +40,11 @@ export function DiscussionThread({
   const path = lineSide === "old" ? anchor?.oldPath : anchor?.newPath;
   const head = anchor?.headSha;
   if (!first) return null;
-  const status = { open: "Open", resolved: "Resolved", comment: "Comment", unknown: "Discussion" }[
-    thread.resolution
-  ];
+  const status = draft
+    ? "GitLab draft"
+    : { open: "Open", resolved: "Resolved", comment: "Comment", unknown: "Discussion" }[
+        thread.resolution
+      ];
   const subject =
     first.body
       .replace(/<!--[\s\S]*?-->|<[^>]+>/g, "")
@@ -128,7 +134,8 @@ export function DiscussionThread({
             </div>
           )}
           {thread.notes.map((note) => {
-            const preview = previewNote?.(note);
+            const selected = note.noteId === selectedNote;
+            const preview = selected ? undefined : previewNote?.(note);
             if (preview !== undefined && !changes)
               return (
                 <article
@@ -155,6 +162,8 @@ export function DiscussionThread({
               <article
                 className="discussion-note stack"
                 data-discussion-source={preview !== undefined ? note.noteId : undefined}
+                data-selected-note={selected ? note.noteId : undefined}
+                tabIndex={selected ? -1 : undefined}
                 key={note.noteId}
               >
                 <header className="discussion-note-meta">

@@ -3,9 +3,14 @@
 use serde::Serialize;
 
 mod approvals;
+mod notes;
 mod source;
 pub use approvals::{
     ApprovalFacts, ApprovalRule, ApprovalView, ApprovalViewResponse, ApprovalWarning, Approver,
+};
+pub use notes::{
+    DiscussionDestination, DiscussionDestinationResponse, DiscussionSearch, DiscussionSearchMatch,
+    DiscussionSearchResponse, NoteKind,
 };
 pub use source::{PatchSourceCursor, PatchSourcePage, PatchSourceResponse, PatchSourceRow};
 

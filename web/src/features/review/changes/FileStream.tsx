@@ -13,6 +13,8 @@ import { createPortal } from "react-dom";
 import { isRichPatch, PATCH_SOURCE_WINDOW_BYTES, PATCH_WINDOW_BYTES } from "../../../api/changes";
 import type { PatchIndex, readPatchPathCatalog } from "../../../api/changes";
 import type {
+  DiscussionDestination,
+  DiscussionSearchMatch,
   PatchDiscussion,
   PatchFile,
   PatchPath,
@@ -22,6 +24,7 @@ import { Empty, Notice } from "../../../components/PanelState";
 import { safeUrl } from "../../../lib/presentation";
 import { ChangedFilePicker } from "./ChangedFilePicker";
 import { FilePatch } from "./FilePatch";
+import { highlightNote, noteMatch } from "./note-highlight";
 import { FILE_NAVIGATION, FILE_NAVIGATION_CHANGE } from "./OtherDiscussions";
 import { setPatchMatch } from "./patch-decoration";
 import {
@@ -58,6 +61,12 @@ type Props = {
   readonly onLoadedAnchors: (threads: ReadonlySet<string> | undefined) => void;
   readonly restore: boolean;
   readonly onReload: () => void;
+  readonly noteGeneration: number;
+  readonly noteTarget: DiscussionDestination | undefined;
+  readonly onChooseNote: (match: DiscussionSearchMatch) => void;
+  readonly onClearNote: () => void;
+  readonly onCancelNote: () => void;
+  readonly onNoteFallback: (target: DiscussionDestination) => void;
 };
 
 type Jump = {
@@ -67,6 +76,7 @@ type Jump = {
   readonly line?: PatchLine | undefined;
   readonly source?: SourcePosition | undefined;
   readonly match?: CodeTarget | undefined;
+  readonly note?: DiscussionDestination | undefined;
 };
 type CodeTarget = { readonly match: PatchSearchMatch; readonly query: string };
 const MAX_ACTIVE_PATCHES = 8;
@@ -87,6 +97,12 @@ export function FileStream({
   onLoadedAnchors,
   restore,
   onReload,
+  noteGeneration,
+  noteTarget,
+  onChooseNote,
+  onClearNote,
+  onCancelNote,
+  onNoteFallback,
 }: Props) {
   const [host, setHost] = useState<HTMLDivElement | null>(null);
   const [readPatch] = useState(createPatchReadQueue);
@@ -292,6 +308,22 @@ export function FileStream({
         if (slot && placement && Math.abs(slot.offsetHeight - placement.size) > 1) return;
         if (file.querySelector("[data-source-seek='pending']")) return;
         const line = jump?.line && patchLineTarget(file, jump.line);
+        const note = jump?.note;
+        if (note && note !== noteTarget) {
+          setJump(undefined);
+          setFileNavigation(scroll, false);
+          return;
+        }
+        const foundNote = note && noteMatch(file, note);
+        if (note && !foundNote) {
+          if (!line && foundNote === undefined) onNoteFallback(note);
+          else if (foundNote === null)
+            setNavigationError("This note occurrence is no longer available.");
+          else return;
+          setJump(undefined);
+          setFileNavigation(scroll, false);
+          return;
+        }
         const row = line?.element;
         const source = jump?.source && sourceRect(file, jump.source);
         const code = jump?.match;
@@ -307,7 +339,11 @@ export function FileStream({
           ranges.push(...sourceRanges(file, jump.source, code.match.sourceEnd));
         const confirmedMatch =
           code && ranges.map((range) => range.toString()).join("") === code.query;
-        const target = (confirmedMatch && ranges[0]?.getClientRects()[0]) || source || line?.rect;
+        const target =
+          (foundNote && foundNote.range.getClientRects()[0]) ||
+          (confirmedMatch && ranges[0]?.getClientRects()[0]) ||
+          source ||
+          line?.rect;
         if ((code && !confirmedMatch) || (!target && jump?.focus && (jump.line || jump.source))) {
           setNavigationError(
             code
@@ -337,8 +373,10 @@ export function FileStream({
           return;
         }
         setPatchMatch(confirmedMatch ? ranges : []);
+        if (foundNote) highlightNote(foundNote.range);
         if (jump?.focus) {
           const focus =
+            (foundNote && foundNote.article) ||
             row ||
             (confirmedMatch &&
               file.querySelector<HTMLElement>(".patch-source-window, pre[data-patch-etag]")) ||
@@ -353,7 +391,19 @@ export function FileStream({
         setFileNavigation(scroll, false);
       });
     }
-  }, [files, geometry.toolbar, host, jump, patchScroll, scroller, toolbar, virtual, wanted]);
+  }, [
+    files,
+    geometry.toolbar,
+    host,
+    jump,
+    noteTarget,
+    onNoteFallback,
+    patchScroll,
+    scroller,
+    toolbar,
+    virtual,
+    wanted,
+  ]);
 
   const cancelNavigation = useEffectEvent((event: Event) => {
     if (!event.isTrusted) return;
@@ -536,6 +586,7 @@ export function FileStream({
       | { readonly paths: Pick<PatchPath, "oldPath" | "newPath"> },
     line?: PatchLine,
     match?: CodeTarget,
+    note?: DiscussionDestination,
   ) {
     const command = beginNavigation();
     const matches = (file: PatchFile) => {
@@ -552,11 +603,15 @@ export function FileStream({
     if (generation.current !== command) return;
     const offset = page?.items.findIndex(matches) ?? -1;
     if (page && offset >= 0) openTarget(pageStart(page.pageNumber) + offset, page.items[offset]!);
-    else setFileNavigation(scroller, false);
+    else {
+      if (note) onNoteFallback(note);
+      setFileNavigation(scroller, false);
+    }
 
     function openTarget(ordinal: number, file: PatchFile) {
       if (!match) {
-        goTo(ordinal, true, line);
+        if (note) setJump({ index: ordinal, inset: 0, focus: true, line, note });
+        else goTo(ordinal, true, line);
         return;
       }
       if (file.patchETag !== match.match.patchETag) {
@@ -579,7 +634,7 @@ export function FileStream({
 
   const chooseThread = useEffectEvent((target: ThreadJump) => {
     onThreadJump(undefined);
-    void chooseTarget(target, target.line);
+    void chooseTarget(target, target.line, undefined, target.note);
   });
   useLayoutEffect(() => {
     if (!threadJump) return;
@@ -613,7 +668,6 @@ export function FileStream({
   return (
     <div className="file-stream">
       {navigation &&
-        count > 0 &&
         createPortal(
           <ChangedFilePicker
             reviewId={reviewId}
@@ -631,17 +685,27 @@ export function FileStream({
             }}
             onOpen={() => {
               interruptNavigation();
+              onCancelNote();
               setNavigationError(undefined);
             }}
-            onChooseFile={chooseFile}
-            onChoosePath={(path) => void chooseTarget({ path })}
-            onChooseMatch={(match, query) =>
+            onChooseFile={(file) => {
+              onClearNote();
+              chooseFile(file);
+            }}
+            onChoosePath={(path) => {
+              onClearNote();
+              void chooseTarget({ path });
+            }}
+            onChooseMatch={(match, query) => {
+              onClearNote();
               void chooseTarget(
                 { fileId: match.fileId },
                 { side: match.side, number: match.line, inset: 0 },
                 { match, query },
-              )
-            }
+              );
+            }}
+            noteGeneration={noteGeneration}
+            onChooseNote={onChooseNote}
           />,
           navigation,
         )}

@@ -3,9 +3,9 @@ import { func0 } from "../runtime.mjs";
 import { validate127 } from "./safe-count-dto.mjs";
 import { validate48 } from "./history-cursor-dto.mjs";
 import { validate235 } from "./utc-timestamp-dto.mjs";
-import { validate1560 } from "./ticket-comment.mjs";
+import { validate1591 } from "./ticket-comment.mjs";
 import { validate25 } from "./checkpoint-id-dto.mjs";
-function validate1556(
+function validate1587(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -30,7 +30,7 @@ function validate1556(
         ((data.nextCursor === undefined || !func0.call(data, "nextCursor")) &&
           (missing0 = "nextCursor"))
       ) {
-        validate1556.errors = [
+        validate1587.errors = [
           {
             instancePath,
             schemaPath: "#/required",
@@ -115,7 +115,7 @@ function validate1556(
                 if (errors === _errs4) {
                   if (Array.isArray(data3)) {
                     if (data3.length > 100) {
-                      validate1556.errors = [
+                      validate1587.errors = [
                         {
                           instancePath: instancePath + "/items",
                           schemaPath: "#/properties/items/maxItems",
@@ -130,7 +130,7 @@ function validate1556(
                       for (let i0 = 0; i0 < len0; i0++) {
                         const _errs6 = errors;
                         if (
-                          !validate1560(data3[i0], {
+                          !validate1591(data3[i0], {
                             instancePath: instancePath + "/items/" + i0,
                             parentData: data3,
                             parentDataProperty: i0,
@@ -139,8 +139,8 @@ function validate1556(
                         ) {
                           vErrors =
                             vErrors === null
-                              ? validate1560.errors
-                              : vErrors.concat(validate1560.errors);
+                              ? validate1591.errors
+                              : vErrors.concat(validate1591.errors);
                           errors = vErrors.length;
                         }
                         var valid1 = _errs6 === errors;
@@ -150,7 +150,7 @@ function validate1556(
                       }
                     }
                   } else {
-                    validate1556.errors = [
+                    validate1587.errors = [
                       {
                         instancePath: instancePath + "/items",
                         schemaPath: "#/properties/items/type",
@@ -244,7 +244,7 @@ function validate1556(
                         vErrors.push(err1);
                       }
                       errors++;
-                      validate1556.errors = vErrors;
+                      validate1587.errors = vErrors;
                       return false;
                     } else {
                       errors = _errs9;
@@ -267,7 +267,7 @@ function validate1556(
         }
       }
     } else {
-      validate1556.errors = [
+      validate1587.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -278,7 +278,7 @@ function validate1556(
       return false;
     }
   }
-  validate1556.errors = vErrors;
+  validate1587.errors = vErrors;
   return errors === 0;
 }
-export { validate1556 };
+export { validate1587 };

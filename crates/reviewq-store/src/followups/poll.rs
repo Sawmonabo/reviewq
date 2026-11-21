@@ -201,6 +201,15 @@ fn record_discovery(
             approval,
             comments,
         )?;
+        if let Some(fingerprint) = value.discussion_fingerprint {
+            crate::queue::discussions::record(
+                tx,
+                &target.review,
+                target.settings,
+                value.observed_at_ms,
+                fingerprint,
+            )?;
+        }
     }
     tx.sql.execute(
         "INSERT INTO review_discovery_due VALUES(?1,?2,?3,?4)

@@ -20,6 +20,17 @@ const FORMAT: u8 = 1;
 struct StoredInvalidation {
     format: u8,
     keys: Vec<StoredKey>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    discussion: Option<DiscussionObservation>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    discussion_denied_at: Option<u64>,
+}
+
+#[derive(Serialize, Deserialize)]
+pub(crate) struct DiscussionObservation {
+    pub(crate) settings: u64,
+    pub(crate) observed_at: i64,
+    pub(crate) fingerprint: [u8; 32],
 }
 
 #[derive(Serialize, Deserialize)]
@@ -95,10 +106,21 @@ impl TryFrom<StoredKey> for ResourceKey {
 impl WriteTx<'_> {
     /// Records a versioned, bounded journal entry in the mutation transaction.
     pub(crate) fn emit(&mut self, keys: &[ResourceKey]) -> Result<EventCursor, StoreError> {
+        self.emit_observation(keys, None, None)
+    }
+
+    pub(crate) fn emit_observation(
+        &mut self,
+        keys: &[ResourceKey],
+        discussion: Option<DiscussionObservation>,
+        discussion_denied_at: Option<u64>,
+    ) -> Result<EventCursor, StoreError> {
         let invalidation = Invalidation::new(keys.to_vec())?;
         let entry = StoredInvalidation {
             format: FORMAT,
             keys: invalidation.keys().iter().map(StoredKey::from).collect(),
+            discussion,
+            discussion_denied_at,
         };
         let resources = serde_json::to_string(&entry).map_err(|_| AppError::Internal)?;
         let cursor = read_head(&self.sql)?

@@ -3,13 +3,14 @@ use std::sync::Arc;
 
 use reviewq_app::access::{AppError, AppFuture};
 use reviewq_app::changes::{
-    ApprovalView, ChangeSource, Discussion, PatchBytes, PatchFile, PatchFileSelection,
+    ApprovalView, ChangeSource, DiscussionDrafts, DiscussionPage, DiscussionPageRequest,
+    DiscussionScope, DiscussionTarget, NoteAddress, PatchBytes, PatchFile, PatchFileSelection,
     PatchPagePreview, PatchPathCursor, PatchPathPage, PatchRead, PatchRevision, PatchSearchPage,
     PatchSearchRequest, PatchSourcePage, PatchSourceRequest, SourcePage,
 };
 use reviewq_domain::identity::{GitSha, MrIdentity};
-use serde::Deserialize;
 use serde::de::DeserializeOwned;
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use super::{GitLab, next_page};
@@ -26,12 +27,13 @@ mod selection;
 mod source;
 mod wire;
 
+pub(super) use discussions::DiscussionCache;
 pub(super) use lease::Leases;
 use lease::{INLINE_LIMIT, IndexKey, IndexedPage, Key};
 
 const MAX_PATCH_FILES: u32 = 10_000;
 
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub(super) struct DiffRefs {
     base_sha: String,
     start_sha: String,
@@ -210,11 +212,26 @@ impl ChangeSource for GitLab {
     fn discussions(
         &self,
         source: MrIdentity,
-        revision: String,
-        page: u32,
-        limit: u16,
-    ) -> AppFuture<'_, SourcePage<Discussion>> {
-        Box::pin(self.discussion_page(source, revision, page, limit))
+        request: DiscussionPageRequest,
+    ) -> AppFuture<'_, DiscussionPage> {
+        Box::pin(self.discussion_page(source, request))
+    }
+
+    fn discussion_drafts(
+        &self,
+        source: MrIdentity,
+        scope: DiscussionScope,
+    ) -> AppFuture<'_, DiscussionDrafts> {
+        Box::pin(self.read_discussion_drafts(source, scope))
+    }
+
+    fn discussion_target(
+        &self,
+        source: MrIdentity,
+        scope: DiscussionScope,
+        address: NoteAddress,
+    ) -> AppFuture<'_, DiscussionTarget> {
+        Box::pin(self.read_discussion_target(source, scope, address))
     }
 
     fn search(

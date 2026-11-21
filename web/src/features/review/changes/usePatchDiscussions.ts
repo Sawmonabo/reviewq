@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { readPatchDiscussions } from "../../../api/changes";
+import { lostDiscussionAccess } from "../../../api/discussion-search";
 import type { PatchDiscussion } from "../../../api/generated/contracts";
 import { useResource } from "../../../hooks/useResource";
 
@@ -14,8 +15,12 @@ type Coverage = {
   readonly limited: boolean;
 };
 
-export function usePatchDiscussions(reviewId: string, revision: string | undefined) {
-  const key = JSON.stringify(["discussions", reviewId, revision]);
+export function usePatchDiscussions(
+  reviewId: string,
+  revision: string | undefined,
+  generation: number,
+) {
+  const key = JSON.stringify(["discussions", reviewId, revision, generation]);
   const [progress, setProgress] = useState<{
     readonly key: string;
     readonly data: Coverage | null;
@@ -60,11 +65,13 @@ export function usePatchDiscussions(reviewId: string, revision: string | undefin
       return { cursor, data: { pages, items: [...items.values()], limited: true } };
     },
     [{ kind: "discussions", id: reviewId }],
+    lostDiscussionAccess,
   );
   // Keep only the key once confirmed, so refreshes need no hidden preview snapshots.
   if (resource.data !== undefined && !confirmed) setProgress({ key, data: null });
   else if (progress && progress.key !== key) setProgress(undefined);
-  const coverage = resource.data ?? (progress?.key === key ? progress.data : undefined);
+  const coverage =
+    resource.data ?? (!resource.error && progress?.key === key ? progress.data : undefined);
   return {
     ...resource,
     items: coverage?.items ?? EMPTY_DISCUSSIONS,

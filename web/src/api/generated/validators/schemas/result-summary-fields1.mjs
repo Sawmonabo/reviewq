@@ -4,9 +4,9 @@ import { validate25 } from "./checkpoint-id-dto.mjs";
 import { validate150 } from "./git-sha-dto.mjs";
 import { validate235 } from "./utc-timestamp-dto.mjs";
 import { validate127 } from "./safe-count-dto.mjs";
-import { validate471 } from "./result-kind.mjs";
-import { schema158 } from "../metadata-4.mjs";
-function validate465(
+import { validate535 } from "./result-kind.mjs";
+import { schema178 } from "../metadata-4.mjs";
+function validate529(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -89,7 +89,7 @@ function validate465(
               vErrors.push(err1);
             }
             errors++;
-            validate465.errors = vErrors;
+            validate529.errors = vErrors;
             return false;
           } else {
             errors = _errs3;
@@ -163,7 +163,7 @@ function validate465(
                 if (errors === _errs9) {
                   if (Array.isArray(data4)) {
                     if (data4.length > 12) {
-                      validate465.errors = [
+                      validate529.errors = [
                         {
                           instancePath: instancePath + "/findingIds",
                           schemaPath: "#/properties/findingIds/maxItems",
@@ -198,7 +198,7 @@ function validate465(
                       }
                     }
                   } else {
-                    validate465.errors = [
+                    validate529.errors = [
                       {
                         instancePath: instancePath + "/findingIds",
                         schemaPath: "#/properties/findingIds/type",
@@ -217,7 +217,7 @@ function validate465(
                 if (data.kind !== undefined && func0.call(data, "kind")) {
                   const _errs12 = errors;
                   if (
-                    !validate471(data.kind, {
+                    !validate535(data.kind, {
                       instancePath: instancePath + "/kind",
                       parentData: data,
                       parentDataProperty: "kind",
@@ -226,8 +226,8 @@ function validate465(
                   ) {
                     vErrors =
                       vErrors === null
-                        ? validate471.errors
-                        : vErrors.concat(validate471.errors);
+                        ? validate535.errors
+                        : vErrors.concat(validate535.errors);
                     errors = vErrors.length;
                   }
                   var valid0 = _errs12 === errors;
@@ -241,7 +241,7 @@ function validate465(
                   ) {
                     const _errs13 = errors;
                     if (typeof data.moreFindingIds !== "boolean") {
-                      validate465.errors = [
+                      validate529.errors = [
                         {
                           instancePath: instancePath + "/moreFindingIds",
                           schemaPath: "#/properties/moreFindingIds/type",
@@ -263,13 +263,13 @@ function validate465(
                       let data8 = data.reasonPreview;
                       const _errs15 = errors;
                       if (typeof data8 !== "string" && data8 !== null) {
-                        validate465.errors = [
+                        validate529.errors = [
                           {
                             instancePath: instancePath + "/reasonPreview",
                             schemaPath: "#/properties/reasonPreview/type",
                             keyword: "type",
                             params: {
-                              type: schema158.properties.reasonPreview.type,
+                              type: schema178.properties.reasonPreview.type,
                             },
                           },
                         ];
@@ -287,7 +287,7 @@ function validate465(
         }
       }
     } else {
-      validate465.errors = [
+      validate529.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -298,7 +298,7 @@ function validate465(
       return false;
     }
   }
-  validate465.errors = vErrors;
+  validate529.errors = vErrors;
   return errors === 0;
 }
-export { validate465 };
+export { validate529 };

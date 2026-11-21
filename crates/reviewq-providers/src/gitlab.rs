@@ -33,6 +33,7 @@ pub struct GitLab {
     http: Arc<SourceNetwork>,
     headers: header::HeaderMap,
     patches: changes::Leases,
+    discussions: Arc<changes::DiscussionCache>,
     lease: Option<SourceLease>,
     account: Option<u64>,
 }
@@ -150,6 +151,7 @@ struct Project {
 
 #[derive(Deserialize)]
 struct MergeRequest {
+    id: Option<u64>,
     project_id: u64,
     iid: u64,
     title: String,
@@ -229,6 +231,7 @@ impl GitLab {
             http,
             headers,
             patches: changes::Leases::new(profile),
+            discussions: Arc::default(),
             lease: None,
             account: None,
         })

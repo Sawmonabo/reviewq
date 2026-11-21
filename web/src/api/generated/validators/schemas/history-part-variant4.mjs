@@ -3,9 +3,9 @@ import { func0 } from "../runtime.mjs";
 import { validate25 } from "./checkpoint-id-dto.mjs";
 import { validate48 } from "./history-cursor-dto.mjs";
 import { validate127 } from "./safe-count-dto.mjs";
-import { validate586 } from "./history-tool-state.mjs";
-import { validate530 } from "./history-text.mjs";
-function validate590(
+import { validate650 } from "./history-tool-state.mjs";
+import { validate594 } from "./history-text.mjs";
+function validate654(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -26,7 +26,7 @@ function validate590(
         ((data.contentRef === undefined || !func0.call(data, "contentRef")) &&
           (missing0 = "contentRef"))
       ) {
-        validate590.errors = [
+        validate654.errors = [
           {
             instancePath,
             schemaPath: "#/required",
@@ -111,7 +111,7 @@ function validate590(
                 vErrors.push(err1);
               }
               errors++;
-              validate590.errors = vErrors;
+              validate654.errors = vErrors;
               return false;
             } else {
               errors = _errs3;
@@ -132,7 +132,7 @@ function validate590(
               let data2 = data.kind;
               const _errs7 = errors;
               if (typeof data2 !== "string") {
-                validate590.errors = [
+                validate654.errors = [
                   {
                     instancePath: instancePath + "/kind",
                     schemaPath: "#/properties/kind/type",
@@ -143,7 +143,7 @@ function validate590(
                 return false;
               }
               if ("tool_result" !== data2) {
-                validate590.errors = [
+                validate654.errors = [
                   {
                     instancePath: instancePath + "/kind",
                     schemaPath: "#/properties/kind/const",
@@ -185,7 +185,7 @@ function validate590(
                 if (data.state !== undefined && func0.call(data, "state")) {
                   const _errs10 = errors;
                   if (
-                    !validate586(data.state, {
+                    !validate650(data.state, {
                       instancePath: instancePath + "/state",
                       parentData: data,
                       parentDataProperty: "state",
@@ -194,8 +194,8 @@ function validate590(
                   ) {
                     vErrors =
                       vErrors === null
-                        ? validate586.errors
-                        : vErrors.concat(validate586.errors);
+                        ? validate650.errors
+                        : vErrors.concat(validate650.errors);
                     errors = vErrors.length;
                   }
                   var valid0 = _errs10 === errors;
@@ -206,7 +206,7 @@ function validate590(
                   if (data.text !== undefined && func0.call(data, "text")) {
                     const _errs11 = errors;
                     if (
-                      !validate530(data.text, {
+                      !validate594(data.text, {
                         instancePath: instancePath + "/text",
                         parentData: data,
                         parentDataProperty: "text",
@@ -215,8 +215,8 @@ function validate590(
                     ) {
                       vErrors =
                         vErrors === null
-                          ? validate530.errors
-                          : vErrors.concat(validate530.errors);
+                          ? validate594.errors
+                          : vErrors.concat(validate594.errors);
                       errors = vErrors.length;
                     }
                     var valid0 = _errs11 === errors;
@@ -230,7 +230,7 @@ function validate590(
         }
       }
     } else {
-      validate590.errors = [
+      validate654.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -241,7 +241,7 @@ function validate590(
       return false;
     }
   }
-  validate590.errors = vErrors;
+  validate654.errors = vErrors;
   return errors === 0;
 }
-export { validate590 };
+export { validate654 };

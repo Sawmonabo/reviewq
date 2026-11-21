@@ -31,6 +31,7 @@ use crate::{SqliteStore, StoreError};
 
 mod archive;
 mod cached;
+pub(crate) mod discussions;
 mod filters;
 mod focus;
 mod lookup;
