@@ -4,9 +4,9 @@ import { validate433 } from "./patch-discussion.mjs";
 import { validate48 } from "./history-cursor-dto.mjs";
 import { validate114 } from "./review-id-dto.mjs";
 import { validate25 } from "./checkpoint-id-dto.mjs";
-import { schema265 } from "../metadata-6.mjs";
-import { validate879 } from "./patch-discussion-text.mjs";
-function validate874(
+import { schema277 } from "../metadata-6.mjs";
+import { validate910 } from "./patch-discussion-text.mjs";
+function validate905(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -25,7 +25,7 @@ function validate874(
         ((data.nextCursor === undefined || !func0.call(data, "nextCursor")) &&
           (missing0 = "nextCursor"))
       ) {
-        validate874.errors = [
+        validate905.errors = [
           {
             instancePath,
             schemaPath: "#/required",
@@ -41,7 +41,7 @@ function validate874(
           if (errors === _errs1) {
             if (Array.isArray(data0)) {
               if (data0.length > 100) {
-                validate874.errors = [
+                validate905.errors = [
                   {
                     instancePath: instancePath + "/items",
                     schemaPath: "#/properties/items/maxItems",
@@ -76,7 +76,7 @@ function validate874(
                 }
               }
             } else {
-              validate874.errors = [
+              validate905.errors = [
                 {
                   instancePath: instancePath + "/items",
                   schemaPath: "#/properties/items/type",
@@ -146,7 +146,7 @@ function validate874(
                 vErrors.push(err1);
               }
               errors++;
-              validate874.errors = vErrors;
+              validate905.errors = vErrors;
               return false;
             } else {
               errors = _errs5;
@@ -212,13 +212,13 @@ function validate874(
                   let data5 = data.textProjections;
                   const _errs11 = errors;
                   if (!Array.isArray(data5) && data5 !== null) {
-                    validate874.errors = [
+                    validate905.errors = [
                       {
                         instancePath: instancePath + "/textProjections",
                         schemaPath: "#/properties/textProjections/type",
                         keyword: "type",
                         params: {
-                          type: schema265.properties.textProjections.type,
+                          type: schema277.properties.textProjections.type,
                         },
                       },
                     ];
@@ -227,7 +227,7 @@ function validate874(
                   if (errors === _errs11) {
                     if (Array.isArray(data5)) {
                       if (data5.length > 64) {
-                        validate874.errors = [
+                        validate905.errors = [
                           {
                             instancePath: instancePath + "/textProjections",
                             schemaPath: "#/properties/textProjections/maxItems",
@@ -242,7 +242,7 @@ function validate874(
                         for (let i1 = 0; i1 < len1; i1++) {
                           const _errs13 = errors;
                           if (
-                            !validate879(data5[i1], {
+                            !validate910(data5[i1], {
                               instancePath:
                                 instancePath + "/textProjections/" + i1,
                               parentData: data5,
@@ -252,8 +252,8 @@ function validate874(
                           ) {
                             vErrors =
                               vErrors === null
-                                ? validate879.errors
-                                : vErrors.concat(validate879.errors);
+                                ? validate910.errors
+                                : vErrors.concat(validate910.errors);
                             errors = vErrors.length;
                           }
                           var valid3 = _errs13 === errors;
@@ -274,7 +274,7 @@ function validate874(
         }
       }
     } else {
-      validate874.errors = [
+      validate905.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -285,7 +285,7 @@ function validate874(
       return false;
     }
   }
-  validate874.errors = vErrors;
+  validate905.errors = vErrors;
   return errors === 0;
 }
-export { validate874 };
+export { validate905 };

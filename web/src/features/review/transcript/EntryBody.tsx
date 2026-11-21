@@ -1,4 +1,5 @@
 import { useState } from "react";
+import type { DocumentDisplay } from "../../../api/generated/contracts/common";
 import type { HistoryEntry, HistoryPart } from "../../../api/generated/contracts";
 import type { SessionAddress } from "../../../api/history";
 import { ExpandedOutput } from "./ExpandedOutput";
@@ -119,6 +120,7 @@ export function EntryBody({
             <Prose
               key={sameReply ? current.turnId : undefined}
               complete={complete || undefined}
+              display={"display" in part ? part.display : undefined}
               preview={part.text}
               waiting={Boolean(sameReply && inlineRef && !reference && complete === undefined)}
             />
@@ -181,11 +183,13 @@ export function EntryBody({
 
 function Prose({
   complete,
+  display,
   preview,
   provisional = false,
   waiting = false,
 }: {
   readonly complete?: InlineProse | undefined;
+  readonly display?: DocumentDisplay | null | undefined;
   readonly preview: string;
   readonly provisional?: boolean;
   readonly waiting?: boolean;
@@ -199,10 +203,11 @@ function Prose({
   return (
     <>
       {complete?.kind === "prepared" ? (
-        <MarkdownContent tree={complete.tree} />
+        <MarkdownContent tree={complete.tree} display={complete.display} />
       ) : (
         <MarkdownContent
           source={complete?.text ?? held ?? preview}
+          display={complete?.display ?? display}
           provisional={provisional || held !== undefined}
           formattingLimit={complete?.kind === "formatting-limit"}
         />

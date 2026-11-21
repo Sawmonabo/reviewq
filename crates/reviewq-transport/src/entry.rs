@@ -26,7 +26,7 @@ use reviewq_app::queue::{
     ArchiveStore, QueueStore, ReviewLookup, SprintStore, TrackingStore, WorkspaceQueue,
 };
 use reviewq_app::reports::{
-    ReportCaptureStore, ReportFileSource, ReportMutationStore, ReportStore,
+    DrawingRenderer, ReportCaptureStore, ReportFileSource, ReportMutationStore, ReportStore,
 };
 use reviewq_app::settings::{ConnectionSources, NativeSkills, RuntimeSources, SettingsStore};
 use reviewq_app::sources::SourceRefreshStore;
@@ -45,6 +45,7 @@ mod changes;
 mod checkout;
 mod control;
 mod control_ops;
+mod diagrams;
 mod error;
 mod events;
 mod features;
@@ -58,6 +59,7 @@ mod questions;
 mod refresh;
 mod settings;
 mod sources;
+mod tables;
 mod targets;
 mod terminal;
 mod tracking;
@@ -157,6 +159,8 @@ pub(super) struct Entry {
     file_history: Arc<dyn NativeHistoryReader>,
     history_watches: history::Watchers,
     workflow: WorkflowIntegration,
+    drawings: diagrams::Cache,
+    tables: tables::Cache,
     terminal: Arc<dyn NativeTerminal>,
     sends_allowed: bool,
     commits: watch::Receiver<EventCursor>,
@@ -220,6 +224,7 @@ pub struct ServiceRuntime<'a> {
     pub claude: Option<Arc<dyn ClaudeCompanion>>,
     pub claude_interrupt: Option<Arc<dyn reviewq_app::hosts::recovery::NativeJobInterrupt>>,
     pub workflow: WorkflowIntegration,
+    pub drawing_renderer: Option<Arc<dyn DrawingRenderer>>,
     pub terminal: Arc<dyn NativeTerminal>,
     pub commits: watch::Receiver<EventCursor>,
     pub shutdown: watch::Receiver<bool>,
@@ -251,6 +256,8 @@ pub fn router(
         file_history,
         history_watches: history::Watchers::default(),
         workflow: runtime.workflow,
+        drawings: diagrams::Cache::new(runtime.drawing_renderer, runtime.shutdown.clone()),
+        tables: tables::Cache::new(),
         terminal: runtime.terminal,
         sends_allowed: runtime.sends_allowed,
         commits: runtime.commits,
@@ -270,6 +277,7 @@ pub fn router(
     }
     let api = Router::new()
         .route("/status", get(status))
+        .route("/drawings/{reference}", get(diagrams::read))
         .route("/control/review", post(control_ops::review))
         .route(
             "/control/ack",

@@ -1,3 +1,4 @@
+import type { DocumentDisplay, DrawingHint } from "../../../api/generated/contracts/common";
 import { reportWindow } from "../../../api/reports";
 import type {
   DisplayBlock,
@@ -6,6 +7,7 @@ import type {
   ReportSummary,
 } from "../../../api/generated/contracts/reports";
 import { parseMarkdown } from "../../../components/markdown/parse-markdown";
+import { parseSettledMarkdown, tableCost } from "../../../components/markdown/settled";
 import { groupReportItems, inDisplayOrder, reportBlocks } from "./report-presentation";
 import type { GroupPosition, PreparedGroup } from "./report-presentation";
 import { isThreadSection, reportText, startsReportBody } from "./report-structure";
@@ -48,6 +50,7 @@ export function wholeDocument(
   tree: NonNullable<ReturnType<typeof parseMarkdown>>,
   report: ReportSummary,
   changes: Changes,
+  display: DocumentDisplay | null | undefined,
 ): ReaderDocument {
   const groups = reportBlocks(tree, source, report, changes);
   const slice = { text: source, utf16: 0, scalar: 0 };
@@ -55,7 +58,7 @@ export function wholeDocument(
     groups,
     prepared: (index) => {
       const block = groups[index];
-      return block ? { block, source: slice } : undefined;
+      return block ? { block, source: slice, drawings: display?.drawings } : undefined;
     },
   };
 }
@@ -93,11 +96,12 @@ export function indexedDocument(
   for (const [index, group] of groups.entries())
     for (let i = group.first; i <= group.last; i++) owners[i] = index;
   const byStart = new Map(spans.map((span, index) => [span.byteStart, index]));
-  const raw = new Map<number, string>();
+  const raw = new Map<number, DisplayBlock>();
   const prepared = new Map<number, PreparedGroup>();
+  const retainedCost = new Map<number, number>();
   let previousPins = new Set<number>();
 
-  function receive(blocks: readonly DisplayBlock[]) {
+  function receive(blocks: readonly DisplayBlock[], destination: number) {
     for (const block of blocks) {
       const index = byStart.get(block.byteStart) ?? -1;
       const span = spans[index];
@@ -112,21 +116,44 @@ export function indexedDocument(
         utf8.encode(block.markdown).length !== span.byteEnd - span.byteStart
       )
         throw new Error("The displayed report span changed.");
-      raw.set(index, block.markdown);
+      // Source look-ahead stays useful even when the optional packet has no
+      // room in the destination's preparation budget.
+      const { display, ...source } = block;
+      raw.set(
+        index,
+        owners[index] === destination || !display?.table
+          ? block
+          : {
+              ...source,
+              ...(display.drawings?.length ? { display: { drawings: display.drawings } } : {}),
+            },
+      );
     }
   }
 
-  function compile(index: number) {
+  function compile(index: number, available: number) {
     if (prepared.has(index)) return true;
     const group = groups[index]!;
-    const parts: string[] = [];
+    const parts: DisplayBlock[] = [];
+    const drawings = new Map<string, DrawingHint>();
     for (let i = group.first; i <= group.last; i++) {
-      const text = raw.get(i);
-      if (text === undefined) return false;
-      parts.push(text);
+      const part = raw.get(i);
+      if (!part) return false;
+      parts.push(part);
+      for (const drawing of part.display?.drawings ?? [])
+        drawings.set(drawing.sourceSha256, drawing);
     }
-    const text = parts.join("");
-    const tree = parseMarkdown(text, base);
+    const text = parts.map((part) => part.markdown).join("");
+    const sourceBytes = spans[group.last]!.byteEnd - spans[group.first]!.byteStart;
+    const extra = parts.reduce((total, part) => total + tableCost(part.display?.table), 0);
+    const provision = extra <= available;
+    const tree = provision
+      ? parseSettledMarkdown(
+          text,
+          parts.map((part) => ({ markdown: part.markdown, table: part.display?.table })),
+          base,
+        )
+      : parseMarkdown(text, base);
     if (!tree) throw new Error("The report group exceeded its formatting limits.");
     const blocks = reportBlocks(
       tree,
@@ -147,17 +174,23 @@ export function indexedDocument(
     prepared.set(index, {
       block,
       source: { text, utf16: first.utf16Start, scalar: first.scalarStart },
+      drawings: drawings.size ? [...drawings.values()] : undefined,
     });
+    retainedCost.set(index, sourceBytes + (provision ? extra : 0));
     for (let i = group.first; i <= group.last; i++) raw.delete(i);
     return true;
   }
 
-  receive(opened.blocks);
   const opening = Math.max(
     0,
     groups.findIndex((group) => group.offset === savedOffset),
   );
-  compile(opening);
+  receive(opened.blocks, opening);
+  const openingGroup = groups[opening]!;
+  compile(
+    opening,
+    MAX_RETAINED_BYTES - (spans[openingGroup.last]!.byteEnd - spans[openingGroup.first]!.byteStart),
+  );
 
   async function prepare(
     indexes: readonly number[],
@@ -170,14 +203,19 @@ export function indexedDocument(
     // screen. A long selection may retain more of this single 1 MiB rich report.
     const held = new Set(pinned.filter((index) => prepared.has(index)));
     for (const index of previousPins)
-      if (!held.has(index) && !indexes.includes(index)) prepared.delete(index);
+      if (!held.has(index) && !indexes.includes(index)) {
+        prepared.delete(index);
+        retainedCost.delete(index);
+      }
     previousPins = held;
     const admitted = new Set(held);
+    const heldBytes = [...held].reduce((sum, index) => sum + (retainedCost.get(index) ?? 0), 0);
     let bytes = 0;
     for (const index of [...indexes, ...Array.from(prepared.keys()).reverse()]) {
       if (admitted.has(index)) continue;
       const group = groups[index]!;
-      const size = spans[group.last]!.byteEnd - spans[group.first]!.byteStart;
+      const size =
+        retainedCost.get(index) ?? spans[group.last]!.byteEnd - spans[group.first]!.byteStart;
       if (
         bytes + size > MAX_RETAINED_BYTES ||
         (admitted.size - held.size >= 12 && !indexes.includes(index))
@@ -186,7 +224,12 @@ export function indexedDocument(
       bytes += size;
       admitted.add(index);
     }
-    for (const index of prepared.keys()) if (!admitted.has(index)) prepared.delete(index);
+    for (const index of prepared.keys()) {
+      if (!admitted.has(index)) {
+        prepared.delete(index);
+        retainedCost.delete(index);
+      }
+    }
     for (const index of indexes) {
       const value = prepared.get(index);
       if (value) {
@@ -198,7 +241,8 @@ export function indexedDocument(
     let adjacentBytes = 0;
     for (const [index] of raw) {
       if (admitted.has(owners[index]!)) continue;
-      const size = spans[index]!.byteEnd - spans[index]!.byteStart;
+      const size =
+        spans[index]!.byteEnd - spans[index]!.byteStart + tableCost(raw.get(index)?.display?.table);
       if (bytes + size > MAX_RETAINED_BYTES || adjacentBytes + size > RANGE_BYTES)
         raw.delete(index);
       else {
@@ -244,11 +288,14 @@ export function indexedDocument(
           result.blocks.at(-1)?.byteEnd !== spans[last]!.byteEnd
         )
           throw new Error("The requested report group is unavailable.");
-        receive(result.blocks);
+        receive(result.blocks, index);
         if (!current()) return;
       }
       signal.throwIfAborted();
-      if (!compile(index)) throw new Error("The report group is incomplete.");
+      if (!compile(index, Math.max(0, MAX_RETAINED_BYTES - bytes - heldBytes)))
+        throw new Error("The report group is incomplete.");
+      bytes +=
+        retainedCost.get(index)! - (spans[group.last]!.byteEnd - spans[group.first]!.byteStart);
       publish();
       // Yield between independent groups so a jump can supersede look-ahead work.
       if (indexes.length > 1) await new Promise<void>((resolve) => window.setTimeout(resolve, 0));

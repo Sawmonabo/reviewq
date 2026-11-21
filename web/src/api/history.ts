@@ -1,4 +1,5 @@
 import { queryString, read, write } from "./client";
+import { drawingFontHeaders } from "./drawing-font";
 import type {
   HistoryContent,
   HistoryNavigation,
@@ -35,6 +36,7 @@ export async function historyPage(
     isHistoryPageResponse,
     signal,
     65_536,
+    drawingFontHeaders(),
   );
   verify(target, result.data);
   return result;
@@ -53,6 +55,7 @@ export async function historyContent(
     isHistoryContentResponse,
     signal,
     384 * 1024,
+    drawingFontHeaders(),
   );
   verify(target, data);
   if (data.entryId !== entryId || data.generation !== generation || data.reset)
@@ -66,6 +69,7 @@ export async function historyResult(target: SessionAddress, signal: AbortSignal)
     isHistoryResultResponse,
     signal,
     65_536,
+    drawingFontHeaders(),
   );
   verify(target, result.data);
   if (result.data.entry && !result.data.generation)
@@ -84,6 +88,7 @@ export async function historyParts(
     isHistoryPartPageResponse,
     signal,
     128 * 1024,
+    drawingFontHeaders(),
   );
   if (data.entryId !== entryId) throw new Error("The native output entry changed.");
   return data;

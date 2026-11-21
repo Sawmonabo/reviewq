@@ -1,5 +1,5 @@
 {
-  "entry": ["src/main.tsx!"],
+  "entry": ["src/main.tsx!", "src/diagram-producer.ts!"],
   "project": ["src/**/*.{ts,tsx}!"],
   "ignoreIssues": {
     "src/api/generated/**": ["exports", "types"]

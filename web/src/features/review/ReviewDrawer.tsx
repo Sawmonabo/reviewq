@@ -1,4 +1,4 @@
-import { Suspense, useMemo, useRef, useState } from "react";
+import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { readOverview } from "../../api/client";
 import type {
@@ -19,7 +19,7 @@ import {
 } from "../../api/review";
 import { ActionMenu } from "../../components/ActionMenu";
 import { FilterSelect } from "../../components/FilterSelect";
-import { DiagramCacheContext } from "../../components/markdown/diagram-cache";
+import { DiagramCache, DiagramCacheContext } from "../../components/markdown/diagram-cache";
 import { Icon } from "../../components/Icon";
 import { PanelBoundary } from "../../components/PanelBoundary";
 import { Empty, Loading, Notice } from "../../components/PanelState";
@@ -110,7 +110,8 @@ export default function ReviewDrawer({
     snapshot.sourceSha !== acknowledgement.sourceSha;
   const source = safeUrl(overview.webUrl);
   const scope = [review.reviewId, run?.runId, session?.sessionKey].join("/");
-  const diagrams = useMemo(() => ({ scope }), [scope]);
+  const diagrams = useMemo(() => new DiagramCache(scope), [scope]);
+  useEffect(() => () => diagrams.clear(), [diagrams]);
   const outcomeMessage = outcome?.key === scope ? outcome.message : undefined;
   const command = outcome?.key === scope ? outcome.terminal : undefined;
   const recovery = useResource(

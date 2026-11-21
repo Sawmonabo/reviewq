@@ -89,9 +89,9 @@ export function ExpandedOutput({
         {content &&
           (format === "markdown" && content.complete ? (
             prepared?.tree ? (
-              <MarkdownContent tree={prepared.tree} />
+              <MarkdownContent tree={prepared.tree} display={content.display} />
             ) : (
-              <MarkdownContent source={content.text} />
+              <MarkdownContent source={content.text} display={content.display} />
             )
           ) : (
             <pre className="tool-output-line" aria-label="Native output text">
@@ -145,6 +145,7 @@ export function ExpandedOutput({
 function outputRange(data: FoundOutput["content"]) {
   return {
     text: data.text,
+    display: data.display,
     complete: data.offset === 0 && data.complete && !data.nextCursor,
     nextCursor: data.nextCursor,
     nextOffset: data.offset + encoder.encode(data.text).length,

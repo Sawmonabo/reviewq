@@ -10,6 +10,7 @@ use reviewq_protocol::history::{HistoryPartPage, HistoryPartPageResponse};
 use reviewq_protocol::{HistoryCursorDto, HistoryEntryIdDto};
 use serde::{Deserialize, Serialize};
 
+use super::drawing_hints::InlineDisplay;
 use super::{Entry, Point, ServiceEndpoint, visible_part};
 use crate::entry::error::{ApiError, ApiPath as Path, ApiQuery as Query};
 use crate::entry::pages::{parse, success};
@@ -80,7 +81,7 @@ pub(in crate::entry) async fn read(
         .await?;
     if entry
         .store
-        .history_session(actor, run.clone(), session.clone())
+        .history_session(actor.clone(), run.clone(), session.clone())
         .await?
         .value
         != source.value
@@ -91,10 +92,21 @@ pub(in crate::entry) async fn read(
         .next
         .map(|first| cursor(endpoint, &run, &session, &reference, first))
         .transpose()?;
+    let display = InlineDisplay {
+        entry: &entry,
+        actor: &actor,
+        run: &run,
+        session: &session,
+        font: crate::entry::diagrams::client_font(&headers),
+    };
     let parts = viewed
         .parts
         .iter()
-        .map(|part| visible_part(endpoint, &run, &session, part))
+        .map(|part| {
+            let mut projected = visible_part(endpoint, &run, &session, part)?;
+            display.part(&mut projected, &reference, part);
+            Ok::<_, AppError>(projected)
+        })
         .collect::<Result<Vec<_>, _>>()?;
     Ok(Json(success(
         HistoryPartPage {

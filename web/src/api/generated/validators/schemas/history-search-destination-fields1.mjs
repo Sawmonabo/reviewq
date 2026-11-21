@@ -3,8 +3,8 @@ import { func0 } from "../runtime.mjs";
 import { validate48 } from "./history-cursor-dto.mjs";
 import { validate127 } from "./safe-count-dto.mjs";
 import { validate25 } from "./checkpoint-id-dto.mjs";
-import { validate594 } from "./history-text.mjs";
-function validate726(
+import { validate621 } from "./history-text.mjs";
+function validate757(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -69,7 +69,7 @@ function validate726(
             vErrors.push(err1);
           }
           errors++;
-          validate726.errors = vErrors;
+          validate757.errors = vErrors;
           return false;
         } else {
           errors = _errs2;
@@ -200,7 +200,7 @@ function validate726(
                   ) {
                     const _errs11 = errors;
                     if (typeof data.markdown !== "boolean") {
-                      validate726.errors = [
+                      validate757.errors = [
                         {
                           instancePath: instancePath + "/markdown",
                           schemaPath: "#/properties/markdown/type",
@@ -221,7 +221,7 @@ function validate726(
                     ) {
                       const _errs13 = errors;
                       if (
-                        !validate594(data.matched, {
+                        !validate621(data.matched, {
                           instancePath: instancePath + "/matched",
                           parentData: data,
                           parentDataProperty: "matched",
@@ -230,8 +230,8 @@ function validate726(
                       ) {
                         vErrors =
                           vErrors === null
-                            ? validate594.errors
-                            : vErrors.concat(validate594.errors);
+                            ? validate621.errors
+                            : vErrors.concat(validate621.errors);
                         errors = vErrors.length;
                       }
                       var valid0 = _errs13 === errors;
@@ -246,7 +246,7 @@ function validate726(
         }
       }
     } else {
-      validate726.errors = [
+      validate757.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -257,7 +257,7 @@ function validate726(
       return false;
     }
   }
-  validate726.errors = vErrors;
+  validate757.errors = vErrors;
   return errors === 0;
 }
-export { validate726 };
+export { validate757 };

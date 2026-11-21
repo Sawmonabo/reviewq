@@ -453,7 +453,7 @@ async function loadReport(
     data: {
       reader:
         tree && typeof markdown === "string"
-          ? wholeDocument(markdown, tree, report, outcomes.changes)
+          ? wholeDocument(markdown, tree, report, outcomes.changes, response.data.display)
           : undefined,
       formattingFailure: typeof markdown === "string" && !tree,
       outcomeError: outcomes.error,

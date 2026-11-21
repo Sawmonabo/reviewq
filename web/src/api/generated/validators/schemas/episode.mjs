@@ -3,10 +3,10 @@ import { func0 } from "../runtime.mjs";
 import { validate25 } from "./checkpoint-id-dto.mjs";
 import { validate322 } from "./kind.mjs";
 import { validate235 } from "./utc-timestamp-dto.mjs";
-import { schema326 } from "../metadata-8.mjs";
+import { schema338 } from "../metadata-8.mjs";
 import { validate35 } from "./event-cursor-dto.mjs";
 import { validate326 } from "./cancel-recovery-response-state.mjs";
-function validate1108(
+function validate1139(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -30,7 +30,7 @@ function validate1108(
         ((data.reason === undefined || !func0.call(data, "reason")) &&
           (missing0 = "reason"))
       ) {
-        validate1108.errors = [
+        validate1139.errors = [
           {
             instancePath,
             schemaPath: "#/required",
@@ -163,7 +163,7 @@ function validate1108(
                     vErrors.push(err1);
                   }
                   errors++;
-                  validate1108.errors = vErrors;
+                  validate1139.errors = vErrors;
                   return false;
                 } else {
                   errors = _errs5;
@@ -184,12 +184,12 @@ function validate1108(
                   let data4 = data.reason;
                   const _errs9 = errors;
                   if (typeof data4 !== "string" && data4 !== null) {
-                    validate1108.errors = [
+                    validate1139.errors = [
                       {
                         instancePath: instancePath + "/reason",
                         schemaPath: "#/properties/reason/type",
                         keyword: "type",
-                        params: { type: schema326.properties.reason.type },
+                        params: { type: schema338.properties.reason.type },
                       },
                     ];
                     return false;
@@ -251,7 +251,7 @@ function validate1108(
         }
       }
     } else {
-      validate1108.errors = [
+      validate1139.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -262,7 +262,7 @@ function validate1108(
       return false;
     }
   }
-  validate1108.errors = vErrors;
+  validate1139.errors = vErrors;
   return errors === 0;
 }
-export { validate1108 };
+export { validate1139 };

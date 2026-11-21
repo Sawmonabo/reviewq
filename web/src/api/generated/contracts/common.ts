@@ -100,6 +100,45 @@ export type FindingConclusion =
   | "still_present"
   | "unverified";
 
+export type TableColumn = "default" | "left" | "center" | "right";
+
+export type TableInline =
+  | {
+      end: number;
+      kind: "text";
+      start: number;
+      [k: string]: unknown;
+    }
+  | {
+      end: number;
+      kind: "code";
+      start: number;
+      text: string;
+      [k: string]: unknown;
+    }
+  | {
+      kind: "emphasis";
+      [k: string]: unknown;
+    }
+  | {
+      kind: "strong";
+      [k: string]: unknown;
+    }
+  | {
+      kind: "strike";
+      [k: string]: unknown;
+    }
+  | {
+      href: string;
+      kind: "link";
+      title: string;
+      [k: string]: unknown;
+    }
+  | {
+      kind: "close";
+      [k: string]: unknown;
+    };
+
 export type HistoryGenerationDto = string;
 
 export type State = "pending" | "confirmed" | "rejected" | "uncertain";
@@ -182,5 +221,224 @@ export interface ErrorDto {
   code: ErrorCode;
   message: string;
   retryable: boolean;
+  [k: string]: unknown;
+}
+
+export interface DocumentDisplay {
+  /**
+   * @maxItems 8
+   */
+  drawings?:
+    | []
+    | [DrawingHint]
+    | [DrawingHint, DrawingHint]
+    | [DrawingHint, DrawingHint, DrawingHint]
+    | [DrawingHint, DrawingHint, DrawingHint, DrawingHint]
+    | [DrawingHint, DrawingHint, DrawingHint, DrawingHint, DrawingHint]
+    | [
+        DrawingHint,
+        DrawingHint,
+        DrawingHint,
+        DrawingHint,
+        DrawingHint,
+        DrawingHint,
+      ]
+    | [
+        DrawingHint,
+        DrawingHint,
+        DrawingHint,
+        DrawingHint,
+        DrawingHint,
+        DrawingHint,
+        DrawingHint,
+      ]
+    | [
+        DrawingHint,
+        DrawingHint,
+        DrawingHint,
+        DrawingHint,
+        DrawingHint,
+        DrawingHint,
+        DrawingHint,
+        DrawingHint,
+      ];
+  table?: PreparedTable | null;
+  [k: string]: unknown;
+}
+
+export interface DrawingHint {
+  font: ReportHashDto;
+  recipe: string;
+  reference: PageCursorDto;
+  sourceSha256: ReportHashDto;
+  [k: string]: unknown;
+}
+
+export interface PreparedTable {
+  /**
+   * @minItems 1
+   * @maxItems 16
+   */
+  columns:
+    | [TableColumn]
+    | [TableColumn, TableColumn]
+    | [TableColumn, TableColumn, TableColumn]
+    | [TableColumn, TableColumn, TableColumn, TableColumn]
+    | [TableColumn, TableColumn, TableColumn, TableColumn, TableColumn]
+    | [
+        TableColumn,
+        TableColumn,
+        TableColumn,
+        TableColumn,
+        TableColumn,
+        TableColumn,
+      ]
+    | [
+        TableColumn,
+        TableColumn,
+        TableColumn,
+        TableColumn,
+        TableColumn,
+        TableColumn,
+        TableColumn,
+      ]
+    | [
+        TableColumn,
+        TableColumn,
+        TableColumn,
+        TableColumn,
+        TableColumn,
+        TableColumn,
+        TableColumn,
+        TableColumn,
+      ]
+    | [
+        TableColumn,
+        TableColumn,
+        TableColumn,
+        TableColumn,
+        TableColumn,
+        TableColumn,
+        TableColumn,
+        TableColumn,
+        TableColumn,
+      ]
+    | [
+        TableColumn,
+        TableColumn,
+        TableColumn,
+        TableColumn,
+        TableColumn,
+        TableColumn,
+        TableColumn,
+        TableColumn,
+        TableColumn,
+        TableColumn,
+      ]
+    | [
+        TableColumn,
+        TableColumn,
+        TableColumn,
+        TableColumn,
+        TableColumn,
+        TableColumn,
+        TableColumn,
+        TableColumn,
+        TableColumn,
+        TableColumn,
+        TableColumn,
+      ]
+    | [
+        TableColumn,
+        TableColumn,
+        TableColumn,
+        TableColumn,
+        TableColumn,
+        TableColumn,
+        TableColumn,
+        TableColumn,
+        TableColumn,
+        TableColumn,
+        TableColumn,
+        TableColumn,
+      ]
+    | [
+        TableColumn,
+        TableColumn,
+        TableColumn,
+        TableColumn,
+        TableColumn,
+        TableColumn,
+        TableColumn,
+        TableColumn,
+        TableColumn,
+        TableColumn,
+        TableColumn,
+        TableColumn,
+        TableColumn,
+      ]
+    | [
+        TableColumn,
+        TableColumn,
+        TableColumn,
+        TableColumn,
+        TableColumn,
+        TableColumn,
+        TableColumn,
+        TableColumn,
+        TableColumn,
+        TableColumn,
+        TableColumn,
+        TableColumn,
+        TableColumn,
+        TableColumn,
+      ]
+    | [
+        TableColumn,
+        TableColumn,
+        TableColumn,
+        TableColumn,
+        TableColumn,
+        TableColumn,
+        TableColumn,
+        TableColumn,
+        TableColumn,
+        TableColumn,
+        TableColumn,
+        TableColumn,
+        TableColumn,
+        TableColumn,
+        TableColumn,
+      ]
+    | [
+        TableColumn,
+        TableColumn,
+        TableColumn,
+        TableColumn,
+        TableColumn,
+        TableColumn,
+        TableColumn,
+        TableColumn,
+        TableColumn,
+        TableColumn,
+        TableColumn,
+        TableColumn,
+        TableColumn,
+        TableColumn,
+        TableColumn,
+        TableColumn,
+      ];
+  encodedBytes: number;
+  end: number;
+  nodes: number;
+  /**
+   * @minItems 2
+   * @maxItems 129
+   */
+  rows: [TableInline[][], TableInline[][], ...TableInline[][][]];
+  /**
+   * Half-open UTF-16 positions within the accompanying verified Markdown.
+   */
+  start: number;
   [k: string]: unknown;
 }

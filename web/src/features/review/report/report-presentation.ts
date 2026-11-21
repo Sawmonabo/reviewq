@@ -1,3 +1,4 @@
+import type { DrawingHint } from "../../../api/generated/contracts/common";
 import type { Element, Root, RootContent } from "hast";
 import type { ReportSummary } from "../../../api/generated/contracts/reports";
 import { isRetired, reportStructure, reportText as text } from "./report-structure";
@@ -129,7 +130,11 @@ export function reportBlocks(
 }
 
 export type ReportText = { readonly text: string; readonly utf16: number; readonly scalar: number };
-export type PreparedGroup = { readonly block: ReportBlock; readonly source: ReportText };
+export type PreparedGroup = {
+  readonly block: ReportBlock;
+  readonly source: ReportText;
+  readonly drawings?: readonly DrawingHint[] | undefined;
+};
 
 export function selectionSource(range: Range, groups: readonly PreparedGroup[]) {
   const start = groups[0],
