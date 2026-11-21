@@ -88,6 +88,7 @@ pub enum PatchSide {
 
 pub struct PatchSearchMatch {
     pub file_id: String,
+    pub patch_etag: String,
     pub old_path: String,
     pub new_path: String,
     pub side: PatchSide,

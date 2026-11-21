@@ -3,7 +3,7 @@ import { func0 } from "../runtime.mjs";
 import { schema433 } from "../metadata-10.mjs";
 import { validate127 } from "./safe-count-dto.mjs";
 import { validate235 } from "./utc-timestamp-dto.mjs";
-function validate1472(
+function validate1473(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -15,7 +15,7 @@ function validate1472(
         let data0 = data.assignee;
         const _errs1 = errors;
         if (typeof data0 !== "string" && data0 !== null) {
-          validate1472.errors = [
+          validate1473.errors = [
             {
               instancePath: instancePath + "/assignee",
               schemaPath: "#/properties/assignee/type",
@@ -34,7 +34,7 @@ function validate1472(
           let data1 = data.assigneeId;
           const _errs3 = errors;
           if (typeof data1 !== "string" && data1 !== null) {
-            validate1472.errors = [
+            validate1473.errors = [
               {
                 instancePath: instancePath + "/assigneeId",
                 schemaPath: "#/properties/assigneeId/type",
@@ -86,7 +86,7 @@ function validate1472(
                   for (let i0 = 0; i0 < len0; i0++) {
                     const _errs8 = errors;
                     if (typeof data3[i0] !== "string") {
-                      validate1472.errors = [
+                      validate1473.errors = [
                         {
                           instancePath: instancePath + "/components/" + i0,
                           schemaPath: "#/properties/components/items/type",
@@ -102,7 +102,7 @@ function validate1472(
                     }
                   }
                 } else {
-                  validate1472.errors = [
+                  validate1473.errors = [
                     {
                       instancePath: instancePath + "/components",
                       schemaPath: "#/properties/components/type",
@@ -125,7 +125,7 @@ function validate1472(
                 let data5 = data.description;
                 const _errs10 = errors;
                 if (typeof data5 !== "string" && data5 !== null) {
-                  validate1472.errors = [
+                  validate1473.errors = [
                     {
                       instancePath: instancePath + "/description",
                       schemaPath: "#/properties/description/type",
@@ -150,7 +150,7 @@ function validate1472(
                     !(typeof data6 == "number" && isFinite(data6)) &&
                     data6 !== null
                   ) {
-                    validate1472.errors = [
+                    validate1473.errors = [
                       {
                         instancePath: instancePath + "/estimate",
                         schemaPath: "#/properties/estimate/type",
@@ -163,7 +163,7 @@ function validate1472(
                   if (errors === _errs12) {
                     if (typeof data6 == "number" && isFinite(data6)) {
                       if (data6 < 0 || isNaN(data6)) {
-                        validate1472.errors = [
+                        validate1473.errors = [
                           {
                             instancePath: instancePath + "/estimate",
                             schemaPath: "#/properties/estimate/minimum",
@@ -211,7 +211,7 @@ function validate1472(
                       let data8 = data.issueType;
                       const _errs15 = errors;
                       if (typeof data8 !== "string" && data8 !== null) {
-                        validate1472.errors = [
+                        validate1473.errors = [
                           {
                             instancePath: instancePath + "/issueType",
                             schemaPath: "#/properties/issueType/type",
@@ -235,7 +235,7 @@ function validate1472(
         }
       }
     } else {
-      validate1472.errors = [
+      validate1473.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -246,7 +246,7 @@ function validate1472(
       return false;
     }
   }
-  validate1472.errors = vErrors;
+  validate1473.errors = vErrors;
   return errors === 0;
 }
-export { validate1472 };
+export { validate1473 };

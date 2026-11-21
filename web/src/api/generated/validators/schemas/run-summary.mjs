@@ -4,7 +4,7 @@ import { schema372 } from "../metadata-9.mjs";
 import { validate25 } from "./checkpoint-id-dto.mjs";
 import { validate71 } from "./host-provider-dto.mjs";
 import { validate235 } from "./utc-timestamp-dto.mjs";
-function validate1256(
+function validate1257(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -26,7 +26,7 @@ function validate1256(
         ((data.startedAt === undefined || !func0.call(data, "startedAt")) &&
           (missing0 = "startedAt"))
       ) {
-        validate1256.errors = [
+        validate1257.errors = [
           {
             instancePath,
             schemaPath: "#/required",
@@ -40,7 +40,7 @@ function validate1256(
           let data0 = data.leadName;
           const _errs1 = errors;
           if (typeof data0 !== "string" && data0 !== null) {
-            validate1256.errors = [
+            validate1257.errors = [
               {
                 instancePath: instancePath + "/leadName",
                 schemaPath: "#/properties/leadName/type",
@@ -178,7 +178,7 @@ function validate1256(
                       vErrors.push(err1);
                     }
                     errors++;
-                    validate1256.errors = vErrors;
+                    validate1257.errors = vErrors;
                     return false;
                   } else {
                     errors = _errs7;
@@ -200,7 +200,7 @@ function validate1256(
         }
       }
     } else {
-      validate1256.errors = [
+      validate1257.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -211,7 +211,7 @@ function validate1256(
       return false;
     }
   }
-  validate1256.errors = vErrors;
+  validate1257.errors = vErrors;
   return errors === 0;
 }
-export { validate1256 };
+export { validate1257 };

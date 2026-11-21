@@ -2,8 +2,8 @@
 import { func0 } from "../runtime.mjs";
 import { validate127 } from "./safe-count-dto.mjs";
 import { schema355 } from "../metadata-8.mjs";
-import { validate1178 } from "./display-block-kind.mjs";
-function validate1184(
+import { validate1179 } from "./display-block-kind.mjs";
+function validate1185(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -24,7 +24,7 @@ function validate1184(
         ((data.kind === undefined || !func0.call(data, "kind")) &&
           (missing0 = "kind"))
       ) {
-        validate1184.errors = [
+        validate1185.errors = [
           {
             instancePath,
             schemaPath: "#/required",
@@ -133,7 +133,7 @@ function validate1184(
                   vErrors.push(err1);
                 }
                 errors++;
-                validate1184.errors = vErrors;
+                validate1185.errors = vErrors;
                 return false;
               } else {
                 errors = _errs4;
@@ -157,7 +157,7 @@ function validate1184(
                 let data3 = data.headingMarkdown;
                 const _errs8 = errors;
                 if (typeof data3 !== "string" && data3 !== null) {
-                  validate1184.errors = [
+                  validate1185.errors = [
                     {
                       instancePath: instancePath + "/headingMarkdown",
                       schemaPath: "#/properties/headingMarkdown/type",
@@ -177,7 +177,7 @@ function validate1184(
                 if (data.kind !== undefined && func0.call(data, "kind")) {
                   const _errs10 = errors;
                   if (
-                    !validate1178(data.kind, {
+                    !validate1179(data.kind, {
                       instancePath: instancePath + "/kind",
                       parentData: data,
                       parentDataProperty: "kind",
@@ -186,8 +186,8 @@ function validate1184(
                   ) {
                     vErrors =
                       vErrors === null
-                        ? validate1178.errors
-                        : vErrors.concat(validate1178.errors);
+                        ? validate1179.errors
+                        : vErrors.concat(validate1179.errors);
                     errors = vErrors.length;
                   }
                   var valid0 = _errs10 === errors;
@@ -250,7 +250,7 @@ function validate1184(
         }
       }
     } else {
-      validate1184.errors = [
+      validate1185.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -261,7 +261,7 @@ function validate1184(
       return false;
     }
   }
-  validate1184.errors = vErrors;
+  validate1185.errors = vErrors;
   return errors === 0;
 }
-export { validate1184 };
+export { validate1185 };

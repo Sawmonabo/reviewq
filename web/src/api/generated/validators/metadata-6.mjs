@@ -47,7 +47,7 @@ const schema256 = {
   },
 };
 const schema264 = { enum: ["reading", "complete", "limited"], type: "string" };
-const schema267 = { enum: ["old", "new"], type: "string" };
+const schema268 = { enum: ["old", "new"], type: "string" };
 const schema272 = {
   enum: ["native", "async"],
   title: "QuestionAnswerResponseMode",
@@ -70,7 +70,7 @@ export {
   schema255,
   schema256,
   schema264,
-  schema267,
+  schema268,
   schema272,
   schema276,
 };

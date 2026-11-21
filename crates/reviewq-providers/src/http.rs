@@ -209,6 +209,16 @@ impl Response {
         self.inner.content_length()
     }
 
+    pub(crate) fn check_body_length(&self) -> Result<(), AppError> {
+        if self
+            .content_length()
+            .is_some_and(|size| size > BODY_LIMIT as u64)
+        {
+            return Err(AppError::PayloadTooLarge);
+        }
+        Ok(())
+    }
+
     pub(crate) async fn chunk(
         &mut self,
     ) -> Result<Option<impl AsRef<[u8]> + std::ops::Deref<Target = [u8]>>, AppError> {

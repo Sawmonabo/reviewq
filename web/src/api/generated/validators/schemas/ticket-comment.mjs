@@ -3,7 +3,7 @@ import { func0 } from "../runtime.mjs";
 import { schema435 } from "../metadata-10.mjs";
 import { validate235 } from "./utc-timestamp-dto.mjs";
 import { validate69 } from "./merge-request-iid-dto.mjs";
-function validate1477(
+function validate1478(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -28,7 +28,7 @@ function validate1477(
         ((data.updatedAt === undefined || !func0.call(data, "updatedAt")) &&
           (missing0 = "updatedAt"))
       ) {
-        validate1477.errors = [
+        validate1478.errors = [
           {
             instancePath,
             schemaPath: "#/required",
@@ -42,7 +42,7 @@ function validate1477(
           let data0 = data.author;
           const _errs1 = errors;
           if (typeof data0 !== "string" && data0 !== null) {
-            validate1477.errors = [
+            validate1478.errors = [
               {
                 instancePath: instancePath + "/author",
                 schemaPath: "#/properties/author/type",
@@ -61,7 +61,7 @@ function validate1477(
             let data1 = data.authorId;
             const _errs3 = errors;
             if (typeof data1 !== "string" && data1 !== null) {
-              validate1477.errors = [
+              validate1478.errors = [
                 {
                   instancePath: instancePath + "/authorId",
                   schemaPath: "#/properties/authorId/type",
@@ -79,7 +79,7 @@ function validate1477(
             if (data.body !== undefined && func0.call(data, "body")) {
               const _errs5 = errors;
               if (typeof data.body !== "string") {
-                validate1477.errors = [
+                validate1478.errors = [
                   {
                     instancePath: instancePath + "/body",
                     schemaPath: "#/properties/body/type",
@@ -196,7 +196,7 @@ function validate1477(
                         vErrors.push(err1);
                       }
                       errors++;
-                      validate1477.errors = vErrors;
+                      validate1478.errors = vErrors;
                       return false;
                     } else {
                       errors = _errs10;
@@ -216,7 +216,7 @@ function validate1477(
                     if (data.url !== undefined && func0.call(data, "url")) {
                       const _errs14 = errors;
                       if (typeof data.url !== "string") {
-                        validate1477.errors = [
+                        validate1478.errors = [
                           {
                             instancePath: instancePath + "/url",
                             schemaPath: "#/properties/url/type",
@@ -238,7 +238,7 @@ function validate1477(
         }
       }
     } else {
-      validate1477.errors = [
+      validate1478.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -249,7 +249,7 @@ function validate1477(
       return false;
     }
   }
-  validate1477.errors = vErrors;
+  validate1478.errors = vErrors;
   return errors === 0;
 }
-export { validate1477 };
+export { validate1478 };

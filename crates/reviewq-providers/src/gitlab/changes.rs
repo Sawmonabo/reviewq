@@ -18,6 +18,7 @@ use crate::http::Response;
 mod approvals;
 mod content;
 mod discussions;
+mod flights;
 mod lease;
 mod paths;
 mod search;
@@ -283,14 +284,16 @@ impl GitLab {
         selection: &wire::Selection,
     ) -> Result<(wire::DiffPage, Option<u32>), AppError> {
         let first = first_ordinal(page, limit)?;
-        let (body, next) = self
-            .receive_diff_page(&selection.source, page, limit)
-            .await?;
         let profile = self.patches.profile.clone();
+        let source = &selection.source;
+        let revision = &selection.revision;
         let selection = selection.clone();
-        let scanned = body
-            .decode(move |body| wire::decode(body, &profile, first, limit, &selection))
+        let (scanned, next) = self
+            .decode_diff_page(source, revision, page, limit, move |body| {
+                wire::decode(body, &profile, first, limit, &selection)
+            })
             .await?;
+        let scanned = scanned?;
         if next.is_some() && scanned.files.len() != usize::from(limit) {
             return Err(AppError::Unavailable);
         }

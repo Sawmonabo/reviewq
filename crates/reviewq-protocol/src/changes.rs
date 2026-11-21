@@ -107,6 +107,8 @@ pub enum PatchSide {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct PatchSearchMatch {
     pub file_id: FileIdDto,
+    #[serde(rename = "patchETag")]
+    pub patch_etag: PatchETagDto,
     #[cfg_attr(feature = "schema", schemars(length(max = 4096)))]
     pub old_path: String,
     #[cfg_attr(feature = "schema", schemars(length(max = 4096)))]

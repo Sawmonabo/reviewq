@@ -4,7 +4,7 @@ import { validate127 } from "./safe-count-dto.mjs";
 import { schema383 } from "../metadata-9.mjs";
 import { validate69 } from "./merge-request-iid-dto.mjs";
 import { validate293 } from "./queue-status.mjs";
-function validate1302(
+function validate1303(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -36,7 +36,7 @@ function validate1302(
         if (data.own !== undefined && func0.call(data, "own")) {
           const _errs2 = errors;
           if (typeof data.own !== "boolean") {
-            validate1302.errors = [
+            validate1303.errors = [
               {
                 instancePath: instancePath + "/own",
                 schemaPath: "#/properties/own/type",
@@ -58,7 +58,7 @@ function validate1302(
             let data2 = data.personalApproval;
             const _errs4 = errors;
             if (typeof data2 !== "boolean" && data2 !== null) {
-              validate1302.errors = [
+              validate1303.errors = [
                 {
                   instancePath: instancePath + "/personalApproval",
                   schemaPath: "#/properties/personalApproval/type",
@@ -100,7 +100,7 @@ function validate1302(
               ) {
                 const _errs7 = errors;
                 if (typeof data.projectPath !== "string") {
-                  validate1302.errors = [
+                  validate1303.errors = [
                     {
                       instancePath: instancePath + "/projectPath",
                       schemaPath: "#/properties/projectPath/type",
@@ -146,7 +146,7 @@ function validate1302(
                     let data6 = data.reasonKind;
                     const _errs10 = errors;
                     if (typeof data6 !== "string" && data6 !== null) {
-                      validate1302.errors = [
+                      validate1303.errors = [
                         {
                           instancePath: instancePath + "/reasonKind",
                           schemaPath: "#/properties/reasonKind/type",
@@ -194,7 +194,7 @@ function validate1302(
         }
       }
     } else {
-      validate1302.errors = [
+      validate1303.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -205,7 +205,7 @@ function validate1302(
       return false;
     }
   }
-  validate1302.errors = vErrors;
+  validate1303.errors = vErrors;
   return errors === 0;
 }
-export { validate1302 };
+export { validate1303 };

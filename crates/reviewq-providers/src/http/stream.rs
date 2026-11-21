@@ -13,12 +13,7 @@ impl Response {
         mut self,
         decode: impl FnOnce(ResponseReader) -> Result<T, AppError> + Send + 'static,
     ) -> Result<T, AppError> {
-        if self
-            .content_length()
-            .is_some_and(|size| size > super::BODY_LIMIT as u64)
-        {
-            return Err(AppError::PayloadTooLarge);
-        }
+        self.check_body_length()?;
         let (sender, receiver) = mpsc::channel(1);
         let pump = async move {
             while let Some(chunk) = self.chunk().await? {

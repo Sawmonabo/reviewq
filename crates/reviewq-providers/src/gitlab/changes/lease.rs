@@ -113,6 +113,7 @@ pub(in crate::gitlab) struct Leases {
     pub(in crate::gitlab) profile: PathBuf,
     entries: Arc<Mutex<VecDeque<Lease>>>,
     scans: Arc<Mutex<VecDeque<IndexLease>>>,
+    pub(super) flights: super::flights::Flights,
 }
 
 pub(super) enum Body {
@@ -148,6 +149,7 @@ impl Leases {
             profile,
             entries,
             scans,
+            flights: super::flights::Flights::default(),
         }
     }
 

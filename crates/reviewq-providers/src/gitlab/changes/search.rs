@@ -116,19 +116,28 @@ impl GitLab {
                     None,
                 )
             } else {
-                self.search_diff_page(&source, first, 1, &search).await?
+                self.search_diff_page(&source, &revision.id, first, 1, &search)
+                    .await?
             }
         } else if position.narrow {
             ordinal = position.ordinal.max(first);
-            self.search_diff_page(&source, ordinal, 1, &search).await?
+            self.search_diff_page(&source, &revision.id, ordinal, 1, &search)
+                .await?
         } else {
             let (batch, next) = self
-                .search_diff_page(&source, position.page, FILES_PER_PAGE, &search)
+                .search_diff_page(
+                    &source,
+                    &revision.id,
+                    position.page,
+                    FILES_PER_PAGE,
+                    &search,
+                )
                 .await?;
             if batch.is_none() {
                 position.narrow = true;
                 ordinal = position.ordinal.max(first);
-                self.search_diff_page(&source, ordinal, 1, &search).await?
+                self.search_diff_page(&source, &revision.id, ordinal, 1, &search)
+                    .await?
             } else {
                 (batch, next)
             }
@@ -210,17 +219,19 @@ impl GitLab {
     async fn search_diff_page(
         &self,
         source: &MrIdentity,
+        revision: &str,
         page: u32,
         limit: u16,
         search: &SearchPage,
     ) -> Result<(Option<SearchBatch>, Option<u32>), AppError> {
         let first = first_ordinal(page, limit)?;
-        let (response, next) = self.receive_diff_page(source, page, limit).await?;
         let search = search.clone();
-        let batch = match response
-            .decode(move |body| wire::find_matches(body, first, limit, search))
-            .await
-        {
+        let (batch, next) = self
+            .decode_diff_page(source, revision, page, limit, move |body| {
+                wire::find_matches(body, first, limit, search)
+            })
+            .await?;
+        let batch = match batch {
             Ok(batch) => batch,
             Err(AppError::PayloadTooLarge) => return Ok((None, next)),
             Err(error) => return Err(error),
@@ -309,8 +320,11 @@ impl SearchBatch {
         if file.availability == PatchAvailability::Binary {
             return Ok(());
         }
-        self.partial |=
-            file.availability != PatchAvailability::Complete || metrics.line_changes.is_none();
+        if file.availability != PatchAvailability::Complete {
+            self.partial = true;
+            return Ok(());
+        }
+        self.partial |= metrics.line_changes.is_none();
         let mut next = matches.next_offset;
         let paths_bytes = 2 * (file.old_path.len() + file.new_path.len());
         for hit in matches.hits {
@@ -322,6 +336,7 @@ impl SearchBatch {
             self.json_bytes += charge;
             self.hits.push(PatchSearchMatch {
                 file_id: file.id.clone(),
+                patch_etag: metrics.etag.clone(),
                 old_path: file.old_path.clone(),
                 new_path: file.new_path.clone(),
                 side: hit.side,

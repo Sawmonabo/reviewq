@@ -252,6 +252,7 @@ export interface PatchSearchMatch {
   line: SafeCountDto;
   newPath: string;
   oldPath: string;
+  patchETag: PatchETagDto;
   side: PatchSide;
   snippet: string;
   sourceEnd: SafeCountDto;
