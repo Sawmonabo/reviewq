@@ -5,6 +5,7 @@ use unicode_normalization::UnicodeNormalization;
 use unicode_segmentation::UnicodeSegmentation;
 
 mod markdown;
+pub mod table;
 
 pub use markdown::{MAX_DISCUSSION_TEXT_SOURCE_BYTES, discussion_text, displayed_markdown};
 

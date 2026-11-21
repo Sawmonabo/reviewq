@@ -58,6 +58,7 @@ mod questions;
 mod refresh;
 mod settings;
 mod sources;
+mod tables;
 mod targets;
 mod terminal;
 mod tracking;
@@ -156,6 +157,7 @@ pub(super) struct Entry {
     history_watches: history::Watchers,
     workflow: WorkflowIntegration,
     drawings: diagrams::Cache,
+    tables: tables::Cache,
     terminal: Arc<dyn NativeTerminal>,
     sends_allowed: bool,
     commits: watch::Receiver<EventCursor>,
@@ -252,6 +254,7 @@ pub fn router(
         history_watches: history::Watchers::default(),
         workflow: runtime.workflow,
         drawings: diagrams::Cache::new(runtime.drawing_renderer, runtime.shutdown.clone()),
+        tables: tables::Cache::new(),
         terminal: runtime.terminal,
         sends_allowed: runtime.sends_allowed,
         commits: runtime.commits,

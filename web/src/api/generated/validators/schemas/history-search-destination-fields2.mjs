@@ -3,7 +3,7 @@ import { func0 } from "../runtime.mjs";
 import { validate127 } from "./safe-count-dto.mjs";
 import { validate48 } from "./history-cursor-dto.mjs";
 import { validate25 } from "./checkpoint-id-dto.mjs";
-function validate682(
+function validate702(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -65,7 +65,7 @@ function validate682(
             vErrors.push(err1);
           }
           errors++;
-          validate682.errors = vErrors;
+          validate702.errors = vErrors;
           return false;
         } else {
           errors = _errs2;
@@ -181,7 +181,7 @@ function validate682(
                   vErrors.push(err3);
                 }
                 errors++;
-                validate682.errors = vErrors;
+                validate702.errors = vErrors;
                 return false;
               } else {
                 errors = _errs9;
@@ -324,7 +324,7 @@ function validate682(
                           vErrors.push(err5);
                         }
                         errors++;
-                        validate682.errors = vErrors;
+                        validate702.errors = vErrors;
                         return false;
                       } else {
                         errors = _errs17;
@@ -348,7 +348,7 @@ function validate682(
         }
       }
     } else {
-      validate682.errors = [
+      validate702.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -359,7 +359,7 @@ function validate682(
       return false;
     }
   }
-  validate682.errors = vErrors;
+  validate702.errors = vErrors;
   return errors === 0;
 }
-export { validate682 };
+export { validate702 };

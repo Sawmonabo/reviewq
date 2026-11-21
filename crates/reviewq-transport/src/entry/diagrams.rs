@@ -214,7 +214,10 @@ fn observe_markdown(
         state.running = true;
         tokio::spawn(build(entry.clone(), renderer));
     }
-    (!hints.is_empty()).then_some(DocumentDisplay { drawings: hints })
+    (!hints.is_empty()).then_some(DocumentDisplay {
+        drawings: hints,
+        table: None,
+    })
 }
 
 async fn build(entry: Arc<Entry>, renderer: Arc<dyn DrawingRenderer>) {

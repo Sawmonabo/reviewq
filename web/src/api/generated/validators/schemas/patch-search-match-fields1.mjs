@@ -2,8 +2,8 @@
 import { func0, func81 } from "../runtime.mjs";
 import { validate25 } from "./checkpoint-id-dto.mjs";
 import { validate127 } from "./safe-count-dto.mjs";
-import { validate879 } from "./patch-etag-dto.mjs";
-function validate911(
+import { validate899 } from "./patch-etag-dto.mjs";
+function validate931(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -128,7 +128,7 @@ function validate911(
                   if (errors === _errs6) {
                     if (typeof data5 === "string") {
                       if (func81(data5) > 4096) {
-                        validate911.errors = [
+                        validate931.errors = [
                           {
                             instancePath: instancePath + "/newPath",
                             schemaPath: "#/properties/newPath/maxLength",
@@ -139,7 +139,7 @@ function validate911(
                         return false;
                       }
                     } else {
-                      validate911.errors = [
+                      validate931.errors = [
                         {
                           instancePath: instancePath + "/newPath",
                           schemaPath: "#/properties/newPath/type",
@@ -164,7 +164,7 @@ function validate911(
                     if (errors === _errs8) {
                       if (typeof data6 === "string") {
                         if (func81(data6) > 4096) {
-                          validate911.errors = [
+                          validate931.errors = [
                             {
                               instancePath: instancePath + "/oldPath",
                               schemaPath: "#/properties/oldPath/maxLength",
@@ -175,7 +175,7 @@ function validate911(
                           return false;
                         }
                       } else {
-                        validate911.errors = [
+                        validate931.errors = [
                           {
                             instancePath: instancePath + "/oldPath",
                             schemaPath: "#/properties/oldPath/type",
@@ -197,7 +197,7 @@ function validate911(
                     ) {
                       const _errs10 = errors;
                       if (
-                        !validate879(data.patchETag, {
+                        !validate899(data.patchETag, {
                           instancePath: instancePath + "/patchETag",
                           parentData: data,
                           parentDataProperty: "patchETag",
@@ -206,8 +206,8 @@ function validate911(
                       ) {
                         vErrors =
                           vErrors === null
-                            ? validate879.errors
-                            : vErrors.concat(validate879.errors);
+                            ? validate899.errors
+                            : vErrors.concat(validate899.errors);
                         errors = vErrors.length;
                       }
                       var valid0 = _errs10 === errors;
@@ -222,7 +222,7 @@ function validate911(
         }
       }
     } else {
-      validate911.errors = [
+      validate931.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -233,7 +233,7 @@ function validate911(
       return false;
     }
   }
-  validate911.errors = vErrors;
+  validate931.errors = vErrors;
   return errors === 0;
 }
-export { validate911 };
+export { validate931 };

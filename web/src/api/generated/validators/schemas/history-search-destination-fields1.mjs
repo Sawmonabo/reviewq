@@ -3,8 +3,8 @@ import { func0 } from "../runtime.mjs";
 import { validate48 } from "./history-cursor-dto.mjs";
 import { validate127 } from "./safe-count-dto.mjs";
 import { validate25 } from "./checkpoint-id-dto.mjs";
-import { validate537 } from "./history-text.mjs";
-function validate673(
+import { validate557 } from "./history-text.mjs";
+function validate693(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -69,7 +69,7 @@ function validate673(
             vErrors.push(err1);
           }
           errors++;
-          validate673.errors = vErrors;
+          validate693.errors = vErrors;
           return false;
         } else {
           errors = _errs2;
@@ -200,7 +200,7 @@ function validate673(
                   ) {
                     const _errs11 = errors;
                     if (typeof data.markdown !== "boolean") {
-                      validate673.errors = [
+                      validate693.errors = [
                         {
                           instancePath: instancePath + "/markdown",
                           schemaPath: "#/properties/markdown/type",
@@ -221,7 +221,7 @@ function validate673(
                     ) {
                       const _errs13 = errors;
                       if (
-                        !validate537(data.matched, {
+                        !validate557(data.matched, {
                           instancePath: instancePath + "/matched",
                           parentData: data,
                           parentDataProperty: "matched",
@@ -230,8 +230,8 @@ function validate673(
                       ) {
                         vErrors =
                           vErrors === null
-                            ? validate537.errors
-                            : vErrors.concat(validate537.errors);
+                            ? validate557.errors
+                            : vErrors.concat(validate557.errors);
                         errors = vErrors.length;
                       }
                       var valid0 = _errs13 === errors;
@@ -246,7 +246,7 @@ function validate673(
         }
       }
     } else {
-      validate673.errors = [
+      validate693.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -257,7 +257,7 @@ function validate673(
       return false;
     }
   }
-  validate673.errors = vErrors;
+  validate693.errors = vErrors;
   return errors === 0;
 }
-export { validate673 };
+export { validate693 };

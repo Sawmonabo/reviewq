@@ -2620,13 +2620,19 @@
             "$ref": "#/definitions/DrawingHint"
           },
           "maxItems": 8,
-          "minItems": 1,
           "type": "array"
+        },
+        "table": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/PreparedTable"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
-      "required": [
-        "drawings"
-      ],
       "type": "object"
     },
     "DrawingHint": {
@@ -6472,6 +6478,62 @@
       ],
       "type": "object"
     },
+    "PreparedTable": {
+      "properties": {
+        "columns": {
+          "items": {
+            "$ref": "#/definitions/TableColumn"
+          },
+          "maxItems": 16,
+          "minItems": 1,
+          "type": "array"
+        },
+        "encodedBytes": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "end": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "nodes": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "rows": {
+          "items": {
+            "items": {
+              "items": {
+                "$ref": "#/definitions/TableInline"
+              },
+              "type": "array"
+            },
+            "type": "array"
+          },
+          "maxItems": 129,
+          "minItems": 2,
+          "type": "array"
+        },
+        "start": {
+          "description": "Half-open UTF-16 positions within the accompanying verified Markdown.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "start",
+        "end",
+        "columns",
+        "rows",
+        "encodedBytes",
+        "nodes"
+      ],
+      "type": "object"
+    },
     "Preview": {
       "properties": {
         "checkout": {
@@ -10128,6 +10190,139 @@
         "overview"
       ],
       "type": "string"
+    },
+    "TableColumn": {
+      "enum": [
+        "default",
+        "left",
+        "center",
+        "right"
+      ],
+      "type": "string"
+    },
+    "TableInline": {
+      "oneOf": [
+        {
+          "properties": {
+            "end": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "kind": {
+              "const": "text",
+              "type": "string"
+            },
+            "start": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "kind",
+            "start",
+            "end"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "end": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "kind": {
+              "const": "code",
+              "type": "string"
+            },
+            "start": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "text": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "start",
+            "end",
+            "text"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "kind": {
+              "const": "emphasis",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "kind": {
+              "const": "strong",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "kind": {
+              "const": "strike",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "href": {
+              "type": "string"
+            },
+            "kind": {
+              "const": "link",
+              "type": "string"
+            },
+            "title": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "href",
+            "title"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "kind": {
+              "const": "close",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        }
+      ]
     },
     "Target": {
       "properties": {

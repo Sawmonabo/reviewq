@@ -2,10 +2,10 @@
 import { func0 } from "../runtime.mjs";
 import { validate69 } from "./merge-request-iid-dto.mjs";
 import { validate127 } from "./safe-count-dto.mjs";
-import { schema242 } from "../metadata-6.mjs";
+import { schema252 } from "../metadata-6.mjs";
 import { validate114 } from "./review-id-dto.mjs";
 import { validate25 } from "./checkpoint-id-dto.mjs";
-function validate799(
+function validate819(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -62,12 +62,12 @@ function validate799(
             let data2 = data.personalApproval;
             const _errs3 = errors;
             if (typeof data2 !== "boolean" && data2 !== null) {
-              validate799.errors = [
+              validate819.errors = [
                 {
                   instancePath: instancePath + "/personalApproval",
                   schemaPath: "#/properties/personalApproval/type",
                   keyword: "type",
-                  params: { type: schema242.properties.personalApproval.type },
+                  params: { type: schema252.properties.personalApproval.type },
                 },
               ];
               return false;
@@ -83,7 +83,7 @@ function validate799(
             ) {
               const _errs5 = errors;
               if (typeof data.projectPath !== "string") {
-                validate799.errors = [
+                validate819.errors = [
                   {
                     instancePath: instancePath + "/projectPath",
                     schemaPath: "#/properties/projectPath/type",
@@ -128,7 +128,7 @@ function validate799(
                   if (errors === _errs8) {
                     if (Array.isArray(data5)) {
                       if (data5.length > 16) {
-                        validate799.errors = [
+                        validate819.errors = [
                           {
                             instancePath: instancePath + "/ticketKeys",
                             schemaPath: "#/properties/ticketKeys/maxItems",
@@ -163,7 +163,7 @@ function validate799(
                         }
                       }
                     } else {
-                      validate799.errors = [
+                      validate819.errors = [
                         {
                           instancePath: instancePath + "/ticketKeys",
                           schemaPath: "#/properties/ticketKeys/type",
@@ -186,13 +186,13 @@ function validate799(
                     let data7 = data.ticketTitle;
                     const _errs11 = errors;
                     if (typeof data7 !== "string" && data7 !== null) {
-                      validate799.errors = [
+                      validate819.errors = [
                         {
                           instancePath: instancePath + "/ticketTitle",
                           schemaPath: "#/properties/ticketTitle/type",
                           keyword: "type",
                           params: {
-                            type: schema242.properties.ticketTitle.type,
+                            type: schema252.properties.ticketTitle.type,
                           },
                         },
                       ];
@@ -206,7 +206,7 @@ function validate799(
                     if (data.title !== undefined && func0.call(data, "title")) {
                       const _errs13 = errors;
                       if (typeof data.title !== "string") {
-                        validate799.errors = [
+                        validate819.errors = [
                           {
                             instancePath: instancePath + "/title",
                             schemaPath: "#/properties/title/type",
@@ -228,7 +228,7 @@ function validate799(
         }
       }
     } else {
-      validate799.errors = [
+      validate819.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -239,7 +239,7 @@ function validate799(
       return false;
     }
   }
-  validate799.errors = vErrors;
+  validate819.errors = vErrors;
   return errors === 0;
 }
-export { validate799 };
+export { validate819 };

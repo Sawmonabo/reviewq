@@ -128,9 +128,15 @@ pub struct DrawingHint {
 #[serde(rename_all = "camelCase")]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct DocumentDisplay {
-    #[cfg_attr(feature = "schema", schemars(length(min = 1, max = 8)))]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    #[cfg_attr(feature = "schema", schemars(length(max = 8)))]
     pub drawings: Vec<DrawingHint>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub table: Option<PreparedTable>,
 }
+
+mod table;
+pub use table::{PreparedTable, TableColumn, TableInline};
 
 wire_enum!(DisplayBlockKind {
     Paragraph,

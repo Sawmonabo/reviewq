@@ -90,21 +90,28 @@ pub(in crate::entry) async fn read(
             layout,
         } => {
             let token = |position| cursor(endpoint.encode_cursor(scope.as_bytes(), &position)?);
+            let mut projected = Vec::with_capacity(blocks.len());
+            let mut available = 128 * 1024;
+            for block in blocks {
+                let mut display = diagrams::observe(
+                    &entry,
+                    &actor,
+                    Owner::report(&run, &report),
+                    &block.markdown,
+                    font.as_ref(),
+                );
+                if block.span.kind == DisplayBlockKind::Table
+                    && let Some(table) = entry.tables.read(&block.markdown).await
+                    && table.encoded_bytes <= available
+                {
+                    available -= table.encoded_bytes;
+                    crate::entry::tables::attach(&mut display, table);
+                }
+                projected.push(project_block(block, display)?);
+            }
             dto::DisplayResult::Ready {
                 total_blocks: count(u64::from(total_blocks))?,
-                blocks: blocks
-                    .into_iter()
-                    .map(|block| {
-                        let display = diagrams::observe(
-                            &entry,
-                            &actor,
-                            Owner::report(&run, &report),
-                            &block.markdown,
-                            font.as_ref(),
-                        );
-                        project_block(block, display)
-                    })
-                    .collect::<Result<_, _>>()?,
+                blocks: projected,
                 previous_cursor: previous.map(WindowCursor::Before).map(token).transpose()?,
                 next_cursor: next.map(WindowCursor::After).map(token).transpose()?,
                 layout: layout.map(project_layout).transpose()?,
@@ -115,7 +122,7 @@ pub(in crate::entry) async fn read(
             reason: project_fallback(reason),
         },
     };
-    let response = success(
+    let mut response = success(
         dto::ReportWindow {
             report: summary(stored.value.report)?,
             index_format: count(u64::from(DISPLAY_INDEX_FORMAT))?,
@@ -123,7 +130,20 @@ pub(in crate::entry) async fn read(
         },
         stored.cursor,
     )?;
-    let bytes = serde_json::to_vec(&response).map_err(|_| AppError::Internal)?;
+    let mut bytes = serde_json::to_vec(&response).map_err(|_| AppError::Internal)?;
+    if bytes.len() > MAX_WINDOW_JSON_BYTES
+        && let dto::DisplayResult::Ready { blocks, .. } = &mut response.data.result
+    {
+        for block in blocks {
+            if let Some(display) = &mut block.display {
+                display.table = None;
+                if display.drawings.is_empty() {
+                    block.display = None;
+                }
+            }
+        }
+        bytes = serde_json::to_vec(&response).map_err(|_| AppError::Internal)?;
+    }
     if bytes.len() > MAX_WINDOW_JSON_BYTES {
         return Err(AppError::Internal.into());
     }
