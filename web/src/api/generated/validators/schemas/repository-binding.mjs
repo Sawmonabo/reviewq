@@ -2,9 +2,9 @@
 import { func0 } from "../runtime.mjs";
 import { validate205 } from "./board-selection.mjs";
 import { schema458 } from "../metadata-11.mjs";
-import { validate1592 } from "./default-skills.mjs";
+import { validate1594 } from "./default-skills.mjs";
 import { validate69 } from "./merge-request-iid-dto.mjs";
-function validate1590(
+function validate1592(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -27,7 +27,7 @@ function validate1590(
           !func0.call(data, "defaultSkills")) &&
           (missing0 = "defaultSkills"))
       ) {
-        validate1590.errors = [
+        validate1592.errors = [
           {
             instancePath,
             schemaPath: "#/required",
@@ -46,7 +46,7 @@ function validate1590(
             key0 === "path" ||
             key0 === "projectId"
           )) {
-            validate1590.errors = [
+            validate1592.errors = [
               {
                 instancePath,
                 schemaPath: "#/additionalProperties",
@@ -87,7 +87,7 @@ function validate1590(
               let data1 = data.checkout;
               const _errs3 = errors;
               if (typeof data1 !== "string" && data1 !== null) {
-                validate1590.errors = [
+                validate1592.errors = [
                   {
                     instancePath: instancePath + "/checkout",
                     schemaPath: "#/properties/checkout/type",
@@ -108,7 +108,7 @@ function validate1590(
               ) {
                 const _errs5 = errors;
                 if (
-                  !validate1592(data.defaultSkills, {
+                  !validate1594(data.defaultSkills, {
                     instancePath: instancePath + "/defaultSkills",
                     parentData: data,
                     parentDataProperty: "defaultSkills",
@@ -117,8 +117,8 @@ function validate1590(
                 ) {
                   vErrors =
                     vErrors === null
-                      ? validate1592.errors
-                      : vErrors.concat(validate1592.errors);
+                      ? validate1594.errors
+                      : vErrors.concat(validate1594.errors);
                   errors = vErrors.length;
                 }
                 var valid0 = _errs5 === errors;
@@ -129,7 +129,7 @@ function validate1590(
                 if (data.path !== undefined && func0.call(data, "path")) {
                   const _errs6 = errors;
                   if (typeof data.path !== "string") {
-                    validate1590.errors = [
+                    validate1592.errors = [
                       {
                         instancePath: instancePath + "/path",
                         schemaPath: "#/properties/path/type",
@@ -174,7 +174,7 @@ function validate1590(
         }
       }
     } else {
-      validate1590.errors = [
+      validate1592.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -185,7 +185,7 @@ function validate1590(
       return false;
     }
   }
-  validate1590.errors = vErrors;
+  validate1592.errors = vErrors;
   return errors === 0;
 }
-export { validate1590 };
+export { validate1592 };

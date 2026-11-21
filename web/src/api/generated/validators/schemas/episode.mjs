@@ -6,7 +6,7 @@ import { validate235 } from "./utc-timestamp-dto.mjs";
 import { schema338 } from "../metadata-8.mjs";
 import { validate35 } from "./event-cursor-dto.mjs";
 import { validate326 } from "./cancel-recovery-response-state.mjs";
-function validate1139(
+function validate1141(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -30,7 +30,7 @@ function validate1139(
         ((data.reason === undefined || !func0.call(data, "reason")) &&
           (missing0 = "reason"))
       ) {
-        validate1139.errors = [
+        validate1141.errors = [
           {
             instancePath,
             schemaPath: "#/required",
@@ -163,7 +163,7 @@ function validate1139(
                     vErrors.push(err1);
                   }
                   errors++;
-                  validate1139.errors = vErrors;
+                  validate1141.errors = vErrors;
                   return false;
                 } else {
                   errors = _errs5;
@@ -184,7 +184,7 @@ function validate1139(
                   let data4 = data.reason;
                   const _errs9 = errors;
                   if (typeof data4 !== "string" && data4 !== null) {
-                    validate1139.errors = [
+                    validate1141.errors = [
                       {
                         instancePath: instancePath + "/reason",
                         schemaPath: "#/properties/reason/type",
@@ -251,7 +251,7 @@ function validate1139(
         }
       }
     } else {
-      validate1139.errors = [
+      validate1141.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -262,7 +262,7 @@ function validate1139(
       return false;
     }
   }
-  validate1139.errors = vErrors;
+  validate1141.errors = vErrors;
   return errors === 0;
 }
-export { validate1139 };
+export { validate1141 };

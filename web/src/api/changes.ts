@@ -259,12 +259,17 @@ export async function readPatchDiscussions(
   signal: AbortSignal,
   cursor?: string,
   includeTextProjection = false,
+  position?: { readonly anchor?: string | undefined },
 ) {
-  const query = new URLSearchParams({ revision });
-  if (cursor) query.set("cursor", cursor);
+  const query = queryString({
+    revision,
+    cursor,
+    recheck: position ? true : undefined,
+    anchor: position?.anchor,
+  });
   const wantsText = includeTextProjection && !cursor;
   const result = await read(
-    `${changesRoute(reviewId)}/discussions?${query}`,
+    `${changesRoute(reviewId)}/discussions${query}`,
     isPatchDiscussionsResponse,
     signal,
     undefined,

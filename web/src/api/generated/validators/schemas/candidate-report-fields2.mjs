@@ -2,9 +2,9 @@
 import { func0 } from "../runtime.mjs";
 import { validate25 } from "./checkpoint-id-dto.mjs";
 import { validate134 } from "./report-hash-dto.mjs";
-import { validate1182 } from "./artifact-stats.mjs";
+import { validate1184 } from "./artifact-stats.mjs";
 import { validate127 } from "./safe-count-dto.mjs";
-function validate1178(
+function validate1180(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -15,7 +15,7 @@ function validate1178(
       if (data.reason !== undefined && func0.call(data, "reason")) {
         const _errs1 = errors;
         if (typeof data.reason !== "string") {
-          validate1178.errors = [
+          validate1180.errors = [
             {
               instancePath: instancePath + "/reason",
               schemaPath: "#/properties/reason/type",
@@ -108,7 +108,7 @@ function validate1178(
                 vErrors.push(err1);
               }
               errors++;
-              validate1178.errors = vErrors;
+              validate1180.errors = vErrors;
               return false;
             } else {
               errors = _errs5;
@@ -149,7 +149,7 @@ function validate1178(
               if (data.stats !== undefined && func0.call(data, "stats")) {
                 const _errs10 = errors;
                 if (
-                  !validate1182(data.stats, {
+                  !validate1184(data.stats, {
                     instancePath: instancePath + "/stats",
                     parentData: data,
                     parentDataProperty: "stats",
@@ -158,8 +158,8 @@ function validate1178(
                 ) {
                   vErrors =
                     vErrors === null
-                      ? validate1182.errors
-                      : vErrors.concat(validate1182.errors);
+                      ? validate1184.errors
+                      : vErrors.concat(validate1184.errors);
                   errors = vErrors.length;
                 }
                 var valid0 = _errs10 === errors;
@@ -170,7 +170,7 @@ function validate1178(
                 if (data.text !== undefined && func0.call(data, "text")) {
                   const _errs11 = errors;
                   if (typeof data.text !== "string") {
-                    validate1178.errors = [
+                    validate1180.errors = [
                       {
                         instancePath: instancePath + "/text",
                         schemaPath: "#/properties/text/type",
@@ -240,7 +240,7 @@ function validate1178(
         }
       }
     } else {
-      validate1178.errors = [
+      validate1180.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -251,7 +251,7 @@ function validate1178(
       return false;
     }
   }
-  validate1178.errors = vErrors;
+  validate1180.errors = vErrors;
   return errors === 0;
 }
-export { validate1178 };
+export { validate1180 };

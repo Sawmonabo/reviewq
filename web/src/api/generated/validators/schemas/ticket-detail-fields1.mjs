@@ -4,7 +4,7 @@ import { schema472 } from "../metadata-11.mjs";
 import { validate127 } from "./safe-count-dto.mjs";
 import { validate48 } from "./history-cursor-dto.mjs";
 import { validate235 } from "./utc-timestamp-dto.mjs";
-function validate1635(
+function validate1637(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -16,7 +16,7 @@ function validate1635(
         let data0 = data.assignee;
         const _errs1 = errors;
         if (typeof data0 !== "string" && data0 !== null) {
-          validate1635.errors = [
+          validate1637.errors = [
             {
               instancePath: instancePath + "/assignee",
               schemaPath: "#/properties/assignee/type",
@@ -35,7 +35,7 @@ function validate1635(
           let data1 = data.assigneeId;
           const _errs3 = errors;
           if (typeof data1 !== "string" && data1 !== null) {
-            validate1635.errors = [
+            validate1637.errors = [
               {
                 instancePath: instancePath + "/assigneeId",
                 schemaPath: "#/properties/assigneeId/type",
@@ -111,7 +111,7 @@ function validate1635(
                     for (let i0 = 0; i0 < len0; i0++) {
                       const _errs9 = errors;
                       if (typeof data4[i0] !== "string") {
-                        validate1635.errors = [
+                        validate1637.errors = [
                           {
                             instancePath: instancePath + "/components/" + i0,
                             schemaPath: "#/properties/components/items/type",
@@ -127,7 +127,7 @@ function validate1635(
                       }
                     }
                   } else {
-                    validate1635.errors = [
+                    validate1637.errors = [
                       {
                         instancePath: instancePath + "/components",
                         schemaPath: "#/properties/components/type",
@@ -150,7 +150,7 @@ function validate1635(
                   let data6 = data.description;
                   const _errs11 = errors;
                   if (typeof data6 !== "string" && data6 !== null) {
-                    validate1635.errors = [
+                    validate1637.errors = [
                       {
                         instancePath: instancePath + "/description",
                         schemaPath: "#/properties/description/type",
@@ -175,7 +175,7 @@ function validate1635(
                       !(typeof data7 == "number" && isFinite(data7)) &&
                       data7 !== null
                     ) {
-                      validate1635.errors = [
+                      validate1637.errors = [
                         {
                           instancePath: instancePath + "/estimate",
                           schemaPath: "#/properties/estimate/type",
@@ -188,7 +188,7 @@ function validate1635(
                     if (errors === _errs13) {
                       if (typeof data7 == "number" && isFinite(data7)) {
                         if (data7 < 0 || isNaN(data7)) {
-                          validate1635.errors = [
+                          validate1637.errors = [
                             {
                               instancePath: instancePath + "/estimate",
                               schemaPath: "#/properties/estimate/minimum",
@@ -236,7 +236,7 @@ function validate1635(
         }
       }
     } else {
-      validate1635.errors = [
+      validate1637.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -247,7 +247,7 @@ function validate1635(
       return false;
     }
   }
-  validate1635.errors = vErrors;
+  validate1637.errors = vErrors;
   return errors === 0;
 }
-export { validate1635 };
+export { validate1637 };

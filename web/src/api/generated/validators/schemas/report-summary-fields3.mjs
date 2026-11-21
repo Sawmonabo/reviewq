@@ -2,11 +2,11 @@
 import { func0 } from "../runtime.mjs";
 import { validate150 } from "./git-sha-dto.mjs";
 import { schema367 } from "../metadata-9.mjs";
-import { validate1259 } from "./semantic-index.mjs";
+import { validate1261 } from "./semantic-index.mjs";
 import { validate134 } from "./report-hash-dto.mjs";
 import { validate127 } from "./safe-count-dto.mjs";
-import { validate1263 } from "./verdict.mjs";
-function validate1257(
+import { validate1265 } from "./verdict.mjs";
+function validate1259(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -68,7 +68,7 @@ function validate1257(
             vErrors.push(err1);
           }
           errors++;
-          validate1257.errors = vErrors;
+          validate1259.errors = vErrors;
           return false;
         } else {
           errors = _errs2;
@@ -92,7 +92,7 @@ function validate1257(
           let data1 = data.revisionReason;
           const _errs6 = errors;
           if (typeof data1 !== "string" && data1 !== null) {
-            validate1257.errors = [
+            validate1259.errors = [
               {
                 instancePath: instancePath + "/revisionReason",
                 schemaPath: "#/properties/revisionReason/type",
@@ -113,7 +113,7 @@ function validate1257(
           ) {
             const _errs8 = errors;
             if (
-              !validate1259(data.semanticIndex, {
+              !validate1261(data.semanticIndex, {
                 instancePath: instancePath + "/semanticIndex",
                 parentData: data,
                 parentDataProperty: "semanticIndex",
@@ -122,8 +122,8 @@ function validate1257(
             ) {
               vErrors =
                 vErrors === null
-                  ? validate1259.errors
-                  : vErrors.concat(validate1259.errors);
+                  ? validate1261.errors
+                  : vErrors.concat(validate1261.errors);
               errors = vErrors.length;
             }
             var valid0 = _errs8 === errors;
@@ -179,7 +179,7 @@ function validate1257(
                 if (data.verdict !== undefined && func0.call(data, "verdict")) {
                   const _errs11 = errors;
                   if (
-                    !validate1263(data.verdict, {
+                    !validate1265(data.verdict, {
                       instancePath: instancePath + "/verdict",
                       parentData: data,
                       parentDataProperty: "verdict",
@@ -188,8 +188,8 @@ function validate1257(
                   ) {
                     vErrors =
                       vErrors === null
-                        ? validate1263.errors
-                        : vErrors.concat(validate1263.errors);
+                        ? validate1265.errors
+                        : vErrors.concat(validate1265.errors);
                     errors = vErrors.length;
                   }
                   var valid0 = _errs11 === errors;
@@ -202,7 +202,7 @@ function validate1257(
         }
       }
     } else {
-      validate1257.errors = [
+      validate1259.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -213,7 +213,7 @@ function validate1257(
       return false;
     }
   }
-  validate1257.errors = vErrors;
+  validate1259.errors = vErrors;
   return errors === 0;
 }
-export { validate1257 };
+export { validate1259 };

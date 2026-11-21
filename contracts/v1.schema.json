@@ -5972,6 +5972,19 @@
             }
           ]
         },
+        "pageNumber": {
+          "$ref": "#/definitions/SafeCountDto"
+        },
+        "previousCursor": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/PageCursorDto"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "reviewId": {
           "$ref": "#/definitions/ReviewIdDto"
         },
@@ -5993,6 +6006,8 @@
       "required": [
         "reviewId",
         "revision",
+        "pageNumber",
+        "previousCursor",
         "items",
         "nextCursor"
       ],

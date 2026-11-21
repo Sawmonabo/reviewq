@@ -2,10 +2,11 @@
 import { func0 } from "../runtime.mjs";
 import { validate433 } from "./patch-discussion.mjs";
 import { validate48 } from "./history-cursor-dto.mjs";
+import { validate127 } from "./safe-count-dto.mjs";
 import { validate114 } from "./review-id-dto.mjs";
 import { validate25 } from "./checkpoint-id-dto.mjs";
 import { schema277 } from "../metadata-6.mjs";
-import { validate910 } from "./patch-discussion-text.mjs";
+import { validate912 } from "./patch-discussion-text.mjs";
 function validate905(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
@@ -20,6 +21,11 @@ function validate905(
           (missing0 = "reviewId")) ||
         ((data.revision === undefined || !func0.call(data, "revision")) &&
           (missing0 = "revision")) ||
+        ((data.pageNumber === undefined || !func0.call(data, "pageNumber")) &&
+          (missing0 = "pageNumber")) ||
+        ((data.previousCursor === undefined ||
+          !func0.call(data, "previousCursor")) &&
+          (missing0 = "previousCursor")) ||
         ((data.items === undefined || !func0.call(data, "items")) &&
           (missing0 = "items")) ||
         ((data.nextCursor === undefined || !func0.call(data, "nextCursor")) &&
@@ -163,20 +169,23 @@ function validate905(
             var valid0 = true;
           }
           if (valid0) {
-            if (data.reviewId !== undefined && func0.call(data, "reviewId")) {
+            if (
+              data.pageNumber !== undefined &&
+              func0.call(data, "pageNumber")
+            ) {
               const _errs9 = errors;
               if (
-                !validate114(data.reviewId, {
-                  instancePath: instancePath + "/reviewId",
+                !validate127(data.pageNumber, {
+                  instancePath: instancePath + "/pageNumber",
                   parentData: data,
-                  parentDataProperty: "reviewId",
+                  parentDataProperty: "pageNumber",
                   rootData,
                 })
               ) {
                 vErrors =
                   vErrors === null
-                    ? validate114.errors
-                    : vErrors.concat(validate114.errors);
+                    ? validate127.errors
+                    : vErrors.concat(validate127.errors);
                 errors = vErrors.length;
               }
               var valid0 = _errs9 === errors;
@@ -184,21 +193,74 @@ function validate905(
               var valid0 = true;
             }
             if (valid0) {
-              if (data.revision !== undefined && func0.call(data, "revision")) {
+              if (
+                data.previousCursor !== undefined &&
+                func0.call(data, "previousCursor")
+              ) {
+                let data4 = data.previousCursor;
                 const _errs10 = errors;
+                const _errs11 = errors;
+                let valid3 = false;
+                const _errs12 = errors;
                 if (
-                  !validate25(data.revision, {
-                    instancePath: instancePath + "/revision",
+                  !validate48(data4, {
+                    instancePath: instancePath + "/previousCursor",
                     parentData: data,
-                    parentDataProperty: "revision",
+                    parentDataProperty: "previousCursor",
                     rootData,
                   })
                 ) {
                   vErrors =
                     vErrors === null
-                      ? validate25.errors
-                      : vErrors.concat(validate25.errors);
+                      ? validate48.errors
+                      : vErrors.concat(validate48.errors);
                   errors = vErrors.length;
+                }
+                var _valid1 = _errs12 === errors;
+                valid3 = valid3 || _valid1;
+                if (!valid3) {
+                  const _errs13 = errors;
+                  if (data4 !== null) {
+                    const err2 = {
+                      instancePath: instancePath + "/previousCursor",
+                      schemaPath: "#/properties/previousCursor/anyOf/1/type",
+                      keyword: "type",
+                      params: { type: "null" },
+                    };
+                    if (vErrors === null) {
+                      vErrors = [err2];
+                    } else {
+                      vErrors.push(err2);
+                    }
+                    errors++;
+                  }
+                  var _valid1 = _errs13 === errors;
+                  valid3 = valid3 || _valid1;
+                }
+                if (!valid3) {
+                  const err3 = {
+                    instancePath: instancePath + "/previousCursor",
+                    schemaPath: "#/properties/previousCursor/anyOf",
+                    keyword: "anyOf",
+                    params: {},
+                  };
+                  if (vErrors === null) {
+                    vErrors = [err3];
+                  } else {
+                    vErrors.push(err3);
+                  }
+                  errors++;
+                  validate905.errors = vErrors;
+                  return false;
+                } else {
+                  errors = _errs11;
+                  if (vErrors !== null) {
+                    if (_errs11) {
+                      vErrors.length = _errs11;
+                    } else {
+                      vErrors = null;
+                    }
+                  }
                 }
                 var valid0 = _errs10 === errors;
               } else {
@@ -206,67 +268,118 @@ function validate905(
               }
               if (valid0) {
                 if (
-                  data.textProjections !== undefined &&
-                  func0.call(data, "textProjections")
+                  data.reviewId !== undefined &&
+                  func0.call(data, "reviewId")
                 ) {
-                  let data5 = data.textProjections;
-                  const _errs11 = errors;
-                  if (!Array.isArray(data5) && data5 !== null) {
-                    validate905.errors = [
-                      {
-                        instancePath: instancePath + "/textProjections",
-                        schemaPath: "#/properties/textProjections/type",
-                        keyword: "type",
-                        params: {
-                          type: schema277.properties.textProjections.type,
-                        },
-                      },
-                    ];
-                    return false;
+                  const _errs15 = errors;
+                  if (
+                    !validate114(data.reviewId, {
+                      instancePath: instancePath + "/reviewId",
+                      parentData: data,
+                      parentDataProperty: "reviewId",
+                      rootData,
+                    })
+                  ) {
+                    vErrors =
+                      vErrors === null
+                        ? validate114.errors
+                        : vErrors.concat(validate114.errors);
+                    errors = vErrors.length;
                   }
-                  if (errors === _errs11) {
-                    if (Array.isArray(data5)) {
-                      if (data5.length > 64) {
+                  var valid0 = _errs15 === errors;
+                } else {
+                  var valid0 = true;
+                }
+                if (valid0) {
+                  if (
+                    data.revision !== undefined &&
+                    func0.call(data, "revision")
+                  ) {
+                    const _errs16 = errors;
+                    if (
+                      !validate25(data.revision, {
+                        instancePath: instancePath + "/revision",
+                        parentData: data,
+                        parentDataProperty: "revision",
+                        rootData,
+                      })
+                    ) {
+                      vErrors =
+                        vErrors === null
+                          ? validate25.errors
+                          : vErrors.concat(validate25.errors);
+                      errors = vErrors.length;
+                    }
+                    var valid0 = _errs16 === errors;
+                  } else {
+                    var valid0 = true;
+                  }
+                  if (valid0) {
+                    if (
+                      data.textProjections !== undefined &&
+                      func0.call(data, "textProjections")
+                    ) {
+                      let data7 = data.textProjections;
+                      const _errs17 = errors;
+                      if (!Array.isArray(data7) && data7 !== null) {
                         validate905.errors = [
                           {
                             instancePath: instancePath + "/textProjections",
-                            schemaPath: "#/properties/textProjections/maxItems",
-                            keyword: "maxItems",
-                            params: { limit: 64 },
+                            schemaPath: "#/properties/textProjections/type",
+                            keyword: "type",
+                            params: {
+                              type: schema277.properties.textProjections.type,
+                            },
                           },
                         ];
                         return false;
-                      } else {
-                        var valid3 = true;
-                        const len1 = data5.length;
-                        for (let i1 = 0; i1 < len1; i1++) {
-                          const _errs13 = errors;
-                          if (
-                            !validate910(data5[i1], {
-                              instancePath:
-                                instancePath + "/textProjections/" + i1,
-                              parentData: data5,
-                              parentDataProperty: i1,
-                              rootData,
-                            })
-                          ) {
-                            vErrors =
-                              vErrors === null
-                                ? validate910.errors
-                                : vErrors.concat(validate910.errors);
-                            errors = vErrors.length;
-                          }
-                          var valid3 = _errs13 === errors;
-                          if (!valid3) {
-                            break;
+                      }
+                      if (errors === _errs17) {
+                        if (Array.isArray(data7)) {
+                          if (data7.length > 64) {
+                            validate905.errors = [
+                              {
+                                instancePath: instancePath + "/textProjections",
+                                schemaPath:
+                                  "#/properties/textProjections/maxItems",
+                                keyword: "maxItems",
+                                params: { limit: 64 },
+                              },
+                            ];
+                            return false;
+                          } else {
+                            var valid4 = true;
+                            const len1 = data7.length;
+                            for (let i1 = 0; i1 < len1; i1++) {
+                              const _errs19 = errors;
+                              if (
+                                !validate912(data7[i1], {
+                                  instancePath:
+                                    instancePath + "/textProjections/" + i1,
+                                  parentData: data7,
+                                  parentDataProperty: i1,
+                                  rootData,
+                                })
+                              ) {
+                                vErrors =
+                                  vErrors === null
+                                    ? validate912.errors
+                                    : vErrors.concat(validate912.errors);
+                                errors = vErrors.length;
+                              }
+                              var valid4 = _errs19 === errors;
+                              if (!valid4) {
+                                break;
+                              }
+                            }
                           }
                         }
                       }
+                      var valid0 = _errs17 === errors;
+                    } else {
+                      var valid0 = true;
                     }
                   }
-                  var valid0 = _errs11 === errors;
-                } else {
-                  var valid0 = true;
                 }
               }
             }

@@ -201,6 +201,8 @@ export interface PatchDiscussions {
    */
   items: PatchDiscussion[];
   nextCursor: PageCursorDto | null;
+  pageNumber: SafeCountDto;
+  previousCursor: PageCursorDto | null;
   reviewId: ReviewIdDto;
   revision: PatchRevisionDto;
   /**

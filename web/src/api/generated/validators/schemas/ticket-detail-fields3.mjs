@@ -2,7 +2,7 @@
 import { func0 } from "../runtime.mjs";
 import { schema474 } from "../metadata-11.mjs";
 import { validate235 } from "./utc-timestamp-dto.mjs";
-function validate1645(
+function validate1647(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -14,7 +14,7 @@ function validate1645(
         let data0 = data.status;
         const _errs1 = errors;
         if (typeof data0 !== "string" && data0 !== null) {
-          validate1645.errors = [
+          validate1647.errors = [
             {
               instancePath: instancePath + "/status",
               schemaPath: "#/properties/status/type",
@@ -32,7 +32,7 @@ function validate1645(
         if (data.title !== undefined && func0.call(data, "title")) {
           const _errs3 = errors;
           if (typeof data.title !== "string") {
-            validate1645.errors = [
+            validate1647.errors = [
               {
                 instancePath: instancePath + "/title",
                 schemaPath: "#/properties/title/type",
@@ -101,7 +101,7 @@ function validate1645(
                 vErrors.push(err1);
               }
               errors++;
-              validate1645.errors = vErrors;
+              validate1647.errors = vErrors;
               return false;
             } else {
               errors = _errs6;
@@ -121,7 +121,7 @@ function validate1645(
             if (data.url !== undefined && func0.call(data, "url")) {
               const _errs10 = errors;
               if (typeof data.url !== "string") {
-                validate1645.errors = [
+                validate1647.errors = [
                   {
                     instancePath: instancePath + "/url",
                     schemaPath: "#/properties/url/type",
@@ -146,7 +146,7 @@ function validate1645(
                     for (let i0 = 0; i0 < len0; i0++) {
                       const _errs14 = errors;
                       if (typeof data4[i0] !== "string") {
-                        validate1645.errors = [
+                        validate1647.errors = [
                           {
                             instancePath: instancePath + "/warnings/" + i0,
                             schemaPath: "#/properties/warnings/items/type",
@@ -162,7 +162,7 @@ function validate1645(
                       }
                     }
                   } else {
-                    validate1645.errors = [
+                    validate1647.errors = [
                       {
                         instancePath: instancePath + "/warnings",
                         schemaPath: "#/properties/warnings/type",
@@ -182,7 +182,7 @@ function validate1645(
         }
       }
     } else {
-      validate1645.errors = [
+      validate1647.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -193,7 +193,7 @@ function validate1645(
       return false;
     }
   }
-  validate1645.errors = vErrors;
+  validate1647.errors = vErrors;
   return errors === 0;
 }
-export { validate1645 };
+export { validate1647 };

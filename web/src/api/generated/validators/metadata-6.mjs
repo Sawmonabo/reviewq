@@ -117,6 +117,10 @@ const schema277 = {
     nextCursor: {
       anyOf: [{ $ref: "#/definitions/HistoryCursorDto" }, { type: "null" }],
     },
+    pageNumber: { $ref: "#/definitions/SafeCountDto" },
+    previousCursor: {
+      anyOf: [{ $ref: "#/definitions/HistoryCursorDto" }, { type: "null" }],
+    },
     reviewId: { $ref: "#/definitions/ReviewIdDto" },
     revision: { $ref: "#/definitions/CheckpointIdDto" },
     textProjections: {
@@ -127,7 +131,14 @@ const schema277 = {
       type: ["array", "null"],
     },
   },
-  required: ["reviewId", "revision", "items", "nextCursor"],
+  required: [
+    "reviewId",
+    "revision",
+    "pageNumber",
+    "previousCursor",
+    "items",
+    "nextCursor",
+  ],
   type: "object",
 };
 export {

@@ -6,8 +6,8 @@ use axum::http::HeaderMap;
 use reviewq_app::access::{Actor, AppError};
 use reviewq_app::changes::{
     Discussion, DiscussionAnchor, DiscussionInvalidation, DiscussionLine, DiscussionPage,
-    DiscussionPageRequest, DiscussionPosition, DiscussionResolution, PatchAvailability, PatchFile,
-    PatchFileSelection, PatchPagePreview,
+    DiscussionPageRequest, DiscussionPosition, DiscussionResolution, DiscussionTarget, NoteAddress,
+    PatchAvailability, PatchFile, PatchFileSelection, PatchPagePreview,
 };
 use reviewq_app::queue::ReviewSource;
 use reviewq_app::settings::ActiveSource;
@@ -39,7 +39,7 @@ pub(super) use selection::selected;
 pub(super) use source::source;
 
 const FILE_CURSOR: &[u8] = b"reviewq-changes-files-v1";
-const DISCUSSION_CURSOR: &[u8] = b"reviewq-changes-discussions-v2";
+const DISCUSSION_CURSOR: &[u8] = b"reviewq-changes-discussions-v3";
 const DISCUSSION_LIMIT: u16 = 40;
 const DISCUSSION_SMALL_LIMIT: u16 = 20;
 
@@ -67,8 +67,82 @@ struct Position {
 #[derive(Deserialize, Serialize)]
 struct DiscussionCursor {
     scope: notes::Scope,
-    page: u32,
+    position: DiscussionPagePosition,
+}
+
+#[derive(Clone, Copy, Deserialize, Serialize)]
+struct DiscussionPagePosition {
+    offset: u32,
     limit: u16,
+    narrow_at: Option<u32>,
+}
+
+impl DiscussionPagePosition {
+    fn page(self) -> Result<u32, AppError> {
+        (self.offset / u32::from(self.limit))
+            .checked_add(1)
+            .ok_or(AppError::InvalidRequest)
+    }
+
+    fn number(self) -> u64 {
+        match self.narrow_at.filter(|offset| *offset <= self.offset) {
+            Some(cut) => {
+                u64::from(cut / u32::from(DISCUSSION_LIMIT))
+                    + u64::from((self.offset - cut) / u32::from(DISCUSSION_SMALL_LIMIT))
+                    + 1
+            }
+            None => u64::from(self.offset / u32::from(self.limit)) + 1,
+        }
+    }
+
+    fn resized(self, limit: u16) -> Self {
+        if limit == self.limit {
+            return self;
+        }
+        Self {
+            limit,
+            narrow_at: Some(self.offset),
+            ..self
+        }
+    }
+
+    fn previous(self) -> Option<Self> {
+        let limit = if self.narrow_at == Some(self.offset) {
+            DISCUSSION_LIMIT
+        } else {
+            self.limit
+        };
+        Some(Self {
+            offset: self.offset.checked_sub(u32::from(limit))?,
+            limit,
+            ..self
+        })
+    }
+
+    fn next(self) -> Option<Self> {
+        let offset = self.offset.checked_add(u32::from(self.limit))?;
+        let limit = if self.narrow_at == Some(offset) {
+            DISCUSSION_SMALL_LIMIT
+        } else {
+            self.limit
+        };
+        Some(Self {
+            offset,
+            limit,
+            ..self
+        })
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct DiscussionQuery {
+    revision: String,
+    limit: Option<u16>,
+    cursor: Option<String>,
+    #[serde(default)]
+    recheck: bool,
+    anchor: Option<String>,
 }
 
 pub(super) async fn revision(
@@ -203,12 +277,13 @@ pub(super) async fn discussions(
     State(entry): State<Arc<Entry>>,
     headers: HeaderMap,
     Path(review): Path<String>,
-    Query(query): Query<ChangeQuery>,
+    Query(query): Query<DiscussionQuery>,
 ) -> Result<Json<dto::PatchDiscussionsResponse>, ApiError> {
-    if query.preferred_file_id.is_some()
-        || query.file_path_hint.is_some()
-        || query.preview_edge.is_some()
-        || query.include_selected_preview.is_some()
+    if !valid_revision(&query.revision)
+        || (query.recheck && query.cursor.is_none())
+        || query.anchor.as_ref().is_some_and(|id| {
+            !query.recheck || id.is_empty() || id.len() > 256 || id.chars().any(char::is_control)
+        })
     {
         return Err(AppError::InvalidRequest.into());
     }
@@ -219,10 +294,6 @@ pub(super) async fn discussions(
         && headers
             .get("x-reviewq-discussion-text")
             .is_some_and(|value| value.as_bytes() == b"1");
-    let revision = query
-        .revision
-        .filter(|revision| valid_revision(revision))
-        .ok_or(AppError::InvalidRequest)?;
     let epoch = entry
         .store
         .discussion_epoch(review_id.clone(), source.context.revision)
@@ -232,24 +303,50 @@ pub(super) async fn discussions(
     if !(1..=DISCUSSION_LIMIT).contains(&requested) {
         return Err(AppError::InvalidRequest.into());
     }
-    let mut scope = notes::Scope::new(&review_id, &source, revision, epoch);
-    let (page, limit) = if let Some(cursor) = query.cursor {
+    let mut scope = notes::Scope::new(&review_id, &source, query.revision, epoch);
+    let position = if let Some(cursor) = query.cursor {
         let saved: DiscussionCursor = entry
             .auth
             .endpoint
             .decode_cursor(DISCUSSION_CURSOR, &cursor)?;
-        scope = scope.continued(saved.scope)?;
-        if saved.limit != requested
-            && !(query.limit.is_none() && saved.limit == DISCUSSION_SMALL_LIMIT)
+        if query.recheck {
+            // Open the same signed coordinate with today's authorized observation.
+            scope.check_authority(&saved.scope)?;
+        } else {
+            scope = scope.continued(saved.scope)?;
+        }
+        if saved.position.limit != requested
+            && !(query.limit.is_none() && saved.position.limit == DISCUSSION_SMALL_LIMIT)
         {
             return Err(AppError::CursorExpired.into());
         }
-        (saved.page, saved.limit)
+        saved.position
     } else {
-        (1, requested)
+        DiscussionPagePosition {
+            offset: 0,
+            limit: requested,
+            narrow_at: None,
+        }
     };
-    let read = read_discussion_page(&source, &scope, page, limit, query.limit.is_none()).await;
-    let (response, limit) = match read {
+    let read = async {
+        let (response, limit) = read_discussion_page(
+            &source,
+            &scope,
+            position.page()?,
+            position.limit,
+            query.limit.is_none(),
+        )
+        .await?;
+        scope.observation = Some(response.observation.clone());
+        let anchor = match query.anchor {
+            Some(id) if !response.items.iter().any(|thread| thread.id == id) => {
+                recover_visible_discussion(&source, &scope, id).await?
+            }
+            _ => None,
+        };
+        Ok((response, limit, anchor))
+    };
+    let (response, limit, anchor) = match read.await {
         Err(error) if loses_access(error) => {
             entry
                 .store
@@ -264,22 +361,23 @@ pub(super) async fn discussions(
         }
         result => result?,
     };
-    scope.observation = Some(response.observation);
-    let next = response
-        .next_page
-        .map(|page| {
-            let cursor = DiscussionCursor { scope, page, limit };
-            let token = entry
-                .auth
-                .endpoint
-                .encode_cursor(DISCUSSION_CURSOR, &cursor)?;
-            PageCursorDto::new(token).ok_or(AppError::Internal)
-        })
-        .transpose()?;
+    let position = position.resized(limit);
+    let cursor = |position: Option<DiscussionPagePosition>| {
+        encode(
+            &entry.auth.endpoint,
+            DISCUSSION_CURSOR,
+            position.map(|position| DiscussionCursor {
+                scope: scope.clone(),
+                position,
+            }),
+        )
+    };
+    let next = cursor(response.next_page.and_then(|_| position.next()))?;
+    let previous_cursor = cursor(position.previous())?;
     let web_url = source.value.web_url()?;
-    let items = response
-        .items
+    let items = anchor
         .iter()
+        .chain(response.items.iter())
         .map(|row| discussion(row, &web_url, &source.context))
         .collect::<Result<Vec<_>, _>>()?;
     let text_projections = if include_text_projection {
@@ -293,10 +391,37 @@ pub(super) async fn discussions(
         data: dto::PatchDiscussions {
             review_id: ReviewIdDto::new(review).ok_or(AppError::Internal)?,
             revision: patch_revision(&response.revision.id)?,
+            page_number: SafeCountDto::new(position.number()).ok_or(AppError::Internal)?,
+            previous_cursor,
             page: Page::new(items, next).ok_or(AppError::Internal)?,
             text_projections,
         },
     }))
+}
+
+async fn recover_visible_discussion(
+    source: &SelectedSource,
+    scope: &notes::Scope,
+    id: String,
+) -> Result<Option<Discussion>, AppError> {
+    let provider = source
+        .context
+        .reader
+        .as_ref()
+        .ok_or(AppError::Unavailable)?;
+    let result = provider
+        .discussion_target(
+            source.value.identity.clone(),
+            scope.provider()?,
+            NoteAddress::Published(id),
+        )
+        .await;
+    match result {
+        Ok(DiscussionTarget::Published(thread)) => Ok(Some(thread)),
+        Err(AppError::NotFound | AppError::PayloadTooLarge) => Ok(None),
+        Err(error) => Err(error),
+        Ok(DiscussionTarget::Draft(_)) => Err(AppError::Internal),
+    }
 }
 
 async fn read_discussion_page(
@@ -381,7 +506,7 @@ fn loses_access(error: AppError) -> bool {
 fn encode(
     endpoint: &ServiceEndpoint,
     scope: &[u8],
-    position: Option<Position>,
+    position: Option<impl Serialize>,
 ) -> Result<Option<PageCursorDto>, AppError> {
     position
         .map(|position| {

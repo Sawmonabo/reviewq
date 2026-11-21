@@ -185,6 +185,8 @@ pub enum PatchAvailability {
 pub struct PatchDiscussions {
     pub review_id: ReviewIdDto,
     pub revision: PatchRevisionDto,
+    pub page_number: SafeCountDto,
+    pub previous_cursor: Option<PageCursorDto>,
     #[serde(flatten)]
     pub page: Page<PatchDiscussion>,
     /// Optional searchable plain text from notes in this same response.

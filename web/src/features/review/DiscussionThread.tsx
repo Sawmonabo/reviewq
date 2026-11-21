@@ -161,6 +161,7 @@ export function DiscussionThread({
             return (
               <article
                 className="discussion-note stack"
+                data-discussion-note={changes ? note.noteId : undefined}
                 data-discussion-source={preview !== undefined ? note.noteId : undefined}
                 data-selected-note={selected ? note.noteId : undefined}
                 tabIndex={selected ? -1 : undefined}

@@ -2,8 +2,8 @@
 import { func0 } from "../runtime.mjs";
 import { schema362 } from "../metadata-9.mjs";
 import { validate25 } from "./checkpoint-id-dto.mjs";
-import { validate1235 } from "./delivery-state.mjs";
-function validate1233(
+import { validate1237 } from "./delivery-state.mjs";
+function validate1235(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -20,7 +20,7 @@ function validate1233(
         ((data.reason === undefined || !func0.call(data, "reason")) &&
           (missing0 = "reason"))
       ) {
-        validate1233.errors = [
+        validate1235.errors = [
           {
             instancePath,
             schemaPath: "#/required",
@@ -34,7 +34,7 @@ function validate1233(
           let data0 = data.reason;
           const _errs1 = errors;
           if (typeof data0 !== "string" && data0 !== null) {
-            validate1233.errors = [
+            validate1235.errors = [
               {
                 instancePath: instancePath + "/reason",
                 schemaPath: "#/properties/reason/type",
@@ -103,7 +103,7 @@ function validate1233(
                 vErrors.push(err1);
               }
               errors++;
-              validate1233.errors = vErrors;
+              validate1235.errors = vErrors;
               return false;
             } else {
               errors = _errs4;
@@ -123,7 +123,7 @@ function validate1233(
             if (data.state !== undefined && func0.call(data, "state")) {
               const _errs8 = errors;
               if (
-                !validate1235(data.state, {
+                !validate1237(data.state, {
                   instancePath: instancePath + "/state",
                   parentData: data,
                   parentDataProperty: "state",
@@ -132,8 +132,8 @@ function validate1233(
               ) {
                 vErrors =
                   vErrors === null
-                    ? validate1235.errors
-                    : vErrors.concat(validate1235.errors);
+                    ? validate1237.errors
+                    : vErrors.concat(validate1237.errors);
                 errors = vErrors.length;
               }
               var valid0 = _errs8 === errors;
@@ -144,7 +144,7 @@ function validate1233(
         }
       }
     } else {
-      validate1233.errors = [
+      validate1235.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -155,7 +155,7 @@ function validate1233(
       return false;
     }
   }
-  validate1233.errors = vErrors;
+  validate1235.errors = vErrors;
   return errors === 0;
 }
-export { validate1233 };
+export { validate1235 };

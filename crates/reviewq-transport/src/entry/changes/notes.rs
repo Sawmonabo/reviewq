@@ -52,14 +52,21 @@ impl Scope {
         }
     }
 
-    pub(super) fn continued(self, mut saved: Self) -> Result<Self, AppError> {
+    pub(super) fn check_authority(&self, saved: &Self) -> Result<(), AppError> {
         if self.review != saved.review
             || self.revision != saved.revision
             || self.settings != saved.settings
             || self.account != saved.account
-            || self.epoch != saved.epoch
             || saved.observation.is_none()
         {
+            return Err(AppError::CursorExpired);
+        }
+        Ok(())
+    }
+
+    pub(super) fn continued(self, mut saved: Self) -> Result<Self, AppError> {
+        self.check_authority(&saved)?;
+        if self.epoch != saved.epoch {
             return Err(AppError::CursorExpired);
         }
         saved.journal_head = self.journal_head;

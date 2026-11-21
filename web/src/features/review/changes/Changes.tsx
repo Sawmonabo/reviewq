@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { ApiResponseError } from "../../../api/client";
 import { lostDiscussionAccess } from "../../../api/discussion-search";
@@ -10,9 +10,13 @@ import {
   readPatchPathCatalog,
   readPatchRevision,
 } from "../../../api/changes";
-import type { DiscussionDestination, PatchDiscussion } from "../../../api/generated/contracts";
+import type {
+  DiscussionDestination,
+  PatchDiscussion,
+  PatchDiscussions,
+} from "../../../api/generated/contracts";
 import { Icon } from "../../../components/Icon";
-import { Pagination } from "../../../components/Pagination";
+import { PageNavigation } from "../../../components/Pagination";
 import { Loading, Notice } from "../../../components/PanelState";
 import { useResource } from "../../../hooks/useResource";
 import { Approvals } from "./Approvals";
@@ -25,7 +29,12 @@ import { matchingFile, storedFile, threadLine } from "./patch-position";
 import type { ThreadJump } from "./patch-position";
 import { usePatchDiscussions } from "./usePatchDiscussions";
 import { useDiscussionSelection } from "./useDiscussionSelection";
-import { useDiscussionListJump } from "./useDiscussionListJump";
+import {
+  discussionReadingPosition,
+  restoreDiscussionReading,
+  useDiscussionListJump,
+} from "./useDiscussionListJump";
+import type { DiscussionReadingPosition } from "./useDiscussionListJump";
 import "./changes.css";
 import "./navigation.css";
 
@@ -92,13 +101,17 @@ export default function Changes({
   );
   const changed = Boolean(revision && current.data && current.data.revision !== revision);
   const [threadPage, setThreadPage] = useState(0);
-  const [threadTrail, setThreadTrail] = useState<readonly string[]>([]);
+  const [conversationPage, setConversationPage] = useState<{
+    readonly number: number;
+    readonly cursor: string;
+    readonly manual: boolean;
+  }>();
   const filtering = involving || status !== "any";
   const note = useDiscussionSelection(reviewId, revision, openNote);
   const [discussionGeneration, setDiscussionGeneration] = useState(note.authority);
   if (note.authority !== discussionGeneration) {
     setDiscussionGeneration(note.authority);
-    setThreadTrail([]);
+    setConversationPage(undefined);
     setThreadPage(0);
     setExtraInline(undefined);
     setThreadJump(undefined);
@@ -106,14 +119,16 @@ export default function Changes({
   const list = useRef<HTMLElement>(null);
   const listTarget = tab === "all" ? note.selected : undefined;
   useDiscussionListJump(list, listTarget);
+  const reading = useRef<{
+    readonly page: PatchDiscussions;
+    readonly position: DiscussionReadingPosition;
+  }>(undefined);
   const fallbackNote = useCallback(() => setTab("all"), []);
   const threads = usePatchDiscussions(reviewId, revision, note.authority);
-  const confirmedPages = [...(threads.pages?.entries() ?? [])];
-  const sharedThreadPage = confirmedPages[threadTrail.length]?.[1];
-  const freshTrail = sharedThreadPage
-    ? confirmedPages.slice(1, threadTrail.length + 1).flatMap(([cursor]) => cursor ?? [])
-    : threadTrail;
-  const threadCursor = freshTrail.at(-1);
+  const confirmedPages = [...(threads.pages?.values() ?? [])];
+  const pageNumber = conversationPage?.number ?? 1;
+  const sharedThreadPage = conversationPage?.manual ? undefined : confirmedPages[pageNumber - 1];
+  const threadCursor = conversationPage?.cursor;
   const requestThreadPage = Boolean(
     tab !== "files" && revision && !sharedThreadPage && !threads.pending,
   );
@@ -126,14 +141,45 @@ export default function Changes({
       threadCursor,
       note.authority,
     ]),
-    (signal) =>
-      requestThreadPage && revision
-        ? readPatchDiscussions(reviewId, revision, signal, threadCursor)
-        : Promise.resolve({ data: null, cursor: "" }),
+    async (signal) => {
+      reading.current = undefined;
+      if (!requestThreadPage || !revision) return { data: null, cursor: "" };
+      const position =
+        threadCursor && !listTarget ? discussionReadingPosition(list.current) : undefined;
+      const current = await readPatchDiscussions(
+        reviewId,
+        revision,
+        signal,
+        threadCursor,
+        false,
+        threadCursor ? { anchor: position?.thread } : undefined,
+      );
+      signal.throwIfAborted();
+      const viewport = list.current?.closest<HTMLElement>(".drawer-body");
+      if (viewport && position && Math.abs(viewport.scrollTop - position.top) < 1)
+        reading.current = { page: current.data, position };
+      return current;
+    },
     requestThreadPage ? [{ kind: "discussions", id: reviewId }] : [],
     lostDiscussionAccess,
   );
+  useLayoutEffect(() => {
+    const saved = reading.current;
+    if (saved && saved.page === extraThreads.data) {
+      restoreDiscussionReading(list.current, saved.position);
+      reading.current = undefined;
+    }
+  }, [extraThreads.data]);
   const threadData = sharedThreadPage?.data ?? extraThreads.data;
+  function turnConversationPage(number: number, cursor?: string | null) {
+    if (number < 2) setConversationPage(undefined);
+    else if (cursor)
+      setConversationPage({
+        number,
+        cursor,
+        manual: conversationPage?.manual || !confirmedPages[number - 1],
+      });
+  }
   const threadPending =
     tab === "files" ? threads.pending : !threadData && (threads.pending || extraThreads.pending);
   const filtered = useMemo(
@@ -214,7 +260,7 @@ export default function Changes({
   function refreshIndex() {
     note.clear();
     setThreadPage(0);
-    setThreadTrail([]);
+    setConversationPage(undefined);
     setThreadJump(undefined);
     setExtraInline(undefined);
     setEpoch((value) => value + 1);
@@ -224,7 +270,7 @@ export default function Changes({
     note.clear();
     setFilters(next);
     setThreadPage(0);
-    setThreadTrail([]);
+    setConversationPage(undefined);
   }
 
   if (index.pending && !shown && !index.error) return <Loading label="Loading changes…" />;
@@ -268,7 +314,7 @@ export default function Changes({
                   setThreadJump(undefined);
                   setTab(id);
                   setThreadPage(0);
-                  setThreadTrail([]);
+                  setConversationPage(undefined);
                 }}
               >
                 <span className="changes-tab-label">{label}</span>
@@ -382,7 +428,20 @@ export default function Changes({
               );
             })}
           {tab !== "files" && (
-            <Pagination trail={freshTrail} next={threadData?.nextCursor} onPage={setThreadTrail} />
+            <PageNavigation
+              page={threadData?.pageNumber ?? pageNumber}
+              first={pageNumber > 1 ? () => turnConversationPage(1) : undefined}
+              previous={
+                threadData?.previousCursor
+                  ? () => turnConversationPage(threadData.pageNumber - 1, threadData.previousCursor)
+                  : undefined
+              }
+              next={
+                threadData?.nextCursor
+                  ? () => turnConversationPage(threadData.pageNumber + 1, threadData.nextCursor)
+                  : undefined
+              }
+            />
           )}
           {tab === "files" && visible.length > DISCUSSIONS_PER_PAGE && (
             <nav className="pagination" aria-label="Conversation pages">
