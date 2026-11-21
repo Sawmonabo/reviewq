@@ -22,6 +22,7 @@ import { Empty, Notice } from "../../../components/PanelState";
 import { safeUrl } from "../../../lib/presentation";
 import { ChangedFilePicker } from "./ChangedFilePicker";
 import { FilePatch } from "./FilePatch";
+import { FILE_NAVIGATION, FILE_NAVIGATION_CHANGE } from "./OtherDiscussions";
 import { setPatchMatch } from "./patch-decoration";
 import { patchDocument } from "./patch-document";
 import {
@@ -90,6 +91,7 @@ export function FileStream({
   const [pinned, setPinned] = useState<readonly number[]>([]);
   const index = usePatchPages(reviewId, initial, pinned, visibleOrdinals);
   const generation = useRef(0);
+  const advanceGeneration = useCallback(() => ++generation.current, []);
   const [navigationError, setNavigationError] = useState<string>();
   useEffect(() => () => setPatchMatch([]), []);
   const [landed, setLanded] = useState<{ readonly index: number; readonly offset: number }>();
@@ -333,6 +335,7 @@ export function FileStream({
         }
         setLanded({ index: jump!.index, offset: scroll.scrollTop });
         setJump(undefined);
+        setFileNavigation(scroll, false);
       });
     }
   }, [files, geometry.toolbar, host, jump, scroller, toolbar, virtual]);
@@ -352,9 +355,7 @@ export function FileStream({
       event.target.closest(".changes-header, .changes-conversation")
     )
       return;
-    generation.current++;
-    index.cancelManual();
-    setJump(undefined);
+    interruptNavigation();
   });
   useLayoutEffect(() => {
     if (!scroller) return;
@@ -362,8 +363,12 @@ export function FileStream({
     const options = { signal: signals.signal, passive: true };
     for (const event of ["wheel", "pointerdown", "touchstart", "keydown"])
       scroller.addEventListener(event, cancelNavigation, options);
-    return () => signals.abort();
-  }, [scroller]);
+    return () => {
+      signals.abort();
+      advanceGeneration();
+      setFileNavigation(scroller, false);
+    };
+  }, [advanceGeneration, scroller]);
 
   const remember = useEffectEvent(() => {
     if (
@@ -481,10 +486,18 @@ export function FileStream({
   ]);
 
   function beginNavigation() {
+    setFileNavigation(scroller, true);
     index.cancelManual();
     setNavigationError(undefined);
     setJump(undefined);
-    return ++generation.current;
+    return advanceGeneration();
+  }
+
+  function interruptNavigation() {
+    advanceGeneration();
+    index.cancelManual();
+    setJump(undefined);
+    setFileNavigation(scroller, false);
   }
 
   function goTo(ordinal: number, focus: boolean, line?: PatchLine, source?: SourcePosition) {
@@ -498,6 +511,7 @@ export function FileStream({
         goTo(ordinal, true);
         return;
       }
+    setFileNavigation(scroller, false);
   }
 
   async function chooseTarget(
@@ -520,9 +534,10 @@ export function FileStream({
         return;
       }
     const page = await index.load(target, true);
-    if (!page || generation.current !== command) return;
-    const offset = page.items.findIndex(matches);
-    if (offset >= 0) openTarget(pageStart(page.pageNumber) + offset, page.items[offset]!);
+    if (generation.current !== command) return;
+    const offset = page?.items.findIndex(matches) ?? -1;
+    if (page && offset >= 0) openTarget(pageStart(page.pageNumber) + offset, page.items[offset]!);
+    else setFileNavigation(scroller, false);
 
     function openTarget(ordinal: number, file: PatchFile) {
       if (!match) {
@@ -531,6 +546,7 @@ export function FileStream({
       }
       if (file.patchETag !== match.match.patchETag) {
         setNavigationError("The patch changed since this match. Search again.");
+        setFileNavigation(scroller, false);
         return;
       }
       const source = file.patchETag
@@ -570,9 +586,13 @@ export function FileStream({
     const target = index.lookupPage(pageAt(ordinal));
     if (target && target.page === pageAt(ordinal)) {
       const page = await index.load(target, true);
-      if (generation.current === command && page?.items[ordinal - pageStart(page.pageNumber)])
+      if (generation.current !== command) return;
+      if (page?.items[ordinal - pageStart(page.pageNumber)]) {
         goTo(ordinal, false);
+        return;
+      }
     }
+    setFileNavigation(scroller, false);
   }
 
   return (
@@ -594,7 +614,10 @@ export function FileStream({
               next: first + 1 < count,
               onStep: (direction) => void goToOrdinal(first + direction),
             }}
-            onOpen={beginNavigation}
+            onOpen={() => {
+              interruptNavigation();
+              setNavigationError(undefined);
+            }}
             onChooseFile={chooseFile}
             onChoosePath={(path) => void chooseTarget({ path })}
             onChooseMatch={(match, query) =>
@@ -686,6 +709,12 @@ export function FileStream({
       </div>
     </div>
   );
+}
+
+function setFileNavigation(scroller: Element | null, pending: boolean) {
+  if (!scroller || scroller.hasAttribute(FILE_NAVIGATION) === pending) return;
+  scroller.toggleAttribute(FILE_NAVIGATION, pending);
+  scroller.dispatchEvent(new Event(FILE_NAVIGATION_CHANGE));
 }
 
 function fileIndex(node: Node | null | undefined) {

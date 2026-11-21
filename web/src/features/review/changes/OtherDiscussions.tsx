@@ -6,6 +6,9 @@ import { ChangesThread } from "./ChangesThread";
 type CompactNotes = "all" | ReadonlySet<string>;
 type ReadingAnchor = { viewport: Element; target: Element | Range; top: number };
 
+export const FILE_NAVIGATION = "data-file-navigation";
+export const FILE_NAVIGATION_CHANGE = "reviewq-file-navigation-change";
+
 const previews = new WeakMap<PatchDiscussionNote, string>();
 const INPUT_SETTLE_MS = 120;
 const SCROLL_KEYS = new Set([
@@ -83,9 +86,16 @@ export function OtherDiscussions({ threads }: { readonly threads: readonly Patch
       schedule();
     }
 
+    function onFileNavigation() {
+      if (viewport?.hasAttribute(FILE_NAVIGATION)) {
+        release();
+        anchor.current = undefined;
+      } else schedule();
+    }
+
     function reconcile() {
       frame = 0;
-      if (!element || !viewport) return;
+      if (!element || !viewport || viewport.hasAttribute(FILE_NAVIGATION)) return;
       const pageFocused = document.hasFocus();
       const selection = document.getSelection();
       const range =
@@ -151,6 +161,7 @@ export function OtherDiscussions({ threads }: { readonly threads: readonly Patch
     for (const event of ["wheel", "pointerdown", "keydown"])
       viewport.addEventListener(event, onInput, options);
     viewport.addEventListener("scroll", onScroll, options);
+    viewport.addEventListener(FILE_NAVIGATION_CHANGE, onFileNavigation, options);
     element.addEventListener("focusin", onReadingTarget);
     element.addEventListener("focusout", onReadingTarget);
     document.addEventListener("selectionchange", onReadingTarget);
