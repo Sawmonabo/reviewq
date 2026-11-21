@@ -46,12 +46,14 @@ const schema256 = {
     revision: { $ref: "#/definitions/CheckpointIdDto" },
   },
 };
-const schema265 = {
+const schema264 = { enum: ["reading", "complete", "limited"], type: "string" };
+const schema267 = { enum: ["old", "new"], type: "string" };
+const schema272 = {
   enum: ["native", "async"],
   title: "QuestionAnswerResponseMode",
   type: "string",
 };
-const schema269 = {
+const schema276 = {
   enum: [
     "pending",
     "submitting",
@@ -62,4 +64,13 @@ const schema269 = {
   ],
   type: "string",
 };
-export { schema247, schema249, schema255, schema256, schema265, schema269 };
+export {
+  schema247,
+  schema249,
+  schema255,
+  schema256,
+  schema264,
+  schema267,
+  schema272,
+  schema276,
+};

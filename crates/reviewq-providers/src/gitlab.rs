@@ -26,6 +26,7 @@ const MERGE_REQUEST_PAGE_BYTES: usize = 8 * 1024 * 1024;
 const MAX_PROVIDER_PAGES: u32 = 40;
 
 /// A GitLab client pinned to one configured, verified transport origin.
+#[derive(Clone)]
 pub struct GitLab {
     origin: Url,
     identity: GitLabOrigin,
@@ -160,6 +161,7 @@ struct MergeRequest {
     #[serde(default)]
     draft: bool,
     diff_refs: Option<changes::DiffRefs>,
+    changes_count: Option<serde_json::Value>,
 }
 
 impl MergeRequest {

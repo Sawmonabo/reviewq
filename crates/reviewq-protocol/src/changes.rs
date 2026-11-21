@@ -72,6 +72,56 @@ pub struct PatchPaths {
 
 pub type PatchPathsResponse = Success<PatchPaths>;
 
+pub type PatchSearchResponse = Success<PatchSearch>;
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct PatchSearch {
+    pub review_id: ReviewIdDto,
+    pub revision: PatchRevisionDto,
+    pub coverage: PatchSearchCoverage,
+    #[serde(flatten)]
+    pub page: Page<PatchSearchMatch>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub enum PatchSearchCoverage {
+    Reading,
+    Complete,
+    Limited,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub enum PatchSide {
+    Old,
+    New,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct PatchSearchMatch {
+    pub file_id: FileIdDto,
+    #[cfg_attr(feature = "schema", schemars(length(max = 4096)))]
+    pub old_path: String,
+    #[cfg_attr(feature = "schema", schemars(length(max = 4096)))]
+    pub new_path: String,
+    pub side: PatchSide,
+    pub line: SafeCountDto,
+    pub hunk: SafeCountDto,
+    pub source_start: SafeCountDto,
+    pub source_end: SafeCountDto,
+    #[cfg_attr(feature = "schema", schemars(length(max = 448)))]
+    pub snippet: String,
+    pub highlight_start: SafeCountDto,
+    pub highlight_end: SafeCountDto,
+}
+
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]

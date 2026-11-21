@@ -26,6 +26,10 @@ export type FileIdDto = string;
 
 export type PatchETagDto = string;
 
+export type PatchSearchCoverage = "reading" | "complete" | "limited";
+
+export type PatchSide = "old" | "new";
+
 export interface ApprovalViewResponse {
   cursor: EventCursorDto;
   data: ApprovalView;
@@ -219,6 +223,39 @@ export interface PatchPath {
   lookupKey: FileIdDto;
   newPath: string;
   oldPath: string;
+  [k: string]: unknown;
+}
+
+export interface PatchSearchResponse {
+  cursor: EventCursorDto;
+  data: PatchSearch;
+  [k: string]: unknown;
+}
+
+export interface PatchSearch {
+  coverage: PatchSearchCoverage;
+  /**
+   * @maxItems 100
+   */
+  items: PatchSearchMatch[];
+  nextCursor: PageCursorDto | null;
+  reviewId: ReviewIdDto;
+  revision: PatchRevisionDto;
+  [k: string]: unknown;
+}
+
+export interface PatchSearchMatch {
+  fileId: FileIdDto;
+  highlightEnd: SafeCountDto;
+  highlightStart: SafeCountDto;
+  hunk: SafeCountDto;
+  line: SafeCountDto;
+  newPath: string;
+  oldPath: string;
+  side: PatchSide;
+  snippet: string;
+  sourceEnd: SafeCountDto;
+  sourceStart: SafeCountDto;
   [k: string]: unknown;
 }
 

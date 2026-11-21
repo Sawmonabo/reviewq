@@ -5754,6 +5754,131 @@
       "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f\\ud800-\\udfff]+$",
       "type": "string"
     },
+    "PatchSearch": {
+      "description": "A bounded compact list with a required nullable keyset continuation.",
+      "properties": {
+        "coverage": {
+          "$ref": "#/definitions/PatchSearchCoverage"
+        },
+        "items": {
+          "items": {
+            "$ref": "#/definitions/PatchSearchMatch"
+          },
+          "maxItems": 100,
+          "type": "array"
+        },
+        "nextCursor": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/PageCursorDto"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "reviewId": {
+          "$ref": "#/definitions/ReviewIdDto"
+        },
+        "revision": {
+          "$ref": "#/definitions/PatchRevisionDto"
+        }
+      },
+      "required": [
+        "reviewId",
+        "revision",
+        "coverage",
+        "items",
+        "nextCursor"
+      ],
+      "type": "object"
+    },
+    "PatchSearchCoverage": {
+      "enum": [
+        "reading",
+        "complete",
+        "limited"
+      ],
+      "type": "string"
+    },
+    "PatchSearchMatch": {
+      "properties": {
+        "fileId": {
+          "$ref": "#/definitions/FileIdDto"
+        },
+        "highlightEnd": {
+          "$ref": "#/definitions/SafeCountDto"
+        },
+        "highlightStart": {
+          "$ref": "#/definitions/SafeCountDto"
+        },
+        "hunk": {
+          "$ref": "#/definitions/SafeCountDto"
+        },
+        "line": {
+          "$ref": "#/definitions/SafeCountDto"
+        },
+        "newPath": {
+          "maxLength": 4096,
+          "type": "string"
+        },
+        "oldPath": {
+          "maxLength": 4096,
+          "type": "string"
+        },
+        "side": {
+          "$ref": "#/definitions/PatchSide"
+        },
+        "snippet": {
+          "maxLength": 448,
+          "type": "string"
+        },
+        "sourceEnd": {
+          "$ref": "#/definitions/SafeCountDto"
+        },
+        "sourceStart": {
+          "$ref": "#/definitions/SafeCountDto"
+        }
+      },
+      "required": [
+        "fileId",
+        "oldPath",
+        "newPath",
+        "side",
+        "line",
+        "hunk",
+        "sourceStart",
+        "sourceEnd",
+        "snippet",
+        "highlightStart",
+        "highlightEnd"
+      ],
+      "type": "object"
+    },
+    "PatchSearchResponse": {
+      "description": "The resource and event head from the same authorized snapshot.",
+      "properties": {
+        "cursor": {
+          "$ref": "#/definitions/EventCursorDto"
+        },
+        "data": {
+          "$ref": "#/definitions/PatchSearch"
+        }
+      },
+      "required": [
+        "data",
+        "cursor"
+      ],
+      "title": "PatchSearchResponse",
+      "type": "object"
+    },
+    "PatchSide": {
+      "enum": [
+        "old",
+        "new"
+      ],
+      "type": "string"
+    },
     "PlanEntry": {
       "properties": {
         "entryId": {
@@ -10149,6 +10274,7 @@
     "PatchDiscussionsResponse": "changes",
     "PatchFileIndexResponse": "changes",
     "PatchPathsResponse": "changes",
+    "PatchSearchResponse": "changes",
     "QuestionAnswerRequest": "questions",
     "QuestionAnswerResponse": "questions",
     "QuestionFormsResponse": "questions",
@@ -10262,6 +10388,7 @@
       "PatchDiscussionsResponse": "#/definitions/PatchDiscussionsResponse",
       "PatchFileIndexResponse": "#/definitions/PatchFileIndexResponse",
       "PatchPathsResponse": "#/definitions/PatchPathsResponse",
+      "PatchSearchResponse": "#/definitions/PatchSearchResponse",
       "QuestionAnswerResponse": "#/definitions/QuestionAnswerResponse",
       "QuestionFormsResponse": "#/definitions/QuestionFormsResponse",
       "QueuePageResponse": "#/definitions/QueuePageResponse",

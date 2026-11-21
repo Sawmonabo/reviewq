@@ -41,8 +41,8 @@ impl DiffStats {
     pub(super) fn end_line(&mut self) {
         match (self.remaining, self.first) {
             ((0, 0), Some(b'@')) => {
-                if let Some(span) = hunk_lines(&self.header[..self.header_len]) {
-                    self.remaining = span;
+                if let Some(((_, old), (_, new))) = hunk_ranges(&self.header[..self.header_len]) {
+                    self.remaining = (old, new);
                     self.saw_hunk = true;
                 } else {
                     self.invalid = true;
@@ -70,7 +70,9 @@ impl DiffStats {
     }
 }
 
-fn hunk_lines(header: &[u8]) -> Option<(usize, usize)> {
+pub(in crate::gitlab::changes) fn hunk_ranges(
+    header: &[u8],
+) -> Option<((u32, usize), (u32, usize))> {
     let mut fields = header.splitn(5, |byte| byte.is_ascii_whitespace());
     if fields.next()? != b"@@" {
         return None;
@@ -80,13 +82,10 @@ fn hunk_lines(header: &[u8]) -> Option<(usize, usize)> {
     (fields.next()? == b"@@").then_some((old, new))
 }
 
-fn span(range: &[u8]) -> Option<usize> {
+fn span(range: &[u8]) -> Option<(u32, usize)> {
     let range = std::str::from_utf8(range).ok()?;
-    match range.split_once(',') {
-        Some((start, count)) => {
-            start.parse::<usize>().ok()?;
-            count.parse().ok()
-        }
-        None => range.parse::<usize>().ok().map(|_| 1),
-    }
+    let (start, count) = range.split_once(',').unwrap_or((range, "1"));
+    let (start, count) = (start.parse::<u32>().ok()?, count.parse::<usize>().ok()?);
+    let end = u64::from(start).checked_add(u64::try_from(count).ok()?)?;
+    (end <= u64::from(u32::MAX) && (start > 0 || count == 0)).then_some((start, count))
 }

@@ -2,10 +2,11 @@ use std::collections::VecDeque;
 
 use reviewq_app::changes::{PatchRange, PatchRead};
 
-use super::Body;
+use super::{Body, BodyPolicy};
 
 // The browser includes up to four overlap bytes for UTF-8 window boundaries.
 const MAX_BYTES: usize = 64 * 1024 + 8;
+const READ_AHEAD_BYTES: usize = 1024 * 1024;
 
 pub(super) enum Capture {
     None,
@@ -21,21 +22,31 @@ pub(super) enum Capture {
 }
 
 impl Capture {
-    pub(super) fn new(read: PatchRead) -> Self {
+    pub(super) fn new(read: PatchRead, policy: BodyPolicy) -> Self {
+        let limit = if matches!(policy, BodyPolicy::ReadAhead) {
+            READ_AHEAD_BYTES
+        } else {
+            MAX_BYTES
+        };
         match read {
+            PatchRead::Full => Self::from(0, limit),
             PatchRead::Range(Some(PatchRange::From { start, last })) => {
                 let end = last.map_or(usize::MAX, |last| last.saturating_add(1));
-                Self::From {
-                    start,
-                    end: end.min(start.saturating_add(MAX_BYTES)),
-                    bytes: Vec::new(),
-                }
+                Self::from(start, end.min(start.saturating_add(limit)))
             }
             PatchRead::Range(Some(PatchRange::Suffix(length))) if length > 0 => Self::Tail {
-                length: length.min(MAX_BYTES),
+                length: length.min(limit),
                 bytes: VecDeque::new(),
             },
             _ => Self::None,
+        }
+    }
+
+    fn from(start: usize, end: usize) -> Self {
+        Self::From {
+            start,
+            end,
+            bytes: Vec::new(),
         }
     }
 

@@ -116,6 +116,7 @@ import type {
   PatchDiscussionsResponse,
   PatchFileIndexResponse,
   PatchPathsResponse,
+  PatchSearchResponse,
   SelectedPatchResponse,
 } from "./changes.js";
 
@@ -194,6 +195,7 @@ export interface Contracts {
   PatchDiscussionsResponse: PatchDiscussionsResponse;
   PatchFileIndexResponse: PatchFileIndexResponse;
   PatchPathsResponse: PatchPathsResponse;
+  PatchSearchResponse: PatchSearchResponse;
   QuestionAnswerResponse: QuestionAnswerResponse;
   QuestionFormsResponse: QuestionFormsResponse;
   QueuePageResponse: QueuePageResponse;

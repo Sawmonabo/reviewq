@@ -12,9 +12,12 @@ use reviewq_domain::identity::MrIdentity;
 use sha2::{Digest, Sha256};
 use struson::reader::{JsonReader, JsonStreamReader};
 
+mod search;
 mod stats;
 mod window;
+pub(super) use search::find_matches;
 use stats::DiffStats;
+pub(super) use stats::hunk_ranges;
 use window::Capture;
 
 const SMALL_PATCH_BYTES: usize = 32 * 1024;
@@ -32,6 +35,14 @@ pub(super) struct Selection {
     pub preferred: Option<String>,
     pub default: bool,
     pub read: PatchRead,
+    pub policy: BodyPolicy,
+}
+
+#[derive(Clone, Copy)]
+pub(super) enum BodyPolicy {
+    Lease,
+    Uncached,
+    ReadAhead,
 }
 
 #[derive(Default)]
@@ -80,8 +91,9 @@ pub(super) fn decode(
         } else {
             Retain::Small(remaining.min(SMALL_PATCH_BYTES))
         };
-        let (file, body) = read_item(&mut reader, profile, index, retain)?;
-        if let Some(body) = body {
+        let (file, _, body) =
+            read_item(&mut reader, index, |string| body(string, profile, &retain))?;
+        if let Some(body) = body.filter(|_| file.availability == PatchAvailability::Complete) {
             if primary && preferred.is_none_or(|required| required == file.id) {
                 selected = Some((file.clone(), body));
             } else if !primary
@@ -147,14 +159,14 @@ pub(super) fn find_file(
     Ok(found)
 }
 
-fn read_item(
+fn read_item<T>(
     reader: &mut JsonStreamReader<ResponseReader>,
-    profile: &Path,
     ordinal: u32,
-    retain: Retain<'_>,
-) -> Result<(PatchFile, Option<Body>), AppError> {
+    scan: impl FnOnce(&mut dyn Read) -> Result<(PatchMetrics, T, bool), AppError>,
+) -> Result<(PatchFile, PatchMetrics, T), AppError> {
     let mut info = Diff::default();
     let mut payload = None;
+    let mut scan = Some(scan);
     reader.begin_object().map_err(invalid)?;
     while reader.has_next().map_err(invalid)? {
         match reader.next_name().map_err(invalid)? {
@@ -173,8 +185,8 @@ fn read_item(
             "too_large" => info.too_large = reader.next_bool().map_err(invalid)?,
             "binary" => info.binary = reader.next_bool().map_err(invalid)?,
             "diff" if payload.is_none() => {
-                let string = reader.next_string_reader().map_err(invalid)?;
-                payload = Some(body(string, profile, &retain)?);
+                let mut string = reader.next_string_reader().map_err(invalid)?;
+                payload = Some(scan.take().ok_or(AppError::Unavailable)?(&mut string)?);
             }
             "old_path" | "new_path" | "renamed_file" | "new_file" | "deleted_file" | "diff" => {
                 return Err(AppError::Unavailable);
@@ -205,10 +217,11 @@ fn read_item(
             created: info.created.ok_or(AppError::Unavailable)?,
             deleted: info.deleted.ok_or(AppError::Unavailable)?,
             availability,
-            metrics: complete.then_some(metrics),
+            metrics: complete.then(|| metrics.clone()),
             preview: None,
         },
-        if complete { data } else { None },
+        metrics,
+        data,
     ))
 }
 
@@ -238,6 +251,18 @@ struct BodyScan {
 }
 
 impl BodyScan {
+    fn new() -> Self {
+        Self {
+            length: 0,
+            lines: 0,
+            max_line: 0,
+            line_length: 0,
+            was_cr: false,
+            digest: Sha256::new(),
+            stats: DiffStats::new(),
+        }
+    }
+
     fn inspect(&mut self, chunk: &[u8]) {
         self.length += chunk.len();
         self.digest.update(chunk);
@@ -279,22 +304,24 @@ fn body(
     profile: &Path,
     retain: &Retain<'_>,
 ) -> Result<(PatchMetrics, Option<Body>, bool), AppError> {
-    let mut scan = BodyScan {
-        length: 0,
-        lines: 0,
-        max_line: 0,
-        line_length: 0,
-        was_cr: false,
-        digest: Sha256::new(),
-        stats: DiffStats::new(),
-    };
+    let mut scan = BodyScan::new();
     // Read loop below uses fixed-sized blocks even for a multi-megabyte JSON string.
     let mut buffer = [0; 64 * 1024];
     let mut prefix = Vec::new();
-    let mut keep = !matches!(retain, Retain::Small(0));
+    let mut keep = !matches!(
+        retain,
+        Retain::Small(0)
+            | Retain::Selected(
+                Selection {
+                    policy: BodyPolicy::ReadAhead,
+                    ..
+                },
+                _,
+            )
+    );
     let mut file = None::<ScratchFile>;
     let mut capture = match retain {
-        Retain::Selected(selection, _) => Capture::new(selection.read),
+        Retain::Selected(selection, _) => Capture::new(selection.read, selection.policy),
         Retain::Small(_) => Capture::None,
     };
     let mut identification = Vec::new();
@@ -315,15 +342,17 @@ fn body(
             Retain::Selected(selection, ordinal)
                 if keep && file.is_none() && scan.length > MEMORY_LIMIT =>
             {
-                file = ScratchFile::create(
-                    profile,
-                    ScratchKey {
-                        source: selection.source.clone(),
-                        revision: selection.revision.clone(),
-                        ordinal: *ordinal,
-                    },
-                )
-                .and_then(|mut scratch| scratch.file.write_all(&prefix).ok().map(|_| scratch));
+                if matches!(selection.policy, BodyPolicy::Lease) {
+                    file = ScratchFile::create(
+                        profile,
+                        ScratchKey {
+                            source: selection.source.clone(),
+                            revision: selection.revision.clone(),
+                            ordinal: *ordinal,
+                        },
+                    )
+                    .and_then(|mut scratch| scratch.file.write_all(&prefix).ok().map(|_| scratch));
+                }
                 keep = file.is_some();
                 prefix = Vec::new();
             }
@@ -352,8 +381,7 @@ fn body(
             prefix = Vec::new();
         }
     }
-    let binary = identification.starts_with(b"Binary files ")
-        || identification.starts_with(b"GIT binary patch");
+    let binary = binary_prefix(&identification);
     let data = if keep {
         Some(file.map_or(Body::Memory(prefix), |file| Body::File(file.into())))
     } else if matches!(retain, Retain::Selected(_, _)) {
@@ -362,6 +390,10 @@ fn body(
         None
     };
     Ok((scan.finish(), data, binary))
+}
+
+fn binary_prefix(prefix: &[u8]) -> bool {
+    prefix.starts_with(b"Binary files ") || prefix.starts_with(b"GIT binary patch")
 }
 
 fn invalid<T>(_: T) -> AppError {

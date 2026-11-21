@@ -1,12 +1,12 @@
 use std::collections::VecDeque;
 use std::os::unix::fs::FileExt;
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, Weak};
 use std::time::{Duration, Instant};
 
 use reviewq_app::access::{AppError, AppFuture};
 use reviewq_app::changes::{
-    PatchBytes, PatchContent, PatchFile, PatchFileSelection, PatchPageEdge, SourcePage,
+    PatchBytes, PatchContent, PatchFile, PatchFileSelection, PatchPagePreview, SourcePage,
 };
 use reviewq_domain::identity::MrIdentity;
 use tokio::sync::{Mutex, OnceCell};
@@ -38,17 +38,21 @@ type Slot = Arc<OnceCell<PatchBytes>>;
 pub(super) struct IndexedPage {
     pub page: SourcePage<PatchFile>,
     pub small: Vec<(usize, Arc<Body>)>,
-    pub selected: Option<(usize, Arc<Body>)>,
+    pub selected: Option<(usize, Weak<Body>)>,
 }
 
 impl IndexedPage {
     pub(super) fn for_reader(
         &self,
-        edge: Option<PatchPageEdge>,
+        preview: Option<PatchPagePreview>,
     ) -> Result<SourcePage<PatchFile>, AppError> {
         let mut page = self.page.clone();
-        let Some(edge) = edge else {
+        let Some(preview) = preview else {
+            return Ok(page);
+        };
+        if matches!(preview, PatchPagePreview::Selected) {
             if let Some((index, body)) = &self.selected
+                && let Some(body) = body.upgrade()
                 && let Body::Memory(bytes) = body.as_ref()
             {
                 page.items[*index].preview = Some(
@@ -63,9 +67,10 @@ impl IndexedPage {
         let mut available = 64 * 1024;
         let len = page.items.len();
         for (index, body) in &self.small {
-            let distance = match edge {
-                PatchPageEdge::Start => *index,
-                PatchPageEdge::End => len - 1 - index,
+            let distance = match preview {
+                PatchPagePreview::Selected => unreachable!("already returned the selected preview"),
+                PatchPagePreview::Start => *index,
+                PatchPagePreview::End => len - 1 - index,
             };
             let file = &mut page.items[*index];
             if distance >= 3
@@ -103,6 +108,7 @@ struct Lease {
     used_at: Instant,
 }
 
+#[derive(Clone)]
 pub(in crate::gitlab) struct Leases {
     pub(in crate::gitlab) profile: PathBuf,
     entries: Arc<Mutex<VecDeque<Lease>>>,

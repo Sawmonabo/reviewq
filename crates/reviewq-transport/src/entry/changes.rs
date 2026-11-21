@@ -6,7 +6,7 @@ use axum::http::HeaderMap;
 use reviewq_app::access::{Actor, AppError};
 use reviewq_app::changes::{
     Discussion, DiscussionAnchor, DiscussionLine, DiscussionPosition, DiscussionResolution,
-    PatchAvailability, PatchFile, PatchFileSelection, PatchPageEdge,
+    PatchAvailability, PatchFile, PatchFileSelection, PatchPagePreview,
 };
 use reviewq_app::queue::ReviewSource;
 use reviewq_app::settings::ActiveSource;
@@ -24,10 +24,12 @@ use super::{ApiError, Entry, ServiceEndpoint};
 mod approval;
 mod paths;
 mod raw;
+mod search;
 mod selection;
 pub(super) use approval::approvals;
 pub(super) use paths::paths;
 pub(super) use raw::patch;
+pub(super) use search::search;
 pub(super) use selection::selected;
 
 const FILE_CURSOR: &[u8] = b"reviewq-changes-files-v1";
@@ -44,6 +46,7 @@ pub(super) struct ChangeQuery {
     preferred_file_id: Option<String>,
     file_path_hint: Option<String>,
     preview_edge: Option<String>,
+    include_selected_preview: Option<u8>,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -112,10 +115,14 @@ pub(super) async fn files(
     {
         return Err(AppError::InvalidRequest.into());
     }
-    let edge = match query.preview_edge.as_deref() {
-        None => None,
-        Some("start") if query.cursor.is_some() => Some(PatchPageEdge::Start),
-        Some("end") if query.cursor.is_some() => Some(PatchPageEdge::End),
+    let preview = match (
+        query.preview_edge.as_deref(),
+        query.include_selected_preview,
+    ) {
+        (None, None) => None,
+        (None, Some(1)) if query.cursor.is_none() => Some(PatchPagePreview::Selected),
+        (Some("start"), None) if query.cursor.is_some() => Some(PatchPagePreview::Start),
+        (Some("end"), None) if query.cursor.is_some() => Some(PatchPagePreview::End),
         Some(_) => return Err(AppError::InvalidRequest.into()),
     };
     let (limit, page, revision) = query.position(
@@ -137,7 +144,7 @@ pub(super) async fn files(
             page,
             limit,
             selected,
-            edge,
+            preview,
         )
         .await?;
     check_source(&entry, &actor, &review_id, &source).await?;
@@ -188,6 +195,7 @@ pub(super) async fn discussions(
     if query.preferred_file_id.is_some()
         || query.file_path_hint.is_some()
         || query.preview_edge.is_some()
+        || query.include_selected_preview.is_some()
     {
         return Err(AppError::InvalidRequest.into());
     }
