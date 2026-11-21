@@ -229,6 +229,7 @@ fn search_entry(
             reverse,
             markdown,
             ranged: !markdown && body.text.len() > 65_536,
+            output_bytes: body.text.len() as u64,
             tool: body.tool,
             hits: VecDeque::new(),
         };
@@ -280,6 +281,7 @@ struct RpcMatches<'a> {
     reverse: bool,
     markdown: bool,
     ranged: bool,
+    output_bytes: u64,
     tool: Option<&'a NativeInputId>,
     hits: VecDeque<SearchHit<RpcContentRef, RpcSearchPoint>>,
 }
@@ -372,6 +374,7 @@ impl RpcMatches<'_> {
             matched: found.to_owned(),
             after: window[span.end.byte..].chars().take(32).collect(),
             output_offset: if self.ranged { anchor } else { 0 },
+            output_bytes: self.output_bytes,
             start_utf16: if self.ranged {
                 0
             } else {

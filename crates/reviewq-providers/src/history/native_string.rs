@@ -1,11 +1,9 @@
 use std::fs::File;
 use std::ops::Range;
 use std::os::unix::fs::FileExt;
-use std::sync::atomic::AtomicBool;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use reviewq_app::access::AppError;
-
-use super::check_cancel;
 
 const BLOCK_BYTES: usize = 32 * 1024;
 
@@ -72,6 +70,17 @@ impl NativeString {
         bytes: u64,
         cancel: &AtomicBool,
     ) -> Result<Self, AppError> {
+        Self::prepare_with(file, field, key, bytes, cancel, |_| {})
+    }
+
+    pub(super) fn prepare_with(
+        file: &File,
+        field: Range<u64>,
+        key: u16,
+        bytes: u64,
+        cancel: &AtomicBool,
+        mut consume: impl FnMut(&str),
+    ) -> Result<Self, AppError> {
         check_quotes(file, &field)?;
         let end = field.end - 1;
         let mut source = field.start + 1;
@@ -83,6 +92,7 @@ impl NativeString {
             points.push(Point { source, decoded });
             let (next, text) = decode(file, source, end, &mut scratch)?;
             decoded += text.len() as u64;
+            consume(&text);
             source = next;
         }
         if decoded != bytes {
@@ -166,4 +176,11 @@ fn decode(
     let text = serde_json::from_slice::<String>(&scratch[..length + 2])
         .map_err(|_| AppError::CursorExpired)?;
     Ok((source + length as u64, text))
+}
+
+fn check_cancel(cancel: &AtomicBool) -> Result<(), AppError> {
+    if cancel.load(Ordering::Relaxed) {
+        return Err(AppError::Unavailable);
+    }
+    Ok(())
 }

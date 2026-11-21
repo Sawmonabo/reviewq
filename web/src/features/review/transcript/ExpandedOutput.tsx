@@ -5,27 +5,38 @@ import { Loading, Notice } from "../../../components/PanelState";
 import { useResource } from "../../../hooks/useResource";
 import { MarkdownContent } from "../../../components/markdown/MarkdownContent";
 import type { FoundOutput } from "./find/destination";
+import { NativeDocument } from "./NativeDocument";
 
 type Position = { readonly offset: number; readonly cursor?: string };
 const start: Position = { offset: 0 };
 const encoder = new TextEncoder();
 const MAX_POSITIONS = 32;
 
-export function ExpandedOutput({
-  target,
-  entryId,
-  generation,
-  reference,
-  format,
-  found,
-}: {
+type Props = {
   readonly target: SessionAddress;
   readonly entryId: string;
   readonly generation: string;
   readonly reference: string;
   readonly format: "markdown" | "text";
   readonly found?: FoundOutput;
-}) {
+};
+
+export function ExpandedOutput(props: Props) {
+  const source = <SourceOutput {...props} />;
+  if (props.format !== "markdown" || props.found) return source;
+  return (
+    <NativeDocument
+      key={props.reference}
+      target={props.target}
+      generation={props.generation}
+      entryId={props.entryId}
+      reference={props.reference}
+      fallback={source}
+    />
+  );
+}
+
+function SourceOutput({ target, entryId, generation, reference, format, found }: Props) {
   const opening = found?.destination;
   const [path, setPath] = useState<readonly Position[]>(() => [
     opening

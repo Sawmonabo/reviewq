@@ -2,8 +2,8 @@
 import { func0 } from "../runtime.mjs";
 import { validate127 } from "./safe-count-dto.mjs";
 import { validate586 } from "./document-display.mjs";
-import { validate1329 } from "./display-block-kind.mjs";
-function validate1324(
+import { validate646 } from "./display-block-kind.mjs";
+function validate641(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -29,7 +29,7 @@ function validate1324(
         ((data.markdown === undefined || !func0.call(data, "markdown")) &&
           (missing0 = "markdown"))
       ) {
-        validate1324.errors = [
+        validate641.errors = [
           {
             instancePath,
             schemaPath: "#/required",
@@ -135,7 +135,7 @@ function validate1324(
                   vErrors.push(err1);
                 }
                 errors++;
-                validate1324.errors = vErrors;
+                validate641.errors = vErrors;
                 return false;
               } else {
                 errors = _errs4;
@@ -209,7 +209,7 @@ function validate1324(
                     vErrors.push(err3);
                   }
                   errors++;
-                  validate1324.errors = vErrors;
+                  validate641.errors = vErrors;
                   return false;
                 } else {
                   errors = _errs9;
@@ -229,7 +229,7 @@ function validate1324(
                 if (data.kind !== undefined && func0.call(data, "kind")) {
                   const _errs13 = errors;
                   if (
-                    !validate1329(data.kind, {
+                    !validate646(data.kind, {
                       instancePath: instancePath + "/kind",
                       parentData: data,
                       parentDataProperty: "kind",
@@ -238,8 +238,8 @@ function validate1324(
                   ) {
                     vErrors =
                       vErrors === null
-                        ? validate1329.errors
-                        : vErrors.concat(validate1329.errors);
+                        ? validate646.errors
+                        : vErrors.concat(validate646.errors);
                     errors = vErrors.length;
                   }
                   var valid0 = _errs13 === errors;
@@ -253,7 +253,7 @@ function validate1324(
                   ) {
                     const _errs14 = errors;
                     if (typeof data.markdown !== "string") {
-                      validate1324.errors = [
+                      validate641.errors = [
                         {
                           instancePath: instancePath + "/markdown",
                           schemaPath: "#/properties/markdown/type",
@@ -324,7 +324,7 @@ function validate1324(
         }
       }
     } else {
-      validate1324.errors = [
+      validate641.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -335,7 +335,7 @@ function validate1324(
       return false;
     }
   }
-  validate1324.errors = vErrors;
+  validate641.errors = vErrors;
   return errors === 0;
 }
-export { validate1324 };
+export { validate641 };

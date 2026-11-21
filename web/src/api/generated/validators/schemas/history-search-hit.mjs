@@ -3,7 +3,7 @@ import { func0 } from "../runtime.mjs";
 import { validate621 } from "./history-text.mjs";
 import { validate48 } from "./history-cursor-dto.mjs";
 import { validate25 } from "./checkpoint-id-dto.mjs";
-function validate782(
+function validate828(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -29,7 +29,7 @@ function validate782(
         ((data.afterCursor === undefined || !func0.call(data, "afterCursor")) &&
           (missing0 = "afterCursor"))
       ) {
-        validate782.errors = [
+        validate828.errors = [
           {
             instancePath,
             schemaPath: "#/required",
@@ -202,7 +202,7 @@ function validate782(
         }
       }
     } else {
-      validate782.errors = [
+      validate828.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -213,7 +213,7 @@ function validate782(
       return false;
     }
   }
-  validate782.errors = vErrors;
+  validate828.errors = vErrors;
   return errors === 0;
 }
-export { validate782 };
+export { validate828 };

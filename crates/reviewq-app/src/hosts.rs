@@ -95,6 +95,15 @@ pub trait NativeHost: QuestionsPort + Send + Sync {
         Box::pin(async { Err(AppError::Unavailable) })
     }
 
+    fn history_document(
+        &self,
+        _target: HistorySession,
+        _reference: crate::history::RpcContentRef,
+        _query: crate::history::document::Query,
+    ) -> AppFuture<'_, crate::history::document::Window> {
+        Box::pin(async { Err(AppError::Unavailable) })
+    }
+
     fn history_stamp(
         &self,
         _target: HistorySession,

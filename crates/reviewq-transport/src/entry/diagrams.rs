@@ -18,7 +18,7 @@ use sha2::{Digest, Sha256};
 use tokio::sync::watch;
 
 use super::error::ApiPath as Path;
-use super::history::{ContentQuery, read_content};
+use super::history::{ContentQuery, drawing_source, read_content};
 use super::pages::parse;
 use super::{ApiError, Entry};
 
@@ -61,7 +61,15 @@ pub(super) enum Owner {
         run: String,
         session: String,
         source: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        window: Option<NativeWindowOwner>,
     },
+}
+
+#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
+pub(super) struct NativeWindowOwner {
+    pub(super) byte_start: u64,
+    pub(super) sha256: String,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -319,24 +327,40 @@ async fn authorized(
             run,
             session,
             source,
+            window,
         } => {
-            let reply = read_content(
-                entry,
-                actor,
-                parse(run)?,
-                parse(session)?,
-                ContentQuery {
-                    reference: source.clone(),
-                    cursor: None,
-                },
-                64 * 1024,
-            )
-            .await?;
-            if !reply.data.complete
-                || reply.data.reset
-                || !mermaid_sources(reply.data.text.as_str())
-                    .iter()
-                    .any(|graph| digest(graph).as_str() == hash)
+            let markdown = if let Some(window) = window {
+                drawing_source(
+                    entry,
+                    actor,
+                    parse(run)?,
+                    parse(session)?,
+                    source,
+                    window.byte_start,
+                    parse(&window.sha256)?,
+                )
+                .await?
+            } else {
+                let reply = read_content(
+                    entry,
+                    actor,
+                    parse(run)?,
+                    parse(session)?,
+                    ContentQuery {
+                        reference: source.clone(),
+                        cursor: None,
+                    },
+                    64 * 1024,
+                )
+                .await?;
+                if !reply.data.complete || reply.data.reset {
+                    return Err(AppError::CursorExpired);
+                }
+                reply.data.text.as_str().to_owned()
+            };
+            if !mermaid_sources(&markdown)
+                .iter()
+                .any(|graph| digest(graph).as_str() == hash)
             {
                 return Err(AppError::CursorExpired);
             }

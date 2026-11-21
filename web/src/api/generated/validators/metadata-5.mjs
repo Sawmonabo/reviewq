@@ -3,12 +3,38 @@ const schema197 = {
   enum: ["default", "left", "center", "right"],
   type: "string",
 };
-const schema223 = {
+const schema215 = {
+  enum: [
+    "paragraph",
+    "heading",
+    "block_quote",
+    "code",
+    "list",
+    "rule",
+    "table",
+  ],
+  type: "string",
+};
+const schema217 = {
+  enum: [
+    "document_budget",
+    "parser_budget",
+    "document_context",
+    "layout_budget",
+    "unsupported_source",
+    "invalid_boundary",
+    "parser_failed",
+    "incomplete_source",
+    "cache_unavailable",
+  ],
+  type: "string",
+};
+const schema233 = {
   enum: ["running", "completed", "failed", "unknown"],
   type: "string",
 };
-const schema234 = {
+const schema244 = {
   enum: ["pending", "in_progress", "completed"],
   type: "string",
 };
-export { schema197, schema223, schema234 };
+export { schema197, schema215, schema217, schema233, schema244 };

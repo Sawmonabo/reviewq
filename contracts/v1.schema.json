@@ -3547,6 +3547,147 @@
       "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f\\ud800-\\udfff]+$",
       "type": "string"
     },
+    "HistoryDocument": {
+      "properties": {
+        "byteEnd": {
+          "$ref": "#/definitions/SafeCountDto"
+        },
+        "byteLength": {
+          "$ref": "#/definitions/SafeCountDto"
+        },
+        "byteStart": {
+          "$ref": "#/definitions/SafeCountDto"
+        },
+        "entryId": {
+          "$ref": "#/definitions/HistoryEntryIdDto"
+        },
+        "generation": {
+          "$ref": "#/definitions/HistoryGenerationDto"
+        },
+        "indexFormat": {
+          "$ref": "#/definitions/SafeCountDto"
+        },
+        "nextByte": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SafeCountDto"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "previousByte": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SafeCountDto"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "result": {
+          "$ref": "#/definitions/HistoryDocumentResult"
+        },
+        "runId": {
+          "$ref": "#/definitions/RunIdDto"
+        },
+        "sessionKey": {
+          "$ref": "#/definitions/SessionKeyDto"
+        },
+        "sha256": {
+          "$ref": "#/definitions/ReportHashDto"
+        }
+      },
+      "required": [
+        "runId",
+        "sessionKey",
+        "entryId",
+        "generation",
+        "sha256",
+        "indexFormat",
+        "byteLength",
+        "byteStart",
+        "byteEnd",
+        "previousByte",
+        "nextByte",
+        "result"
+      ],
+      "type": "object"
+    },
+    "HistoryDocumentResponse": {
+      "description": "The resource and event head from the same authorized snapshot.",
+      "properties": {
+        "cursor": {
+          "$ref": "#/definitions/EventCursorDto"
+        },
+        "data": {
+          "$ref": "#/definitions/HistoryDocument"
+        }
+      },
+      "required": [
+        "data",
+        "cursor"
+      ],
+      "title": "HistoryDocumentResponse",
+      "type": "object"
+    },
+    "HistoryDocumentResult": {
+      "oneOf": [
+        {
+          "properties": {
+            "blocks": {
+              "items": {
+                "$ref": "#/definitions/DisplayBlock"
+              },
+              "maxItems": 32,
+              "minItems": 1,
+              "type": "array"
+            },
+            "state": {
+              "const": "ready",
+              "type": "string"
+            }
+          },
+          "required": [
+            "state",
+            "blocks"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "display": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/DocumentDisplay"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "markdown": {
+              "$ref": "#/definitions/HistoryText"
+            },
+            "reason": {
+              "$ref": "#/definitions/DisplayFallback"
+            },
+            "state": {
+              "const": "source",
+              "type": "string"
+            }
+          },
+          "required": [
+            "state",
+            "reason",
+            "markdown"
+          ],
+          "type": "object"
+        }
+      ]
+    },
     "HistoryEntry": {
       "description": "A visible native entry. Provider timestamps can be unknown.",
       "properties": {
@@ -3818,6 +3959,16 @@
             },
             "text": {
               "$ref": "#/definitions/HistoryText"
+            },
+            "textBytes": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/SafeCountDto"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             }
           },
           "required": [
@@ -3857,6 +4008,16 @@
             },
             "text": {
               "$ref": "#/definitions/HistoryText"
+            },
+            "textBytes": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/SafeCountDto"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             }
           },
           "required": [
@@ -3980,6 +4141,16 @@
             },
             "text": {
               "$ref": "#/definitions/HistoryText"
+            },
+            "textBytes": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/SafeCountDto"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             }
           },
           "required": [
@@ -4020,6 +4191,16 @@
             },
             "text": {
               "$ref": "#/definitions/HistoryText"
+            },
+            "textBytes": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/SafeCountDto"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             }
           },
           "required": [
@@ -4250,6 +4431,16 @@
         },
         "ordinal": {
           "$ref": "#/definitions/SafeCountDto"
+        },
+        "outputBytes": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SafeCountDto"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "partsCursor": {
           "anyOf": [
@@ -11263,6 +11454,7 @@
     "FollowupPreferencesResponse": "followups",
     "FollowupResultsResponse": "followups",
     "HistoryContentResponse": "history",
+    "HistoryDocumentResponse": "history",
     "HistoryNavigationResponse": "history",
     "HistoryPageResponse": "history",
     "HistoryPartPageResponse": "history",
@@ -11387,6 +11579,7 @@
       "FollowupPreferencesResponse": "#/definitions/FollowupPreferencesResponse",
       "FollowupResultsResponse": "#/definitions/FollowupResultsResponse",
       "HistoryContentResponse": "#/definitions/HistoryContentResponse",
+      "HistoryDocumentResponse": "#/definitions/HistoryDocumentResponse",
       "HistoryNavigationResponse": "#/definitions/HistoryNavigationResponse",
       "HistoryPageResponse": "#/definitions/HistoryPageResponse",
       "HistoryPartPageResponse": "#/definitions/HistoryPartPageResponse",

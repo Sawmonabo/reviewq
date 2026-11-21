@@ -50,13 +50,14 @@ export function parseSettledMarkdown(
   for (const piece of pieces) {
     const table = piece.table && nativeTable(piece.markdown, piece.table, base);
     const next = at + piece.markdown.length;
-    const nextLine = line + piece.markdown.split("\n").length - 1;
+    const nextLine = line + newlineCount(piece.markdown);
     if (table && piece.table) {
-      if (!flush(at)) return;
+      const tableStart = at + piece.table.start;
+      if (!flush(tableStart)) return;
       shiftNodes([table], { offset: at, line });
       append([table], piece.table.nodes);
-      start = next;
-      startLine = nextLine;
+      start = at + piece.table.end;
+      startLine = line + newlineCount(piece.markdown.slice(0, piece.table.end));
     }
     at = next;
     line = nextLine;
@@ -71,8 +72,8 @@ function nativeTable(source: string, packet: PreparedTable, base?: string) {
     packet.nodes > 8_000 ||
     packet.start >= packet.end ||
     packet.end > source.length ||
-    source.slice(0, packet.start).trim() ||
-    source.slice(packet.end).trim()
+    splitsScalar(source, packet.start) ||
+    splitsScalar(source, packet.end)
   )
     return;
   const lines = [0];
@@ -190,4 +191,10 @@ function withNewlines(elements: readonly Element[]): ElementContent[] {
 
 function splitsScalar(source: string, offset: number) {
   return (source.charCodeAt(offset) & 0xfc00) === 0xdc00;
+}
+
+function newlineCount(source: string) {
+  let count = 0;
+  for (let at = source.indexOf("\n"); at >= 0; at = source.indexOf("\n", at + 1)) count++;
+  return count;
 }

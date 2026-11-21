@@ -141,6 +141,20 @@ export type TableInline =
 
 export type HistoryGenerationDto = string;
 
+export type DisplayBlockKind =
+  "paragraph" | "heading" | "block_quote" | "code" | "list" | "rule" | "table";
+
+export type DisplayFallback =
+  | "document_budget"
+  | "parser_budget"
+  | "document_context"
+  | "layout_budget"
+  | "unsupported_source"
+  | "invalid_boundary"
+  | "parser_failed"
+  | "incomplete_source"
+  | "cache_unavailable";
+
 export type State = "pending" | "confirmed" | "rejected" | "uncertain";
 
 export type Invocation =
@@ -440,5 +454,17 @@ export interface PreparedTable {
    * Half-open UTF-16 positions within the accompanying verified Markdown.
    */
   start: number;
+  [k: string]: unknown;
+}
+
+export interface DisplayBlock {
+  byteEnd: SafeCountDto;
+  byteStart: SafeCountDto;
+  display?: DocumentDisplay | null;
+  headingLevel: SafeCountDto | null;
+  kind: DisplayBlockKind;
+  markdown: string;
+  scalarStart: SafeCountDto;
+  utf16Start: SafeCountDto;
   [k: string]: unknown;
 }

@@ -5,7 +5,7 @@ import { validate48 } from "./history-cursor-dto.mjs";
 import { validate127 } from "./safe-count-dto.mjs";
 import { validate621 } from "./history-text.mjs";
 import { validate235 } from "./utc-timestamp-dto.mjs";
-function validate638(
+function validate677(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -26,7 +26,7 @@ function validate638(
         ((data.locator === undefined || !func0.call(data, "locator")) &&
           (missing0 = "locator"))
       ) {
-        validate638.errors = [
+        validate677.errors = [
           {
             instancePath,
             schemaPath: "#/required",
@@ -177,7 +177,7 @@ function validate638(
                       vErrors.push(err1);
                     }
                     errors++;
-                    validate638.errors = vErrors;
+                    validate677.errors = vErrors;
                     return false;
                   } else {
                     errors = _errs6;
@@ -199,7 +199,7 @@ function validate638(
         }
       }
     } else {
-      validate638.errors = [
+      validate677.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -210,7 +210,7 @@ function validate638(
       return false;
     }
   }
-  validate638.errors = vErrors;
+  validate677.errors = vErrors;
   return errors === 0;
 }
-export { validate638 };
+export { validate677 };

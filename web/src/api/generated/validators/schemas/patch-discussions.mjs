@@ -5,9 +5,9 @@ import { validate48 } from "./history-cursor-dto.mjs";
 import { validate127 } from "./safe-count-dto.mjs";
 import { validate114 } from "./review-id-dto.mjs";
 import { validate25 } from "./checkpoint-id-dto.mjs";
-import { schema277 } from "../metadata-6.mjs";
-import { validate912 } from "./patch-discussion-text.mjs";
-function validate905(
+import { schema288 } from "../metadata-7.mjs";
+import { validate958 } from "./patch-discussion-text.mjs";
+function validate951(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -31,7 +31,7 @@ function validate905(
         ((data.nextCursor === undefined || !func0.call(data, "nextCursor")) &&
           (missing0 = "nextCursor"))
       ) {
-        validate905.errors = [
+        validate951.errors = [
           {
             instancePath,
             schemaPath: "#/required",
@@ -47,7 +47,7 @@ function validate905(
           if (errors === _errs1) {
             if (Array.isArray(data0)) {
               if (data0.length > 100) {
-                validate905.errors = [
+                validate951.errors = [
                   {
                     instancePath: instancePath + "/items",
                     schemaPath: "#/properties/items/maxItems",
@@ -82,7 +82,7 @@ function validate905(
                 }
               }
             } else {
-              validate905.errors = [
+              validate951.errors = [
                 {
                   instancePath: instancePath + "/items",
                   schemaPath: "#/properties/items/type",
@@ -152,7 +152,7 @@ function validate905(
                 vErrors.push(err1);
               }
               errors++;
-              validate905.errors = vErrors;
+              validate951.errors = vErrors;
               return false;
             } else {
               errors = _errs5;
@@ -250,7 +250,7 @@ function validate905(
                     vErrors.push(err3);
                   }
                   errors++;
-                  validate905.errors = vErrors;
+                  validate951.errors = vErrors;
                   return false;
                 } else {
                   errors = _errs11;
@@ -322,13 +322,13 @@ function validate905(
                       let data7 = data.textProjections;
                       const _errs17 = errors;
                       if (!Array.isArray(data7) && data7 !== null) {
-                        validate905.errors = [
+                        validate951.errors = [
                           {
                             instancePath: instancePath + "/textProjections",
                             schemaPath: "#/properties/textProjections/type",
                             keyword: "type",
                             params: {
-                              type: schema277.properties.textProjections.type,
+                              type: schema288.properties.textProjections.type,
                             },
                           },
                         ];
@@ -337,7 +337,7 @@ function validate905(
                       if (errors === _errs17) {
                         if (Array.isArray(data7)) {
                           if (data7.length > 64) {
-                            validate905.errors = [
+                            validate951.errors = [
                               {
                                 instancePath: instancePath + "/textProjections",
                                 schemaPath:
@@ -353,7 +353,7 @@ function validate905(
                             for (let i1 = 0; i1 < len1; i1++) {
                               const _errs19 = errors;
                               if (
-                                !validate912(data7[i1], {
+                                !validate958(data7[i1], {
                                   instancePath:
                                     instancePath + "/textProjections/" + i1,
                                   parentData: data7,
@@ -363,8 +363,8 @@ function validate905(
                               ) {
                                 vErrors =
                                   vErrors === null
-                                    ? validate912.errors
-                                    : vErrors.concat(validate912.errors);
+                                    ? validate958.errors
+                                    : vErrors.concat(validate958.errors);
                                 errors = vErrors.length;
                               }
                               var valid4 = _errs19 === errors;
@@ -387,7 +387,7 @@ function validate905(
         }
       }
     } else {
-      validate905.errors = [
+      validate951.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -398,7 +398,7 @@ function validate905(
       return false;
     }
   }
-  validate905.errors = vErrors;
+  validate951.errors = vErrors;
   return errors === 0;
 }
-export { validate905 };
+export { validate951 };

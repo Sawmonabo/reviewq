@@ -383,6 +383,7 @@ pub(super) fn visible(
             parts.push(VisiblePart {
                 native_index: 0,
                 kind: VisiblePartKind::Plan,
+                text_bytes: text.len() as u64,
                 text,
                 content: None,
             });
@@ -458,6 +459,7 @@ fn rpc_tool(
             label: crate::history::tools::label(name),
             state,
         },
+        text_bytes: argument.len() as u64,
         text: argument,
         content: None,
     }];
@@ -465,6 +467,7 @@ fn rpc_tool(
         parts.push(VisiblePart {
             native_index: 1,
             kind: VisiblePartKind::ToolResult { call, state },
+            text_bytes: text.len() as u64,
             text,
             content: None,
         });

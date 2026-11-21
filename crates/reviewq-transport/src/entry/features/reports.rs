@@ -156,21 +156,25 @@ async fn view(
             matches!(view, View::Markdown),
         )
         .await?;
-    let display = stored
+    let mut display = None;
+    if let Some((report, markdown)) = stored
         .value
         .report
         .as_ref()
         .filter(|report| report.stats.complete)
         .zip(stored.value.markdown.as_deref())
-        .and_then(|(report, markdown)| {
-            diagrams::observe(
-                &entry,
-                &actor,
-                Owner::report(&run, &report.reference),
-                markdown,
-                font.as_ref(),
-            )
-        });
+    {
+        display = diagrams::observe(
+            &entry,
+            &actor,
+            Owner::report(&run, &report.reference),
+            markdown,
+            font.as_ref(),
+        );
+        if let Some(table) = entry.tables.document(markdown).await {
+            crate::entry::tables::attach(&mut display, table);
+        }
+    }
     let mut body = project_view(stored.value)?;
     body.display = display;
     Ok(Json(success(body, stored.cursor)?))

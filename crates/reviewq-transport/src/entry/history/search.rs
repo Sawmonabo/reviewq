@@ -125,6 +125,8 @@ struct Hit {
     source: HitSource,
     tool: Option<String>,
     offset: u64,
+    #[serde(default)]
+    output_bytes: Option<u64>,
     start: u64,
     end: u64,
     markdown: bool,
@@ -229,6 +231,7 @@ impl SearchScope<'_> {
             source: origin.source,
             tool: found.tool_call.map(|call| call.to_string()),
             offset: found.output_offset,
+            output_bytes: Some(found.output_bytes),
             start: found.start_utf16,
             end: found.end_utf16,
             markdown: found.markdown,
@@ -547,6 +550,7 @@ pub(super) async fn locate(
                 .map(|tool| HistoryEntryIdDto::new(tool).ok_or(AppError::Internal))
                 .transpose()?,
             offset: count(hit.offset)?,
+            output_bytes: hit.output_bytes.map(count).transpose()?,
             start_utf16: count(hit.start)?,
             end_utf16: count(hit.end)?,
             markdown: hit.markdown,

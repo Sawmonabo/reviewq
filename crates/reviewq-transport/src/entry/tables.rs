@@ -3,6 +3,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use reviewq_app::reading::table::{self, Column, Inline, MIN_TABLE_BYTES};
+use reviewq_app::reports::{DisplayBlockKind, DisplayIndex, build_display_index};
 use reviewq_protocol::reports::{DocumentDisplay, PreparedTable, TableColumn, TableInline};
 use sha2::{Digest, Sha256};
 use tokio::sync::Semaphore;
@@ -12,7 +13,13 @@ const RETENTION: Duration = Duration::from_secs(30);
 const PACKET_BYTES: usize = 96 * 1024;
 const MAX_LAYOUT_COST: usize = 300 * 1024;
 
-type Key = [u8; 32];
+#[derive(Clone, Copy, PartialEq)]
+enum Shape {
+    Block,
+    Document,
+}
+
+type Key = (Shape, [u8; 32]);
 type Entries = VecDeque<(Key, Option<Arc<PreparedTable>>, Instant)>;
 
 pub(super) struct Cache {
@@ -43,10 +50,25 @@ impl Cache {
 
     /// The caller supplies bytes from a verified, individually bounded Markdown block.
     pub(super) async fn read(&self, source: &str) -> Option<PreparedTable> {
-        if source.len() < MIN_TABLE_BYTES || source.len() > 64 * 1024 {
+        self.prepare(source, Shape::Block).await
+    }
+
+    pub(super) async fn document(&self, source: &str) -> Option<PreparedTable> {
+        if !source.contains('|') {
             return None;
         }
-        let key = Sha256::digest(source.as_bytes()).into();
+        self.prepare(source, Shape::Document).await
+    }
+
+    async fn prepare(&self, source: &str, shape: Shape) -> Option<PreparedTable> {
+        let ceiling = match shape {
+            Shape::Block => 64 * 1024,
+            Shape::Document => 128 * 1024,
+        };
+        if !(MIN_TABLE_BYTES..=ceiling).contains(&source.len()) {
+            return None;
+        }
+        let key = (shape, Sha256::digest(source.as_bytes()).into());
         if let Some(cached) = lookup(&self.entries, &key) {
             return cached.as_deref().cloned();
         }
@@ -58,7 +80,11 @@ impl Cache {
             if let Some(cached) = lookup(&entries, &key) {
                 return cached.as_deref().cloned();
             }
-            let result = prepare(&source).map(Arc::new);
+            let result = match shape {
+                Shape::Block => prepare(&source),
+                Shape::Document => prepare_document(&source),
+            }
+            .map(Arc::new);
             let mut entries = entries.lock().ok()?;
             entries.push_back((key, result.clone(), Instant::now()));
             while entries.len() > MAX_ENTRIES {
@@ -81,6 +107,33 @@ fn lookup(entries: &Mutex<Entries>, key: &Key) -> Option<Option<Arc<PreparedTabl
     let result = item.1.clone();
     entries.push_back(item);
     Some(result)
+}
+
+fn prepare_document(source: &str) -> Option<PreparedTable> {
+    let DisplayIndex::Indexed(layout) = build_display_index(source) else {
+        return None;
+    };
+    for block in layout.blocks {
+        if block.kind != DisplayBlockKind::Table {
+            continue;
+        }
+        let markdown = source.get(block.byte_start as usize..block.byte_end as usize)?;
+        let Some(mut packet) = prepare(markdown) else {
+            continue;
+        };
+        let base = block.utf16_start;
+        packet.start += base;
+        packet.end += base;
+        for token in packet.rows.iter_mut().flatten().flatten() {
+            if let TableInline::Text { start, end } | TableInline::Code { start, end, .. } = token {
+                *start += base;
+                *end += base;
+            }
+        }
+        update_budget(&mut packet, source.len())?;
+        return Some(packet);
+    }
+    None
 }
 
 fn prepare(source: &str) -> Option<PreparedTable> {
@@ -133,12 +186,20 @@ fn prepare(source: &str) -> Option<PreparedTable> {
         encoded_bytes: 0,
         nodes: nodes as u32,
     };
+    update_budget(&mut packet, source.len())?;
+    Some(packet)
+}
+
+fn update_budget(packet: &mut PreparedTable, source_bytes: usize) -> Option<()> {
+    packet.encoded_bytes = 0;
     let encoded = serde_json::to_vec(&packet).ok()?.len() + 8;
-    if encoded > PACKET_BYTES || source.len() + encoded + nodes * 40 > MAX_LAYOUT_COST {
+    if encoded > PACKET_BYTES
+        || source_bytes + encoded + packet.nodes as usize * 40 > MAX_LAYOUT_COST
+    {
         return None;
     }
     packet.encoded_bytes = encoded as u32;
-    Some(packet)
+    Some(())
 }
 
 pub(super) fn attach(display: &mut Option<DocumentDisplay>, table: PreparedTable) {

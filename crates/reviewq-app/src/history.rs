@@ -9,6 +9,7 @@ use crate::access::{Actor, AppFuture};
 use crate::events::Snapshot;
 use crate::hosts::{ObservedAsyncQuestion, QuestionForm};
 
+pub mod document;
 pub mod search;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -129,6 +130,13 @@ pub trait NativeHistoryReader: Send + Sync {
         offset: u64,
         limit: u32,
     ) -> AppFuture<'_, NativeContent>;
+
+    fn document(
+        &self,
+        session: HistorySession,
+        reference: FileContentRef,
+        query: document::Query,
+    ) -> AppFuture<'_, document::Window>;
 
     fn search(
         &self,
@@ -406,6 +414,7 @@ pub struct VisiblePart {
     pub native_index: u16,
     pub kind: VisiblePartKind,
     pub text: String,
+    pub text_bytes: u64,
     pub content: Option<ContentReference>,
 }
 

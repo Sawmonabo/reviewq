@@ -24,7 +24,7 @@ use super::tools::stream_value;
 
 mod index;
 mod large;
-mod native_string;
+use super::native_string;
 pub(super) use index::Acceleration;
 pub(super) use large::LargeRecords;
 
@@ -194,7 +194,7 @@ fn first(record: u64, reverse: bool) -> SearchPoint {
     }
 }
 
-fn observed(source: &Source, stamp: &Metadata, high_water: u64) -> SourceObservation {
+pub(super) fn observed(source: &Source, stamp: &Metadata, high_water: u64) -> SourceObservation {
     let mut version = Sha256::new();
     version.update(source.fingerprint);
     version.update(stamp.dev().to_be_bytes());
@@ -210,7 +210,10 @@ fn observed(source: &Source, stamp: &Metadata, high_water: u64) -> SourceObserva
     }
 }
 
-fn verify_observation(source: &Source, expected: &SourceObservation) -> Result<(), AppError> {
+pub(super) fn verify_observation(
+    source: &Source,
+    expected: &SourceObservation,
+) -> Result<(), AppError> {
     let descriptor = source.file.metadata().map_err(|_| AppError::Unavailable)?;
     let path = fs::symlink_metadata(&source.path).map_err(|_| AppError::CursorExpired)?;
     if !path.is_file()
@@ -710,6 +713,7 @@ impl Matches<'_> {
             matched: matched.to_owned(),
             after: text[span.end.byte..].chars().take(32).collect(),
             output_offset: if ranged { point.byte } else { 0 },
+            output_bytes: self.body.bytes,
             start_utf16: if ranged {
                 0
             } else {

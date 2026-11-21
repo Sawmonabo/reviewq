@@ -1,7 +1,10 @@
-import type { DocumentDisplay, DrawingHint } from "../../../api/generated/contracts/common";
-import { reportWindow } from "../../../api/reports";
 import type {
   DisplayBlock,
+  DocumentDisplay,
+  DrawingHint,
+} from "../../../api/generated/contracts/common";
+import { reportWindow } from "../../../api/reports";
+import type {
   DisplayLayout,
   DisplayResult,
   ReportSummary,
@@ -116,18 +119,8 @@ export function indexedDocument(
         utf8.encode(block.markdown).length !== span.byteEnd - span.byteStart
       )
         throw new Error("The displayed report span changed.");
-      // Source look-ahead stays useful even when the optional packet has no
-      // room in the destination's preparation budget.
-      const { display, ...source } = block;
-      raw.set(
-        index,
-        owners[index] === destination || !display?.table
-          ? block
-          : {
-              ...source,
-              ...(display.drawings?.length ? { display: { drawings: display.drawings } } : {}),
-            },
-      );
+      if (spans[index]?.kind === "table" && owners[index] !== destination) continue;
+      raw.set(index, block);
     }
   }
 
@@ -263,6 +256,7 @@ export function indexedDocument(
           if (
             raw.has(last + 1) ||
             prepared.has(owners[last + 1]!) ||
+            (next.kind === "table" && owners[last + 1] !== index) ||
             next.byteEnd - spans[first]!.byteStart > RANGE_BYTES
           )
             break;
@@ -277,6 +271,7 @@ export function indexedDocument(
         const { data } = await reportWindow(runId, report, signal, {
           byteOffset: spans[first]!.byteStart,
           byteEnd: spans[last]!.byteEnd,
+          tableByteEnd: spans[Math.min(last, group.last)]!.byteEnd,
         });
         signal.throwIfAborted();
         const result = data.result;

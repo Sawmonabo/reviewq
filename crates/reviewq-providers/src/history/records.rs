@@ -57,6 +57,7 @@ struct BodySink<'a> {
     target: Option<&'a mut dyn Write>,
     parts_from: u16,
     parts_limit: u16,
+    document: bool,
 }
 
 impl BodySink<'_> {
@@ -160,6 +161,7 @@ pub(super) fn project_window(
             target: None,
             parts_from: 0,
             parts_limit: MAX_NATIVE_PARTS,
+            document: false,
         },
     )
     .ok()
@@ -189,6 +191,7 @@ pub(super) fn stream_body(
             target: Some(output),
             parts_from: 0,
             parts_limit: MAX_NATIVE_PARTS,
+            document: false,
         },
     )
     .ok()
@@ -217,6 +220,7 @@ pub(super) fn project_parts(
             target: None,
             parts_from: first,
             parts_limit: MAX_NATIVE_PARTS,
+            document: false,
         },
     )
     .ok()
@@ -245,6 +249,36 @@ pub(super) fn project_search(
             target: None,
             parts_from: 0,
             parts_limit: 16_384,
+            document: false,
+        },
+    )
+}
+
+/// Locate only original Markdown strings. A structured tool body can share
+/// this JSONL record without ever being decoded as a display body here.
+pub(super) fn project_document(
+    provider: HostProvider,
+    input: impl Read,
+    native: &NativeSessionId,
+    root_session: Option<&NativeSessionId>,
+    part: Option<u16>,
+) -> Result<Option<Record>, AppError> {
+    project_to(
+        provider,
+        input,
+        native,
+        root_session,
+        Window {
+            start: 0,
+            limit: 0,
+            part,
+        },
+        &mut BodySink {
+            field: BodyField::Text,
+            target: None,
+            parts_from: 0,
+            parts_limit: 16_384,
+            document: true,
         },
     )
 }
@@ -274,7 +308,8 @@ fn project_to(
     if item.text.bytes == 0 && item.parts.is_empty() && item.next_part.is_none() {
         return Ok(None);
     }
-    if output.parts_from == 0
+    if !output.document
+        && output.parts_from == 0
         && item.next_part.is_none()
         && item.parts.iter().all(|part| {
             part.index < MAX_NATIVE_PARTS && matches!(part.kind, VisiblePartKind::Text(_))
@@ -514,7 +549,7 @@ fn codex_item<R: Read>(
             item.restricted |= reader.peek().map_err(invalid)? != ValueType::Null;
             reader.skip_value().map_err(invalid)
         }
-        "command" | "arguments" | "query" | "changes" | "prompt" => {
+        "command" | "arguments" | "query" | "changes" | "prompt" if !output.document => {
             item.argument_field = Some(name.to_owned());
             tools::body(
                 reader,
@@ -523,7 +558,7 @@ fn codex_item<R: Read>(
             )
             .map(|value| item.argument = value)
         }
-        "aggregated_output" | "aggregatedOutput" | "result" | "output" => {
+        "aggregated_output" | "aggregatedOutput" | "result" | "output" if !output.document => {
             item.result_field = Some(name.to_owned());
             tools::body(
                 reader,
@@ -608,13 +643,13 @@ fn block<R: Read>(
             output.for_field(BodyField::TextBlock(index)),
         )
         .map(|value| plain = value),
-        "input" if retained => tools::body(
+        "input" if retained && !output.document => tools::body(
             reader,
             preview_window,
             output.for_field(BodyField::InputBlock(index)),
         )
         .map(|value| body = value),
-        "content" if retained => tools::body(
+        "content" if retained && !output.document => tools::body(
             reader,
             preview_window,
             output.for_field(BodyField::ResultBlock(index)),

@@ -47,6 +47,7 @@ import type {
   FollowupPreferencesResponse,
   FollowupResultsResponse,
   HistoryContentResponse,
+  HistoryDocumentResponse,
   HistoryNavigationResponse,
   HistoryPageResponse,
   HistoryPartPageResponse,
@@ -213,6 +214,9 @@ export function isFollowupResultsResponse(
 export function isHistoryContentResponse(
   value: unknown,
 ): value is HistoryContentResponse;
+export function isHistoryDocumentResponse(
+  value: unknown,
+): value is HistoryDocumentResponse;
 export function isHistoryNavigationResponse(
   value: unknown,
 ): value is HistoryNavigationResponse;

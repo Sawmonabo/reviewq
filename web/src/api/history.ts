@@ -11,6 +11,7 @@ import type { DeliveryReceipt } from "./generated/contracts/delivery";
 import {
   isDeliveryReceiptResponse,
   isHistoryContentResponse,
+  isHistoryDocumentResponse,
   isHistoryNavigationResponse,
   isHistoryPageResponse,
   isHistoryPartPageResponse,
@@ -61,6 +62,63 @@ export async function historyContent(
   if (data.entryId !== entryId || data.generation !== generation || data.reset)
     throw new Error("The native output source changed. Reopen the entry.");
   return data;
+}
+
+const length = new TextEncoder();
+const MAX_DOCUMENT_WINDOW_BYTES = 65_536;
+
+export async function historyDocument(
+  target: SessionAddress,
+  entryId: string,
+  generation: string,
+  ref: string,
+  position: { byteOffset: number; sha256?: string },
+  signal: AbortSignal,
+) {
+  const result = await read(
+    `${path(target)}/history/content/window${queryString({ ref, ...position })}`,
+    isHistoryDocumentResponse,
+    signal,
+    640 * 1024,
+    drawingFontHeaders(),
+  );
+  const { data } = result;
+  verify(target, data);
+  const { byteStart, byteEnd, byteLength, nextByte, previousByte } = data;
+  if (
+    data.entryId !== entryId ||
+    data.generation !== generation ||
+    (position.sha256 !== undefined && position.sha256 !== data.sha256)
+  )
+    throw new Error("The native output source changed. Reopen the entry.");
+  if (
+    data.indexFormat !== 2 ||
+    byteEnd > byteLength ||
+    byteEnd < byteStart ||
+    byteEnd - byteStart > MAX_DOCUMENT_WINDOW_BYTES ||
+    !(byteStart <= position.byteOffset && position.byteOffset <= byteEnd) ||
+    (nextByte !== null && (nextByte !== byteEnd || nextByte >= byteLength)) ||
+    (previousByte !== null && previousByte >= byteStart) ||
+    (previousByte === null && byteStart !== 0) ||
+    (nextByte === null && byteEnd !== byteLength)
+  )
+    throw new Error("The native document range is invalid.");
+  if (data.result.state === "ready") {
+    let byte = byteStart;
+    for (const block of data.result.blocks) {
+      if (
+        block.byteStart !== byte ||
+        block.byteEnd <= byte ||
+        length.encode(block.markdown).length !== block.byteEnd - byte
+      )
+        throw new Error("The native document block is invalid.");
+      byte = block.byteEnd;
+    }
+    if (byte !== byteEnd) throw new Error("The native document range is incomplete.");
+  } else if (length.encode(data.result.markdown).length !== byteEnd - byteStart) {
+    throw new Error("The native source range is incomplete.");
+  }
+  return result;
 }
 
 export async function historyResult(target: SessionAddress, signal: AbortSignal) {

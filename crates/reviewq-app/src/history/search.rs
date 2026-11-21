@@ -43,6 +43,7 @@ pub struct SearchHit<Reference = FileContentRef, Position = SearchPoint> {
     pub matched: String,
     pub after: String,
     pub output_offset: u64,
+    pub output_bytes: u64,
     pub start_utf16: u64,
     pub end_utf16: u64,
     pub markdown: bool,

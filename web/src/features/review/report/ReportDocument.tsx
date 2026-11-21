@@ -12,7 +12,7 @@ import {
 import { ActionMenu } from "../../../components/ActionMenu";
 import { Icon } from "../../../components/Icon";
 import { Empty, Loading, Notice } from "../../../components/PanelState";
-import { parseMarkdown } from "../../../components/markdown/parse-markdown";
+import { parseSettledMarkdown } from "../../../components/markdown/settled";
 import { useDraft } from "../../../hooks/useDraft";
 import { useResource } from "../../../hooks/useResource";
 import type { DraftStore } from "../../../lib/drafts";
@@ -444,7 +444,12 @@ async function loadReport(
     response.data.report?.sha256 === report.sha256 ? response.data.markdown : undefined;
   let tree;
   try {
-    if (typeof markdown === "string") tree = parseMarkdown(markdown, base);
+    if (typeof markdown === "string")
+      tree = parseSettledMarkdown(
+        markdown,
+        [{ markdown, table: response.data.display?.table }],
+        base,
+      );
   } catch {
     tree = undefined;
   }

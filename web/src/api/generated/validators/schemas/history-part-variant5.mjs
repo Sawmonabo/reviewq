@@ -4,7 +4,7 @@ import { validate48 } from "./history-cursor-dto.mjs";
 import { validate586 } from "./document-display.mjs";
 import { validate127 } from "./safe-count-dto.mjs";
 import { validate621 } from "./history-text.mjs";
-function validate690(
+function validate731(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -21,7 +21,7 @@ function validate690(
         ((data.contentRef === undefined || !func0.call(data, "contentRef")) &&
           (missing0 = "contentRef"))
       ) {
-        validate690.errors = [
+        validate731.errors = [
           {
             instancePath,
             schemaPath: "#/required",
@@ -85,7 +85,7 @@ function validate690(
               vErrors.push(err1);
             }
             errors++;
-            validate690.errors = vErrors;
+            validate731.errors = vErrors;
             return false;
           } else {
             errors = _errs2;
@@ -156,7 +156,7 @@ function validate690(
                 vErrors.push(err3);
               }
               errors++;
-              validate690.errors = vErrors;
+              validate731.errors = vErrors;
               return false;
             } else {
               errors = _errs7;
@@ -177,7 +177,7 @@ function validate690(
               let data2 = data.kind;
               const _errs11 = errors;
               if (typeof data2 !== "string") {
-                validate690.errors = [
+                validate731.errors = [
                   {
                     instancePath: instancePath + "/kind",
                     schemaPath: "#/properties/kind/type",
@@ -188,7 +188,7 @@ function validate690(
                 return false;
               }
               if ("plan" !== data2) {
-                validate690.errors = [
+                validate731.errors = [
                   {
                     instancePath: instancePath + "/kind",
                     schemaPath: "#/properties/kind/const",
@@ -247,13 +247,88 @@ function validate690(
                 } else {
                   var valid0 = true;
                 }
+                if (valid0) {
+                  if (
+                    data.textBytes !== undefined &&
+                    func0.call(data, "textBytes")
+                  ) {
+                    let data5 = data.textBytes;
+                    const _errs15 = errors;
+                    const _errs16 = errors;
+                    let valid3 = false;
+                    const _errs17 = errors;
+                    if (
+                      !validate127(data5, {
+                        instancePath: instancePath + "/textBytes",
+                        parentData: data,
+                        parentDataProperty: "textBytes",
+                        rootData,
+                      })
+                    ) {
+                      vErrors =
+                        vErrors === null
+                          ? validate127.errors
+                          : vErrors.concat(validate127.errors);
+                      errors = vErrors.length;
+                    }
+                    var _valid2 = _errs17 === errors;
+                    valid3 = valid3 || _valid2;
+                    if (!valid3) {
+                      const _errs18 = errors;
+                      if (data5 !== null) {
+                        const err4 = {
+                          instancePath: instancePath + "/textBytes",
+                          schemaPath: "#/properties/textBytes/anyOf/1/type",
+                          keyword: "type",
+                          params: { type: "null" },
+                        };
+                        if (vErrors === null) {
+                          vErrors = [err4];
+                        } else {
+                          vErrors.push(err4);
+                        }
+                        errors++;
+                      }
+                      var _valid2 = _errs18 === errors;
+                      valid3 = valid3 || _valid2;
+                    }
+                    if (!valid3) {
+                      const err5 = {
+                        instancePath: instancePath + "/textBytes",
+                        schemaPath: "#/properties/textBytes/anyOf",
+                        keyword: "anyOf",
+                        params: {},
+                      };
+                      if (vErrors === null) {
+                        vErrors = [err5];
+                      } else {
+                        vErrors.push(err5);
+                      }
+                      errors++;
+                      validate731.errors = vErrors;
+                      return false;
+                    } else {
+                      errors = _errs16;
+                      if (vErrors !== null) {
+                        if (_errs16) {
+                          vErrors.length = _errs16;
+                        } else {
+                          vErrors = null;
+                        }
+                      }
+                    }
+                    var valid0 = _errs15 === errors;
+                  } else {
+                    var valid0 = true;
+                  }
+                }
               }
             }
           }
         }
       }
     } else {
-      validate690.errors = [
+      validate731.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -264,7 +339,7 @@ function validate690(
       return false;
     }
   }
-  validate690.errors = vErrors;
+  validate731.errors = vErrors;
   return errors === 0;
 }
-export { validate690 };
+export { validate731 };

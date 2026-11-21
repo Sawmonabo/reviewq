@@ -252,6 +252,7 @@ fn visible_parts(
             Ok(VisiblePart {
                 native_index: part.index,
                 kind: part.kind,
+                text_bytes: part.body.bytes,
                 text,
                 content,
             })
@@ -323,6 +324,67 @@ pub(super) fn content_source(
         )
     };
     Ok(ContentSource { end, bytes, field })
+}
+
+type DocumentSource = (u64, u64, Vec<(u64, records::NativeValue)>);
+
+pub(super) fn document_source(
+    source: &Source,
+    reference: &FileContentRef,
+    cancelled: &AtomicBool,
+) -> Result<DocumentSource, AppError> {
+    let start = reference.position.offset;
+    let mut budget = READ_BUDGET;
+    let end = next_line(
+        &source.file,
+        start,
+        reference.position.high_water,
+        &mut budget,
+        cancelled,
+    )?;
+    if end == start || !boundary(&source.file, end)? {
+        return Err(AppError::CursorExpired);
+    }
+    let record = records::project_document(
+        source.provider,
+        input(&source.file, start, end, cancelled),
+        &source.native_id,
+        source.root_session.as_ref(),
+        reference.part,
+    )?
+    .filter(|record| record.id == reference.entry)
+    .ok_or(AppError::CursorExpired)?;
+    let original = |part: records::Part| {
+        let native = part
+            .body
+            .native_value
+            .filter(|value| value.string)
+            .ok_or(AppError::NotFound)?;
+        Ok((part.body.bytes, native))
+    };
+    let (bytes, fields) = if let Some(index) = reference.part {
+        let part = record
+            .parts
+            .into_iter()
+            .find(|part| {
+                part.index == index
+                    && matches!(part.kind, VisiblePartKind::Text(_) | VisiblePartKind::Plan)
+            })
+            .ok_or(AppError::NotFound)?;
+        let field = original(part)?;
+        (field.0, vec![field])
+    } else if let Some(field) = record.native_value.filter(|value| value.string) {
+        (record.bytes, vec![(record.bytes, field)])
+    } else {
+        let parts = record
+            .parts
+            .into_iter()
+            .filter(|part| part.body.bytes > 0 && matches!(part.kind, VisiblePartKind::Text(_)))
+            .map(original)
+            .collect::<Result<Vec<_>, _>>()?;
+        (record.bytes, parts)
+    };
+    Ok((end, bytes, fields))
 }
 
 pub(super) fn part_field(
