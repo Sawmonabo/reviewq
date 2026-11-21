@@ -384,10 +384,10 @@ export function ChangedFilePicker({
           {scanned.error && <Notice retry={scanned.retry}>{scanned.error}</Notice>}
           {!!entries.length && (
             <div className="changes-picker-grid changes-picker-columns" aria-hidden="true">
-              <span className="changes-picker-path">File / path</span>
+              <span className="changes-picker-path">File</span>
               <span className="changes-picker-kind">Change</span>
-              <span className="plus">+</span>
-              <span className="minus">−</span>
+              <span className="plus">Added</span>
+              <span className="minus">Removed</span>
             </div>
           )}
           {[...groups].map(([folder, items]) => (
