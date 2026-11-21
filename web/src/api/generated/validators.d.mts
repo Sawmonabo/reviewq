@@ -38,6 +38,8 @@ import type {
   CurrentActionResponse,
   CurrentPatchRevisionResponse,
   DeliveryReceiptResponse,
+  DiscussionDestinationResponse,
+  DiscussionSearchResponse,
   Failure,
   FollowupAssessmentsResponse,
   FollowupEnrollmentResponse,
@@ -188,6 +190,12 @@ export function isCurrentPatchRevisionResponse(
 export function isDeliveryReceiptResponse(
   value: unknown,
 ): value is DeliveryReceiptResponse;
+export function isDiscussionDestinationResponse(
+  value: unknown,
+): value is DiscussionDestinationResponse;
+export function isDiscussionSearchResponse(
+  value: unknown,
+): value is DiscussionSearchResponse;
 export function isFailure(value: unknown): value is Failure;
 export function isFollowupAssessmentsResponse(
   value: unknown,

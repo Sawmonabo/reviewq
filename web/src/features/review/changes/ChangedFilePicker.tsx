@@ -2,13 +2,19 @@ import { useEffect, useId, useMemo, useRef, useState } from "react";
 import type { KeyboardEvent, ReactNode, RefObject } from "react";
 import { PATH_MATCHES_PER_PAGE, readPatchPathMatches } from "../../../api/changes";
 import type { PatchIndex, readPatchPathCatalog } from "../../../api/changes";
-import type { PatchFile, PatchPath, PatchSearchMatch } from "../../../api/generated/contracts";
+import type {
+  DiscussionSearchMatch,
+  PatchFile,
+  PatchPath,
+  PatchSearchMatch,
+} from "../../../api/generated/contracts";
 import { Icon } from "../../../components/Icon";
 import { Loading, Notice } from "../../../components/PanelState";
 import { useResource } from "../../../hooks/useResource";
 import { pathMatch, splitPath } from "./file-search";
 import type { MatchRange } from "./file-search";
 import { usePatchSearch } from "./usePatchSearch";
+import { useDiscussionSearch } from "./useDiscussionSearch";
 
 type Props = {
   readonly reviewId: string;
@@ -32,6 +38,8 @@ type Props = {
   readonly onChooseFile: (file: PatchFile) => void;
   readonly onChoosePath: (path: PatchPath) => void;
   readonly onChooseMatch: (match: PatchSearchMatch, sourceText: string) => void;
+  readonly noteGeneration: number;
+  readonly onChooseNote: (match: DiscussionSearchMatch) => void;
 };
 
 type Entry = {
@@ -58,7 +66,8 @@ export function ChangedFilePicker(props: Props) {
     : pending
       ? "Loading files…"
       : "Changed files";
-  const ordinal = total ? `${position} of ${total}` : `File ${position}`;
+  const ordinal =
+    total === "0" ? undefined : total ? `${position} of ${total}` : `File ${position}`;
 
   return (
     <nav
@@ -96,7 +105,7 @@ export function ChangedFilePicker(props: Props) {
         </span>
       </button>
       <span id={`${id}-position`} hidden>
-        {selected?.newPath} · {ordinal}
+        {[selected?.newPath, ordinal].filter(Boolean).join(" · ")}
       </span>
       {(["Previous", "Next"] as const).map((label) => {
         const previous = label === "Previous";
@@ -274,6 +283,13 @@ function FileDialog({
   const readingCode = canSearch && searchReady;
   const code = usePatchSearch(reviewId, index.revision, readingCode ? query : "", visibleFileId);
   const matches = readingCode ? code.items : [];
+  const notes = useDiscussionSearch(
+    reviewId,
+    index.revision,
+    readingCode ? query : "",
+    picker.noteGeneration,
+  );
+  const noteHits = notes.data?.items ?? [];
   const codeGroups = new Map<string, PatchSearchMatch[]>();
   for (const match of matches) {
     const path = match.side === "old" ? match.oldPath : match.newPath;
@@ -286,17 +302,20 @@ function FileDialog({
     suggested ??
     (!text ? entries.find((entry) => entry.selected)?.key : undefined) ??
     entries[0]?.key ??
-    (firstMatch && matchKey(firstMatch));
+    (firstMatch && matchKey(firstMatch)) ??
+    (noteHits.length ? "note-0" : notes.data?.nextCursor ? "note-continue" : undefined);
   const count = found?.count ?? entries.length;
   const noMatches =
     count === 0 &&
     matches.length === 0 &&
+    noteHits.length === 0 &&
     Boolean(
       found &&
       readingCode &&
       !code.pending &&
       code.data?.coverage === "complete" &&
-      !code.data.nextCursor,
+      !code.data.nextCursor &&
+      notes.data?.coverage === "complete",
     );
   const resultsSummary = [];
   if (!text) resultsSummary.push(`${count} ${count === 1 ? "file" : "files"}`);
@@ -306,6 +325,8 @@ function FileDialog({
       const amount = `${matches.length}${code.data?.nextCursor ? "+" : ""}`;
       resultsSummary.push(`${amount} code ${amount === "1" ? "match" : "matches"}`);
     }
+    if (noteHits.length)
+      resultsSummary.push(`${noteHits.length} note ${noteHits.length === 1 ? "match" : "matches"}`);
     if (noMatches) resultsSummary.push("0 matches");
   }
   if (catalog.data?.partial) resultsSummary.push("Partial GitLab file list");
@@ -393,10 +414,10 @@ function FileDialog({
         <Icon name="search" size={14} />
         <input
           ref={input}
-          aria-label="Search filenames or code in this diff"
+          aria-label="Search filenames, code or discussion notes"
           aria-controls={`${id}-results`}
           value={query}
-          placeholder="Search filenames or code"
+          placeholder="Search filenames, code or notes"
           autoComplete="off"
           spellCheck={false}
           onChange={(event) => {
@@ -412,7 +433,7 @@ function FileDialog({
         id={`${id}-results`}
         className="changes-picker-results"
         role="region"
-        aria-label="Matching files and code"
+        aria-label="Matching files, code and notes"
       >
         {catalog.error && <Notice retry={catalog.retry}>{catalog.error}</Notice>}
         {scanned.error && <Notice retry={scanned.retry}>{scanned.error}</Notice>}
@@ -533,7 +554,7 @@ function FileDialog({
                 Search coverage is limited by the available GitLab patch.
               </p>
             )}
-            {noMatches && <p className="changes-picker-empty">No matching files or code.</p>}
+            {noMatches && <p className="changes-picker-empty">No matches.</p>}
             {readingCode && code.exhausted && (
               <p className="changes-picker-empty">No more code matches.</p>
             )}
@@ -560,6 +581,84 @@ function FileDialog({
                 }}
               >
                 {matches.length ? "More code matches" : "Continue searching code"}
+              </button>
+            )}
+            {!!noteHits.length && (
+              <>
+                <p className="changes-code-heading">Discussion notes</p>
+                <ul className="changes-picker-list">
+                  {noteHits.map((hit, index) => {
+                    const key = `note-${index}`;
+                    const location = {
+                      inline:
+                        hit.path && hit.line !== null ? `${hit.path} · ${hit.line}` : "Discussion",
+                      general: "General comment",
+                      outdated: "Earlier revision",
+                      draft: "GitLab draft",
+                    }[hit.kind];
+                    return (
+                      <li key={hit.hit}>
+                        <button
+                          type="button"
+                          className="changes-code-choice"
+                          data-option={key}
+                          data-suggested={active === key || undefined}
+                          onFocus={() => setSuggested(key)}
+                          onClick={() => {
+                            close();
+                            picker.onChooseNote(hit);
+                          }}
+                        >
+                          <span className="changes-code-location">
+                            {location} · {hit.author}
+                          </span>
+                          <span>
+                            <Marked
+                              text={hit.snippet}
+                              ranges={[[hit.highlightStart, hit.highlightEnd]]}
+                            />
+                          </span>
+                        </button>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </>
+            )}
+            {notes.pending && <Loading label="Searching discussion notes…" />}
+            {notes.error && <Notice retry={notes.retry}>{notes.error}</Notice>}
+            {notes.data?.draftsUnavailable && (
+              <p className="changes-picker-empty">GitLab drafts are unavailable.</p>
+            )}
+            {notes.data?.coverage === "limited" && !notes.data.draftsUnavailable && (
+              <p className="changes-picker-empty">Some discussion notes could not be searched.</p>
+            )}
+            {notes.hasPrevious && (
+              <button
+                type="button"
+                className="changes-clear"
+                disabled={notes.pending}
+                onClick={() => {
+                  setSuggested(undefined);
+                  notes.previous();
+                }}
+              >
+                Previous note matches
+              </button>
+            )}
+            {notes.data?.nextCursor && (
+              <button
+                type="button"
+                className="changes-clear"
+                data-option="note-continue"
+                data-suggested={active === "note-continue" || undefined}
+                onFocus={() => setSuggested("note-continue")}
+                onClick={() => {
+                  setSuggested(undefined);
+                  notes.more();
+                }}
+              >
+                {noteHits.length ? "More note matches" : "Continue searching notes"}
               </button>
             )}
           </>

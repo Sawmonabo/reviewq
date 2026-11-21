@@ -19,6 +19,7 @@ type Props = {
   readonly reference: string;
   readonly format: "markdown" | "text";
   readonly found?: FoundOutput;
+  readonly onReadRange?: ((element: HTMLElement) => boolean) | undefined;
 };
 
 export function ExpandedOutput(props: Props) {
@@ -32,6 +33,7 @@ export function ExpandedOutput(props: Props) {
       entryId={props.entryId}
       reference={props.reference}
       fallback={source}
+      onReadRange={props.onReadRange}
     />
   );
 }

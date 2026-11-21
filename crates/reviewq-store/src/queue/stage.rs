@@ -94,6 +94,13 @@ pub(crate) fn observe_source(
         source.observed_at_ms,
         approval,
         Some(comments),
+    )?;
+    super::discussions::record(
+        tx,
+        review,
+        settings,
+        source.observed_at_ms,
+        source.discussion_fingerprint,
     )
 }
 

@@ -3,9 +3,9 @@ import { func0 } from "../runtime.mjs";
 import { validate25 } from "./checkpoint-id-dto.mjs";
 import { validate48 } from "./history-cursor-dto.mjs";
 import { validate127 } from "./safe-count-dto.mjs";
-import { validate664 } from "./history-tool-state.mjs";
-import { validate557 } from "./history-text.mjs";
-function validate668(
+import { validate728 } from "./history-tool-state.mjs";
+import { validate621 } from "./history-text.mjs";
+function validate732(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -26,7 +26,7 @@ function validate668(
         ((data.contentRef === undefined || !func0.call(data, "contentRef")) &&
           (missing0 = "contentRef"))
       ) {
-        validate668.errors = [
+        validate732.errors = [
           {
             instancePath,
             schemaPath: "#/required",
@@ -111,7 +111,7 @@ function validate668(
                 vErrors.push(err1);
               }
               errors++;
-              validate668.errors = vErrors;
+              validate732.errors = vErrors;
               return false;
             } else {
               errors = _errs3;
@@ -132,7 +132,7 @@ function validate668(
               let data2 = data.kind;
               const _errs7 = errors;
               if (typeof data2 !== "string") {
-                validate668.errors = [
+                validate732.errors = [
                   {
                     instancePath: instancePath + "/kind",
                     schemaPath: "#/properties/kind/type",
@@ -143,7 +143,7 @@ function validate668(
                 return false;
               }
               if ("tool_result" !== data2) {
-                validate668.errors = [
+                validate732.errors = [
                   {
                     instancePath: instancePath + "/kind",
                     schemaPath: "#/properties/kind/const",
@@ -185,7 +185,7 @@ function validate668(
                 if (data.state !== undefined && func0.call(data, "state")) {
                   const _errs10 = errors;
                   if (
-                    !validate664(data.state, {
+                    !validate728(data.state, {
                       instancePath: instancePath + "/state",
                       parentData: data,
                       parentDataProperty: "state",
@@ -194,8 +194,8 @@ function validate668(
                   ) {
                     vErrors =
                       vErrors === null
-                        ? validate664.errors
-                        : vErrors.concat(validate664.errors);
+                        ? validate728.errors
+                        : vErrors.concat(validate728.errors);
                     errors = vErrors.length;
                   }
                   var valid0 = _errs10 === errors;
@@ -206,7 +206,7 @@ function validate668(
                   if (data.text !== undefined && func0.call(data, "text")) {
                     const _errs11 = errors;
                     if (
-                      !validate557(data.text, {
+                      !validate621(data.text, {
                         instancePath: instancePath + "/text",
                         parentData: data,
                         parentDataProperty: "text",
@@ -215,8 +215,8 @@ function validate668(
                     ) {
                       vErrors =
                         vErrors === null
-                          ? validate557.errors
-                          : vErrors.concat(validate557.errors);
+                          ? validate621.errors
+                          : vErrors.concat(validate621.errors);
                       errors = vErrors.length;
                     }
                     var valid0 = _errs11 === errors;
@@ -230,7 +230,7 @@ function validate668(
         }
       }
     } else {
-      validate668.errors = [
+      validate732.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -241,7 +241,7 @@ function validate668(
       return false;
     }
   }
-  validate668.errors = vErrors;
+  validate732.errors = vErrors;
   return errors === 0;
 }
-export { validate668 };
+export { validate732 };

@@ -6,9 +6,15 @@ use reviewq_domain::identity::{GitSha, MrIdentity};
 
 use crate::access::AppFuture;
 
+mod notes;
 mod source;
 
 pub use crate::reading::{MAX_DISCUSSION_TEXT_SOURCE_BYTES, discussion_text};
+pub use notes::{
+    DiscussionDraft, DiscussionDrafts, DiscussionEpoch, DiscussionEpochStore,
+    DiscussionInvalidation, DiscussionPage, DiscussionPageRequest, DiscussionScope,
+    DiscussionTarget, NoteAddress, NoteOccurrence, discussion_page_at, note_occurrence,
+};
 pub use source::{
     PATCH_SOURCE_BYTES, PATCH_SOURCE_ROWS, PatchSourceCursor, PatchSourcePage, PatchSourceRequest,
     PatchSourceRow, PatchSourceTarget, PatchSourceWindow,
@@ -215,6 +221,8 @@ impl PatchRange {
 #[derive(Debug)]
 pub struct Discussion {
     pub id: String,
+    pub fingerprint: [u8; 32],
+    pub limited: bool,
     pub anchor: Option<DiscussionAnchor>,
     pub outdated: bool,
     pub notes: Vec<DiscussionNote>,
@@ -261,7 +269,7 @@ impl DiscussionResolution {
     }
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct DiscussionAnchor {
     pub base_sha: GitSha,
     pub start_sha: GitSha,
@@ -274,20 +282,20 @@ pub struct DiscussionAnchor {
     pub range: Option<DiscussionRange>,
 }
 
-#[derive(Debug)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum DiscussionPosition {
     Text,
     File,
     Other,
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct DiscussionRange {
     pub start: DiscussionLine,
     pub end: DiscussionLine,
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct DiscussionLine {
     pub old_line: Option<u32>,
     pub new_line: Option<u32>,
@@ -398,8 +406,19 @@ pub trait ChangeSource: Send + Sync {
     fn discussions(
         &self,
         source: MrIdentity,
-        revision: String,
-        page: u32,
-        limit: u16,
-    ) -> AppFuture<'_, SourcePage<Discussion>>;
+        request: DiscussionPageRequest,
+    ) -> AppFuture<'_, DiscussionPage>;
+
+    fn discussion_drafts(
+        &self,
+        source: MrIdentity,
+        scope: DiscussionScope,
+    ) -> AppFuture<'_, DiscussionDrafts>;
+
+    fn discussion_target(
+        &self,
+        source: MrIdentity,
+        scope: DiscussionScope,
+        address: NoteAddress,
+    ) -> AppFuture<'_, DiscussionTarget>;
 }

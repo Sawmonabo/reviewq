@@ -285,6 +285,7 @@ pub struct WorkflowSnapshot {
     pub approved_reviewers: Option<Vec<u64>>,
     pub observed_at_ms: i64,
     pub discussions: Vec<WorkflowDiscussion>,
+    pub discussion_fingerprint: [u8; 32],
 }
 
 pub struct DiscoveryEvidence {
@@ -292,6 +293,7 @@ pub struct DiscoveryEvidence {
     pub authenticated_actor: u64,
     pub approved_reviewers: Option<Vec<u64>>,
     pub discussions: Option<Vec<DiscoveryDiscussion>>,
+    pub discussion_fingerprint: Option<[u8; 32]>,
     pub observed_at_ms: i64,
 }
 

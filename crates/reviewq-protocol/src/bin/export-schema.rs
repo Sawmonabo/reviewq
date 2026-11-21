@@ -106,6 +106,14 @@ fn main() -> Result<(), Box<dyn Error>> {
     registry.response::<PatchSearchResponse>("changes", "PatchSearchResponse")?;
     registry.response::<PatchSourceResponse>("changes", "PatchSourceResponse")?;
     registry.response::<PatchDiscussionsResponse>("changes", "PatchDiscussionsResponse")?;
+    registry.response::<reviewq_protocol::changes::DiscussionSearchResponse>(
+        "changes",
+        "DiscussionSearchResponse",
+    )?;
+    registry.response::<reviewq_protocol::changes::DiscussionDestinationResponse>(
+        "changes",
+        "DiscussionDestinationResponse",
+    )?;
     registry.response::<reviewq_protocol::changes::ApprovalViewResponse>(
         "changes",
         "ApprovalViewResponse",

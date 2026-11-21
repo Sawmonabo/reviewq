@@ -1,4 +1,8 @@
-import type { PatchDiscussion, PatchPath } from "../../../api/generated/contracts";
+import type {
+  DiscussionDestination,
+  PatchDiscussion,
+  PatchPath,
+} from "../../../api/generated/contracts";
 import { savedValue, saveValue } from "../../../lib/view-preferences";
 import { patchDocument } from "./patch-document";
 import type { PatchDocument } from "./patch-document";
@@ -110,7 +114,11 @@ export type ThreadJump = (
   | { readonly fileId: string }
   | { readonly path: PatchPath }
   | { readonly paths: Pick<PatchPath, "oldPath" | "newPath"> }
-) & { readonly line: PatchLine; readonly thread: PatchDiscussion };
+) & {
+  readonly line: PatchLine;
+  readonly thread: PatchDiscussion;
+  readonly note?: DiscussionDestination;
+};
 
 export function threadLine(thread: PatchDiscussion): PatchLine | undefined {
   const anchor = thread.anchor;

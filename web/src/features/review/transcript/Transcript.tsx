@@ -605,6 +605,24 @@ export function Transcript({ target, provider, child, messages, working }: Props
     setExpanded((known) => toggleKey(known, openKey(at.entryId, at.callId), true));
   }
 
+  function holdOutputRange(element: HTMLElement) {
+    const host = viewport.current;
+    const row = element.closest<HTMLElement>("[data-entry]");
+    const id = row?.dataset.entry;
+    if ((!following && !requestedLatest.current) || !host || !row || !id || !host.contains(row))
+      return false;
+    anchor.current = {
+      id,
+      toolEntry: true,
+      offset: row.getBoundingClientRect().top - host.getBoundingClientRect().top,
+    };
+    scrollIntent.current = undefined;
+    requestedLatest.current = false;
+    list.cancelScroll();
+    setFollowing(false);
+    return true;
+  }
+
   function openFound({ page, output: found, extra }: PreparedDestination) {
     const { entryId, generation, locator, contentRef, toolCallId } = found.destination;
     if (!history.openPrepared(page, { entryId, locator })) return false;
@@ -858,6 +876,7 @@ export function Transcript({ target, provider, child, messages, working }: Props
                             ? { extra: extraParts }
                             : {})}
                           onMoreParts={(cursor) => void moreParts(row.id, cursor)}
+                          onReadRange={holdOutputRange}
                           {...(found ? { found } : {})}
                           onReference={(reference) => {
                             setFoundOutput(undefined);

@@ -1,6 +1,7 @@
-import { useMemo, useRef, useState } from "react";
+import { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { ApiResponseError } from "../../../api/client";
+import { lostDiscussionAccess } from "../../../api/discussion-search";
 import {
   PATCH_FILES_PER_PAGE,
   readInitialPatchFiles,
@@ -9,9 +10,13 @@ import {
   readPatchPathCatalog,
   readPatchRevision,
 } from "../../../api/changes";
-import type { PatchDiscussion } from "../../../api/generated/contracts";
+import type {
+  DiscussionDestination,
+  PatchDiscussion,
+  PatchDiscussions,
+} from "../../../api/generated/contracts";
 import { Icon } from "../../../components/Icon";
-import { Pagination } from "../../../components/Pagination";
+import { PageNavigation } from "../../../components/Pagination";
 import { Loading, Notice } from "../../../components/PanelState";
 import { useResource } from "../../../hooks/useResource";
 import { Approvals } from "./Approvals";
@@ -23,6 +28,13 @@ import { OtherDiscussions } from "./OtherDiscussions";
 import { matchingFile, storedFile, threadLine } from "./patch-position";
 import type { ThreadJump } from "./patch-position";
 import { usePatchDiscussions } from "./usePatchDiscussions";
+import { useDiscussionSelection } from "./useDiscussionSelection";
+import {
+  discussionReadingPosition,
+  restoreDiscussionReading,
+  useDiscussionListJump,
+} from "./useDiscussionListJump";
+import type { DiscussionReadingPosition } from "./useDiscussionListJump";
 import "./changes.css";
 import "./navigation.css";
 
@@ -89,23 +101,85 @@ export default function Changes({
   );
   const changed = Boolean(revision && current.data && current.data.revision !== revision);
   const [threadPage, setThreadPage] = useState(0);
-  const [threadTrail, setThreadTrail] = useState<readonly string[]>([]);
+  const [conversationPage, setConversationPage] = useState<{
+    readonly number: number;
+    readonly cursor: string;
+    readonly manual: boolean;
+  }>();
   const filtering = involving || status !== "any";
-  const threads = usePatchDiscussions(reviewId, revision);
-  const threadCursor = threadTrail.at(-1);
-  const sharedThreadPage = threads.pages?.get(threadCursor);
+  const note = useDiscussionSelection(reviewId, revision, openNote);
+  const [discussionGeneration, setDiscussionGeneration] = useState(note.authority);
+  if (note.authority !== discussionGeneration) {
+    setDiscussionGeneration(note.authority);
+    setConversationPage(undefined);
+    setThreadPage(0);
+    setExtraInline(undefined);
+    setThreadJump(undefined);
+  }
+  const list = useRef<HTMLElement>(null);
+  const listTarget = tab === "all" ? note.selected : undefined;
+  useDiscussionListJump(list, listTarget);
+  const reading = useRef<{
+    readonly page: PatchDiscussions;
+    readonly position: DiscussionReadingPosition;
+  }>(undefined);
+  const fallbackNote = useCallback(() => setTab("all"), []);
+  const threads = usePatchDiscussions(reviewId, revision, note.authority);
+  const confirmedPages = [...(threads.pages?.values() ?? [])];
+  const pageNumber = conversationPage?.number ?? 1;
+  const sharedThreadPage = conversationPage?.manual ? undefined : confirmedPages[pageNumber - 1];
+  const threadCursor = conversationPage?.cursor;
   const requestThreadPage = Boolean(
     tab !== "files" && revision && !sharedThreadPage && !threads.pending,
   );
   const extraThreads = useResource(
-    JSON.stringify(["discussion-page", reviewId, revision, requestThreadPage, threadCursor]),
-    (signal) =>
-      requestThreadPage && revision
-        ? readPatchDiscussions(reviewId, revision, signal, threadCursor)
-        : Promise.resolve({ data: null, cursor: "" }),
+    JSON.stringify([
+      "discussion-page",
+      reviewId,
+      revision,
+      requestThreadPage,
+      threadCursor,
+      note.authority,
+    ]),
+    async (signal) => {
+      reading.current = undefined;
+      if (!requestThreadPage || !revision) return { data: null, cursor: "" };
+      const position =
+        threadCursor && !listTarget ? discussionReadingPosition(list.current) : undefined;
+      const current = await readPatchDiscussions(
+        reviewId,
+        revision,
+        signal,
+        threadCursor,
+        false,
+        threadCursor ? { anchor: position?.thread } : undefined,
+      );
+      signal.throwIfAborted();
+      const viewport = list.current?.closest<HTMLElement>(".drawer-body");
+      if (viewport && position && Math.abs(viewport.scrollTop - position.top) < 1)
+        reading.current = { page: current.data, position };
+      return current;
+    },
     requestThreadPage ? [{ kind: "discussions", id: reviewId }] : [],
+    lostDiscussionAccess,
   );
+  useLayoutEffect(() => {
+    const saved = reading.current;
+    if (saved && saved.page === extraThreads.data) {
+      restoreDiscussionReading(list.current, saved.position);
+      reading.current = undefined;
+    }
+  }, [extraThreads.data]);
   const threadData = sharedThreadPage?.data ?? extraThreads.data;
+  function turnConversationPage(number: number, cursor?: string | null) {
+    if (number < 2) setConversationPage(undefined);
+    else if (cursor)
+      setConversationPage({
+        number,
+        cursor,
+        manual: conversationPage?.manual || !confirmedPages[number - 1],
+      });
+  }
   const threadPending =
     tab === "files" ? threads.pending : !threadData && (threads.pending || extraThreads.pending);
   const filtered = useMemo(
@@ -124,15 +198,19 @@ export default function Changes({
     all: discussionCount(filtered.length, threads.limited),
   };
   const requestedInline = extraInline?.revision === revision ? extraInline?.thread : undefined;
-  const inline = useMemo(
-    () =>
-      requestedInline &&
+  const inlineTarget = tab === "files" ? note.selected?.thread : undefined;
+  const inline = useMemo(() => {
+    if (inlineTarget)
+      return [
+        ...filtered.filter((thread) => thread.discussionId !== inlineTarget.discussionId),
+        inlineTarget,
+      ];
+    return requestedInline &&
       matchesFilters(requestedInline, status, involving) &&
       !threads.items.some((item) => item.discussionId === requestedInline.discussionId)
-        ? [...filtered, requestedInline]
-        : filtered,
-    [filtered, involving, requestedInline, status, threads.items],
-  );
+      ? [...filtered, requestedInline]
+      : filtered;
+  }, [filtered, involving, inlineTarget, requestedInline, status, threads.items]);
   const visible =
     tab === "files"
       ? filtered.filter(
@@ -143,7 +221,9 @@ export default function Changes({
         )
       : (threadData?.items ?? []).filter(
           (thread) =>
-            matchesFilters(thread, status, involving) && (tab !== "general" || isGeneral(thread)),
+            thread.discussionId !== listTarget?.thread.discussionId &&
+            matchesFilters(thread, status, involving) &&
+            (tab !== "general" || isGeneral(thread)),
         );
 
   const page = Math.min(
@@ -153,26 +233,50 @@ export default function Changes({
   const displayed =
     tab === "files"
       ? visible.slice(page * DISCUSSIONS_PER_PAGE, (page + 1) * DISCUSSIONS_PER_PAGE)
-      : visible;
+      : listTarget
+        ? [listTarget.thread, ...visible]
+        : visible;
+
+  function threadTarget(thread: PatchDiscussion): ThreadJump | undefined {
+    const line = threadLine(thread);
+    const anchor = thread.anchor;
+    if (!line || !anchor) return;
+    const file = shown?.items.find((entry) => matchingFile(thread, entry));
+    if (file) return { fileId: file.fileId, line, thread };
+    const path = catalog.data?.paths?.find((entry) => matchingFile(thread, entry));
+    if (path) return { path, line, thread };
+    if (catalog.data?.paths && !catalog.data.partial) return;
+    return { paths: { oldPath: anchor.oldPath, newPath: anchor.newPath }, line, thread };
+  }
+
+  function openNote(destination: DiscussionDestination) {
+    const target = threadTarget(destination.thread);
+    if (target) {
+      setThreadJump({ ...target, note: destination });
+      setTab("files");
+    } else setTab("all");
+  }
 
   function refreshIndex() {
+    note.clear();
     setThreadPage(0);
-    setThreadTrail([]);
+    setConversationPage(undefined);
     setThreadJump(undefined);
     setExtraInline(undefined);
     setEpoch((value) => value + 1);
   }
 
   function changeFilters(next: ConversationFilterValues) {
+    note.clear();
     setFilters(next);
     setThreadPage(0);
-    setThreadTrail([]);
+    setConversationPage(undefined);
   }
 
   if (index.pending && !shown && !index.error) return <Loading label="Loading changes…" />;
 
   return (
-    <ChangesThreadExpansion key={revision ?? reviewId}>
+    <ChangesThreadExpansion key={revision ?? reviewId} target={note.selected}>
       <section className="changes stack" aria-label="Changes">
         <div className="changes-top">
           <h3>Changes &amp; conversations</h3>
@@ -206,10 +310,11 @@ export default function Changes({
                 title={label}
                 onClick={() => {
                   if (tab === id) return;
+                  note.clear();
                   setThreadJump(undefined);
                   setTab(id);
                   setThreadPage(0);
-                  setThreadTrail([]);
+                  setConversationPage(undefined);
                 }}
               >
                 <span className="changes-tab-label">{label}</span>
@@ -226,6 +331,7 @@ export default function Changes({
           )}
         </header>
         {index.error && <Notice retry={index.retry}>{index.error}</Notice>}
+        {note.error && <Notice>{note.error}</Notice>}
         {tab === "files" && shown && (
           <FileStream
             key={`${shown.revision}:${epoch}`}
@@ -241,6 +347,12 @@ export default function Changes({
             onLoadedAnchors={setLoadedAnchors}
             restore={epoch === 0}
             onReload={refreshIndex}
+            noteGeneration={note.generation}
+            noteTarget={note.selected}
+            onChooseNote={(hit) => void note.confirm(hit)}
+            onClearNote={note.clear}
+            onCancelNote={note.cancel}
+            onNoteFallback={fallbackNote}
           />
         )}
         {threads.error && <Notice retry={threads.retry}>{threads.error}</Notice>}
@@ -255,14 +367,15 @@ export default function Changes({
             Inline conversation coverage is partial. All conversations has more pages.
           </p>
         )}
-        <section className="discussion-list stack" aria-label="Review discussions">
+        <section className="discussion-list stack" aria-label="Review discussions" ref={list}>
           {tab === "files" && visible.length > 0 && <h3>Other discussions</h3>}
           {revision && (
             <p role="status" className="sr-only">
-              {visible.length} {visible.length === 1 ? "discussion" : "discussions"} on this page
+              {displayed.length} {displayed.length === 1 ? "discussion" : "discussions"} on this
+              page
             </p>
           )}
-          {tab !== "files" && !threadPending && !visible.length && !extraThreads.error && (
+          {tab !== "files" && !threadPending && !displayed.length && !extraThreads.error && (
             <div className="changes-conversation-empty">
               <div role="status">
                 <Icon name="inbox" size={28} />
@@ -295,25 +408,7 @@ export default function Changes({
           {tab === "files" && displayed.length > 0 && <OtherDiscussions threads={displayed} />}
           {tab !== "files" &&
             displayed.map((thread) => {
-              const line = threadLine(thread);
-              const path =
-                line && catalog.data?.paths?.find((entry) => matchingFile(thread, entry));
-              const file = line && shown?.items.find((entry) => matchingFile(thread, entry));
-              const anchor = thread.anchor;
-              const target: ThreadJump | undefined =
-                line && anchor
-                  ? file
-                    ? { fileId: file.fileId, line, thread }
-                    : path
-                      ? { path, line, thread }
-                      : catalog.data?.paths && !catalog.data.partial
-                        ? undefined
-                        : {
-                            paths: { oldPath: anchor.oldPath, newPath: anchor.newPath },
-                            line,
-                            thread,
-                          }
-                  : undefined;
+              const target = threadTarget(thread);
               return (
                 <div key={thread.discussionId} className="changes-conversation">
                   <ChangesThread
@@ -321,6 +416,7 @@ export default function Changes({
                     onJump={
                       tab === "all" && target
                         ? () => {
+                            note.clear();
                             if (revision) setExtraInline({ revision, thread: target.thread });
                             setThreadJump(target);
                             setTab("files");
@@ -332,7 +428,20 @@ export default function Changes({
               );
             })}
           {tab !== "files" && (
-            <Pagination trail={threadTrail} next={threadData?.nextCursor} onPage={setThreadTrail} />
+            <PageNavigation
+              page={threadData?.pageNumber ?? pageNumber}
+              first={pageNumber > 1 ? () => turnConversationPage(1) : undefined}
+              previous={
+                threadData?.previousCursor
+                  ? () => turnConversationPage(threadData.pageNumber - 1, threadData.previousCursor)
+                  : undefined
+              }
+              next={
+                threadData?.nextCursor
+                  ? () => turnConversationPage(threadData.pageNumber + 1, threadData.nextCursor)
+                  : undefined
+              }
+            />
           )}
           {tab === "files" && visible.length > DISCUSSIONS_PER_PAGE && (
             <nav className="pagination" aria-label="Conversation pages">

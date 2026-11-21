@@ -116,55 +116,38 @@ const schema129 = {
 };
 const schema131 = { enum: ["unknown", "absent", "confirmed"], type: "string" };
 const schema145 = {
-  description: "Stable error codes for the public JSON envelope.",
-  enum: [
-    "ticket_unverified",
-    "invalid_request",
-    "unauthorized",
-    "forbidden",
-    "not_found",
-    "conflict",
-    "stale_revision",
-    "idempotency_conflict",
-    "cursor_expired",
-    "precondition_failed",
-    "payload_too_large",
-    "range_not_satisfiable",
-    "busy",
-    "unavailable",
-    "internal",
-  ],
-  type: "string",
-};
-const schema149 = {
-  enum: [
-    "fixed",
-    "clarified_withdrawn",
-    "superseded",
-    "partly_addressed",
-    "still_present",
-    "unverified",
-  ],
-  type: "string",
-};
-const schema150 = { enum: ["review", "waiting_author"], type: "string" };
-const schema154 = {
   type: "object",
   properties: {
-    authorityVerified: { type: "boolean" },
-    batchId: { $ref: "#/definitions/CheckpointIdDto" },
-    checkedSha: {
-      anyOf: [{ $ref: "#/definitions/GitShaDto" }, { type: "null" }],
+    endUtf16: { $ref: "#/definitions/SafeCountDto" },
+    kind: { $ref: "#/definitions/NoteKind" },
+    matched: { type: "string" },
+    noteId: { type: "string" },
+    ordinal: { $ref: "#/definitions/SafeCountDto" },
+    parentDiscussionId: { type: ["string", "null"] },
+    reviewId: { $ref: "#/definitions/ReviewIdDto" },
+    revision: { $ref: "#/definitions/CheckpointIdDto" },
+  },
+};
+const schema146 = {
+  enum: ["inline", "general", "outdated", "draft"],
+  type: "string",
+};
+const schema151 = { enum: ["text", "file", "other"], type: "string" };
+const schema156 = {
+  type: "object",
+  properties: {
+    author: { type: "string" },
+    authorId: {
+      anyOf: [{ $ref: "#/definitions/MergeRequestIidDto" }, { type: "null" }],
     },
-    completedAt: {
+    body: { type: "string" },
+    createdAt: {
       anyOf: [{ $ref: "#/definitions/UtcTimestampDto" }, { type: "null" }],
     },
-    dueAt: {
-      anyOf: [{ $ref: "#/definitions/UtcTimestampDto" }, { type: "null" }],
-    },
-    firstObservedAt: { $ref: "#/definitions/UtcTimestampDto" },
-    generation: { $ref: "#/definitions/EventCursorDto" },
-    holdReason: { type: ["string", "null"] },
+    noteId: { type: "string" },
+    ours: { type: "boolean" },
+    resolvable: { type: ["boolean", "null"] },
+    resolved: { type: ["boolean", "null"] },
   },
 };
 export {
@@ -178,7 +161,7 @@ export {
   schema129,
   schema131,
   schema145,
-  schema149,
-  schema150,
-  schema154,
+  schema146,
+  schema151,
+  schema156,
 };

@@ -11,6 +11,7 @@ use axum::{Json, Router};
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use reviewq_app::access::{Actor, AppError};
 use reviewq_app::actions::{ActionCommandStore, ActionStore};
+use reviewq_app::changes::DiscussionEpochStore;
 use reviewq_app::decisions::{Checkpoints, DecisionStore};
 use reviewq_app::events::EventLog;
 use reviewq_app::followups::{FollowupCommands, FollowupStore};
@@ -81,6 +82,7 @@ pub trait Store:
     + TrackingStore
     + ReviewLookup
     + EventLog
+    + DiscussionEpochStore
     + LeadStore
     + ClaudeStore
     + ClaudeWorkflowStore
@@ -111,6 +113,7 @@ impl<
         + TrackingStore
         + ReviewLookup
         + EventLog
+        + DiscussionEpochStore
         + LeadStore
         + ClaudeStore
         + ClaudeWorkflowStore
@@ -311,6 +314,14 @@ pub fn router(
         .route("/reviews/{review_id}/changes/patch", get(changes::patch))
         .route("/reviews/{review_id}/changes/source", get(changes::source))
         .route("/reviews/{review_id}/changes/search", get(changes::search))
+        .route(
+            "/reviews/{review_id}/changes/notes",
+            get(changes::search_notes),
+        )
+        .route(
+            "/reviews/{review_id}/changes/notes/destination",
+            get(changes::note_destination),
+        )
         .route(
             "/reviews/{review_id}/changes/discussions",
             get(changes::discussions),

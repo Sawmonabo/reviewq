@@ -1,17 +1,25 @@
+use std::sync::Arc;
+use std::time::Instant;
+
 use reviewq_app::access::AppError;
 use reviewq_app::changes::{
-    Discussion, DiscussionAnchor, DiscussionLine, DiscussionNote, DiscussionPosition,
-    DiscussionRange, DiscussionResolution, PatchRevision, SourcePage,
+    Discussion, DiscussionAnchor, DiscussionLine, DiscussionNote, DiscussionPage,
+    DiscussionPageRequest, DiscussionPosition, DiscussionRange, DiscussionResolution,
+    PatchRevision, discussion_page_at,
 };
 use reviewq_app::sources::{
     DiscoveryEvidence, DiscussionNoteTime, ReviewSourceReader, WorkflowDiscussion, WorkflowNote,
     WorkflowSnapshot,
 };
 use reviewq_domain::identity::{MrIdentity, ReportHash};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use super::{DiffRefs, GitLab, git_sha, safe_path};
+use super::{DiffRefs, GitLab, git_sha, revision_from_refs, safe_path};
+
+mod cache;
+mod drafts;
+pub(in crate::gitlab) use cache::DiscussionCache;
 
 const MAX_DISCUSSION_BYTES: usize = 512 * 1024;
 
@@ -21,7 +29,7 @@ struct UpstreamDiscussion {
     notes: Vec<UpstreamNote>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize)]
 struct UpstreamNote {
     id: u64,
     body: String,
@@ -39,14 +47,14 @@ struct UpstreamNote {
     position: Option<Position>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize)]
 struct Author {
     #[serde(default)]
     id: Option<u64>,
     username: String,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize)]
 struct Position {
     #[serde(flatten)]
     refs: DiffRefs,
@@ -58,13 +66,13 @@ struct Position {
     line_range: Option<LineRange>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize)]
 struct LineRange {
     start: Line,
     end: Line,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize)]
 struct Line {
     old_line: Option<u32>,
     new_line: Option<u32>,
@@ -122,36 +130,109 @@ impl GitLab {
     pub(super) async fn discussion_page(
         &self,
         source: MrIdentity,
-        revision: String,
-        page: u32,
-        limit: u16,
-    ) -> Result<SourcePage<Discussion>, AppError> {
+        request: DiscussionPageRequest,
+    ) -> Result<DiscussionPage, AppError> {
+        let DiscussionPageRequest {
+            scope,
+            page,
+            limit,
+            allow_partial,
+        } = request;
         if page == 0 || page > 1000 || !(1..=50).contains(&limit) {
             return Err(AppError::InvalidRequest);
         }
-        let current = self.patch_revision(&source, Some(&revision)).await?;
-        let (rows, next_page) = self
-            .read_diff_rows::<UpstreamDiscussion>(
-                &source,
-                "discussions",
-                page,
-                limit,
-                MAX_DISCUSSION_BYTES,
-            )
+        let (current, mr_id) = self.discussion_context(&source, &scope.revision).await?;
+        let observation = self.discussions.observe(&source, mr_id, &scope)?;
+        let slot = observation.page(page, limit)?;
+        let cached = slot
+            .get_or_try_init(|| async {
+                let started = Instant::now();
+                let raw = self
+                    .read_diff_rows::<UpstreamDiscussion>(
+                        &source,
+                        "discussions",
+                        page,
+                        limit,
+                        MAX_DISCUSSION_BYTES,
+                    )
+                    .await;
+                let (rows, next) = match raw {
+                    Err(AppError::PayloadTooLarge) => return Ok(None),
+                    result => result?,
+                };
+                let mut items = Vec::with_capacity(rows.len());
+                let mut fingerprint = Vec::with_capacity(rows.len());
+                for row in rows {
+                    let normalized = project(row, &source, &current)?;
+                    fingerprint.push(normalized.as_ref().map(|item| item.fingerprint));
+                    if let Some(item) = normalized {
+                        items.push(item);
+                    }
+                }
+                self.confirm_discussion_context(&source, &current.id, mr_id)
+                    .await?;
+                let weight = items.iter().map(cache::discussion_bytes).sum::<usize>()
+                    + fingerprint.capacity() * size_of::<Option<[u8; 32]>>();
+                let limited = items.iter().any(|thread| thread.limited);
+                items.retain(|thread| !thread.notes.is_empty());
+                Ok::<_, AppError>(Some(cache::Page {
+                    items: Arc::from(items),
+                    next,
+                    weight,
+                    limited,
+                    fingerprint,
+                    started,
+                }))
+            })
             .await?;
-        let mut items = Vec::with_capacity(rows.len());
-        for row in rows {
-            if let Some(item) = project(row, &source, &current)? {
-                items.push(item);
-            }
+        self.discussions.check(&source, &scope, &observation)?;
+        observation.trim()?;
+        if cached.as_ref().map_or(!allow_partial || limit > 1, |page| {
+            !allow_partial && page.limited
+        }) {
+            return Err(AppError::PayloadTooLarge);
         }
-        self.patch_revision(&source, Some(&current.id)).await?;
-        Ok(SourcePage {
+        Ok(DiscussionPage {
             revision: current,
-            items,
-            page,
-            next_page,
+            observation: observation.id.clone(),
+            items: cached
+                .as_ref()
+                .map_or_else(|| Arc::from([]), |page| page.items.clone()),
+            next_page: cached
+                .as_ref()
+                .map_or_else(|| (page < 1000).then_some(page + 1), |page| page.next),
+            limited: cached.as_ref().is_none_or(|page| page.limited),
         })
+    }
+
+    async fn discussion_context(
+        &self,
+        source: &MrIdentity,
+        revision: &str,
+    ) -> Result<(PatchRevision, Option<u64>), AppError> {
+        if source.origin() != &self.identity {
+            return Err(AppError::NotFound);
+        }
+        let row = self
+            .merge_request(source.project_id(), source.iid())
+            .await?;
+        let head = row.head_sha()?;
+        let refs = row.diff_refs.ok_or(AppError::Unavailable)?;
+        let revision = revision_from_refs(source, refs, head, Some(revision))?;
+        Ok((revision, row.id))
+    }
+
+    async fn confirm_discussion_context(
+        &self,
+        source: &MrIdentity,
+        revision: &str,
+        expected_id: Option<u64>,
+    ) -> Result<(), AppError> {
+        let (_, id) = self.discussion_context(source, revision).await?;
+        if id != expected_id {
+            return Err(AppError::StaleRevision);
+        }
+        Ok(())
     }
 }
 
@@ -163,6 +244,9 @@ fn project(
     if row.id.is_empty() || row.id.len() > 256 || row.id.chars().any(char::is_control) {
         return Err(AppError::Unavailable);
     }
+    let Some(fingerprint) = row.fingerprint()? else {
+        return Ok(None);
+    };
     let mut notes = row
         .notes
         .into_iter()
@@ -177,25 +261,29 @@ fn project(
             || pos.refs.start_sha != revision.start.as_str()
     });
     let anchor = position.and_then(Position::anchor);
+    let mut limited = false;
     let notes = std::iter::once(first)
         .chain(notes)
-        .map(|note| {
+        .filter_map(|note| {
             if note.id == 0
                 || note.project_id != source.project_id().get()
                 || note
                     .noteable_iid
                     .is_some_and(|iid| iid != source.iid().get())
-                || note.body.len() > 64 * 1024
                 || note.author.username.len() > 256
             {
-                return Err(AppError::Unavailable);
+                return Some(Err(AppError::Unavailable));
+            }
+            if note.body.len() > 64 * 1024 {
+                limited = true;
+                return None;
             }
             let created_at_ms = note
                 .created_at
                 .parse::<jiff::Timestamp>()
                 .ok()
                 .map(|stamp| stamp.as_millisecond());
-            Ok(DiscussionNote {
+            Some(Ok(DiscussionNote {
                 id: note.id,
                 author: note.author.username,
                 author_id: note.author.id,
@@ -204,21 +292,53 @@ fn project(
                 resolvable: note.resolvable,
                 resolved: note.resolved,
                 resolved_by: note.resolved_by.map(|user| user.id),
-            })
+            }))
         })
         .collect::<Result<Vec<_>, AppError>>()?;
     Ok(Some(Discussion {
         id: row.id,
+        fingerprint,
+        limited,
         anchor,
         outdated,
         notes,
     }))
 }
 
+impl UpstreamDiscussion {
+    fn fingerprint(&self) -> Result<Option<[u8; 32]>, AppError> {
+        let visible = self
+            .notes
+            .iter()
+            .filter(|note| !note.system && !note.confidential)
+            .collect::<Vec<_>>();
+        if visible.is_empty() {
+            return Ok(None);
+        }
+        Ok(Some(content_fingerprint(&(&self.id, visible))?))
+    }
+}
+
+fn content_fingerprint(value: &impl Serialize) -> Result<[u8; 32], AppError> {
+    struct Sink(Sha256);
+    impl std::io::Write for Sink {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            self.0.update(bytes);
+            Ok(bytes.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+    let mut sink = Sink(Sha256::new());
+    serde_json::to_writer(&mut sink, value).map_err(|_| AppError::Internal)?;
+    Ok(sink.0.finalize().into())
+}
+
 const MAX_WORKFLOW_DISCUSSIONS: usize = 2_000;
 const MAX_WORKFLOW_NOTES: usize = 5_000;
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize)]
 struct ConnectedUser {
     id: u64,
 }
@@ -236,18 +356,21 @@ impl GitLab {
         );
         let approved_reviewers =
             facts?.map(|facts| facts.approvers.into_iter().map(|value| value.id).collect());
-        let discussions = match discussions {
-            Ok(discussions) => Some(
-                discussions
-                    .into_iter()
-                    .map(|thread| reviewq_app::sources::DiscoveryDiscussion {
-                        resolution: thread.resolution,
-                        notes: thread.notes.iter().map(DiscussionNoteTime::from).collect(),
-                    })
-                    .collect(),
+        let (discussions, discussion_fingerprint) = match discussions {
+            Ok((discussions, fingerprint)) => (
+                Some(
+                    discussions
+                        .into_iter()
+                        .map(|thread| reviewq_app::sources::DiscoveryDiscussion {
+                            resolution: thread.resolution,
+                            notes: thread.notes.iter().map(DiscussionNoteTime::from).collect(),
+                        })
+                        .collect(),
+                ),
+                Some(fingerprint),
             ),
             Err(AppError::StaleRevision) => return Err(AppError::StaleRevision),
-            Err(_) => None,
+            Err(_) => (None, None),
         };
         let review = ReviewSourceReader::review(self, identity).await?;
         if before != review {
@@ -258,6 +381,7 @@ impl GitLab {
             authenticated_actor,
             approved_reviewers,
             discussions,
+            discussion_fingerprint,
             observed_at_ms: jiff::Timestamp::now().as_millisecond(),
         })
     }
@@ -265,21 +389,30 @@ impl GitLab {
     async fn workflow_discussions(
         &self,
         identity: &MrIdentity,
-    ) -> Result<Vec<WorkflowDiscussion>, AppError> {
+    ) -> Result<(Vec<WorkflowDiscussion>, [u8; 32]), AppError> {
+        let started = Instant::now();
         let mut discussions = Vec::new();
+        let mut fingerprints = Vec::new();
         let mut discussion_ids = std::collections::HashSet::new();
         let mut note_ids = std::collections::HashSet::new();
-        let mut page = 1;
+        let (mut page, mut limit) = (1, 40);
         loop {
-            let (rows, next_page) = self
+            let result = self
                 .read_diff_rows::<UpstreamDiscussion>(
                     identity,
                     "discussions",
                     page,
-                    30,
+                    limit,
                     MAX_DISCUSSION_BYTES,
                 )
-                .await?;
+                .await;
+            let (rows, next_page) = match result {
+                Err(AppError::PayloadTooLarge) if limit > 1 => {
+                    (page, limit) = discussion_page_at((page - 1) * u32::from(limit), limit - 1);
+                    continue;
+                }
+                result => result?,
+            };
             for discussion in rows {
                 if discussion.id.is_empty()
                     || discussion.id.len() > 256
@@ -291,6 +424,7 @@ impl GitLab {
                 if discussion_ids.len() > MAX_WORKFLOW_DISCUSSIONS {
                     return Err(AppError::PayloadTooLarge);
                 }
+                fingerprints.push(discussion.fingerprint()?);
                 let root_note_id = discussion
                     .notes
                     .first()
@@ -373,12 +507,24 @@ impl GitLab {
                 }
             }
             let Some(next) = next_page else { break };
-            if next > 100 {
+            let offset = (next - 1) * u32::from(limit);
+            if offset as usize >= MAX_WORKFLOW_DISCUSSIONS {
                 return Err(AppError::PayloadTooLarge);
             }
-            page = next;
+            (page, limit) = discussion_page_at(offset, 40);
         }
-        Ok(discussions)
+        self.discussions
+            .invalidate_if_changed(identity, started, &fingerprints)?;
+        let mut fingerprint = Sha256::new();
+        for row in fingerprints {
+            if let Some(hash) = row {
+                fingerprint.update([1]);
+                fingerprint.update(hash);
+            } else {
+                fingerprint.update([0]);
+            }
+        }
+        Ok((discussions, fingerprint.finalize().into()))
     }
 
     pub(in crate::gitlab) async fn read_workflow_snapshot(
@@ -387,7 +533,7 @@ impl GitLab {
     ) -> Result<WorkflowSnapshot, AppError> {
         let before = ReviewSourceReader::review(self, identity.clone()).await?;
         let user = self.approval_account().await?;
-        let discussions = self.workflow_discussions(&identity).await?;
+        let (discussions, discussion_fingerprint) = self.workflow_discussions(&identity).await?;
         let approved_reviewers = self.read_approval_facts(&identity).await?.map(|facts| {
             facts
                 .approvers
@@ -408,6 +554,7 @@ impl GitLab {
             approved_reviewers,
             observed_at_ms: jiff::Timestamp::now().as_millisecond(),
             discussions,
+            discussion_fingerprint,
         })
     }
 }

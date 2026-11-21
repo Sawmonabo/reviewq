@@ -6,7 +6,7 @@ import { validate299 } from "./run-stage.mjs";
 import { validate150 } from "./git-sha-dto.mjs";
 import { validate305 } from "./compact-ticket.mjs";
 import { validate127 } from "./safe-count-dto.mjs";
-function validate1120(
+function validate1153(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -46,7 +46,7 @@ function validate1120(
               }
             }
           } else {
-            validate1120.errors = [
+            validate1153.errors = [
               {
                 instancePath: instancePath + "/registeredProviders",
                 schemaPath: "#/properties/registeredProviders/type",
@@ -137,7 +137,7 @@ function validate1120(
                 vErrors.push(err1);
               }
               errors++;
-              validate1120.errors = vErrors;
+              validate1153.errors = vErrors;
               return false;
             } else {
               errors = _errs6;
@@ -204,7 +204,7 @@ function validate1120(
                       }
                     }
                   } else {
-                    validate1120.errors = [
+                    validate1153.errors = [
                       {
                         instancePath: instancePath + "/tickets",
                         schemaPath: "#/properties/tickets/type",
@@ -223,7 +223,7 @@ function validate1120(
                 if (data.title !== undefined && func0.call(data, "title")) {
                   const _errs14 = errors;
                   if (typeof data.title !== "string") {
-                    validate1120.errors = [
+                    validate1153.errors = [
                       {
                         instancePath: instancePath + "/title",
                         schemaPath: "#/properties/title/type",
@@ -293,7 +293,7 @@ function validate1120(
         }
       }
     } else {
-      validate1120.errors = [
+      validate1153.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -304,7 +304,7 @@ function validate1120(
       return false;
     }
   }
-  validate1120.errors = vErrors;
+  validate1153.errors = vErrors;
   return errors === 0;
 }
-export { validate1120 };
+export { validate1153 };

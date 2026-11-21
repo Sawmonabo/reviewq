@@ -2302,6 +2302,73 @@
       ],
       "type": "object"
     },
+    "DiscussionDestination": {
+      "properties": {
+        "endUtf16": {
+          "$ref": "#/definitions/SafeCountDto"
+        },
+        "kind": {
+          "$ref": "#/definitions/NoteKind"
+        },
+        "matched": {
+          "type": "string"
+        },
+        "noteId": {
+          "type": "string"
+        },
+        "ordinal": {
+          "$ref": "#/definitions/SafeCountDto"
+        },
+        "parentDiscussionId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "reviewId": {
+          "$ref": "#/definitions/ReviewIdDto"
+        },
+        "revision": {
+          "$ref": "#/definitions/PatchRevisionDto"
+        },
+        "startUtf16": {
+          "$ref": "#/definitions/SafeCountDto"
+        },
+        "thread": {
+          "$ref": "#/definitions/PatchDiscussion"
+        }
+      },
+      "required": [
+        "reviewId",
+        "revision",
+        "thread",
+        "noteId",
+        "kind",
+        "parentDiscussionId",
+        "matched",
+        "startUtf16",
+        "endUtf16",
+        "ordinal"
+      ],
+      "type": "object"
+    },
+    "DiscussionDestinationResponse": {
+      "description": "The resource and event head from the same authorized snapshot.",
+      "properties": {
+        "cursor": {
+          "$ref": "#/definitions/EventCursorDto"
+        },
+        "data": {
+          "$ref": "#/definitions/DiscussionDestination"
+        }
+      },
+      "required": [
+        "data",
+        "cursor"
+      ],
+      "title": "DiscussionDestinationResponse",
+      "type": "object"
+    },
     "DiscussionPosition": {
       "enum": [
         "text",
@@ -2318,6 +2385,116 @@
         "unknown"
       ],
       "type": "string"
+    },
+    "DiscussionSearch": {
+      "description": "A bounded compact list with a required nullable keyset continuation.",
+      "properties": {
+        "coverage": {
+          "$ref": "#/definitions/PatchSearchCoverage"
+        },
+        "draftsUnavailable": {
+          "type": "boolean"
+        },
+        "items": {
+          "items": {
+            "$ref": "#/definitions/DiscussionSearchMatch"
+          },
+          "maxItems": 100,
+          "type": "array"
+        },
+        "nextCursor": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/PageCursorDto"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "reviewId": {
+          "$ref": "#/definitions/ReviewIdDto"
+        },
+        "revision": {
+          "$ref": "#/definitions/PatchRevisionDto"
+        }
+      },
+      "required": [
+        "reviewId",
+        "revision",
+        "coverage",
+        "draftsUnavailable",
+        "items",
+        "nextCursor"
+      ],
+      "type": "object"
+    },
+    "DiscussionSearchMatch": {
+      "properties": {
+        "author": {
+          "type": "string"
+        },
+        "highlightEnd": {
+          "$ref": "#/definitions/SafeCountDto"
+        },
+        "highlightStart": {
+          "$ref": "#/definitions/SafeCountDto"
+        },
+        "hit": {
+          "$ref": "#/definitions/PageCursorDto"
+        },
+        "kind": {
+          "$ref": "#/definitions/NoteKind"
+        },
+        "line": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SafeCountDto"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "path": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "snippet": {
+          "maxLength": 400,
+          "type": "string"
+        }
+      },
+      "required": [
+        "hit",
+        "kind",
+        "author",
+        "path",
+        "line",
+        "snippet",
+        "highlightStart",
+        "highlightEnd"
+      ],
+      "type": "object"
+    },
+    "DiscussionSearchResponse": {
+      "description": "The resource and event head from the same authorized snapshot.",
+      "properties": {
+        "cursor": {
+          "$ref": "#/definitions/EventCursorDto"
+        },
+        "data": {
+          "$ref": "#/definitions/DiscussionSearch"
+        }
+      },
+      "required": [
+        "data",
+        "cursor"
+      ],
+      "title": "DiscussionSearchResponse",
+      "type": "object"
     },
     "DisplayBlock": {
       "properties": {
@@ -5481,6 +5658,15 @@
       ],
       "type": "string"
     },
+    "NoteKind": {
+      "enum": [
+        "inline",
+        "general",
+        "outdated",
+        "draft"
+      ],
+      "type": "string"
+    },
     "Notification": {
       "properties": {
         "desktopReason": {
@@ -6003,6 +6189,19 @@
             }
           ]
         },
+        "pageNumber": {
+          "$ref": "#/definitions/SafeCountDto"
+        },
+        "previousCursor": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/PageCursorDto"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "reviewId": {
           "$ref": "#/definitions/ReviewIdDto"
         },
@@ -6024,6 +6223,8 @@
       "required": [
         "reviewId",
         "revision",
+        "pageNumber",
+        "previousCursor",
         "items",
         "nextCursor"
       ],
@@ -11397,6 +11598,8 @@
     "CurrentPatchRevisionResponse": "changes",
     "DeliveryReceiptResponse": "delivery",
     "DisconnectSettings": "settings",
+    "DiscussionDestinationResponse": "changes",
+    "DiscussionSearchResponse": "changes",
     "EventReplayCursor": "common",
     "Failure": "common",
     "FollowupAssessmentsResponse": "followups",
@@ -11525,6 +11728,8 @@
       "CurrentActionResponse": "#/definitions/CurrentActionResponse",
       "CurrentPatchRevisionResponse": "#/definitions/CurrentPatchRevisionResponse",
       "DeliveryReceiptResponse": "#/definitions/DeliveryReceiptResponse",
+      "DiscussionDestinationResponse": "#/definitions/DiscussionDestinationResponse",
+      "DiscussionSearchResponse": "#/definitions/DiscussionSearchResponse",
       "Failure": "#/definitions/Failure",
       "FollowupAssessmentsResponse": "#/definitions/FollowupAssessmentsResponse",
       "FollowupEnrollmentResponse": "#/definitions/FollowupEnrollmentResponse",

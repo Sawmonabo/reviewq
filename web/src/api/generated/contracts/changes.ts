@@ -15,9 +15,13 @@ export type ApprovalWarning = "approvals_unavailable" | "rules_unavailable";
 
 export type PatchRevisionDto = string;
 
+export type NoteKind = "inline" | "general" | "outdated" | "draft";
+
 export type DiscussionPosition = "text" | "file" | "other";
 
 export type DiscussionResolution = "open" | "resolved" | "comment" | "unknown";
+
+export type PatchSearchCoverage = "reading" | "complete" | "limited";
 
 export type PatchAvailability =
   "complete" | "incomplete" | "binary" | "provider_limited" | "missing";
@@ -25,8 +29,6 @@ export type PatchAvailability =
 export type FileIdDto = string;
 
 export type PatchETagDto = string;
-
-export type PatchSearchCoverage = "reading" | "complete" | "limited";
 
 export type PatchSide = "old" | "new";
 
@@ -86,26 +88,23 @@ export interface CurrentPatchRevision {
   [k: string]: unknown;
 }
 
-export interface PatchDiscussionsResponse {
+export interface DiscussionDestinationResponse {
   cursor: EventCursorDto;
-  data: PatchDiscussions;
+  data: DiscussionDestination;
   [k: string]: unknown;
 }
 
-export interface PatchDiscussions {
-  /**
-   * @maxItems 100
-   */
-  items: PatchDiscussion[];
-  nextCursor: PageCursorDto | null;
+export interface DiscussionDestination {
+  endUtf16: SafeCountDto;
+  kind: NoteKind;
+  matched: string;
+  noteId: string;
+  ordinal: SafeCountDto;
+  parentDiscussionId: string | null;
   reviewId: ReviewIdDto;
   revision: PatchRevisionDto;
-  /**
-   * Optional searchable plain text from notes in this same response.
-   *
-   * @maxItems 64
-   */
-  textProjections?: PatchDiscussionText[] | null;
+  startUtf16: SafeCountDto;
+  thread: PatchDiscussion;
   [k: string]: unknown;
 }
 
@@ -156,6 +155,62 @@ export interface PatchDiscussionNote {
   resolved: boolean | null;
   resolvedBy: UpstreamIdDto | null;
   webUrl: string;
+  [k: string]: unknown;
+}
+
+export interface DiscussionSearchResponse {
+  cursor: EventCursorDto;
+  data: DiscussionSearch;
+  [k: string]: unknown;
+}
+
+export interface DiscussionSearch {
+  coverage: PatchSearchCoverage;
+  draftsUnavailable: boolean;
+  /**
+   * @maxItems 100
+   */
+  items: DiscussionSearchMatch[];
+  nextCursor: PageCursorDto | null;
+  reviewId: ReviewIdDto;
+  revision: PatchRevisionDto;
+  [k: string]: unknown;
+}
+
+export interface DiscussionSearchMatch {
+  author: string;
+  highlightEnd: SafeCountDto;
+  highlightStart: SafeCountDto;
+  hit: PageCursorDto;
+  kind: NoteKind;
+  line: SafeCountDto | null;
+  path: string | null;
+  snippet: string;
+  [k: string]: unknown;
+}
+
+export interface PatchDiscussionsResponse {
+  cursor: EventCursorDto;
+  data: PatchDiscussions;
+  [k: string]: unknown;
+}
+
+export interface PatchDiscussions {
+  /**
+   * @maxItems 100
+   */
+  items: PatchDiscussion[];
+  nextCursor: PageCursorDto | null;
+  pageNumber: SafeCountDto;
+  previousCursor: PageCursorDto | null;
+  reviewId: ReviewIdDto;
+  revision: PatchRevisionDto;
+  /**
+   * Optional searchable plain text from notes in this same response.
+   *
+   * @maxItems 64
+   */
+  textProjections?: PatchDiscussionText[] | null;
   [k: string]: unknown;
 }
 

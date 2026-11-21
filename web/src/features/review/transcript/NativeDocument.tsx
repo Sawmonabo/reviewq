@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useEffectEvent, useRef, useState } from "react";
 import { historyDocument } from "../../../api/history";
 import type { SessionAddress } from "../../../api/history";
 import { MarkdownContent } from "../../../components/markdown/MarkdownContent";
@@ -13,12 +13,14 @@ export function NativeDocument({
   generation,
   reference,
   fallback,
+  onReadRange,
 }: {
   readonly target: SessionAddress;
   readonly entryId: string;
   readonly generation: string;
   readonly reference: string;
   readonly fallback: React.ReactNode;
+  readonly onReadRange?: ((element: HTMLElement) => boolean) | undefined;
 }) {
   const [position, setPosition] = useState<{ byteOffset: number; sha256?: string }>({
     byteOffset: 0,
@@ -74,9 +76,13 @@ export function NativeDocument({
   );
   const [shown, setShown] = useState(range.data);
   const remember = useReadingInset(output, shown);
+  const holdReading = useEffectEvent((element: HTMLElement | null, pagedTable: boolean) => {
+    if (element && pagedTable && onReadRange?.(element)) return;
+    remember(element);
+  });
   useEffect(() => {
     const next = range.data;
-    if (next === undefined) return;
+    if (next === undefined || next === shown) return;
     const events = new AbortController();
     function commit() {
       if (
@@ -87,7 +93,7 @@ export function NativeDocument({
         return;
       const active = document.activeElement;
       if (active && active !== output.current && output.current?.contains(active)) return;
-      remember(output.current);
+      if (next) holdReading(output.current, next.table !== undefined);
       setShown(next);
     }
     document.addEventListener("selectionchange", commit, { signal: events.signal });
@@ -95,7 +101,7 @@ export function NativeDocument({
     document.addEventListener("focusout", () => queueMicrotask(commit), { signal: events.signal });
     commit();
     return () => events.abort();
-  }, [position.byteOffset, range.data, remember]);
+  }, [position.byteOffset, range.data, shown]);
   if (shown === null) return fallback;
   const data = shown?.range;
 

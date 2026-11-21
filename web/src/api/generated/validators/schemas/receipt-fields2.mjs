@@ -2,7 +2,7 @@
 import { func0 } from "../runtime.mjs";
 import { validate25 } from "./checkpoint-id-dto.mjs";
 import { validate235 } from "./utc-timestamp-dto.mjs";
-function validate813(
+function validate877(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -53,7 +53,7 @@ function validate813(
         }
       }
     } else {
-      validate813.errors = [
+      validate877.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -64,7 +64,7 @@ function validate813(
       return false;
     }
   }
-  validate813.errors = vErrors;
+  validate877.errors = vErrors;
   return errors === 0;
 }
-export { validate813 };
+export { validate877 };

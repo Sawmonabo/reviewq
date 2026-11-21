@@ -467,7 +467,8 @@
   background: #584522;
   border-radius: 2px;
 }
-::highlight(reviewq-patch-match) {
+::highlight(reviewq-patch-match),
+::highlight(reviewq-discussion-match) {
   color: #17140b;
   background-color: #ffd881;
 }

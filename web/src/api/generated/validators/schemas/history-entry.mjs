@@ -2,10 +2,10 @@
 import { func0 } from "../runtime.mjs";
 import { validate48 } from "./history-cursor-dto.mjs";
 import { validate25 } from "./checkpoint-id-dto.mjs";
-import { validate645 } from "./history-part.mjs";
+import { validate709 } from "./history-part.mjs";
 import { validate127 } from "./safe-count-dto.mjs";
 import { validate235 } from "./utc-timestamp-dto.mjs";
-function validate642(
+function validate706(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -24,7 +24,7 @@ function validate642(
         ((data.parts === undefined || !func0.call(data, "parts")) &&
           (missing0 = "parts"))
       ) {
-        validate642.errors = [
+        validate706.errors = [
           {
             instancePath,
             schemaPath: "#/required",
@@ -86,7 +86,7 @@ function validate642(
                   for (let i0 = 0; i0 < len0; i0++) {
                     const _errs5 = errors;
                     if (
-                      !validate645(data2[i0], {
+                      !validate709(data2[i0], {
                         instancePath: instancePath + "/parts/" + i0,
                         parentData: data2,
                         parentDataProperty: i0,
@@ -95,8 +95,8 @@ function validate642(
                     ) {
                       vErrors =
                         vErrors === null
-                          ? validate645.errors
-                          : vErrors.concat(validate645.errors);
+                          ? validate709.errors
+                          : vErrors.concat(validate709.errors);
                       errors = vErrors.length;
                     }
                     var valid1 = _errs5 === errors;
@@ -105,7 +105,7 @@ function validate642(
                     }
                   }
                 } else {
-                  validate642.errors = [
+                  validate706.errors = [
                     {
                       instancePath: instancePath + "/parts",
                       schemaPath: "#/properties/parts/type",
@@ -226,7 +226,7 @@ function validate642(
                         vErrors.push(err1);
                       }
                       errors++;
-                      validate642.errors = vErrors;
+                      validate706.errors = vErrors;
                       return false;
                     } else {
                       errors = _errs9;
@@ -300,7 +300,7 @@ function validate642(
                           vErrors.push(err3);
                         }
                         errors++;
-                        validate642.errors = vErrors;
+                        validate706.errors = vErrors;
                         return false;
                       } else {
                         errors = _errs14;
@@ -324,7 +324,7 @@ function validate642(
         }
       }
     } else {
-      validate642.errors = [
+      validate706.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -335,7 +335,7 @@ function validate642(
       return false;
     }
   }
-  validate642.errors = vErrors;
+  validate706.errors = vErrors;
   return errors === 0;
 }
-export { validate642 };
+export { validate706 };

@@ -2,7 +2,7 @@
 import { func0 } from "../runtime.mjs";
 import { validate134 } from "./report-hash-dto.mjs";
 import { validate48 } from "./history-cursor-dto.mjs";
-function validate523(
+function validate587(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -22,7 +22,7 @@ function validate523(
         ((data.font === undefined || !func0.call(data, "font")) &&
           (missing0 = "font"))
       ) {
-        validate523.errors = [
+        validate587.errors = [
           {
             instancePath,
             schemaPath: "#/required",
@@ -56,7 +56,7 @@ function validate523(
           if (data.recipe !== undefined && func0.call(data, "recipe")) {
             const _errs2 = errors;
             if (typeof data.recipe !== "string") {
-              validate523.errors = [
+              validate587.errors = [
                 {
                   instancePath: instancePath + "/recipe",
                   schemaPath: "#/properties/recipe/type",
@@ -120,7 +120,7 @@ function validate523(
         }
       }
     } else {
-      validate523.errors = [
+      validate587.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -131,7 +131,7 @@ function validate523(
       return false;
     }
   }
-  validate523.errors = vErrors;
+  validate587.errors = vErrors;
   return errors === 0;
 }
-export { validate523 };
+export { validate587 };

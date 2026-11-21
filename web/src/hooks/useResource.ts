@@ -14,10 +14,12 @@ export function useResource<T>(
   key: string,
   read: (signal: AbortSignal) => Promise<Envelope<T>>,
   resources: readonly ResourceKeyDto[] = [],
+  discardOnError?: (error: unknown) => boolean,
 ) {
   const [result, setResult] = useState<Result<T>>();
   const [epoch, setEpoch] = useState(0);
   const readCurrent = useEffectEvent(read);
+  const discard = useEffectEvent((error: unknown) => discardOnError?.(error) ?? false);
   const keys = JSON.stringify(resources);
   const lease = useRef<ReturnType<typeof watchResources> | undefined>(undefined);
 
@@ -64,8 +66,9 @@ export function useResource<T>(
       (error: unknown) => {
         pending = false;
         if (!controller.signal.aborted) {
+          const retain = !discard(error);
           setResult((previous) => ({
-            ...(previous?.key === key ? previous : {}),
+            ...(retain && previous?.key === key ? previous : {}),
             key,
             error: errorMessage(error),
           }));

@@ -3,9 +3,14 @@
 use serde::Serialize;
 
 mod approvals;
+mod notes;
 mod source;
 pub use approvals::{
     ApprovalFacts, ApprovalRule, ApprovalView, ApprovalViewResponse, ApprovalWarning, Approver,
+};
+pub use notes::{
+    DiscussionDestination, DiscussionDestinationResponse, DiscussionSearch, DiscussionSearchMatch,
+    DiscussionSearchResponse, NoteKind,
 };
 pub use source::{PatchSourceCursor, PatchSourcePage, PatchSourceResponse, PatchSourceRow};
 
@@ -180,6 +185,8 @@ pub enum PatchAvailability {
 pub struct PatchDiscussions {
     pub review_id: ReviewIdDto,
     pub revision: PatchRevisionDto,
+    pub page_number: SafeCountDto,
+    pub previous_cursor: Option<PageCursorDto>,
     #[serde(flatten)]
     pub page: Page<PatchDiscussion>,
     /// Optional searchable plain text from notes in this same response.
