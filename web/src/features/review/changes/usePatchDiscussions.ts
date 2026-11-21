@@ -16,7 +16,11 @@ type Coverage = {
 
 export function usePatchDiscussions(reviewId: string, revision: string | undefined) {
   const key = JSON.stringify(["discussions", reviewId, revision]);
-  const [progress, setProgress] = useState<{ readonly key: string; readonly data: Coverage }>();
+  const [progress, setProgress] = useState<{
+    readonly key: string;
+    readonly data: Coverage | null;
+  }>();
+  const confirmed = progress?.key === key && progress.data === null;
   const resource = useResource(
     key,
     async (signal) => {
@@ -45,16 +49,21 @@ export function usePatchDiscussions(reviewId: string, revision: string | undefin
             cursor,
             data: { pages, items: [...items.values()], limited: Boolean(following) },
           };
-        setProgress({
-          key,
-          data: { pages: new Map(pages), items: [...items.values()], limited: true },
-        });
+        if (!confirmed) {
+          setProgress({
+            key,
+            data: { pages: new Map(pages), items: [...items.values()], limited: true },
+          });
+        }
         next = following;
       }
       return { cursor, data: { pages, items: [...items.values()], limited: true } };
     },
     [{ kind: "discussions", id: reviewId }],
   );
+  // Keep only the key once confirmed, so refreshes need no hidden preview snapshots.
+  if (resource.data !== undefined && !confirmed) setProgress({ key, data: null });
+  else if (progress && progress.key !== key) setProgress(undefined);
   const coverage = resource.data ?? (progress?.key === key ? progress.data : undefined);
   return {
     ...resource,
