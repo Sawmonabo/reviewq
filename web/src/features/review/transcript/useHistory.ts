@@ -166,7 +166,7 @@ export function useHistory(
       const bytes = utf8.encode(value.text).length;
       if (bytes > 65_536 || value.offset + bytes > 65_536) return;
       setLive((current) => {
-        if (!current || current.entryId !== value.entryId) {
+        if (!current || current.entryId !== value.entryId || current.turnId !== value.turnId) {
           return value.offset === 0
             ? { entryId: value.entryId, turnId: value.turnId, text: value.text, bytes }
             : current;

@@ -159,14 +159,13 @@ export function Transcript({ target, provider, child, messages, working }: Props
       Boolean(inProgress),
       groupKeys,
     );
-    if (following && inProgress)
-      rows.push({ kind: "live", id: inProgress.entryId, provisional: inProgress.text });
+    if (!history.newer && inProgress)
+      rows.push({ kind: "live", id: inProgress.entryId, provisional: inProgress });
     return rows;
   }, [
     expanded,
     expandedReads,
     expandedRuns,
-    following,
     groupKeys,
     history.generation,
     history.newer,
@@ -776,7 +775,6 @@ export function Transcript({ target, provider, child, messages, working }: Props
                     </header>
                   )}
                   <div className="message-body stack">
-                    {row.provisional !== undefined && <MarkdownContent source={row.provisional} />}
                     {row.delivery && (
                       <div className="timeline-delivery">
                         {row.delivery.attachment?.quote && (
@@ -790,12 +788,13 @@ export function Transcript({ target, provider, child, messages, working }: Props
                         )}
                       </div>
                     )}
-                    {row.entry && !row.delivery && history.generation && (
+                    {(row.entry || row.provisional) && !row.delivery && history.generation && (
                       <EntryBody
                         key={history.generation}
                         target={target}
                         generation={history.generation}
                         entry={row.entry}
+                        provisional={row.provisional}
                         knownTools={knownTools}
                         expanded={expanded}
                         prose={prose}

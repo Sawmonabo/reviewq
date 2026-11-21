@@ -14,8 +14,10 @@ type MarkdownNode = {
   readonly children?: readonly MarkdownNode[] | undefined;
 };
 
+export type PreparedMarkdown = { readonly tree: Root; readonly nodes: number };
+
 const MAX_DEPTH = 128;
-const MAX_NODES = 60_000;
+export const MAX_MARKDOWN_NODES = 60_000;
 const MARKDOWN_SYNTAX = /[*_`~[<>&\\|#]|^(?:[ \t]*[+-]|\d+[.)])[ \t]/m;
 const blockNodes = new Set(["root", "list", "listItem", "blockquote", "table"]);
 const syntax = unified().use(remarkParse).use(remarkGfm);
@@ -30,6 +32,10 @@ const rich = syntax()
   });
 
 export function parseMarkdown(source: string, base?: string): Root | undefined {
+  return prepareMarkdown(source, base)?.tree;
+}
+
+export function prepareMarkdown(source: string, base?: string): PreparedMarkdown | undefined {
   if (!admitMarkdown(source)) return;
   const tree = rich.runSync(rich.parse(source));
   const pending: { node: Root | RootContent; depth: number }[] = [{ node: tree, depth: 0 }];
@@ -37,27 +43,27 @@ export function parseMarkdown(source: string, base?: string): Root | undefined {
   while (pending.length) {
     const entry = pending.pop();
     if (!entry) break;
-    if (++count > MAX_NODES || entry.depth > MAX_DEPTH) return;
+    if (++count > MAX_MARKDOWN_NODES || entry.depth > MAX_DEPTH) return;
     if (entry.node.type === "element") safeElement(entry.node, base);
     if ("children" in entry.node) {
       for (const node of entry.node.children) pending.push({ node, depth: entry.depth + 1 });
     }
   }
-  return tree;
+  return { tree, nodes: count };
 }
 
 export function projectMarkdownText(source: string): string {
   if (!admitMarkdown(source) || !MARKDOWN_SYNTAX.test(source)) return source;
   // Use the syntax tree for searchable prose without creating the rendered HTML tree.
   try {
-    return textContent(syntax.parse(source), 0, { remaining: MAX_NODES });
+    return textContent(syntax.parse(source), 0, { remaining: MAX_MARKDOWN_NODES });
   } catch (error) {
     if (!(error instanceof RangeError)) throw error;
     return source;
   }
 }
 
-function admitMarkdown(source: string): boolean {
+export function admitMarkdown(source: string): boolean {
   const encoder = new TextEncoder();
   if (source.length > 1024 * 1024 || encoder.encode(source).length > 1024 * 1024) return false;
   const lines = source.split("\n");
