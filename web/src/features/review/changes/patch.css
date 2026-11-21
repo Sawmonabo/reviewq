@@ -103,6 +103,7 @@ pre.patch-source {
   --patch-gutter: 85px;
   --patch-number-width: 34px;
   --patch-number-padding: 7px;
+  --patch-sign-offset: -5px;
   isolation: isolate;
   color: light-dark(var(--text), #d9dbe6);
   font-size: 11px;
@@ -138,7 +139,6 @@ pre.patch-source {
   user-select: none;
 }
 .patch-row:focus {
-  z-index: 2;
   outline: 2px solid var(--focus);
   outline-offset: -2px;
 }
@@ -179,6 +179,16 @@ pre.patch-source {
 ::highlight(reviewq-patch-delete) {
   color: light-dark(var(--diff-deleted), #f0c7ce);
 }
+@media (forced-colors: none) {
+  ::highlight(reviewq-patch-add-sign) {
+    color: transparent;
+    text-shadow: var(--patch-sign-offset) 0 light-dark(var(--diff-added), #c9e6d3);
+  }
+  ::highlight(reviewq-patch-delete-sign) {
+    color: transparent;
+    text-shadow: var(--patch-sign-offset) 0 light-dark(var(--diff-deleted), #f0c7ce);
+  }
+}
 ::highlight(reviewq-patch-hunk) {
   color: light-dark(var(--link), #bdc9f8);
 }
@@ -210,6 +220,7 @@ pre.patch-source {
     --patch-gutter: 67px;
     --patch-number-width: 26px;
     --patch-number-padding: 4px;
+    --patch-sign-offset: -4px;
   }
   .patch-thread-slot:not(:empty) {
     padding-inline: 7px;
