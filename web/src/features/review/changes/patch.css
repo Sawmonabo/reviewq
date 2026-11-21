@@ -105,6 +105,9 @@
   clip-path: inset(100%);
   pointer-events: none;
 }
+.patch-window-held .patch-block-text {
+  visibility: hidden;
+}
 pre.patch-source {
   padding: 8px;
 }
