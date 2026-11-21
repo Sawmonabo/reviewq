@@ -231,6 +231,24 @@ pub(super) fn open_anchor(
     Ok((locator.generation, locator.point.open()?))
 }
 
+pub(super) fn entry_locator(
+    endpoint: &ServiceEndpoint,
+    run: &RunId,
+    session: &SessionKey,
+    generation: &str,
+    id: &NativeInputId,
+    point: &HistoryBookmark,
+) -> Result<HistoryCursorDto, AppError> {
+    let locator = EntryLocator {
+        run: run.to_string(),
+        session: session.to_string(),
+        generation: generation.to_owned(),
+        entry: id.to_string(),
+        point: Bookmark::from_bookmark(point, run, session, generation),
+    };
+    HistoryCursorDto::new(endpoint.encode_cursor(AROUND, &locator)?).ok_or(AppError::Internal)
+}
+
 pub(in crate::entry) async fn navigation(
     State(entry): State<Arc<Entry>>,
     headers: HeaderMap,

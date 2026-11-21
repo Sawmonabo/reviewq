@@ -15,9 +15,13 @@ import type { MessageHistoryItem } from "../../../api/generated/contracts/delive
 import { historyParts } from "../../../api/history";
 import type { SessionAddress } from "../../../api/history";
 import { Empty, Loading, Notice } from "../../../components/PanelState";
-import { describeError, formatTime, readable } from "../../../lib/presentation";
+import { describeError, readable } from "../../../lib/presentation";
 import { deliveryLabels } from "../delivery-labels";
 import { EntryBody } from "./EntryBody";
+import { HistorySelection } from "./HistorySelection";
+import { HistoryStatus } from "./HistoryStatus";
+import { TranscriptFind } from "./find/TranscriptFind";
+import type { FoundOutput, PreparedDestination } from "./find/destination";
 import {
   entriesIn,
   historyBookmark,
@@ -34,7 +38,15 @@ import { HistoryTimestamp } from "./HistoryTimestamp";
 import { FileReadPack, ToolRunHeader } from "./ToolActivity";
 import { openKey, toolCatalog, toolOnly } from "./tool-activity";
 import type { ReadTarget, ToolRun } from "./tool-activity";
-import { promptRanks, timelineRows, type VisibleRow } from "./timeline-rows";
+import {
+  historyId,
+  openToolRun,
+  promptRanks,
+  readingIndex,
+  timelineRows,
+  toggleKey,
+  type VisibleRow,
+} from "./timeline-rows";
 import { MarkdownContent } from "../../../components/markdown/MarkdownContent";
 import { useHistory } from "./useHistory";
 import { useInlineProse } from "./useInlineProse";
@@ -87,6 +99,7 @@ export function Transcript({ target, provider, child, messages, working }: Props
     () => new Set(saved && !saved.following && saved.toolEntry !== false ? [saved.entryId] : []),
   );
   const [output, setOutput] = useState<OutputSelection>();
+  const [foundOutput, setFoundOutput] = useState<FoundOutput>();
   const [extraParts, setExtraParts] = useState<ExtraParts>();
   const partsRequest = useRef<AbortController | undefined>(undefined);
   const viewport = useRef<HTMLDivElement>(null);
@@ -419,7 +432,11 @@ export function Transcript({ target, provider, child, messages, working }: Props
   }, [bookmark]);
 
   function leaveReopen() {
-    if (anchor.current?.reopenPages !== undefined || anchor.current?.adjacent)
+    if (
+      anchor.current?.jump ||
+      anchor.current?.reopenPages !== undefined ||
+      anchor.current?.adjacent
+    )
       anchor.current = undefined;
   }
 
@@ -564,47 +581,42 @@ export function Transcript({ target, provider, child, messages, working }: Props
     setExpanded((known) => toggleKey(known, openKey(at.entryId, at.callId), true));
   }
 
+  function openFound({ page, output: found, extra }: PreparedDestination) {
+    const { entryId, generation, locator, contentRef, toolCallId } = found.destination;
+    if (!history.openPrepared(page, { entryId, locator })) return false;
+    setFollowing(false);
+    setFoundOutput(found);
+    setOutput({ entryId, reference: contentRef });
+    if (extra) setExtraParts({ entryId, generation, pages: 1, ...extra });
+    if (toolCallId) {
+      setExpanded((known) => toggleKey(known, openKey(entryId, toolCallId), true));
+      setExpandedReads((known) => toggleKey(known, entryId, true));
+      setExpandedRuns((known) => openToolRun(entries, known, entryId));
+    }
+    return true;
+  }
+
   return (
     <section className="transcript-shell" aria-label="Native conversation">
-      {selectedText && (
-        <div className="timeline-controls">
-          <button
-            type="button"
-            onClick={() => {
-              const value = getSelection()?.toString();
-              if (value)
-                void navigator.clipboard
-                  .writeText(value)
-                  .catch((failure: unknown) => setActionNotice(describeError(failure)));
-            }}
-          >
-            Copy selection
-          </button>
-          <button type="button" onClick={clear}>
-            Clear selection
-          </button>
-        </div>
-      )}
+      <TranscriptFind
+        target={target}
+        viewport={viewport}
+        onOpen={() => {
+          const reading = visibleAnchor(viewport.current);
+          anchor.current = reading && { ...reading, jump: true };
+          list.cancelScroll();
+          requestedLatest.current = false;
+          setFollowing(false);
+        }}
+        onClose={leaveReopen}
+        onChoose={openFound}
+        onReveal={() => {
+          anchor.current = undefined;
+        }}
+      />
+      {selectedText && <HistorySelection onClear={clear} onError={setActionNotice} />}
       {actionNotice && <Notice>{actionNotice}</Notice>}
-      {history.error && (
-        <Notice retry={() => void history.load("latest")}>
-          {history.error}
-          {history.updated && ` · Last confirmed ${formatTime(history.updated)}`}
-        </Notice>
-      )}
-      {!history.online && (
-        <Notice>
-          Live updates paused
-          {history.updated ? ` · Last confirmed ${formatTime(history.updated)}` : ""}.
-        </Notice>
-      )}
-      {history.availability && history.availability !== "available" && (
-        <Notice>
-          {history.availability === "partial"
-            ? "Only part of this conversation is available."
-            : `Native history · ${readable(history.availability)}`}
-        </Notice>
-      )}
+      <HistoryStatus history={history} onRetry={() => void history.load("latest")} />
       <div
         className="timeline-viewport"
         aria-label="Conversation history"
@@ -733,6 +745,11 @@ export function Transcript({ target, provider, child, messages, working }: Props
                       : "You"
                   : providerName;
               const timestamp = row.entry?.timestamp ?? row.delivery?.createdAt;
+              const found =
+                foundOutput?.destination.entryId === row.id &&
+                foundOutput.destination.generation === history.generation
+                  ? foundOutput
+                  : undefined;
               return (
                 <article
                   ref={list.measureElement}
@@ -782,34 +799,40 @@ export function Transcript({ target, provider, child, messages, working }: Props
                             <MarkdownContent source={row.delivery.attachment.quote} />
                           </blockquote>
                         )}
-                        <MarkdownContent source={row.delivery.text} />
+                        {!found && <MarkdownContent source={row.delivery.text} />}
                         {row.delivery.outcomeDetail && (
                           <small className="meta">{row.delivery.outcomeDetail}</small>
                         )}
                       </div>
                     )}
-                    {(row.entry || row.provisional) && !row.delivery && history.generation && (
-                      <EntryBody
-                        key={history.generation}
-                        target={target}
-                        generation={history.generation}
-                        entry={row.entry}
-                        provisional={row.provisional}
-                        knownTools={knownTools}
-                        expanded={expanded}
-                        prose={prose}
-                        toggle={(key, open) => setExpanded((known) => toggleKey(known, key, open))}
-                        reference={output?.entryId === row.id ? output.reference : undefined}
-                        {...(extraParts?.generation === history.generation &&
-                        extraParts.entryId === row.id
-                          ? { extra: extraParts }
-                          : {})}
-                        onMoreParts={(cursor) => void moreParts(row.id, cursor)}
-                        onReference={(reference) =>
-                          setOutput(reference ? { entryId: row.id, reference } : undefined)
-                        }
-                      />
-                    )}
+                    {(row.entry || row.provisional) &&
+                      (!row.delivery || found) &&
+                      history.generation && (
+                        <EntryBody
+                          key={history.generation}
+                          target={target}
+                          generation={history.generation}
+                          entry={row.entry}
+                          provisional={row.provisional}
+                          knownTools={knownTools}
+                          expanded={expanded}
+                          prose={prose}
+                          toggle={(key, open) =>
+                            setExpanded((known) => toggleKey(known, key, open))
+                          }
+                          reference={output?.entryId === row.id ? output.reference : undefined}
+                          {...(extraParts?.generation === history.generation &&
+                          extraParts.entryId === row.id
+                            ? { extra: extraParts }
+                            : {})}
+                          onMoreParts={(cursor) => void moreParts(row.id, cursor)}
+                          {...(found ? { found } : {})}
+                          onReference={(reference) => {
+                            setFoundOutput(undefined);
+                            setOutput(reference ? { entryId: row.id, reference } : undefined);
+                          }}
+                        />
+                      )}
                   </div>
                 </article>
               );
@@ -864,23 +887,4 @@ export function Transcript({ target, provider, child, messages, working }: Props
       )}
     </section>
   );
-}
-
-function readingIndex(entries: readonly VisibleRow[], saved: Position, exact = saved.toolEntry) {
-  const index = entries.findIndex((row) => (exact ? row.id : historyId(row)) === saved.id);
-  if (index >= 0 || (exact && !saved.adjacent)) return index;
-  // A retained native entry can become part of a differently keyed collapsed group.
-  return entries.findIndex((row) => row.kind === "tool-run" && row.members.includes(saved.id));
-}
-
-function historyId(row: VisibleRow) {
-  return "anchorId" in row ? row.anchorId : row.id;
-}
-
-function toggleKey(known: ReadonlySet<string>, key: string, open: boolean) {
-  if (known.has(key) === open) return known;
-  const next = new Set(known);
-  if (open) next.add(key);
-  else next.delete(key);
-  return next.size > 160 ? new Set([...next].slice(-160)) : next;
 }

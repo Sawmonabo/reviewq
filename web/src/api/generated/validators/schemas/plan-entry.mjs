@@ -2,7 +2,7 @@
 import { func0 } from "../runtime.mjs";
 import { validate25 } from "./checkpoint-id-dto.mjs";
 import { validate571 } from "./history-part.mjs";
-function validate629(
+function validate635(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -17,7 +17,7 @@ function validate629(
         ((data.part === undefined || !func0.call(data, "part")) &&
           (missing0 = "part"))
       ) {
-        validate629.errors = [
+        validate635.errors = [
           {
             instancePath,
             schemaPath: "#/required",
@@ -71,7 +71,7 @@ function validate629(
         }
       }
     } else {
-      validate629.errors = [
+      validate635.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -82,7 +82,7 @@ function validate629(
       return false;
     }
   }
-  validate629.errors = vErrors;
+  validate635.errors = vErrors;
   return errors === 0;
 }
-export { validate629 };
+export { validate635 };

@@ -3,7 +3,7 @@ import { func0 } from "../runtime.mjs";
 import { validate69 } from "./merge-request-iid-dto.mjs";
 import { validate114 } from "./review-id-dto.mjs";
 import { validate150 } from "./git-sha-dto.mjs";
-function validate1529(
+function validate1576(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -22,7 +22,7 @@ function validate1529(
         ((data.sourceSha === undefined || !func0.call(data, "sourceSha")) &&
           (missing0 = "sourceSha"))
       ) {
-        validate1529.errors = [
+        validate1576.errors = [
           {
             instancePath,
             schemaPath: "#/required",
@@ -123,7 +123,7 @@ function validate1529(
         }
       }
     } else {
-      validate1529.errors = [
+      validate1576.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -134,7 +134,7 @@ function validate1529(
       return false;
     }
   }
-  validate1529.errors = vErrors;
+  validate1576.errors = vErrors;
   return errors === 0;
 }
-export { validate1529 };
+export { validate1576 };

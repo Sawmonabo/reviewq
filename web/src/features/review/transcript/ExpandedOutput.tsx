@@ -4,6 +4,7 @@ import type { SessionAddress } from "../../../api/history";
 import { Loading, Notice } from "../../../components/PanelState";
 import { useResource } from "../../../hooks/useResource";
 import { MarkdownContent } from "../../../components/markdown/MarkdownContent";
+import type { FoundOutput } from "./find/destination";
 
 type Position = { readonly offset: number; readonly cursor?: string };
 const start: Position = { offset: 0 };
@@ -16,44 +17,47 @@ export function ExpandedOutput({
   generation,
   reference,
   format,
+  found,
 }: {
   readonly target: SessionAddress;
   readonly entryId: string;
   readonly generation: string;
   readonly reference: string;
   readonly format: "markdown" | "text";
+  readonly found?: FoundOutput;
 }) {
-  const [path, setPath] = useState<readonly Position[]>([start]);
+  const opening = found?.destination;
+  const [path, setPath] = useState<readonly Position[]>(() => [
+    opening
+      ? {
+          offset: opening.offset,
+          ...(opening.contentCursor ? { cursor: opening.contentCursor } : {}),
+        }
+      : start,
+  ]);
   const [blocked, setBlocked] = useState(false);
   const output = useRef<HTMLDivElement>(null);
   const position = path.at(-1) ?? start;
+  const prepared = opening?.offset === position.offset ? found : undefined;
+  const initialRange = prepared && outputRange(prepared.content);
   const range = useResource(
     `output:${target.runId}:${target.sessionKey}:${generation}:${reference}:${position.offset}`,
     async (signal) => {
-      const data = await historyContent(
-        target,
-        entryId,
-        generation,
-        reference,
-        position.cursor,
-        signal,
-      );
+      const data =
+        prepared?.content ??
+        (await historyContent(target, entryId, generation, reference, position.cursor, signal));
       const bytes = encoder.encode(data.text).length;
       if (data.offset !== position.offset || bytes > 65_536 || (!bytes && data.nextCursor)) {
         throw new Error("The requested native output range is unavailable.");
       }
       return {
-        data: {
-          text: data.text,
-          complete: data.offset === 0 && data.complete && !data.nextCursor,
-          nextCursor: data.nextCursor,
-          nextOffset: data.offset + bytes,
-        },
+        data: outputRange(data),
         cursor: "",
       };
     },
   );
-  const next = range.data?.nextCursor;
+  const content = initialRange ?? range.data;
+  const next = content?.nextCursor;
 
   function move(next: readonly Position[]) {
     const selection = getSelection();
@@ -74,15 +78,24 @@ export function ExpandedOutput({
 
   return (
     <div className="output-reader stack">
-      <div ref={output} tabIndex={-1} aria-label="Native output">
-        {range.pending && <Loading label="Reading native output…" />}
+      <div
+        ref={output}
+        tabIndex={-1}
+        aria-label="Native output"
+        data-find-body={prepared ? "" : undefined}
+      >
+        {!content && range.pending && <Loading label="Reading native output…" />}
         {range.error && <Notice retry={range.retry}>{range.error}</Notice>}
-        {range.data &&
-          (format === "markdown" && range.data.complete ? (
-            <MarkdownContent source={range.data.text} />
+        {content &&
+          (format === "markdown" && content.complete ? (
+            prepared?.tree ? (
+              <MarkdownContent tree={prepared.tree} />
+            ) : (
+              <MarkdownContent source={content.text} />
+            )
           ) : (
             <pre className="tool-output-line" aria-label="Native output text">
-              {range.data.text}
+              {content.text}
             </pre>
           ))}
       </div>
@@ -98,18 +111,13 @@ export function ExpandedOutput({
               Earlier output
             </button>
           )}
-          {next && range.data && (
+          {next && content && (
             <button
               type="button"
               className="quiet-button"
-              onClick={() => {
-                if (range.data)
-                  move(
-                    [...path, { offset: range.data.nextOffset, cursor: next }].slice(
-                      -MAX_POSITIONS,
-                    ),
-                  );
-              }}
+              onClick={() =>
+                move([...path, { offset: content.nextOffset, cursor: next }].slice(-MAX_POSITIONS))
+              }
             >
               More output
             </button>
@@ -132,4 +140,13 @@ export function ExpandedOutput({
       )}
     </div>
   );
+}
+
+function outputRange(data: FoundOutput["content"]) {
+  return {
+    text: data.text,
+    complete: data.offset === 0 && data.complete && !data.nextCursor,
+    nextCursor: data.nextCursor,
+    nextOffset: data.offset + encoder.encode(data.text).length,
+  };
 }

@@ -12,6 +12,7 @@ mod labels;
 pub mod launch;
 pub mod notifications;
 pub mod queue;
+pub mod reading;
 pub mod reports;
 pub mod settings;
 pub mod sources;

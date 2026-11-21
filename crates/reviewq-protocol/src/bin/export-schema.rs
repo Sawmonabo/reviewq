@@ -116,6 +116,14 @@ fn main() -> Result<(), Box<dyn Error>> {
         "HistoryPartPageResponse",
     )?;
     registry.response::<HistoryContentResponse>("history", "HistoryContentResponse")?;
+    registry.response::<reviewq_protocol::history::search::HistorySearchResponse>(
+        "history",
+        "HistorySearchResponse",
+    )?;
+    registry.response::<reviewq_protocol::history::search::HistorySearchDestinationResponse>(
+        "history",
+        "HistorySearchDestinationResponse",
+    )?;
 
     registry.request::<SendMessageRequest>("delivery", "SendMessageRequest")?;
     registry.response::<DeliveryReceiptResponse>("delivery", "DeliveryReceiptResponse")?;

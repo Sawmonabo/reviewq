@@ -6,10 +6,9 @@ use reviewq_domain::identity::{GitSha, MrIdentity};
 
 use crate::access::AppFuture;
 
-mod discussion_text;
 mod source;
 
-pub use discussion_text::{MAX_DISCUSSION_TEXT_SOURCE_BYTES, discussion_text};
+pub use crate::reading::{MAX_DISCUSSION_TEXT_SOURCE_BYTES, discussion_text};
 pub use source::{
     PATCH_SOURCE_BYTES, PATCH_SOURCE_ROWS, PatchSourceCursor, PatchSourcePage, PatchSourceRequest,
     PatchSourceRow, PatchSourceTarget, PatchSourceWindow,

@@ -1,0 +1,52 @@
+.transcript-find {
+  position: absolute;
+  z-index: 5;
+  inset-block-start: 0.4rem;
+  inset-inline-end: 1.8rem;
+}
+
+.transcript-shell:has(.timeline-controls) .transcript-find {
+  inset-block-start: 2.5rem;
+}
+
+.transcript-find-panel {
+  display: grid;
+  width: min(22rem, calc(100vw - 4rem));
+  padding: 0.4rem;
+}
+
+.transcript-find-controls {
+  display: flex;
+  gap: 0.25rem;
+  align-items: center;
+}
+
+.transcript-find-controls input {
+  flex: 1;
+  min-width: 0;
+}
+
+.transcript-find-status {
+  margin: 0.35rem 0.4rem 0;
+}
+
+.transcript-find-results {
+  display: grid;
+  max-height: 12rem;
+  margin-top: 0.35rem;
+  overflow: auto;
+}
+
+.transcript-find-results button {
+  justify-content: start;
+  overflow: hidden;
+  text-align: start;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.transcript-find-results mark,
+::highlight(reviewq-transcript-match) {
+  background: #f5d67a;
+  color: #171921;
+}

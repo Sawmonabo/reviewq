@@ -14,6 +14,8 @@ import {
   isHistoryPageResponse,
   isHistoryPartPageResponse,
   isHistoryResultResponse,
+  isHistorySearchDestinationResponse,
+  isHistorySearchResponse,
   isMessageHistoryPageResponse,
   isQuestionAnswerResponse,
   isQuestionFormsResponse,
@@ -100,6 +102,36 @@ export async function historyPrompts(
   );
   verify(target, result.data);
   return result;
+}
+
+export async function historySearch(
+  target: SessionAddress,
+  params: { q: string; cursor?: string; reverse?: boolean },
+  signal: AbortSignal,
+) {
+  const { data } = await read(
+    `${path(target)}/history/search${queryString(params)}`,
+    isHistorySearchResponse,
+    signal,
+    256 * 1024,
+  );
+  verify(target, data);
+  return data;
+}
+
+export async function historySearchDestination(
+  target: SessionAddress,
+  hit: string,
+  signal: AbortSignal,
+) {
+  const { data } = await read(
+    `${path(target)}/history/search/locate${queryString({ hit })}`,
+    isHistorySearchDestinationResponse,
+    signal,
+    16 * 1024,
+  );
+  verify(target, data);
+  return data;
 }
 
 export function nativeHistoryUrl(target: SessionAddress) {

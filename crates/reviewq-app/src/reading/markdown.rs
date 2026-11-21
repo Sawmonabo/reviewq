@@ -13,6 +13,19 @@ const MAX_BLOCK_PREFIX: usize = 128;
 const MAX_DEPTH: usize = 128;
 const MAX_NODES: usize = 60_000;
 
+/// Text of one admitted Markdown body. Unknown display constructs have no certified projection.
+pub fn displayed_markdown(source: &str) -> Option<String> {
+    if source.len() > 65_536
+        || source
+            .split_terminator('\n')
+            .enumerate()
+            .any(|(index, line)| index >= MAX_LINES || !admit_line(line))
+    {
+        return None;
+    }
+    project(source, true)
+}
+
 /// Optional plain text for a distant note. The browser retains its existing projection for
 /// inputs outside this bounded subset and always renders the original Markdown when reading.
 pub fn discussion_text(source: &str) -> Option<String> {
@@ -32,11 +45,16 @@ pub fn discussion_text(source: &str) -> Option<String> {
         return None;
     }
 
+    let text = project(source, false)?;
+    (!text.eq(source) && text.len() <= MAX_DISCUSSION_TEXT_SOURCE_BYTES).then_some(text)
+}
+
+fn project(source: &str, reader: bool) -> Option<String> {
     let tree = markdown::to_mdast(source, &ParseOptions::gfm()).ok()?;
     let mut text = String::new();
     let mut remaining = MAX_NODES;
-    append_text(&tree, source, &mut text, 0, &mut remaining)?;
-    (!text.eq(source) && text.len() <= MAX_DISCUSSION_TEXT_SOURCE_BYTES).then_some(text)
+    append_text(&tree, source, &mut text, 0, &mut remaining, reader)?;
+    Some(text)
 }
 
 fn admit_line(line: &str) -> bool {
@@ -71,6 +89,7 @@ fn append_text(
     text: &mut String,
     depth: usize,
     remaining: &mut usize,
+    reader: bool,
 ) -> Option<()> {
     *remaining = remaining.checked_sub(1)?;
     if depth > MAX_DEPTH {
@@ -81,16 +100,27 @@ fn append_text(
         Node::Text(content) => text.push_str(&content.value),
         Node::InlineCode(content) => {
             let position = content.position.as_ref()?;
-            if position.start.line != position.end.line {
+            if !reader && position.start.line != position.end.line {
                 return None;
             }
             text.push_str(&content.value);
         }
-        Node::Code(content) => text.push_str(&content.value),
+        Node::Code(content) if !reader || content.lang.as_deref() != Some("mermaid") => {
+            text.push_str(&content.value);
+        }
+        Node::Code(_) => (),
         Node::Image(image) => text.push_str(image_label(node, source, &image.alt)?),
         Node::ImageReference(image) => text.push_str(image_label(node, source, &image.alt)?),
         Node::Break(_) => text.push('\n'),
         Node::Html(html) => text.push_str(&html_text(&html.value)?),
+        Node::TableRow(row) if reader => {
+            for (index, cell) in row.children.iter().enumerate() {
+                if index > 0 {
+                    text.push('\t');
+                }
+                append_text(cell, source, text, depth + 1, remaining, reader)?;
+            }
+        }
         _ => {
             let separator = match node {
                 Node::TableRow(_) => "\t",
@@ -108,7 +138,7 @@ fn append_text(
                     text.push_str(separator);
                 }
                 let body = text.len();
-                append_text(child, source, text, depth + 1, remaining)?;
+                append_text(child, source, text, depth + 1, remaining, reader)?;
                 if text.len() == body {
                     text.truncate(before);
                 }
@@ -148,7 +178,10 @@ impl TokenSink for PlainHtml {
             // These tags leave text order intact in an inert HTML template. Delegate tags
             // such as tables, templates, scripts and foreign markup to the browser.
             Token::TagToken(tag) => match &*tag.name {
-                "a" | "br" | "code" | "details" | "picture" | "source" | "strong" | "summary" => (),
+                "a" | "b" | "blockquote" | "br" | "code" | "del" | "details" | "div" | "em"
+                | "h1" | "h2" | "h3" | "h4" | "h5" | "h6" | "i" | "kbd" | "mark" | "p" | "pre"
+                | "picture" | "samp" | "small" | "source" | "span" | "strong" | "sub"
+                | "summary" | "sup" => (),
                 "img" if tag.kind == TagKind::StartTag => {
                     let alt = tag.attrs.iter().find(|attr| &*attr.name.local == "alt");
                     text.push_str(attachment_label(alt.map_or("", |attr| &attr.value)));

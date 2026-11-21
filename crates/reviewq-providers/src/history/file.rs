@@ -312,28 +312,10 @@ pub(super) fn content_source(
     let (bytes, field) = if let Some(index) = reference.part {
         let part = record
             .parts
-            .into_iter()
+            .iter()
             .find(|part| part.index == index)
             .ok_or(AppError::CursorExpired)?;
-        let field = match (&part.kind, source.provider) {
-            (VisiblePartKind::Text(_), _) => records::BodyField::TextBlock(index),
-            (VisiblePartKind::Plan, HostProvider::Codex) => {
-                records::BodyField::CombinedText(record.text_blocks)
-            }
-            (VisiblePartKind::ToolCall { .. }, HostProvider::Codex) => {
-                records::BodyField::CodexField(
-                    record.argument_field.ok_or(AppError::CursorExpired)?,
-                )
-            }
-            (VisiblePartKind::ToolResult { .. }, HostProvider::Codex) => {
-                records::BodyField::CodexField(record.result_field.ok_or(AppError::CursorExpired)?)
-            }
-            (VisiblePartKind::ToolResult { .. }, HostProvider::Claude) => {
-                records::BodyField::ResultBlock(index)
-            }
-            _ => records::BodyField::InputBlock(index),
-        };
-        (part.body.bytes, field)
+        (part.body.bytes, part_field(source.provider, &record, part)?)
     } else {
         (
             record.bytes,
@@ -343,14 +325,41 @@ pub(super) fn content_source(
     Ok(ContentSource { end, bytes, field })
 }
 
-struct ToolProof<'a> {
+pub(super) fn part_field(
+    provider: HostProvider,
+    record: &records::Record,
+    part: &records::Part,
+) -> Result<records::BodyField, AppError> {
+    use records::BodyField;
+    Ok(match (&part.kind, provider) {
+        (VisiblePartKind::Text(_), _) => BodyField::TextBlock(part.index),
+        (VisiblePartKind::Plan, HostProvider::Codex) => {
+            BodyField::CombinedText(record.text_blocks.clone())
+        }
+        (VisiblePartKind::ToolCall { .. }, HostProvider::Codex) => BodyField::CodexField(
+            record
+                .argument_field
+                .clone()
+                .ok_or(AppError::CursorExpired)?,
+        ),
+        (VisiblePartKind::ToolResult { .. }, HostProvider::Codex) => {
+            BodyField::CodexField(record.result_field.clone().ok_or(AppError::CursorExpired)?)
+        }
+        (VisiblePartKind::ToolResult { .. }, HostProvider::Claude) => {
+            BodyField::ResultBlock(part.index)
+        }
+        _ => BodyField::InputBlock(part.index),
+    })
+}
+
+pub(super) struct ToolProof<'a> {
     parents: HashMap<NativeInputId, Vec<(NativeInputId, String)>>,
     budget: u64,
     lines: Lines<'a>,
 }
 
 impl<'a> ToolProof<'a> {
-    fn new(file: &'a File, cancel: &'a AtomicBool) -> Self {
+    pub(super) fn new(file: &'a File, cancel: &'a AtomicBool) -> Self {
         Self {
             parents: HashMap::new(),
             budget: 4 * 1024 * 1024,
@@ -358,7 +367,7 @@ impl<'a> ToolProof<'a> {
         }
     }
 
-    fn redact(&mut self, source: &Source, start: u64, record: &mut records::Record) {
+    pub(super) fn redact(&mut self, source: &Source, start: u64, record: &mut records::Record) {
         if source.provider != HostProvider::Claude
             || !record
                 .parts

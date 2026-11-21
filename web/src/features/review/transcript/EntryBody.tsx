@@ -9,6 +9,7 @@ import { MarkdownContent } from "../../../components/markdown/MarkdownContent";
 import type { ProvisionalReply } from "./timeline-rows";
 import { inlineProseReference } from "./useInlineProse";
 import type { InlineProse } from "./useInlineProse";
+import type { FoundOutput } from "./find/destination";
 
 type Props = {
   readonly target: SessionAddress;
@@ -23,6 +24,7 @@ type Props = {
   readonly toggle: (key: string, open: boolean) => void;
   readonly extra?: { readonly items: readonly HistoryPart[]; readonly next: string | null };
   readonly onMoreParts: (cursor: string) => void;
+  readonly found?: FoundOutput;
 };
 
 export function EntryBody({
@@ -38,6 +40,7 @@ export function EntryBody({
   toggle,
   extra,
   onMoreParts,
+  found,
 }: Props) {
   const next = extra ? extra.next : entry?.partsCursor;
   const sourceParts = [...(entry?.parts ?? []), ...(extra?.items ?? [])];
@@ -51,7 +54,13 @@ export function EntryBody({
   const singleRef = entry && singlePart && inlineProseReference(entry, singlePart);
   const wholeIsInline = singleRef && !reference && prose.get(singleRef) != null;
 
-  function disclosure(entryId: string, ref: string, format: "markdown" | "text", entire = false) {
+  function disclosure(
+    entryId: string,
+    ref: string,
+    format: "markdown" | "text",
+    entire = false,
+    match?: FoundOutput,
+  ) {
     const open = reference === ref;
     return (
       <div className="stack">
@@ -71,12 +80,13 @@ export function EntryBody({
         </button>
         {open && (
           <ExpandedOutput
-            key={ref}
+            key={match ? ref + ":" + match.destination.offset : ref}
             target={target}
             generation={generation}
             entryId={entryId}
             reference={ref}
             format={format}
+            {...(match ? { found: match } : {})}
           />
         )}
       </div>
@@ -84,6 +94,20 @@ export function EntryBody({
   }
 
   function value(current: HistoryEntry, part: HistoryPart, key: string) {
+    if (found && found.destination.nativeIndex === (part.nativeIndex ?? null)) {
+      const { contentRef, markdown, nativeIndex } = found.destination;
+      return (
+        <div className="stack" key={key}>
+          {disclosure(
+            current.entryId,
+            contentRef,
+            markdown ? "markdown" : "text",
+            nativeIndex === null,
+            found,
+          )}
+        </div>
+      );
+    }
     const formatted = part.kind !== "tool_call" && part.kind !== "tool_result";
     const inlineRef = inlineProseReference(current, part);
     const complete = inlineRef && !reference ? prose.get(inlineRef) : undefined;
@@ -144,6 +168,7 @@ export function EntryBody({
       {entry &&
         wholeEntry &&
         !wholeIsInline &&
+        !found &&
         disclosure(entry.entryId, wholeEntry, entryFormat, true)}
       {next && (
         <button className="quiet-button" type="button" onClick={() => onMoreParts(next)}>

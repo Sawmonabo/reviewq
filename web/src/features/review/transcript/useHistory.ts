@@ -1,6 +1,6 @@
 import { useEffect, useEffectEvent, useLayoutEffect, useRef, useState } from "react";
 import { observeSnapshot } from "../../../api/events";
-import type { HistoryPage } from "../../../api/generated/contracts";
+import type { HistoryPage, HistoryPageResponse } from "../../../api/generated/contracts";
 import { historyPage, nativeHistoryUrl } from "../../../api/history";
 import type { SessionAddress } from "../../../api/history";
 import { describeError } from "../../../lib/presentation";
@@ -63,6 +63,24 @@ export function useHistory(
       active.current = undefined;
       setLoading(false);
     }
+  }
+
+  function openPrepared(response: HistoryPageResponse, wanted: Anchor) {
+    if (currentView.current.pinned.size || response.data.reset) return false;
+    active.current?.controller.abort();
+    active.current = undefined;
+    pending.current = false;
+    resetTo.current = undefined;
+    currentView.current.beforeUpdate("around", wanted, false);
+    observeSnapshot(response.cursor);
+    setAvailability(response.data.availability);
+    setUpdated(Date.now());
+    setLoading(false);
+    setWaiting(false);
+    setError(undefined);
+    setPages([response.data]);
+    setLive(undefined);
+    return true;
   }
 
   async function load(position: ReadPosition, wanted?: Anchor, background = false) {
@@ -276,6 +294,7 @@ export function useHistory(
     generation,
     cancelOpposite,
     load,
+    openPrepared,
   };
 }
 

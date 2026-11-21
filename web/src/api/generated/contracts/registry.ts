@@ -132,6 +132,8 @@ import type {
   HistoryPartPageResponse,
   HistoryPlanResponse,
   HistoryResultResponse,
+  HistorySearchDestinationResponse,
+  HistorySearchResponse,
 } from "./history.js";
 
 import type { TicketDetailResponse } from "./tickets.js";
@@ -186,6 +188,8 @@ export interface Contracts {
   HistoryPartPageResponse: HistoryPartPageResponse;
   HistoryPlanResponse: HistoryPlanResponse;
   HistoryResultResponse: HistoryResultResponse;
+  HistorySearchDestinationResponse: HistorySearchDestinationResponse;
+  HistorySearchResponse: HistorySearchResponse;
   InterruptResponse: InterruptResponse;
   InterruptTargetResponse: InterruptTargetResponse;
   LaunchReceiptResponse: LaunchReceiptResponse;

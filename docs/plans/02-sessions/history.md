@@ -40,6 +40,8 @@ For browser JSON under `GET /api/v1/runs/{runId}/sessions/{sessionKey}/history` 
 
 With a verified native file, large item bodies expand through bounded chunks even when a record exceeds the Codex socket frame size. For RPC-only Codex history, a single provider item above the 2 MiB native connection limit is unavailable. The exact terminal offers access to that native result. Provisional Codex text uses received item starts and deltas on the shared connection. The file or bounded RPC read remains authoritative across reconnects.
 
+The first file-backed Find scan reuses the provider's visibility and body decoder. When a long native part needs repeated seek, an anonymous disk-backed file in the private runtime profile can retain one verified decoded body. One service-wide reservation limits the staged bytes to 512 MiB. A body is released on replacement, source invalidation or idle expiry, and anonymous files release on process exit. If staging is unavailable, Find continues through the source decoder in bounded memory from the verified record and decoded position. Write and page buffers are independent of the staged body size.
+
 
 ## Verification
 

@@ -33,6 +33,7 @@ pub(super) use content::{ContentQuery, content, read_content};
 mod live;
 mod parts;
 mod result;
+mod search;
 pub(super) use live::Watchers;
 
 pub(super) fn routes() -> axum::Router<Arc<Entry>> {
@@ -57,6 +58,14 @@ pub(super) fn routes() -> axum::Router<Arc<Entry>> {
         .route(
             "/runs/{run_id}/sessions/{session_key}/history/stream",
             get(live::live),
+        )
+        .route(
+            "/runs/{run_id}/sessions/{session_key}/history/search",
+            get(search::read),
+        )
+        .route(
+            "/runs/{run_id}/sessions/{session_key}/history/search/locate",
+            get(search::locate),
         )
 }
 
@@ -497,10 +506,12 @@ fn encode_entry(
     let text = HistoryText::new(&entry.text[..end]).ok_or(AppError::Internal)?;
     let part = match entry.kind {
         VisibleKind::User => HistoryPart::UserPrompt {
+            native_index: None,
             text,
             content_ref: None,
         },
         VisibleKind::Assistant => HistoryPart::AssistantText {
+            native_index: None,
             text,
             content_ref: None,
         },
@@ -571,16 +582,23 @@ fn visible_part(
         ToolState::Unknown => HistoryToolState::Unknown,
     };
     Ok(match &part.kind {
-        VisiblePartKind::Text(VisibleKind::User) => HistoryPart::UserPrompt { text, content_ref },
-        VisiblePartKind::Text(VisibleKind::Assistant) => {
-            HistoryPart::AssistantText { text, content_ref }
-        }
+        VisiblePartKind::Text(VisibleKind::User) => HistoryPart::UserPrompt {
+            native_index: SafeCountDto::new(u64::from(part.native_index)),
+            text,
+            content_ref,
+        },
+        VisiblePartKind::Text(VisibleKind::Assistant) => HistoryPart::AssistantText {
+            native_index: SafeCountDto::new(u64::from(part.native_index)),
+            text,
+            content_ref,
+        },
         VisiblePartKind::ToolCall {
             call,
             name,
             label,
             state,
         } => HistoryPart::ToolCall {
+            native_index: SafeCountDto::new(u64::from(part.native_index)),
             call_id: HistoryEntryIdDto::new(call.as_str()).ok_or(AppError::Internal)?,
             name: name.clone(),
             label,
@@ -589,13 +607,22 @@ fn visible_part(
             content_ref,
         },
         VisiblePartKind::ToolResult { call, state } => HistoryPart::ToolResult {
+            native_index: SafeCountDto::new(u64::from(part.native_index)),
             call_id: HistoryEntryIdDto::new(call.as_str()).ok_or(AppError::Internal)?,
             state: tool_state(*state),
             text,
             content_ref,
         },
-        VisiblePartKind::Plan => HistoryPart::Plan { text, content_ref },
-        VisiblePartKind::Assignment => HistoryPart::Assignment { text, content_ref },
+        VisiblePartKind::Plan => HistoryPart::Plan {
+            native_index: SafeCountDto::new(u64::from(part.native_index)),
+            text,
+            content_ref,
+        },
+        VisiblePartKind::Assignment => HistoryPart::Assignment {
+            native_index: SafeCountDto::new(u64::from(part.native_index)),
+            text,
+            content_ref,
+        },
     })
 }
 

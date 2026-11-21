@@ -1,0 +1,594 @@
+//! Find literal occurrences in the verified native display projection.
+
+use std::collections::VecDeque;
+use std::fs::{self, Metadata};
+use std::io::{self, Write};
+use std::os::unix::fs::{FileExt, MetadataExt};
+use std::sync::atomic::{AtomicBool, Ordering};
+
+use reviewq_app::access::AppError;
+use reviewq_app::history::search::{
+    HistorySearch, MAX_SEARCH_HITS, SearchHit, SearchPage, SearchPoint, SourceObservation,
+};
+use reviewq_app::history::{FileContentRef, FilePosition, VisiblePartKind};
+use reviewq_app::reading::{FoldedText, Literal, TextMatch, displayed_markdown};
+use reviewq_domain::identity::NativeInputId;
+use reviewq_domain::session::SessionTarget;
+use sha2::{Digest, Sha256};
+
+use super::file::{self, Lines, ToolProof};
+use super::locator::Source;
+use super::records::{self, BodyField, Record};
+
+mod large;
+pub(super) use large::LargeRecords;
+
+const RECORDS_PER_PAGE: usize = 64;
+const BYTES_PER_PAGE: u64 = 2 * 1024 * 1024;
+const DECODE_BLOCK: usize = 16 * 1024;
+const BODY_STEP: u64 = 512 * 1024;
+const CONTENT_BYTES: u64 = 65_536;
+
+pub(super) fn read(
+    source: &Source,
+    owner: &SessionTarget,
+    query: HistorySearch,
+    cancel: &AtomicBool,
+    large: &mut LargeRecords,
+) -> Result<SearchPage, AppError> {
+    let mut budget = file::READ_BUDGET;
+    let metadata = source.file.metadata().map_err(|_| AppError::Unavailable)?;
+    let complete = file::end_of_line(&source.file, metadata.len(), &mut budget, cancel)?;
+    let observation = observed(source, &metadata, complete);
+    let generation = file::generation(source)?;
+    if query
+        .from
+        .as_ref()
+        .is_some_and(|cursor| cursor.observation != observation)
+    {
+        return Err(AppError::CursorExpired);
+    }
+    let mut lines = Lines::new(&source.file, cancel);
+    let mut proof = ToolProof::new(&source.file, cancel);
+    let mut next = match &query.from {
+        Some(cursor) => Some(cursor.point),
+        None if query.reverse && complete > 0 => {
+            Some(first(lines.previous(complete - 1, &mut budget)?, true))
+        }
+        None if complete > 0 => Some(first(0, false)),
+        None => None,
+    };
+    let mut output = SearchPage {
+        generation,
+        observation,
+        hits: Vec::with_capacity(MAX_SEARCH_HITS),
+        next: None,
+        partial: complete < metadata.len(),
+    };
+    let mut scanned = 0;
+    for _ in 0..RECORDS_PER_PAGE {
+        let Some(at) = next.take() else { break };
+        if at.record >= complete || !file::boundary(&source.file, at.record)? {
+            return Err(AppError::CursorExpired);
+        }
+        let prepared = large.take(owner, &output.observation, at.record);
+        let end = if let Some(window) = &prepared {
+            window.end
+        } else {
+            lines.next(at.record, complete, &mut budget)?
+        };
+        let prepared = if prepared.is_some() {
+            prepared
+        } else {
+            match records::project_search(
+                source.provider,
+                lines.input(at.record, end),
+                &source.native_id,
+                source.root_session.as_ref(),
+            ) {
+                Ok(Some(mut record)) => {
+                    proof.redact(source, at.record, &mut record);
+                    let position = file::file_position(&source.file, at.record, complete)?;
+                    Some(RecordWindow {
+                        end,
+                        record,
+                        position,
+                        staged: None,
+                        stage_unavailable: false,
+                    })
+                }
+                Ok(None) => None,
+                Err(_) => {
+                    check_cancel(cancel)?;
+                    output.partial = true;
+                    None
+                }
+            }
+        };
+        if let Some(mut window) = prepared {
+            next = match_record(
+                MatchSource {
+                    source,
+                    lines: &lines,
+                    cancel,
+                    large,
+                },
+                &mut window,
+                at,
+                &query,
+                &mut output,
+            )?;
+            check_cancel(cancel)?;
+            verify_observation(source, &output.observation)?;
+            large.remember(owner, &output.observation, window);
+            if next.is_some() {
+                break;
+            }
+        }
+        next = match query.reverse {
+            true if at.record > 0 => Some(first(lines.previous(at.record - 1, &mut budget)?, true)),
+            false if end < complete => Some(first(end, false)),
+            _ => None,
+        };
+        scanned += end - at.record;
+        // Deliver useful suggestions before scanning through the remaining conversation.
+        if output.hits.len() == MAX_SEARCH_HITS
+            || scanned >= BYTES_PER_PAGE
+            || (!output.hits.is_empty() && scanned >= 128 * 1024)
+        {
+            break;
+        }
+    }
+    verify_observation(source, &output.observation)?;
+    output.next = next;
+    Ok(output)
+}
+
+pub(super) fn confirm(
+    source: &Source,
+    observation: &SourceObservation,
+    reference: &FileContentRef,
+) -> Result<(), AppError> {
+    verify_observation(source, observation)?;
+    file::verify_content(source, reference)
+}
+
+fn first(record: u64, reverse: bool) -> SearchPoint {
+    if reverse {
+        SearchPoint {
+            record,
+            part: u16::MAX,
+            byte: u64::MAX,
+        }
+    } else {
+        SearchPoint {
+            record,
+            part: 0,
+            byte: 0,
+        }
+    }
+}
+
+fn observed(source: &Source, stamp: &Metadata, high_water: u64) -> SourceObservation {
+    let mut version = Sha256::new();
+    version.update(source.fingerprint);
+    version.update(stamp.dev().to_be_bytes());
+    version.update(stamp.ino().to_be_bytes());
+    version.update(stamp.len().to_be_bytes());
+    version.update(stamp.mtime().to_be_bytes());
+    version.update(stamp.mtime_nsec().to_be_bytes());
+    version.update(stamp.ctime().to_be_bytes());
+    version.update(stamp.ctime_nsec().to_be_bytes());
+    SourceObservation {
+        high_water,
+        version: version.finalize().into(),
+    }
+}
+
+fn verify_observation(source: &Source, expected: &SourceObservation) -> Result<(), AppError> {
+    let descriptor = source.file.metadata().map_err(|_| AppError::Unavailable)?;
+    let path = fs::symlink_metadata(&source.path).map_err(|_| AppError::CursorExpired)?;
+    if !path.is_file()
+        || observed(source, &descriptor, expected.high_water) != *expected
+        || observed(source, &path, expected.high_water) != *expected
+    {
+        return Err(AppError::CursorExpired);
+    }
+    Ok(())
+}
+
+struct Body {
+    field: BodyField,
+    part: Option<u16>,
+    tool_call: Option<NativeInputId>,
+    markdown: bool,
+    bytes: u64,
+}
+
+impl Body {
+    fn key(&self) -> u16 {
+        self.part.map_or(0, |index| index + 1)
+    }
+}
+
+fn bodies(source: &Source, record: &Record) -> Result<Vec<Body>, AppError> {
+    if record.parts.is_empty() {
+        return Ok(vec![Body {
+            field: BodyField::CombinedText(record.text_blocks.clone()),
+            part: None,
+            tool_call: None,
+            markdown: record.bytes <= CONTENT_BYTES,
+            bytes: record.bytes,
+        }]);
+    }
+    record
+        .parts
+        .iter()
+        .filter(|part| part.body.bytes > 0)
+        .map(|part| {
+            let tool_call = match &part.kind {
+                VisiblePartKind::ToolCall { call, .. }
+                | VisiblePartKind::ToolResult { call, .. } => Some(call.clone()),
+                _ => None,
+            };
+            Ok(Body {
+                field: file::part_field(source.provider, record, part)?,
+                part: Some(part.index),
+                markdown: tool_call.is_none() && part.body.bytes <= CONTENT_BYTES,
+                tool_call,
+                bytes: part.body.bytes,
+            })
+        })
+        .collect()
+}
+
+struct RecordWindow {
+    end: u64,
+    record: Record,
+    position: FilePosition,
+    staged: Option<large::StagedBody>,
+    stage_unavailable: bool,
+}
+
+struct MatchSource<'a, 'b> {
+    source: &'a Source,
+    lines: &'a Lines<'b>,
+    cancel: &'a AtomicBool,
+    large: &'a mut LargeRecords,
+}
+
+fn match_record(
+    MatchSource {
+        source,
+        lines,
+        cancel,
+        large,
+    }: MatchSource<'_, '_>,
+    window: &mut RecordWindow,
+    at: SearchPoint,
+    query: &HistorySearch,
+    output: &mut SearchPage,
+) -> Result<Option<SearchPoint>, AppError> {
+    let mut bodies = bodies(source, &window.record)?;
+    if query.reverse {
+        bodies.reverse();
+    }
+    for body in bodies {
+        let key = body.key();
+        if if query.reverse {
+            key > at.part
+        } else {
+            key < at.part
+        } {
+            continue;
+        }
+        let point = SearchPoint {
+            record: at.record,
+            part: key,
+            byte: 0,
+        };
+        let reference = FileContentRef {
+            generation: output.generation.clone(),
+            entry: window.record.id.clone(),
+            part: body.part,
+            position: window.position.clone(),
+        };
+        let boundary = if at.part == key {
+            at.byte
+        } else if query.reverse {
+            u64::MAX
+        } else {
+            0
+        };
+        let available = MAX_SEARCH_HITS - output.hits.len();
+        if available == 0 {
+            return Ok(Some(SearchPoint {
+                byte: boundary,
+                ..point
+            }));
+        }
+        let mut matches = Matches {
+            query: &query.literal,
+            reverse: query.reverse,
+            reference,
+            body: &body,
+            point,
+            boundary,
+            range: 0..u64::MAX,
+            available,
+            hits: VecDeque::new(),
+            bytes: Vec::new(),
+            decoded: 0,
+            start_utf16: 0,
+            next: None,
+            partial: false,
+            stopped: false,
+        };
+        if body.bytes > CONTENT_BYTES
+            && !window.stage_unavailable
+            && window
+                .staged
+                .as_ref()
+                .is_none_or(|staged| staged.key != key)
+        {
+            window.staged.take();
+            window.staged = large.stage(source, window, &body, cancel).ok();
+            window.stage_unavailable = window.staged.is_none();
+            check_cancel(cancel)?;
+        }
+        if let Some(staged) = window.staged.as_ref().filter(|staged| staged.key == key) {
+            matches.scan_body(&staged.file, cancel)?;
+        } else {
+            let projected = records::stream_body(
+                source.provider,
+                lines.input(at.record, window.end),
+                &source.native_id,
+                source.root_session.as_ref(),
+                body.field.clone(),
+                &mut matches,
+            );
+            if matches.next.is_none() && !matches.stopped {
+                if !projected.is_some_and(|current| current.id == window.record.id)
+                    || matches.decoded + matches.bytes.len() as u64 != body.bytes
+                {
+                    output.partial = true;
+                    continue;
+                }
+                if body.markdown {
+                    let text = file::readable_prefix(&matches.bytes)?;
+                    if let Some(display) = displayed_markdown(text) {
+                        matches.collect(&display, true);
+                    } else {
+                        matches.partial = true;
+                    }
+                } else {
+                    matches.flush_matches(true)?;
+                }
+            }
+        }
+        if query.reverse && matches.hits.len() == available {
+            let earliest = matches.hits.front().ok_or(AppError::Internal)?.point;
+            matches.next = Some(earliest);
+        }
+        output.partial |= matches.partial;
+        if query.reverse {
+            output.hits.extend(matches.hits.into_iter().rev());
+        } else {
+            output.hits.extend(matches.hits);
+        }
+        if matches.next.is_some() {
+            return Ok(matches.next);
+        }
+    }
+    Ok(None)
+}
+
+struct Matches<'a> {
+    query: &'a Literal,
+    reverse: bool,
+    reference: FileContentRef,
+    body: &'a Body,
+    point: SearchPoint,
+    boundary: u64,
+    range: std::ops::Range<u64>,
+    available: usize,
+    hits: VecDeque<SearchHit>,
+    bytes: Vec<u8>,
+    decoded: u64,
+    start_utf16: u64,
+    next: Option<SearchPoint>,
+    partial: bool,
+    stopped: bool,
+}
+
+impl Matches<'_> {
+    fn scan_body(&mut self, file: &std::fs::File, cancel: &AtomicBool) -> Result<(), AppError> {
+        let boundary = self.boundary.min(self.body.bytes);
+        self.range = if self.reverse {
+            boundary.saturating_sub(BODY_STEP)..boundary
+        } else {
+            boundary..boundary.saturating_add(BODY_STEP).min(self.body.bytes)
+        };
+        let end = self
+            .range
+            .end
+            .saturating_add(CONTENT_BYTES)
+            .min(self.body.bytes);
+        let mut offset = self.range.start.saturating_sub(CONTENT_BYTES);
+        self.decoded = offset;
+        let mut scratch = [0; DECODE_BLOCK];
+        while offset < end && self.next.is_none() {
+            check_cancel(cancel)?;
+            let count = (end - offset).min(DECODE_BLOCK as u64) as usize;
+            file.read_exact_at(&mut scratch[..count], offset)
+                .map_err(|_| AppError::Unavailable)?;
+            let skip = if offset == self.decoded && offset > 0 && self.bytes.is_empty() {
+                scratch[..count]
+                    .iter()
+                    .take_while(|byte| **byte & 0xc0 == 0x80)
+                    .count()
+            } else {
+                0
+            };
+            self.decoded += skip as u64;
+            self.bytes.extend_from_slice(&scratch[skip..count]);
+            self.flush_matches(false)?;
+            offset += count as u64;
+        }
+        if self.next.is_none() {
+            self.flush_matches(true)?;
+        }
+        if self.next.is_none() {
+            let next = if self.reverse {
+                self.range.start
+            } else {
+                self.range.end
+            };
+            if if self.reverse {
+                next > 0
+            } else {
+                next < self.body.bytes
+            } {
+                self.next = Some(SearchPoint {
+                    byte: next,
+                    ..self.point
+                });
+            }
+        }
+        Ok(())
+    }
+
+    fn flush_matches(&mut self, final_block: bool) -> Result<(), AppError> {
+        let bytes = std::mem::take(&mut self.bytes);
+        let text = file::readable_prefix(&bytes)?;
+        let cut = self.collect(text, final_block);
+        self.decoded += cut.byte as u64;
+        self.start_utf16 += cut.utf16 as u64;
+        self.bytes.extend_from_slice(&bytes[cut.byte..]);
+        if self.range.end == u64::MAX
+            && !self.reverse
+            && self.next.is_none()
+            && self.decoded >= self.boundary.saturating_add(BODY_STEP)
+        {
+            self.next = Some(SearchPoint {
+                byte: self.decoded,
+                ..self.point
+            });
+        }
+        // A pathological cluster is larger than a display window and has no bounded witness.
+        if self.bytes.len() >= CONTENT_BYTES as usize {
+            let end = text.len();
+            self.partial = true;
+            self.bytes.drain(..end);
+            self.decoded += end as u64;
+            self.start_utf16 += text.encode_utf16().count() as u64;
+        }
+        Ok(())
+    }
+
+    fn collect(&mut self, text: &str, final_block: bool) -> reviewq_app::reading::TextPoint {
+        use reviewq_app::reading::TextPoint;
+        let folded = FoldedText::new(text);
+        let cut = if final_block {
+            TextPoint {
+                byte: text.len(),
+                utf16: text.encode_utf16().count(),
+            }
+        } else {
+            folded.settled_prefix(self.query.folded().len())
+        };
+        for span in folded
+            .occurrences(self.query)
+            .take_while(|span| span.start.byte < cut.byte)
+        {
+            let byte = self.decoded + span.start.byte as u64;
+            if !self.range.contains(&byte) {
+                continue;
+            }
+            if if self.reverse {
+                byte >= self.boundary
+            } else {
+                byte < self.boundary
+            } {
+                continue;
+            }
+            let point = SearchPoint { byte, ..self.point };
+            let matched = &text[span.start.byte..span.end.byte];
+            if matched.len() > 1024 {
+                self.partial = true;
+                continue;
+            }
+            if self.reverse && self.hits.len() == self.available {
+                self.hits.pop_front();
+            }
+            self.hits.push_back(self.hit(text, span, point, matched));
+            if !self.reverse && self.hits.len() == self.available {
+                self.next = Some(SearchPoint {
+                    byte: byte + 1,
+                    ..self.point
+                });
+                break;
+            }
+        }
+        cut
+    }
+
+    fn hit(&self, text: &str, span: TextMatch, point: SearchPoint, matched: &str) -> SearchHit {
+        let ranged = !self.body.markdown && self.body.bytes > CONTENT_BYTES;
+        let before = &text[..span.start.byte];
+        let from = before.char_indices().rev().nth(31).map_or(0, |(at, _)| at);
+        SearchHit {
+            reference: self.reference.clone(),
+            point,
+            tool_call: self.body.tool_call.clone(),
+            before: before[from..].to_owned(),
+            matched: matched.to_owned(),
+            after: text[span.end.byte..].chars().take(32).collect(),
+            output_offset: if ranged { point.byte } else { 0 },
+            start_utf16: if ranged {
+                0
+            } else {
+                self.start_utf16 + span.start.utf16 as u64
+            },
+            end_utf16: if ranged {
+                (span.end.utf16 - span.start.utf16) as u64
+            } else {
+                self.start_utf16 + span.end.utf16 as u64
+            },
+            markdown: self.body.markdown,
+            ordinal: if self.body.markdown {
+                before
+                    .char_indices()
+                    .filter(|(start, _)| text[*start..].starts_with(matched))
+                    .count() as u64
+            } else {
+                0
+            },
+        }
+    }
+}
+
+impl Write for Matches<'_> {
+    fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+        self.bytes.extend_from_slice(bytes);
+        if !self.body.markdown && self.bytes.len() >= DECODE_BLOCK {
+            self.flush_matches(false).map_err(io::Error::other)?;
+        }
+        self.stopped = self.reverse && self.decoded >= self.boundary.saturating_add(CONTENT_BYTES);
+        if self.next.is_some() || self.stopped {
+            return Err(io::Error::other("search page ready"));
+        }
+        Ok(bytes.len())
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
+}
+
+fn check_cancel(cancel: &AtomicBool) -> Result<(), AppError> {
+    if cancel.load(Ordering::Relaxed) {
+        return Err(AppError::Unavailable);
+    }
+    Ok(())
+}

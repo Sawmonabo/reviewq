@@ -55,6 +55,7 @@ struct BodySink<'a> {
     field: BodyField,
     target: Option<&'a mut dyn Write>,
     parts_from: u16,
+    parts_limit: u16,
 }
 
 impl BodySink<'_> {
@@ -150,8 +151,11 @@ pub(super) fn project_window(
             field: BodyField::Text,
             target: None,
             parts_from: 0,
+            parts_limit: MAX_NATIVE_PARTS,
         },
     )
+    .ok()
+    .flatten()
 }
 
 pub(super) fn stream_body(
@@ -176,8 +180,11 @@ pub(super) fn stream_body(
             field,
             target: Some(output),
             parts_from: 0,
+            parts_limit: MAX_NATIVE_PARTS,
         },
     )
+    .ok()
+    .flatten()
 }
 
 pub(super) fn project_parts(
@@ -201,6 +208,35 @@ pub(super) fn project_parts(
             field: BodyField::Text,
             target: None,
             parts_from: first,
+            parts_limit: MAX_NATIVE_PARTS,
+        },
+    )
+    .ok()
+    .flatten()
+}
+
+/// Keep bounded field identities and lengths, without retaining body bytes.
+pub(super) fn project_search(
+    provider: HostProvider,
+    input: impl Read,
+    native: &NativeSessionId,
+    root_session: Option<&NativeSessionId>,
+) -> Result<Option<Record>, AppError> {
+    project_to(
+        provider,
+        input,
+        native,
+        root_session,
+        Window {
+            start: 0,
+            limit: 0,
+            part: None,
+        },
+        &mut BodySink {
+            field: BodyField::Text,
+            target: None,
+            parts_from: 0,
+            parts_limit: 16_384,
         },
     )
 }
@@ -212,24 +248,29 @@ fn project_to(
     root_session: Option<&NativeSessionId>,
     window: Window,
     output: &mut BodySink<'_>,
-) -> Option<Record> {
+) -> Result<Option<Record>, AppError> {
     let mut reader = JsonStreamReader::new(NameBudget::new(input));
     let result = match provider {
         HostProvider::Codex => codex(&mut reader, native, window, output),
         HostProvider::Claude => claude(&mut reader, native, root_session, window, output),
     };
-    let (mut item, kind, at_ms, turn) = result.ok()??;
-    reader.consume_trailing_whitespace().ok()?;
-    let id = item.id?.parse().ok()?;
+    let Some((mut item, kind, at_ms, turn)) = result? else {
+        return Ok(None);
+    };
+    reader.consume_trailing_whitespace().map_err(invalid)?;
+    let id = item
+        .id
+        .ok_or(AppError::Unavailable)?
+        .parse()
+        .map_err(invalid)?;
     if item.text.bytes == 0 && item.parts.is_empty() && item.next_part.is_none() {
-        return None;
+        return Ok(None);
     }
     if output.parts_from == 0
         && item.next_part.is_none()
-        && item
-            .parts
-            .iter()
-            .all(|part| matches!(part.kind, VisiblePartKind::Text(_)))
+        && item.parts.iter().all(|part| {
+            part.index < MAX_NATIVE_PARTS && matches!(part.kind, VisiblePartKind::Text(_))
+        })
     {
         item.parts.clear();
     } else {
@@ -239,7 +280,7 @@ fn project_to(
             }
         }
     }
-    Some(Record {
+    Ok(Some(Record {
         id,
         turn: turn.and_then(|value| value.parse().ok()),
         at_ms,
@@ -254,7 +295,7 @@ fn project_to(
         result_field: item.result_field,
         text_blocks: item.text_blocks,
         next_part: item.next_part,
-    })
+    }))
 }
 
 type Projection = Option<(Message, VisibleKind, Option<i64>, Option<String>)>;
@@ -530,7 +571,7 @@ fn block<R: Read>(
     let mut error = false;
     let mut plain = Text::default();
     let mut body = Text::default();
-    let retained = (output.parts_from..output.parts_from.saturating_add(MAX_NATIVE_PARTS))
+    let retained = (output.parts_from..output.parts_from.saturating_add(output.parts_limit))
         .contains(&index)
         || window.part == Some(index)
         || matches!(output.field,BodyField::TextBlock(at)|BodyField::InputBlock(at)|BodyField::ResultBlock(at) if index==at);
