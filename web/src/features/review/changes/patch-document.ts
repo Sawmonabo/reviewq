@@ -17,7 +17,7 @@ type Segment = {
   readonly text: Text;
   readonly first: number;
   end: number;
-  tops: readonly number[] | undefined;
+  layout: number | Float64Array | undefined;
   readonly decorations: Map<number, PatchDecoration>;
 };
 type Line = {
@@ -67,6 +67,7 @@ export function mountPatchDocument(host: HTMLDivElement, source: string): PatchD
   let activeRange:
     { readonly range: Range; readonly inset: number; readonly offset: number } | undefined;
   let width = host.clientWidth;
+  let lineHeight = Number.parseFloat(getComputedStyle(host).lineHeight);
   let frame = 0;
 
   const observer = new IntersectionObserver(
@@ -97,9 +98,11 @@ export function mountPatchDocument(host: HTMLDivElement, source: string): PatchD
       const delta = anchor.range.getBoundingClientRect().top - box.top - anchor.inset;
       if (Math.abs(delta) > 0.5) scroller.scrollTop += delta;
     }
-    if (width !== host.clientWidth) {
+    const nextLineHeight = Number.parseFloat(getComputedStyle(host).lineHeight);
+    if (width !== host.clientWidth || lineHeight !== nextLineHeight) {
       width = host.clientWidth;
-      for (const segment of segments) segment.tops = undefined;
+      lineHeight = nextLineHeight;
+      for (const segment of segments) segment.layout = undefined;
     }
     requestDecoration();
     rememberReading();
@@ -136,10 +139,11 @@ export function mountPatchDocument(host: HTMLDivElement, source: string): PatchD
       let decoration = segment.decorations.get(ordinal);
       if (!decoration) {
         const bounds = segment.element.getBoundingClientRect();
-        const top = rowTop(segment, ordinal);
-        const bottom = ordinal + 1 < segment.end ? rowTop(segment, ordinal + 1) : bounds.bottom;
+        const index = ordinal - segment.first;
+        const top = blockRowTop(segment, index, bounds);
+        const bottom = blockRowTop(segment, index + 1, bounds);
         decoration = addDecoration(segment, ordinal, segment.element);
-        positionPatchRow(decoration.element, Math.max(0, top - bounds.top - 3), bottom - top);
+        positionPatchRow(decoration.element, top, bottom - top);
       }
       return { element: decoration.element, rect };
     },
@@ -222,7 +226,14 @@ export function mountPatchDocument(host: HTMLDivElement, source: string): PatchD
     body.className = "patch-block-text";
     body.append(text);
     element.append(body);
-    const segment: Segment = { element, text, first, end, tops: undefined, decorations: new Map() };
+    const segment: Segment = {
+      element,
+      text,
+      first,
+      end,
+      layout: undefined,
+      decorations: new Map(),
+    };
     byElement.set(element, segment);
     return segment;
   }
@@ -252,7 +263,7 @@ export function mountPatchDocument(host: HTMLDivElement, source: string): PatchD
     segments.splice(location + 1, 0, next);
     segment.element.after(next.element);
     observer.observe(next.element);
-    segment.tops = undefined;
+    segment.layout = undefined;
     // Moving the split Text to its new wrapper retargets a DOM Selection to
     // the old parent. Reapply its original direction and source boundaries.
     if (
@@ -308,8 +319,33 @@ export function mountPatchDocument(host: HTMLDivElement, source: string): PatchD
     return source[end - 2] === "\r" ? end - 2 : end - 1;
   }
 
-  function rowTop(segment: Segment, ordinal: number) {
-    return rowRange(segment, ordinal, 0).getBoundingClientRect().top;
+  function blockRowTop(segment: Segment, index: number, bounds: DOMRect) {
+    const length = segment.end - segment.first;
+    if (index === length) return bounds.height;
+    const layout = (segment.layout ??=
+      lineHeight > 0 && Math.abs(bounds.height - length * lineHeight) < 0.5
+        ? lineHeight
+        : new Float64Array(length).fill(Number.NaN));
+    if (typeof layout === "number") return index * layout;
+    const cached = layout[index]!;
+    if (!Number.isNaN(cached)) return cached;
+    // Wrapped text still uses its native geometry. Seek the viewport by row
+    // and measure only its boundary probes and visible/nearby rows.
+    const top = rowRange(segment, segment.first + index, 0).getBoundingClientRect().top;
+    const relative = Math.max(0, top - bounds.top - 3);
+    layout[index] = relative;
+    return relative;
+  }
+
+  function rowAtOffset(segment: Segment, length: number, bounds: DOMRect, offset: number) {
+    let low = 0;
+    let high = length;
+    while (low < high) {
+      const mid = (low + high) >>> 1;
+      if (blockRowTop(segment, mid + 1, bounds) <= offset) low = mid + 1;
+      else high = mid;
+    }
+    return low;
   }
 
   function addDecoration(
@@ -353,27 +389,27 @@ export function mountPatchDocument(host: HTMLDivElement, source: string): PatchD
       // Read each block's layout before adding children or styling any markers.
       const measurements = [...watched].map((segment) => {
         const bounds = segment.element.getBoundingClientRect();
-        let tops = segment.tops;
-        const changed = tops === undefined;
-        if (!tops) {
-          const positions: number[] = [];
-          for (let ordinal = segment.first; ordinal < segment.end; ordinal++)
-            positions.push(Math.max(0, rowTop(segment, ordinal) - bounds.top - 3));
-          positions.push(bounds.height);
-          tops = positions;
-          segment.tops = tops;
-        }
-        const first = tops.findIndex((position, index) => index > 0 && bounds.top + position > top);
-        const last = tops.findIndex((position) => bounds.top + position >= bottom);
+        const changed = segment.layout === undefined;
+        const length = segment.end - segment.first;
+        if (bounds.bottom <= top || bounds.top >= bottom)
+          return { segment, changed, positions: [], from: segment.end, to: segment.end };
+        const first = rowAtOffset(segment, length, bounds, top - bounds.top);
+        const last = Math.min(
+          length,
+          rowAtOffset(segment, length, bounds, bottom - bounds.top) + 1,
+        );
+        const positions: number[] = [];
+        for (let index = first; index <= last; index++)
+          positions.push(blockRowTop(segment, index, bounds));
         return {
           segment,
           changed,
-          tops,
-          from: first > 0 ? segment.first + first - 1 : segment.end,
-          to: last >= 0 ? segment.first + last : segment.end,
+          positions,
+          from: segment.first + first,
+          to: segment.first + last,
         };
       });
-      for (const { segment, changed, tops, from, to } of measurements) {
+      for (const { segment, changed, positions, from, to } of measurements) {
         for (const [ordinal, decoration] of segment.decorations) {
           if ((ordinal >= from && ordinal < to) || decoration.element === document.activeElement)
             continue;
@@ -382,14 +418,14 @@ export function mountPatchDocument(host: HTMLDivElement, source: string): PatchD
         }
         let additions: DocumentFragment | undefined;
         for (let ordinal = from; ordinal < to; ordinal++) {
-          const index = ordinal - segment.first;
+          const index = ordinal - from;
           const existing = segment.decorations.get(ordinal);
           if (existing && !changed) continue;
           const decoration =
             existing ??
             addDecoration(segment, ordinal, (additions ??= document.createDocumentFragment()));
-          const start = tops[index]!;
-          positionPatchRow(decoration.element, start, tops[index + 1]! - start);
+          const start = positions[index]!;
+          positionPatchRow(decoration.element, start, positions[index + 1]! - start);
         }
         if (additions) segment.element.append(additions);
       }
