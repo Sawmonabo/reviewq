@@ -8,7 +8,8 @@ import {
   useRef,
   useState,
 } from "react";
-import type { CSSProperties } from "react";
+import type { CSSProperties, RefObject } from "react";
+import { createPortal } from "react-dom";
 import { isRichPatch, PATCH_WINDOW_BYTES } from "../../../api/changes";
 import type { PatchIndex, readPatchPathCatalog } from "../../../api/changes";
 import type { PatchDiscussion, PatchFile, PatchPath } from "../../../api/generated/contracts";
@@ -17,15 +18,15 @@ import { safeUrl } from "../../../lib/presentation";
 import { ChangedFilePicker } from "./ChangedFilePicker";
 import { FilePatch } from "./FilePatch";
 import {
-  alignPatch,
   lineAt,
   matchingFile,
   sourceAt,
+  sourceRect,
   storedFile,
   storedPatch,
   storePatch,
 } from "./patch-position";
-import type { PatchLine, SourcePosition } from "./patch-position";
+import type { PatchLine, SourcePosition, ThreadJump } from "./patch-position";
 import { pageAt, pageStart, usePatchPages } from "./usePatchPages";
 
 type Props = {
@@ -38,8 +39,10 @@ type Props = {
   };
   readonly threads: readonly PatchDiscussion[];
   readonly webUrl: string;
-  readonly query: string;
-  readonly onQuery: (value: string) => void;
+  readonly toolbar: RefObject<HTMLDivElement | null>;
+  readonly navigation: HTMLDivElement | null;
+  readonly threadJump: ThreadJump | undefined;
+  readonly onThreadJump: (target: ThreadJump | undefined) => void;
   readonly onLoadedAnchors: (threads: ReadonlySet<string> | undefined) => void;
   readonly restore: boolean;
   readonly onReload: () => void;
@@ -49,8 +52,8 @@ type Jump = {
   readonly index: number;
   readonly inset: number;
   readonly focus: boolean;
-  readonly line?: PatchLine;
-  readonly source?: SourcePosition;
+  readonly line?: PatchLine | undefined;
+  readonly source?: SourcePosition | undefined;
 };
 const MAX_ACTIVE_PATCHES = 8;
 const MAX_ACTIVE_BYTES = 4 * 1024 * 1024;
@@ -63,22 +66,23 @@ export function FileStream({
   catalog,
   threads,
   webUrl,
-  query,
-  onQuery,
+  toolbar,
+  navigation,
+  threadJump,
+  onThreadJump,
   onLoadedAnchors,
   restore,
   onReload,
 }: Props) {
-  const toolbar = useRef<HTMLDivElement>(null);
   const [host, setHost] = useState<HTMLDivElement | null>(null);
   const [geometry, setGeometry] = useState({ margin: 0, toolbar: 0 });
   const [pinned, setPinned] = useState<readonly number[]>([]);
   const index = usePatchPages(reviewId, initial, pinned);
-  const releaseAlignment = useRef<(() => void) | undefined>(undefined);
+  const generation = useRef(0);
+  const [navigationError, setNavigationError] = useState<string>();
   const [landed, setLanded] = useState<{ readonly index: number; readonly offset: number }>();
-  useEffect(() => () => releaseAlignment.current?.(), []);
   const [jump, setJump] = useState<Jump | undefined>(() => {
-    if (!restore) return;
+    if (!restore || threadJump) return;
     const saved = storedPatch(reviewId, initial.revision);
     const file = initial.items.findIndex(
       (entry) => entry.fileId === (saved?.fileId ?? storedFile(reviewId)),
@@ -129,6 +133,7 @@ export function FileStream({
   }, [anchors, onLoadedAnchors]);
   useEffect(() => () => onLoadedAnchors(undefined), [onLoadedAnchors]);
 
+  const knownExtents = useRef(new Set<number>());
   const rangeExtractor = useCallback(
     (range: Parameters<typeof defaultRangeExtractor>[0]) => {
       const items = new Set([
@@ -146,7 +151,7 @@ export function FileStream({
   const list = useVirtualizer({
     count,
     getScrollElement: () => scroller,
-    estimateSize: (ordinal) => estimateFile(files.get(ordinal)),
+    estimateSize: () => estimateFile(undefined),
     overscan: 4,
     rangeExtractor,
     scrollMargin: geometry.margin,
@@ -214,35 +219,99 @@ export function FileStream({
     if (element.parentElement) observer.observe(element.parentElement);
     measure();
     return () => observer.disconnect();
-  }, [host, scroller]);
+  }, [host, scroller, toolbar]);
 
   useLayoutEffect(() => {
-    if (!jump || !host || !scroller || !geometry.margin || !files.has(jump.index)) return;
+    for (const [ordinal, file] of files) {
+      if (knownExtents.current.has(ordinal)) continue;
+      knownExtents.current.add(ordinal);
+      if (!list.elementsCache.has(ordinal)) list.resizeItem(ordinal, estimateFile(file));
+    }
+  }, [files, list]);
+
+  useLayoutEffect(() => {
+    if (!jump || !host || !scroller || !files.has(jump.index)) return;
     const scroll = scroller;
-    const element = host;
-    releaseAlignment.current?.();
-    list.scrollToIndex(jump.index, { align: "start" });
-    const frame = requestAnimationFrame(() => {
-      const file = element.querySelector<HTMLElement>(`[data-file-position="${jump.index + 1}"]`);
-      if (!file) return;
-      list.cancelScroll();
-      releaseAlignment.current = alignPatch(
-        file,
-        scroll,
-        geometry.toolbar,
-        jump.inset,
-        jump.line,
-        jump.source,
-        () => {
-          if (jump.focus)
-            file.querySelector<HTMLElement>(".patch-file-title")?.focus({ preventScroll: true });
-          setLanded({ index: jump.index, offset: scroll.scrollTop });
-          setJump(undefined);
-        },
-      );
+    const file = host.querySelector<HTMLElement>(`[data-file-position="${jump.index + 1}"]`);
+    if (!file) return;
+    const requested = generation.current;
+    let frame = 0;
+    const observer = new ResizeObserver(schedule);
+    const mutations = new MutationObserver(schedule);
+    observer.observe(file);
+    mutations.observe(file, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      attributeFilter: ["data-patch-prepared"],
     });
-    return () => cancelAnimationFrame(frame);
-  }, [files, geometry.margin, geometry.toolbar, host, jump, list, scroller]);
+    schedule();
+    return () => {
+      cancelAnimationFrame(frame);
+      mutations.disconnect();
+      observer.disconnect();
+    };
+
+    function schedule() {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => {
+        if (requested !== generation.current || !file?.isConnected) return;
+        if (file.querySelector(".patch-waiting, .patch-rich:not([data-patch-prepared])")) return;
+        const row =
+          jump?.line &&
+          file.querySelector<HTMLElement>(`[data-${jump.line.side}="${jump.line.number}"]`);
+        const source = jump?.source && sourceRect(file, jump.source);
+        const target = source || (row && row.getBoundingClientRect());
+        const top =
+          scroll.getBoundingClientRect().top + (toolbar.current?.offsetHeight ?? geometry.toolbar);
+        if (target)
+          scroll.scrollTop += target.top - top - (jump?.source?.inset ?? jump?.line?.inset ?? 0);
+        else {
+          const inset = Math.min(jump?.inset ?? 0, Math.max(0, file.offsetHeight - 30));
+          scroll.scrollTop += file.getBoundingClientRect().top - top + inset;
+          if (jump?.focus && (jump.line || jump.source))
+            setNavigationError("This line is outside the available patch.");
+        }
+        if (jump?.focus) {
+          const focus = row || file.querySelector<HTMLElement>(".patch-file-title");
+          if (focus) {
+            focus.tabIndex = -1;
+            focus.focus({ preventScroll: true });
+          }
+        }
+        setLanded({ index: jump!.index, offset: scroll.scrollTop });
+        setJump(undefined);
+      });
+    }
+  }, [files, geometry.toolbar, host, jump, scroller, toolbar, virtual]);
+
+  const cancelNavigation = useEffectEvent((event: Event) => {
+    if (!event.isTrusted) return;
+    if (
+      event instanceof KeyboardEvent &&
+      (!["ArrowUp", "ArrowDown", "PageUp", "PageDown", "Home", "End", " "].includes(event.key) ||
+        (event.target instanceof Element &&
+          event.target.closest("button, a, input, summary, select, textarea")))
+    )
+      return;
+    if (
+      event instanceof PointerEvent &&
+      event.target instanceof Element &&
+      event.target.closest(".changes-header, .changes-conversation")
+    )
+      return;
+    generation.current++;
+    index.cancelManual();
+    setJump(undefined);
+  });
+  useEffect(() => {
+    if (!scroller) return;
+    const signals = new AbortController();
+    const options = { signal: signals.signal, passive: true };
+    for (const event of ["wheel", "pointerdown", "touchstart", "keydown"])
+      scroller.addEventListener(event, cancelNavigation, options);
+    return () => signals.abort();
+  }, [scroller]);
 
   const remember = useEffectEvent(() => {
     if (
@@ -320,9 +389,9 @@ export function FileStream({
   }, [host, scroller]);
 
   const fetchNearby = useEffectEvent(() => {
-    if (index.pending || index.error || !scroller || !count) return;
-    const start = jump?.index ?? viewportFirst;
-    const finish = jump?.index ?? last;
+    if (index.pending || index.error || !scroller || !count || jump) return;
+    const start = viewportFirst;
+    const finish = last;
     const before = pageStart(pageAt(start)) - 1;
     const after = pageStart(pageAt(finish) + 1);
     const wantedPositions = backwards
@@ -351,37 +420,59 @@ export function FileStream({
     scroller,
   ]);
 
-  function goTo(ordinal: number, focus = true) {
+  function beginNavigation() {
     index.cancelManual();
-    toolbar.current?.querySelector("details")?.removeAttribute("open");
-    setJump({ index: ordinal, inset: 0, focus });
+    setNavigationError(undefined);
+    setJump(undefined);
+    return ++generation.current;
+  }
+
+  function goTo(ordinal: number, focus: boolean, line?: PatchLine, source?: SourcePosition) {
+    setJump({ index: ordinal, inset: 0, focus, line, source });
   }
 
   function chooseFile(file: PatchFile) {
+    beginNavigation();
     for (const [ordinal, entry] of files)
       if (entry.fileId === file.fileId) {
-        goTo(ordinal);
+        goTo(ordinal, true);
         return;
       }
   }
 
-  async function choosePath(path: PatchPath) {
+  async function chooseTarget(
+    target: { readonly path: PatchPath } | { readonly fileId: string },
+    line?: PatchLine,
+  ) {
+    const command = beginNavigation();
+    const matches = (file: PatchFile) =>
+      "fileId" in target
+        ? file.fileId === target.fileId
+        : file.oldPath === target.path.oldPath && file.newPath === target.path.newPath;
     for (const [ordinal, file] of files)
-      if (file.oldPath === path.oldPath && file.newPath === path.newPath) {
-        goTo(ordinal);
+      if (matches(file)) {
+        goTo(ordinal, true, line);
         return;
       }
-    const page = await index.load({ path }, true);
-    if (page) {
-      const offset = page.items.findIndex(
-        (file) => file.oldPath === path.oldPath && file.newPath === path.newPath,
-      );
-      if (offset >= 0) goTo(pageStart(page.pageNumber) + offset);
-    }
+    const page = await index.load(target, true);
+    if (!page || generation.current !== command) return;
+    const offset = page.items.findIndex(matches);
+    if (offset >= 0) goTo(pageStart(page.pageNumber) + offset, true, line);
   }
+
+  const chooseThread = useEffectEvent((target: ThreadJump) => {
+    onThreadJump(undefined);
+    void chooseTarget(target, target.line);
+  });
+  useEffect(() => {
+    if (!threadJump) return;
+    const frame = requestAnimationFrame(() => chooseThread(threadJump));
+    return () => cancelAnimationFrame(frame);
+  }, [threadJump]);
 
   async function goToOrdinal(ordinal: number) {
     if (ordinal < 0 || ordinal >= count) return;
+    const command = beginNavigation();
     if (files.has(ordinal)) {
       goTo(ordinal, false);
       return;
@@ -389,54 +480,41 @@ export function FileStream({
     const target = index.lookupPage(pageAt(ordinal));
     if (target && target.page === pageAt(ordinal)) {
       const page = await index.load(target, true);
-      if (page?.items[ordinal - pageStart(page.pageNumber)]) goTo(ordinal, false);
+      if (generation.current === command && page?.items[ordinal - pageStart(page.pageNumber)])
+        goTo(ordinal, false);
     }
   }
 
   return (
     <div className="file-stream">
-      <div className="file-stream-controls" ref={toolbar}>
-        <ChangedFilePicker
-          reviewId={reviewId}
-          index={shown}
-          selected={active}
-          total={total}
-          pending={index.pending && !active}
-          catalog={catalog}
-          query={query}
-          onQuery={onQuery}
-          onChooseFile={chooseFile}
-          onChoosePath={(path) => void choosePath(path)}
-          onPage={(cursor) => {
-            const page = shown.pageNumber + (cursor === shown.previousCursor ? -1 : 1);
-            if (cursor)
-              void index.load({ page, cursor }, true).then((result) => {
-                if (result?.items.length) goTo(pageStart(result.pageNumber));
-              });
-          }}
-        />
-        {count > 0 && (
-          <div className="actions patch-arrows" aria-label="Changed file position">
-            <button
-              type="button"
-              aria-label="Previous file"
-              aria-disabled={first === 0}
-              onClick={() => void goToOrdinal(first - 1)}
-            >
-              ‹
-            </button>
-            <small>{total === undefined ? `File ${first + 1}` : `${first + 1}/${total}`}</small>
-            <button
-              type="button"
-              aria-label="Next file"
-              aria-disabled={first + 1 >= count}
-              onClick={() => void goToOrdinal(first + 1)}
-            >
-              ›
-            </button>
-          </div>
+      {navigation &&
+        count > 0 &&
+        createPortal(
+          <ChangedFilePicker
+            reviewId={reviewId}
+            index={shown}
+            files={files}
+            selected={active}
+            position={first + 1}
+            total={total}
+            pending={index.pending && !active}
+            catalog={catalog}
+            navigation={{
+              previous: first > 0,
+              next: first + 1 < count,
+              onStep: (direction) => void goToOrdinal(first + direction),
+            }}
+            onChooseFile={chooseFile}
+            onChoosePath={(path) => void chooseTarget({ path })}
+          />,
+          navigation,
         )}
-      </div>
+      {navigationError && <Notice>{navigationError}</Notice>}
+      {jump && (
+        <p className="sr-only" role="status">
+          Opening the selected patch…
+        </p>
+      )}
       {index.error && (
         <Notice retry={index.retry}>
           {index.error}{" "}

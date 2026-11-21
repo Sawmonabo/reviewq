@@ -6,7 +6,10 @@ import type { PatchPath } from "../../../api/generated/contracts";
 
 const RETAINED_PAGES = 5;
 
-type Lookup = { readonly page: number; readonly cursor: string } | { readonly path: PatchPath };
+type Lookup =
+  | { readonly page: number; readonly cursor: string }
+  | { readonly path: PatchPath }
+  | { readonly fileId: string };
 
 export function usePatchPages(reviewId: string, initial: PatchIndex, pinned: readonly number[]) {
   const pinnedPages = useRef(new Set<number>());

@@ -4,7 +4,6 @@ import { ApiResponseError } from "../../../api/client";
 import {
   PATCH_FILES_PER_PAGE,
   readInitialPatchFiles,
-  readPatchDiscussions,
   readPatchFiles,
   readPatchPathCatalog,
   readPatchRevision,
@@ -12,19 +11,20 @@ import {
 import type { PatchDiscussion } from "../../../api/generated/contracts";
 import { FilterSelect } from "../../../components/FilterSelect";
 import { Icon } from "../../../components/Icon";
-import { Pagination } from "../../../components/Pagination";
 import { Loading, Notice } from "../../../components/PanelState";
 import { useResource } from "../../../hooks/useResource";
 import { DiscussionThread } from "../DiscussionThread";
 import { Approvals } from "./Approvals";
 import { FileStream } from "./FileStream";
-import { matchingFile, storedFile } from "./patch-position";
+import { matchingFile, storedFile, threadLine } from "./patch-position";
+import type { ThreadJump } from "./patch-position";
+import { usePatchDiscussions } from "./usePatchDiscussions";
 import "./changes.css";
+import "./navigation.css";
 
 type Tab = "files" | "general" | "all";
 type Status = "any" | "open" | "resolved";
-const MAX_EMPTY_DISCUSSION_PAGES = 4;
-const EMPTY_DISCUSSIONS: readonly PatchDiscussion[] = [];
+const DISCUSSIONS_PER_PAGE = 30;
 const tabs = [
   ["files", "Files"],
   ["general", "General comments"],
@@ -41,7 +41,9 @@ export default function Changes({
   readonly children?: ReactNode;
 }) {
   const [epoch, setEpoch] = useState(0);
-  const [query, setQuery] = useState("");
+  const [navigation, setNavigation] = useState<HTMLDivElement | null>(null);
+  const toolbar = useRef<HTMLDivElement>(null);
+  const [threadJump, setThreadJump] = useState<ThreadJump>();
   const [loadedAnchors, setLoadedAnchors] = useState<ReadonlySet<string>>();
   const [tab, setTab] = useState<Tab>("files");
   const [status, setStatus] = useState<Status>("any");
@@ -79,45 +81,12 @@ export default function Changes({
     [{ kind: "changes", id: reviewId }],
   );
   const changed = Boolean(revision && current.data && current.data.revision !== revision);
-  const [threadTrail, setThreadTrail] = useState<readonly string[]>([]);
-  const discussionScope = tab === "general" ? "general" : "all";
+  const [threadPage, setThreadPage] = useState(0);
   const filtering = involving || status !== "any";
-  const threads = useResource(
-    JSON.stringify([
-      "discussions",
-      reviewId,
-      revision,
-      discussionScope,
-      involving,
-      status,
-      threadTrail.at(-1),
-    ]),
-    async (signal) => {
-      if (!revision) return { data: null, cursor: "" };
-      let page = await readPatchDiscussions(reviewId, revision, signal, threadTrail.at(-1));
-      if (!filtering && discussionScope === "all") return page;
-      for (let skipped = 0; skipped < MAX_EMPTY_DISCUSSION_PAGES; skipped++) {
-        const next = page.data.nextCursor;
-        if (
-          !next ||
-          signal.aborted ||
-          page.data.items.some(
-            (thread) =>
-              matchesFilters(thread, status, involving) &&
-              (discussionScope === "all" || isGeneral(thread)),
-          )
-        )
-          break;
-        page = await readPatchDiscussions(reviewId, revision, signal, next);
-      }
-      return page;
-    },
-    [{ kind: "discussions", id: reviewId }],
-  );
-  const discussionItems = threads.data?.items ?? EMPTY_DISCUSSIONS;
+  const threads = usePatchDiscussions(reviewId, revision);
   const filtered = useMemo(
-    () => discussionItems.filter((thread) => matchesFilters(thread, status, involving)),
-    [discussionItems, status, involving],
+    () => threads.items.filter((thread) => matchesFilters(thread, status, involving)),
+    [threads.items, status, involving],
   );
   const knownFiles = shown ? (shown.pageNumber - 1) * PATCH_FILES_PER_PAGE + shown.items.length : 0;
   const totalFiles = catalog.data
@@ -138,15 +107,22 @@ export default function Changes({
           )
         : filtered;
 
+  const page = Math.min(
+    threadPage,
+    Math.max(0, Math.ceil(visible.length / DISCUSSIONS_PER_PAGE) - 1),
+  );
+  const displayed = visible.slice(page * DISCUSSIONS_PER_PAGE, (page + 1) * DISCUSSIONS_PER_PAGE);
+
   function refreshIndex() {
-    setThreadTrail([]);
+    setThreadPage(0);
+    setThreadJump(undefined);
     setEpoch((value) => value + 1);
   }
 
   function clearConversationFilters() {
     setInvolving(false);
     setStatus("any");
-    setThreadTrail([]);
+    setThreadPage(0);
     participant.current?.focus({ preventScroll: true });
   }
 
@@ -155,17 +131,7 @@ export default function Changes({
   return (
     <section className="changes stack" aria-label="Changes">
       <div className="changes-top">
-        <div>
-          <h3>Changes &amp; conversations</h3>
-          {(totalFiles !== undefined || threads.data) && (
-            <p className="meta">
-              {totalFiles !== undefined && `${totalFiles} files`}
-              {totalFiles !== undefined && threads.data && " · "}
-              {threads.data &&
-                `${filtered.length}${threads.data.nextCursor || threadTrail.length ? "+" : ""} conversations`}
-            </p>
-          )}
-        </div>
+        <h3>Changes &amp; conversations</h3>
         <Approvals reviewId={reviewId} displayedSha={shown?.headSha} webUrl={webUrl} />
       </div>
       {children}
@@ -184,75 +150,78 @@ export default function Changes({
           </button>
         </Notice>
       )}
-      <div className="actions changes-tabs">
-        {tabs.map(([id, label]) => (
-          <button
-            key={id}
-            type="button"
-            aria-pressed={tab === id}
-            onClick={() => {
-              if (tab !== id) {
-                setTab(id);
-                setThreadTrail([]);
-              }
+      <header className="changes-header" ref={toolbar}>
+        <div className="thread-filters" role="group" aria-label="Conversation filters">
+          <span className="changes-filter-title" aria-hidden="true">
+            Conversation filters
+          </span>
+          <FilterSelect
+            label="Show"
+            accessibleLabel="Conversation participants"
+            selectRef={participant}
+            value={involving ? "mine" : "all"}
+            options={[
+              { value: "all", label: "Everyone" },
+              { value: "mine", label: "Involving you" },
+            ]}
+            onChange={(value) => {
+              setInvolving(value === "mine");
+              setThreadPage(0);
             }}
-          >
-            {label}{" "}
-            {id === "files" ? (
-              <strong className="changes-count">{totalFiles}</strong>
-            ) : (
-              threads.data &&
-              (id === "general" || discussionScope === "all") && (
-                <strong className="changes-count">
-                  {id === "general" ? general.length : filtered.length}
-                  {(threads.data.nextCursor || threadTrail.length > 0) && "+"}
-                </strong>
-              )
-            )}
-          </button>
-        ))}
-      </div>
-      <div className="actions thread-filters">
-        <FilterSelect
-          label="Show"
-          accessibleLabel="Conversation participants"
-          selectRef={participant}
-          value={involving ? "mine" : "all"}
-          options={[
-            { value: "all", label: "Everyone" },
-            { value: "mine", label: "Involving you" },
-          ]}
-          onChange={(value) => {
-            setInvolving(value === "mine");
-            setThreadTrail([]);
-          }}
-        />
-        <FilterSelect
-          label="Status"
-          accessibleLabel="Conversation status"
-          value={status}
-          options={[
-            { value: "any", label: "Any status" },
-            { value: "open", label: "Open only" },
-            { value: "resolved", label: "Resolved only" },
-          ]}
-          onChange={(value) => {
-            setStatus(value as Status);
-            setThreadTrail([]);
-          }}
-        />
-        {filtering && (
-          <button
-            type="button"
-            className="filter-control clear-filters"
-            aria-label="Clear conversation filters"
-            title="Clear conversation filters"
-            onClick={clearConversationFilters}
-          >
-            <Icon name="clearFilters" size={16} />
-          </button>
-        )}
-      </div>
+          />
+          <FilterSelect
+            label="Status"
+            accessibleLabel="Conversation status"
+            value={status}
+            options={[
+              { value: "any", label: "Any status" },
+              { value: "open", label: "Open only" },
+              { value: "resolved", label: "Resolved only" },
+            ]}
+            onChange={(value) => {
+              setStatus(value as Status);
+              setThreadPage(0);
+            }}
+          />
+          {filtering && (
+            <button
+              type="button"
+              className="changes-clear"
+              aria-label="Clear conversation filters"
+              onClick={clearConversationFilters}
+            >
+              Clear
+            </button>
+          )}
+        </div>
+        <div className="changes-navigation">
+          <div className="changes-tabs" role="group" aria-label="Changes view">
+            {tabs.map(([id, label]) => (
+              <button
+                key={id}
+                type="button"
+                aria-pressed={tab === id}
+                onClick={() => {
+                  if (tab === id) return;
+                  setThreadJump(undefined);
+                  setTab(id);
+                  setThreadPage(0);
+                }}
+              >
+                {label}
+                <small className="changes-count">
+                  {id === "files"
+                    ? totalFiles
+                    : `${id === "general" ? general.length : filtered.length}${threads.limited ? "+" : ""}`}
+                </small>
+              </button>
+            ))}
+          </div>
+          {tab === "files" && shown && (
+            <div className="changes-navigation-slot" ref={setNavigation} />
+          )}
+        </div>
+      </header>
       {index.error && <Notice retry={index.retry}>{index.error}</Notice>}
       {tab === "files" && shown && (
         <FileStream
@@ -262,29 +231,40 @@ export default function Changes({
           catalog={catalog}
           threads={filtered}
           webUrl={webUrl}
-          query={query}
-          onQuery={setQuery}
+          toolbar={toolbar}
+          navigation={navigation}
+          threadJump={threadJump}
+          onThreadJump={setThreadJump}
           onLoadedAnchors={setLoadedAnchors}
           restore={epoch === 0}
           onReload={refreshIndex}
         />
       )}
       {threads.error && <Notice retry={threads.retry}>{threads.error}</Notice>}
-      {threads.pending && <Loading label="Loading discussions…" />}
+      {threads.pending && (
+        <p className="meta" role="status">
+          Loading more conversations…
+        </p>
+      )}
+      {!threads.pending && threads.limited && !threads.error && (
+        <p className="meta" role="status">
+          Conversation coverage is partial.
+        </p>
+      )}
       <section className="discussion-list stack" aria-label="Review discussions">
         {tab === "files" && visible.length > 0 && <h3>Other discussions</h3>}
-        {threads.data && (
+        {revision && (
           <p role="status" className="sr-only">
             {visible.length} {visible.length === 1 ? "discussion" : "discussions"} on this page
           </p>
         )}
-        {tab !== "files" && threads.data && !visible.length && (
+        {tab !== "files" && !threads.pending && !visible.length && (
           <div className="changes-conversation-empty">
             <div role="status">
               <Icon name="inbox" size={28} />
               <h3>
-                {threads.data.nextCursor
-                  ? "No matching conversations on this page"
+                {threads.limited
+                  ? "No matching conversations in the available discussions"
                   : filtering
                     ? tab === "general"
                       ? "No matching comments"
@@ -293,11 +273,7 @@ export default function Changes({
                       ? "No general comments yet"
                       : "No conversations yet"}
               </h3>
-              {threads.data.nextCursor ? (
-                <p className="meta">More discussion pages are available below.</p>
-              ) : (
-                filtering && <p className="meta">Try changing your filters.</p>
-              )}
+              {filtering && <p className="meta">Try changing your filters.</p>}
             </div>
             {filtering && (
               <button type="button" onClick={clearConversationFilters}>
@@ -306,14 +282,48 @@ export default function Changes({
             )}
           </div>
         )}
-        {visible.map((thread) => (
-          <DiscussionThread
-            key={thread.discussionId}
-            thread={thread}
-            outside={tab === "files" && !thread.outdated && Boolean(thread.anchor)}
-          />
-        ))}
-        <Pagination trail={threadTrail} next={threads.data?.nextCursor} onPage={setThreadTrail} />
+        {displayed.map((thread) => {
+          const line = threadLine(thread);
+          const path = line && catalog.data?.paths?.find((entry) => matchingFile(thread, entry));
+          const file = line && shown?.items.find((entry) => matchingFile(thread, entry));
+          const target: ThreadJump | undefined =
+            line && (file ? { fileId: file.fileId, line } : path ? { path, line } : undefined);
+          return (
+            <div key={thread.discussionId} className="changes-conversation">
+              <DiscussionThread
+                thread={thread}
+                outside={tab === "files" && !thread.outdated && Boolean(thread.anchor)}
+              />
+              {tab === "all" && target && (
+                <button
+                  type="button"
+                  className="changes-clear"
+                  onClick={() => {
+                    setThreadJump(target);
+                    setTab("files");
+                  }}
+                >
+                  Jump to line
+                </button>
+              )}
+            </div>
+          );
+        })}
+        {visible.length > DISCUSSIONS_PER_PAGE && (
+          <nav className="pagination" aria-label="Conversation pages">
+            <button type="button" disabled={page === 0} onClick={() => setThreadPage(page - 1)}>
+              Previous
+            </button>
+            <span className="meta">Page {page + 1}</span>
+            <button
+              type="button"
+              disabled={(page + 1) * DISCUSSIONS_PER_PAGE >= visible.length}
+              onClick={() => setThreadPage(page + 1)}
+            >
+              Next
+            </button>
+          </nav>
+        )}
       </section>
     </section>
   );

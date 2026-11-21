@@ -17,7 +17,9 @@ const PATH_CACHE_BYTES = 768 * 1024;
 export type PatchIndex = PatchFileIndex;
 type PatchIndexResult = { readonly cursor: string; readonly data: PatchIndex };
 type FileIndexPosition = { readonly revision: string } & (
-  { readonly cursor: string; readonly previewEdge?: "start" | "end" } | { readonly path: PatchPath }
+  | { readonly cursor: string; readonly previewEdge?: "start" | "end" }
+  | { readonly path: PatchPath }
+  | { readonly fileId: string }
 );
 // Keep bodies from only the most recent requested page edge, outside the metadata cache.
 let pageBodies = new WeakMap<PatchFile, string>();
@@ -42,7 +44,8 @@ export async function readPatchFiles(
     if ("cursor" in position) {
       query.set("cursor", position.cursor);
       if (position.previewEdge) query.set("previewEdge", position.previewEdge);
-    } else query.set("filePathHint", position.path.lookupKey);
+    } else if ("path" in position) query.set("filePathHint", position.path.lookupKey);
+    else query.set("preferredFileId", position.fileId);
   }
   if (preferredFileId) query.set("preferredFileId", preferredFileId);
   const result = await read(
@@ -58,6 +61,9 @@ export async function readPatchFiles(
       !data.items.some(
         (file) => file.oldPath === position.path.oldPath && file.newPath === position.path.newPath,
       )) ||
+    (position &&
+      "fileId" in position &&
+      !data.items.some((file) => file.fileId === position.fileId)) ||
     data.items.some((item) => item.reviewId !== reviewId || item.revision !== data.revision)
   ) {
     throw new Error("The selected patch index changed.");
@@ -70,15 +76,20 @@ export async function readPatchFiles(
     if (item.preview === undefined || item.preview === null) return item;
     const { preview, ...file } = item;
     const bytes = file.byteLength;
+    const selected =
+      file.fileId === preferredFileId ||
+      (position && "fileId" in position && file.fileId === position.fileId) ||
+      (position &&
+        "path" in position &&
+        file.oldPath === position.path.oldPath &&
+        file.newPath === position.path.newPath);
+    const edge = position && "previewEdge" in position && position.previewEdge;
     if (
-      !position ||
-      !("previewEdge" in position) ||
-      !position.previewEdge ||
       !isRichPatch(file) ||
       bytes === null ||
-      bytes > 32 * 1024 ||
-      bytes > bytesAvailable ||
-      admitted >= 3 ||
+      (selected
+        ? bytes > 128 * 1024
+        : !edge || bytes > 32 * 1024 || bytes > bytesAvailable || admitted >= 3) ||
       new TextEncoder().encode(preview).length !== bytes
     )
       throw new Error("The selected patch preview exceeded its bounds.");
@@ -151,21 +162,17 @@ export async function readPatchPathMatches(
   reviewId: string,
   revision: string,
   signal: AbortSignal,
-  text: string,
+  matches: (path: PatchPath) => boolean,
   offset: number,
 ) {
   const paths: PatchPath[] = [];
   let count = 0;
   const result = await scanPatchPaths(reviewId, revision, signal, (path) => {
-    if (!matchesPatchPath(path, text)) return;
+    if (!matches(path)) return;
     if (count >= offset && paths.length < PATH_MATCHES_PER_PAGE) paths.push(path);
     count++;
   });
   return { cursor: result.cursor, data: { count, paths } };
-}
-
-export function matchesPatchPath(path: PatchPath, text: string) {
-  return path.oldPath.toLowerCase().includes(text) || path.newPath.toLowerCase().includes(text);
 }
 
 async function scanPatchPaths(

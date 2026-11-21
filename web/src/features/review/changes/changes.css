@@ -10,23 +10,8 @@
 .changes .discussion-list {
   overflow-anchor: none;
 }
-.file-stream-controls {
-  position: sticky;
-  top: 0;
-  z-index: 1;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: start;
-  gap: 8px;
-  padding-block: 4px 8px;
-  background: var(--surface);
-  overflow-anchor: none;
-}
-.file-stream-controls .patch-arrows {
-  align-self: start;
-  margin-top: 6px;
-}
 .file-stream-list {
+  margin-top: 13px;
   position: relative;
 }
 .file-stream-slot {
@@ -157,118 +142,30 @@ pre.patch-source {
   user-select: text;
 }
 .changes {
-  gap: 15px;
+  container-type: inline-size;
+  gap: 0;
 }
 .changes-top {
   display: flex;
   justify-content: space-between;
-  align-items: flex-start;
-  gap: 12px;
-  margin-bottom: 2px;
+  align-items: center;
+  gap: 9px;
+  margin-bottom: 11px;
 }
 .changes-top h3 {
   font-size: 14px;
-  font-weight: 550;
-}
-.changes-top p {
-  margin-top: 5px;
-  font-size: 11px;
+  font-weight: 625;
 }
 .diff-revision {
   display: flex;
   justify-content: space-between;
   gap: 8px;
-  border-bottom: 1px solid var(--line);
-  padding-bottom: 14px;
+  padding-bottom: 13px;
   color: var(--muted);
-  font-size: 10px;
+  font-size: 11px;
 }
 .diff-revision code {
   font-size: inherit;
-}
-.changes .changes-tabs {
-  gap: 4px;
-  padding: 3px;
-  border: 1px solid var(--line);
-  border-radius: 6px;
-}
-.changes .changes-tabs button {
-  flex: 1;
-  padding: 8px 6px;
-  border: 0;
-  border-radius: 4px;
-  background: transparent;
-  color: light-dark(var(--muted), #999baa);
-  font-size: 11px;
-}
-.changes .changes-tabs button[aria-pressed="true"] {
-  background: light-dark(var(--hover), #24242e);
-  color: light-dark(var(--text), #e1e3ee);
-}
-.changes-count {
-  margin-left: 4px;
-  color: light-dark(var(--muted), #a8acc0);
-  font-size: 9px;
-  font-weight: 500;
-}
-.changed-file-picker {
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  background: var(--surface);
-}
-.changed-file-picker > summary {
-  padding: 11px 13px;
-  color: light-dark(var(--text), #d3d5e1);
-  font-size: 11px;
-}
-.changed-file-picker > summary small {
-  float: right;
-  color: light-dark(var(--muted), #828592);
-}
-.changed-file-picker > .search-field {
-  margin: 0 10px 6px;
-}
-.changed-file-picker nav {
-  max-height: 210px;
-  overflow: auto;
-  overscroll-behavior: contain;
-  padding: 0 4px 4px;
-}
-.changed-file-picker nav button {
-  display: flex;
-  width: 100%;
-  align-items: center;
-  gap: 9px;
-  border: 0;
-  background: transparent;
-  text-align: left;
-  color: var(--muted);
-}
-.changed-file-picker nav button[aria-current="true"] {
-  background: var(--selected);
-  color: var(--text);
-}
-.changed-file-picker nav button code {
-  flex: 1;
-  min-width: 0;
-  overflow-wrap: anywhere;
-  font-size: 11px;
-}
-.changed-file-picker nav small {
-  flex: 0 0 auto;
-  font-size: 10px;
-}
-.changed-file-picker .file-initial {
-  flex: 0 0 auto;
-  width: 12px;
-  color: var(--link);
-  font-size: 10px;
-}
-.changed-file-picker .file-picker-coverage {
-  padding: 6px 9px;
-}
-.changed-file-picker .pagination {
-  padding: 6px 9px;
 }
 .selected-patch {
   border: 1px solid var(--strong-line);
@@ -306,21 +203,6 @@ pre.patch-source {
     min-width: 44px;
     min-height: 44px;
   }
-}
-.patch-arrows {
-  flex: 0 0 auto;
-  color: var(--muted);
-  font-size: 11px;
-}
-.patch-arrows button {
-  min-height: 23px;
-  padding: 0 7px;
-  border: 1px solid var(--strong-line);
-  font-size: 17px;
-}
-.changes :is(.changed-file-picker .pagination, .patch-arrows) button[aria-disabled="true"] {
-  opacity: 0.52;
-  cursor: default;
 }
 .selected-patch .patch-source {
   border: 0;
@@ -474,4 +356,14 @@ pre.patch-source {
 }
 .approval-card .approval-met {
   color: light-dark(var(--green), #a9cdb7);
+}
+
+.changes-conversation {
+  position: relative;
+}
+.changes-conversation > .changes-clear {
+  margin: 7px 0 0 9px;
+}
+.changes .discussion-list {
+  margin-block: 12px;
 }

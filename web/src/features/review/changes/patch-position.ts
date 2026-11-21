@@ -90,84 +90,18 @@ export function lineAt(
   }
 }
 
-export function alignPatch(
-  file: HTMLElement,
-  scroll: HTMLElement,
-  toolbar: number,
-  inset: number,
-  line: PatchLine | undefined,
-  source: SourcePosition | undefined,
-  done: () => void,
-) {
-  let frame = requestAnimationFrame(align);
-  let lastTop: number | undefined;
-  let landed = false;
-  const observer = new ResizeObserver(schedule);
-  const mutation = new MutationObserver(schedule);
-  observer.observe(file);
-  scroll.addEventListener("scroll", schedule, { passive: true });
-  mutation.observe(file, {
-    childList: true,
-    subtree: true,
-    attributes: true,
-    attributeFilter: ["data-patch-prepared"],
-  });
-  const signals = new AbortController();
-  for (const event of ["wheel", "touchstart", "pointerdown", "keydown"])
-    scroll.addEventListener(event, cancel, { signal: signals.signal, passive: true });
+export type ThreadJump = ({ readonly fileId: string } | { readonly path: PatchPath }) & {
+  readonly line: PatchLine;
+};
 
-  function schedule() {
-    cancelAnimationFrame(frame);
-    frame = requestAnimationFrame(align);
-  }
-  function align() {
-    const top = scroll.getBoundingClientRect().top + toolbar;
-    const row = line && file.querySelector<HTMLElement>(`[data-${line.side}="${line.number}"]`);
-    const location = source && sourceRect(file, source);
-    const target = location ?? (row && row.getBoundingClientRect());
-    const targetInset = source?.inset ?? line?.inset;
-    const waiting = Boolean(
-      (line || source) &&
-      file.querySelector(".patch-waiting, .patch-rich:not([data-patch-prepared])"),
-    );
-    if (target && targetInset !== undefined) {
-      const insetNow = target.top - top;
-      const documentTop = scroll.scrollTop + insetNow;
-      if (
-        lastTop !== undefined &&
-        Math.abs(documentTop - lastTop) < 0.5 &&
-        Math.abs(insetNow - targetInset) > 1
-      ) {
-        cancel();
-        return;
-      }
-      lastTop = documentTop;
-      if (Math.abs(insetNow - targetInset) > 0.5) scroll.scrollTop += insetNow - targetInset;
-      if (!landed) {
-        landed = true;
-        done();
-      }
-    } else if (!landed) {
-      const offset = Math.min(inset, Math.max(0, file.offsetHeight - 30));
-      scroll.scrollTop += file.getBoundingClientRect().top - top + offset;
-      if (!waiting) cancel();
-    }
-  }
-  function cancel() {
-    release();
-    if (!landed) {
-      landed = true;
-      done();
-    }
-  }
-  function release() {
-    cancelAnimationFrame(frame);
-    signals.abort();
-    scroll.removeEventListener("scroll", schedule);
-    mutation.disconnect();
-    observer.disconnect();
-  }
-  return release;
+export function threadLine(thread: PatchDiscussion): PatchLine | undefined {
+  const anchor = thread.anchor;
+  if (thread.outdated || anchor?.positionType !== "text") return;
+  const end = anchor.range?.end;
+  const next = end?.newLine ?? anchor.newLine;
+  const old = end?.oldLine ?? anchor.oldLine;
+  if (next != null) return { side: "new", number: next, inset: 0 };
+  if (old != null) return { side: "old", number: old, inset: 0 };
 }
 
 export function matchingFile(
@@ -260,14 +194,17 @@ export function sourceAt(
 }
 
 export function sourceReadingTop(pre: HTMLElement, scroll: HTMLElement) {
-  const controls = pre.closest(".file-stream")?.querySelector(".file-stream-controls");
+  const controls = pre
+    .closest(".file-stream")
+    ?.closest(".changes")
+    ?.querySelector(".changes-header");
   return Math.max(
     scroll.getBoundingClientRect().top,
     controls?.getBoundingClientRect().bottom ?? 0,
   );
 }
 
-function sourceRect(file: HTMLElement, source: SourcePosition) {
+export function sourceRect(file: HTMLElement, source: SourcePosition) {
   const pre = file.querySelector<HTMLElement>("pre[data-patch-etag]");
   if (pre?.dataset.patchEtag !== source.etag) return;
   const span = [...pre.querySelectorAll<HTMLElement>("[data-source-start]")]
