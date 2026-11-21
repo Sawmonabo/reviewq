@@ -17,9 +17,9 @@ import { historyParts } from "../../../api/history";
 import type { SessionAddress } from "../../../api/history";
 import { Empty, Loading, Notice } from "../../../components/PanelState";
 import { describeError, readable } from "../../../lib/presentation";
-import { deliveryLabels } from "../delivery-labels";
 import { EntryBody } from "./EntryBody";
-import { HistorySelection } from "./HistorySelection";
+import { HistorySelection, useHistorySelection } from "./HistorySelection";
+import { HistoryEntryHeading, messageAuthor } from "./HistoryEntryHeading";
 import { HistoryStatus } from "./HistoryStatus";
 import { TranscriptFind } from "./find/TranscriptFind";
 import type { FoundOutput, PreparedDestination } from "./find/destination";
@@ -33,9 +33,7 @@ import {
   type ReadingAnchor,
   type TimelineBookmark,
 } from "./history-window";
-import { ProviderMark } from "./ProviderMark";
 import { PromptNavigator } from "./PromptNavigator";
-import { HistoryTimestamp } from "./HistoryTimestamp";
 import { FileReadPack, ToolRunHeader } from "./ToolActivity";
 import { openKey, toolCatalog, toolOnly } from "./tool-activity";
 import type { ReadTarget, ToolRun } from "./tool-activity";
@@ -82,10 +80,8 @@ export function Transcript({ target, provider, child, messages, working }: Props
   const [saved] = useState(() => readBookmark(bookmark));
   const [following, setFollowing] = useState(saved?.following ?? true);
   const followBeforeFind = useRef<boolean | undefined>(undefined);
-  const [pinned, setPinned] = useState<ReadonlySet<string>>(() => new Set());
-  const [selectedText, setSelectedText] = useState(false);
-  const [diagramFocus, setDiagramFocus] = useState<string>();
-  const focusedDiagram = !selectedText && pinned.size === 1 ? diagramFocus : undefined;
+  const viewport = useRef<HTMLDivElement>(null);
+  const { pinned, selectedText, focusedDiagram, clear } = useHistorySelection(viewport);
   const [groupKeys, setGroupKeys] = useState<ReadonlySet<string>>(() => new Set());
   const [actionNotice, setActionNotice] = useState<string>();
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(
@@ -109,7 +105,6 @@ export function Transcript({ target, provider, child, messages, working }: Props
   const releaseFindAnchor = useCallback(() => setFindAnchorEntry(undefined), []);
   const [extraParts, setExtraParts] = useState<ExtraParts>();
   const partsRequest = useRef<AbortController | undefined>(undefined);
-  const viewport = useRef<HTMLDivElement>(null);
   const anchor = useRef<Position | undefined>(
     saved && !saved.following
       ? {
@@ -120,10 +115,6 @@ export function Transcript({ target, provider, child, messages, working }: Props
         }
       : undefined,
   );
-  const selectionState = useRef<{ hasText: boolean; ids: Set<string>; diagram?: string }>({
-    hasText: false,
-    ids: new Set(),
-  });
   const scrollIntent = useRef<"head" | "tail" | "scrollbar" | undefined>(undefined);
   const pageLead = useRef(160);
   const touchY = useRef<number | undefined>(undefined);
@@ -357,56 +348,6 @@ export function Transcript({ target, provider, child, messages, working }: Props
     }
   }, [entries, following, list, prose, contentHeight, focusedDiagram]);
 
-  useEffect(() => {
-    const host = viewport.current;
-    if (!host) return;
-    function updatePins() {
-      if (!host) return;
-      const selected = getSelection();
-      const ids = new Set<string>();
-      let hasText = false;
-      if (selected && !selected.isCollapsed && selected.rangeCount) {
-        const range = selected.getRangeAt(0);
-        hasText = range.intersectsNode(host);
-        if (hasText)
-          for (const node of host.querySelectorAll<HTMLElement>("[data-native-entry]")) {
-            if (node.dataset.nativeEntry && range.intersectsNode(node))
-              ids.add(node.dataset.nativeEntry);
-          }
-      }
-      const active = document.activeElement;
-      const focused = active?.closest<HTMLElement>("[data-native-entry]");
-      const id = focused && host.contains(focused) ? focused.dataset.nativeEntry : undefined;
-      if (id) ids.add(id);
-      const previous = selectionState.current;
-      const diagram =
-        id &&
-        (previous.diagram === id || focused?.hasAttribute("data-live-entry")) &&
-        active?.closest(".mermaid-figure")
-          ? id
-          : undefined;
-      if (
-        previous.hasText !== hasText ||
-        previous.diagram !== diagram ||
-        previous.ids.size !== ids.size ||
-        [...ids].some((id) => !previous.ids.has(id))
-      ) {
-        selectionState.current = { hasText, ids, ...(diagram ? { diagram } : {}) };
-        setPinned(ids);
-        setSelectedText(hasText);
-        setDiagramFocus(diagram);
-      }
-    }
-    document.addEventListener("selectionchange", updatePins);
-    host.addEventListener("focusin", updatePins);
-    host.addEventListener("focusout", updatePins);
-    return () => {
-      document.removeEventListener("selectionchange", updatePins);
-      host.removeEventListener("focusin", updatePins);
-      host.removeEventListener("focusout", updatePins);
-    };
-  }, []);
-
   const savePosition = useEffectEvent((host: HTMLDivElement | null) => {
     if (anchor.current?.reopenPages !== undefined && !anchor.current.jump) return;
     const current = historyBookmark(host, history.generation, following);
@@ -507,14 +448,6 @@ export function Transcript({ target, provider, child, messages, working }: Props
       setFollowing(false);
     }
     approachEdge(host, up ? "head" : "tail");
-  }
-
-  function clear() {
-    if (selectedText) getSelection()?.removeAllRanges();
-    setSelectedText(false);
-    setDiagramFocus(undefined);
-    setPinned(new Set());
-    selectionState.current = { hasText: false, ids: new Set() };
   }
 
   function latest() {
@@ -772,28 +705,7 @@ export function Transcript({ target, provider, child, messages, working }: Props
               const followsTool =
                 previous &&
                 ("anchorId" in previous || (previous.entry && toolOnly(previous.entry)));
-              const assignment = Boolean(
-                child &&
-                row.entry?.parts.length &&
-                row.entry.parts.every((part) => part.kind === "assignment"),
-              );
-              const user = row.entry
-                ? row.entry.parts.some((part) => part.kind === "user_prompt")
-                : Boolean(row.delivery);
-              const followup = user && row.delivery?.purpose === "thread_followup";
-              const automatic = followup || (user && row.delivery?.purpose === "codex_recovery");
-              const role = assignment
-                ? "Assignment"
-                : user
-                  ? automatic
-                    ? followup
-                      ? "ReviewQ follow-up"
-                      : "ReviewQ"
-                    : child
-                      ? "Incoming message"
-                      : "You"
-                  : providerName;
-              const timestamp = row.entry?.timestamp ?? row.delivery?.createdAt;
+              const author = messageAuthor(row, child);
               const found =
                 foundOutput?.destination.entryId === row.id &&
                 foundOutput.destination.generation === history.generation
@@ -809,37 +721,11 @@ export function Transcript({ target, provider, child, messages, working }: Props
                   data-tool-member={row.grouped ? "" : undefined}
                   data-after-tools={followsTool && !justTools ? "" : undefined}
                   key={row.id}
-                  className={`timeline-entry ${justTools ? "tool-entry" : assignment || user ? "user-entry" : "agent-entry"}`}
+                  className={`timeline-entry ${justTools ? "tool-entry" : author ? "user-entry" : "agent-entry"}`}
                   style={{ transform: `translateY(${item.start}px)` }}
                 >
                   {!justTools && (
-                    <header className="timeline-message-heading">
-                      <span className="timeline-symbol" aria-hidden="true">
-                        {assignment ? (
-                          "A"
-                        ) : user ? (
-                          automatic ? (
-                            "RQ"
-                          ) : (
-                            "Y"
-                          )
-                        ) : (
-                          <ProviderMark provider={provider} />
-                        )}
-                      </span>
-                      <strong>{role}</strong>
-                      {timestamp && (
-                        <HistoryTimestamp timestamp={timestamp} delivery={!row.entry?.timestamp} />
-                      )}
-                      {row.delivery && (
-                        <span className="delivery-status" data-state={row.delivery.state}>
-                          {deliveryLabels[row.delivery.state]}
-                        </span>
-                      )}
-                      {row.provisional !== undefined && (
-                        <span className="badge green">Working</span>
-                      )}
-                    </header>
+                    <HistoryEntryHeading row={row} author={author} provider={provider} />
                   )}
                   <div className="message-body stack">
                     {row.delivery && (

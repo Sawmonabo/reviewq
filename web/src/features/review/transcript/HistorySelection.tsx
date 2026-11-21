@@ -1,4 +1,77 @@
+import { useEffect, useRef, useState } from "react";
+import type { RefObject } from "react";
 import { describeError } from "../../../lib/presentation";
+
+export function useHistorySelection(viewport: RefObject<HTMLDivElement | null>) {
+  const [pinned, setPinned] = useState<ReadonlySet<string>>(() => new Set());
+  const [selectedText, setSelectedText] = useState(false);
+  const [diagramFocus, setDiagramFocus] = useState<string>();
+  const focusedDiagram = !selectedText && pinned.size === 1 ? diagramFocus : undefined;
+  const selectionState = useRef<{ hasText: boolean; ids: Set<string>; diagram?: string }>({
+    hasText: false,
+    ids: new Set(),
+  });
+
+  useEffect(() => {
+    const host = viewport.current;
+    if (!host) return;
+    function updatePins() {
+      if (!host) return;
+      const selected = getSelection();
+      const ids = new Set<string>();
+      let hasText = false;
+      if (selected && !selected.isCollapsed && selected.rangeCount) {
+        const range = selected.getRangeAt(0);
+        hasText = range.intersectsNode(host);
+        if (hasText)
+          for (const node of host.querySelectorAll<HTMLElement>("[data-native-entry]")) {
+            if (node.dataset.nativeEntry && range.intersectsNode(node))
+              ids.add(node.dataset.nativeEntry);
+          }
+      }
+      const active = document.activeElement;
+      const focused = active?.closest<HTMLElement>("[data-native-entry]");
+      const id = focused && host.contains(focused) ? focused.dataset.nativeEntry : undefined;
+      if (id) ids.add(id);
+      const previous = selectionState.current;
+      const diagram =
+        id &&
+        (previous.diagram === id || focused?.hasAttribute("data-live-entry")) &&
+        active?.closest(".mermaid-figure")
+          ? id
+          : undefined;
+      if (
+        previous.hasText !== hasText ||
+        previous.diagram !== diagram ||
+        previous.ids.size !== ids.size ||
+        [...ids].some((id) => !previous.ids.has(id))
+      ) {
+        selectionState.current = { hasText, ids, ...(diagram ? { diagram } : {}) };
+        setPinned(ids);
+        setSelectedText(hasText);
+        setDiagramFocus(diagram);
+      }
+    }
+    document.addEventListener("selectionchange", updatePins);
+    host.addEventListener("focusin", updatePins);
+    host.addEventListener("focusout", updatePins);
+    return () => {
+      document.removeEventListener("selectionchange", updatePins);
+      host.removeEventListener("focusin", updatePins);
+      host.removeEventListener("focusout", updatePins);
+    };
+  }, [viewport]);
+
+  function clear() {
+    if (selectedText) getSelection()?.removeAllRanges();
+    setSelectedText(false);
+    setDiagramFocus(undefined);
+    setPinned(new Set());
+    selectionState.current = { hasText: false, ids: new Set() };
+  }
+
+  return { pinned, selectedText, focusedDiagram, clear };
+}
 
 export function HistorySelection({
   onClear,
