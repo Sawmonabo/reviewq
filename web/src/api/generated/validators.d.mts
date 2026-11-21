@@ -61,6 +61,7 @@ import type {
   PatchFileIndexResponse,
   PatchPathsResponse,
   PatchSearchResponse,
+  PatchSourceResponse,
   QuestionAnswerResponse,
   QuestionFormsResponse,
   QueuePageResponse,
@@ -247,6 +248,9 @@ export function isPatchPathsResponse(
 export function isPatchSearchResponse(
   value: unknown,
 ): value is PatchSearchResponse;
+export function isPatchSourceResponse(
+  value: unknown,
+): value is PatchSourceResponse;
 export function isQuestionAnswerResponse(
   value: unknown,
 ): value is QuestionAnswerResponse;

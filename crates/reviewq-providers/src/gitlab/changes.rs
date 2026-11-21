@@ -5,7 +5,7 @@ use reviewq_app::access::{AppError, AppFuture};
 use reviewq_app::changes::{
     ApprovalView, ChangeSource, Discussion, PatchBytes, PatchFile, PatchFileSelection,
     PatchPagePreview, PatchPathCursor, PatchPathPage, PatchRead, PatchRevision, PatchSearchPage,
-    PatchSearchRequest, SourcePage,
+    PatchSearchRequest, PatchSourcePage, PatchSourceRequest, SourcePage,
 };
 use reviewq_domain::identity::{GitSha, MrIdentity};
 use serde::Deserialize;
@@ -23,10 +23,11 @@ mod lease;
 mod paths;
 mod search;
 mod selection;
+mod source;
 mod wire;
 
 pub(super) use lease::Leases;
-use lease::{Body, INLINE_LIMIT, IndexKey, IndexedPage, Key};
+use lease::{INLINE_LIMIT, IndexKey, IndexedPage, Key};
 
 const MAX_PATCH_FILES: u32 = 10_000;
 
@@ -125,7 +126,6 @@ impl ChangeSource for GitLab {
                     self.patch_revision(&source, Some(&current.id)).await?;
                     let mut selected = None;
                     if let Some((file, body)) = scan.selected
-                        && !matches!(body, Body::Window { .. })
                         && let Ok(slot) = self
                             .patches
                             .slot(Key {
@@ -136,7 +136,7 @@ impl ChangeSource for GitLab {
                             .await
                     {
                         let body = Arc::new(body);
-                        if let Body::Memory(bytes) = body.as_ref()
+                        if let Some(bytes) = body.memory()
                             && !bytes.is_empty()
                             && bytes.len() <= INLINE_LIMIT
                             && file.metrics.as_ref().is_some_and(|metrics| {
@@ -148,14 +148,10 @@ impl ChangeSource for GitLab {
                             selected = Some((index, Arc::downgrade(&body)));
                         }
                         let _ = slot
-                            .get_or_init(|| async {
-                                PatchBytes {
-                                    revision: current.clone(),
-                                    file,
-                                    body,
-                                }
+                            .get_or_try_init(|| async {
+                                self.patch_bytes(current.clone(), file, body, selection)
                             })
-                            .await;
+                            .await?;
                     }
                     Ok(IndexedPage {
                         page: SourcePage {
@@ -201,6 +197,14 @@ impl ChangeSource for GitLab {
         read: PatchRead,
     ) -> AppFuture<'_, PatchBytes> {
         Box::pin(self.read_patch(source, revision, file, read))
+    }
+
+    fn patch_source(
+        &self,
+        source: MrIdentity,
+        request: PatchSourceRequest,
+    ) -> AppFuture<'_, PatchSourcePage> {
+        Box::pin(self.read_source_window(source, request))
     }
 
     fn discussions(

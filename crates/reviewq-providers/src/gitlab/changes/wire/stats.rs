@@ -1,6 +1,6 @@
 use reviewq_app::changes::LineChanges;
 
-const HUNK_HEADER_PREFIX: usize = 96;
+pub(in crate::gitlab::changes) const HUNK_HEADER_PREFIX: usize = 96;
 
 /// Counts complete unified-diff hunks without buffering code or long section headings.
 pub(super) struct DiffStats {
@@ -62,6 +62,14 @@ impl DiffStats {
             _ => self.invalid = true,
         }
         self.header_len = 0;
+    }
+
+    pub(super) fn prefix(&self) -> (Option<u8>, &[u8]) {
+        (self.first, &self.header[..self.header_len])
+    }
+
+    pub(super) fn incomplete(&self) -> bool {
+        self.saw_hunk && self.remaining != (0, 0)
     }
 
     pub(super) fn finish(self, empty: bool) -> Option<LineChanges> {

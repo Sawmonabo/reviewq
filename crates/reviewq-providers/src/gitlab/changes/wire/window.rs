@@ -1,12 +1,14 @@
 use std::collections::VecDeque;
 
-use reviewq_app::changes::{PatchRange, PatchRead};
+use reviewq_app::changes::{PATCH_SOURCE_BYTES, PatchRange, PatchRead, PatchSourceTarget};
 
-use super::{Body, BodyPolicy};
+use super::super::source::SEEK_BEHIND_BYTES;
+use super::{BodyPolicy, Storage};
 
 // The browser includes up to four overlap bytes for UTF-8 window boundaries.
 const MAX_BYTES: usize = 64 * 1024 + 8;
 const READ_AHEAD_BYTES: usize = 1024 * 1024;
+const SOURCE_CAPTURE_BYTES: usize = PATCH_SOURCE_BYTES + 2 * SEEK_BEHIND_BYTES;
 
 pub(super) enum Capture {
     None,
@@ -38,8 +40,30 @@ impl Capture {
                 length: length.min(limit),
                 bytes: VecDeque::new(),
             },
+            PatchRead::Source(target) => Self::source(target),
             _ => Self::None,
         }
+    }
+
+    fn source(target: PatchSourceTarget) -> Self {
+        let start = match target {
+            PatchSourceTarget::Byte(byte)
+            | PatchSourceTarget::Row {
+                byte: Some(byte), ..
+            } => byte.saturating_sub(SEEK_BEHIND_BYTES),
+            PatchSourceTarget::Before(byte) => {
+                byte.saturating_sub(PATCH_SOURCE_BYTES + SEEK_BEHIND_BYTES)
+            }
+            PatchSourceTarget::End => {
+                return Self::Tail {
+                    length: SOURCE_CAPTURE_BYTES,
+                    bytes: VecDeque::new(),
+                };
+            }
+            PatchSourceTarget::Row { row: 0, byte: None } => 0,
+            _ => return Self::None,
+        };
+        Self::from(start, start.saturating_add(SOURCE_CAPTURE_BYTES))
     }
 
     fn from(start: usize, end: usize) -> Self {
@@ -75,12 +99,12 @@ impl Capture {
         }
     }
 
-    pub(super) fn finish(self, length: usize) -> Body {
+    pub(super) fn finish(self, length: usize) -> Storage {
         let (start, bytes) = match self {
             Self::None => (0, Vec::new()),
             Self::From { start, bytes, .. } => (start, bytes),
             Self::Tail { bytes, .. } => (length - bytes.len(), Vec::from(bytes)),
         };
-        Body::Window { start, bytes }
+        Storage::Window { start, bytes }
     }
 }

@@ -27,11 +27,13 @@ mod paths;
 mod raw;
 mod search;
 mod selection;
+mod source;
 pub(super) use approval::approvals;
 pub(super) use paths::paths;
 pub(super) use raw::patch;
 pub(super) use search::search;
 pub(super) use selection::selected;
+pub(super) use source::source;
 
 const FILE_CURSOR: &[u8] = b"reviewq-changes-files-v1";
 const DISCUSSION_CURSOR: &[u8] = b"reviewq-changes-discussions-v1";

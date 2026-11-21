@@ -1,6 +1,7 @@
 import { useEffect, useEffectEvent, useLayoutEffect, useRef, useState } from "react";
-import { readPatch } from "../../../api/changes";
-import type { PatchRange, PatchWindow } from "../../../api/changes";
+import { PatchSourceChanged, readPatch, readPatchSource } from "../../../api/changes";
+import type { PatchRange, PatchSourceTarget, PatchWindow } from "../../../api/changes";
+import { ApiResponseError } from "../../../api/client";
 import type { PatchFile } from "../../../api/generated/contracts";
 import { Empty, Loading, Notice } from "../../../components/PanelState";
 import { sourceReadingTop } from "./patch-position";
@@ -14,13 +15,15 @@ type Move = {
   readonly entry?: "start" | "end";
   readonly land?: "start" | "end";
 };
+type SourcePage = PatchWindow & { readonly continuesLine?: boolean };
 type Props = {
   readonly file: PatchFile;
   readonly position: SourcePosition | "start" | "away" | undefined;
   readonly entrySide: "start" | "end" | undefined;
+  readonly onSourceChanged: () => void;
 };
 
-export function PatchSource({ file, position, entrySide }: Props) {
+export function PatchSource({ file, position, entrySide, onSourceChanged }: Props) {
   const pre = useRef<HTMLPreElement>(null);
   const lastScroll = useRef(0);
   const reentry = useRef(entrySide);
@@ -28,14 +31,14 @@ export function PatchSource({ file, position, entrySide }: Props) {
     if (entrySide) reentry.current = entrySide;
     if (position && position !== "away") reentry.current = undefined;
   }, [entrySide, position]);
-  const [pages, setPages] = useState<readonly PatchWindow[]>([]);
+  const [pages, setPages] = useState<readonly SourcePage[]>([]);
   const [move, setMove] = useState<Move | undefined>(() =>
     openingMove(file, position, entrySide === "end"),
   );
   const [failure, setFailure] = useState<{
     readonly move: Move;
     readonly message: string;
-    readonly ready?: PatchWindow[];
+    readonly ready?: SourcePage[];
   }>();
   const [previousPosition, setPreviousPosition] = useState(position);
   if (previousPosition !== position) {
@@ -64,7 +67,7 @@ export function PatchSource({ file, position, entrySide }: Props) {
   >(undefined);
   const head = pages[0];
   const tail = pages.at(-1);
-  const finishPage = useEffectEvent((target: Move, loaded: PatchWindow[]) => {
+  const finishPage = useEffectEvent((target: Move, loaded: SourcePage[]) => {
     const page = loaded[0]!;
     try {
       const element = pre.current;
@@ -121,7 +124,7 @@ export function PatchSource({ file, position, entrySide }: Props) {
   });
 
   const read = useEffectEvent(async (target: Move, signal: AbortSignal) => {
-    const result = [await readPatch(file, signal, target.range)];
+    const result = [await readSourcePage(file, signal, target.range)];
     let tail = result[0]!;
     // Restore the same wrapping context for a bookmark inside a giant physical line.
     while (
@@ -130,11 +133,18 @@ export function PatchSource({ file, position, entrySide }: Props) {
       tail.next < tail.total &&
       result.length < 3
     ) {
-      tail = await readPatch(file, signal, { offset: tail.next, etag: tail.etag });
+      tail = await readSourcePage(file, signal, { offset: tail.next, etag: tail.etag });
       result.push(tail);
     }
+    if (
+      target.byte !== undefined &&
+      tail.next < (target.end ?? target.byte + 1) &&
+      tail.next < tail.total
+    )
+      return [await readSourcePage(file, signal, { offset: target.byte, etag: tail.etag })];
     return result;
   });
+  const sourceChanged = useEffectEvent(onSourceChanged);
   useLayoutEffect(() => {
     if (!move) return;
     const controller = new AbortController();
@@ -144,6 +154,14 @@ export function PatchSource({ file, position, entrySide }: Props) {
       },
       (error: unknown) => {
         if (controller.signal.aborted) return;
+        if (
+          error instanceof PatchSourceChanged ||
+          (error instanceof ApiResponseError && error.code === "precondition_failed")
+        ) {
+          setMove(undefined);
+          sourceChanged();
+          return;
+        }
         setFailure({
           move,
           message: error instanceof Error ? error.message : "The patch range could not be loaded.",
@@ -152,7 +170,7 @@ export function PatchSource({ file, position, entrySide }: Props) {
       },
     );
     return () => controller.abort();
-  }, [move]);
+  }, [move, file.reviewId, file.revision, file.fileId, file.patchETag]);
 
   useLayoutEffect(() => {
     const element = pre.current;
@@ -365,6 +383,18 @@ export function PatchSource({ file, position, entrySide }: Props) {
               <button type="button" onClick={() => seek("end")}>
                 End
               </button>
+              {tail.continuesLine && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setFailure(undefined);
+                    reentry.current = undefined;
+                    setMove({ range: { offset: tail.next, etag: tail.etag }, land: "start" });
+                  }}
+                >
+                  Continue line
+                </button>
+              )}
             </div>
             <p className="meta">Browser Find searches the displayed source range.</p>
           </div>
@@ -401,6 +431,33 @@ export function PatchSource({ file, position, entrySide }: Props) {
       {failedAtEnd && notice}
     </>
   );
+}
+
+async function readSourcePage(
+  file: PatchFile,
+  signal: AbortSignal,
+  range: PatchRange,
+): Promise<SourcePage> {
+  if (!file.patchETag) return readPatch(file, signal, range);
+  if (range.etag && range.etag !== file.patchETag)
+    throw new Error("The selected patch validator changed.");
+  const target: PatchSourceTarget =
+    "offset" in range
+      ? { byte: range.offset }
+      : "before" in range
+        ? { before: range.before }
+        : { last: true };
+  const page = await readPatchSource(file, signal, target);
+  const first = page.rows[0];
+  const last = page.rows.at(-1);
+  return {
+    text: page.rows.map((row) => row.text).join(""),
+    first: first?.sourceStart ?? page.totalBytes,
+    next: last?.sourceEnd ?? page.totalBytes,
+    total: page.totalBytes,
+    etag: page.patchETag,
+    continuesLine: page.next !== null && page.next.row === last?.row,
+  };
 }
 
 function openingMove(file: PatchFile, position: Props["position"], entrySide: boolean): Move {

@@ -1,11 +1,12 @@
 import { decodeUtf8, readBoundedBytes } from "./bounded-bytes";
-import { read, request } from "./client";
+import { queryString, read, request } from "./client";
 import type {
   PatchDiscussionNote,
   PatchDiscussionText,
   PatchFile,
   PatchFileIndex,
   PatchPath,
+  PatchSourcePage,
 } from "./generated/contracts";
 import {
   isApprovalViewResponse,
@@ -13,9 +14,11 @@ import {
   isPatchDiscussionsResponse,
   isPatchFileIndexResponse,
   isPatchPathsResponse,
+  isPatchSourceResponse,
 } from "./generated/validators.mjs";
 
 export const PATCH_WINDOW_BYTES = 64 * 1024;
+export const PATCH_SOURCE_WINDOW_BYTES = 128 * 1024;
 export const PATCH_FILES_PER_PAGE = 10;
 export const PATH_MATCHES_PER_PAGE = 60;
 const MAX_RICH_BYTES = 2 * 1024 * 1024;
@@ -327,6 +330,108 @@ export type PatchWindow = {
 export type PatchRange = { readonly etag?: string } & (
   { readonly offset: number } | { readonly before: number } | { readonly last: true }
 );
+
+export type PatchSourceTarget =
+  | { readonly row: number; readonly byte?: number }
+  | { readonly byte: number }
+  | { readonly side: "old" | "new"; readonly line: number }
+  | { readonly before: number }
+  | { readonly last: true };
+
+export class PatchSourceChanged extends Error {}
+
+export async function readPatchSource(
+  file: PatchFile,
+  signal: AbortSignal,
+  target: PatchSourceTarget,
+): Promise<PatchSourcePage> {
+  if (!file.patchETag) throw new Error("The selected patch has no source validator.");
+  const query = queryString({
+    revision: file.revision,
+    fileId: file.fileId,
+    ...("last" in target ? { last: 1 } : target),
+  });
+  const { data } = await read(
+    `${changesRoute(file.reviewId)}/source${query}`,
+    isPatchSourceResponse,
+    signal,
+    PATCH_SOURCE_WINDOW_BYTES,
+    { "If-Match": file.patchETag },
+  );
+  if (
+    data.reviewId !== file.reviewId ||
+    data.fileId !== file.fileId ||
+    data.revision !== file.revision ||
+    data.patchETag !== file.patchETag ||
+    data.totalBytes !== file.byteLength ||
+    data.totalRows !== file.lineCount
+  )
+    throw new PatchSourceChanged("The selected patch source changed.");
+  if (!sourceWindowMatches(data, target)) throw new Error("The patch source range is invalid.");
+  signal.throwIfAborted();
+  return data;
+}
+
+function sourceWindowMatches(data: PatchSourcePage, target: PatchSourceTarget): boolean {
+  const first = data.rows[0];
+  if (first === undefined)
+    return (
+      data.next === null &&
+      ("row" in target
+        ? target.row === data.totalRows &&
+          (target.byte === undefined || target.byte === data.totalBytes)
+        : "byte" in target
+          ? target.byte === data.totalBytes
+          : "last" in target && data.totalBytes === 0)
+    );
+  const bytes = new TextEncoder();
+  let previous: typeof first | undefined;
+  for (const row of data.rows) {
+    if (
+      row.row >= data.totalRows ||
+      row.rowStart > row.sourceStart ||
+      row.sourceEnd <= row.sourceStart ||
+      row.sourceEnd > row.rowEnd ||
+      row.rowEnd > data.totalBytes ||
+      (row.hunk !== null && row.hunk > row.rowStart) ||
+      row.oldLine === 0 ||
+      row.newLine === 0 ||
+      bytes.encode(row.text).byteLength !== row.sourceEnd - row.sourceStart ||
+      (previous !== undefined &&
+        (row.row !== previous.row + 1 ||
+          row.rowStart !== previous.sourceEnd ||
+          row.rowStart !== previous.rowEnd ||
+          row.sourceStart !== row.rowStart))
+    )
+      return false;
+    previous = row;
+  }
+  const last = previous!;
+  const nextRow = last.row + Number(last.rowEnd === last.sourceEnd);
+  if (
+    data.next === null
+      ? last.sourceEnd !== data.totalBytes || nextRow !== data.totalRows
+      : data.next.byte !== last.sourceEnd ||
+        data.next.row !== nextRow ||
+        data.next.byte >= data.totalBytes ||
+        data.next.row >= data.totalRows
+  )
+    return false;
+  if ("row" in target)
+    return first.row === target.row && first.sourceStart === (target.byte ?? first.rowStart);
+  if ("byte" in target)
+    return (
+      first.sourceStart <= target.byte &&
+      target.byte - first.sourceStart <= 3 &&
+      target.byte < first.rowEnd
+    );
+  if ("side" in target)
+    return (
+      first.sourceStart === first.rowStart &&
+      first[target.side === "old" ? "oldLine" : "newLine"] === target.line
+    );
+  return last.sourceEnd === ("before" in target ? target.before : data.totalBytes);
+}
 
 export async function readPatch(
   file: PatchFile,

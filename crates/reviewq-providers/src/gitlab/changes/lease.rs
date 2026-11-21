@@ -1,20 +1,24 @@
 use std::collections::VecDeque;
 use std::os::unix::fs::FileExt;
 use std::path::PathBuf;
-use std::sync::{Arc, Weak};
+use std::sync::{Arc, OnceLock, Weak};
 use std::time::{Duration, Instant};
 
 use reviewq_app::access::{AppError, AppFuture};
 use reviewq_app::changes::{
-    PatchBytes, PatchContent, PatchFile, PatchFileSelection, PatchPagePreview, SourcePage,
+    PatchBytes, PatchContent, PatchFile, PatchFileSelection, PatchPagePreview, PatchSourceTarget,
+    PatchSourceWindow, SourcePage,
 };
 use reviewq_domain::identity::MrIdentity;
-use tokio::sync::{Mutex, OnceCell};
+use tokio::sync::{Mutex, OnceCell, Semaphore};
+
+use super::source::{SourceIndex, SourceRead};
 
 mod scratch;
 pub(super) use scratch::{ScratchFile, ScratchKey};
 
 const MAX_LEASES: usize = 4;
+const MAX_SOURCE_READS: usize = 12;
 const INACTIVITY: Duration = Duration::from_secs(30);
 pub(super) const MEMORY_LIMIT: usize = 2 * 1024 * 1024;
 pub(super) const INLINE_LIMIT: usize = 128 * 1024;
@@ -53,7 +57,7 @@ impl IndexedPage {
         if matches!(preview, PatchPagePreview::Selected) {
             if let Some((index, body)) = &self.selected
                 && let Some(body) = body.upgrade()
-                && let Body::Memory(bytes) = body.as_ref()
+                && let Some(bytes) = body.memory()
             {
                 page.items[*index].preview = Some(
                     std::str::from_utf8(bytes)
@@ -81,7 +85,7 @@ impl IndexedPage {
             {
                 continue;
             }
-            if let Body::Memory(bytes) = body.as_ref()
+            if let Some(bytes) = body.memory()
                 && !bytes.is_empty()
                 && bytes.len() <= available
             {
@@ -114,12 +118,42 @@ pub(in crate::gitlab) struct Leases {
     entries: Arc<Mutex<VecDeque<Lease>>>,
     scans: Arc<Mutex<VecDeque<IndexLease>>>,
     pub(super) flights: super::flights::Flights,
+    pub(super) source_reads: Arc<Semaphore>,
 }
 
-pub(super) enum Body {
+pub(super) struct Body {
+    storage: Storage,
+    index: OnceLock<Arc<SourceIndex>>,
+}
+
+pub(super) enum Storage {
     Memory(Vec<u8>),
     File(Arc<ScratchFile>),
     Window { start: usize, bytes: Vec<u8> },
+}
+
+impl Body {
+    pub(super) fn new(storage: Storage, index: Option<SourceIndex>) -> Self {
+        Self {
+            storage,
+            index: index.map_or_else(OnceLock::new, |value| OnceLock::from(Arc::new(value))),
+        }
+    }
+
+    pub(super) fn memory(&self) -> Option<&Vec<u8>> {
+        match &self.storage {
+            Storage::Memory(bytes) => Some(bytes),
+            _ => None,
+        }
+    }
+
+    pub(super) fn is_window(&self) -> bool {
+        matches!(self.storage, Storage::Window { .. })
+    }
+
+    pub(super) fn index(&self) -> Option<&Arc<SourceIndex>> {
+        self.index.get()
+    }
 }
 
 impl Leases {
@@ -150,7 +184,37 @@ impl Leases {
             entries,
             scans,
             flights: super::flights::Flights::default(),
+            source_reads: Arc::new(Semaphore::new(MAX_SOURCE_READS)),
         }
+    }
+
+    pub(super) fn refetch_only(&self) -> Self {
+        // A leased fallback shares in-flight provider reads but has no strong
+        // reference back to the entries that own it.
+        Self {
+            profile: self.profile.clone(),
+            entries: Arc::default(),
+            scans: Arc::default(),
+            flights: self.flights.clone(),
+            source_reads: self.source_reads.clone(),
+        }
+    }
+
+    pub(super) async fn discard_stale(&self, key: &Key, etag: &str) {
+        let stale = |file: &PatchFile| {
+            file.id == key.file && file.metrics.as_ref().is_some_and(|data| data.etag == etag)
+        };
+        self.entries.lock().await.retain(|entry| {
+            &entry.key != key || entry.slot.get().is_none_or(|patch| !stale(&patch.file))
+        });
+        self.scans.lock().await.retain(|scan| {
+            scan.key.source != key.source
+                || scan.key.revision != key.revision
+                || scan
+                    .slot
+                    .get()
+                    .is_none_or(|indexed| !indexed.page.items.iter().any(stale))
+        });
     }
 
     pub(super) async fn index(&self, key: IndexKey) -> Result<Arc<IndexSlot>, AppError> {
@@ -215,9 +279,12 @@ impl Leases {
         let lease = entries.iter_mut().find(|entry| {
             &entry.key == key && (entry.used_at.elapsed() < INACTIVITY || entry.in_use())
         })?;
-        let patch = lease.slot.get()?.clone();
+        let patch = lease.slot.get()?;
+        if !patch.body.retained() {
+            return None;
+        }
         lease.used_at = Instant::now();
-        Some(patch)
+        Some(patch.clone())
     }
 
     pub(super) async fn slot(&self, key: Key) -> Result<Slot, AppError> {
@@ -283,11 +350,15 @@ impl Lease {
 }
 
 impl PatchContent for Body {
+    fn retained(&self) -> bool {
+        !self.is_window()
+    }
+
     fn covers(&self, offset: usize, length: usize) -> bool {
-        match self {
-            Self::Memory(bytes) => length <= bytes.len().saturating_sub(offset),
-            Self::File(_) => true,
-            Self::Window { start, bytes } => offset
+        match &self.storage {
+            Storage::Memory(bytes) => length <= bytes.len().saturating_sub(offset),
+            Storage::File(_) => true,
+            Storage::Window { start, bytes } => offset
                 .checked_sub(*start)
                 .is_some_and(|offset| offset <= bytes.len() && length <= bytes.len() - offset),
         }
@@ -295,15 +366,15 @@ impl PatchContent for Body {
 
     fn read(&self, offset: usize, length: usize) -> AppFuture<'_, Vec<u8>> {
         Box::pin(async move {
-            match self {
-                Self::Memory(bytes) => {
+            match &self.storage {
+                Storage::Memory(bytes) => {
                     let end = offset.checked_add(length).ok_or(AppError::Internal)?;
                     bytes
                         .get(offset..end)
                         .map(<[u8]>::to_vec)
                         .ok_or(AppError::Internal)
                 }
-                Self::File(owner) => {
+                Storage::File(owner) => {
                     let file = owner.clone();
                     tokio::task::spawn_blocking(move || {
                         let mut bytes = vec![0; length];
@@ -315,7 +386,7 @@ impl PatchContent for Body {
                     .await
                     .map_err(|_| AppError::Unavailable)?
                 }
-                Self::Window { start, bytes } => {
+                Storage::Window { start, bytes } => {
                     let first = offset.checked_sub(*start).ok_or(AppError::Internal)?;
                     let end = first.checked_add(length).ok_or(AppError::Internal)?;
                     bytes
@@ -325,5 +396,24 @@ impl PatchContent for Body {
                 }
             }
         })
+    }
+
+    fn source_window(&self, target: PatchSourceTarget) -> AppFuture<'_, PatchSourceWindow> {
+        Box::pin(async move {
+            let index = match self.memory() {
+                Some(bytes) => self
+                    .index
+                    .get_or_init(|| Arc::new(SourceIndex::memory(bytes))),
+                None => self.index.get().ok_or(AppError::Internal)?,
+            };
+            let mut reader = self;
+            index.window(&mut reader, target).await
+        })
+    }
+}
+
+impl SourceRead for &Body {
+    fn read(&mut self, offset: usize, length: usize) -> AppFuture<'_, Vec<u8>> {
+        PatchContent::read(*self, offset, length)
     }
 }

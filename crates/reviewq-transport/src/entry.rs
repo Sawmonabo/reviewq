@@ -300,6 +300,7 @@ pub fn router(
         )
         .route("/reviews/{review_id}/changes/paths", get(changes::paths))
         .route("/reviews/{review_id}/changes/patch", get(changes::patch))
+        .route("/reviews/{review_id}/changes/source", get(changes::source))
         .route("/reviews/{review_id}/changes/search", get(changes::search))
         .route(
             "/reviews/{review_id}/changes/discussions",

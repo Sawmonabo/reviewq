@@ -272,6 +272,55 @@ export interface PatchSearchMatch {
   [k: string]: unknown;
 }
 
+export interface PatchSourceResponse {
+  cursor: EventCursorDto;
+  data: PatchSourcePage;
+  [k: string]: unknown;
+}
+
+export interface PatchSourcePage {
+  baseSha: GitShaDto;
+  fileId: FileIdDto;
+  headSha: GitShaDto;
+  next: PatchSourceCursor | null;
+  patchETag: PatchETagDto;
+  reviewId: ReviewIdDto;
+  revision: PatchRevisionDto;
+  /**
+   * @maxItems 128
+   */
+  rows: PatchSourceRow[];
+  startSha: GitShaDto;
+  totalBytes: SafeCountDto;
+  totalRows: SafeCountDto;
+  [k: string]: unknown;
+}
+
+export interface PatchSourceCursor {
+  byte: SafeCountDto;
+  row: SafeCountDto;
+  [k: string]: unknown;
+}
+
+export interface PatchSourceRow {
+  hunk: SafeCountDto | null;
+  newLine: SafeCountDto | null;
+  oldLine: SafeCountDto | null;
+  row: SafeCountDto;
+  rowEnd: SafeCountDto;
+  /**
+   * The complete row's original half-open byte range.
+   */
+  rowStart: SafeCountDto;
+  sourceEnd: SafeCountDto;
+  /**
+   * The returned fragment's original half-open byte range.
+   */
+  sourceStart: SafeCountDto;
+  text: string;
+  [k: string]: unknown;
+}
+
 export interface SelectedPatchResponse {
   cursor: EventCursorDto;
   data: SelectedPatch;

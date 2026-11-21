@@ -10,7 +10,7 @@ import {
 } from "react";
 import type { CSSProperties, RefObject } from "react";
 import { createPortal } from "react-dom";
-import { isRichPatch, PATCH_WINDOW_BYTES } from "../../../api/changes";
+import { isRichPatch, PATCH_SOURCE_WINDOW_BYTES, PATCH_WINDOW_BYTES } from "../../../api/changes";
 import type { PatchIndex, readPatchPathCatalog } from "../../../api/changes";
 import type {
   PatchDiscussion,
@@ -673,6 +673,7 @@ export function FileStream({
                   file={file}
                   threads={anchors.get(item.index) ?? EMPTY_THREADS}
                   source={source}
+                  onSourceChanged={onReload}
                   position={item.index + 1}
                   admitted={wanted.has(item.index)}
                   entrySide={
@@ -748,9 +749,10 @@ function admitPatches(
     if (admitted.size >= MAX_ACTIVE_PATCHES) break;
     const file = files.get(ordinal);
     if (!file || admitted.has(ordinal) || file.availability !== "complete") continue;
+    const rangeBytes = file.patchETag ? PATCH_SOURCE_WINDOW_BYTES : PATCH_WINDOW_BYTES;
     const size = isRichPatch(file)
       ? (file.byteLength ?? MAX_ACTIVE_BYTES)
-      : Math.min(file.byteLength ?? Infinity, PATCH_WINDOW_BYTES * 4);
+      : Math.min(file.byteLength ?? Infinity, rangeBytes * 4);
     if (bytes + size > MAX_ACTIVE_BYTES) continue;
     if (
       !(ordinal >= first && ordinal <= last) &&

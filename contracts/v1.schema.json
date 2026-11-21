@@ -5911,6 +5911,175 @@
       ],
       "type": "string"
     },
+    "PatchSourceCursor": {
+      "properties": {
+        "byte": {
+          "$ref": "#/definitions/SafeCountDto"
+        },
+        "row": {
+          "$ref": "#/definitions/SafeCountDto"
+        }
+      },
+      "required": [
+        "row",
+        "byte"
+      ],
+      "type": "object"
+    },
+    "PatchSourcePage": {
+      "properties": {
+        "baseSha": {
+          "$ref": "#/definitions/GitShaDto"
+        },
+        "fileId": {
+          "$ref": "#/definitions/FileIdDto"
+        },
+        "headSha": {
+          "$ref": "#/definitions/GitShaDto"
+        },
+        "next": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/PatchSourceCursor"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "patchETag": {
+          "$ref": "#/definitions/PatchETagDto"
+        },
+        "reviewId": {
+          "$ref": "#/definitions/ReviewIdDto"
+        },
+        "revision": {
+          "$ref": "#/definitions/PatchRevisionDto"
+        },
+        "rows": {
+          "items": {
+            "$ref": "#/definitions/PatchSourceRow"
+          },
+          "maxItems": 128,
+          "type": "array"
+        },
+        "startSha": {
+          "$ref": "#/definitions/GitShaDto"
+        },
+        "totalBytes": {
+          "$ref": "#/definitions/SafeCountDto"
+        },
+        "totalRows": {
+          "$ref": "#/definitions/SafeCountDto"
+        }
+      },
+      "required": [
+        "reviewId",
+        "revision",
+        "fileId",
+        "baseSha",
+        "startSha",
+        "headSha",
+        "patchETag",
+        "totalBytes",
+        "totalRows",
+        "rows",
+        "next"
+      ],
+      "type": "object"
+    },
+    "PatchSourceResponse": {
+      "description": "The resource and event head from the same authorized snapshot.",
+      "properties": {
+        "cursor": {
+          "$ref": "#/definitions/EventCursorDto"
+        },
+        "data": {
+          "$ref": "#/definitions/PatchSourcePage"
+        }
+      },
+      "required": [
+        "data",
+        "cursor"
+      ],
+      "title": "PatchSourceResponse",
+      "type": "object"
+    },
+    "PatchSourceRow": {
+      "properties": {
+        "hunk": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SafeCountDto"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "newLine": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SafeCountDto"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "oldLine": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SafeCountDto"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "row": {
+          "$ref": "#/definitions/SafeCountDto"
+        },
+        "rowEnd": {
+          "$ref": "#/definitions/SafeCountDto"
+        },
+        "rowStart": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/SafeCountDto"
+            }
+          ],
+          "description": "The complete row's original half-open byte range."
+        },
+        "sourceEnd": {
+          "$ref": "#/definitions/SafeCountDto"
+        },
+        "sourceStart": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/SafeCountDto"
+            }
+          ],
+          "description": "The returned fragment's original half-open byte range."
+        },
+        "text": {
+          "maxLength": 131072,
+          "type": "string"
+        }
+      },
+      "required": [
+        "row",
+        "hunk",
+        "oldLine",
+        "newLine",
+        "rowStart",
+        "rowEnd",
+        "sourceStart",
+        "sourceEnd",
+        "text"
+      ],
+      "type": "object"
+    },
     "PlanEntry": {
       "properties": {
         "entryId": {
@@ -10307,6 +10476,7 @@
     "PatchFileIndexResponse": "changes",
     "PatchPathsResponse": "changes",
     "PatchSearchResponse": "changes",
+    "PatchSourceResponse": "changes",
     "QuestionAnswerRequest": "questions",
     "QuestionAnswerResponse": "questions",
     "QuestionFormsResponse": "questions",
@@ -10421,6 +10591,7 @@
       "PatchFileIndexResponse": "#/definitions/PatchFileIndexResponse",
       "PatchPathsResponse": "#/definitions/PatchPathsResponse",
       "PatchSearchResponse": "#/definitions/PatchSearchResponse",
+      "PatchSourceResponse": "#/definitions/PatchSourceResponse",
       "QuestionAnswerResponse": "#/definitions/QuestionAnswerResponse",
       "QuestionFormsResponse": "#/definitions/QuestionFormsResponse",
       "QueuePageResponse": "#/definitions/QueuePageResponse",

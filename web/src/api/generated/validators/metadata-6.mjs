@@ -48,12 +48,12 @@ const schema257 = {
 };
 const schema265 = { enum: ["reading", "complete", "limited"], type: "string" };
 const schema269 = { enum: ["old", "new"], type: "string" };
-const schema273 = {
+const schema281 = {
   enum: ["native", "async"],
   title: "QuestionAnswerResponseMode",
   type: "string",
 };
-const schema277 = {
+const schema285 = {
   enum: [
     "pending",
     "submitting",
@@ -71,6 +71,6 @@ export {
   schema257,
   schema265,
   schema269,
-  schema273,
-  schema277,
+  schema281,
+  schema285,
 };

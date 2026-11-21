@@ -7,8 +7,13 @@ use reviewq_domain::identity::{GitSha, MrIdentity};
 use crate::access::AppFuture;
 
 mod discussion_text;
+mod source;
 
 pub use discussion_text::{MAX_DISCUSSION_TEXT_SOURCE_BYTES, discussion_text};
+pub use source::{
+    PATCH_SOURCE_BYTES, PATCH_SOURCE_ROWS, PatchSourceCursor, PatchSourcePage, PatchSourceRequest,
+    PatchSourceRow, PatchSourceTarget, PatchSourceWindow,
+};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PatchRevision {
@@ -172,15 +177,21 @@ pub struct PatchBytes {
 }
 
 pub trait PatchContent: Send + Sync {
+    /// Whether sequential consumers can read the complete body without upstream I/O.
+    fn retained(&self) -> bool;
+
     fn covers(&self, offset: usize, length: usize) -> bool;
 
     fn read(&self, offset: usize, length: usize) -> AppFuture<'_, Vec<u8>>;
+
+    fn source_window(&self, target: PatchSourceTarget) -> AppFuture<'_, PatchSourceWindow>;
 }
 
 #[derive(Clone, Copy)]
 pub enum PatchRead {
     Full,
     Range(Option<PatchRange>),
+    Source(PatchSourceTarget),
 }
 
 #[derive(Clone, Copy)]
@@ -372,6 +383,12 @@ pub trait ChangeSource: Send + Sync {
         file: String,
         read: PatchRead,
     ) -> AppFuture<'_, PatchBytes>;
+
+    fn patch_source(
+        &self,
+        source: MrIdentity,
+        request: PatchSourceRequest,
+    ) -> AppFuture<'_, PatchSourcePage>;
 
     fn search(
         &self,

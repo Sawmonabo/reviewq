@@ -2,8 +2,9 @@ use std::io::{Read, Write};
 use std::path::Path;
 use std::sync::Arc;
 
-use super::lease::{Body, MEMORY_LIMIT, ScratchFile, ScratchKey};
+use super::lease::{Body, MEMORY_LIMIT, ScratchFile, ScratchKey, Storage};
 use super::paths::matches_digest;
+use super::source::{IndexBuilder, SourceIndex};
 use super::{file_lookup_key, hex, safe_path};
 use crate::http::ResponseReader;
 use reviewq_app::access::AppError;
@@ -17,7 +18,7 @@ mod stats;
 mod window;
 pub(super) use search::find_matches;
 use stats::DiffStats;
-pub(super) use stats::hunk_ranges;
+pub(super) use stats::{HUNK_HEADER_PREFIX, hunk_ranges};
 use window::Capture;
 
 const SMALL_PATCH_BYTES: usize = 32 * 1024;
@@ -97,7 +98,7 @@ pub(super) fn decode(
             if primary && preferred.is_none_or(|required| required == file.id) {
                 selected = Some((file.clone(), body));
             } else if !primary
-                && let Body::Memory(bytes) = &body
+                && let Some(bytes) = body.memory()
                 && bytes.capacity() <= remaining
             {
                 remaining -= bytes.capacity();
@@ -162,7 +163,7 @@ pub(super) fn find_file(
 fn read_item<T>(
     reader: &mut JsonStreamReader<ResponseReader>,
     ordinal: u32,
-    scan: impl FnOnce(&mut dyn Read) -> Result<(PatchMetrics, T, bool), AppError>,
+    scan: impl FnOnce(&mut dyn Read) -> Result<(PatchMetrics, T, PatchAvailability), AppError>,
 ) -> Result<(PatchFile, PatchMetrics, T), AppError> {
     let mut info = Diff::default();
     let mut payload = None;
@@ -197,15 +198,15 @@ fn read_item<T>(
     reader.end_object().map_err(invalid)?;
     let old_path = info.old_path.ok_or(AppError::Unavailable)?;
     let new_path = info.new_path.ok_or(AppError::Unavailable)?;
-    let (metrics, data, binary) = payload.ok_or(AppError::Unavailable)?;
-    let availability = if info.binary || binary {
+    let (metrics, data, coverage) = payload.ok_or(AppError::Unavailable)?;
+    let availability = if info.binary || coverage == PatchAvailability::Binary {
         PatchAvailability::Binary
     } else if info.too_large {
         PatchAvailability::ProviderLimited
     } else if info.collapsed {
         PatchAvailability::Incomplete
     } else {
-        PatchAvailability::Complete
+        coverage
     };
     let complete = availability == PatchAvailability::Complete;
     Ok((
@@ -248,6 +249,7 @@ struct BodyScan {
     was_cr: bool,
     digest: Sha256,
     stats: DiffStats,
+    source_index: Option<IndexBuilder>,
 }
 
 impl BodyScan {
@@ -260,13 +262,16 @@ impl BodyScan {
             was_cr: false,
             digest: Sha256::new(),
             stats: DiffStats::new(),
+            source_index: None,
         }
     }
 
     fn inspect(&mut self, chunk: &[u8]) {
+        let mut end = self.length;
         self.length += chunk.len();
         self.digest.update(chunk);
         for line in chunk.split_inclusive(|byte| *byte == b'\n') {
+            end += line.len();
             let bytes = line.strip_suffix(b"\n").unwrap_or(line);
             self.stats.part(bytes, self.line_length == 0);
             self.line_length += bytes.len();
@@ -278,24 +283,43 @@ impl BodyScan {
                 self.max_line = self
                     .max_line
                     .max(self.line_length - usize::from(self.was_cr));
-                self.stats.end_line();
+                self.end_line(end);
                 self.line_length = 0;
                 self.was_cr = false;
             }
         }
     }
 
-    fn finish(mut self) -> PatchMetrics {
+    fn end_line(&mut self, end: usize) {
+        if let Some(index) = &mut self.source_index {
+            let (first, header) = self.stats.prefix();
+            index.push(end, first, header);
+        }
+        self.stats.end_line();
+    }
+
+    fn finish(mut self, prefix: &[u8]) -> (PatchMetrics, Option<SourceIndex>, PatchAvailability) {
         if self.line_length != 0 {
-            self.stats.end_line();
+            self.end_line(self.length);
         }
-        PatchMetrics {
-            byte_length: self.length,
-            line_count: self.lines + usize::from(self.line_length != 0),
-            max_line_bytes: self.max_line.max(self.line_length),
-            line_changes: self.stats.finish(self.length == 0),
-            etag: format!("\"{}\"", hex(&self.digest.finalize())),
-        }
+        let coverage = if binary_prefix(prefix) {
+            PatchAvailability::Binary
+        } else if self.stats.incomplete() {
+            PatchAvailability::Incomplete
+        } else {
+            PatchAvailability::Complete
+        };
+        (
+            PatchMetrics {
+                byte_length: self.length,
+                line_count: self.lines + usize::from(self.line_length != 0),
+                max_line_bytes: self.max_line.max(self.line_length),
+                line_changes: self.stats.finish(self.length == 0),
+                etag: format!("\"{}\"", hex(&self.digest.finalize())),
+            },
+            self.source_index.map(IndexBuilder::finish),
+            coverage,
+        )
     }
 }
 
@@ -303,8 +327,20 @@ fn body(
     mut reader: impl Read,
     profile: &Path,
     retain: &Retain<'_>,
-) -> Result<(PatchMetrics, Option<Body>, bool), AppError> {
+) -> Result<(PatchMetrics, Option<Body>, PatchAvailability), AppError> {
     let mut scan = BodyScan::new();
+    if matches!(
+        retain,
+        Retain::Selected(
+            Selection {
+                policy: BodyPolicy::Lease | BodyPolicy::Uncached,
+                ..
+            },
+            _,
+        )
+    ) {
+        scan.source_index = Some(IndexBuilder::default());
+    }
     // Read loop below uses fixed-sized blocks even for a multi-megabyte JSON string.
     let mut buffer = [0; 64 * 1024];
     let mut prefix = Vec::new();
@@ -381,15 +417,19 @@ fn body(
             prefix = Vec::new();
         }
     }
-    let binary = binary_prefix(&identification);
+    let (metrics, index, coverage) = scan.finish(&identification);
     let data = if keep {
-        Some(file.map_or(Body::Memory(prefix), |file| Body::File(file.into())))
+        Some(file.map_or(Storage::Memory(prefix), |file| Storage::File(file.into())))
     } else if matches!(retain, Retain::Selected(_, _)) {
-        Some(capture.finish(scan.length))
+        Some(capture.finish(metrics.byte_length))
     } else {
         None
     };
-    Ok((scan.finish(), data, binary))
+    Ok((
+        metrics,
+        data.map(|storage| Body::new(storage, index)),
+        coverage,
+    ))
 }
 
 fn binary_prefix(prefix: &[u8]) -> bool {
@@ -402,32 +442,25 @@ fn invalid<T>(_: T) -> AppError {
 
 #[cfg(test)]
 mod tests {
-    use super::{BodyScan, DiffStats, Sha256};
-    use sha2::Digest;
+    use super::{BodyScan, PatchAvailability};
 
     #[test]
     fn counts_hunk_lines_across_chunks_and_withholds_partial_counts() {
-        let scan = || BodyScan {
-            length: 0,
-            lines: 0,
-            max_line: 0,
-            line_length: 0,
-            was_cr: false,
-            digest: Sha256::new(),
-            stats: DiffStats::new(),
-        };
-        let mut complete = scan();
+        let mut complete = BodyScan::new();
         let patch = b"--- a/file\r\n+++ b/file\r\n@@ -1,3 +1,3 @@\r\n old\r\n--- old\r\n+++ new\r\n tail\r\n@@ -5 +5 @@\r\n-old\r\n+new\r\n\\ No newline at end of file";
         for chunk in patch.chunks(7) {
             complete.inspect(chunk);
         }
-        let metrics = complete.finish();
+        let (metrics, _, coverage) = complete.finish(patch);
+        assert_eq!(coverage, PatchAvailability::Complete);
         let counts = metrics.line_changes.unwrap();
         assert_eq!((counts.additions, counts.deletions), (2, 2));
         assert_eq!((metrics.line_count, metrics.byte_length), (11, patch.len()));
 
-        let mut partial = scan();
+        let mut partial = BodyScan::new();
         partial.inspect(b"@@ -0,0 +1,2 @@\n+only the first line");
-        assert!(partial.finish().line_changes.is_none());
+        let (metrics, _, coverage) = partial.finish(b"");
+        assert_eq!(coverage, PatchAvailability::Incomplete);
+        assert!(metrics.line_changes.is_none());
     }
 }

@@ -1,10 +1,11 @@
 use std::io::Read;
 
 use reviewq_app::access::AppError;
+use reviewq_app::changes::{PatchAvailability, PatchMetrics};
 use struson::reader::{JsonReader, JsonStreamReader};
 
 use super::super::search::{FileSearch, SearchBatch, SearchPage};
-use super::{BodyScan, ResponseReader, binary_prefix, invalid, read_item};
+use super::{BodyScan, ResponseReader, invalid, read_item};
 
 pub(in crate::gitlab::changes) fn find_matches(
     wire: ResponseReader,
@@ -46,7 +47,7 @@ pub(in crate::gitlab::changes) fn find_matches(
 fn scan(
     mut string: impl Read,
     hunt: &mut super::super::search::Rows<'_>,
-) -> Result<(reviewq_app::changes::PatchMetrics, (), bool), AppError> {
+) -> Result<(PatchMetrics, (), PatchAvailability), AppError> {
     let mut metrics = BodyScan::new();
     let mut bytes = [0; 64 * 1024];
     let mut prefix = [0; 16];
@@ -63,5 +64,6 @@ fn scan(
         metrics.inspect(chunk);
         hunt.part(chunk);
     }
-    Ok((metrics.finish(), (), binary_prefix(&prefix)))
+    let (metrics, _, coverage) = metrics.finish(&prefix);
+    Ok((metrics, (), coverage))
 }

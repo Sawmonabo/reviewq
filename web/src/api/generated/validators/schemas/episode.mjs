@@ -3,10 +3,10 @@ import { func0 } from "../runtime.mjs";
 import { validate25 } from "./checkpoint-id-dto.mjs";
 import { validate322 } from "./kind.mjs";
 import { validate235 } from "./utc-timestamp-dto.mjs";
-import { schema303 } from "../metadata-7.mjs";
+import { schema311 } from "../metadata-7.mjs";
 import { validate35 } from "./event-cursor-dto.mjs";
 import { validate326 } from "./cancel-recovery-response-state.mjs";
-function validate995(
+function validate1030(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -30,7 +30,7 @@ function validate995(
         ((data.reason === undefined || !func0.call(data, "reason")) &&
           (missing0 = "reason"))
       ) {
-        validate995.errors = [
+        validate1030.errors = [
           {
             instancePath,
             schemaPath: "#/required",
@@ -163,7 +163,7 @@ function validate995(
                     vErrors.push(err1);
                   }
                   errors++;
-                  validate995.errors = vErrors;
+                  validate1030.errors = vErrors;
                   return false;
                 } else {
                   errors = _errs5;
@@ -184,12 +184,12 @@ function validate995(
                   let data4 = data.reason;
                   const _errs9 = errors;
                   if (typeof data4 !== "string" && data4 !== null) {
-                    validate995.errors = [
+                    validate1030.errors = [
                       {
                         instancePath: instancePath + "/reason",
                         schemaPath: "#/properties/reason/type",
                         keyword: "type",
-                        params: { type: schema303.properties.reason.type },
+                        params: { type: schema311.properties.reason.type },
                       },
                     ];
                     return false;
@@ -251,7 +251,7 @@ function validate995(
         }
       }
     } else {
-      validate995.errors = [
+      validate1030.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -262,7 +262,7 @@ function validate995(
       return false;
     }
   }
-  validate995.errors = vErrors;
+  validate1030.errors = vErrors;
   return errors === 0;
 }
-export { validate995 };
+export { validate1030 };

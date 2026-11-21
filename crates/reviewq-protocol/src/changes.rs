@@ -3,9 +3,11 @@
 use serde::Serialize;
 
 mod approvals;
+mod source;
 pub use approvals::{
     ApprovalFacts, ApprovalRule, ApprovalView, ApprovalViewResponse, ApprovalWarning, Approver,
 };
+pub use source::{PatchSourceCursor, PatchSourcePage, PatchSourceResponse, PatchSourceRow};
 
 use crate::scalar::{
     FileIdDto, GitShaDto, PageCursorDto, PatchETagDto, PatchRevisionDto, ReviewIdDto, RevisionDto,

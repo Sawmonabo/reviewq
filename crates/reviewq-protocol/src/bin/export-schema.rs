@@ -6,6 +6,7 @@ use std::io::{self, Write};
 
 use reviewq_protocol::changes::{
     PatchDiscussionsResponse, PatchFileIndexResponse, PatchPathsResponse, PatchSearchResponse,
+    PatchSourceResponse,
 };
 use reviewq_protocol::events::{InvalidateEvent, ResetEvent};
 use reviewq_protocol::history::{
@@ -99,6 +100,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     )?;
     registry.response::<PatchPathsResponse>("changes", "PatchPathsResponse")?;
     registry.response::<PatchSearchResponse>("changes", "PatchSearchResponse")?;
+    registry.response::<PatchSourceResponse>("changes", "PatchSourceResponse")?;
     registry.response::<PatchDiscussionsResponse>("changes", "PatchDiscussionsResponse")?;
     registry.response::<reviewq_protocol::changes::ApprovalViewResponse>(
         "changes",

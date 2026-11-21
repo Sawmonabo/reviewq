@@ -2,7 +2,7 @@
 import { func0 } from "../runtime.mjs";
 import { validate25 } from "./checkpoint-id-dto.mjs";
 import { validate235 } from "./utc-timestamp-dto.mjs";
-function validate1226(
+function validate1261(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -21,7 +21,7 @@ function validate1226(
         ((data.completedAt === undefined || !func0.call(data, "completedAt")) &&
           (missing0 = "completedAt"))
       ) {
-        validate1226.errors = [
+        validate1261.errors = [
           {
             instancePath,
             schemaPath: "#/required",
@@ -130,7 +130,7 @@ function validate1226(
                   vErrors.push(err1);
                 }
                 errors++;
-                validate1226.errors = vErrors;
+                validate1261.errors = vErrors;
                 return false;
               } else {
                 errors = _errs4;
@@ -172,7 +172,7 @@ function validate1226(
         }
       }
     } else {
-      validate1226.errors = [
+      validate1261.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -183,7 +183,7 @@ function validate1226(
       return false;
     }
   }
-  validate1226.errors = vErrors;
+  validate1261.errors = vErrors;
   return errors === 0;
 }
-export { validate1226 };
+export { validate1261 };
