@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { MarkdownContent } from "../../components/markdown/MarkdownContent";
-import type { PatchDiscussion } from "../../api/generated/contracts";
+import type { PatchDiscussion, PatchDiscussionNote } from "../../api/generated/contracts";
 import { formatActivityTime, safeUrl } from "../../lib/presentation";
 
 export function DiscussionThread({
@@ -8,11 +8,13 @@ export function DiscussionThread({
   outside = false,
   expanded,
   onExpanded,
+  previewNote,
 }: {
   readonly thread: PatchDiscussion;
   readonly outside?: boolean;
   readonly expanded?: boolean | undefined;
   readonly onExpanded?: (open: boolean) => void;
+  readonly previewNote?: ((note: PatchDiscussionNote) => string | undefined) | undefined;
 }) {
   const [localOpen, setLocalOpen] = useState(() => thread.resolution !== "resolved");
   const open = expanded ?? localOpen;
@@ -88,6 +90,22 @@ export function DiscussionThread({
             </div>
           )}
           {thread.notes.map((note) => {
+            const preview = previewNote?.(note);
+            if (preview !== undefined)
+              return (
+                <article
+                  className="prose"
+                  data-discussion-source={note.noteId}
+                  key={note.noteId}
+                  style={{ whiteSpace: "pre-wrap" }}
+                >
+                  <div className="meta">
+                    {note.author}
+                    {note.createdAt && ` · ${formatActivityTime(note.createdAt)}`}
+                  </div>
+                  {preview}
+                </article>
+              );
             const href = safeUrl(note.webUrl);
             const stamp = note.createdAt ? (
               <time dateTime={note.createdAt}>{formatActivityTime(note.createdAt)}</time>

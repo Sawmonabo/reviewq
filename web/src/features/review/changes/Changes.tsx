@@ -18,6 +18,7 @@ import { useResource } from "../../../hooks/useResource";
 import { Approvals } from "./Approvals";
 import { ChangesThread, ChangesThreadExpansion } from "./ChangesThread";
 import { FileStream } from "./FileStream";
+import { OtherDiscussions } from "./OtherDiscussions";
 import { matchingFile, storedFile, threadLine } from "./patch-position";
 import type { ThreadJump } from "./patch-position";
 import { usePatchDiscussions } from "./usePatchDiscussions";
@@ -328,47 +329,47 @@ export default function Changes({
               )}
             </div>
           )}
-          {displayed.map((thread) => {
-            const line = threadLine(thread);
-            const path = line && catalog.data?.paths?.find((entry) => matchingFile(thread, entry));
-            const file = line && shown?.items.find((entry) => matchingFile(thread, entry));
-            const anchor = thread.anchor;
-            const target: ThreadJump | undefined =
-              line && anchor
-                ? file
-                  ? { fileId: file.fileId, line, thread }
-                  : path
-                    ? { path, line, thread }
-                    : catalog.data?.paths && !catalog.data.partial
-                      ? undefined
-                      : {
-                          paths: { oldPath: anchor.oldPath, newPath: anchor.newPath },
-                          line,
-                          thread,
-                        }
-                : undefined;
-            return (
-              <div key={thread.discussionId} className="changes-conversation">
-                <ChangesThread
-                  thread={thread}
-                  outside={tab === "files" && !thread.outdated && Boolean(thread.anchor)}
-                />
-                {tab === "all" && target && (
-                  <button
-                    type="button"
-                    className="changes-clear"
-                    onClick={() => {
-                      if (revision) setExtraInline({ revision, thread: target.thread });
-                      setThreadJump(target);
-                      setTab("files");
-                    }}
-                  >
-                    Jump to line
-                  </button>
-                )}
-              </div>
-            );
-          })}
+          {tab === "files" && displayed.length > 0 && <OtherDiscussions threads={displayed} />}
+          {tab !== "files" &&
+            displayed.map((thread) => {
+              const line = threadLine(thread);
+              const path =
+                line && catalog.data?.paths?.find((entry) => matchingFile(thread, entry));
+              const file = line && shown?.items.find((entry) => matchingFile(thread, entry));
+              const anchor = thread.anchor;
+              const target: ThreadJump | undefined =
+                line && anchor
+                  ? file
+                    ? { fileId: file.fileId, line, thread }
+                    : path
+                      ? { path, line, thread }
+                      : catalog.data?.paths && !catalog.data.partial
+                        ? undefined
+                        : {
+                            paths: { oldPath: anchor.oldPath, newPath: anchor.newPath },
+                            line,
+                            thread,
+                          }
+                  : undefined;
+              return (
+                <div key={thread.discussionId} className="changes-conversation">
+                  <ChangesThread thread={thread} />
+                  {tab === "all" && target && (
+                    <button
+                      type="button"
+                      className="changes-clear"
+                      onClick={() => {
+                        if (revision) setExtraInline({ revision, thread: target.thread });
+                        setThreadJump(target);
+                        setTab("files");
+                      }}
+                    >
+                      Jump to line
+                    </button>
+                  )}
+                </div>
+              );
+            })}
           {tab !== "files" && (
             <Pagination trail={threadTrail} next={threadData?.nextCursor} onPage={setThreadTrail} />
           )}
