@@ -22,6 +22,7 @@ use super::error::{ApiPath as Path, ApiQuery as Query};
 use super::{ApiError, Entry, ServiceEndpoint};
 
 mod approval;
+mod discussion_text;
 mod paths;
 mod raw;
 mod search;
@@ -202,6 +203,10 @@ pub(super) async fn discussions(
     let actor = entry.auth.browser_actor(&headers, false)?;
     let review_id = parse_review(&review)?;
     let source = read_source(&entry, &actor, &review_id).await?;
+    let include_text_projection = query.cursor.is_none()
+        && headers
+            .get("x-reviewq-discussion-text")
+            .is_some_and(|value| value.as_bytes() == b"1");
     let adaptive = query.limit.is_none();
     let (mut limit, page, revision) = query.position(
         &entry.auth.endpoint,
@@ -236,7 +241,6 @@ pub(super) async fn discussions(
         }
         response => response?,
     };
-    check_source(&entry, &actor, &review_id, &source).await?;
     let position = response.next_page.map(|page| Position {
         review: review.clone(),
         settings: source.context.revision.get(),
@@ -251,12 +255,19 @@ pub(super) async fn discussions(
         .into_iter()
         .map(|row| discussion(row, &web_url, &source.context))
         .collect::<Result<Vec<_>, _>>()?;
+    let text_projections = if include_text_projection {
+        discussion_text::project_page(&items).await
+    } else {
+        None
+    };
+    check_source(&entry, &actor, &review_id, &source).await?;
     Ok(Json(Success {
         cursor: EventCursorDto::new(source.cursor.get()).ok_or(AppError::Internal)?,
         data: dto::PatchDiscussions {
             review_id: ReviewIdDto::new(review).ok_or(AppError::Internal)?,
             revision: patch_revision(&response.revision.id)?,
             page: Page::new(items, next).ok_or(AppError::Internal)?,
+            text_projections,
         },
     }))
 }

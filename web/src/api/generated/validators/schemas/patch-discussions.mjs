@@ -4,6 +4,8 @@ import { validate764 } from "./patch-discussion.mjs";
 import { validate48 } from "./history-cursor-dto.mjs";
 import { validate114 } from "./review-id-dto.mjs";
 import { validate25 } from "./checkpoint-id-dto.mjs";
+import { schema238 } from "../metadata-5.mjs";
+import { validate800 } from "./patch-discussion-text.mjs";
 function validate763(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
@@ -201,6 +203,71 @@ function validate763(
                 var valid0 = _errs10 === errors;
               } else {
                 var valid0 = true;
+              }
+              if (valid0) {
+                if (
+                  data.textProjections !== undefined &&
+                  func0.call(data, "textProjections")
+                ) {
+                  let data5 = data.textProjections;
+                  const _errs11 = errors;
+                  if (!Array.isArray(data5) && data5 !== null) {
+                    validate763.errors = [
+                      {
+                        instancePath: instancePath + "/textProjections",
+                        schemaPath: "#/properties/textProjections/type",
+                        keyword: "type",
+                        params: {
+                          type: schema238.properties.textProjections.type,
+                        },
+                      },
+                    ];
+                    return false;
+                  }
+                  if (errors === _errs11) {
+                    if (Array.isArray(data5)) {
+                      if (data5.length > 64) {
+                        validate763.errors = [
+                          {
+                            instancePath: instancePath + "/textProjections",
+                            schemaPath: "#/properties/textProjections/maxItems",
+                            keyword: "maxItems",
+                            params: { limit: 64 },
+                          },
+                        ];
+                        return false;
+                      } else {
+                        var valid3 = true;
+                        const len1 = data5.length;
+                        for (let i1 = 0; i1 < len1; i1++) {
+                          const _errs13 = errors;
+                          if (
+                            !validate800(data5[i1], {
+                              instancePath:
+                                instancePath + "/textProjections/" + i1,
+                              parentData: data5,
+                              parentDataProperty: i1,
+                              rootData,
+                            })
+                          ) {
+                            vErrors =
+                              vErrors === null
+                                ? validate800.errors
+                                : vErrors.concat(validate800.errors);
+                            errors = vErrors.length;
+                          }
+                          var valid3 = _errs13 === errors;
+                          if (!valid3) {
+                            break;
+                          }
+                        }
+                      }
+                    }
+                  }
+                  var valid0 = _errs11 === errors;
+                } else {
+                  var valid0 = true;
+                }
               }
             }
           }

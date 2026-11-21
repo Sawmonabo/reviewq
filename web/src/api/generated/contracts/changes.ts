@@ -100,6 +100,12 @@ export interface PatchDiscussions {
   nextCursor: PageCursorDto | null;
   reviewId: ReviewIdDto;
   revision: PatchRevisionDto;
+  /**
+   * Optional searchable plain text from notes in this same response.
+   *
+   * @maxItems 64
+   */
+  textProjections?: PatchDiscussionText[] | null;
   [k: string]: unknown;
 }
 
@@ -150,6 +156,12 @@ export interface PatchDiscussionNote {
   resolved: boolean | null;
   resolvedBy: UpstreamIdDto | null;
   webUrl: string;
+  [k: string]: unknown;
+}
+
+export interface PatchDiscussionText {
+  noteId: string;
+  text: string;
   [k: string]: unknown;
 }
 

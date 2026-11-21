@@ -20,11 +20,11 @@ const schema249 = {
   enum: ["open", "resolved", "comment", "unknown"],
   type: "string",
 };
-const schema255 = {
+const schema256 = {
   enum: ["complete", "incomplete", "binary", "provider_limited", "missing"],
   type: "string",
 };
-const schema256 = {
+const schema257 = {
   type: "object",
   properties: {
     maxLineBytes: {
@@ -46,14 +46,14 @@ const schema256 = {
     revision: { $ref: "#/definitions/CheckpointIdDto" },
   },
 };
-const schema264 = { enum: ["reading", "complete", "limited"], type: "string" };
-const schema268 = { enum: ["old", "new"], type: "string" };
-const schema272 = {
+const schema265 = { enum: ["reading", "complete", "limited"], type: "string" };
+const schema269 = { enum: ["old", "new"], type: "string" };
+const schema273 = {
   enum: ["native", "async"],
   title: "QuestionAnswerResponseMode",
   type: "string",
 };
-const schema276 = {
+const schema277 = {
   enum: [
     "pending",
     "submitting",
@@ -67,10 +67,10 @@ const schema276 = {
 export {
   schema247,
   schema249,
-  schema255,
   schema256,
-  schema264,
-  schema268,
-  schema272,
-  schema276,
+  schema257,
+  schema265,
+  schema269,
+  schema273,
+  schema277,
 };

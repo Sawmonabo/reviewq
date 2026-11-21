@@ -2,8 +2,8 @@
 import { func0 } from "../runtime.mjs";
 import { validate422 } from "./error-dto.mjs";
 import { validate235 } from "./utc-timestamp-dto.mjs";
-import { validate977 } from "./mode.mjs";
-function validate973(
+import { validate979 } from "./mode.mjs";
+function validate975(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -28,7 +28,7 @@ function validate973(
         ((data.error === undefined || !func0.call(data, "error")) &&
           (missing0 = "error"))
       ) {
-        validate973.errors = [
+        validate975.errors = [
           {
             instancePath,
             schemaPath: "#/required",
@@ -41,7 +41,7 @@ function validate973(
         if (data.active !== undefined && func0.call(data, "active")) {
           const _errs1 = errors;
           if (typeof data.active !== "boolean") {
-            validate973.errors = [
+            validate975.errors = [
               {
                 instancePath: instancePath + "/active",
                 schemaPath: "#/properties/active/type",
@@ -110,7 +110,7 @@ function validate973(
                 vErrors.push(err1);
               }
               errors++;
-              validate973.errors = vErrors;
+              validate975.errors = vErrors;
               return false;
             } else {
               errors = _errs4;
@@ -184,7 +184,7 @@ function validate973(
                   vErrors.push(err3);
                 }
                 errors++;
-                validate973.errors = vErrors;
+                validate975.errors = vErrors;
                 return false;
               } else {
                 errors = _errs9;
@@ -258,7 +258,7 @@ function validate973(
                     vErrors.push(err5);
                   }
                   errors++;
-                  validate973.errors = vErrors;
+                  validate975.errors = vErrors;
                   return false;
                 } else {
                   errors = _errs14;
@@ -278,7 +278,7 @@ function validate973(
                 if (data.mode !== undefined && func0.call(data, "mode")) {
                   const _errs18 = errors;
                   if (
-                    !validate977(data.mode, {
+                    !validate979(data.mode, {
                       instancePath: instancePath + "/mode",
                       parentData: data,
                       parentDataProperty: "mode",
@@ -287,8 +287,8 @@ function validate973(
                   ) {
                     vErrors =
                       vErrors === null
-                        ? validate977.errors
-                        : vErrors.concat(validate977.errors);
+                        ? validate979.errors
+                        : vErrors.concat(validate979.errors);
                     errors = vErrors.length;
                   }
                   var valid0 = _errs18 === errors;
@@ -299,7 +299,7 @@ function validate973(
                   if (data.stale !== undefined && func0.call(data, "stale")) {
                     const _errs19 = errors;
                     if (typeof data.stale !== "boolean") {
-                      validate973.errors = [
+                      validate975.errors = [
                         {
                           instancePath: instancePath + "/stale",
                           schemaPath: "#/properties/stale/type",
@@ -320,7 +320,7 @@ function validate973(
         }
       }
     } else {
-      validate973.errors = [
+      validate975.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -331,7 +331,7 @@ function validate973(
       return false;
     }
   }
-  validate973.errors = vErrors;
+  validate975.errors = vErrors;
   return errors === 0;
 }
-export { validate973 };
+export { validate975 };

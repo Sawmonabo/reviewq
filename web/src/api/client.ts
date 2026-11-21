@@ -89,8 +89,9 @@ export async function read<T>(
   accepts: (data: unknown) => data is T,
   signal: AbortSignal,
   limit?: number,
+  headers?: HeadersInit,
 ): Promise<T> {
-  return decode(await request(path, { signal }), accepts, limit);
+  return decode(await request(path, { signal, ...(headers ? { headers } : {}) }), accepts, limit);
 }
 
 export async function write<T>(

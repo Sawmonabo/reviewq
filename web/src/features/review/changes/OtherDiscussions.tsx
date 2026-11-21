@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { patchDiscussionText } from "../../../api/changes";
 import type { PatchDiscussion, PatchDiscussionNote } from "../../../api/generated/contracts";
 import { projectMarkdownText } from "../../../components/markdown/parse-markdown";
 import { ChangesThread } from "./ChangesThread";
@@ -261,7 +262,7 @@ function restoreAnchor({ target, viewport, top }: ReadingAnchor): boolean {
 }
 
 function discussionText(note: PatchDiscussionNote): string {
-  const retained = previews.get(note);
+  const retained = patchDiscussionText(note) ?? previews.get(note);
   if (retained !== undefined) return retained;
   const text = projectMarkdownText(note.body);
   previews.set(note, text);

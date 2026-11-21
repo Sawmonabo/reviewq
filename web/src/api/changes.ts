@@ -1,6 +1,12 @@
 import { decodeUtf8, readBoundedBytes } from "./bounded-bytes";
 import { read, request } from "./client";
-import type { PatchFile, PatchFileIndex, PatchPath } from "./generated/contracts";
+import type {
+  PatchDiscussionNote,
+  PatchDiscussionText,
+  PatchFile,
+  PatchFileIndex,
+  PatchPath,
+} from "./generated/contracts";
 import {
   isApprovalViewResponse,
   isCurrentPatchRevisionResponse,
@@ -238,24 +244,59 @@ export async function readPatchRevision(reviewId: string, signal: AbortSignal) {
   return result;
 }
 
+const discussionText = new WeakMap<PatchDiscussionNote, string>();
+
+export function patchDiscussionText(note: PatchDiscussionNote) {
+  return discussionText.get(note);
+}
+
 export async function readPatchDiscussions(
   reviewId: string,
   revision: string,
   signal: AbortSignal,
   cursor?: string,
+  includeTextProjection = false,
 ) {
   const query = new URLSearchParams({ revision });
   if (cursor) query.set("cursor", cursor);
+  const wantsText = includeTextProjection && !cursor;
   const result = await read(
     `${changesRoute(reviewId)}/discussions?${query}`,
     isPatchDiscussionsResponse,
     signal,
+    undefined,
+    wantsText ? { "X-ReviewQ-Discussion-Text": "1" } : undefined,
   );
   const { data } = result;
   if (data.reviewId !== reviewId || data.revision !== revision) {
     throw new Error("The selected discussion scope changed.");
   }
-  return result;
+  if (!data.textProjections) return result;
+  const { textProjections, ...page } = data;
+  if (wantsText) {
+    signal.throwIfAborted();
+    rememberDiscussionText(
+      page.items.flatMap((thread) => thread.notes),
+      textProjections,
+    );
+  }
+  return { ...result, data: page };
+}
+
+function rememberDiscussionText(
+  notes: readonly PatchDiscussionNote[],
+  projections: readonly PatchDiscussionText[],
+) {
+  const source = new Map(notes.map((note) => [note.noteId, note]));
+  const seen = new Set<string>();
+  let characters = 0;
+  for (const item of projections) {
+    characters += item.text.length;
+    if (!source.has(item.noteId) || seen.has(item.noteId) || characters > 64 * 1024) return;
+    seen.add(item.noteId);
+  }
+  if (source.size !== notes.length) return;
+  for (const item of projections) discussionText.set(source.get(item.noteId)!, item.text);
 }
 
 export function downloadPatchUrl(file: PatchFile): string {

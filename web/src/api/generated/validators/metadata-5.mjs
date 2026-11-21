@@ -105,6 +105,31 @@ const schema233 = {
     title: { type: "string" },
   },
 };
+const schema238 = {
+  description:
+    "A bounded compact list with a required nullable keyset continuation.",
+  properties: {
+    items: {
+      items: { $ref: "#/definitions/PatchDiscussion" },
+      maxItems: 100,
+      type: "array",
+    },
+    nextCursor: {
+      anyOf: [{ $ref: "#/definitions/HistoryCursorDto" }, { type: "null" }],
+    },
+    reviewId: { $ref: "#/definitions/ReviewIdDto" },
+    revision: { $ref: "#/definitions/CheckpointIdDto" },
+    textProjections: {
+      description:
+        "Optional searchable plain text from notes in this same response.",
+      items: { $ref: "#/definitions/PatchDiscussionText" },
+      maxItems: 64,
+      type: ["array", "null"],
+    },
+  },
+  required: ["reviewId", "revision", "items", "nextCursor"],
+  type: "object",
+};
 const schema242 = { enum: ["text", "file", "other"], type: "string" };
 export {
   schema208,
@@ -116,5 +141,6 @@ export {
   schema229,
   schema231,
   schema233,
+  schema238,
   schema242,
 };

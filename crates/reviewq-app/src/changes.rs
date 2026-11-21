@@ -6,6 +6,10 @@ use reviewq_domain::identity::{GitSha, MrIdentity};
 
 use crate::access::AppFuture;
 
+mod discussion_text;
+
+pub use discussion_text::{MAX_DISCUSSION_TEXT_SOURCE_BYTES, discussion_text};
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PatchRevision {
     pub id: String,

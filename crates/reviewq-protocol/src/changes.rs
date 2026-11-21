@@ -180,6 +180,20 @@ pub struct PatchDiscussions {
     pub revision: PatchRevisionDto,
     #[serde(flatten)]
     pub page: Page<PatchDiscussion>,
+    /// Optional searchable plain text from notes in this same response.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "schema", schemars(length(max = 64)))]
+    pub text_projections: Option<Vec<PatchDiscussionText>>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct PatchDiscussionText {
+    #[cfg_attr(feature = "schema", schemars(length(max = 20)))]
+    pub note_id: String,
+    #[cfg_attr(feature = "schema", schemars(length(max = 32768)))]
+    pub text: String,
 }
 
 pub type PatchDiscussionsResponse = Success<PatchDiscussions>;

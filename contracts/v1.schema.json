@@ -5408,6 +5408,23 @@
       ],
       "type": "object"
     },
+    "PatchDiscussionText": {
+      "properties": {
+        "noteId": {
+          "maxLength": 20,
+          "type": "string"
+        },
+        "text": {
+          "maxLength": 32768,
+          "type": "string"
+        }
+      },
+      "required": [
+        "noteId",
+        "text"
+      ],
+      "type": "object"
+    },
     "PatchDiscussions": {
       "description": "A bounded compact list with a required nullable keyset continuation.",
       "properties": {
@@ -5433,6 +5450,17 @@
         },
         "revision": {
           "$ref": "#/definitions/PatchRevisionDto"
+        },
+        "textProjections": {
+          "description": "Optional searchable plain text from notes in this same response.",
+          "items": {
+            "$ref": "#/definitions/PatchDiscussionText"
+          },
+          "maxItems": 64,
+          "type": [
+            "array",
+            "null"
+          ]
         }
       },
       "required": [

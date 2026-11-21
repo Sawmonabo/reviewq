@@ -6,7 +6,7 @@ import { validate25 } from "./checkpoint-id-dto.mjs";
 import { validate69 } from "./merge-request-iid-dto.mjs";
 import { validate235 } from "./utc-timestamp-dto.mjs";
 import { validate287 } from "./merge-request-status.mjs";
-function validate936(
+function validate938(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -71,7 +71,7 @@ function validate936(
             vErrors.push(err1);
           }
           errors++;
-          validate936.errors = vErrors;
+          validate938.errors = vErrors;
           return false;
         } else {
           errors = _errs2;
@@ -146,7 +146,7 @@ function validate936(
               vErrors.push(err3);
             }
             errors++;
-            validate936.errors = vErrors;
+            validate938.errors = vErrors;
             return false;
           } else {
             errors = _errs7;
@@ -220,7 +220,7 @@ function validate936(
                 vErrors.push(err5);
               }
               errors++;
-              validate936.errors = vErrors;
+              validate938.errors = vErrors;
               return false;
             } else {
               errors = _errs12;
@@ -294,7 +294,7 @@ function validate936(
                   vErrors.push(err7);
                 }
                 errors++;
-                validate936.errors = vErrors;
+                validate938.errors = vErrors;
                 return false;
               } else {
                 errors = _errs17;
@@ -317,7 +317,7 @@ function validate936(
               ) {
                 const _errs21 = errors;
                 if (typeof data.hasAgentQuestions !== "boolean") {
-                  validate936.errors = [
+                  validate938.errors = [
                     {
                       instancePath: instancePath + "/hasAgentQuestions",
                       schemaPath: "#/properties/hasAgentQuestions/type",
@@ -411,7 +411,7 @@ function validate936(
                         vErrors.push(err9);
                       }
                       errors++;
-                      validate936.errors = vErrors;
+                      validate938.errors = vErrors;
                       return false;
                     } else {
                       errors = _errs25;
@@ -459,7 +459,7 @@ function validate936(
         }
       }
     } else {
-      validate936.errors = [
+      validate938.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -470,7 +470,7 @@ function validate936(
       return false;
     }
   }
-  validate936.errors = vErrors;
+  validate938.errors = vErrors;
   return errors === 0;
 }
-export { validate936 };
+export { validate938 };

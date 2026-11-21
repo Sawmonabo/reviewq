@@ -31,7 +31,7 @@ export function usePatchDiscussions(reviewId: string, revision: string | undefin
       let next: string | undefined;
       let cursor = "";
       for (let page = 0; page < MAX_DISCUSSION_PAGES; page++) {
-        const result = await readPatchDiscussions(reviewId, revision, signal, next);
+        const result = await readPatchDiscussions(reviewId, revision, signal, next, page === 0);
         signal.throwIfAborted();
         cursor = result.cursor;
         const size = 2 * JSON.stringify(result.data.items).length;
