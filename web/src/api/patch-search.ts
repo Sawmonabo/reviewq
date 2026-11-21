@@ -19,22 +19,25 @@ export async function readPatchSearch(
     MAX_REPLY_BYTES,
   );
   const { data } = response;
-  const needleBytes = new TextEncoder().encode(query).length;
+  const literal = new RegExp("^" + query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "$", "iu");
+  const encoder = new TextEncoder();
   if (
     data.reviewId !== reviewId ||
     data.revision !== revision ||
     data.items.length > MAX_MATCHES ||
     (data.coverage === "reading") !== (data.nextCursor !== null) ||
     (data.nextCursor !== null && data.nextCursor === options?.cursor) ||
-    data.items.some(
-      (match) =>
+    data.items.some((match) => {
+      const matched = match.snippet.slice(match.highlightStart, match.highlightEnd);
+      return (
         match.line < 1 ||
         match.hunk >= match.sourceStart ||
-        match.sourceEnd - match.sourceStart !== needleBytes ||
+        match.sourceEnd - match.sourceStart !== encoder.encode(matched).length ||
         match.highlightEnd > match.snippet.length ||
         match.highlightEnd <= match.highlightStart ||
-        match.snippet.slice(match.highlightStart, match.highlightEnd) !== query,
-    )
+        !literal.test(matched)
+      );
+    })
   ) {
     throw new Error("The patch search response changed or exceeded its bounds.");
   }

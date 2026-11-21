@@ -1,4 +1,4 @@
-use aho_corasick::AhoCorasick;
+use regex::bytes::{Regex, RegexBuilder};
 use reviewq_app::access::AppError;
 use reviewq_app::changes::{
     PatchAvailability, PatchBytes, PatchFile, PatchMetrics, PatchSearchCursor, PatchSearchMatch,
@@ -20,7 +20,7 @@ const MAX_MATCH_JSON_BYTES: usize = 224 * 1024;
 
 #[derive(Clone)]
 pub(super) struct SearchPage {
-    pattern: AhoCorasick,
+    pattern: Regex,
     pattern_bytes: usize,
     resume_file: u32,
     resume_offset: usize,
@@ -79,9 +79,12 @@ impl GitLab {
             .patch_revision(&source, Some(&request.revision))
             .await?;
         let search = SearchPage {
-            pattern: AhoCorasick::new([request.query.as_bytes()])
+            pattern: RegexBuilder::new(&regex::escape(&request.query))
+                .case_insensitive(true)
+                .build()
                 .map_err(|_| AppError::Internal)?,
-            pattern_bytes: request.query.len(),
+            // Unicode simple folding preserves scalar count but can change UTF-8 width.
+            pattern_bytes: 4 * request.query.chars().count(),
             resume_file: position.ordinal,
             resume_offset: position.offset,
             resume_id: position.file_id.take(),

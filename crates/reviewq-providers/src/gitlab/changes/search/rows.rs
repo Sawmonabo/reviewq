@@ -1,4 +1,4 @@
-use aho_corasick::AhoCorasick;
+use regex::bytes::Regex;
 use reviewq_app::changes::PatchSide;
 
 use super::super::wire::hunk_ranges;
@@ -24,7 +24,7 @@ pub(in crate::gitlab::changes) struct Matches {
 }
 
 pub(in crate::gitlab::changes) struct Rows<'a> {
-    query: &'a AhoCorasick,
+    query: &'a Regex,
     after: usize,
     limit: usize,
     match_bytes: usize,
@@ -58,12 +58,7 @@ enum Line {
 }
 
 impl<'a> Rows<'a> {
-    pub(super) fn new(
-        query: &'a AhoCorasick,
-        match_bytes: usize,
-        after: usize,
-        limit: usize,
-    ) -> Self {
+    pub(super) fn new(query: &'a Regex, match_bytes: usize, after: usize, limit: usize) -> Self {
         Self {
             query,
             after,
@@ -191,9 +186,12 @@ impl<'a> Rows<'a> {
         if begin >= up_to || self.matches.next_offset.is_some() {
             return;
         }
-        for hit in self.query.find_overlapping_iter(&self.window[begin..]) {
-            let first = begin + hit.start();
-            let last = begin + hit.end();
+        let mut seek = begin;
+        while let Some(hit) = self.query.find_at(&self.window, seek) {
+            let first = hit.start();
+            let last = hit.end();
+            // A match may overlap the previous one. The Unicode matcher skips partial scalars.
+            seek = first + 1;
             if first >= up_to {
                 break;
             }
@@ -270,12 +268,17 @@ fn is_continuation(byte: u8) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{AhoCorasick, PatchSide, Rows, WINDOW_BYTES};
+    use super::{PatchSide, Rows, WINDOW_BYTES};
+    use regex::bytes::RegexBuilder;
 
     #[test]
     fn locates_hunk_bytes_and_unicode_across_chunk_and_result_boundaries() {
-        let fragment = "🐍needle";
-        let query = AhoCorasick::new([fragment]).unwrap();
+        let fragment = "🐍KeEdLe";
+        let needle = "🐍keedle";
+        let query = RegexBuilder::new(&regex::escape(needle))
+            .case_insensitive(true)
+            .build()
+            .unwrap();
         let prior = "🦀".repeat((WINDOW_BYTES - 4) / 4);
         let patch = format!(
             "--- a/a\r\n+++ b/b\r\n@@ -4,2 +7,2 @@\r\n-🦀{fragment}\r\n+{prior}{fragment}\r\n context {fragment}"
@@ -285,7 +288,7 @@ mod tests {
             .map(|(start, _)| start)
             .collect();
         let read = |after, limit| {
-            let mut rows = Rows::new(&query, fragment.len(), after, limit);
+            let mut rows = Rows::new(&query, 4 * needle.chars().count(), after, limit);
             for chunk in patch.as_bytes().chunks(9) {
                 rows.part(chunk);
             }

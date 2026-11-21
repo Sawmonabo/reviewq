@@ -31,7 +31,7 @@ type Props = {
   readonly onOpen: () => void;
   readonly onChooseFile: (file: PatchFile) => void;
   readonly onChoosePath: (path: PatchPath) => void;
-  readonly onChooseMatch: (match: PatchSearchMatch, query: string) => void;
+  readonly onChooseMatch: (match: PatchSearchMatch, sourceText: string) => void;
 };
 
 type Entry = {
@@ -471,7 +471,10 @@ export function ChangedFilePicker({
                             onFocus={() => setSuggested(key)}
                             onClick={() => {
                               close();
-                              onChooseMatch(hit, search);
+                              onChooseMatch(
+                                hit,
+                                hit.snippet.slice(hit.highlightStart, hit.highlightEnd),
+                              );
                             }}
                           >
                             <span className="changes-code-location">

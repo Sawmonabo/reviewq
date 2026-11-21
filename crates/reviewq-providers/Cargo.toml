@@ -13,6 +13,7 @@ httpdate = "1.0.3"
 jiff = { version = "1.0.1", default-features = false, features = ["std"] }
 notify = { version = "=8.2.2", default-features = false }
 percent-encoding = "2.3"
+regex = { version = "1.13.2", default-features = false, features = ["std", "perf-literal", "perf-dfa", "unicode-case"] }
 reqwest = { version = "=0.13.5", default-features = false, features = ["rustls"] }
 rustix = { version = "1", features = ["fs", "process"] }
 reviewq-app = { path = "../reviewq-app" }
