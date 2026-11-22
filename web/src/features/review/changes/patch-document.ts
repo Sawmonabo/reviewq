@@ -9,8 +9,8 @@ import {
 import type { PatchDecoration } from "./patch-decoration";
 import { indexAtByte, patchRows, utf8Length } from "./patch-rows";
 import type { PatchRow } from "./patch-rows";
-import { patchTextOffset, setPatchTextRange, splitPatchText } from "./patch-text";
-import type { PatchText } from "./patch-text";
+import { patchTextOffset, setPatchTextRange, splitPatchText } from "./patch/text";
+import type { PatchText } from "./patch/text";
 
 const ROWS_PER_BLOCK = 96;
 const EXTRA_HUNK_BLOCKS = 32;

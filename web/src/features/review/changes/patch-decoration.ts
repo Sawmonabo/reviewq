@@ -1,6 +1,6 @@
 import type { PatchRow } from "./patch-rows";
-import { patchPaintRange } from "./patch-text";
-import type { PatchText } from "./patch-text";
+import { patchPaintRange } from "./patch/text";
+import type { PatchText } from "./patch/text";
 
 const ROW_HEIGHT = 21;
 const SYNTAX =
