@@ -1,4 +1,6 @@
 import type { PatchRow } from "./patch-rows";
+import { patchPaintRange } from "./patch-text";
+import type { PatchText } from "./patch-text";
 
 const ROW_HEIGHT = 21;
 const SYNTAX =
@@ -45,7 +47,7 @@ export type PatchDecoration = {
 
 export function decoratePatchRow(
   row: PatchRow,
-  node: Text,
+  nodes: PatchText,
   from: number,
   to: number,
   text: string,
@@ -67,10 +69,10 @@ export function decoratePatchRow(
   }
   const colors: PaintedRange[] = [];
   if (row.kind !== "context")
-    addColor(colors, highlight(`reviewq-patch-${row.kind}`), node, from, to);
+    addColor(colors, highlight(`reviewq-patch-${row.kind}`), nodes, from, to);
   if ((row.kind === "add" || row.kind === "delete") && row.byte === row.rowStart) {
     // Paint the source sign in the center of its gutter without moving the text or selection.
-    addColor(colors, highlight(`reviewq-patch-${row.kind}-sign`, 1), node, from, from + 1);
+    addColor(colors, highlight(`reviewq-patch-${row.kind}-sign`, 1), nodes, from, from + 1);
   }
   if (row.old !== undefined || row.new !== undefined) {
     for (const token of text.matchAll(SYNTAX)) {
@@ -81,7 +83,7 @@ export function decoratePatchRow(
       addColor(
         colors,
         highlight(`reviewq-patch-syntax-${kind}`, 1),
-        node,
+        nodes,
         start,
         start + token[0].length,
       );
@@ -109,29 +111,14 @@ export function releasePatchMatch(host: HTMLElement) {
 function addColor(
   colors: PaintedRange[],
   highlight: Highlight | undefined,
-  node: Text,
+  nodes: PatchText,
   from: number,
   to: number,
 ) {
   if (!highlight) return;
-  const range = staticRange(node, from, to);
+  const range = patchPaintRange(nodes, from, to);
   highlight.add(range);
   colors.push({ highlight, range });
-}
-
-function staticRange(node: Text, from: number, to: number) {
-  if (typeof StaticRange === "function") {
-    return new StaticRange({
-      startContainer: node,
-      endContainer: node,
-      startOffset: from,
-      endOffset: to,
-    });
-  }
-  const range = new Range();
-  range.setStart(node, from);
-  range.setEnd(node, to);
-  return range;
 }
 
 function highlight(name: string, priority = 0) {

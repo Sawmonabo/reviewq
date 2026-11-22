@@ -9,11 +9,14 @@ import {
 import type { PatchDecoration } from "./patch-decoration";
 import { indexAtByte, patchRows, utf8Length } from "./patch-rows";
 import type { PatchRow } from "./patch-rows";
+import { patchTextOffset, setPatchTextRange, splitPatchText } from "./patch-text";
+import type { PatchText } from "./patch-text";
 
 const ROWS_PER_BLOCK = 96;
 const EXTRA_HUNK_BLOCKS = 32;
 const AHEAD_PX = 240;
 const BEHIND_PX = 100;
+const LONG_ROW_BYTES = 16 * 1024;
 
 type BlockLayout = {
   readonly width: number;
@@ -25,7 +28,8 @@ type BlockLayout = {
 type TextStyle = { readonly lineHeight: number; readonly inlinePadding: number };
 type Segment = {
   readonly element: HTMLDivElement;
-  readonly text: Text;
+  readonly body: HTMLDivElement;
+  readonly text: PatchText;
   readonly first: number;
   end: number;
   layout: BlockLayout | undefined;
@@ -79,6 +83,7 @@ export function mountPatchDocument(
     (!fragments || fragments[0]?.byte === 0) && "onbeforematch" in HTMLElement.prototype
       ? duplicateHeaders(rows, source, file)
       : -1;
+  const longRows = fragments && splitLongRows(source, fragments, headers);
   // A patch with many tiny hunks still needs compact text blocks for native Find.
   let hunkBudget = Math.ceil(rows.length / ROWS_PER_BLOCK) + EXTRA_HUNK_BLOCKS;
   for (const row of rows) {
@@ -122,19 +127,26 @@ export function mountPatchDocument(
   const resize = new ResizeObserver(requestDecoration);
 
   for (let start = 0; start < rows.length;) {
+    const parts = longRows?.get(start);
     const fileHeaders = start === headers;
     const hunk = separateHunks && rows[start]!.kind === "hunk";
     const continuation = rows[start]!.byte !== rows[start]!.rowStart;
     let end = start + (fileHeaders ? 2 : 1);
-    if (!fileHeaders && !hunk && !continuation) {
+    // A segmented row owns one block. Threads only split the ordinary single-node blocks.
+    if (!fileHeaders && !hunk && !continuation && !parts) {
       const limit = Math.min(start + ROWS_PER_BLOCK, rows.length);
-      while (end < limit && end !== headers && !(separateHunks && rows[end]!.kind === "hunk"))
+      while (
+        end < limit &&
+        end !== headers &&
+        !(separateHunks && rows[end]!.kind === "hunk") &&
+        !longRows?.has(end)
+      )
         end++;
     }
     const segment = createSegment(
       start,
       end,
-      document.createTextNode(source.slice(rows[start]!.start, rows[end - 1]!.end)),
+      parts ?? document.createTextNode(source.slice(rows[start]!.start, rows[end - 1]!.end)),
     );
     if (fileHeaders) {
       segment.element.classList.add("patch-file-headers");
@@ -194,10 +206,7 @@ export function mountPatchDocument(
       const segment = segmentAt(ordinal);
       if (from === undefined || to === undefined || from >= to || !segment) return;
       const offset = row.start - rows[segment.first]!.start;
-      const range = new Range();
-      range.setStart(segment.text, offset + from);
-      range.setEnd(segment.text, offset + to);
-      return range;
+      return setPatchTextRange(new Range(), segment.text, offset + from, offset + to);
     },
     readingLine(top) {
       const point = caret(top + 1);
@@ -229,10 +238,11 @@ export function mountPatchDocument(
       const column = indexAtByte(source.slice(row.start, row.end), byte - row.byte);
       const segment = segmentAt(ordinal);
       if (column === undefined || !segment) return;
-      const range = new Range();
-      range.setStart(segment.text, row.start - rows[segment.first]!.start + column);
-      range.collapse(true);
-      return range;
+      return setPatchTextRange(
+        new Range(),
+        segment.text,
+        row.start - rows[segment.first]!.start + column,
+      );
     },
     sourceByte(node, offset) {
       const location = textOffset(node, offset);
@@ -251,7 +261,8 @@ export function mountPatchDocument(
       if (known) return known;
       const segment = segmentAt(ordinal);
       if (!segment) return;
-      if (ordinal + 1 < segment.end) splitAfter(segment, ordinal);
+      if (ordinal + 1 < segment.end && segment.text instanceof Text)
+        splitAfter(segment, segment.text, ordinal);
       const target = document.createElement("div");
       target.className = "patch-thread-slot";
       segment.element.after(target);
@@ -281,15 +292,17 @@ export function mountPatchDocument(
   documents.set(host, handle);
   return handle;
 
-  function createSegment(first: number, end: number, text: Text): Segment {
+  function createSegment(first: number, end: number, text: PatchText): Segment {
     const element = document.createElement("div");
     element.className = "patch-block";
     const body = document.createElement("div");
     body.className = "patch-block-text";
-    body.append(text);
+    if (text instanceof Text) body.append(text);
+    else for (const part of text) body.append(part.node);
     element.append(body);
     const segment: Segment = {
       element,
+      body,
       text,
       first,
       end,
@@ -301,7 +314,7 @@ export function mountPatchDocument(
     return segment;
   }
 
-  function splitAfter(segment: Segment, ordinal: number) {
+  function splitAfter(segment: Segment, text: Text, ordinal: number) {
     const selection = getSelection();
     const previousSelection =
       selection && selection.anchorNode && selection.focusNode
@@ -314,9 +327,9 @@ export function mountPatchDocument(
         : undefined;
     const first = ordinal + 1;
     const split = rows[first]!.start - rows[segment.first]!.start;
-    const restoreMatch = keepSplitMatch(segment.text, split);
+    const restoreMatch = keepSplitMatch(text, split);
     removeDecorations(segment, true);
-    const tail = segment.text.splitText(split);
+    const tail = text.splitText(split);
     const next = createSegment(first, segment.end, tail);
     segment.end = first;
     const location = segments.indexOf(segment);
@@ -329,11 +342,11 @@ export function mountPatchDocument(
     if (
       selection &&
       previousSelection &&
-      (previousSelection.anchor === segment.text || previousSelection.focus === segment.text)
+      (previousSelection.anchor === text || previousSelection.focus === text)
     ) {
       const { anchor, anchorOffset, focus, focusOffset } = previousSelection;
-      const moveAnchor = anchor === segment.text && anchorOffset > split;
-      const moveFocus = focus === segment.text && focusOffset > split;
+      const moveAnchor = anchor === text && anchorOffset > split;
+      const moveFocus = focus === text && focusOffset > split;
       selection.setBaseAndExtent(
         moveAnchor ? tail : anchor,
         moveAnchor ? anchorOffset - split : anchorOffset,
@@ -369,14 +382,9 @@ export function mountPatchDocument(
     const offset = rows[segment.first]!.start;
     const start = row.start - offset;
     const end = contentEnd(row.end) - offset;
-    if (column === undefined) {
-      geometryRange.setStart(segment.text, start);
-      geometryRange.setEnd(segment.text, end);
-    } else {
-      geometryRange.setStart(segment.text, Math.min(start + column, end));
-      geometryRange.collapse(true);
-    }
-    return geometryRange;
+    return column === undefined
+      ? setPatchTextRange(geometryRange, segment.text, start, end)
+      : setPatchTextRange(geometryRange, segment.text, Math.min(start + column, end));
   }
 
   function contentEnd(end: number) {
@@ -385,7 +393,7 @@ export function mountPatchDocument(
   }
 
   function textStyle(segment: Segment): TextStyle {
-    const style = getComputedStyle(segment.text.parentElement!);
+    const style = getComputedStyle(segment.body);
     return {
       lineHeight: Number.parseFloat(style.lineHeight),
       inlinePadding: Number.parseFloat(style.paddingLeft) + Number.parseFloat(style.paddingRight),
@@ -547,7 +555,9 @@ export function mountPatchDocument(
   function textOffset(node: Node, offset: number) {
     const container = node.parentElement?.closest<HTMLElement>(".patch-block");
     const segment = container && byElement.get(container);
-    return segment && segment.text === node ? rows[segment.first]!.start + offset : undefined;
+    if (!segment) return;
+    const location = patchTextOffset(segment.text, node, offset);
+    if (location !== undefined) return rows[segment.first]!.start + location;
   }
 
   function caret(top: number) {
@@ -573,6 +583,17 @@ export function mountPatchDocument(
     }
     requestDecoration();
   }
+}
+
+function splitLongRows(source: string, rows: readonly PatchRow[], headers: number) {
+  let result: Map<number, PatchText> | undefined;
+  for (const [ordinal, row] of rows.entries()) {
+    if (row.rowEnd - row.rowStart <= LONG_ROW_BYTES) continue;
+    if (headers >= 0 && (ordinal === headers || ordinal === headers + 1)) continue;
+    const parts = splitPatchText(source.slice(row.start, row.end));
+    if (parts) (result ??= new Map()).set(ordinal, parts);
+  }
+  return result;
 }
 
 function duplicateHeaders(
