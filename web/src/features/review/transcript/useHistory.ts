@@ -5,7 +5,7 @@ import { historyPage, nativeHistoryUrl } from "../../../api/history";
 import type { SessionAddress } from "../../../api/history";
 import { isWorkspaceConnectionFailure } from "../../../hooks/useWorkspaceResource";
 import { describeError } from "../../../lib/presentation";
-import { historyKey, PAGE_LIMIT, readBookmark } from "./history-window";
+import { deliveryRowKey, historyKey, PAGE_LIMIT, readBookmark } from "./history-window";
 
 type ReadPosition = "older" | "newer" | "latest" | "around";
 type Anchor = { readonly entryId: string; readonly locator?: string; readonly rowId?: string };
@@ -119,7 +119,11 @@ export function useHistory(
       if (
         !replace &&
         (pages.length < PAGE_LIMIT ||
-          !evict?.items.some((item) => protectedIds.has(historyKey(item))))
+          !evict?.items.some(
+            (item) =>
+              protectedIds.has(historyKey(item)) ||
+              (item.messageId && protectedIds.has(deliveryRowKey(item.messageId))),
+          ))
       )
         return false;
       if (position === "around") resetTo.current = wanted;

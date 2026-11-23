@@ -2,8 +2,8 @@
 import { func0 } from "../runtime.mjs";
 import { validate263 } from "./named-upstream-id.mjs";
 import { validate129 } from "./safe-count-dto.mjs";
-import { validate1145 } from "./sprint-facet.mjs";
-function validate1139(
+import { validate1146 } from "./sprint-facet.mjs";
+function validate1140(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -28,7 +28,7 @@ function validate1139(
           !func0.call(data, "hideInProgress")) &&
           (missing0 = "hideInProgress"))
       ) {
-        validate1139.errors = [
+        validate1140.errors = [
           {
             instancePath,
             schemaPath: "#/required",
@@ -67,7 +67,7 @@ function validate1139(
                 }
               }
             } else {
-              validate1139.errors = [
+              validate1140.errors = [
                 {
                   instancePath: instancePath + "/authors",
                   schemaPath: "#/properties/authors/type",
@@ -112,7 +112,7 @@ function validate1139(
                   }
                 }
               } else {
-                validate1139.errors = [
+                validate1140.errors = [
                   {
                     instancePath: instancePath + "/boards",
                     schemaPath: "#/properties/boards/type",
@@ -208,7 +208,7 @@ function validate1139(
                         }
                       }
                     } else {
-                      validate1139.errors = [
+                      validate1140.errors = [
                         {
                           instancePath: instancePath + "/projects",
                           schemaPath: "#/properties/projects/type",
@@ -237,7 +237,7 @@ function validate1139(
                         for (let i3 = 0; i3 < len3; i3++) {
                           const _errs14 = errors;
                           if (
-                            !validate1145(data8[i3], {
+                            !validate1146(data8[i3], {
                               instancePath: instancePath + "/sprints/" + i3,
                               parentData: data8,
                               parentDataProperty: i3,
@@ -246,8 +246,8 @@ function validate1139(
                           ) {
                             vErrors =
                               vErrors === null
-                                ? validate1145.errors
-                                : vErrors.concat(validate1145.errors);
+                                ? validate1146.errors
+                                : vErrors.concat(validate1146.errors);
                             errors = vErrors.length;
                           }
                           var valid4 = _errs14 === errors;
@@ -256,7 +256,7 @@ function validate1139(
                           }
                         }
                       } else {
-                        validate1139.errors = [
+                        validate1140.errors = [
                           {
                             instancePath: instancePath + "/sprints",
                             schemaPath: "#/properties/sprints/type",
@@ -278,7 +278,7 @@ function validate1139(
         }
       }
     } else {
-      validate1139.errors = [
+      validate1140.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -289,7 +289,7 @@ function validate1139(
       return false;
     }
   }
-  validate1139.errors = vErrors;
+  validate1140.errors = vErrors;
   return errors === 0;
 }
-export { validate1139 };
+export { validate1140 };

@@ -2,7 +2,7 @@
 import { func0 } from "../runtime.mjs";
 import { schema382 } from "../metadata-9.mjs";
 import { validate120 } from "./publication.mjs";
-function validate1308(
+function validate1309(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -23,7 +23,7 @@ function validate1308(
         ((data.reason === undefined || !func0.call(data, "reason")) &&
           (missing0 = "reason"))
       ) {
-        validate1308.errors = [
+        validate1309.errors = [
           {
             instancePath,
             schemaPath: "#/required",
@@ -37,7 +37,7 @@ function validate1308(
           let data0 = data.blocking;
           const _errs1 = errors;
           if (typeof data0 !== "boolean" && data0 !== null) {
-            validate1308.errors = [
+            validate1309.errors = [
               {
                 instancePath: instancePath + "/blocking",
                 schemaPath: "#/properties/blocking/type",
@@ -55,7 +55,7 @@ function validate1308(
           if (data.findingId !== undefined && func0.call(data, "findingId")) {
             const _errs3 = errors;
             if (typeof data.findingId !== "string") {
-              validate1308.errors = [
+              validate1309.errors = [
                 {
                   instancePath: instancePath + "/findingId",
                   schemaPath: "#/properties/findingId/type",
@@ -74,7 +74,7 @@ function validate1308(
               let data2 = data.kind;
               const _errs5 = errors;
               if (typeof data2 !== "string") {
-                validate1308.errors = [
+                validate1309.errors = [
                   {
                     instancePath: instancePath + "/kind",
                     schemaPath: "#/properties/kind/type",
@@ -85,7 +85,7 @@ function validate1308(
                 return false;
               }
               if ("disposition" !== data2) {
-                validate1308.errors = [
+                validate1309.errors = [
                   {
                     instancePath: instancePath + "/kind",
                     schemaPath: "#/properties/kind/const",
@@ -157,7 +157,7 @@ function validate1308(
                     vErrors.push(err1);
                   }
                   errors++;
-                  validate1308.errors = vErrors;
+                  validate1309.errors = vErrors;
                   return false;
                 } else {
                   errors = _errs8;
@@ -177,7 +177,7 @@ function validate1308(
                 if (data.reason !== undefined && func0.call(data, "reason")) {
                   const _errs12 = errors;
                   if (typeof data.reason !== "string") {
-                    validate1308.errors = [
+                    validate1309.errors = [
                       {
                         instancePath: instancePath + "/reason",
                         schemaPath: "#/properties/reason/type",
@@ -197,7 +197,7 @@ function validate1308(
         }
       }
     } else {
-      validate1308.errors = [
+      validate1309.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -208,7 +208,7 @@ function validate1308(
       return false;
     }
   }
-  validate1308.errors = vErrors;
+  validate1309.errors = vErrors;
   return errors === 0;
 }
-export { validate1308 };
+export { validate1309 };

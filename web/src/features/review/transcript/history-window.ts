@@ -22,6 +22,10 @@ export type TimelineBookmark = {
 
 export const PAGE_LIMIT = 6;
 
+export function deliveryRowKey(deliveryId: string) {
+  return `delivery:${deliveryId}`;
+}
+
 export function historyKey(entry: HistoryEntry) {
   const question = entry.parts.find((part) => part.kind === "user_question");
   return question && entry.turnId

@@ -243,6 +243,7 @@ export interface HistoryPage {
 export interface HistoryEntry {
   contentRef?: HistoryCursorDto;
   entryId: HistoryEntryIdDto;
+  messageId?: ResourceIdDto;
   parts: HistoryPart[];
   partsCursor?: HistoryCursorDto;
   textBytes?: SafeCountDto;

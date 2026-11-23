@@ -2,7 +2,7 @@
 import { func0 } from "../runtime.mjs";
 import { validate48 } from "./history-cursor-dto.mjs";
 import { validate25 } from "./checkpoint-id-dto.mjs";
-import { validate717 } from "./history-part.mjs";
+import { validate718 } from "./history-part.mjs";
 import { validate129 } from "./safe-count-dto.mjs";
 import { validate237 } from "./utc-timestamp-dto.mjs";
 function validate714(
@@ -76,92 +76,89 @@ function validate714(
             var valid0 = true;
           }
           if (valid0) {
-            if (data.parts !== undefined && func0.call(data, "parts")) {
-              let data2 = data.parts;
+            if (data.messageId !== undefined && func0.call(data, "messageId")) {
               const _errs3 = errors;
-              if (errors === _errs3) {
-                if (Array.isArray(data2)) {
-                  var valid1 = true;
-                  const len0 = data2.length;
-                  for (let i0 = 0; i0 < len0; i0++) {
-                    const _errs5 = errors;
-                    if (
-                      !validate717(data2[i0], {
-                        instancePath: instancePath + "/parts/" + i0,
-                        parentData: data2,
-                        parentDataProperty: i0,
-                        rootData,
-                      })
-                    ) {
-                      vErrors =
-                        vErrors === null
-                          ? validate717.errors
-                          : vErrors.concat(validate717.errors);
-                      errors = vErrors.length;
-                    }
-                    var valid1 = _errs5 === errors;
-                    if (!valid1) {
-                      break;
-                    }
-                  }
-                } else {
-                  validate714.errors = [
-                    {
-                      instancePath: instancePath + "/parts",
-                      schemaPath: "#/properties/parts/type",
-                      keyword: "type",
-                      params: { type: "array" },
-                    },
-                  ];
-                  return false;
-                }
+              if (
+                !validate25(data.messageId, {
+                  instancePath: instancePath + "/messageId",
+                  parentData: data,
+                  parentDataProperty: "messageId",
+                  rootData,
+                })
+              ) {
+                vErrors =
+                  vErrors === null
+                    ? validate25.errors
+                    : vErrors.concat(validate25.errors);
+                errors = vErrors.length;
               }
               var valid0 = _errs3 === errors;
             } else {
               var valid0 = true;
             }
             if (valid0) {
-              if (
-                data.partsCursor !== undefined &&
-                func0.call(data, "partsCursor")
-              ) {
-                const _errs6 = errors;
-                if (
-                  !validate48(data.partsCursor, {
-                    instancePath: instancePath + "/partsCursor",
-                    parentData: data,
-                    parentDataProperty: "partsCursor",
-                    rootData,
-                  })
-                ) {
-                  vErrors =
-                    vErrors === null
-                      ? validate48.errors
-                      : vErrors.concat(validate48.errors);
-                  errors = vErrors.length;
+              if (data.parts !== undefined && func0.call(data, "parts")) {
+                let data3 = data.parts;
+                const _errs4 = errors;
+                if (errors === _errs4) {
+                  if (Array.isArray(data3)) {
+                    var valid1 = true;
+                    const len0 = data3.length;
+                    for (let i0 = 0; i0 < len0; i0++) {
+                      const _errs6 = errors;
+                      if (
+                        !validate718(data3[i0], {
+                          instancePath: instancePath + "/parts/" + i0,
+                          parentData: data3,
+                          parentDataProperty: i0,
+                          rootData,
+                        })
+                      ) {
+                        vErrors =
+                          vErrors === null
+                            ? validate718.errors
+                            : vErrors.concat(validate718.errors);
+                        errors = vErrors.length;
+                      }
+                      var valid1 = _errs6 === errors;
+                      if (!valid1) {
+                        break;
+                      }
+                    }
+                  } else {
+                    validate714.errors = [
+                      {
+                        instancePath: instancePath + "/parts",
+                        schemaPath: "#/properties/parts/type",
+                        keyword: "type",
+                        params: { type: "array" },
+                      },
+                    ];
+                    return false;
+                  }
                 }
-                var valid0 = _errs6 === errors;
+                var valid0 = _errs4 === errors;
               } else {
                 var valid0 = true;
               }
               if (valid0) {
                 if (
-                  data.textBytes !== undefined &&
-                  func0.call(data, "textBytes")
+                  data.partsCursor !== undefined &&
+                  func0.call(data, "partsCursor")
                 ) {
                   const _errs7 = errors;
                   if (
-                    !validate129(data.textBytes, {
-                      instancePath: instancePath + "/textBytes",
+                    !validate48(data.partsCursor, {
+                      instancePath: instancePath + "/partsCursor",
                       parentData: data,
-                      parentDataProperty: "textBytes",
+                      parentDataProperty: "partsCursor",
                       rootData,
                     })
                   ) {
                     vErrors =
                       vErrors === null
-                        ? validate129.errors
-                        : vErrors.concat(validate129.errors);
+                        ? validate48.errors
+                        : vErrors.concat(validate48.errors);
                     errors = vErrors.length;
                   }
                   var valid0 = _errs7 === errors;
@@ -170,73 +167,23 @@ function validate714(
                 }
                 if (valid0) {
                   if (
-                    data.timestamp !== undefined &&
-                    func0.call(data, "timestamp")
+                    data.textBytes !== undefined &&
+                    func0.call(data, "textBytes")
                   ) {
-                    let data6 = data.timestamp;
                     const _errs8 = errors;
-                    const _errs9 = errors;
-                    let valid2 = false;
-                    const _errs10 = errors;
                     if (
-                      !validate237(data6, {
-                        instancePath: instancePath + "/timestamp",
+                      !validate129(data.textBytes, {
+                        instancePath: instancePath + "/textBytes",
                         parentData: data,
-                        parentDataProperty: "timestamp",
+                        parentDataProperty: "textBytes",
                         rootData,
                       })
                     ) {
                       vErrors =
                         vErrors === null
-                          ? validate237.errors
-                          : vErrors.concat(validate237.errors);
+                          ? validate129.errors
+                          : vErrors.concat(validate129.errors);
                       errors = vErrors.length;
-                    }
-                    var _valid0 = _errs10 === errors;
-                    valid2 = valid2 || _valid0;
-                    if (!valid2) {
-                      const _errs11 = errors;
-                      if (data6 !== null) {
-                        const err0 = {
-                          instancePath: instancePath + "/timestamp",
-                          schemaPath: "#/properties/timestamp/anyOf/1/type",
-                          keyword: "type",
-                          params: { type: "null" },
-                        };
-                        if (vErrors === null) {
-                          vErrors = [err0];
-                        } else {
-                          vErrors.push(err0);
-                        }
-                        errors++;
-                      }
-                      var _valid0 = _errs11 === errors;
-                      valid2 = valid2 || _valid0;
-                    }
-                    if (!valid2) {
-                      const err1 = {
-                        instancePath: instancePath + "/timestamp",
-                        schemaPath: "#/properties/timestamp/anyOf",
-                        keyword: "anyOf",
-                        params: {},
-                      };
-                      if (vErrors === null) {
-                        vErrors = [err1];
-                      } else {
-                        vErrors.push(err1);
-                      }
-                      errors++;
-                      validate714.errors = vErrors;
-                      return false;
-                    } else {
-                      errors = _errs9;
-                      if (vErrors !== null) {
-                        if (_errs9) {
-                          vErrors.length = _errs9;
-                        } else {
-                          vErrors = null;
-                        }
-                      }
                     }
                     var valid0 = _errs8 === errors;
                   } else {
@@ -244,77 +191,152 @@ function validate714(
                   }
                   if (valid0) {
                     if (
-                      data.turnId !== undefined &&
-                      func0.call(data, "turnId")
+                      data.timestamp !== undefined &&
+                      func0.call(data, "timestamp")
                     ) {
-                      let data7 = data.turnId;
-                      const _errs13 = errors;
-                      const _errs14 = errors;
-                      let valid3 = false;
-                      const _errs15 = errors;
+                      let data7 = data.timestamp;
+                      const _errs9 = errors;
+                      const _errs10 = errors;
+                      let valid2 = false;
+                      const _errs11 = errors;
                       if (
-                        !validate25(data7, {
-                          instancePath: instancePath + "/turnId",
+                        !validate237(data7, {
+                          instancePath: instancePath + "/timestamp",
                           parentData: data,
-                          parentDataProperty: "turnId",
+                          parentDataProperty: "timestamp",
                           rootData,
                         })
                       ) {
                         vErrors =
                           vErrors === null
-                            ? validate25.errors
-                            : vErrors.concat(validate25.errors);
+                            ? validate237.errors
+                            : vErrors.concat(validate237.errors);
                         errors = vErrors.length;
                       }
-                      var _valid1 = _errs15 === errors;
-                      valid3 = valid3 || _valid1;
-                      if (!valid3) {
-                        const _errs16 = errors;
+                      var _valid0 = _errs11 === errors;
+                      valid2 = valid2 || _valid0;
+                      if (!valid2) {
+                        const _errs12 = errors;
                         if (data7 !== null) {
-                          const err2 = {
-                            instancePath: instancePath + "/turnId",
-                            schemaPath: "#/properties/turnId/anyOf/1/type",
+                          const err0 = {
+                            instancePath: instancePath + "/timestamp",
+                            schemaPath: "#/properties/timestamp/anyOf/1/type",
                             keyword: "type",
                             params: { type: "null" },
                           };
                           if (vErrors === null) {
-                            vErrors = [err2];
+                            vErrors = [err0];
                           } else {
-                            vErrors.push(err2);
+                            vErrors.push(err0);
                           }
                           errors++;
                         }
-                        var _valid1 = _errs16 === errors;
-                        valid3 = valid3 || _valid1;
+                        var _valid0 = _errs12 === errors;
+                        valid2 = valid2 || _valid0;
                       }
-                      if (!valid3) {
-                        const err3 = {
-                          instancePath: instancePath + "/turnId",
-                          schemaPath: "#/properties/turnId/anyOf",
+                      if (!valid2) {
+                        const err1 = {
+                          instancePath: instancePath + "/timestamp",
+                          schemaPath: "#/properties/timestamp/anyOf",
                           keyword: "anyOf",
                           params: {},
                         };
                         if (vErrors === null) {
-                          vErrors = [err3];
+                          vErrors = [err1];
                         } else {
-                          vErrors.push(err3);
+                          vErrors.push(err1);
                         }
                         errors++;
                         validate714.errors = vErrors;
                         return false;
                       } else {
-                        errors = _errs14;
+                        errors = _errs10;
                         if (vErrors !== null) {
-                          if (_errs14) {
-                            vErrors.length = _errs14;
+                          if (_errs10) {
+                            vErrors.length = _errs10;
                           } else {
                             vErrors = null;
                           }
                         }
                       }
-                      var valid0 = _errs13 === errors;
+                      var valid0 = _errs9 === errors;
                     } else {
                       var valid0 = true;
+                    }
+                    if (valid0) {
+                      if (
+                        data.turnId !== undefined &&
+                        func0.call(data, "turnId")
+                      ) {
+                        let data8 = data.turnId;
+                        const _errs14 = errors;
+                        const _errs15 = errors;
+                        let valid3 = false;
+                        const _errs16 = errors;
+                        if (
+                          !validate25(data8, {
+                            instancePath: instancePath + "/turnId",
+                            parentData: data,
+                            parentDataProperty: "turnId",
+                            rootData,
+                          })
+                        ) {
+                          vErrors =
+                            vErrors === null
+                              ? validate25.errors
+                              : vErrors.concat(validate25.errors);
+                          errors = vErrors.length;
+                        }
+                        var _valid1 = _errs16 === errors;
+                        valid3 = valid3 || _valid1;
+                        if (!valid3) {
+                          const _errs17 = errors;
+                          if (data8 !== null) {
+                            const err2 = {
+                              instancePath: instancePath + "/turnId",
+                              schemaPath: "#/properties/turnId/anyOf/1/type",
+                              keyword: "type",
+                              params: { type: "null" },
+                            };
+                            if (vErrors === null) {
+                              vErrors = [err2];
+                            } else {
+                              vErrors.push(err2);
+                            }
+                            errors++;
+                          }
+                          var _valid1 = _errs17 === errors;
+                          valid3 = valid3 || _valid1;
+                        }
+                        if (!valid3) {
+                          const err3 = {
+                            instancePath: instancePath + "/turnId",
+                            schemaPath: "#/properties/turnId/anyOf",
+                            keyword: "anyOf",
+                            params: {},
+                          };
+                          if (vErrors === null) {
+                            vErrors = [err3];
+                          } else {
+                            vErrors.push(err3);
+                          }
+                          errors++;
+                          validate714.errors = vErrors;
+                          return false;
+                        } else {
+                          errors = _errs15;
+                          if (vErrors !== null) {
+                            if (_errs15) {
+                              vErrors.length = _errs15;
+                            } else {
+                              vErrors = null;
+                            }
+                          }
+                        }
+                        var valid0 = _errs14 === errors;
+                      } else {
+                        var valid0 = true;
+                      }
                     }
                   }
                 }

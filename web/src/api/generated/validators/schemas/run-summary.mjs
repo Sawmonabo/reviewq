@@ -4,7 +4,7 @@ import { schema439 } from "../metadata-10.mjs";
 import { validate25 } from "./checkpoint-id-dto.mjs";
 import { validate71 } from "./host-provider-dto.mjs";
 import { validate237 } from "./utc-timestamp-dto.mjs";
-function validate1518(
+function validate1519(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -26,7 +26,7 @@ function validate1518(
         ((data.startedAt === undefined || !func0.call(data, "startedAt")) &&
           (missing0 = "startedAt"))
       ) {
-        validate1518.errors = [
+        validate1519.errors = [
           {
             instancePath,
             schemaPath: "#/required",
@@ -40,7 +40,7 @@ function validate1518(
           let data0 = data.leadName;
           const _errs1 = errors;
           if (typeof data0 !== "string" && data0 !== null) {
-            validate1518.errors = [
+            validate1519.errors = [
               {
                 instancePath: instancePath + "/leadName",
                 schemaPath: "#/properties/leadName/type",
@@ -178,7 +178,7 @@ function validate1518(
                       vErrors.push(err1);
                     }
                     errors++;
-                    validate1518.errors = vErrors;
+                    validate1519.errors = vErrors;
                     return false;
                   } else {
                     errors = _errs7;
@@ -200,7 +200,7 @@ function validate1518(
         }
       }
     } else {
-      validate1518.errors = [
+      validate1519.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -211,7 +211,7 @@ function validate1518(
       return false;
     }
   }
-  validate1518.errors = vErrors;
+  validate1519.errors = vErrors;
   return errors === 0;
 }
-export { validate1518 };
+export { validate1519 };

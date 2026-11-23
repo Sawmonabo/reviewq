@@ -2,7 +2,9 @@
 
 use std::collections::BTreeMap;
 
-use reviewq_domain::identity::{NativeInputId, NativeSessionId, NativeTurnId, RunId, SessionKey};
+use reviewq_domain::identity::{
+    DeliveryId, NativeInputId, NativeSessionId, NativeTurnId, RunId, SessionKey,
+};
 use reviewq_domain::session::{AbsolutePath, NativeBinding, SessionTarget};
 
 use crate::access::{Actor, AppFuture};
@@ -433,6 +435,7 @@ pub struct VisiblePart {
 pub struct VisibleEntry {
     pub id: NativeInputId,
     pub turn: Option<NativeTurnId>,
+    pub delivery_id: Option<DeliveryId>,
     pub at_ms: Option<i64>,
     pub kind: VisibleKind,
     pub text: String,

@@ -4,8 +4,8 @@ use reviewq_app::hosts::{
     DeliveryState, MAX_MESSAGE_HISTORY_PAGE, MessageAttachment, MessageHistory,
     MessageHistoryStore, MessagePosition, RecordedMessage, RecordedPurpose,
 };
-use reviewq_domain::identity::{RunId, SessionKey};
-use rusqlite::{Connection, Row, params};
+use reviewq_domain::identity::{MessageId, RunId, SessionKey};
+use rusqlite::{Connection, OptionalExtension, Row, params};
 
 use crate::events::snapshot;
 use crate::queue::{parse, text};
@@ -50,13 +50,37 @@ fn read_page(
     after: Option<MessagePosition>,
     limit: u16,
 ) -> Result<MessageHistory, StoreError> {
-    let (time, id) = after.as_ref().map_or((None, ""), |p| {
-        (Some(p.created_at_ms), p.message_id.as_str())
-    });
+    let cursor_message_id: Option<MessageId> = after
+        .as_ref()
+        .map(|position| {
+            let id: String = db
+                .prepare_cached(
+                    "SELECT message_id FROM messages
+                     WHERE rowid=?1 AND run_id=?2 AND session_key=?3 AND created_at_ms=?4",
+                )?
+                .query_row(
+                    params![
+                        position.row_id,
+                        run.as_str(),
+                        session.as_str(),
+                        position.created_at_ms
+                    ],
+                    |row| row.get(0),
+                )
+                .optional()?
+                .ok_or(AppError::CursorExpired)?;
+            parse(&id)
+        })
+        .transpose()?;
+    let (time, id) = after
+        .as_ref()
+        .zip(cursor_message_id.as_ref())
+        .map_or((None, ""), |(p, id)| (Some(p.created_at_ms), id.as_str()));
     let mut statement = db.prepare_cached(
         "SELECT message_id, submission_id, purpose, state, body, receipt_id, report_hash,
             current_receipt_id, quoted_text, quoted_offset, native_turn_id, native_input_id,
-            actor_key IS NOT NULL, created_at_ms, updated_at_ms, outcome_detail, followup_batch_id
+            actor_key IS NOT NULL, created_at_ms, updated_at_ms, outcome_detail, followup_batch_id,
+            rowid
          FROM messages
          WHERE run_id=?1 AND session_key=?2 AND (?3 IS NULL OR (created_at_ms, message_id)<(?3,?4))
          ORDER BY created_at_ms DESC, message_id DESC LIMIT ?5",
@@ -68,6 +92,7 @@ fn read_page(
             return Ok(MessageHistory {
                 items,
                 has_more: true,
+                cursor_message_id,
             });
         }
         items.push(decode(row)?);
@@ -75,6 +100,7 @@ fn read_page(
     Ok(MessageHistory {
         items,
         has_more: false,
+        cursor_message_id,
     })
 }
 
@@ -113,8 +139,9 @@ fn decode(row: &Row<'_>) -> Result<RecordedMessage, StoreError> {
     Ok(RecordedMessage {
         position: MessagePosition {
             created_at_ms: row.get(13)?,
-            message_id: parse(text(row, 0)?)?,
+            row_id: row.get(17)?,
         },
+        message_id: parse(text(row, 0)?)?,
         submission_id: parse(text(row, 1)?)?,
         purpose,
         state,
@@ -123,7 +150,9 @@ fn decode(row: &Row<'_>) -> Result<RecordedMessage, StoreError> {
         native_turn_id: optional(row, 10)?,
         native_entry_id: optional(row, 11)?,
         service_admitted: row.get(12)?,
-        outcome_detail: row.get(15)?,
+        outcome_detail: row
+            .get::<_, Option<String>>(15)?
+            .filter(|detail| detail != super::delivery::AWAITING_NATIVE_INPUT),
         followup_batch_id: row.get(16)?,
         updated_at_ms: row.get(14)?,
     })

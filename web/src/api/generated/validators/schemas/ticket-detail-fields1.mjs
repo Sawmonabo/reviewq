@@ -4,7 +4,7 @@ import { schema503 } from "../metadata-12.mjs";
 import { validate129 } from "./safe-count-dto.mjs";
 import { validate48 } from "./history-cursor-dto.mjs";
 import { validate237 } from "./utc-timestamp-dto.mjs";
-function validate1748(
+function validate1749(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -16,7 +16,7 @@ function validate1748(
         let data0 = data.assignee;
         const _errs1 = errors;
         if (typeof data0 !== "string" && data0 !== null) {
-          validate1748.errors = [
+          validate1749.errors = [
             {
               instancePath: instancePath + "/assignee",
               schemaPath: "#/properties/assignee/type",
@@ -35,7 +35,7 @@ function validate1748(
           let data1 = data.assigneeId;
           const _errs3 = errors;
           if (typeof data1 !== "string" && data1 !== null) {
-            validate1748.errors = [
+            validate1749.errors = [
               {
                 instancePath: instancePath + "/assigneeId",
                 schemaPath: "#/properties/assigneeId/type",
@@ -111,7 +111,7 @@ function validate1748(
                     for (let i0 = 0; i0 < len0; i0++) {
                       const _errs9 = errors;
                       if (typeof data4[i0] !== "string") {
-                        validate1748.errors = [
+                        validate1749.errors = [
                           {
                             instancePath: instancePath + "/components/" + i0,
                             schemaPath: "#/properties/components/items/type",
@@ -127,7 +127,7 @@ function validate1748(
                       }
                     }
                   } else {
-                    validate1748.errors = [
+                    validate1749.errors = [
                       {
                         instancePath: instancePath + "/components",
                         schemaPath: "#/properties/components/type",
@@ -150,7 +150,7 @@ function validate1748(
                   let data6 = data.description;
                   const _errs11 = errors;
                   if (typeof data6 !== "string" && data6 !== null) {
-                    validate1748.errors = [
+                    validate1749.errors = [
                       {
                         instancePath: instancePath + "/description",
                         schemaPath: "#/properties/description/type",
@@ -175,7 +175,7 @@ function validate1748(
                       !(typeof data7 == "number" && isFinite(data7)) &&
                       data7 !== null
                     ) {
-                      validate1748.errors = [
+                      validate1749.errors = [
                         {
                           instancePath: instancePath + "/estimate",
                           schemaPath: "#/properties/estimate/type",
@@ -188,7 +188,7 @@ function validate1748(
                     if (errors === _errs13) {
                       if (typeof data7 == "number" && isFinite(data7)) {
                         if (data7 < 0 || isNaN(data7)) {
-                          validate1748.errors = [
+                          validate1749.errors = [
                             {
                               instancePath: instancePath + "/estimate",
                               schemaPath: "#/properties/estimate/minimum",
@@ -236,7 +236,7 @@ function validate1748(
         }
       }
     } else {
-      validate1748.errors = [
+      validate1749.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -247,7 +247,7 @@ function validate1748(
       return false;
     }
   }
-  validate1748.errors = vErrors;
+  validate1749.errors = vErrors;
   return errors === 0;
 }
-export { validate1748 };
+export { validate1749 };

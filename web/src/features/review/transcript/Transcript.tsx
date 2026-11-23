@@ -44,11 +44,11 @@ import {
   promptRanks,
   transcriptRangeIndexes,
   readingIndex,
+  timelineRowKey,
   timelineRows,
   toggleKey,
   type VisibleRow,
 } from "./timeline-rows";
-import { MarkdownContent } from "../../../components/markdown/MarkdownContent";
 import { useHistory } from "./useHistory";
 import { useInlineProse } from "./useInlineProse";
 import { useQuestionJump } from "./questions/useQuestionJump";
@@ -196,6 +196,7 @@ export function Transcript({ target, provider, child, messages, working, questio
       expandedReads,
       expanded,
       history.generation ? messages : [],
+      provider,
       history.older,
       history.newer,
       Boolean(inProgress),
@@ -216,6 +217,7 @@ export function Transcript({ target, provider, child, messages, working, questio
     inProgress,
     knownTools,
     messages,
+    provider,
   ]);
 
   const rangeExtractor = useCallback(
@@ -224,7 +226,13 @@ export function Transcript({ target, provider, child, messages, working, questio
     [entries, pinned, findAnchorEntry],
   );
 
-  const rowKey = useCallback((index: number) => entries[index]?.id ?? index, [entries]);
+  const rowKey = useCallback(
+    (index: number) => {
+      const row = entries[index];
+      return row ? timelineRowKey(row) : index;
+    },
+    [entries],
+  );
 
   // Keep scroll measurements and the TanStack instance within this component.
   // eslint-disable-next-line react-hooks/incompatible-library
@@ -244,7 +252,7 @@ export function Transcript({ target, provider, child, messages, working, questio
 
   useEffect(() => {
     // Heights belong to the retained pages. Keep measurements for pinned and overlapping rows.
-    const retained = new Set(entries.map((row) => row.id));
+    const retained = new Set(entries.map(timelineRowKey));
     for (const key of list.itemSizeCache.keys()) {
       if (typeof key !== "string" || !retained.has(key)) list.itemSizeCache.delete(key);
     }
@@ -739,11 +747,12 @@ export function Transcript({ target, provider, child, messages, working, questio
                   data-index={item.index}
                   data-entry={row.id}
                   data-native-entry={row.kind === "delivery" ? undefined : native}
+                  data-delivery-row={row.deliveryKey}
                   data-question-row={row.id !== native ? row.id : undefined}
                   data-live-entry={row.kind === "live" ? "" : undefined}
                   data-tool-member={row.grouped ? "" : undefined}
                   data-after-tools={followsTool && !justTools ? "" : undefined}
-                  key={row.id}
+                  key={item.key}
                   className={`timeline-entry ${justTools ? "tool-entry" : author ? "user-entry" : "agent-entry"}`}
                   style={{ transform: `translateY(${item.start}px)` }}
                 >
@@ -751,51 +760,36 @@ export function Transcript({ target, provider, child, messages, working, questio
                     <HistoryEntryHeading row={row} author={author} provider={provider} />
                   )}
                   <div className="message-body stack">
-                    {row.delivery && (
-                      <div className="timeline-delivery">
-                        {row.delivery.attachment?.quote && (
-                          <blockquote>
-                            <MarkdownContent source={row.delivery.attachment.quote} />
-                          </blockquote>
-                        )}
-                        {!found && <MarkdownContent source={row.delivery.text} />}
-                        {row.delivery.outcomeDetail && (
-                          <small className="meta">{row.delivery.outcomeDetail}</small>
-                        )}
-                      </div>
+                    {history.generation && (
+                      <EntryBody
+                        key={history.generation}
+                        target={target}
+                        generation={history.generation}
+                        entry={row.entry}
+                        delivery={row.delivery}
+                        preferReceipt={provider === "codex"}
+                        provisional={row.provisional}
+                        knownTools={knownTools}
+                        expanded={expanded}
+                        prose={prose}
+                        questions={questions}
+                        observeQuestion={questionJump.observe}
+                        toggle={(key, open) => setExpanded((known) => toggleKey(known, key, open))}
+                        reference={output?.rowId === row.id ? output.reference : undefined}
+                        {...(extraParts?.generation === history.generation &&
+                        extraParts.rowId === row.id
+                          ? { extra: extraParts }
+                          : {})}
+                        onMoreParts={(cursor) => void moreParts(native, row.id, cursor)}
+                        onReadRange={holdOutputRange}
+                        {...(found ? { found } : {})}
+                        onReference={(reference) => {
+                          setFoundOutput(undefined);
+                          setReadingOutput(undefined);
+                          setOutput(reference ? { rowId: row.id, reference } : undefined);
+                        }}
+                      />
                     )}
-                    {(row.entry || row.provisional) &&
-                      (!row.delivery || found) &&
-                      history.generation && (
-                        <EntryBody
-                          key={history.generation}
-                          target={target}
-                          generation={history.generation}
-                          entry={row.entry}
-                          provisional={row.provisional}
-                          knownTools={knownTools}
-                          expanded={expanded}
-                          prose={prose}
-                          questions={questions}
-                          observeQuestion={questionJump.observe}
-                          toggle={(key, open) =>
-                            setExpanded((known) => toggleKey(known, key, open))
-                          }
-                          reference={output?.rowId === row.id ? output.reference : undefined}
-                          {...(extraParts?.generation === history.generation &&
-                          extraParts.rowId === row.id
-                            ? { extra: extraParts }
-                            : {})}
-                          onMoreParts={(cursor) => void moreParts(native, row.id, cursor)}
-                          onReadRange={holdOutputRange}
-                          {...(found ? { found } : {})}
-                          onReference={(reference) => {
-                            setFoundOutput(undefined);
-                            setReadingOutput(undefined);
-                            setOutput(reference ? { rowId: row.id, reference } : undefined);
-                          }}
-                        />
-                      )}
                   </div>
                 </article>
               );

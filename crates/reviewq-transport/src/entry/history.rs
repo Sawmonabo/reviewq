@@ -581,6 +581,11 @@ fn encode_entry(
     Ok(HistoryEntry {
         parts_cursor,
         entry_id: HistoryEntryIdDto::new(entry.id.as_str()).ok_or(AppError::Internal)?,
+        message_id: entry
+            .delivery_id
+            .as_ref()
+            .map(|id| super::messages::display_message_id(run, session, id.as_str()))
+            .transpose()?,
         turn_id: entry
             .turn
             .as_ref()

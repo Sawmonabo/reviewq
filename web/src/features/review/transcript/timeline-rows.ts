@@ -1,7 +1,8 @@
 import { defaultRangeExtractor } from "@tanstack/react-virtual";
 import type { HistoryEntry } from "../../../api/generated/contracts";
+import type { HostProviderDto } from "../../../api/generated/contracts/common";
 import type { MessageHistoryItem } from "../../../api/generated/contracts/delivery";
-import type { ReadingAnchor } from "./history-window";
+import { deliveryRowKey, type ReadingAnchor } from "./history-window";
 import { activityRows } from "./tool-activity";
 import type { ReadPack, ToolCatalog, ToolRun } from "./tool-activity";
 
@@ -10,6 +11,7 @@ export type ProvisionalReply = { readonly turnId: string; readonly text: string 
 type MessageRow = {
   readonly kind: "native" | "live" | "delivery";
   readonly id: string;
+  readonly deliveryKey?: string;
   readonly entry?: HistoryEntry;
   readonly delivery?: MessageHistoryItem;
   readonly provisional?: ProvisionalReply;
@@ -24,22 +26,47 @@ export function timelineRows(
   expandedReads: ReadonlySet<string>,
   expandedCalls: ReadonlySet<string>,
   messages: readonly MessageHistoryItem[],
+  provider: HostProviderDto,
   older: boolean,
   newer: boolean,
   streaming: boolean,
   groupKeys: ReadonlySet<string>,
 ): VisibleRow[] {
-  const confirmed = new Map(
+  const byEntry = new Map(
     messages.flatMap((item) => (item.nativeEntryId ? [[item.nativeEntryId, item] as const] : [])),
   );
-  const loadedIds = new Set(entries.map((entry) => entry.entryId));
+  const byMessage = new Map(messages.map((item) => [item.messageId, item] as const));
+  const linked = new Set<string>();
+  const deliveryKeys = new Set<string>();
+  const links = new Map<HistoryEntry, Pick<MessageRow, "delivery" | "deliveryKey">>();
+  for (const entry of entries) {
+    const confirmed = byEntry.get(entry.entryId);
+    const correlated = entry.messageId ? byMessage.get(entry.messageId) : undefined;
+    if (!confirmed && !correlated && !entry.messageId) continue;
+    if (!entry.parts.some((part) => part.kind === "user_prompt")) continue;
+    const exact = confirmed && (!entry.turnId || confirmed.nativeTurnId === entry.turnId);
+    const candidate = exact ? confirmed : correlated?.nativeEntryId ? undefined : correlated;
+    const delivery = candidate && !linked.has(candidate.messageId) ? candidate : undefined;
+    if (delivery) linked.add(delivery.messageId);
+    const key = entry.messageId && deliveryRowKey(entry.messageId);
+    const deliveryKey =
+      key && !deliveryKeys.has(key) && (!correlated?.nativeEntryId || correlated === delivery)
+        ? key
+        : undefined;
+    if (deliveryKey) deliveryKeys.add(deliveryKey);
+    links.set(entry, {
+      ...(delivery ? { delivery } : {}),
+      ...(deliveryKey ? { deliveryKey } : {}),
+    });
+  }
   const first = entries.find((entry) => entry.timestamp)?.timestamp;
   let last: string | null | undefined;
   for (let i = entries.length - 1; i >= 0 && !last; i--) last = entries[i]?.timestamp;
   const pending = messages
     .filter(
       (item) =>
-        (!item.nativeEntryId || !loadedIds.has(item.nativeEntryId)) &&
+        !linked.has(item.messageId) &&
+        (provider !== "claude" || item.state === "uncertain" || item.state === "rejected") &&
         (!older || (first && item.createdAt >= first)) &&
         (!newer || (last && item.createdAt <= last)),
     )
@@ -59,8 +86,8 @@ export function timelineRows(
       (newer || streaming) && end === entries.length,
       groupKeys,
     )) {
-      const delivery = row.kind === "native" ? confirmed.get(row.id) : undefined;
-      rows.push(row.kind === "native" && delivery ? { ...row, delivery } : row);
+      const link = row.kind === "native" ? links.get(row.entry) : undefined;
+      rows.push(link ? { ...row, ...link } : row);
     }
     start = end;
   }
@@ -72,7 +99,8 @@ export function timelineRows(
       index++;
     }
     addNative(index);
-    rows.push({ kind: "delivery", id: `delivery:${delivery.messageId}`, delivery });
+    const key = deliveryRowKey(delivery.messageId);
+    rows.push({ kind: "delivery", id: key, deliveryKey: key, delivery });
   }
   addNative(entries.length);
   return rows;
@@ -106,6 +134,10 @@ export function readingIndex(
 
 export function historyId(row: VisibleRow) {
   return "anchorId" in row ? row.anchorId : (row.entry?.entryId ?? row.id);
+}
+
+export function timelineRowKey(row: VisibleRow) {
+  return "deliveryKey" in row ? (row.deliveryKey ?? row.id) : row.id;
 }
 
 export function toggleKey(known: ReadonlySet<string>, key: string, open: boolean) {
@@ -146,7 +178,12 @@ export function transcriptRangeIndexes(
   }
   if (pinned.size || findEntry)
     entries.forEach((entry, index) => {
-      if (pinned.has(entry.id) || pinned.has(historyId(entry)) || entry.id === findEntry)
+      if (
+        pinned.has(entry.id) ||
+        pinned.has(historyId(entry)) ||
+        pinned.has(timelineRowKey(entry)) ||
+        entry.id === findEntry
+      )
         indexes.add(index);
     });
   return [...indexes].sort((left, right) => left - right);

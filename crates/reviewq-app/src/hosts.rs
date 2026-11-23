@@ -187,6 +187,7 @@ pub trait NativeHost: QuestionsPort + Send + Sync {
         delivery: DeliveryId,
         cursor: Option<String>,
         require_new_turn: bool,
+        latest_only: bool,
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = DeliveryObservation> + Send + '_>>;
 }
 
@@ -517,6 +518,7 @@ pub enum DeliveryWork {
     },
     Reconcile {
         cursor: Option<String>,
+        latest_only: bool,
     },
 }
 
@@ -525,6 +527,8 @@ pub enum DeliveryWork {
 pub enum DeliveryObservation {
     /// The host proved no native input occurred and the same delivery can retry.
     NotSubmitted,
+    /// The native call succeeded. Exact input readback is still pending.
+    Acknowledged,
     /// New capacity evidence was acquired before a recovery was sent.
     RecoveryAllowanceChanged(ReportHash),
     /// The input is observable, but starting an independent turn is unproved.

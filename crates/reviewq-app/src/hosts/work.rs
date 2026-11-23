@@ -139,12 +139,16 @@ pub async fn recover_delivery(
             )
             .await
         }
-        DeliveryWork::Reconcile { cursor } => {
+        DeliveryWork::Reconcile {
+            cursor,
+            latest_only,
+        } => {
             host.observe(
                 claim.target.clone(),
                 claim.delivery_id.clone(),
                 cursor.clone(),
                 claim.purpose.requires_new_turn(),
+                *latest_only,
             )
             .await
         }

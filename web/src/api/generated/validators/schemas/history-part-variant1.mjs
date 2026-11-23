@@ -4,7 +4,7 @@ import { validate48 } from "./history-cursor-dto.mjs";
 import { validate594 } from "./document-display.mjs";
 import { validate129 } from "./safe-count-dto.mjs";
 import { validate629 } from "./history-text.mjs";
-function validate718(
+function validate719(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -19,7 +19,7 @@ function validate718(
         ((data.text === undefined || !func0.call(data, "text")) &&
           (missing0 = "text"))
       ) {
-        validate718.errors = [
+        validate719.errors = [
           {
             instancePath,
             schemaPath: "#/required",
@@ -83,7 +83,7 @@ function validate718(
               vErrors.push(err1);
             }
             errors++;
-            validate718.errors = vErrors;
+            validate719.errors = vErrors;
             return false;
           } else {
             errors = _errs2;
@@ -154,7 +154,7 @@ function validate718(
                 vErrors.push(err3);
               }
               errors++;
-              validate718.errors = vErrors;
+              validate719.errors = vErrors;
               return false;
             } else {
               errors = _errs7;
@@ -175,7 +175,7 @@ function validate718(
               let data2 = data.kind;
               const _errs11 = errors;
               if (typeof data2 !== "string") {
-                validate718.errors = [
+                validate719.errors = [
                   {
                     instancePath: instancePath + "/kind",
                     schemaPath: "#/properties/kind/type",
@@ -186,7 +186,7 @@ function validate718(
                 return false;
               }
               if ("user_prompt" !== data2) {
-                validate718.errors = [
+                validate719.errors = [
                   {
                     instancePath: instancePath + "/kind",
                     schemaPath: "#/properties/kind/const",
@@ -303,7 +303,7 @@ function validate718(
                         vErrors.push(err5);
                       }
                       errors++;
-                      validate718.errors = vErrors;
+                      validate719.errors = vErrors;
                       return false;
                     } else {
                       errors = _errs16;
@@ -326,7 +326,7 @@ function validate718(
         }
       }
     } else {
-      validate718.errors = [
+      validate719.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -337,7 +337,7 @@ function validate718(
       return false;
     }
   }
-  validate718.errors = vErrors;
+  validate719.errors = vErrors;
   return errors === 0;
 }
-export { validate718 };
+export { validate719 };

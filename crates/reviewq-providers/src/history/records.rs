@@ -3,7 +3,7 @@ use std::io::{Read, Write};
 use reviewq_app::access::AppError;
 use reviewq_app::history::{ToolState, VisibleKind, VisiblePartKind};
 use reviewq_app::hosts::Question;
-use reviewq_domain::identity::{NativeInputId, NativeSessionId, NativeTurnId};
+use reviewq_domain::identity::{DeliveryId, NativeInputId, NativeSessionId, NativeTurnId};
 use reviewq_domain::session::HostProvider;
 use struson::reader::{JsonReader, JsonStreamReader, ValueType};
 
@@ -19,6 +19,7 @@ const MAX_CONTENT_BLOCKS: u16 = 16_384;
 pub(super) struct Record {
     pub id: NativeInputId,
     pub turn: Option<NativeTurnId>,
+    pub delivery_id: Option<DeliveryId>,
     pub at_ms: Option<i64>,
     pub kind: VisibleKind,
     pub final_response: bool,
@@ -104,6 +105,7 @@ pub(super) struct NativeValue {
 #[derive(Default)]
 struct Message {
     id: Option<String>,
+    delivery_id: Option<DeliveryId>,
     kind: Option<String>,
     text: Text,
     parts: Vec<Part>,
@@ -354,6 +356,10 @@ fn project_to(
     Ok(Some(Record {
         id,
         turn: turn.and_then(|value| value.parse().ok()),
+        delivery_id: match kind {
+            VisibleKind::User => item.delivery_id,
+            VisibleKind::Assistant => None,
+        },
         at_ms,
         kind,
         final_response: item.final_response,
@@ -511,6 +517,24 @@ fn codex_item<R: Read>(
     object(reader, |name, reader| match name {
         "type" => string(reader, ID_BYTES).map(|value| item.kind = value),
         "id" => string(reader, ID_BYTES).map(|value| item.id = value),
+        "client_id" | "clientId" if reader.peek().map_err(invalid)? == ValueType::String => {
+            let marker = capture(
+                reader,
+                Window {
+                    start: 0,
+                    limit: 36,
+                    part: None,
+                },
+                0,
+                None,
+            )?;
+            if marker.bytes == 36 {
+                item.delivery_id = std::str::from_utf8(&marker.picked)
+                    .ok()
+                    .and_then(|value| value.parse().ok());
+            }
+            Ok(())
+        }
         "sender_thread_id" => string(reader, ID_BYTES).map(|value| item.sender_thread = value),
         "content" => contents(reader, window, &mut item, output),
         "text" => tools::body(reader, window, output.for_field(BodyField::Text))

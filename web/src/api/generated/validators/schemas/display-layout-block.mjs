@@ -3,7 +3,7 @@ import { func0 } from "../runtime.mjs";
 import { validate129 } from "./safe-count-dto.mjs";
 import { schema423 } from "../metadata-10.mjs";
 import { validate654 } from "./display-block-kind.mjs";
-function validate1447(
+function validate1448(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -24,7 +24,7 @@ function validate1447(
         ((data.kind === undefined || !func0.call(data, "kind")) &&
           (missing0 = "kind"))
       ) {
-        validate1447.errors = [
+        validate1448.errors = [
           {
             instancePath,
             schemaPath: "#/required",
@@ -133,7 +133,7 @@ function validate1447(
                   vErrors.push(err1);
                 }
                 errors++;
-                validate1447.errors = vErrors;
+                validate1448.errors = vErrors;
                 return false;
               } else {
                 errors = _errs4;
@@ -157,7 +157,7 @@ function validate1447(
                 let data3 = data.headingMarkdown;
                 const _errs8 = errors;
                 if (typeof data3 !== "string" && data3 !== null) {
-                  validate1447.errors = [
+                  validate1448.errors = [
                     {
                       instancePath: instancePath + "/headingMarkdown",
                       schemaPath: "#/properties/headingMarkdown/type",
@@ -250,7 +250,7 @@ function validate1447(
         }
       }
     } else {
-      validate1447.errors = [
+      validate1448.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -261,7 +261,7 @@ function validate1447(
       return false;
     }
   }
-  validate1447.errors = vErrors;
+  validate1448.errors = vErrors;
   return errors === 0;
 }
-export { validate1447 };
+export { validate1448 };

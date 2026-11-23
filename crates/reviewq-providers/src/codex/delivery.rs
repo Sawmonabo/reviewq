@@ -224,8 +224,12 @@ impl Codex {
                 DeliveryObservation::QuestionAlreadyAnswered
             }
             Err(CallError::Denied(_)) => DeliveryObservation::Rejected,
-            // A reply, missing reply or exact remote error alone does not prove native input.
-            _ => self.find_input(lead, delivery, None, automatic).await,
+            Ok(()) if !automatic && !answers_question => DeliveryObservation::Acknowledged,
+            // The remaining replies and errors still need the original exact readback.
+            _ => {
+                self.find_input(lead, delivery, None, automatic, false)
+                    .await
+            }
         }
     }
 
@@ -235,6 +239,7 @@ impl Codex {
         delivery: DeliveryId,
         mut cursor: Option<String>,
         require_new_turn: bool,
+        latest_only: bool,
     ) -> DeliveryObservation {
         let identity = lead.binding().identity();
         if identity.provider() != HostProvider::Codex || identity.profile() != &self.profile {
@@ -248,7 +253,7 @@ impl Codex {
         {
             return DeliveryObservation::Uncertain;
         }
-        for _ in 0..4 {
+        for _ in 0..if latest_only { 1 } else { 4 } {
             let Ok(mut turns) = self
                 .turns(&thread.id, cursor.as_deref(), false, 1, true)
                 .await

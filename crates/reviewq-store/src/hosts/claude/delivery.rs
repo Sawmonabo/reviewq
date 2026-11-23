@@ -245,7 +245,10 @@ pub(super) fn finish(
         if changed != 1 {
             return Err(AppError::Conflict.into());
         }
-        claim.work = DeliveryWork::Reconcile { cursor: None };
+        claim.work = DeliveryWork::Reconcile {
+            cursor: None,
+            latest_only: false,
+        };
     }
     if confirmed_late_drop {
         delivery::finish_claude_drop(tx, claim)?;

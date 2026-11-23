@@ -171,6 +171,9 @@ pub enum HistoryAvailability {
 pub struct HistoryEntry {
     pub entry_id: HistoryEntryIdDto,
     pub turn_id: Option<HistoryTurnIdDto>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "schema", schemars(with = "ResourceIdDto"))]
+    pub message_id: Option<ResourceIdDto>,
     pub timestamp: Option<UtcTimestampDto>,
     pub parts: Vec<HistoryPart>,
     #[serde(skip_serializing_if = "Option::is_none")]

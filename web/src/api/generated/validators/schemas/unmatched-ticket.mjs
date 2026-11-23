@@ -2,7 +2,7 @@
 import { func0 } from "../runtime.mjs";
 import { schema351 } from "../metadata-8.mjs";
 import { validate25 } from "./checkpoint-id-dto.mjs";
-function validate1191(
+function validate1192(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -23,7 +23,7 @@ function validate1191(
         ((data.assignee === undefined || !func0.call(data, "assignee")) &&
           (missing0 = "assignee"))
       ) {
-        validate1191.errors = [
+        validate1192.errors = [
           {
             instancePath,
             schemaPath: "#/required",
@@ -37,7 +37,7 @@ function validate1191(
           let data0 = data.assignee;
           const _errs1 = errors;
           if (typeof data0 !== "string" && data0 !== null) {
-            validate1191.errors = [
+            validate1192.errors = [
               {
                 instancePath: instancePath + "/assignee",
                 schemaPath: "#/properties/assignee/type",
@@ -77,7 +77,7 @@ function validate1191(
               let data2 = data.priority;
               const _errs4 = errors;
               if (typeof data2 !== "string" && data2 !== null) {
-                validate1191.errors = [
+                validate1192.errors = [
                   {
                     instancePath: instancePath + "/priority",
                     schemaPath: "#/properties/priority/type",
@@ -95,7 +95,7 @@ function validate1191(
               if (data.status !== undefined && func0.call(data, "status")) {
                 const _errs6 = errors;
                 if (typeof data.status !== "string") {
-                  validate1191.errors = [
+                  validate1192.errors = [
                     {
                       instancePath: instancePath + "/status",
                       schemaPath: "#/properties/status/type",
@@ -113,7 +113,7 @@ function validate1191(
                 if (data.title !== undefined && func0.call(data, "title")) {
                   const _errs8 = errors;
                   if (typeof data.title !== "string") {
-                    validate1191.errors = [
+                    validate1192.errors = [
                       {
                         instancePath: instancePath + "/title",
                         schemaPath: "#/properties/title/type",
@@ -133,7 +133,7 @@ function validate1191(
         }
       }
     } else {
-      validate1191.errors = [
+      validate1192.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -144,7 +144,7 @@ function validate1191(
       return false;
     }
   }
-  validate1191.errors = vErrors;
+  validate1192.errors = vErrors;
   return errors === 0;
 }
-export { validate1191 };
+export { validate1192 };

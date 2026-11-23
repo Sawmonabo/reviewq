@@ -4,8 +4,8 @@ import { validate237 } from "./utc-timestamp-dto.mjs";
 import { validate25 } from "./checkpoint-id-dto.mjs";
 import { validate408 } from "./observed-input-dto.mjs";
 import { validate116 } from "./review-id-dto.mjs";
-import { validate898 } from "./state.mjs";
-function validate890(
+import { validate899 } from "./state.mjs";
+function validate891(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -88,7 +88,7 @@ function validate890(
               vErrors.push(err1);
             }
             errors++;
-            validate890.errors = vErrors;
+            validate891.errors = vErrors;
             return false;
           } else {
             errors = _errs3;
@@ -162,7 +162,7 @@ function validate890(
                 vErrors.push(err3);
               }
               errors++;
-              validate890.errors = vErrors;
+              validate891.errors = vErrors;
               return false;
             } else {
               errors = _errs8;
@@ -236,7 +236,7 @@ function validate890(
                   vErrors.push(err5);
                 }
                 errors++;
-                validate890.errors = vErrors;
+                validate891.errors = vErrors;
                 return false;
               } else {
                 errors = _errs13;
@@ -328,7 +328,7 @@ function validate890(
                       vErrors.push(err7);
                     }
                     errors++;
-                    validate890.errors = vErrors;
+                    validate891.errors = vErrors;
                     return false;
                   } else {
                     errors = _errs19;
@@ -402,7 +402,7 @@ function validate890(
                         vErrors.push(err9);
                       }
                       errors++;
-                      validate890.errors = vErrors;
+                      validate891.errors = vErrors;
                       return false;
                     } else {
                       errors = _errs24;
@@ -422,7 +422,7 @@ function validate890(
                     if (data.state !== undefined && func0.call(data, "state")) {
                       const _errs28 = errors;
                       if (
-                        !validate898(data.state, {
+                        !validate899(data.state, {
                           instancePath: instancePath + "/state",
                           parentData: data,
                           parentDataProperty: "state",
@@ -431,8 +431,8 @@ function validate890(
                       ) {
                         vErrors =
                           vErrors === null
-                            ? validate898.errors
-                            : vErrors.concat(validate898.errors);
+                            ? validate899.errors
+                            : vErrors.concat(validate899.errors);
                         errors = vErrors.length;
                       }
                       var valid0 = _errs28 === errors;
@@ -447,7 +447,7 @@ function validate890(
         }
       }
     } else {
-      validate890.errors = [
+      validate891.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -458,7 +458,7 @@ function validate890(
       return false;
     }
   }
-  validate890.errors = vErrors;
+  validate891.errors = vErrors;
   return errors === 0;
 }
-export { validate890 };
+export { validate891 };

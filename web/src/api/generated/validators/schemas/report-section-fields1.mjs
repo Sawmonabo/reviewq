@@ -4,7 +4,7 @@ import { validate129 } from "./safe-count-dto.mjs";
 import { validate132 } from "./offset-unit.mjs";
 import { validate136 } from "./report-hash-dto.mjs";
 import { validate25 } from "./checkpoint-id-dto.mjs";
-function validate1390(
+function validate1391(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -15,7 +15,7 @@ function validate1390(
       if (data.complete !== undefined && func0.call(data, "complete")) {
         const _errs1 = errors;
         if (typeof data.complete !== "boolean") {
-          validate1390.errors = [
+          validate1391.errors = [
             {
               instancePath: instancePath + "/complete",
               schemaPath: "#/properties/complete/type",
@@ -84,7 +84,7 @@ function validate1390(
               vErrors.push(err1);
             }
             errors++;
-            validate1390.errors = vErrors;
+            validate1391.errors = vErrors;
             return false;
           } else {
             errors = _errs4;
@@ -203,7 +203,7 @@ function validate1390(
                     vErrors.push(err3);
                   }
                   errors++;
-                  validate1390.errors = vErrors;
+                  validate1391.errors = vErrors;
                   return false;
                 } else {
                   errors = _errs11;
@@ -268,7 +268,7 @@ function validate1390(
                     if (data.text !== undefined && func0.call(data, "text")) {
                       const _errs17 = errors;
                       if (typeof data.text !== "string") {
-                        validate1390.errors = [
+                        validate1391.errors = [
                           {
                             instancePath: instancePath + "/text",
                             schemaPath: "#/properties/text/type",
@@ -290,7 +290,7 @@ function validate1390(
         }
       }
     } else {
-      validate1390.errors = [
+      validate1391.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -301,7 +301,7 @@ function validate1390(
       return false;
     }
   }
-  validate1390.errors = vErrors;
+  validate1391.errors = vErrors;
   return errors === 0;
 }
-export { validate1390 };
+export { validate1391 };

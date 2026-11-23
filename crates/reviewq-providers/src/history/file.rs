@@ -92,6 +92,7 @@ pub(super) fn page(
             entries.push(VisibleEntry {
                 id: record.id.clone(),
                 turn: record.turn,
+                delivery_id: record.delivery_id,
                 at_ms: record.at_ms,
                 kind: record.kind,
                 text,
@@ -167,6 +168,7 @@ pub(super) fn final_response(
             entry = Some(VisibleEntry {
                 id: record.id.clone(),
                 turn: record.turn,
+                delivery_id: record.delivery_id,
                 at_ms: record.at_ms,
                 kind: record.kind,
                 text: readable_prefix(&record.text)?.chars().take(512).collect(),

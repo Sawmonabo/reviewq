@@ -2,7 +2,7 @@
 import { func0 } from "../runtime.mjs";
 import { schema465 } from "../metadata-11.mjs";
 import { validate237 } from "./utc-timestamp-dto.mjs";
-function validate1619(
+function validate1620(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -23,7 +23,7 @@ function validate1619(
         ((data.effort === undefined || !func0.call(data, "effort")) &&
           (missing0 = "effort"))
       ) {
-        validate1619.errors = [
+        validate1620.errors = [
           {
             instancePath,
             schemaPath: "#/required",
@@ -37,7 +37,7 @@ function validate1619(
           let data0 = data.effort;
           const _errs1 = errors;
           if (typeof data0 !== "string" && data0 !== null) {
-            validate1619.errors = [
+            validate1620.errors = [
               {
                 instancePath: instancePath + "/effort",
                 schemaPath: "#/properties/effort/type",
@@ -56,7 +56,7 @@ function validate1619(
             let data1 = data.model;
             const _errs3 = errors;
             if (typeof data1 !== "string" && data1 !== null) {
-              validate1619.errors = [
+              validate1620.errors = [
                 {
                   instancePath: instancePath + "/model",
                   schemaPath: "#/properties/model/type",
@@ -75,7 +75,7 @@ function validate1619(
               let data2 = data.name;
               const _errs5 = errors;
               if (typeof data2 !== "string" && data2 !== null) {
-                validate1619.errors = [
+                validate1620.errors = [
                   {
                     instancePath: instancePath + "/name",
                     schemaPath: "#/properties/name/type",
@@ -147,7 +147,7 @@ function validate1619(
                     vErrors.push(err1);
                   }
                   errors++;
-                  validate1619.errors = vErrors;
+                  validate1620.errors = vErrors;
                   return false;
                 } else {
                   errors = _errs8;
@@ -168,7 +168,7 @@ function validate1619(
                   let data4 = data.status;
                   const _errs12 = errors;
                   if (typeof data4 !== "string" && data4 !== null) {
-                    validate1619.errors = [
+                    validate1620.errors = [
                       {
                         instancePath: instancePath + "/status",
                         schemaPath: "#/properties/status/type",
@@ -188,7 +188,7 @@ function validate1619(
         }
       }
     } else {
-      validate1619.errors = [
+      validate1620.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -199,7 +199,7 @@ function validate1619(
       return false;
     }
   }
-  validate1619.errors = vErrors;
+  validate1620.errors = vErrors;
   return errors === 0;
 }
-export { validate1619 };
+export { validate1620 };

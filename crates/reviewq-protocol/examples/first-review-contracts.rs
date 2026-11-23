@@ -190,6 +190,7 @@ fn emit_history_and_receipt(output: &Path) -> Result<(), Box<dyn Error>> {
         HistoryEntry {
             entry_id: HistoryEntryIdDto::new("active-item-0").unwrap(),
             turn_id: Some(HistoryTurnIdDto::new("active-turn-0").unwrap()),
+            message_id: None,
             timestamp: None,
             parts_cursor: None,
             content_ref: None,
@@ -270,6 +271,8 @@ fn user_entry(entry: &str, text: String) -> HistoryEntry {
     HistoryEntry {
         entry_id: HistoryEntryIdDto::new(entry).unwrap(),
         turn_id: Some(HistoryTurnIdDto::new(TURN).unwrap()),
+        message_id: (entry == ENTRY_A)
+            .then(|| ResourceIdDto::new("fixture-message-display-id").unwrap()),
         timestamp: None,
         parts_cursor: None,
         content_ref: None,

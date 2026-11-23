@@ -1,6 +1,6 @@
 import type { HostProviderDto } from "../../../api/generated/contracts/common";
 import { readable } from "../../../lib/presentation";
-import { deliveryLabels } from "../delivery-labels";
+import { deliveryLabels, pendingDelivery } from "../delivery-labels";
 import { HistoryTimestamp } from "./HistoryTimestamp";
 import { ProviderMark } from "./ProviderMark";
 import type { VisibleRow } from "./timeline-rows";
@@ -42,7 +42,7 @@ export function HistoryEntryHeading({
       </span>
       <strong>{author?.label ?? readable(provider)}</strong>
       {timestamp && <HistoryTimestamp timestamp={timestamp} delivery={!row.entry?.timestamp} />}
-      {row.delivery && (
+      {row.delivery && (!row.entry || !pendingDelivery(row.delivery.state)) && (
         <span className="delivery-status" data-state={row.delivery.state}>
           {deliveryLabels[row.delivery.state]}
         </span>

@@ -3,14 +3,17 @@ use std::sync::Arc;
 use axum::Json;
 use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode};
+use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use reviewq_app::access::AppError;
 use reviewq_app::events::Snapshot;
 use reviewq_app::hosts::{DeliveryOutcome, DeliveryReceipt, MessageBody, receipt, send_message};
+use reviewq_domain::identity::{RunId, SessionKey};
 use reviewq_protocol::{
     DeliveryReceipt as ReceiptDto, DeliveryReceiptResponse, DeliveryState, EventCursorDto,
-    HistoryEntryIdDto, HistoryTurnIdDto, ObservedInputDto, RunIdDto, SendMessageRequest,
-    SessionKeyDto, SubmissionIdDto, Success, UtcTimestampDto,
+    HistoryEntryIdDto, HistoryTurnIdDto, ObservedInputDto, ResourceIdDto, RunIdDto,
+    SendMessageRequest, SessionKeyDto, SubmissionIdDto, Success, UtcTimestampDto,
 };
+use sha2::{Digest, Sha256};
 
 use super::error::{ApiBytes, ApiPath as Path};
 use super::pages::parse;
@@ -120,7 +123,7 @@ pub(super) struct MessageQuery {
 }
 
 #[derive(serde::Deserialize, serde::Serialize)]
-struct MessageCursor(i64, String);
+struct MessageCursor(i64, i64, ResourceIdDto);
 
 pub(super) async fn list(
     State(entry): State<Arc<Entry>>,
@@ -129,41 +132,48 @@ pub(super) async fn list(
     super::error::ApiQuery(query): super::error::ApiQuery<MessageQuery>,
 ) -> Result<Json<Success<reviewq_protocol::MessageHistoryPage>>, ApiError> {
     use reviewq_app::hosts::{MAX_MESSAGE_HISTORY_PAGE, MessagePosition};
-    use reviewq_domain::identity::{RunId, SessionKey};
     use reviewq_protocol::{Page, PageCursorDto};
 
     let actor = entry.auth.browser_actor(&headers, false)?;
     let limit = query.limit.unwrap_or(MAX_MESSAGE_HISTORY_PAGE);
     let run: RunId = parse(&run)?;
     let session: SessionKey = parse(&session)?;
-    let scope = serde_json::to_vec(&("browser-messages", run.as_str(), session.as_str(), limit))
+    let scope = serde_json::to_vec(&("browser-messages-v2", run.as_str(), session.as_str(), limit))
         .map_err(|_| AppError::Internal)?;
     let endpoint = &entry.auth.endpoint;
-    let after = query
+    let cursor: Option<MessageCursor> = query
         .cursor
         .as_deref()
-        .map(|token| {
-            let MessageCursor(time, id) = endpoint.decode_cursor(&scope, token)?;
-            Ok::<_, AppError>(MessagePosition {
-                created_at_ms: time,
-                message_id: parse(&id)?,
-            })
-        })
+        .map(|token| endpoint.decode_cursor(&scope, token))
         .transpose()?;
+    let after = cursor
+        .as_ref()
+        .map(|MessageCursor(time, row_id, _)| MessagePosition {
+            created_at_ms: *time,
+            row_id: *row_id,
+        });
     let stored = entry
         .store
-        .read_messages(actor, run, session, after, limit)
+        .read_messages(actor, run.clone(), session.clone(), after, limit)
         .await?;
+    if let Some(MessageCursor(_, _, expected)) = cursor {
+        let found = stored
+            .value
+            .cursor_message_id
+            .as_ref()
+            .ok_or(AppError::CursorExpired)?;
+        if display_message_id(&run, &session, found.as_str())? != expected {
+            return Err(AppError::CursorExpired.into());
+        }
+    }
     let mut budget: usize = 512 * 1024 - 4096;
     let mut last = None;
     let mut has_more = stored.value.has_more;
     let mut items = Vec::new();
     for message in stored.value.items {
-        let position = MessageCursor(
-            message.position.created_at_ms,
-            message.position.message_id.to_string(),
-        );
-        let item = project_message(message)?;
+        let time = message.position.created_at_ms;
+        let row_id = message.position.row_id;
+        let item = project_message(&run, &session, message)?;
         let charge = serde_json::to_vec(&item)
             .map_err(|_| AppError::Internal)?
             .len()
@@ -173,8 +183,8 @@ pub(super) async fn list(
             break;
         };
         budget = remaining;
+        last = Some(MessageCursor(time, row_id, item.message_id.clone()));
         items.push(item);
-        last = Some(position);
     }
     let next_cursor = has_more
         .then(|| {
@@ -187,12 +197,14 @@ pub(super) async fn list(
 }
 
 fn project_message(
+    run: &RunId,
+    session: &SessionKey,
     value: reviewq_app::hosts::RecordedMessage,
 ) -> Result<reviewq_protocol::MessageHistoryItem, AppError> {
     use super::pages::count;
     use reviewq_app::hosts::RecordedPurpose as Purpose;
+    use reviewq_protocol::reports::ReportHashDto;
     use reviewq_protocol::{MessageAttachment, MessageHistoryItem, RecordedPurpose};
-    use reviewq_protocol::{ResourceIdDto, reports::ReportHashDto};
 
     let resource = |value: reviewq_domain::identity::ReceiptId| {
         ResourceIdDto::new(value.as_str()).ok_or(AppError::Internal)
@@ -213,8 +225,7 @@ fn project_message(
         })
         .transpose()?;
     Ok(MessageHistoryItem {
-        message_id: ResourceIdDto::new(value.position.message_id.as_str())
-            .ok_or(AppError::Internal)?,
+        message_id: display_message_id(run, session, value.message_id.as_str())?,
         submission_id: SubmissionIdDto::new(value.submission_id.as_str())
             .ok_or(AppError::Internal)?,
         purpose: match value.purpose {
@@ -246,6 +257,20 @@ fn project_message(
         updated_at: UtcTimestampDto::from_unix_milliseconds(value.updated_at_ms)
             .ok_or(AppError::Internal)?,
     })
+}
+
+pub(super) fn display_message_id(
+    run: &RunId,
+    session: &SessionKey,
+    native_correlation: &str,
+) -> Result<ResourceIdDto, AppError> {
+    let mut hash = Sha256::new();
+    hash.update(b"reviewq-message-display-v1");
+    for value in [run.as_str(), session.as_str(), native_correlation] {
+        hash.update((value.len() as u64).to_be_bytes());
+        hash.update(value.as_bytes());
+    }
+    ResourceIdDto::new(URL_SAFE_NO_PAD.encode(hash.finalize())).ok_or(AppError::Internal)
 }
 
 pub(in crate::entry) fn recorded_state(

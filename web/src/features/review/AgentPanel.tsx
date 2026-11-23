@@ -9,7 +9,7 @@ import { Notice } from "../../components/PanelState";
 import { useResource } from "../../hooks/useResource";
 import type { DraftStore } from "../../lib/drafts";
 import { formatActivityTime, formatTime, readable } from "../../lib/presentation";
-import { deliveryLabels } from "./delivery-labels";
+import { deliveryLabels, pendingDelivery } from "./delivery-labels";
 import { ReportedPlan } from "./ReportedPlan";
 import { ProviderMark } from "./transcript/ProviderMark";
 import { AgentInput } from "./transcript/questions/AgentInput";
@@ -171,6 +171,7 @@ export default function AgentPanel({
                 targetLabel: "To lead review",
                 targetTitle: `To lead review${session.metadata.name ? ` · ${session.metadata.name}` : ""}`,
                 draftKey: JSON.stringify(["message", run.reviewId, run.runId, run.leadSessionKey]),
+                deliveryPending: outbox.data?.items.some((item) => pendingDelivery(item.state)),
                 onAccepted: outbox.retry,
               },
             }

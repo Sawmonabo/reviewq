@@ -4,7 +4,7 @@ import { validate129 } from "./safe-count-dto.mjs";
 import { schema450 } from "../metadata-11.mjs";
 import { validate69 } from "./merge-request-iid-dto.mjs";
 import { validate295 } from "./queue-status.mjs";
-function validate1564(
+function validate1565(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -36,7 +36,7 @@ function validate1564(
         if (data.own !== undefined && func0.call(data, "own")) {
           const _errs2 = errors;
           if (typeof data.own !== "boolean") {
-            validate1564.errors = [
+            validate1565.errors = [
               {
                 instancePath: instancePath + "/own",
                 schemaPath: "#/properties/own/type",
@@ -58,7 +58,7 @@ function validate1564(
             let data2 = data.personalApproval;
             const _errs4 = errors;
             if (typeof data2 !== "boolean" && data2 !== null) {
-              validate1564.errors = [
+              validate1565.errors = [
                 {
                   instancePath: instancePath + "/personalApproval",
                   schemaPath: "#/properties/personalApproval/type",
@@ -100,7 +100,7 @@ function validate1564(
               ) {
                 const _errs7 = errors;
                 if (typeof data.projectPath !== "string") {
-                  validate1564.errors = [
+                  validate1565.errors = [
                     {
                       instancePath: instancePath + "/projectPath",
                       schemaPath: "#/properties/projectPath/type",
@@ -146,7 +146,7 @@ function validate1564(
                     let data6 = data.reasonKind;
                     const _errs10 = errors;
                     if (typeof data6 !== "string" && data6 !== null) {
-                      validate1564.errors = [
+                      validate1565.errors = [
                         {
                           instancePath: instancePath + "/reasonKind",
                           schemaPath: "#/properties/reasonKind/type",
@@ -194,7 +194,7 @@ function validate1564(
         }
       }
     } else {
-      validate1564.errors = [
+      validate1565.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -205,7 +205,7 @@ function validate1564(
       return false;
     }
   }
-  validate1564.errors = vErrors;
+  validate1565.errors = vErrors;
   return errors === 0;
 }
-export { validate1564 };
+export { validate1565 };

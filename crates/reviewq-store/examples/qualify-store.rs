@@ -179,7 +179,13 @@ async fn exercise(db: &Path, backup: &Path, inputs: &Path) -> Result<(), Box<dyn
         .claim_delivery(id.clone(), RecoverableDeliveryState::Dispatching)
         .await?
         .unwrap();
-    assert_eq!(retry.work, DeliveryWork::Reconcile { cursor: None });
+    assert_eq!(
+        retry.work,
+        DeliveryWork::Reconcile {
+            cursor: None,
+            latest_only: false,
+        }
+    );
     assert_eq!(
         store.authorize_dispatch(retry.clone()).await,
         Err(AppError::Forbidden)
@@ -204,9 +210,46 @@ async fn exercise(db: &Path, backup: &Path, inputs: &Path) -> Result<(), Box<dyn
             .await,
         Err(AppError::Conflict)
     );
+    let id = second.value.delivery_id;
+    let dispatch = store
+        .claim_delivery(id.clone(), RecoverableDeliveryState::Queued)
+        .await?
+        .unwrap();
+    assert_eq!(
+        store
+            .finish_delivery(dispatch, DeliveryObservation::Acknowledged)
+            .await?
+            .outcome,
+        DeliveryOutcome::Dispatching
+    );
+    store.close(WAIT).await?;
+    let store = SqliteStore::open(absolute(db)).await?;
+    store.recover_delivery_claims().await?;
+    let wait = store
+        .claim_delivery(id, RecoverableDeliveryState::Dispatching)
+        .await?
+        .unwrap();
+    assert_eq!(
+        wait.work,
+        DeliveryWork::Reconcile {
+            cursor: None,
+            latest_only: true,
+        }
+    );
+    assert_eq!(
+        store.authorize_dispatch(wait.clone()).await,
+        Err(AppError::Forbidden)
+    );
+    assert_eq!(
+        store
+            .finish_delivery(wait, DeliveryObservation::Uncertain)
+            .await?
+            .outcome,
+        DeliveryOutcome::Dispatching
+    );
     store.close(WAIT).await?;
     println!(
-        "scoped pagination, duplicate admission, same client ID across grants, coherent backup and lost-reply evidence"
+        "scoped pagination, duplicate admission, coherent backup, lost-reply recovery and acknowledged observation"
     );
     Ok(())
 }
@@ -223,10 +266,12 @@ async fn leave_wal(db: &Path, inputs: &Path) -> Result<(), Box<dyn Error>> {
 async fn check_wal(db: &Path) -> Result<(), Box<dyn Error>> {
     let identity = SqliteStore::probe(absolute(db)).await?;
     let store = SqliteStore::open(absolute(db)).await?;
+    store.recover_delivery_claims().await?;
     let recoverable = store
         .recoverable_deliveries(HostProvider::Codex, None, 1)
         .await?;
     assert_eq!(store.identity(), &identity);
+    assert_eq!(recoverable.len(), 1);
     assert_eq!(recoverable[0].state, RecoverableDeliveryState::Dispatching);
     store.close(WAIT).await?;
     println!("retained WAL restored the committed delivery and its dispatch state");

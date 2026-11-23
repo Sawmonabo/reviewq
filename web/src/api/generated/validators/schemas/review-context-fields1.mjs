@@ -5,7 +5,7 @@ import { validate129 } from "./safe-count-dto.mjs";
 import { schema294 } from "../metadata-7.mjs";
 import { validate116 } from "./review-id-dto.mjs";
 import { validate25 } from "./checkpoint-id-dto.mjs";
-function validate961(
+function validate962(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -62,7 +62,7 @@ function validate961(
             let data2 = data.personalApproval;
             const _errs3 = errors;
             if (typeof data2 !== "boolean" && data2 !== null) {
-              validate961.errors = [
+              validate962.errors = [
                 {
                   instancePath: instancePath + "/personalApproval",
                   schemaPath: "#/properties/personalApproval/type",
@@ -83,7 +83,7 @@ function validate961(
             ) {
               const _errs5 = errors;
               if (typeof data.projectPath !== "string") {
-                validate961.errors = [
+                validate962.errors = [
                   {
                     instancePath: instancePath + "/projectPath",
                     schemaPath: "#/properties/projectPath/type",
@@ -128,7 +128,7 @@ function validate961(
                   if (errors === _errs8) {
                     if (Array.isArray(data5)) {
                       if (data5.length > 16) {
-                        validate961.errors = [
+                        validate962.errors = [
                           {
                             instancePath: instancePath + "/ticketKeys",
                             schemaPath: "#/properties/ticketKeys/maxItems",
@@ -163,7 +163,7 @@ function validate961(
                         }
                       }
                     } else {
-                      validate961.errors = [
+                      validate962.errors = [
                         {
                           instancePath: instancePath + "/ticketKeys",
                           schemaPath: "#/properties/ticketKeys/type",
@@ -186,7 +186,7 @@ function validate961(
                     let data7 = data.ticketTitle;
                     const _errs11 = errors;
                     if (typeof data7 !== "string" && data7 !== null) {
-                      validate961.errors = [
+                      validate962.errors = [
                         {
                           instancePath: instancePath + "/ticketTitle",
                           schemaPath: "#/properties/ticketTitle/type",
@@ -206,7 +206,7 @@ function validate961(
                     if (data.title !== undefined && func0.call(data, "title")) {
                       const _errs13 = errors;
                       if (typeof data.title !== "string") {
-                        validate961.errors = [
+                        validate962.errors = [
                           {
                             instancePath: instancePath + "/title",
                             schemaPath: "#/properties/title/type",
@@ -228,7 +228,7 @@ function validate961(
         }
       }
     } else {
-      validate961.errors = [
+      validate962.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -239,7 +239,7 @@ function validate961(
       return false;
     }
   }
-  validate961.errors = vErrors;
+  validate962.errors = vErrors;
   return errors === 0;
 }
-export { validate961 };
+export { validate962 };

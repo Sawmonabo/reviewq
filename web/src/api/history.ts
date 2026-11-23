@@ -254,12 +254,12 @@ export async function readReceipt(
   submissionId: string,
   signal: AbortSignal,
 ) {
-  const { data } = await read(
+  const result = await read(
     `${path(target)}/messages/${encodeURIComponent(submissionId)}`,
     isDeliveryReceiptResponse,
     signal,
   );
-  return verifyReceipt(target, submissionId, data);
+  return { ...result, data: verifyReceipt(target, submissionId, result.data) };
 }
 
 export function verifyReceipt(

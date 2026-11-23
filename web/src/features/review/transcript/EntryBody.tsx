@@ -1,5 +1,6 @@
 import { useState } from "react";
 import type { DocumentDisplay } from "../../../api/generated/contracts/common";
+import type { MessageHistoryItem } from "../../../api/generated/contracts/delivery";
 import type { HistoryEntry, HistoryPart } from "../../../api/generated/contracts";
 import type { SessionAddress } from "../../../api/history";
 import { ExpandedOutput } from "./ExpandedOutput";
@@ -17,6 +18,8 @@ import type { Questions } from "./questions/useQuestions";
 type Props = {
   readonly target: SessionAddress;
   readonly entry: HistoryEntry | undefined;
+  readonly delivery: MessageHistoryItem | undefined;
+  readonly preferReceipt: boolean;
   readonly provisional: ProvisionalReply | undefined;
   readonly knownTools: ToolCatalog;
   readonly generation: string;
@@ -35,6 +38,8 @@ type Props = {
 
 export function EntryBody({
   entry,
+  delivery,
+  preferReceipt,
   provisional,
   knownTools,
   target,
@@ -51,6 +56,12 @@ export function EntryBody({
   questions,
   observeQuestion,
 }: Props) {
+  // Keep the first rendered body mounted when the other source catches up.
+  const [receiptFirst] = useState(() => delivery !== undefined && (!entry || preferReceipt));
+  const receiptText =
+    !found && (!entry || (receiptFirst && preferReceipt)) ? delivery?.text : undefined;
+  const quote = delivery?.attachment?.quote;
+  const outcomeDetail = delivery?.outcomeDetail;
   const next = extra ? extra.next : entry?.partsCursor;
   const sourceParts = [...(entry?.parts ?? []), ...(extra?.items ?? [])];
   const parts = entry ? groupParts(entry, sourceParts, knownTools) : [];
@@ -206,13 +217,25 @@ export function EntryBody({
       : [];
   return (
     <>
-      {body}
+      {(receiptText || quote || outcomeDetail) && (
+        <div className="timeline-delivery">
+          {quote && (
+            <blockquote>
+              <MarkdownContent source={quote} />
+            </blockquote>
+          )}
+          {receiptText && <MarkdownContent source={receiptText} />}
+          {outcomeDetail && <small className="meta">{outcomeDetail}</small>}
+        </div>
+      )}
+      {!receiptText && body}
       {entry &&
         wholeEntry &&
         !wholeIsInline &&
+        !receiptText &&
         !found &&
         disclosure(entry.entryId, wholeEntry, entryFormat, true)}
-      {next && (
+      {next && !receiptText && (
         <button className="quiet-button" type="button" onClick={() => onMoreParts(next)}>
           More parts
         </button>

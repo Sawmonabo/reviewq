@@ -3,9 +3,9 @@ import { func0 } from "../runtime.mjs";
 import { validate129 } from "./safe-count-dto.mjs";
 import { validate48 } from "./history-cursor-dto.mjs";
 import { validate237 } from "./utc-timestamp-dto.mjs";
-import { validate1737 } from "./ticket-comment.mjs";
+import { validate1738 } from "./ticket-comment.mjs";
 import { validate25 } from "./checkpoint-id-dto.mjs";
-function validate1733(
+function validate1734(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -30,7 +30,7 @@ function validate1733(
         ((data.nextCursor === undefined || !func0.call(data, "nextCursor")) &&
           (missing0 = "nextCursor"))
       ) {
-        validate1733.errors = [
+        validate1734.errors = [
           {
             instancePath,
             schemaPath: "#/required",
@@ -115,7 +115,7 @@ function validate1733(
                 if (errors === _errs4) {
                   if (Array.isArray(data3)) {
                     if (data3.length > 100) {
-                      validate1733.errors = [
+                      validate1734.errors = [
                         {
                           instancePath: instancePath + "/items",
                           schemaPath: "#/properties/items/maxItems",
@@ -130,7 +130,7 @@ function validate1733(
                       for (let i0 = 0; i0 < len0; i0++) {
                         const _errs6 = errors;
                         if (
-                          !validate1737(data3[i0], {
+                          !validate1738(data3[i0], {
                             instancePath: instancePath + "/items/" + i0,
                             parentData: data3,
                             parentDataProperty: i0,
@@ -139,8 +139,8 @@ function validate1733(
                         ) {
                           vErrors =
                             vErrors === null
-                              ? validate1737.errors
-                              : vErrors.concat(validate1737.errors);
+                              ? validate1738.errors
+                              : vErrors.concat(validate1738.errors);
                           errors = vErrors.length;
                         }
                         var valid1 = _errs6 === errors;
@@ -150,7 +150,7 @@ function validate1733(
                       }
                     }
                   } else {
-                    validate1733.errors = [
+                    validate1734.errors = [
                       {
                         instancePath: instancePath + "/items",
                         schemaPath: "#/properties/items/type",
@@ -244,7 +244,7 @@ function validate1733(
                         vErrors.push(err1);
                       }
                       errors++;
-                      validate1733.errors = vErrors;
+                      validate1734.errors = vErrors;
                       return false;
                     } else {
                       errors = _errs9;
@@ -267,7 +267,7 @@ function validate1733(
         }
       }
     } else {
-      validate1733.errors = [
+      validate1734.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -278,7 +278,7 @@ function validate1733(
       return false;
     }
   }
-  validate1733.errors = vErrors;
+  validate1734.errors = vErrors;
   return errors === 0;
 }
-export { validate1733 };
+export { validate1734 };

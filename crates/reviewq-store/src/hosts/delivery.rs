@@ -27,11 +27,13 @@ use reviewq_domain::session::{HostProvider, LeadTarget, SessionTarget};
 use rusqlite::{Connection, ErrorCode, OptionalExtension, Row, params};
 
 const CLAIM_MS: i64 = 90_000;
+const INPUT_OBSERVATION_MS: i64 = 8_000;
+pub(super) const AWAITING_NATIVE_INPUT: &str = "awaiting_native_input";
 const RECEIPT_COLUMNS: &str =
     "d.message_id, d.submission_id, r.review_id, d.run_id, d.session_key, d.state,
      d.created_at_ms, d.updated_at_ms, d.native_turn_id, d.native_input_id, coalesce(o.fence, 0),
      d.purpose, o.claim_kind, m.grant_id, m.grant_epoch, o.due_at_ms, coalesce(o.retry_count, 0),
-     d.receipt_id, d.report_hash, d.current_receipt_id, o.reconcile_cursor, o.uncertain_turn_id, o.uncertain_input_id, d.operation";
+     d.receipt_id, d.report_hash, d.current_receipt_id, o.reconcile_cursor, o.uncertain_turn_id, o.uncertain_input_id, d.operation, d.outcome_detail";
 const RECEIPT_JOIN: &str =
     "messages d JOIN runs r ON r.run_id=d.run_id
      JOIN mutation_receipts m ON m.actor_key=d.actor_key AND m.operation=d.operation AND m.submission_id=d.submission_id
@@ -63,6 +65,7 @@ struct Delivery {
     retry_count: u8,
     reconcile_cursor: Option<String>,
     raced_input: Option<ObservedInput>,
+    input_deadline_ms: Option<i64>,
 }
 
 #[derive(Clone, Copy, Eq, PartialEq)]
@@ -219,6 +222,7 @@ pub(super) fn claim(
             prior,
             DeliveryWork::Reconcile {
                 cursor: delivery.reconcile_cursor,
+                latest_only: delivery.input_deadline_ms.is_some_and(|end| time < end),
             },
         ),
     };
@@ -434,11 +438,19 @@ fn finish_with(
     authority: CompletionAuthority,
 ) -> Result<DeliveryReceipt, StoreError> {
     let mut stored = matching_claim(&tx.sql, &claim)?;
+    let now = now_ms()?;
+    let acknowledged = matches!(observation, DeliveryObservation::Acknowledged);
+    let awaiting_input = acknowledged
+        || (stored.input_deadline_ms.is_some_and(|end| now < end)
+            && matches!(
+                observation,
+                DeliveryObservation::Uncertain | DeliveryObservation::ReconcileFrom(_)
+            ));
     let scan = match &observation {
         DeliveryObservation::ReconcileFrom(cursor)
             if !cursor.is_empty() && cursor.len() <= 2048 =>
         {
-            Some(cursor.clone())
+            (!awaiting_input).then(|| cursor.clone())
         }
         DeliveryObservation::ReconcileFrom(_) => return Err(AppError::InvalidRequest.into()),
         _ => None,
@@ -475,6 +487,21 @@ fn finish_with(
         DeliveryObservation::NotSubmitted | DeliveryObservation::RecoveryAllowanceChanged(_) => {
             return Err(AppError::Conflict.into());
         }
+        DeliveryObservation::Acknowledged
+            if matches!(stored.receipt.outcome, DeliveryOutcome::Dispatching)
+                && matches!(
+                    claim.work,
+                    DeliveryWork::Dispatch {
+                        async_question: None,
+                        ..
+                    }
+                )
+                && !claim.purpose.requires_new_turn()
+                && claim.target.binding().identity().provider() == HostProvider::Codex =>
+        {
+            DeliveryOutcome::Dispatching
+        }
+        DeliveryObservation::Acknowledged => return Err(AppError::Conflict.into()),
         DeliveryObservation::Started { delivery_id, input } => {
             if delivery_id != claim.delivery_id
                 || stored
@@ -494,6 +521,11 @@ fn finish_with(
             DeliveryOutcome::Rejected
         }
         DeliveryObservation::QuestionAlreadyAnswered => return Err(AppError::Conflict.into()),
+        DeliveryObservation::Uncertain | DeliveryObservation::ReconcileFrom(_)
+            if awaiting_input =>
+        {
+            DeliveryOutcome::Dispatching
+        }
         DeliveryObservation::Uncertain
         | DeliveryObservation::ReconcileFrom(_)
         | DeliveryObservation::UncertainInput { .. } => DeliveryOutcome::Uncertain,
@@ -506,8 +538,7 @@ fn finish_with(
     let new_raced_input = uncertain_proof.is_some() && stored.raced_input.is_none();
     let state = outcome_label(&outcome);
     let prior = outcome_label(&stored.receipt.outcome);
-    let now = now_ms()?;
-    let receipt_changed = stored.receipt.outcome != outcome || new_raced_input;
+    let receipt_changed = stored.receipt.outcome != outcome || new_raced_input || acknowledged;
     let timestamp = if receipt_changed {
         now.max(stored.receipt.updated_at_ms)
     } else {
@@ -522,9 +553,16 @@ fn finish_with(
         };
         let changed = tx.sql.execute(
             "UPDATE messages SET state=?2, updated_at_ms=?3, native_turn_id=?4, native_input_id=?5,
-                outcome_detail=CASE WHEN ?7 THEN 'native_turn_start_unproved' WHEN ?2='started' THEN NULL ELSE outcome_detail END
+                outcome_detail=CASE
+                    WHEN ?7 THEN 'native_turn_start_unproved'
+                    WHEN ?8 THEN ?9
+                    WHEN ?2='started' OR outcome_detail=?9 THEN NULL
+                    ELSE outcome_detail END
              WHERE message_id=?1 AND state=?6",
-            params![claim.delivery_id.as_str(), state, timestamp, turn, item, prior, new_raced_input],
+            params![
+                claim.delivery_id.as_str(), state, timestamp, turn, item, prior, new_raced_input,
+                acknowledged, AWAITING_NATIVE_INPUT,
+            ],
         ).map_err(|error| {
             if error.sqlite_error_code() == Some(ErrorCode::ConstraintViolation) {
                 StoreError::from(AppError::Conflict)
@@ -552,13 +590,22 @@ fn finish_with(
             )?;
         }
         _ => {
-            let (retry_count, delay) = if scan.is_some() {
-                (stored.retry_count, 250)
+            let (retry_count, due_at_ms) = if acknowledged {
+                (0, now)
+            } else if let Some(end) = stored.input_deadline_ms.filter(|_| awaiting_input) {
+                // Release the dispatch slot between reads and check again at the deadline.
+                let count = stored.retry_count.saturating_add(1).min(4);
+                (count, now.saturating_add(250_i64 << (count - 1)).min(end))
+            } else if scan.is_some() {
+                (stored.retry_count, now.saturating_add(250))
             } else {
-                let count = stored.retry_count.saturating_add(1).min(7);
-                (count, 1_000_i64 << (count - 1))
+                let count = if stored.input_deadline_ms.is_some() {
+                    1
+                } else {
+                    stored.retry_count.saturating_add(1).min(7)
+                };
+                (count, now.saturating_add(1_000_i64 << (count - 1)))
             };
-            let due_at_ms = now.saturating_add(delay);
             tx.sql.execute(
                 "UPDATE outbox SET claim_kind=NULL,due_at_ms=?2,retry_count=?3,reconcile_cursor=?4,
                     uncertain_turn_id=coalesce(?5,uncertain_turn_id),uncertain_input_id=coalesce(?6,uncertain_input_id)
@@ -674,6 +721,9 @@ fn delivery_row(row: &Row<'_>) -> Result<Delivery, StoreError> {
         updated_at_ms: row.get(7)?,
     };
     let fence = DeliveryFence::try_from(row.get::<_, i64>(10)?).map_err(|_| AppError::Internal)?;
+    let input_deadline_ms = (row.get::<_, Option<String>>(24)?.as_deref()
+        == Some(AWAITING_NATIVE_INPUT))
+    .then(|| receipt.updated_at_ms.saturating_add(INPUT_OBSERVATION_MS));
     Ok(Delivery {
         receipt,
         fence,
@@ -684,6 +734,7 @@ fn delivery_row(row: &Row<'_>) -> Result<Delivery, StoreError> {
         due_at_ms: row.get(15)?,
         retry_count: row.get(16)?,
         reconcile_cursor: row.get(20)?,
+        input_deadline_ms,
         raced_input: row
             .get::<_, Option<String>>(21)?
             .map(|turn| {

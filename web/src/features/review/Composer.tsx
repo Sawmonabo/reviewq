@@ -1,4 +1,4 @@
-import { useId, useRef, useState } from "react";
+import { useId, useRef, useState, useSyncExternalStore } from "react";
 import { ApiResponseError } from "../../api/client";
 import type { DeliveryReceipt } from "../../api/generated/contracts/delivery";
 import { readReceipt, sendMessage } from "../../api/history";
@@ -6,6 +6,7 @@ import type { SessionAddress } from "../../api/history";
 import { Icon } from "../../components/Icon";
 import { Notice } from "../../components/PanelState";
 import { useDraft } from "../../hooks/useDraft";
+import { useResource } from "../../hooks/useResource";
 import { useWorkspaceRecovery } from "../../hooks/useWorkspaceRecovery";
 import { isWorkspaceConnectionFailure } from "../../hooks/useWorkspaceResource";
 import type { DraftStore } from "../../lib/drafts";
@@ -22,8 +23,9 @@ type Attempt = {
   readonly error?: string;
   readonly lookupInterrupted?: boolean;
 };
-const attempts = new WeakMap<DraftStore, Map<string, Attempt>>();
+const attempts = new WeakMap<DraftStore, SubmissionAttempts>();
 const MAX_MESSAGE = 12_000;
+const RECEIPT_TIMEOUT_MS = 10_000;
 
 type Props = {
   readonly store: DraftStore;
@@ -37,9 +39,14 @@ type Props = {
   readonly send?: (text: string, submissionId: string) => Promise<DeliveryReceipt>;
   readonly onAccepted?: () => void;
   readonly disabled?: boolean;
+  readonly deliveryPending?: boolean | undefined;
 };
 
-export function Composer({
+export function Composer(props: Props) {
+  return <MessageComposer key={props.draftKey} {...props} />;
+}
+
+function MessageComposer({
   store,
   target,
   draftKey,
@@ -51,44 +58,78 @@ export function Composer({
   send,
   onAccepted,
   disabled = false,
+  deliveryPending = false,
 }: Props) {
   const text = useDraft(store, draftKey);
   const input = useId();
   const [managed] = useState(() => {
     const existing = attempts.get(store);
     if (existing) return existing;
-    const created = new Map<string, Attempt>();
+    const created = new SubmissionAttempts();
     attempts.set(store, created);
     return created;
   });
-  const [last, setLast] = useState(() => managed.get(draftKey));
   const [busy, setBusy] = useState(false);
   const checking = useRef(false);
   const [rejectedEdit, setRejectedEdit] = useState(false);
   const [composition, setComposition] = useState<string>();
-  const current = managed.get(draftKey) ?? last;
-  const unconfirmed = Boolean(
-    current && (!current.receipt || !["started", "rejected"].includes(current.receipt.state)),
+  const [failure, setFailure] = useState<string>();
+  const current = useSyncExternalStore(managed.subscribe, () => managed.get(draftKey));
+  const recoverable = current?.receipt?.state === "uncertain" || Boolean(current?.error);
+  const observing =
+    current && (current.receipt || current.error) ? current.submissionId : undefined;
+  useResource(
+    JSON.stringify(["delivery-receipt", target.runId, target.sessionKey, observing]),
+    async (signal) => {
+      const attempt = managed.get(draftKey);
+      if (!observing || attempt?.submissionId !== observing) return { data: null, cursor: "" };
+      try {
+        const { data, cursor } = await readReceipt(
+          target,
+          observing,
+          AbortSignal.any([signal, AbortSignal.timeout(RECEIPT_TIMEOUT_MS)]),
+        );
+        signal.throwIfAborted();
+        finish(data);
+        return { data: null, cursor };
+      } catch (error) {
+        if (!signal.aborted) rememberError(attempt, error, error);
+        throw error;
+      }
+    },
+    observing ? [{ kind: "session", id: target.sessionKey }] : [],
   );
   const chars = [...text].length;
   const available =
-    !disabled && !busy && !unconfirmed && text.trim().length > 0 && chars <= MAX_MESSAGE;
+    !disabled && !busy && !current && text.trim().length > 0 && chars <= MAX_MESSAGE;
 
-  function remember(attempt: Attempt) {
-    if (attempt.receipt && ["started", "rejected"].includes(attempt.receipt.state))
-      managed.delete(draftKey);
-    else managed.set(draftKey, attempt);
-    setLast(attempt);
+  function finish(receipt: DeliveryReceipt) {
+    const attempt = managed.get(draftKey);
+    if (
+      attempt?.submissionId !== receipt.submissionId ||
+      (attempt.receipt && attempt.receipt.updatedAt > receipt.updatedAt)
+    )
+      return;
+
+    if (receipt.state === "rejected") setFailure("Delivery rejected.");
+    if (!attempt.receipt) {
+      const accepted = receipt.state !== "rejected";
+      store.finish(draftKey, accepted);
+      if (accepted) attempt.accepted?.();
+    }
+    if (receipt.state === "rejected" || receipt.state === "started")
+      managed.set(draftKey, undefined);
+    else if (attempt.receipt?.state !== receipt.state || attempt.error)
+      managed.set(draftKey, { submissionId: attempt.submissionId, receipt });
   }
 
-  function finish(attempt: Attempt, receipt: DeliveryReceipt) {
-    remember({ submissionId: attempt.submissionId, receipt });
-    const accepted = receipt.state !== "rejected";
-    if (accepted) setFailure(undefined);
-    if (accepted && !attempt.receipt) {
-      store.finish(draftKey, true);
-      attempt.accepted?.();
-    } else if (!accepted) store.finish(draftKey, false);
+  function rememberError(attempt: Attempt, error: unknown, lookupError: unknown) {
+    if (managed.get(draftKey) !== attempt) return;
+    managed.set(draftKey, {
+      ...attempt,
+      error: describeError(error),
+      lookupInterrupted: receiptUnavailable(lookupError),
+    });
   }
 
   async function reconcile(attempt: Attempt, retry: boolean) {
@@ -98,31 +139,27 @@ export function Composer({
     setFailure(undefined);
     setBusy(true);
     try {
-      const result = await readReceipt(target, attempt.submissionId, AbortSignal.timeout(10_000));
-      finish(attempt, result);
+      const { data } = await readReceipt(
+        target,
+        attempt.submissionId,
+        AbortSignal.timeout(RECEIPT_TIMEOUT_MS),
+      );
+      finish(data);
     } catch (error) {
       if (
         retry &&
         attempt.dispatch &&
+        managed.get(draftKey) === attempt &&
         error instanceof ApiResponseError &&
         error.code === "not_found"
       ) {
         try {
-          const receipt = await attempt.dispatch();
-          finish(attempt, receipt);
+          finish(await attempt.dispatch());
         } catch (retryError) {
-          remember({
-            ...attempt,
-            error: describeError(retryError),
-            lookupInterrupted: receiptUnavailable(retryError),
-          });
+          rememberError(attempt, retryError, retryError);
         }
       } else {
-        remember({
-          ...attempt,
-          error: describeError(error),
-          lookupInterrupted: receiptUnavailable(error),
-        });
+        rememberError(attempt, error, error);
       }
     } finally {
       checking.current = false;
@@ -131,7 +168,7 @@ export function Composer({
   }
 
   async function submit() {
-    if (!available || managed.has(draftKey)) return;
+    if (!available || managed.get(draftKey)) return;
     const captured = store.freeze(draftKey);
     if (!captured) return;
     setFailure(undefined);
@@ -144,29 +181,25 @@ export function Composer({
       dispatch,
       ...(onAccepted ? { accepted: onAccepted } : {}),
     };
-    remember(attempt);
+    managed.set(draftKey, attempt);
     setBusy(true);
     try {
-      const receipt = await dispatch();
-      finish(attempt, receipt);
+      finish(await dispatch());
     } catch (error) {
       if (error instanceof ApiResponseError && !error.retryable) {
-        managed.delete(draftKey);
+        managed.set(draftKey, undefined);
         store.finish(draftKey, false);
-        setLast(undefined);
         setFailure(describeError(error));
       } else {
         try {
-          finish(
-            attempt,
-            await readReceipt(target, attempt.submissionId, AbortSignal.timeout(10_000)),
+          const { data } = await readReceipt(
+            target,
+            attempt.submissionId,
+            AbortSignal.timeout(RECEIPT_TIMEOUT_MS),
           );
+          finish(data);
         } catch (lookupError) {
-          remember({
-            ...attempt,
-            error: describeError(error),
-            lookupInterrupted: receiptUnavailable(lookupError),
-          });
+          rememberError(attempt, error, lookupError);
         }
       }
     } finally {
@@ -174,13 +207,18 @@ export function Composer({
     }
   }
 
-  const [failure, setFailure] = useState<string>();
   useWorkspaceRecovery(
     current?.lookupInterrupted
       ? { kind: "receipt", label: "Delivery receipt", retry: () => void reconcile(current, false) }
       : undefined,
   );
   const sendLabel = "Send to review agent";
+  const pendingLabel =
+    current && !current.receipt && !recoverable
+      ? "Sending…"
+      : !recoverable && (current || deliveryPending)
+        ? "Waiting for agent…"
+        : undefined;
   function edit(value: string) {
     setFailure(undefined);
     const accepted = store.set(draftKey, draftLabel, value);
@@ -196,21 +234,19 @@ export function Composer({
           void submit();
         }}
       >
-        {current && (
+        {current && recoverable && (
           <div className="spread composer-status" role="status">
             <span>
-              {current.receipt
-                ? deliveryLabels[current.receipt.state]
-                : busy
-                  ? "Submitting…"
+              {current.receipt?.state === "uncertain"
+                ? deliveryLabels.uncertain
+                : current.receipt
+                  ? "Could not check delivery"
                   : "Delivery unconfirmed"}
               {current.error && ` · ${current.error}`}
             </span>
-            {unconfirmed && (
-              <button type="button" disabled={busy} onClick={() => void reconcile(current, false)}>
-                Check delivery
-              </button>
-            )}
+            <button type="button" disabled={busy} onClick={() => void reconcile(current, false)}>
+              Check delivery
+            </button>
             {!current.receipt && current.error && current.dispatch && !disabled && (
               <button type="button" disabled={busy} onClick={() => void reconcile(current, true)}>
                 Retry same submission
@@ -251,6 +287,7 @@ export function Composer({
         <div className="composer-bottom">
           <span className="composer-destination" title={targetTitle}>
             {targetLabel}
+            {pendingLabel && <span role="status"> · {pendingLabel}</span>}
             <span className="composer-shortcut"> · Enter to send · Shift+Enter for a new line</span>
             {chars > MAX_MESSAGE &&
               ` · ${chars.toLocaleString()} / ${MAX_MESSAGE.toLocaleString()} characters`}
@@ -269,6 +306,28 @@ export function Composer({
       </form>
     </div>
   );
+}
+
+class SubmissionAttempts {
+  readonly #attempts = new Map<string, Attempt>();
+  readonly #listeners = new Set<() => void>();
+
+  get(key: string) {
+    return this.#attempts.get(key);
+  }
+
+  set(key: string, attempt: Attempt | undefined) {
+    if (attempt) this.#attempts.set(key, attempt);
+    else this.#attempts.delete(key);
+    for (const listener of this.#listeners) listener();
+  }
+
+  subscribe = (listener: () => void) => {
+    this.#listeners.add(listener);
+    return () => {
+      this.#listeners.delete(listener);
+    };
+  };
 }
 
 function receiptUnavailable(error: unknown) {

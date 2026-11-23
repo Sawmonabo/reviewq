@@ -4,7 +4,7 @@ import { validate48 } from "./history-cursor-dto.mjs";
 import { validate594 } from "./document-display.mjs";
 import { validate129 } from "./safe-count-dto.mjs";
 import { validate629 } from "./history-text.mjs";
-function validate725(
+function validate726(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -19,7 +19,7 @@ function validate725(
         ((data.text === undefined || !func0.call(data, "text")) &&
           (missing0 = "text"))
       ) {
-        validate725.errors = [
+        validate726.errors = [
           {
             instancePath,
             schemaPath: "#/required",
@@ -83,7 +83,7 @@ function validate725(
               vErrors.push(err1);
             }
             errors++;
-            validate725.errors = vErrors;
+            validate726.errors = vErrors;
             return false;
           } else {
             errors = _errs2;
@@ -154,7 +154,7 @@ function validate725(
                 vErrors.push(err3);
               }
               errors++;
-              validate725.errors = vErrors;
+              validate726.errors = vErrors;
               return false;
             } else {
               errors = _errs7;
@@ -175,7 +175,7 @@ function validate725(
               let data2 = data.kind;
               const _errs11 = errors;
               if (typeof data2 !== "string") {
-                validate725.errors = [
+                validate726.errors = [
                   {
                     instancePath: instancePath + "/kind",
                     schemaPath: "#/properties/kind/type",
@@ -186,7 +186,7 @@ function validate725(
                 return false;
               }
               if ("assistant_text" !== data2) {
-                validate725.errors = [
+                validate726.errors = [
                   {
                     instancePath: instancePath + "/kind",
                     schemaPath: "#/properties/kind/const",
@@ -303,7 +303,7 @@ function validate725(
                         vErrors.push(err5);
                       }
                       errors++;
-                      validate725.errors = vErrors;
+                      validate726.errors = vErrors;
                       return false;
                     } else {
                       errors = _errs16;
@@ -326,7 +326,7 @@ function validate725(
         }
       }
     } else {
-      validate725.errors = [
+      validate726.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -337,7 +337,7 @@ function validate725(
       return false;
     }
   }
-  validate725.errors = vErrors;
+  validate726.errors = vErrors;
   return errors === 0;
 }
-export { validate725 };
+export { validate726 };

@@ -3911,6 +3911,9 @@
         "entryId": {
           "$ref": "#/definitions/HistoryEntryIdDto"
         },
+        "messageId": {
+          "$ref": "#/definitions/ResourceIdDto"
+        },
         "parts": {
           "items": {
             "$ref": "#/definitions/HistoryPart"

@@ -2,7 +2,7 @@
 import { func0 } from "../runtime.mjs";
 import { schema378 } from "../metadata-9.mjs";
 import { validate120 } from "./publication.mjs";
-function validate1290(
+function validate1291(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -19,7 +19,7 @@ function validate1290(
         ((data.reason === undefined || !func0.call(data, "reason")) &&
           (missing0 = "reason"))
       ) {
-        validate1290.errors = [
+        validate1291.errors = [
           {
             instancePath,
             schemaPath: "#/required",
@@ -33,7 +33,7 @@ function validate1290(
           let data0 = data.blocking;
           const _errs1 = errors;
           if (typeof data0 !== "boolean" && data0 !== null) {
-            validate1290.errors = [
+            validate1291.errors = [
               {
                 instancePath: instancePath + "/blocking",
                 schemaPath: "#/properties/blocking/type",
@@ -105,7 +105,7 @@ function validate1290(
                 vErrors.push(err1);
               }
               errors++;
-              validate1290.errors = vErrors;
+              validate1291.errors = vErrors;
               return false;
             } else {
               errors = _errs4;
@@ -125,7 +125,7 @@ function validate1290(
             if (data.reason !== undefined && func0.call(data, "reason")) {
               const _errs8 = errors;
               if (typeof data.reason !== "string") {
-                validate1290.errors = [
+                validate1291.errors = [
                   {
                     instancePath: instancePath + "/reason",
                     schemaPath: "#/properties/reason/type",
@@ -143,7 +143,7 @@ function validate1290(
         }
       }
     } else {
-      validate1290.errors = [
+      validate1291.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -154,7 +154,7 @@ function validate1290(
       return false;
     }
   }
-  validate1290.errors = vErrors;
+  validate1291.errors = vErrors;
   return errors === 0;
 }
-export { validate1290 };
+export { validate1291 };

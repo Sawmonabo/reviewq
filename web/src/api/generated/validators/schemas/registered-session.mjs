@@ -4,7 +4,7 @@ import { validate25 } from "./checkpoint-id-dto.mjs";
 import { validate71 } from "./host-provider-dto.mjs";
 import { schema363 } from "../metadata-9.mjs";
 import { validate116 } from "./review-id-dto.mjs";
-function validate1239(
+function validate1240(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -34,7 +34,7 @@ function validate1239(
           !func0.call(data, "reportGuidance")) &&
           (missing0 = "reportGuidance"))
       ) {
-        validate1239.errors = [
+        validate1240.errors = [
           {
             instancePath,
             schemaPath: "#/required",
@@ -47,7 +47,7 @@ function validate1239(
         if (data.cwd !== undefined && func0.call(data, "cwd")) {
           const _errs1 = errors;
           if (typeof data.cwd !== "string") {
-            validate1239.errors = [
+            validate1240.errors = [
               {
                 instancePath: instancePath + "/cwd",
                 schemaPath: "#/properties/cwd/type",
@@ -134,7 +134,7 @@ function validate1239(
                 ) {
                   const _errs6 = errors;
                   if (typeof data.reportGuidance !== "string") {
-                    validate1239.errors = [
+                    validate1240.errors = [
                       {
                         instancePath: instancePath + "/reportGuidance",
                         schemaPath: "#/properties/reportGuidance/type",
@@ -156,7 +156,7 @@ function validate1239(
                     let data5 = data.reviewCheckout;
                     const _errs8 = errors;
                     if (typeof data5 !== "string" && data5 !== null) {
-                      validate1239.errors = [
+                      validate1240.errors = [
                         {
                           instancePath: instancePath + "/reviewCheckout",
                           schemaPath: "#/properties/reviewCheckout/type",
@@ -229,7 +229,7 @@ function validate1239(
         }
       }
     } else {
-      validate1239.errors = [
+      validate1240.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -240,7 +240,7 @@ function validate1239(
       return false;
     }
   }
-  validate1239.errors = vErrors;
+  validate1240.errors = vErrors;
   return errors === 0;
 }
-export { validate1239 };
+export { validate1240 };

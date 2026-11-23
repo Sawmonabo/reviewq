@@ -2,9 +2,9 @@
 import { func0 } from "../runtime.mjs";
 import { validate207 } from "./board-selection.mjs";
 import { schema489 } from "../metadata-12.mjs";
-import { validate1705 } from "./default-skills.mjs";
+import { validate1706 } from "./default-skills.mjs";
 import { validate69 } from "./merge-request-iid-dto.mjs";
-function validate1703(
+function validate1704(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -27,7 +27,7 @@ function validate1703(
           !func0.call(data, "defaultSkills")) &&
           (missing0 = "defaultSkills"))
       ) {
-        validate1703.errors = [
+        validate1704.errors = [
           {
             instancePath,
             schemaPath: "#/required",
@@ -46,7 +46,7 @@ function validate1703(
             key0 === "path" ||
             key0 === "projectId"
           )) {
-            validate1703.errors = [
+            validate1704.errors = [
               {
                 instancePath,
                 schemaPath: "#/additionalProperties",
@@ -87,7 +87,7 @@ function validate1703(
               let data1 = data.checkout;
               const _errs3 = errors;
               if (typeof data1 !== "string" && data1 !== null) {
-                validate1703.errors = [
+                validate1704.errors = [
                   {
                     instancePath: instancePath + "/checkout",
                     schemaPath: "#/properties/checkout/type",
@@ -108,7 +108,7 @@ function validate1703(
               ) {
                 const _errs5 = errors;
                 if (
-                  !validate1705(data.defaultSkills, {
+                  !validate1706(data.defaultSkills, {
                     instancePath: instancePath + "/defaultSkills",
                     parentData: data,
                     parentDataProperty: "defaultSkills",
@@ -117,8 +117,8 @@ function validate1703(
                 ) {
                   vErrors =
                     vErrors === null
-                      ? validate1705.errors
-                      : vErrors.concat(validate1705.errors);
+                      ? validate1706.errors
+                      : vErrors.concat(validate1706.errors);
                   errors = vErrors.length;
                 }
                 var valid0 = _errs5 === errors;
@@ -129,7 +129,7 @@ function validate1703(
                 if (data.path !== undefined && func0.call(data, "path")) {
                   const _errs6 = errors;
                   if (typeof data.path !== "string") {
-                    validate1703.errors = [
+                    validate1704.errors = [
                       {
                         instancePath: instancePath + "/path",
                         schemaPath: "#/properties/path/type",
@@ -174,7 +174,7 @@ function validate1703(
         }
       }
     } else {
-      validate1703.errors = [
+      validate1704.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -185,7 +185,7 @@ function validate1703(
       return false;
     }
   }
-  validate1703.errors = vErrors;
+  validate1704.errors = vErrors;
   return errors === 0;
 }
-export { validate1703 };
+export { validate1704 };

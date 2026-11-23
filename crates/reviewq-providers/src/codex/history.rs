@@ -380,8 +380,14 @@ pub(super) fn visible(
     completed: Option<i64>,
 ) -> Option<Result<VisibleEntry, AppError>> {
     let mut parts = Vec::new();
+    let mut delivery_id = None;
     let (id, text, kind, at_ms) = match item {
-        Item::UserMessage { id, content, .. } => {
+        Item::UserMessage {
+            id,
+            client_id,
+            content,
+        } => {
+            delivery_id = client_id.and_then(|value| value.parse().ok());
             let text = content
                 .into_iter()
                 .filter_map(|part| match part {
@@ -460,6 +466,7 @@ pub(super) fn visible(
             .map(|id| VisibleEntry {
                 id,
                 turn: Some(turn.clone()),
+                delivery_id,
                 at_ms,
                 kind,
                 text,

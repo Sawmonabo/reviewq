@@ -12,7 +12,7 @@ pub const MAX_MESSAGE_HISTORY_PAGE: u16 = 20;
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct MessagePosition {
     pub created_at_ms: i64,
-    pub message_id: MessageId,
+    pub row_id: i64,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -34,6 +34,7 @@ pub struct MessageAttachment {
 
 pub struct RecordedMessage {
     pub position: MessagePosition,
+    pub message_id: MessageId,
     pub submission_id: SubmissionId,
     pub purpose: RecordedPurpose,
     pub state: DeliveryState,
@@ -50,6 +51,7 @@ pub struct RecordedMessage {
 pub struct MessageHistory {
     pub items: Vec<RecordedMessage>,
     pub has_more: bool,
+    pub cursor_message_id: Option<MessageId>,
 }
 
 /// Reads the one canonical private message history. Admission and recovery use LeadStore.
