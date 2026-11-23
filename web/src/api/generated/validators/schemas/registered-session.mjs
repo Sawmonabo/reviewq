@@ -2,9 +2,9 @@
 import { func0 } from "../runtime.mjs";
 import { validate25 } from "./checkpoint-id-dto.mjs";
 import { validate71 } from "./host-provider-dto.mjs";
-import { schema360 } from "../metadata-8.mjs";
+import { schema363 } from "../metadata-9.mjs";
 import { validate116 } from "./review-id-dto.mjs";
-function validate1233(
+function validate1239(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -34,7 +34,7 @@ function validate1233(
           !func0.call(data, "reportGuidance")) &&
           (missing0 = "reportGuidance"))
       ) {
-        validate1233.errors = [
+        validate1239.errors = [
           {
             instancePath,
             schemaPath: "#/required",
@@ -47,7 +47,7 @@ function validate1233(
         if (data.cwd !== undefined && func0.call(data, "cwd")) {
           const _errs1 = errors;
           if (typeof data.cwd !== "string") {
-            validate1233.errors = [
+            validate1239.errors = [
               {
                 instancePath: instancePath + "/cwd",
                 schemaPath: "#/properties/cwd/type",
@@ -134,7 +134,7 @@ function validate1233(
                 ) {
                   const _errs6 = errors;
                   if (typeof data.reportGuidance !== "string") {
-                    validate1233.errors = [
+                    validate1239.errors = [
                       {
                         instancePath: instancePath + "/reportGuidance",
                         schemaPath: "#/properties/reportGuidance/type",
@@ -156,13 +156,13 @@ function validate1233(
                     let data5 = data.reviewCheckout;
                     const _errs8 = errors;
                     if (typeof data5 !== "string" && data5 !== null) {
-                      validate1233.errors = [
+                      validate1239.errors = [
                         {
                           instancePath: instancePath + "/reviewCheckout",
                           schemaPath: "#/properties/reviewCheckout/type",
                           keyword: "type",
                           params: {
-                            type: schema360.properties.reviewCheckout.type,
+                            type: schema363.properties.reviewCheckout.type,
                           },
                         },
                       ];
@@ -229,7 +229,7 @@ function validate1233(
         }
       }
     } else {
-      validate1233.errors = [
+      validate1239.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -240,7 +240,7 @@ function validate1233(
       return false;
     }
   }
-  validate1233.errors = vErrors;
+  validate1239.errors = vErrors;
   return errors === 0;
 }
-export { validate1233 };
+export { validate1239 };

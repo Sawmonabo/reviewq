@@ -15,7 +15,13 @@ export type ConnectionDraft = GitlabDraft | JiraDraft;
 export type TokenType = "scoped" | "unscoped";
 
 export type CatalogKind =
-  "projects" | "boards" | "board" | "statuses" | "filters" | "sprints";
+  | "projects"
+  | "reviewers"
+  | "boards"
+  | "board"
+  | "statuses"
+  | "filters"
+  | "sprints";
 
 export type Provider = "gitlab" | "jira";
 
@@ -146,8 +152,15 @@ export interface CatalogItem {
   id: ResourceIdDto;
   label: string;
   path: string | null;
+  reviewer?: CatalogReviewer | null;
   state: string | null;
   statusIds: ResourceIdDto[];
+  [k: string]: unknown;
+}
+
+export interface CatalogReviewer {
+  publicEmail: string | null;
+  username: string;
   [k: string]: unknown;
 }
 

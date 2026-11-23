@@ -2,10 +2,10 @@
 import { func0 } from "../runtime.mjs";
 import { validate25 } from "./checkpoint-id-dto.mjs";
 import { validate237 } from "./utc-timestamp-dto.mjs";
-import { schema127 } from "../metadata-3.mjs";
+import { schema130 } from "../metadata-3.mjs";
 import { validate152 } from "./git-sha-dto.mjs";
 import { validate35 } from "./event-cursor-dto.mjs";
-function validate363(
+function validate369(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -70,7 +70,7 @@ function validate363(
             vErrors.push(err1);
           }
           errors++;
-          validate363.errors = vErrors;
+          validate369.errors = vErrors;
           return false;
         } else {
           errors = _errs2;
@@ -144,7 +144,7 @@ function validate363(
               vErrors.push(err3);
             }
             errors++;
-            validate363.errors = vErrors;
+            validate369.errors = vErrors;
             return false;
           } else {
             errors = _errs7;
@@ -218,7 +218,7 @@ function validate363(
                 vErrors.push(err5);
               }
               errors++;
-              validate363.errors = vErrors;
+              validate369.errors = vErrors;
               return false;
             } else {
               errors = _errs12;
@@ -292,7 +292,7 @@ function validate363(
                   vErrors.push(err7);
                 }
                 errors++;
-                validate363.errors = vErrors;
+                validate369.errors = vErrors;
                 return false;
               } else {
                 errors = _errs17;
@@ -313,12 +313,12 @@ function validate363(
                 let data4 = data.reason;
                 const _errs21 = errors;
                 if (typeof data4 !== "string" && data4 !== null) {
-                  validate363.errors = [
+                  validate369.errors = [
                     {
                       instancePath: instancePath + "/reason",
                       schemaPath: "#/properties/reason/type",
                       keyword: "type",
-                      params: { type: schema127.properties.reason.type },
+                      params: { type: schema130.properties.reason.type },
                     },
                   ];
                   return false;
@@ -385,7 +385,7 @@ function validate363(
                       vErrors.push(err9);
                     }
                     errors++;
-                    validate363.errors = vErrors;
+                    validate369.errors = vErrors;
                     return false;
                   } else {
                     errors = _errs24;
@@ -459,7 +459,7 @@ function validate363(
                         vErrors.push(err11);
                       }
                       errors++;
-                      validate363.errors = vErrors;
+                      validate369.errors = vErrors;
                       return false;
                     } else {
                       errors = _errs29;
@@ -507,7 +507,7 @@ function validate363(
         }
       }
     } else {
-      validate363.errors = [
+      validate369.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -518,7 +518,7 @@ function validate363(
       return false;
     }
   }
-  validate363.errors = vErrors;
+  validate369.errors = vErrors;
   return errors === 0;
 }
-export { validate363 };
+export { validate369 };

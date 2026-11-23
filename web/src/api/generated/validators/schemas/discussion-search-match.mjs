@@ -2,9 +2,9 @@
 import { func0, func81 } from "../runtime.mjs";
 import { validate129 } from "./safe-count-dto.mjs";
 import { validate48 } from "./history-cursor-dto.mjs";
-import { validate427 } from "./note-kind.mjs";
-import { schema162 } from "../metadata-4.mjs";
-function validate475(
+import { validate433 } from "./note-kind.mjs";
+import { schema165 } from "../metadata-4.mjs";
+function validate481(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -33,7 +33,7 @@ function validate475(
           !func0.call(data, "highlightEnd")) &&
           (missing0 = "highlightEnd"))
       ) {
-        validate475.errors = [
+        validate481.errors = [
           {
             instancePath,
             schemaPath: "#/required",
@@ -46,7 +46,7 @@ function validate475(
         if (data.author !== undefined && func0.call(data, "author")) {
           const _errs1 = errors;
           if (typeof data.author !== "string") {
-            validate475.errors = [
+            validate481.errors = [
               {
                 instancePath: instancePath + "/author",
                 schemaPath: "#/properties/author/type",
@@ -133,7 +133,7 @@ function validate475(
                 if (data.kind !== undefined && func0.call(data, "kind")) {
                   const _errs6 = errors;
                   if (
-                    !validate427(data.kind, {
+                    !validate433(data.kind, {
                       instancePath: instancePath + "/kind",
                       parentData: data,
                       parentDataProperty: "kind",
@@ -142,8 +142,8 @@ function validate475(
                   ) {
                     vErrors =
                       vErrors === null
-                        ? validate427.errors
-                        : vErrors.concat(validate427.errors);
+                        ? validate433.errors
+                        : vErrors.concat(validate433.errors);
                     errors = vErrors.length;
                   }
                   var valid0 = _errs6 === errors;
@@ -205,7 +205,7 @@ function validate475(
                         vErrors.push(err1);
                       }
                       errors++;
-                      validate475.errors = vErrors;
+                      validate481.errors = vErrors;
                       return false;
                     } else {
                       errors = _errs8;
@@ -226,12 +226,12 @@ function validate475(
                       let data6 = data.path;
                       const _errs12 = errors;
                       if (typeof data6 !== "string" && data6 !== null) {
-                        validate475.errors = [
+                        validate481.errors = [
                           {
                             instancePath: instancePath + "/path",
                             schemaPath: "#/properties/path/type",
                             keyword: "type",
-                            params: { type: schema162.properties.path.type },
+                            params: { type: schema165.properties.path.type },
                           },
                         ];
                         return false;
@@ -250,7 +250,7 @@ function validate475(
                         if (errors === _errs14) {
                           if (typeof data7 === "string") {
                             if (func81(data7) > 400) {
-                              validate475.errors = [
+                              validate481.errors = [
                                 {
                                   instancePath: instancePath + "/snippet",
                                   schemaPath: "#/properties/snippet/maxLength",
@@ -261,7 +261,7 @@ function validate475(
                               return false;
                             }
                           } else {
-                            validate475.errors = [
+                            validate481.errors = [
                               {
                                 instancePath: instancePath + "/snippet",
                                 schemaPath: "#/properties/snippet/type",
@@ -285,7 +285,7 @@ function validate475(
         }
       }
     } else {
-      validate475.errors = [
+      validate481.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -296,7 +296,7 @@ function validate475(
       return false;
     }
   }
-  validate475.errors = vErrors;
+  validate481.errors = vErrors;
   return errors === 0;
 }
-export { validate475 };
+export { validate481 };

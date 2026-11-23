@@ -2,7 +2,7 @@
 import { func0 } from "../runtime.mjs";
 import { validate237 } from "./utc-timestamp-dto.mjs";
 import { validate25 } from "./checkpoint-id-dto.mjs";
-function validate809(
+function validate815(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -20,7 +20,7 @@ function validate809(
           !func0.call(data, "followedByLeadReport")) &&
           (missing0 = "followedByLeadReport"))
       ) {
-        validate809.errors = [
+        validate815.errors = [
           {
             instancePath,
             schemaPath: "#/required",
@@ -57,7 +57,7 @@ function validate809(
           ) {
             const _errs2 = errors;
             if (typeof data.followedByLeadReport !== "boolean") {
-              validate809.errors = [
+              validate815.errors = [
                 {
                   instancePath: instancePath + "/followedByLeadReport",
                   schemaPath: "#/properties/followedByLeadReport/type",
@@ -96,7 +96,7 @@ function validate809(
         }
       }
     } else {
-      validate809.errors = [
+      validate815.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -107,7 +107,7 @@ function validate809(
       return false;
     }
   }
-  validate809.errors = vErrors;
+  validate815.errors = vErrors;
   return errors === 0;
 }
-export { validate809 };
+export { validate815 };

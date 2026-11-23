@@ -86,6 +86,7 @@ impl GitLab {
                     board_type: None,
                     status_ids: Vec::new(),
                     estimate_field: None,
+                    reviewer: None,
                 })
             })
             .collect::<Result<Vec<_>, AppError>>()?;

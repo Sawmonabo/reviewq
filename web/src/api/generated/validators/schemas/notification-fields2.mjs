@@ -3,8 +3,8 @@ import { func0 } from "../runtime.mjs";
 import { validate237 } from "./utc-timestamp-dto.mjs";
 import { validate116 } from "./review-id-dto.mjs";
 import { validate25 } from "./checkpoint-id-dto.mjs";
-import { validate949 } from "./tab.mjs";
-function validate944(
+import { validate955 } from "./tab.mjs";
+function validate950(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -66,7 +66,7 @@ function validate944(
             vErrors.push(err1);
           }
           errors++;
-          validate944.errors = vErrors;
+          validate950.errors = vErrors;
           return false;
         } else {
           errors = _errs2;
@@ -158,7 +158,7 @@ function validate944(
                 vErrors.push(err3);
               }
               errors++;
-              validate944.errors = vErrors;
+              validate950.errors = vErrors;
               return false;
             } else {
               errors = _errs8;
@@ -232,7 +232,7 @@ function validate944(
                   vErrors.push(err5);
                 }
                 errors++;
-                validate944.errors = vErrors;
+                validate950.errors = vErrors;
                 return false;
               } else {
                 errors = _errs13;
@@ -252,7 +252,7 @@ function validate944(
               if (data.source !== undefined && func0.call(data, "source")) {
                 const _errs17 = errors;
                 if (typeof data.source !== "string") {
-                  validate944.errors = [
+                  validate950.errors = [
                     {
                       instancePath: instancePath + "/source",
                       schemaPath: "#/properties/source/type",
@@ -270,7 +270,7 @@ function validate944(
                 if (data.tab !== undefined && func0.call(data, "tab")) {
                   const _errs19 = errors;
                   if (
-                    !validate949(data.tab, {
+                    !validate955(data.tab, {
                       instancePath: instancePath + "/tab",
                       parentData: data,
                       parentDataProperty: "tab",
@@ -279,8 +279,8 @@ function validate944(
                   ) {
                     vErrors =
                       vErrors === null
-                        ? validate949.errors
-                        : vErrors.concat(validate949.errors);
+                        ? validate955.errors
+                        : vErrors.concat(validate955.errors);
                     errors = vErrors.length;
                   }
                   var valid0 = _errs19 === errors;
@@ -293,7 +293,7 @@ function validate944(
         }
       }
     } else {
-      validate944.errors = [
+      validate950.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -304,7 +304,7 @@ function validate944(
       return false;
     }
   }
-  validate944.errors = vErrors;
+  validate950.errors = vErrors;
   return errors === 0;
 }
-export { validate944 };
+export { validate950 };

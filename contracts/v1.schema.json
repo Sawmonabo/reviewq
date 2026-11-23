@@ -1225,6 +1225,16 @@
             "null"
           ]
         },
+        "reviewer": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/CatalogReviewer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "state": {
           "type": [
             "string",
@@ -1253,6 +1263,7 @@
     "CatalogKind": {
       "enum": [
         "projects",
+        "reviewers",
         "boards",
         "board",
         "statuses",
@@ -1372,6 +1383,24 @@
       "required": [
         "items",
         "nextCursor"
+      ],
+      "type": "object"
+    },
+    "CatalogReviewer": {
+      "properties": {
+        "publicEmail": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "username": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "username",
+        "publicEmail"
       ],
       "type": "object"
     },

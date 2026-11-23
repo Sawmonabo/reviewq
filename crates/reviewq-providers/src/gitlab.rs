@@ -18,6 +18,7 @@ use crate::http::SourceNetwork;
 mod changes;
 mod checkout;
 mod lookup;
+mod reviewers;
 mod settings;
 mod tickets;
 

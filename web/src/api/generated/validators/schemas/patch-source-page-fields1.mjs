@@ -2,11 +2,11 @@
 import { func0 } from "../runtime.mjs";
 import { validate152 } from "./git-sha-dto.mjs";
 import { validate25 } from "./checkpoint-id-dto.mjs";
-import { validate1062 } from "./patch-source-cursor.mjs";
-import { validate1005 } from "./patch-etag-dto.mjs";
+import { validate1068 } from "./patch-source-cursor.mjs";
+import { validate1011 } from "./patch-etag-dto.mjs";
 import { validate116 } from "./review-id-dto.mjs";
-import { validate1069 } from "./patch-source-row.mjs";
-function validate1058(
+import { validate1075 } from "./patch-source-row.mjs";
+function validate1064(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -84,7 +84,7 @@ function validate1058(
               let valid1 = false;
               const _errs6 = errors;
               if (
-                !validate1062(data3, {
+                !validate1068(data3, {
                   instancePath: instancePath + "/next",
                   parentData: data,
                   parentDataProperty: "next",
@@ -93,8 +93,8 @@ function validate1058(
               ) {
                 vErrors =
                   vErrors === null
-                    ? validate1062.errors
-                    : vErrors.concat(validate1062.errors);
+                    ? validate1068.errors
+                    : vErrors.concat(validate1068.errors);
                 errors = vErrors.length;
               }
               var _valid0 = _errs6 === errors;
@@ -131,7 +131,7 @@ function validate1058(
                   vErrors.push(err1);
                 }
                 errors++;
-                validate1058.errors = vErrors;
+                validate1064.errors = vErrors;
                 return false;
               } else {
                 errors = _errs5;
@@ -154,7 +154,7 @@ function validate1058(
               ) {
                 const _errs9 = errors;
                 if (
-                  !validate1005(data.patchETag, {
+                  !validate1011(data.patchETag, {
                     instancePath: instancePath + "/patchETag",
                     parentData: data,
                     parentDataProperty: "patchETag",
@@ -163,8 +163,8 @@ function validate1058(
                 ) {
                   vErrors =
                     vErrors === null
-                      ? validate1005.errors
-                      : vErrors.concat(validate1005.errors);
+                      ? validate1011.errors
+                      : vErrors.concat(validate1011.errors);
                   errors = vErrors.length;
                 }
                 var valid0 = _errs9 === errors;
@@ -226,7 +226,7 @@ function validate1058(
                       if (errors === _errs12) {
                         if (Array.isArray(data7)) {
                           if (data7.length > 128) {
-                            validate1058.errors = [
+                            validate1064.errors = [
                               {
                                 instancePath: instancePath + "/rows",
                                 schemaPath: "#/properties/rows/maxItems",
@@ -241,7 +241,7 @@ function validate1058(
                             for (let i0 = 0; i0 < len0; i0++) {
                               const _errs14 = errors;
                               if (
-                                !validate1069(data7[i0], {
+                                !validate1075(data7[i0], {
                                   instancePath: instancePath + "/rows/" + i0,
                                   parentData: data7,
                                   parentDataProperty: i0,
@@ -250,8 +250,8 @@ function validate1058(
                               ) {
                                 vErrors =
                                   vErrors === null
-                                    ? validate1069.errors
-                                    : vErrors.concat(validate1069.errors);
+                                    ? validate1075.errors
+                                    : vErrors.concat(validate1075.errors);
                                 errors = vErrors.length;
                               }
                               var valid2 = _errs14 === errors;
@@ -261,7 +261,7 @@ function validate1058(
                             }
                           }
                         } else {
-                          validate1058.errors = [
+                          validate1064.errors = [
                             {
                               instancePath: instancePath + "/rows",
                               schemaPath: "#/properties/rows/type",
@@ -284,7 +284,7 @@ function validate1058(
         }
       }
     } else {
-      validate1058.errors = [
+      validate1064.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -295,7 +295,7 @@ function validate1058(
       return false;
     }
   }
-  validate1058.errors = vErrors;
+  validate1064.errors = vErrors;
   return errors === 0;
 }
-export { validate1058 };
+export { validate1064 };

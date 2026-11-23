@@ -66,6 +66,7 @@ pub struct ConnectionAuthority {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CatalogKind {
     Projects(ProjectView),
+    Reviewers,
     Boards,
     Board(u64),
     Statuses,
@@ -84,6 +85,7 @@ pub struct CatalogQuery {
     pub kind: CatalogKind,
     pub text: Option<String>,
     pub states: Vec<String>,
+    pub saved_reviewer_ids: Vec<u64>,
     pub offset: u32,
 }
 
@@ -101,6 +103,12 @@ pub struct CatalogItem {
     pub board_type: Option<String>,
     pub status_ids: Vec<String>,
     pub estimate_field: Option<String>,
+    pub reviewer: Option<CatalogReviewer>,
+}
+
+pub struct CatalogReviewer {
+    pub username: String,
+    pub public_email: Option<String>,
 }
 
 pub trait ConnectionSources: Send + Sync {

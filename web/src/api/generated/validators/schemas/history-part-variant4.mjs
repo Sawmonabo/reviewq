@@ -3,9 +3,9 @@ import { func0 } from "../runtime.mjs";
 import { validate25 } from "./checkpoint-id-dto.mjs";
 import { validate48 } from "./history-cursor-dto.mjs";
 import { validate129 } from "./safe-count-dto.mjs";
-import { validate730 } from "./history-tool-state.mjs";
-import { validate623 } from "./history-text.mjs";
-function validate734(
+import { validate736 } from "./history-tool-state.mjs";
+import { validate629 } from "./history-text.mjs";
+function validate740(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -26,7 +26,7 @@ function validate734(
         ((data.contentRef === undefined || !func0.call(data, "contentRef")) &&
           (missing0 = "contentRef"))
       ) {
-        validate734.errors = [
+        validate740.errors = [
           {
             instancePath,
             schemaPath: "#/required",
@@ -111,7 +111,7 @@ function validate734(
                 vErrors.push(err1);
               }
               errors++;
-              validate734.errors = vErrors;
+              validate740.errors = vErrors;
               return false;
             } else {
               errors = _errs3;
@@ -132,7 +132,7 @@ function validate734(
               let data2 = data.kind;
               const _errs7 = errors;
               if (typeof data2 !== "string") {
-                validate734.errors = [
+                validate740.errors = [
                   {
                     instancePath: instancePath + "/kind",
                     schemaPath: "#/properties/kind/type",
@@ -143,7 +143,7 @@ function validate734(
                 return false;
               }
               if ("tool_result" !== data2) {
-                validate734.errors = [
+                validate740.errors = [
                   {
                     instancePath: instancePath + "/kind",
                     schemaPath: "#/properties/kind/const",
@@ -185,7 +185,7 @@ function validate734(
                 if (data.state !== undefined && func0.call(data, "state")) {
                   const _errs10 = errors;
                   if (
-                    !validate730(data.state, {
+                    !validate736(data.state, {
                       instancePath: instancePath + "/state",
                       parentData: data,
                       parentDataProperty: "state",
@@ -194,8 +194,8 @@ function validate734(
                   ) {
                     vErrors =
                       vErrors === null
-                        ? validate730.errors
-                        : vErrors.concat(validate730.errors);
+                        ? validate736.errors
+                        : vErrors.concat(validate736.errors);
                     errors = vErrors.length;
                   }
                   var valid0 = _errs10 === errors;
@@ -206,7 +206,7 @@ function validate734(
                   if (data.text !== undefined && func0.call(data, "text")) {
                     const _errs11 = errors;
                     if (
-                      !validate623(data.text, {
+                      !validate629(data.text, {
                         instancePath: instancePath + "/text",
                         parentData: data,
                         parentDataProperty: "text",
@@ -215,8 +215,8 @@ function validate734(
                     ) {
                       vErrors =
                         vErrors === null
-                          ? validate623.errors
-                          : vErrors.concat(validate623.errors);
+                          ? validate629.errors
+                          : vErrors.concat(validate629.errors);
                       errors = vErrors.length;
                     }
                     var valid0 = _errs11 === errors;
@@ -230,7 +230,7 @@ function validate734(
         }
       }
     } else {
-      validate734.errors = [
+      validate740.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -241,7 +241,7 @@ function validate734(
       return false;
     }
   }
-  validate734.errors = vErrors;
+  validate740.errors = vErrors;
   return errors === 0;
 }
-export { validate734 };
+export { validate740 };

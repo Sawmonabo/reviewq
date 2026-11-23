@@ -4,8 +4,8 @@ import { validate25 } from "./checkpoint-id-dto.mjs";
 import { validate152 } from "./git-sha-dto.mjs";
 import { validate237 } from "./utc-timestamp-dto.mjs";
 import { validate35 } from "./event-cursor-dto.mjs";
-import { schema174 } from "../metadata-4.mjs";
-function validate512(
+import { schema177 } from "../metadata-4.mjs";
+function validate518(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -19,7 +19,7 @@ function validate512(
       ) {
         const _errs1 = errors;
         if (typeof data.authorityVerified !== "boolean") {
-          validate512.errors = [
+          validate518.errors = [
             {
               instancePath: instancePath + "/authorityVerified",
               schemaPath: "#/properties/authorityVerified/type",
@@ -109,7 +109,7 @@ function validate512(
                 vErrors.push(err1);
               }
               errors++;
-              validate512.errors = vErrors;
+              validate518.errors = vErrors;
               return false;
             } else {
               errors = _errs5;
@@ -183,7 +183,7 @@ function validate512(
                   vErrors.push(err3);
                 }
                 errors++;
-                validate512.errors = vErrors;
+                validate518.errors = vErrors;
                 return false;
               } else {
                 errors = _errs10;
@@ -254,7 +254,7 @@ function validate512(
                     vErrors.push(err5);
                   }
                   errors++;
-                  validate512.errors = vErrors;
+                  validate518.errors = vErrors;
                   return false;
                 } else {
                   errors = _errs15;
@@ -326,13 +326,13 @@ function validate512(
                       let data7 = data.holdReason;
                       const _errs21 = errors;
                       if (typeof data7 !== "string" && data7 !== null) {
-                        validate512.errors = [
+                        validate518.errors = [
                           {
                             instancePath: instancePath + "/holdReason",
                             schemaPath: "#/properties/holdReason/type",
                             keyword: "type",
                             params: {
-                              type: schema174.properties.holdReason.type,
+                              type: schema177.properties.holdReason.type,
                             },
                           },
                         ];
@@ -350,7 +350,7 @@ function validate512(
         }
       }
     } else {
-      validate512.errors = [
+      validate518.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -361,7 +361,7 @@ function validate512(
       return false;
     }
   }
-  validate512.errors = vErrors;
+  validate518.errors = vErrors;
   return errors === 0;
 }
-export { validate512 };
+export { validate518 };

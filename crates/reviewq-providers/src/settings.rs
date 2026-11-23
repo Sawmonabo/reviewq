@@ -157,6 +157,7 @@ impl ConnectionSources for SourceAccounts {
                             kind: CatalogKind::Projects(ProjectView::Member),
                             text: None,
                             states: Vec::new(),
+                            saved_reviewer_ids: Vec::new(),
                             offset: 0,
                         })
                         .await?;
@@ -206,10 +207,15 @@ impl ConnectionSources for SourceAccounts {
             match &connection {
                 Connection::GitLab { origin } => {
                     let gitlab = self.gitlab(origin, &token)?;
-                    if pinned_account.is_some() {
+                    let reviewers = query.kind == CatalogKind::Reviewers;
+                    if reviewers || pinned_account.is_some() {
                         check_account(pinned_account.as_ref(), &gitlab.current_user().await?.id)?;
                     }
-                    gitlab.project_catalog(query).await
+                    if reviewers {
+                        gitlab.reviewer_catalog(query).await
+                    } else {
+                        gitlab.project_catalog(query).await
+                    }
                 }
                 Connection::Jira { .. } => {
                     let cloud = pinned_account
