@@ -17,6 +17,7 @@ export type TokenType = "scoped" | "unscoped";
 export type CatalogKind =
   | "projects"
   | "reviewers"
+  | "reviewerSuggestions"
   | "boards"
   | "board"
   | "statuses"
@@ -151,6 +152,7 @@ export interface CatalogItem {
   estimateField: string | null;
   id: ResourceIdDto;
   label: string;
+  outsideView?: boolean | null;
   path: string | null;
   reviewer?: CatalogReviewer | null;
   state: string | null;

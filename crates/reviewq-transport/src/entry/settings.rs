@@ -129,9 +129,12 @@ pub(super) async fn catalog(
     let saved = entry.store.read_credentials(actor.clone()).await?;
     let kind = catalog_kind(request.kind, request.board_id, request.view)?;
     let reviewers = kind == app::CatalogKind::Reviewers;
+    let suggestions = kind == app::CatalogKind::ReviewerSuggestions;
     let saved_reviewers = reviewers && request.q.is_none();
-    if reviewers && !matches!(request.provider, dto::Provider::Gitlab)
-        || saved_reviewers && !matches!(&request.token, dto::TokenInput::Keep)
+    if (reviewers || suggestions) && !matches!(request.provider, dto::Provider::Gitlab)
+        || (saved_reviewers || suggestions) && !matches!(&request.token, dto::TokenInput::Keep)
+        || suggestions
+            && (request.q.is_some() || request.cursor.is_some() || !request.states.is_empty())
     {
         return Err(AppError::InvalidRequest.into());
     }
@@ -177,7 +180,39 @@ pub(super) async fn catalog(
     if let Some(cursor) = &request.cursor {
         query.offset = endpoint.decode_cursor(&scope, cursor.as_str())?;
     }
-    let found = entry.settings_sources.catalog(authority, query).await?;
+    let found = if suggestions {
+        let authors = entry
+            .store
+            .reviewer_suggestions(
+                actor.clone(),
+                expected,
+                authority.connection.origin().to_owned(),
+            )
+            .await?;
+        app::CatalogPage {
+            items: authors
+                .into_iter()
+                .map(|author| app::CatalogItem {
+                    id: author.id.to_string(),
+                    label: author.username.clone(),
+                    path: None,
+                    board_id: None,
+                    state: None,
+                    board_type: None,
+                    status_ids: Vec::new(),
+                    estimate_field: None,
+                    reviewer: Some(app::CatalogReviewer {
+                        username: author.username,
+                        public_email: None,
+                    }),
+                    outside_view: None,
+                })
+                .collect(),
+            next: None,
+        }
+    } else {
+        entry.settings_sources.catalog(authority, query).await?
+    };
     let current = revision_snapshot(&entry, actor, expected).await?;
     let next_cursor = found
         .next
@@ -349,6 +384,7 @@ fn catalog_kind(
             Some(dto::ProjectView::All) => View::All,
         }),
         (dto::CatalogKind::Reviewers, None, None) => Kind::Reviewers,
+        (dto::CatalogKind::ReviewerSuggestions, None, None) => Kind::ReviewerSuggestions,
         (dto::CatalogKind::Boards, None, None) => Kind::Boards,
         (dto::CatalogKind::Board, Some(board), None) => Kind::Board(parse(board.as_str())?),
         (dto::CatalogKind::Statuses, None, None) => Kind::Statuses,
@@ -482,5 +518,6 @@ fn catalog_item(value: app::CatalogItem) -> Result<dto::CatalogItem, AppError> {
             username: reviewer.username,
             public_email: reviewer.public_email,
         }),
+        outside_view: value.outside_view,
     })
 }

@@ -23,6 +23,8 @@ pub(crate) use tickets::valid_issue_key;
 
 const METADATA_LIMIT: usize = 1024 * 1024;
 const PAGE_LIMIT: usize = 100;
+const MAX_CATALOG_OFFSET: u32 = 200_000;
+const BOARDS_PATH: &str = "rest/agile/1.0/board";
 
 pub(crate) struct Jira {
     network: Arc<SourceNetwork>,
@@ -138,31 +140,28 @@ impl Jira {
     }
 
     pub(crate) async fn catalog(&self, query: CatalogQuery) -> Result<CatalogPage, AppError> {
-        if query.offset >= 200_000 || query.states.len() > 3 {
+        let searchable = query
+            .text
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty());
+        if query.kind == CatalogKind::Boards && query.states.is_empty() {
+            return self.board_catalog(searchable, query.offset).await;
+        }
+        if query.offset >= MAX_CATALOG_OFFSET || query.states.len() > 3 {
             return Err(AppError::InvalidRequest);
         }
         let mut params = vec![
             ("startAt", query.offset.to_string()),
             ("maxResults", PAGE_LIMIT.to_string()),
         ];
-        let searchable = query.text.filter(|value| !value.is_empty());
         if !matches!(query.kind, CatalogKind::Sprints(_)) && !query.states.is_empty() {
             return Err(AppError::InvalidRequest);
         }
-        if let Some(text) = searchable.as_ref() {
-            params.push(("name", text.clone()));
+        if let Some(text) = searchable {
+            params.push(("name", text.to_owned()));
         }
         match query.kind {
-            CatalogKind::Boards => {
-                self.catalog_page(
-                    "rest/agile/1.0/board",
-                    "values",
-                    &params,
-                    query.offset,
-                    None,
-                )
-                .await
-            }
             CatalogKind::Filters => {
                 if let Some((name, _)) = params.last_mut().filter(|(name, _)| *name == "name") {
                     *name = "filterName";
@@ -232,16 +231,123 @@ impl Jira {
         }
     }
 
-    async fn board_kind(&self, board: u64) -> Result<(CatalogItem, &'static str), AppError> {
-        if board == 0 || board > i64::MAX as u64 {
+    async fn board_catalog(
+        &self,
+        text: Option<&str>,
+        offset: u32,
+    ) -> Result<CatalogPage, AppError> {
+        if let Some(number) = text.map(|text| text.strip_prefix('#').unwrap_or(text))
+            && !number.is_empty()
+            && number.bytes().all(|byte| byte.is_ascii_digit())
+        {
+            if offset != 0 {
+                return Err(AppError::InvalidRequest);
+            }
+            let mut items = Vec::new();
+            if let Some(id) = number
+                .parse()
+                .ok()
+                .filter(|id| (1..=i64::MAX as u64).contains(id))
+            {
+                match self.board_record(id).await {
+                    Ok(row) => items.push(item(&row, None)?),
+                    Err(AppError::NotFound) => {}
+                    Err(error) => return Err(error),
+                }
+            }
+            return Ok(CatalogPage { items, next: None });
+        }
+
+        let name = text.map(|value| ("name", value));
+        let key = text
+            .map(str::to_ascii_uppercase)
+            .filter(|key| valid_project(key));
+        let Some(key) = key else {
+            return self.board_list(name, offset).await;
+        };
+        // The name continuation starts after the project-key pages. Both offsets passed to
+        // Jira stay within its ordinary catalog paging window.
+        if let Some(offset) = offset.checked_sub(MAX_CATALOG_OFFSET) {
+            let mut page = self.board_list(name, offset).await?;
+            page.next = page.next.map(|next| MAX_CATALOG_OFFSET + next);
+            return Ok(page);
+        }
+
+        let mut page = match self
+            .board_list(Some(("projectKeyOrId", &key)), offset)
+            .await
+        {
+            Err(AppError::NotFound) if offset == 0 => CatalogPage {
+                items: Vec::new(),
+                next: None,
+            },
+            result => result?,
+        };
+        if page.next.is_some() {
+            return Ok(page);
+        }
+        if page.items.len() == PAGE_LIMIT {
+            page.next = Some(MAX_CATALOG_OFFSET);
+            return Ok(page);
+        }
+        let names = self.board_list(name, 0).await?;
+        let mut seen: HashSet<_> = page.items.iter().map(|item| item.id.clone()).collect();
+        let mut names_remaining = names.items.into_iter();
+        let mut consumed = 0;
+        while page.items.len() < PAGE_LIMIT {
+            let Some(item) = names_remaining.next() else {
+                break;
+            };
+            consumed += 1;
+            if seen.insert(item.id.clone()) {
+                page.items.push(item);
+            }
+        }
+        let next = if names_remaining.len() > 0 {
+            Some(consumed)
+        } else {
+            names.next
+        };
+        page.next = next.map(|next| MAX_CATALOG_OFFSET + next);
+        Ok(page)
+    }
+
+    async fn board_list(
+        &self,
+        filter: Option<(&str, &str)>,
+        offset: u32,
+    ) -> Result<CatalogPage, AppError> {
+        if offset >= MAX_CATALOG_OFFSET {
             return Err(AppError::InvalidRequest);
         }
-        let base = format!("rest/agile/1.0/board/{board}");
-        let row: Value = self.read(&base, &[], METADATA_LIMIT).await?;
-        let record = item(&row, Some(board))?;
-        if record.id != board.to_string() {
+        let mut params = vec![
+            ("startAt", offset.to_string()),
+            ("maxResults", PAGE_LIMIT.to_string()),
+        ];
+        if let Some((name, value)) = filter {
+            params.push((name, value.to_owned()));
+        }
+        self.catalog_page(BOARDS_PATH, "values", &params, offset, None)
+            .await
+    }
+
+    async fn board_record(&self, board: u64) -> Result<Value, AppError> {
+        if !(1..=i64::MAX as u64).contains(&board) {
+            return Err(AppError::InvalidRequest);
+        }
+        let row: Value = self
+            .read(&format!("{BOARDS_PATH}/{board}"), &[], METADATA_LIMIT)
+            .await?;
+        if numeric_id(&row["id"]) != Some(board) {
             return Err(AppError::Conflict);
         }
+        Ok(row)
+    }
+
+    async fn board_kind(&self, board: u64) -> Result<(CatalogItem, &'static str), AppError> {
+        let base = format!("{BOARDS_PATH}/{board}");
+        let row = self.board_record(board).await?;
+        let record = item(&row, Some(board))?;
         let kind = match row.get("type").and_then(Value::as_str) {
             Some("scrum") => "scrum",
             Some("kanban") => "kanban",
@@ -338,7 +444,7 @@ impl Jira {
             (None, Some(total)) => u64::from(end) < total,
             _ => return Err(AppError::Unavailable),
         };
-        if more && (items.is_empty() || end >= 200_000) {
+        if more && (items.is_empty() || end >= MAX_CATALOG_OFFSET) {
             return Err(AppError::Unavailable);
         }
         Ok(CatalogPage {
@@ -408,12 +514,16 @@ fn item(value: &Value, board: Option<u64>) -> Result<CatalogItem, AppError> {
     Ok(CatalogItem {
         id,
         label,
-        path: None,
+        path: value["location"]["projectKey"]
+            .as_str()
+            .filter(|key| valid_project(key))
+            .map(str::to_owned),
         board_id: board,
         state,
         board_type: None,
         status_ids: Vec::new(),
         estimate_field: None,
         reviewer: None,
+        outside_view: None,
     })
 }

@@ -1,7 +1,10 @@
 //! Settings projection and private credential reads under the same revision fence.
 
+use std::collections::HashSet;
+
 use reviewq_app::access::{Actor, AppError, AppFuture};
 use reviewq_app::events::{ResourceKey, Snapshot};
+use reviewq_app::queue::ReviewAuthor;
 use reviewq_app::settings::{
     ConnectionSummary, Connections, ReducedWorkspace, SavedConnection, SavedCredentials,
     SecretToken, SettingsStore,
@@ -19,6 +22,9 @@ use crate::{SqliteStore, StoreError};
 
 pub(crate) mod projection;
 mod scope;
+
+const REVIEWER_SUGGESTIONS: usize = 20;
+const RECENT_REVIEWS: u32 = 256;
 
 impl SettingsStore for SqliteStore {
     fn preference_revision(&self) -> AppFuture<'_, Revision> {
@@ -55,6 +61,44 @@ impl SettingsStore for SqliteStore {
             self.read(|db| snapshot(db, view(db)?))
                 .await
                 .map_err(StoreError::app)
+        })
+    }
+
+    fn reviewer_suggestions(
+        &self,
+        actor: Actor,
+        expected: Revision,
+        origin: String,
+    ) -> AppFuture<'_, Vec<ReviewAuthor>> {
+        Box::pin(async move {
+            operator(&actor).map_err(StoreError::app)?;
+            self.read(move |db| {
+                recheck(db, expected)?;
+                let mut statement = db.prepare_cached(
+                    "SELECT r.author_id, r.author_username
+                     FROM reviews r JOIN configured_projects p USING (origin, project_id)
+                     JOIN settings s ON s.provider='gitlab' AND s.origin=r.origin
+                     JOIN credentials c ON c.provider=s.provider
+                     WHERE r.origin=?1 AND r.author_id<>CAST(s.identity_id AS INTEGER)
+                       AND NOT EXISTS (SELECT 1 FROM settings_reviewers u WHERE u.reviewer_id=r.author_id)
+                       AND (EXISTS (SELECT 1 FROM review_discoveries d WHERE d.review_id=r.review_id)
+                            OR EXISTS (SELECT 1 FROM retained_reviews v WHERE v.review_id=r.review_id))
+                     ORDER BY r.updated_at_ms DESC,r.review_id DESC LIMIT ?2",
+                )?;
+                let mut rows = statement.query(params![origin, RECENT_REVIEWS])?;
+                let mut seen = HashSet::new();
+                let mut authors = Vec::new();
+                while authors.len() < REVIEWER_SUGGESTIONS {
+                    let Some(row) = rows.next()? else { break };
+                    let id = u64::try_from(row.get::<_, i64>(0)?).map_err(|_| AppError::Internal)?;
+                    if seen.insert(id) {
+                        authors.push(ReviewAuthor { id, username: row.get(1)? });
+                    }
+                }
+                Ok(authors)
+            })
+            .await
+            .map_err(StoreError::app)
         })
     }
 

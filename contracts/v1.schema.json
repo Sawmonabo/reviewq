@@ -1219,6 +1219,12 @@
         "label": {
           "type": "string"
         },
+        "outsideView": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
         "path": {
           "type": [
             "string",
@@ -1264,6 +1270,7 @@
       "enum": [
         "projects",
         "reviewers",
+        "reviewerSuggestions",
         "boards",
         "board",
         "statuses",
