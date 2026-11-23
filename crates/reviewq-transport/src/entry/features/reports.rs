@@ -8,6 +8,7 @@ pub(super) use quote::resolve as resolve_quote;
 pub(super) use table::read as read_table;
 pub(super) use window::read as read_window;
 
+pub(in crate::entry) use handoff::{McpReportProof, submit_verified};
 pub(super) use handoff::{accepted, handoff, handoff_status};
 
 pub(in crate::entry) use mutations::feedback_reference;
@@ -596,6 +597,13 @@ fn summary(value: app::ReportSummary) -> Result<dto::ReportSummary, AppError> {
             app::SemanticIndex::Ready => dto::SemanticIndex::Ready,
             app::SemanticIndex::SourceOnly => dto::SemanticIndex::SourceOnly,
         },
+        structured_version: value.structured_version,
+        structured_scope: value.structured_scope.map(|scope| match scope {
+            app::ReportScope::FullReview => dto::ReportScope::FullReview,
+            app::ReportScope::SelectedThreads => dto::ReportScope::SelectedThreads,
+            app::ReportScope::Amendment => dto::ReportScope::Amendment,
+        }),
+        blocking_finding_count: value.blocking_finding_count.map(count).transpose()?,
         finding_count: value.finding_count.map(count).transpose()?,
         change_count: value.change_count.map(count).transpose()?,
         captured_at: UtcTimestampDto::from_unix_milliseconds(value.captured_at_ms)
@@ -636,12 +644,46 @@ fn descriptor(value: Descriptor) -> Result<dto::Descriptor, AppError> {
             severity,
             blocking,
             source,
+            details,
+            disposition,
         } => dto::Descriptor::Finding {
             finding_id: id,
             title,
             severity,
             blocking,
             source: source.map(range).transpose()?,
+            disposition: disposition.map(|value| {
+                Box::new(dto::FindingDisposition {
+                    blocking: value.blocking,
+                    publication: value.publication.map(project_publication),
+                    reason: value.reason,
+                })
+            }),
+            details: details
+                .map(|details| {
+                    Ok::<_, AppError>(Box::new(dto::FindingDetails {
+                        location: details.location.map(|location| dto::FindingLocation {
+                            path: location.path,
+                            line: location.line,
+                        }),
+                        consequence: details.consequence,
+                        evidence: dto::FindingBasis {
+                            kind: match details.evidence.kind {
+                                app::FindingBasisKind::Observed => dto::FindingBasisKind::Observed,
+                                app::FindingBasisKind::Gap => dto::FindingBasisKind::Gap,
+                            },
+                            text: details.evidence.text,
+                        },
+                        checked_sha: details
+                            .checked_sha
+                            .map(|sha| GitShaDto::new(sha).ok_or(AppError::Internal))
+                            .transpose()?,
+                        evidence_sha256: hash(
+                            details.evidence_hash.as_deref().ok_or(AppError::Internal)?,
+                        )?,
+                    }))
+                })
+                .transpose()?,
         },
         Descriptor::Section { title, source } => dto::Descriptor::Section {
             title,
@@ -681,11 +723,15 @@ fn descriptor(value: Descriptor) -> Result<dto::Descriptor, AppError> {
             finding_id: id,
             blocking,
             reason,
-            publication: publication.map(|publication| match publication {
-                app::Publication::Withheld => dto::Publication::Withheld,
-                app::Publication::Authorized => dto::Publication::Authorized,
-                app::Publication::Published => dto::Publication::Published,
-            }),
+            publication: publication.map(project_publication),
         },
     })
+}
+
+fn project_publication(publication: app::Publication) -> dto::Publication {
+    match publication {
+        app::Publication::Withheld => dto::Publication::Withheld,
+        app::Publication::Authorized => dto::Publication::Authorized,
+        app::Publication::Published => dto::Publication::Published,
+    }
 }

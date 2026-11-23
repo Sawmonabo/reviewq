@@ -207,7 +207,7 @@ fn link_text(
         HostProvider::Claude => "Claude Code",
         HostProvider::Codex => "Codex",
     };
-    let guidance = reviewq_app::launch::report_guidance(provider);
+    let guidance = reviewq_app::launch::report_guidance();
     Ok(format!(
         "Linked this {name} conversation.\n{url}\nContinue the review in this terminal or open it with ReviewQ.\n{guidance}"
     ))

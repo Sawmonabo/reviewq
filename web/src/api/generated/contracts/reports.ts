@@ -30,6 +30,8 @@ export type OffsetUnit = "unicode_codepoints";
 export type Descriptor =
   | {
       blocking: boolean | null;
+      details?: FindingDetails | null;
+      disposition?: FindingDisposition | null;
       findingId: string;
       kind: "finding";
       severity: string | null;
@@ -61,11 +63,15 @@ export type Descriptor =
       [k: string]: unknown;
     };
 
+export type FindingBasisKind = "observed" | "gap";
+
 export type Publication = "withheld" | "authorized" | "published";
 
 export type DeliveryState = "preparing" | "saving" | "failed" | "saved";
 
 export type SemanticIndex = "ready" | "source_only";
+
+export type ReportScope = "full_review" | "selected_threads" | "amendment";
 
 export type Verdict =
   "approve" | "request_changes" | "blocked" | "not_specified";
@@ -221,6 +227,32 @@ export interface ReportReference {
   [k: string]: unknown;
 }
 
+export interface FindingDetails {
+  checkedSha: GitShaDto | null;
+  consequence: string;
+  evidence: FindingBasis;
+  evidenceSha256: ReportHashDto;
+  location?: FindingLocation | null;
+  [k: string]: unknown;
+}
+
+export interface FindingBasis {
+  kind: FindingBasisKind;
+  text: string;
+}
+
+export interface FindingLocation {
+  line?: number | null;
+  path: string;
+}
+
+export interface FindingDisposition {
+  blocking: boolean | null;
+  publication: Publication | null;
+  reason: string;
+  [k: string]: unknown;
+}
+
 export interface SourceRange {
   length: SafeCountDto;
   offset: SafeCountDto;
@@ -267,6 +299,7 @@ export interface ReportDelivery {
 
 export interface ReportSummary {
   attentionReceiptId: ResourceIdDto;
+  blockingFindingCount?: SafeCountDto | null;
   byteLength: SafeCountDto;
   capturedAt: UtcTimestampDto;
   changeCount: SafeCountDto | null;
@@ -286,6 +319,8 @@ export interface ReportSummary {
   revisionReason: string | null;
   semanticIndex: SemanticIndex;
   sha256: ReportHashDto;
+  structuredScope?: ReportScope | null;
+  structuredVersion?: number | null;
   totalCodePoints: SafeCountDto;
   verdict: Verdict;
   [k: string]: unknown;

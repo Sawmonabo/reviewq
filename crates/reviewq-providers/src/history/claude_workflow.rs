@@ -42,6 +42,7 @@ impl Row {
 pub(crate) struct ClaudeOpening {
     pub generation: String,
     pub position: u64,
+    pub ordinal: u32,
     pub request: Option<NativeInputId>,
 }
 
@@ -49,6 +50,7 @@ pub(crate) fn claude_workflow_opening(
     session: &HistorySession,
     call_id: &str,
     tool: WorkflowTool,
+    arguments: Option<&Value>,
     cancelled: &AtomicBool,
 ) -> Result<ClaudeOpening, AppError> {
     let source = source(session, cancelled)?;
@@ -69,29 +71,43 @@ pub(crate) fn claude_workflow_opening(
             {
                 return Err(AppError::Conflict);
             }
-            if row.kind == "assistant"
-                && row.blocks().any(|block| {
-                    block["type"] == "tool_use" && block["id"] == call_id && block["name"] == name
-                })
-            {
-                if opening.replace(start).is_some() {
-                    return Err(AppError::Conflict);
+            if row.kind == "assistant" {
+                for (index, block) in row
+                    .blocks()
+                    .enumerate()
+                    .filter(|(_, block)| block["type"] == "tool_use" && block["id"] == call_id)
+                {
+                    if block["name"] != name
+                        || arguments.is_some_and(|args| block.get("input") != Some(args))
+                    {
+                        return Err(AppError::Conflict);
+                    }
+                    let ordinal = if arguments.is_some() {
+                        u32::try_from(index + 1).map_err(|_| AppError::Unavailable)?
+                    } else {
+                        0
+                    };
+                    if opening.replace((start, ordinal)).is_some() {
+                        return Err(AppError::Conflict);
+                    }
                 }
             } else if let Some(request) = user_entry(&source, start, end, cancelled) {
-                let position = opening.ok_or(AppError::NotFound)?;
+                let (position, ordinal) = opening.ok_or(AppError::NotFound)?;
                 return Ok(ClaudeOpening {
                     generation: file::generation(&source)?,
                     position,
+                    ordinal,
                     request: Some(request),
                 });
             }
         }
         end = start;
     }
-    let position = opening.ok_or(AppError::NotFound)?;
+    let (position, ordinal) = opening.ok_or(AppError::NotFound)?;
     Ok(ClaudeOpening {
         generation: file::generation(&source)?,
         position,
+        ordinal,
         request: None,
     })
 }
@@ -121,8 +137,9 @@ pub(crate) fn claude_workflow_result(
     let opening_end = file::next_line(&source.file, offset, complete, &mut budget, cancelled)?;
     let open = row(&source, offset, opening_end, cancelled)?.ok_or(AppError::Conflict)?;
     if open.kind != "assistant"
-        || !open.blocks().any(|block| {
-            block["type"] == "tool_use"
+        || !open.blocks().enumerate().any(|(index, block)| {
+            (call.source_ordinal == 0 || index + 1 == call.source_ordinal as usize)
+                && block["type"] == "tool_use"
                 && block["id"] == call.call_id
                 && block["name"] == "mcp__reviewq__report_handoff"
         })

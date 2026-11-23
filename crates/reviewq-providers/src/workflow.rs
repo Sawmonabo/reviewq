@@ -116,6 +116,20 @@ impl NativeWorkflowProof for Workflows {
         })
     }
 
+    fn verify_mcp_report_call(
+        &self,
+        lead: LeadTarget,
+        call_id: String,
+        arguments: Vec<u8>,
+        origin_item_id: Option<String>,
+    ) -> AppFuture<'_, NativeCall> {
+        Box::pin(async move {
+            self.reader(&lead)?
+                .verify_mcp_report_call(lead, call_id, arguments, origin_item_id)
+                .await
+        })
+    }
+
     fn report_completion(
         &self,
         call: NativeCall,

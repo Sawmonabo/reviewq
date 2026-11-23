@@ -2127,6 +2127,26 @@
                 "null"
               ]
             },
+            "details": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/FindingDetails"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "disposition": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/FindingDisposition"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "findingId": {
               "type": "string"
             },
@@ -3023,6 +3043,31 @@
       "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f\\ud800-\\udfff]+$",
       "type": "string"
     },
+    "FindingBasis": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "$ref": "#/definitions/FindingBasisKind"
+        },
+        "text": {
+          "maxLength": 2048,
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "text"
+      ],
+      "type": "object"
+    },
+    "FindingBasisKind": {
+      "enum": [
+        "observed",
+        "gap"
+      ],
+      "type": "string"
+    },
     "FindingConclusion": {
       "enum": [
         "fixed",
@@ -3033,6 +3078,97 @@
         "unverified"
       ],
       "type": "string"
+    },
+    "FindingDetails": {
+      "properties": {
+        "checkedSha": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/GitShaDto"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "consequence": {
+          "type": "string"
+        },
+        "evidence": {
+          "$ref": "#/definitions/FindingBasis"
+        },
+        "evidenceSha256": {
+          "$ref": "#/definitions/ReportHashDto"
+        },
+        "location": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/FindingLocation"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "consequence",
+        "evidence",
+        "checkedSha",
+        "evidenceSha256"
+      ],
+      "type": "object"
+    },
+    "FindingDisposition": {
+      "properties": {
+        "blocking": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "publication": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/Publication"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "reason": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "blocking",
+        "publication",
+        "reason"
+      ],
+      "type": "object"
+    },
+    "FindingLocation": {
+      "additionalProperties": false,
+      "properties": {
+        "line": {
+          "format": "uint32",
+          "minimum": 1,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "path": {
+          "maxLength": 512,
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "type": "object"
     },
     "FocusedActivity": {
       "description": "Most recent verified phase on the focused native session.",
@@ -8320,6 +8456,14 @@
       ],
       "type": "object"
     },
+    "ReportScope": {
+      "enum": [
+        "full_review",
+        "selected_threads",
+        "amendment"
+      ],
+      "type": "string"
+    },
     "ReportSection": {
       "properties": {
         "complete": {
@@ -8398,6 +8542,16 @@
       "properties": {
         "attentionReceiptId": {
           "$ref": "#/definitions/ResourceIdDto"
+        },
+        "blockingFindingCount": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SafeCountDto"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "byteLength": {
           "$ref": "#/definitions/SafeCountDto"
@@ -8514,6 +8668,25 @@
         },
         "sha256": {
           "$ref": "#/definitions/ReportHashDto"
+        },
+        "structuredScope": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ReportScope"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "structuredVersion": {
+          "format": "uint8",
+          "maximum": 255,
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
         },
         "totalCodePoints": {
           "$ref": "#/definitions/SafeCountDto"

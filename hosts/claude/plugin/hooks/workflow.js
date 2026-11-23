@@ -1,4 +1,5 @@
 import { invoke } from "./bridge.js";
+import { description, inputSchema } from "./report-handoff-schema.js";
 
 const sha = { type: "string", pattern: "^(?:[a-f0-9]{40}|[a-f0-9]{64})$" };
 const digest = { type: "string", pattern: "^[a-f0-9]{64}$" };
@@ -20,40 +21,11 @@ const declaration = {
   additionalProperties: false,
 };
 
-const handoff = {
-  type: "object",
-  properties: {
-    outcome: { enum: ["final", "unchanged", "needs_input"] },
-    source: {
-      type: "object",
-      properties: { kind: { enum: ["file", "response"] }, path: { type: "string" }, sha256: digest },
-      required: ["kind"],
-      additionalProperties: false,
-    },
-    revision: {
-      type: "object",
-      properties: { sha: { anyOf: [sha, { type: "null" }] }, reason: { type: "string" } },
-      required: ["sha"],
-      additionalProperties: false,
-    },
-    verdict: { enum: ["approve", "request_changes", "blocked", "not_specified"] },
-    reason: { type: "string", maxLength: 1024 },
-    accepted: { type: "object" },
-    amendsReport: { type: "object" },
-    correctsReport: { type: "object" },
-    assessments: { type: "array", maxItems: 10, items: { type: "object" } },
-    findingChanges: { type: "array", maxItems: 50, items: { type: "object" } },
-    sectionChanges: { type: "array", maxItems: 20, items: { type: "object" } },
-  },
-  required: ["outcome"],
-  additionalProperties: false,
-};
-
 export async function registerWorkflowTools($) {
   await $.tool.register({
     name: "report_handoff",
-    description: "Stage findings for this linked review lead. For final, supply an absolute Markdown file or the final native response, an exact reviewed SHA or an explicit unknown reason, and the verdict. For unchanged, supply the accepted receipt and source. For needs_input, supply the reason. The receipt is pending until ReviewQ verifies this native tool result.",
-    inputSchema: { type: "object", properties: { handoff }, required: ["handoff"], additionalProperties: false },
+    description,
+    inputSchema,
   });
   await $.tool.register({
     name: "review_action",
@@ -97,6 +69,9 @@ export async function reportTurn($, state, event) {
 
 function stringifyResult(result) {
   if (result.error || !Object.hasOwn(result, "data")) {
+    if (Array.isArray(result.fieldErrors)) {
+      return { result: JSON.stringify({ error: result.error, fieldErrors: result.fieldErrors }), isError: true };
+    }
     return { result: result.error ?? "ReviewQ did not record this native tool call.", isError: true };
   }
   return { result: JSON.stringify(result.data) };

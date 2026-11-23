@@ -601,6 +601,20 @@
 .finding-card .badge {
   white-space: normal;
 }
+.finding-details {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  color: var(--text);
+}
+.finding-details dt {
+  font-weight: 650;
+}
+.finding-details dd {
+  margin: 3px 0 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
 .disposition-form {
   padding-top: 10px;
   border-top: 1px solid var(--line);

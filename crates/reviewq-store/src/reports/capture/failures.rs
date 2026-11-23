@@ -114,14 +114,14 @@ pub(super) fn resolve(
                 (h.run_id,h.lead_session_key,h.turn_id,h.call_id)=(f.run_id,f.lead_session_key,f.native_turn_id,f.native_call_id)
                 AND h.state='failed' AND h.form='final'
                 AND h.batch_id IS (SELECT batch_id FROM report_handoffs WHERE receipt_id=?3)
-                AND h.source_generation=?4 AND h.source_position<?5)
+                AND reviewq_report_order(h.source_generation,h.source_position,?4,?5)<0)
              OR EXISTS(SELECT 1 FROM report_correction_requests c WHERE
                 (c.run_id,c.lead_session_key,c.turn_id,c.call_id)=(f.run_id,f.lead_session_key,f.native_turn_id,f.native_call_id)
-                AND c.source_generation=?4 AND ((c.source_position<?5 AND
+                AND ((reviewq_report_order(c.source_generation,c.source_position,?4,?5)<0 AND
                    (c.turn_id=?6 OR (SELECT batch_id FROM report_handoffs WHERE receipt_id=?3) IS NULL)) OR
-                   (c.source_position=?5 AND c.turn_id=?6 AND c.call_id=?7)))
+                   (reviewq_report_order(c.source_generation,c.source_position,?4,?5)=0 AND c.turn_id=?6 AND c.call_id=?7)))
            )",
-        params![run,lead,receipt,call.source_generation,position,call.turn_id.as_str(),call.call_id],
+        params![run,lead,receipt,super::address::encode(call).as_ref(),position,call.turn_id.as_str(),call.call_id],
     )?;
     let mut update = db.prepare_cached(
         "UPDATE report_delivery_failures SET resolved_by_receipt_id=?1

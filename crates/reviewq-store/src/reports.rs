@@ -1,5 +1,6 @@
 //! Scoped reads over accepted report versions and their immutable bytes.
 
+pub(crate) mod address;
 mod capture;
 mod context;
 mod mutations;
@@ -11,8 +12,8 @@ use reviewq_app::hosts::MessageBody;
 use reviewq_app::reports::{
     ArtifactStats, CandidateReport, ContextRequest, DisplayWindow, DisplayWindowPosition,
     MAX_REPORT_PAGE, MAX_SECTION_SCALARS, QuoteResolution, ReportContext, ReportDelivery,
-    ReportHistory, ReportPosition, ReportReference, ReportSection, ReportStore, ReportSummary,
-    ReportView,
+    ReportHistory, ReportPosition, ReportReference, ReportScope, ReportSection, ReportStore,
+    ReportSummary, ReportView,
 };
 use reviewq_domain::identity::{ReceiptId, ReportHash, RunId};
 use rusqlite::{Connection, OptionalExtension, Row, params};
@@ -39,8 +40,20 @@ const VERSION_SELECT: &str = "
         v.reviewed_sha, v.revision_reason, v.full_mr_reviewed_sha, v.coverage, v.verdict,
         v.semantic_index, v.finding_count, v.change_count, v.captured_at_ms, v.artifact_id,
         a.byte_length, a.total_code_points, a.line_count, a.max_line_bytes, a.complete,
-        a.original_sha256, v.handoff_receipt_id IS NOT NULL, v.coverage_source_sha, v.coverage_target_sha
+        a.original_sha256, v.handoff_receipt_id IS NOT NULL, v.coverage_source_sha, v.coverage_target_sha,
+        json_extract(c.edits,'$.structured.version'),
+        CASE WHEN json_extract(c.edits,'$.structured.version') IS NOT NULL THEN (
+            SELECT count(*) FROM report_findings f
+            WHERE f.run_id=v.run_id AND f.receipt_id=v.receipt_id AND coalesce((
+                SELECT CASE WHEN d.removed=0 THEN d.blocking END FROM finding_dispositions d
+                WHERE d.run_id=f.run_id AND d.finding_id=f.finding_id AND d.disposition_version<=coalesce(
+                    v.closing_disposition_version, h.disposition_version, v.starting_disposition_version)
+                ORDER BY d.disposition_version DESC LIMIT 1
+            ), f.blocking)=1
+        ) END, json_extract(c.edits,'$.structured.scope')
     FROM report_versions v JOIN artifacts a USING(artifact_id)
+    LEFT JOIN report_handoffs c ON c.receipt_id=v.handoff_receipt_id
+    LEFT JOIN report_heads h ON h.run_id=v.run_id AND h.receipt_id=v.receipt_id
     WHERE v.run_id=?1 AND a.sealed=1";
 
 impl ReportStore for SqliteStore {
@@ -457,6 +470,19 @@ fn decode_version(row: &Row<'_>) -> Result<Version, StoreError> {
             coverage_target_sha: optional(row, 22)?,
             verdict: parse(text(row, 8)?)?,
             semantic_index: parse(text(row, 9)?)?,
+            structured_version: row.get(23)?,
+            structured_scope: match row
+                .get_ref(25)?
+                .as_str_or_null()
+                .map_err(rusqlite::Error::from)?
+            {
+                Some("full_review") => Some(ReportScope::FullReview),
+                Some("selected_threads") => Some(ReportScope::SelectedThreads),
+                Some("amendment") => Some(ReportScope::Amendment),
+                None => None,
+                _ => return Err(AppError::Internal.into()),
+            },
+            blocking_finding_count: read_optional_count(row, 24)?,
             finding_count: read_optional_count(row, 10)?,
             change_count: read_optional_count(row, 11)?,
             captured_at_ms: row.get(12)?,

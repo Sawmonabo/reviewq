@@ -2,6 +2,12 @@
 const schema370 = {
   properties: {
     blocking: { type: ["boolean", "null"] },
+    details: {
+      anyOf: [{ $ref: "#/definitions/FindingDetails" }, { type: "null" }],
+    },
+    disposition: {
+      anyOf: [{ $ref: "#/definitions/FindingDisposition" }, { type: "null" }],
+    },
     findingId: { type: "string" },
     kind: { const: "finding", type: "string" },
     severity: { type: ["string", "null"] },
@@ -13,7 +19,28 @@ const schema370 = {
   required: ["kind", "findingId", "title", "severity", "blocking", "source"],
   type: "object",
 };
-const schema373 = {
+const schema373 = { enum: ["observed", "gap"], type: "string" };
+const schema374 = {
+  additionalProperties: false,
+  properties: {
+    line: { format: "uint32", minimum: 1, type: ["integer", "null"] },
+    path: { maxLength: 512, minLength: 1, type: "string" },
+  },
+  required: ["path"],
+  type: "object",
+};
+const schema375 = {
+  properties: {
+    blocking: { type: ["boolean", "null"] },
+    publication: {
+      anyOf: [{ $ref: "#/definitions/Publication" }, { type: "null" }],
+    },
+    reason: { type: "string" },
+  },
+  required: ["blocking", "publication", "reason"],
+  type: "object",
+};
+const schema378 = {
   properties: {
     blocking: { type: ["boolean", "null"] },
     findingId: { type: "string" },
@@ -26,7 +53,7 @@ const schema373 = {
   required: ["kind", "findingId", "blocking", "publication", "reason"],
   type: "object",
 };
-const schema379 = {
+const schema384 = {
   properties: {
     reason: { type: ["string", "null"] },
     receiptId: {
@@ -37,51 +64,51 @@ const schema379 = {
   required: ["receiptId", "state", "reason"],
   type: "object",
 };
-const schema380 = {
+const schema385 = {
   enum: ["preparing", "saving", "failed", "saved"],
   type: "string",
 };
-const schema384 = {
+const schema389 = {
   type: "object",
   properties: {
+    receiptId: { $ref: "#/definitions/CheckpointIdDto" },
     reviewedSha: {
       anyOf: [{ $ref: "#/definitions/GitShaDto" }, { type: "null" }],
     },
     revisionReason: { type: ["string", "null"] },
     semanticIndex: { $ref: "#/definitions/SemanticIndex" },
     sha256: { $ref: "#/definitions/ReportHashDto" },
+    structuredScope: {
+      anyOf: [{ $ref: "#/definitions/ReportScope" }, { type: "null" }],
+    },
+    structuredVersion: {
+      format: "uint8",
+      maximum: 255,
+      minimum: 0,
+      type: ["integer", "null"],
+    },
     totalCodePoints: { $ref: "#/definitions/SafeCountDto" },
-    verdict: { $ref: "#/definitions/Verdict" },
   },
 };
-const schema385 = { enum: ["ready", "source_only"], type: "string" };
-const schema386 = {
-  enum: ["approve", "request_changes", "blocked", "not_specified"],
+const schema390 = { enum: ["ready", "source_only"], type: "string" };
+const schema391 = {
+  enum: ["full_review", "selected_threads", "amendment"],
   type: "string",
 };
-const schema404 = {
-  properties: {
-    delivery: {
-      anyOf: [{ $ref: "#/definitions/ReportDelivery" }, { type: "null" }],
-    },
-    display: {
-      anyOf: [{ $ref: "#/definitions/DocumentDisplay" }, { type: "null" }],
-    },
-    markdown: { type: ["string", "null"] },
-    report: {
-      anyOf: [{ $ref: "#/definitions/ReportSummary" }, { type: "null" }],
-    },
-  },
-  required: ["report", "delivery"],
-  type: "object",
+const schema393 = {
+  enum: ["approve", "request_changes", "blocked", "not_specified"],
+  type: "string",
 };
 export {
   schema370,
   schema373,
-  schema379,
-  schema380,
+  schema374,
+  schema375,
+  schema378,
   schema384,
   schema385,
-  schema386,
-  schema404,
+  schema389,
+  schema390,
+  schema391,
+  schema393,
 };

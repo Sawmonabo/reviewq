@@ -26,6 +26,8 @@ pub struct NativeCall {
     pub call_id: String,
     pub source_generation: String,
     pub source_position: u64,
+    /// Order within a shared native opening, or zero for an ordinary standalone call.
+    pub source_ordinal: u32,
     pub request_entry_id: Option<NativeInputId>,
     pub tool: WorkflowTool,
 }
@@ -271,6 +273,17 @@ pub trait NativeWorkflowProof: Send + Sync {
         call_id: String,
         tool: WorkflowTool,
     ) -> AppFuture<'_, NativeCall>;
+
+    /// Match a registered lead's active MCP call and the original JSON argument object.
+    fn verify_mcp_report_call(
+        &self,
+        _lead: LeadTarget,
+        _call_id: String,
+        _arguments: Vec<u8>,
+        _origin_item_id: Option<String>,
+    ) -> AppFuture<'_, NativeCall> {
+        Box::pin(async { Err(AppError::Unavailable) })
+    }
 
     /// Verify the matching structured acknowledgement from this exact completed call.
     fn report_completion(

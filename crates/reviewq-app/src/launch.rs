@@ -150,7 +150,7 @@ impl LaunchInput {
             self.source.identity.iid(),
             self.source.head_sha,
         ));
-        text.push_str(report_guidance(self.provider));
+        text.push_str(report_guidance());
         text
     }
 }
@@ -218,15 +218,15 @@ impl LaunchPreparation {
     }
 }
 
-pub fn report_guidance(provider: HostProvider) -> &'static str {
-    match provider {
-        HostProvider::Codex => {
-            "Use reviewq report complete to hand off the final report with its reviewed revision, reviewq report unchanged to preserve the accepted report, or reviewq report needs-input if a decision or missing evidence blocks you. Keep publication separate and obtain explicit human authorization for any GitLab write."
-        }
-        HostProvider::Claude => {
-            "Use report_handoff to hand off the final report with its reviewed revision, report an unchanged outcome, or explain why input is needed. Keep publication separate and obtain explicit human authorization for any GitLab write."
-        }
-    }
+pub fn report_guidance() -> &'static str {
+    concat!(
+        "Follow the repository's review instructions and keep its requested output. ",
+        "When finished, submit once with ReviewQ's report_handoff tool from this linked lead conversation. ",
+        "Use the tool schema to map your own conclusions to its finding fields. ",
+        "Use an empty findings list for a clean review. A pending receipt will be verified after the native turn completes. ",
+        "GitLab publication requires separate explicit human authorization.\nExample handoff:\n",
+        include_str!("../../../fixtures/contracts/report-handoff.json"),
+    )
 }
 
 fn select_model(

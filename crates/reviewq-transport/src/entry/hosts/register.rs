@@ -89,7 +89,7 @@ pub(in crate::entry) async fn register(
                 .to_string_lossy()
                 .into_owned(),
             review_checkout: checkout,
-            report_guidance: report_guidance(provider),
+            report_guidance: report_guidance(),
         },
         registered.cursor,
     )?))

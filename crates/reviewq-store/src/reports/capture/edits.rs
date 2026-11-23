@@ -1,10 +1,12 @@
+use std::borrow::Cow;
 use std::collections::BTreeMap;
+use std::sync::Arc;
 
 use reviewq_app::access::AppError;
 use reviewq_app::reports::{
     CapturedArtifact, Correction, CorrectionKind, Declaration, Descriptor, EvidenceReference,
     EvidenceTarget, FindingEdit, ReportEdits, ReportReference, ReportWork, SectionEdit,
-    SourceRange,
+    SourceRange, StructuredReport,
 };
 use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
@@ -15,10 +17,12 @@ use crate::queue::parse;
 use crate::{SqliteStore, StoreError};
 
 #[derive(Serialize, Deserialize)]
-struct StoredEdits {
+struct StoredEdits<'a> {
     correction: Option<StoredCorrection>,
     findings: Vec<StoredFinding>,
     sections: Vec<StoredSection>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    structured: Option<Cow<'a, StructuredReport>>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -54,11 +58,15 @@ struct StoredSection {
     discussion_ids: Vec<String>,
 }
 
-pub(super) fn encode(edits: &ReportEdits) -> Result<Option<String>, StoreError> {
-    if edits.is_empty() {
+pub(super) fn encode(
+    edits: &ReportEdits,
+    structured: Option<&Arc<StructuredReport>>,
+) -> Result<Option<String>, StoreError> {
+    if edits.is_empty() && structured.is_none() {
         return Ok(None);
     }
     let value = StoredEdits {
+        structured: structured.map(|report| Cow::Borrowed(report.as_ref())),
         correction: edits
             .correction
             .as_ref()
@@ -115,12 +123,12 @@ pub(super) fn encode(edits: &ReportEdits) -> Result<Option<String>, StoreError> 
 pub(super) fn decode(
     encoded: Option<&str>,
     base: Option<&ReportReference>,
-) -> Result<ReportEdits, StoreError> {
+) -> Result<(ReportEdits, Option<Arc<StructuredReport>>), StoreError> {
     let Some(encoded) = encoded else {
-        return Ok(ReportEdits::default());
+        return Ok((ReportEdits::default(), None));
     };
-    let value: StoredEdits = serde_json::from_str(encoded).map_err(|_| AppError::Internal)?;
-    Ok(ReportEdits {
+    let value: StoredEdits<'_> = serde_json::from_str(encoded).map_err(|_| AppError::Internal)?;
+    let edits = ReportEdits {
         correction: value
             .correction
             .map(|correction| {
@@ -173,7 +181,11 @@ pub(super) fn decode(
                 })
             })
             .collect::<Result<_, StoreError>>()?,
-    })
+    };
+    Ok((
+        edits,
+        value.structured.map(|report| Arc::new(report.into_owned())),
+    ))
 }
 
 pub(super) async fn verify(
@@ -182,17 +194,29 @@ pub(super) async fn verify(
     artifact: Option<&mut CapturedArtifact>,
 ) -> Result<bool, AppError> {
     let Declaration::Final {
-        edits, assessments, ..
+        edits,
+        assessments,
+        report,
+        ..
     } = &work.declaration
     else {
         return Ok(true);
     };
-    if edits.correction.is_none() && assessments.is_empty() {
+    let structured = report.is_some();
+    if edits.correction.is_none() && (structured || assessments.is_empty()) {
         return Ok(true);
     }
     let Some(artifact) = artifact else {
         return Ok(false);
     };
+    if structured
+        && edits
+            .correction
+            .as_ref()
+            .is_some_and(|correction| correction.base.hash == artifact.hash)
+    {
+        return Ok(true);
+    }
     let Some(index) = artifact.index.as_ref() else {
         return Ok(false);
     };
@@ -220,7 +244,7 @@ pub(super) async fn verify(
             let Some(base) = base else {
                 return Ok(None);
             };
-            Ok(Some(prepare(db, &context, &base)?))
+            Ok(Some(prepare(db, &context, &base, !structured)?))
         })
         .await
         .map_err(StoreError::app);
@@ -239,7 +263,14 @@ pub(super) async fn verify(
         Err(error) => return Err(error),
     };
     let index = index.to_vec();
-    let edits = edits.clone();
+    let edits = if structured {
+        ReportEdits {
+            sections: edits.sections.clone(),
+            ..ReportEdits::default()
+        }
+    } else {
+        edits.clone()
+    };
     let replacement = tokio::task::spawn_blocking(move || validate_source(evidence, &edits, index))
         .await
         .map_err(|_| AppError::Internal)?;
@@ -263,6 +294,7 @@ fn prepare(
     db: &Connection,
     work: &ReportWork,
     reference: &ReportReference,
+    include_findings: bool,
 ) -> Result<Option<SourceEvidence>, StoreError> {
     let run = work.call.lead.run_id().as_str();
     let receipt = reference.receipt_id.as_str();
@@ -284,9 +316,9 @@ fn prepare(
     let mut findings = BTreeMap::new();
     let mut query = db.prepare_cached(
         "SELECT finding_id,title,severity,blocking,scalar_offset,scalar_length,evidence_sha256
-         FROM report_findings WHERE run_id=?1 AND receipt_id=?2 ORDER BY finding_id",
+         FROM report_findings WHERE run_id=?1 AND receipt_id=?2 AND ?3 ORDER BY finding_id",
     )?;
-    let mut rows = query.query(params![run, receipt])?;
+    let mut rows = query.query(params![run, receipt, include_findings])?;
     while let Some(row) = rows.next()? {
         let id: String = row.get(0)?;
         let Some(offset) = row.get::<_, Option<i64>>(4)? else {
@@ -304,6 +336,8 @@ fn prepare(
                     length: u64::try_from(row.get::<_, i64>(5)?).map_err(|_| AppError::Internal)?,
                     hash: parse(crate::queue::text(row, 6)?)?,
                 }),
+                details: None,
+                disposition: None,
             },
         );
     }
@@ -381,6 +415,8 @@ fn validate_source(
                     severity: None,
                     blocking: None,
                     source: Some(source),
+                    details: None,
+                    disposition: None,
                 });
             }
             index.retain(|entry| !matches!(entry, Descriptor::Finding { .. }));
@@ -450,6 +486,8 @@ fn validate_source(
                 severity: severity.clone(),
                 blocking: *blocking,
                 source: Some(moved.clone()),
+                details: None,
+                disposition: None,
             });
         }
     }
@@ -568,6 +606,7 @@ pub(super) fn overrides_user_blocking(
     disposition_version: i64,
     edits: &ReportEdits,
     artifact: &CapturedArtifact,
+    structured: Option<&StructuredReport>,
 ) -> Result<bool, StoreError> {
     let authored = artifact.index.as_deref().unwrap_or_default();
     let mut current = db.prepare_cached(
@@ -575,11 +614,28 @@ pub(super) fn overrides_user_blocking(
          WHERE run_id=?1 AND finding_id=?2 AND disposition_version<=?3
          ORDER BY disposition_version DESC LIMIT 1",
     )?;
-    for edit in &edits.findings {
-        if authored.iter().any(|entry| matches!(entry, Descriptor::Finding {id, blocking: Some(true), ..} if id == &edit.finding_id))
-            && current.query_row(
-                params![run,edit.finding_id,disposition_version], |row| row.get::<_, bool>(0),
-            ).optional()?.unwrap_or(false)
+    let legacy_ids = authored.iter().filter_map(|entry| match entry {
+        Descriptor::Finding {
+            id,
+            blocking: Some(true),
+            ..
+        } if edits.findings.iter().any(|edit| &edit.finding_id == id) => Some(id),
+        _ => None,
+    });
+    let structured_ids = structured.into_iter().flat_map(|report| {
+        report
+            .findings
+            .iter()
+            .filter(|item| item.blocking)
+            .map(|item| &item.id)
+    });
+    for id in legacy_ids.chain(structured_ids) {
+        if current
+            .query_row(params![run, id, disposition_version], |row| {
+                row.get::<_, bool>(0)
+            })
+            .optional()?
+            .unwrap_or(false)
         {
             return Ok(true);
         }

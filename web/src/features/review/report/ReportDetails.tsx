@@ -41,30 +41,23 @@ export function ReportDetails({
   );
   const context = useResource(
     `report-details:${run.runId}:${report.receiptId}:${collection}:${trail.at(-1) ?? ""}`,
-    (signal) => reportContext(run.runId, report.receiptId, collection, trail.at(-1), signal),
-    [{ kind: "report", id: run.runId }],
-  );
-  const dispositions = useResource(
-    `report-dispositions:${run.runId}:${report.receiptId}:${collection}`,
     (signal) =>
-      collection === "findings"
-        ? reportContext(run.runId, report.receiptId, "dispositions", undefined, signal)
-        : Promise.resolve({ data: null, cursor: "" }),
+      reportContext(
+        run.runId,
+        report.receiptId,
+        collection,
+        trail.at(-1),
+        signal,
+        collection === "findings" && report.structuredVersion !== undefined ? 6 : undefined,
+      ),
     [{ kind: "report", id: run.runId }],
   );
-  const currentVersion =
-    dispositions.data?.userDispositionVersion ?? context.data?.userDispositionVersion;
-  const byId = new Map(
-    (dispositions.data?.items ?? []).flatMap((item) =>
-      item.kind === "disposition" ? [[item.findingId, item] as const] : [],
-    ),
-  );
+  const currentVersion = context.data?.userDispositionVersion;
 
   return (
     <div className="stack">
       {context.pending && <Loading label={`Reading report ${collection}…`} />}
       {context.error && <Notice retry={context.retry}>{context.error}</Notice>}
-      {dispositions.error && <Notice retry={dispositions.retry}>{dispositions.error}</Notice>}
       {!context.data?.items.length && !context.pending && !context.error && (
         <Empty title={`No recorded ${collection}`} />
       )}
@@ -104,7 +97,7 @@ export function ReportDetails({
         const saved =
           edit && (currentVersion === undefined || BigInt(edit.version) >= BigInt(currentVersion))
             ? edit.value
-            : byId.get(item.findingId);
+            : item.disposition;
         return (
           <FindingCard
             key={item.findingId}
@@ -124,12 +117,8 @@ export function ReportDetails({
             onSave={(value, version) => {
               setEdits((known) => ({ ...known, [item.findingId]: { value, version } }));
               context.retry();
-              dispositions.retry();
             }}
-            onRefresh={() => {
-              dispositions.retry();
-              context.retry();
-            }}
+            onRefresh={context.retry}
           />
         );
       })}
@@ -154,7 +143,7 @@ function FindingCard({
   readonly item: Finding;
   readonly report: ReportSummary;
   readonly run: RunDetail;
-  readonly saved: Saved | undefined;
+  readonly saved: Finding["disposition"];
   readonly drafts: DraftStore;
   readonly version: string | undefined;
   readonly current: boolean;
@@ -256,6 +245,37 @@ function FindingCard({
         )}
       </div>
       <h3>{item.title}</h3>
+      {item.details && (
+        <dl className="finding-details">
+          {item.details.location && (
+            <div>
+              <dt>Location</dt>
+              <dd>
+                <code>
+                  {item.details.location.path}
+                  {item.details.location.line ? `:${item.details.location.line}` : ""}
+                </code>
+              </dd>
+            </div>
+          )}
+          <div>
+            <dt>Why it matters</dt>
+            <dd>{item.details.consequence}</dd>
+          </div>
+          <div>
+            <dt>{item.details.evidence.kind === "gap" ? "Evidence gap" : "Evidence"}</dt>
+            <dd>{item.details.evidence.text}</dd>
+          </div>
+          {item.details.checkedSha && (
+            <div>
+              <dt>Checked at</dt>
+              <dd>
+                <code>{item.details.checkedSha}</code>
+              </dd>
+            </div>
+          )}
+        </dl>
+      )}
       {saved?.reason && <p className="meta">Local disposition · {saved.reason}</p>}
       {patch && (
         <button className="quiet-button" type="button" onClick={() => onSource(patch.offset)}>

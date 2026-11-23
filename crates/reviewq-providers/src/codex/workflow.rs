@@ -11,6 +11,7 @@ use serde::Deserialize;
 
 use super::Codex;
 use super::history::{Item, Turn};
+use super::history_reads::ItemWindow;
 use super::session::{Thread, ThreadStatus};
 
 #[derive(Deserialize)]
@@ -66,41 +67,68 @@ impl NativeWorkflowProof for Codex {
         tool: WorkflowTool,
     ) -> AppFuture<'_, NativeCall> {
         Box::pin(async move {
-            let thread = self.verified_thread(&lead).await?;
-            if !matches!(thread.status, ThreadStatus::Active { .. }) {
-                return Err(AppError::NotFound);
-            }
-            let mut turns = self.turns(&thread.id, None, false, 1, true).await?;
-            let turn = turns
-                .data
-                .pop()
-                .filter(|native| {
-                    native.status == "inProgress"
-                        && turn.as_ref().is_none_or(|turn| native.id == turn.as_str())
-                })
-                .ok_or(AppError::NotFound)?;
-            let index = call_position(&turn, &call_id, tool).ok_or(AppError::NotFound)?;
-            if !matches!(&turn.items[index], Item::CommandExecution { status, .. } if status == "inProgress")
+            let (thread, active) = self
+                .active_workflow_turn(&lead, turn.as_ref(), true)
+                .await?;
+            let index = call_position(&active, &call_id, tool).ok_or(AppError::NotFound)?;
+            if !matches!(&active.items[index], Item::CommandExecution { status, .. } if status == "inProgress")
             {
                 return Err(AppError::NotFound);
             }
-            if turn.items[index + 1..]
+            let (generation, position) = workflow_source(&lead, &thread, &call_id, None).await?;
+            if active.items[index + 1..]
                 .iter()
                 .any(|item| matches!(item, Item::UserMessage { .. }))
             {
                 return Err(AppError::Conflict);
             }
-            let (source_generation, source_position) =
-                workflow_source(&lead, &thread, &call_id, None).await?;
             Ok(NativeCall {
                 lead,
-                turn_id: turn.id.parse().map_err(|_| AppError::Unavailable)?,
-                root_turn_id: root_turn(&turn)?,
+                turn_id: active.id.parse().map_err(|_| AppError::Unavailable)?,
+                root_turn_id: root_turn(&active)?,
                 call_id,
-                source_generation,
-                source_position,
-                request_entry_id: request_address(&turn, index)?,
+                source_generation: generation,
+                source_position: position,
+                source_ordinal: 0,
+                request_entry_id: request_address(&active, index)?,
                 tool,
+            })
+        })
+    }
+
+    fn verify_mcp_report_call(
+        &self,
+        lead: LeadTarget,
+        call_id: String,
+        arguments: Vec<u8>,
+        origin_item_id: Option<String>,
+    ) -> AppFuture<'_, NativeCall> {
+        Box::pin(async move {
+            let arguments: serde_json::Value =
+                serde_json::from_slice(&arguments).map_err(|_| AppError::InvalidRequest)?;
+            let (thread, turn) = self.active_workflow_turn(&lead, None, false).await?;
+            let turn_id: NativeTurnId = turn.id.parse().map_err(|_| AppError::Unavailable)?;
+            let (ordinal, request) = self
+                .mcp_report_position(&thread.id, &turn_id, &call_id, &arguments)
+                .await?;
+            let (generation, position, nested) = crate::history::codex_mcp_opening(
+                lead.binding().clone(),
+                thread.path.ok_or(AppError::Unavailable)?,
+                turn_id.clone(),
+                call_id.clone(),
+                origin_item_id,
+            )
+            .await?;
+            Ok(NativeCall {
+                lead,
+                root_turn_id: root_turn(&turn)?,
+                turn_id,
+                call_id,
+                tool: WorkflowTool::Report,
+                source_generation: generation,
+                source_position: position,
+                source_ordinal: if nested { ordinal } else { 0 },
+                request_entry_id: request,
             })
         })
     }
@@ -122,14 +150,7 @@ impl NativeWorkflowProof for Codex {
             let result = self
                 .exact_item(&thread.id, &call.turn_id, &result_entry)
                 .await;
-            let Item::CommandExecution {
-                id,
-                status,
-                command,
-                source,
-                exit_code,
-                aggregated_output,
-            } = (match result {
+            let item = match result {
                 Ok(item) => item.item,
                 Err(AppError::NotFound) => {
                     let ended = crate::history::codex_report_terminal(call, path, false).await?;
@@ -140,26 +161,43 @@ impl NativeWorkflowProof for Codex {
                     });
                 }
                 Err(error) => return Err(error),
-            })
-            else {
-                return Ok(ReportCompletion::Unproved);
             };
-            if id != call.call_id
-                || !matches!(source.as_deref(), Some("agent" | "unifiedExecStartup"))
-                || !reviewq_command(&command, call.tool)
-            {
-                return Ok(ReportCompletion::Unproved);
-            }
+            let mcp = matches!(&item, Item::McpToolCall { .. });
+            let (status, acknowledged) = match item {
+                Item::McpToolCall {
+                    id,
+                    server,
+                    tool,
+                    status,
+                    result,
+                    ..
+                } if id == call.call_id && report_tool(&server, &tool) => {
+                    (status, result.as_ref().and_then(mcp_acknowledgement))
+                }
+                Item::CommandExecution {
+                    id,
+                    status,
+                    command,
+                    source,
+                    exit_code,
+                    aggregated_output,
+                } if id == call.call_id
+                    && matches!(source.as_deref(), Some("agent" | "unifiedExecStartup"))
+                    && reviewq_command(&command, call.tool) =>
+                {
+                    let acknowledgement = aggregated_output
+                        .as_deref()
+                        .filter(|_| exit_code == Some(0))
+                        .and_then(read_acknowledgement);
+                    (status, acknowledgement)
+                }
+                _ => return Ok(ReportCompletion::Unproved),
+            };
             if status == "inProgress" {
                 return Ok(ReportCompletion::Pending);
             }
             if status != "completed"
-                || exit_code != Some(0)
-                || !aggregated_output
-                    .as_deref()
-                    .filter(|value| value.len() <= 8192)
-                    .and_then(|value| serde_json::from_str::<Acknowledgement>(value).ok())
-                    .is_some_and(|ack| ack.matches(&acknowledgement))
+                || !acknowledged.is_some_and(|ack| ack.matches(&acknowledgement))
             {
                 return Ok(ReportCompletion::Unproved);
             }
@@ -168,6 +206,9 @@ impl NativeWorkflowProof for Codex {
             else {
                 return Ok(ReportCompletion::Pending);
             };
+            if mcp && !evidence.result_seen {
+                return Ok(ReportCompletion::Unproved);
+            }
             Ok(ReportCompletion::Confirmed(Box::new(CompletedReportCall {
                 call,
                 acknowledged: acknowledgement,
@@ -192,6 +233,95 @@ impl NativeWorkflowProof for Codex {
 }
 
 impl Codex {
+    async fn active_workflow_turn(
+        &self,
+        lead: &LeadTarget,
+        turn: Option<&NativeTurnId>,
+        full: bool,
+    ) -> Result<(Thread, Turn), AppError> {
+        let thread = self.verified_thread(lead).await?;
+        if !matches!(thread.status, ThreadStatus::Active { .. }) {
+            return Err(AppError::NotFound);
+        }
+        let active = self
+            .turns(&thread.id, None, false, 1, full)
+            .await?
+            .data
+            .pop()
+            .filter(|native| {
+                native.status == "inProgress" && turn.is_none_or(|turn| native.id == turn.as_str())
+            })
+            .ok_or(AppError::NotFound)?;
+        Ok((thread, active))
+    }
+
+    /// The host sorts this page by immutable creation ordinal. Defer completed tool output
+    /// so earlier large command logs cannot prevent verification of the current handoff.
+    async fn mcp_report_position(
+        &self,
+        thread: &str,
+        turn: &NativeTurnId,
+        call: &str,
+        arguments: &serde_json::Value,
+    ) -> Result<(u32, Option<NativeInputId>), AppError> {
+        let mut cursor: Option<String> = None;
+        let mut limit = 64;
+        let mut ordinal = 0u32;
+        let mut request = None;
+        let mut matched = None;
+        loop {
+            let window = ItemWindow {
+                forward: true,
+                cursor: cursor.as_deref(),
+                anchor: None,
+                limit,
+                defer: true,
+            };
+            let page = match self.read_item_window(thread, turn, window).await {
+                Err(AppError::Unavailable) if limit > 1 => {
+                    limit /= 2;
+                    continue;
+                }
+                result => result?,
+            };
+            for entry in page.data {
+                ordinal = ordinal.checked_add(1).ok_or(AppError::Unavailable)?;
+                match entry.item {
+                    Item::UserMessage { id, .. } => {
+                        if matched.is_some() {
+                            return Err(AppError::Conflict);
+                        }
+                        request = Some(id.parse().map_err(|_| AppError::Unavailable)?);
+                    }
+                    Item::McpToolCall {
+                        id,
+                        server,
+                        tool,
+                        status,
+                        arguments: native,
+                        ..
+                    } if id == call => {
+                        if matched.is_some()
+                            || !report_tool(&server, &tool)
+                            || status != "inProgress"
+                            || native.as_ref() != Some(arguments)
+                        {
+                            return Err(AppError::Conflict);
+                        }
+                        matched = Some(ordinal);
+                    }
+                    _ => {}
+                }
+            }
+            let Some(next) = page.next_cursor else { break };
+            if cursor.as_ref() == Some(&next) {
+                return Err(AppError::Unavailable);
+            }
+            cursor = Some(next);
+        }
+        Ok((matched.ok_or(AppError::NotFound)?, request))
+    }
+
     pub(super) async fn idle_readiness(
         &self,
         lead: &LeadTarget,
@@ -273,6 +403,26 @@ impl Codex {
             latest_user_entry_id: latest,
         }))
     }
+}
+
+fn report_tool(server: &str, tool: &str) -> bool {
+    server == "reviewq" && tool == "report_handoff"
+}
+
+fn mcp_acknowledgement(result: &serde_json::Value) -> Option<Acknowledgement> {
+    let [block] = result.get("content")?.as_array()?.as_slice() else {
+        return None;
+    };
+    if block.get("type")?.as_str()? != "text" {
+        return None;
+    }
+    read_acknowledgement(block.get("text")?.as_str()?)
+}
+
+fn read_acknowledgement(text: &str) -> Option<Acknowledgement> {
+    (text.len() <= 8192)
+        .then(|| serde_json::from_str(text).ok())
+        .flatten()
 }
 
 fn root_turn(turn: &Turn) -> Result<Option<NativeTurnId>, AppError> {
@@ -364,7 +514,10 @@ fn reviewq_command(command: &str, tool: WorkflowTool) -> bool {
     match tool {
         WorkflowTool::Report => {
             category == "report"
-                && matches!(operation.as_str(), "complete" | "unchanged" | "needs-input")
+                && matches!(
+                    operation.as_str(),
+                    "complete" | "unchanged" | "needs-input" | "handoff"
+                )
         }
         WorkflowTool::Action => {
             category == "action" && matches!(operation.as_str(), "declare" | "reconcile")

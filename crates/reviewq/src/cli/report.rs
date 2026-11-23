@@ -7,8 +7,9 @@ use reviewq_domain::identity::{GitSha, ReportHash};
 use reviewq_protocol::GitShaDto;
 use reviewq_protocol::reports::{
     AcceptedReference, AcceptedReport, Assessment, CodexCommand, Correction, FindingEdit, Handoff,
-    HandoffReceipt, HandoffState, NativeReportAddress, ReportHashDto, ReportRevision, ReportSource,
-    ReportVerdict, SectionEdit,
+    HandoffReceipt, HandoffState, NativeReportAddress, REPORT_HANDOFF_EXAMPLE, ReportHandoffInput,
+    ReportHashDto, ReportRevision, ReportSource, ReportVerdict, SectionEdit,
+    validate_report_handoff,
 };
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
@@ -21,8 +22,17 @@ const HANDOFF: &str = "/api/v1/native/reports/handoff";
 const STATUS: &str = "/api/v1/native/reports/handoff-status";
 const MAX_METADATA_BYTES: u64 = 96 * 1024;
 
+const MAX_HANDOFF_BYTES: u64 = 128 * 1024;
+
 #[derive(Subcommand)]
 pub(super) enum Report {
+    /// Print the shared structured report handoff JSON example.
+    Example,
+    /// Stage the shared structured report handoff JSON in this lead.
+    Handoff {
+        #[arg(long, value_name = "JSON")]
+        file: PathBuf,
+    },
     /// Stage an exact file or the current turn's final response.
     Complete(Complete),
     /// Record a completed review that leaves the accepted report unchanged.
@@ -113,8 +123,22 @@ pub(super) async fn execute(
     scope: Profile,
     command: Report,
 ) -> Result<(), Failure> {
+    let command = match command {
+        Report::Example => {
+            print!("{REPORT_HANDOFF_EXAMPLE}");
+            return Ok(());
+        }
+        Report::Handoff { file } => {
+            let mut handoff = read_handoff(&file)?;
+            let context = Context::connect(profile, scope, true).await?;
+            bind_handoff_source(&mut handoff)?;
+            return submit(&context, handoff).await;
+        }
+        command => command,
+    };
     let context = Context::connect(profile, scope, !matches!(&command, Report::Accepted)).await?;
     let handoff = match command {
+        Report::Example | Report::Handoff { .. } => unreachable!(),
         Report::Accepted => return workflow::print(&accepted(&context).await?, false),
         Report::Complete(input) => complete(&context, input).await?,
         Report::Unchanged { assessment_file } => {
@@ -141,6 +165,10 @@ pub(super) async fn execute(
             assessments: Metadata::read(assessment_file.as_deref())?.assessments()?,
         },
     };
+    submit(&context, handoff).await
+}
+
+async fn submit(context: &Context, handoff: Handoff) -> Result<(), Failure> {
     let body = serde_json::to_vec(&CodexCommand {
         session_key: context.session.clone(),
         call_id: context.call()?,
@@ -169,6 +197,42 @@ async fn accepted(context: &Context) -> Result<Option<AcceptedReport>, Failure> 
         .post(ACCEPTED, &body)
         .await
         .map_err(|error| error.report("report lookup", &context.session))
+}
+
+fn read_handoff(file: &Path) -> Result<Handoff, Failure> {
+    let input = workflow::json_file(file, MAX_HANDOFF_BYTES)?;
+    let errors = validate_report_handoff(&input);
+    if !errors.is_empty() {
+        let messages = errors
+            .into_iter()
+            .map(|error| {
+                let path = if error.path.is_empty() {
+                    "/"
+                } else {
+                    &error.path
+                };
+                format!("{path} {}", error.message)
+            })
+            .collect::<Vec<_>>();
+        return Err(format!("Invalid report handoff.\n{}", messages.join("\n")).into());
+    }
+    let ReportHandoffInput { handoff } = serde_json::from_value(input)?;
+    Ok(handoff)
+}
+
+fn bind_handoff_source(handoff: &mut Handoff) -> Result<(), Failure> {
+    if let Handoff::Final { source, .. } | Handoff::Unchanged { source, .. } = handoff
+        && let ReportSource::File { path, sha256 } = source
+    {
+        let bound = report_file(Path::new(path))?;
+        if sha256.is_some()
+            && !matches!(&bound, ReportSource::File { sha256: actual, .. } if actual == sha256)
+        {
+            return Err("The declared SHA-256 does not match the report file.".into());
+        }
+        *source = bound;
+    }
+    Ok(())
 }
 
 async fn complete(context: &Context, input: Complete) -> Result<Handoff, Failure> {
@@ -203,11 +267,13 @@ async fn complete(context: &Context, input: Complete) -> Result<Handoff, Failure
     };
     Ok(Handoff::Final {
         source,
-        revision: ReportRevision {
-            sha,
-            reason: input.unknown_revision,
+        revision: match (sha, input.unknown_revision) {
+            (Some(sha), None) => ReportRevision::Exact { sha },
+            (None, Some(reason)) => ReportRevision::Unknown { sha: (), reason },
+            _ => return Err("Choose one reviewed revision or unknown revision reason.".into()),
         },
         verdict: input.verdict.into(),
+        report: None,
         amends,
         corrects: metadata.corrects_report.map(Box::new),
         finding_changes: metadata.finding_changes,

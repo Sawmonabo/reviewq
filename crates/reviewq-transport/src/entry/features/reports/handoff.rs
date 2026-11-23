@@ -4,7 +4,7 @@ use std::sync::Arc;
 use axum::Json;
 use axum::extract::State;
 use axum::http::{HeaderMap, header};
-use reviewq_app::access::AppError;
+use reviewq_app::access::{Actor, AppError};
 use reviewq_app::reports::{
     self as app, Declaration, ReportReference, RevisionEvidence, Source, Verdict,
 };
@@ -87,14 +87,12 @@ async fn receive(
     lookup: bool,
 ) -> Result<Json<Success<dto::HandoffReceipt>>, ApiError> {
     authenticate(entry, headers)?;
-    let workflow = &entry.workflow;
-    let proof = workflow.proof.as_ref();
     let command = match serde_json::from_slice::<dto::HandoffCommand>(bytes) {
         Ok(command) => command,
         Err(_) if !lookup => return Err(malformed_handoff(entry, bytes).await.into()),
         Err(_) => return Err(AppError::InvalidRequest.into()),
     };
-    let (session, turn, call_id, expected, mut handoff) = match command {
+    let (session, turn, call_id, expected, handoff) = match command {
         dto::HandoffCommand::Codex(value) => (
             value.session_key,
             None,
@@ -110,12 +108,60 @@ async fn receive(
             value.handoff,
         ),
     };
+    if expected == HostProvider::Claude {
+        // Claude's native tool hook supplies the session and turn that its HTTP MCP client omits.
+        let mut wire: serde_json::Value =
+            serde_json::from_slice(bytes).map_err(|_| AppError::InvalidRequest)?;
+        let raw = serde_json::json!({"handoff": wire["handoff"].take()});
+        let arguments = serde_json::to_vec(&raw).map_err(|_| AppError::InvalidRequest)?;
+        let lead = entry.store.report_lead(parse(session.as_str())?).await?;
+        if lead.binding().identity().provider() != expected {
+            return Err(AppError::Forbidden.into());
+        }
+        let verified = entry
+            .workflow
+            .proof
+            .verify_mcp_report_call(lead, call_id.as_str().to_owned(), arguments.clone(), None)
+            .await?;
+        if turn.as_ref() != Some(&verified.turn_id) {
+            return Err(AppError::Conflict.into());
+        }
+        let proof = McpReportProof {
+            actor: None,
+            arguments,
+            enclosing: None,
+        };
+        return Ok(Json(
+            submit_verified(entry, verified, handoff, lookup, Some(proof)).await?,
+        ));
+    }
+    let verified = verify_call(entry, &session, turn, &call_id, expected).await?;
+    Ok(Json(
+        submit_verified(entry, verified, handoff, lookup, None).await?,
+    ))
+}
+
+pub(in crate::entry) struct McpReportProof {
+    pub(in crate::entry) actor: Option<Actor>,
+    pub(in crate::entry) arguments: Vec<u8>,
+    pub(in crate::entry) enclosing: Option<String>,
+}
+
+pub(in crate::entry) async fn submit_verified(
+    entry: &Entry,
+    verified: NativeCall,
+    mut handoff: dto::Handoff,
+    lookup: bool,
+    mcp: Option<McpReportProof>,
+) -> Result<Success<dto::HandoffReceipt>, AppError> {
+    let workflow = &entry.workflow;
+    let proof = workflow.proof.as_ref();
+    let expected = verified.lead.binding().identity().provider();
     let canonical = serde_json::to_vec(&handoff).map_err(|_| AppError::Internal)?;
     if canonical.len() > 128 * 1024 {
-        return Err(AppError::PayloadTooLarge.into());
+        return Err(AppError::PayloadTooLarge);
     }
     let request_sha256 = ReportHash::from_sha256(Sha256::digest(canonical).into());
-    let verified = verify_call(entry, &session, turn.clone(), &call_id, expected).await?;
     let lead = verified.lead.clone();
     let existing = entry
         .store
@@ -127,15 +173,23 @@ async fn receive(
             if let Some(dto::ReportSource::File { path, sha256 }) = source_mut(&mut handoff)
                 && sha256.is_none()
             {
-                if expected != HostProvider::Claude {
-                    return Err(request_correction(entry, &verified).await.into());
+                if mcp.is_none() && expected != HostProvider::Claude {
+                    return Err(if mcp.is_some() {
+                        AppError::InvalidRequest
+                    } else {
+                        request_correction(entry, &verified).await
+                    });
                 }
                 let path = match absolute_path(path) {
                     Ok(path) => path,
                     Err(AppError::InvalidRequest) => {
-                        return Err(request_correction(entry, &verified).await.into());
+                        return Err(if mcp.is_some() {
+                            AppError::InvalidRequest
+                        } else {
+                            request_correction(entry, &verified).await
+                        });
                     }
-                    Err(error) => return Err(error.into()),
+                    Err(error) => return Err(error),
                 };
                 let hash_value =
                     app::hash_report_file(workflow.report_files.as_ref(), verified.clone(), path)
@@ -150,30 +204,48 @@ async fn receive(
             }) {
                 Ok(declaration) => declaration,
                 Err(AppError::InvalidRequest) => {
-                    return Err(request_correction(entry, &verified).await.into());
+                    return Err(if mcp.is_some() {
+                        AppError::InvalidRequest
+                    } else {
+                        request_correction(entry, &verified).await
+                    });
                 }
-                Err(error) => return Err(error.into()),
+                Err(error) => return Err(error),
             };
             let settings = if declaration.requires_review_refresh() {
-                let source = entry.source_reader().await?;
                 let (identity, settings) = entry.store.report_source(lead.clone()).await?;
+                let source = entry.source_reader().await?;
                 if source.review(identity.clone()).await?.identity != identity {
-                    return Err(AppError::Conflict.into());
+                    return Err(AppError::Conflict);
                 }
                 Some(settings)
             } else {
                 None
             };
-            let current = proof
-                .verify_active_call(
-                    lead,
-                    turn,
-                    call_id.as_str().to_owned(),
-                    WorkflowTool::Report,
-                )
-                .await?;
+            let current = match &mcp {
+                Some(mcp) => {
+                    proof
+                        .verify_mcp_report_call(
+                            lead,
+                            verified.call_id.clone(),
+                            mcp.arguments.clone(),
+                            mcp.enclosing.clone(),
+                        )
+                        .await?
+                }
+                None => {
+                    proof
+                        .verify_active_call(
+                            lead,
+                            Some(verified.turn_id.clone()),
+                            verified.call_id.clone(),
+                            WorkflowTool::Report,
+                        )
+                        .await?
+                }
+            };
             if current != verified {
-                return Err(AppError::Conflict.into());
+                return Err(AppError::Conflict);
             }
 
             entry
@@ -184,12 +256,13 @@ async fn receive(
                     request_sha256,
                     declaration_sha256,
                     settings,
+                    mcp.and_then(|context| context.actor),
                 )
                 .await?
         }
-        Err(error) => return Err(error.into()),
+        Err(error) => return Err(error),
     };
-    Ok(Json(success(
+    success(
         dto::HandoffReceipt {
             receipt_id: resource(stored.value.receipt_id.as_str())?,
             declaration_sha256: hash(stored.value.declaration_sha256.as_str())?,
@@ -200,7 +273,7 @@ async fn receive(
             },
         },
         stored.cursor,
-    )?))
+    )
 }
 
 async fn verify_call(
@@ -332,6 +405,7 @@ fn declaration(input: dto::Handoff, provider: HostProvider) -> Result<Declaratio
             source,
             revision,
             verdict,
+            report,
             amends,
             corrects,
             finding_changes,
@@ -339,10 +413,9 @@ fn declaration(input: dto::Handoff, provider: HostProvider) -> Result<Declaratio
             assessments,
         } => Declaration::Final {
             source: project_source(source, provider)?,
-            revision: match (revision.sha, revision.reason) {
-                (Some(sha), None) => RevisionEvidence::Exact(parse(sha.as_str())?),
-                (None, Some(reason)) => RevisionEvidence::Unknown(reason),
-                _ => return Err(AppError::InvalidRequest),
+            revision: match revision {
+                dto::ReportRevision::Exact { sha } => RevisionEvidence::Exact(parse(sha.as_str())?),
+                dto::ReportRevision::Unknown { reason, .. } => RevisionEvidence::Unknown(reason),
             },
             verdict: match verdict {
                 dto::ReportVerdict::Approve => Verdict::Approve,
@@ -350,6 +423,7 @@ fn declaration(input: dto::Handoff, provider: HostProvider) -> Result<Declaratio
                 dto::ReportVerdict::Blocked => Verdict::Blocked,
                 dto::ReportVerdict::NotSpecified => Verdict::NotSpecified,
             },
+            report: report.map(|report| Arc::new(structured_report(report))),
             assessments: project_assessments(assessments)?,
             edits: project_edits(
                 corrects.map(|correction| *correction),
@@ -385,6 +459,43 @@ fn declaration(input: dto::Handoff, provider: HostProvider) -> Result<Declaratio
             assessments: project_assessments(assessments)?,
         },
     })
+}
+
+fn structured_report(report: dto::StructuredReport) -> app::StructuredReport {
+    app::StructuredReport {
+        version: report.version,
+        scope: match report.scope {
+            dto::ReportScope::FullReview => app::ReportScope::FullReview,
+            dto::ReportScope::SelectedThreads => app::ReportScope::SelectedThreads,
+            dto::ReportScope::Amendment => app::ReportScope::Amendment,
+        },
+        findings: report
+            .findings
+            .into_iter()
+            .map(|finding| app::StructuredFinding {
+                id: finding.id,
+                title: finding.title,
+                severity: finding.severity,
+                blocking: finding.blocking,
+                details: app::FindingDetails {
+                    location: finding.location.map(|location| app::FindingLocation {
+                        path: location.path,
+                        line: location.line,
+                    }),
+                    consequence: finding.consequence,
+                    evidence: app::FindingBasis {
+                        kind: match finding.evidence.kind {
+                            dto::FindingBasisKind::Observed => app::FindingBasisKind::Observed,
+                            dto::FindingBasisKind::Gap => app::FindingBasisKind::Gap,
+                        },
+                        text: finding.evidence.text,
+                    },
+                    checked_sha: None,
+                    evidence_hash: None,
+                },
+            })
+            .collect(),
+    }
 }
 
 fn project_assessments(values: Vec<dto::Assessment>) -> Result<Vec<app::Assessment>, AppError> {

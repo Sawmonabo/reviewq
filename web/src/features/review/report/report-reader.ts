@@ -93,7 +93,7 @@ export function indexedDocument(
     )
       throw new Error("The report layout contains an invalid range.");
   }
-  const groups = planGroups(layout, changes, base);
+  const groups = planGroups(layout, changes, base, report.structuredVersion === undefined);
   if (groups.length <= 17) throw new Error("This report fits its full formatted view.");
   const owners = new Array<number>(spans.length);
   for (const [index, group] of groups.entries())
@@ -307,7 +307,12 @@ export function indexedDocument(
   };
 }
 
-function planGroups(layout: DisplayLayout, changes: Changes, base: string | undefined) {
+function planGroups(
+  layout: DisplayLayout,
+  changes: Changes,
+  base: string | undefined,
+  legacy: boolean,
+) {
   const spans = layout.blocks;
   const headings = spans.filter((s) => s.kind === "heading" && (s.headingLevel ?? 7) <= 3);
   if (headings.some((h) => !h.headingMarkdown))
@@ -324,7 +329,7 @@ function planGroups(layout: DisplayLayout, changes: Changes, base: string | unde
     labels.set(span.byteStart, {
       level: span.headingLevel!,
       label: reportText(node).trim(),
-      section: startsReportBody(node),
+      section: legacy ? startsReportBody(node) : node.tagName !== "h1",
     });
   }
   const bodyStart = spans.findIndex(
@@ -334,14 +339,18 @@ function planGroups(layout: DisplayLayout, changes: Changes, base: string | unde
   // verdict/count. Keep the complete cover inside its first presentation group.
   if (bodyStart < 1 || bodyStart > 18 || spans[bodyStart]?.kind === "table")
     throw new Error("The report cover needs its full document.");
-  const pieces = groupReportItems(spans, (span) => {
-    const heading =
-      span.byteStart >= spans[bodyStart]!.byteStart ? labels.get(span.byteStart) : undefined;
-    return {
-      offset: span.utf16Start,
-      ...(heading && { level: heading.level, label: heading.label }),
-    };
-  });
+  const pieces = groupReportItems(
+    spans,
+    (span) => {
+      const heading =
+        span.byteStart >= spans[bodyStart]!.byteStart ? labels.get(span.byteStart) : undefined;
+      return {
+        offset: span.utf16Start,
+        ...(heading && { level: heading.level, label: heading.label }),
+      };
+    },
+    legacy,
+  );
   let first = 0;
   let previousThreads = false;
   const result: Group[] = pieces.map((group, index) => {

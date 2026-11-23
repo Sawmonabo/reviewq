@@ -3,19 +3,19 @@ use reviewq_app::events::ResourceKey;
 use reviewq_app::notifications::{Kind, Observation, Source};
 use reviewq_app::reports::{
     CapturedArtifact, CorrectionKind, Declaration, Descriptor, ReportEdits, ReportReference,
-    ReportWork, RevisionEvidence, Source as ReportSource, Verdict,
+    ReportWork, RevisionEvidence, Source as ReportSource, StructuredReport, Verdict,
 };
 use reviewq_app::workflow::ReportFailureAddress;
 use reviewq_domain::identity::NativeInputId;
 use rusqlite::{Connection, OptionalExtension, params};
 
-use super::{batch, db_int, edits, ensure_claim, failures};
+use super::{authority, batch, db_int, edits, ensure_claim, failures, structured};
 use crate::StoreError;
 use crate::connection::WriteTx;
 use crate::events::now_ms;
 use crate::notifications::insert_notification;
 use crate::queue::identity_for_review;
-use crate::workspace::{advance_queue, configured, settings_revision};
+use crate::workspace::{advance_queue, settings_revision};
 
 pub(super) fn complete(
     tx: &mut WriteTx<'_>,
@@ -30,7 +30,8 @@ pub(super) fn complete(
     let run = work.call.lead.run_id().as_str();
     let receipt = work.acknowledgement.receipt_id.as_str();
     let time = now_ms()?;
-    if !configured(db, &identity_for_review(db, work.call.lead.review_id())?)? {
+    let identity = identity_for_review(db, work.call.lead.review_id())?;
+    let Some(authority) = authority::for_project(db, &identity)? else {
         return reject(
             tx,
             &work,
@@ -39,7 +40,7 @@ pub(super) fn complete(
             Some(&result),
         )
         .map(|()| false);
-    }
+    };
     if let Some(hold) =
         crate::hosts::unresolved_workflow_input(db, &work.call.lead, &work.call.turn_id)?
     {
@@ -61,27 +62,32 @@ pub(super) fn complete(
     }
     let current = head(db, run)?;
     let base = db.query_row(
-        "SELECT base_receipt_id, disposition_version, settings_revision FROM report_handoffs WHERE receipt_id=?1",
+        "SELECT base_receipt_id, disposition_version, settings_revision, json_extract(edits, '$.authority') FROM report_handoffs WHERE receipt_id=?1",
         [receipt],
-        |row| Ok((row.get::<_, Option<String>>(0)?, row.get::<_, i64>(1)?, row.get::<_, i64>(2)?)),
+        |row| Ok((row.get::<_, Option<String>>(0)?, row.get::<_, i64>(1)?, row.get::<_, i64>(2)?, row.get::<_, Option<String>>(3)?)),
     )?;
     let newer: bool = db.query_row(
         "SELECT EXISTS (SELECT 1 FROM report_handoffs
              WHERE run_id=?1 AND receipt_id<>?2 AND
-                ((source_generation=?3 AND source_position>?4) OR
-                   (source_generation<>?3 AND state IN ('pending_completion','recorded'))))",
+                coalesce(reviewq_report_order(source_generation,source_position,?3,?4)>0,
+                   state IN ('pending_completion','recorded')))",
         params![
             run,
             receipt,
-            work.call.source_generation,
+            super::address::encode(&work.call).as_ref(),
             db_int(work.call.source_position)?
         ],
         |row| row.get(0),
     )?;
+    // Receipts staged before scoped authority was recorded retain their original guard.
+    let authority_changed = match base.3 {
+        Some(saved) => saved != authority.0.as_str(),
+        None => base.2 != settings_revision(db)?.as_sqlite_integer(),
+    };
     if newer
         || current.receipt.as_ref() != base.0.as_ref()
         || current.disposition_version != base.1
-        || base.2 != settings_revision(db)?.as_sqlite_integer()
+        || authority_changed
     {
         return reject(
             tx,
@@ -129,6 +135,7 @@ pub(super) fn complete(
             verdict,
             amends,
             edits,
+            report,
             ..
         } => {
             let captured = artifact.as_ref().ok_or(AppError::Internal)?;
@@ -145,6 +152,8 @@ pub(super) fn complete(
             }
             if let Some(scope) = &scoped
                 && (!continuity_verified
+                    || (current.receipt.is_some() && !current.semantic_ready)
+                    || (current.structured && report.is_none())
                     || amends.is_some()
                     || edits.correction.is_some()
                     || !batch::edits_match(db, run, scope, edits, work.declaration.assessments())?
@@ -162,7 +171,7 @@ pub(super) fn complete(
             if let Some(reference) = amends
                 && (!current.complete
                     || !current.semantic_ready
-                    || captured.index.is_none()
+                    || (report.is_none() && (current.structured || captured.index.is_none()))
                     || !current.matches(reference)
                     || current
                         .original_hash
@@ -183,6 +192,8 @@ pub(super) fn complete(
             }
             if let Some(correction) = &edits.correction
                 && (!continuity_verified
+                    || !current.semantic_ready
+                    || (current.structured && report.is_none())
                     || !current.matches(&correction.base)
                     || !current.matches_revision(revision)
                     || current.verdict.as_deref() != Some(verdict.to_string().as_str()))
@@ -203,6 +214,7 @@ pub(super) fn complete(
                     current.disposition_version,
                     edits,
                     captured,
+                    report.as_deref(),
                 )?
             {
                 return reject(
@@ -219,6 +231,20 @@ pub(super) fn complete(
                     .correction
                     .as_ref()
                     .is_some_and(|correction| correction.kind == CorrectionKind::Presentation);
+            let same_source = current.hash.as_deref() == Some(captured.hash.as_str());
+            let projection = if let Some(report) = report {
+                let projection = structured::prepare(
+                    db, run, current.receipt.as_deref(), same_source, report, revision, edits,
+                    captured.index.as_deref().unwrap_or_default(),
+                )?;
+                match projection {
+                    Some(projection) if projection.fits(db, receipt)? => Some((projection, report, same_source)),
+                    Some(_) => return reject(tx, &work, Some(captured), "report_structured_payload_too_large", Some(&result)).map(|()| false),
+                    None => return reject(tx, &work, Some(captured), "report_structured_continuity_unproved", Some(&result)).map(|()| false),
+                }
+            } else {
+                None
+            };
             seal(db, artifact_id, captured)?;
             promote(
                 db,
@@ -232,6 +258,7 @@ pub(super) fn complete(
                 preserve_attention,
                 edits,
                 captured,
+                projection.as_ref().map(|(projection, report, same_source)| (projection, report.as_ref(), *same_source)),
                 time,
                 scoped
                     .as_ref()
@@ -400,6 +427,7 @@ struct Head {
     source_path: Option<Vec<u8>>,
     complete: bool,
     semantic_ready: bool,
+    structured: bool,
     change_count: Option<i64>,
     finding_count: Option<i64>,
     original_hash: Option<String>,
@@ -424,7 +452,7 @@ impl Head {
 fn head(db: &Connection, run: &str) -> Result<Head, StoreError> {
     Ok(db.query_row(
         "SELECT h.receipt_id, h.disposition_version, a.sha256, v.attention_receipt_id, v.reviewed_sha,
-                v.revision_reason, v.full_mr_reviewed_sha, v.verdict, v.coverage, c.source_kind, c.source_path, a.complete, a.original_sha256, v.coverage_source_sha, v.coverage_target_sha, v.semantic_index='ready', v.change_count, v.finding_count
+                v.revision_reason, v.full_mr_reviewed_sha, v.verdict, v.coverage, c.source_kind, c.source_path, a.complete, a.original_sha256, v.coverage_source_sha, v.coverage_target_sha, v.semantic_index='ready', v.change_count, v.finding_count, json_extract(c.edits,'$.structured.version') IS NOT NULL
          FROM report_heads h JOIN report_versions v USING(run_id, receipt_id)
          JOIN artifacts a USING(artifact_id)
          LEFT JOIN report_handoffs c ON c.run_id=v.run_id AND c.receipt_id=v.handoff_receipt_id
@@ -432,11 +460,11 @@ fn head(db: &Connection, run: &str) -> Result<Head, StoreError> {
         [run], |row| Ok(Head {
             receipt: row.get(0)?, disposition_version: row.get(1)?, hash: row.get(2)?,
             attention: row.get(3)?, reviewed_sha: row.get(4)?, revision_reason: row.get(5)?,
-            full_sha: row.get(6)?, verdict: row.get(7)?, coverage: row.get(8)?, source_kind: row.get(9)?, source_path: row.get(10)?, complete: row.get(11)?, original_hash: row.get(12)?, coverage_source: row.get(13)?, coverage_target: row.get(14)?, semantic_ready: row.get(15)?, change_count: row.get(16)?, finding_count: row.get(17)?,
+            full_sha: row.get(6)?, verdict: row.get(7)?, coverage: row.get(8)?, source_kind: row.get(9)?, source_path: row.get(10)?, complete: row.get(11)?, original_hash: row.get(12)?, coverage_source: row.get(13)?, coverage_target: row.get(14)?, semantic_ready: row.get(15)?, change_count: row.get(16)?, finding_count: row.get(17)?, structured: row.get(18)?,
         }),
     ).optional()?.unwrap_or(Head {
         receipt: None, disposition_version: 0, hash: None, attention: None,
-        reviewed_sha: None, revision_reason: None, full_sha: None, verdict: None, coverage: None, source_kind: None, source_path: None, complete: false, semantic_ready: false, change_count: None, finding_count: None, original_hash: None, coverage_source: None, coverage_target: None,
+        reviewed_sha: None, revision_reason: None, full_sha: None, verdict: None, coverage: None, source_kind: None, source_path: None, complete: false, semantic_ready: false, structured: false, change_count: None, finding_count: None, original_hash: None, coverage_source: None, coverage_target: None,
     }))
 }
 
@@ -473,6 +501,7 @@ fn promote(
     preserve_attention: bool,
     edits: &ReportEdits,
     captured: &CapturedArtifact,
+    structured: Option<(&structured::Projection, &StructuredReport, bool)>,
     time: i64,
     scoped: Option<(
         &crate::followups::work::FrozenManifest,
@@ -506,7 +535,9 @@ fn promote(
     } else {
         edits.findings.len() as i64
     };
-    let count = if amendment {
+    let count = if let Some((projection, ..)) = structured {
+        Some(projection.count)
+    } else if amendment {
         previous.finding_count
     } else {
         captured.index.as_ref().map(|items| {
@@ -540,7 +571,12 @@ fn promote(
             if keeps_coverage { previous.coverage_source.as_deref() } else { reviewed },
             if keeps_coverage { previous.coverage_target.as_deref() } else { scoped.and_then(|(manifest,_)| manifest.target_sha.as_deref()) }],
     )?;
-    if amendment {
+    if let Some((projection, report, same_source)) = structured {
+        projection.install(db, run, receipt, previous.receipt.as_deref(), same_source, &report.findings)?;
+        if let Some(items) = &captured.index {
+            write_index(db, run, receipt, items)?;
+        }
+    } else if amendment {
         let parent = previous.receipt.as_deref().ok_or(AppError::Internal)?;
         db.execute(
             "INSERT INTO report_findings
@@ -603,6 +639,7 @@ fn write_index(
                 severity,
                 blocking,
                 source: Some(source),
+                ..
             } => {
                 finding.execute(params![
                     run,

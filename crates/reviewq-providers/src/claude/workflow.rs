@@ -52,38 +52,17 @@ impl NativeWorkflowProof for ClaudeWorkflow {
         call_id: String,
         tool: WorkflowTool,
     ) -> AppFuture<'_, NativeCall> {
-        Box::pin(async move {
-            let context = self
-                .state
-                .claude_workflow_context(lead.clone(), None)
-                .await?;
-            let turn_id = context
-                .active_turn
-                .filter(|id| turn.as_ref().is_none_or(|turn| turn == id))
-                .ok_or(AppError::NotFound)?;
-            let id = call_id.clone();
-            let opening = self
-                .native
-                .read_native(context.session, move |session, cancelled| {
-                    claude_workflow_opening(&session, &id, tool, cancelled)
-                })
-                .await?;
-            if tool == WorkflowTool::Action
-                && (context.request.is_none() || context.request != opening.request)
-            {
-                return Err(AppError::Forbidden);
-            }
-            Ok(NativeCall {
-                lead,
-                turn_id,
-                root_turn_id: None,
-                call_id,
-                tool,
-                source_generation: opening.generation,
-                source_position: opening.position,
-                request_entry_id: opening.request,
-            })
-        })
+        self.verify_opening(lead, turn, call_id, tool, None)
+    }
+
+    fn verify_mcp_report_call(
+        &self,
+        lead: LeadTarget,
+        call_id: String,
+        arguments: Vec<u8>,
+        _origin_item_id: Option<String>,
+    ) -> AppFuture<'_, NativeCall> {
+        self.verify_opening(lead, None, call_id, WorkflowTool::Report, Some(arguments))
     }
 
     fn report_completion(
@@ -140,6 +119,56 @@ impl NativeWorkflowProof for ClaudeWorkflow {
                 normal_turn_completion: normal,
                 final_response,
             })))
+        })
+    }
+}
+
+impl ClaudeWorkflow {
+    fn verify_opening(
+        &self,
+        lead: LeadTarget,
+        turn: Option<NativeTurnId>,
+        call_id: String,
+        tool: WorkflowTool,
+        arguments: Option<Vec<u8>>,
+    ) -> AppFuture<'_, NativeCall> {
+        Box::pin(async move {
+            let context = self
+                .state
+                .claude_workflow_context(lead.clone(), None)
+                .await?;
+            let turn_id = context
+                .active_turn
+                .filter(|id| turn.as_ref().is_none_or(|turn| turn == id))
+                .ok_or(AppError::NotFound)?;
+            let arguments = arguments
+                .as_deref()
+                .map(serde_json::from_slice)
+                .transpose()
+                .map_err(|_| AppError::InvalidRequest)?;
+            let id = call_id.clone();
+            let opening = self
+                .native
+                .read_native(context.session, move |session, cancelled| {
+                    claude_workflow_opening(&session, &id, tool, arguments.as_ref(), cancelled)
+                })
+                .await?;
+            if tool == WorkflowTool::Action
+                && (context.request.is_none() || context.request != opening.request)
+            {
+                return Err(AppError::Forbidden);
+            }
+            Ok(NativeCall {
+                lead,
+                turn_id,
+                root_turn_id: None,
+                call_id,
+                tool,
+                source_generation: opening.generation,
+                source_position: opening.position,
+                source_ordinal: opening.ordinal,
+                request_entry_id: opening.request,
+            })
         })
     }
 }

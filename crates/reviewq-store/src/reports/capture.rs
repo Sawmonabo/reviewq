@@ -2,23 +2,23 @@ use std::ffi::OsString;
 use std::os::unix::ffi::{OsStrExt, OsStringExt};
 use std::path::PathBuf;
 
-use reviewq_app::access::{AppError, AppFuture};
+use reviewq_app::access::{Actor, AppError, AppFuture};
 use reviewq_app::events::{ResourceKey, Snapshot};
 use reviewq_app::reports::{
     AcceptedReport, ArtifactChunk, CapturedArtifact, Declaration, HandoffReceipt,
-    ReportCaptureStore, ReportReference, ReportWork, RevisionEvidence, Source,
+    ReportAuthority, ReportCaptureStore, ReportReference, ReportWork, RevisionEvidence, Source,
 };
 use reviewq_app::workflow::{
     ExpectedAcknowledgement, NativeCall, ReportFailureAddress, WorkflowTool,
 };
 use reviewq_domain::identity::{
-    MrIdentity, NativeInputId, ReportHash, Revision, RunId, SessionKey,
+    MrIdentity, NativeInputId, ReportHash, RunId, SessionKey,
 };
 use reviewq_domain::session::{AbsolutePath, LeadTarget};
 use rusqlite::{Connection, OptionalExtension, Row, params};
 use uuid::Uuid;
 
-use super::optional;
+use super::{address, optional};
 use crate::connection::WriteTx;
 use crate::events::{now_ms, snapshot};
 use crate::queue::{lead_for_run, parse, text};
@@ -26,10 +26,12 @@ use crate::workspace::{configured, settings_revision};
 use crate::{SqliteStore, StoreError};
 
 mod accept;
+mod authority;
 mod batch;
 mod edits;
 mod failures;
 mod reconciliation;
+mod structured;
 
 const CLAIM_MS: i64 = 60_000;
 const RECHECK_MS: i64 = 2_000;
@@ -63,17 +65,27 @@ impl ReportCaptureStore for SqliteStore {
         })
     }
 
-    fn report_source(&self, lead: LeadTarget) -> AppFuture<'_, (MrIdentity, Revision)> {
+    fn mcp_report_lead(
+        &self,
+        actor: Actor,
+        provider: reviewq_domain::session::HostProvider,
+        native_id: reviewq_domain::identity::NativeSessionId,
+    ) -> AppFuture<'_, LeadTarget> {
+        Box::pin(async move {
+            self.read(move |db| authority::checkout_lead(db, &actor, provider, native_id.as_str()))
+                .await.map_err(StoreError::app)
+        })
+    }
+
+    fn report_source(&self, lead: LeadTarget) -> AppFuture<'_, (MrIdentity, ReportAuthority)> {
         Box::pin(async move {
             self.read(move |db| {
                 if lead_for_session(db, lead.session_key())? != lead {
                     return Err(AppError::NotFound.into());
                 }
                 let identity = crate::queue::identity_for_review(db, lead.review_id())?;
-                if !configured(db, &identity)? {
-                    return Err(AppError::Unavailable.into());
-                }
-                Ok((identity, settings_revision(db)?))
+                let authority = authority::for_project(db, &identity)?.ok_or(AppError::Unavailable)?;
+                Ok((identity, authority))
             })
             .await
             .map_err(StoreError::app)
@@ -100,18 +112,25 @@ impl ReportCaptureStore for SqliteStore {
         declaration: Declaration,
         request_sha256: ReportHash,
         declaration_sha256: ReportHash,
-        source_settings: Option<Revision>,
+        source_authority: Option<ReportAuthority>,
+        checkout: Option<Actor>,
     ) -> AppFuture<'_, Snapshot<HandoffReceipt>> {
         Box::pin(async move {
             declaration.validate()?;
             self.write(move |tx| {
+                if let Some(actor) = checkout {
+                    let host = call.lead.binding().identity();
+                    if authority::checkout_lead(&tx.sql, &actor, host.provider(), host.native_id().as_str())? != call.lead {
+                        return Err(AppError::Forbidden.into());
+                    }
+                }
                 stage(
                     tx,
                     call,
                     declaration,
                     request_sha256,
                     declaration_sha256,
-                    source_settings,
+                    source_authority,
                 )
             })
             .await
@@ -132,7 +151,7 @@ impl ReportCaptureStore for SqliteStore {
                     "INSERT INTO report_correction_requests(run_id,lead_session_key,turn_id,call_id,source_generation,source_position,requested_at_ms)
                      VALUES(?1,?2,?3,?4,?5,?6,?7) ON CONFLICT DO NOTHING",
                     params![call.lead.run_id().as_str(),call.lead.session_key().as_str(),call.turn_id.as_str(),
-                        call.call_id,call.source_generation,db_int(call.source_position)?,time],
+                        call.call_id,address::encode(&call).as_ref(),db_int(call.source_position)?,time],
                 )?;
                 if inserted == 1
                     && let Some(notification) = failures::note(db, &call, Uuid::new_v4().to_string(),
@@ -407,7 +426,7 @@ fn saved(
         return Ok(None);
     };
     if text(row, 2)? != digest.as_str()
-        || text(row, 3)? != call.source_generation
+        || text(row, 3)? != address::encode(call).as_ref()
         || row.get::<_, i64>(4)? != db_int(call.source_position)?
         || optional::<NativeInputId>(row, 5)? != call.request_entry_id
         || optional::<reviewq_domain::identity::NativeTurnId>(row, 7)? != call.root_turn_id
@@ -427,21 +446,17 @@ fn stage(
     declaration: Declaration,
     request_sha256: ReportHash,
     declaration_sha256: ReportHash,
-    source_settings: Option<Revision>,
+    source_authority: Option<ReportAuthority>,
 ) -> Result<Snapshot<HandoffReceipt>, StoreError> {
     let db = &tx.sql;
     check_call(db, &call)?;
     if let Some(receipt) = saved(db, &call, &request_sha256)? {
         return snapshot(db, receipt);
     }
-    if !configured(
-        db,
-        &crate::queue::identity_for_review(db, call.lead.review_id())?,
-    )? {
-        return Err(AppError::Unavailable.into());
-    }
+    let identity = crate::queue::identity_for_review(db, call.lead.review_id())?;
+    let authority = authority::for_project(db, &identity)?.ok_or(AppError::Unavailable)?;
     let settings = settings_revision(db)?;
-    if declaration.requires_review_refresh() && source_settings != Some(settings) {
+    if declaration.requires_review_refresh() && source_authority.as_ref() != Some(&authority) {
         return Err(AppError::StaleRevision.into());
     }
     let run = call.lead.run_id();
@@ -477,9 +492,10 @@ fn stage(
             verdict,
             amends,
             edits,
+            report,
             ..
         } => {
-            let metadata = edits::encode(&edits)?;
+            let metadata = edits::encode(&edits, report.as_ref())?;
             (
                 "final",
                 Some(source),
@@ -515,6 +531,10 @@ fn stage(
         Some(RevisionEvidence::Unknown(reason)) => (None, Some(reason)),
         None => (None, None),
     };
+    let edits = authority::bind(db, edits.as_deref(), &authority)?;
+    if !structured::full_projection_fits(db, &edits, head.as_ref().map(|sha| sha.as_str()))? {
+        return Err(AppError::PayloadTooLarge.into());
+    }
     let receipt_id = Uuid::new_v4().to_string();
     let time = now_ms()?;
     db.execute(
@@ -527,7 +547,7 @@ fn stage(
                 'pending_completion',?21,?21,?21,?22,?23,?24,?25,?26,?27,?28)",
         params![
             receipt_id, run.as_str(), call.lead.session_key().as_str(), call.turn_id.as_str(), call.call_id,
-            call.source_generation, call.request_entry_id.as_ref().map(|id| id.as_str()), declaration_sha256.as_str(),
+            address::encode(&call).as_ref(), call.request_entry_id.as_ref().map(|id| id.as_str()), declaration_sha256.as_str(),
             form, kind, path.as_ref().map(|path| path.as_path().as_os_str().as_bytes()),
             hash.as_ref().map(|hash| hash.as_str()), head.as_ref().map(|sha| sha.as_str()), revision_reason,
             verdict.map(|value| value.to_string()), expected.as_ref().map(|value| value.receipt_id.as_str()),
@@ -578,13 +598,15 @@ fn claim(db: &Connection, limit: u16) -> Result<Vec<ReportWork>, StoreError> {
             .get::<_, i64>(18)?
             .checked_add(1)
             .ok_or(AppError::Internal)?;
+        let (generation, source_ordinal) = address::decode(text(row, 5)?);
         output.push(ReportWork {
             call: NativeCall {
                 lead,
                 turn_id: parse(text(row, 3)?)?,
                 root_turn_id: optional(row, 22)?,
                 call_id: row.get(4)?,
-                source_generation: row.get(5)?,
+                source_generation: generation.to_owned(),
+                source_ordinal,
                 source_position: u64::try_from(row.get::<_, i64>(19)?)
                     .map_err(|_| AppError::Internal)?,
                 request_entry_id: optional(row, 6)?,
@@ -634,7 +656,7 @@ fn declaration(row: &Row<'_>) -> Result<Declaration, StoreError> {
     Ok(match text(row, 8)? {
         "final" => {
             let metadata: Option<String> = row.get(21)?;
-            let edits = edits::decode(metadata.as_deref(), expected.as_ref())?;
+            let (edits, report) = edits::decode(metadata.as_deref(), expected.as_ref())?;
             Declaration::Final {
                 source: source.ok_or(AppError::Internal)?,
                 revision: match optional(row, 12)? {
@@ -642,6 +664,7 @@ fn declaration(row: &Row<'_>) -> Result<Declaration, StoreError> {
                     None => RevisionEvidence::Unknown(row.get(13)?),
                 },
                 verdict: parse(text(row, 14)?)?,
+                report,
                 amends: if edits.correction.is_some() {
                     None
                 } else {
@@ -672,7 +695,7 @@ fn ensure_claim(db: &Connection, work: &ReportWork) -> Result<Option<String>, St
         params![
             work.acknowledgement.receipt_id.as_str(), work.call.lead.run_id().as_str(),
             work.call.lead.session_key().as_str(), work.call.turn_id.as_str(), work.call.call_id,
-            work.call.source_generation, work.acknowledgement.declaration_sha256.as_str(), db_int(work.fence)?,
+            address::encode(&work.call).as_ref(), work.acknowledgement.declaration_sha256.as_str(), db_int(work.fence)?,
         ], |row| row.get(0),
     ).optional()?.ok_or_else(|| AppError::Conflict.into())
 }

@@ -44,7 +44,9 @@ pub(crate) use locator::{
     inspect_claude_lead, verified_claude_child, verified_claude_source, verified_codex_source,
     verify_codex_live_source,
 };
-pub(crate) use proof::{codex_opening, codex_question_answered, codex_question_opening};
+pub(crate) use proof::{
+    codex_mcp_opening, codex_opening, codex_question_answered, codex_question_opening,
+};
 pub(crate) use turn_metadata::{
     codex_exact_turn_settings, codex_turn_settings, codex_turn_started,
 };

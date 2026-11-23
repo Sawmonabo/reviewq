@@ -5,6 +5,12 @@ mod display;
 mod drawings;
 mod index;
 mod revision;
+mod structured;
+
+pub use structured::{
+    FindingBasis, FindingBasisKind, FindingDetails, FindingLocation, ReportScope, StructuredFinding,
+    StructuredReport,
+};
 
 pub use display::{
     DISPLAY_INDEX_FORMAT, DisplayBlock, DisplayBlockKind, DisplayFallback, DisplayIndex,
@@ -22,7 +28,7 @@ pub use revision::{
 
 pub use capture::{
     AcceptedReport, ArtifactChunk, Assessment, CHUNK_BYTES, CapturedArtifact, Declaration,
-    HandoffReceipt, HandoffState, ReportCaptureStore, ReportFileSource, ReportWork,
+    HandoffReceipt, HandoffState, ReportAuthority, ReportCaptureStore, ReportFileSource, ReportWork,
     RevisionEvidence, Source, hash_report_file, reconcile_reports,
 };
 
@@ -114,6 +120,9 @@ pub struct ReportSummary {
     pub coverage_target_sha: Option<GitSha>,
     pub verdict: Verdict,
     pub semantic_index: SemanticIndex,
+    pub structured_version: Option<u8>,
+    pub structured_scope: Option<ReportScope>,
+    pub blocking_finding_count: Option<u64>,
     pub finding_count: Option<u64>,
     pub change_count: Option<u64>,
     pub captured_at_ms: i64,
@@ -191,6 +200,13 @@ pub struct SourceRange {
 }
 
 #[derive(Clone)]
+pub struct FindingDisposition {
+    pub blocking: Option<bool>,
+    pub publication: Option<Publication>,
+    pub reason: String,
+}
+
+#[derive(Clone)]
 pub enum Descriptor {
     Finding {
         id: String,
@@ -198,6 +214,8 @@ pub enum Descriptor {
         severity: Option<String>,
         blocking: Option<bool>,
         source: Option<SourceRange>,
+        details: Option<Box<FindingDetails>>,
+        disposition: Option<Box<FindingDisposition>>,
     },
     Change {
         id: String,

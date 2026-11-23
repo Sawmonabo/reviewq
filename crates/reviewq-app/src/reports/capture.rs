@@ -1,12 +1,12 @@
 use std::sync::Arc;
 
 use reviewq_domain::identity::{
-    GitSha, MrIdentity, ReceiptId, ReportHash, Revision, RunId, SessionKey,
+    GitSha, MrIdentity, ReceiptId, ReportHash, RunId, SessionKey,
 };
 use reviewq_domain::session::{AbsolutePath, LeadTarget};
 use sha2::{Digest, Sha256};
 
-use crate::access::{AppError, AppFuture};
+use crate::access::{Actor, AppError, AppFuture};
 use crate::events::Snapshot;
 use crate::labels::labels;
 use crate::workflow::{
@@ -15,7 +15,10 @@ use crate::workflow::{
 };
 
 use super::index;
-use super::{ArtifactStats, Descriptor, FindingConclusion, ReportEdits, ReportReference, Verdict};
+use super::{
+    ArtifactStats, Descriptor, FindingConclusion, ReportEdits, ReportReference, ReportScope,
+    StructuredReport, Verdict,
+};
 
 pub const CHUNK_BYTES: usize = 64 * 1024;
 const SEMANTIC_BYTES: u64 = 4 * 1024 * 1024;
@@ -51,6 +54,7 @@ pub enum Declaration {
         source: Source,
         revision: RevisionEvidence,
         verdict: Verdict,
+        report: Option<Arc<StructuredReport>>,
         amends: Option<ReportReference>,
         edits: ReportEdits,
         assessments: Vec<Assessment>,
@@ -103,10 +107,20 @@ impl Declaration {
             edits,
             revision,
             assessments,
+            report,
             ..
         } = self
         {
             edits.validate(amends.as_ref(), revision, !assessments.is_empty())?;
+            if let Some(report) = report {
+                report.validate(if !assessments.is_empty() {
+                    ReportScope::SelectedThreads
+                } else if amends.is_some() || edits.correction.is_some() {
+                    ReportScope::Amendment
+                } else {
+                    ReportScope::FullReview
+                })?;
+            }
         }
         let mut discussions = std::collections::HashSet::new();
         if self.assessments().len() > 10
@@ -184,10 +198,22 @@ pub trait ReportFileSource: Send + Sync {
     ) -> AppFuture<'_, Arc<dyn ReportContent>>;
 }
 
+/// Identifies the configured project, GitLab principal and checkout used by a report.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ReportAuthority(pub ReportHash);
+
 pub trait ReportCaptureStore: Send + Sync {
     fn report_lead(&self, session: SessionKey) -> AppFuture<'_, LeadTarget>;
 
-    fn report_source(&self, lead: LeadTarget) -> AppFuture<'_, (MrIdentity, Revision)>;
+    /// Resolves a host-reported session inside the checkout that presented the grant.
+    fn mcp_report_lead(
+        &self,
+        actor: Actor,
+        provider: reviewq_domain::session::HostProvider,
+        native_id: reviewq_domain::identity::NativeSessionId,
+    ) -> AppFuture<'_, LeadTarget>;
+
+    fn report_source(&self, lead: LeadTarget) -> AppFuture<'_, (MrIdentity, ReportAuthority)>;
 
     fn accepted_report(&self, lead: LeadTarget) -> AppFuture<'_, Snapshot<Option<AcceptedReport>>>;
 
@@ -197,7 +223,8 @@ pub trait ReportCaptureStore: Send + Sync {
         declaration: Declaration,
         request_sha256: ReportHash,
         declaration_sha256: ReportHash,
-        source_settings: Option<Revision>,
+        source_authority: Option<ReportAuthority>,
+        checkout: Option<Actor>,
     ) -> AppFuture<'_, Snapshot<HandoffReceipt>>;
 
     fn reserve_report_correction(&self, call: NativeCall) -> AppFuture<'_, bool>;
@@ -527,9 +554,10 @@ async fn read_source(
         complete: true,
     };
     let display_admitted = stats.require_markdown_budget().is_ok();
+    let legacy = !matches!(&work.declaration, Declaration::Final { report: Some(_), .. });
     let (index, semantic_failure, display_source) = match index_source {
         Some(source) => match tokio::task::spawn_blocking(move || {
-            let index = index::parse(&source)?;
+            let index = index::parse(&source, legacy)?;
             Ok::<_, AppError>((index, display_admitted.then_some(source)))
         })
         .await

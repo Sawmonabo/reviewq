@@ -60,6 +60,8 @@ export default function ReportDocument({
   const [notice, setNotice] = useState<string>();
   const [feedbackNotice, setFeedbackNotice] = useState<string>();
   const [context, setContext] = useState<"findings" | "changes" | "sections">();
+  const structured = report.structuredVersion !== undefined;
+  const readerHistory = structured ? null : historyAccess;
   const contextTitle =
     context === "findings"
       ? "Finding dispositions"
@@ -199,7 +201,7 @@ export default function ReportDocument({
 
   const sourceView = (
     <ReportSource
-      historyAccess={historyAccess}
+      historyAccess={readerHistory}
       runId={run.runId}
       report={report}
       requestedOffset={sourceOffset}
@@ -220,8 +222,49 @@ export default function ReportDocument({
   );
   return (
     <>
+      {structured && (
+        <section className="report-structured stack" aria-label="Review findings">
+          <div className="spread">
+            <div className="actions">
+              <strong>{readable(report.verdict)}</strong>
+              <span className="badge">
+                {report.structuredScope === "amendment"
+                  ? "Amendment"
+                  : report.coverage === "full_mr"
+                    ? "Full MR"
+                    : "Selected threads"}
+              </span>
+              <span className="badge">
+                {report.findingCount} {report.findingCount === 1 ? "finding" : "findings"}
+              </span>
+              <span className="badge">{report.blockingFindingCount} blocking</span>
+            </div>
+            {historyAccess}
+          </div>
+          {report.reviewedSha ? (
+            <p className="meta">
+              Reviewed revision <code>{report.reviewedSha}</code>
+            </p>
+          ) : (
+            <p className="meta">Revision unavailable · {report.revisionReason}</p>
+          )}
+          {report.findingCount ? (
+            <ReportDetails
+              run={run}
+              report={report}
+              collection="findings"
+              current={current}
+              drafts={drafts}
+              reviewTitle={reviewTitle}
+              onSource={openSource}
+            />
+          ) : (
+            <p>No findings reported.</p>
+          )}
+        </section>
+      )}
       <div className="report-reader" ref={reader}>
-        {!sourceMode && (body.pending || !displayed?.reader) && historyAccess}
+        {!sourceMode && (body.pending || !displayed?.reader) && readerHistory}
         {notice && <Notice>{notice}</Notice>}
         {!sourceMode && displayed?.outcomeError && (
           <Notice retry={body.retry}>Accepted finding outcomes are unavailable.</Notice>
@@ -229,7 +272,7 @@ export default function ReportDocument({
         {sourceMode ? (
           tryTable ? (
             <ReportTable
-              historyAccess={historyAccess}
+              historyAccess={readerHistory}
               runId={run.runId}
               report={report}
               base={safeUrl(webUrl)}
@@ -249,7 +292,7 @@ export default function ReportDocument({
           <Loading label="Loading accepted report…" />
         ) : displayed?.reader ? (
           <RichReport
-            historyAccess={historyAccess}
+            historyAccess={readerHistory}
             document={displayed.reader}
             report={report}
             onFallback={fallback}
@@ -291,7 +334,7 @@ export default function ReportDocument({
           trigger={<Icon name="more" />}
           triggerRef={reportActions}
           items={[
-            ...(report.semanticIndex === "ready" && report.findingCount !== 0
+            ...(!structured && report.semanticIndex === "ready" && report.findingCount !== 0
               ? [{ label: "Finding dispositions", run: () => setContext("findings") }]
               : []),
             ...(report.semanticIndex === "ready" && report.changeCount !== 0
@@ -427,7 +470,7 @@ async function loadReport(
 ) {
   const eligible = !full && canWindowReport(report);
   const [outcomes, entry] = await Promise.all([
-    report.changeCount
+    report.changeCount && report.structuredVersion === undefined
       ? acceptedChanges(runId, report, signal)
           .then((result) => ({ changes: result.data, error: false }))
           .catch(() => {

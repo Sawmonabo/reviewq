@@ -15,6 +15,7 @@ use super::{Cancel, content, file, locator, proof, reader::NameBudget};
 
 pub(crate) struct CodexTerminalReport {
     pub normal: bool,
+    pub result_seen: bool,
     pub response: Option<Arc<dyn ReportContent>>,
 }
 
@@ -25,11 +26,13 @@ pub(crate) async fn codex_report_terminal(
 ) -> Result<Option<CodexTerminalReport>, AppError> {
     let cancel = Cancel(Arc::new(AtomicBool::new(false)));
     let stopped = cancel.0.clone();
-    let Some((source, normal, response)) = tokio::task::spawn_blocking(move || {
+    let Some((source, normal, result_seen, response)) = tokio::task::spawn_blocking(move || {
         let source = locator::verify(call.lead.binding(), None, &path, &stopped)?
             .ok_or(AppError::Unavailable)?;
         let outcome = terminal(&source, &call, include_response, &stopped)?;
-        Ok::<_, AppError>(outcome.map(|(normal, response)| (source, normal, response)))
+        Ok::<_, AppError>(
+            outcome.map(|(normal, result_seen, response)| (source, normal, result_seen, response)),
+        )
     })
     .await
     .map_err(|_| AppError::Unavailable)??
@@ -42,7 +45,11 @@ pub(crate) async fn codex_report_terminal(
         }
         None => None,
     };
-    Ok(Some(CodexTerminalReport { normal, response }))
+    Ok(Some(CodexTerminalReport {
+        normal,
+        result_seen,
+        response,
+    }))
 }
 
 pub(crate) async fn codex_earlier_report_failures(
@@ -78,9 +85,11 @@ pub(crate) async fn codex_earlier_report_failures(
             if record.kind.as_deref() != Some("item_completed")
                 || record.thread.as_deref() != Some(source.native_id.as_str())
                 || record.item.restricted
-                || !(record.item.kind.as_deref() == Some("CommandExecution")
-                    || (record.item.kind.as_deref() == Some("AgentMessage")
-                        && record.item.phase.as_deref() == Some("final_answer")))
+                || !(matches!(
+                    record.item.kind.as_deref(),
+                    Some("CommandExecution" | "McpToolCall")
+                ) || (record.item.kind.as_deref() == Some("AgentMessage")
+                    && record.item.phase.as_deref() == Some("final_answer")))
             {
                 continue;
             }
@@ -144,7 +153,7 @@ fn terminal(
     call: &NativeCall,
     include_response: bool,
     cancelled: &AtomicBool,
-) -> Result<Option<(bool, Option<FinalResponse>)>, AppError> {
+) -> Result<Option<(bool, bool, Option<FinalResponse>)>, AppError> {
     let generation = file::generation(source)?;
     let length = source
         .file
@@ -160,13 +169,24 @@ fn terminal(
     }
     let mut lines = file::Lines::new(&source.file, cancelled);
     let mut offset = lines.next(call.source_position, length, &mut budget)?;
-    if !file::boundary(&source.file, offset)?
-        || !proof::opening(
-            lines.input(call.source_position, offset),
-            &call.call_id,
-            None,
-        )?
-    {
+    if !file::boundary(&source.file, offset)? {
+        return Err(AppError::Conflict);
+    }
+    let opening = lines.input(call.source_position, offset);
+    let valid = if call.source_ordinal > 0 {
+        proof::code_cell_opening(opening)?
+            && super::turn_metadata::turn_before(
+                source,
+                call.source_position,
+                &mut budget,
+                cancelled,
+            )?
+            .as_deref()
+                == Some(call.turn_id.as_str())
+    } else {
+        proof::opening(opening, &call.call_id, None)?
+    };
+    if !valid {
         return Err(AppError::Conflict);
     }
     let mut result_seen = false;
@@ -205,16 +225,18 @@ fn terminal(
                         Ok::<_, AppError>((reference, hash_record(lines.input(start, end))?))
                     })
                     .transpose()?;
-                return Ok(Some((normal, response)));
+                return Ok(Some((normal, result_seen, response)));
             }
-            Some("exec_command_end") if event.call.as_deref() == Some(call.call_id.as_str()) => {
+            Some("exec_command_end" | "mcp_tool_call_end")
+                if event.call.as_deref() == Some(call.call_id.as_str()) =>
+            {
                 result_seen = true;
             }
             Some("item_completed")
                 if event.thread.as_deref() == Some(source.native_id.as_str()) =>
             {
                 match event.item.kind.as_deref() {
-                    Some("CommandExecution")
+                    Some("CommandExecution" | "McpToolCall")
                         if event.item.id.as_deref() == Some(call.call_id.as_str()) =>
                     {
                         result_seen = true;
@@ -335,3 +357,6 @@ fn hash_record(mut input: impl Read) -> Result<[u8; 32], AppError> {
         digest.update(&buffer[..used]);
     }
 }
+
+#[cfg(test)]
+mod tests;

@@ -1,6 +1,7 @@
 use reviewq_app::access::AppError;
 use reviewq_app::reports::{
-    Collection, ContextKey, ContextPosition, ContextRequest, Descriptor, ReportContext, SourceRange,
+    Collection, ContextKey, ContextPosition, ContextRequest, Descriptor, FindingDetails,
+    FindingDisposition, ReportContext, SourceRange,
 };
 use reviewq_domain::identity::{Revision, RunId};
 use rusqlite::{Connection, Row, params};
@@ -99,9 +100,17 @@ pub(super) fn read(
 fn query(collection: Collection) -> &'static str {
     match collection {
         Collection::Findings =>
-            "SELECT finding_id, title, severity, blocking, scalar_offset, scalar_length, evidence_sha256
-             FROM report_findings WHERE run_id=?1 AND receipt_id=?2 AND finding_id>?3
-             ORDER BY finding_id LIMIT ?5",
+            "SELECT f.finding_id, f.title, f.severity, f.blocking, f.scalar_offset, f.scalar_length,
+                    f.evidence_sha256, details.value, d.blocking, d.publication, d.reason
+             FROM report_findings f LEFT JOIN report_handoffs h ON h.receipt_id=f.receipt_id
+             LEFT JOIN json_each(h.edits, '$.acceptedDetails') details ON details.key=f.finding_id
+             LEFT JOIN finding_dispositions d ON d.run_id=f.run_id AND d.finding_id=f.finding_id
+               AND d.removed=0 AND d.disposition_version=(
+                 SELECT MAX(a.disposition_version) FROM finding_dispositions a
+                 WHERE a.run_id=f.run_id AND a.finding_id=f.finding_id AND a.disposition_version<=?4
+               )
+             WHERE f.run_id=?1 AND f.receipt_id=?2 AND f.finding_id>?3
+             ORDER BY f.finding_id LIMIT ?5",
         Collection::Changes =>
             "SELECT c.finding_id, c.conclusion, c.reason, c.checked_sha,
                 (SELECT json_group_array(d.discussion_id) FROM (
@@ -149,6 +158,24 @@ fn decode(collection: Collection, row: &Row<'_>) -> Result<Descriptor, StoreErro
             source: (row.get::<_, Option<i64>>(4)?.is_some())
                 .then(|| range(4))
                 .transpose()?,
+            details: text_optional(row, 7)?
+                .map(|value| {
+                    let mut details: FindingDetails =
+                        serde_json::from_str(value).map_err(|_| AppError::Internal)?;
+                    details.evidence_hash = row.get(6)?;
+                    Ok::<_, StoreError>(Box::new(details))
+                })
+                .transpose()?,
+            disposition: row
+                .get::<_, Option<String>>(10)?
+                .map(|reason| {
+                    Ok::<_, StoreError>(Box::new(FindingDisposition {
+                        blocking: row.get(8)?,
+                        publication: optional(row, 9)?,
+                        reason,
+                    }))
+                })
+                .transpose()?,
         },
         Collection::Changes => Descriptor::Change {
             id: row.get(0)?,
@@ -168,6 +195,13 @@ fn decode(collection: Collection, row: &Row<'_>) -> Result<Descriptor, StoreErro
             reason: row.get(3)?,
         },
     })
+}
+
+fn text_optional<'a>(row: &'a Row<'_>, column: usize) -> Result<Option<&'a str>, StoreError> {
+    Ok(row
+        .get_ref(column)?
+        .as_str_or_null()
+        .map_err(rusqlite::Error::from)?)
 }
 
 fn revision(value: i64) -> Result<Revision, StoreError> {

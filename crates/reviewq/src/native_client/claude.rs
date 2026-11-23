@@ -77,6 +77,24 @@ pub(crate) async fn claude_bridge(
             let call = fields
                 .remove("callId")
                 .ok_or("Missing native Claude call.")?;
+            if matches!(operation, ClaudeBridgeOperation::Report) {
+                let input = serde_json::Value::Object(std::mem::take(fields));
+                let errors = reviewq_protocol::reports::validate_report_handoff(&input);
+                if !errors.is_empty() {
+                    println!(
+                        "{}",
+                        serde_json::json!({
+                            "error": "Invalid report handoff.",
+                            "fieldErrors": errors,
+                            "correctionRequested": true,
+                        })
+                    );
+                    return Ok(());
+                }
+                if let serde_json::Value::Object(input) = input {
+                    *fields = input;
+                }
+            }
             fields.insert(
                 "context".into(),
                 serde_json::json!({

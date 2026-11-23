@@ -134,32 +134,104 @@ pub(super) fn opening(
     expected: &str,
     expected_tool: Option<&str>,
 ) -> Result<bool, AppError> {
+    let Some(row) = response_call(input)? else {
+        return Ok(false);
+    };
+    Ok(row.call.as_deref() == Some(expected)
+        && expected_tool.is_none_or(|name| {
+            row.kind.as_deref() == Some("function_call") && row.name.as_deref() == Some(name)
+        }))
+}
+
+#[derive(Default)]
+struct ResponseCall {
+    kind: Option<String>,
+    call: Option<String>,
+    item: Option<String>,
+    name: Option<String>,
+}
+
+impl ResponseCall {
+    fn code_cell(&self) -> bool {
+        self.kind.as_deref() == Some("custom_tool_call")
+            && matches!(self.name.as_deref(), Some("exec" | "functions.exec"))
+    }
+}
+
+fn response_call(input: impl Read) -> Result<Option<ResponseCall>, AppError> {
     let mut reader = JsonStreamReader::new(NameBudget::new(input));
-    let (mut outer, mut kind, mut id, mut tool) = (None, None, None, None);
+    let mut outer = None;
+    let mut row = ResponseCall::default();
     object(&mut reader, |name, reader| match name {
         "type" => string(reader, ID_BYTES).map(|value| outer = value),
         "payload" if reader.peek().map_err(invalid)? == ValueType::Object => {
             object(reader, |name, reader| match name {
-                "type" => string(reader, ID_BYTES).map(|value| kind = value),
-                "call_id" => string(reader, ID_BYTES).map(|value| id = value),
-                "name" if expected_tool.is_some() => {
-                    string(reader, ID_BYTES).map(|value| tool = value)
-                }
+                "type" => string(reader, ID_BYTES).map(|value| row.kind = value),
+                "call_id" => string(reader, ID_BYTES).map(|value| row.call = value),
+                "id" => string(reader, ID_BYTES).map(|value| row.item = value),
+                "name" => string(reader, ID_BYTES).map(|value| row.name = value),
                 _ => reader.skip_value().map_err(invalid),
             })
         }
         _ => reader.skip_value().map_err(invalid),
     })?;
     reader.consume_trailing_whitespace().map_err(invalid)?;
-    Ok(outer.as_deref() == Some("response_item")
+    Ok((outer.as_deref() == Some("response_item")
         && matches!(
-            kind.as_deref(),
+            row.kind.as_deref(),
             Some("function_call" | "custom_tool_call" | "local_shell_call")
-        )
-        && id.as_deref() == Some(expected)
-        && expected_tool.is_none_or(|name| {
-            kind.as_deref() == Some("function_call") && tool.as_deref() == Some(name)
-        }))
+        ))
+    .then_some(row))
+}
+
+/// A direct tool has its own persisted opening. A nested tool shares the Code Mode
+/// cell's opening and is ordered separately by the host's active turn item index.
+pub(crate) async fn codex_mcp_opening(
+    binding: NativeBinding,
+    path: PathBuf,
+    turn: NativeTurnId,
+    call: String,
+    origin_item: Option<String>,
+) -> Result<(String, u64, bool), AppError> {
+    let cancel = Cancel(Arc::new(AtomicBool::new(false)));
+    let stopped = cancel.0.clone();
+    tokio::task::spawn_blocking(move || {
+        let source =
+            locator::verify(&binding, None, &path, &stopped)?.ok_or(AppError::Unavailable)?;
+        let length = source
+            .file
+            .metadata()
+            .map_err(|_| AppError::Unavailable)?
+            .len();
+        let mut budget = SEARCH_BYTES;
+        let mut lines = file::Lines::new(&source.file, &stopped);
+        let mut end = lines.previous(length, &mut budget)?;
+        while end > 0 {
+            let start = lines.previous(end - 1, &mut budget)?;
+            if let Some(row) = response_call(lines.input(start, end))? {
+                let direct = row.kind.as_deref() == Some("function_call")
+                    && row.call.as_deref() == Some(&call);
+                let nested = row.code_cell() && row.item.is_some() && row.item == origin_item;
+                if direct || nested {
+                    if super::turn_metadata::turn_before(&source, start, &mut budget, &stopped)?
+                        .as_deref()
+                        != Some(turn.as_str())
+                    {
+                        return Err(AppError::Conflict);
+                    }
+                    return Ok((file::generation(&source)?, start, nested));
+                }
+            }
+            end = start;
+        }
+        Err(AppError::NotFound)
+    })
+    .await
+    .map_err(|_| AppError::Unavailable)?
+}
+
+pub(super) fn code_cell_opening(input: impl Read) -> Result<bool, AppError> {
+    Ok(response_call(input)?.is_some_and(|row| row.code_cell()))
 }
 
 pub(crate) async fn codex_question_answered(

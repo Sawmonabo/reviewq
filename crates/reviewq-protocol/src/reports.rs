@@ -85,6 +85,12 @@ pub struct ReportSummary {
     pub coverage_target_sha: Option<GitShaDto>,
     pub verdict: Verdict,
     pub semantic_index: SemanticIndex,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub structured_version: Option<u8>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub structured_scope: Option<ReportScope>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub blocking_finding_count: Option<SafeCountDto>,
     pub finding_count: Option<SafeCountDto>,
     pub change_count: Option<SafeCountDto>,
     pub captured_at: UtcTimestampDto,
@@ -283,6 +289,10 @@ pub enum Descriptor {
         severity: Option<String>,
         blocking: Option<bool>,
         source: Option<SourceRange>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        details: Option<Box<FindingDetails>>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        disposition: Option<Box<FindingDisposition>>,
     },
     Change {
         finding_id: String,
@@ -301,6 +311,27 @@ pub enum Descriptor {
         title: String,
         source: SourceRange,
     },
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct FindingDetails {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub location: Option<FindingLocation>,
+    pub consequence: String,
+    pub evidence: FindingBasis,
+    pub checked_sha: Option<GitShaDto>,
+    pub evidence_sha256: ReportHashDto,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct FindingDisposition {
+    pub blocking: Option<bool>,
+    pub publication: Option<Publication>,
+    pub reason: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -456,6 +487,9 @@ pub struct FeedbackRequest {
 mod handoff;
 pub use handoff::{
     AcceptedReference, AcceptedReport, Assessment, CodexCommand, Correction, CorrectionKind,
-    EvidenceReference, FindingEdit, Handoff, HandoffCommand, HandoffReceipt, HandoffState,
-    NativeContext, NativeReportAddress, ReportRevision, ReportSource, ReportVerdict, SectionEdit,
+    EvidenceReference, FindingBasis, FindingBasisKind, FindingEdit, FindingLocation, Handoff,
+    HandoffCommand, HandoffReceipt, HandoffState, NativeContext, NativeReportAddress,
+    REPORT_HANDOFF_DESCRIPTION, REPORT_HANDOFF_EXAMPLE, REPORT_HANDOFF_SCHEMA,
+    ReportHandoffFieldError, ReportHandoffInput, ReportRevision, ReportScope, ReportSource,
+    ReportVerdict, SectionEdit, StructuredFinding, StructuredReport, validate_report_handoff,
 };
