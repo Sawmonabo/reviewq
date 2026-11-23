@@ -578,12 +578,23 @@ fn stage(
         Some(RevisionEvidence::Unknown(reason)) => (None, Some(reason)),
         None => (None, None),
     };
+    let source_generation = address::encode(&call);
+    let source_position = db_int(call.source_position)?;
+    // Terminal receipts cannot reopen. Pin the incomparable ones already
+    // recorded when this verified active call enters the store.
+    let incomparable_recorded: i64 = db.query_row(
+        "SELECT count(*) FROM report_handoffs WHERE run_id=?1 AND state='recorded'
+           AND reviewq_report_order(source_generation,source_position,?2,?3) IS NULL",
+        params![run.as_str(), source_generation.as_ref(), source_position],
+        |row| row.get(0),
+    )?;
     let edits = authority::bind(
         db,
         edits.as_deref(),
         &authority,
         checkout,
         call.arguments_sha256.as_ref(),
+        incomparable_recorded,
     )?;
     if !structured::full_projection_fits(db, &edits, head.as_ref().map(|sha| sha.as_str()))? {
         return Err(AppError::PayloadTooLarge.into());
@@ -600,12 +611,12 @@ fn stage(
                 'pending_completion',?21,?21,?21,?22,?23,?24,?25,?26,?27,?28)",
         params![
             receipt_id, run.as_str(), call.lead.session_key().as_str(), call.turn_id.as_str(), call.call_id,
-            address::encode(&call).as_ref(), call.request_entry_id.as_ref().map(|id| id.as_str()), declaration_sha256.as_str(),
+            source_generation.as_ref(), call.request_entry_id.as_ref().map(|id| id.as_str()), declaration_sha256.as_str(),
             form, kind, path.as_ref().map(|path| path.as_path().as_os_str().as_bytes()),
             hash.as_ref().map(|hash| hash.as_str()), head.as_ref().map(|sha| sha.as_str()), revision_reason,
             verdict.map(|value| value.to_string()), expected.as_ref().map(|value| value.receipt_id.as_str()),
             expected.as_ref().map(|value| value.hash.as_str()), base, version, reason, time,
-            db_int(call.source_position)?, request_sha256.as_str(), settings.as_sqlite_integer(), scoped_batch, assessments, edits,
+            source_position, request_sha256.as_str(), settings.as_sqlite_integer(), scoped_batch, assessments, edits,
             call.root_turn_id.as_ref().map(|turn| turn.as_str()),
         ],
     )?;

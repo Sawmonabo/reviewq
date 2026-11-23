@@ -32,6 +32,7 @@ pub(super) fn bind(
     authority: &ReportAuthority,
     checkout: Option<&Actor>,
     arguments: Option<&ReportHash>,
+    incomparable_recorded: i64,
 ) -> Result<String, StoreError> {
     let grant = match checkout.map(Actor::scope) {
         Some(ActorScope::CheckoutGrant(id)) => Some(id.as_str()),
@@ -42,8 +43,9 @@ pub(super) fn bind(
         .and_then(Actor::grant_epoch)
         .map(|value| value.as_sqlite_integer());
     let metadata: String = db.query_row(
-        r#"SELECT json_set(coalesce(?1, '{"findings":[],"sections":[]}'), '$.authority', ?2, '$.grantId', ?3, '$.grantEpoch', ?4, '$.argumentsSha256', ?5)"#,
-        params![edits, authority.0.as_str(), grant, epoch, arguments.map(ReportHash::as_str)],
+        r#"SELECT json_set(coalesce(?1, '{"findings":[],"sections":[]}'), '$.authority', ?2,
+              '$.grantId', ?3, '$.grantEpoch', ?4, '$.argumentsSha256', ?5, '$.incomparableRecorded', ?6)"#,
+        params![edits, authority.0.as_str(), grant, epoch, arguments.map(ReportHash::as_str), incomparable_recorded],
         |row| row.get(0),
     )?;
     if metadata.len() > 128 * 1024 {

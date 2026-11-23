@@ -140,6 +140,26 @@ pub(crate) async fn claude_bridge(
     let result = bridge(&client, &endpoint, path, serde_json::to_vec(&payload)?).await?;
     let status = result.status();
     let body = bounded(result, 256 * 1024).await?;
+    #[derive(serde::Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct InvalidReport {
+        field_errors: Vec<reviewq_protocol::reports::ReportHandoffFieldError>,
+    }
+    if status == reqwest::StatusCode::BAD_REQUEST
+        && matches!(operation, ClaudeBridgeOperation::Report)
+        && let Ok(response) = serde_json::from_slice::<InvalidReport>(&body)
+        && !response.field_errors.is_empty()
+    {
+        println!(
+            "{}",
+            serde_json::json!({
+                "error": "Invalid report handoff.",
+                "fieldErrors": response.field_errors,
+                "correctionRequested": true,
+            })
+        );
+        return Ok(());
+    }
     if status == reqwest::StatusCode::UNPROCESSABLE_ENTITY
         && matches!(operation, ClaudeBridgeOperation::Report)
     {

@@ -72,19 +72,7 @@ pub(super) fn complete(
         |row| Ok((row.get::<_, Option<String>>(0)?, row.get::<_, i64>(1)?, row.get::<_, i64>(2)?,
             row.get::<_, Option<String>>(3)?, row.get::<_, bool>(4)?)),
     )?;
-    let newer: bool = db.query_row(
-        "SELECT EXISTS (SELECT 1 FROM report_handoffs
-             WHERE run_id=?1 AND receipt_id<>?2 AND
-                coalesce(reviewq_report_order(source_generation,source_position,?3,?4)>0,
-                   state IN ('pending_completion','recorded')))",
-        params![
-            run,
-            receipt,
-            super::address::encode(&work.call).as_ref(),
-            db_int(work.call.source_position)?
-        ],
-        |row| row.get(0),
-    )?;
+    let newer = newer_handoff(db, receipt)?;
     // Receipts staged before scoped authority was recorded retain their original guard.
     let authority_changed = match saved_authority {
         Some(saved) => saved != authority.0.as_str(),
@@ -385,6 +373,26 @@ pub(super) fn complete(
     }
     emit(tx, &work, time, notification)?;
     Ok(matches!(work.declaration, Declaration::Final { .. }))
+}
+
+fn newer_handoff(db: &Connection, staged_receipt: &str) -> Result<bool, StoreError> {
+    // A missing admission count preserves the guard for pre-upgrade stages.
+    // Across generations, pending calls and changes in the recorded count
+    // indicate competing submissions without a comparable native order.
+    Ok(db.query_row(
+        "WITH competing AS (
+            SELECT other.state, reviewq_report_order(other.source_generation,other.source_position,
+                       staged.source_generation,staged.source_position) AS native_order
+            FROM report_handoffs staged JOIN report_handoffs other USING(run_id)
+            WHERE staged.receipt_id=?1 AND other.receipt_id<>staged.receipt_id
+         )
+         SELECT count(*) FILTER (WHERE coalesce(native_order>0,state='pending_completion'))>0
+            OR count(*) FILTER (WHERE native_order IS NULL AND state='recorded')<>coalesce(
+                (SELECT json_extract(edits,'$.incomparableRecorded') FROM report_handoffs WHERE receipt_id=?1),0)
+         FROM competing",
+        [staged_receipt],
+        |row| row.get(0),
+    )?)
 }
 
 pub(super) fn reject(
@@ -746,3 +754,6 @@ fn emit(
     tx.emit(&keys)?;
     Ok(())
 }
+
+#[cfg(test)]
+mod tests;

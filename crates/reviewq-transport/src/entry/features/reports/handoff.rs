@@ -235,6 +235,9 @@ pub(in crate::entry) async fn submit_verified(
                         .await?;
                 *sha256 = Some(hash(hash_value.as_str())?);
             }
+            if handoff.changes_amended_source() {
+                return Err(AppError::ReportAmendmentSourceChanged);
+            }
             let bound = serde_json::to_vec(&handoff).map_err(|_| AppError::Internal)?;
             let declaration_sha256 = ReportHash::from_sha256(Sha256::digest(bound).into());
             let declaration = match declaration(handoff, expected).and_then(|declaration| {

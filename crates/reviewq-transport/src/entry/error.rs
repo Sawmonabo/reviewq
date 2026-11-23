@@ -69,6 +69,14 @@ impl IntoResponse for ApiError {
         match self {
             Self::Application(error) => {
                 let (status, failure) = failure(error);
+                if error == AppError::ReportAmendmentSourceChanged {
+                    let body = serde_json::json!({
+                        "cursor": failure.cursor,
+                        "error": failure.error,
+                        "fieldErrors": [reviewq_protocol::reports::report_amendment_source_error()],
+                    });
+                    return (status, Json(body)).into_response();
+                }
                 (status, Json(failure)).into_response()
             }
             Self::BrowserProofRejected => {
@@ -81,7 +89,9 @@ impl IntoResponse for ApiError {
 
 pub(super) fn failure(error: AppError) -> (StatusCode, Failure) {
     let (status, code) = match error {
-        AppError::InvalidRequest => (StatusCode::BAD_REQUEST, ErrorCode::InvalidRequest),
+        AppError::InvalidRequest | AppError::ReportAmendmentSourceChanged => {
+            (StatusCode::BAD_REQUEST, ErrorCode::InvalidRequest)
+        }
         AppError::TicketUnverified => (
             StatusCode::UNPROCESSABLE_ENTITY,
             ErrorCode::TicketUnverified,

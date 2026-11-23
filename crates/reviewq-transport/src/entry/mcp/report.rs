@@ -3,7 +3,8 @@
 use reviewq_app::access::{Actor, AppError};
 use reviewq_domain::session::HostProvider;
 use reviewq_protocol::reports::{
-    REPORT_HANDOFF_DESCRIPTION, REPORT_HANDOFF_SCHEMA, ReportHandoffInput, validate_report_handoff,
+    REPORT_HANDOFF_DESCRIPTION, REPORT_HANDOFF_SCHEMA, ReportHandoffFieldError, ReportHandoffInput,
+    report_amendment_source_error, validate_report_handoff,
 };
 use rmcp::model::{CallToolResult, ContentBlock, JsonObject, RequestMetaObject, Tool};
 use serde_json::{Value, json};
@@ -29,13 +30,7 @@ pub(super) async fn submit(
     let raw = Value::Object(input);
     let errors = validate_report_handoff(&raw);
     if !errors.is_empty() {
-        let message =
-            serde_json::to_string(&json!({"error":"Invalid report handoff.","fieldErrors":errors}))
-                .map_err(|_| AppError::Internal)?;
-        if message.len() > super::MAX_TOOL_RESPONSE {
-            return Err(AppError::PayloadTooLarge);
-        }
-        return Ok(CallToolResult::error(vec![ContentBlock::text(message)]));
+        return invalid_handoff(&errors);
     }
     let field = |key| meta.get(key).and_then(Value::as_str);
     let session = field("threadId").ok_or(AppError::Forbidden)?;
@@ -60,6 +55,22 @@ pub(super) async fn submit(
         witness,
     };
     let verified = context.verify(entry, lead, call.as_str()).await?;
-    let receipt = submit_verified(entry, verified, value.handoff, false, Some(context)).await?;
+    let receipt = match submit_verified(entry, verified, value.handoff, false, Some(context)).await
+    {
+        Err(AppError::ReportAmendmentSourceChanged) => {
+            return invalid_handoff(&[report_amendment_source_error()]);
+        }
+        result => result?,
+    };
     super::bounded_result(&serde_json::to_value(receipt.data).map_err(|_| AppError::Internal)?)
+}
+
+fn invalid_handoff(errors: &[ReportHandoffFieldError]) -> Result<CallToolResult, AppError> {
+    let message =
+        serde_json::to_string(&json!({"error":"Invalid report handoff.","fieldErrors":errors}))
+            .map_err(|_| AppError::Internal)?;
+    if message.len() > super::MAX_TOOL_RESPONSE {
+        return Err(AppError::PayloadTooLarge);
+    }
+    Ok(CallToolResult::error(vec![ContentBlock::text(message)]))
 }

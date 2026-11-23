@@ -222,9 +222,7 @@ export default function Findings({
       {delivery && delivery.state !== "saved" && (
         <Notice>
           {delivery.state === "failed" ? "Report handoff failed" : "Report completion pending"}
-          {delivery.reason === "report_presentation_evidence_unproved"
-            ? " · Submit an evidence correction for claims the cited section does not establish."
-            : delivery.reason && ` · ${delivery.reason}`}
+          {delivery.reason && ` · ${reportHandoffReason(delivery.reason)}`}
         </Notice>
       )}
       {outdated && (
@@ -324,4 +322,19 @@ export default function Findings({
       )}
     </div>
   );
+}
+
+function reportHandoffReason(reason: string) {
+  switch (reason) {
+    case "report_base_changed":
+      return "ReviewQ could not confirm this handoff still applies to the report. Check the current Findings before submitting again.";
+    case "report_amendment_continuity_unproved":
+      return "An amendment keeps the accepted Markdown, reviewed revision, and verdict. Use an evidence correction for changes that preserve the revision and verdict.";
+    case "report_unchanged_evidence_mismatch":
+      return "An unchanged result uses the current accepted receipt and its original source.";
+    case "report_presentation_evidence_unproved":
+      return "Submit an evidence correction for claims the cited section does not establish.";
+    default:
+      return reason;
+  }
 }

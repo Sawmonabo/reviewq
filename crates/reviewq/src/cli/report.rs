@@ -7,9 +7,9 @@ use reviewq_domain::identity::{GitSha, ReportHash};
 use reviewq_protocol::GitShaDto;
 use reviewq_protocol::reports::{
     AcceptedReference, AcceptedReport, Assessment, CodexCommand, Correction, FindingEdit, Handoff,
-    HandoffReceipt, HandoffState, NativeReportAddress, REPORT_HANDOFF_EXAMPLE, ReportHandoffInput,
-    ReportHashDto, ReportRevision, ReportSource, ReportVerdict, SectionEdit,
-    validate_report_handoff,
+    HandoffReceipt, HandoffState, NativeReportAddress, REPORT_AMENDMENT_SOURCE_MESSAGE,
+    REPORT_HANDOFF_EXAMPLE, ReportHandoffInput, ReportHashDto, ReportRevision, ReportSource,
+    ReportVerdict, SectionEdit, validate_report_handoff,
 };
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
@@ -169,6 +169,9 @@ pub(super) async fn execute(
 }
 
 async fn submit(context: &Context, handoff: Handoff) -> Result<(), Failure> {
+    if handoff.changes_amended_source() {
+        return Err(REPORT_AMENDMENT_SOURCE_MESSAGE.into());
+    }
     let body = serde_json::to_vec(&CodexCommand {
         session_key: context.session.clone(),
         call_id: context.call()?,

@@ -499,7 +499,8 @@ pub use handoff::{
     AcceptedReference, AcceptedReport, Assessment, CodexCommand, Correction, CorrectionKind,
     EvidenceReference, FindingBasis, FindingBasisKind, FindingEdit, FindingLocation, Handoff,
     HandoffCommand, HandoffReceipt, HandoffState, NativeContext, NativeReportAddress,
-    REPORT_HANDOFF_DESCRIPTION, REPORT_HANDOFF_EXAMPLE, REPORT_HANDOFF_SCHEMA,
-    ReportHandoffFieldError, ReportHandoffInput, ReportRevision, ReportScope, ReportSource,
-    ReportVerdict, SectionEdit, StructuredFinding, StructuredReport, validate_report_handoff,
+    REPORT_AMENDMENT_SOURCE_MESSAGE, REPORT_HANDOFF_DESCRIPTION, REPORT_HANDOFF_EXAMPLE,
+    REPORT_HANDOFF_SCHEMA, ReportHandoffFieldError, ReportHandoffInput, ReportRevision,
+    ReportScope, ReportSource, ReportVerdict, SectionEdit, StructuredFinding, StructuredReport,
+    report_amendment_source_error, validate_report_handoff,
 };

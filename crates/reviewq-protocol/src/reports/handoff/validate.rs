@@ -2,10 +2,10 @@ use std::collections::BTreeSet;
 use std::sync::LazyLock;
 
 use jsonschema::{ValidationError, Validator, error::ValidationErrorKind};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use super::REPORT_HANDOFF_SCHEMA;
+use super::{REPORT_AMENDMENT_SOURCE_MESSAGE, REPORT_HANDOFF_SCHEMA, ReportHashDto};
 
 static VALIDATOR: LazyLock<Validator> = LazyLock::new(|| {
     let schema =
@@ -13,10 +13,17 @@ static VALIDATOR: LazyLock<Validator> = LazyLock::new(|| {
     jsonschema::validator_for(&schema).expect("generated handoff schema compiles")
 });
 
-#[derive(Debug, Eq, Ord, PartialEq, PartialOrd, Serialize)]
+#[derive(Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
 pub struct ReportHandoffFieldError {
     pub path: String,
     pub message: String,
+}
+
+pub fn report_amendment_source_error() -> ReportHandoffFieldError {
+    ReportHandoffFieldError {
+        path: "/handoff/source/sha256".into(),
+        message: REPORT_AMENDMENT_SOURCE_MESSAGE.into(),
+    }
 }
 
 /// Validate public tool input before consuming its native workflow context.
@@ -177,6 +184,14 @@ fn validate_values(input: &Value, errors: &mut BTreeSet<ReportHandoffFieldError>
             "Supply an amendment or a correction.",
         );
     }
+    let hash = |value: &Value| value.as_str().and_then(ReportHashDto::new);
+    if handoff["source"]["kind"] == "file"
+        && let Some(file) = hash(&handoff["source"]["sha256"])
+        && let Some(accepted) = hash(&handoff["amendsReport"]["sha256"])
+        && file != accepted
+    {
+        errors.insert(report_amendment_source_error());
+    }
     for field in ["findingChanges", "sectionChanges"] {
         if handoff[field]
             .as_array()
@@ -319,5 +334,42 @@ mod tests {
                 .any(|error| error.path == "/handoff/report")
         );
         assert!(!validate_report_handoff(&json!({"handoff":{"outcome":"needs_input","reason":"Awaiting target revision","verdict":"approve"}})).is_empty());
+    }
+
+    #[test]
+    fn a_metadata_amendment_uses_the_accepted_file_digest() {
+        let mut input: Value = serde_json::from_str(REPORT_HANDOFF_EXAMPLE).unwrap();
+        let accepted = "a".repeat(64);
+        let changed = "b".repeat(64);
+        let handoff = &mut input["handoff"];
+        handoff["amendsReport"] = json!({"receiptId":"accepted-receipt","sha256":accepted});
+        handoff["report"]["scope"] = json!("amendment");
+        handoff["report"]["findings"] = json!([]);
+        handoff["source"] = json!({"kind":"file","path":"/tmp/report.md","sha256":accepted});
+        assert!(validate_report_handoff(&input).is_empty());
+
+        input["handoff"]["source"]["sha256"] = json!(changed);
+        let errors = validate_report_handoff(&input);
+        assert_eq!(
+            errors,
+            vec![ReportHandoffFieldError {
+                path: "/handoff/source/sha256".into(),
+                message: super::REPORT_AMENDMENT_SOURCE_MESSAGE.into(),
+            }]
+        );
+        let parsed: ReportHandoffInput = serde_json::from_value(input.clone()).unwrap();
+        assert!(parsed.handoff.changes_amended_source());
+
+        let handoff = input["handoff"].as_object_mut().unwrap();
+        handoff.remove("amendsReport");
+        handoff.insert(
+            "correctsReport".into(),
+            json!({
+                "receiptId":"accepted-receipt","sha256":accepted,"kind":"evidence",
+                "reason":"Clarify the cited evidence.","findingIds":["F-1"],
+                "evidence":[{"findingId":"F-1","sha256":"c".repeat(64)}]
+            }),
+        );
+        assert!(validate_report_handoff(&input).is_empty());
     }
 }

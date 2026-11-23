@@ -6,13 +6,17 @@ use crate::{GitShaDto, HistoryTurnIdDto, ResourceIdDto, SessionKeyDto};
 mod structured;
 mod validate;
 pub use structured::*;
-pub use validate::{ReportHandoffFieldError, validate_report_handoff};
+pub use validate::{
+    ReportHandoffFieldError, report_amendment_source_error, validate_report_handoff,
+};
 
 pub const REPORT_HANDOFF_SCHEMA: &str =
     include_str!("../../../../contracts/report-handoff.schema.json");
 pub const REPORT_HANDOFF_EXAMPLE: &str =
     include_str!("../../../../fixtures/contracts/report-handoff.json");
-pub const REPORT_HANDOFF_DESCRIPTION: &str = "Submit the exact Markdown report or final native response and a versioned set of finding cards for this linked ReviewQ lead. Set a reviewed SHA or an explicit unknown reason and a verdict. Use an empty findings list when the review found none. For selected-thread follow-ups, include only findings updated by findingChanges and assess the frozen discussions. Unchanged retains the accepted receipt. Needs input records the reason. ReviewQ verifies native completion before accepting the report.";
+pub const REPORT_HANDOFF_DESCRIPTION: &str = "Submit the exact Markdown report or final native response and versioned finding cards for this linked ReviewQ lead. Set a reviewed SHA or an explicit unknown reason and a verdict. An empty findings list is valid. Use amendsReport for disposition or publication updates that preserve the accepted Markdown, revision, and verdict. For changed content with the same reviewed revision and verdict, use correctsReport with kind evidence and cite the accepted report. For a fresh review, use full_review or a bound selected_threads follow-up and supply the reviewed SHA. Selected-thread results include only findings updated by findingChanges and assessments of the frozen discussions. Unchanged retains the accepted receipt. Needs input records the reason. ReviewQ verifies native completion before accepting the report.";
+
+pub const REPORT_AMENDMENT_SOURCE_MESSAGE: &str = "amendsReport requires the accepted Markdown bytes. Use a correctsReport evidence correction for changed content with the same reviewed revision and verdict. For a fresh assessment, submit a review using its reviewed SHA.";
 
 /// Tool input and the exact JSON file accepted by the native CLI.
 #[derive(Debug, Deserialize, Serialize)]
@@ -119,6 +123,20 @@ pub enum Handoff {
         #[cfg_attr(feature = "schema", schemars(length(max = 10)))]
         assessments: Vec<Assessment>,
     },
+}
+
+impl Handoff {
+    /// Whether a supplied file digest contradicts a same-source amendment.
+    pub fn changes_amended_source(&self) -> bool {
+        matches!(
+            self,
+            Self::Final {
+                source: ReportSource::File { sha256: Some(file), .. },
+                amends: Some(accepted),
+                ..
+            } if file != &accepted.sha256
+        )
+    }
 }
 
 #[derive(Debug, Deserialize, Serialize)]
