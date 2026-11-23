@@ -75,20 +75,32 @@ impl Auth {
         headers: &HeaderMap,
         mutation: bool,
     ) -> Result<Actor, ApiError> {
-        self.check_browser(headers)?;
         if mutation {
-            if value(headers, "origin") != Some(&self.origin) {
-                return Err(AppError::Forbidden.into());
-            }
+            self.require_browser_origin(headers)?;
             let supplied = value(headers, CSRF)
-                .and_then(decode)
                 .filter(|_| headers.get_all(CSRF).iter().count() == 1)
                 .ok_or(ApiError::BrowserProofRejected)?;
-            if !bool::from(self.csrf.ct_eq(&supplied)) {
+            if !self.valid_browser_proof(supplied) {
                 return Err(ApiError::BrowserProofRejected);
             }
+        } else {
+            self.check_browser(headers)?;
         }
         Ok(Actor::local_operator())
+    }
+
+    pub(super) fn require_browser_origin(&self, headers: &HeaderMap) -> Result<(), AppError> {
+        self.check_browser(headers)?;
+        if value(headers, "origin") != Some(&self.origin)
+            || headers.get_all(header::ORIGIN).iter().count() != 1
+        {
+            return Err(AppError::Forbidden);
+        }
+        Ok(())
+    }
+
+    pub(super) fn valid_browser_proof(&self, supplied: &str) -> bool {
+        decode(supplied).is_some_and(|bytes| bool::from(self.csrf.ct_eq(&bytes)))
     }
 
     pub(super) fn csrf(&self, headers: &HeaderMap) -> Result<String, AppError> {

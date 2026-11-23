@@ -84,18 +84,10 @@ impl Message {
             .append_pair("view", "notifications")
             .append_pair("notificationId", id);
         url.set_fragment(Some(&format!("notification-{id}")));
-        let label: String = claim
-            .label
-            .chars()
-            .filter(|ch| !ch.is_control())
-            .take(120)
-            .collect();
-        let body = if claim.event_count > 1 {
-            format!("{label}\n{} updates", claim.event_count)
-        } else {
-            label
-        };
-        Self { url, body }
+        Self {
+            url,
+            body: claim.body(),
+        }
     }
 }
 
