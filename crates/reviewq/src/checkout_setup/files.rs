@@ -13,7 +13,7 @@ use super::Failure;
 const FILE_LIMIT: u64 = 4 * 1024 * 1024;
 
 #[derive(Clone)]
-pub(super) struct Existing {
+pub(crate) struct Existing {
     pub bytes: Vec<u8>,
     pub mode: u32,
 }
@@ -136,7 +136,7 @@ pub(super) fn forget(profile: &Path, common: &Path) -> Result<(), Failure> {
     Ok(())
 }
 
-pub(super) fn read(path: &Path) -> Result<Option<Existing>, Failure> {
+pub(crate) fn read(path: &Path) -> Result<Option<Existing>, Failure> {
     read_limited(path, FILE_LIMIT)
 }
 

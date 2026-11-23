@@ -9,6 +9,7 @@ use sha2::Digest;
 pub(crate) mod bridge;
 mod bundle;
 mod claude;
+mod codex_hook;
 mod files;
 mod managed;
 pub(crate) mod paths;
@@ -297,6 +298,10 @@ pub(crate) async fn install(bundle_path: &Path) -> Result<(), Failure> {
     }
     let endpoint =
         crate::runtime::read_endpoint_with_build(&paths.profile, &identity.build_digest)?;
+    // A hook is optional and can be installed only after the new release has
+    // passed rollback and operational readiness. Keep pending ownership across
+    // an interrupted write, independently of the active release.
+    let codex_hook = codex_hook::reconcile(&paths, next.skill.is_some());
     println!(
         "ReviewQ {}\nBundle {}\nDashboard http://{}/\nRuntime configuration {}",
         bundle.manifest.version,
@@ -308,6 +313,18 @@ pub(crate) async fn install(bundle_path: &Path) -> Result<(), Failure> {
         println!(
             "Codex unavailable. Set codexCommand in runtime.json and retry install to enable its skill."
         );
+    }
+    if next.skill.is_some() {
+        match codex_hook {
+            Ok(()) => println!(
+                "For independent Codex Code Mode sessions, use /hooks to review and trust the ReviewQ report hook. Managed ReviewQ sessions can verify tool calls directly."
+            ),
+            Err(error) => eprintln!(
+                "ReviewQ could not configure the optional Codex report hook: {error} Direct native proof remains available in managed sessions."
+            ),
+        }
+    } else if let Err(error) = codex_hook {
+        eprintln!("ReviewQ preserved the previous Codex report hook: {error}");
     }
     if next.claude.is_none() {
         println!("Claude Code unavailable. Set claudeCommand in runtime.json and retry install.");
@@ -469,6 +486,7 @@ pub(crate) async fn uninstall() -> Result<(), Failure> {
         return Err("Finish the interrupted activation before uninstalling.".into());
     }
     let Some(active) = inventory.active.as_ref() else {
+        codex_hook::reconcile(&paths, false)?;
         println!(
             "ReviewQ is already removed. Retained data {}",
             paths.profile.display()
@@ -509,6 +527,7 @@ pub(crate) async fn uninstall() -> Result<(), Failure> {
     let removed = crate::checkout_setup::remove_installation(&paths.profile, &store).await;
     store.close(std::time::Duration::from_secs(10)).await?;
     removed?;
+    codex_hook::reconcile(&paths, false)?;
     claude::remove(&paths, active).await?;
     if let Some(windows) = &active.windows {
         windows.remove().await?;

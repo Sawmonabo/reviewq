@@ -1,3 +1,5 @@
+//! Compare and atomically replace native profile files without losing concurrent edits.
+
 use std::fs::{self, DirBuilder, File, Metadata, OpenOptions, Permissions};
 use std::io::{ErrorKind, Write};
 use std::os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt, PermissionsExt};
@@ -6,23 +8,41 @@ use std::time::{Duration, Instant};
 
 use rustix::fs::{CWD, Mode, OFlags, RenameFlags, renameat_with};
 
-use super::{Existing, Failure, read};
+use crate::checkout_setup::files::{Existing, read};
+
+type Failure = Box<dyn std::error::Error + Send + Sync>;
 
 // Claude Code 2.1.330 considers the empty lock directory stale after ten seconds.
 const STALE_AFTER: Duration = Duration::from_secs(10);
-const LOCK_LOST: &str = "ReviewQ lost the Claude profile lock. Retry checkout setup.";
-const CONFIG_CHANGED: &str =
-    "Claude changed its profile config during setup. Retry checkout setup.";
+#[derive(Clone, Copy)]
+pub(crate) enum Profile {
+    Claude,
+    Codex,
+}
 
-pub(super) struct Lock<'a> {
+impl Profile {
+    fn name(self) -> &'static str {
+        match self {
+            Self::Claude => "Claude",
+            Self::Codex => "Codex",
+        }
+    }
+}
+
+pub(crate) struct Lock<'a> {
     config: &'a Path,
+    native: Option<NativeLock>,
+    profile: Profile,
+}
+
+struct NativeLock {
     path: PathBuf,
     directory: File,
     created: Instant,
 }
 
 impl<'a> Lock<'a> {
-    pub(super) fn acquire(config: &'a Path) -> Result<Option<Self>, Failure> {
+    pub(crate) fn acquire(config: &'a Path, profile: Profile) -> Result<Option<Self>, Failure> {
         let parent = parent(config)?;
         let metadata = match parent.symlink_metadata() {
             Ok(metadata) => metadata,
@@ -33,7 +53,16 @@ impl<'a> Lock<'a> {
             || metadata.uid() != rustix::process::getuid().as_raw()
             || parent.canonicalize()? != parent
         {
-            return Err("Expected an owned Claude profile directory.".into());
+            return Err(format!("Expected an owned {} profile directory.", profile.name()).into());
+        }
+        // ReviewQ's install lock already serializes Codex lifecycle edits. The
+        // exchange below also protects against concurrent writes by an editor.
+        if matches!(profile, Profile::Codex) {
+            return Ok(Some(Self {
+                config,
+                native: None,
+                profile,
+            }));
         }
         let mut filename = config.as_os_str().to_owned();
         filename.push(".lock");
@@ -43,7 +72,8 @@ impl<'a> Lock<'a> {
             Ok(()) => (),
             Err(error) if error.kind() == ErrorKind::AlreadyExists => {
                 return Err(format!(
-                    "The Claude profile is locked at {}. Retry when Claude finishes.",
+                    "The {} profile is locked at {}.",
+                    profile.name(),
                     path.display()
                 )
                 .into());
@@ -54,15 +84,18 @@ impl<'a> Lock<'a> {
         let directory = File::from(rustix::fs::open(&path, flags, Mode::empty())?);
         let lock = Self {
             config,
-            path,
-            directory,
-            created,
+            native: Some(NativeLock {
+                path,
+                directory,
+                created,
+            }),
+            profile,
         };
         lock.check()?;
         Ok(Some(lock))
     }
 
-    pub(super) fn write(
+    pub(crate) fn write(
         &self,
         before: Option<&Existing>,
         after: Option<&Existing>,
@@ -76,9 +109,9 @@ impl<'a> Lock<'a> {
         self.publish(stage, before, after)
     }
 
-    pub(super) fn readback(&self, expected: Option<&Existing>) -> Result<(), Failure> {
+    pub(crate) fn readback(&self, expected: Option<&Existing>) -> Result<(), Failure> {
         if !same(read(self.config)?.as_ref(), expected) {
-            return Err(CONFIG_CHANGED.into());
+            return Err(self.config_changed());
         }
         self.check()
     }
@@ -122,10 +155,11 @@ impl<'a> Lock<'a> {
         });
         if restored {
             stage.disable_cleanup(false);
-            return Err(CONFIG_CHANGED.into());
+            return Err(self.config_changed());
         }
         Err(format!(
-            "Concurrent Claude settings writes prevented recovery. Displaced data was saved under {}.",
+            "Concurrent {} settings writes prevented recovery. Displaced data was saved under {}.",
+            self.profile.name(),
             stage.keep().display()
         )
         .into())
@@ -148,38 +182,48 @@ impl<'a> Lock<'a> {
         )?;
         if let Some((replacement, identity)) = replacement {
             if !is_candidate(self.config, identity, replacement) {
-                return Err(CONFIG_CHANGED.into());
+                return Err(self.config_changed());
             }
             self.check()?;
             rename(candidate, self.config, RenameFlags::EXCHANGE)?;
             if !is_candidate(candidate, identity, replacement) {
-                return Err(CONFIG_CHANGED.into());
+                return Err(self.config_changed());
             }
         } else {
             self.check()?;
             rename(candidate, self.config, RenameFlags::NOREPLACE)?;
         }
         if !is_candidate(self.config, &original, displaced) {
-            return Err(CONFIG_CHANGED.into());
+            return Err(self.config_changed());
         }
         Ok(())
     }
 
+    fn config_changed(&self) -> Failure {
+        format!(
+            "{} changed its profile config during setup.",
+            self.profile.name()
+        )
+        .into()
+    }
+
     fn check(&self) -> Result<(), Failure> {
         if !self.still_owned(STALE_AFTER / 2) {
-            return Err(LOCK_LOST.into());
+            return Err(format!("ReviewQ lost the {} profile lock.", self.profile.name()).into());
         }
         Ok(())
     }
 
     fn still_owned(&self, max_age: Duration) -> bool {
-        self.directory.metadata().is_ok_and(|directory| {
-            self.path.symlink_metadata().is_ok_and(|current| {
-                identity(&directory) == identity(&current)
-                    && current.modified().is_ok_and(|modified| {
-                        modified.elapsed().unwrap_or_default() < max_age
-                            && self.created.elapsed() < max_age
-                    })
+        self.native.as_ref().is_none_or(|native| {
+            native.directory.metadata().is_ok_and(|directory| {
+                native.path.symlink_metadata().is_ok_and(|current| {
+                    identity(&directory) == identity(&current)
+                        && current.modified().is_ok_and(|modified| {
+                            modified.elapsed().unwrap_or_default() < max_age
+                                && native.created.elapsed() < max_age
+                        })
+                })
             })
         })
     }
@@ -187,13 +231,15 @@ impl<'a> Lock<'a> {
 
 impl Drop for Lock<'_> {
     fn drop(&mut self) {
-        if self.still_owned(STALE_AFTER) {
-            let _ = fs::remove_dir(&self.path);
+        if let Some(native) = &self.native
+            && self.still_owned(STALE_AFTER)
+        {
+            let _ = fs::remove_dir(&native.path);
         }
     }
 }
 
-pub(super) fn same(left: Option<&Existing>, right: Option<&Existing>) -> bool {
+pub(crate) fn same(left: Option<&Existing>, right: Option<&Existing>) -> bool {
     match (left, right) {
         (Some(left), Some(right)) => left.mode == right.mode && left.bytes == right.bytes,
         (None, None) => true,
@@ -201,13 +247,13 @@ pub(super) fn same(left: Option<&Existing>, right: Option<&Existing>) -> bool {
     }
 }
 
-pub(super) fn sync_parent(config: &Path) -> Result<(), Failure> {
+pub(crate) fn sync_parent(config: &Path) -> Result<(), Failure> {
     Ok(File::open(parent(config)?)?.sync_all()?)
 }
 
 fn parent(path: &Path) -> Result<&Path, Failure> {
     path.parent()
-        .ok_or("Missing Claude profile directory.".into())
+        .ok_or("Missing native profile directory.".into())
 }
 
 fn rename(from: &Path, to: &Path, flags: RenameFlags) -> Result<(), rustix::io::Errno> {
@@ -216,7 +262,7 @@ fn rename(from: &Path, to: &Path, flags: RenameFlags) -> Result<(), rustix::io::
 
 fn staging_directory(parent: &Path) -> Result<tempfile::TempDir, Failure> {
     let stage = tempfile::Builder::new()
-        .prefix(".reviewq-claude-")
+        .prefix(".reviewq-profile-")
         .permissions(Permissions::from_mode(0o700))
         .tempdir_in(parent)?;
     // A custom Claude profile can live in a Git worktree.
@@ -263,7 +309,7 @@ mod tests {
             mode: 0o600,
         };
         stage_file(&config, &before.bytes, before.mode)?;
-        let lock = Lock::acquire(&config)?.expect("profile directory exists");
+        let lock = Lock::acquire(&config, Profile::Claude)?.expect("profile directory exists");
         let stage = staging_directory(&directory)?;
         stage_file(&stage.path().join("config"), &after.bytes, after.mode)?;
         lock.readback(Some(&before))?;
@@ -277,7 +323,7 @@ mod tests {
             lock.publish(stage, Some(&before), Some(&after))
                 .unwrap_err()
                 .to_string(),
-            CONFIG_CHANGED,
+            "Claude changed its profile config during setup.",
         );
         assert_eq!(fs::read(&config)?, native_bytes);
         assert_eq!(config.metadata()?.ino(), native_inode);
