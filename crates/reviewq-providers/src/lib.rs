@@ -19,6 +19,7 @@ pub use claude::{Claude, ClaudeCli, ClaudeWorkflow};
 pub use codex::Codex;
 pub use desktop::{
     LinuxDesktopNotifier, WindowsDesktop, WindowsDesktopNotifier, WindowsRegistration,
+    open_windows_browser,
 };
 pub use gitlab::GitLab;
 pub use history::FileHistory;

@@ -5,7 +5,7 @@ use reqwest::Client;
 use reviewq_domain::identity::{NativeSessionId, ReviewId, RunId, SessionKey};
 use reviewq_domain::session::HostProvider;
 use reviewq_protocol::EventCursorDto;
-use reviewq_providers::desktop::open_windows_browser;
+use reviewq_providers::open_windows_browser;
 use reviewq_transport::{ServiceEndpoint, ServiceIdentity};
 use serde::Deserialize;
 
