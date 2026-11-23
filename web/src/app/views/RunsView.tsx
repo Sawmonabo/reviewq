@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import type { RunCard, RunStage } from "../../api/generated/contracts";
 import { readArchive, readQueue, readQueueSync, readRuns } from "../../api/workspace";
@@ -58,6 +58,13 @@ export function RunsView({
   const [checked, setChecked] = useState<readonly string[]>([]);
   const [questions, setQuestions] = useState(false);
   const [reason, setReason] = useState("");
+  const searchInput = useRef<HTMLInputElement>(null);
+  const questionFilterRef = useCallback((button: HTMLButtonElement | null) => {
+    if (!button) return;
+    return () => {
+      if (document.activeElement === button) searchInput.current?.focus({ preventScroll: true });
+    };
+  }, []);
   const filters = {
     stage,
     q: query,
@@ -79,6 +86,7 @@ export function RunsView({
     [{ kind: "run" }, { kind: "review" }, { kind: "queue" }],
   );
   const sync = useResource("runs-queue-sync", readQueueSync, [{ kind: "queue_sync" }]).data;
+  const stageCounts = runs.data?.stageCounts ?? counts.data?.stageCounts;
   const eligible = (runs.data?.items ?? []).filter((row) => row.mrState === "open");
   const captured = eligible.filter((row) => checked.includes(row.reviewId));
   function changeQuery(value: string) {
@@ -122,7 +130,7 @@ export function RunsView({
             }}
           >
             <span>{label}</span>
-            <strong>{(runs.data?.stageCounts ?? counts.data?.stageCounts)?.[field] ?? "—"}</strong>
+            <strong>{stageCounts?.[field] ?? "—"}</strong>
           </button>
         ))}
       </div>
@@ -140,6 +148,7 @@ export function RunsView({
             <label className="run-search">
               <Icon name="search" size={14} />
               <input
+                ref={searchInput}
                 type="search"
                 aria-label="Search review runs"
                 placeholder="Search ticket or title"
@@ -148,19 +157,23 @@ export function RunsView({
                 onChange={(event) => changeQuery(event.currentTarget.value)}
               />
             </label>
-            {(stage === "working" || questions) && (
-              <label className="run-question-filter">
-                <input
-                  type="checkbox"
-                  checked={questions}
-                  onChange={(event) => {
-                    setQuestions(event.currentTarget.checked);
-                    setTrail([]);
-                    setChecked([]);
-                  }}
-                />
-                Agent questions
-              </label>
+            {stage === "working" && (questions || (stageCounts?.working ?? 0) > 0) && (
+              <button
+                ref={questionFilterRef}
+                type="button"
+                className="filter-control run-question-filter"
+                aria-pressed={questions}
+                aria-controls="review-runs-list"
+                title="Filter working runs by open agent questions"
+                onClick={() => {
+                  setQuestions(!questions);
+                  setTrail([]);
+                  setChecked([]);
+                }}
+              >
+                <Icon name={questions ? "check" : "filters"} size={14} />
+                Open questions
+              </button>
             )}
             {reason && (
               <button
@@ -220,20 +233,24 @@ export function RunsView({
                 <h3>
                   {query.trim()
                     ? "No runs match your search"
-                    : reason || questions
+                    : reason
                       ? "No runs match these filters"
-                      : {
-                          needs_input: "Nothing awaiting your input",
-                          working: "No runs working right now",
-                          waiting: "No reviews waiting",
-                        }[stage]}
+                      : questions
+                        ? "No working runs have open questions"
+                        : {
+                            needs_input: "Nothing awaiting your input",
+                            working: "No runs working right now",
+                            waiting: "No reviews waiting",
+                          }[stage]}
                 </h3>
                 <p>
                   {query.trim()
                     ? "Try another ticket, title or MR number."
-                    : stage === "waiting"
-                      ? "Reviews waiting on author changes or merge appear here."
-                      : "Start a review or choose another view."}
+                    : questions
+                      ? "Turn off Open questions to see other working runs."
+                      : stage === "waiting"
+                        ? "Reviews waiting on author changes or merge appear here."
+                        : "Start a review or choose another view."}
                 </p>
               </div>
             )}
