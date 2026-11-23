@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useEffectEvent, useLayoutEffect, useRef, useState } from "react";
-import { isPatchScopeChanged } from "../../../api/changes";
+import { isPatchScopeChanged, PatchRangeUnavailable } from "../../../api/changes";
 import type { PatchRange } from "../../../api/changes";
 import type { PatchDiscussion, PatchFile } from "../../../api/generated/contracts";
 import { Empty, Loading, Notice } from "../../../components/PanelState";
@@ -36,6 +36,7 @@ type Props = {
   readonly entrySide: "start" | "end" | undefined;
   readonly onSourceChanged: () => void;
 };
+const COPY_RETRY_NOTICE = "The selected source could not be copied. Try copying again.";
 
 export function PatchSource({
   file,
@@ -61,7 +62,7 @@ export function PatchSource({
   const [lookahead] = useState(createPatchLookahead);
   const [heldPages, setHeldPages] = useState<readonly SourcePage[]>([]);
   const [stale, setStale] = useState(false);
-  const [copyError, setCopyError] = useState(false);
+  const [copyError, setCopyError] = useState<string>();
   const copying = useRef<AbortController | undefined>(undefined);
   useEffect(() => () => copying.current?.abort(), []);
   useEffect(() => () => lookahead.clear(), [lookahead]);
@@ -73,6 +74,7 @@ export function PatchSource({
     readonly move: Move;
     readonly message: string;
     readonly ready?: SourcePage[];
+    readonly rangeUnavailable?: boolean;
   }>();
   const [previousPosition, setPreviousPosition] = useState(position);
   const [previousLine, setPreviousLine] = useState(line);
@@ -164,9 +166,9 @@ export function PatchSource({
   });
 
   const read = useEffectEvent(async (target: Move, signal: AbortSignal) => {
-    const load = (range: PatchRange, line?: PatchLine) =>
+    const load = (range: PatchRange, line?: PatchLine, recoverEnd = false) =>
       lookahead.measure(() =>
-        queued(signal, "foreground", () => readSourcePage(file, signal, range, line)),
+        queued(signal, "foreground", () => readSourcePage(file, signal, range, line, recoverEnd)),
       );
     if (target.explicit || target.land || target.entry) lookahead.clear();
     let prepared = target.direction && (await lookahead.take(target.range, signal));
@@ -178,7 +180,7 @@ export function PatchSource({
       if (predicted && "offset" in target.range && predicted.first === target.range.offset)
         prepared = predicted;
     }
-    const result = [prepared || (await load(target.range, target.line))];
+    const result = [prepared || (await load(target.range, target.line, !head))];
     let tail = result[0]!;
     const first = tail.rows?.[0];
     if (target.line && first && first.byteEnd < first.rowEnd)
@@ -227,6 +229,7 @@ export function PatchSource({
         setFailure({
           move,
           message: error instanceof Error ? error.message : "The patch range could not be loaded.",
+          rangeUnavailable: error instanceof PatchRangeUnavailable,
         });
         setMove(undefined);
       },
@@ -337,7 +340,7 @@ export function PatchSource({
   const keepSourceEdge = useEffectEvent(
     (element: HTMLElement, scroll: HTMLElement, previous: number, delta: number) => {
       const backwards = delta < 0;
-      if (stale || !head || !tail) return;
+      if (stale || failure?.rangeUnavailable || !head || !tail) return;
       const box = element.getBoundingClientRect();
       const top = sourceReadingTop(element, scroll);
       const bottom = scroll.getBoundingClientRect().bottom;
@@ -377,6 +380,7 @@ export function PatchSource({
     (event: WheelEvent, element: HTMLElement, scroll: HTMLElement, delta: number) => {
       if (
         stale ||
+        failure?.rangeUnavailable ||
         !head?.rows ||
         !tail ||
         !event.cancelable ||
@@ -501,11 +505,16 @@ export function PatchSource({
   const seeking = move && position && position !== "away" ? "pending" : undefined;
   const retained = [...heldPages, ...pages].sort((a, b) => a.first - b.first);
   const notice = failure && (
-    <Notice {...(!move && !failure.ready && { retry: () => setMove(failure.move) })}>
+    <Notice
+      {...(!move &&
+        !failure.ready &&
+        !failure.rangeUnavailable && { retry: () => setMove(failure.move) })}
+    >
       {move ? "Retrying the patch range…" : failure.message}
     </Notice>
   );
 
+  if (head?.total === 0) return <Empty title="This file has an empty patch" />;
   return (
     <>
       {!head && notice}
@@ -549,9 +558,7 @@ export function PatchSource({
             </p>
           </div>
           {!failedAtEnd && notice}
-          {head.total === 0 ? (
-            <Empty title="This file has an empty patch" />
-          ) : head.rows ? (
+          {head.rows ? (
             <div
               className="patch-source-window"
               tabIndex={0}
@@ -571,7 +578,7 @@ export function PatchSource({
                 if (to <= from) return;
                 event.preventDefault();
                 copying.current?.abort();
-                setCopyError(false);
+                setCopyError(undefined);
                 const text = copyLoadedPages(retained, from, to);
                 if (text !== undefined) {
                   event.clipboardData.setData("text/plain", text);
@@ -580,20 +587,23 @@ export function PatchSource({
                 const controller = new AbortController();
                 copying.current = controller;
                 if (typeof ClipboardItem === "undefined" || !navigator.clipboard) {
-                  setCopyError(true);
+                  setCopyError(COPY_RETRY_NOTICE);
                   return;
                 }
                 const payload = copyPatchRange(file, from, to, controller.signal, queued);
                 const failed = () => {
                   if (controller.signal.aborted) return;
                   controller.abort();
-                  setCopyError(true);
+                  setCopyError(COPY_RETRY_NOTICE);
                 };
                 void payload.catch((error: unknown) => {
                   if (controller.signal.aborted) return;
                   if (isPatchScopeChanged(error)) {
                     controller.abort();
                     reportSourceChange();
+                  } else if (error instanceof PatchRangeUnavailable) {
+                    controller.abort();
+                    setCopyError("The selected bytes are outside the available patch.");
                   } else failed();
                 });
                 try {
@@ -650,9 +660,7 @@ export function PatchSource({
               ))}
             </pre>
           )}
-          {copyError && (
-            <Notice>The selected source could not be copied. Try copying again.</Notice>
-          )}
+          {copyError && <Notice>{copyError}</Notice>}
         </>
       )}
       {failedAtEnd && notice}

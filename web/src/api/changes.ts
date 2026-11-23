@@ -23,6 +23,7 @@ export const PATCH_FILES_PER_PAGE = 10;
 export const PATH_MATCHES_PER_PAGE = 60;
 const MAX_RICH_BYTES = 2 * 1024 * 1024;
 const PATH_CACHE_BYTES = 768 * 1024;
+const RANGE_NOT_SATISFIABLE = 416;
 export type PatchIndex = PatchFileIndex;
 type PatchIndexResult = { readonly cursor: string; readonly data: PatchIndex };
 type FileIndexPosition = { readonly revision: string } & (
@@ -336,6 +337,17 @@ export type PatchRange = { readonly etag?: string } & (
   { readonly offset: number } | { readonly before: number } | { readonly last: true }
 );
 
+export class PatchRangeUnavailable extends Error {
+  constructor(
+    readonly reportedLength: number | undefined,
+    cause?: ApiResponseError,
+  ) {
+    super(cause?.message ?? "The requested byte range is outside the available patch.", {
+      cause,
+    });
+  }
+}
+
 export type PatchSourceTarget =
   | { readonly row: number; readonly byte?: number }
   | { readonly byte: number }
@@ -478,13 +490,24 @@ export async function readPatch(
   const offset =
     window && "offset" in window ? window.offset : Math.max(0, (before ?? 0) - PATCH_WINDOW_BYTES);
   const suffix = window && "last" in window;
-  const bounded = window === undefined ? MAX_RICH_BYTES : PATCH_WINDOW_BYTES;
+  const bounded = window ? PATCH_WINDOW_BYTES : file.byteLength === 0 ? 0 : MAX_RICH_BYTES;
   if (window)
     headers.set(
       "Range",
       suffix ? `bytes=-${bounded}` : `bytes=${offset}-${(before ?? offset + bounded) - 1}`,
     );
-  const response = await request(patchRoute(file), { headers, signal });
+  const response = await request(
+    patchRoute(file),
+    { headers, signal },
+    window ? RANGE_NOT_SATISFIABLE : undefined,
+  );
+  if (response.status === RANGE_NOT_SATISFIABLE) {
+    const match = /^bytes \*\/(\d+)$/.exec(response.headers.get("Content-Range") ?? "");
+    const length = Number(match?.[1]);
+    await response.body?.cancel();
+    signal.throwIfAborted();
+    throw new PatchRangeUnavailable(Number.isSafeInteger(length) ? length : undefined);
+  }
   const etag = response.headers.get("ETag");
   if (
     response.status !== (window ? 206 : 200) ||
@@ -513,7 +536,12 @@ export async function readPatch(
     };
     return result;
   }
-  const [first, end, total] = contentRange(response);
+  const range = contentRange(response);
+  if (!range) {
+    await response.body?.cancel();
+    throw new Error("ReviewQ returned an invalid byte range.");
+  }
+  const [first, end, total] = range;
   if (
     first !== (suffix ? Math.max(0, total - bounded) : offset) ||
     end !== (before ?? Math.min(total, first + bounded)) ||
@@ -550,15 +578,13 @@ export async function readPatch(
   };
 }
 
-function contentRange(response: Response): [number, number, number] {
+function contentRange(response: Response): [number, number, number] | undefined {
   const match = /^bytes (\d+)-(\d+)\/(\d+)$/.exec(response.headers.get("Content-Range") ?? "");
-  if (!match) throw new Error("ReviewQ returned an invalid byte range.");
+  if (!match) return;
   const first = Number(match[1]);
   const end = Number(match[2]) + 1;
   const total = Number(match[3]);
-  if (![first, end, total].every(Number.isSafeInteger) || first >= end || end > total) {
-    throw new Error("ReviewQ returned an invalid byte range.");
-  }
+  if (![first, end, total].every(Number.isSafeInteger) || first >= end || end > total) return;
   return [first, end, total];
 }
 

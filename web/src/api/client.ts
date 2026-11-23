@@ -116,7 +116,11 @@ export async function write<T>(
   );
 }
 
-export async function request(path: string, options: RequestInit = {}): Promise<Response> {
+export async function request(
+  path: string,
+  options: RequestInit = {},
+  allowedStatus?: number,
+): Promise<Response> {
   const active = requireSession();
   const token = await active;
   const headers = new Headers(options.headers);
@@ -134,7 +138,7 @@ export async function request(path: string, options: RequestInit = {}): Promise<
       if (response.status === 401 && session === reopened) session = undefined;
     }
   }
-  if (!response.ok) throw await apiError(response);
+  if (!response.ok && response.status !== allowedStatus) throw await apiError(response);
   return response;
 }
 
