@@ -1,8 +1,10 @@
 import type { HistoryEntry, HistoryPage } from "../../../api/generated/contracts";
 import { savedValue, saveValue } from "../../../lib/view-preferences";
+import { questionKey } from "./questions/question-key";
 
 export type ReadingAnchor = {
   readonly id: string;
+  readonly rowId?: string;
   readonly offset: number;
   readonly toolEntry?: boolean;
   readonly callId?: string;
@@ -10,6 +12,7 @@ export type ReadingAnchor = {
 
 export type TimelineBookmark = {
   readonly entryId: string;
+  readonly rowId?: string;
   readonly offset: number;
   readonly following: boolean;
   readonly generation: string;
@@ -19,13 +22,21 @@ export type TimelineBookmark = {
 
 export const PAGE_LIMIT = 6;
 
+export function historyKey(entry: HistoryEntry) {
+  const question = entry.parts.find((part) => part.kind === "user_question");
+  return question && entry.turnId
+    ? `question:${questionKey({ requestId: question.requestId, turnId: entry.turnId, itemId: entry.entryId })}`
+    : entry.entryId;
+}
+
 export function entriesIn(pages: readonly HistoryPage[]) {
   const seen = new Set<string>();
   const entries: HistoryEntry[] = [];
   for (const page of pages) {
     for (const entry of page.items) {
-      if (seen.has(entry.entryId)) continue;
-      seen.add(entry.entryId);
+      const key = historyKey(entry);
+      if (seen.has(key)) continue;
+      seen.add(key);
       entries.push(entry);
     }
   }
@@ -49,6 +60,9 @@ export function readBookmark(key: string): TimelineBookmark | undefined {
   ) {
     return {
       entryId: value.entryId,
+      ...("rowId" in value && typeof value.rowId === "string" && value.rowId.length <= 2048
+        ? { rowId: value.rowId }
+        : {}),
       offset: value.offset,
       following: value.following,
       generation: value.generation,
@@ -75,6 +89,7 @@ export function historyBookmark(
   if (!current || !generation) return;
   return {
     entryId: current.id,
+    ...(current.rowId ? { rowId: current.rowId } : {}),
     offset: current.offset,
     following,
     generation,
@@ -87,6 +102,7 @@ export function sameBookmark(left: TimelineBookmark, right: TimelineBookmark | u
   return (
     right &&
     left.entryId === right.entryId &&
+    left.rowId === right.rowId &&
     left.offset === right.offset &&
     left.following === right.following &&
     left.generation === right.generation &&
@@ -105,6 +121,7 @@ export function visibleAnchor(host: HTMLDivElement | null): ReadingAnchor | unde
     if (bounds.bottom > frame.top && bounds.top < frame.bottom)
       return {
         id: focused.dataset.nativeEntry,
+        ...(focused.dataset.questionRow ? { rowId: focused.dataset.questionRow } : {}),
         offset: bounds.top - frame.top,
         toolEntry: true,
         ...(active?.dataset.toolCall ? { callId: active.dataset.toolCall } : {}),
@@ -116,6 +133,7 @@ export function visibleAnchor(host: HTMLDivElement | null): ReadingAnchor | unde
       const tool = node.querySelector<HTMLElement>("details[open] > [data-tool-call]");
       return {
         id: node.dataset.nativeEntry,
+        ...(node.dataset.questionRow ? { rowId: node.dataset.questionRow } : {}),
         offset: item.top - frame.top,
         toolEntry:
           node.classList.contains("tool-entry") && node.dataset.entry === node.dataset.nativeEntry,

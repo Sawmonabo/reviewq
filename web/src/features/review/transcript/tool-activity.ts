@@ -1,5 +1,6 @@
 import type { HistoryEntry, HistoryPart } from "../../../api/generated/contracts";
 import type { HistoryToolState } from "../../../api/generated/contracts/history";
+import { historyKey } from "./history-window";
 
 type CallPart = Extract<HistoryPart, { kind: "tool_call" }>;
 type ToolPart = Extract<HistoryPart, { kind: "tool_call" | "tool_result" }>;
@@ -243,7 +244,7 @@ function expandedRows(
 }
 
 function native(entry: HistoryEntry, grouped = false): NativeRow {
-  return { kind: "native", id: entry.entryId, entry, grouped };
+  return { kind: "native", id: historyKey(entry), entry, grouped };
 }
 
 function isTool(part: HistoryPart): part is ToolPart {

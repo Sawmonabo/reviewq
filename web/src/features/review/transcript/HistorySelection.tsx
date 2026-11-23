@@ -25,13 +25,16 @@ export function useHistorySelection(viewport: RefObject<HTMLDivElement | null>) 
         hasText = range.intersectsNode(host);
         if (hasText)
           for (const node of host.querySelectorAll<HTMLElement>("[data-native-entry]")) {
-            if (node.dataset.nativeEntry && range.intersectsNode(node))
-              ids.add(node.dataset.nativeEntry);
+            const id = node.dataset.questionRow ?? node.dataset.nativeEntry;
+            if (id && range.intersectsNode(node)) ids.add(id);
           }
       }
       const active = document.activeElement;
       const focused = active?.closest<HTMLElement>("[data-native-entry]");
-      const id = focused && host.contains(focused) ? focused.dataset.nativeEntry : undefined;
+      const id =
+        focused && host.contains(focused)
+          ? (focused.dataset.questionRow ?? focused.dataset.nativeEntry)
+          : undefined;
       if (id) ids.add(id);
       const previous = selectionState.current;
       const diagram =

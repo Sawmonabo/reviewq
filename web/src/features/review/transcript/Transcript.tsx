@@ -34,6 +34,7 @@ import {
   type TimelineBookmark,
 } from "./history-window";
 import { PromptNavigator } from "./PromptNavigator";
+import { TranscriptJumpControls } from "./TranscriptJumpControls";
 import { FileReadPack, ToolRunHeader } from "./ToolActivity";
 import { openKey, toolCatalog, toolOnly } from "./tool-activity";
 import type { ReadTarget, ToolRun } from "./tool-activity";
@@ -50,8 +51,6 @@ import {
 import { MarkdownContent } from "../../../components/markdown/MarkdownContent";
 import { useHistory } from "./useHistory";
 import { useInlineProse } from "./useInlineProse";
-import { DetachedQuestion } from "./questions/DetachedQuestion";
-import { questionKey } from "./questions/question-key";
 import { useQuestionJump } from "./questions/useQuestionJump";
 import type { Questions } from "./questions/useQuestions";
 
@@ -63,13 +62,13 @@ type Position = ReadingAnchor & {
 const SCROLL_IDLE_MS = 160;
 const MAX_REOPEN_PAGES = 4;
 type ExtraParts = {
-  readonly entryId: string;
+  readonly rowId: string;
   readonly generation: string;
   readonly pages: number;
   readonly items: readonly HistoryPart[];
   readonly next: string | null;
 };
-type OutputSelection = { readonly entryId: string; readonly reference: string };
+type OutputSelection = { readonly rowId: string; readonly reference: string };
 type Props = {
   readonly target: SessionAddress;
   readonly provider: HostProviderDto;
@@ -107,7 +106,10 @@ export function Transcript({ target, provider, child, messages, working, questio
   );
   const [output, setOutput] = useState<OutputSelection>();
   const [readingOutput, setReadingOutput] = useState<string>();
-  const [foundOutput, setFoundOutput] = useState<FoundOutput>();
+  const [foundOutput, setFoundOutput] = useState<{
+    readonly rowId: string;
+    readonly value: FoundOutput;
+  }>();
   const [findAnchorEntry, setFindAnchorEntry] = useState<string>();
   const releaseFindAnchor = useCallback(() => setFindAnchorEntry(undefined), []);
   const [extraParts, setExtraParts] = useState<ExtraParts>();
@@ -116,6 +118,7 @@ export function Transcript({ target, provider, child, messages, working, questio
     saved && !saved.following
       ? {
           id: saved.entryId,
+          ...(saved.rowId ? { rowId: saved.rowId } : {}),
           offset: saved.offset,
           toolEntry: saved.toolEntry ?? true,
           reopenPages: 0,
@@ -152,6 +155,7 @@ export function Transcript({ target, provider, child, messages, working, questio
         if (wanted.locator || anchor.current?.id !== wanted.entryId)
           anchor.current = {
             id: wanted.entryId,
+            ...(wanted.rowId ? { rowId: wanted.rowId } : {}),
             offset: wanted.locator ? 24 : 0,
             reopenPages: 0,
             jump: true,
@@ -290,7 +294,7 @@ export function Transcript({ target, provider, child, messages, working, questio
     } else if (anchor.current) {
       const saved = anchor.current;
       const focus = toolFocus.current?.entryId === saved.id ? toolFocus.current : undefined;
-      const exactEntry = Boolean(focus || saved.toolEntry);
+      const exactEntry = Boolean(saved.rowId || focus || saved.toolEntry);
       const index = readingIndex(entries, saved, exactEntry);
       const targetRow = entries[index];
       const container = viewport.current;
@@ -321,7 +325,7 @@ export function Transcript({ target, provider, child, messages, working, questio
         return () => window.clearTimeout(settled);
       }
       if (!targetRow) return;
-      const targetId = exactEntry ? saved.id : historyId(targetRow);
+      const targetId = exactEntry ? targetRow.id : historyId(targetRow);
       const selector = `[${exactEntry ? "data-entry" : "data-native-entry"}="${CSS.escape(targetId)}"]`;
       if (!container?.querySelector(selector)) list.scrollToIndex(index, { align: "start" });
       const frame = requestAnimationFrame(() => {
@@ -479,17 +483,15 @@ export function Transcript({ target, provider, child, messages, working, questio
     }
   }, [pinned, history]);
 
-  async function moreParts(entryId: string, cursor: string) {
+  async function moreParts(entryId: string, rowId: string, cursor: string) {
     const generation = history.generation;
     if (!generation || partsRequest.current) return;
-    if (extraParts && extraParts.entryId !== entryId && pinned.has(extraParts.entryId)) {
+    if (extraParts && extraParts.rowId !== rowId && pinned.has(extraParts.rowId)) {
       setActionNotice("Clear the active selection before opening another long entry.");
       return;
     }
     const prior =
-      extraParts?.generation === generation && extraParts.entryId === entryId
-        ? extraParts
-        : undefined;
+      extraParts?.generation === generation && extraParts.rowId === rowId ? extraParts : undefined;
     if (prior && prior.pages >= 4) {
       setActionNotice(
         "This entry has more parts than fit in one window. Use its complete output or open the session in the terminal.",
@@ -503,7 +505,7 @@ export function Transcript({ target, provider, child, messages, working, questio
       const result = await historyParts(target, entryId, cursor, controller.signal);
       if (!controller.signal.aborted)
         setExtraParts({
-          entryId,
+          rowId,
           generation,
           pages: (prior?.pages ?? 0) + 1,
           items: [...(prior?.items ?? []), ...result.parts],
@@ -551,12 +553,13 @@ export function Transcript({ target, provider, child, messages, working, questio
     const host = viewport.current;
     const row = element.closest<HTMLElement>("[data-entry]");
     const id = row?.dataset.entry;
-    const reference = output?.entryId === id ? output?.reference : undefined;
+    const reference = output?.rowId === id ? output?.reference : undefined;
     if (!host || !row || !id || !reference || !host.contains(row)) return false;
     if (readingOutput === reference && !following && !requestedLatest.current) return false;
     setReadingOutput(reference);
     anchor.current = {
-      id,
+      id: row.dataset.nativeEntry ?? id,
+      ...(row.dataset.questionRow ? { rowId: row.dataset.questionRow } : {}),
       toolEntry: true,
       offset: row.getBoundingClientRect().top - host.getBoundingClientRect().top,
     };
@@ -567,15 +570,16 @@ export function Transcript({ target, provider, child, messages, working, questio
     return true;
   }
 
-  function openFound({ page, output: found, extra }: PreparedDestination) {
+  function openFound({ page, rowId, output: found, extra }: PreparedDestination) {
     const { entryId, generation, locator, contentRef, toolCallId } = found.destination;
-    if (!history.openPrepared(page, { entryId, locator })) return false;
+    if (!history.openPrepared(page, { entryId, locator, ...(rowId !== entryId ? { rowId } : {}) }))
+      return false;
     followBeforeFind.current = undefined;
     setFollowing(false);
-    setFoundOutput(found);
-    setFindAnchorEntry(entryId);
-    setOutput({ entryId, reference: contentRef });
-    if (extra) setExtraParts({ entryId, generation, pages: 1, ...extra });
+    setFoundOutput({ rowId, value: found });
+    setFindAnchorEntry(rowId);
+    setOutput({ rowId, reference: contentRef });
+    if (extra) setExtraParts({ rowId, generation, pages: 1, ...extra });
     if (toolCallId) {
       setExpanded((known) => toggleKey(known, openKey(entryId, toolCallId), true));
       setExpandedReads((known) => toggleKey(known, entryId, true));
@@ -719,17 +723,19 @@ export function Transcript({ target, provider, child, messages, working, questio
                 previous &&
                 ("anchorId" in previous || (previous.entry && toolOnly(previous.entry)));
               const author = messageAuthor(row, child);
+              const native = historyId(row);
               const found =
-                foundOutput?.destination.entryId === row.id &&
-                foundOutput.destination.generation === history.generation
-                  ? foundOutput
+                foundOutput?.rowId === row.id &&
+                foundOutput.value.destination.generation === history.generation
+                  ? foundOutput.value
                   : undefined;
               return (
                 <article
                   ref={list.measureElement}
                   data-index={item.index}
                   data-entry={row.id}
-                  data-native-entry={row.kind === "delivery" ? undefined : row.id}
+                  data-native-entry={row.kind === "delivery" ? undefined : native}
+                  data-question-row={row.id !== native ? row.id : undefined}
                   data-live-entry={row.kind === "live" ? "" : undefined}
                   data-tool-member={row.grouped ? "" : undefined}
                   data-after-tools={followsTool && !justTools ? "" : undefined}
@@ -771,18 +777,18 @@ export function Transcript({ target, provider, child, messages, working, questio
                           toggle={(key, open) =>
                             setExpanded((known) => toggleKey(known, key, open))
                           }
-                          reference={output?.entryId === row.id ? output.reference : undefined}
+                          reference={output?.rowId === row.id ? output.reference : undefined}
                           {...(extraParts?.generation === history.generation &&
-                          extraParts.entryId === row.id
+                          extraParts.rowId === row.id
                             ? { extra: extraParts }
                             : {})}
-                          onMoreParts={(cursor) => void moreParts(row.id, cursor)}
+                          onMoreParts={(cursor) => void moreParts(native, row.id, cursor)}
                           onReadRange={holdOutputRange}
                           {...(found ? { found } : {})}
                           onReference={(reference) => {
                             setFoundOutput(undefined);
                             setReadingOutput(undefined);
-                            setOutput(reference ? { entryId: row.id, reference } : undefined);
+                            setOutput(reference ? { rowId: row.id, reference } : undefined);
                           }}
                         />
                       )}
@@ -834,50 +840,27 @@ export function Transcript({ target, provider, child, messages, working, questio
           }}
         />
       )}
-      <div className="timeline-jump-controls">
-        {questionJump.detached && (
-          <DetachedQuestion
-            key={questionKey(questionJump.detached)}
-            form={questionJump.detached}
-            questions={questions}
-          />
-        )}
-        {questionJump.offscreen && (
-          <button
-            type="button"
-            className="question-jump quiet-button"
-            aria-disabled={questionJump.jumping || undefined}
-            onClick={(event) => {
-              if (!questionJump.offscreen) return;
-              void questionJump.jump(
-                questionJump.offscreen,
-                event.currentTarget,
-                (page, entryId, locator) => {
-                  if (!history.openPrepared(page, { entryId, locator })) return false;
-                  followBeforeFind.current = undefined;
-                  requestedLatest.current = false;
-                  setFollowing(false);
-                  return true;
-                },
-                () => {
-                  leaveReopen();
-                  list.cancelScroll();
-                  scrollIntent.current = undefined;
-                },
-                setActionNotice,
-              );
-            }}
-          >
-            Jump to question
-          </button>
-        )}
-        {(!following || history.waiting) && (
-          <button type="button" className="timeline-jump" onClick={latest}>
-            <span aria-hidden="true">↓ </span>
-            {history.waiting ? "New messages available" : "Jump to latest"}
-          </button>
-        )}
-      </div>
+      <TranscriptJumpControls
+        jump={questionJump}
+        questions={questions}
+        latestLabel={
+          history.waiting ? "New messages available" : !following ? "Jump to latest" : undefined
+        }
+        onLatest={latest}
+        onChoose={({ page, ...wanted }) => {
+          if (!history.openPrepared(page, wanted)) return false;
+          followBeforeFind.current = undefined;
+          requestedLatest.current = false;
+          setFollowing(false);
+          return true;
+        }}
+        onReveal={() => {
+          leaveReopen();
+          list.cancelScroll();
+          scrollIntent.current = undefined;
+        }}
+        onError={setActionNotice}
+      />
     </section>
   );
 }

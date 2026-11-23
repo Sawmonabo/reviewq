@@ -85,7 +85,7 @@ export function promptRanks(rows: readonly VisibleRow[]) {
   const ranks = rows.map((row) => {
     if (row.kind === "native" && row.entry?.parts.some((part) => part.kind === "user_prompt")) {
       count++;
-      offsets.set(row.id, count);
+      offsets.set(historyId(row), count);
     }
     return count;
   });
@@ -97,6 +97,7 @@ export function readingIndex(
   saved: ReadingAnchor & { readonly adjacent?: string },
   exact = saved.toolEntry,
 ) {
+  if (saved.rowId) return entries.findIndex((row) => row.id === saved.rowId);
   const index = entries.findIndex((row) => (exact ? row.id : historyId(row)) === saved.id);
   if (index >= 0 || (exact && !saved.adjacent)) return index;
   // A retained native entry can become part of a differently keyed collapsed group.
@@ -104,7 +105,7 @@ export function readingIndex(
 }
 
 export function historyId(row: VisibleRow) {
-  return "anchorId" in row ? row.anchorId : row.id;
+  return "anchorId" in row ? row.anchorId : (row.entry?.entryId ?? row.id);
 }
 
 export function toggleKey(known: ReadonlySet<string>, key: string, open: boolean) {
@@ -145,7 +146,8 @@ export function transcriptRangeIndexes(
   }
   if (pinned.size || findEntry)
     entries.forEach((entry, index) => {
-      if (pinned.has(historyId(entry)) || entry.id === findEntry) indexes.add(index);
+      if (pinned.has(entry.id) || pinned.has(historyId(entry)) || entry.id === findEntry)
+        indexes.add(index);
     });
   return [...indexes].sort((left, right) => left - right);
 }

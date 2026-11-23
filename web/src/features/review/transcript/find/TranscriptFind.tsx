@@ -195,8 +195,13 @@ export function TranscriptFind({
     setActive(hit);
     const view = viewport.current;
     if (view)
-      holdOccurrence(view, destination.output.destination, request.signal, onReveal, () =>
-        setNotice("The occurrence could not be highlighted."),
+      holdOccurrence(
+        view,
+        destination.rowId,
+        destination.output.destination,
+        request.signal,
+        onReveal,
+        () => setNotice("The occurrence could not be highlighted."),
       );
   }
 

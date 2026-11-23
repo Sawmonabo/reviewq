@@ -27,6 +27,7 @@ import {
   revealDetails,
 } from "../../../../components/markdown/reading-range";
 import { completeDocument, documentSource, documentTree } from "../document";
+import { historyKey } from "../history-window";
 
 const changed = "This occurrence is no longer available in the conversation.";
 const highlightName = "reviewq-transcript-match";
@@ -47,6 +48,7 @@ export type FoundOutput = {
 
 export type PreparedDestination = {
   readonly page: HistoryPageResponse;
+  readonly rowId: string;
   readonly output: FoundOutput;
   readonly extra?: { readonly items: readonly HistoryPart[]; readonly next: string | null };
 };
@@ -113,12 +115,19 @@ export async function prepareDestination(
     if (!positions(tree ? markdownText(tree) : content.text, destination)) throw new Error(changed);
     return { destination, content, ...(tree ? { tree } : {}) };
   }
-  const [page, output] = await Promise.all([
+  const [expectedPage, output] = await Promise.all([
     historyPage(target, { aroundId: entryId, locator }, signal),
     readBody(),
   ]);
-  const entry = page.data.items.find((row) => row.entryId === entryId);
-  if (!entry || page.data.generation !== generation || page.data.reset) throw new Error(changed);
+  const occurrences = expectedPage.data.items.filter((row) => row.entryId === entryId);
+  const page =
+    occurrences.length > 1
+      ? await historyPage(target, { aroundId: entryId, locator, limit: 1 }, signal)
+      : expectedPage;
+  const matching = page.data.items.filter((row) => row.entryId === entryId);
+  const entry = matching[0];
+  if (!entry || matching.length !== 1 || page.data.generation !== generation || page.data.reset)
+    throw new Error(changed);
   let extra;
   if (nativeIndex !== null && !entry.parts.some((part) => part.nativeIndex === nativeIndex)) {
     if (!partsCursor) throw new Error(changed);
@@ -131,13 +140,19 @@ export async function prepareDestination(
   await historySearchDestination(target, hit.hit, signal);
   return {
     page,
+    rowId: historyKey(entry),
     output,
     ...(extra ? { extra } : {}),
   };
 }
 
-function revealOccurrence(view: HTMLElement, match: HistorySearchDestination, inset?: number) {
-  const row = view.querySelector('[data-native-entry="' + CSS.escape(match.entryId) + '"]');
+function revealOccurrence(
+  view: HTMLElement,
+  rowId: string,
+  match: HistorySearchDestination,
+  inset?: number,
+) {
+  const row = view.querySelector(`[data-entry="${CSS.escape(rowId)}"]`);
   const body = row?.querySelector<HTMLElement>("[data-find-body]");
   const scope = match.document?.mode === "table_body" ? body?.querySelector("tbody") : body;
   const range = scope && nativeRange(scope, match);
@@ -167,6 +182,7 @@ function revealOccurrence(view: HTMLElement, match: HistorySearchDestination, in
 
 export function holdOccurrence(
   view: HTMLElement,
+  rowId: string,
   match: HistorySearchDestination,
   signal: AbortSignal,
   onReveal: () => void,
@@ -196,7 +212,7 @@ export function holdOccurrence(
   function paint() {
     frame = 0;
     if (signal.aborted) return;
-    const projected = revealOccurrence(view, match, inset);
+    const projected = revealOccurrence(view, rowId, match, inset);
     if (projected !== undefined && inset === undefined) {
       inset = projected;
       onReveal();

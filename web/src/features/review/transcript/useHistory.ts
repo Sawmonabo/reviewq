@@ -4,10 +4,10 @@ import type { HistoryPage, HistoryPageResponse } from "../../../api/generated/co
 import { historyPage, nativeHistoryUrl } from "../../../api/history";
 import type { SessionAddress } from "../../../api/history";
 import { describeError } from "../../../lib/presentation";
-import { PAGE_LIMIT, readBookmark } from "./history-window";
+import { historyKey, PAGE_LIMIT, readBookmark } from "./history-window";
 
 type ReadPosition = "older" | "newer" | "latest" | "around";
-type Anchor = { readonly entryId: string; readonly locator?: string };
+type Anchor = { readonly entryId: string; readonly locator?: string; readonly rowId?: string };
 type Delta = {
   readonly runId: string;
   readonly sessionKey: string;
@@ -116,7 +116,8 @@ export function useHistory(
       }
       if (
         !replace &&
-        (pages.length < PAGE_LIMIT || !evict?.items.some((item) => protectedIds.has(item.entryId)))
+        (pages.length < PAGE_LIMIT ||
+          !evict?.items.some((item) => protectedIds.has(historyKey(item))))
       )
         return false;
       if (position === "around") resetTo.current = wanted;
@@ -183,7 +184,11 @@ export function useHistory(
   const initialize = useEffectEvent(() => {
     if (active.current) return;
     const saved = readBookmark(bookmark);
-    if (saved && !saved.following) void load("around", { entryId: saved.entryId });
+    if (saved && !saved.following)
+      void load("around", {
+        entryId: saved.entryId,
+        ...(saved.rowId ? { rowId: saved.rowId } : {}),
+      });
     else void load("latest");
   });
 

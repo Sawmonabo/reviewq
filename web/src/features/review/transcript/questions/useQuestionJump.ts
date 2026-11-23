@@ -5,9 +5,17 @@ import type { Form } from "../../../../api/generated/contracts/questions";
 import { historyPage } from "../../../../api/history";
 import type { SessionAddress } from "../../../../api/history";
 import { describeError } from "../../../../lib/presentation";
+import { historyKey } from "../history-window";
 import { questionKey } from "./question-key";
 
 const ORIGINAL_UNAVAILABLE = "The original question is unavailable in the conversation.";
+
+export type QuestionDestination = {
+  readonly page: HistoryPageResponse;
+  readonly entryId: string;
+  readonly locator: string;
+  readonly rowId: string;
+};
 
 export function useQuestionJump(
   target: SessionAddress,
@@ -79,7 +87,7 @@ export function useQuestionJump(
   async function jump(
     form: Form,
     trigger: HTMLButtonElement,
-    choose: (page: HistoryPageResponse, entryId: string, locator: string) => boolean,
+    choose: (destination: QuestionDestination) => boolean,
     beforeReveal: () => void,
     onError: (message: string | undefined) => void,
   ) {
@@ -97,19 +105,9 @@ export function useQuestionJump(
       const page = await historyPage(target, { aroundId: form.itemId, locator }, signal);
       signal.throwIfAborted();
       if (!stillPending()) return;
-      if (
-        page.data.reset ||
-        !page.data.items.some(
-          (entry) =>
-            entry.entryId === form.itemId &&
-            entry.turnId === form.turnId &&
-            entry.parts.some(
-              (part) => part.kind === "user_question" && part.requestId === form.requestId,
-            ),
-        )
-      )
-        throw new Error(ORIGINAL_UNAVAILABLE);
-      if (!choose(page, form.itemId, locator))
+      const opening = page.data.items.find((entry) => matches(entry, form));
+      if (page.data.reset || !opening) throw new Error(ORIGINAL_UNAVAILABLE);
+      if (!choose({ page, entryId: form.itemId, locator, rowId: historyKey(opening) }))
         throw new Error("Clear the active selection before jumping to the question.");
       const deadline = performance.now() + 1200;
       while (performance.now() < deadline) {
@@ -142,6 +140,14 @@ export function useQuestionJump(
   }
 
   return { offscreen, detached, jumping, observe, jump, cancel };
+}
+
+function matches(entry: HistoryPageResponse["data"]["items"][number], form: Form) {
+  return (
+    entry.entryId === form.itemId &&
+    entry.turnId === form.turnId &&
+    entry.parts.some((part) => part.kind === "user_question" && part.requestId === form.requestId)
+  );
 }
 
 function withVisibility(values: ReadonlySet<string>, key: string, visible: boolean) {

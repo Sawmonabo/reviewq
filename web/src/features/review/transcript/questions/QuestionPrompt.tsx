@@ -49,24 +49,27 @@ export function QuestionPrompt({
     const current = element.current;
     if (!open || !current) return;
     const drafts = store.getSnapshot().entries;
-    const answers = form.questions.map(
-      (question) =>
-        [
-          question.id,
-          question.isSecret
-            ? secretAnswer(current, question)
-            : questionValue(
-                drafts.find(({ key }) => key === questionDraftKey(target, form, question.id))
-                  ?.text ?? "",
-              ),
-        ] as const,
-    );
+    const answers = form.questions.map((question) => ({
+      question,
+      value: question.isSecret
+        ? secretAnswer(current, question)
+        : questionValue(
+            drafts.find(({ key }) => key === questionDraftKey(target, form, question.id))?.text ??
+              "",
+          ),
+    }));
     const invalid = answers.find(
-      ([, value]) => !value.trim() || utf8.encode(value).length > MAX_ANSWER_BYTES,
+      ({ question, value }) =>
+        !value.trim() ||
+        utf8.encode(value).length > MAX_ANSWER_BYTES ||
+        /\p{Cc}/u.test(value.replace(/[\t\r\n]/g, "")) ||
+        (!question.isOther &&
+          question.options.length > 0 &&
+          !question.options.some(({ label }) => label === value)),
     );
     if (invalid) {
       setNotice("Enter an answer of up to 8 KiB for each required question.");
-      const field = current.querySelector(`[data-question="${CSS.escape(invalid[0])}"]`);
+      const field = current.querySelector(`[data-question="${CSS.escape(invalid.question.id)}"]`);
       (
         field?.querySelector<HTMLElement>("textarea, select, input[type=password]") ??
         field?.querySelector("input")
@@ -76,7 +79,10 @@ export function QuestionPrompt({
     setNotice(undefined);
     clearSecrets(current);
     if (current.contains(document.activeElement)) current.focus({ preventScroll: true });
-    void questions.respond(form, Object.fromEntries(answers));
+    void questions.respond(
+      form,
+      Object.fromEntries(answers.map(({ question, value }) => [question.id, value])),
+    );
   }
 
   return (
@@ -89,6 +95,9 @@ export function QuestionPrompt({
       onSubmit={(event) => {
         event.preventDefault();
         submit();
+      }}
+      onChange={() => {
+        if (notice) setNotice(undefined);
       }}
       onKeyDown={(event) => {
         if (
