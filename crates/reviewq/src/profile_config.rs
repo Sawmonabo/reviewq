@@ -31,10 +31,14 @@ impl Profile {
 
 pub(crate) struct Lock<'a> {
     config: &'a Path,
+    native: Option<NativeLock>,
+    profile: Profile,
+}
+
+struct NativeLock {
     path: PathBuf,
     directory: File,
     created: Instant,
-    profile: Profile,
 }
 
 impl<'a> Lock<'a> {
@@ -50,6 +54,15 @@ impl<'a> Lock<'a> {
             || parent.canonicalize()? != parent
         {
             return Err(format!("Expected an owned {} profile directory.", profile.name()).into());
+        }
+        // ReviewQ's install lock already serializes Codex lifecycle edits. The
+        // exchange below also protects against concurrent writes by an editor.
+        if matches!(profile, Profile::Codex) {
+            return Ok(Some(Self {
+                config,
+                native: None,
+                profile,
+            }));
         }
         let mut filename = config.as_os_str().to_owned();
         filename.push(".lock");
@@ -71,9 +84,11 @@ impl<'a> Lock<'a> {
         let directory = File::from(rustix::fs::open(&path, flags, Mode::empty())?);
         let lock = Self {
             config,
-            path,
-            directory,
-            created,
+            native: Some(NativeLock {
+                path,
+                directory,
+                created,
+            }),
             profile,
         };
         lock.check()?;
@@ -200,13 +215,15 @@ impl<'a> Lock<'a> {
     }
 
     fn still_owned(&self, max_age: Duration) -> bool {
-        self.directory.metadata().is_ok_and(|directory| {
-            self.path.symlink_metadata().is_ok_and(|current| {
-                identity(&directory) == identity(&current)
-                    && current.modified().is_ok_and(|modified| {
-                        modified.elapsed().unwrap_or_default() < max_age
-                            && self.created.elapsed() < max_age
-                    })
+        self.native.as_ref().is_none_or(|native| {
+            native.directory.metadata().is_ok_and(|directory| {
+                native.path.symlink_metadata().is_ok_and(|current| {
+                    identity(&directory) == identity(&current)
+                        && current.modified().is_ok_and(|modified| {
+                            modified.elapsed().unwrap_or_default() < max_age
+                                && native.created.elapsed() < max_age
+                        })
+                })
             })
         })
     }
@@ -214,8 +231,10 @@ impl<'a> Lock<'a> {
 
 impl Drop for Lock<'_> {
     fn drop(&mut self) {
-        if self.still_owned(STALE_AFTER) {
-            let _ = fs::remove_dir(&self.path);
+        if let Some(native) = &self.native
+            && self.still_owned(STALE_AFTER)
+        {
+            let _ = fs::remove_dir(&native.path);
         }
     }
 }

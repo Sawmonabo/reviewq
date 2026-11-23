@@ -9,7 +9,7 @@ use reviewq_domain::identity::{NativeInputId, NativeSessionId, NativeTurnId};
 use serde::{Deserialize, Serialize};
 use serde_json::value::RawValue;
 
-use super::{Failure, client_with_timeout, signed};
+use super::{Failure, bounded, bridge, client_with_timeout, signed, verify_ready};
 use crate::runtime;
 
 const TOOL: &str = "mcp__reviewq__report_handoff";
@@ -65,16 +65,25 @@ pub(crate) async fn codex_report_witness(
         return Ok(());
     }
     let endpoint = runtime::read_native_endpoint(profile)?;
-    let client = client_with_timeout(Some(Duration::from_secs(3)))?;
-    signed(
-        &client,
-        &endpoint,
-        "POST",
-        "/api/v1/native/reports/codex-witness",
-        &body,
-    )
-    .await?;
-    Ok(())
+    let timeout = Duration::from_secs(3);
+    let client = client_with_timeout(Some(timeout))?;
+    tokio::time::timeout(timeout, async {
+        let status = signed(&client, &endpoint, "GET", "/api/v1/status", b"").await?;
+        verify_ready(&endpoint, &status)?;
+        let response = bridge(
+            &client,
+            &endpoint,
+            "/api/v1/native/reports/codex-witness",
+            body,
+        )
+        .await?;
+        let accepted = response.status() == reqwest::StatusCode::NO_CONTENT;
+        if !bounded(response, 8192).await?.is_empty() || !accepted {
+            return Err("ReviewQ did not accept this Codex report witness.".into());
+        }
+        Ok(())
+    })
+    .await?
 }
 
 impl Event<'_> {

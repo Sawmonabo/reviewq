@@ -24,6 +24,8 @@ The installer prints the runtime configuration path and reports missing native p
 
 An independent Codex terminal using Code Mode can verify ReviewQ report handoffs through the optional user hook. Open `/hooks` in Codex and review and trust the ReviewQ `PreToolUse` entry for `mcp__reviewq__report_handoff`. ReviewQ leaves Codex's trust settings to you. ReviewQ-managed Codex sessions and calls with direct native evidence can verify handoffs without this hook. [Codex hook trust](https://learn.chatgpt.com/docs/hooks#review-and-trust-hooks)
 
+If you already uninstalled with a bundle released before the hook was added, run `bin/reviewq uninstall` from a bundle that supports the hook to remove its leftover registration.
+
 ## Develop
 
 For UI development against your installed ReviewQ service, run `pnpm --dir web run dev --installed`. Open the printed loopback URL in the browser profile signed in through `reviewq`. Vite updates the UI live and forwards read-only requests to the running service. The installed backend updates when you install a new package.

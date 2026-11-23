@@ -24,7 +24,7 @@ pub(super) enum Added {
     Matcher,
 }
 
-#[derive(Deserialize, PartialEq, Serialize)]
+#[derive(Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 struct Group<'a> {
     matcher: &'a str,
@@ -32,7 +32,7 @@ struct Group<'a> {
     hooks: [Command<'a>; 1],
 }
 
-#[derive(Deserialize, PartialEq, Serialize)]
+#[derive(Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 struct Command<'a> {
     #[serde(rename = "type")]
@@ -219,10 +219,15 @@ fn items(source: &str, array: usize) -> Result<Vec<Range<usize>>, Failure> {
 
 fn owned(source: &str, items: &[Range<usize>], command: &str) -> Result<Option<usize>, Failure> {
     let mut owned = None;
-    let expected = group(command);
+    let expected = group_value(command);
     for (index, range) in items.iter().enumerate() {
         let item = &source[range.clone()];
-        if serde_json::from_str::<Group<'_>>(item).is_ok_and(|value| value == expected) {
+        if serde_json::from_str::<serde_json::Value>(item)
+            .ok()
+            .as_ref()
+            == Some(&expected)
+            && serde_json::from_str::<Group<'_>>(item).is_ok()
+        {
             if owned.replace(index).is_some() {
                 return Err(CHANGED.into());
             }
