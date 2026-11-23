@@ -186,7 +186,7 @@ pub(super) async fn execute(
         .claim_launch(actor.clone(), input.clone(), submission, digest)
         .await?
     {
-        app::LaunchClaim::Existing(found) => return reconcile(entry, actor, found).await,
+        app::LaunchClaim::Existing(found) => return reconcile(entry, actor, *found).await,
         app::LaunchClaim::Admitted { id, created_at_ms } => (id, created_at_ms),
     };
     let store = entry.store.clone();

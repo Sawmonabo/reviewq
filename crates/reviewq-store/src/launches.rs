@@ -88,7 +88,7 @@ impl LaunchStore for SqliteStore {
                 if let Some(found) =
                     previous(db, &actor, Some(&input.review), &submission, Some(digest))?
                 {
-                    return Ok(LaunchClaim::Existing(found));
+                    return Ok(LaunchClaim::Existing(Box::new(found)));
                 }
                 let identity = identity_for_review(db, &input.review)?;
                 authorize(db, &actor, &input.review)?;

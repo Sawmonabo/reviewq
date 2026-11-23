@@ -46,7 +46,7 @@ pub struct ClaudeLaunchLocator {
 }
 
 pub enum LaunchClaim {
-    Existing(Snapshot<LaunchReceipt>),
+    Existing(Box<Snapshot<LaunchReceipt>>),
     Admitted { id: DeliveryId, created_at_ms: i64 },
 }
 
