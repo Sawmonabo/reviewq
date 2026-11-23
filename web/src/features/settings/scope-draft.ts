@@ -1,13 +1,43 @@
 import type {
   CatalogRequest,
+  Provider,
   SaveSettingsBoardScope,
   SaveSettingsRepositoryBinding,
+  SettingsDraft,
 } from "../../api/generated/contracts/settings";
 
 export type CatalogConnection = Omit<
   CatalogRequest,
   "kind" | "boardId" | "cursor" | "q" | "view" | "states"
 >;
+
+export type ScopeOrigins = Record<Provider, string | undefined>;
+
+export function sourceOrigin(value: string | null) {
+  try {
+    const url = new URL(value?.trim() ?? "");
+    if ((url.protocol === "https:" || url.protocol === "http:") && url.href === `${url.origin}/`) {
+      return url.origin;
+    }
+  } catch {
+    // Connection inputs can be incomplete while editing.
+  }
+  return undefined;
+}
+
+export function draftOrigins(draft: SettingsDraft): ScopeOrigins {
+  return { gitlab: sourceOrigin(draft.gitlab.origin), jira: sourceOrigin(draft.jira.site) };
+}
+
+export function clearProviderScope(draft: SettingsDraft, provider: Provider): SettingsDraft {
+  if (provider === "jira") return { ...draft, boards: [] };
+  return {
+    ...draft,
+    repositories: [],
+    additionalReviewerIds: [],
+    boards: draft.boards.map((board) => ({ ...board, projectIds: [] })),
+  };
+}
 
 export function boardIncludesRepository(
   board: SaveSettingsBoardScope,

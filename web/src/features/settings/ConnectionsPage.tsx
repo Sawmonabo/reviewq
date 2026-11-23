@@ -1,4 +1,9 @@
-import type { Provider, SettingsDraft, SettingsView } from "../../api/generated/contracts/settings";
+import type {
+  Identity,
+  Provider,
+  SettingsDraft,
+  SettingsView,
+} from "../../api/generated/contracts/settings";
 import { Notice } from "../../components/PanelState";
 import gitlabLogo from "./gitlab.svg";
 import jiraLogo from "./jira.svg";
@@ -21,7 +26,7 @@ export function ConnectionsPage({
   readonly draft: SettingsDraft;
   readonly tokens: Record<Provider, string>;
   readonly testing: Provider | undefined;
-  readonly verified: Partial<Record<Provider, string>>;
+  readonly verified: Partial<Record<Provider, Identity>>;
   readonly errors: Partial<Record<Provider, string>>;
   readonly busy: boolean;
   readonly onGitLab: (origin: string) => void;
@@ -42,7 +47,7 @@ export function ConnectionsPage({
             : draft.jira.site !== (snapshot.connections.jira.site ?? "") ||
               draft.jira.email !== (snapshot.connections.jira.email ?? "") ||
               draft.jira.tokenType !== (snapshot.connections.jira.tokenType ?? "unscoped"));
-        const label = verified[provider];
+        const label = verified[provider]?.label;
         const status = label
           ? "Test passed"
           : changed

@@ -3,8 +3,10 @@ import { ApiResponseError } from "../../api/client";
 import { disconnectSettings, readSettings, saveSettings, testConnection } from "../../api/settings";
 import type {
   CatalogItem,
+  Identity,
   Provider,
   SaveSettingsBoardScope,
+  SaveSettingsRepositoryBinding,
   SettingsDraft,
   SettingsView,
   TokenInput,
@@ -20,7 +22,15 @@ import { AgentPreferences } from "./AgentPreferences";
 import { AppearancePage } from "./AppearancePage";
 import { ConnectionsPage } from "./ConnectionsPage";
 import { Repositories } from "./Repositories";
-import { boardIncludesRepository, settingsFocus, toggleMembership } from "./scope-draft";
+import {
+  boardIncludesRepository,
+  clearProviderScope,
+  draftOrigins,
+  settingsFocus,
+  sourceOrigin,
+  toggleMembership,
+} from "./scope-draft";
+import type { ScopeOrigins } from "./scope-draft";
 import { SettingsNavigation, SettingsPage, savedPage } from "./SettingsNavigation";
 import type { Page } from "./SettingsNavigation";
 import { TeamBoards } from "./TeamBoards";
@@ -32,7 +42,11 @@ type Editor = {
   readonly snapshot: SettingsView;
   readonly draft: SettingsDraft;
   readonly tokens: Record<Provider, string>;
+  readonly scopeOrigins: ScopeOrigins;
 };
+
+type Picker = "scope" | "repositories" | "reviewers";
+type ScopeReset = { readonly provider: Provider; readonly picker: Picker | undefined };
 
 type Props = {
   readonly onClose: () => void;
@@ -117,7 +131,7 @@ function SettingsEditor({
   const [busy, setBusy] = useState(false);
   const [testing, setTesting] = useState<Provider>();
   const [confirm, setConfirm] = useState<Provider | "discard">();
-  const [verified, setVerified] = useState<Partial<Record<Provider, string>>>({});
+  const [verified, setVerified] = useState<Partial<Record<Provider, Identity>>>({});
   const [errors, setErrors] = useState<Partial<Record<Provider, string>>>({});
   const [notice, setNotice] = useState<string>();
   const [credentialEpoch, setCredentialEpoch] = useState<Record<Provider, number>>({
@@ -126,9 +140,9 @@ function SettingsEditor({
   });
   const [conflict, setConflict] = useState<SettingsView>();
   const [saved, setSaved] = useState<"workspace" | "agents">();
-  const [catalog, setCatalog] = useState<"scope" | "repositories">();
+  const [catalog, setCatalog] = useState<Picker>();
+  const [scopeReset, setScopeReset] = useState<ScopeReset>();
   const [showScopeErrors, setShowScopeErrors] = useState(false);
-  const [resolvingBoard, setResolvingBoard] = useState(false);
   const preferences = useAgentPreferences();
   const tests = useRef<Partial<Record<Provider, AbortController>>>({});
   const errorSummary = useRef<HTMLDivElement>(null);
@@ -137,6 +151,20 @@ function SettingsEditor({
   const positions = useRef<Partial<Record<Page, number>>>({});
   const pending = useRef(false);
   const { snapshot, draft, tokens } = editor;
+  const origins = draftOrigins(draft);
+  const wrongScope = {
+    gitlab:
+      Boolean(draft.repositories.length || draft.additionalReviewerIds.length) &&
+      origins.gitlab !== editor.scopeOrigins.gitlab,
+    jira: Boolean(draft.boards.length) && origins.jira !== editor.scopeOrigins.jira,
+  };
+  const gitlab = snapshot.connections.gitlab;
+  const savedGitlab =
+    gitlab.configured && !wrongScope.gitlab && origins.gitlab === sourceOrigin(gitlab.origin);
+  const savedGitlabToken = savedGitlab && !tokens.gitlab;
+  const sameGitlabAccount =
+    savedGitlabToken ||
+    (savedGitlab && Boolean(verified.gitlab && verified.gitlab.id === gitlab.identity?.id));
   const workspaceDirty =
     Boolean(tokens.gitlab || tokens.jira) ||
     JSON.stringify(draft) !== JSON.stringify(fromSaved(snapshot).draft);
@@ -176,17 +204,32 @@ function SettingsEditor({
     });
   }
 
-  function toggleCatalog(page: "scope" | "repositories") {
-    setCatalog((open) => (open === page ? undefined : page));
+  function openCatalog(picker: Picker) {
+    const provider = picker === "scope" ? "jira" : "gitlab";
+    if (wrongScope[provider]) askScopeReset(provider, picker);
+    else setCatalog(picker);
   }
 
-  function dismissCatalog(page: "scope" | "repositories") {
-    setCatalog(undefined);
-    settingsFocus(page === "scope" ? "settings-add-board" : "settings-add-repository");
+  function askScopeReset(provider: Provider, picker?: Picker) {
+    if (!origins[provider]) {
+      select("connections");
+      setNotice(
+        `Enter a valid ${provider === "jira" ? "Jira site" : "GitLab address"} to configure its scope.`,
+      );
+      requestAnimationFrame(() => errorSummary.current?.focus());
+      return;
+    }
+    setScopeReset({ provider, picker });
   }
 
-  function edit(update: (current: SettingsDraft) => SettingsDraft) {
-    setEditor((previous) => ({ ...previous, draft: update(previous.draft) }));
+  function edit(update: (current: SettingsDraft) => SettingsDraft, provider?: Provider) {
+    setEditor((previous) => ({
+      ...previous,
+      draft: update(previous.draft),
+      scopeOrigins: provider
+        ? { ...previous.scopeOrigins, [provider]: draftOrigins(previous.draft)[provider] }
+        : previous.scopeOrigins,
+    }));
     setSaved(undefined);
   }
 
@@ -222,7 +265,7 @@ function SettingsEditor({
     try {
       const { data } = await testConnection(scoped(provider), controller.signal);
       if (!controller.signal.aborted && data.provider === provider) {
-        setVerified((previous) => ({ ...previous, [provider]: data.identity.label }));
+        setVerified((previous) => ({ ...previous, [provider]: data.identity }));
         setErrors((previous) => ({ ...previous, [provider]: undefined }));
       }
     } catch (error) {
@@ -233,51 +276,63 @@ function SettingsEditor({
     }
   }
 
-  function addBoard(item: CatalogItem) {
-    if (!item.boardType) return;
-    const board: SaveSettingsBoardScope = {
-      boardId: item.id,
-      scopeId: crypto.randomUUID(),
-      name: item.label,
-      type: item.boardType,
-      enabled: true,
-      jiraProjectKeys: [],
-      projectIds: [],
-      reviewStatusIds: [],
-      storyPointsField: null,
-      teamFilterId: null,
-    };
-    edit((previous) =>
-      previous.boards.some((known) => known.boardId === board.boardId)
-        ? previous
-        : { ...previous, boards: [...previous.boards, board] },
+  function addBoards(items: readonly CatalogItem[]) {
+    const boards: SaveSettingsBoardScope[] = [];
+    for (const item of items) {
+      if (!item.boardType) throw new Error("Jira did not verify the board type.");
+      boards.push({
+        boardId: item.id,
+        scopeId: crypto.randomUUID(),
+        name: item.label,
+        type: item.boardType,
+        enabled: true,
+        jiraProjectKeys: [],
+        projectIds: [],
+        reviewStatusIds: [],
+        storyPointsField: null,
+        teamFilterId: null,
+      });
+    }
+    edit(
+      (previous) => ({
+        ...previous,
+        boards: [
+          ...previous.boards,
+          ...boards.filter(
+            (board) => !previous.boards.some((known) => known.boardId === board.boardId),
+          ),
+        ],
+      }),
+      "jira",
     );
-    setCatalog(undefined);
-    settingsFocus(`settings-board-${item.id}`);
+    if (boards[0]) settingsFocus(`settings-board-${boards[0].boardId}`);
   }
 
-  function addRepo(item: CatalogItem) {
-    const path = item.path;
-    if (!path) return;
-    edit((previous) =>
-      previous.repositories.some((repo) => repo.projectId === item.id)
-        ? previous
-        : {
-            ...previous,
-            repositories: [
-              ...previous.repositories,
-              {
-                projectId: item.id,
-                path,
-                boardSelection: "selected",
-                checkout: null,
-                defaultSkills: {},
-              },
-            ],
-          },
+  function addRepositories(items: readonly CatalogItem[]) {
+    const repositories: SaveSettingsRepositoryBinding[] = [];
+    for (const item of items) {
+      if (!item.path) throw new Error("GitLab did not return the repository path.");
+      repositories.push({
+        projectId: item.id,
+        path: item.path,
+        boardSelection: "selected",
+        checkout: null,
+        defaultSkills: {},
+      });
+    }
+    edit(
+      (previous) => ({
+        ...previous,
+        repositories: [
+          ...previous.repositories,
+          ...repositories.filter(
+            (repo) => !previous.repositories.some((known) => known.projectId === repo.projectId),
+          ),
+        ],
+      }),
+      "gitlab",
     );
-    setCatalog(undefined);
-    settingsFocus(`settings-repository-${item.id}`);
+    if (repositories[0]) settingsFocus(`settings-repository-${repositories[0].projectId}`);
   }
 
   function setMembership(scopeId: string, projectId: string, include: boolean) {
@@ -293,10 +348,7 @@ function SettingsEditor({
 
   async function save(disconnect?: Provider) {
     const saveWorkspace = Boolean(disconnect) || saveArea === "workspace";
-    if (
-      pending.current ||
-      (!disconnect && (!pageDirty || (saveWorkspace && (resolvingBoard || stale))))
-    ) {
+    if (pending.current || (!disconnect && (!pageDirty || (saveWorkspace && (catalog || stale))))) {
       return;
     }
     setNotice(undefined);
@@ -309,6 +361,10 @@ function SettingsEditor({
         select("connections");
         setNotice(invalid.validationMessage);
         requestAnimationFrame(() => invalid.focus());
+        return;
+      }
+      if (wrongScope.gitlab || wrongScope.jira) {
+        askScopeReset(wrongScope.gitlab ? "gitlab" : "jira");
         return;
       }
       setShowScopeErrors(true);
@@ -346,6 +402,7 @@ function SettingsEditor({
         const next = fromSaved(data);
         setEditor({
           ...next,
+          scopeOrigins: editor.scopeOrigins,
           draft: { ...draft, [disconnect]: next.draft[disconnect] },
           tokens: { ...tokens, [disconnect]: "" },
         });
@@ -482,11 +539,14 @@ function SettingsEditor({
                 <button
                   type="button"
                   id="settings-add-board"
-                  aria-expanded={catalog === "scope"}
-                  disabled={busy}
-                  onClick={() => toggleCatalog("scope")}
+                  aria-haspopup="dialog"
+                  disabled={busy || stale}
+                  onClick={(event) => {
+                    event.currentTarget.focus({ preventScroll: true });
+                    openCatalog("scope");
+                  }}
                 >
-                  {catalog === "scope" ? "Close catalog" : "+ Add board"}
+                  + Add board
                 </button>
               }
             >
@@ -494,15 +554,14 @@ function SettingsEditor({
                 key={`team-boards:${snapshot.settingsRevision}:${credentialEpoch.jira}`}
                 boards={draft.boards}
                 browsing={catalog === "scope"}
-                onDismissCatalog={() => dismissCatalog("scope")}
-                active={active === "scope"}
+                onDismissCatalog={() => setCatalog(undefined)}
+                active={active === "scope" && !wrongScope.jira}
                 repositories={draft.repositories}
                 connection={scoped("jira")}
                 connectionEpoch={credentialEpoch.jira}
-                disabled={busy}
+                disabled={busy || wrongScope.jira}
                 showErrors={showScopeErrors}
-                onResolving={setResolvingBoard}
-                onAdd={addBoard}
+                onAdd={addBoards}
                 onChange={(board) =>
                   edit((previous) => ({
                     ...previous,
@@ -522,31 +581,33 @@ function SettingsEditor({
               <TeamReviewers
                 key={`reviewers:${credentialEpoch.gitlab}`}
                 active={active === "scope"}
+                browsing={catalog === "reviewers"}
                 connection={scoped("gitlab")}
+                connectionEpoch={credentialEpoch.gitlab}
+                suggestReviewers={savedGitlabToken}
                 savedConnection={
-                  snapshot.connections.gitlab.configured
+                  sameGitlabAccount
                     ? {
                         expectedRevision: snapshot.settingsRevision,
                         provider: "gitlab",
-                        connection: { origin: snapshot.connections.gitlab.origin ?? "" },
+                        connection: { origin: gitlab.origin ?? "" },
                         token: { action: "keep" },
                       }
                     : undefined
                 }
                 savedIds={snapshot.additionalReviewerIds}
                 ids={draft.additionalReviewerIds}
-                canLookUp={
-                  Boolean(tokens.gitlab && draft.gitlab.origin) ||
-                  Boolean(
-                    snapshot.connections.gitlab.configured &&
-                    draft.gitlab.origin === snapshot.connections.gitlab.origin,
-                  )
-                }
+                canLookUp={Boolean(tokens.gitlab && origins.gitlab) || savedGitlabToken}
                 disabled={busy || stale}
                 onChange={(ids) =>
-                  edit((previous) => ({ ...previous, additionalReviewerIds: ids }))
+                  edit(
+                    (previous) => ({ ...previous, additionalReviewerIds: ids }),
+                    catalog === "reviewers" ? "gitlab" : undefined,
+                  )
                 }
                 onConnections={() => select("connections")}
+                onBrowse={() => openCatalog("reviewers")}
+                onDismissCatalog={() => setCatalog(undefined)}
               />
             </SettingsPage>
             <SettingsPage
@@ -556,25 +617,28 @@ function SettingsEditor({
                 <button
                   type="button"
                   id="settings-add-repository"
-                  aria-expanded={catalog === "repositories"}
-                  disabled={busy}
-                  onClick={() => toggleCatalog("repositories")}
+                  aria-haspopup="dialog"
+                  disabled={busy || stale}
+                  onClick={(event) => {
+                    event.currentTarget.focus({ preventScroll: true });
+                    openCatalog("repositories");
+                  }}
                 >
-                  {catalog === "repositories" ? "Close catalog" : "+ Add repository"}
+                  + Add repository
                 </button>
               }
             >
               <Repositories
-                key={`repositories:${snapshot.settingsRevision}`}
+                key={`repositories:${snapshot.settingsRevision}:${credentialEpoch.gitlab}`}
                 boards={draft.boards}
                 repositories={draft.repositories}
                 gitlab={draft.gitlab}
-                browsing={catalog === "repositories"}
-                onDismissCatalog={() => dismissCatalog("repositories")}
+                browsing={catalog === "repositories" && active === "repositories"}
+                onDismissCatalog={() => setCatalog(undefined)}
                 connection={scoped("gitlab")}
                 connectionEpoch={credentialEpoch.gitlab}
-                disabled={busy}
-                onAdd={addRepo}
+                disabled={busy || wrongScope.gitlab}
+                onAdd={addRepositories}
                 onChange={(repo) =>
                   edit((previous) => ({
                     ...previous,
@@ -615,13 +679,51 @@ function SettingsEditor({
             type="submit"
             form="workspace-settings"
             className="primary"
-            disabled={busy || (saveArea === "workspace" && (resolvingBoard || stale))}
+            disabled={busy || (saveArea === "workspace" && (Boolean(catalog) || stale))}
           >
             Save changes
           </button>
         )}
         <kbd aria-hidden="true">Esc</kbd>
       </footer>
+      {scopeReset && (
+        <Modal
+          title={
+            scopeReset.provider === "gitlab"
+              ? "Use a different GitLab address?"
+              : "Use a different Jira site?"
+          }
+          className="settings-confirm"
+          onClose={() => setScopeReset(undefined)}
+          footer={
+            <>
+              <button type="button" onClick={() => setScopeReset(undefined)}>
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="primary"
+                onClick={() => {
+                  edit(
+                    (previous) => clearProviderScope(previous, scopeReset.provider),
+                    scopeReset.provider,
+                  );
+                  setCatalog(scopeReset.picker);
+                  setScopeReset(undefined);
+                }}
+              >
+                {scopeReset.provider === "gitlab" ? "Clear GitLab scope" : "Clear Jira boards"}
+              </button>
+            </>
+          }
+        >
+          <p className="meta">
+            {scopeReset.provider === "gitlab"
+              ? "This clears tracked repositories and team reviewers from your draft and removes repository links from Jira boards."
+              : "This clears tracked boards and their review settings from your draft."}
+          </p>
+        </Modal>
+      )}
       {confirm && (
         <Modal
           title={
@@ -663,6 +765,10 @@ function fromSaved(snapshot: SettingsView): Editor {
   return {
     snapshot,
     tokens: { gitlab: "", jira: "" },
+    scopeOrigins: {
+      gitlab: sourceOrigin(snapshot.connections.gitlab.origin),
+      jira: sourceOrigin(snapshot.connections.jira.site),
+    },
     draft: {
       gitlab: { origin: snapshot.connections.gitlab.origin ?? "" },
       jira: {

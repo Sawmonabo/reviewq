@@ -66,6 +66,7 @@ export function ModalFrame({
       aria-busy={busy}
       onCancel={(event) => {
         event.preventDefault();
+        event.stopPropagation();
         if (!busy) onClose();
       }}
       onKeyDown={(event) => {

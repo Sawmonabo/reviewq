@@ -10,7 +10,8 @@ import { Icon } from "../../components/Icon";
 import { Loading, Notice } from "../../components/PanelState";
 import { useResource } from "../../hooks/useResource";
 import { describeError, readable } from "../../lib/presentation";
-import { CatalogPicker } from "./CatalogPicker";
+import { CatalogDialog } from "./catalog/CatalogDialog";
+import { SavedFilterPicker } from "./catalog/SavedFilterPicker";
 import { boardIncludesRepository, settingsFocus, toggleMembership } from "./scope-draft";
 import type { CatalogConnection } from "./scope-draft";
 
@@ -18,6 +19,7 @@ type StatusCatalog = {
   readonly entries: ReadonlyMap<string, CatalogItem>;
   readonly next: string | null;
 };
+const boardReadBatch = 3;
 type Props = {
   readonly active: boolean;
   readonly boards: readonly SaveSettingsBoardScope[];
@@ -29,8 +31,7 @@ type Props = {
   readonly onDismissCatalog: () => void;
   readonly onRepositories: () => void;
   readonly showErrors: boolean;
-  readonly onResolving: (resolving: boolean) => void;
-  readonly onAdd: (item: CatalogItem) => void;
+  readonly onAdd: (items: readonly CatalogItem[]) => void;
   readonly onChange: (board: SaveSettingsBoardScope) => void;
   readonly onRemove: (scopeId: string) => void;
 };
@@ -49,50 +50,50 @@ export function TeamBoards({
   onAdd,
   onChange,
   onRemove,
-  onResolving,
 }: Props) {
-  const [adding, setAdding] = useState<string>();
-  const [addError, setAddError] = useState<string>();
   const [metadata, setMetadata] = useState<ReadonlyMap<string, CatalogItem>>(() => new Map());
   const [statuses, setStatuses] = useState<StatusCatalog>();
   const [statusError, setStatusError] = useState<string>();
   const [readingStatuses, setReadingStatuses] = useState(false);
   const enabledCount = boards.filter((board) => board.enabled).length;
-  const addRequest = useRef<AbortController | undefined>(undefined);
   const statusRequest = useRef<AbortController | undefined>(undefined);
 
   useEffect(
     () => () => {
-      addRequest.current?.abort();
       statusRequest.current?.abort();
-      onResolving(false);
     },
-    [onResolving],
+    [],
   );
 
-  async function add(item: CatalogItem) {
-    if (disabled || addRequest.current) return;
-    const controller = new AbortController();
-    addRequest.current = controller;
-    onResolving(true);
-    setAdding(item.label);
-    setAddError(undefined);
+  async function add(items: readonly CatalogItem[], modalSignal: AbortSignal) {
+    const requests = new AbortController();
+    const signal = AbortSignal.any([modalSignal, requests.signal]);
+    const verified: CatalogItem[] = [];
     try {
-      const exact = await readBoard(connection, item.id, controller.signal);
-      if (!controller.signal.aborted) {
-        setMetadata((known) => new Map(known).set(item.id, exact.data));
-        onAdd(exact.data);
+      for (let start = 0; start < items.length; start += boardReadBatch) {
+        signal.throwIfAborted();
+        const batch = await Promise.all(
+          items.slice(start, start + boardReadBatch).map(async (item) => {
+            try {
+              return (await readBoard(connection, item.id, signal)).data;
+            } catch (error) {
+              signal.throwIfAborted();
+              throw new Error(
+                `Could not verify ${item.label} (#${item.id}). ${describeError(error)}`,
+                { cause: error },
+              );
+            }
+          }),
+        );
+        verified.push(...batch);
       }
-    } catch (error) {
-      if (!controller.signal.aborted) setAddError(describeError(error));
+      signal.throwIfAborted();
+      setMetadata(
+        (known) => new Map([...known, ...verified.map((item) => [item.id, item] as const)]),
+      );
+      onAdd(verified);
     } finally {
-      if (addRequest.current === controller) {
-        addRequest.current = undefined;
-        if (!controller.signal.aborted) {
-          setAdding(undefined);
-          onResolving(false);
-        }
-      }
+      requests.abort();
     }
   }
 
@@ -132,18 +133,21 @@ export function TeamBoards({
 
   return (
     <section className="settings-section stack" aria-labelledby="team-boards">
-      {browsing && (
-        <CatalogPicker
+      {browsing && active && (
+        <CatalogDialog
           connectionEpoch={connectionEpoch}
-          scope={connection}
+          connection={connection}
           kind="boards"
-          label="Browse Jira boards"
-          inputId="settings-board-search"
-          unavailable={boards.map((board) => board.boardId)}
-          disabled={disabled || Boolean(adding)}
-          embedded
-          onDismiss={onDismissCatalog}
-          onAdd={(item) => void add(item)}
+          added={boards.map((board) => board.boardId)}
+          tracked={boards.map((board) => ({
+            id: board.boardId,
+            label: board.name,
+            detail: [metadata.get(board.boardId)?.path, readable(board.type)]
+              .filter(Boolean)
+              .join(" · "),
+          }))}
+          onClose={onDismissCatalog}
+          onAdd={add}
         />
       )}
       <div className="settings-inline">
@@ -152,8 +156,6 @@ export function TeamBoards({
           {enabledCount} active {enabledCount === 1 ? "board" : "boards"}
         </span>
       </div>
-      {adding && <Loading label={`Loading ${adding}…`} />}
-      {addError && <Notice>{addError}</Notice>}
       {boards.map((board, index) => (
         <BoardEditor
           key={board.scopeId}
@@ -406,12 +408,11 @@ function BoardEditor({
               )}
             </div>
             <p className="meta">Narrow a shared board to your team with an existing Jira filter.</p>
-            <CatalogPicker
+            <SavedFilterPicker
               connectionEpoch={connectionEpoch}
-              scope={connection}
-              kind="filters"
-              label="Browse saved filters"
-              unavailable={board.teamFilterId ? [board.teamFilterId] : []}
+              connection={connection}
+              current={board.teamFilterId}
+              disabled={disabled}
               onAdd={(item) => {
                 setFilterLabel(item.label);
                 onChange({ ...board, teamFilterId: item.id });

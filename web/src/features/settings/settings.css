@@ -476,8 +476,7 @@
   gap: 7px;
   margin-top: 22px;
 }
-.settings-reviewers-list,
-.reviewer-selection {
+.settings-reviewers-list {
   list-style: none;
   padding: 0;
   margin: 0;
@@ -559,85 +558,17 @@
   outline: 2px solid var(--settings-accent);
   outline-offset: 2px;
 }
-.settings-confirm,
-.reviewer-picker {
+.settings-confirm {
   width: min(460px, calc(100vw - 24px));
   background: var(--settings-panel);
   border-color: var(--settings-strong);
   border-radius: 12px;
 }
-.settings-pane .reviewer-picker input {
-  width: 100%;
-}
-.settings-confirm .icon-button,
-.reviewer-picker .icon-button {
+.settings-confirm .icon-button {
   font-size: 19px;
 }
-.settings-confirm .modal-frame > header h2,
-.reviewer-picker .modal-frame > header h2 {
+.settings-confirm .modal-frame > header h2 {
   font-size: 17px;
-}
-.reviewer-results {
-  min-height: min(200px, 31dvh);
-  max-height: min(260px, 39dvh);
-  overflow: auto;
-  border: 1px solid var(--settings-line);
-  border-radius: 8px;
-}
-.reviewer-option {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 9px 11px;
-  cursor: pointer;
-}
-.reviewer-option + .reviewer-option {
-  border-top: 1px solid var(--settings-line);
-}
-.reviewer-option[data-selected],
-.reviewer-option[data-hovered] {
-  background: var(--settings-selected);
-}
-.reviewer-option[data-focus-visible] {
-  outline: 2px solid var(--settings-accent);
-  outline-offset: -2px;
-}
-.reviewer-option[data-disabled] {
-  color: var(--settings-muted);
-  cursor: default;
-}
-.reviewer-option-text {
-  flex: 1;
-  display: grid;
-  min-width: 0;
-  overflow-wrap: anywhere;
-  gap: 2px;
-}
-.reviewer-option small {
-  color: var(--settings-muted);
-  font-size: 11px;
-}
-.reviewer-check {
-  display: grid;
-  place-items: center;
-  flex: none;
-  width: 16px;
-  height: 16px;
-  border-radius: 4px;
-  border: 1px solid var(--settings-input-line);
-}
-.reviewer-selection {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 5px;
-}
-.reviewer-selection button {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  min-height: 25px;
-  padding: 2px 7px;
-  text-align: start;
 }
 @media (max-width: 850px) {
   .settings-layout {

@@ -5,7 +5,7 @@ import type {
   SaveSettingsRepositoryBinding,
 } from "../../api/generated/contracts/settings";
 import { Icon } from "../../components/Icon";
-import { CatalogPicker } from "./CatalogPicker";
+import { CatalogDialog } from "./catalog/CatalogDialog";
 import { CheckoutSkill } from "./CheckoutSkill";
 import { boardIncludesRepository, settingsFocus } from "./scope-draft";
 import type { CatalogConnection } from "./scope-draft";
@@ -32,7 +32,7 @@ export function Repositories({
   readonly disabled: boolean;
   readonly browsing: boolean;
   readonly onDismissCatalog: () => void;
-  readonly onAdd: (item: CatalogItem) => void;
+  readonly onAdd: (items: readonly CatalogItem[]) => void;
   readonly onChange: (repo: SaveSettingsRepositoryBinding) => void;
   readonly onRemove: (id: string) => void;
   readonly onMembership: (scopeId: string, projectId: string, include: boolean) => void;
@@ -40,16 +40,17 @@ export function Repositories({
   return (
     <section className="settings-section stack" aria-labelledby="settings-repositories">
       {browsing && (
-        <CatalogPicker
+        <CatalogDialog
           kind="projects"
-          label="Browse repositories"
-          inputId="settings-repository-search"
-          scope={connection}
+          connection={connection}
           connectionEpoch={connectionEpoch}
-          disabled={disabled}
-          unavailable={repositories.map((repo) => repo.projectId)}
-          embedded
-          onDismiss={onDismissCatalog}
+          added={repositories.map((repo) => repo.projectId)}
+          tracked={repositories.map((repo) => ({
+            id: repo.projectId,
+            label: repo.path.split("/").at(-1) ?? repo.path,
+            detail: repo.path,
+          }))}
+          onClose={onDismissCatalog}
           onAdd={onAdd}
         />
       )}
