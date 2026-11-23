@@ -47,6 +47,9 @@ export function ReportHistory({
     [{ kind: "report", id: run.runId }],
   );
   const currentReceipt = versions.data ? (versions.data.currentReceiptId ?? undefined) : latestId;
+  const accepted =
+    versions.data?.items.find((version) => version.receiptId === currentReceipt) ??
+    (latestReport?.receiptId === currentReceipt ? latestReport : undefined);
   const update = versions.data ? versions.data.delivery : delivery;
   async function showEarlierEvidence() {
     if (!report?.parentReceiptId || evidenceRequest.current) return;
@@ -79,16 +82,16 @@ export function ReportHistory({
           <section className="report-update-status" aria-label="Report update failed">
             <h3>Report update failed</h3>
             {update.reason && <p>{reportHandoffReason(update.reason)}</p>}
-            {latestReport && (
+            {accepted && (
               <p className="meta">
                 Latest accepted report ·{" "}
-                <time dateTime={latestReport.capturedAt}>
-                  {formatActivityTime(latestReport.capturedAt)}
+                <time dateTime={accepted.capturedAt}>
+                  {formatActivityTime(accepted.capturedAt)}
                 </time>
-                {latestReport.reviewedSha && (
+                {accepted.reviewedSha && (
                   <>
                     {" "}
-                    · Checked <code>{latestReport.reviewedSha.slice(0, 8)}</code>
+                    · Checked <code>{accepted.reviewedSha.slice(0, 8)}</code>
                   </>
                 )}
               </p>
