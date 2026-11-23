@@ -1,13 +1,11 @@
-import { execFile, spawn } from "node:child_process";
+import { spawn } from "node:child_process";
 import { constants, watch } from "node:fs";
 import { copyFile, lstat, mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { basename, dirname, isAbsolute, join, resolve, sep } from "node:path";
 import { createInterface } from "node:readline";
 import { setTimeout as delay } from "node:timers/promises";
-import { promisify } from "node:util";
 
-const execute = promisify(execFile);
 const ROOT_INPUTS = new Set(["Cargo.toml", "Cargo.lock", "rust-toolchain", "rust-toolchain.toml"]);
 const DEBOUNCE_MS = 200;
 const SHUTDOWN_MS = 15_000;
@@ -125,7 +123,6 @@ export async function createDevBackend(root, options) {
       const origin = await ready(current);
       if (disposed) return;
       current.origin = origin;
-      // Browser grants are scoped to the backend's browser address.
       browserPort = Number(new URL(origin).port);
       console.log(`Rust backend ready on ${origin}`);
     } catch (error) {
@@ -164,29 +161,6 @@ export async function createDevBackend(root, options) {
 
   return {
     origin: () => server?.origin,
-    async browserLink(frontend) {
-      const current = server;
-      if (!current?.origin) throw new Error("Wait for the development backend before signing in.");
-      try {
-        const { stdout } = await execute(
-          current.binary,
-          ["--profile", profile, "open", "--print-url"],
-          { timeout: 5000 },
-        );
-        const link = new URL(stdout.trim());
-        if (
-          server !== current ||
-          link.origin !== current.origin ||
-          !/^#ticket=[A-Za-z0-9_-]{43}$/.test(link.hash)
-        )
-          throw new Error("The backend changed.");
-        return `${frontend}/${link.hash}`;
-      } catch {
-        throw new Error(
-          "Could not issue a development browser link. Try again once the backend is ready.",
-        );
-      }
-    },
     async close() {
       disposed = true;
       clearTimeout(timer);

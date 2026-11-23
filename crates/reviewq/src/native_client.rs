@@ -42,11 +42,6 @@ pub(crate) struct Readiness {
 }
 
 #[derive(Deserialize)]
-struct Ticket {
-    ticket: String,
-}
-
-#[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct Linked {
     review_id: String,
@@ -284,25 +279,7 @@ pub(crate) async fn open(profile: &Path, options: Open) -> Result<(), Failure> {
     let client = client()?;
     let status = signed(&client, &endpoint, "GET", "/api/v1/status", b"").await?;
     verify_ready(&endpoint, &status)?;
-    let bytes = signed(
-        &client,
-        &endpoint,
-        "POST",
-        "/api/v1/session",
-        br#"{"mode":"launch"}"#,
-    )
-    .await?;
-    let ticket = serde_json::from_slice::<Envelope<Ticket>>(&bytes)?
-        .data
-        .ticket;
-    if ticket.len() != 43
-        || !ticket
-            .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
-    {
-        return Err("invalid browser ticket".into());
-    }
-    let url = reqwest::Url::parse(&format!("http://{}/#ticket={ticket}", endpoint.browser()))?;
+    let url = reqwest::Url::parse(&format!("http://{}/", endpoint.browser()))?;
     if options.print_url {
         println!("{url}");
         return Ok(());
@@ -314,10 +291,7 @@ pub(crate) async fn open(profile: &Path, options: Open) -> Result<(), Failure> {
             .is_ok_and(|(opened, _)| opened),
     };
     if !opened {
-        println!("Open ReviewQ at http://{}/", endpoint.browser());
-        eprintln!(
-            "For a one-time sign-in link, run `reviewq open --print-url` with any `--profile` option you used."
-        );
+        println!("Open ReviewQ at {url}");
     }
     Ok(())
 }

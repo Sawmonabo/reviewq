@@ -128,7 +128,7 @@ pub(in crate::entry) async fn patch(
             )
                 .into_response());
         }
-        let mut error = ApiError(AppError::RangeNotSatisfiable).into_response();
+        let mut error = ApiError::from(AppError::RangeNotSatisfiable).into_response();
         put(
             error.headers_mut(),
             header::CONTENT_RANGE,

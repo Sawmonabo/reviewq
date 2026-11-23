@@ -3,12 +3,11 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use axum::extract::{DefaultBodyLimit, OriginalUri, Request, State};
-use axum::http::{HeaderMap, header};
+use axum::http::{HeaderMap, HeaderValue, header};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
-use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use reviewq_app::access::{Actor, AppError};
 use reviewq_app::actions::{ActionCommandStore, ActionStore};
 use reviewq_app::changes::DiscussionEpochStore;
@@ -35,12 +34,11 @@ use reviewq_app::workspace::WorkspaceStore;
 use reviewq_domain::identity::EventCursor;
 use reviewq_protocol::queue::QueueSync;
 use reviewq_protocol::{EventCursorDto, Success};
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use tokio::sync::{Notify, Semaphore, watch};
 use tower_http::services::{ServeDir, ServeFile};
 
 mod auth;
-mod browser_sessions;
 mod changes;
 mod checkout;
 mod control;
@@ -66,11 +64,10 @@ mod terminal;
 mod tracking;
 mod workspace;
 
-pub use browser_sessions::BrowserSessions;
 pub use control::{BridgeDescriptor, ControlRequest, ServiceEndpoint, ServiceIdentity};
 
 use auth::Auth;
-use error::{ApiBytes, ApiError};
+use error::ApiError;
 
 /// Shared application ports for one ReviewQ listener pair.
 pub trait Store:
@@ -173,13 +170,6 @@ pub(super) struct Entry {
     checkpoints: Checkpoints,
 }
 
-#[derive(Deserialize)]
-#[serde(rename_all = "snake_case", tag = "mode", deny_unknown_fields)]
-enum SessionRequest {
-    Launch,
-    Redeem { ticket: String },
-}
-
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct Status<'a> {
@@ -199,7 +189,7 @@ struct Status<'a> {
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
-struct SessionResult {
+struct BrowserProof {
     csrf_token: String,
 }
 
@@ -213,7 +203,6 @@ pub enum StartupState {
 /// Runtime-owned listener identity and commit/shutdown signals.
 pub struct ServiceRuntime<'a> {
     pub endpoint: ServiceEndpoint,
-    pub browser_sessions: BrowserSessions,
     pub web: &'a Path,
     pub retained_assets: Option<&'a Path>,
     pub sends_allowed: bool,
@@ -240,7 +229,7 @@ pub fn router(
     host: Option<Arc<dyn NativeHost>>,
     file_history: Arc<dyn NativeHistoryReader>,
     runtime: ServiceRuntime<'_>,
-) -> Router {
+) -> Result<Router, AppError> {
     let entry = Arc::new(Entry {
         store,
         source,
@@ -267,7 +256,7 @@ pub fn router(
         shutdown: runtime.shutdown,
         startup: runtime.startup.clone(),
         event_slots: Arc::new(Semaphore::new(32)),
-        auth: Auth::new(runtime.endpoint, runtime.browser_sessions),
+        auth: Auth::new(runtime.endpoint)?,
         checkpoints: Checkpoints::default(),
     });
     let web = runtime.web;
@@ -293,7 +282,7 @@ pub fn router(
         .route("/settings/disconnect", post(settings::disconnect))
         .route("/checkout/grant", post(checkout::grant))
         .route("/events", get(events::feed))
-        .route("/session", get(session).post(start_session))
+        .route("/session", get(browser_proof))
         .route("/queue", get(workspace::queue))
         .route("/queue/sync", get(refresh::sync))
         .route("/queue/sprints", post(workspace::load_sprints))
@@ -409,7 +398,7 @@ pub fn router(
     } else {
         router
     };
-    router
+    Ok(router
         .fallback_service(
             ServeDir::new(web).not_found_service(ServeFile::new(web.join("index.html"))),
         )
@@ -421,7 +410,7 @@ pub fn router(
             runtime.startup,
             activation_guard,
         ))
-        .with_state(entry)
+        .with_state(entry))
 }
 
 async fn activation_guard(
@@ -469,20 +458,38 @@ async fn poll_source(
 
 async fn guard(State(entry): State<Arc<Entry>>, request: Request, next: Next) -> Response {
     if !entry.auth.allowed_host(request.headers()) {
-        return ApiError(AppError::Forbidden).into_response();
+        return ApiError::from(AppError::Forbidden).into_response();
     }
     let private = request.uri().path().starts_with("/api/") || request.uri().path() == "/mcp";
     let mut response = next.run(request).await;
+    let headers = response.headers_mut();
+    headers.insert(header::X_FRAME_OPTIONS, HeaderValue::from_static("DENY"));
+    headers.insert(
+        "cross-origin-opener-policy",
+        HeaderValue::from_static("same-origin"),
+    );
     if private {
-        response
-            .headers_mut()
-            .insert(header::CACHE_CONTROL, "no-store".parse().unwrap());
+        headers.insert(
+            "cross-origin-resource-policy",
+            HeaderValue::from_static("same-origin"),
+        );
+        headers.insert(
+            header::X_CONTENT_TYPE_OPTIONS,
+            HeaderValue::from_static("nosniff"),
+        );
+    }
+    if private
+        || headers
+            .get(header::CONTENT_TYPE)
+            .is_some_and(|value| value.as_bytes().starts_with(b"text/html"))
+    {
+        headers.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
     }
     response
 }
 
 async fn api_not_found() -> ApiError {
-    ApiError(AppError::NotFound)
+    AppError::NotFound.into()
 }
 
 async fn status(
@@ -531,67 +538,14 @@ async fn status(
     Ok((response_headers, body).into_response())
 }
 
-async fn session(
+async fn browser_proof(
     State(entry): State<Arc<Entry>>,
     headers: HeaderMap,
-) -> Result<Json<Success<SessionResult>>, ApiError> {
-    let csrf = URL_SAFE_NO_PAD.encode(entry.auth.csrf(&headers)?);
-    let body = SessionResult { csrf_token: csrf };
+) -> Result<Json<Success<BrowserProof>>, ApiError> {
+    let body = BrowserProof {
+        csrf_token: entry.auth.csrf(&headers)?,
+    };
     Ok(Json(pages::success(body, *entry.commits.borrow())?))
-}
-
-async fn start_session(
-    State(entry): State<Arc<Entry>>,
-    OriginalUri(uri): OriginalUri,
-    headers: HeaderMap,
-    ApiBytes(bytes): ApiBytes,
-) -> Result<Response, ApiError> {
-    if !headers
-        .get(header::CONTENT_TYPE)
-        .and_then(|value| value.to_str().ok())
-        .is_some_and(|value| value.split(';').next() == Some("application/json"))
-    {
-        return Err(AppError::InvalidRequest.into());
-    }
-    let request: SessionRequest =
-        serde_json::from_slice(&bytes).map_err(|_| AppError::InvalidRequest)?;
-    match request {
-        SessionRequest::Launch => {
-            let target = uri
-                .path_and_query()
-                .ok_or(AppError::InvalidRequest)?
-                .as_str();
-            let proof = entry.auth.control("POST", target, &headers, &bytes)?;
-            let response = pages::success(
-                serde_json::json!({"ticket": entry.auth.launch()?}),
-                *entry.commits.borrow(),
-            )?;
-            let body = serde_json::to_vec(&response).map_err(|_| AppError::Internal)?;
-            let mut response_headers = HeaderMap::new();
-            response_headers.insert(header::CONTENT_TYPE, "application/json".parse().unwrap());
-            entry
-                .auth
-                .endpoint
-                .response_proof(&proof, 200, &mut response_headers, &body)?;
-            Ok((response_headers, body).into_response())
-        }
-        SessionRequest::Redeem { ticket } => {
-            entry.auth.check_origin(&headers)?;
-            entry.auth.consume_ticket(&ticket)?;
-            let (csrf, cookie) = entry.auth.browser.issue(&headers)?;
-            let mut result = Json(pages::success(
-                SessionResult {
-                    csrf_token: URL_SAFE_NO_PAD.encode(csrf),
-                },
-                *entry.commits.borrow(),
-            )?)
-            .into_response();
-            if let Some(cookie) = cookie {
-                result.headers_mut().insert(header::SET_COOKIE, cookie);
-            }
-            Ok(result)
-        }
-    }
 }
 
 impl Entry {

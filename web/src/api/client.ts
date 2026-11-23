@@ -12,9 +12,9 @@ import {
   isReviewSelectionResponse,
   isRunDetailResponse,
 } from "./generated/validators.mjs";
+import { ApiTransportError } from "./transport-error";
 
-let session: Promise<string> | undefined;
-let openingTicket: string | undefined;
+let browserProof: Promise<string> | undefined;
 
 export async function readOverview(
   reviewId: string,
@@ -121,22 +121,28 @@ export async function request(
   options: RequestInit = {},
   allowedStatus?: number,
 ): Promise<Response> {
-  const active = requireSession();
-  const token = await active;
   const headers = new Headers(options.headers);
-  const reading = !options.method || options.method === "GET" || options.method === "HEAD";
-  if (!reading) headers.set("X-ReviewQ-CSRF", token);
+  const method = options.method?.toUpperCase() ?? "GET";
+  const reading = method === "GET" || method === "HEAD";
   const url = `/api/v1${path}`;
-  let response = await fetch(url, { ...options, headers });
-  if (response.status === 401) {
-    if (session === active) session = undefined;
-    if (reading) {
-      options.signal?.throwIfAborted();
-      const reopened = requireSession();
-      await reopened;
-      response = await fetch(url, { ...options, headers });
-      if (response.status === 401 && session === reopened) session = undefined;
-    }
+  let response: Response;
+  for (let attempt = 0; ; attempt++) {
+    options.signal?.throwIfAborted();
+    const active = reading ? undefined : requireBrowserProof();
+    if (active) headers.set("X-ReviewQ-CSRF", await active);
+    options.signal?.throwIfAborted();
+    response = await fetchLocal(url, { ...options, headers });
+
+    // The service marks a proof rejection before running the operation.
+    if (
+      !active ||
+      response.status !== 403 ||
+      response.headers.get("X-ReviewQ-CSRF-Rejected") !== "1"
+    )
+      break;
+    if (browserProof === active) browserProof = undefined;
+    if (attempt > 0 || (options.body != null && typeof options.body !== "string")) break;
+    void response.body?.cancel().catch(() => {});
   }
   if (!response.ok && response.status !== allowedStatus) throw await apiError(response);
   return response;
@@ -164,49 +170,24 @@ async function decode<T>(
   accepts: (data: unknown) => data is T,
   limit = 12 * 1024 * 1024,
 ): Promise<T> {
-  const payload: unknown = JSON.parse(decodeUtf8(await readBoundedBytes(response, limit)));
+  const bytes = await readBoundedBytes(response, limit).catch(transportFailure);
+  const payload: unknown = JSON.parse(decodeUtf8(bytes));
   if (!accepts(payload)) throw new Error("ReviewQ returned an invalid response.");
   return payload;
 }
 
-function requireSession(): Promise<string> {
-  session ??= bootstrapSession().catch((error: unknown) => {
-    session = undefined;
+function requireBrowserProof(): Promise<string> {
+  browserProof ??= readBrowserProof().catch((error: unknown) => {
+    browserProof = undefined;
     throw error;
   });
-  return session;
+  return browserProof;
 }
 
-async function bootstrapSession(): Promise<string> {
-  const url = new URL(window.location.href);
-  const fragment = new URLSearchParams(url.hash.slice(1)).get("ticket");
-  if (fragment !== null) {
-    openingTicket = fragment;
-    url.hash = "";
-    window.history.replaceState(window.history.state, "", url);
-  }
-  const ticket = openingTicket;
-  let response = await fetch(
-    "/api/v1/session",
-    ticket === undefined
-      ? undefined
-      : {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ mode: "redeem", ticket }),
-        },
-  );
-  if (response.status === 401 && ticket !== undefined) {
-    // A spent launch link can still open a review in an authorized browser.
-    openingTicket = undefined;
-    response = await fetch("/api/v1/session", { cache: "no-store" });
-  }
-  if (response.status === 401) {
-    throw new Error("This browser needs a ReviewQ session. Open the launcher, then retry here.");
-  }
+async function readBrowserProof(): Promise<string> {
+  const response = await fetchLocal("/api/v1/session", { cache: "no-store" });
   if (!response.ok) throw await apiError(response);
-  openingTicket = undefined;
-  const payload: unknown = await response.json();
+  const payload: unknown = await response.json().catch(transportFailure);
   if (
     typeof payload === "object" &&
     payload !== null &&
@@ -214,18 +195,38 @@ async function bootstrapSession(): Promise<string> {
     typeof payload.data === "object" &&
     payload.data !== null &&
     "csrfToken" in payload.data &&
-    typeof payload.data.csrfToken === "string"
+    typeof payload.data.csrfToken === "string" &&
+    /^[A-Za-z0-9_-]{43}$/.test(payload.data.csrfToken)
   ) {
     return payload.data.csrfToken;
   }
-  throw new Error("ReviewQ returned an invalid session.");
+  throw new Error("ReviewQ returned an invalid browser proof.");
+}
+
+function fetchLocal(url: string, options: RequestInit): Promise<Response> {
+  return fetch(url, {
+    ...options,
+    mode: "same-origin",
+    credentials: "omit",
+    redirect: "error",
+  }).catch(transportFailure);
+}
+
+function transportFailure(error: unknown): never {
+  if (error instanceof TypeError) throw new ApiTransportError("Could not reach ReviewQ.");
+  throw error;
 }
 
 async function apiError(response: Response): Promise<Error> {
-  const payload: unknown = await response.json().catch(() => null);
+  const payload: unknown = await response.json().catch((error: unknown) => {
+    if (error instanceof DOMException && error.name === "AbortError") throw error;
+    return null;
+  });
   if (isFailure(payload)) {
     return new ApiResponseError(payload.error.code, payload.error.message, payload.error.retryable);
   }
+  if (response.status >= 500)
+    return new ApiTransportError("ReviewQ is unavailable.", response.status);
   return new Error("ReviewQ could not complete the request.");
 }
 

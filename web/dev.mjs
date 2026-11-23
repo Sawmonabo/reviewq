@@ -3,7 +3,6 @@ import { once } from "node:events";
 import { createServer } from "node:http";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
-import { createInterface } from "node:readline";
 import { parseArgs, promisify } from "node:util";
 import { createServer as createViteServer } from "vite";
 import { createDevBackend } from "./tools/dev/backend.mjs";
@@ -46,10 +45,10 @@ const vite = await createViteServer({
     ws: { server: http },
     fs: { strict: true, allow: [import.meta.dirname] },
     proxy: { "/api/v1/": api.config },
+    headers: { "X-Frame-Options": "DENY", "Cross-Origin-Opener-Policy": "same-origin" },
   },
 });
 
-let terminal;
 let stopping = false;
 try {
   const listening = once(http, "listening");
@@ -70,7 +69,7 @@ try {
       throw new Error("Start the installed ReviewQ service before opening its live frontend.");
     const origin = new URL(`http://${browser}`).origin;
     backend = { origin: () => origin };
-    console.log(`Read-only preview of ${origin}. Sign in using the reviewq launcher.`);
+    console.log(`Read-only preview of ${origin}.`);
   } else if (values.profile) {
     backend = await createDevBackend(resolve(import.meta.dirname, ".."), {
       profile: values.profile,
@@ -79,15 +78,6 @@ try {
       validation: values.validation,
     });
     if (stopping) await backend.close();
-    if (!stopping && process.stdin.isTTY && process.stdout.isTTY) {
-      console.log("Press Enter for a one-time development browser link.");
-      terminal = createInterface({ input: process.stdin });
-      terminal.on("line", () => {
-        void backend
-          .browserLink(address)
-          .then(console.log, (error) => console.error(error.message));
-      });
-    }
   }
 } catch (error) {
   await close();
@@ -97,7 +87,6 @@ try {
 async function close() {
   if (stopping) return;
   stopping = true;
-  terminal?.close();
   try {
     await backend?.close?.();
   } finally {

@@ -62,7 +62,7 @@ A building result lets the reader retry the same bounds. A known unsupported doc
 
 ### Resolve a pasted passage
 
-Send a browser-authenticated `POST /api/v1/runs/{runId}/report/versions/{receiptId}/quote/resolve` with `sha256` and exact `text` in the JSON body. The read-only operation checks CSRF, the accepted version and the 12,000-scalar quote limit. It scans the sealed source within the rich source envelope and carries a bounded UTF-8 suffix across chunk boundaries. It stops after the second match, including an overlap with the first. The result binds the receipt and digest and returns `missing`, `ambiguous`, or `unique` with the absolute `offset`, `length` and `unicode_codepoints` unit. Feedback submission still verifies the supplied source text and range against the same version.
+Send `POST /api/v1/runs/{runId}/report/versions/{receiptId}/quote/resolve` with the browser write proof and with `sha256` and exact `text` in the JSON body. The read-only operation checks the accepted version and the 12,000-scalar quote limit. It scans the sealed source within the rich source envelope and carries a bounded UTF-8 suffix across chunk boundaries. It stops after the second match, including an overlap with the first. The result binds the receipt and digest and returns `missing`, `ambiguous`, or `unique` with the absolute `offset`, `length` and `unicode_codepoints` unit. Feedback submission still verifies the supplied source text and range against the same version.
 
 ### Planned extensions
 

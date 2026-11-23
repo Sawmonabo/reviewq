@@ -7,40 +7,34 @@ use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use reviewq_app::access::{Actor, AppError};
 use subtle::ConstantTimeEq;
 
-use super::browser_sessions::{BrowserSession, BrowserSessions};
 use super::control::{ControlRequest, MAX_CONTROL_AGE, ServiceEndpoint, decode, random, value};
+use super::error::ApiError;
 
 const MAX_NONCES: usize = 1024;
-const MAX_TICKETS: usize = 128;
-const TICKET_AGE: Duration = Duration::from_secs(60);
+const FETCH_SITE: &str = "sec-fetch-site";
+const CSRF: &str = "x-reviewq-csrf";
 
 pub(super) struct Auth {
     pub(super) endpoint: ServiceEndpoint,
     pub(super) origin: String,
     browser_host: String,
     native_host: String,
-    pub(super) browser: BrowserSessions,
-    state: Mutex<AuthState>,
-}
-
-#[derive(Default)]
-struct AuthState {
-    nonces: HashMap<[u8; 32], Instant>,
-    tickets: HashMap<[u8; 32], Instant>,
+    csrf: [u8; 32],
+    nonces: Mutex<HashMap<[u8; 32], Instant>>,
 }
 
 impl Auth {
-    pub(super) fn new(endpoint: ServiceEndpoint, browser: BrowserSessions) -> Self {
+    pub(super) fn new(endpoint: ServiceEndpoint) -> Result<Self, AppError> {
         let browser_host = endpoint.browser().to_string();
         let native_host = endpoint.native().to_string();
-        Self {
+        Ok(Self {
             origin: format!("http://{browser_host}"),
             browser_host,
             native_host,
             endpoint,
-            browser,
-            state: Mutex::default(),
-        }
+            csrf: random()?,
+            nonces: Mutex::default(),
+        })
     }
 
     pub(super) fn allowed_host(&self, headers: &HeaderMap) -> bool {
@@ -52,13 +46,6 @@ impl Auth {
                 || value(headers, "origin") == Some(&self.origin))
     }
 
-    pub(super) fn check_origin(&self, headers: &HeaderMap) -> Result<(), AppError> {
-        (value(headers, "host") == Some(&self.browser_host)
-            && value(headers, "origin") == Some(&self.origin))
-        .then_some(())
-        .ok_or(AppError::Forbidden)
-    }
-
     pub(super) fn control<'a>(
         &self,
         method: &'a str,
@@ -67,75 +54,131 @@ impl Auth {
         bytes: &[u8],
     ) -> Result<ControlRequest<'a>, AppError> {
         let request = self.endpoint.verify_request(method, url, headers, bytes)?;
-        let mut state = self.state.lock().map_err(|_| AppError::Internal)?;
+        let mut nonces = self.nonces.lock().map_err(|_| AppError::Internal)?;
         let now = Instant::now();
-        state.nonces.retain(|_, deadline| *deadline > now);
-        if state.nonces.contains_key(&request.nonce()) {
+        nonces.retain(|_, deadline| *deadline > now);
+        if nonces.contains_key(&request.nonce()) {
             return Err(AppError::Unauthorized);
         }
-        if state.nonces.len() >= MAX_NONCES {
+        if nonces.len() >= MAX_NONCES {
             return Err(AppError::Busy);
         }
-        state.nonces.insert(
+        nonces.insert(
             request.nonce(),
             now + Duration::from_secs(MAX_CONTROL_AGE * 2 + 1),
         );
         Ok(request)
     }
 
-    pub(super) fn launch(&self) -> Result<String, AppError> {
-        let mut state = self.state.lock().map_err(|_| AppError::Internal)?;
-        let now = Instant::now();
-        state.tickets.retain(|_, expiry| *expiry > now);
-        if state.tickets.len() >= MAX_TICKETS {
-            return Err(AppError::Busy);
-        }
-        let ticket = random()?;
-        if state.tickets.contains_key(&ticket) {
-            return Err(AppError::Internal);
-        }
-        state.tickets.insert(ticket, now + TICKET_AGE);
-        Ok(URL_SAFE_NO_PAD.encode(ticket))
-    }
-
-    pub(super) fn consume_ticket(&self, ticket: &str) -> Result<(), AppError> {
-        let ticket = decode(ticket).ok_or(AppError::Unauthorized)?;
-        self.state
-            .lock()
-            .map_err(|_| AppError::Internal)?
-            .tickets
-            .remove(&ticket)
-            .filter(|expiry| *expiry > Instant::now())
-            .map(|_| ())
-            .ok_or(AppError::Unauthorized)
-    }
-
     pub(super) fn browser_actor(
         &self,
         headers: &HeaderMap,
         mutation: bool,
-    ) -> Result<Actor, AppError> {
-        let session = self.browser_session(headers)?;
+    ) -> Result<Actor, ApiError> {
+        self.check_browser(headers)?;
         if mutation {
-            self.check_origin(headers)?;
-            let supplied = value(headers, "x-reviewq-csrf")
+            if value(headers, "origin") != Some(&self.origin) {
+                return Err(AppError::Forbidden.into());
+            }
+            let supplied = value(headers, CSRF)
                 .and_then(decode)
-                .ok_or(AppError::Forbidden)?;
-            if !bool::from(self.browser.csrf(&session).ct_eq(&supplied)) {
-                return Err(AppError::Forbidden);
+                .filter(|_| headers.get_all(CSRF).iter().count() == 1)
+                .ok_or(ApiError::BrowserProofRejected)?;
+            if !bool::from(self.csrf.ct_eq(&supplied)) {
+                return Err(ApiError::BrowserProofRejected);
             }
         }
         Ok(Actor::local_operator())
     }
 
-    pub(super) fn csrf(&self, headers: &HeaderMap) -> Result<[u8; 32], AppError> {
-        Ok(self.browser.csrf(&self.browser_session(headers)?))
+    pub(super) fn csrf(&self, headers: &HeaderMap) -> Result<String, AppError> {
+        self.check_browser(headers)?;
+        let same_origin = if headers.contains_key(FETCH_SITE) {
+            value(headers, FETCH_SITE) == Some("same-origin")
+        } else {
+            // A GET may omit Origin. Older browsers still send a same-origin Referer.
+            value(headers, "origin") == Some(&self.origin)
+                || value(headers, "referer")
+                    .and_then(|referer| referer.strip_prefix(&self.origin))
+                    .is_some_and(|path| path.starts_with('/'))
+        };
+        if !same_origin {
+            return Err(AppError::Forbidden);
+        }
+        Ok(URL_SAFE_NO_PAD.encode(self.csrf))
     }
 
-    fn browser_session(&self, headers: &HeaderMap) -> Result<BrowserSession, AppError> {
-        if value(headers, "host") != Some(&self.browser_host) {
-            return Err(AppError::Unauthorized);
+    fn check_browser(&self, headers: &HeaderMap) -> Result<(), AppError> {
+        let mut sites = headers.get_all(FETCH_SITE).iter();
+        let origin_allowed = sites
+            .next()
+            .is_none_or(|site| site == "same-origin" || site == "none");
+        if value(headers, "host") != Some(&self.browser_host)
+            || !origin_allowed
+            || sites.next().is_some()
+        {
+            return Err(AppError::Forbidden);
         }
-        self.browser.verify(headers)
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use axum::http::{HeaderValue, StatusCode};
+    use axum::response::IntoResponse;
+
+    use super::*;
+    use crate::entry::ServiceIdentity;
+
+    #[test]
+    fn old_browser_proof_is_rejected_at_the_gate_after_restart() {
+        let endpoint = ServiceEndpoint::new(
+            "127.0.0.1:8766".parse().unwrap(),
+            "[::1]:8767".parse().unwrap(),
+            ServiceIdentity {
+                build_digest: String::new(),
+                profile_id: String::new(),
+                store_id: String::new(),
+                store_application_id: 0,
+                store_schema: 0,
+            },
+        )
+        .unwrap();
+        let before = Auth::new(endpoint.clone()).unwrap();
+        let mut headers = HeaderMap::new();
+        headers.insert(header::HOST, HeaderValue::from_static("127.0.0.1:8766"));
+        assert!(before.browser_actor(&headers, false).is_ok());
+        assert!(before.csrf(&headers).is_err());
+
+        headers.insert(FETCH_SITE, HeaderValue::from_static("same-origin"));
+        let old_proof = before.csrf(&headers).unwrap();
+        headers.insert(CSRF, old_proof.parse().unwrap());
+        headers.insert(
+            header::ORIGIN,
+            HeaderValue::from_static("http://127.0.0.1:8766"),
+        );
+        assert!(before.browser_actor(&headers, true).is_ok());
+
+        let after = Auth::new(endpoint).unwrap();
+        let response = after
+            .browser_actor(&headers, true)
+            .unwrap_err()
+            .into_response();
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+        assert_eq!(response.headers()["x-reviewq-csrf-rejected"], "1");
+
+        let new_proof = after.csrf(&headers).unwrap();
+        headers.insert(CSRF, new_proof.parse().unwrap());
+        assert!(after.browser_actor(&headers, true).is_ok());
+
+        headers.insert(FETCH_SITE, HeaderValue::from_static("same-site"));
+        assert!(after.csrf(&headers).is_err());
+        let response = after
+            .browser_actor(&headers, true)
+            .unwrap_err()
+            .into_response();
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+        assert!(!response.headers().contains_key("x-reviewq-csrf-rejected"));
     }
 }

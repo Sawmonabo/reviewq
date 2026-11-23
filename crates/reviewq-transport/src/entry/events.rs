@@ -53,7 +53,6 @@ pub(super) async fn feed(
         shutdown: entry.shutdown.clone(),
         entry,
         updates,
-        headers,
         after,
         pending: VecDeque::new(),
         finished: false,
@@ -67,7 +66,6 @@ struct Feed {
     entry: Arc<Entry>,
     updates: watch::Receiver<EventCursor>,
     shutdown: watch::Receiver<bool>,
-    headers: HeaderMap,
     after: EventCursor,
     pending: VecDeque<(EventCursor, Invalidation)>,
     finished: bool,
@@ -77,10 +75,7 @@ struct Feed {
 impl Feed {
     async fn next(mut self) -> Option<(Result<Event, Infallible>, Self)> {
         loop {
-            if self.finished
-                || *self.shutdown.borrow()
-                || self.entry.auth.browser_actor(&self.headers, false).is_err()
-            {
+            if self.finished || *self.shutdown.borrow() {
                 return None;
             }
             if let Some((cursor, change)) = self.pending.pop_front() {

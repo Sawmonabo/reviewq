@@ -12,8 +12,13 @@ export function devApiProxy(frontend, backend, readOnly) {
       configure(server) {
         proxy = server;
         proxy.on("proxyReq", (outbound, request) => {
-          if (request.headers.origin === frontend())
-            outbound.setHeader("origin", `http://${outbound.getHeader("host")}`);
+          const origin = frontend();
+          const target = `http://${outbound.getHeader("host")}`;
+          if (request.headers.origin === origin) outbound.setHeader("origin", target);
+          const referer = request.headers.referer;
+          if (referer?.startsWith(`${origin}/`))
+            outbound.setHeader("referer", `${target}${referer.slice(origin.length)}`);
+          else outbound.removeHeader("referer");
         });
       },
     },
@@ -42,8 +47,8 @@ export function devApiProxy(frontend, backend, readOnly) {
         !(
           request.method === "POST" &&
           origins &&
-          (path === "/api/v1/session" ||
-            (QUOTE_RESOLUTION.test(path) && new URL(path, origin).pathname === path))
+          QUOTE_RESOLUTION.test(path) &&
+          new URL(path, origin).pathname === path
         )
       )
         return fail(response, 403, "forbidden", "The development frontend is in read-only mode.");

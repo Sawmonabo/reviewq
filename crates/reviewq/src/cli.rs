@@ -43,7 +43,7 @@ enum Command {
     Uninstall,
     /// Serve the dashboard and API in the foreground.
     Serve(Serve),
-    /// Open a private browser session.
+    /// Open the local dashboard in a browser.
     Open(Open),
     /// Check the identity and readiness of the running service.
     Status,
@@ -175,7 +175,7 @@ pub(crate) struct Serve {
 
 #[derive(Default, Args)]
 pub(crate) struct Open {
-    /// Print the transient launch URL for an explicit local handoff.
+    /// Print the local dashboard address.
     #[arg(long)]
     pub(crate) print_url: bool,
 }

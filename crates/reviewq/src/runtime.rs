@@ -33,7 +33,6 @@ use tokio::sync::watch;
 
 use crate::{cli::Serve, install, runtime_settings};
 
-mod browser_sessions;
 mod desktop;
 mod diagram;
 mod http;
@@ -145,7 +144,6 @@ pub(crate) async fn serve(profile: PathBuf, options: Serve) -> Result<(), Failur
             store_schema: identity.format,
         },
     )?;
-    let browser_sessions = browser_sessions::open(&profile, &endpoint)?;
     let network = Arc::new(SourceNetwork::new()?);
     let settings_sources = Arc::new(SourceAccounts::new(
         network.clone(),
@@ -349,7 +347,6 @@ pub(crate) async fn serve(profile: PathBuf, options: Serve) -> Result<(), Failur
                 report_files: report_files.clone(),
             },
             endpoint: endpoint.clone(),
-            browser_sessions,
             web: &web,
             retained_assets: retained_assets.as_deref(),
             drawing_renderer,
@@ -357,7 +354,7 @@ pub(crate) async fn serve(profile: PathBuf, options: Serve) -> Result<(), Failur
             shutdown: wait.clone(),
             startup,
         },
-    );
+    )?;
     let mut terminate = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
     if options.managed {
         install::bridge::publish(&endpoint)?;

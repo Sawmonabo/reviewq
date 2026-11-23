@@ -3,6 +3,6 @@
 mod entry;
 
 pub use entry::{
-    BridgeDescriptor, BrowserSessions, ControlRequest, ServiceEndpoint, ServiceIdentity,
-    ServiceRuntime, StartupState, Store, WorkflowIntegration, router,
+    BridgeDescriptor, ControlRequest, ServiceEndpoint, ServiceIdentity, ServiceRuntime,
+    StartupState, Store, WorkflowIntegration, router,
 };

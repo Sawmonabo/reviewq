@@ -22,7 +22,7 @@ pub fn admits_disk_scratch(filesystem: u64) -> bool {
 /// Stable authority for idempotency and scope checks. This contains no credentials.
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub enum ActorScope {
-    /// The single installation operator across browser sessions and CLI calls.
+    /// The single installation operator across browser and CLI requests.
     LocalOperator,
     /// One checkout grant, whose current epoch and configured scope must be rechecked.
     CheckoutGrant(GrantId),
@@ -30,7 +30,7 @@ pub enum ActorScope {
     NativeSession(NativeIdentity),
 }
 
-/// A principal initialized from verified credentials by an entry adapter.
+/// A principal established by an entry adapter.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Actor {
     scope: ActorScope,

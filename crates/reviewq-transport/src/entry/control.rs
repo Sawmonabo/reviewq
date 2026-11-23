@@ -328,7 +328,7 @@ impl ControlRequest<'_> {
     }
 }
 
-pub(super) fn mac(key: &[u8; 32]) -> HmacSha256 {
+fn mac(key: &[u8; 32]) -> HmacSha256 {
     HmacSha256::new_from_slice(key).expect("HMAC accepts every key length")
 }
 

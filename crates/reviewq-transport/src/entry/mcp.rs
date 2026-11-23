@@ -123,7 +123,7 @@ async fn authenticate(
             next.run(request).await
         }
         Err(AppError::Unauthorized) => challenge(),
-        Err(error) => ApiError(error).into_response(),
+        Err(error) => ApiError::from(error).into_response(),
     }
 }
 

@@ -8,7 +8,11 @@ use reviewq_app::access::AppError;
 use reviewq_protocol::{ErrorCode, ErrorDto, Failure};
 use serde::de::DeserializeOwned;
 
-pub(super) struct ApiError(pub(super) AppError);
+pub(super) enum ApiError {
+    Application(AppError),
+    // The proof gate rejected the request before performing the operation.
+    BrowserProofRejected,
+}
 
 pub(super) struct ApiPath<T>(pub(super) T);
 pub(super) struct ApiQuery<T>(pub(super) T);
@@ -56,14 +60,22 @@ impl<S: Send + Sync> FromRequest<S> for ApiBytes {
 
 impl From<AppError> for ApiError {
     fn from(error: AppError) -> Self {
-        Self(error)
+        Self::Application(error)
     }
 }
 
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
-        let (status, failure) = failure(self.0);
-        (status, Json(failure)).into_response()
+        match self {
+            Self::Application(error) => {
+                let (status, failure) = failure(error);
+                (status, Json(failure)).into_response()
+            }
+            Self::BrowserProofRejected => {
+                let (status, failure) = failure(AppError::Forbidden);
+                (status, [("x-reviewq-csrf-rejected", "1")], Json(failure)).into_response()
+            }
+        }
     }
 }
 
