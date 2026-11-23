@@ -2,11 +2,11 @@
 import { func0 } from "../runtime.mjs";
 import { schema70 } from "../metadata-2.mjs";
 import { validate35 } from "./event-cursor-dto.mjs";
-import { validate165 } from "./run-prepare-request-invocation.mjs";
+import { validate167 } from "./run-prepare-request-invocation.mjs";
 import { validate71 } from "./host-provider-dto.mjs";
-import { validate114 } from "./review-id-dto.mjs";
-import { validate150 } from "./git-sha-dto.mjs";
-function validate174(
+import { validate116 } from "./review-id-dto.mjs";
+import { validate152 } from "./git-sha-dto.mjs";
+function validate176(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -18,7 +18,7 @@ function validate174(
         let data0 = data.context;
         const _errs1 = errors;
         if (typeof data0 !== "string" && data0 !== null) {
-          validate174.errors = [
+          validate176.errors = [
             {
               instancePath: instancePath + "/context",
               schemaPath: "#/properties/context/type",
@@ -37,7 +37,7 @@ function validate174(
           let data1 = data.effort;
           const _errs3 = errors;
           if (typeof data1 !== "string" && data1 !== null) {
-            validate174.errors = [
+            validate176.errors = [
               {
                 instancePath: instancePath + "/effort",
                 schemaPath: "#/properties/effort/type",
@@ -82,7 +82,7 @@ function validate174(
             ) {
               const _errs6 = errors;
               if (
-                !validate165(data.invocation, {
+                !validate167(data.invocation, {
                   instancePath: instancePath + "/invocation",
                   parentData: data,
                   parentDataProperty: "invocation",
@@ -91,8 +91,8 @@ function validate174(
               ) {
                 vErrors =
                   vErrors === null
-                    ? validate165.errors
-                    : vErrors.concat(validate165.errors);
+                    ? validate167.errors
+                    : vErrors.concat(validate167.errors);
                 errors = vErrors.length;
               }
               var valid0 = _errs6 === errors;
@@ -104,7 +104,7 @@ function validate174(
                 let data4 = data.model;
                 const _errs7 = errors;
                 if (typeof data4 !== "string" && data4 !== null) {
-                  validate174.errors = [
+                  validate176.errors = [
                     {
                       instancePath: instancePath + "/model",
                       schemaPath: "#/properties/model/type",
@@ -149,7 +149,7 @@ function validate174(
                   ) {
                     const _errs10 = errors;
                     if (
-                      !validate114(data.reviewId, {
+                      !validate116(data.reviewId, {
                         instancePath: instancePath + "/reviewId",
                         parentData: data,
                         parentDataProperty: "reviewId",
@@ -158,8 +158,8 @@ function validate174(
                     ) {
                       vErrors =
                         vErrors === null
-                          ? validate114.errors
-                          : vErrors.concat(validate114.errors);
+                          ? validate116.errors
+                          : vErrors.concat(validate116.errors);
                       errors = vErrors.length;
                     }
                     var valid0 = _errs10 === errors;
@@ -173,7 +173,7 @@ function validate174(
                     ) {
                       const _errs11 = errors;
                       if (
-                        !validate150(data.sourceSha, {
+                        !validate152(data.sourceSha, {
                           instancePath: instancePath + "/sourceSha",
                           parentData: data,
                           parentDataProperty: "sourceSha",
@@ -182,8 +182,8 @@ function validate174(
                       ) {
                         vErrors =
                           vErrors === null
-                            ? validate150.errors
-                            : vErrors.concat(validate150.errors);
+                            ? validate152.errors
+                            : vErrors.concat(validate152.errors);
                         errors = vErrors.length;
                       }
                       var valid0 = _errs11 === errors;
@@ -198,7 +198,7 @@ function validate174(
         }
       }
     } else {
-      validate174.errors = [
+      validate176.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -209,7 +209,7 @@ function validate174(
       return false;
     }
   }
-  validate174.errors = vErrors;
+  validate176.errors = vErrors;
   return errors === 0;
 }
-export { validate174 };
+export { validate176 };

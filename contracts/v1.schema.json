@@ -3341,6 +3341,9 @@
         "itemId": {
           "$ref": "#/definitions/HistoryEntryIdDto"
         },
+        "locator": {
+          "$ref": "#/definitions/HistoryCursorDto"
+        },
         "mode": {
           "$ref": "#/definitions/QuestionFormsResponseMode"
         },
@@ -4239,6 +4242,32 @@
             "kind",
             "text",
             "contentRef"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "kind": {
+              "const": "user_question",
+              "type": "string"
+            },
+            "nativeIndex": {
+              "$ref": "#/definitions/SafeCountDto"
+            },
+            "questions": {
+              "items": {
+                "$ref": "#/definitions/Question"
+              },
+              "type": "array"
+            },
+            "requestId": {
+              "$ref": "#/definitions/ResourceIdDto"
+            }
+          },
+          "required": [
+            "kind",
+            "requestId",
+            "questions"
           ],
           "type": "object"
         }
@@ -7184,12 +7213,20 @@
           },
           "type": "object"
         },
+        "itemId": {
+          "$ref": "#/definitions/HistoryEntryIdDto"
+        },
         "submissionId": {
           "$ref": "#/definitions/SubmissionIdDto"
+        },
+        "turnId": {
+          "$ref": "#/definitions/HistoryTurnIdDto"
         }
       },
       "required": [
         "submissionId",
+        "turnId",
+        "itemId",
         "answers"
       ],
       "title": "QuestionAnswerRequest",
@@ -7222,6 +7259,9 @@
         },
         "itemId": {
           "$ref": "#/definitions/HistoryEntryIdDto"
+        },
+        "locator": {
+          "$ref": "#/definitions/HistoryCursorDto"
         },
         "mode": {
           "$ref": "#/definitions/QuestionAnswerResponseMode"

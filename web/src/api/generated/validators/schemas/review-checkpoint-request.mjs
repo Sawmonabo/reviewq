@@ -2,8 +2,8 @@
 import { func0 } from "../runtime.mjs";
 import { validate25 } from "./checkpoint-id-dto.mjs";
 import { validate35 } from "./event-cursor-dto.mjs";
-import { validate150 } from "./git-sha-dto.mjs";
-function validate146(
+import { validate152 } from "./git-sha-dto.mjs";
+function validate148(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -28,7 +28,7 @@ function validate146(
           !func0.call(data, "checkpointId")) &&
           (missing0 = "checkpointId"))
       ) {
-        validate146.errors = [
+        validate148.errors = [
           {
             instancePath,
             schemaPath: "#/required",
@@ -47,7 +47,7 @@ function validate146(
             key0 === "sourceSha" ||
             key0 === "submissionId"
           )) {
-            validate146.errors = [
+            validate148.errors = [
               {
                 instancePath,
                 schemaPath: "#/additionalProperties",
@@ -138,7 +138,7 @@ function validate146(
                 ) {
                   const _errs5 = errors;
                   if (
-                    !validate150(data.sourceSha, {
+                    !validate152(data.sourceSha, {
                       instancePath: instancePath + "/sourceSha",
                       parentData: data,
                       parentDataProperty: "sourceSha",
@@ -147,8 +147,8 @@ function validate146(
                   ) {
                     vErrors =
                       vErrors === null
-                        ? validate150.errors
-                        : vErrors.concat(validate150.errors);
+                        ? validate152.errors
+                        : vErrors.concat(validate152.errors);
                     errors = vErrors.length;
                   }
                   var valid0 = _errs5 === errors;
@@ -186,7 +186,7 @@ function validate146(
         }
       }
     } else {
-      validate146.errors = [
+      validate148.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -197,7 +197,7 @@ function validate146(
       return false;
     }
   }
-  validate146.errors = vErrors;
+  validate148.errors = vErrors;
   return errors === 0;
 }
-export { validate146 };
+export { validate148 };

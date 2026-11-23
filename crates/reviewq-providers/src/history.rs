@@ -202,9 +202,20 @@ impl NativeHistoryReader for FileHistory {
         session: HistorySession,
         known: Vec<ObservedAsyncQuestion>,
         request: Option<String>,
-    ) -> AppFuture<'_, Option<Vec<QuestionForm>>> {
-        self.inspect(session, move |source, cancel| {
-            questions::read(&source, &known, request.as_deref(), cancel)
+    ) -> AppFuture<'_, Vec<QuestionForm>> {
+        Box::pin(async move {
+            let unavailable: Vec<_> = known.iter().map(questions::unverified).collect();
+            match self
+                .inspect(session, move |source, cancel| {
+                    questions::read(&source, &known, request.as_deref(), cancel)
+                })
+                .await
+            {
+                Ok(Some(forms)) => Ok(forms),
+                Ok(None) => Ok(unavailable),
+                Err(_) if !unavailable.is_empty() => Ok(unavailable),
+                Err(error) => Err(error),
+            }
         })
     }
 
@@ -389,11 +400,45 @@ pub(crate) async fn observe_async_questions(
     .map_err(|_| AppError::Unavailable)?
 }
 
+pub(crate) async fn locate_native_question_forms(
+    session: HistorySession,
+    path: PathBuf,
+    forms: &mut [QuestionForm],
+) {
+    let wanted = forms
+        .iter()
+        .map(|form| (form.turn.clone(), form.item.clone()))
+        .collect::<Vec<_>>();
+    if wanted.is_empty()
+        || session
+            .source
+            .as_ref()
+            .is_some_and(|source| source.as_path() != path)
+    {
+        return;
+    }
+    let stopped = Cancel(Arc::new(AtomicBool::new(false)));
+    let cancel = stopped.0.clone();
+    let lookup = tokio::task::spawn_blocking(move || {
+        let source = locator::verify(&session.binding, session.parent.as_ref(), &path, &cancel)?
+            .ok_or(AppError::NotFound)?;
+        questions::native_locations(&source, &wanted, &cancel)
+    });
+    if let Ok(Ok(mut found)) = lookup.await {
+        for form in forms {
+            form.locator = found.remove(&(form.turn.clone(), form.item.clone()));
+        }
+    }
+}
+
 pub(crate) async fn verify_pending_async_question(
     mut session: HistorySession,
     path: std::path::PathBuf,
     mut evidence: ObservedAsyncQuestion,
 ) -> Result<bool, AppError> {
+    if evidence.state != reviewq_app::hosts::QuestionStatus::Submitting {
+        return Err(AppError::PreconditionFailed);
+    }
     let stopped = Cancel(Arc::new(AtomicBool::new(false)));
     let cancel = stopped.0.clone();
     let source = reviewq_domain::session::AbsolutePath::from_canonical(path)

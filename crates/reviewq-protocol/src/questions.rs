@@ -5,8 +5,8 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    HistoryEntryIdDto, HistoryTurnIdDto, ResourceIdDto, RunIdDto, SessionKeyDto, SubmissionIdDto,
-    Success,
+    HistoryCursorDto, HistoryEntryIdDto, HistoryTurnIdDto, ResourceIdDto, RunIdDto, SessionKeyDto,
+    SubmissionIdDto, Success,
 };
 
 #[derive(Deserialize)]
@@ -14,6 +14,8 @@ use crate::{
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct Answer {
     pub submission_id: SubmissionIdDto,
+    pub turn_id: HistoryTurnIdDto,
+    pub item_id: HistoryEntryIdDto,
     pub answers: BTreeMap<String, Values>,
 }
 
@@ -58,9 +60,12 @@ pub struct Form {
     pub answerable: bool,
     pub status: Status,
     pub questions: Vec<Question>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "schema", schemars(with = "HistoryCursorDto"))]
+    pub locator: Option<HistoryCursorDto>,
 }
 
-#[derive(Serialize)]
+#[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct Question {
@@ -72,7 +77,7 @@ pub struct Question {
     pub is_secret: bool,
 }
 
-#[derive(Serialize)]
+#[derive(Debug, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct Choice {
     pub label: String,

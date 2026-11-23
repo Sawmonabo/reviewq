@@ -2,11 +2,11 @@
 import { func0 } from "../runtime.mjs";
 import { validate25 } from "./checkpoint-id-dto.mjs";
 import { validate35 } from "./event-cursor-dto.mjs";
-import { validate155 } from "./disposition.mjs";
-import { validate114 } from "./review-id-dto.mjs";
-import { validate235 } from "./utc-timestamp-dto.mjs";
-import { validate150 } from "./git-sha-dto.mjs";
-function validate1433(
+import { validate157 } from "./disposition.mjs";
+import { validate116 } from "./review-id-dto.mjs";
+import { validate237 } from "./utc-timestamp-dto.mjs";
+import { validate152 } from "./git-sha-dto.mjs";
+function validate1442(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -31,7 +31,7 @@ function validate1433(
           !func0.call(data, "checkpointId")) &&
           (missing0 = "checkpointId"))
       ) {
-        validate1433.errors = [
+        validate1442.errors = [
           {
             instancePath,
             schemaPath: "#/required",
@@ -98,7 +98,7 @@ function validate1433(
               vErrors.push(err1);
             }
             errors++;
-            validate1433.errors = vErrors;
+            validate1442.errors = vErrors;
             return false;
           } else {
             errors = _errs2;
@@ -149,7 +149,7 @@ function validate1433(
               let valid2 = false;
               const _errs9 = errors;
               if (
-                !validate155(data2, {
+                !validate157(data2, {
                   instancePath: instancePath + "/disposition",
                   parentData: data,
                   parentDataProperty: "disposition",
@@ -158,8 +158,8 @@ function validate1433(
               ) {
                 vErrors =
                   vErrors === null
-                    ? validate155.errors
-                    : vErrors.concat(validate155.errors);
+                    ? validate157.errors
+                    : vErrors.concat(validate157.errors);
                 errors = vErrors.length;
               }
               var _valid1 = _errs9 === errors;
@@ -196,7 +196,7 @@ function validate1433(
                   vErrors.push(err3);
                 }
                 errors++;
-                validate1433.errors = vErrors;
+                validate1442.errors = vErrors;
                 return false;
               } else {
                 errors = _errs8;
@@ -216,7 +216,7 @@ function validate1433(
               if (data.reviewId !== undefined && func0.call(data, "reviewId")) {
                 const _errs12 = errors;
                 if (
-                  !validate114(data.reviewId, {
+                  !validate116(data.reviewId, {
                     instancePath: instancePath + "/reviewId",
                     parentData: data,
                     parentDataProperty: "reviewId",
@@ -225,8 +225,8 @@ function validate1433(
                 ) {
                   vErrors =
                     vErrors === null
-                      ? validate114.errors
-                      : vErrors.concat(validate114.errors);
+                      ? validate116.errors
+                      : vErrors.concat(validate116.errors);
                   errors = vErrors.length;
                 }
                 var valid0 = _errs12 === errors;
@@ -244,7 +244,7 @@ function validate1433(
                   let valid3 = false;
                   const _errs15 = errors;
                   if (
-                    !validate235(data4, {
+                    !validate237(data4, {
                       instancePath: instancePath + "/reviewedAt",
                       parentData: data,
                       parentDataProperty: "reviewedAt",
@@ -253,8 +253,8 @@ function validate1433(
                   ) {
                     vErrors =
                       vErrors === null
-                        ? validate235.errors
-                        : vErrors.concat(validate235.errors);
+                        ? validate237.errors
+                        : vErrors.concat(validate237.errors);
                     errors = vErrors.length;
                   }
                   var _valid2 = _errs15 === errors;
@@ -291,7 +291,7 @@ function validate1433(
                       vErrors.push(err5);
                     }
                     errors++;
-                    validate1433.errors = vErrors;
+                    validate1442.errors = vErrors;
                     return false;
                   } else {
                     errors = _errs14;
@@ -318,7 +318,7 @@ function validate1433(
                     let valid4 = false;
                     const _errs20 = errors;
                     if (
-                      !validate150(data5, {
+                      !validate152(data5, {
                         instancePath: instancePath + "/reviewedSha",
                         parentData: data,
                         parentDataProperty: "reviewedSha",
@@ -327,8 +327,8 @@ function validate1433(
                     ) {
                       vErrors =
                         vErrors === null
-                          ? validate150.errors
-                          : vErrors.concat(validate150.errors);
+                          ? validate152.errors
+                          : vErrors.concat(validate152.errors);
                       errors = vErrors.length;
                     }
                     var _valid3 = _errs20 === errors;
@@ -365,7 +365,7 @@ function validate1433(
                         vErrors.push(err7);
                       }
                       errors++;
-                      validate1433.errors = vErrors;
+                      validate1442.errors = vErrors;
                       return false;
                     } else {
                       errors = _errs19;
@@ -388,7 +388,7 @@ function validate1433(
         }
       }
     } else {
-      validate1433.errors = [
+      validate1442.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -399,7 +399,7 @@ function validate1433(
       return false;
     }
   }
-  validate1433.errors = vErrors;
+  validate1442.errors = vErrors;
   return errors === 0;
 }
-export { validate1433 };
+export { validate1442 };

@@ -69,9 +69,17 @@ impl QuestionsPort for Codex {
                 .questions(native.native_id().as_str(), request.as_deref())?;
             // A remembered socket handle can only describe the currently bound cwd and lineage.
             // Durable receipts below remain readable with their independently verified file.
-            if !forms.is_empty() && self.question_thread(session, false).await.is_err() {
-                forms.clear();
-            }
+            let live_path = if forms.is_empty() {
+                None
+            } else {
+                match self.question_thread(session, false).await {
+                    Ok(thread) => thread.path,
+                    Err(_) => {
+                        forms.clear();
+                        None
+                    }
+                }
+            };
             let focused = request.is_some();
             let receipts = access.attempts(request).await?;
             let mut active = receipts
@@ -84,10 +92,15 @@ impl QuestionsPort for Codex {
             } else {
                 None
             };
-            let path = if verify.is_some() {
+            let saved_path = session
+                .source
+                .as_ref()
+                .map(|source| source.as_path().to_owned());
+            let path = saved_path.or(live_path);
+            let path = if verify.is_some() && path.is_none() {
                 self.question_readback_path(session).await
             } else {
-                None
+                path
             };
             for mut receipt in receipts {
                 let form = forms.iter_mut().find(|form| receipt.matches(form));
@@ -121,6 +134,11 @@ impl QuestionsPort for Codex {
                 )
             });
             forms.truncate(8);
+            let lookup = verify.or_else(|| self.question_proofs.try_acquire().ok());
+            if let (Some(_permit), Some(path)) = (lookup, path) {
+                crate::history::locate_native_question_forms(session.clone(), path, &mut forms)
+                    .await;
+            }
             Ok(forms)
         })
     }
@@ -134,6 +152,7 @@ impl QuestionsPort for Codex {
             }
             let digest = answer.digest()?;
             if let Some(mut saved) = answer.replay(digest).await? {
+                answer.check_address(&saved.key.request, &saved.key.turn, &saved.key.item)?;
                 if needs_question_proof(&saved, true)
                     && let Ok(_permit) = self.question_proofs.try_acquire()
                     && let Some(path) = self.question_readback_path(answer.session()).await
@@ -150,6 +169,7 @@ impl QuestionsPort for Codex {
             let Some(form) = forms.into_iter().next() else {
                 return Err(AppError::NotFound);
             };
+            answer.check_address(&form.request, &form.turn, &form.item)?;
             if form.state != QuestionStatus::Pending {
                 return Ok(form);
             }
@@ -407,6 +427,7 @@ impl Questions {
                     mode: QuestionMode::Native,
                     state: QuestionStatus::Pending,
                     questions,
+                    locator: None,
                 },
             },
         );

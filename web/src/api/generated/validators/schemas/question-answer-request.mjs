@@ -15,6 +15,10 @@ function validate107(
         ((data.submissionId === undefined ||
           !func0.call(data, "submissionId")) &&
           (missing0 = "submissionId")) ||
+        ((data.turnId === undefined || !func0.call(data, "turnId")) &&
+          (missing0 = "turnId")) ||
+        ((data.itemId === undefined || !func0.call(data, "itemId")) &&
+          (missing0 = "itemId")) ||
         ((data.answers === undefined || !func0.call(data, "answers")) &&
           (missing0 = "answers"))
       ) {
@@ -30,7 +34,12 @@ function validate107(
       } else {
         const _errs1 = errors;
         for (const key0 of Object.keys(data)) {
-          if (!(key0 === "answers" || key0 === "submissionId")) {
+          if (!(
+            key0 === "answers" ||
+            key0 === "itemId" ||
+            key0 === "submissionId" ||
+            key0 === "turnId"
+          )) {
             validate107.errors = [
               {
                 instancePath,
@@ -90,16 +99,13 @@ function validate107(
             var valid0 = true;
           }
           if (valid0) {
-            if (
-              data.submissionId !== undefined &&
-              func0.call(data, "submissionId")
-            ) {
+            if (data.itemId !== undefined && func0.call(data, "itemId")) {
               const _errs6 = errors;
               if (
-                !validate25(data.submissionId, {
-                  instancePath: instancePath + "/submissionId",
+                !validate25(data.itemId, {
+                  instancePath: instancePath + "/itemId",
                   parentData: data,
-                  parentDataProperty: "submissionId",
+                  parentDataProperty: "itemId",
                   rootData,
                 })
               ) {
@@ -112,6 +118,53 @@ function validate107(
               var valid0 = _errs6 === errors;
             } else {
               var valid0 = true;
+            }
+            if (valid0) {
+              if (
+                data.submissionId !== undefined &&
+                func0.call(data, "submissionId")
+              ) {
+                const _errs7 = errors;
+                if (
+                  !validate25(data.submissionId, {
+                    instancePath: instancePath + "/submissionId",
+                    parentData: data,
+                    parentDataProperty: "submissionId",
+                    rootData,
+                  })
+                ) {
+                  vErrors =
+                    vErrors === null
+                      ? validate25.errors
+                      : vErrors.concat(validate25.errors);
+                  errors = vErrors.length;
+                }
+                var valid0 = _errs7 === errors;
+              } else {
+                var valid0 = true;
+              }
+              if (valid0) {
+                if (data.turnId !== undefined && func0.call(data, "turnId")) {
+                  const _errs8 = errors;
+                  if (
+                    !validate25(data.turnId, {
+                      instancePath: instancePath + "/turnId",
+                      parentData: data,
+                      parentDataProperty: "turnId",
+                      rootData,
+                    })
+                  ) {
+                    vErrors =
+                      vErrors === null
+                        ? validate25.errors
+                        : vErrors.concat(validate25.errors);
+                    errors = vErrors.length;
+                  }
+                  var valid0 = _errs8 === errors;
+                } else {
+                  var valid0 = true;
+                }
+              }
             }
           }
         }

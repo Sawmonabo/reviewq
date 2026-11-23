@@ -2,8 +2,10 @@
 
 import type {
   EventCursorDto,
+  HistoryCursorDto,
   HistoryEntryIdDto,
   HistoryTurnIdDto,
+  Question,
   ResourceIdDto,
   RunIdDto,
   SessionKeyDto,
@@ -26,7 +28,9 @@ export interface QuestionAnswerRequest {
   answers: {
     [k: string]: Values;
   };
+  itemId: HistoryEntryIdDto;
   submissionId: SubmissionIdDto;
+  turnId: HistoryTurnIdDto;
 }
 
 export interface Values {
@@ -43,6 +47,7 @@ export interface QuestionAnswerResponseForm {
   answerable: boolean;
   blocking: boolean;
   itemId: HistoryEntryIdDto;
+  locator?: HistoryCursorDto;
   mode: QuestionAnswerResponseMode;
   questions: Question[];
   requestId: ResourceIdDto;
@@ -50,22 +55,6 @@ export interface QuestionAnswerResponseForm {
   sessionKey: SessionKeyDto;
   status: Status;
   turnId: HistoryTurnIdDto;
-  [k: string]: unknown;
-}
-
-export interface Question {
-  header: string;
-  id: string;
-  isOther: boolean;
-  isSecret: boolean;
-  options: Choice[];
-  question: string;
-  [k: string]: unknown;
-}
-
-export interface Choice {
-  description: string;
-  label: string;
   [k: string]: unknown;
 }
 
@@ -87,6 +76,7 @@ export interface Form {
   answerable: boolean;
   blocking: boolean;
   itemId: HistoryEntryIdDto;
+  locator?: HistoryCursorDto;
   mode: QuestionFormsResponseMode;
   questions: Question[];
   requestId: ResourceIdDto;

@@ -2,10 +2,10 @@
 import { func0 } from "../runtime.mjs";
 import { validate25 } from "./checkpoint-id-dto.mjs";
 import { validate48 } from "./history-cursor-dto.mjs";
-import { validate127 } from "./safe-count-dto.mjs";
-import { validate728 } from "./history-tool-state.mjs";
-import { validate621 } from "./history-text.mjs";
-function validate724(
+import { validate129 } from "./safe-count-dto.mjs";
+import { validate730 } from "./history-tool-state.mjs";
+import { validate623 } from "./history-text.mjs";
+function validate726(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -30,7 +30,7 @@ function validate724(
         ((data.contentRef === undefined || !func0.call(data, "contentRef")) &&
           (missing0 = "contentRef"))
       ) {
-        validate724.errors = [
+        validate726.errors = [
           {
             instancePath,
             schemaPath: "#/required",
@@ -115,7 +115,7 @@ function validate724(
                 vErrors.push(err1);
               }
               errors++;
-              validate724.errors = vErrors;
+              validate726.errors = vErrors;
               return false;
             } else {
               errors = _errs3;
@@ -136,7 +136,7 @@ function validate724(
               let data2 = data.kind;
               const _errs7 = errors;
               if (typeof data2 !== "string") {
-                validate724.errors = [
+                validate726.errors = [
                   {
                     instancePath: instancePath + "/kind",
                     schemaPath: "#/properties/kind/type",
@@ -147,7 +147,7 @@ function validate724(
                 return false;
               }
               if ("tool_call" !== data2) {
-                validate724.errors = [
+                validate726.errors = [
                   {
                     instancePath: instancePath + "/kind",
                     schemaPath: "#/properties/kind/const",
@@ -165,7 +165,7 @@ function validate724(
               if (data.label !== undefined && func0.call(data, "label")) {
                 const _errs9 = errors;
                 if (typeof data.label !== "string") {
-                  validate724.errors = [
+                  validate726.errors = [
                     {
                       instancePath: instancePath + "/label",
                       schemaPath: "#/properties/label/type",
@@ -183,7 +183,7 @@ function validate724(
                 if (data.name !== undefined && func0.call(data, "name")) {
                   const _errs11 = errors;
                   if (typeof data.name !== "string") {
-                    validate724.errors = [
+                    validate726.errors = [
                       {
                         instancePath: instancePath + "/name",
                         schemaPath: "#/properties/name/type",
@@ -204,7 +204,7 @@ function validate724(
                   ) {
                     const _errs13 = errors;
                     if (
-                      !validate127(data.nativeIndex, {
+                      !validate129(data.nativeIndex, {
                         instancePath: instancePath + "/nativeIndex",
                         parentData: data,
                         parentDataProperty: "nativeIndex",
@@ -213,8 +213,8 @@ function validate724(
                     ) {
                       vErrors =
                         vErrors === null
-                          ? validate127.errors
-                          : vErrors.concat(validate127.errors);
+                          ? validate129.errors
+                          : vErrors.concat(validate129.errors);
                       errors = vErrors.length;
                     }
                     var valid0 = _errs13 === errors;
@@ -225,7 +225,7 @@ function validate724(
                     if (data.state !== undefined && func0.call(data, "state")) {
                       const _errs14 = errors;
                       if (
-                        !validate728(data.state, {
+                        !validate730(data.state, {
                           instancePath: instancePath + "/state",
                           parentData: data,
                           parentDataProperty: "state",
@@ -234,8 +234,8 @@ function validate724(
                       ) {
                         vErrors =
                           vErrors === null
-                            ? validate728.errors
-                            : vErrors.concat(validate728.errors);
+                            ? validate730.errors
+                            : vErrors.concat(validate730.errors);
                         errors = vErrors.length;
                       }
                       var valid0 = _errs14 === errors;
@@ -246,7 +246,7 @@ function validate724(
                       if (data.text !== undefined && func0.call(data, "text")) {
                         const _errs15 = errors;
                         if (
-                          !validate621(data.text, {
+                          !validate623(data.text, {
                             instancePath: instancePath + "/text",
                             parentData: data,
                             parentDataProperty: "text",
@@ -255,8 +255,8 @@ function validate724(
                         ) {
                           vErrors =
                             vErrors === null
-                              ? validate621.errors
-                              : vErrors.concat(validate621.errors);
+                              ? validate623.errors
+                              : vErrors.concat(validate623.errors);
                           errors = vErrors.length;
                         }
                         var valid0 = _errs15 === errors;
@@ -272,7 +272,7 @@ function validate724(
         }
       }
     } else {
-      validate724.errors = [
+      validate726.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -283,7 +283,7 @@ function validate724(
       return false;
     }
   }
-  validate724.errors = vErrors;
+  validate726.errors = vErrors;
   return errors === 0;
 }
-export { validate724 };
+export { validate726 };

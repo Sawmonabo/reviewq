@@ -7,7 +7,7 @@ use reviewq_domain::session::{AbsolutePath, NativeBinding, SessionTarget};
 
 use crate::access::{Actor, AppFuture};
 use crate::events::Snapshot;
-use crate::hosts::{ObservedAsyncQuestion, QuestionForm};
+use crate::hosts::{ObservedAsyncQuestion, Question, QuestionForm};
 
 pub mod document;
 pub mod search;
@@ -95,7 +95,7 @@ pub trait NativeHistoryReader: Send + Sync {
         session: HistorySession,
         known: Vec<ObservedAsyncQuestion>,
         request: Option<String>,
-    ) -> AppFuture<'_, Option<Vec<QuestionForm>>>;
+    ) -> AppFuture<'_, Vec<QuestionForm>>;
 
     fn prove_async_question(
         &self,
@@ -390,6 +390,10 @@ pub enum ToolState {
 #[derive(Clone, Debug)]
 pub enum VisiblePartKind {
     Text(VisibleKind),
+    UserQuestion {
+        request: String,
+        questions: Vec<Question>,
+    },
     ToolCall {
         call: NativeInputId,
         name: String,

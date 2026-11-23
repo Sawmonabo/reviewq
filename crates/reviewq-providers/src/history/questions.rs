@@ -1,25 +1,26 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::io::Read;
 use std::sync::atomic::AtomicBool;
 
 use reviewq_app::access::AppError;
+use reviewq_app::history::SourceAnchor;
 use reviewq_app::hosts::{
-    ObservedAsyncQuestion, Question, QuestionAnchor, QuestionForm, QuestionKey, QuestionMode,
-    QuestionOption, QuestionStatus,
+    ObservedAsyncQuestion, Question, QuestionAnchor, QuestionForm, QuestionKey, QuestionStatus,
 };
-use reviewq_domain::identity::ReportHash;
+use reviewq_domain::identity::{NativeInputId, NativeTurnId, ReportHash};
+use reviewq_domain::session::HostProvider;
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
 
-use crate::question_wire::{NativeQuestion, project_questions, request_id, visible};
+use crate::question_wire::{ASYNC_FORM_BYTES, AsyncQuestions, request_id};
 
-use super::{file, locator::Source};
+use super::{file, locator::Source, records};
 
 const MAX_FORMS: usize = 8;
-const FORM_BYTES: u64 = 48 * 1024;
 const ANSWER_BYTES: u64 = 384 * 1024;
 const DISCOVERY_BYTES: u64 = 256 * 1024;
 const DISCOVERY_RECORDS: usize = 256;
+const NATIVE_LOCATOR_BYTES: u64 = 2 * 1024 * 1024;
 const PROOF_BYTES: u64 = 64 * 1024 * 1024;
 const PROOF_RECORDS: usize = 16_384;
 const ANSWER_PREFIX: &str = "Answer to Codex question (";
@@ -60,23 +61,53 @@ struct Content {
     text: Option<String>,
 }
 
-#[derive(Deserialize)]
-#[serde(untagged)]
-enum AsyncQuestions {
-    Titled(Vec<TitledQuestion>),
-    Structured(Vec<NativeQuestion>),
+struct Observation {
+    evidence: ObservedAsyncQuestion,
+    questions: Vec<Question>,
+    end: u64,
 }
 
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct TitledQuestion {
-    title: String,
-    options: Option<Vec<String>>,
-    #[serde(default, alias = "is_secret")]
-    is_secret: bool,
+impl Observation {
+    fn located(self, source: &Source, state: QuestionStatus) -> QuestionForm {
+        let mut form = self.evidence.form(state);
+        let anchor = self.evidence.key.anchor;
+        let file = file::file_position(&source.file, anchor.opening, self.end).ok();
+        form.locator = file.map(|file| SourceAnchor {
+            generation: anchor.generation,
+            file,
+        });
+        form.questions = self.questions;
+        form
+    }
 }
 
-type Observation = (ObservedAsyncQuestion, QuestionForm);
+struct ReplyProof {
+    opening: u64,
+    address: String,
+    answered: Option<bool>,
+}
+
+impl ReplyProof {
+    fn new(key: &QuestionKey) -> Self {
+        Self {
+            opening: key.anchor.opening,
+            address: address(key),
+            answered: None,
+        }
+    }
+}
+
+pub(super) fn unverified(evidence: &ObservedAsyncQuestion) -> QuestionForm {
+    evidence.form(unverified_state(evidence.state))
+}
+
+fn unverified_state(state: QuestionStatus) -> QuestionStatus {
+    if state == QuestionStatus::Pending {
+        QuestionStatus::Unavailable
+    } else {
+        state
+    }
+}
 
 pub(super) fn read(
     source: &Source,
@@ -85,35 +116,68 @@ pub(super) fn read(
     cancel: &AtomicBool,
 ) -> Result<Vec<QuestionForm>, AppError> {
     let generation = file::generation(source)?;
-    let complete = end(source, cancel)?;
+    let length = length(source)?;
     let mut lines = file::Lines::new(&source.file, cancel);
     let mut forms = Vec::with_capacity(known.len());
+    let mut candidates = Vec::new();
+    let mut proofs = Vec::new();
     for evidence in known {
-        let form = exact(source, &mut lines, &generation, complete, evidence)?.map_or_else(
-            || evidence.form(QuestionStatus::Unavailable),
-            |(_, form)| form,
-        );
+        let form = match exact(source, &mut lines, &generation, length, evidence) {
+            Ok(Some(found)) => {
+                if matches!(
+                    evidence.state,
+                    QuestionStatus::Pending
+                        | QuestionStatus::Submitting
+                        | QuestionStatus::Uncertain
+                ) {
+                    let can_be_pending = evidence.state == QuestionStatus::Pending
+                        && evidence.key.anchor.generation == generation;
+                    candidates.push((forms.len(), can_be_pending));
+                    proofs.push(ReplyProof::new(&evidence.key));
+                }
+                found.located(source, unverified_state(evidence.state))
+            }
+            Ok(None) | Err(_) => unverified(evidence),
+        };
         forms.push(form);
     }
-    if forms.len() < MAX_FORMS && (request.is_none() || forms.is_empty()) {
-        let new = recent(source, cancel, &generation, complete)?;
-        for (evidence, form) in new {
+    let discover = forms.len() < MAX_FORMS && (request.is_none() || forms.is_empty());
+    if !discover && proofs.is_empty() {
+        return Ok(forms);
+    }
+    let complete = match end(source, length, cancel) {
+        Ok(complete) => complete,
+        Err(_) if !forms.is_empty() => return Ok(forms),
+        Err(error) => return Err(error),
+    };
+    if !proofs.is_empty() {
+        let _ = check_replies(source, &mut lines, complete, &mut proofs);
+        for ((index, can_be_pending), proof) in candidates.into_iter().zip(proofs) {
+            let form = &mut forms[index];
+            form.state = match proof.answered {
+                Some(true) => QuestionStatus::Answered,
+                Some(false) if can_be_pending && complete == length => QuestionStatus::Pending,
+                _ => form.state,
+            };
+        }
+    }
+    if discover {
+        let new = recent(source, cancel, &generation, complete);
+        let new = match new {
+            Ok(new) => new,
+            Err(_) if !forms.is_empty() => return Ok(forms),
+            Err(error) => return Err(error),
+        };
+        for found in new {
             if forms.len() == MAX_FORMS {
                 break;
             }
-            if request.is_none_or(|request| form.request == request)
-                && !known
-                    .iter()
-                    .any(|row| row.key.request == evidence.key.request)
+            let key = &found.evidence.key;
+            if request.is_none_or(|request| key.request == request)
+                && !known.iter().any(|row| row.key.request == key.request)
             {
-                forms.push(QuestionForm {
-                    state: if evidence.state == QuestionStatus::Answered {
-                        QuestionStatus::Answered
-                    } else {
-                        QuestionStatus::Unavailable
-                    },
-                    ..form
-                });
+                let state = unverified_state(found.evidence.state);
+                forms.push(found.located(source, state));
             }
         }
     }
@@ -127,10 +191,10 @@ pub(super) fn observe(
     cancel: &AtomicBool,
 ) -> Result<Vec<ObservedAsyncQuestion>, AppError> {
     let generation = file::generation(source)?;
-    let complete = end(source, cancel)?;
+    let complete = end(source, length(source)?, cancel)?;
     let mut evidence: Vec<_> = recent(source, cancel, &generation, complete)?
         .into_iter()
-        .map(|(evidence, _)| evidence)
+        .map(|found| found.evidence)
         .filter(|evidence| evidence.occurred_at_ms >= started_at_ms)
         .filter(|evidence| {
             !known
@@ -143,18 +207,59 @@ pub(super) fn observe(
         matches!(
             item.state,
             QuestionStatus::Pending | QuestionStatus::Submitting | QuestionStatus::Uncertain
-        )
+        ) && item.key.anchor.generation == generation
     }) {
-        let Some((mut verified, _)) = exact(source, &mut lines, &generation, complete, item)?
-        else {
+        let Some(mut found) = exact(source, &mut lines, &generation, complete, item)? else {
             continue;
         };
         if answered_after(source, &mut lines, complete, &item.key).unwrap_or(false) {
-            verified.state = QuestionStatus::Answered;
-            evidence.push(verified);
+            found.evidence.state = QuestionStatus::Answered;
+            evidence.push(found.evidence);
         }
     }
     Ok(evidence)
+}
+
+pub(super) fn native_locations(
+    source: &Source,
+    wanted: &[(NativeTurnId, NativeInputId)],
+    cancel: &AtomicBool,
+) -> Result<HashMap<(NativeTurnId, NativeInputId), SourceAnchor>, AppError> {
+    let generation = file::generation(source)?;
+    let mut found = HashMap::new();
+    let mut budget = NATIVE_LOCATOR_BYTES;
+    let mut offset = file::end_of_line(&source.file, length(source)?, &mut budget, cancel)?;
+    let mut turn_budget = records::NATIVE_QUESTION_TURN_BYTES;
+    let mut lines = file::Lines::new(&source.file, cancel);
+    for _ in 0..DISCOVERY_RECORDS {
+        if offset == 0 || found.len() == wanted.len() {
+            break;
+        }
+        let Ok(start) = lines.previous(offset - 1, &mut budget) else {
+            break;
+        };
+        if let Some(mut row) = records::project(
+            source.provider,
+            lines.input(start, offset),
+            &source.native_id,
+            source.root_session.as_ref(),
+            0,
+            0,
+        ) && row.native_question
+            && wanted.iter().any(|(_, item)| *item == row.id)
+            && records::bind_native_question(&mut row, source, start, &mut turn_budget, cancel)
+            && let Some(turn) = row.turn
+            && let Some(key) = wanted.iter().find(|(t, id)| *t == turn && *id == row.id)
+            && let Ok(file) = file::file_position(&source.file, start, offset)
+        {
+            found.entry(key.clone()).or_insert_with(|| SourceAnchor {
+                generation: generation.clone(),
+                file,
+            });
+        }
+        offset = start;
+    }
+    Ok(found)
 }
 
 pub(super) fn prove(
@@ -163,24 +268,36 @@ pub(super) fn prove(
     cancel: &AtomicBool,
 ) -> Result<QuestionForm, AppError> {
     let generation = file::generation(source)?;
-    let complete = end(source, cancel)?;
-    let mut lines = file::Lines::new(&source.file, cancel);
-    let (_, mut form) = exact(source, &mut lines, &generation, complete, evidence)?
-        .ok_or(AppError::StaleRevision)?;
-    if form.state == QuestionStatus::Pending
-        && answered_after(source, &mut lines, complete, &evidence.key)?
-    {
-        form.state = QuestionStatus::Answered;
+    if evidence.state != QuestionStatus::Pending {
+        return Err(AppError::PreconditionFailed);
     }
-    Ok(form)
+    if evidence.key.anchor.generation != generation {
+        return Err(AppError::StaleRevision);
+    }
+    let complete = length(source)?;
+    if !file::boundary(&source.file, complete)? {
+        return Err(AppError::Unavailable);
+    }
+    let mut lines = file::Lines::new(&source.file, cancel);
+    let found = exact(source, &mut lines, &generation, complete, evidence)?
+        .ok_or(AppError::StaleRevision)?;
+    let state = if answered_after(source, &mut lines, complete, &evidence.key)? {
+        QuestionStatus::Answered
+    } else {
+        QuestionStatus::Pending
+    };
+    Ok(found.located(source, state))
 }
 
-fn end(source: &Source, cancel: &AtomicBool) -> Result<u64, AppError> {
-    let length = source
+fn length(source: &Source) -> Result<u64, AppError> {
+    Ok(source
         .file
         .metadata()
         .map_err(|_| AppError::Unavailable)?
-        .len();
+        .len())
+}
+
+fn end(source: &Source, length: u64, cancel: &AtomicBool) -> Result<u64, AppError> {
     let mut budget = PROOF_BYTES;
     file::end_of_line(&source.file, length, &mut budget, cancel)
 }
@@ -189,35 +306,34 @@ fn exact(
     source: &Source,
     lines: &mut file::Lines<'_>,
     generation: &str,
-    complete: u64,
+    length: u64,
     evidence: &ObservedAsyncQuestion,
 ) -> Result<Option<Observation>, AppError> {
     let start = evidence.key.anchor.opening;
-    if evidence.key.anchor.generation != generation
-        || start >= complete
-        || !file::boundary(&source.file, start)?
-    {
+    if start >= length || !file::boundary(&source.file, start)? {
         return Ok(None);
     }
-    let mut budget = FORM_BYTES;
-    let end = match lines.next(start, complete, &mut budget) {
+    let mut budget = ASYNC_FORM_BYTES;
+    let end = match lines.next(start, length, &mut budget) {
         Ok(end) => end,
         Err(AppError::PayloadTooLarge) => return Ok(None),
         Err(error) => return Err(error),
     };
-    let bytes = raw_record(lines, start, end, FORM_BYTES)?;
-    let Some((mut observed, mut form)) = project(&bytes, source, generation, start) else {
-        return Ok(None);
-    };
-    if observed.key != evidence.key
-        || observed.line_sha256 != evidence.line_sha256
-        || observed.occurred_at_ms != evidence.occurred_at_ms
-    {
+    let bytes = raw_record(lines, start, end, ASYNC_FORM_BYTES)?;
+    if bytes.len() as u64 != end - start || !bytes.ends_with(b"\n") {
         return Ok(None);
     }
-    observed.state = evidence.state;
-    form.state = evidence.state;
-    Ok(Some((observed, form)))
+    let Some(found) = project(&bytes, source, generation, start) else {
+        return Ok(None);
+    };
+    // The native opening survives a filesystem move. Compare every persisted
+    // property of that opening except the physical generation.
+    Ok((found.evidence.key.request == evidence.key.request
+        && found.evidence.key.turn == evidence.key.turn
+        && found.evidence.key.item == evidence.key.item
+        && found.evidence.line_sha256 == evidence.line_sha256
+        && found.evidence.occurred_at_ms == evidence.occurred_at_ms)
+        .then_some(found))
 }
 
 fn recent(
@@ -246,15 +362,14 @@ fn recent(
             if let Some(address) = answer_address(&bytes, source) {
                 answers.insert(address);
             }
-            if offset - start <= FORM_BYTES
-                && let Some((mut evidence, mut form)) = project(&bytes, source, generation, start)
-                && seen.insert(form.request.clone())
+            if offset - start <= ASYNC_FORM_BYTES
+                && let Some(mut found) = project(&bytes, source, generation, start)
+                && seen.insert(found.evidence.key.request.clone())
             {
-                if answers.contains(&address(&evidence.key)) {
-                    evidence.state = QuestionStatus::Answered;
-                    form.state = QuestionStatus::Answered;
+                if answers.contains(&address(&found.evidence.key)) {
+                    found.evidence.state = QuestionStatus::Answered;
                 }
-                output.push((evidence, form));
+                output.push(found);
             }
         }
         offset = start;
@@ -268,22 +383,46 @@ fn answered_after(
     complete: u64,
     key: &QuestionKey,
 ) -> Result<bool, AppError> {
-    let address = address(key);
+    let mut proof = ReplyProof::new(key);
+    check_replies(source, lines, complete, std::slice::from_mut(&mut proof))?;
+    proof.answered.ok_or(AppError::Unavailable)
+}
+
+fn check_replies(
+    source: &Source,
+    lines: &mut file::Lines<'_>,
+    complete: u64,
+    proofs: &mut [ReplyProof],
+) -> Result<(), AppError> {
     let mut offset = complete;
     let mut budget = PROOF_BYTES;
     for _ in 0..PROOF_RECORDS {
-        if offset <= key.anchor.opening {
-            return Ok(false);
+        if offset == 0 {
+            break;
         }
         let start = lines.previous(offset - 1, &mut budget)?;
-        if start <= key.anchor.opening {
-            return Ok(false);
-        }
-        if offset - start <= ANSWER_BYTES {
+        if proofs
+            .iter()
+            .any(|proof| proof.answered.is_none() && start > proof.opening)
+            && offset - start <= ANSWER_BYTES
+        {
             let bytes = raw_record(lines, start, offset, ANSWER_BYTES)?;
-            if answer_address(&bytes, source).as_deref() == Some(address.as_str()) {
-                return Ok(true);
+            if let Some(address) = answer_address(&bytes, source) {
+                for proof in proofs.iter_mut() {
+                    if proof.answered.is_none() && start > proof.opening && proof.address == address
+                    {
+                        proof.answered = Some(true);
+                    }
+                }
             }
+        }
+        for proof in proofs.iter_mut() {
+            if proof.answered.is_none() && start <= proof.opening {
+                proof.answered = Some(false);
+            }
+        }
+        if proofs.iter().all(|proof| proof.answered.is_some()) {
+            return Ok(());
         }
         offset = start;
     }
@@ -333,7 +472,9 @@ fn raw_record(
 }
 
 fn event(bytes: &[u8], source: &Source, marker: &[u8]) -> Option<Record> {
-    if !bytes.windows(marker.len()).any(|bytes| bytes == marker) {
+    if source.provider != HostProvider::Codex
+        || !bytes.windows(marker.len()).any(|bytes| bytes == marker)
+    {
         return None;
     }
     let record: Record = serde_json::from_slice(bytes).ok()?;
@@ -351,10 +492,7 @@ fn project(bytes: &[u8], source: &Source, generation: &str, start: u64) -> Optio
     if event.item.kind != "AgentMessage" || event.item.delivery.as_deref() != Some("async") {
         return None;
     }
-    let questions = match event.item.questions? {
-        AsyncQuestions::Titled(values) => project_titled(values)?,
-        AsyncQuestions::Structured(values) => project_questions(values)?,
-    };
+    let questions = event.item.questions?.project()?;
     let key = QuestionKey {
         request: request_id(&event.thread_id, &event.turn_id, &event.item.id),
         turn: event.turn_id.parse().ok()?,
@@ -364,58 +502,17 @@ fn project(bytes: &[u8], source: &Source, generation: &str, start: u64) -> Optio
             opening: start,
         },
     };
-    let form = QuestionForm {
-        request: key.request.clone(),
-        turn: key.turn.clone(),
-        item: key.item.clone(),
-        blocking: false,
-        mode: QuestionMode::Async,
-        state: QuestionStatus::Pending,
-        questions,
-    };
-    Some((
-        ObservedAsyncQuestion {
+    Some(Observation {
+        evidence: ObservedAsyncQuestion {
             key,
             line_sha256: ReportHash::from_sha256(Sha256::digest(bytes).into()),
             occurred_at_ms: super::records::date(record.timestamp)?,
-            state: form.state,
+            state: QuestionStatus::Pending,
         },
-        form,
-    ))
+        questions,
+        end: start + bytes.len() as u64,
+    })
 }
 
-fn project_titled(values: Vec<TitledQuestion>) -> Option<Vec<Question>> {
-    if values.is_empty() || values.len() > 16 {
-        return None;
-    }
-    values
-        .into_iter()
-        .enumerate()
-        .map(|(index, value)| {
-            let options = value.options.unwrap_or_default();
-            if !visible(&value.title, 8192, true) || options.len() > 32 {
-                return None;
-            }
-            let mut seen = HashSet::new();
-            let options = options
-                .into_iter()
-                .map(|label| {
-                    (visible(&label, 1024, false) && seen.insert(label.clone())).then_some(
-                        QuestionOption {
-                            label,
-                            description: String::new(),
-                        },
-                    )
-                })
-                .collect::<Option<Vec<_>>>()?;
-            Some(Question {
-                id: format!("question-{}", index + 1),
-                header: String::new(),
-                prompt: value.title,
-                allows_other: true,
-                secret: value.is_secret,
-                options,
-            })
-        })
-        .collect()
-}
+#[cfg(test)]
+mod tests;

@@ -90,7 +90,9 @@ impl InlineDisplay<'_> {
             | HistoryPart::UserPrompt { text, display, .. }
             | HistoryPart::Assignment { text, display, .. }
             | HistoryPart::Plan { text, display, .. } => (text.as_str(), display),
-            HistoryPart::ToolCall { .. } | HistoryPart::ToolResult { .. } => return,
+            HistoryPart::ToolCall { .. }
+            | HistoryPart::ToolResult { .. }
+            | HistoryPart::UserQuestion { .. } => return,
         };
         if !text.contains("mermaid") {
             return;

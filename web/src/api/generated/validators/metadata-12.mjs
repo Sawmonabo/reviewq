@@ -2,6 +2,19 @@
 const schema491 = {
   type: "object",
   properties: {
+    assignee: { type: ["string", "null"] },
+    assigneeId: { type: ["string", "null"] },
+    commentCount: { $ref: "#/definitions/SafeCountDto" },
+    commentScope: { $ref: "#/definitions/HistoryCursorDto" },
+    components: { items: { type: "string" }, type: "array" },
+    description: { type: ["string", "null"] },
+    estimate: { format: "double", minimum: 0, type: ["number", "null"] },
+    fetchedAt: { $ref: "#/definitions/UtcTimestampDto" },
+  },
+};
+const schema492 = {
+  type: "object",
+  properties: {
     issueType: { type: ["string", "null"] },
     items: {
       items: { $ref: "#/definitions/TicketComment" },
@@ -18,7 +31,7 @@ const schema491 = {
     reporterId: { type: ["string", "null"] },
   },
 };
-const schema492 = {
+const schema493 = {
   type: "object",
   properties: {
     status: { type: ["string", "null"] },
@@ -30,4 +43,4 @@ const schema492 = {
     warnings: { items: { type: "string" }, type: "array" },
   },
 };
-export { schema491, schema492 };
+export { schema491, schema492, schema493 };
