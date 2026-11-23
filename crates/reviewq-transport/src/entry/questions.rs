@@ -1,14 +1,16 @@
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use axum::Json;
 use axum::extract::State;
 use axum::http::HeaderMap;
 use reviewq_app::access::{Actor, ActorScope, AppError};
+use reviewq_app::history::HistoryBookmark;
 use reviewq_app::hosts::{
-    ObservedAsyncQuestion, QuestionAccess, QuestionAnswer, QuestionForm, QuestionMode,
+    ObservedAsyncQuestion, Question, QuestionAccess, QuestionAnswer, QuestionForm, QuestionMode,
     QuestionStatus,
 };
-use reviewq_domain::identity::{RunId, SessionKey};
+use reviewq_domain::identity::{NativeInputId, NativeTurnId, RunId, SessionKey, SubmissionId};
 use reviewq_domain::session::HostProvider;
 use reviewq_protocol::questions as dto;
 use reviewq_protocol::{
@@ -18,7 +20,7 @@ use serde::Deserialize;
 
 use super::error::{ApiBytes, ApiPath as Path, ApiQuery as Query};
 use super::pages::{parse, success};
-use super::{ApiError, Entry};
+use super::{ApiError, Entry, ServiceEndpoint, history};
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -69,6 +71,13 @@ pub(super) async fn read(
             )
             .await?
         }
+        None if stored.value.binding.identity().provider() == HostProvider::Codex => entry
+            .store
+            .question_attempts(actor.clone(), stored.value.clone(), request.clone())
+            .await?
+            .into_iter()
+            .map(|receipt| receipt.form())
+            .collect(),
         None => Vec::new(),
     };
     if stored.value.binding.identity().provider() == HostProvider::Codex {
@@ -76,17 +85,20 @@ pub(super) async fn read(
             .store
             .observed_async_questions(actor.clone(), stored.value.clone(), request.clone())
             .await?;
-        if let Some(observed) = entry
+        let observed = match entry
             .file_history
             .async_questions(stored.value.clone(), known, request.clone())
-            .await?
+            .await
         {
-            for form in observed {
-                if let Some(prior) = forms.iter_mut().find(|prior| prior.request == form.request) {
-                    *prior = form;
-                } else {
-                    forms.push(form);
-                }
+            Ok(observed) => observed,
+            Err(_) if !forms.is_empty() => Vec::new(),
+            Err(error) => return Err(error),
+        };
+        for form in observed {
+            if let Some(prior) = forms.iter_mut().find(|prior| prior.request == form.request) {
+                *prior = form;
+            } else {
+                forms.push(form);
             }
         }
         forms.sort_by_key(|form| {
@@ -114,7 +126,16 @@ pub(super) async fn read(
     }
     let items = forms
         .into_iter()
-        .map(|form| project(&run, &session, form, can_answer, local_operator))
+        .map(|form| {
+            project(
+                &entry.auth.endpoint,
+                &run,
+                &session,
+                form,
+                can_answer,
+                local_operator,
+            )
+        })
         .collect::<Result<_, _>>()?;
     success(
         dto::Forms {
@@ -142,11 +163,25 @@ pub(super) async fn answer(
             actor,
             parse(&run)?,
             parse(&session)?,
-            request,
-            input,
+            Submission {
+                request,
+                id: parse(input.submission_id.as_str())?,
+                answers: input.answers,
+                address: Some((
+                    parse(input.turn_id.as_str())?,
+                    parse(input.item_id.as_str())?,
+                )),
+            },
         )
         .await?,
     ))
+}
+
+pub(super) struct Submission {
+    pub request: String,
+    pub id: SubmissionId,
+    pub answers: BTreeMap<String, dto::Values>,
+    pub address: Option<(NativeTurnId, NativeInputId)>,
 }
 
 pub(super) async fn respond(
@@ -154,13 +189,12 @@ pub(super) async fn respond(
     actor: Actor,
     run: RunId,
     session: SessionKey,
-    request: String,
-    input: dto::Answer,
+    input: Submission,
 ) -> Result<dto::AnswerResponse, AppError> {
     if !entry.sends_allowed {
         return Err(AppError::Forbidden);
     }
-    validate_request(Some(&request))?;
+    validate_request(Some(&input.request))?;
     let stored = entry
         .store
         .history_session(actor.clone(), run.clone(), session.clone())
@@ -170,7 +204,11 @@ pub(super) async fn respond(
     }
     let known = entry
         .store
-        .observed_async_questions(actor.clone(), stored.value.clone(), Some(request.clone()))
+        .observed_async_questions(
+            actor.clone(),
+            stored.value.clone(),
+            Some(input.request.clone()),
+        )
         .await?
         .pop();
     let host = entry
@@ -178,7 +216,6 @@ pub(super) async fn respond(
         .as_ref()
         .filter(|host| host.supports_questions(stored.value.binding.identity()))
         .ok_or(AppError::Unavailable)?;
-    let submission = parse(input.submission_id.as_str())?;
     let answers = input
         .answers
         .into_iter()
@@ -186,17 +223,25 @@ pub(super) async fn respond(
         .collect();
     let local_operator = matches!(actor.scope(), ActorScope::LocalOperator);
     let answer = QuestionAnswer::new(
-        request,
-        submission,
+        input.request,
+        input.id,
         answers,
         QuestionAccess::new(actor.clone(), stored.value, entry.store.clone()),
+        input.address,
     );
     let form = match known {
         Some(evidence) => respond_async(entry, actor, answer, evidence).await?,
         None => host.answer_question(answer).await?,
     };
     success(
-        project(&run, &session, form, true, local_operator)?,
+        project(
+            &entry.auth.endpoint,
+            &run,
+            &session,
+            form,
+            true,
+            local_operator,
+        )?,
         stored.cursor,
     )
 }
@@ -207,6 +252,11 @@ async fn respond_async(
     answer: QuestionAnswer,
     evidence: ObservedAsyncQuestion,
 ) -> Result<QuestionForm, AppError> {
+    answer.check_address(
+        &evidence.key.request,
+        &evidence.key.turn,
+        &evidence.key.item,
+    )?;
     let digest = answer.digest()?;
     let session = answer.session().clone();
     if let Some(state) = entry
@@ -226,7 +276,6 @@ async fn respond_async(
             .async_questions(session, vec![evidence], Some(answer.request))
             .await
             .ok()
-            .flatten()
             .and_then(|mut forms| forms.pop())
             .unwrap_or(bare);
         return Ok(QuestionForm { state, ..form });
@@ -248,12 +297,27 @@ async fn respond_async(
 }
 
 fn project(
+    endpoint: &ServiceEndpoint,
     run: &RunId,
     session: &SessionKey,
     value: QuestionForm,
     can_answer: bool,
     local_operator: bool,
 ) -> Result<dto::Form, AppError> {
+    let locator = value
+        .locator
+        .map(|locator| {
+            history::entry_locator(
+                endpoint,
+                run,
+                session,
+                &locator.generation,
+                &value.item,
+                &HistoryBookmark::File(locator.file),
+                Some(&value.turn),
+            )
+        })
+        .transpose()?;
     Ok(dto::Form {
         run_id: run_id(run)?,
         session_key: session_key(session)?,
@@ -267,6 +331,7 @@ fn project(
         },
         answerable: can_answer
             && value.state == QuestionStatus::Pending
+            && !value.questions.is_empty()
             && (!value.questions.iter().any(|question| question.secret)
                 || (value.mode == QuestionMode::Native && value.blocking && local_operator)),
         status: match value.state {
@@ -277,26 +342,27 @@ fn project(
             QuestionStatus::Unavailable => dto::Status::Unavailable,
             QuestionStatus::Uncertain => dto::Status::Uncertain,
         },
-        questions: value
-            .questions
-            .into_iter()
-            .map(|question| dto::Question {
-                id: question.id,
-                header: question.header,
-                question: question.prompt,
-                options: question
-                    .options
-                    .into_iter()
-                    .map(|option| dto::Choice {
-                        label: option.label,
-                        description: option.description,
-                    })
-                    .collect(),
-                is_other: question.allows_other,
-                is_secret: question.secret,
+        questions: value.questions.iter().map(project_question).collect(),
+        locator,
+    })
+}
+
+pub(super) fn project_question(value: &Question) -> dto::Question {
+    dto::Question {
+        id: value.id.clone(),
+        header: value.header.clone(),
+        question: value.prompt.clone(),
+        options: value
+            .options
+            .iter()
+            .map(|option| dto::Choice {
+                label: option.label.clone(),
+                description: option.description.clone(),
             })
             .collect(),
-    })
+        is_other: value.allows_other,
+        is_secret: value.secret,
+    }
 }
 
 fn run_id(run: &RunId) -> Result<RunIdDto, AppError> {

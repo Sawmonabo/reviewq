@@ -27,6 +27,19 @@ pub(super) fn around(
     let current = head(source, None, cancel)?.anchor;
     let complete = current.file.high_water;
     let mut budget = READ_BUDGET;
+    let mut question_budget = records::NATIVE_QUESTION_TURN_BYTES;
+    let matches_entry = |start, end, question_budget: &mut u64| {
+        record(source, start, end, 0, cancel).is_some_and(|mut record| {
+            record.id == *entry
+                && records::bind_native_question(
+                    &mut record,
+                    source,
+                    start,
+                    question_budget,
+                    cancel,
+                )
+        })
+    };
     let at = if let Some(anchor) = anchor {
         if anchor.generation != current.generation {
             return Err(AppError::CursorExpired);
@@ -34,7 +47,7 @@ pub(super) fn around(
         file::verify_position(&source.file, &anchor.file, complete)?;
         let start = anchor.file.offset;
         let end = file::next_line(&source.file, start, complete, &mut budget, cancel)?;
-        if !record(source, start, end, 0, cancel).is_some_and(|record| record.id == *entry) {
+        if !matches_entry(start, end, &mut question_budget) {
             return Err(AppError::CursorExpired);
         }
         anchor.file
@@ -46,7 +59,7 @@ pub(super) fn around(
                 break;
             }
             let ending = file::next_line(&source.file, offset, complete, &mut budget, cancel)?;
-            if record(source, offset, ending, 0, cancel).is_some_and(|record| record.id == *entry) {
+            if matches_entry(offset, ending, &mut question_budget) {
                 found = Some(file::file_position(&source.file, offset, complete)?);
                 break;
             }

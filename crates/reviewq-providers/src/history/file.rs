@@ -49,6 +49,7 @@ pub(super) fn page(
     let mut offset = initial;
     let mut entries = Vec::with_capacity(usize::from(limit));
     let mut tool_proof = ToolProof::new(file, cancelled);
+    let mut question_budget = records::NATIVE_QUESTION_TURN_BYTES;
     let mut lines = Lines::new(file, cancelled);
     for _ in 0..MAX_RECORDS {
         if cancelled.load(Ordering::Relaxed) {
@@ -72,6 +73,12 @@ pub(super) fn page(
             source.root_session.as_ref(),
             0,
             2_052,
+        ) && records::bind_native_question(
+            &mut record,
+            source,
+            start,
+            &mut question_budget,
+            cancelled,
         ) {
             tool_proof.redact(source, start, &mut record);
             let text = readable_prefix(&record.text)?
@@ -394,6 +401,9 @@ pub(super) fn part_field(
 ) -> Result<records::BodyField, AppError> {
     use records::BodyField;
     Ok(match (&part.kind, provider) {
+        (VisiblePartKind::Text(_), HostProvider::Codex) if record.text_blocks.is_empty() => {
+            BodyField::Text
+        }
         (VisiblePartKind::Text(_), _) => BodyField::TextBlock(part.index),
         (VisiblePartKind::Plan, HostProvider::Codex) => {
             BodyField::CombinedText(record.text_blocks.clone())

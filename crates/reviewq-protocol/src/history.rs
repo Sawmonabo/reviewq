@@ -7,9 +7,10 @@ use serde::Serialize;
 
 use crate::Success;
 use crate::UtcTimestampDto;
+use crate::questions::Question;
 use crate::scalar::{
     EventCursorDto, HistoryCursorDto, HistoryEntryIdDto, HistoryGenerationDto, HistoryTurnIdDto,
-    RunIdDto, SafeCountDto, SessionKeyDto,
+    ResourceIdDto, RunIdDto, SafeCountDto, SessionKeyDto,
 };
 
 /// Encoded JSON budget for one history page.
@@ -358,6 +359,13 @@ pub enum HistoryPart {
         display: Option<crate::reports::DocumentDisplay>,
         #[serde(skip_serializing_if = "Option::is_none")]
         text_bytes: Option<SafeCountDto>,
+    },
+    UserQuestion {
+        #[serde(skip_serializing_if = "Option::is_none")]
+        #[cfg_attr(feature = "schema", schemars(with = "SafeCountDto"))]
+        native_index: Option<SafeCountDto>,
+        request_id: ResourceIdDto,
+        questions: Vec<Question>,
     },
 }
 

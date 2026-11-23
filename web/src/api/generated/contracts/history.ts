@@ -5,10 +5,13 @@ import type {
   DisplayFallback,
   DocumentDisplay,
   EventCursorDto,
+  HistoryCursorDto,
   HistoryEntryIdDto,
   HistoryGenerationDto,
   HistoryTurnIdDto,
+  Question,
   ReportHashDto,
+  ResourceIdDto,
   RunIdDto,
   SafeCountDto,
   SessionKeyDto,
@@ -17,8 +20,6 @@ import type {
 } from "./common.js";
 
 export type HistoryAvailability = "available" | "partial" | "unavailable";
-
-export type HistoryCursorDto = string;
 
 export type HistoryText = string;
 
@@ -128,6 +129,13 @@ export type HistoryPart =
       nativeIndex?: SafeCountDto;
       text: HistoryText;
       textBytes?: SafeCountDto | null;
+      [k: string]: unknown;
+    }
+  | {
+      kind: "user_question";
+      nativeIndex?: SafeCountDto;
+      questions: Question[];
+      requestId: ResourceIdDto;
       [k: string]: unknown;
     };
 

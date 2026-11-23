@@ -240,10 +240,11 @@ pub(super) async fn answer(
         actor,
         run,
         session,
-        args.request_id.as_str().to_owned(),
-        reviewq_protocol::questions::Answer {
-            submission_id: args.submission_id,
+        questions::Submission {
+            request: args.request_id.as_str().to_owned(),
+            id: parse(args.submission_id.as_str())?,
             answers: args.answers,
+            address: None,
         },
     )
     .await?;

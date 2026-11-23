@@ -12,6 +12,8 @@ use reviewq_domain::session::{HostProvider, NativeBinding};
 use serde::Deserialize;
 use struson::reader::{JsonReader, JsonStreamReader, ValueType};
 
+use crate::question_wire::NATIVE_QUESTION_TOOL;
+
 use super::reader::NameBudget;
 use super::records::{ID_BYTES, invalid, object, string};
 use super::{Cancel, file, locator};
@@ -77,7 +79,7 @@ async fn codex_call(
         };
         let name = expected_question_turn
             .as_ref()
-            .map(|_| "request_user_input");
+            .map(|_| NATIVE_QUESTION_TOOL);
         let offset = if let Some(position) = position {
             if position >= length || !file::boundary(&source.file, position)? {
                 return Err(AppError::Conflict);
@@ -112,11 +114,14 @@ async fn codex_call(
                 end = start;
             }
         };
-        if let Some(turn) = expected_question_turn
-            && super::turn_metadata::turn_before(&source, offset, &stopped)?.as_deref()
+        if let Some(turn) = expected_question_turn {
+            let mut turn_budget = file::READ_BUDGET;
+            if super::turn_metadata::turn_before(&source, offset, &mut turn_budget, &stopped)?
+                .as_deref()
                 != Some(turn.as_str())
-        {
-            return Err(AppError::Conflict);
+            {
+                return Err(AppError::Conflict);
+            }
         }
         Ok((file::generation(&source)?, offset))
     })
@@ -186,7 +191,7 @@ pub(crate) async fn codex_question_answered(
             || !opening(
                 lines.input(key.anchor.opening, start),
                 key.item.as_str(),
-                Some("request_user_input"),
+                Some(NATIVE_QUESTION_TOOL),
             )?
         {
             return Err(AppError::CursorExpired);

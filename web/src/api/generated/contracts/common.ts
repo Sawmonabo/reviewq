@@ -38,6 +38,8 @@ export type UpstreamIdDto = string;
 
 export type HistoryTurnIdDto = string;
 
+export type HistoryEntryIdDto = string;
+
 export type ReviewIdDto = string;
 
 export type SafeCountDto = number;
@@ -72,8 +74,6 @@ export type QueueStatus =
 export type RunStage = "needs_input" | "working" | "waiting" | "archived";
 
 export type TicketKeyDto = string;
-
-export type HistoryEntryIdDto = string;
 
 export type ErrorCode =
   | "ticket_unverified"
@@ -140,6 +140,8 @@ export type TableInline =
     };
 
 export type HistoryGenerationDto = string;
+
+export type HistoryCursorDto = string;
 
 export type DisplayBlockKind =
   "paragraph" | "heading" | "block_quote" | "code" | "list" | "rule" | "table";
@@ -595,5 +597,21 @@ export interface TablePage {
         number,
         number,
       ];
+  [k: string]: unknown;
+}
+
+export interface Question {
+  header: string;
+  id: string;
+  isOther: boolean;
+  isSecret: boolean;
+  options: Choice[];
+  question: string;
+  [k: string]: unknown;
+}
+
+export interface Choice {
+  description: string;
+  label: string;
   [k: string]: unknown;
 }

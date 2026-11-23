@@ -7,6 +7,28 @@ use sha2::{Digest, Sha256};
 
 const MAX_QUESTIONS: usize = 16;
 const MAX_OPTIONS: usize = 32;
+pub(crate) const ASYNC_FORM_BYTES: u64 = 48 * 1024;
+pub(crate) const NATIVE_QUESTION_TOOL: &str = "request_user_input";
+
+#[derive(Deserialize)]
+#[serde(transparent)]
+pub(crate) struct AsyncQuestions(AsyncQuestionList);
+
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum AsyncQuestionList {
+    Titled(Vec<TitledQuestion>),
+    Structured(Vec<NativeQuestion>),
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct TitledQuestion {
+    title: String,
+    options: Option<Vec<String>>,
+    #[serde(default, alias = "is_secret")]
+    is_secret: bool,
+}
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -25,6 +47,51 @@ pub(crate) struct NativeQuestion {
 struct NativeOption {
     label: String,
     description: String,
+}
+
+impl AsyncQuestions {
+    pub(crate) fn project(self) -> Option<Vec<Question>> {
+        match self.0 {
+            AsyncQuestionList::Titled(values) => project_titled(values),
+            AsyncQuestionList::Structured(values) => project_questions(values),
+        }
+    }
+}
+
+fn project_titled(values: Vec<TitledQuestion>) -> Option<Vec<Question>> {
+    if values.is_empty() || values.len() > MAX_QUESTIONS {
+        return None;
+    }
+    values
+        .into_iter()
+        .enumerate()
+        .map(|(index, value)| {
+            let options = value.options.unwrap_or_default();
+            if !visible(&value.title, 8192, true) || options.len() > MAX_OPTIONS {
+                return None;
+            }
+            let mut seen = HashSet::new();
+            let options = options
+                .into_iter()
+                .map(|label| {
+                    (visible(&label, 1024, false) && seen.insert(label.clone())).then_some(
+                        QuestionOption {
+                            label,
+                            description: String::new(),
+                        },
+                    )
+                })
+                .collect::<Option<Vec<_>>>()?;
+            Some(Question {
+                id: format!("question-{}", index + 1),
+                header: String::new(),
+                prompt: value.title,
+                allows_other: true,
+                secret: value.is_secret,
+                options,
+            })
+        })
+        .collect()
 }
 
 pub(crate) fn project_questions(input: Vec<NativeQuestion>) -> Option<Vec<Question>> {

@@ -5,12 +5,12 @@ use reviewq_domain::identity::{NativeInputId, NativeTurnId, ReceiptId, ReportHas
 use reviewq_domain::session::NativeIdentity;
 
 use crate::access::{Actor, ActorScope, AppError, AppFuture};
-use crate::history::{HistorySession, HistoryStore};
+use crate::history::{HistorySession, HistoryStore, SourceAnchor};
 use sha2::{Digest, Sha256};
 
 use super::MessageBody;
 
-#[derive(Clone, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Question {
     pub id: String,
     pub header: String,
@@ -20,7 +20,7 @@ pub struct Question {
     pub secret: bool,
 }
 
-#[derive(Clone, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct QuestionOption {
     pub label: String,
     pub description: String,
@@ -35,6 +35,7 @@ pub struct QuestionForm {
     pub mode: QuestionMode,
     pub state: QuestionStatus,
     pub questions: Vec<Question>,
+    pub locator: Option<SourceAnchor>,
 }
 
 #[derive(Clone, Copy, Eq, PartialEq)]
@@ -138,6 +139,7 @@ impl ObservedAsyncQuestion {
             mode: QuestionMode::Async,
             state,
             questions: Vec::new(),
+            locator: None,
         }
     }
 }
@@ -171,6 +173,7 @@ impl QuestionReceipt {
             mode: QuestionMode::Native,
             state: self.state,
             questions: Vec::new(),
+            locator: None,
         }
     }
 }
@@ -246,6 +249,7 @@ pub struct QuestionAnswer {
     pub submission: SubmissionId,
     pub answers: BTreeMap<String, Vec<String>>,
     pub access: QuestionAccess,
+    address: Option<(NativeTurnId, NativeInputId)>,
 }
 
 impl QuestionAnswer {
@@ -254,13 +258,34 @@ impl QuestionAnswer {
         submission: SubmissionId,
         answers: BTreeMap<String, Vec<String>>,
         access: QuestionAccess,
+        address: Option<(NativeTurnId, NativeInputId)>,
     ) -> Self {
         Self {
             request,
             submission,
             answers,
             access,
+            address,
         }
+    }
+
+    pub fn check_address(
+        &self,
+        request: &str,
+        turn: &NativeTurnId,
+        item: &NativeInputId,
+    ) -> Result<(), AppError> {
+        if self.request != request
+            || self
+                .address
+                .as_ref()
+                .is_some_and(|(expected_turn, expected_item)| {
+                    expected_turn != turn || expected_item != item
+                })
+        {
+            return Err(AppError::StaleRevision);
+        }
+        Ok(())
     }
 
     pub fn identity(&self) -> &NativeIdentity {
@@ -298,6 +323,7 @@ impl QuestionAnswer {
     }
 
     pub fn validate(&self, form: &QuestionForm) -> Result<bool, AppError> {
+        self.check_address(&form.request, &form.turn, &form.item)?;
         let secret = form.questions.iter().any(|question| question.secret);
         if (secret && (!form.blocking || !self.allows_secret()))
             || self.answers.len() != form.questions.len()

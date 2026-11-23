@@ -552,6 +552,7 @@ pub(super) async fn locate(
         &hit.generation,
         &parse(&hit.entry)?,
         &bookmark,
+        None,
     )?;
     let parts_cursor = source
         .file()

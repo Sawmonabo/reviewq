@@ -9,7 +9,7 @@ use reviewq_app::history::{
     HistoryBookmark, HistorySession, NativeNavigation, NavigationQuery, PromptOverviewCheckpoint,
     PromptPosition,
 };
-use reviewq_domain::identity::{NativeInputId, RunId, SessionKey};
+use reviewq_domain::identity::{NativeInputId, NativeTurnId, RunId, SessionKey};
 use reviewq_protocol::history::{
     HistoryAvailability, HistoryNavigation, HistoryPlan, HistoryPlanResponse, HistoryText,
     NavigationPage, PlanEntry, PlanTask, PlanTaskStatus, PromptGroup, PromptPreview,
@@ -64,6 +64,8 @@ struct EntryLocator {
     session: String,
     generation: String,
     entry: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    exact_turn: Option<String>,
     point: Bookmark,
 }
 
@@ -220,7 +222,7 @@ pub(super) fn open_anchor(
     session: &SessionKey,
     entry: &NativeInputId,
     token: &str,
-) -> Result<(String, HistoryBookmark), AppError> {
+) -> Result<(String, HistoryBookmark, Option<NativeTurnId>), AppError> {
     let locator: EntryLocator = endpoint.decode_cursor(AROUND, token)?;
     if locator.run != run.as_str()
         || locator.session != session.as_str()
@@ -228,22 +230,28 @@ pub(super) fn open_anchor(
     {
         return Err(AppError::CursorExpired);
     }
-    Ok((locator.generation, locator.point.open()?))
+    Ok((
+        locator.generation,
+        locator.point.open()?,
+        locator.exact_turn.as_deref().map(parse).transpose()?,
+    ))
 }
 
-pub(super) fn entry_locator(
+pub(in crate::entry) fn entry_locator(
     endpoint: &ServiceEndpoint,
     run: &RunId,
     session: &SessionKey,
     generation: &str,
     id: &NativeInputId,
     point: &HistoryBookmark,
+    exact_turn: Option<&NativeTurnId>,
 ) -> Result<HistoryCursorDto, AppError> {
     let locator = EntryLocator {
         run: run.to_string(),
         session: session.to_string(),
         generation: generation.to_owned(),
         entry: id.to_string(),
+        exact_turn: exact_turn.map(ToString::to_string),
         point: Bookmark::from_bookmark(point, run, session, generation),
     };
     HistoryCursorDto::new(endpoint.encode_cursor(AROUND, &locator)?).ok_or(AppError::Internal)
@@ -429,6 +437,7 @@ pub(in crate::entry) async fn navigation(
                             session: session.to_string(),
                             generation: generation.clone(),
                             entry: item.entry.to_string(),
+                            exact_turn: None,
                             point: Bookmark::from_bookmark(
                                 &item.anchor,
                                 &run,

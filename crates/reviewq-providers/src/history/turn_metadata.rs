@@ -68,21 +68,28 @@ pub(crate) async fn codex_turn_started(
 pub(super) fn turn_before(
     source: &locator::Source,
     mut end: u64,
+    budget: &mut u64,
     cancelled: &AtomicBool,
 ) -> Result<Option<String>, AppError> {
-    let mut budget = file::READ_BUDGET;
     let mut lines = file::Lines::new(&source.file, cancelled);
     for _ in 0..file::MAX_RECORDS {
-        if end == 0 || budget == 0 {
+        if end == 0 || *budget == 0 {
             break;
         }
-        let start = lines.previous(end - 1, &mut budget)?;
+        let start = lines.previous(end - 1, budget)?;
         let row = read(lines.input(start, end))?;
         if row.turn.is_some()
             && (row.outer.as_deref() == Some("turn_context")
                 || (row.outer.as_deref() == Some("event_msg")
                     && matches!(row.kind.as_deref(), Some("task_started" | "turn_started"))))
         {
+            if row
+                .thread
+                .as_deref()
+                .is_some_and(|thread| thread != source.native_id.as_str())
+            {
+                return Err(AppError::Conflict);
+            }
             return Ok(row.turn);
         }
         end = start;

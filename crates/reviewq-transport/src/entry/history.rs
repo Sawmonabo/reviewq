@@ -15,7 +15,7 @@ use reviewq_protocol::history::{
 };
 use reviewq_protocol::{
     EventCursorDto, HistoryCursorDto, HistoryEntryIdDto, HistoryGenerationDto, HistoryTurnIdDto,
-    RunIdDto, SafeCountDto, SessionKeyDto, UtcTimestampDto,
+    ResourceIdDto, RunIdDto, SafeCountDto, SessionKeyDto, UtcTimestampDto,
 };
 use serde::{Deserialize, Serialize};
 
@@ -34,6 +34,7 @@ mod drawing_hints;
 mod explore;
 pub(super) use content::{ContentQuery, content, read_content};
 pub(super) use document::{document, drawing_source, markdown};
+pub(super) use explore::entry_locator;
 mod live;
 mod parts;
 mod result;
@@ -232,11 +233,15 @@ pub(super) async fn read(
         .transpose()?
         .unwrap_or_else(|| first.clone());
     if let Some(around) = around {
-        let anchor = query
+        let opened = query
             .locator
             .as_deref()
             .map(|token| explore::open_anchor(endpoint, &run, &session, &around, token))
             .transpose()?;
+        let (anchor, exact_turn) = match opened {
+            Some((generation, bookmark, turn)) => (Some((generation, bookmark)), turn),
+            None => (None, None),
+        };
         // A marker jump needs the target and its immediate surroundings. Keep
         // adjacent-page cursors at the regular limit so scrolling refills normally.
         let jump_limit = if anchor.is_some() && query.limit.is_none() {
@@ -254,12 +259,24 @@ pub(super) async fn read(
         .await;
         let (mut result, reset) = match current {
             Ok(current) => (current, false),
-            Err(AppError::CursorExpired) if anchor.is_some() => (
+            Err(AppError::CursorExpired) if anchor.is_some() && exact_turn.is_none() => (
                 around_page(entry, lead.value.clone(), &around, None, jump_limit).await?,
                 true,
             ),
             Err(error) => return Err(error),
         };
+        if let Some(turn) = exact_turn
+            && !result.entries.iter().any(|entry| {
+                entry.id == around
+                    && entry.turn.as_ref() == Some(&turn)
+                    && entry
+                        .parts
+                        .iter()
+                        .any(|part| matches!(&part.kind, VisiblePartKind::UserQuestion { .. }))
+            })
+        {
+            return Err(AppError::CursorExpired);
+        }
         bind_observed_turns(entry, actor.clone(), lead.value, &mut result).await?;
         return encode(
             &projection,
@@ -621,6 +638,14 @@ fn visible_part(
         ToolState::Unknown => HistoryToolState::Unknown,
     };
     Ok(match &part.kind {
+        VisiblePartKind::UserQuestion { request, questions } => HistoryPart::UserQuestion {
+            native_index: SafeCountDto::new(u64::from(part.native_index)),
+            request_id: ResourceIdDto::new(request.as_str()).ok_or(AppError::Internal)?,
+            questions: questions
+                .iter()
+                .map(super::questions::project_question)
+                .collect(),
+        },
         VisiblePartKind::Text(VisibleKind::User) => HistoryPart::UserPrompt {
             native_index: SafeCountDto::new(u64::from(part.native_index)),
             text,

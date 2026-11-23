@@ -2,6 +2,7 @@ use std::io::{Read, Write};
 
 use reviewq_app::access::AppError;
 use reviewq_app::history::{ToolState, VisibleKind, VisiblePartKind};
+use reviewq_app::hosts::Question;
 use reviewq_domain::identity::{NativeInputId, NativeSessionId, NativeTurnId};
 use reviewq_domain::session::HostProvider;
 use struson::reader::{JsonReader, JsonStreamReader, ValueType};
@@ -9,7 +10,10 @@ use struson::reader::{JsonReader, JsonStreamReader, ValueType};
 use super::reader::NameBudget;
 use super::tools::{self, MAX_NATIVE_PARTS};
 
+mod questions;
+
 pub(super) const ID_BYTES: u64 = 512;
+const MAX_CONTENT_BLOCKS: u16 = 16_384;
 
 pub(super) struct Record {
     pub id: NativeInputId,
@@ -27,6 +31,7 @@ pub(super) struct Record {
     pub result_field: Option<String>,
     pub text_blocks: Vec<u16>,
     pub next_part: Option<u16>,
+    pub native_question: bool,
 }
 
 pub(super) struct Part {
@@ -80,7 +85,7 @@ impl BodySink<'_> {
     }
 }
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub(super) struct Text {
     pub bytes: u64,
     pub picked: Vec<u8>,
@@ -104,7 +109,10 @@ struct Message {
     tool: Option<String>,
     status: Option<String>,
     phase: Option<String>,
-    restricted: bool,
+    delivered: bool,
+    async_delivery: bool,
+    moderated: bool,
+    questions: Option<Vec<Question>>,
     final_response: bool,
     claude_tool_parent: Option<NativeInputId>,
     tool_calls: Vec<(NativeInputId, String)>,
@@ -112,6 +120,7 @@ struct Message {
     result_field: Option<String>,
     text_blocks: Vec<u16>,
     next_part: Option<u16>,
+    native_question: bool,
 }
 
 #[derive(Default)]
@@ -120,6 +129,8 @@ struct Event {
     thread: Option<String>,
     turn: Option<String>,
     item: Message,
+    call: Option<String>,
+    tool: Option<String>,
 }
 
 pub(super) fn project(
@@ -305,7 +316,11 @@ fn project_to(
         .ok_or(AppError::Unavailable)?
         .parse()
         .map_err(invalid)?;
-    if item.text.bytes == 0 && item.parts.is_empty() && item.next_part.is_none() {
+    if item.text.bytes == 0
+        && item.parts.is_empty()
+        && item.next_part.is_none()
+        && !item.native_question
+    {
         return Ok(None);
     }
     if !output.document
@@ -339,6 +354,7 @@ fn project_to(
         result_field: item.result_field,
         text_blocks: item.text_blocks,
         next_part: item.next_part,
+        native_question: item.native_question,
     }))
 }
 
@@ -361,6 +377,8 @@ fn codex<R: Read>(
                 "type" => string(reader, ID_BYTES).map(|value| event.kind = value),
                 "thread_id" => string(reader, ID_BYTES).map(|value| event.thread = value),
                 "turn_id" => string(reader, ID_BYTES).map(|value| event.turn = value),
+                "call_id" => string(reader, ID_BYTES).map(|value| event.call = value),
+                "name" => string(reader, ID_BYTES).map(|value| event.tool = value),
                 "item" if reader.peek().map_err(invalid)? == ValueType::Object => {
                     codex_item(reader, window, output).map(|value| event.item = value)
                 }
@@ -369,6 +387,11 @@ fn codex<R: Read>(
         }
         _ => reader.skip_value().map_err(invalid),
     })?;
+    if record_type.as_deref() == Some("response_item")
+        && let Some(opening) = questions::native_opening(&mut event, native)
+    {
+        return Ok(Some((opening, VisibleKind::Assistant, stamp, event.turn)));
+    }
     if record_type.as_deref() != Some("event_msg")
         || event.kind.as_deref() != Some("item_completed")
         || event.thread.as_deref() != Some(native.as_str())
@@ -379,8 +402,10 @@ fn codex<R: Read>(
     let kind = match event.item.kind.as_deref() {
         Some("UserMessage") => VisibleKind::User,
         Some("AgentMessage") => {
-            event.item.final_response =
-                event.item.phase.as_deref() == Some("final_answer") && !event.item.restricted;
+            questions::attach(&mut event, native, output.parts_from);
+            event.item.final_response = event.item.phase.as_deref() == Some("final_answer")
+                && !event.item.delivered
+                && !event.item.moderated;
             VisibleKind::Assistant
         }
         Some("Plan" | "plan") => {
@@ -445,6 +470,8 @@ fn codex<R: Read>(
     };
     Ok(Some((event.item, kind, stamp, event.turn)))
 }
+
+pub(super) use questions::{NATIVE_QUESTION_TURN_BYTES, bind_native_question};
 
 fn claude<R: Read>(
     reader: &mut JsonStreamReader<R>,
@@ -545,10 +572,12 @@ fn codex_item<R: Read>(
         "tool" | "name" => string(reader, 128).map(|value| item.tool = value),
         "status" => string(reader, 32).map(|value| item.status = value),
         "phase" => string(reader, 32).map(|value| item.phase = value),
-        "moderation" | "delivery" => {
-            item.restricted |= reader.peek().map_err(invalid)? != ValueType::Null;
+        "moderation" => {
+            item.moderated = reader.peek().map_err(invalid)? != ValueType::Null;
             reader.skip_value().map_err(invalid)
         }
+        "delivery" => questions::delivery(reader, &mut item),
+        "questions" => questions::read(reader).map(|details| item.questions = details),
         "command" | "arguments" | "query" | "changes" | "prompt" if !output.document => {
             item.argument_field = Some(name.to_owned());
             tools::body(
@@ -587,7 +616,7 @@ fn contents<R: Read>(
             reader.begin_array().map_err(invalid)?;
             let mut index = 0_u16;
             while reader.has_next().map_err(invalid)? {
-                if index >= 16_384 {
+                if index >= MAX_CONTENT_BLOCKS {
                     return Err(AppError::PayloadTooLarge);
                 }
                 block(reader, window, index, item, output)?;
