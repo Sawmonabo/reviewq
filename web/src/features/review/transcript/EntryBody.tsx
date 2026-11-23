@@ -148,9 +148,9 @@ export function EntryBody({
               preview={part.text}
               waiting={Boolean(sameReply && inlineRef && !reference && complete === undefined)}
             />
-          ) : (
+          ) : part.text.trim() ? (
             <pre className="tool-output-line">{part.text}</pre>
-          ))}
+          ) : null)}
         {part.contentRef &&
           complete == null &&
           disclosure(current.entryId, part.contentRef, formatted ? "markdown" : "text")}
@@ -162,6 +162,21 @@ export function EntryBody({
     ? parts.map((group, index) => {
         if (group.kind === "prose") return value(entry, group.part, `part:${index}`);
         const key = openKey(entry.entryId, group.callId);
+        const content = group.parts.filter(
+          (part) =>
+            part.contentRef ||
+            /\S/u.test(part.text) ||
+            (found && found.destination.nativeIndex === (part.nativeIndex ?? null)),
+        );
+        const heading = (
+          <ToolHeading call={group.call} state={group.state} timestamp={entry.timestamp} />
+        );
+        if (!content.length)
+          return (
+            <div className="tool-summary" key={`${key}:${index}`}>
+              {heading}
+            </div>
+          );
         const open = expanded.has(key);
         return (
           <details
@@ -170,12 +185,10 @@ export function EntryBody({
             open={open}
             onToggle={(event) => toggle(key, event.currentTarget.open)}
           >
-            <summary data-tool-call={group.callId}>
-              <ToolHeading call={group.call} state={group.state} timestamp={entry.timestamp} />
-            </summary>
+            <summary data-tool-call={group.callId}>{heading}</summary>
             {open && (
               <div className="tool-content stack">
-                {group.parts.map((item, ordinal) => value(entry, item, `tool:${ordinal}`))}
+                {content.map((item, ordinal) => value(entry, item, `tool:${ordinal}`))}
               </div>
             )}
           </details>

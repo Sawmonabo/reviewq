@@ -96,6 +96,7 @@
 .tool-running {
   color: var(--tool-command);
 }
+.tool-summary,
 .transcript-tool-run,
 .tool-disclosure summary {
   display: flex;
@@ -111,6 +112,9 @@
   color: light-dark(var(--muted), #b0b0be);
   line-height: 1.4;
   text-align: start;
+}
+.transcript-tool-run,
+.tool-disclosure summary {
   cursor: pointer;
 }
 .transcript-tool-run:enabled:is(:hover, :active, :focus-visible),
