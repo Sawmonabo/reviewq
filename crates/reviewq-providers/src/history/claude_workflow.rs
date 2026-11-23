@@ -159,24 +159,24 @@ pub(crate) fn claude_workflow_result(
         return Err(AppError::Conflict);
     }
     let opening_end = file::next_line(&source.file, offset, complete, &mut budget, cancelled)?;
-    let mut opened = if call.arguments_sha256.is_some() {
-        if user_entry(&source, offset, opening_end, cancelled)
-            .is_none_or(|id| Some(&id) != call.request_entry_id.as_ref())
-        {
-            return Err(AppError::Conflict);
-        }
-        false
-    } else {
-        let open = row(&source, offset, opening_end, cancelled)?.ok_or(AppError::Conflict)?;
-        if open.kind != "assistant"
-            || !open.blocks().enumerate().any(|(index, block)| {
+    let open = row(&source, offset, opening_end, cancelled)?.ok_or(AppError::Conflict)?;
+    let mut opened = match open.kind.as_str() {
+        "assistant"
+            if open.blocks().enumerate().any(|(index, block)| {
                 (call.source_ordinal == 0 || index + 1 == call.source_ordinal as usize)
-                    && report_block(block, &call.call_id)
-            })
+                    && report_block(block, call)
+            }) =>
         {
-            return Err(AppError::Conflict);
+            true
         }
-        true
+        "user"
+            if call.arguments_sha256.is_some()
+                && user_entry(&source, offset, opening_end, cancelled)
+                    .is_some_and(|id| Some(&id) == call.request_entry_id.as_ref()) =>
+        {
+            false
+        }
+        _ => return Err(AppError::Conflict),
     };
 
     let mut result = None;
@@ -184,19 +184,12 @@ pub(crate) fn claude_workflow_result(
     while offset < complete {
         let end = file::next_line(&source.file, offset, complete, &mut budget, cancelled)?;
         if let Some(row) = row(&source, offset, end, cancelled)? {
-            if let Some(hash) = call.arguments_sha256.as_ref()
-                && row.kind == "assistant"
-            {
+            if row.kind == "assistant" && call.arguments_sha256.is_some() {
                 for block in row
                     .blocks()
                     .filter(|block| block["type"] == "tool_use" && block["id"] == call.call_id)
                 {
-                    if opened
-                        || !report_block(block, &call.call_id)
-                        || !block.get("input").is_some_and(|input| {
-                            native_arguments_hash(input.clone()).as_ref() == Ok(hash)
-                        })
-                    {
+                    if opened || !report_block(block, call) {
                         return Err(AppError::Conflict);
                     }
                     opened = true;
@@ -256,10 +249,15 @@ pub(crate) fn claude_workflow_result(
     Ok(result)
 }
 
-fn report_block(block: &Value, id: &str) -> bool {
+fn report_block(block: &Value, call: &NativeCall) -> bool {
     block["type"] == "tool_use"
-        && block["id"] == id
+        && block["id"] == call.call_id
         && block["name"] == "mcp__reviewq__report_handoff"
+        && call.arguments_sha256.as_ref().is_none_or(|hash| {
+            block
+                .get("input")
+                .is_some_and(|input| native_arguments_hash(input.clone()).as_ref() == Ok(hash))
+        })
 }
 
 fn source(session: &HistorySession, cancelled: &AtomicBool) -> Result<Source, AppError> {
@@ -318,4 +316,100 @@ fn user_entry(
         0,
     )?;
     (row.kind == VisibleKind::User).then_some(row.id)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::fs::{self, File};
+    use std::io::Write;
+
+    use reviewq_domain::session::{
+        AbsolutePath, LeadTarget, NativeBinding, NativeIdentity, SessionTarget,
+    };
+    use serde_json::json;
+
+    use super::*;
+
+    #[test]
+    fn buffered_claude_call_keeps_its_prompt_anchor_and_rechecks_the_original_arguments() {
+        let profile = tempfile::tempdir().unwrap();
+        let directory = profile.path().join("projects").join("project");
+        fs::create_dir_all(&directory).unwrap();
+        let path = directory.join("thread.jsonl");
+        let mut file = File::create(&path).unwrap();
+        let root = AbsolutePath::from_canonical(profile.path().to_path_buf()).unwrap();
+        let session = HistorySession {
+            target: SessionTarget::new(
+                "review".parse().unwrap(),
+                "run".parse().unwrap(),
+                "session".parse().unwrap(),
+            ),
+            binding: NativeBinding::new(
+                NativeIdentity::new(
+                    HostProvider::Claude,
+                    root.clone(),
+                    "thread".parse().unwrap(),
+                ),
+                root,
+            ),
+            source: Some(AbsolutePath::from_canonical(path).unwrap()),
+            parent: None,
+        };
+        let prompt = "prompt".parse().unwrap();
+        let arguments = json!({"handoff":{"outcome":"needs_input","reason":"fixture"}});
+        let cancelled = AtomicBool::new(false);
+        let row = json!({"type":"user","uuid":"prompt","cwd":profile.path(),"sessionId":"thread","message":{"role":"user","content":"Review the project"}});
+        writeln!(file, "{row}").unwrap();
+        let anchor = claude_workflow_prompt(&session, &prompt, &cancelled).unwrap();
+        let call = NativeCall {
+            lead: LeadTarget::new(session.target.clone(), session.binding.clone()),
+            turn_id: "turn".parse().unwrap(),
+            root_turn_id: None,
+            call_id: "toolu_fixture".into(),
+            source_generation: anchor.0.clone(),
+            source_position: anchor.1,
+            source_ordinal: 2,
+            request_entry_id: Some(prompt.clone()),
+            arguments_sha256: Some(native_arguments_hash(arguments.clone()).unwrap()),
+            tool: WorkflowTool::Report,
+        };
+        let ack = ExpectedAcknowledgement {
+            receipt_id: "receipt".parse().unwrap(),
+            declaration_sha256: "f".repeat(64).parse().unwrap(),
+        };
+        let result =
+            |call: &NativeCall| claude_workflow_result(&session, call, &ack, None, &cancelled);
+        assert!(result(&call).unwrap().is_none());
+        let row = json!({"type":"assistant","uuid":"assistant","sessionId":"thread","message":{"role":"assistant","content":[
+            {"type":"tool_use","name":"mcp__reviewq__report_handoff","id":"toolu_fixture","input":arguments}
+        ]}});
+        writeln!(file, "{row}").unwrap();
+        let direct = claude_workflow_opening(
+            &session,
+            &call.call_id,
+            WorkflowTool::Report,
+            Some(&arguments),
+            &cancelled,
+        )
+        .unwrap();
+        let receipt = json!({"receiptId":ack.receipt_id.as_str(),"declarationSha256":ack.declaration_sha256.as_str(),"state":"pending_completion"}).to_string();
+        let row = json!({"type":"user","uuid":"result","sessionId":"thread","message":{"role":"user","content":[
+            {"type":"tool_result","tool_use_id":"toolu_fixture","content":[{"type":"text","text":receipt}]}
+        ]}});
+        writeln!(file, "{row}").unwrap();
+        assert_eq!(
+            claude_workflow_prompt(&session, &prompt, &cancelled).unwrap(),
+            anchor
+        );
+        let directly_verified = NativeCall {
+            source_position: direct.position,
+            source_ordinal: direct.ordinal,
+            ..call.clone()
+        };
+        for mut native in [call, directly_verified] {
+            assert_eq!(result(&native).unwrap().unwrap().entry.as_str(), "result");
+            native.arguments_sha256 = Some(native_arguments_hash(json!({"handoff":{}})).unwrap());
+            assert_eq!(result(&native).err(), Some(AppError::Conflict));
+        }
+    }
 }

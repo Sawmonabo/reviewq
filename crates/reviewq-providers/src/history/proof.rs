@@ -258,29 +258,8 @@ pub(crate) async fn codex_mcp_opening(
                 if row.kind.as_deref() == Some("function_call")
                     && row.call.as_deref() == Some(&call)
                 {
-                    if end - start > 2 * 1024 * 1024 {
-                        return Err(AppError::PayloadTooLarge);
-                    }
-                    #[derive(Deserialize)]
-                    struct Record {
-                        payload: Tool,
-                    }
-                    #[derive(Deserialize)]
-                    struct Tool {
-                        name: String,
-                        namespace: Option<String>,
-                        arguments: String,
-                    }
-                    let record: Record = serde_json::from_reader(lines.input(start, end))
-                        .map_err(|_| AppError::Conflict)?;
-                    let tool = record.payload;
-                    let named = (tool.name == "mcp__reviewq__report_handoff"
-                        && tool.namespace.is_none())
-                        || (tool.name == "report_handoff"
-                            && tool.namespace.as_deref() == Some("mcp__reviewq"));
-                    if !named
-                        || !serde_json::from_str::<serde_json::Value>(&tool.arguments)
-                            .is_ok_and(|value| value == arguments)
+                    if direct_report_arguments(lines.input(start, end), end - start, &call)?
+                        != arguments
                     {
                         return Err(AppError::Conflict);
                     }
@@ -299,6 +278,43 @@ pub(crate) async fn codex_mcp_opening(
 
 pub(super) fn code_cell_opening(input: impl Read) -> Result<bool, AppError> {
     Ok(response_call(input)?.is_some_and(|row| row.code_cell()))
+}
+
+pub(super) fn direct_report_arguments(
+    input: impl Read,
+    length: u64,
+    call: &str,
+) -> Result<serde_json::Value, AppError> {
+    if length > 2 * 1024 * 1024 {
+        return Err(AppError::PayloadTooLarge);
+    }
+    #[derive(Deserialize)]
+    struct Record {
+        #[serde(rename = "type")]
+        kind: String,
+        payload: Tool,
+    }
+    #[derive(Deserialize)]
+    struct Tool {
+        #[serde(rename = "type")]
+        kind: String,
+        call_id: String,
+        name: String,
+        namespace: Option<String>,
+        arguments: String,
+    }
+    let record: Record = serde_json::from_reader(input).map_err(|_| AppError::Conflict)?;
+    let tool = record.payload;
+    let named = (tool.name == "mcp__reviewq__report_handoff" && tool.namespace.is_none())
+        || (tool.name == "report_handoff" && tool.namespace.as_deref() == Some("mcp__reviewq"));
+    if record.kind != "response_item"
+        || tool.kind != "function_call"
+        || tool.call_id != call
+        || !named
+    {
+        return Err(AppError::Conflict);
+    }
+    serde_json::from_str(&tool.arguments).map_err(|_| AppError::Conflict)
 }
 
 pub(crate) async fn codex_question_answered(

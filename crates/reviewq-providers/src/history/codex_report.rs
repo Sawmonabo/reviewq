@@ -185,6 +185,15 @@ fn terminal(
     let opening = lines.input(call.source_position, offset);
     let valid = if call.source_ordinal > 0 {
         proof::code_cell_opening(opening)?
+    } else if let Some(hash) = &call.arguments_sha256 {
+        let arguments =
+            proof::direct_report_arguments(opening, offset - call.source_position, &call.call_id)?;
+        super::native_arguments_hash(arguments)? == *hash
+    } else {
+        proof::opening(opening, &call.call_id, None)?
+    };
+    if !valid
+        || (call.arguments_sha256.is_some()
             && super::turn_metadata::turn_before(
                 source,
                 call.source_position,
@@ -192,11 +201,8 @@ fn terminal(
                 cancelled,
             )?
             .as_deref()
-                == Some(call.turn_id.as_str())
-    } else {
-        proof::opening(opening, &call.call_id, None)?
-    };
-    if !valid {
+                != Some(call.turn_id.as_str()))
+    {
         return Err(AppError::Conflict);
     }
     let mut result_seen = false;

@@ -199,9 +199,10 @@ impl ClaudeWorkflow {
                 .ok_or(AppError::NotFound)?;
             let arguments = arguments
                 .as_deref()
-                .map(serde_json::from_slice)
+                .map(serde_json::from_slice::<serde_json::Value>)
                 .transpose()
                 .map_err(|_| AppError::InvalidRequest)?;
+            let arguments_sha256 = arguments.clone().map(native_arguments_hash).transpose()?;
             let id = call_id.clone();
             let opening = self
                 .native
@@ -222,7 +223,7 @@ impl ClaudeWorkflow {
                 tool,
                 source_generation: opening.generation,
                 source_position: opening.position,
-                arguments_sha256: None,
+                arguments_sha256,
                 source_ordinal: opening.ordinal,
                 request_entry_id: opening.request,
             })
