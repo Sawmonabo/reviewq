@@ -14,7 +14,9 @@ import type { QuestionAddress } from "../../../../api/history";
 import { Notice } from "../../../../components/PanelState";
 import { useResource } from "../../../../hooks/useResource";
 import { describeError } from "../../../../lib/presentation";
-import { questionDraftPrefix, questionKey, questionValue } from "./question-key";
+import { questionDraftValues } from "../../../../lib/question-draft";
+import { questionDraftPrefix, questionKey } from "./question-key";
+import { QuestionOptions } from "./QuestionField";
 import { QuestionContent, QuestionPrompt, QuestionStatus } from "./QuestionPrompt";
 import { canAnswer, needsResponse, questionResources } from "./useQuestions";
 import type { Questions } from "./useQuestions";
@@ -22,27 +24,41 @@ import type { Questions } from "./useQuestions";
 type Observe = (element: HTMLElement, key: string) => () => void;
 
 export function QuestionEntry({
-  address,
+  requestId,
+  itemId,
+  turnId,
+  recordedStatus,
+  selected,
   items,
   questions,
   observe,
 }: {
-  readonly address: QuestionAddress;
+  readonly requestId: string;
+  readonly itemId: string;
+  readonly turnId: string | null;
+  readonly recordedStatus?: "answered" | "closed";
+  readonly selected?: Readonly<Record<string, readonly string[]>>;
   readonly items: readonly Question[];
   readonly questions: Questions;
   readonly observe: Observe;
 }) {
-  const { requestId, turnId, itemId } = address;
-  const key = questionKey(address);
-  const known = questions.byKey.get(key);
+  // Claude transcript rows identify the assistant message and tool invocation.
+  // Only a live, scoped form supplies its native turn for answering.
+  const address: QuestionAddress | null = turnId === null ? null : { requestId, itemId, turnId };
+  const key = address ? questionKey(address) : requestId;
+  const known = address
+    ? questions.byKey.get(key)
+    : [...questions.byKey.values()].find(
+        ({ form }) => form.requestId === requestId && form.itemId === itemId,
+      );
   const { target, store, reconcile } = questions;
   const [replying, setReplying] = useState(false);
   const [inspecting, setInspecting] = useState(false);
-  const focusedRead = !known && (inspecting || replying);
+  const focusedRead = !!address && !recordedStatus && !known && (inspecting || replying);
   const exact = useResource(
     `question-detail:${target.runId}:${target.sessionKey}:${key}:${focusedRead}`,
     async (signal) => {
-      if (!focusedRead) return { data: null, cursor: "" };
+      if (!focusedRead || !address) return { data: null, cursor: "" };
       try {
         return await readQuestion(target, address, signal);
       } catch (error) {
@@ -59,24 +75,22 @@ export function QuestionEntry({
   const displayed = (items.length ? items : (form?.questions ?? [])).filter(
     (question) => !question.isSecret,
   );
-  const actionable = form && !form.blocking && needsResponse(form.status);
+  const actionable = !recordedStatus && form && !form.blocking && needsResponse(form.status);
   const reply = useRef<HTMLButtonElement>(null);
   const body = useRef<HTMLDivElement>(null);
   const activePrompt = useRef<HTMLDivElement>(null);
   const moveToPrompt = useRef(false);
   const wasFocused = useRef(false);
-  const prefix = questionDraftPrefix(target, address);
-  const hasDraft = useSyncExternalStore(store.subscribe, () =>
-    store.getSnapshot().entries.some((draft) => draft.key.startsWith(prefix)),
+  const draftAddress = form ?? address;
+  const prefix = draftAddress ? questionDraftPrefix(target, draftAddress) : null;
+  const hasDraft = useSyncExternalStore(
+    store.subscribe,
+    () => !!prefix && store.getSnapshot().entries.some((draft) => draft.key.startsWith(prefix)),
   );
   const open = Boolean(actionable && replying);
-  const outcome = known && outcomeLabel(known.form.status);
-  const watch = useCallback(
-    (node: HTMLElement | null) => {
-      if (node) return observe(node, questionKey({ requestId, turnId, itemId }));
-    },
-    [itemId, observe, requestId, turnId],
-  );
+  const outcome = outcomeLabel(recordedStatus ?? known?.form.status);
+  const visibleKey = form ? questionKey(form) : key;
+  const watch = useQuestionAnchor(observe, visibleKey);
   const rememberFocus = useCallback((node: HTMLDivElement | null) => {
     if (!node) return;
     activePrompt.current = node;
@@ -109,7 +123,7 @@ export function QuestionEntry({
           exact.retry();
           questions.refresh();
         },
-        respond: async (form: Form, values: Readonly<Record<string, string>>) => {
+        respond: async (form: Form, values: Readonly<Record<string, readonly string[]>>) => {
           await questions.respond(form, values);
           exact.retry();
         },
@@ -150,9 +164,11 @@ export function QuestionEntry({
       {outcome && <p className="meta question-outcome">{outcome}</p>}
       {!open &&
         (!displayed.length ||
-          !known ||
+          (address && !known && !recordedStatus) ||
           hasDraft ||
-          displayed.some((question) => question.options.length > 0)) && (
+          displayed.some(
+            (question) => question.options.length || selected?.[question.id]?.length,
+          )) && (
           <details
             className="question-inspection"
             onToggle={(event) => setInspecting(event.currentTarget.open)}
@@ -161,6 +177,7 @@ export function QuestionEntry({
             {inspecting && (
               <QuestionDetails
                 items={displayed}
+                selected={selected}
                 form={form}
                 prefix={prefix}
                 store={store}
@@ -178,6 +195,7 @@ export function QuestionEntry({
 
 function QuestionDetails({
   items,
+  selected,
   form,
   prefix,
   store,
@@ -187,8 +205,9 @@ function QuestionDetails({
   onRetry,
 }: {
   readonly items: readonly Question[];
+  readonly selected: Readonly<Record<string, readonly string[]>> | undefined;
   readonly form: Form | undefined;
-  readonly prefix: string;
+  readonly prefix: string | null;
   readonly store: Questions["store"];
   readonly reading: boolean;
   readonly error: string | undefined;
@@ -211,24 +230,17 @@ function QuestionDetails({
       {outcome && <p className="meta">{outcome}</p>}
       {items.map(
         (question) =>
-          question.options.length > 0 && (
+          (question.options.length > 0 || selected?.[question.id]?.length) && (
             <div key={question.id}>
               {items.length > 1 && <strong>{question.header || question.question}</strong>}
-              <ul>
-                {question.options.map((option) => (
-                  <li key={option.label}>
-                    {option.label}
-                    {option.description && ` · ${option.description}`}
-                  </li>
-                ))}
-              </ul>
+              <QuestionOptions options={question.options} selected={selected?.[question.id]} />
             </div>
           ),
       )}
       {notice && <Notice>{notice}</Notice>}
       {!needsResponse(form?.status ?? "unavailable") &&
         snapshot.entries
-          .filter((draft) => draft.key.startsWith(prefix))
+          .filter((draft) => prefix && draft.key.startsWith(prefix))
           .map((draft) => (
             <div className="actions" key={draft.key}>
               <small className="meta">Unsent answer</small>
@@ -237,7 +249,7 @@ function QuestionDetails({
                 onClick={() => {
                   setNotice(undefined);
                   void navigator.clipboard
-                    .writeText(questionValue(draft.text))
+                    .writeText(questionDraftValues(draft.text).join(", "))
                     .catch((error: unknown) => setNotice(describeError(error)));
                 }}
               >
@@ -258,7 +270,16 @@ function QuestionDetails({
   );
 }
 
-function outcomeLabel(status: Form["status"]) {
+function outcomeLabel(status: Form["status"] | undefined) {
   if (status === "answered") return "Answered";
   if (status === "closed") return "Closed without a confirmed answer";
+}
+
+function useQuestionAnchor(observe: Observe, key: string) {
+  return useCallback(
+    (node: HTMLElement | null) => {
+      if (node) return observe(node, key);
+    },
+    [observe, key],
+  );
 }

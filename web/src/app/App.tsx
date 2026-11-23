@@ -1,3 +1,4 @@
+import { questionDraftValues } from "../lib/question-draft";
 import { lazy, Suspense, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import type { CSSProperties, ReactNode } from "react";
 import { findRunSession, readOverview, readRun, resolveReview } from "../api/client";
@@ -848,7 +849,7 @@ function DraftDialog({
 }
 
 function draftContent(key: string, text: string) {
-  if (key.startsWith('["question",')) return text.slice(text.indexOf(":") + 1);
+  if (key.startsWith('["question",')) return questionDraftValues(text).join(", ");
   if (!key.startsWith('["quote",')) return text;
   try {
     const value: unknown = JSON.parse(text);

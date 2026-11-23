@@ -108,17 +108,20 @@ export function EntryBody({
   }
 
   function value(current: HistoryEntry, part: HistoryPart, key: string) {
-    if (part.kind === "user_question" && current.turnId)
+    if (part.kind === "user_question")
       return (
         <QuestionEntry
           key={key}
-          address={{ requestId: part.requestId, turnId: current.turnId, itemId: current.entryId }}
+          requestId={part.requestId}
+          turnId={current.turnId}
+          itemId={current.entryId}
+          {...(part.status ? { recordedStatus: part.status } : {})}
+          {...(part.selected ? { selected: part.selected } : {})}
           items={part.questions}
           questions={questions}
           observe={observeQuestion}
         />
       );
-    if (part.kind === "user_question") return null;
     if (found && found.destination.nativeIndex === (part.nativeIndex ?? null)) {
       const { contentRef, markdown, nativeIndex } = found.destination;
       return (

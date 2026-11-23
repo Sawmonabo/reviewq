@@ -45,13 +45,7 @@ export default function AgentPanel({
 }: Props) {
   const target = { runId: run.runId, sessionKey: session.sessionKey };
   const lead = session.sessionKey === run.leadSessionKey;
-  const questions = useQuestions(
-    target,
-    drafts,
-    session.provider === "codex",
-    `Question · ${reviewTitle}`,
-    onTerminal,
-  );
+  const questions = useQuestions(target, drafts, `Question · ${reviewTitle}`, onTerminal);
 
   const [cursor, setCursor] = useState<string>();
   const deliveryKeys = [

@@ -23,7 +23,6 @@ export type Questions = ReturnType<typeof useQuestions>;
 export function useQuestions(
   target: SessionAddress,
   store: DraftStore,
-  enabled: boolean,
   draftName: string,
   onTerminal: () => void,
 ) {
@@ -32,9 +31,8 @@ export function useQuestions(
   const snapshot = useSyncExternalStore(attempts.subscribe, attempts.getSnapshot);
   const resource = useResource(
     `questions:${runId}:${sessionKey}`,
-    (signal) =>
-      enabled ? readQuestions(target, signal) : Promise.resolve({ data: null, cursor: "" }),
-    enabled ? questionResources(target) : [],
+    (signal) => readQuestions(target, signal),
+    questionResources(target),
   );
   const items = resource.data?.items;
   function stateFor(form: Form, failed = false): QuestionState {
@@ -73,7 +71,7 @@ export function useQuestions(
     for (const item of items ?? []) reconcile(item);
   }, [items, reconcile]);
 
-  async function respond(form: Form, values: Readonly<Record<string, string>>) {
+  async function respond(form: Form, values: Readonly<Record<string, readonly string[]>>) {
     const key = questionKey(form);
     const current = byKey.get(key)?.form ?? form;
     if (
@@ -94,7 +92,7 @@ export function useQuestions(
       const result = await answerQuestion(target, current, {
         submissionId: crypto.randomUUID(),
         answers: Object.fromEntries(
-          Object.entries(values).map(([id, value]) => [id, { answers: [value] }]),
+          Object.entries(values).map(([id, answers]) => [id, { answers: [...answers] }]),
         ),
       });
       if (result.mode !== current.mode || result.blocking !== current.blocking)

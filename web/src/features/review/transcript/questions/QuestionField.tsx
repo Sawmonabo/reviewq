@@ -1,6 +1,7 @@
 import { useId, useRef, useState } from "react";
-import type { Question } from "../../../../api/generated/contracts/common";
+import type { Choice, Question } from "../../../../api/generated/contracts/common";
 import { Notice } from "../../../../components/PanelState";
+import { readQuestionDraft, writeQuestionDraft } from "../../../../lib/question-draft";
 import { useDraft } from "../../../../hooks/useDraft";
 import type { DraftStore } from "../../../../lib/drafts";
 
@@ -21,10 +22,12 @@ export function QuestionField({
   const draft = useDraft(store, draftKey);
   const [limited, setLimited] = useState(false);
   const [composing, setComposing] = useState<string>();
-  const freeText = draft.startsWith("text:");
+  const { choices, other: text } = readQuestionDraft(draft);
+  const freeText = text !== null;
+  const multiple = question.multiSelect === true;
   const options = question.options;
-  function edit(value: string) {
-    setLimited(!store.set(draftKey, draftName, value));
+  function edit(selected: readonly string[], otherAnswer: string | null) {
+    setLimited(!store.set(draftKey, draftName, writeQuestionDraft(selected, otherAnswer)));
   }
   return (
     <fieldset className="question-field" data-question={question.id}>
@@ -36,17 +39,33 @@ export function QuestionField({
           {options.map((option, index) => (
             <label key={option.label} className="question-option">
               <input
-                type="radio"
+                type={multiple ? "checkbox" : "radio"}
                 name={name}
-                checked={draft === `option:${option.label}`}
+                checked={choices.includes(option.label)}
                 aria-labelledby={`${name}-choice-${index}`}
-                aria-describedby={option.description ? `${name}-description-${index}` : undefined}
-                onChange={() => edit(`option:${option.label}`)}
+                aria-describedby={
+                  option.description || option.preview ? `${name}-detail-${index}` : undefined
+                }
+                onChange={(event) => {
+                  const selected = multiple
+                    ? options
+                        .filter(({ label }) =>
+                          label === option.label ? event.target.checked : choices.includes(label),
+                        )
+                        .map(({ label }) => label)
+                    : [option.label];
+                  edit(selected, multiple ? text : null);
+                }}
               />
               <span>
                 <strong id={`${name}-choice-${index}`}>{option.label}</strong>
-                {option.description && (
-                  <small id={`${name}-description-${index}`}>{option.description}</small>
+                {(option.description || option.preview) && (
+                  <span id={`${name}-detail-${index}`}>
+                    {option.description && <small>{option.description}</small>}
+                    {option.preview && choices.includes(option.label) && (
+                      <span className="question-preview">{option.preview}</span>
+                    )}
+                  </span>
                 )}
               </span>
             </label>
@@ -54,12 +73,13 @@ export function QuestionField({
           {question.isOther && (
             <label className="question-option">
               <input
-                type="radio"
+                type={multiple ? "checkbox" : "radio"}
                 name={name}
                 checked={freeText}
-                onChange={() => {
-                  edit("text:");
-                  requestAnimationFrame(() => other.current?.focus());
+                onChange={(event) => {
+                  const enabled = event.target.checked;
+                  edit(multiple ? choices : [], enabled ? "" : null);
+                  if (enabled) requestAnimationFrame(() => other.current?.focus());
                 }}
               />
               Other
@@ -72,7 +92,7 @@ export function QuestionField({
           {options.length ? "Other answer" : "Your answer"}
           <textarea
             ref={other}
-            value={composing ?? (freeText ? draft.slice(5) : "")}
+            value={composing ?? text ?? ""}
             rows={2}
             maxLength={8192}
             onCompositionStart={(event) => {
@@ -82,12 +102,12 @@ export function QuestionField({
             onCompositionEnd={(event) => {
               composition.current = false;
               setComposing(undefined);
-              edit(`text:${event.currentTarget.value}`);
+              edit(choices, event.currentTarget.value || (options.length ? "" : null));
             }}
             onChange={(event) => {
               const next = event.currentTarget.value;
               if (composition.current) setComposing(next);
-              else edit(next || options.length ? `text:${next}` : "");
+              else edit(choices, next || (options.length ? "" : null));
             }}
           />
         </label>
@@ -139,6 +159,39 @@ export function SecretQuestionField({ question }: { readonly question: Question 
         </label>
       )}
     </fieldset>
+  );
+}
+
+export function QuestionOptions({
+  options,
+  selected,
+}: {
+  readonly options: readonly Choice[];
+  readonly selected?: readonly string[] | undefined;
+}) {
+  const other = selected?.filter((answer) => !options.some(({ label }) => label === answer));
+  return (
+    <>
+      {options.length > 0 && (
+        <ul>
+          {options.map((option) => (
+            <li key={option.label}>
+              {option.label}
+              {selected?.includes(option.label) && (
+                <small className="question-chosen">Selected</small>
+              )}
+              {option.description && ` · ${option.description}`}
+              {option.preview && <span className="question-preview">{option.preview}</span>}
+            </li>
+          ))}
+        </ul>
+      )}
+      {other?.map((answer) => (
+        <p className="question-written-answer" key={answer}>
+          <strong>{options.length ? "Other" : "Answer"}</strong> {answer}
+        </p>
+      ))}
+    </>
   );
 }
 

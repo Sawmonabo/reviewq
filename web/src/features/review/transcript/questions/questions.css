@@ -78,12 +78,26 @@
   background: var(--selected);
   border-color: var(--focus);
 }
-.question-option input[type="radio"] {
+.question-option input {
   width: 13px;
   height: 13px;
   margin: 3px 0 0;
   padding: 0;
   accent-color: var(--focus);
+}
+.question-chosen {
+  margin-inline-start: 0.5em;
+  color: var(--muted);
+}
+.question-written-answer {
+  white-space: pre-wrap;
+}
+.question-preview {
+  display: block;
+  margin-block: 4px;
+  white-space: pre-wrap;
+  font-family: var(--mono, monospace);
+  font-size: 12px;
 }
 .question-option strong {
   font-weight: 530;

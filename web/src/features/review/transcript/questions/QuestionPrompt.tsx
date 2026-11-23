@@ -6,11 +6,13 @@ import { submits } from "../../../../lib/submit-key";
 import {
   clearSecrets,
   QuestionField,
+  QuestionOptions,
   QuestionWording,
   secretAnswer,
   SecretQuestionField,
 } from "./QuestionField";
-import { questionDraftKey, questionValue } from "./question-key";
+import { questionDraftValues } from "../../../../lib/question-draft";
+import { questionDraftKey } from "./question-key";
 import { canAnswer } from "./useQuestions";
 import type { Questions } from "./useQuestions";
 
@@ -51,21 +53,26 @@ export function QuestionPrompt({
     const drafts = store.getSnapshot().entries;
     const answers = form.questions.map((question) => ({
       question,
-      value: question.isSecret
-        ? secretAnswer(current, question)
-        : questionValue(
+      values: question.isSecret
+        ? [secretAnswer(current, question)]
+        : questionDraftValues(
             drafts.find(({ key }) => key === questionDraftKey(target, form, question.id))?.text ??
               "",
           ),
     }));
     const invalid = answers.find(
-      ({ question, value }) =>
-        !value.trim() ||
-        utf8.encode(value).length > MAX_ANSWER_BYTES ||
-        /\p{Cc}/u.test(value.replace(/[\t\r\n]/g, "")) ||
-        (!question.isOther &&
-          question.options.length > 0 &&
-          !question.options.some(({ label }) => label === value)),
+      ({ question, values }) =>
+        !values.length ||
+        (!question.multiSelect && values.length !== 1) ||
+        values.some(
+          (value) =>
+            !value.trim() ||
+            utf8.encode(value).length > MAX_ANSWER_BYTES ||
+            /\p{Cc}/u.test(value.replace(/[\t\r\n]/g, "")) ||
+            (!question.isOther &&
+              question.options.length > 0 &&
+              !question.options.some(({ label }) => label === value)),
+        ),
     );
     if (invalid) {
       setNotice("Enter an answer of up to 8 KiB for each required question.");
@@ -81,7 +88,7 @@ export function QuestionPrompt({
     if (current.contains(document.activeElement)) current.focus({ preventScroll: true });
     void questions.respond(
       form,
-      Object.fromEntries(answers.map(({ question, value }) => [question.id, value])),
+      Object.fromEntries(answers.map(({ question, values }) => [question.id, values])),
     );
   }
 
@@ -89,7 +96,7 @@ export function QuestionPrompt({
     <form
       ref={element}
       className="question-form"
-      aria-label="Answer Codex question"
+      aria-label="Answer agent question"
       aria-busy={form.status === "submitting" || undefined}
       tabIndex={-1}
       onSubmit={(event) => {
@@ -165,16 +172,7 @@ export function QuestionContent({
       <p>
         <QuestionWording question={question} />
       </p>
-      {showChoices && question.options.length > 0 && (
-        <ul>
-          {question.options.map((option) => (
-            <li key={option.label}>
-              {option.label}
-              {option.description && ` · ${option.description}`}
-            </li>
-          ))}
-        </ul>
-      )}
+      {showChoices && <QuestionOptions options={question.options} />}
     </div>
   ));
 }

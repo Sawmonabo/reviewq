@@ -16,10 +16,6 @@ export function questionDraftPrefix(target: SessionAddress, form: QuestionAddres
   return JSON.stringify(["question", ...draftScope(target, form)]).slice(0, -1) + ",";
 }
 
-export function questionValue(draft: string) {
-  return draft.slice(draft.indexOf(":") + 1);
-}
-
 function draftScope(target: SessionAddress, { requestId, turnId, itemId }: QuestionAddress) {
   return [target.runId, target.sessionKey, requestId, turnId, itemId];
 }
