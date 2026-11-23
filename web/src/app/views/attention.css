@@ -1,13 +1,3 @@
-.inbox-summary {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  flex-wrap: wrap;
-  gap: 12px;
-  margin-bottom: 17px;
-  color: var(--muted);
-  font-size: 12px;
-}
 .inbox-filters {
   display: inline-flex;
   gap: 4px;
@@ -37,29 +27,73 @@
 .inbox-toolbar {
   display: flex;
   align-items: center;
-  justify-content: flex-end;
   flex-wrap: wrap;
-  gap: 10px;
-  margin-left: auto;
+  gap: 7px 12px;
+  min-height: 40px;
+  margin-bottom: 12px;
+  padding-inline-start: 14px;
 }
-.inbox-toolbar button {
-  padding: 7px 11px;
+.inbox-actions button,
+.inbox-event-actions button {
+  padding: 6px 10px;
   line-height: 16px;
-  font-size: 11px;
+  font-size: 12px;
+  white-space: nowrap;
 }
-.inbox-toolbar button:not(.quiet-button) {
+.inbox-actions button:not(.quiet-button) {
   border-color: var(--control-line);
   background: var(--workspace-secondary);
   color: var(--workspace-secondary-text);
 }
-.inbox-toolbar button:not(.quiet-button):hover:not(:disabled) {
+.inbox-actions button:not(.quiet-button):hover:not(:disabled) {
   border-color: var(--control-hover-line);
   background: var(--workspace-secondary-hover);
 }
-.inbox-toolbar .quiet-button {
-  padding-inline: 4px;
-  font-size: 10px;
-  color: var(--ticket-text);
+.inbox-selection {
+  margin-right: 3px;
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 560;
+}
+.inbox-total {
+  color: var(--muted);
+  font-size: 12px;
+}
+.inbox-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  margin-inline-start: auto;
+}
+.inbox-status {
+  margin-block: 0 9px;
+  color: var(--muted);
+  font-size: 12px;
+}
+.inbox-status:empty {
+  margin: 0;
+}
+.inbox-checkbox {
+  display: grid;
+  flex: 0 0 auto;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 5px;
+  cursor: pointer;
+}
+.inbox-checkbox:hover:has(input:enabled) {
+  background: var(--row-selected);
+}
+.inbox-checkbox input {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  cursor: inherit;
+}
+.inbox-checkbox:has(input:disabled) {
+  cursor: default;
 }
 .inbox-list,
 .inbox-events {
@@ -73,7 +107,7 @@
 .inbox-list {
   overflow: hidden;
   border: 1px solid var(--line);
-  border-radius: 6px;
+  border-radius: 8px;
   background: var(--run-bg);
 }
 .inbox-group + .inbox-group {
@@ -83,10 +117,30 @@
   box-shadow: inset 3px 0 var(--inbox-selected-line);
   background: var(--inbox-selected-bg);
 }
+.inbox-row {
+  display: grid;
+  grid-template-columns: 36px minmax(0, 1fr) 36px;
+  align-items: start;
+  gap: 2px;
+  padding-inline: 13px;
+}
+.inbox-row > :is(.inbox-checkbox, .inbox-toggle) {
+  margin-top: 10px;
+}
+.inbox-row .inbox-toggle {
+  color: var(--quiet-text);
+  background: transparent;
+  border-color: transparent;
+}
+.inbox-row .inbox-toggle:hover:not(:disabled) {
+  color: var(--quiet-hover-text);
+  background: var(--row-selected);
+  border-color: var(--control-line);
+}
 .inbox-open {
   display: block;
   width: 100%;
-  padding: 18px 20px;
+  padding: 15px 10px 12px;
   border: 0;
   border-radius: 0;
   background: none;
@@ -120,22 +174,28 @@
   font-size: 10px;
 }
 .inbox-unread {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
   flex-shrink: 0;
-  border: 1px solid #454433;
-  border-radius: 12px;
-  padding: 3px 8px;
-  color: var(--inbox-unread-text);
-  background: var(--inbox-unread-bg);
-  font-size: 10px;
+  color: var(--link);
+  font-size: 11px;
   line-height: 1.35;
   font-variant-numeric: tabular-nums;
 }
+.inbox-unread::before {
+  width: 6px;
+  height: 6px;
+  border: 3px solid currentColor;
+  border-radius: 50%;
+  content: "";
+}
 .inbox-open > strong {
   display: block;
-  margin: 9px 0 5px;
-  font-size: 13px;
-  font-weight: 500;
-  line-height: 1.7;
+  margin: 6px 0 2px;
+  font-size: 14px;
+  font-weight: 570;
+  line-height: 1.5;
   overflow-wrap: anywhere;
 }
 .inbox-preview {
@@ -147,21 +207,31 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.inbox-caption {
-  margin-top: 12px;
-  color: var(--dim-text);
-  font-size: 10px;
-}
-.inbox-caption time {
-  white-space: nowrap;
-}
-.inbox-items {
-  border-top: 1px solid var(--row-line);
-}
 .inbox-items > summary {
-  padding: 12px 20px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  margin-inline: 51px 12px;
+  padding: 5px 10px 10px;
   color: var(--ticket-text);
-  font-size: 10px;
+  font-size: 11px;
+}
+.inbox-items > summary::-webkit-details-marker {
+  display: none;
+}
+.inbox-items > summary span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.inbox-items[open] > summary svg {
+  transform: rotate(90deg);
+}
+.inbox-items > summary time {
+  color: var(--dim-text);
+  white-space: nowrap;
 }
 .inbox-events {
   padding: 0 15px 12px;
@@ -211,37 +281,30 @@
   color: var(--inbox-event-text);
 }
 .inbox-event-actions {
-  flex: 0 0 auto;
-  gap: 6px;
+  flex: none;
+  gap: 2px;
 }
-.inbox-event-actions button {
-  padding-inline: 6px;
-  font-size: 10px;
-}
-.inbox-select-group {
-  display: inline-flex;
-  align-items: center;
-  gap: 9px;
-  min-height: 0;
-  margin: 8px 15px 0;
-  padding: 4px 5px;
-  border: 0;
-  background: transparent;
-  color: var(--ticket-text);
-  font-size: 11px;
-}
-.inbox-select-group:hover:not(:disabled) {
-  color: var(--text);
-  background: var(--row-selected);
-}
-@media (max-width: 700px) {
-  .inbox-summary {
-    gap: 7px;
+@container workspace-content (max-width: 440px) {
+  .inbox-row {
+    padding-inline: 6px;
   }
-  .inbox-open,
-  .inbox-items > summary,
-  .inbox-select-group {
-    padding-inline: 15px;
+  .inbox-toolbar {
+    gap: 6px 8px;
+    padding-inline-start: 7px;
+  }
+  .inbox-actions {
+    margin-inline-start: 0;
+  }
+  .inbox-open {
+    padding-inline: 4px;
+  }
+  .inbox-meta {
+    gap: 6px;
+    flex-wrap: wrap;
+  }
+  .inbox-items > summary {
+    margin-inline-start: 44px;
+    padding-inline-start: 4px;
   }
   .inbox-events > li {
     flex-wrap: wrap;
@@ -250,6 +313,8 @@
     padding-inline: 10px;
   }
   .inbox-event-actions {
-    margin-left: auto;
+    justify-content: flex-end;
+    width: 100%;
+    padding-bottom: 7px;
   }
 }

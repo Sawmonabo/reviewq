@@ -372,7 +372,7 @@ export function App() {
     return (
       <>
         <header className="workspace-title">
-          <p>Your workspace</p>
+          {route.view !== "notifications" && <p>Your workspace</p>}
           <h1 id="view-title" tabIndex={-1}>
             {title}
           </h1>
