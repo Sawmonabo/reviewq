@@ -42,7 +42,7 @@ const reviewReasons: Readonly<Record<string, string>> = {
   agent_failed: "Agent error",
   session_working: "Session working",
   action_verifying: "Verifying review action",
-  report_failed: "Findings could not be saved",
+  report_failed: "Report update failed",
   followup_ready: "Follow-up ready",
   report_saving: "Saving findings",
   recovery_pending: "Recovery pending",

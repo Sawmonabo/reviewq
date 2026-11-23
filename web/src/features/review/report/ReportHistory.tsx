@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { RunDetail } from "../../../api/generated/contracts";
 import type { ResultSummary } from "../../../api/generated/contracts/followups";
-import type { ReportSummary } from "../../../api/generated/contracts/reports";
+import type { ReportDelivery, ReportSummary } from "../../../api/generated/contracts/reports";
 import { reportHistory, reportView } from "../../../api/reports";
 import { Modal } from "../../../components/Modal";
 import { Loading, Notice } from "../../../components/PanelState";
@@ -13,6 +13,8 @@ export function ReportHistory({
   run,
   report,
   latestId,
+  latestReport,
+  delivery,
   selected,
   selectedBatch,
   onVersion,
@@ -22,6 +24,8 @@ export function ReportHistory({
   readonly run: RunDetail;
   readonly report: ReportSummary | undefined;
   readonly latestId: string | undefined;
+  readonly latestReport: ReportSummary | undefined;
+  readonly delivery: ReportDelivery | null | undefined;
   readonly selected: string | undefined;
   readonly selectedBatch: string | undefined;
   readonly onVersion: (
@@ -43,6 +47,7 @@ export function ReportHistory({
     [{ kind: "report", id: run.runId }],
   );
   const currentReceipt = versions.data ? (versions.data.currentReceiptId ?? undefined) : latestId;
+  const update = versions.data ? versions.data.delivery : delivery;
   async function showEarlierEvidence() {
     if (!report?.parentReceiptId || evidenceRequest.current) return;
     const controller = new AbortController();
@@ -70,6 +75,26 @@ export function ReportHistory({
       }}
     >
       <Modal title="History" className="report-history-dialog" onClose={onClose}>
+        {update?.state === "failed" && (
+          <section className="report-update-status" aria-label="Report update failed">
+            <h3>Report update failed</h3>
+            {update.reason && <p>{reportHandoffReason(update.reason)}</p>}
+            {latestReport && (
+              <p className="meta">
+                Latest accepted report ·{" "}
+                <time dateTime={latestReport.capturedAt}>
+                  {formatActivityTime(latestReport.capturedAt)}
+                </time>
+                {latestReport.reviewedSha && (
+                  <>
+                    {" "}
+                    · Checked <code>{latestReport.reviewedSha.slice(0, 8)}</code>
+                  </>
+                )}
+              </p>
+            )}
+          </section>
+        )}
         {report?.parentReceiptId && report.receiptId === currentReceipt && (
           <button
             type="button"
@@ -144,4 +169,19 @@ async function earlierEvidence(runId: string, report: ReportSummary, signal: Abo
   throw new Error(
     "The earlier evidence could not be confirmed. Choose an accepted version from History.",
   );
+}
+
+function reportHandoffReason(reason: string) {
+  switch (reason) {
+    case "report_base_changed":
+      return "ReviewQ could not confirm this handoff still applies to the report. Check the current Findings before submitting again.";
+    case "report_amendment_continuity_unproved":
+      return "An amendment keeps the accepted Markdown, reviewed revision, and verdict. Use an evidence correction for changes that preserve the revision and verdict.";
+    case "report_unchanged_evidence_mismatch":
+      return "An unchanged result uses the current accepted receipt and its original source.";
+    case "report_presentation_evidence_unproved":
+      return "Submit an evidence correction for claims the cited section does not establish.";
+    default:
+      return readable(reason);
+  }
 }

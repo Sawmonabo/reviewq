@@ -96,6 +96,7 @@ export default function Findings({
         (frozen?.receiptId === chosen ? frozen : undefined) ??
         (first?.receiptId === chosen ? first : undefined));
   const delivery = current.data?.delivery;
+  const updateFailed = delivery?.state === "failed";
   const displayedReceipt = report?.receiptId;
   const displayedCheck =
     check ??
@@ -208,10 +209,13 @@ export default function Findings({
         ref={bindHistory}
         className="quiet-button history-trigger"
         aria-haspopup="dialog"
+        data-update={updateFailed ? "failed" : undefined}
+        title={updateFailed ? "A report update failed. Open History for details." : undefined}
+        aria-label={updateFailed ? "History, report update failed" : undefined}
         aria-expanded={history}
         onClick={() => setHistory(true)}
       >
-        <Icon name="history" size={14} />
+        <Icon name={updateFailed ? "warning" : "history"} size={14} />
         History
       </button>
     </span>
@@ -219,11 +223,10 @@ export default function Findings({
 
   return (
     <div className="findings stack">
-      {delivery && delivery.state !== "saved" && (
-        <Notice>
-          {delivery.state === "failed" ? "Report handoff failed" : "Report completion pending"}
-          {delivery.reason && ` · ${reportHandoffReason(delivery.reason)}`}
-        </Notice>
+      {delivery && (delivery.state === "saving" || delivery.state === "preparing") && (
+        <span className="meta" role="status">
+          Saving report update…
+        </span>
       )}
       {outdated && (
         <Notice>
@@ -248,6 +251,8 @@ export default function Findings({
       {history && (
         <ReportHistory
           run={run}
+          latestReport={current.data?.report ?? undefined}
+          delivery={delivery}
           report={report ?? undefined}
           latestId={latestId}
           selected={chosen}
@@ -292,7 +297,12 @@ export default function Findings({
         (current.pending || (chosen && chosen !== loadedLatest && historical.pending) ? (
           <Loading label="Loading accepted findings…" />
         ) : (
-          current.data && !chosen && <Empty title="No accepted findings yet" />
+          current.data &&
+          !chosen && (
+            <Empty title="No accepted findings yet">
+              {updateFailed && <p>The report submission failed. Open History for details.</p>}
+            </Empty>
+          )
         ))}
       {report && (
         <article className="stack" aria-label="Accepted findings">
@@ -322,19 +332,4 @@ export default function Findings({
       )}
     </div>
   );
-}
-
-function reportHandoffReason(reason: string) {
-  switch (reason) {
-    case "report_base_changed":
-      return "ReviewQ could not confirm this handoff still applies to the report. Check the current Findings before submitting again.";
-    case "report_amendment_continuity_unproved":
-      return "An amendment keeps the accepted Markdown, reviewed revision, and verdict. Use an evidence correction for changes that preserve the revision and verdict.";
-    case "report_unchanged_evidence_mismatch":
-      return "An unchanged result uses the current accepted receipt and its original source.";
-    case "report_presentation_evidence_unproved":
-      return "Submit an evidence correction for claims the cited section does not establish.";
-    default:
-      return reason;
-  }
 }

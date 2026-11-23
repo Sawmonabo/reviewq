@@ -34,6 +34,13 @@
   anchor-name: --findings-history;
   color: var(--muted);
 }
+.history-trigger[data-update="failed"] svg {
+  color: var(--amber);
+}
+.report-update-status :is(h3, p) {
+  margin: 0 0 6px;
+  font-size: 12px;
+}
 .report-identity + .report-title {
   clear: inline-end;
 }

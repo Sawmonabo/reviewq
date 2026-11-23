@@ -26,7 +26,13 @@ import { PanelBoundary } from "../../components/PanelBoundary";
 import { Empty, Loading, Notice } from "../../components/PanelState";
 import { useResource } from "../../hooks/useResource";
 import type { DraftStore } from "../../lib/drafts";
-import { describeError, formatActivityTime, readable, safeUrl } from "../../lib/presentation";
+import {
+  describeError,
+  formatActivityTime,
+  readable,
+  reviewReasonLabel,
+  safeUrl,
+} from "../../lib/presentation";
 import AgentPanel from "./AgentPanel";
 import { ReviewOverviewPane } from "./ReviewOverviewPane";
 import { ReviewAttention } from "./ReviewAttention";
@@ -797,7 +803,7 @@ function DrawerSummary({
     agent_input: ["Awaiting input", "rose"],
     permission_required: ["Agent needs input", "rose"],
     report_ready: ["Response ready", "blue"],
-    report_failed: ["Findings could not be saved", "red"],
+    report_failed: [reviewReasonLabel("report_failed"), "red"],
     lead_working: ["Working", "green"],
     session_working: ["Working", "green"],
     waiting_author: ["Waiting on author", "amber"],
