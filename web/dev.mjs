@@ -1,8 +1,10 @@
+import { execFile } from "node:child_process";
 import { once } from "node:events";
 import { createServer } from "node:http";
-import { resolve } from "node:path";
+import { homedir } from "node:os";
+import { join, resolve } from "node:path";
 import { createInterface } from "node:readline";
-import { parseArgs } from "node:util";
+import { parseArgs, promisify } from "node:util";
 import { createServer as createViteServer } from "vite";
 import { createDevBackend } from "./tools/dev/backend.mjs";
 import { devApiProxy } from "./tools/dev/proxy.mjs";
@@ -10,12 +12,15 @@ import { devApiProxy } from "./tools/dev/proxy.mjs";
 const { values } = parseArgs({
   options: {
     profile: { type: "string" },
+    installed: { type: "boolean" },
     validation: { type: "boolean" },
     "read-only": { type: "boolean" },
     "backend-port": { type: "string" },
     "native-port": { type: "string" },
   },
 });
+if (values.installed && values.profile)
+  throw new Error("Choose the installed service or a separate development profile.");
 if (
   !values.profile &&
   (values.validation || values["read-only"] || values["backend-port"] || values["native-port"])
@@ -32,7 +37,7 @@ let backend;
 const api = devApiProxy(
   () => address,
   () => backend?.origin(),
-  values.validation || values["read-only"],
+  values.installed || values.validation || values["read-only"],
 );
 const vite = await createViteServer({
   root: import.meta.dirname,
@@ -57,7 +62,16 @@ try {
   process.once("SIGINT", () => void close());
   process.once("SIGTERM", () => void close());
   console.log(`ReviewQ ${address}/`);
-  if (values.profile) {
+  if (values.installed) {
+    const binary = join(homedir(), ".local/bin/reviewq");
+    const { stdout } = await promisify(execFile)(binary, ["status"], { timeout: 5000 });
+    const { browser, ready } = JSON.parse(stdout).data;
+    if (!ready || typeof browser !== "string" || !/^127\.0\.0\.1:[1-9]\d{0,4}$/.test(browser))
+      throw new Error("Start the installed ReviewQ service before opening its live frontend.");
+    const origin = new URL(`http://${browser}`).origin;
+    backend = { origin: () => origin };
+    console.log(`Read-only preview of ${origin}. Sign in using the reviewq launcher.`);
+  } else if (values.profile) {
     backend = await createDevBackend(resolve(import.meta.dirname, ".."), {
       profile: values.profile,
       backendPort,
@@ -85,7 +99,7 @@ async function close() {
   stopping = true;
   terminal?.close();
   try {
-    await backend?.close();
+    await backend?.close?.();
   } finally {
     await vite.close();
     http.closeAllConnections();
