@@ -3,6 +3,9 @@ mod mutations;
 mod quote;
 mod table;
 mod window;
+mod witness;
+pub(super) use witness::record as codex_witness;
+pub(in crate::entry) use witness::{ReportWitnesses, canonical_arguments};
 
 pub(super) use quote::resolve as resolve_quote;
 pub(super) use table::read as read_table;

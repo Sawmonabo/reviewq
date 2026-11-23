@@ -184,15 +184,27 @@ fn response_call(input: impl Read) -> Result<Option<ResponseCall>, AppError> {
     .then_some(row))
 }
 
-/// A direct tool has its own persisted opening. A nested tool shares the Code Mode
-/// cell's opening and is ordered separately by the host's active turn item index.
+pub(crate) struct McpOpening {
+    pub generation: String,
+    pub position: u64,
+    pub nested: bool,
+    pub turn: NativeTurnId,
+    pub root: Option<NativeTurnId>,
+    pub request: Option<reviewq_domain::identity::NativeInputId>,
+}
+
+/// In a direct call the persisted model request is the exact in-flight input.
+/// Code Mode persists the outer cell, while the host's live call or PreToolUse
+/// witness supplies the individual nested arguments.
 pub(crate) async fn codex_mcp_opening(
     binding: NativeBinding,
     path: PathBuf,
-    turn: NativeTurnId,
     call: String,
     origin_item: Option<String>,
-) -> Result<(String, u64, bool), AppError> {
+    arguments: serde_json::Value,
+    witness: Option<NativeTurnId>,
+) -> Result<McpOpening, AppError> {
+    use super::codex_report::{McpBoundary, mcp_boundary};
     let cancel = Cancel(Arc::new(AtomicBool::new(false)));
     let stopped = cancel.0.clone();
     tokio::task::spawn_blocking(move || {
@@ -206,20 +218,75 @@ pub(crate) async fn codex_mcp_opening(
         let mut budget = SEARCH_BYTES;
         let mut lines = file::Lines::new(&source.file, &stopped);
         let mut end = lines.previous(length, &mut budget)?;
+        let mut opening = None;
+        let mut request = None;
         while end > 0 {
             let start = lines.previous(end - 1, &mut budget)?;
-            if let Some(row) = response_call(lines.input(start, end))? {
-                let direct = row.kind.as_deref() == Some("function_call")
-                    && row.call.as_deref() == Some(&call);
-                let nested = row.code_cell() && row.item.is_some() && row.item == origin_item;
-                if direct || nested {
-                    if super::turn_metadata::turn_before(&source, start, &mut budget, &stopped)?
-                        .as_deref()
-                        != Some(turn.as_str())
+            match mcp_boundary(lines.input(start, end), source.native_id.as_str())? {
+                McpBoundary::Ended => return Err(AppError::Conflict),
+                McpBoundary::ToolEnded(id) if id == call => return Err(AppError::Conflict),
+                McpBoundary::User(id) if request.is_none() => {
+                    if opening.is_none() {
+                        return Err(AppError::NotFound);
+                    }
+                    request = Some(id.parse().map_err(|_| AppError::Unavailable)?);
+                }
+                McpBoundary::Started { turn, root } => {
+                    let (position, nested) = opening.ok_or(AppError::NotFound)?;
+                    if witness
+                        .as_ref()
+                        .is_some_and(|expected| expected.as_str() != turn)
                     {
                         return Err(AppError::Conflict);
                     }
-                    return Ok((file::generation(&source)?, start, nested));
+                    return Ok(McpOpening {
+                        generation: file::generation(&source)?,
+                        position,
+                        nested,
+                        turn: turn.parse().map_err(|_| AppError::Unavailable)?,
+                        root: root
+                            .map(|s| s.parse().map_err(|_| AppError::Unavailable))
+                            .transpose()?,
+                        request,
+                    });
+                }
+                _ => {}
+            }
+            if opening.is_none()
+                && let Some(row) = response_call(lines.input(start, end))?
+            {
+                if row.kind.as_deref() == Some("function_call")
+                    && row.call.as_deref() == Some(&call)
+                {
+                    if end - start > 2 * 1024 * 1024 {
+                        return Err(AppError::PayloadTooLarge);
+                    }
+                    #[derive(Deserialize)]
+                    struct Record {
+                        payload: Tool,
+                    }
+                    #[derive(Deserialize)]
+                    struct Tool {
+                        name: String,
+                        namespace: Option<String>,
+                        arguments: String,
+                    }
+                    let record: Record = serde_json::from_reader(lines.input(start, end))
+                        .map_err(|_| AppError::Conflict)?;
+                    let tool = record.payload;
+                    let named = (tool.name == "mcp__reviewq__report_handoff"
+                        && tool.namespace.is_none())
+                        || (tool.name == "report_handoff"
+                            && tool.namespace.as_deref() == Some("mcp__reviewq"));
+                    if !named
+                        || !serde_json::from_str::<serde_json::Value>(&tool.arguments)
+                            .is_ok_and(|value| value == arguments)
+                    {
+                        return Err(AppError::Conflict);
+                    }
+                    opening = Some((start, false));
+                } else if row.code_cell() && row.item.is_some() && row.item == origin_item {
+                    opening = Some((start, true));
                 }
             }
             end = start;

@@ -130,6 +130,29 @@ impl NativeWorkflowProof for Workflows {
         })
     }
 
+    fn verify_witnessed_report_call(
+        &self,
+        lead: LeadTarget,
+        turn: NativeTurnId,
+        call_id: String,
+        arguments: Vec<u8>,
+        ordinal: u32,
+        origin_item_id: Option<String>,
+    ) -> AppFuture<'_, NativeCall> {
+        Box::pin(async move {
+            self.reader(&lead)?
+                .verify_witnessed_report_call(
+                    lead,
+                    turn,
+                    call_id,
+                    arguments,
+                    ordinal,
+                    origin_item_id,
+                )
+                .await
+        })
+    }
+
     fn report_completion(
         &self,
         call: NativeCall,

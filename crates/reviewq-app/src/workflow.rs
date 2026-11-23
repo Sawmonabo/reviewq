@@ -28,6 +28,8 @@ pub struct NativeCall {
     pub source_position: u64,
     /// Order within a shared native opening, or zero for an ordinary standalone call.
     pub source_ordinal: u32,
+    /// Original native MCP input for an opening witnessed before its transcript row was flushed.
+    pub arguments_sha256: Option<ReportHash>,
     pub request_entry_id: Option<NativeInputId>,
     pub tool: WorkflowTool,
 }
@@ -280,6 +282,19 @@ pub trait NativeWorkflowProof: Send + Sync {
         _lead: LeadTarget,
         _call_id: String,
         _arguments: Vec<u8>,
+        _origin_item_id: Option<String>,
+    ) -> AppFuture<'_, NativeCall> {
+        Box::pin(async { Err(AppError::Unavailable) })
+    }
+
+    /// Verify a private host callback against its exact registered turn and durable prompt.
+    fn verify_witnessed_report_call(
+        &self,
+        _lead: LeadTarget,
+        _turn: NativeTurnId,
+        _call_id: String,
+        _arguments: Vec<u8>,
+        _ordinal: u32,
         _origin_item_id: Option<String>,
     ) -> AppFuture<'_, NativeCall> {
         Box::pin(async { Err(AppError::Unavailable) })

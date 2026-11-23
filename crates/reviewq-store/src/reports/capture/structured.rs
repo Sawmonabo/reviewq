@@ -284,7 +284,7 @@ mod tests {
                    'response','request_changes',0,0,0,0,0,?4)",
                 params![
                     receipt,
-                    position,
+                    position as i64,
                     "c".repeat(64),
                     json!({"structured":report}).to_string()
                 ],

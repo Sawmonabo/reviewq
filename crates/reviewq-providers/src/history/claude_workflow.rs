@@ -11,6 +11,7 @@ use serde_json::Value;
 use sha2::{Digest, Sha256};
 
 use super::locator::Source;
+use super::report::{acknowledgement, native_arguments_hash};
 use super::{file, locator, records};
 
 const SCAN_BYTES: u64 = 16 * 1024 * 1024;
@@ -112,6 +113,29 @@ pub(crate) fn claude_workflow_opening(
     })
 }
 
+/// A Mod can receive tool.call before Claude flushes the assistant tool_use row.
+pub(crate) fn claude_workflow_prompt(
+    session: &HistorySession,
+    expected: &NativeInputId,
+    cancelled: &AtomicBool,
+) -> Result<(String, u64), AppError> {
+    let source = source(session, cancelled)?;
+    let mut budget = SCAN_BYTES;
+    let mut end = complete_end(&source, &mut budget, cancelled)?;
+    let mut lines = file::Lines::new(&source.file, cancelled);
+    while end > 0 {
+        let start = lines.previous(end - 1, &mut budget)?;
+        if let Some(id) = user_entry(&source, start, end, cancelled) {
+            if &id != expected {
+                return Err(AppError::Conflict);
+            }
+            return Ok((file::generation(&source)?, start));
+        }
+        end = start;
+    }
+    Err(AppError::NotFound)
+}
+
 pub(crate) struct ClaudeReportResult {
     pub entry: NativeInputId,
     pub response: Option<Vec<u8>>,
@@ -135,29 +159,56 @@ pub(crate) fn claude_workflow_result(
         return Err(AppError::Conflict);
     }
     let opening_end = file::next_line(&source.file, offset, complete, &mut budget, cancelled)?;
-    let open = row(&source, offset, opening_end, cancelled)?.ok_or(AppError::Conflict)?;
-    if open.kind != "assistant"
-        || !open.blocks().enumerate().any(|(index, block)| {
-            (call.source_ordinal == 0 || index + 1 == call.source_ordinal as usize)
-                && block["type"] == "tool_use"
-                && block["id"] == call.call_id
-                && block["name"] == "mcp__reviewq__report_handoff"
-        })
-    {
-        return Err(AppError::Conflict);
-    }
+    let mut opened = if call.arguments_sha256.is_some() {
+        if user_entry(&source, offset, opening_end, cancelled)
+            .is_none_or(|id| Some(&id) != call.request_entry_id.as_ref())
+        {
+            return Err(AppError::Conflict);
+        }
+        false
+    } else {
+        let open = row(&source, offset, opening_end, cancelled)?.ok_or(AppError::Conflict)?;
+        if open.kind != "assistant"
+            || !open.blocks().enumerate().any(|(index, block)| {
+                (call.source_ordinal == 0 || index + 1 == call.source_ordinal as usize)
+                    && report_block(block, &call.call_id)
+            })
+        {
+            return Err(AppError::Conflict);
+        }
+        true
+    };
 
     let mut result = None;
     offset = opening_end;
     while offset < complete {
         let end = file::next_line(&source.file, offset, complete, &mut budget, cancelled)?;
         if let Some(row) = row(&source, offset, end, cancelled)? {
+            if let Some(hash) = call.arguments_sha256.as_ref()
+                && row.kind == "assistant"
+            {
+                for block in row
+                    .blocks()
+                    .filter(|block| block["type"] == "tool_use" && block["id"] == call.call_id)
+                {
+                    if opened
+                        || !report_block(block, &call.call_id)
+                        || !block.get("input").is_some_and(|input| {
+                            native_arguments_hash(input.clone()).as_ref() == Ok(hash)
+                        })
+                    {
+                        return Err(AppError::Conflict);
+                    }
+                    opened = true;
+                }
+            }
             if row.kind == "user" {
                 for block in row
                     .blocks()
                     .filter(|b| b["type"] == "tool_result" && b["tool_use_id"] == call.call_id)
                 {
-                    if result.is_some()
+                    if !opened
+                        || result.is_some()
                         || block["is_error"].as_bool() == Some(true)
                         || !acknowledgement(&block["content"], expected)
                     {
@@ -203,6 +254,12 @@ pub(crate) fn claude_workflow_result(
         offset = end;
     }
     Ok(result)
+}
+
+fn report_block(block: &Value, id: &str) -> bool {
+    block["type"] == "tool_use"
+        && block["id"] == id
+        && block["name"] == "mcp__reviewq__report_handoff"
 }
 
 fn source(session: &HistorySession, cancelled: &AtomicBool) -> Result<Source, AppError> {
@@ -261,30 +318,4 @@ fn user_entry(
         0,
     )?;
     (row.kind == VisibleKind::User).then_some(row.id)
-}
-
-fn acknowledgement(content: &Value, expected: &ExpectedAcknowledgement) -> bool {
-    #[derive(Deserialize)]
-    #[serde(rename_all = "camelCase", deny_unknown_fields)]
-    struct Ack {
-        receipt_id: String,
-        state: String,
-        declaration_sha256: String,
-    }
-    let text = match content {
-        Value::String(text) => text.as_str(),
-        Value::Array(items) if items.len() == 1 && items[0]["type"] == "text" => {
-            let Some(text) = items[0]["text"].as_str() else {
-                return false;
-            };
-            text
-        }
-        _ => return false,
-    };
-    text.len() <= 1_024
-        && serde_json::from_str::<Ack>(text).is_ok_and(|value| {
-            value.receipt_id == expected.receipt_id.as_str()
-                && value.declaration_sha256 == expected.declaration_sha256.as_str()
-                && matches!(value.state.as_str(), "pending_completion" | "recorded")
-        })
 }

@@ -81,6 +81,10 @@ pub(super) fn routes() -> Router<Arc<Entry>> {
             axum::routing::post(reports::feedback).layer(DefaultBodyLimit::max(160 * 1024)),
         )
         .route(
+            "/native/reports/codex-witness",
+            axum::routing::post(reports::codex_witness).layer(DefaultBodyLimit::max(144 * 1024)),
+        )
+        .route(
             "/native/reports/accepted",
             axum::routing::post(reports::accepted),
         )

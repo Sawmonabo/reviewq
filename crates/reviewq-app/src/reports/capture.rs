@@ -1,8 +1,6 @@
 use std::sync::Arc;
 
-use reviewq_domain::identity::{
-    GitSha, MrIdentity, ReceiptId, ReportHash, RunId, SessionKey,
-};
+use reviewq_domain::identity::{GitSha, MrIdentity, ReceiptId, ReportHash, RunId, SessionKey};
 use reviewq_domain::session::{AbsolutePath, LeadTarget};
 use sha2::{Digest, Sha256};
 
@@ -212,6 +210,14 @@ pub trait ReportCaptureStore: Send + Sync {
         provider: reviewq_domain::session::HostProvider,
         native_id: reviewq_domain::identity::NativeSessionId,
     ) -> AppFuture<'_, LeadTarget>;
+
+    /// Last occurrence in this native turn and the prior occurrence of an exact retried hook.
+    fn report_hook_order(
+        &self,
+        session: SessionKey,
+        turn: reviewq_domain::identity::NativeTurnId,
+        call_id: String,
+    ) -> AppFuture<'_, (u32, Option<u32>)>;
 
     fn report_source(&self, lead: LeadTarget) -> AppFuture<'_, (MrIdentity, ReportAuthority)>;
 
@@ -554,7 +560,13 @@ async fn read_source(
         complete: true,
     };
     let display_admitted = stats.require_markdown_budget().is_ok();
-    let legacy = !matches!(&work.declaration, Declaration::Final { report: Some(_), .. });
+    let legacy = !matches!(
+        &work.declaration,
+        Declaration::Final {
+            report: Some(_),
+            ..
+        }
+    );
     let (index, semantic_failure, display_source) = match index_source {
         Some(source) => match tokio::task::spawn_blocking(move || {
             let index = index::parse(&source, legacy)?;

@@ -68,6 +68,8 @@ pub struct NativeContext {
     pub session_key: SessionKeyDto,
     pub turn_id: HistoryTurnIdDto,
     pub call_id: ResourceIdDto,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub witness_ordinal: Option<std::num::NonZeroU32>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]

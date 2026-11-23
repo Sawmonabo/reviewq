@@ -1,6 +1,6 @@
 import { invoke } from "./bridge.js";
 import { deliver, finishTurn, observeFirstStep, observeInput, observeTurn, reviewqOrigin } from "./delivery.js";
-import { registerWorkflowTools, reportTurn, stageAction, stageReport } from "./workflow.js";
+import { registerWorkflowTools, reportCallOrdinal, reportTurn, stageAction, stageReport } from "./workflow.js";
 import { reconcileChildren } from "./children.js";
 import { currentSettings } from "./settings.js";
 import { answerQuestion, observeQuestion } from "./questions.js";
@@ -166,6 +166,9 @@ export function register(on) {
       return next(event);
     }
     const state = await current($);
+    if (state.reportTurn?.id !== event.turnId) {
+      state.reportTurn = { id: event.turnId, calls: new Map() };
+    }
     state.turnId = event.turnId;
     state.activeTurn = event.turnId;
     state.stepIndex = undefined;
@@ -208,6 +211,7 @@ export function register(on) {
         await reportTurn($, state, event);
       }
       state.activeTurn = undefined;
+      state.reportTurn = undefined;
       session.phase = event.reason === "error" ? "failed" : "idle";
       finishTurn(session, event.turnId);
       session.question = undefined;
@@ -246,13 +250,22 @@ export function register(on) {
     return result;
   });
 
-  on("tool.call", { tool: "mcp__reviewq__report_handoff" }, async ($, event) => {
+  on("tool.call", { tool: "mcp__reviewq__report_handoff" }, async ($, event, next) => {
+    const opened = session;
+    const turn = opened?.activeTurn;
+    const witnessOrdinal = reportCallOrdinal(opened, event, next.origin);
     const state = event.agentId ? undefined : await workflowLead($);
-    if (!state?.linked || !state.activeTurn) {
-      return { result: "Link the active lead with /reviewq before handing off a report.", isError: true };
+    if (!state?.linked) {
+      return { deny: "Link the active lead with /reviewq before handing off a report." };
+    }
+    if (!state.activeTurn) {
+      return { deny: "ReviewQ could not verify the active Claude turn." };
     }
     await heartbeat($, state, false);
-    return stageReport($, state, event);
+    if (session !== state || state.activeTurn !== turn) {
+      return { deny: "The active Claude lead or turn changed during report handoff." };
+    }
+    return stageReport($, state, event, opened === state ? witnessOrdinal : undefined);
   });
 
   on("tool.call", { tool: "mcp__reviewq__review_action" }, async ($, event) => {

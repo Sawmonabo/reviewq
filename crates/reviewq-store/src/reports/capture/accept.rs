@@ -61,10 +61,16 @@ pub(super) fn complete(
         .map(|()| false);
     }
     let current = head(db, run)?;
-    let base = db.query_row(
-        "SELECT base_receipt_id, disposition_version, settings_revision, json_extract(edits, '$.authority') FROM report_handoffs WHERE receipt_id=?1",
-        [receipt],
-        |row| Ok((row.get::<_, Option<String>>(0)?, row.get::<_, i64>(1)?, row.get::<_, i64>(2)?, row.get::<_, Option<String>>(3)?)),
+    let (base_receipt, base_disposition, legacy_settings, saved_authority, grant_current) = db.query_row(
+        "SELECT base_receipt_id, disposition_version, settings_revision, json_extract(edits, '$.authority'),
+            json_extract(edits, '$.grantId') IS NULL OR EXISTS (
+                SELECT 1 FROM repo_grants g WHERE g.grant_id=json_extract(h.edits, '$.grantId')
+                AND g.epoch=json_extract(h.edits, '$.grantEpoch') AND g.active=1
+                AND g.origin=?2 AND g.project_id=?3)
+         FROM report_handoffs h WHERE receipt_id=?1",
+        params![receipt, identity.origin().as_str(), identity.project_id().as_sqlite_integer()],
+        |row| Ok((row.get::<_, Option<String>>(0)?, row.get::<_, i64>(1)?, row.get::<_, i64>(2)?,
+            row.get::<_, Option<String>>(3)?, row.get::<_, bool>(4)?)),
     )?;
     let newer: bool = db.query_row(
         "SELECT EXISTS (SELECT 1 FROM report_handoffs
@@ -80,13 +86,14 @@ pub(super) fn complete(
         |row| row.get(0),
     )?;
     // Receipts staged before scoped authority was recorded retain their original guard.
-    let authority_changed = match base.3 {
+    let authority_changed = match saved_authority {
         Some(saved) => saved != authority.0.as_str(),
-        None => base.2 != settings_revision(db)?.as_sqlite_integer(),
+        None => legacy_settings != settings_revision(db)?.as_sqlite_integer(),
     };
     if newer
-        || current.receipt.as_ref() != base.0.as_ref()
-        || current.disposition_version != base.1
+        || current.receipt != base_receipt
+        || current.disposition_version != base_disposition
+        || !grant_current
         || authority_changed
     {
         return reject(
@@ -234,13 +241,39 @@ pub(super) fn complete(
             let same_source = current.hash.as_deref() == Some(captured.hash.as_str());
             let projection = if let Some(report) = report {
                 let projection = structured::prepare(
-                    db, run, current.receipt.as_deref(), same_source, report, revision, edits,
+                    db,
+                    run,
+                    current.receipt.as_deref(),
+                    same_source,
+                    report,
+                    revision,
+                    edits,
                     captured.index.as_deref().unwrap_or_default(),
                 )?;
                 match projection {
-                    Some(projection) if projection.fits(db, receipt)? => Some((projection, report, same_source)),
-                    Some(_) => return reject(tx, &work, Some(captured), "report_structured_payload_too_large", Some(&result)).map(|()| false),
-                    None => return reject(tx, &work, Some(captured), "report_structured_continuity_unproved", Some(&result)).map(|()| false),
+                    Some(projection) if projection.fits(db, receipt)? => {
+                        Some((projection, report, same_source))
+                    }
+                    Some(_) => {
+                        return reject(
+                            tx,
+                            &work,
+                            Some(captured),
+                            "report_structured_payload_too_large",
+                            Some(&result),
+                        )
+                        .map(|()| false);
+                    }
+                    None => {
+                        return reject(
+                            tx,
+                            &work,
+                            Some(captured),
+                            "report_structured_continuity_unproved",
+                            Some(&result),
+                        )
+                        .map(|()| false);
+                    }
                 }
             } else {
                 None
@@ -258,7 +291,11 @@ pub(super) fn complete(
                 preserve_attention,
                 edits,
                 captured,
-                projection.as_ref().map(|(projection, report, same_source)| (projection, report.as_ref(), *same_source)),
+                projection
+                    .as_ref()
+                    .map(|(projection, report, same_source)| {
+                        (projection, report.as_ref(), *same_source)
+                    }),
                 time,
                 scoped
                     .as_ref()
@@ -572,7 +609,14 @@ fn promote(
             if keeps_coverage { previous.coverage_target.as_deref() } else { scoped.and_then(|(manifest,_)| manifest.target_sha.as_deref()) }],
     )?;
     if let Some((projection, report, same_source)) = structured {
-        projection.install(db, run, receipt, previous.receipt.as_deref(), same_source, &report.findings)?;
+        projection.install(
+            db,
+            run,
+            receipt,
+            previous.receipt.as_deref(),
+            same_source,
+            &report.findings,
+        )?;
         if let Some(items) = &captured.index {
             write_index(db, run, receipt, items)?;
         }

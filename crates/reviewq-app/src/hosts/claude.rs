@@ -117,10 +117,12 @@ pub struct ClaudeTurnResult {
 pub struct ClaudeWorkflowContext {
     pub session: HistorySession,
     pub active_turn: Option<NativeTurnId>,
+    pub active_prompt: Option<NativeInputId>,
     pub idle: bool,
     pub request: Option<NativeInputId>,
     pub ready: Option<ReadyWorkflow>,
     pub terminal: Option<ClaudeTurnResult>,
+    pub terminal_settling: bool,
 }
 
 pub trait ClaudeWorkflowStore: Send + Sync {

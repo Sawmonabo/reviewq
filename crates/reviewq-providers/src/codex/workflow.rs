@@ -10,8 +10,7 @@ use reviewq_domain::session::LeadTarget;
 use serde::Deserialize;
 
 use super::Codex;
-use super::history::{Item, Turn};
-use super::history_reads::ItemWindow;
+use super::history::{Item, Turn, Turns};
 use super::session::{Thread, ThreadStatus};
 
 #[derive(Deserialize)]
@@ -67,9 +66,7 @@ impl NativeWorkflowProof for Codex {
         tool: WorkflowTool,
     ) -> AppFuture<'_, NativeCall> {
         Box::pin(async move {
-            let (thread, active) = self
-                .active_workflow_turn(&lead, turn.as_ref(), true)
-                .await?;
+            let (thread, active) = self.active_workflow_turn(&lead, turn.as_ref()).await?;
             let index = call_position(&active, &call_id, tool).ok_or(AppError::NotFound)?;
             if !matches!(&active.items[index], Item::CommandExecution { status, .. } if status == "inProgress")
             {
@@ -89,6 +86,7 @@ impl NativeWorkflowProof for Codex {
                 call_id,
                 source_generation: generation,
                 source_position: position,
+                arguments_sha256: None,
                 source_ordinal: 0,
                 request_entry_id: request_address(&active, index)?,
                 tool,
@@ -103,34 +101,25 @@ impl NativeWorkflowProof for Codex {
         arguments: Vec<u8>,
         origin_item_id: Option<String>,
     ) -> AppFuture<'_, NativeCall> {
-        Box::pin(async move {
-            let arguments: serde_json::Value =
-                serde_json::from_slice(&arguments).map_err(|_| AppError::InvalidRequest)?;
-            let (thread, turn) = self.active_workflow_turn(&lead, None, false).await?;
-            let turn_id: NativeTurnId = turn.id.parse().map_err(|_| AppError::Unavailable)?;
-            let (ordinal, request) = self
-                .mcp_report_position(&thread.id, &turn_id, &call_id, &arguments)
-                .await?;
-            let (generation, position, nested) = crate::history::codex_mcp_opening(
-                lead.binding().clone(),
-                thread.path.ok_or(AppError::Unavailable)?,
-                turn_id.clone(),
-                call_id.clone(),
-                origin_item_id,
-            )
-            .await?;
-            Ok(NativeCall {
-                lead,
-                root_turn_id: root_turn(&turn)?,
-                turn_id,
-                call_id,
-                tool: WorkflowTool::Report,
-                source_generation: generation,
-                source_position: position,
-                source_ordinal: if nested { ordinal } else { 0 },
-                request_entry_id: request,
-            })
-        })
+        self.mcp_report_call(lead, call_id, arguments, origin_item_id, None)
+    }
+
+    fn verify_witnessed_report_call(
+        &self,
+        lead: LeadTarget,
+        turn: NativeTurnId,
+        call_id: String,
+        arguments: Vec<u8>,
+        ordinal: u32,
+        origin_item_id: Option<String>,
+    ) -> AppFuture<'_, NativeCall> {
+        self.mcp_report_call(
+            lead,
+            call_id,
+            arguments,
+            origin_item_id,
+            Some((turn, ordinal)),
+        )
     }
 
     fn report_completion(
@@ -147,13 +136,36 @@ impl NativeWorkflowProof for Codex {
             let path = thread.path.ok_or(AppError::Unavailable)?;
             let result_entry: NativeInputId =
                 call.call_id.parse().map_err(|_| AppError::Conflict)?;
+            if call.arguments_sha256.is_some() {
+                let evidence = crate::history::codex_report_terminal(
+                    call.clone(),
+                    path,
+                    include_response,
+                    Some(acknowledgement.clone()),
+                )
+                .await?;
+                let Some(evidence) = evidence else {
+                    return Ok(ReportCompletion::Pending);
+                };
+                if !evidence.result_seen {
+                    return Ok(ReportCompletion::Unproved);
+                }
+                return Ok(ReportCompletion::Confirmed(Box::new(CompletedReportCall {
+                    call,
+                    acknowledged: acknowledgement,
+                    result_entry_id: result_entry,
+                    normal_turn_completion: evidence.normal,
+                    final_response: evidence.response,
+                })));
+            }
             let result = self
                 .exact_item(&thread.id, &call.turn_id, &result_entry)
                 .await;
             let item = match result {
                 Ok(item) => item.item,
                 Err(AppError::NotFound) => {
-                    let ended = crate::history::codex_report_terminal(call, path, false).await?;
+                    let ended =
+                        crate::history::codex_report_terminal(call, path, false, None).await?;
                     return Ok(if ended.is_some() {
                         ReportCompletion::Unproved
                     } else {
@@ -202,7 +214,8 @@ impl NativeWorkflowProof for Codex {
                 return Ok(ReportCompletion::Unproved);
             }
             let Some(evidence) =
-                crate::history::codex_report_terminal(call.clone(), path, include_response).await?
+                crate::history::codex_report_terminal(call.clone(), path, include_response, None)
+                    .await?
             else {
                 return Ok(ReportCompletion::Pending);
             };
@@ -237,14 +250,13 @@ impl Codex {
         &self,
         lead: &LeadTarget,
         turn: Option<&NativeTurnId>,
-        full: bool,
     ) -> Result<(Thread, Turn), AppError> {
         let thread = self.verified_thread(lead).await?;
         if !matches!(thread.status, ThreadStatus::Active { .. }) {
             return Err(AppError::NotFound);
         }
         let active = self
-            .turns(&thread.id, None, false, 1, full)
+            .turns(&thread.id, None, false, 1, true)
             .await?
             .data
             .pop()
@@ -255,71 +267,118 @@ impl Codex {
         Ok((thread, active))
     }
 
-    /// The host sorts this page by immutable creation ordinal. Defer completed tool output
-    /// so earlier large command logs cannot prevent verification of the current handoff.
-    async fn mcp_report_position(
+    fn mcp_report_call(
         &self,
-        thread: &str,
+        lead: LeadTarget,
+        call_id: String,
+        arguments: Vec<u8>,
+        origin: Option<String>,
+        witness: Option<(NativeTurnId, u32)>,
+    ) -> AppFuture<'_, NativeCall> {
+        Box::pin(async move {
+            let arguments: serde_json::Value =
+                serde_json::from_slice(&arguments).map_err(|_| AppError::InvalidRequest)?;
+            let thread = self.verified_thread(&lead).await?;
+            if thread.parent_thread_id.is_some() {
+                return Err(AppError::Forbidden);
+            }
+            let opening = crate::history::codex_mcp_opening(
+                lead.binding().clone(),
+                thread.path.clone().ok_or(AppError::Unavailable)?,
+                call_id.clone(),
+                origin,
+                arguments.clone(),
+                witness.as_ref().map(|(turn, _)| turn.clone()),
+            )
+            .await?;
+            let source_ordinal = if !opening.nested {
+                0
+            } else if let Some((_, ordinal)) = witness {
+                if ordinal == 0 {
+                    return Err(AppError::InvalidRequest);
+                }
+                ordinal
+            } else {
+                self.live_mcp_ordinal(&thread, &opening.turn, &call_id, &arguments)
+                    .await?
+            };
+            Ok(NativeCall {
+                lead,
+                turn_id: opening.turn,
+                root_turn_id: opening.root,
+                call_id,
+                tool: WorkflowTool::Report,
+                source_generation: opening.generation,
+                source_position: opening.position,
+                source_ordinal,
+                arguments_sha256: Some(crate::history::native_arguments_hash(arguments)?),
+                request_entry_id: opening.request,
+            })
+        })
+    }
+
+    /// History reads omit running nested calls. Attaching to the already-running thread
+    /// with no configuration overrides returns its live items in native creation order.
+    async fn live_mcp_ordinal(
+        &self,
+        thread: &Thread,
         turn: &NativeTurnId,
         call: &str,
         arguments: &serde_json::Value,
-    ) -> Result<(u32, Option<NativeInputId>), AppError> {
-        let mut cursor: Option<String> = None;
-        let mut limit = 64;
-        let mut ordinal = 0u32;
-        let mut request = None;
-        let mut matched = None;
-        loop {
-            let window = ItemWindow {
-                forward: true,
-                cursor: cursor.as_deref(),
-                anchor: None,
-                limit,
-                defer: true,
-            };
-            let page = match self.read_item_window(thread, turn, window).await {
-                Err(AppError::Unavailable) if limit > 1 => {
-                    limit /= 2;
-                    continue;
-                }
-                result => result?,
-            };
-            for entry in page.data {
-                ordinal = ordinal.checked_add(1).ok_or(AppError::Unavailable)?;
-                match entry.item {
-                    Item::UserMessage { id, .. } => {
-                        if matched.is_some() {
-                            return Err(AppError::Conflict);
-                        }
-                        request = Some(id.parse().map_err(|_| AppError::Unavailable)?);
-                    }
-                    Item::McpToolCall {
-                        id,
-                        server,
-                        tool,
-                        status,
-                        arguments: native,
-                        ..
-                    } if id == call => {
-                        if matched.is_some()
-                            || !report_tool(&server, &tool)
-                            || status != "inProgress"
-                            || native.as_ref() != Some(arguments)
-                        {
-                            return Err(AppError::Conflict);
-                        }
-                        matched = Some(ordinal);
-                    }
-                    _ => {}
-                }
-            }
-            let Some(next) = page.next_cursor else { break };
-            if cursor.as_ref() == Some(&next) {
-                return Err(AppError::Unavailable);
-            }
-            cursor = Some(next);
+    ) -> Result<u32, AppError> {
+        if !matches!(thread.status, ThreadStatus::Active { .. }) {
+            return Err(AppError::NotFound);
         }
-        Ok((matched.ok_or(AppError::NotFound)?, request))
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct Resumed {
+            thread: Thread,
+            initial_turns_page: Turns,
+        }
+        let response: Resumed = self.connection.read("thread/resume", serde_json::json!({
+            "threadId":thread.id, "excludeTurns":true, "initialTurnsPage":{"limit":1,"sortDirection":"desc","itemsView":"full"}
+        })).await?;
+        if response.thread.id != thread.id
+            || response.thread.path != thread.path
+            || response.thread.cwd != thread.cwd
+            || response.thread.parent_thread_id.is_some()
+            || !matches!(response.thread.status, ThreadStatus::Active { .. })
+        {
+            return Err(AppError::Conflict);
+        }
+        let [active]: [Turn; 1] = response
+            .initial_turns_page
+            .data
+            .try_into()
+            .map_err(|_| AppError::NotFound)?;
+        if active.id != turn.as_str() || active.status != "inProgress" {
+            return Err(AppError::NotFound);
+        }
+        let mut matched = None;
+        for (i, item) in active.items.iter().enumerate() {
+            match item {
+                Item::McpToolCall {
+                    id,
+                    server,
+                    tool,
+                    status,
+                    arguments: native,
+                    ..
+                } if id == call => {
+                    if matched.is_some()
+                        || !report_tool(server, tool)
+                        || status != "inProgress"
+                        || native.as_ref() != Some(arguments)
+                    {
+                        return Err(AppError::Conflict);
+                    }
+                    matched = Some(u32::try_from(i + 1).map_err(|_| AppError::Unavailable)?);
+                }
+                Item::UserMessage { .. } if matched.is_some() => return Err(AppError::Conflict),
+                _ => {}
+            }
+        }
+        matched.ok_or(AppError::NotFound)
     }
 
     pub(super) async fn idle_readiness(

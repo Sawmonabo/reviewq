@@ -5,15 +5,13 @@ use std::path::PathBuf;
 use reviewq_app::access::{Actor, AppError, AppFuture};
 use reviewq_app::events::{ResourceKey, Snapshot};
 use reviewq_app::reports::{
-    AcceptedReport, ArtifactChunk, CapturedArtifact, Declaration, HandoffReceipt,
-    ReportAuthority, ReportCaptureStore, ReportReference, ReportWork, RevisionEvidence, Source,
+    AcceptedReport, ArtifactChunk, CapturedArtifact, Declaration, HandoffReceipt, ReportAuthority,
+    ReportCaptureStore, ReportReference, ReportWork, RevisionEvidence, Source,
 };
 use reviewq_app::workflow::{
     ExpectedAcknowledgement, NativeCall, ReportFailureAddress, WorkflowTool,
 };
-use reviewq_domain::identity::{
-    MrIdentity, NativeInputId, ReportHash, RunId, SessionKey,
-};
+use reviewq_domain::identity::{MrIdentity, NativeInputId, ReportHash, RunId, SessionKey};
 use reviewq_domain::session::{AbsolutePath, LeadTarget};
 use rusqlite::{Connection, OptionalExtension, Row, params};
 use uuid::Uuid;
@@ -73,7 +71,46 @@ impl ReportCaptureStore for SqliteStore {
     ) -> AppFuture<'_, LeadTarget> {
         Box::pin(async move {
             self.read(move |db| authority::checkout_lead(db, &actor, provider, native_id.as_str()))
-                .await.map_err(StoreError::app)
+                .await
+                .map_err(StoreError::app)
+        })
+    }
+
+    fn report_hook_order(
+        &self,
+        session: SessionKey,
+        turn: reviewq_domain::identity::NativeTurnId,
+        call_id: String,
+    ) -> AppFuture<'_, (u32, Option<u32>)> {
+        Box::pin(async move {
+            self.read(move |db| {
+                let lead = lead_for_session(db, &session)?;
+                if lead.binding().identity().provider()
+                    != reviewq_domain::session::HostProvider::Codex
+                {
+                    return Err(AppError::Forbidden.into());
+                }
+                let mut query = db.prepare_cached(
+                    "SELECT source_generation, call_id FROM report_handoffs
+                     WHERE run_id=?1 AND lead_session_key=?2 AND turn_id=?3",
+                )?;
+                let mut rows = query.query(params![
+                    lead.run_id().as_str(),
+                    session.as_str(),
+                    turn.as_str()
+                ])?;
+                let (mut largest, mut previous) = (0, None);
+                while let Some(row) = rows.next()? {
+                    let (_, ordinal) = address::decode(text(row, 0)?);
+                    largest = largest.max(ordinal);
+                    if text(row, 1)? == call_id && ordinal != 0 {
+                        previous = Some(ordinal);
+                    }
+                }
+                Ok((largest, previous))
+            })
+            .await
+            .map_err(StoreError::app)
         })
     }
 
@@ -84,7 +121,8 @@ impl ReportCaptureStore for SqliteStore {
                     return Err(AppError::NotFound.into());
                 }
                 let identity = crate::queue::identity_for_review(db, lead.review_id())?;
-                let authority = authority::for_project(db, &identity)?.ok_or(AppError::Unavailable)?;
+                let authority =
+                    authority::for_project(db, &identity)?.ok_or(AppError::Unavailable)?;
                 Ok((identity, authority))
             })
             .await
@@ -118,9 +156,15 @@ impl ReportCaptureStore for SqliteStore {
         Box::pin(async move {
             declaration.validate()?;
             self.write(move |tx| {
-                if let Some(actor) = checkout {
+                if let Some(actor) = &checkout {
                     let host = call.lead.binding().identity();
-                    if authority::checkout_lead(&tx.sql, &actor, host.provider(), host.native_id().as_str())? != call.lead {
+                    if authority::checkout_lead(
+                        &tx.sql,
+                        actor,
+                        host.provider(),
+                        host.native_id().as_str(),
+                    )? != call.lead
+                    {
                         return Err(AppError::Forbidden.into());
                     }
                 }
@@ -131,6 +175,7 @@ impl ReportCaptureStore for SqliteStore {
                     request_sha256,
                     declaration_sha256,
                     source_authority,
+                    checkout.as_ref(),
                 )
             })
             .await
@@ -413,7 +458,7 @@ fn saved(
 ) -> Result<Option<HandoffReceipt>, StoreError> {
     let mut statement = db.prepare_cached(
         "SELECT receipt_id, state, request_sha256, source_generation, source_position,
-                request_entry_id, declaration_sha256, root_turn_id FROM report_handoffs
+                request_entry_id, declaration_sha256, root_turn_id, json_extract(edits, '$.argumentsSha256') FROM report_handoffs
          WHERE run_id=?1 AND lead_session_key=?2 AND turn_id=?3 AND call_id=?4",
     )?;
     let mut rows = statement.query(params![
@@ -429,6 +474,7 @@ fn saved(
         || text(row, 3)? != address::encode(call).as_ref()
         || row.get::<_, i64>(4)? != db_int(call.source_position)?
         || optional::<NativeInputId>(row, 5)? != call.request_entry_id
+        || optional::<ReportHash>(row, 8)? != call.arguments_sha256
         || optional::<reviewq_domain::identity::NativeTurnId>(row, 7)? != call.root_turn_id
     {
         return Err(AppError::IdempotencyConflict.into());
@@ -447,6 +493,7 @@ fn stage(
     request_sha256: ReportHash,
     declaration_sha256: ReportHash,
     source_authority: Option<ReportAuthority>,
+    checkout: Option<&Actor>,
 ) -> Result<Snapshot<HandoffReceipt>, StoreError> {
     let db = &tx.sql;
     check_call(db, &call)?;
@@ -531,7 +578,13 @@ fn stage(
         Some(RevisionEvidence::Unknown(reason)) => (None, Some(reason)),
         None => (None, None),
     };
-    let edits = authority::bind(db, edits.as_deref(), &authority)?;
+    let edits = authority::bind(
+        db,
+        edits.as_deref(),
+        &authority,
+        checkout,
+        call.arguments_sha256.as_ref(),
+    )?;
     if !structured::full_projection_fits(db, &edits, head.as_ref().map(|sha| sha.as_str()))? {
         return Err(AppError::PayloadTooLarge.into());
     }
@@ -583,7 +636,7 @@ fn claim(db: &Connection, limit: u16) -> Result<Vec<ReportWork>, StoreError> {
     let mut query = db.prepare_cached(
         "SELECT receipt_id, run_id, lead_session_key, turn_id, call_id, source_generation,
             request_entry_id, declaration_sha256, form, source_kind, source_path, source_hash,
-            reviewed_sha, revision_reason, verdict, expected_receipt_id, expected_sha256, reason, fence, source_position, assessments, edits, root_turn_id
+            reviewed_sha, revision_reason, verdict, expected_receipt_id, expected_sha256, reason, fence, source_position, assessments, edits, root_turn_id, json_extract(edits, '$.argumentsSha256')
          FROM report_handoffs WHERE state='pending_completion' AND due_at_ms<=?1
          ORDER BY due_at_ms, receipt_id LIMIT ?2",
     )?;
@@ -607,6 +660,7 @@ fn claim(db: &Connection, limit: u16) -> Result<Vec<ReportWork>, StoreError> {
                 call_id: row.get(4)?,
                 source_generation: generation.to_owned(),
                 source_ordinal,
+                arguments_sha256: optional(row, 23)?,
                 source_position: u64::try_from(row.get::<_, i64>(19)?)
                     .map_err(|_| AppError::Internal)?,
                 request_entry_id: optional(row, 6)?,

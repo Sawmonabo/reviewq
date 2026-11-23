@@ -30,10 +30,20 @@ pub(super) fn bind(
     db: &Connection,
     edits: Option<&str>,
     authority: &ReportAuthority,
+    checkout: Option<&Actor>,
+    arguments: Option<&ReportHash>,
 ) -> Result<String, StoreError> {
+    let grant = match checkout.map(Actor::scope) {
+        Some(ActorScope::CheckoutGrant(id)) => Some(id.as_str()),
+        Some(_) => return Err(AppError::Forbidden.into()),
+        None => None,
+    };
+    let epoch = checkout
+        .and_then(Actor::grant_epoch)
+        .map(|value| value.as_sqlite_integer());
     let metadata: String = db.query_row(
-        r#"SELECT json_set(coalesce(?1, '{"findings":[],"sections":[]}'), '$.authority', ?2)"#,
-        params![edits, authority.0.as_str()],
+        r#"SELECT json_set(coalesce(?1, '{"findings":[],"sections":[]}'), '$.authority', ?2, '$.grantId', ?3, '$.grantEpoch', ?4, '$.argumentsSha256', ?5)"#,
+        params![edits, authority.0.as_str(), grant, epoch, arguments.map(ReportHash::as_str)],
         |row| row.get(0),
     )?;
     if metadata.len() > 128 * 1024 {

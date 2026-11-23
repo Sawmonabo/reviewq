@@ -36,11 +36,23 @@ export async function registerWorkflowTools($) {
   });
 }
 
-export async function stageReport($, state, event) {
-  const context = { turnId: state.activeTurn, callId: event.tool_use_id, handoff: event.handoff };
-  let result = await invoke($, "report", state.id, context);
-  if (result.error && !result.correctionRequested) result = await invoke($, "report-status", state.id, context);
-  return stringifyResult(result);
+export function reportCallOrdinal(state, event, origin) {
+  if (!state?.activeTurn || state.reportTurn?.id !== state.activeTurn || event.agentId ||
+      origin?.plugin !== "engine" || origin.tier !== "core" || typeof event.tool_use_id !== "string" ||
+      !event.tool_use_id) return undefined;
+  const calls = state.reportTurn.calls;
+  if (!calls.has(event.tool_use_id)) calls.set(event.tool_use_id, calls.size + 1);
+  return calls.get(event.tool_use_id);
+}
+
+export async function stageReport($, state, event, witnessOrdinal) {
+  const context = { turnId: state.activeTurn, callId: event.tool_use_id, handoff: event.handoff, witnessOrdinal };
+  const result = await invoke($, "report", state.id, context);
+  if (result.error && !result.correctionRequested) {
+    const saved = await invoke($, "report-status", state.id, context);
+    if (Object.hasOwn(saved, "data")) return stringifyResult(saved, true);
+  }
+  return stringifyResult(result, true);
 }
 
 export async function stageAction($, state, event) {
@@ -67,12 +79,12 @@ export async function reportTurn($, state, event) {
   });
 }
 
-function stringifyResult(result) {
+function stringifyResult(result, deny = false) {
   if (result.error || !Object.hasOwn(result, "data")) {
-    if (Array.isArray(result.fieldErrors)) {
-      return { result: JSON.stringify({ error: result.error, fieldErrors: result.fieldErrors }), isError: true };
-    }
-    return { result: result.error ?? "ReviewQ did not record this native tool call.", isError: true };
+    const message = Array.isArray(result.fieldErrors) ?
+      JSON.stringify({ error: result.error, fieldErrors: result.fieldErrors }) :
+      result.error ?? "ReviewQ did not record this native tool call.";
+    return deny ? { deny: message } : { result: message, isError: true };
   }
   return { result: JSON.stringify(result.data) };
 }

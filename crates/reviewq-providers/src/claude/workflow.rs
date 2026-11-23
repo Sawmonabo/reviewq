@@ -10,7 +10,9 @@ use reviewq_domain::identity::NativeTurnId;
 use reviewq_domain::session::LeadTarget;
 
 use super::Claude;
-use crate::history::{claude_workflow_opening, claude_workflow_result};
+use crate::history::{
+    claude_workflow_opening, claude_workflow_prompt, claude_workflow_result, native_arguments_hash,
+};
 
 pub struct ClaudeWorkflow {
     native: Arc<Claude>,
@@ -65,6 +67,52 @@ impl NativeWorkflowProof for ClaudeWorkflow {
         self.verify_opening(lead, None, call_id, WorkflowTool::Report, Some(arguments))
     }
 
+    fn verify_witnessed_report_call(
+        &self,
+        lead: LeadTarget,
+        turn: NativeTurnId,
+        call_id: String,
+        arguments: Vec<u8>,
+        ordinal: u32,
+        _origin_item_id: Option<String>,
+    ) -> AppFuture<'_, NativeCall> {
+        Box::pin(async move {
+            if ordinal == 0 {
+                return Err(AppError::InvalidRequest);
+            }
+            let context = self
+                .state
+                .claude_workflow_context(lead.clone(), None)
+                .await?;
+            if context.active_turn.as_ref() != Some(&turn) {
+                return Err(AppError::Conflict);
+            }
+            let prompt = context.active_prompt.ok_or(AppError::NotFound)?;
+            let arguments =
+                serde_json::from_slice(&arguments).map_err(|_| AppError::InvalidRequest)?;
+            let hash = native_arguments_hash(arguments)?;
+            let (source_generation, source_position) = self
+                .native
+                .read_native(context.session, {
+                    let prompt = prompt.clone();
+                    move |session, cancelled| claude_workflow_prompt(&session, &prompt, cancelled)
+                })
+                .await?;
+            Ok(NativeCall {
+                lead,
+                turn_id: turn,
+                root_turn_id: None,
+                call_id,
+                source_generation,
+                source_position,
+                source_ordinal: ordinal,
+                arguments_sha256: Some(hash),
+                request_entry_id: Some(prompt),
+                tool: WorkflowTool::Report,
+            })
+        })
+    }
+
     fn report_completion(
         &self,
         call: NativeCall,
@@ -98,11 +146,19 @@ impl NativeWorkflowProof for ClaudeWorkflow {
                 .await;
             let found = match result {
                 Ok(Some(result)) => result,
-                Ok(None) if context.terminal.is_none() => return Ok(ReportCompletion::Pending),
+                Ok(None)
+                    if context.terminal.is_none()
+                        || (call.arguments_sha256.is_some() && context.terminal_settling) =>
+                {
+                    return Ok(ReportCompletion::Pending);
+                }
                 Ok(None) | Err(AppError::Conflict) => return Ok(ReportCompletion::Unproved),
                 Err(error) => return Err(error),
             };
             if context.terminal.is_none() && context.active_turn.as_ref() == Some(&call.turn_id) {
+                return Ok(ReportCompletion::Pending);
+            }
+            if include_response && normal && found.response.is_none() && context.terminal_settling {
                 return Ok(ReportCompletion::Pending);
             }
             let final_response = if normal {
@@ -166,6 +222,7 @@ impl ClaudeWorkflow {
                 tool,
                 source_generation: opening.generation,
                 source_position: opening.position,
+                arguments_sha256: None,
                 source_ordinal: opening.ordinal,
                 request_entry_id: opening.request,
             })

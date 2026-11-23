@@ -92,20 +92,22 @@ async fn receive(
         Err(_) if !lookup => return Err(malformed_handoff(entry, bytes).await.into()),
         Err(_) => return Err(AppError::InvalidRequest.into()),
     };
-    let (session, turn, call_id, expected, handoff) = match command {
+    let (session, turn, call_id, expected, handoff, witness) = match command {
         dto::HandoffCommand::Codex(value) => (
             value.session_key,
             None,
             value.call_id,
             HostProvider::Codex,
             value.handoff,
+            None,
         ),
         dto::HandoffCommand::Companion(value) => (
             value.context.session_key,
-            Some(parse(value.context.turn_id.as_str())?),
+            Some(parse::<NativeTurnId>(value.context.turn_id.as_str())?),
             value.context.call_id,
             HostProvider::Claude,
             value.handoff,
+            value.context.witness_ordinal,
         ),
     };
     if expected == HostProvider::Claude {
@@ -118,19 +120,17 @@ async fn receive(
         if lead.binding().identity().provider() != expected {
             return Err(AppError::Forbidden.into());
         }
-        let verified = entry
-            .workflow
-            .proof
-            .verify_mcp_report_call(lead, call_id.as_str().to_owned(), arguments.clone(), None)
-            .await?;
-        if turn.as_ref() != Some(&verified.turn_id) {
-            return Err(AppError::Conflict.into());
-        }
+        let turn = turn.ok_or(AppError::InvalidRequest)?;
         let proof = McpReportProof {
             actor: None,
             arguments,
             enclosing: None,
+            witness: witness.map(|ordinal| (turn.clone(), ordinal.get())),
         };
+        let verified = proof.verify(entry, lead, call_id.as_str()).await?;
+        if turn != verified.turn_id {
+            return Err(AppError::Conflict.into());
+        }
         return Ok(Json(
             submit_verified(entry, verified, handoff, lookup, Some(proof)).await?,
         ));
@@ -145,6 +145,45 @@ pub(in crate::entry) struct McpReportProof {
     pub(in crate::entry) actor: Option<Actor>,
     pub(in crate::entry) arguments: Vec<u8>,
     pub(in crate::entry) enclosing: Option<String>,
+    pub(in crate::entry) witness: Option<(NativeTurnId, u32)>,
+}
+
+impl McpReportProof {
+    pub(in crate::entry) async fn verify(
+        &self,
+        entry: &Entry,
+        lead: reviewq_domain::session::LeadTarget,
+        call_id: &str,
+    ) -> Result<NativeCall, AppError> {
+        match &self.witness {
+            Some((turn, ordinal)) => {
+                entry
+                    .workflow
+                    .proof
+                    .verify_witnessed_report_call(
+                        lead,
+                        turn.clone(),
+                        call_id.to_owned(),
+                        self.arguments.clone(),
+                        *ordinal,
+                        self.enclosing.clone(),
+                    )
+                    .await
+            }
+            None => {
+                entry
+                    .workflow
+                    .proof
+                    .verify_mcp_report_call(
+                        lead,
+                        call_id.to_owned(),
+                        self.arguments.clone(),
+                        self.enclosing.clone(),
+                    )
+                    .await
+            }
+        }
+    }
 }
 
 pub(in crate::entry) async fn submit_verified(
@@ -223,16 +262,7 @@ pub(in crate::entry) async fn submit_verified(
                 None
             };
             let current = match &mcp {
-                Some(mcp) => {
-                    proof
-                        .verify_mcp_report_call(
-                            lead,
-                            verified.call_id.clone(),
-                            mcp.arguments.clone(),
-                            mcp.enclosing.clone(),
-                        )
-                        .await?
-                }
+                Some(mcp) => mcp.verify(entry, lead, &verified.call_id).await?,
                 None => {
                     proof
                         .verify_active_call(
@@ -387,7 +417,7 @@ async fn request_correction(entry: &Entry, call: &NativeCall) -> AppError {
     }
 }
 
-fn authenticate(entry: &Entry, headers: &HeaderMap) -> Result<(), AppError> {
+pub(super) fn authenticate(entry: &Entry, headers: &HeaderMap) -> Result<(), AppError> {
     entry.auth.endpoint.verify_bridge(headers)?;
     if !headers
         .get(header::CONTENT_TYPE)

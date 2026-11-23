@@ -12,6 +12,9 @@ use crate::hosts::allow_target;
 use crate::queue::{lead_for_run, parse};
 use crate::{SqliteStore, StoreError};
 
+// Native turn completion may precede the final JSONL flush.
+const TRANSCRIPT_FLUSH_MS: i64 = 30_000;
+
 impl ClaudeWorkflowStore for SqliteStore {
     fn claude_workflow_context(
         &self,
@@ -57,7 +60,8 @@ fn context(
                              AND m.state='started' AND m.actor_key IS NOT NULL AND m.purpose IN ('user','report_feedback')
                      )) THEN c.latest_prompt_id END,
            coalesce(s.host_activity='working',0),
-           coalesce(s.host_activity='idle' AND s.host_questions=0 AND c.permission_turn_id IS NULL,0)
+           coalesce(s.host_activity='idle' AND s.host_questions=0 AND c.permission_turn_id IS NULL,0),
+           CASE WHEN s.host_activity='working' AND c.turn_id=c.latest_prompt_turn_id THEN c.latest_prompt_id END
          FROM claude_companions c JOIN sessions s USING(session_key)
          WHERE c.session_key=?1 AND c.seen_at_ms>?2",
             params![key, now_ms()?.saturating_sub(COMPANION_FRESH_MS)],
@@ -68,61 +72,70 @@ fn context(
                     row.get::<_, Option<String>>(2)?,
                     row.get::<_, bool>(3)?,
                     row.get::<_, bool>(4)?,
+                    row.get::<_, Option<String>>(5)?,
                 ))
             },
         )
         .optional()?;
-    let (active_turn, request, ready, idle) =
-        if let Some((generation, seen, request, working, idle)) = live {
+    let (active_turn, request, ready, idle, active_prompt) =
+        if let Some((generation, seen, request, working, idle, prompt)) = live {
             (
                 seen.filter(|_| working).as_deref().map(parse).transpose()?,
                 request.as_deref().map(parse).transpose()?,
                 fresh(db, &lead, &generation)?.1,
                 idle,
+                prompt.as_deref().map(parse).transpose()?,
             )
         } else {
-            (None, None, None, false)
+            (None, None, None, false, None)
         };
-    let terminal = if let Some(turn) = turn {
+    let (terminal, terminal_settling) = if let Some(turn) = turn {
         let row = db
             .query_row(
-                "SELECT companion_generation,normal,response_id,response_sha256 FROM claude_turns
+                "SELECT companion_generation,normal,response_id,response_sha256,recorded_at_ms>=?3 FROM claude_turns
              WHERE session_key=?1 AND turn_id=?2",
-                params![key, turn.as_str()],
+                params![key, turn.as_str(), now_ms()?.saturating_sub(TRANSCRIPT_FLUSH_MS)],
                 |row| {
                     Ok((
                         row.get::<_, String>(0)?,
                         row.get::<_, bool>(1)?,
                         row.get::<_, Option<String>>(2)?,
                         row.get::<_, Option<String>>(3)?,
+                        row.get::<_, bool>(4)?,
                     ))
                 },
             )
             .optional()?;
-        row.map(|(generation, normal, id, hash)| {
+        row.map(|(generation, normal, id, hash, settling)| {
             let response = match (id, hash) {
                 (Some(id), Some(hash)) => Some((parse(&id)?, parse(&hash)?)),
                 (None, None) => None,
                 _ => return Err(StoreError::from(AppError::Internal)),
             };
-            Ok(ClaudeTurnResult {
-                turn,
-                generation,
-                normal,
-                response,
-            })
+            Ok((
+                Some(ClaudeTurnResult {
+                    turn,
+                    generation,
+                    normal,
+                    response,
+                }),
+                settling,
+            ))
         })
         .transpose()?
+        .unwrap_or((None, false))
     } else {
-        None
+        (None, false)
     };
     Ok(ClaudeWorkflowContext {
         session,
         active_turn,
+        active_prompt,
         idle,
         request,
         ready,
         terminal,
+        terminal_settling,
     })
 }
 

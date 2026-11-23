@@ -8,8 +8,8 @@ mod revision;
 mod structured;
 
 pub use structured::{
-    FindingBasis, FindingBasisKind, FindingDetails, FindingLocation, ReportScope, StructuredFinding,
-    StructuredReport,
+    FindingBasis, FindingBasisKind, FindingDetails, FindingLocation, ReportScope,
+    StructuredFinding, StructuredReport,
 };
 
 pub use display::{
@@ -28,8 +28,8 @@ pub use revision::{
 
 pub use capture::{
     AcceptedReport, ArtifactChunk, Assessment, CHUNK_BYTES, CapturedArtifact, Declaration,
-    HandoffReceipt, HandoffState, ReportAuthority, ReportCaptureStore, ReportFileSource, ReportWork,
-    RevisionEvidence, Source, hash_report_file, reconcile_reports,
+    HandoffReceipt, HandoffState, ReportAuthority, ReportCaptureStore, ReportFileSource,
+    ReportWork, RevisionEvidence, Source, hash_report_file, reconcile_reports,
 };
 
 use reviewq_domain::identity::{GitSha, ReceiptId, ReportHash, Revision, RunId};

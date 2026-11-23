@@ -30,6 +30,7 @@ mod proof;
 mod questions;
 mod reader;
 mod records;
+mod report;
 mod search;
 mod task_plan;
 pub(crate) mod tools;
@@ -38,7 +39,9 @@ mod wait;
 mod watch;
 
 pub(crate) use claude::{claude_anchor, claude_confirm_prompt};
-pub(crate) use claude_workflow::{claude_workflow_opening, claude_workflow_result};
+pub(crate) use claude_workflow::{
+    claude_workflow_opening, claude_workflow_prompt, claude_workflow_result,
+};
 pub(crate) use codex_report::{codex_earlier_report_failures, codex_report_terminal};
 pub(crate) use locator::{
     inspect_claude_lead, verified_claude_child, verified_claude_source, verified_codex_source,
@@ -47,6 +50,7 @@ pub(crate) use locator::{
 pub(crate) use proof::{
     codex_mcp_opening, codex_opening, codex_question_answered, codex_question_opening,
 };
+pub(crate) use report::native_arguments_hash;
 pub(crate) use turn_metadata::{
     codex_exact_turn_settings, codex_turn_settings, codex_turn_started,
 };

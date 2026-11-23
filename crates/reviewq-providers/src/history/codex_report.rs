@@ -5,7 +5,9 @@ use std::sync::atomic::AtomicBool;
 
 use reviewq_app::access::AppError;
 use reviewq_app::history::{FileContentRef, NativeTerminalFailure};
-use reviewq_app::workflow::{NativeCall, ReportContent, ReportFailureAddress};
+use reviewq_app::workflow::{
+    ExpectedAcknowledgement, NativeCall, ReportContent, ReportFailureAddress,
+};
 use reviewq_domain::identity::NativeInputId;
 use sha2::{Digest, Sha256};
 use struson::reader::{JsonReader, JsonStreamReader, ValueType};
@@ -23,13 +25,20 @@ pub(crate) async fn codex_report_terminal(
     call: NativeCall,
     path: PathBuf,
     include_response: bool,
+    acknowledgement: Option<ExpectedAcknowledgement>,
 ) -> Result<Option<CodexTerminalReport>, AppError> {
     let cancel = Cancel(Arc::new(AtomicBool::new(false)));
     let stopped = cancel.0.clone();
     let Some((source, normal, result_seen, response)) = tokio::task::spawn_blocking(move || {
         let source = locator::verify(call.lead.binding(), None, &path, &stopped)?
             .ok_or(AppError::Unavailable)?;
-        let outcome = terminal(&source, &call, include_response, &stopped)?;
+        let outcome = terminal(
+            &source,
+            &call,
+            include_response,
+            acknowledgement.as_ref(),
+            &stopped,
+        )?;
         Ok::<_, AppError>(
             outcome.map(|(normal, result_seen, response)| (source, normal, result_seen, response)),
         )
@@ -152,6 +161,7 @@ fn terminal(
     source: &locator::Source,
     call: &NativeCall,
     include_response: bool,
+    acknowledgement: Option<&ExpectedAcknowledgement>,
     cancelled: &AtomicBool,
 ) -> Result<Option<(bool, bool, Option<FinalResponse>)>, AppError> {
     let generation = file::generation(source)?;
@@ -205,6 +215,28 @@ fn terminal(
         if event.turn.as_deref() != Some(turn) {
             continue;
         }
+        let legacy_mcp = event.kind.as_deref() == Some("mcp_tool_call_end")
+            && event.call.as_deref() == Some(call.call_id.as_str());
+        let paged_mcp = event.kind.as_deref() == Some("item_completed")
+            && event.thread.as_deref() == Some(source.native_id.as_str())
+            && event.item.kind.as_deref() == Some("McpToolCall")
+            && event.item.id.as_deref() == Some(call.call_id.as_str());
+        if legacy_mcp || paged_mcp {
+            if let Some(expected) = acknowledgement
+                && (result_seen
+                    || !mcp_result(
+                        lines.input(start, offset),
+                        offset - start,
+                        call,
+                        expected,
+                        legacy_mcp,
+                    )?)
+            {
+                return Err(AppError::Conflict);
+            }
+            result_seen = true;
+            continue;
+        }
         match event.kind.as_deref() {
             Some("task_complete" | "turn_complete" | "turn_aborted") => {
                 if let Some(root) = &call.root_turn_id
@@ -227,8 +259,9 @@ fn terminal(
                     .transpose()?;
                 return Ok(Some((normal, result_seen, response)));
             }
-            Some("exec_command_end" | "mcp_tool_call_end")
-                if event.call.as_deref() == Some(call.call_id.as_str()) =>
+            Some("exec_command_end")
+                if acknowledgement.is_none()
+                    && event.call.as_deref() == Some(call.call_id.as_str()) =>
             {
                 result_seen = true;
             }
@@ -236,8 +269,9 @@ fn terminal(
                 if event.thread.as_deref() == Some(source.native_id.as_str()) =>
             {
                 match event.item.kind.as_deref() {
-                    Some("CommandExecution" | "McpToolCall")
-                        if event.item.id.as_deref() == Some(call.call_id.as_str()) =>
+                    Some("CommandExecution")
+                        if acknowledgement.is_none()
+                            && event.item.id.as_deref() == Some(call.call_id.as_str()) =>
                     {
                         result_seen = true;
                     }
@@ -265,6 +299,42 @@ fn terminal(
     }
     // Require the exact terminal event within this native scan budget.
     Err(AppError::PayloadTooLarge)
+}
+
+fn mcp_result(
+    input: impl Read,
+    length: u64,
+    call: &NativeCall,
+    expected: &ExpectedAcknowledgement,
+    legacy: bool,
+) -> Result<bool, AppError> {
+    if length > 2 * 1024 * 1024 {
+        return Err(AppError::PayloadTooLarge);
+    }
+    let row: serde_json::Value = serde_json::from_reader(input).map_err(|_| AppError::Conflict)?;
+    let (invocation, result) = if legacy {
+        let payload = &row["payload"];
+        (&payload["invocation"], &payload["result"]["Ok"])
+    } else {
+        let item = &row["payload"]["item"];
+        if item["status"] != "completed" || !item["error"].is_null() {
+            return Ok(false);
+        }
+        (item, &item["result"])
+    };
+    Ok(invocation["server"] == "reviewq"
+        && invocation["tool"] == "report_handoff"
+        && !result
+            .get("isError")
+            .or_else(|| result.get("is_error"))
+            .is_some_and(|v| v == true)
+        && invocation.get("arguments").is_some_and(|args| {
+            super::native_arguments_hash(args.clone()).ok().as_ref()
+                == call.arguments_sha256.as_ref()
+        })
+        && result
+            .get("content")
+            .is_some_and(|v| super::report::acknowledgement(v, expected)))
 }
 
 #[derive(Default)]
@@ -338,6 +408,40 @@ fn event(input: impl Read) -> Result<Event, AppError> {
         result.kind = None;
     }
     Ok(result)
+}
+
+/// Boundaries needed to qualify an in-flight declaration against the provider-owned file.
+pub(super) enum McpBoundary {
+    Started { turn: String, root: Option<String> },
+    Ended,
+    User(String),
+    ToolEnded(String),
+    Other,
+}
+
+pub(super) fn mcp_boundary(input: impl Read, thread: &str) -> Result<McpBoundary, AppError> {
+    let e = event(input)?;
+    if e.thread.as_deref().is_some_and(|id| id != thread) {
+        return Ok(McpBoundary::Other);
+    }
+    Ok(match e.kind.as_deref() {
+        Some("task_started" | "turn_started") => McpBoundary::Started {
+            turn: e.turn.ok_or(AppError::Unavailable)?,
+            root: e.root,
+        },
+        Some("task_complete" | "turn_complete" | "turn_aborted") => McpBoundary::Ended,
+        Some("mcp_tool_call_end") => McpBoundary::ToolEnded(e.call.ok_or(AppError::Unavailable)?),
+        Some("item_completed") if e.thread.as_deref() == Some(thread) => {
+            match e.item.kind.as_deref() {
+                Some("UserMessage") => McpBoundary::User(e.item.id.ok_or(AppError::Unavailable)?),
+                Some("McpToolCall") => {
+                    McpBoundary::ToolEnded(e.item.id.ok_or(AppError::Unavailable)?)
+                }
+                _ => McpBoundary::Other,
+            }
+        }
+        _ => McpBoundary::Other,
+    })
 }
 
 fn non_null<R: Read>(reader: &mut JsonStreamReader<R>) -> Result<bool, AppError> {

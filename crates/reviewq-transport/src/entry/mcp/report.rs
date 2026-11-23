@@ -9,7 +9,7 @@ use rmcp::model::{CallToolResult, ContentBlock, JsonObject, RequestMetaObject, T
 use serde_json::{Value, json};
 
 use crate::entry::Entry;
-use crate::entry::features::reports::{McpReportProof, submit_verified};
+use crate::entry::features::reports::{McpReportProof, canonical_arguments, submit_verified};
 use crate::entry::pages::parse;
 
 const NAME: &str = "report_handoff";
@@ -32,6 +32,9 @@ pub(super) async fn submit(
         let message =
             serde_json::to_string(&json!({"error":"Invalid report handoff.","fieldErrors":errors}))
                 .map_err(|_| AppError::Internal)?;
+        if message.len() > super::MAX_TOOL_RESPONSE {
+            return Err(AppError::PayloadTooLarge);
+        }
         return Ok(CallToolResult::error(vec![ContentBlock::text(message)]));
     }
     let field = |key| meta.get(key).and_then(Value::as_str);
@@ -43,24 +46,20 @@ pub(super) async fn submit(
         .store
         .mcp_report_lead(actor.clone(), HostProvider::Codex, parse(session)?)
         .await?;
-    let arguments = serde_json::to_vec(&raw).map_err(|_| AppError::InvalidRequest)?;
+    let arguments = canonical_arguments(raw)?;
     let value: ReportHandoffInput =
-        serde_json::from_value(raw).map_err(|_| AppError::InvalidRequest)?;
+        serde_json::from_slice(&arguments).map_err(|_| AppError::InvalidRequest)?;
+    let witness =
+        entry
+            .report_witnesses
+            .take_proof(lead.session_key(), call.as_str(), &arguments)?;
     let context = McpReportProof {
         actor: Some(actor),
         arguments,
         enclosing: enclosing.map(str::to_owned),
+        witness,
     };
-    let verified = entry
-        .workflow
-        .proof
-        .verify_mcp_report_call(
-            lead,
-            call.as_str().to_owned(),
-            context.arguments.clone(),
-            context.enclosing.clone(),
-        )
-        .await?;
+    let verified = context.verify(entry, lead, call.as_str()).await?;
     let receipt = submit_verified(entry, verified, value.handoff, false, Some(context)).await?;
     super::bounded_result(&serde_json::to_value(receipt.data).map_err(|_| AppError::Internal)?)
 }
