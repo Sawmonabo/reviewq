@@ -7,26 +7,96 @@
 .findings {
   gap: 12px;
 }
-.report-tools {
-  display: flex;
+.report-history-access {
+  float: inline-end;
+  display: inline-flex;
   flex-wrap: wrap;
   justify-content: flex-end;
-  align-items: start;
-  gap: 14px;
-  margin-bottom: 4px;
-  min-height: 26px;
+  align-items: center;
+  gap: 2px 6px;
+  margin-inline-start: 8px;
+  position: relative;
+  z-index: 1;
 }
-.report-tools > .quiet-button {
-  min-height: 0;
-  padding: 5px 6px;
-  border: 0;
-  border-radius: 0;
-  color: var(--quiet-text);
+.report-history-access > button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 24px;
+  padding: 2px 5px;
+  font-size: 11px;
+}
+.report-version-label {
   font-size: 10px;
+  color: var(--muted);
 }
-.report-tools > .quiet-button:enabled:is(:hover, :active) {
+.report-history-access > .history-trigger {
+  anchor-name: --findings-history;
+  color: var(--muted);
+}
+.report-identity + .report-title {
+  clear: inline-end;
+}
+.history-trigger:is(:focus-visible, :hover, [aria-expanded="true"]) {
+  color: var(--text);
+}
+.report-history-layer {
+  display: contents;
+}
+.modal.report-history-dialog {
+  width: min(374px, calc(100vw - 24px));
+  background: var(--popup-bg);
+}
+@supports (position-area: block-end span-inline-start) {
+  .report-history-dialog {
+    position-anchor: --findings-history;
+    inset: auto;
+    position-area: block-end span-inline-start;
+    justify-self: end;
+    align-self: start;
+    margin: 5px 0;
+    position-try-fallbacks:
+      flip-block,
+      flip-inline,
+      flip-block flip-inline;
+  }
+}
+.report-history-dialog::backdrop {
   background: transparent;
-  color: var(--quiet-hover-text);
+}
+.report-history-dialog .modal-frame {
+  max-height: min(62dvh, 460px);
+}
+.report-history-dialog .modal-frame > header {
+  padding: 8px 12px;
+}
+.report-history-dialog .modal-frame > header h2 {
+  font-size: 15px;
+}
+.report-history-dialog .modal-body {
+  display: grid;
+  gap: 10px;
+  padding: 10px;
+}
+.earlier-evidence {
+  justify-self: start;
+}
+@media (max-width: 700px) {
+  .modal.report-history-dialog {
+    position-area: none;
+    inset: auto 0 0;
+    margin: 0;
+    width: 100%;
+    max-width: 100%;
+    border-radius: 14px 14px 0 0;
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+  .report-history-dialog::backdrop {
+    background: #0006;
+  }
+  .report-history-dialog .modal-frame {
+    max-height: 72dvh;
+  }
 }
 .report-history-list {
   gap: 0;

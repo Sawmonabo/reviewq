@@ -8,6 +8,7 @@ import type {
   RunDetail,
   SessionSummary,
 } from "../../api/generated/contracts";
+import type { ResultSummary } from "../../api/generated/contracts/followups";
 import type { Tab } from "../../api/generated/contracts/notifications";
 import {
   cancelRecovery,
@@ -85,6 +86,7 @@ export default function ReviewDrawer({
   onMonitor,
 }: Props) {
   const { review } = overview;
+  const [linkedCheck, setLinkedCheck] = useState<ResultSummary>();
   const [runTrail, setRunTrail] = useState<readonly string[]>([]);
   const [deliveryScope, setDeliveryScope] = useState<string>();
   const [busy, setBusy] = useState(false);
@@ -334,6 +336,7 @@ export default function ReviewDrawer({
   }
 
   function activate(next: Tab) {
+    if (next !== "findings") setLinkedCheck(undefined);
     onTab(next);
   }
 
@@ -581,7 +584,10 @@ export default function ReviewDrawer({
                       .join(" · "),
                   })),
                 ]}
-                onChange={onRun}
+                onChange={(id) => {
+                  setLinkedCheck(undefined);
+                  onRun(id);
+                }}
               />
             )}
         </div>
@@ -709,7 +715,12 @@ export default function ReviewDrawer({
                   reviewTitle={review.title}
                   webUrl={overview.webUrl}
                   followup={follows.data?.latestCompletedResult}
-                  onRun={onRun}
+                  linkedCheck={linkedCheck?.runId === run.runId ? linkedCheck : undefined}
+                  onLinkHandled={() => setLinkedCheck(undefined)}
+                  onOpenCheckRun={(check) => {
+                    setLinkedCheck(check);
+                    onRun(check.runId);
+                  }}
                 />
               ) : selectionPending ? (
                 <Loading label="Resolving selected run…" />

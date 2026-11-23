@@ -8,6 +8,7 @@ const paths = {
   more: "M4 12h.01 M12 12h.01 M20 12h.01",
   plus: "M12 5v14M5 12h14",
   search: "M15.7 15.7 20 20 M17 11a6 6 0 1 1-12 0 6 6 0 0 1 12 0Z",
+  history: "M3 4v5h5 M3.8 8a9 9 0 1 1-.6 6 M12 7v5l3 2",
   refresh: "M20 7v5h-5 M4 17v-5h5 M5.4 8A7 7 0 0 1 17 6l3 6 M4 12l3 6a7 7 0 0 0 11.6-2",
   calendar: "M4 6h16v15H4z M8 3v6m8-6v6M4 11h16M8 15h2m4 0h2m-8 3h2",
   collapse: "M4 5h16v14H4z M9 5v14",

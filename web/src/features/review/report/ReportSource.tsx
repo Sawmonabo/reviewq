@@ -1,4 +1,5 @@
 import { useRef, useState } from "react";
+import type { ReactNode } from "react";
 import type { ReportSummary } from "../../../api/generated/contracts/reports";
 import { reportSection } from "../../../api/reports";
 import { Loading, Notice } from "../../../components/PanelState";
@@ -8,6 +9,7 @@ import { useVisibleContent } from "./useVisibleContent";
 const STEP = 12_000;
 
 export function ReportSource({
+  historyAccess,
   runId,
   report,
   requestedOffset,
@@ -15,6 +17,7 @@ export function ReportSource({
   onQuote,
   onRendered,
 }: {
+  readonly historyAccess: ReactNode;
   readonly runId: string;
   readonly report: ReportSummary;
   readonly requestedOffset: number;
@@ -80,6 +83,7 @@ export function ReportSource({
             {value.totalCodePoints}
           </span>
         )}
+        {historyAccess}
       </div>
       <div className="actions source-nav">
         <button type="button" disabled={offset === 0} onClick={() => move(0)}>

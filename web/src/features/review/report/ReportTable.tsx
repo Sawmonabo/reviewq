@@ -13,6 +13,7 @@ import { finishReading } from "./report-position";
 import { useVisibleContent } from "./useVisibleContent";
 
 export function ReportTable({
+  historyAccess,
   runId,
   report,
   base,
@@ -22,6 +23,7 @@ export function ReportTable({
   onQuote,
   onRendered,
 }: {
+  readonly historyAccess: ReactNode;
   readonly runId: string;
   readonly report: ReportSummary;
   readonly base: string | undefined;
@@ -65,7 +67,13 @@ export function ReportTable({
   useVisibleContent(content, shown ? report.receiptId : undefined, onRendered);
 
   if (shown === null || (!shown && result.error)) return fallback;
-  if (!shown) return <Loading label="Reading table rows…" />;
+  if (!shown)
+    return (
+      <>
+        {historyAccess}
+        <Loading label="Reading table rows…" />
+      </>
+    );
   const { range, tree, table, tableStart, tableEnd, markdown } = shown;
   const introduction = !table && range.byteEnd === tableStart;
 
@@ -134,6 +142,7 @@ export function ReportTable({
         <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={quote}>
           Quote selection
         </button>
+        {historyAccess}
       </div>
       {notice && <Notice>{notice}</Notice>}
       {result.error && <Notice retry={result.retry}>{result.error}</Notice>}

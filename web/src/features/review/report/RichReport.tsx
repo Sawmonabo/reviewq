@@ -1,5 +1,6 @@
 import { defaultRangeExtractor, useVirtualizer } from "@tanstack/react-virtual";
 import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import type { ReactNode } from "react";
 import type { RootContent } from "hast";
 import type { ReportSummary } from "../../../api/generated/contracts/reports";
 import { DiagramDisplayContext } from "../../../components/markdown/diagram-cache";
@@ -25,6 +26,7 @@ type Selection = {
 };
 
 export function RichReport({
+  historyAccess,
   document: reader,
   onFallback,
   report,
@@ -32,6 +34,7 @@ export function RichReport({
   onQuote,
   onSource,
 }: {
+  readonly historyAccess: ReactNode;
   readonly document: ReaderDocument;
   readonly onFallback: () => void;
   readonly report: ReportSummary;
@@ -446,16 +449,21 @@ export function RichReport({
 
   function renderPrepared(index: number) {
     const group = reader.prepared(index);
-    return group ? (
-      <DiagramDisplayContext value={group.drawings}>
-        {renderBlock(group.block, index)}
-      </DiagramDisplayContext>
-    ) : (
-      <div
-        className="report-preparing"
-        aria-busy="true"
-        style={{ minHeight: virtual.measurementsCache[index]?.size ?? 230 }}
-      />
+    return (
+      <>
+        {index === 0 && historyAccess}
+        {group ? (
+          <DiagramDisplayContext value={group.drawings}>
+            {renderBlock(group.block, index)}
+          </DiagramDisplayContext>
+        ) : (
+          <div
+            className="report-preparing"
+            aria-busy="true"
+            style={{ minHeight: virtual.measurementsCache[index]?.size ?? 230 }}
+          />
+        )}
+      </>
     );
   }
 

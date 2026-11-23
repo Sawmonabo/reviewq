@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import type { ReactNode } from "react";
 import type { RunDetail } from "../../../api/generated/contracts";
 import type { QuoteRef, ReportSummary } from "../../../api/generated/contracts/reports";
 import {
@@ -29,6 +30,7 @@ import { useVisibleContent } from "./useVisibleContent";
 
 type Quote = { readonly text: string; readonly reference: QuoteRef | null };
 type Props = {
+  readonly historyAccess: ReactNode;
   readonly run: RunDetail;
   readonly report: ReportSummary;
   readonly current: boolean;
@@ -41,6 +43,7 @@ type Props = {
 };
 
 export default function ReportDocument({
+  historyAccess,
   run,
   report,
   current,
@@ -196,6 +199,7 @@ export default function ReportDocument({
 
   const sourceView = (
     <ReportSource
+      historyAccess={historyAccess}
       runId={run.runId}
       report={report}
       requestedOffset={sourceOffset}
@@ -217,6 +221,7 @@ export default function ReportDocument({
   return (
     <>
       <div className="report-reader" ref={reader}>
+        {!sourceMode && (body.pending || !displayed?.reader) && historyAccess}
         {notice && <Notice>{notice}</Notice>}
         {!sourceMode && displayed?.outcomeError && (
           <Notice retry={body.retry}>Accepted finding outcomes are unavailable.</Notice>
@@ -224,6 +229,7 @@ export default function ReportDocument({
         {sourceMode ? (
           tryTable ? (
             <ReportTable
+              historyAccess={historyAccess}
               runId={run.runId}
               report={report}
               base={safeUrl(webUrl)}
@@ -243,6 +249,7 @@ export default function ReportDocument({
           <Loading label="Loading accepted report…" />
         ) : displayed?.reader ? (
           <RichReport
+            historyAccess={historyAccess}
             document={displayed.reader}
             report={report}
             onFallback={fallback}

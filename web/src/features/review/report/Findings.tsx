@@ -1,15 +1,17 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { RunDetail } from "../../../api/generated/contracts";
 import type { ResultSummary } from "../../../api/generated/contracts/followups";
 import type { ReportSummary } from "../../../api/generated/contracts/reports";
-import { markReportViewed, reportHistory, reportView } from "../../../api/reports";
+import { markReportViewed, reportView } from "../../../api/reports";
 import { Empty, Loading, Notice } from "../../../components/PanelState";
 import { useResource } from "../../../hooks/useResource";
 import type { DraftStore } from "../../../lib/drafts";
-import { describeError, formatActivityTime, formatTime, readable } from "../../../lib/presentation";
+import { describeError } from "../../../lib/presentation";
 import { savedValue, saveValue } from "../../../lib/view-preferences";
 import { FollowupResults } from "./FollowupResults";
 import ReportDocument from "./ReportDocument";
+import { ReportHistory } from "./ReportHistory";
+import { Icon } from "../../../components/Icon";
 import "./report.css";
 
 type Props = {
@@ -18,24 +20,43 @@ type Props = {
   readonly reviewTitle: string;
   readonly webUrl: string;
   readonly followup: ResultSummary | null | undefined;
-  readonly onRun: (run: string) => void;
+  readonly linkedCheck: ResultSummary | undefined;
+  readonly onLinkHandled: () => void;
+  readonly onOpenCheckRun: (check: ResultSummary) => void;
 };
 
-export default function Findings({ run, drafts, reviewTitle, webUrl, followup, onRun }: Props) {
+export default function Findings({
+  run,
+  drafts,
+  reviewTitle,
+  webUrl,
+  followup,
+  linkedCheck,
+  onLinkHandled,
+  onOpenCheckRun,
+}: Props) {
   const bookmark = `report.receipt.${run.runId}`;
   const [receipt, setReceipt] = useState<string | undefined>(() => {
+    if (linkedCheck) return linkedCheck.receiptId ?? undefined;
     const value = savedValue(bookmark);
     return typeof value === "string" && value.length <= 256 ? value : undefined;
   });
+  const [historyLatest, setHistoryLatest] = useState<string>();
   const [first, setFirst] = useState<ReportSummary>();
   const [frozen, setFrozen] = useState<ReportSummary>();
   const [history, setHistory] = useState(false);
   const [checksEpoch, setChecksEpoch] = useState(0);
-  const [cursor, setCursor] = useState<string>();
+  const [dismissedCheck, setDismissedCheck] = useState<string>();
+  const [check, setCheck] = useState<ResultSummary | undefined>(linkedCheck);
+  useEffect(() => {
+    if (linkedCheck) {
+      saveValue(bookmark, linkedCheck.receiptId);
+      onLinkHandled();
+    }
+  }, [linkedCheck, bookmark, onLinkHandled]);
   const [notice, setNotice] = useState<string>();
   const [busy, setBusy] = useState(false);
-  const [locatingEvidence, setLocatingEvidence] = useState(false);
-  const evidenceRequest = useRef<AbortController | undefined>(undefined);
+
   const historyTrigger = useRef<HTMLButtonElement>(null);
   const viewed = useRef(
     new Map<
@@ -54,74 +75,65 @@ export default function Findings({ run, drafts, reviewTitle, webUrl, followup, o
     [{ kind: "report", id: run.runId }],
   );
   const chosen = receipt ?? first?.receiptId;
-  const latestId = current.data?.report?.receiptId;
+  const loadedLatest = current.data?.report?.receiptId;
+  const latestId = current.data ? loadedLatest : historyLatest;
   const historical = useResource(
-    `report-version:${run.runId}:${chosen ?? ""}:${latestId ?? ""}`,
+    `report-version:${run.runId}:${chosen ?? ""}:${loadedLatest ?? ""}`,
     (signal) =>
-      chosen && chosen !== latestId
+      chosen && chosen !== loadedLatest
         ? reportView(run.runId, signal, chosen)
         : Promise.resolve({ data: null, cursor: "" }),
     [{ kind: "report", id: run.runId }],
   );
-  const versions = useResource(
-    `report-history:${run.runId}:${history}:${cursor ?? ""}`,
-    (signal) =>
-      history
-        ? reportHistory(run.runId, cursor, signal)
-        : Promise.resolve({ data: null, cursor: "" }),
-    [{ kind: "report", id: run.runId }],
-  );
   const report =
-    chosen === latestId
+    chosen === loadedLatest
       ? current.data?.report
       : (historical.data?.report ??
         (frozen?.receiptId === chosen ? frozen : undefined) ??
         (first?.receiptId === chosen ? first : undefined));
   const delivery = current.data?.delivery;
   const displayedReceipt = report?.receiptId;
+  const displayedCheck =
+    check ??
+    (followup?.kind === "unchanged" &&
+    followup.runId === run.runId &&
+    displayedReceipt &&
+    followup.receiptId === displayedReceipt &&
+    followup.batchId !== dismissedCheck
+      ? followup
+      : undefined);
   const isHistorical = Boolean(chosen && latestId && chosen !== latestId && receipt);
   const outdated = Boolean(chosen && latestId && chosen !== latestId && !receipt);
-  useEffect(
-    () => () => {
-      evidenceRequest.current?.abort();
-      evidenceRequest.current = undefined;
-    },
-    [run.runId],
-  );
+  const returnFocus = useRef(false);
+  const bindHistory = useCallback((button: HTMLButtonElement | null) => {
+    if (!button) return;
+    historyTrigger.current = button;
+    if (returnFocus.current && document.activeElement === document.body)
+      button.focus({ preventScroll: true });
+    returnFocus.current = false;
+    return () => {
+      returnFocus.current = returnFocus.current || document.activeElement === button;
+      historyTrigger.current = null;
+    };
+  }, []);
 
-  function choose(id: string | undefined, closeCheck = true) {
-    const shown =
-      current.data?.report?.receiptId === id
-        ? current.data?.report
-        : versions.data?.items.find((version) => version.receiptId === id);
-    setFrozen(shown ?? undefined);
+  function choose(id: string | undefined, closeCheck = true, summary?: ReportSummary) {
+    returnFocus.current =
+      history ||
+      document.activeElement === historyTrigger.current ||
+      Boolean(document.activeElement?.closest(".report-history-access"));
+    setFrozen(
+      summary ?? (id && current.data?.report?.receiptId === id ? current.data.report : undefined),
+    );
     setReceipt(id);
     setNotice(undefined);
     setHistory(false);
-    if (closeCheck) setChecksEpoch((value) => value + 1);
-    evidenceRequest.current?.abort();
-    evidenceRequest.current = undefined;
-    setLocatingEvidence(false);
-    saveValue(bookmark, id ?? null);
-  }
-
-  async function showEarlierEvidence() {
-    if (!report?.parentReceiptId || evidenceRequest.current) return;
-    const controller = new AbortController();
-    evidenceRequest.current = controller;
-    setLocatingEvidence(true);
-    setNotice(undefined);
-    try {
-      const earlier = await earlierEvidence(run.runId, report, controller.signal);
-      if (!controller.signal.aborted) choose(earlier);
-    } catch (error) {
-      if (!controller.signal.aborted) setNotice(describeError(error));
-    } finally {
-      if (evidenceRequest.current === controller) {
-        evidenceRequest.current = undefined;
-        setLocatingEvidence(false);
-      }
+    if (closeCheck) {
+      setCheck(undefined);
+      setDismissedCheck(undefined);
+      setChecksEpoch((value) => value + 1);
     }
+    saveValue(bookmark, id ?? null);
   }
 
   async function acknowledge(receiptId: string, renderedBatchId?: string, automatic = false) {
@@ -166,6 +178,35 @@ export default function Findings({ run, drafts, reviewTitle, webUrl, followup, o
     }
   }
 
+  const historyAccess = (
+    <span className="report-history-access">
+      {isHistorical && (
+        <>
+          <span className="report-version-label">Earlier version</span>
+          <button
+            type="button"
+            className="quiet-button"
+            title="Viewing an earlier version"
+            onClick={() => choose(latestId)}
+          >
+            Back to latest
+          </button>
+        </>
+      )}
+      <button
+        type="button"
+        ref={bindHistory}
+        className="quiet-button history-trigger"
+        aria-haspopup="dialog"
+        aria-expanded={history}
+        onClick={() => setHistory(true)}
+      >
+        <Icon name="history" size={14} />
+        History
+      </button>
+    </span>
+  );
+
   return (
     <div className="findings stack">
       {delivery && delivery.state !== "saved" && (
@@ -183,7 +224,7 @@ export default function Findings({ run, drafts, reviewTitle, webUrl, followup, o
         </Notice>
       )}
       {current.error && <Notice retry={current.retry}>{current.error}</Notice>}
-      {historical.error && chosen !== latestId && (
+      {historical.error && chosen !== loadedLatest && (
         <Notice retry={historical.retry}>
           {historical.error}
           {latestId && (
@@ -194,98 +235,51 @@ export default function Findings({ run, drafts, reviewTitle, webUrl, followup, o
         </Notice>
       )}
       {notice && <Notice>{notice}</Notice>}
-      <div className="report-tools">
-        {isHistorical && (
-          <button type="button" className="quiet-button" onClick={() => choose(latestId)}>
-            Back to current findings
-          </button>
-        )}
-        {!isHistorical && report?.parentReceiptId && (
-          <button
-            type="button"
-            className="quiet-button"
-            disabled={locatingEvidence}
-            onClick={() => void showEarlierEvidence()}
-          >
-            {locatingEvidence ? "Opening earlier evidence…" : "Earlier evidence"}
-          </button>
-        )}
-        <button
-          ref={historyTrigger}
-          type="button"
-          className="quiet-button"
-          aria-expanded={history}
-          onClick={() => setHistory(!history)}
-        >
-          Report history
-        </button>
-      </div>
       {history && (
-        <section className="report-history-list stack" aria-label="Report history">
-          {versions.pending && <Loading label="Reading accepted report versions…" />}
-          {versions.error && <Notice retry={versions.retry}>{versions.error}</Notice>}
-          {!versions.data?.items.length && !versions.pending && (
-            <p className="meta">No accepted versions in this page.</p>
-          )}
-          {versions.data?.items.map((version) => (
-            <button
-              type="button"
-              className="report-version quiet-button"
-              key={version.receiptId}
-              aria-pressed={chosen === version.receiptId}
-              onClick={() => {
-                historyTrigger.current?.focus({ preventScroll: true });
-                choose(version.receiptId);
-              }}
-            >
-              <time dateTime={version.capturedAt} title={formatTime(version.capturedAt)}>
-                {formatActivityTime(version.capturedAt)}
-              </time>
-              <span className="meta" title={`${readable(version.verdict)} · ${version.sha256}`}>
-                {version.receiptId === latestId ? "Latest" : "Earlier findings"}
-              </span>
-            </button>
-          ))}
-          <div className="actions">
-            {cursor && (
-              <button type="button" onClick={() => setCursor(undefined)}>
-                Latest versions
-              </button>
-            )}
-            {versions.data?.nextCursor && (
-              <button
-                type="button"
-                onClick={() => setCursor(versions.data?.nextCursor ?? undefined)}
-              >
-                Older versions
-              </button>
-            )}
-          </div>
-        </section>
+        <ReportHistory
+          run={run}
+          report={report ?? undefined}
+          latestId={latestId}
+          selected={chosen}
+          selectedBatch={displayedCheck?.batchId}
+          onClose={() => setHistory(false)}
+          onVersion={(id, summary, latest) => {
+            setHistoryLatest(latest);
+            choose(id, true, summary);
+          }}
+          onCheck={(batch) => {
+            setCheck(batch);
+            setHistory(false);
+            if (
+              batch.runId === run.runId &&
+              batch.receiptId &&
+              batch.receiptId !== displayedReceipt
+            )
+              choose(batch.receiptId, false);
+          }}
+        />
       )}
       <FollowupResults
         key={checksEpoch}
         run={run}
-        latest={followup}
-        open={history}
+        batch={displayedCheck}
+        onDismiss={() => {
+          setDismissedCheck(displayedCheck?.batchId);
+          setCheck(undefined);
+        }}
         receipt={displayedReceipt}
         disabled={busy}
         onOpenReceipt={(id) => choose(id, false)}
-        onOpenRun={onRun}
-        onChoose={(batch) => {
-          historyTrigger.current?.focus({ preventScroll: true });
-          setHistory(false);
-          if (batch.runId === run.runId && batch.receiptId && batch.receiptId !== displayedReceipt)
-            choose(batch.receiptId, false);
-        }}
+        onOpenRun={onOpenCheckRun}
         onAcknowledge={(batch, automatic) =>
           batch.runId === run.runId && batch.receiptId === displayedReceipt && displayedReceipt
             ? acknowledge(displayedReceipt, batch.batchId, automatic)
             : Promise.resolve(false)
         }
       />
+      {!report && (chosen || current.data || current.error) && <div>{historyAccess}</div>}
       {!report &&
-        (current.pending || (chosen && chosen !== latestId && historical.pending) ? (
+        (current.pending || (chosen && chosen !== loadedLatest && historical.pending) ? (
           <Loading label="Loading accepted findings…" />
         ) : (
           current.data && !chosen && <Empty title="No accepted findings yet" />
@@ -297,6 +291,7 @@ export default function Findings({ run, drafts, reviewTitle, webUrl, followup, o
             run={run}
             report={report}
             current={chosen === latestId}
+            historyAccess={historyAccess}
             drafts={drafts}
             reviewTitle={reviewTitle}
             webUrl={webUrl}
@@ -307,23 +302,5 @@ export default function Findings({ run, drafts, reviewTitle, webUrl, followup, o
         </article>
       )}
     </div>
-  );
-}
-
-async function earlierEvidence(runId: string, report: ReportSummary, signal: AbortSignal) {
-  let parent = report.parentReceiptId;
-  if (report.coverage !== "selected_threads" && parent) return parent;
-  const seen = new Set([report.receiptId]);
-  while (parent && seen.size <= 32 && !seen.has(parent)) {
-    seen.add(parent);
-    const response = await reportView(runId, signal, parent);
-    const previous = response.data.report;
-    if (!previous) break;
-    if (previous.coverage !== "selected_threads" || !previous.parentReceiptId)
-      return previous.receiptId;
-    parent = previous.parentReceiptId;
-  }
-  throw new Error(
-    "The earlier evidence could not be confirmed. Choose an accepted version from Report history.",
   );
 }

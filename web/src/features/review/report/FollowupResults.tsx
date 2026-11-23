@@ -1,118 +1,52 @@
 import { useRef, useState } from "react";
 import type { RunDetail } from "../../../api/generated/contracts";
 import type { ResultSummary } from "../../../api/generated/contracts/followups";
-import { readFollowupBatchAssessments, readFollowupResults } from "../../../api/review";
+import { readFollowupBatchAssessments } from "../../../api/review";
 import { Pagination } from "../../../components/Pagination";
 import { Loading, Notice } from "../../../components/PanelState";
 import { useResource } from "../../../hooks/useResource";
-import { formatTime, readable } from "../../../lib/presentation";
-import { saveValue } from "../../../lib/view-preferences";
+import { readable } from "../../../lib/presentation";
 import { useVisibleContent } from "./useVisibleContent";
 
 type Props = {
   readonly run: RunDetail;
-  readonly latest: ResultSummary | null | undefined;
-  readonly open: boolean;
+  readonly batch: ResultSummary | undefined;
+  readonly onDismiss: () => void;
   readonly receipt: string | undefined;
   readonly disabled: boolean;
   readonly onOpenReceipt: (receipt: string) => void;
-  readonly onOpenRun: (run: string) => void;
-  readonly onChoose: (result: ResultSummary) => void;
+  readonly onOpenRun: (check: ResultSummary) => void;
   readonly onAcknowledge: (result: ResultSummary, automatic: boolean) => Promise<boolean>;
 };
 
 export function FollowupResults({
   run,
-  latest,
-  open,
+  batch,
+  onDismiss,
   receipt,
   disabled,
   onOpenReceipt,
   onOpenRun,
-  onChoose,
   onAcknowledge,
 }: Props) {
-  const [trail, setTrail] = useState<readonly string[]>([]);
-  const [choice, setChoice] = useState<ResultSummary>();
-  const [dismissed, setDismissed] = useState<string>();
   const [acknowledged, setAcknowledged] = useState<ReadonlySet<string>>(() => new Set());
-  const results = useResource(
-    `followup-results:${run.reviewId}:${open}:${trail.at(-1) ?? ""}`,
-    (signal) =>
-      open
-        ? readFollowupResults(run.reviewId, trail.at(-1), signal)
-        : Promise.resolve({ data: null, cursor: "" }),
-    open ? [{ kind: "followup", id: run.reviewId }] : [],
-  );
-  const unchanged =
-    latest?.kind === "unchanged" &&
-    latest.runId === run.runId &&
-    receipt &&
-    latest.receiptId === receipt &&
-    latest.batchId !== dismissed
-      ? latest
-      : undefined;
-  const batch = choice ?? unchanged;
-
+  if (!batch) return null;
   return (
-    <>
-      {open && (
-        <section className="report-history-list stack" aria-label="Follow-up result history">
-          <h3 className="report-check-heading">Thread checks</h3>
-          {results.pending && <Loading label="Loading follow-up results…" />}
-          {results.error && <Notice retry={results.retry}>{results.error}</Notice>}
-          {results.data?.items.length === 0 && <p className="meta">No completed follow-ups.</p>}
-          {results.data?.items.map((result) => (
-            <button
-              type="button"
-              className="quiet-button report-version"
-              key={result.batchId}
-              aria-pressed={batch?.batchId === result.batchId}
-              title={formatTime(result.completedAt)}
-              onClick={() => {
-                setChoice(result);
-                onChoose(result);
-              }}
-            >
-              <span className="report-check-summary">
-                <span>
-                  {result.concernCount} {result.concernCount === 1 ? "concern" : "concerns"} checked
-                  · {result.kind === "unchanged" ? "Findings unchanged" : "Findings updated"}
-                </span>
-                {result.concernCount > 0 && (
-                  <small className="meta">
-                    {result.findingIds.join(", ") || "Selected threads"}
-                    {result.moreFindingIds && ", …"}
-                    {result.reasonPreview && ` · ${result.reasonPreview}`}
-                  </small>
-                )}
-              </span>
-            </button>
-          ))}
-          <Pagination trail={trail} next={results.data?.nextCursor} onPage={setTrail} />
-        </section>
-      )}
-      {batch && (
-        <Assessments
-          key={batch.batchId}
-          reviewId={run.reviewId}
-          batch={batch}
-          currentRun={run.runId}
-          receipt={receipt}
-          disabled={disabled || acknowledged.has(batch.batchId)}
-          onOpenRun={onOpenRun}
-          onOpenReceipt={onOpenReceipt}
-          onClose={() => {
-            setDismissed(batch.batchId);
-            setChoice(undefined);
-          }}
-          onAcknowledge={async (automatic = false) => {
-            if (await onAcknowledge(batch, automatic))
-              setAcknowledged((known) => new Set([...known, batch.batchId]));
-          }}
-        />
-      )}
-    </>
+    <Assessments
+      key={batch.batchId}
+      reviewId={run.reviewId}
+      batch={batch}
+      currentRun={run.runId}
+      receipt={receipt}
+      disabled={disabled || acknowledged.has(batch.batchId)}
+      onOpenRun={onOpenRun}
+      onOpenReceipt={onOpenReceipt}
+      onClose={onDismiss}
+      onAcknowledge={async (automatic = false) => {
+        if (await onAcknowledge(batch, automatic))
+          setAcknowledged((known) => new Set([...known, batch.batchId]));
+      }}
+    />
   );
 }
 
@@ -133,7 +67,7 @@ function Assessments({
   readonly receipt: string | undefined;
   readonly disabled: boolean;
   readonly onOpenReceipt: (receipt: string) => void;
-  readonly onOpenRun: (run: string) => void;
+  readonly onOpenRun: (check: ResultSummary) => void;
   readonly onAcknowledge: (automatic?: boolean) => Promise<void>;
   readonly onClose: () => void;
 }) {
@@ -227,13 +161,7 @@ function Assessments({
       )}
       <Pagination trail={trail} next={data?.nextCursor} onPage={turnPage} />
       {currentRun !== batch.runId && (
-        <button
-          type="button"
-          onClick={() => {
-            if (batch.receiptId) saveValue(`report.receipt.${batch.runId}`, batch.receiptId);
-            onOpenRun(batch.runId);
-          }}
-        >
+        <button type="button" onClick={() => onOpenRun(batch)}>
           Open the run for this result
         </button>
       )}
