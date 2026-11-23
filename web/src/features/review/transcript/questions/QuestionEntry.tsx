@@ -231,7 +231,11 @@ function QuestionDetails({
           (question.options.length > 0 || selected?.[question.id]?.length) && (
             <div key={question.id}>
               {items.length > 1 && <strong>{question.header || question.question}</strong>}
-              <QuestionOptions options={question.options} selected={selected?.[question.id]} />
+              <QuestionOptions
+                options={question.options}
+                multiSelect={question.multiSelect ?? false}
+                selected={selected?.[question.id]}
+              />
             </div>
           ),
       )}

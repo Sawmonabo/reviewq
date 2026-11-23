@@ -165,11 +165,22 @@ export function SecretQuestionField({ question }: { readonly question: Question 
 export function QuestionOptions({
   options,
   selected,
+  multiSelect = false,
 }: {
   readonly options: readonly Choice[];
+  readonly multiSelect?: boolean;
   readonly selected?: readonly string[] | undefined;
 }) {
-  const other = selected?.filter((answer) => !options.some(({ label }) => label === answer));
+  // Claude joins multiple selections with commas, including commas inside native labels.
+  const ambiguous =
+    multiSelect &&
+    selected?.length === 1 &&
+    selected[0]?.includes(",") &&
+    options.some(({ label }) => label.includes(","));
+  const chosen = ambiguous ? undefined : selected;
+  const other = ambiguous
+    ? selected
+    : selected?.filter((answer) => !options.some(({ label }) => label === answer));
   return (
     <>
       {options.length > 0 && (
@@ -177,7 +188,7 @@ export function QuestionOptions({
           {options.map((option) => (
             <li key={option.label}>
               {option.label}
-              {selected?.includes(option.label) && (
+              {chosen?.includes(option.label) && (
                 <small className="question-chosen">Selected</small>
               )}
               {option.description && ` · ${option.description}`}
