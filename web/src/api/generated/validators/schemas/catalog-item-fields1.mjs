@@ -215,16 +215,19 @@ function validate335(
                 var valid0 = true;
               }
               if (valid0) {
-                if (data.path !== undefined && func0.call(data, "path")) {
-                  let data5 = data.path;
+                if (
+                  data.outsideView !== undefined &&
+                  func0.call(data, "outsideView")
+                ) {
+                  let data5 = data.outsideView;
                   const _errs16 = errors;
-                  if (typeof data5 !== "string" && data5 !== null) {
+                  if (typeof data5 !== "boolean" && data5 !== null) {
                     validate335.errors = [
                       {
-                        instancePath: instancePath + "/path",
-                        schemaPath: "#/properties/path/type",
+                        instancePath: instancePath + "/outsideView",
+                        schemaPath: "#/properties/outsideView/type",
                         keyword: "type",
-                        params: { type: schema120.properties.path.type },
+                        params: { type: schema120.properties.outsideView.type },
                       },
                     ];
                     return false;
@@ -234,95 +237,95 @@ function validate335(
                   var valid0 = true;
                 }
                 if (valid0) {
-                  if (
-                    data.reviewer !== undefined &&
-                    func0.call(data, "reviewer")
-                  ) {
-                    let data6 = data.reviewer;
+                  if (data.path !== undefined && func0.call(data, "path")) {
+                    let data6 = data.path;
                     const _errs18 = errors;
-                    const _errs19 = errors;
-                    let valid3 = false;
-                    const _errs20 = errors;
-                    if (
-                      !validate339(data6, {
-                        instancePath: instancePath + "/reviewer",
-                        parentData: data,
-                        parentDataProperty: "reviewer",
-                        rootData,
-                      })
-                    ) {
-                      vErrors =
-                        vErrors === null
-                          ? validate339.errors
-                          : vErrors.concat(validate339.errors);
-                      errors = vErrors.length;
-                    }
-                    var _valid2 = _errs20 === errors;
-                    valid3 = valid3 || _valid2;
-                    if (!valid3) {
-                      const _errs21 = errors;
-                      if (data6 !== null) {
-                        const err4 = {
-                          instancePath: instancePath + "/reviewer",
-                          schemaPath: "#/properties/reviewer/anyOf/1/type",
+                    if (typeof data6 !== "string" && data6 !== null) {
+                      validate335.errors = [
+                        {
+                          instancePath: instancePath + "/path",
+                          schemaPath: "#/properties/path/type",
                           keyword: "type",
-                          params: { type: "null" },
-                        };
-                        if (vErrors === null) {
-                          vErrors = [err4];
-                        } else {
-                          vErrors.push(err4);
-                        }
-                        errors++;
-                      }
-                      var _valid2 = _errs21 === errors;
-                      valid3 = valid3 || _valid2;
-                    }
-                    if (!valid3) {
-                      const err5 = {
-                        instancePath: instancePath + "/reviewer",
-                        schemaPath: "#/properties/reviewer/anyOf",
-                        keyword: "anyOf",
-                        params: {},
-                      };
-                      if (vErrors === null) {
-                        vErrors = [err5];
-                      } else {
-                        vErrors.push(err5);
-                      }
-                      errors++;
-                      validate335.errors = vErrors;
+                          params: { type: schema120.properties.path.type },
+                        },
+                      ];
                       return false;
-                    } else {
-                      errors = _errs19;
-                      if (vErrors !== null) {
-                        if (_errs19) {
-                          vErrors.length = _errs19;
-                        } else {
-                          vErrors = null;
-                        }
-                      }
                     }
                     var valid0 = _errs18 === errors;
                   } else {
                     var valid0 = true;
                   }
                   if (valid0) {
-                    if (data.state !== undefined && func0.call(data, "state")) {
-                      let data7 = data.state;
-                      const _errs23 = errors;
-                      if (typeof data7 !== "string" && data7 !== null) {
-                        validate335.errors = [
-                          {
-                            instancePath: instancePath + "/state",
-                            schemaPath: "#/properties/state/type",
-                            keyword: "type",
-                            params: { type: schema120.properties.state.type },
-                          },
-                        ];
-                        return false;
+                    if (
+                      data.reviewer !== undefined &&
+                      func0.call(data, "reviewer")
+                    ) {
+                      let data7 = data.reviewer;
+                      const _errs20 = errors;
+                      const _errs21 = errors;
+                      let valid3 = false;
+                      const _errs22 = errors;
+                      if (
+                        !validate339(data7, {
+                          instancePath: instancePath + "/reviewer",
+                          parentData: data,
+                          parentDataProperty: "reviewer",
+                          rootData,
+                        })
+                      ) {
+                        vErrors =
+                          vErrors === null
+                            ? validate339.errors
+                            : vErrors.concat(validate339.errors);
+                        errors = vErrors.length;
                       }
-                      var valid0 = _errs23 === errors;
+                      var _valid2 = _errs22 === errors;
+                      valid3 = valid3 || _valid2;
+                      if (!valid3) {
+                        const _errs23 = errors;
+                        if (data7 !== null) {
+                          const err4 = {
+                            instancePath: instancePath + "/reviewer",
+                            schemaPath: "#/properties/reviewer/anyOf/1/type",
+                            keyword: "type",
+                            params: { type: "null" },
+                          };
+                          if (vErrors === null) {
+                            vErrors = [err4];
+                          } else {
+                            vErrors.push(err4);
+                          }
+                          errors++;
+                        }
+                        var _valid2 = _errs23 === errors;
+                        valid3 = valid3 || _valid2;
+                      }
+                      if (!valid3) {
+                        const err5 = {
+                          instancePath: instancePath + "/reviewer",
+                          schemaPath: "#/properties/reviewer/anyOf",
+                          keyword: "anyOf",
+                          params: {},
+                        };
+                        if (vErrors === null) {
+                          vErrors = [err5];
+                        } else {
+                          vErrors.push(err5);
+                        }
+                        errors++;
+                        validate335.errors = vErrors;
+                        return false;
+                      } else {
+                        errors = _errs21;
+                        if (vErrors !== null) {
+                          if (_errs21) {
+                            vErrors.length = _errs21;
+                          } else {
+                            vErrors = null;
+                          }
+                        }
+                      }
+                      var valid0 = _errs20 === errors;
                     } else {
                       var valid0 = true;
                     }

@@ -10,6 +10,7 @@ use reviewq_domain::settings::{
 
 use crate::access::{Actor, AppError, AppFuture};
 use crate::events::Snapshot;
+use crate::queue::ReviewAuthor;
 use crate::sources::{ReviewSourceReader, TicketSourceReader};
 
 mod reduction;
@@ -67,6 +68,7 @@ pub struct ConnectionAuthority {
 pub enum CatalogKind {
     Projects(ProjectView),
     Reviewers,
+    ReviewerSuggestions,
     Boards,
     Board(u64),
     Statuses,
@@ -104,6 +106,7 @@ pub struct CatalogItem {
     pub status_ids: Vec<String>,
     pub estimate_field: Option<String>,
     pub reviewer: Option<CatalogReviewer>,
+    pub outside_view: Option<bool>,
 }
 
 pub struct CatalogReviewer {
@@ -171,6 +174,13 @@ impl SavedCredentials {
 pub trait SettingsStore: Send + Sync {
     /// Private credentials are used only by the connection/projection use cases.
     fn read_credentials(&self, actor: Actor) -> AppFuture<'_, Snapshot<SavedCredentials>>;
+
+    fn reviewer_suggestions(
+        &self,
+        actor: Actor,
+        expected: Revision,
+        origin: String,
+    ) -> AppFuture<'_, Vec<ReviewAuthor>>;
 
     fn settings(&self, actor: Actor) -> AppFuture<'_, Snapshot<Connections>>;
     fn preference_revision(&self) -> AppFuture<'_, Revision>;

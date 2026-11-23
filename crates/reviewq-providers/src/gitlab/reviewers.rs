@@ -162,6 +162,7 @@ impl User {
                     .public_email
                     .and_then(|email| safe_label(&email, 320).ok()),
             }),
+            outside_view: None,
         })
     }
 }

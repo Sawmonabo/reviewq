@@ -71,6 +71,8 @@ pub struct TestConnection {
 pub enum CatalogKind {
     Projects,
     Reviewers,
+    #[serde(rename = "reviewerSuggestions")]
+    ReviewerSuggestions,
     Boards,
     Board,
     Statuses,
@@ -253,6 +255,8 @@ pub struct CatalogItem {
     pub estimate_field: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reviewer: Option<CatalogReviewer>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub outside_view: Option<bool>,
 }
 
 #[derive(Serialize)]

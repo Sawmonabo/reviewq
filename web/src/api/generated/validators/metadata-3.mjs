@@ -51,11 +51,11 @@ const schema120 = {
     estimateField: { type: ["string", "null"] },
     id: { $ref: "#/definitions/CheckpointIdDto" },
     label: { type: "string" },
+    outsideView: { type: ["boolean", "null"] },
     path: { type: ["string", "null"] },
     reviewer: {
       anyOf: [{ $ref: "#/definitions/CatalogReviewer" }, { type: "null" }],
     },
-    state: { type: ["string", "null"] },
   },
 };
 const schema121 = {
@@ -65,6 +65,16 @@ const schema121 = {
   },
   required: ["username", "publicEmail"],
   type: "object",
+};
+const schema122 = {
+  type: "object",
+  properties: {
+    state: { type: ["string", "null"] },
+    statusIds: {
+      items: { $ref: "#/definitions/CheckpointIdDto" },
+      type: "array",
+    },
+  },
 };
 const schema128 = {
   enum: ["not_requested", "unknown", "absent", "confirmed"],
@@ -136,6 +146,7 @@ export {
   schema116,
   schema120,
   schema121,
+  schema122,
   schema128,
   schema129,
   schema130,

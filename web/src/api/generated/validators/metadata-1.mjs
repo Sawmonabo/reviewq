@@ -66,6 +66,7 @@ const schema23 = {
   enum: [
     "projects",
     "reviewers",
+    "reviewerSuggestions",
     "boards",
     "board",
     "statuses",

@@ -20,6 +20,7 @@ function validate51(
   if (!(
     data === "projects" ||
     data === "reviewers" ||
+    data === "reviewerSuggestions" ||
     data === "boards" ||
     data === "board" ||
     data === "statuses" ||

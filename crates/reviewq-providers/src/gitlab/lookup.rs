@@ -167,18 +167,22 @@ impl GitLab {
         if projects.is_empty() || !valid_path(path) {
             return Err(AppError::NotFound);
         }
-        let mut url = self.url("api/v4/projects/")?;
-        url.path_segments_mut()
-            .map_err(|_| AppError::Internal)?
-            .pop_if_empty()
-            .push(path);
-        let project = self.project_metadata(url).await?;
+        let project = self.project_by_path(path).await?;
         let id = ProjectId::try_from(project.id).map_err(|_| AppError::Unavailable)?;
         if project.path_with_namespace != path || !projects.contains(&id) {
             return Err(AppError::NotFound);
         }
         let row = self.merge_request(id, iid).await?;
         Ok((project, id, row))
+    }
+
+    pub(super) async fn project_by_path(&self, path: &str) -> Result<Project, AppError> {
+        let mut url = self.url("api/v4/projects/")?;
+        url.path_segments_mut()
+            .map_err(|_| AppError::Internal)?
+            .pop_if_empty()
+            .push(path);
+        self.project_metadata(url).await
     }
 
     pub(super) async fn merge_request(
@@ -291,7 +295,7 @@ impl<'a> Target<'a> {
     }
 }
 
-fn valid_path(path: &str) -> bool {
+pub(super) fn valid_path(path: &str) -> bool {
     path.len() <= 512
         && path.contains('/')
         && path.split('/').all(|part| {
