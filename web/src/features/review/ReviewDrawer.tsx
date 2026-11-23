@@ -375,32 +375,6 @@ export default function ReviewDrawer({
               </>
             )}
           </div>
-          {!child &&
-            ((runs?.items.length ?? 0) > 1 ||
-              (!selected && Boolean(runs?.items.length)) ||
-              runTrail.length > 0 ||
-              Boolean(runs?.nextCursor)) && (
-              <FilterSelect
-                label="Runs"
-                value={run?.runId ?? ""}
-                options={[
-                  ...(!run ? [{ value: "", label: "Choose run", disabled: true }] : []),
-                  ...(run && !runs?.items.some((item) => item.runId === run.runId)
-                    ? [{ value: run.runId, label: "Selected run" }]
-                    : []),
-                  ...(runs?.items ?? []).map((item) => ({
-                    value: item.runId,
-                    label: [
-                      item.provider === "claude" ? "Claude Code" : "Codex",
-                      item.startedAt ? formatActivityTime(item.startedAt) : item.runId,
-                    ]
-                      .filter(Boolean)
-                      .join(" · "),
-                  })),
-                ]}
-                onChange={onRun}
-              />
-            )}
           <div className="actions drawer-actions">
             <ActionMenu
               label="Review actions"
@@ -584,6 +558,32 @@ export default function ReviewDrawer({
               </button>
             ))}
           </div>
+          {!child &&
+            ((runs?.items.length ?? 0) > 1 ||
+              (!selected && Boolean(runs?.items.length)) ||
+              runTrail.length > 0 ||
+              Boolean(runs?.nextCursor)) && (
+              <FilterSelect
+                label="Runs"
+                value={run?.runId ?? ""}
+                options={[
+                  ...(!run ? [{ value: "", label: "Choose run", disabled: true }] : []),
+                  ...(run && !runs?.items.some((item) => item.runId === run.runId)
+                    ? [{ value: run.runId, label: "Selected run" }]
+                    : []),
+                  ...(runs?.items ?? []).map((item) => ({
+                    value: item.runId,
+                    label: [
+                      item.provider === "claude" ? "Claude Code" : "Codex",
+                      item.startedAt ? formatActivityTime(item.startedAt) : item.runId,
+                    ]
+                      .filter(Boolean)
+                      .join(" · "),
+                  })),
+                ]}
+                onChange={onRun}
+              />
+            )}
         </div>
       </header>
       <div

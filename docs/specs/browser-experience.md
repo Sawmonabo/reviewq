@@ -24,7 +24,7 @@ Notifications 2
 Settings
 ```
 
-In the drawer keep the breadcrumb, human title, run selector and tabs above the reading area. On Agent, the selected lead and Send stay visible beside the editable draft. Use the primary button for the current task, such as Prepare reviews in selection mode or Send in Agent. Secondary actions belong in named menus. Counts, statuses and people come from the selected resource.
+Place Runs at the right of the drawer tabs when a lead has multiple runs. Keep the lead/child selector on the Agent toolbar. Keep the lead message draft editable unless the displayed agent is waiting on a blocking question. Show one answer form there and restore the draft when the request settles. Use the primary button for the current task, such as Prepare reviews in selection mode or Send in Agent. Secondary actions belong in named menus. Counts, statuses and people come from the selected resource.
 
 | Visual token | Implementation value and placement |
 | --- | --- |

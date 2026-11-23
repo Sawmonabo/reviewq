@@ -188,15 +188,14 @@
 :root[data-theme="light"] .drawer-surface .drawer-tabs button[aria-selected="true"] {
   color: var(--text);
 }
-.drawer-header-row > .select-filter {
+.drawer-tab-bar > .select-filter {
   flex: 0 1 auto;
   min-width: 0;
   max-width: min(42%, 195px);
-  margin-inline-start: auto;
   min-height: 29px;
   height: 29px;
 }
-.drawer-header-row .filter-value {
+.drawer-tab-bar .filter-value {
   max-width: 135px;
 }
 .run-pages {
@@ -303,7 +302,13 @@
     gap: 17px;
   }
 }
+@container review-detail (max-width: 400px) {
+  .drawer-tab-bar > .select-filter .filter-value {
+    display: none;
+  }
+}
 @media (pointer: coarse) {
+  .drawer-tab-bar > .select-filter,
   .drawer-actions :is(.menu-trigger, .icon-button),
   .drawer-surface .drawer-tabs button {
     min-height: 44px;
