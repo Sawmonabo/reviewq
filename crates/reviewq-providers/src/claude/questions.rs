@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
@@ -13,8 +14,7 @@ use sha2::{Digest, Sha256};
 use tokio::sync::oneshot;
 
 use super::Claude;
-use crate::history::claude_questions;
-use crate::question_wire::request_id;
+use crate::question_wire::{claude, request_id};
 
 const MAX_FORMS: usize = 64;
 const MAX_SESSION_FORMS: usize = 8;
@@ -33,17 +33,23 @@ struct LiveQuestion {
 }
 
 impl Claude {
-    pub(super) async fn watch_question(
+    pub(super) fn watch_question(
         &self,
         session: HistorySession,
         address: ClaudeQuestionAddress,
+        input: &[u8],
     ) -> Result<oneshot::Receiver<ClaudeQuestionAnswers>, AppError> {
-        let questions = self
-            .read_native(session.clone(), {
-                let address = address.clone();
-                move |source, cancelled| claude_questions::open(&source, &address, cancelled)
-            })
-            .await?;
+        if session.parent.is_some() || !self.supports_questions(session.binding.identity()) {
+            return Err(AppError::Forbidden);
+        }
+        let questions = claude::project(input).ok_or(AppError::Unavailable)?;
+        let mut prompts = HashSet::new();
+        if questions
+            .iter()
+            .any(|question| question.secret || !prompts.insert(&question.prompt))
+        {
+            return Err(AppError::Unavailable);
+        }
         let request = request_id(
             session.binding.identity().native_id().as_str(),
             address.assistant.as_str(),

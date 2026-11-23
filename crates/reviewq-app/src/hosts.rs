@@ -214,7 +214,8 @@ pub trait ClaudeCompanion: QuestionsPort + Send + Sync {
         &self,
         session: HistorySession,
         address: ClaudeQuestionAddress,
-    ) -> AppFuture<'_, tokio::sync::oneshot::Receiver<ClaudeQuestionAnswers>>;
+        input: &[u8],
+    ) -> Result<tokio::sync::oneshot::Receiver<ClaudeQuestionAnswers>, AppError>;
 
     fn finish_question(
         &self,

@@ -29,7 +29,7 @@ pub(crate) async fn claude_bridge(
         ClaudeBridgeOperation::Heartbeat => ("/api/v1/native/claude/heartbeat", 16_384usize),
         ClaudeBridgeOperation::DeliveryCheck => ("/api/v1/native/claude/delivery-check", 16_384),
         ClaudeBridgeOperation::Hook => ("/api/v1/native/claude/hook", 16_384),
-        ClaudeBridgeOperation::Question => ("/api/v1/native/claude/question", 4096),
+        ClaudeBridgeOperation::Question => ("/api/v1/native/claude/question", 64 * 1024),
         ClaudeBridgeOperation::QuestionFinished => {
             ("/api/v1/native/claude/question-finished", 4096)
         }

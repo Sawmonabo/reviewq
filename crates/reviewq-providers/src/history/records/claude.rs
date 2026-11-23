@@ -1,14 +1,13 @@
-use std::collections::{BTreeMap, HashSet};
+use std::collections::BTreeMap;
 use std::io::Read;
 
 use reviewq_app::access::AppError;
 use reviewq_app::history::{QuestionOutcome, VisibleKind, VisiblePartKind};
-use reviewq_app::hosts::{Question, QuestionOption};
+use reviewq_app::hosts::Question;
 use reviewq_domain::identity::{NativeInputId, NativeSessionId};
-use serde::Deserialize;
 use struson::reader::{JsonReader, JsonStreamReader, ValueType};
 
-use crate::question_wire::{request_id, visible};
+use crate::question_wire::{claude, request_id, visible};
 
 use super::{
     BodySink, ID_BYTES, Message, Projection, Text, Window, contents, date, invalid, object, string,
@@ -17,7 +16,7 @@ use super::{
 pub(in crate::history) const ASK_USER_QUESTION: &str = "AskUserQuestion";
 pub(super) const INPUT_WINDOW: Window = Window {
     start: 0,
-    limit: 42 * 1024,
+    limit: claude::MAX_INPUT_BYTES,
     part: None,
 };
 
@@ -113,7 +112,11 @@ pub(super) fn project<R: Read>(
             if name != ASK_USER_QUESTION {
                 continue;
             }
-            let questions = input(&part.body).unwrap_or_default();
+            let questions = if part.body.bytes <= claude::MAX_INPUT_BYTES as u64 {
+                claude::project(&part.body.picked).unwrap_or_default()
+            } else {
+                Vec::new()
+            };
             part.kind = VisiblePartKind::UserQuestion {
                 request: request_id(native.as_str(), id, call.as_str()),
                 questions,
@@ -125,86 +128,6 @@ pub(super) fn project<R: Read>(
     item.id = id;
     item.claude_tool_parent = tool_parent.or(parent).and_then(|value| value.parse().ok());
     Ok(Some((item, kind, stamp, None)))
-}
-
-#[derive(Deserialize)]
-struct QuestionInput {
-    questions: Vec<NativeQuestion>,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct NativeQuestion {
-    header: String,
-    question: String,
-    kind: Option<String>,
-    options: Option<Vec<NativeOption>>,
-    #[serde(default)]
-    multi_select: bool,
-    #[serde(default, alias = "is_secret", alias = "secret")]
-    is_secret: bool,
-}
-
-#[derive(Deserialize)]
-struct NativeOption {
-    label: String,
-    #[serde(default)]
-    description: String,
-    preview: Option<String>,
-}
-
-fn input(body: &Text) -> Option<Vec<Question>> {
-    if body.bytes > INPUT_WINDOW.limit as u64 {
-        return None;
-    }
-    let input: QuestionInput = serde_json::from_slice(&body.picked).ok()?;
-    if !(1..=4).contains(&input.questions.len()) {
-        return None;
-    }
-    input
-        .questions
-        .into_iter()
-        .enumerate()
-        .map(|(index, question)| {
-            if !visible(&question.header, 1024, false) || !visible(&question.question, 8192, true) {
-                return None;
-            }
-            let options = question.options.unwrap_or_default();
-            match question.kind.as_deref() {
-                None | Some("choice") if (2..=4).contains(&options.len()) => (),
-                Some("text") if options.is_empty() && !question.multi_select => (),
-                _ => return None,
-            }
-            let mut seen = HashSet::new();
-            let options = options
-                .into_iter()
-                .map(|option| {
-                    if !visible(&option.label, 1024, false)
-                        || !seen.insert(option.label.clone())
-                        || option.description.len() > 4096
-                    {
-                        return None;
-                    }
-                    Some(QuestionOption {
-                        label: option.label,
-                        description: option.description,
-                        preview: option
-                            .preview
-                            .filter(|preview| visible(preview, 8192, true)),
-                    })
-                })
-                .collect::<Option<Vec<_>>>()?;
-            Some(Question {
-                id: format!("question-{}", index + 1),
-                header: question.header,
-                prompt: question.question,
-                options,
-                allows_other: true,
-                secret: question.is_secret,
-                multi_select: question.multi_select,
-            })
-        })
-        .collect()
 }
 
 /// An exact native result can close an opening even if its answer was unavailable.

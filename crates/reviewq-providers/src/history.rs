@@ -16,7 +16,7 @@ use reviewq_domain::identity::NativeInputId;
 use tokio::sync::Semaphore;
 
 mod claude;
-pub(crate) mod claude_questions;
+mod claude_questions;
 mod claude_workflow;
 mod codex_report;
 mod content;

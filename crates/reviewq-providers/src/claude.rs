@@ -159,8 +159,9 @@ impl ClaudeCompanion for Claude {
         &self,
         session: HistorySession,
         address: ClaudeQuestionAddress,
-    ) -> AppFuture<'_, tokio::sync::oneshot::Receiver<ClaudeQuestionAnswers>> {
-        Box::pin(self.watch_question(session, address))
+        input: &[u8],
+    ) -> Result<tokio::sync::oneshot::Receiver<ClaudeQuestionAnswers>, AppError> {
+        self.watch_question(session, address, input)
     }
 
     fn finish_question(

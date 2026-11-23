@@ -29,11 +29,11 @@ export async function invoke($, action, id, value) {
   }
 }
 
-export async function waitForQuestion($, id, address) {
+export async function waitForQuestion($, id, address, questions) {
   const argv = await nativeArgv($);
   if (!argv) return undefined;
   argv.push("claude-bridge", "question", id);
-  const stream = $.process.spawn({ argv, input: JSON.stringify({ address }), env: await $.process.hookEnv() });
+  const stream = $.process.spawn({ argv, input: JSON.stringify({ address, input: { questions } }), env: await $.process.hookEnv() });
   let stdout = "";
   for await (const chunk of stream) {
     if (chunk.stream !== "stdout") continue;

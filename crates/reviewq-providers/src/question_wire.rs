@@ -5,6 +5,8 @@ use reviewq_domain::identity::ReportHash;
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
 
+pub(crate) mod claude;
+
 const MAX_QUESTIONS: usize = 16;
 const MAX_OPTIONS: usize = 32;
 pub(crate) const ASYNC_FORM_BYTES: u64 = 48 * 1024;

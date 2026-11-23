@@ -68,7 +68,7 @@ export async function answerQuestion($, state, event, next, heartbeat, current) 
   try {
     await heartbeat();
     if (active()) {
-      const answers = await waitForQuestion($, state.id, question.address);
+      const answers = await waitForQuestion($, state.id, question.address, input.questions);
       if (answers && active()) return { decision: { behavior: "allow", updatedInput: { ...input, answers } } };
     }
   } catch {

@@ -46,6 +46,7 @@ impl Address {
 struct Watch {
     context: ClaudeCommand,
     address: Address,
+    input: serde_json::Value,
 }
 
 pub(super) async fn watch(
@@ -53,7 +54,7 @@ pub(super) async fn watch(
     headers: HeaderMap,
     ApiBytes(bytes): ApiBytes,
 ) -> Result<Json<Success<Option<ClaudeQuestionAnswers>>>, ApiError> {
-    let command: Watch = bridge_command(&entry, &headers, &bytes, 4096)?;
+    let command: Watch = bridge_command(&entry, &headers, &bytes, 64 * 1024)?;
     if !entry.sends_allowed {
         return Err(AppError::Unavailable.into());
     }
@@ -64,9 +65,8 @@ pub(super) async fn watch(
         .store
         .fence_claude_question(lead.clone(), address.clone(), false)
         .await?;
-    let receiver = companion
-        .open_question(session.clone(), address.clone())
-        .await?;
+    let input = serde_json::to_vec(&command.input).map_err(|_| AppError::InvalidRequest)?;
+    let receiver = companion.open_question(session.clone(), address.clone(), &input)?;
     if let Err(error) = entry
         .store
         .fence_claude_question(lead.clone(), address.clone(), true)

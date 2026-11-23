@@ -1,96 +1,14 @@
-use std::collections::HashSet;
-use std::sync::atomic::AtomicBool;
-
-use reviewq_app::access::AppError;
-use reviewq_app::history::{HistorySession, QuestionOutcome, VisiblePartKind};
-use reviewq_app::hosts::{ClaudeQuestionAddress, Question};
+use reviewq_app::history::{QuestionOutcome, VisiblePartKind};
+use reviewq_app::hosts::Question;
 use reviewq_domain::identity::NativeInputId;
 use reviewq_domain::session::HostProvider;
 
-use super::file::{self, Lines};
+use super::file::Lines;
 use super::{locator, records};
 use crate::question_wire::request_id;
 
 pub(super) const QUESTION_LOOKAHEAD_BYTES: u64 = 4 * 1024 * 1024;
 const QUESTION_LOOKAHEAD_LINES: usize = 128;
-
-pub(crate) fn open(
-    session: &HistorySession,
-    address: &ClaudeQuestionAddress,
-    cancel: &AtomicBool,
-) -> Result<Vec<Question>, AppError> {
-    if session.parent.is_some() || session.binding.identity().provider() != HostProvider::Claude {
-        return Err(AppError::Forbidden);
-    }
-    let source = locator::locate(session, cancel)?.ok_or(AppError::NotFound)?;
-    let length = source
-        .file
-        .metadata()
-        .map_err(|_| AppError::Unavailable)?
-        .len();
-    let mut budget = QUESTION_LOOKAHEAD_BYTES;
-    let complete = file::end_of_line(&source.file, length, &mut budget, cancel)?;
-    let mut lines = Lines::new(&source.file, cancel);
-    let mut end = complete;
-    let request = request_id(
-        source.native_id.as_str(),
-        address.assistant.as_str(),
-        address.call.as_str(),
-    );
-    for _ in 0..QUESTION_LOOKAHEAD_LINES {
-        if end == 0 || budget == 0 {
-            break;
-        }
-        let start = lines.previous(end - 1, &mut budget)?;
-        let record = records::project(
-            HostProvider::Claude,
-            lines.input(start, end),
-            &source.native_id,
-            None,
-            0,
-            0,
-        );
-        if let Some(record) = record
-            && record.id == address.assistant
-        {
-            let mut matching = record.parts.into_iter().filter_map(|part| match part.kind {
-                VisiblePartKind::UserQuestion {
-                    request: candidate,
-                    questions,
-                    ..
-                } if candidate == request => Some(questions),
-                _ => None,
-            });
-            let questions = matching.next().ok_or(AppError::NotFound)?;
-            let mut prompts = HashSet::new();
-            if matching.next().is_some()
-                || questions.is_empty()
-                || questions
-                    .iter()
-                    .any(|question| question.secret || !prompts.insert(&question.prompt))
-            {
-                return Err(AppError::Unavailable);
-            }
-            if outcome(
-                &source,
-                &mut lines,
-                end,
-                complete,
-                &mut budget,
-                &address.assistant,
-                &address.call,
-                &questions,
-            )
-            .is_some()
-            {
-                return Err(AppError::StaleRevision);
-            }
-            return Ok(questions);
-        }
-        end = start;
-    }
-    Err(AppError::NotFound)
-}
 
 pub(super) fn attach_outcomes(
     source: &locator::Source,
@@ -161,6 +79,9 @@ fn outcome(
 #[cfg(test)]
 mod tests {
     use std::io::Write as _;
+    use std::sync::atomic::AtomicBool;
+
+    use crate::history::file;
 
     use reviewq_app::history::NativePosition;
     use serde_json::{Value, json};
