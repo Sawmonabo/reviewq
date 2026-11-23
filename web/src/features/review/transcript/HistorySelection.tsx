@@ -78,7 +78,22 @@ export function useHistorySelection(viewport: RefObject<HTMLDivElement | null>) 
     selectionState.current = { hasText: false, ids: new Set() };
   }
 
-  return { pinned, selectedText, focusedDiagram, clear };
+  function isDiagramVisible(entryId: string) {
+    const host = viewport.current;
+    const figure = document.activeElement?.closest(".mermaid-figure");
+    if (
+      !host ||
+      !figure ||
+      !host.contains(figure) ||
+      figure.closest<HTMLElement>("[data-native-entry]")?.dataset.nativeEntry !== entryId
+    )
+      return false;
+    const bounds = figure.getBoundingClientRect();
+    const frame = host.getBoundingClientRect();
+    return bounds.height > 0 && bounds.bottom > frame.top && bounds.top < frame.bottom;
+  }
+
+  return { pinned, selectedText, focusedDiagram, isDiagramVisible, clear };
 }
 
 export function HistorySelection({

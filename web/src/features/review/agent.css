@@ -291,7 +291,7 @@
   position: relative;
   width: 100%;
   min-height: 34px;
-  margin: 24px 0 20px;
+  margin: 0 0 20px;
 }
 .timeline-boundary {
   position: absolute;
@@ -304,7 +304,7 @@
   font-size: 12px;
 }
 .timeline-boundary.older {
-  top: 0;
+  top: 24px;
 }
 .timeline-boundary.newer {
   bottom: 0;

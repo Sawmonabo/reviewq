@@ -35,6 +35,7 @@ export function useHistory(
   following: boolean,
   pinned: ReadonlySet<string>,
   focusedDiagram: string | undefined,
+  isDiagramVisible: (entryId: string) => boolean,
   beforeUpdate: (position: ReadPosition, anchor: Anchor | undefined, extend: boolean) => void,
 ) {
   const { runId, sessionKey } = target;
@@ -46,13 +47,13 @@ export function useHistory(
   const [updated, setUpdated] = useState<number>();
   const [waiting, setWaiting] = useState(false);
   const [live, setLive] = useState<Provisional>();
-  const active = useRef<{ controller: AbortController; position: ReadPosition } | undefined>(
-    undefined,
-  );
-  const currentView = useRef({ beforeUpdate, pinned, focusedDiagram });
+  const active = useRef<
+    { controller: AbortController; position: ReadPosition; mode: ReadMode } | undefined
+  >(undefined);
+  const currentView = useRef({ beforeUpdate, following, pinned, focusedDiagram, isDiagramVisible });
   useLayoutEffect(() => {
-    currentView.current = { beforeUpdate, pinned, focusedDiagram };
-  }, [beforeUpdate, pinned, focusedDiagram]);
+    currentView.current = { beforeUpdate, following, pinned, focusedDiagram, isDiagramVisible };
+  }, [beforeUpdate, following, pinned, focusedDiagram, isDiagramVisible]);
   const pending = useRef(false);
   const reopen = useRef<(() => void) | undefined>(undefined);
   const resetWhileFocused = useRef(false);
@@ -63,10 +64,17 @@ export function useHistory(
 
   function cancelOpposite(up: boolean) {
     const request = active.current;
-    if (request?.position === (up ? "newer" : "older")) {
+    if (!request) return;
+    const forward =
+      request.position === "newer" || (request.position === "latest" && pages.length > 0);
+    if (up ? forward : request.position === "older") {
       request.controller.abort();
       active.current = undefined;
       setLoading(false);
+      if (request.mode === "refresh") {
+        pending.current = true;
+        setWaiting(true);
+      }
     }
   }
 
@@ -88,9 +96,9 @@ export function useHistory(
     return true;
   }
 
-  function sameLiveDiagram(entryId: string | undefined) {
-    const { focusedDiagram } = currentView.current;
-    return entryId !== undefined && focusedDiagram === entryId;
+  function isReadingLiveDiagram(entryId: string | undefined) {
+    const { focusedDiagram, isDiagramVisible } = currentView.current;
+    return entryId !== undefined && focusedDiagram === entryId && isDiagramVisible(entryId);
   }
 
   async function load(position: ReadPosition, wanted?: Anchor, mode: ReadMode = "manual") {
@@ -114,7 +122,7 @@ export function useHistory(
     function held(replace: boolean, refreshed?: HistoryPage) {
       const protectedIds = currentView.current.pinned;
       if (!protectedIds.size) return false;
-      if (background && sameLiveDiagram(live?.entryId) && !resetWhileFocused.current) {
+      if (background && isReadingLiveDiagram(live?.entryId) && !resetWhileFocused.current) {
         if (!refreshed || (!refreshed.reset && refreshed.generation === generation)) return false;
         resetWhileFocused.current = true;
       }
@@ -138,8 +146,8 @@ export function useHistory(
     active.current?.controller.abort();
     if (requestedJump) resetTo.current = undefined;
     const controller = new AbortController();
-    active.current = { controller, position };
-    pending.current = false;
+    active.current = { controller, position, mode };
+    if (!adjacent || mode === "refresh") pending.current = false;
     setLoading(true);
     try {
       const response = await historyPage(
@@ -154,6 +162,15 @@ export function useHistory(
       if (controller.signal.aborted) return;
       const { data, cursor: eventCursor } = response;
       const replacing = data.reset || !adjacent || data.generation !== generation;
+      if (
+        mode === "refresh" &&
+        !currentView.current.following &&
+        !isReadingLiveDiagram(live?.entryId)
+      ) {
+        pending.current = true;
+        setWaiting(true);
+        return;
+      }
       if (mode === "prefill" && (replacing || currentView.current.pinned.size)) return;
       if (held(replacing, data)) return;
       const previousHead = last?.items[0];
@@ -176,11 +193,13 @@ export function useHistory(
       setError(undefined);
       setWaiting(pending.current);
       if (replacing) {
+        const focused = currentView.current.focusedDiagram;
+        const preserveDiagram = background && isReadingLiveDiagram(focused);
         setPages(keepEarlier ? [...pages.slice(0, -1), data] : [data]);
         setLive((current) =>
-          background &&
+          preserveDiagram &&
           current &&
-          sameLiveDiagram(current.entryId) &&
+          current.entryId === focused &&
           !data.reset &&
           data.generation === generation &&
           !data.items.some((item) => item.entryId === current.entryId)
@@ -223,7 +242,7 @@ export function useHistory(
   const notice = useEffectEvent((kind: string, value: Record<string, unknown>) => {
     if (kind === "delta") {
       if (!isDelta(value) || value.generation !== generation || value.block !== 0) return;
-      if (!sameLiveDiagram(value.entryId) && (!following || pinned.size)) {
+      if (!isReadingLiveDiagram(value.entryId) && (!following || pinned.size)) {
         pending.current = true;
         setWaiting(true);
         return;
@@ -244,7 +263,7 @@ export function useHistory(
     }
     if (typeof value.availability === "string") setAvailability(value.availability);
     if (
-      (resetWhileFocused.current || !sameLiveDiagram(live?.entryId)) &&
+      (resetWhileFocused.current || !isReadingLiveDiagram(live?.entryId)) &&
       (!following || pinned.size)
     ) {
       pending.current = true;
@@ -260,7 +279,7 @@ export function useHistory(
   });
 
   const catchup = useEffectEvent(() => {
-    const diagram = !resetWhileFocused.current && sameLiveDiagram(live?.entryId);
+    const diagram = !resetWhileFocused.current && isReadingLiveDiagram(live?.entryId);
     if ((!diagram && pinned.size) || !waiting || loading) return;
     const wanted = resetTo.current;
     if (!wanted && !following && !diagram) return;

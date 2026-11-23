@@ -140,6 +140,10 @@ export function timelineRowKey(row: VisibleRow) {
   return "deliveryKey" in row ? (row.deliveryKey ?? row.id) : row.id;
 }
 
+export function isPinnedRow(row: VisibleRow, pinned: ReadonlySet<string>) {
+  return pinned.has(row.id) || pinned.has(historyId(row)) || pinned.has(timelineRowKey(row));
+}
+
 export function toggleKey(known: ReadonlySet<string>, key: string, open: boolean) {
   if (known.has(key) === open) return known;
   const next = new Set(known);
@@ -178,13 +182,7 @@ export function transcriptRangeIndexes(
   }
   if (pinned.size || findEntry)
     entries.forEach((entry, index) => {
-      if (
-        pinned.has(entry.id) ||
-        pinned.has(historyId(entry)) ||
-        pinned.has(timelineRowKey(entry)) ||
-        entry.id === findEntry
-      )
-        indexes.add(index);
+      if (isPinnedRow(entry, pinned) || entry.id === findEntry) indexes.add(index);
     });
   return [...indexes].sort((left, right) => left - right);
 }

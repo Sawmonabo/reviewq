@@ -39,6 +39,7 @@ import { openKey, toolCatalog, toolOnly } from "./tool-activity";
 import type { ReadTarget, ToolRun } from "./tool-activity";
 import {
   historyId,
+  isPinnedRow,
   openToolRun,
   promptRanks,
   transcriptRangeIndexes,
@@ -49,6 +50,7 @@ import {
 } from "./timeline-rows";
 import { useHistory } from "./useHistory";
 import { useInlineProse } from "./useInlineProse";
+import { useScrollGestures } from "./useScrollGestures";
 import { useTimelineList } from "./useTimelineList";
 import { useQuestionJump } from "./questions/useQuestionJump";
 import type { Questions } from "./questions/useQuestions";
@@ -85,7 +87,8 @@ export function Transcript({ target, provider, child, messages, working, questio
   const followBeforeFind = useRef<boolean | undefined>(undefined);
   const viewport = useRef<HTMLDivElement>(null);
   const questionJump = useQuestionJump(target, viewport, questions.nonblocking);
-  const { pinned, selectedText, focusedDiagram, clear } = useHistorySelection(viewport);
+  const { pinned, selectedText, focusedDiagram, isDiagramVisible, clear } =
+    useHistorySelection(viewport);
   const [groupKeys, setGroupKeys] = useState<ReadonlySet<string>>(() => new Set());
   const [actionNotice, setActionNotice] = useState<string>();
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(
@@ -125,8 +128,9 @@ export function Transcript({ target, provider, child, messages, working, questio
       : undefined,
   );
   const scrollIntent = useRef<"head" | "tail" | "scrollbar" | undefined>(undefined);
+  const scrollbarTop = useRef<number | undefined>(undefined);
   const pageLead = useRef(160);
-  const touchY = useRef<number | undefined>(undefined);
+  const scrollGestures = useScrollGestures(gesture);
   const readingPosition = useRef<TimelineBookmark | undefined>(undefined);
   const written = useRef(saved);
   const requestedLatest = useRef(false);
@@ -140,6 +144,7 @@ export function Transcript({ target, provider, child, messages, working, questio
     following,
     pinned,
     focusedDiagram,
+    isDiagramVisible,
     (position, wanted, extend) => {
       // Keep mounted group controls across a prepend or append that extends their native span.
       setGroupKeys(
@@ -242,6 +247,7 @@ export function Transcript({ target, provider, child, messages, working, questio
     anchorToStart: Boolean(focusedDiagram || (output && readingOutput === output.reference)),
     older: history.older,
     newer: history.newer,
+    readingBelowPreview: (row) => !following && !anchor.current && !isPinnedRow(row, pinned),
     fillCursor,
     onFill: () => {
       if (anchor.current || scrollIntent.current) return false;
@@ -424,13 +430,12 @@ export function Transcript({ target, provider, child, messages, working, questio
       anchor.current = undefined;
   }
 
-  function approachEdge(host: HTMLDivElement, direction: "head" | "tail" | "scrollbar") {
-    if (history.loading) return;
+  function approachEdge(host: HTMLDivElement, direction: "head" | "tail") {
     const lead = pinned.size ? 160 : pageLead.current;
-    if (direction !== "tail" && history.older && host.scrollTop < lead) {
+    if (direction === "head" && history.older && host.scrollTop < lead) {
       void history.load("older");
     } else if (
-      direction !== "head" &&
+      direction === "tail" &&
       history.newer &&
       host.scrollHeight - host.clientHeight - host.scrollTop < lead
     ) {
@@ -442,7 +447,16 @@ export function Transcript({ target, provider, child, messages, working, questio
     const host = viewport.current;
     if (!host) return;
     const nearEnd = host.scrollHeight - host.clientHeight - host.scrollTop < 42;
-    const intent = scrollIntent.current;
+    let intent = scrollIntent.current;
+    if (intent === "scrollbar") {
+      const previous = scrollbarTop.current;
+      scrollbarTop.current = host.scrollTop;
+      if (previous === undefined || previous === host.scrollTop) return;
+      const up = host.scrollTop < previous;
+      intent = up ? "head" : "tail";
+      history.cancelOpposite(up);
+      if (up) interruptLatest();
+    }
     let nextFollowing = following;
     if (intent) {
       nextFollowing = intent !== "head" && nearEnd && !history.newer;
@@ -453,22 +467,26 @@ export function Transcript({ target, provider, child, messages, working, questio
     if (position) readingPosition.current = position;
   }
 
+  function interruptLatest() {
+    activeLatest.current = false;
+    if (!following && !requestedLatest.current) return;
+    requestedLatest.current = false;
+    list.cancelScroll();
+    setFollowing(false);
+  }
+
   function gesture(up: boolean, distance?: number) {
+    const host = viewport.current;
+    if (!host || (up && host.scrollTop <= 0 && !history.older)) return;
     followBeforeFind.current = undefined;
     leaveReopen();
-    const host = viewport.current;
-    if (!host) return;
     scrollIntent.current = up ? "head" : "tail";
     pageLead.current = Math.max(
       160,
       Math.min(host.clientHeight * 3, (distance ?? host.clientHeight) * 3),
     );
     history.cancelOpposite(up);
-    if (up && (host.scrollTop > 0 || history.older) && (following || requestedLatest.current)) {
-      requestedLatest.current = false;
-      list.cancelScroll();
-      setFollowing(false);
-    }
+    if (up) interruptLatest();
     approachEdge(host, up ? "head" : "tail");
   }
 
@@ -637,27 +655,7 @@ export function Transcript({ target, provider, child, messages, working, questio
         ref={viewport}
         tabIndex={0}
         onScroll={recordScroll}
-        onWheel={(event) => {
-          if (event.deltaY && !event.ctrlKey) {
-            const unit =
-              event.deltaMode === 2
-                ? event.currentTarget.clientHeight
-                : event.deltaMode === 1
-                  ? 16
-                  : 1;
-            gesture(event.deltaY < 0, Math.abs(event.deltaY) * unit);
-          }
-        }}
-        onTouchStart={(event) => {
-          touchY.current = event.touches.length === 1 ? event.touches[0]?.clientY : undefined;
-        }}
-        onTouchMove={(event) => {
-          const previous = touchY.current;
-          const current = event.touches.length === 1 ? event.touches[0]?.clientY : undefined;
-          touchY.current = current;
-          if (previous !== undefined && current !== undefined && current !== previous)
-            gesture(current > previous, Math.abs(current - previous));
-        }}
+        {...scrollGestures}
         onPointerDown={(event) => {
           if (anchor.current?.adjacent) anchor.current = undefined;
           const box = event.currentTarget.getBoundingClientRect();
@@ -665,6 +663,7 @@ export function Transcript({ target, provider, child, messages, working, questio
             followBeforeFind.current = undefined;
             leaveReopen();
             pageLead.current = event.currentTarget.clientHeight;
+            scrollbarTop.current = event.currentTarget.scrollTop;
             scrollIntent.current = "scrollbar";
           }
         }}

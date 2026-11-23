@@ -11,11 +11,13 @@ type Options = {
   readonly anchorToStart: boolean;
   readonly older: boolean;
   readonly newer: boolean;
+  readonly readingBelowPreview: (row: VisibleRow) => boolean;
   readonly fillCursor: string | undefined;
   readonly onFill: () => boolean;
 };
 
 const MESSAGE_HEIGHT = 95;
+const TIMELINE_TOP_INSET = 24;
 const FILL_DELAY_MS = 160;
 const MAX_FILL_PAGES = 2;
 
@@ -26,6 +28,7 @@ export function useTimelineList({
   anchorToStart,
   older,
   newer,
+  readingBelowPreview,
   fillCursor,
   onFill,
 }: Options) {
@@ -59,11 +62,20 @@ export function useTimelineList({
         : entries[index]?.kind === "read-pack"
           ? 55
           : MESSAGE_HEIGHT,
-    paddingStart: older ? 40 : 0,
+    paddingStart: TIMELINE_TOP_INSET + (older ? 40 : 0),
     paddingEnd: newer ? 40 : 0,
     overscan: 7,
     rangeExtractor,
   });
+  list.shouldAdjustScrollPositionOnItemSizeChange = (item, _delta, instance) => {
+    const top = instance.scrollOffset ?? 0;
+    if (!instance.itemSizeCache.has(item.key)) return item.start < top;
+    if (item.end <= top) return true;
+    // Keep the middle of the viewport stable if the clipped preview above it grows.
+    const middle = top + (instance.scrollRect?.height ?? 0) / 2;
+    const row = entries[item.index];
+    return row !== undefined && item.start < top && item.end <= middle && readingBelowPreview(row);
+  };
 
   useEffect(() => {
     // Heights belong to the retained pages. Keep measurements for pinned and overlapping rows.
