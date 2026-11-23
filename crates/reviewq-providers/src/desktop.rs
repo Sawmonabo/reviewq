@@ -9,7 +9,9 @@ use tokio::process::Command;
 use url::Url;
 
 mod windows;
-pub use windows::{WindowsDesktop, WindowsDesktopNotifier, WindowsRegistration};
+pub use windows::{
+    WindowsDesktop, WindowsDesktopNotifier, WindowsRegistration, open_windows_browser,
+};
 
 /// Linux desktop delivery via the installed notification client.
 pub struct LinuxDesktopNotifier {

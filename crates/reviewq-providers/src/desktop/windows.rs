@@ -1,6 +1,6 @@
 use std::io;
 use std::net::SocketAddr;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{ExitStatus, Stdio};
 use std::time::Duration;
 
@@ -10,9 +10,17 @@ use reviewq_app::notifications::{DesktopClaim, DesktopNotifier, DesktopOutcome};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use tokio::io::AsyncWriteExt;
-use tokio::process::Command;
+use tokio::process::{Child, Command};
+use url::Url;
 
 use super::Message;
+
+const OPEN_BROWSER_SCRIPT: &str = r"
+$ErrorActionPreference = 'Stop'
+$start = [Diagnostics.ProcessStartInfo]::new([Console]::In.ReadToEnd())
+$start.UseShellExecute = $true
+[void][Diagnostics.Process]::Start($start)
+";
 
 pub struct WindowsDesktop {
     executable: PathBuf,
@@ -23,6 +31,24 @@ pub enum WindowsRegistration {
     Check,
     Install,
     Remove,
+}
+
+/// Open the verified dashboard URL through Windows. `None` means PowerShell could not start.
+pub async fn open_windows_browser(url: &Url) -> Option<bool> {
+    let executable = windows_tool()?;
+    if url.scheme() != "http"
+        || url.host_str() != Some("127.0.0.1")
+        || !url.username().is_empty()
+        || url.password().is_some()
+    {
+        return Some(false);
+    }
+    let child = start_powershell(&executable, OPEN_BROWSER_SCRIPT).ok()?;
+    Some(
+        send_to_powershell(child, url.as_str())
+            .await
+            .is_ok_and(|status| status.success()),
+    )
 }
 
 impl WindowsDesktop {
@@ -117,37 +143,8 @@ impl WindowsDesktop {
     async fn run(&self, mut body: Value) -> io::Result<ExitStatus> {
         body["owner"] = json!(self.owner);
         let payload = STANDARD.encode(serde_json::to_vec(&body)?);
-        let script = include_str!("windows.ps1");
-        let script: Vec<u8> = script.encode_utf16().flat_map(u16::to_le_bytes).collect();
-        let mut child = Command::new(&self.executable)
-            .args([
-                "-NoLogo",
-                "-NoProfile",
-                "-NonInteractive",
-                "-EncodedCommand",
-                &STANDARD.encode(script),
-            ])
-            .stdin(Stdio::piped())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .kill_on_drop(true)
-            .spawn()?;
-        let mut stdin = child
-            .stdin
-            .take()
-            .ok_or_else(|| io::Error::other("Windows input unavailable."))?;
-        tokio::time::timeout(Duration::from_secs(15), async move {
-            stdin.write_all(payload.as_bytes()).await?;
-            drop(stdin);
-            child.wait().await
-        })
-        .await
-        .map_err(|_| {
-            io::Error::new(
-                io::ErrorKind::TimedOut,
-                "Windows notification handoff timed out.",
-            )
-        })?
+        let child = start_powershell(&self.executable, include_str!("windows.ps1"))?;
+        send_to_powershell(child, &payload).await
     }
 }
 
@@ -187,6 +184,42 @@ fn tag(key: &str) -> String {
         .iter()
         .map(|byte| format!("{byte:02x}"))
         .collect()
+}
+
+fn start_powershell(executable: &Path, script: &str) -> io::Result<Child> {
+    let script: Vec<u8> = script.encode_utf16().flat_map(u16::to_le_bytes).collect();
+    Command::new(executable)
+        .args([
+            "-NoLogo",
+            "-NoProfile",
+            "-NonInteractive",
+            "-EncodedCommand",
+            &STANDARD.encode(script),
+        ])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .kill_on_drop(true)
+        .spawn()
+}
+
+async fn send_to_powershell(mut child: Child, input: &str) -> io::Result<ExitStatus> {
+    let mut stdin = child
+        .stdin
+        .take()
+        .ok_or_else(|| io::Error::other("Windows input unavailable."))?;
+    tokio::time::timeout(Duration::from_secs(15), async move {
+        stdin.write_all(input.as_bytes()).await?;
+        drop(stdin);
+        child.wait().await
+    })
+    .await
+    .map_err(|_| {
+        io::Error::new(
+            io::ErrorKind::TimedOut,
+            "Windows desktop handoff timed out.",
+        )
+    })?
 }
 
 fn windows_tool() -> Option<PathBuf> {

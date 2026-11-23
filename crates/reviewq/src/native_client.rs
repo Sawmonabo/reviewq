@@ -5,6 +5,7 @@ use reqwest::Client;
 use reviewq_domain::identity::{NativeSessionId, ReviewId, RunId, SessionKey};
 use reviewq_domain::session::HostProvider;
 use reviewq_protocol::EventCursorDto;
+use reviewq_providers::desktop::open_windows_browser;
 use reviewq_transport::{ServiceEndpoint, ServiceIdentity};
 use serde::Deserialize;
 
@@ -300,14 +301,22 @@ pub(crate) async fn open(profile: &Path, options: Open) -> Result<(), Failure> {
     {
         return Err("invalid browser ticket".into());
     }
-    let url = format!("http://{}/#ticket={ticket}", endpoint.browser());
+    let url = reqwest::Url::parse(&format!("http://{}/#ticket={ticket}", endpoint.browser()))?;
     if options.print_url {
         println!("{url}");
-    } else if !crate::service::capture("xdg-open", &[&url], true)
-        .await
-        .is_ok_and(|(opened, _)| opened)
-    {
+        return Ok(());
+    }
+    let opened = match open_windows_browser(&url).await {
+        Some(opened) => opened,
+        None => crate::service::capture("xdg-open", &[url.as_str()], true)
+            .await
+            .is_ok_and(|(opened, _)| opened),
+    };
+    if !opened {
         println!("Open ReviewQ at http://{}/", endpoint.browser());
+        eprintln!(
+            "For a one-time sign-in link, run `reviewq open --print-url` with any `--profile` option you used."
+        );
     }
     Ok(())
 }
