@@ -216,9 +216,9 @@ pub(in crate::history) fn result(
                         if let Some(value) = value.filter(|value| !value.trim().is_empty()) {
                             answered = true;
                             if !question.secret
-                                && let Some(labels) = public_choices(question, &value)
+                                && let Some(values) = public_answer(question, &value)
                             {
-                                selections.insert(question.id.clone(), labels);
+                                selections.insert(question.id.clone(), values);
                             }
                         }
                         Ok(())
@@ -283,28 +283,25 @@ fn result_block<R: Read>(
     )
 }
 
-fn public_choices(question: &Question, answer: &str) -> Option<Vec<String>> {
-    if question.multi_select
-        && question
+fn public_answer(question: &Question, answer: &str) -> Option<Vec<String>> {
+    if !visible(answer, 8192, true) {
+        return None;
+    }
+    let verbatim = || Some(vec![answer.to_owned()]);
+    if !question.multi_select
+        || question
             .options
             .iter()
             .any(|choice| choice.label.contains(','))
     {
-        return None;
-    }
-    let known = |label| question.options.iter().any(|choice| choice.label == label);
-    if known(answer) {
-        return Some(vec![answer.to_owned()]);
-    }
-    if !question.multi_select {
-        return visible(answer, 8192, true).then(|| vec![answer.to_owned()]);
+        return verbatim();
     }
     let mut labels = Vec::new();
-    for label in answer.split(',').map(str::trim) {
-        if !known(label) || labels.contains(&label) {
-            return None;
+    for label in answer.split(", ") {
+        if labels.contains(&label) || !question.options.iter().any(|choice| choice.label == label) {
+            return verbatim();
         }
         labels.push(label);
     }
-    (labels.len() > 1).then(|| labels.into_iter().map(str::to_owned).collect())
+    Some(labels.into_iter().map(str::to_owned).collect())
 }

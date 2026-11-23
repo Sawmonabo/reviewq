@@ -99,8 +99,10 @@ mod tests {
                     "input": {"questions": [
                         {"header":"Lanes", "question":"Which lanes?", "multiSelect":true,
                          "options":[{"label":"North", "preview":"North diagram"},{"label":"South"}]},
-                        {"header":"Name", "question":"Name the plan?",
+                        {"header":"Name", "question":"Name the plan?", "multiSelect":true,
                          "options":[{"label":"Pitch"},{"label":"Draft"}]},
+                        {"header":"Regions", "question":"Which regions?", "multiSelect":true,
+                         "options":[{"label":"North"},{"label":"South"},{"label":"North, South"}]},
                         {"header":"Private", "question":"Private question?", "isSecret":true,
                          "options":[{"label":"One"},{"label":"Two"}]}
                     ]}
@@ -125,7 +127,8 @@ mod tests {
                 "first",
                 false,
                 json!({"answers":{
-                "Which lanes?":"North, South", "Name the plan?":"Custom name", "Private question?":"private answer"
+                "Which lanes?":"North, South", "Name the plan?":"Custom name, with a comma",
+                "Which regions?":"North, South", "Private question?":"private answer"
             }, "annotations":{"Name the plan?":"unprojected annotation"}}),
             ),
             opening("second", "assistant"),
@@ -179,8 +182,9 @@ mod tests {
             questions[0].options[0].preview.as_deref(),
             Some("North diagram")
         );
-        assert_eq!(selected.len(), 2);
+        assert_eq!(selected.len(), 3);
         assert_eq!(selected["question-1"], ["North", "South"]);
-        assert_eq!(selected["question-2"], ["Custom name"]);
+        assert_eq!(selected["question-2"], ["Custom name, with a comma"]);
+        assert_eq!(selected["question-3"], ["North, South"]);
     }
 }
