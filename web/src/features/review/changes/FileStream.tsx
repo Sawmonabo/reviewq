@@ -61,6 +61,7 @@ type Props = {
   readonly onLoadedAnchors: (threads: ReadonlySet<string> | undefined) => void;
   readonly restore: boolean;
   readonly onReload: () => void;
+  readonly onSourceChanged: () => void;
   readonly noteGeneration: number;
   readonly noteTarget: DiscussionDestination | undefined;
   readonly onChooseNote: (match: DiscussionSearchMatch) => void;
@@ -97,6 +98,7 @@ export function FileStream({
   onLoadedAnchors,
   restore,
   onReload,
+  onSourceChanged,
   noteGeneration,
   noteTarget,
   onChooseNote,
@@ -754,7 +756,7 @@ export function FileStream({
                   scroll={patchScroll}
                   threads={anchors.get(item.index) ?? EMPTY_THREADS}
                   source={source}
-                  onSourceChanged={onReload}
+                  onSourceChanged={onSourceChanged}
                   position={item.index + 1}
                   admitted={wanted.has(item.index)}
                   entrySide={
