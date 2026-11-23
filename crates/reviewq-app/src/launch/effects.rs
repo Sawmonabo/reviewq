@@ -3,7 +3,7 @@ use std::sync::Arc;
 use reviewq_domain::identity::{
     DeliveryId, NativeSessionId, ReviewId, RunId, SessionKey, SubmissionId,
 };
-use reviewq_domain::session::{HostProvider, LeadTarget};
+use reviewq_domain::session::{AbsolutePath, HostProvider, LeadTarget};
 
 use crate::access::{Actor, AppError, AppFuture};
 use crate::events::Snapshot;
@@ -28,15 +28,26 @@ pub struct LaunchReceipt {
     pub session: Option<SessionKey>,
     pub native: Option<NativeSessionId>,
     pub job: Option<String>,
+    pub claude: Option<ClaudeLaunchLocator>,
     pub observed_input: Option<ObservedInput>,
     pub provider: HostProvider,
     pub created_at_ms: i64,
     pub updated_at_ms: i64,
 }
 
+/// Private launch correlation recorded before starting the native job.
+#[derive(Clone)]
+pub struct ClaudeLaunchLocator {
+    pub profile: AbsolutePath,
+    pub checkout: AbsolutePath,
+    pub name: Option<String>,
+    pub native: Option<NativeSessionId>,
+    pub job: Option<String>,
+}
+
 pub enum LaunchClaim {
     Existing(Snapshot<LaunchReceipt>),
-    Admitted(DeliveryId),
+    Admitted { id: DeliveryId, created_at_ms: i64 },
 }
 
 pub struct ObservedLaunchSettings {
@@ -63,6 +74,15 @@ pub trait LaunchStore: Send + Sync {
 
     fn check_launch(&self, actor: Actor, id: DeliveryId) -> AppFuture<'_, ()>;
 
+    fn record_claude_locator(
+        &self,
+        actor: Actor,
+        id: DeliveryId,
+        profile: AbsolutePath,
+        name: String,
+        job: Option<String>,
+    ) -> AppFuture<'_, ()>;
+
     fn record_launch_native(
         &self,
         actor: Actor,
@@ -81,6 +101,15 @@ pub trait LaunchStore: Send + Sync {
         proof: HostProof,
         settings: Option<ObservedLaunchSettings>,
     ) -> AppFuture<'_, LeadTarget>;
+
+    fn confirm_claude_launch(
+        &self,
+        actor: Actor,
+        review: ReviewId,
+        submission: SubmissionId,
+        proof: HostProof,
+        job: String,
+    ) -> AppFuture<'_, Snapshot<LaunchReceipt>>;
 
     fn finish_launch(
         &self,
@@ -103,6 +132,14 @@ pub trait NativeLauncher: Send + Sync {
         _target: LeadTarget,
         _id: DeliveryId,
     ) -> AppFuture<'_, Option<ObservedInput>> {
+        Box::pin(async { Ok(None) })
+    }
+
+    fn reconcile_job(
+        &self,
+        _locator: ClaudeLaunchLocator,
+        _created_at_ms: i64,
+    ) -> AppFuture<'_, Option<(HostProof, String)>> {
         Box::pin(async { Ok(None) })
     }
 }
@@ -129,11 +166,16 @@ pub struct LaunchProgress {
     store: Arc<dyn LaunchStore>,
     actor: Actor,
     id: DeliveryId,
+    created_at_ms: i64,
 }
 
 impl LaunchProgress {
     pub fn id(&self) -> DeliveryId {
         self.id.clone()
+    }
+
+    pub fn created_at_ms(&self) -> i64 {
+        self.created_at_ms
     }
 
     pub async fn check(&self) -> Result<(), AppError> {
@@ -149,6 +191,17 @@ impl LaunchProgress {
     ) -> Result<LeadTarget, AppError> {
         self.store
             .register_launch(self.actor.clone(), self.id.clone(), proof, settings)
+            .await
+    }
+
+    pub async fn record_claude_locator(
+        &self,
+        profile: AbsolutePath,
+        name: String,
+        job: Option<String>,
+    ) -> Result<(), AppError> {
+        self.store
+            .record_claude_locator(self.actor.clone(), self.id.clone(), profile, name, job)
             .await
     }
 
@@ -179,12 +232,14 @@ pub async fn run_launch(
     host: Arc<dyn NativeLauncher>,
     actor: Actor,
     id: DeliveryId,
+    created_at_ms: i64,
     input: LaunchInput,
 ) -> Result<Snapshot<LaunchReceipt>, AppError> {
     let progress = LaunchProgress {
         store: store.clone(),
         actor,
         id: id.clone(),
+        created_at_ms,
     };
     let state = host.launch(input, progress).await;
     store.finish_launch(id, state).await

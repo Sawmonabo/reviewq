@@ -56,17 +56,29 @@ impl ClaudeStore for SqliteStore {
     ) -> AppFuture<'_, bool> {
         Box::pin(async move {
             self.read(move |db| {
+                let profile = context.profile.as_path().as_os_str().as_bytes();
+                let reserved_profile = serde_json::to_string(profile).map_err(|_| AppError::Internal)?;
+                // The provisional hint only drives the companion's bounded startup retries.
+                // Linkage still requires the exact registered native identity and transcript.
                 Ok(db.query_row(
-                    "SELECT EXISTS(SELECT 1 FROM launch_attempts l JOIN reviews r USING(review_id)
-                     JOIN configured_projects p ON p.origin=r.origin AND p.project_id=r.project_id
-                     WHERE l.id=?1 AND l.provider='claude' AND l.checkout=?2
-                       AND l.state IN ('pending','confirmed') AND l.created_at_ms>?3
-                       AND (l.profile IS NULL OR l.profile=?4))",
+                    "SELECT EXISTS(
+                       SELECT 1 FROM launch_attempts l JOIN reviews r USING(review_id)
+                       JOIN configured_projects p ON p.origin=r.origin AND p.project_id=r.project_id
+                       WHERE l.provider='claude' AND l.checkout=?2 AND l.created_at_ms>?3
+                         AND l.native_id=?1 AND l.profile=?4 AND l.state IN ('pending','confirmed','uncertain')
+                       UNION ALL
+                       SELECT 1 FROM launch_attempts l JOIN reviews r USING(review_id)
+                       JOIN configured_projects p ON p.origin=r.origin AND p.project_id=r.project_id
+                       JOIN settings_repositories b ON b.project_id=r.project_id AND b.checkout=l.checkout AND b.common_dir=l.common_dir
+                       WHERE l.provider='claude' AND l.checkout=?2 AND l.created_at_ms>?3
+                         AND l.native_id IS NULL AND l.state='pending'
+                         AND json_extract(l.invocation,'$.claude.profile')=?5)",
                     params![
                         context.session_id.as_str(),
                         context.cwd.as_path().as_os_str().as_bytes(),
                         now_ms()?.saturating_sub(30_000),
-                        context.profile.as_path().as_os_str().as_bytes()
+                        profile,
+                        reserved_profile,
                     ],
                     |row| row.get(0),
                 )?)

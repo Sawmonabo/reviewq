@@ -181,18 +181,18 @@ pub(super) async fn execute(
     {
         return Err(AppError::StaleRevision);
     }
-    let id = match entry
+    let (id, created_at_ms) = match entry
         .store
         .claim_launch(actor.clone(), input.clone(), submission, digest)
         .await?
     {
         app::LaunchClaim::Existing(found) => return reconcile(entry, actor, found).await,
-        app::LaunchClaim::Admitted(id) => id,
+        app::LaunchClaim::Admitted { id, created_at_ms } => (id, created_at_ms),
     };
     let store = entry.store.clone();
     tokio::spawn(async move {
         let _slot = slot;
-        app::run_launch(store, host, actor, id, input).await
+        app::run_launch(store, host, actor, id, created_at_ms, input).await
     })
     .await
     .map_err(|_| AppError::Internal)?
@@ -267,7 +267,38 @@ pub(super) async fn reconcile(
     receipt: Snapshot<app::LaunchReceipt>,
 ) -> Result<Snapshot<app::LaunchReceipt>, AppError> {
     let value = &receipt.value;
-    if value.state != app::LaunchState::Uncertain || value.run.is_none() {
+    if value.state != app::LaunchState::Uncertain {
+        return Ok(receipt);
+    }
+    if value.provider == HostProvider::Claude {
+        let Some(locator) = value.claude.clone() else {
+            return Ok(receipt);
+        };
+        let Ok(host) = entry.launchers.select(value.provider) else {
+            return Ok(receipt);
+        };
+        let Ok(_slot) = entry.launch_slots.try_acquire() else {
+            return Ok(receipt);
+        };
+        let Ok(Some((proof, job))) = host.reconcile_job(locator, value.created_at_ms).await else {
+            return Ok(receipt);
+        };
+        return match entry
+            .store
+            .confirm_claude_launch(
+                actor,
+                value.review.clone(),
+                value.submission.clone(),
+                proof,
+                job,
+            )
+            .await
+        {
+            Err(AppError::Conflict) => Ok(receipt),
+            result => result,
+        };
+    }
+    if value.run.is_none() {
         return Ok(receipt);
     }
     if value.observed_input.is_some() {

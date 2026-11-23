@@ -10,7 +10,7 @@ use tokio::process::Command;
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct Job {
-    session_id: Option<String>,
+    pub(super) session_id: Option<String>,
     cwd: PathBuf,
     pub(crate) kind: JobKind,
     pub(crate) id: Option<String>,
@@ -84,10 +84,53 @@ pub(crate) fn native_command(executable: &Path, config_dir: Option<&Path>, cwd: 
 }
 
 pub(crate) async fn claude_job(
-    mut command: Command,
+    command: Command,
     cwd: &Path,
     session_id: &str,
 ) -> Result<Option<Job>, AppError> {
+    let rows = jobs(command, cwd).await?;
+    select(
+        rows,
+        cwd,
+        |job| job.session_id.as_deref() == Some(session_id),
+        false,
+    )
+}
+
+/// Finds the unique background job for a known launch address or its reserved name.
+pub(super) async fn claude_launch_job(
+    command: Command,
+    cwd: &Path,
+    job_id: Option<&str>,
+    session_id: Option<&str>,
+    name: Option<&str>,
+) -> Result<Option<Job>, AppError> {
+    let rows = jobs(command, cwd).await?;
+    let job = select(
+        rows,
+        cwd,
+        |job| {
+            if let Some(id) = job_id {
+                job.id.as_deref() == Some(id)
+            } else if let Some(id) = session_id {
+                job.session_id.as_deref() == Some(id)
+            } else {
+                name.is_some_and(|name| job.name.as_deref() == Some(name))
+            }
+        },
+        true,
+    )?;
+    if job.as_ref().is_some_and(|job| {
+        !matches!(job.kind, JobKind::Background)
+            || session_id.is_some_and(|id| job.session_id.as_deref() != Some(id))
+            || (session_id.is_none() && name.is_some_and(|name| job.name.as_deref() != Some(name)))
+    }) {
+        return Err(AppError::Conflict);
+    }
+    Ok(job)
+}
+
+async fn jobs(mut command: Command, cwd: &Path) -> Result<Vec<Job>, AppError> {
     let mut child = command
         .args(["agents", "--json", "--all", "--cwd"])
         .arg(cwd)
@@ -95,7 +138,7 @@ pub(crate) async fn claude_job(
         .spawn()
         .map_err(|_| AppError::Unavailable)?;
     let output = child.stdout.take().ok_or(AppError::Unavailable)?;
-    let rows = tokio::time::timeout(Duration::from_secs(4), async move {
+    tokio::time::timeout(Duration::from_secs(4), async move {
         let mut body = Vec::new();
         output
             .take(256 * 1024 + 1)
@@ -111,15 +154,25 @@ pub(crate) async fn claude_job(
         serde_json::from_slice::<Vec<Job>>(&body).map_err(|_| AppError::Unavailable)
     })
     .await
-    .map_err(|_| AppError::Unavailable)??;
-    let mut matches = rows
-        .into_iter()
-        .filter(|job| job.session_id.as_deref() == Some(session_id));
-    let Some(job) = matches.next() else {
+    .map_err(|_| AppError::Unavailable)?
+}
+
+fn select(
+    mut rows: Vec<Job>,
+    cwd: &Path,
+    matches: impl Fn(&Job) -> bool,
+    verify_aliases: bool,
+) -> Result<Option<Job>, AppError> {
+    let Some(index) = rows.iter().position(&matches) else {
         return Ok(None);
     };
-    if matches.next().is_some()
-        || job.cwd != cwd
+    let job = rows.swap_remove(index);
+    if rows.iter().any(|other| {
+        matches(other)
+            || (verify_aliases
+                && (job.id.is_some() && job.id == other.id
+                    || job.session_id.is_some() && job.session_id == other.session_id))
+    }) || job.cwd != cwd
         || job.id.as_ref().is_some_and(|id| {
             id.is_empty() || id.len() > 64 || !id.bytes().all(|byte| byte.is_ascii_alphanumeric())
         })

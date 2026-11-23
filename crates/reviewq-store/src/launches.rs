@@ -4,18 +4,23 @@ use reviewq_app::access::{Actor, ActorScope, AppError, AppFuture};
 use reviewq_app::events::{ResourceKey, Snapshot};
 use reviewq_app::hosts::{HostProof, ObservedInput, RegisterLead};
 use reviewq_app::launch::{
-    Invocation, LaunchClaim, LaunchDetails, LaunchInput, LaunchReceipt, LaunchState, LaunchStore,
-    NativeLaunchResult, ObservedLaunchSettings,
+    ClaudeLaunchLocator, Invocation, LaunchClaim, LaunchDetails, LaunchInput, LaunchReceipt,
+    LaunchState, LaunchStore, NativeLaunchResult, ObservedLaunchSettings,
 };
 use reviewq_app::queue::MergeRequestState;
-use reviewq_domain::identity::{DeliveryId, ReviewId, Revision, RunId, SubmissionId};
+use reviewq_domain::identity::{
+    DeliveryId, NativeSessionId, ReviewId, Revision, RunId, SubmissionId,
+};
 use reviewq_domain::session::{AbsolutePath, HostProvider, LeadTarget};
 use rusqlite::{Connection, Row, params};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use crate::connection::WriteTx;
 use crate::events::{now_ms, snapshot};
-use crate::queue::{identity_for_review, parse, save_observations, source_for_review, text};
+use crate::queue::{
+    identity_for_review, lead_for_run, parse, path, save_observations, source_for_review, text,
+};
 use crate::workspace::{
     actor_key, allow_review, configured, provider_label, scope, settings_revision,
 };
@@ -23,13 +28,23 @@ use crate::{SqliteStore, StoreError};
 
 const RECEIPT: &str =
     "review_id, submission_id, state, run_id, session_key, native_id, created_at_ms, updated_at_ms,
-     id, provider, native_job_id, native_turn_id, native_entry_id";
+     id, provider, native_job_id, native_turn_id, native_entry_id, profile, checkout,
+     CASE WHEN provider='claude' THEN json_extract(invocation,'$.claude') END AS claude_locator";
 
 #[derive(Deserialize, Serialize)]
 struct StoredSelection {
     #[serde(flatten)]
     invocation: StoredInvocation,
     context: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    claude: Option<StoredClaudeLocator>,
+}
+
+#[derive(Deserialize, Serialize)]
+struct StoredClaudeLocator {
+    profile: Vec<u8>,
+    name: String,
+    job: Option<String>,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -97,6 +112,7 @@ impl LaunchStore for SqliteStore {
                 save_observations(tx, std::slice::from_ref(&input.source))?;
                 let db = &tx.sql;
                 let id: DeliveryId = parse(&Uuid::new_v4().to_string())?;
+                let created_at_ms = now_ms()?;
                 db.execute(
                     "INSERT INTO launch_attempts(id,actor,submission_id,review_id,request_digest,
                         settings_revision,source_sha,provider,checkout,common_dir,requested_model,
@@ -116,12 +132,12 @@ impl LaunchStore for SqliteStore {
                         input.model,
                         input.effort,
                         invocation(&input)?,
-                        now_ms()?
+                        created_at_ms,
                     ],
                 )?;
                 check(db, &actor, &id)?;
                 tx.emit(&[ResourceKey::Review(Some(input.review))])?;
-                Ok(LaunchClaim::Admitted(id))
+                Ok(LaunchClaim::Admitted { id, created_at_ms })
             })
             .await
             .map_err(StoreError::app)
@@ -136,6 +152,47 @@ impl LaunchStore for SqliteStore {
         })
     }
 
+    fn record_claude_locator(
+        &self,
+        actor: Actor,
+        id: DeliveryId,
+        profile: AbsolutePath,
+        name: String,
+        job: Option<String>,
+    ) -> AppFuture<'_, ()> {
+        Box::pin(async move {
+            if let Some(job) = &job {
+                validate_job(job)?;
+            }
+            let locator = serde_json::to_string(&StoredClaudeLocator {
+                profile: bytes(&profile).to_vec(),
+                name,
+                job,
+            })
+            .map_err(|_| AppError::Internal)?;
+            self.write(move |tx| {
+                // Keep the private CLI parameters with the existing immutable request.
+                // The native identity columns remain empty until roster readback.
+                let changed = tx.sql.execute(
+                    "UPDATE launch_attempts SET invocation=json_set(invocation,'$.claude',json(?3))
+                     WHERE id=?1 AND actor=?2 AND provider='claude' AND state='pending'
+                       AND (json_extract(invocation,'$.claude') IS NULL OR (
+                         json_extract(invocation,'$.claude.profile')=json_extract(?3,'$.profile')
+                         AND json_extract(invocation,'$.claude.name')=json_extract(?3,'$.name')
+                         AND (json_extract(invocation,'$.claude.job') IS NULL OR
+                           json_extract(invocation,'$.claude.job')=json_extract(?3,'$.job'))))",
+                    params![id.as_str(), actor_key(&actor).as_slice(), locator],
+                )?;
+                if changed != 1 {
+                    return Err(AppError::Conflict.into());
+                }
+                Ok(())
+            })
+            .await
+            .map_err(StoreError::app)
+        })
+    }
+
     fn record_launch_native(
         &self,
         actor: Actor,
@@ -145,20 +202,13 @@ impl LaunchStore for SqliteStore {
         settings: Option<ObservedLaunchSettings>,
     ) -> AppFuture<'_, ()> {
         Box::pin(async move {
-            if job.as_ref().is_some_and(|job| {
-                job.is_empty()
-                    || job.len() > 256
-                    || !job
-                        .bytes()
-                        .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
-            }) {
-                return Err(AppError::InvalidRequest);
+            if let Some(job) = &job {
+                validate_job(job)?;
             }
-            let native = proof.binding.identity().clone();
-            let checkout = proof.binding.cwd().clone();
-            let locator = id.clone();
+            let binding = proof.binding;
             let issuer = actor_key(&actor);
             self.write(move |tx| {
+                let native = binding.identity();
                 let recorded = tx.sql.execute(
                     "UPDATE launch_attempts SET profile=?2,native_id=?3,
                        observed_model=coalesce(?4,observed_model),observed_effort=coalesce(?5,observed_effort),
@@ -168,10 +218,10 @@ impl LaunchStore for SqliteStore {
                        AND (native_id IS NULL OR (native_id=?3 AND profile=?2))
                        AND (?10 IS NULL OR native_job_id IS NULL OR native_job_id=?10)",
                     params![
-                        locator.to_string(), bytes(native.profile()), native.native_id().as_str(),
+                        id.as_str(), bytes(native.profile()), native.native_id().as_str(),
                         settings.as_ref().map(|settings| &settings.model),
                         settings.as_ref().and_then(|settings| settings.effort.as_deref()), now_ms()?,
-                        issuer.as_slice(), provider_label(native.provider()), bytes(&checkout),
+                        issuer.as_slice(), provider_label(native.provider()), bytes(binding.cwd()),
                         job,
                     ],
                 )?;
@@ -179,7 +229,7 @@ impl LaunchStore for SqliteStore {
                     return Err(AppError::Conflict.into());
                 }
                 let review: String = tx.sql.query_row(
-                    "SELECT review_id FROM launch_attempts WHERE id=?1", [locator.to_string()], |row| row.get(0)
+                    "SELECT review_id FROM launch_attempts WHERE id=?1", [id.as_str()], |row| row.get(0)
                 )?;
                 tx.emit(&[ResourceKey::Review(Some(parse(&review)?))])?;
                 Ok(())
@@ -213,44 +263,61 @@ impl LaunchStore for SqliteStore {
         Box::pin(async move {
             self.record_launch_native(actor.clone(), id.clone(), proof.clone(), None, settings)
                 .await?;
-            let native = proof.binding.identity().clone();
             self.write(move |tx| {
                 let bound = check(&tx.sql, &actor, &id)?;
-                let found = tx.sql.query_row(
-                    "SELECT run_id FROM launch_attempts WHERE id=?1",
-                    [id.to_string()], |row| row.get::<_, Option<String>>(0),
-                )?;
-                if let Some(run) = found {
-                    return crate::queue::lead_for_run(&tx.sql, &parse(&run)?)?
-                        .filter(|target| target.binding() == &proof.binding)
-                        .ok_or_else(|| AppError::Conflict.into());
-                }
-                let source = source_for_review(&tx.sql, &bound.review)?;
-                let session_key = match native.provider() {
-                    HostProvider::Codex => parse(native.native_id().as_str())?,
-                    HostProvider::Claude => parse(&format!("claude:{}", native.native_id()))?,
-                };
-                let registered = crate::hosts::register(tx, actor, RegisterLead {
-                    expected_settings: bound.settings,
-                    review: source,
-                    provider: native.provider(),
-                    profile: native.profile().clone(),
-                    native_id: native.native_id().clone(),
-                    session_key,
-                    cwd: proof.binding.cwd().clone(),
-                    native_source: proof.source,
-                    activity: proof.activity,
-                    metadata: proof.metadata,
-                })?.value;
-                if registered.review_id() != &bound.review {
+                register_bound(tx, actor, &id, bound, proof)
+            })
+            .await
+            .map_err(StoreError::app)
+        })
+    }
+
+    fn confirm_claude_launch(
+        &self,
+        actor: Actor,
+        review: ReviewId,
+        submission: SubmissionId,
+        proof: HostProof,
+        job: String,
+    ) -> AppFuture<'_, Snapshot<LaunchReceipt>> {
+        Box::pin(async move {
+            validate_job(&job)?;
+            self.write(move |tx| {
+                let stored = previous(&tx.sql, &actor, Some(&review), &submission, None)?
+                    .ok_or(AppError::NotFound)?;
+                let value = stored.value;
+                let native = proof.binding.identity().clone();
+                let locator = value.claude.as_ref().ok_or(AppError::Conflict)?;
+                if native.provider() != HostProvider::Claude
+                    || native.profile() != &locator.profile
+                    || proof.binding.cwd() != &locator.checkout
+                    || locator.native.as_ref().is_some_and(|expected| expected != native.native_id())
+                    || locator.job.as_ref().is_some_and(|expected| expected != &job)
+                {
                     return Err(AppError::Conflict.into());
                 }
-                tx.sql.execute(
-                    "UPDATE launch_attempts SET run_id=?2,session_key=?3,updated_at_ms=max(updated_at_ms,?4)
-                     WHERE id=?1 AND state='pending'",
-                    params![id.to_string(), registered.run_id().as_str(), registered.session_key().as_str(), now_ms()?],
+                if value.state != LaunchState::Uncertain {
+                    return Ok(Snapshot { cursor: stored.cursor, value });
+                }
+                let claimed: bool = tx.sql.query_row(
+                    "SELECT EXISTS(SELECT 1 FROM launch_attempts WHERE id<>?1 AND provider='claude' AND profile=?2 AND native_id=?3)",
+                    params![value.id.as_str(), bytes(native.profile()), native.native_id().as_str()],
+                    |row| row.get(0),
                 )?;
-                Ok(registered)
+                if claimed {
+                    return Err(AppError::Conflict.into());
+                }
+                // The provider already created this job. Reconcile the old attempt even
+                // if its original MR head or settings changed after launch.
+                let settings = settings_revision(&tx.sql)?;
+                register_bound(tx, actor, &value.id, Bound { review: review.clone(), settings }, proof)?;
+                tx.sql.execute(
+                    "UPDATE launch_attempts SET state='confirmed',profile=?2,native_id=?3,native_job_id=?4,
+                      updated_at_ms=max(updated_at_ms,?5) WHERE id=?1 AND state='uncertain'",
+                    params![value.id.as_str(), bytes(native.profile()), native.native_id().as_str(), job, now_ms()?],
+                )?;
+                tx.emit(&[ResourceKey::Review(Some(review))])?;
+                snapshot(&tx.sql, receipt_by_id(&tx.sql, &value.id)?)
             }).await.map_err(StoreError::app)
         })
     }
@@ -277,13 +344,10 @@ impl LaunchStore for SqliteStore {
                      WHERE id=?1 AND (state='pending' OR (state='uncertain' AND ?2='confirmed'))",
                     params![id.to_string(), state, now_ms()?],
                 )?;
-                let query = format!("SELECT {RECEIPT} FROM launch_attempts WHERE id=?1");
-                let mut query = tx.sql.prepare_cached(&query)?;
-                let mut rows = query.query([id.to_string()])?;
-                let value = receipt(rows.next()?.ok_or(AppError::NotFound)?)?;
-                drop(rows);
-                drop(query);
-                if changed != 0 { tx.emit(&[ResourceKey::Review(Some(value.review.clone()))])?; }
+                let value = receipt_by_id(&tx.sql, &id)?;
+                if changed != 0 {
+                    tx.emit(&[ResourceKey::Review(Some(value.review.clone()))])?;
+                }
                 snapshot(&tx.sql, value)
             }).await.map_err(StoreError::app)
         })
@@ -307,6 +371,79 @@ impl LaunchStore for SqliteStore {
 struct Bound {
     review: ReviewId,
     settings: Revision,
+}
+
+fn register_bound(
+    tx: &mut WriteTx<'_>,
+    actor: Actor,
+    id: &DeliveryId,
+    bound: Bound,
+    proof: HostProof,
+) -> Result<LeadTarget, StoreError> {
+    let found = tx.sql.query_row(
+        "SELECT run_id FROM launch_attempts WHERE id=?1",
+        [id.as_str()],
+        |row| row.get::<_, Option<String>>(0),
+    )?;
+    if let Some(run) = found {
+        return lead_for_run(&tx.sql, &parse(&run)?)?
+            .filter(|target| {
+                target.binding() == &proof.binding && target.review_id() == &bound.review
+            })
+            .ok_or_else(|| AppError::Conflict.into());
+    }
+    let native = proof.binding.identity();
+    let source = source_for_review(&tx.sql, &bound.review)?;
+    let session_key = match native.provider() {
+        HostProvider::Codex => parse(native.native_id().as_str())?,
+        HostProvider::Claude => parse(&format!("claude:{}", native.native_id()))?,
+    };
+    let registered = crate::hosts::register(
+        tx,
+        actor,
+        RegisterLead {
+            expected_settings: bound.settings,
+            review: source,
+            provider: native.provider(),
+            profile: native.profile().clone(),
+            native_id: native.native_id().clone(),
+            session_key,
+            cwd: proof.binding.cwd().clone(),
+            native_source: proof.source,
+            activity: proof.activity,
+            metadata: proof.metadata,
+        },
+    )?
+    .value;
+    if registered.review_id() != &bound.review {
+        return Err(AppError::Conflict.into());
+    }
+    let changed = tx.sql.execute(
+        "UPDATE launch_attempts SET run_id=?2,session_key=?3,updated_at_ms=max(updated_at_ms,?4)
+         WHERE id=?1 AND state IN ('pending','uncertain')",
+        params![
+            id.as_str(),
+            registered.run_id().as_str(),
+            registered.session_key().as_str(),
+            now_ms()?
+        ],
+    )?;
+    if changed != 1 {
+        return Err(AppError::Conflict.into());
+    }
+    Ok(registered)
+}
+
+fn validate_job(job: &str) -> Result<(), AppError> {
+    if job.is_empty()
+        || job.len() > 256
+        || !job
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
+    {
+        return Err(AppError::InvalidRequest);
+    }
+    Ok(())
 }
 
 fn check(db: &Connection, actor: &Actor, id: &DeliveryId) -> Result<Bound, StoreError> {
@@ -347,7 +484,7 @@ fn previous(
         return Ok(None);
     };
     let value = receipt(row)?;
-    let saved: Vec<u8> = row.get(13)?;
+    let saved: Vec<u8> = row.get("request_digest")?;
     authorize(db, actor, &value.review)?;
     if review.is_some_and(|review| review != &value.review)
         || digest.is_some_and(|digest| saved != digest)
@@ -372,6 +509,36 @@ fn authorize(db: &Connection, actor: &Actor, review: &ReviewId) -> Result<(), St
 
 fn receipt(row: &Row<'_>) -> Result<LaunchReceipt, StoreError> {
     let optional = |column| row.get::<_, Option<String>>(column);
+    let provider = crate::queue::provider(text(row, 9)?)?;
+    let native: Option<NativeSessionId> = optional(5)?.map(|value| parse(&value)).transpose()?;
+    let job = optional(10)?;
+    let claude = if provider == HostProvider::Claude {
+        let encoded: Option<String> = row.get("claude_locator")?;
+        let stored: Option<StoredClaudeLocator> = encoded
+            .as_deref()
+            .map(serde_json::from_str)
+            .transpose()
+            .map_err(|_| AppError::Internal)?;
+        let profile: Option<Vec<u8>> = row.get("profile")?;
+        let (profile, name, acknowledged) = match stored {
+            Some(stored) => (Some(stored.profile), Some(stored.name), stored.job),
+            None => (profile, None, None),
+        };
+        profile
+            .map(|profile| {
+                Ok::<_, StoreError>(ClaudeLaunchLocator {
+                    profile: path(profile)?,
+                    checkout: path(row.get("checkout")?)?,
+                    name,
+                    native: native.clone(),
+                    job: job.clone().or(acknowledged),
+                })
+            })
+            .transpose()?
+    } else {
+        None
+    };
+    let job = job.or_else(|| claude.as_ref().and_then(|locator| locator.job.clone()));
     Ok(LaunchReceipt {
         id: parse(text(row, 8)?)?,
         review: parse(text(row, 0)?)?,
@@ -385,9 +552,10 @@ fn receipt(row: &Row<'_>) -> Result<LaunchReceipt, StoreError> {
         },
         run: optional(3)?.map(|value| parse(&value)).transpose()?,
         session: optional(4)?.map(|value| parse(&value)).transpose()?,
-        native: optional(5)?.map(|value| parse(&value)).transpose()?,
-        provider: crate::queue::provider(text(row, 9)?)?,
-        job: optional(10)?,
+        native,
+        provider,
+        job,
+        claude,
         observed_input: match (optional(11)?, optional(12)?) {
             (Some(turn), Some(entry)) => Some(ObservedInput {
                 turn_id: parse(&turn)?,
@@ -399,6 +567,13 @@ fn receipt(row: &Row<'_>) -> Result<LaunchReceipt, StoreError> {
         created_at_ms: row.get(6)?,
         updated_at_ms: row.get(7)?,
     })
+}
+
+fn receipt_by_id(db: &Connection, id: &DeliveryId) -> Result<LaunchReceipt, StoreError> {
+    let query = format!("SELECT {RECEIPT} FROM launch_attempts WHERE id=?1");
+    let mut query = db.prepare_cached(&query)?;
+    let mut rows = query.query([id.as_str()])?;
+    receipt(rows.next()?.ok_or(AppError::NotFound)?)
 }
 
 fn bytes(path: &AbsolutePath) -> &[u8] {
@@ -419,6 +594,7 @@ fn invocation(input: &LaunchInput) -> Result<String, StoreError> {
     let encoded = serde_json::to_string(&StoredSelection {
         invocation,
         context: input.context.clone(),
+        claude: None,
     })
     .map_err(|_| AppError::Internal)?;
     if encoded.len() > 153600 {
