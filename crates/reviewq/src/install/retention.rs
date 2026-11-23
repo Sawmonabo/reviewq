@@ -608,7 +608,7 @@ mod tests {
             paths.profile.join("current"),
         )?;
         planned.finish(&paths, &next_release, &mut known)?;
-        assert_eq!(known, [next.id.clone()]);
+        assert_eq!(known.as_slice(), std::slice::from_ref(&next.id));
         assert!(!archived.root.exists() && !previous.root.exists());
         assert!(next.root.is_dir() && unknown.is_dir());
         assert!(user_file.is_file());
