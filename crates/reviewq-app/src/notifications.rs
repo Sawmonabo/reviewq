@@ -107,6 +107,13 @@ pub struct InboxPage {
     pub counts: UnreadCounts,
 }
 
+/// An exact occurrence from a notification link, even if it has since been dismissed.
+pub struct InboxItem {
+    pub item: Notification,
+    pub review_context: ReviewContext,
+    pub dismissed: bool,
+}
+
 /// Compact context shared by all occurrences for a review on the same page.
 pub struct ReviewContext {
     pub review_id: ReviewId,
@@ -131,6 +138,11 @@ pub struct UnreadCounts {
 }
 
 pub trait InboxStore: Send + Sync {
+    fn read_inbox_item(
+        &self,
+        actor: Actor,
+        id: NotificationId,
+    ) -> AppFuture<'_, Snapshot<InboxItem>>;
     fn read_inbox(
         &self,
         actor: Actor,

@@ -11,6 +11,8 @@ import { Modal } from "../components/Modal";
 import { PanelBoundary } from "../components/PanelBoundary";
 import { Loading, Notice } from "../components/PanelState";
 import { Wordmark } from "../components/Wordmark";
+import { startBrowserAlerts } from "../features/notifications/browser-alerts";
+import { BrowserAlertsButton } from "../features/notifications/BrowserAlertsButton";
 import type { LaunchMode, LaunchTarget } from "../features/queue/types";
 import { useAppearance } from "../hooks/useAppearance";
 import { useResource } from "../hooks/useResource";
@@ -23,7 +25,14 @@ import { WorkspaceWarning } from "./connection/WorkspaceWarning";
 import { useWorkspaceConnection } from "./connection/useWorkspaceConnection";
 import type { WorkspaceConnection } from "./connection/useWorkspaceConnection";
 import { DetailHeader, LoadingDetail } from "./DetailHeader";
-import { readRoute, writeRoute } from "./selection";
+import {
+  observeRoute,
+  openNotificationRoute,
+  readRoute,
+  restoreSettings,
+  settingsScope,
+  writeRoute,
+} from "./selection";
 import type { Route } from "./selection";
 import { clampSplit, Splitter } from "./Splitter";
 import { AttentionView } from "./views/AttentionView";
@@ -73,9 +82,7 @@ function Workspace({ warning }: { readonly warning: WorkspaceConnection | undefi
   });
   const [railSmall, setRailSmall] = useState(savedValue("rail") === true);
   const { appearance, change: changeAppearance } = useAppearance();
-  const [settings, setSettings] = useState(
-    () => savedValue("settings.open") === settingsScope(route),
-  );
+  const [settings, setSettings] = useState(() => restoreSettings(route));
   const [revision, setRevision] = useState(0);
   const [overlay, setOverlay] = useState<Overlay>();
   const overlayHost = useRef<HTMLDivElement>(null);
@@ -90,6 +97,7 @@ function Workspace({ warning }: { readonly warning: WorkspaceConnection | undefi
   const opener = useRef<HTMLElement | undefined>(undefined);
   const resolvedRun = useRef<{ reviewId: string; runId: string } | undefined>(undefined);
   const { reviewId, runId, sessionKey, ticket } = route;
+  const hasNotificationAnchor = route.notificationId !== undefined;
   const opened = Boolean(reviewId || ticket);
   const form =
     overlay?.kind === "monitor" || (overlay?.kind === "launch" && overlay.mode !== "receipts");
@@ -175,22 +183,17 @@ function Workspace({ warning }: { readonly warning: WorkspaceConnection | undefi
     }
   }, [route, selectedRun]);
   useEffect(() => {
-    function restore() {
+    const stopRoute = observeRoute((next) => {
       resolvedRun.current = undefined;
-      const next = readRoute();
       setRoute(next);
-      setSettings(savedValue("settings.open") === settingsScope(next));
+      setSettings(restoreSettings(next));
       setOverlay(undefined);
       setSelecting(false);
-    }
-    function restoreCachedPage(event: PageTransitionEvent) {
-      if (event.persisted) restore();
-    }
-    window.addEventListener("popstate", restore);
-    window.addEventListener("pageshow", restoreCachedPage);
+    });
+    const stopAlerts = startBrowserAlerts(openNotificationRoute);
     return () => {
-      window.removeEventListener("popstate", restore);
-      window.removeEventListener("pageshow", restoreCachedPage);
+      stopAlerts();
+      stopRoute();
     };
   }, []);
   useEffect(() => {
@@ -211,7 +214,8 @@ function Workspace({ warning }: { readonly warning: WorkspaceConnection | undefi
     const content = workspaceBody.current;
     if (!target || !content) return;
     const saved = savedValue(`scroll.${route.view}`);
-    const position = typeof saved === "number" && Number.isFinite(saved) ? saved : 0;
+    const position =
+      !hasNotificationAnchor && typeof saved === "number" && Number.isFinite(saved) ? saved : 0;
     let restoring = position > 0;
     const observer = new ResizeObserver(restoreScroll);
     const contentChanges = new MutationObserver(restoreScroll);
@@ -261,7 +265,7 @@ function Workspace({ warning }: { readonly warning: WorkspaceConnection | undefi
       target.removeEventListener("scrollend", save);
       window.removeEventListener("pagehide", save);
     };
-  }, [route.view]);
+  }, [route.view, hasNotificationAnchor]);
   useEffect(() => {
     if (opened && phoneDetailViewport()) drawer.current?.focus();
   }, [opened]);
@@ -384,6 +388,7 @@ function Workspace({ warning }: { readonly warning: WorkspaceConnection | undefi
           {title}
         </h1>
         <div className={selection ? "actions workspace-selection" : "actions"}>
+          {route.view === "notifications" && <BrowserAlertsButton />}
           {route.view !== "notifications" &&
             (selection ?? (
               <ActionMenu
@@ -576,7 +581,11 @@ function Workspace({ warning }: { readonly warning: WorkspaceConnection | undefi
               {route.view === "notifications" && (
                 <>
                   {renderHeader()}
-                  <AttentionView onOpen={openNotification} onChange={unread.retry} />
+                  <AttentionView
+                    location={route}
+                    onOpen={openNotification}
+                    onChange={unread.retry}
+                  />
                 </>
               )}
             </PanelBoundary>
@@ -743,17 +752,6 @@ function watchDetailViewport(notify: () => void) {
   const query = window.matchMedia(DETAIL_VIEWPORT);
   query.addEventListener("change", notify);
   return () => query.removeEventListener("change", notify);
-}
-
-function settingsScope(route: Route): string {
-  return JSON.stringify([
-    route.view,
-    route.reviewId,
-    route.runId,
-    route.sessionKey,
-    route.ticket,
-    route.tab,
-  ]);
 }
 
 function NavIcon({ view }: { readonly view: Route["view"] | "settings" }) {

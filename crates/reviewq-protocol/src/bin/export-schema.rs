@@ -205,6 +205,10 @@ fn main() -> Result<(), Box<dyn Error>> {
         "notifications",
         "NotificationPageResponse",
     )?;
+    registry.response::<Success<notifications::NotificationDetail>>(
+        "notifications",
+        "ViewNotificationResponse",
+    )?;
     registry.response::<Success<notifications::StateResult>>(
         "notifications",
         "NotificationStateResponse",

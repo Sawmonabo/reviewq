@@ -99,6 +99,7 @@ import type {
   TicketDetailResponse,
   TrackReviewResponse,
   VerifiedConnectionResponse,
+  ViewNotificationResponse,
 } from "./contracts.js";
 
 export function isInvalidateEvent(value: unknown): value is InvalidateEvent;
@@ -355,3 +356,6 @@ export function isTrackReviewResponse(
 export function isVerifiedConnectionResponse(
   value: unknown,
 ): value is VerifiedConnectionResponse;
+export function isViewNotificationResponse(
+  value: unknown,
+): value is ViewNotificationResponse;

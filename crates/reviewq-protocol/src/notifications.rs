@@ -86,6 +86,15 @@ pub struct NotificationPage {
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct NotificationDetail {
+    pub item: Notification,
+    pub review_context: ReviewContext,
+    pub dismissed: bool,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct ReviewContext {
     pub review_id: ReviewIdDto,
     pub title: String,

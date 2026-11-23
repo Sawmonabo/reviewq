@@ -8,6 +8,7 @@ export type Route = {
   readonly runId?: string;
   readonly sessionKey?: string;
   readonly ticket?: string;
+  readonly notificationId?: string;
   readonly tab: Tab;
 };
 
@@ -16,6 +17,9 @@ export function readRoute(): Route {
   const savedView = savedValue("view");
   const view = query.get("view") ?? savedView;
   const tab = query.get("tab");
+  const notificationId = identifier(query.get("notificationId"));
+  if (view === "notifications" && notificationId)
+    return { view: "notifications", tab: "overview", notificationId };
   const reviewId = identifier(query.get("reviewId"));
   const runId = identifier(query.get("runId"));
   const sessionKey = identifier(query.get("sessionKey"));
@@ -37,14 +41,69 @@ export function writeRoute(route: Route, replace = false) {
     url.searchParams.set("view", readRoute().view);
     history.replaceState(history.state, "", url);
   }
-  for (const key of ["view", "tab", "reviewId", "runId", "sessionKey", "ticket"] as const) {
-    const value = route[key];
+  for (const key of [
+    "view",
+    "tab",
+    "reviewId",
+    "runId",
+    "sessionKey",
+    "ticket",
+    "notificationId",
+  ] as const) {
+    const value = key === "tab" && route.notificationId ? undefined : route[key];
     if (value) url.searchParams.set(key, value);
     else url.searchParams.delete(key);
   }
+  if (route.notificationId) url.hash = encodeURIComponent(notificationAnchor(route.notificationId));
+  else if (url.hash.startsWith("#notification-")) url.hash = "";
   if (replace) history.replaceState(history.state, "", url);
   else history.pushState(null, "", url);
   saveValue("view", route.view);
+}
+
+export function openNotificationRoute(notificationId: string) {
+  const id = identifier(notificationId);
+  if (!id) return;
+  const current = readRoute();
+  writeRoute(
+    { view: "notifications", tab: "overview", notificationId: id },
+    current.notificationId === id,
+  );
+  window.dispatchEvent(new PopStateEvent("popstate"));
+}
+
+export function observeRoute(onRoute: (route: Route) => void) {
+  function restore() {
+    onRoute(readRoute());
+  }
+  function restoreCachedPage(event: PageTransitionEvent) {
+    if (event.persisted) restore();
+  }
+  window.addEventListener("popstate", restore);
+  window.addEventListener("pageshow", restoreCachedPage);
+  return () => {
+    window.removeEventListener("popstate", restore);
+    window.removeEventListener("pageshow", restoreCachedPage);
+  };
+}
+
+export function notificationAnchor(id: string) {
+  return `notification-${id}`;
+}
+
+export function settingsScope(route: Route): string {
+  return JSON.stringify([
+    route.view,
+    route.reviewId,
+    route.runId,
+    route.sessionKey,
+    route.ticket,
+    route.tab,
+  ]);
+}
+
+export function restoreSettings(route: Route) {
+  return !route.notificationId && savedValue("settings.open") === settingsScope(route);
 }
 
 function identifier(value: string | null): string | undefined {

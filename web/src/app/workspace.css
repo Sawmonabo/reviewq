@@ -329,6 +329,9 @@
   inset-block: 0;
   inset-inline-end: 0;
 }
+.workspace-title[data-view="notifications"] > .actions:not(:empty) {
+  margin-inline-end: 48px;
+}
 .workspace-title[data-view="notifications"] > h1 {
   max-inline-size: calc(100% - 52px);
 }

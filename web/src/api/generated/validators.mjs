@@ -97,3 +97,4 @@ export { validate1732 as isTicketCommentsResponse } from "./validators/schemas/t
 export { validate1746 as isTicketDetailResponse } from "./validators/schemas/ticket-detail-response.mjs";
 export { validate1763 as isTrackReviewResponse } from "./validators/schemas/track-review-response.mjs";
 export { validate1771 as isVerifiedConnectionResponse } from "./validators/schemas/verified-connection-response.mjs";
+export { validate1777 as isViewNotificationResponse } from "./validators/schemas/view-notification-response.mjs";

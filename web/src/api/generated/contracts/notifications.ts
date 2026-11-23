@@ -238,3 +238,16 @@ export interface StateResult {
   unreadMrCount: SafeCountDto;
   [k: string]: unknown;
 }
+
+export interface ViewNotificationResponse {
+  cursor: EventCursorDto;
+  data: NotificationDetail;
+  [k: string]: unknown;
+}
+
+export interface NotificationDetail {
+  dismissed: boolean;
+  item: Notification;
+  reviewContext: ReviewContext;
+  [k: string]: unknown;
+}

@@ -14,6 +14,7 @@ import {
   isRefreshResponse,
   isRunCardsResponse,
   isTrackReviewResponse,
+  isViewNotificationResponse,
 } from "./generated/validators.mjs";
 
 type Params = Parameters<typeof queryString>[0];
@@ -48,6 +49,20 @@ export function readArchive(params: Params, signal: AbortSignal) {
 
 export function readNotifications(params: Params, signal: AbortSignal) {
   return read(`/notifications${queryString(params)}`, isNotificationPageResponse, signal);
+}
+
+export async function readNotification(id: string, signal: AbortSignal) {
+  const result = await read(
+    `/notifications/${encodeURIComponent(id)}`,
+    isViewNotificationResponse,
+    signal,
+  );
+  if (
+    result.data.item.id !== id ||
+    result.data.reviewContext.reviewId !== result.data.item.reviewId
+  )
+    throw new Error("The linked notification is unavailable.");
+  return result;
 }
 
 export function assignNotifications(body: NotificationStateRequest) {

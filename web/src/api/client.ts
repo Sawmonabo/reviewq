@@ -184,8 +184,11 @@ function requireBrowserProof(): Promise<string> {
   return browserProof;
 }
 
-async function readBrowserProof(): Promise<string> {
-  const response = await fetchLocal("/api/v1/session", { cache: "no-store" });
+export async function readBrowserProof(signal?: AbortSignal): Promise<string> {
+  const response = await fetchLocal("/api/v1/session", {
+    cache: "no-store",
+    signal: signal ?? null,
+  });
   if (!response.ok) throw await apiError(response);
   const payload: unknown = await response.json().catch(transportFailure);
   if (

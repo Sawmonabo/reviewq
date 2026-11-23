@@ -58,6 +58,7 @@ import type {
   NotificationPageResponse,
   NotificationStateRequest,
   NotificationStateResponse,
+  ViewNotificationResponse,
 } from "./notifications.js";
 
 import type {
@@ -244,4 +245,5 @@ export interface Contracts {
   TicketDetailResponse: TicketDetailResponse;
   TrackReviewResponse: TrackReviewResponse;
   VerifiedConnectionResponse: VerifiedConnectionResponse;
+  ViewNotificationResponse: ViewNotificationResponse;
 }

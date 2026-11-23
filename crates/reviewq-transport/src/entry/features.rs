@@ -64,6 +64,7 @@ pub(super) fn routes() -> Router<Arc<Entry>> {
             axum::routing::post(decisions::checkpoint),
         )
         .route("/notifications", get(notifications::list))
+        .route("/notifications/{id}", get(notifications::detail))
         .route(
             "/notifications/state",
             axum::routing::post(notifications::update).layer(DefaultBodyLimit::max(2_100_000)),

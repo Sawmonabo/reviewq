@@ -3,13 +3,15 @@ import type { RefObject } from "react";
 import { ApiResponseError } from "../../api/client";
 import type { Notification } from "../../api/generated/contracts";
 import type { Action, ReviewContext } from "../../api/generated/contracts/notifications";
-import { assignNotifications, readNotifications } from "../../api/workspace";
+import { assignNotifications, readNotification, readNotifications } from "../../api/workspace";
 import { Icon } from "../../components/Icon";
 import { Empty, Loading, Notice } from "../../components/PanelState";
 import { ReviewBadges } from "../../components/ReviewRow";
 import { useWorkspaceResource } from "../../hooks/useWorkspaceResource";
 import { describeError, formatActivityTime, formatTime, readable } from "../../lib/presentation";
 import { savedValue, saveValue } from "../../lib/view-preferences";
+import { notificationAnchor } from "../selection";
+import type { Route } from "../selection";
 import "./attention.css";
 
 type InboxHistory = {
@@ -47,9 +49,11 @@ const eventLabels: Readonly<Record<string, string>> = {
 };
 
 export function AttentionView({
+  location,
   onOpen,
   onChange,
 }: {
+  readonly location: Pick<Route, "notificationId">;
   readonly onOpen: (item: Notification) => void;
   readonly onChange: () => void;
 }) {
@@ -66,6 +70,7 @@ export function AttentionView({
   const activeFilter = useRef<HTMLButtonElement>(null);
   const selectShown = useRef<HTMLInputElement>(null);
   const focusAfterUpdate = useRef<InboxFocus | undefined>(undefined);
+  const revealed = useRef<typeof location | undefined>(undefined);
   useEffect(() => () => request.current?.abort(), []);
   const page = useWorkspaceResource(
     "Notifications",
@@ -74,6 +79,19 @@ export function AttentionView({
     [{ kind: "notification" }, { kind: "review" }, { kind: "queue" }],
     accessLost,
   );
+  const { notificationId } = location;
+  const link = useWorkspaceResource(
+    "Linked notification",
+    notificationId ?? "",
+    (signal) =>
+      notificationId
+        ? readNotification(notificationId, signal)
+        : Promise.resolve({ data: null, cursor: "" }),
+    notificationId ? [{ kind: "notification", id: notificationId }] : [],
+    accessLost,
+  );
+  const linked = link.data;
+  const linkedInInbox = linked && !linked.dismissed && (mode === "all" || !linked.item.readAt);
   const headCursor = page.data?.nextCursor;
   // A new head cursor can change the revision, watermark or access scope of every older page.
   const history = older?.headCursor === headCursor ? older : undefined;
@@ -83,6 +101,13 @@ export function AttentionView({
   for (const item of history?.items ?? []) if (!byId.has(item.id)) byId.set(item.id, item);
   const contexts = new Map(history?.contexts);
   for (const context of page.data?.reviewContexts ?? []) contexts.set(context.reviewId, context);
+  if (linked) {
+    if (linkedInInbox) {
+      byId.set(linked.item.id, linked.item);
+      if (!contexts.has(linked.reviewContext.reviewId))
+        contexts.set(linked.reviewContext.reviewId, linked.reviewContext);
+    } else byId.delete(linked.item.id);
+  }
   const oldest = history?.items.at(-1) ?? page.data?.items.at(-1);
   let refreshedSelection: Map<string, SelectedNotification> | undefined;
   for (const [id, { item, context }] of selected) {
@@ -95,7 +120,12 @@ export function AttentionView({
           context: confirmedContext,
         });
       }
-    } else if (cursor && oldest && compareNotifications(item, oldest) > 0) {
+    } else if (
+      id !== linked?.item.id &&
+      cursor &&
+      oldest &&
+      compareNotifications(item, oldest) > 0
+    ) {
       // A live arrival can displace this choice beyond the refreshed page boundary.
       byId.set(id, item);
       if (context && !contexts.has(item.reviewId)) contexts.set(item.reviewId, context);
@@ -112,6 +142,20 @@ export function AttentionView({
   const selectedRead = selection.filter((item) => item.readAt).map((item) => item.id);
   const allSelected = shown.length > 0 && selection.length === shown.length;
   const staleHistory = Boolean(older && !history && page.data);
+
+  useLayoutEffect(() => {
+    if (page.pending || !linked || revealed.current === location) return;
+    const frame = requestAnimationFrame(() => {
+      const row = document.getElementById(notificationAnchor(linked.item.id));
+      if (!row) return;
+      const group = row.closest("details");
+      if (group) group.open = true;
+      row.scrollIntoView({ block: "nearest" });
+      row.querySelector<HTMLButtonElement>(".inbox-event-open")?.focus({ preventScroll: true });
+      revealed.current = location;
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [linked, location, page.pending]);
 
   useLayoutEffect(() => {
     const previous = focusAfterUpdate.current;
@@ -232,6 +276,7 @@ export function AttentionView({
       const { data } = await assignNotifications({ action, ids: [...ids] });
       unselect(ids);
       page.retry();
+      if (notificationId && ids.includes(notificationId)) link.retry();
       onChange();
       const count = data.affectedIds.length;
       setFeedback({
@@ -360,6 +405,13 @@ export function AttentionView({
       </div>
       {feedback?.error && <Notice>{feedback.message}</Notice>}
       {page.error && <Notice retry={page.retry}>{page.error}</Notice>}
+      {notificationId && link.pending && <Loading label="Opening notification…" />}
+      {link.error &&
+        (accessLost(link.errorCause) ? (
+          <Notice>This notification is unavailable.</Notice>
+        ) : (
+          <Notice retry={link.retry}>{link.error}</Notice>
+        ))}
       <p className="inbox-status" role="status">
         {feedback && !feedback.error && feedback.message}
         {staleHistory && feedback?.message !== historyChanged && (
@@ -370,7 +422,20 @@ export function AttentionView({
         )}
       </p>
       {page.pending && <Loading label="Loading inbox…" />}
-      {page.data && !groups.length && (
+      {linked && !linkedInInbox && (
+        <ul className="inbox-events inbox-linked-list" aria-label="Linked notification">
+          <InboxEvent
+            item={linked.item}
+            linked
+            context={linked.reviewContext}
+            dismissed={linked.dismissed}
+            busy={busy}
+            onOpen={onOpen}
+            onAssign={(action, control) => void assign(action, [linked.item.id], control)}
+          />
+        </ul>
+      )}
+      {page.data && !groups.length && !linked && (
         <Empty title={mode === "unread" ? "You’re caught up" : "No notifications yet"} />
       )}
       <ul className="inbox-list">
@@ -453,54 +518,16 @@ export function AttentionView({
                 </summary>
                 <ul className="inbox-events">
                   {items.map((item) => (
-                    <li key={item.id} data-read={Boolean(item.readAt)}>
-                      <SelectionCheckbox
-                        label={`Select ${item.label}`}
-                        disabled={busy}
-                        checked={selected.has(item.id)}
-                        onChange={(checked) => select([item.id], checked)}
-                      />
-                      <button
-                        type="button"
-                        className="inbox-event-open"
-                        onClick={() => onOpen(item)}
-                      >
-                        <span>
-                          {notificationSource(item.source)} ·{" "}
-                          {eventLabels[item.kind] ?? readable(item.kind)}
-                        </span>
-                        <strong>{item.label}</strong>
-                        <time dateTime={item.occurredAt} title={formatTime(item.occurredAt)}>
-                          {formatActivityTime(item.occurredAt)}
-                        </time>
-                      </button>
-                      <div className="actions inbox-event-actions">
-                        <button
-                          className="quiet-button"
-                          disabled={busy}
-                          type="button"
-                          onClick={(event) =>
-                            void assign(
-                              item.readAt ? "unread" : "read",
-                              [item.id],
-                              event.currentTarget,
-                            )
-                          }
-                        >
-                          {item.readAt ? "Mark as unread" : "Mark as read"}
-                        </button>
-                        <button
-                          className="quiet-button"
-                          disabled={busy}
-                          type="button"
-                          onClick={(event) =>
-                            void assign("dismiss", [item.id], event.currentTarget)
-                          }
-                        >
-                          Dismiss
-                        </button>
-                      </div>
-                    </li>
+                    <InboxEvent
+                      key={item.id}
+                      item={item}
+                      linked={item.id === linked?.item.id}
+                      checked={selected.has(item.id)}
+                      busy={busy}
+                      onSelect={(checked) => select([item.id], checked)}
+                      onOpen={onOpen}
+                      onAssign={(action, control) => void assign(action, [item.id], control)}
+                    />
                   ))}
                 </ul>
               </details>
@@ -516,6 +543,86 @@ export function AttentionView({
         </div>
       )}
     </div>
+  );
+}
+
+function InboxEvent({
+  item,
+  linked,
+  context,
+  dismissed,
+  checked,
+  busy,
+  onSelect,
+  onOpen,
+  onAssign,
+}: {
+  readonly item: Notification;
+  readonly linked: boolean;
+  readonly context?: ReviewContext;
+  readonly dismissed?: boolean;
+  readonly checked?: boolean;
+  readonly busy: boolean;
+  readonly onSelect?: (checked: boolean) => void;
+  readonly onOpen: (item: Notification) => void;
+  readonly onAssign: (action: Action, control: HTMLButtonElement) => void;
+}) {
+  return (
+    <li
+      id={notificationAnchor(item.id)}
+      data-read={Boolean(item.readAt)}
+      data-linked={linked || undefined}
+    >
+      {onSelect && (
+        <SelectionCheckbox
+          label={`Select ${item.label}`}
+          disabled={busy}
+          checked={checked ?? false}
+          onChange={onSelect}
+        />
+      )}
+      <button
+        type="button"
+        className="inbox-event-open"
+        aria-current={linked ? "location" : undefined}
+        onClick={() => onOpen(item)}
+      >
+        {context && (
+          <span>
+            {context.ticketKeys.length > 0 && `${context.ticketKeys.join(" · ")} · `}
+            {context.projectPath.split("/").at(-1)} !{context.iid}
+          </span>
+        )}
+        <span>
+          {notificationSource(item.source)} · {eventLabels[item.kind] ?? readable(item.kind)}
+          {dismissed ? " · Dismissed" : context && item.readAt ? " · Read" : ""}
+        </span>
+        <strong>{item.label}</strong>
+        <time dateTime={item.occurredAt} title={formatTime(item.occurredAt)}>
+          {formatActivityTime(item.occurredAt)}
+        </time>
+      </button>
+      {!dismissed && (
+        <div className="actions inbox-event-actions">
+          <button
+            className="quiet-button"
+            disabled={busy}
+            type="button"
+            onClick={(event) => onAssign(item.readAt ? "unread" : "read", event.currentTarget)}
+          >
+            {item.readAt ? "Mark as unread" : "Mark as read"}
+          </button>
+          <button
+            className="quiet-button"
+            disabled={busy}
+            type="button"
+            onClick={(event) => onAssign("dismiss", event.currentTarget)}
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
+    </li>
   );
 }
 

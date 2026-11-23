@@ -16,7 +16,7 @@ use reviewq_protocol::{
 };
 use serde::{Deserialize, Serialize};
 
-use crate::entry::error::{ApiBytes, ApiQuery as Query};
+use crate::entry::error::{ApiBytes, ApiPath as Path, ApiQuery as Query};
 use crate::entry::pages::{count, parse, success};
 use crate::entry::{ApiError, Entry};
 
@@ -54,6 +54,23 @@ impl InboxCursor {
             id: parse(&self.id)?,
         })
     }
+}
+
+pub(super) async fn detail(
+    State(entry): State<Arc<Entry>>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> Result<Json<Success<dto::NotificationDetail>>, ApiError> {
+    let actor = entry.auth.browser_actor(&headers, false)?;
+    let stored = entry.store.read_inbox_item(actor, parse(&id)?).await?;
+    Ok(Json(success(
+        dto::NotificationDetail {
+            item: notification(stored.value.item)?,
+            review_context: review_context(stored.value.review_context)?,
+            dismissed: stored.value.dismissed,
+        },
+        stored.cursor,
+    )?))
 }
 
 pub(super) async fn list(

@@ -4,7 +4,7 @@ use std::process::Stdio;
 use std::time::Duration;
 
 use reviewq_app::access::AppFuture;
-use reviewq_app::notifications::{DesktopClaim, DesktopNotifier, DesktopOutcome, Kind};
+use reviewq_app::notifications::{DesktopClaim, DesktopNotifier, DesktopOutcome};
 use tokio::process::Command;
 use url::Url;
 
@@ -79,25 +79,11 @@ impl Message {
     fn new(browser: SocketAddr, claim: &DesktopClaim) -> Self {
         let mut url =
             Url::parse(&format!("http://{browser}/")).expect("a loopback address is a valid URI");
-        let tab = match claim.kind {
-            Kind::Reply | Kind::EditedReply | Kind::Reopened | Kind::Resolved | Kind::NewHead => {
-                "changes"
-            }
-            Kind::ReportReady | Kind::ReportFailed | Kind::FollowupReady => "findings",
-            Kind::AgentFailure | Kind::AgentPermission | Kind::AgentQuestion | Kind::Quota => {
-                "agent"
-            }
-            _ => "overview",
-        };
-        {
-            let mut query = url.query_pairs_mut();
-            query
-                .append_pair("reviewId", claim.review.as_str())
-                .append_pair("tab", tab);
-            if let Some(run) = &claim.run {
-                query.append_pair("runId", run.as_str());
-            }
-        }
+        let id = claim.notification.as_str();
+        url.query_pairs_mut()
+            .append_pair("view", "notifications")
+            .append_pair("notificationId", id);
+        url.set_fragment(Some(&format!("notification-{id}")));
         let label: String = claim
             .label
             .chars()

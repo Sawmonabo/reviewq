@@ -243,6 +243,21 @@
   gap: 8px;
   border-top: 1px solid var(--row-line);
 }
+.inbox-events > li[data-linked] {
+  box-shadow: inset 3px 0 var(--inbox-selected-line);
+  background: var(--inbox-selected-bg);
+}
+.inbox-linked-list {
+  margin-bottom: 12px;
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+.inbox-linked-list > li {
+  padding-inline: 14px;
+  border-top: 0;
+}
 .inbox-event-open {
   flex: 1;
   min-width: 0;

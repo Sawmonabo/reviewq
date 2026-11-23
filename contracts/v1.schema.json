@@ -6045,6 +6045,25 @@
       ],
       "type": "object"
     },
+    "NotificationDetail": {
+      "properties": {
+        "dismissed": {
+          "type": "boolean"
+        },
+        "item": {
+          "$ref": "#/definitions/Notification"
+        },
+        "reviewContext": {
+          "$ref": "#/definitions/ReviewContext"
+        }
+      },
+      "required": [
+        "item",
+        "reviewContext",
+        "dismissed"
+      ],
+      "type": "object"
+    },
     "NotificationPage": {
       "description": "A bounded compact list with a required nullable keyset continuation.",
       "properties": {
@@ -11969,6 +11988,23 @@
       "title": "VerifiedConnectionResponse",
       "type": "object"
     },
+    "ViewNotificationResponse": {
+      "description": "The resource and event head from the same authorized snapshot.",
+      "properties": {
+        "cursor": {
+          "$ref": "#/definitions/EventCursorDto"
+        },
+        "data": {
+          "$ref": "#/definitions/NotificationDetail"
+        }
+      },
+      "required": [
+        "data",
+        "cursor"
+      ],
+      "title": "ViewNotificationResponse",
+      "type": "object"
+    },
     "ViewedReceipt": {
       "properties": {
         "previousReceiptId": {
@@ -12101,7 +12137,8 @@
     "TicketDetailResponse": "tickets",
     "TrackReviewRequest": "queue",
     "TrackReviewResponse": "queue",
-    "VerifiedConnectionResponse": "settings"
+    "VerifiedConnectionResponse": "settings",
+    "ViewNotificationResponse": "notifications"
   },
   "x-reviewq-roots": {
     "events": {
@@ -12206,7 +12243,8 @@
       "TicketCommentsResponse": "#/definitions/TicketCommentsResponse",
       "TicketDetailResponse": "#/definitions/TicketDetailResponse",
       "TrackReviewResponse": "#/definitions/TrackReviewResponse",
-      "VerifiedConnectionResponse": "#/definitions/VerifiedConnectionResponse"
+      "VerifiedConnectionResponse": "#/definitions/VerifiedConnectionResponse",
+      "ViewNotificationResponse": "#/definitions/ViewNotificationResponse"
     }
   }
 }

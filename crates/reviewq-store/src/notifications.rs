@@ -8,7 +8,7 @@ pub(crate) mod native;
 use reviewq_app::access::{Actor, AppError, AppFuture};
 use reviewq_app::events::{ResourceKey, Snapshot};
 use reviewq_app::notifications::{
-    InboxChange, InboxPage, InboxPosition, InboxStore, InboxView, MAX_INBOX_PAGE,
+    InboxChange, InboxItem, InboxPage, InboxPosition, InboxStore, InboxView, MAX_INBOX_PAGE,
     MAX_INBOX_SELECTION, Notification, NotificationAction, ReviewContext, UnreadCounts,
 };
 use reviewq_domain::identity::{NotificationId, Revision};
@@ -20,6 +20,18 @@ use crate::workspace::{ReadScope, actor_key, scope, settings_revision};
 use crate::{SqliteStore, StoreError};
 
 impl InboxStore for SqliteStore {
+    fn read_inbox_item(
+        &self,
+        actor: Actor,
+        id: NotificationId,
+    ) -> AppFuture<'_, Snapshot<InboxItem>> {
+        Box::pin(async move {
+            self.read(move |tx| snapshot(tx, inbox_item(tx, actor, id)?))
+                .await
+                .map_err(StoreError::app)
+        })
+    }
+
     fn read_inbox(
         &self,
         actor: Actor,
@@ -97,6 +109,35 @@ const SCOPE_PREDICATE: &str = "(?1=0 OR (?1=1 AND EXISTS(
 
 const JOIN_SCOPE: &str = "FROM notifications n JOIN reviews r ON r.review_id=n.review_id
     WHERE n.ordinal<=?3 AND n.dismissed_at_ms IS NULL";
+
+const NOTIFICATION_COLUMNS: &str = "n.notification_id, n.source, n.kind, n.review_id, n.run_id,
+    n.session_key, n.label, n.occurred_at_ms, n.read_at_ms, n.notified_at_ms, n.event_ref,
+    (SELECT d.state FROM desktop_members m JOIN desktop_receipts d USING(receipt_id)
+     WHERE m.notification_id=n.notification_id),
+    (SELECT d.reason FROM desktop_members m JOIN desktop_receipts d USING(receipt_id)
+     WHERE m.notification_id=n.notification_id)";
+
+fn inbox_item(db: &Connection, actor: Actor, id: NotificationId) -> Result<InboxItem, StoreError> {
+    let (scope_code, scope_id) = define_scope(scope(db, &actor)?);
+    let sql = format!(
+        "SELECT {NOTIFICATION_COLUMNS}, n.dismissed_at_ms IS NOT NULL
+         FROM notifications n JOIN reviews r USING(review_id)
+         WHERE n.notification_id=?3 AND {SCOPE_PREDICATE}"
+    );
+    let mut statement = db.prepare_cached(&sql)?;
+    let mut rows = statement.query(params![scope_code, scope_id, id.as_str()])?;
+    let row = rows.next()?.ok_or(AppError::NotFound)?;
+    let (item, dismissed) = (decode(row)?, row.get(13)?);
+    drop(rows);
+    let review_context = review_contexts(db, std::slice::from_ref(&item), i64::MAX)?
+        .pop()
+        .ok_or(AppError::Internal)?;
+    Ok(InboxItem {
+        item,
+        review_context,
+        dismissed,
+    })
+}
 
 fn assign(
     db: &Connection,
@@ -183,12 +224,7 @@ fn page(
         (watermark, None, String::new(), "")
     };
     let sql = format!(
-        "SELECT n.notification_id, n.source, n.kind, n.review_id, n.run_id, n.session_key,
-             n.label, n.occurred_at_ms, n.read_at_ms, n.notified_at_ms, n.event_ref,
-             (SELECT d.state FROM desktop_members m JOIN desktop_receipts d USING(receipt_id)
-               WHERE m.notification_id=n.notification_id),
-             (SELECT d.reason FROM desktop_members m JOIN desktop_receipts d USING(receipt_id)
-               WHERE m.notification_id=n.notification_id)
+        "SELECT {NOTIFICATION_COLUMNS}
          {JOIN_SCOPE} AND {SCOPE_PREDICATE}
            AND (?4 OR n.read_at_ms IS NULL)
            AND (?5 IS NULL OR n.occurred_at_ms<?5 OR
