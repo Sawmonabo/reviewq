@@ -24,6 +24,8 @@ The installer prints the runtime configuration path and reports missing native p
 
 ## Develop
 
+For UI development against your installed ReviewQ service, run `pnpm --dir web run dev --installed`. Open the printed loopback URL in the browser profile signed in through `reviewq`. Vite updates the UI live and forwards read-only requests to the running service. The installed backend updates when you install a new package.
+
 Install the locked browser dependencies once. The development URL serves the current checkout through Vite. Saving browser code or applying a branch change there uses hot module replacement when possible. The installed ReviewQ URL serves its packaged release until the next installation.
 
 ```sh
