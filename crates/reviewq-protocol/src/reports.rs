@@ -273,6 +273,16 @@ pub struct SourceRange {
     pub offset: SafeCountDto,
     pub length: SafeCountDto,
     pub sha256: ReportHashDto,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub origin: Option<Box<SourceOrigin>>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct SourceOrigin {
+    pub report: ReportReference,
+    pub checked_sha: Option<GitShaDto>,
 }
 
 #[derive(Debug, Serialize)]

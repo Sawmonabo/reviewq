@@ -46,7 +46,12 @@ const schema376 = { enum: ["observed", "gap"], type: "string" };
 const schema377 = {
   additionalProperties: false,
   properties: {
-    line: { format: "uint32", minimum: 1, type: ["integer", "null"] },
+    line: {
+      format: "uint32",
+      maximum: 4294967295,
+      minimum: 1,
+      type: ["integer", "null"],
+    },
     path: { maxLength: 512, minLength: 1, type: "string" },
   },
   required: ["path"],
@@ -63,7 +68,7 @@ const schema378 = {
   required: ["blocking", "publication", "reason"],
   type: "object",
 };
-const schema381 = {
+const schema382 = {
   properties: {
     blocking: { type: ["boolean", "null"] },
     findingId: { type: "string" },
@@ -76,7 +81,7 @@ const schema381 = {
   required: ["kind", "findingId", "blocking", "publication", "reason"],
   type: "object",
 };
-const schema387 = {
+const schema388 = {
   properties: {
     reason: { type: ["string", "null"] },
     receiptId: {
@@ -87,11 +92,11 @@ const schema387 = {
   required: ["receiptId", "state", "reason"],
   type: "object",
 };
-const schema388 = {
+const schema389 = {
   enum: ["preparing", "saving", "failed", "saved"],
   type: "string",
 };
-const schema392 = {
+const schema393 = {
   type: "object",
   properties: {
     receiptId: { $ref: "#/definitions/CheckpointIdDto" },
@@ -113,12 +118,12 @@ const schema392 = {
     totalCodePoints: { $ref: "#/definitions/SafeCountDto" },
   },
 };
-const schema393 = { enum: ["ready", "source_only"], type: "string" };
-const schema394 = {
+const schema394 = { enum: ["ready", "source_only"], type: "string" };
+const schema395 = {
   enum: ["full_review", "selected_threads", "amendment"],
   type: "string",
 };
-const schema396 = {
+const schema397 = {
   enum: ["approve", "request_changes", "blocked", "not_specified"],
   type: "string",
 };
@@ -128,11 +133,11 @@ export {
   schema376,
   schema377,
   schema378,
-  schema381,
-  schema387,
+  schema382,
   schema388,
-  schema392,
+  schema389,
   schema393,
   schema394,
-  schema396,
+  schema395,
+  schema397,
 };

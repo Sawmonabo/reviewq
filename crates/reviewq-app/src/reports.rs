@@ -4,8 +4,11 @@ mod capture;
 mod display;
 mod drawings;
 mod index;
+mod presentation;
 mod revision;
 mod structured;
+
+pub use presentation::{presentation_matches, presentation_source};
 
 pub use structured::{
     FindingBasis, FindingBasisKind, FindingDetails, FindingLocation, ReportScope,
@@ -197,6 +200,13 @@ pub struct SourceRange {
     pub offset: u64,
     pub length: u64,
     pub hash: ReportHash,
+    pub origin: Option<Box<SourceOrigin>>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SourceOrigin {
+    pub report: ReportReference,
+    pub checked_sha: Option<GitSha>,
 }
 
 #[derive(Clone)]
@@ -233,6 +243,7 @@ pub enum Descriptor {
     Section {
         title: String,
         source: SourceRange,
+        cursor_offset: u64,
     },
 }
 
@@ -242,7 +253,7 @@ impl Descriptor {
             Self::Finding { id, .. } | Self::Change { id, .. } | Self::Disposition { id, .. } => {
                 ContextKey::Identity(id.clone())
             }
-            Self::Section { source, .. } => ContextKey::Offset(source.offset),
+            Self::Section { cursor_offset, .. } => ContextKey::Offset(*cursor_offset),
         }
     }
 }

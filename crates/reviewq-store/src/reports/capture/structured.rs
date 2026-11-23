@@ -3,19 +3,31 @@ use std::collections::{BTreeMap, BTreeSet};
 use reviewq_app::access::AppError;
 use reviewq_app::reports::{
     CorrectionKind, Descriptor, EvidenceTarget, FindingDetails, ReportEdits, ReportScope,
-    RevisionEvidence, StructuredFinding, StructuredReport,
+    RevisionEvidence, SourceRange, StructuredFinding, StructuredReport, presentation_source,
 };
 use reviewq_domain::identity::ReportHash;
 use rusqlite::{Connection, OptionalExtension, params};
+use serde::Serialize;
 use sha2::{Digest, Sha256};
 
 use crate::StoreError;
+
+mod carry;
 
 pub(super) struct Projection {
     pub count: i64,
     retain: bool,
     replaced: Vec<String>,
-    details: String,
+    metadata: String,
+    promoted: BTreeMap<String, SourceRange>,
+}
+
+#[derive(Serialize)]
+struct AcceptedMetadata {
+    #[serde(rename = "acceptedDetails")]
+    details: BTreeMap<String, FindingDetails>,
+    #[serde(skip_serializing_if = "carry::Carry::is_empty")]
+    carry: carry::Carry,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -33,6 +45,7 @@ pub(super) fn prepare(
     let previous = previous.filter(|_| retain);
     let mut prior = BTreeMap::new();
     let mut details: BTreeMap<String, FindingDetails> = BTreeMap::new();
+    let mut promoted = BTreeMap::new();
     if let Some(receipt) = previous {
         let mut statement = db.prepare_cached(
             "SELECT finding_id, evidence_sha256 FROM report_findings
@@ -82,7 +95,13 @@ pub(super) fn prepare(
                     }
                     EvidenceTarget::Section(title) => {
                         cited_sections.insert((title.as_str(), reference.hash.as_str()))
-                            && matches_section(db, run, previous, title, reference.hash.as_str())?
+                            && carry::matches_section(
+                                db,
+                                run,
+                                previous,
+                                title,
+                                reference.hash.as_str(),
+                            )?
                     }
                 };
                 if !matched {
@@ -108,6 +127,20 @@ pub(super) fn prepare(
                     return Ok(None);
                 }
                 expected.extend(new_ids);
+                let mut spans = BTreeSet::new();
+                for finding in &report.findings {
+                    let Some(source) = presentation_source(finding, correction, sections) else {
+                        return Ok(None);
+                    };
+                    if !spans.insert(source.offset)
+                        || prior
+                            .values()
+                            .any(|hash| hash.as_deref() == Some(source.hash.as_str()))
+                    {
+                        return Ok(None);
+                    }
+                    promoted.insert(finding.id.clone(), source.clone());
+                }
             }
         }
         if supplied != expected {
@@ -117,7 +150,7 @@ pub(super) fn prepare(
             let Some(previous) = previous else {
                 return Ok(None);
             };
-            if !matches_section(db, run, previous, &edit.baseline_title, edit.baseline_hash.as_str())?
+            if !carry::matches_section(db, run, previous, &edit.baseline_title, edit.baseline_hash.as_str())?
                 || edit.replacement_title.as_ref().is_some_and(|expected| {
                     sections.iter().filter(|entry| matches!(entry, Descriptor::Section { title, .. } if title == expected)).count() != 1
                 })
@@ -146,12 +179,15 @@ pub(super) fn prepare(
         details.insert(finding.id.clone(), current);
         replaced.push(finding.id.clone());
     }
-    let details = serde_json::to_string(&details).map_err(|_| AppError::Internal)?;
+    let carry = carry::prepare(db, run, previous, edits, sections)?;
+    let metadata = serde_json::to_string(&AcceptedMetadata { details, carry })
+        .map_err(|_| AppError::Internal)?;
     Ok(Some(Projection {
         count: count as i64,
         retain,
         replaced,
-        details,
+        metadata,
+        promoted,
     }))
 }
 
@@ -176,9 +212,9 @@ pub(super) fn full_projection_fits(
 impl Projection {
     pub(super) fn fits(&self, db: &Connection, receipt: &str) -> Result<bool, StoreError> {
         Ok(db.query_row(
-            "SELECT length(CAST(json_set(json_remove(edits,'$.structured.findings'),
-                 '$.acceptedDetails',json(?2)) AS BLOB))<=131072 FROM report_handoffs WHERE receipt_id=?1",
-            params![receipt, self.details],
+            "SELECT length(CAST(json_patch(json_remove(edits,'$.structured.findings'),?2)
+                  AS BLOB))<=131072 FROM report_handoffs WHERE receipt_id=?1",
+            params![receipt, self.metadata],
             |row| row.get(0),
         )?)
     }
@@ -189,27 +225,26 @@ impl Projection {
         run: &str,
         receipt: &str,
         previous: Option<&str>,
-        same_source: bool,
         supplied: &[StructuredFinding],
     ) -> Result<(), StoreError> {
         if let Some(parent) = previous.filter(|_| self.retain) {
             let replaced = serde_json::to_string(&self.replaced).map_err(|_| AppError::Internal)?;
             db.execute(
                 "INSERT INTO report_findings
-                 SELECT run_id,?3,finding_id,title,severity,blocking,
-                   CASE WHEN ?4 THEN scalar_offset END, CASE WHEN ?4 THEN scalar_length END, evidence_sha256
+                 SELECT run_id,?3,finding_id,title,severity,blocking,NULL,NULL,evidence_sha256
                  FROM report_findings WHERE run_id=?1 AND receipt_id=?2
-                   AND finding_id NOT IN (SELECT value FROM json_each(?5))",
-                params![run, parent, receipt, same_source, replaced],
+                   AND finding_id NOT IN (SELECT value FROM json_each(?4))",
+                params![run, parent, receipt, replaced],
             )?;
         }
         let mut insert = db.prepare_cached(
-            "INSERT INTO report_findings(run_id,receipt_id,finding_id,title,severity,blocking,evidence_sha256)
-             VALUES(?1,?2,?3,?4,?5,?6,?7)",
+            "INSERT INTO report_findings(run_id,receipt_id,finding_id,title,severity,blocking,evidence_sha256,scalar_offset,scalar_length)
+             VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9)",
         )?;
         for finding in supplied {
             let authored = serde_json::to_vec(finding).map_err(|_| AppError::Internal)?;
             let digest = ReportHash::from_sha256(Sha256::digest(authored).into());
+            let source = self.promoted.get(&finding.id);
             insert.execute(params![
                 run,
                 receipt,
@@ -217,30 +252,22 @@ impl Projection {
                 finding.title,
                 finding.severity,
                 finding.blocking,
-                digest.as_str()
+                source.map_or(digest.as_str(), |source| source.hash.as_str()),
+                source
+                    .map(|source| super::db_int(source.offset))
+                    .transpose()?,
+                source
+                    .map(|source| super::db_int(source.length))
+                    .transpose()?,
             ])?;
         }
         db.execute(
-            "UPDATE report_handoffs SET edits=json_set(json_remove(edits,'$.structured.findings'),
-                 '$.acceptedDetails',json(?2)) WHERE receipt_id=?1",
-            params![receipt, self.details],
+            "UPDATE report_handoffs SET edits=json_patch(json_remove(edits,'$.structured.findings'),?2)
+                  WHERE receipt_id=?1",
+            params![receipt, self.metadata],
         )?;
         Ok(())
     }
-}
-
-fn matches_section(
-    db: &Connection,
-    run: &str,
-    receipt: &str,
-    title: &str,
-    hash: &str,
-) -> Result<bool, StoreError> {
-    Ok(db.query_row(
-        "SELECT count(*)=1 FROM report_sections WHERE run_id=?1 AND receipt_id=?2 AND title=?3 AND evidence_sha256=?4",
-        params![run, receipt, title, hash],
-        |row| row.get(0),
-    )?)
 }
 
 #[cfg(test)]
@@ -306,7 +333,7 @@ mod tests {
         assert_eq!(initial.count, 2);
         assert!(initial.fits(&db, "first").unwrap());
         initial
-            .install(&db, "run", "first", None, false, &original.findings)
+            .install(&db, "run", "first", None, &original.findings)
             .unwrap();
 
         let revision = RevisionEvidence::Exact(next_sha.parse().unwrap());
@@ -335,7 +362,7 @@ mod tests {
         assert_eq!(result.count, 1);
         assert!(result.fits(&db, "next").unwrap());
         result
-            .install(&db, "run", "next", Some("first"), false, &revised.findings)
+            .install(&db, "run", "next", Some("first"), &revised.findings)
             .unwrap();
         let stored: (String, String, String) = db.query_row(
             "SELECT f.finding_id, json_extract(h.edits,'$.acceptedDetails.\"late-reminder\".checkedSha'),
@@ -360,6 +387,8 @@ mod tests {
             .unwrap();
         assert_eq!(old_count, 2);
 
+        assert_mixed_legacy_source(&db, &revised, &revision, &edits);
+
         edits.findings[0].conclusion = FindingConclusion::StillPresent;
         assert!(
             prepare(
@@ -375,6 +404,124 @@ mod tests {
             .unwrap()
             .is_none()
         );
+    }
+
+    fn assert_mixed_legacy_source(
+        db: &Connection,
+        revised: &StructuredReport,
+        revision: &RevisionEvidence,
+        edits: &ReportEdits,
+    ) {
+        use reviewq_app::reports::{Collection, ContextRequest};
+
+        let prior_sha = "a".repeat(40);
+        let next_sha = "b".repeat(40);
+        let previous_hash = "d".repeat(64);
+        let next_hash = "e".repeat(64);
+        let evidence_hash = "f".repeat(64);
+        for (receipt, reviewed, hash, handoff) in [
+            ("legacy", &prior_sha, &previous_hash, None),
+            ("next-legacy", &next_sha, &next_hash, Some("next-legacy")),
+        ] {
+            db.execute(
+                "INSERT INTO artifacts(artifact_id,sha256,byte_length,total_code_points,line_count,
+                                       max_line_bytes,complete,sealed,created_at_ms)
+                 VALUES(?1,?2,100,100,5,40,1,1,0)",
+                params![receipt, hash],
+            )
+            .unwrap();
+            db.execute(
+                "INSERT INTO report_versions(run_id,receipt_id,artifact_id,handoff_receipt_id,attention_receipt_id,
+                      reviewed_sha,coverage,verdict,semantic_index,finding_count,change_count,captured_at_ms,
+                      starting_disposition_version)
+                 VALUES('run',?1,?1,?3,?1,?2,'full_mr','request_changes','ready',2,0,0,0)",
+                params![receipt, reviewed, handoff],
+            ).unwrap();
+        }
+        db.execute(
+            "INSERT INTO report_handoffs(receipt_id,run_id,lead_session_key,turn_id,call_id,
+                source_generation,source_position,request_sha256,declaration_sha256,form,state,
+                source_kind,verdict,disposition_version,due_at_ms,created_at_ms,updated_at_ms,settings_revision,edits)
+             VALUES('next-legacy','run','codex:lead','next-legacy','next-legacy','gen',12,?1,?1,
+                'final','pending_completion','response','request_changes',0,0,0,0,0,?2)",
+            params![evidence_hash, json!({"structured":revised}).to_string()],
+        ).unwrap();
+        for (finding, offset) in [("duplicate-invoice", 10_i64), ("late-reminder", 30)] {
+            db.execute("INSERT INTO report_findings VALUES('run','legacy',?1,'Legacy evidence','high',0,?2,10,?3)",
+                params![finding, offset, evidence_hash]).unwrap();
+        }
+        db.execute("INSERT INTO report_sections VALUES('run','legacy',0,100,'Earlier report',?1),
+            ('run','legacy',10,10,'Fixed evidence',?1),('run','legacy',60,10,'Unreviewed production configuration',?1),
+            ('run','next-legacy',0,10,'New report',?2)", params![evidence_hash, next_hash]).unwrap();
+        let projection = prepare(
+            db,
+            "run",
+            Some("legacy"),
+            false,
+            revised,
+            revision,
+            edits,
+            &[],
+        )
+        .unwrap()
+        .unwrap();
+        projection
+            .install(db, "run", "next-legacy", Some("legacy"), &[])
+            .unwrap();
+        let read = |collection, after, limit| {
+            crate::reports::context::read(
+                db,
+                &"run".parse().unwrap(),
+                ContextRequest {
+                    receipt: Some("next-legacy".parse().unwrap()),
+                    collection,
+                    after,
+                    limit,
+                },
+            )
+            .unwrap()
+        };
+        let findings = read(Collection::Findings, None, 5);
+        let [
+            Descriptor::Finding {
+                id,
+                source: Some(source),
+                ..
+            },
+        ] = findings.items.as_slice()
+        else {
+            panic!("expected one carried legacy finding")
+        };
+        assert_eq!(id, "late-reminder");
+        assert_eq!(source.offset, 30);
+        let origin = source.origin.as_ref().unwrap();
+        assert_eq!(origin.report.receipt_id.as_str(), "legacy");
+        assert_eq!(origin.report.hash.as_str(), previous_hash);
+        assert_eq!(origin.checked_sha.as_ref().unwrap().as_str(), prior_sha);
+
+        let first_page = read(Collection::Sections, None, 1);
+        let sections = read(Collection::Sections, first_page.next, 5).items;
+        assert_eq!(sections.len(), 2);
+        let Descriptor::Section { title, source, .. } = &sections[1] else {
+            panic!("expected a carried standalone section")
+        };
+        assert_eq!(title, "Unreviewed production configuration");
+        assert_eq!(source.offset, 60);
+        assert_eq!(
+            source.origin.as_ref().unwrap().report.receipt_id.as_str(),
+            "legacy"
+        );
+
+        let section = "### Legacy evidence\n\nSeverity: high\nBlocking: false\nEvidence: Observed in the test trace.\n\nNo duplicate charges occur.\n";
+        let mut proposal = finding("promotion");
+        proposal.details.consequence = "No duplicate charges occur.".into();
+        assert!(reviewq_app::reports::presentation_matches(
+            section, &proposal
+        ));
+        proposal.details.consequence = "duplicate charges occur.".into();
+        assert!(!reviewq_app::reports::presentation_matches(
+            section, &proposal
+        ));
     }
 
     fn finding(id: &str) -> StructuredFinding {

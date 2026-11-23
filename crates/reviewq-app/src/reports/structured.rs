@@ -44,6 +44,7 @@ pub struct FindingDetails {
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct FindingLocation {
     pub path: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub line: Option<u32>,
 }
 

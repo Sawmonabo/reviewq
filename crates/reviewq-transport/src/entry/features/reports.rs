@@ -638,6 +638,15 @@ fn descriptor(value: Descriptor) -> Result<dto::Descriptor, AppError> {
             offset: count(range.offset)?,
             length: count(range.length)?,
             sha256: hash(range.hash.as_str())?,
+            origin: range
+                .origin
+                .map(|origin| {
+                    Ok::<_, AppError>(Box::new(dto::SourceOrigin {
+                        report: reference(origin.report)?,
+                        checked_sha: origin.checked_sha.as_ref().map(sha).transpose()?,
+                    }))
+                })
+                .transpose()?,
         })
     };
     Ok(match value {
@@ -688,7 +697,7 @@ fn descriptor(value: Descriptor) -> Result<dto::Descriptor, AppError> {
                 })
                 .transpose()?,
         },
-        Descriptor::Section { title, source } => dto::Descriptor::Section {
+        Descriptor::Section { title, source, .. } => dto::Descriptor::Section {
             title,
             source: range(source)?,
         },

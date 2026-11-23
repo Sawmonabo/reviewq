@@ -6,7 +6,7 @@ use reviewq_app::access::AppError;
 use reviewq_app::reports::{
     CapturedArtifact, Correction, CorrectionKind, Declaration, Descriptor, EvidenceReference,
     EvidenceTarget, FindingEdit, ReportEdits, ReportReference, ReportWork, SectionEdit,
-    SourceRange, StructuredReport,
+    SourceRange, StructuredReport, presentation_matches, presentation_source,
 };
 use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
@@ -209,6 +209,11 @@ pub(super) async fn verify(
     let Some(artifact) = artifact else {
         return Ok(false);
     };
+    if let (Some(report), Some(correction)) = (report, &edits.correction)
+        && correction.kind == CorrectionKind::Presentation
+    {
+        return verify_presentation(store, work, artifact, report, correction).await;
+    }
     if structured
         && edits
             .correction
@@ -281,6 +286,65 @@ pub(super) async fn verify(
     Ok(false)
 }
 
+async fn verify_presentation(
+    store: &SqliteStore,
+    work: &ReportWork,
+    artifact: &CapturedArtifact,
+    report: &Arc<StructuredReport>,
+    correction: &Correction,
+) -> Result<bool, AppError> {
+    if correction.base.hash != artifact.hash {
+        return Ok(false);
+    }
+    if report.findings.is_empty() {
+        return Ok(true);
+    }
+    let Some(index) = &artifact.index else {
+        return Ok(false);
+    };
+    let Some(ranges) = report
+        .findings
+        .iter()
+        .map(|finding| presentation_source(finding, correction, index).cloned())
+        .collect::<Option<Vec<_>>>()
+    else {
+        return Ok(false);
+    };
+    let context = work.clone();
+    let body = store
+        .read(move |db| {
+            let artifact = ensure_claim(db, &context)?.ok_or(AppError::Conflict)?;
+            batch::read_semantic_body(db, &artifact)
+        })
+        .await
+        .map_err(StoreError::app)?;
+    let Some(body) = body else { return Ok(false) };
+    let report = Arc::clone(report);
+    tokio::task::spawn_blocking(move || {
+        ranges
+            .into_iter()
+            .zip(&report.findings)
+            .all(|(source, finding)| {
+                source_excerpt(&body, &source)
+                    .is_some_and(|section| presentation_matches(section, finding))
+            })
+    })
+    .await
+    .map_err(|_| AppError::Internal)
+}
+
+fn source_excerpt<'a>(body: &'a str, source: &SourceRange) -> Option<&'a str> {
+    let byte = |text: &str, offset: u64| {
+        text.char_indices()
+            .map(|(byte, _)| byte)
+            .chain(std::iter::once(text.len()))
+            .nth(usize::try_from(offset).ok()?)
+    };
+    let start = byte(body, source.offset)?;
+    let length = byte(&body[start..], source.length)?;
+    body.get(start..start.checked_add(length)?)
+}
+
 type Findings = BTreeMap<String, Descriptor>;
 
 pub(super) struct SourceEvidence {
@@ -335,6 +399,7 @@ fn prepare(
                     offset: u64::try_from(offset).map_err(|_| AppError::Internal)?,
                     length: u64::try_from(row.get::<_, i64>(5)?).map_err(|_| AppError::Internal)?,
                     hash: parse(crate::queue::text(row, 6)?)?,
+                    origin: None,
                 }),
                 details: None,
                 disposition: None,
@@ -348,12 +413,15 @@ fn prepare(
     )?;
     let mut rows = query.query(params![run, receipt])?;
     while let Some(row) = rows.next()? {
+        let offset = u64::try_from(row.get::<_, i64>(1)?).map_err(|_| AppError::Internal)?;
         sections.push(Descriptor::Section {
             title: row.get(0)?,
+            cursor_offset: offset,
             source: SourceRange {
-                offset: u64::try_from(row.get::<_, i64>(1)?).map_err(|_| AppError::Internal)?,
+                offset,
                 length: u64::try_from(row.get::<_, i64>(2)?).map_err(|_| AppError::Internal)?,
                 hash: parse(crate::queue::text(row, 3)?)?,
+                origin: None,
             },
         });
     }
@@ -534,7 +602,7 @@ fn preserved_sections<'a>(
     index
         .iter()
         .filter_map(|entry| match entry {
-            Descriptor::Section { title, source }
+            Descriptor::Section { title, source, .. }
                 if !ranges.iter().any(|&(offset, length)| {
                     source.offset < offset.saturating_add(length)
                         && offset < source.offset.saturating_add(source.length)
@@ -560,7 +628,7 @@ fn section<'a>(
     hash: Option<&reviewq_domain::identity::ReportHash>,
 ) -> Option<(&'a str, &'a SourceRange)> {
     let mut matches = index.iter().filter_map(|entry| match entry {
-        Descriptor::Section { title, source }
+        Descriptor::Section { title, source, .. }
             if title == expected && hash.is_none_or(|hash| hash == &source.hash) =>
         {
             Some((title.as_str(), source))

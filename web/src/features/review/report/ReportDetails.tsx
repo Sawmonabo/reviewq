@@ -1,6 +1,10 @@
 import { useState } from "react";
 import type { RunDetail } from "../../../api/generated/contracts";
-import type { Descriptor, ReportSummary } from "../../../api/generated/contracts/reports";
+import type {
+  Descriptor,
+  ReportSummary,
+  SourceRange,
+} from "../../../api/generated/contracts/reports";
 import { reportContext, saveDisposition } from "../../../api/reports";
 import { Pagination } from "../../../components/Pagination";
 import { Empty, Loading, Notice } from "../../../components/PanelState";
@@ -33,7 +37,7 @@ export function ReportDetails({
   readonly current: boolean;
   readonly drafts: DraftStore;
   readonly reviewTitle: string;
-  readonly onSource: (offset: number) => void;
+  readonly onSource: (source: SourceRange) => void;
 }) {
   const [trail, setTrail] = useState<readonly string[]>([]);
   const [edits, setEdits] = useState<Readonly<Record<string, { value: Saved; version: string }>>>(
@@ -84,12 +88,14 @@ export function ReportDetails({
           return (
             <button
               className="report-version"
-              key={item.source.offset}
+              key={JSON.stringify([item.source.origin?.report.receiptId, item.source.offset])}
               type="button"
-              onClick={() => onSource(item.source.offset)}
+              onClick={() => onSource(item.source)}
             >
               <strong>{item.title}</strong>
-              <span className="meta">Open original source</span>
+              <span className="meta">
+                {item.source.origin ? "Open source in earlier report" : "Open original source"}
+              </span>
             </button>
           );
         if (item.kind !== "finding") return null;
@@ -148,7 +154,7 @@ function FindingCard({
   readonly version: string | undefined;
   readonly current: boolean;
   readonly reviewTitle: string;
-  readonly onSource: (offset: number) => void;
+  readonly onSource: (source: SourceRange) => void;
   readonly onSave: (value: Saved, version: string) => void;
   readonly onRefresh: () => void;
 }) {
@@ -277,8 +283,13 @@ function FindingCard({
         </dl>
       )}
       {saved?.reason && <p className="meta">Local disposition · {saved.reason}</p>}
+      {!item.details?.checkedSha && patch?.origin?.checkedSha && (
+        <p className="meta">
+          Checked at <code>{patch.origin.checkedSha}</code>
+        </p>
+      )}
       {patch && (
-        <button className="quiet-button" type="button" onClick={() => onSource(patch.offset)}>
+        <button className="quiet-button" type="button" onClick={() => onSource(patch)}>
           Open finding in original report
         </button>
       )}

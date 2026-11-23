@@ -1,7 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import type { RunDetail } from "../../../api/generated/contracts";
-import type { QuoteRef, ReportSummary } from "../../../api/generated/contracts/reports";
+import type {
+  QuoteRef,
+  ReportSummary,
+  SourceOrigin,
+  SourceRange,
+} from "../../../api/generated/contracts/reports";
 import {
   reportContext,
   reportDownload,
@@ -37,6 +42,8 @@ type Props = {
   readonly drafts: DraftStore;
   readonly reviewTitle: string;
   readonly webUrl: string;
+  readonly initialSourceOffset: number | undefined;
+  readonly onOpenEvidence: (origin: SourceOrigin, offset: number) => void;
   readonly onRendered: (receiptId: string) => void;
   readonly onMarkViewed: () => void;
   readonly markingViewed: boolean;
@@ -50,12 +57,14 @@ export default function ReportDocument({
   drafts,
   reviewTitle,
   webUrl,
+  initialSourceOffset,
+  onOpenEvidence,
   onRendered,
   onMarkViewed,
   markingViewed,
 }: Props) {
-  const [source, setSource] = useState(false);
-  const [sourceOffset, setSourceOffset] = useState(0);
+  const [source, setSource] = useState(initialSourceOffset !== undefined);
+  const [sourceOffset, setSourceOffset] = useState(initialSourceOffset ?? 0);
   const [tableSource, setTableSource] = useState<{ sha256: string; byte: number }>();
   const [notice, setNotice] = useState<string>();
   const [feedbackNotice, setFeedbackNotice] = useState<string>();
@@ -71,6 +80,9 @@ export default function ReportDocument({
   const feedback = useRef<HTMLElement>(null);
   const reader = useRef<HTMLDivElement>(null);
   const reportActions = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (initialSourceOffset !== undefined && reader.current) scrollWithinDrawer(reader.current);
+  }, [initialSourceOffset]);
   const address = [run.reviewId, run.runId, run.leadSessionKey, report.receiptId, report.sha256];
   const quoteKey = JSON.stringify(["quote", ...address]);
   const quoteLabel = `Quote · ${reviewTitle}`;
@@ -199,6 +211,11 @@ export default function ReportDocument({
       });
   }
 
+  function openEvidence(range: SourceRange) {
+    if (range.origin) onOpenEvidence(range.origin, range.offset);
+    else openSource(range.offset);
+  }
+
   const sourceView = (
     <ReportSource
       historyAccess={readerHistory}
@@ -256,7 +273,7 @@ export default function ReportDocument({
               current={current}
               drafts={drafts}
               reviewTitle={reviewTitle}
-              onSource={openSource}
+              onSource={openEvidence}
             />
           ) : (
             <p>No findings reported.</p>
@@ -371,7 +388,7 @@ export default function ReportDocument({
             current={current}
             drafts={drafts}
             reviewTitle={reviewTitle}
-            onSource={openSource}
+            onSource={openEvidence}
           />
         </section>
       )}

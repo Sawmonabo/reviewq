@@ -289,11 +289,13 @@ mod tests {
         input["handoff"]["report"]["version"] = json!(2);
         input["handoff"]["report"]["scope"] = json!("selected_threads");
         input["handoff"]["report"]["findings"] = json!([card, {"id":"F-1","blocking":"yes"}]);
+        input["handoff"]["report"]["findings"][0]["location"]["line"] = json!(4294967296_u64);
         input["handoff"]["source"] = json!({"kind":"file","sha256":false});
         let errors = validate_report_handoff(&input);
         for path in [
             "/handoff/report/version",
             "/handoff/report/scope",
+            "/handoff/report/findings/0/location/line",
             "/handoff/report/findings/1/id",
             "/handoff/report/findings/1/blocking",
             "/handoff/report/findings/1/consequence",

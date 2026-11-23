@@ -196,6 +196,7 @@ export const inputSchema = {
       "properties": {
         "line": {
           "format": "uint32",
+          "maximum": 4294967295,
           "minimum": 1,
           "type": [
             "integer",

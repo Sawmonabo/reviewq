@@ -109,6 +109,7 @@ pub(super) fn parse(source: &str, legacy: bool) -> Result<Option<Vec<Descriptor>
                 offset: scalar,
                 length: body.chars().count() as u64,
                 hash,
+                origin: None,
             })
         };
         let title = if heading.title.trim().is_empty() {
@@ -133,6 +134,7 @@ pub(super) fn parse(source: &str, legacy: bool) -> Result<Option<Vec<Descriptor>
         items.push(Descriptor::Section {
             title,
             source: range()?,
+            cursor_offset: scalar,
         });
     }
     Ok(Some(items))

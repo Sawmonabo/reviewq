@@ -256,7 +256,14 @@ export interface FindingDisposition {
 export interface SourceRange {
   length: SafeCountDto;
   offset: SafeCountDto;
+  origin?: SourceOrigin | null;
   sha256: ReportHashDto;
+  [k: string]: unknown;
+}
+
+export interface SourceOrigin {
+  checkedSha: GitShaDto | null;
+  report: ReportReference;
   [k: string]: unknown;
 }
 

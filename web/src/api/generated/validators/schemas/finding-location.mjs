@@ -64,16 +64,28 @@ function validate1287(
             }
             if (errors === _errs2) {
               if (typeof data0 == "number" && isFinite(data0)) {
-                if (data0 < 1 || isNaN(data0)) {
+                if (data0 > 4294967295 || isNaN(data0)) {
                   validate1287.errors = [
                     {
                       instancePath: instancePath + "/line",
-                      schemaPath: "#/properties/line/minimum",
-                      keyword: "minimum",
-                      params: { comparison: ">=", limit: 1 },
+                      schemaPath: "#/properties/line/maximum",
+                      keyword: "maximum",
+                      params: { comparison: "<=", limit: 4294967295 },
                     },
                   ];
                   return false;
+                } else {
+                  if (data0 < 1 || isNaN(data0)) {
+                    validate1287.errors = [
+                      {
+                        instancePath: instancePath + "/line",
+                        schemaPath: "#/properties/line/minimum",
+                        keyword: "minimum",
+                        params: { comparison: ">=", limit: 1 },
+                      },
+                    ];
+                    return false;
+                  }
                 }
               }
             }

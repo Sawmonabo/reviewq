@@ -1,7 +1,7 @@
 use reviewq_app::access::AppError;
 use reviewq_app::reports::{
     Collection, ContextKey, ContextPosition, ContextRequest, Descriptor, FindingDetails,
-    FindingDisposition, ReportContext, SourceRange,
+    FindingDisposition, ReportContext, ReportReference, SourceOrigin, SourceRange,
 };
 use reviewq_domain::identity::{Revision, RunId};
 use rusqlite::{Connection, Row, params};
@@ -100,10 +100,17 @@ pub(super) fn read(
 fn query(collection: Collection) -> &'static str {
     match collection {
         Collection::Findings =>
-            "SELECT f.finding_id, f.title, f.severity, f.blocking, f.scalar_offset, f.scalar_length,
-                    f.evidence_sha256, details.value, d.blocking, d.publication, d.reason
+            "SELECT f.finding_id, f.title, f.severity, f.blocking,
+                    coalesce(prior.scalar_offset,f.scalar_offset), coalesce(prior.scalar_length,f.scalar_length),
+                    f.evidence_sha256, details.value, d.blocking, d.publication, d.reason,
+                    v.receipt_id, artifact.sha256, v.reviewed_sha
              FROM report_findings f LEFT JOIN report_handoffs h ON h.receipt_id=f.receipt_id
              LEFT JOIN json_each(h.edits, '$.acceptedDetails') details ON details.key=f.finding_id
+             LEFT JOIN json_each(h.edits,'$.carry.findings') inherited ON inherited.key=f.finding_id
+             LEFT JOIN report_versions v ON v.run_id=f.run_id AND v.receipt_id=inherited.value
+             LEFT JOIN artifacts artifact ON artifact.artifact_id=v.artifact_id
+             LEFT JOIN report_findings prior ON prior.run_id=v.run_id AND prior.receipt_id=v.receipt_id
+                                            AND prior.finding_id=f.finding_id
              LEFT JOIN finding_dispositions d ON d.run_id=f.run_id AND d.finding_id=f.finding_id
                AND d.removed=0 AND d.disposition_version=(
                  SELECT MAX(a.disposition_version) FROM finding_dispositions a
@@ -121,9 +128,23 @@ fn query(collection: Collection) -> &'static str {
              FROM report_changes c WHERE c.run_id=?1 AND c.receipt_id=?2 AND c.finding_id>?3
              ORDER BY c.finding_id LIMIT ?5",
         Collection::Sections =>
-            "SELECT title, scalar_offset, scalar_length, evidence_sha256
-             FROM report_sections WHERE run_id=?1 AND receipt_id=?2 AND scalar_offset>?3
-             ORDER BY scalar_offset LIMIT ?5",
+            "WITH available AS (
+                SELECT s.title, s.scalar_offset, s.scalar_length, s.evidence_sha256,
+                       NULL AS origin, NULL AS sha256, NULL AS reviewed_sha, s.scalar_offset AS position
+                FROM report_sections s WHERE s.run_id=?1 AND s.receipt_id=?2
+                UNION ALL
+                SELECT s.title,s.scalar_offset,s.scalar_length,s.evidence_sha256,
+                       origin.receipt_id, original.sha256, origin.reviewed_sha,
+                       current.total_code_points + row_number() OVER (ORDER BY s.receipt_id,s.scalar_offset)
+                FROM report_versions v JOIN artifacts current ON current.artifact_id=v.artifact_id
+                JOIN report_handoffs h ON h.receipt_id=v.handoff_receipt_id
+                JOIN json_each(h.edits,'$.carry.sections') origins JOIN json_each(origins.value) offsets
+                JOIN report_versions origin ON origin.run_id=v.run_id AND origin.receipt_id=origins.key
+                JOIN artifacts original ON original.artifact_id=origin.artifact_id
+                JOIN report_sections s ON s.run_id=origin.run_id AND s.receipt_id=origin.receipt_id
+                                      AND s.scalar_offset=offsets.value
+                WHERE v.run_id=?1 AND v.receipt_id=?2
+             ) SELECT * FROM available WHERE position>?3 ORDER BY position LIMIT ?5",
         Collection::Dispositions =>
             "WITH available(finding_id) AS (
                  SELECT finding_id FROM report_findings WHERE run_id=?1 AND receipt_id=?2 AND finding_id>?3
@@ -142,11 +163,22 @@ fn query(collection: Collection) -> &'static str {
 }
 
 fn decode(collection: Collection, row: &Row<'_>) -> Result<Descriptor, StoreError> {
-    let range = |column: usize| -> Result<SourceRange, StoreError> {
+    let range = |column: usize, reference: usize| -> Result<SourceRange, StoreError> {
         Ok(SourceRange {
             offset: read_count(row, column)?,
             length: read_count(row, column + 1)?,
             hash: parse(text(row, column + 2)?)?,
+            origin: optional(row, reference)?
+                .map(|receipt_id| {
+                    Ok::<_, StoreError>(Box::new(SourceOrigin {
+                        report: ReportReference {
+                            receipt_id,
+                            hash: parse(text(row, reference + 1)?)?,
+                        },
+                        checked_sha: optional(row, reference + 2)?,
+                    }))
+                })
+                .transpose()?,
         })
     };
     Ok(match collection {
@@ -156,7 +188,7 @@ fn decode(collection: Collection, row: &Row<'_>) -> Result<Descriptor, StoreErro
             severity: row.get(2)?,
             blocking: row.get(3)?,
             source: (row.get::<_, Option<i64>>(4)?.is_some())
-                .then(|| range(4))
+                .then(|| range(4, 11))
                 .transpose()?,
             details: text_optional(row, 7)?
                 .map(|value| {
@@ -186,7 +218,8 @@ fn decode(collection: Collection, row: &Row<'_>) -> Result<Descriptor, StoreErro
         },
         Collection::Sections => Descriptor::Section {
             title: row.get(0)?,
-            source: range(1)?,
+            source: range(1, 4)?,
+            cursor_offset: read_count(row, 7)?,
         },
         Collection::Dispositions => Descriptor::Disposition {
             id: row.get(0)?,

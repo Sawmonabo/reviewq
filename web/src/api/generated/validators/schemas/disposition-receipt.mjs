@@ -3,7 +3,7 @@ import { func0 } from "../runtime.mjs";
 import { validate1278 } from "./descriptor.mjs";
 import { validate25 } from "./checkpoint-id-dto.mjs";
 import { validate35 } from "./event-cursor-dto.mjs";
-function validate1316(
+function validate1320(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -21,7 +21,7 @@ function validate1316(
         ((data.finding === undefined || !func0.call(data, "finding")) &&
           (missing0 = "finding"))
       ) {
-        validate1316.errors = [
+        validate1320.errors = [
           {
             instancePath,
             schemaPath: "#/required",
@@ -100,7 +100,7 @@ function validate1316(
         }
       }
     } else {
-      validate1316.errors = [
+      validate1320.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -111,7 +111,7 @@ function validate1316(
       return false;
     }
   }
-  validate1316.errors = vErrors;
+  validate1320.errors = vErrors;
   return errors === 0;
 }
-export { validate1316 };
+export { validate1320 };

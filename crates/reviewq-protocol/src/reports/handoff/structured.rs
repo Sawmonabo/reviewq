@@ -48,7 +48,7 @@ pub struct FindingLocation {
     #[cfg_attr(feature = "schema", schemars(length(min = 1, max = 512)))]
     pub path: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[cfg_attr(feature = "schema", schemars(range(min = 1)))]
+    #[cfg_attr(feature = "schema", schemars(range(min = 1, max = 4294967295_u32)))]
     pub line: Option<u32>,
 }
 

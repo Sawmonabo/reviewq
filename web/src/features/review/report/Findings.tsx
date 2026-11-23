@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { RunDetail } from "../../../api/generated/contracts";
 import type { ResultSummary } from "../../../api/generated/contracts/followups";
-import type { ReportSummary } from "../../../api/generated/contracts/reports";
+import type { ReportSummary, SourceOrigin } from "../../../api/generated/contracts/reports";
 import { markReportViewed, reportView } from "../../../api/reports";
 import { Empty, Loading, Notice } from "../../../components/PanelState";
 import { useResource } from "../../../hooks/useResource";
@@ -42,6 +42,10 @@ export default function Findings({
     return typeof value === "string" && value.length <= 256 ? value : undefined;
   });
   const [historyLatest, setHistoryLatest] = useState<string>();
+  const [sourceJump, setSourceJump] = useState<{
+    report: SourceOrigin["report"];
+    offset: number;
+  }>();
   const [first, setFirst] = useState<ReportSummary>();
   const [frozen, setFrozen] = useState<ReportSummary>();
   const [history, setHistory] = useState(false);
@@ -117,7 +121,12 @@ export default function Findings({
     };
   }, []);
 
-  function choose(id: string | undefined, closeCheck = true, summary?: ReportSummary) {
+  function choose(
+    id: string | undefined,
+    closeCheck = true,
+    summary?: ReportSummary,
+    source?: typeof sourceJump,
+  ) {
     returnFocus.current =
       history ||
       document.activeElement === historyTrigger.current ||
@@ -126,6 +135,7 @@ export default function Findings({
       summary ?? (id && current.data?.report?.receiptId === id ? current.data.report : undefined),
     );
     setReceipt(id);
+    setSourceJump(source);
     setNotice(undefined);
     setHistory(false);
     if (closeCheck) {
@@ -212,7 +222,9 @@ export default function Findings({
       {delivery && delivery.state !== "saved" && (
         <Notice>
           {delivery.state === "failed" ? "Report handoff failed" : "Report completion pending"}
-          {delivery.reason && ` · ${delivery.reason}`}
+          {delivery.reason === "report_presentation_evidence_unproved"
+            ? " · Submit an evidence correction for claims the cited section does not establish."
+            : delivery.reason && ` · ${delivery.reason}`}
         </Notice>
       )}
       {outdated && (
@@ -295,6 +307,15 @@ export default function Findings({
             drafts={drafts}
             reviewTitle={reviewTitle}
             webUrl={webUrl}
+            initialSourceOffset={
+              sourceJump?.report.receiptId === report.receiptId &&
+              sourceJump.report.sha256 === report.sha256
+                ? sourceJump.offset
+                : undefined
+            }
+            onOpenEvidence={(origin, offset) =>
+              choose(origin.report.receiptId, true, undefined, { report: origin.report, offset })
+            }
             onRendered={(id) => void acknowledge(id, undefined, true)}
             onMarkViewed={() => void acknowledge(report.receiptId)}
             markingViewed={busy}

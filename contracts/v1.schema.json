@@ -3182,6 +3182,7 @@
       "properties": {
         "line": {
           "format": "uint32",
+          "maximum": 4294967295,
           "minimum": 1,
           "type": [
             "integer",
@@ -10922,6 +10923,28 @@
       ],
       "type": "object"
     },
+    "SourceOrigin": {
+      "properties": {
+        "checkedSha": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/GitShaDto"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "report": {
+          "$ref": "#/definitions/ReportReference"
+        }
+      },
+      "required": [
+        "report",
+        "checkedSha"
+      ],
+      "type": "object"
+    },
     "SourceRange": {
       "properties": {
         "length": {
@@ -10929,6 +10952,16 @@
         },
         "offset": {
           "$ref": "#/definitions/SafeCountDto"
+        },
+        "origin": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SourceOrigin"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "sha256": {
           "$ref": "#/definitions/ReportHashDto"

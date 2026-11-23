@@ -205,14 +205,15 @@ pub(super) fn complete(
                     || !current.matches_revision(revision)
                     || current.verdict.as_deref() != Some(verdict.to_string().as_str()))
             {
-                return reject(
-                    tx,
-                    &work,
-                    Some(captured),
-                    "report_correction_continuity_unproved",
-                    Some(&result),
-                )
-                .map(|()| false);
+                let reason = if report.is_some()
+                    && !continuity_verified
+                    && correction.kind == CorrectionKind::Presentation
+                {
+                    "report_presentation_evidence_unproved"
+                } else {
+                    "report_correction_continuity_unproved"
+                };
+                return reject(tx, &work, Some(captured), reason, Some(&result)).map(|()| false);
             }
             if (scoped.is_some() || edits.correction.is_some())
                 && edits::overrides_user_blocking(
@@ -251,9 +252,7 @@ pub(super) fn complete(
                     captured.index.as_deref().unwrap_or_default(),
                 )?;
                 match projection {
-                    Some(projection) if projection.fits(db, receipt)? => {
-                        Some((projection, report, same_source))
-                    }
+                    Some(projection) if projection.fits(db, receipt)? => Some((projection, report)),
                     Some(_) => {
                         return reject(
                             tx,
@@ -293,9 +292,7 @@ pub(super) fn complete(
                 captured,
                 projection
                     .as_ref()
-                    .map(|(projection, report, same_source)| {
-                        (projection, report.as_ref(), *same_source)
-                    }),
+                    .map(|(projection, report)| (projection, report.as_ref())),
                 time,
                 scoped
                     .as_ref()
@@ -538,7 +535,7 @@ fn promote(
     preserve_attention: bool,
     edits: &ReportEdits,
     captured: &CapturedArtifact,
-    structured: Option<(&structured::Projection, &StructuredReport, bool)>,
+    structured: Option<(&structured::Projection, &StructuredReport)>,
     time: i64,
     scoped: Option<(
         &crate::followups::work::FrozenManifest,
@@ -608,13 +605,12 @@ fn promote(
             if keeps_coverage { previous.coverage_source.as_deref() } else { reviewed },
             if keeps_coverage { previous.coverage_target.as_deref() } else { scoped.and_then(|(manifest,_)| manifest.target_sha.as_deref()) }],
     )?;
-    if let Some((projection, report, same_source)) = structured {
+    if let Some((projection, report)) = structured {
         projection.install(
             db,
             run,
             receipt,
             previous.receipt.as_deref(),
-            same_source,
             &report.findings,
         )?;
         if let Some(items) = &captured.index {
@@ -697,7 +693,7 @@ fn write_index(
                     source.hash.as_str()
                 ])?;
             }
-            Descriptor::Section { title, source } => {
+            Descriptor::Section { title, source, .. } => {
                 section.execute(params![
                     run,
                     receipt,
