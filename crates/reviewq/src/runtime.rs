@@ -492,6 +492,11 @@ async fn capture_reports(
     }
 }
 
+pub(crate) fn codex_home() -> Result<PathBuf, Failure> {
+    chosen_profile("CODEX_HOME", ".codex")
+        .ok_or_else(|| "cannot resolve the Codex configuration directory".into())
+}
+
 pub(crate) fn claude_home() -> Result<PathBuf, Failure> {
     chosen_profile("CLAUDE_CONFIG_DIR", ".claude")
         .ok_or_else(|| "cannot resolve the Claude configuration directory".into())

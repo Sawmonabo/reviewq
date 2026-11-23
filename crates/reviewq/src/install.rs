@@ -9,6 +9,7 @@ use sha2::Digest;
 pub(crate) mod bridge;
 mod bundle;
 mod claude;
+mod codex_hook;
 mod files;
 mod managed;
 pub(crate) mod paths;
@@ -78,6 +79,8 @@ struct Inventory {
     store_id: Option<String>,
     pending: Option<Activation>,
     known: Vec<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    codex_hooks: Vec<codex_hook::Registration>,
     removing: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     removal_stage: Option<String>,
@@ -297,6 +300,10 @@ pub(crate) async fn install(bundle_path: &Path) -> Result<(), Failure> {
     }
     let endpoint =
         crate::runtime::read_endpoint_with_build(&paths.profile, &identity.build_digest)?;
+    // A hook is optional and can be installed only after the new release has
+    // passed rollback and operational readiness. Keep pending ownership across
+    // an interrupted write, independently of the active release.
+    let codex_hook = reconcile_codex_hook(&paths, &mut inventory, next.skill.is_some());
     println!(
         "ReviewQ {}\nBundle {}\nDashboard http://{}/\nRuntime configuration {}",
         bundle.manifest.version,
@@ -309,12 +316,70 @@ pub(crate) async fn install(bundle_path: &Path) -> Result<(), Failure> {
             "Codex unavailable. Set codexCommand in runtime.json and retry install to enable its skill."
         );
     }
+    if next.skill.is_some() {
+        match codex_hook {
+            Ok(()) => println!(
+                "For independent Codex Code Mode sessions, use /hooks to review and trust the ReviewQ report hook. Managed ReviewQ sessions can verify tool calls directly."
+            ),
+            Err(error) => eprintln!(
+                "ReviewQ could not configure the optional Codex report hook: {error} Direct native proof remains available in managed sessions."
+            ),
+        }
+    } else if let Err(error) = codex_hook {
+        eprintln!("ReviewQ preserved the previous Codex report hook: {error}");
+    }
     if next.claude.is_none() {
         println!("Claude Code unavailable. Set claudeCommand in runtime.json and retry install.");
     } else {
         println!("Use /reload-plugins in open Claude Code sessions to load this release.");
     }
     Ok(())
+}
+
+fn reconcile_codex_hook(
+    paths: &Paths,
+    inventory: &mut Inventory,
+    has_codex: bool,
+) -> Result<(), Failure> {
+    let wanted = has_codex.then(|| paths.codex_home.join("hooks.json"));
+    let mut retire_error = None;
+    inventory.codex_hooks.retain(|hook| {
+        if wanted.as_ref() == Some(&hook.path) {
+            return true;
+        }
+        match hook.remove() {
+            Ok(()) => false,
+            Err(error) => {
+                retire_error = Some(error);
+                true
+            }
+        }
+    });
+    paths::write_json(&journal(paths), inventory)?;
+    if let Some(wanted) = wanted {
+        let existing = inventory
+            .codex_hooks
+            .iter()
+            .position(|hook| hook.path == wanted);
+        let index = if let Some(existing) = existing {
+            Some(existing)
+        } else if let Some(hook) = codex_hook::Registration::plan(paths, &wanted)? {
+            inventory.codex_hooks.push(hook);
+            paths::write_json(&journal(paths), inventory)?;
+            Some(inventory.codex_hooks.len() - 1)
+        } else {
+            None
+        };
+        if let Some(index) = index {
+            let hook = &mut inventory.codex_hooks[index];
+            hook.install()?;
+            if !hook.applied {
+                hook.applied = true;
+                paths::write_json(&journal(paths), inventory)?;
+            }
+        }
+    }
+    retire_error.map_or(Ok(()), Err)
 }
 
 async fn authorize_recovery(
@@ -509,6 +574,9 @@ pub(crate) async fn uninstall() -> Result<(), Failure> {
     let removed = crate::checkout_setup::remove_installation(&paths.profile, &store).await;
     store.close(std::time::Duration::from_secs(10)).await?;
     removed?;
+    for hook in &inventory.codex_hooks {
+        hook.remove()?;
+    }
     claude::remove(&paths, active).await?;
     if let Some(windows) = &active.windows {
         windows.remove().await?;

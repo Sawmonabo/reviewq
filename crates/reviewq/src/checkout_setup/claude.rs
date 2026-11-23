@@ -1,10 +1,11 @@
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
+use crate::profile_config::{self, Lock, Profile};
+
 use super::files::{Existing, read};
 use super::{Failure, git};
 
-mod files;
 mod json;
 
 pub(super) struct Edit {
@@ -61,7 +62,7 @@ impl Edit {
     }
 
     pub(super) fn apply(&mut self) -> Result<(), Failure> {
-        let Some(lock) = files::Lock::acquire(&self.file)? else {
+        let Some(lock) = Lock::acquire(&self.file, Profile::Claude)? else {
             if self.selected.is_none() {
                 return Ok(());
             }
@@ -81,22 +82,22 @@ impl Edit {
         });
         drop(lock);
         verified?;
-        files::sync_parent(&self.file)
+        profile_config::sync_parent(&self.file)
     }
 
     pub(super) fn rollback(&mut self) -> Result<(), Failure> {
         let Some(applied) = &self.applied else {
             return Ok(());
         };
-        let lock = files::Lock::acquire(&self.file)?
+        let lock = Lock::acquire(&self.file, Profile::Claude)?
             .ok_or("The Claude profile directory changed during setup.")?;
         let current = read(&self.file)?;
-        if files::same(current.as_ref(), applied.before.as_ref()) {
+        if profile_config::same(current.as_ref(), applied.before.as_ref()) {
             self.applied = None;
             return Ok(());
         }
         let current = current.ok_or("The Claude profile config changed during setup.")?;
-        let verified = if files::same(Some(&current), Some(&applied.after)) {
+        let verified = if profile_config::same(Some(&current), Some(&applied.after)) {
             lock.write(Some(&current), applied.before.as_ref())?;
             lock.readback(applied.before.as_ref())
         } else {
@@ -120,7 +121,7 @@ impl Edit {
         self.applied = None;
         drop(lock);
         verified?;
-        files::sync_parent(&self.file)
+        profile_config::sync_parent(&self.file)
     }
 
     fn changes(

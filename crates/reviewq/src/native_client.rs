@@ -13,6 +13,7 @@ use crate::cli::Open;
 use crate::runtime;
 
 mod claude;
+pub(crate) mod codex;
 pub(crate) use claude::{ClaudeBridgeOperation, claude_bridge, claude_hook};
 
 type Failure = Box<dyn std::error::Error + Send + Sync>;
