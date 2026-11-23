@@ -10,6 +10,7 @@ import type {
   SendMessageRequest,
 } from "./generated/contracts";
 import type { DeliveryReceipt } from "./generated/contracts/delivery";
+import type { Form } from "./generated/contracts/questions";
 import {
   isDeliveryReceiptResponse,
   isHistoryContentResponse,
@@ -27,6 +28,7 @@ import {
 import { sessionPath } from "./review";
 
 export type SessionAddress = { readonly runId: string; readonly sessionKey: string };
+export type QuestionAddress = Pick<Form, "requestId" | "turnId" | "itemId">;
 type ReadAddress = { readonly runId: string; readonly sessionKey: string };
 
 export async function historyPage(
@@ -270,30 +272,57 @@ export function verifyReceipt(
   return result;
 }
 
-export async function readQuestions(target: SessionAddress, signal: AbortSignal) {
-  const result = await read(`${path(target)}/questions`, isQuestionFormsResponse, signal);
+export async function readQuestions(
+  target: SessionAddress,
+  signal: AbortSignal,
+  requestId?: string,
+) {
+  const result = await read(
+    `${path(target)}/questions${queryString({ requestId })}`,
+    isQuestionFormsResponse,
+    signal,
+  );
   verify(target, result.data);
   for (const form of result.data.items) verify(target, form);
   return result;
 }
 
+export async function readQuestion(
+  target: SessionAddress,
+  address: QuestionAddress,
+  signal: AbortSignal,
+) {
+  const result = await readQuestions(target, signal, address.requestId);
+  const form = result.data.items[0];
+  if (result.data.items.length > 1 || (form && !sameQuestion(form, address)))
+    throw new Error("The native question changed.");
+  return { data: form ?? null, cursor: result.cursor };
+}
+
 export async function answerQuestion(
   target: SessionAddress,
-  requestId: string,
-  turnId: string,
-  itemId: string,
-  body: QuestionAnswerRequest,
+  address: QuestionAddress,
+  body: Pick<QuestionAnswerRequest, "submissionId" | "answers">,
 ) {
+  const { requestId, turnId, itemId } = address;
   const { data } = await write(
     `${path(target)}/questions/${encodeURIComponent(requestId)}/answer`,
     "POST",
-    body,
+    { ...body, turnId, itemId },
     isQuestionAnswerResponse,
+    AbortSignal.timeout(15_000),
   );
   verify(target, data);
-  if (data.requestId !== requestId || data.turnId !== turnId || data.itemId !== itemId)
-    throw new Error("The native question changed.");
+  if (!sameQuestion(data, address)) throw new Error("The native question changed.");
   return data;
+}
+
+function sameQuestion(left: QuestionAddress, right: QuestionAddress) {
+  return (
+    left.requestId === right.requestId &&
+    left.turnId === right.turnId &&
+    left.itemId === right.itemId
+  );
 }
 
 function path(target: SessionAddress) {

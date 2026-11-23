@@ -11,6 +11,8 @@ import type { ProvisionalReply } from "./timeline-rows";
 import { inlineProseReference } from "./useInlineProse";
 import type { InlineProse } from "./useInlineProse";
 import type { FoundOutput } from "./find/destination";
+import { QuestionEntry } from "./questions/QuestionEntry";
+import type { Questions } from "./questions/useQuestions";
 
 type Props = {
   readonly target: SessionAddress;
@@ -27,6 +29,8 @@ type Props = {
   readonly extra?: { readonly items: readonly HistoryPart[]; readonly next: string | null };
   readonly onMoreParts: (cursor: string) => void;
   readonly found?: FoundOutput;
+  readonly questions: Questions;
+  readonly observeQuestion: (node: HTMLElement, key: string) => () => void;
 };
 
 export function EntryBody({
@@ -44,6 +48,8 @@ export function EntryBody({
   extra,
   onMoreParts,
   found,
+  questions,
+  observeQuestion,
 }: Props) {
   const next = extra ? extra.next : entry?.partsCursor;
   const sourceParts = [...(entry?.parts ?? []), ...(extra?.items ?? [])];
@@ -102,6 +108,17 @@ export function EntryBody({
   }
 
   function value(current: HistoryEntry, part: HistoryPart, key: string) {
+    if (part.kind === "user_question" && current.turnId)
+      return (
+        <QuestionEntry
+          key={key}
+          address={{ requestId: part.requestId, turnId: current.turnId, itemId: current.entryId }}
+          items={part.questions}
+          questions={questions}
+          observe={observeQuestion}
+        />
+      );
+    if (part.kind === "user_question") return null;
     if (found && found.destination.nativeIndex === (part.nativeIndex ?? null)) {
       const { contentRef, markdown, nativeIndex } = found.destination;
       return (

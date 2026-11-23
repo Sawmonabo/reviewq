@@ -16,7 +16,8 @@ export function ReportedPlan({ runId, sessionKey }: Props) {
     (signal) => readPlan(runId, sessionKey, signal),
     [{ kind: "history", id: sessionKey }],
   );
-  const text = plan.data?.plan?.part.text;
+  const part = plan.data?.plan?.part;
+  const text = typeof part?.text === "string" ? part.text : undefined;
   const normalized = plan.data?.tasks?.length ? plan.data.tasks : undefined;
   const native = text && !normalized ? readNativePlan(text) : undefined;
   const tasks = normalized ?? native?.tasks;

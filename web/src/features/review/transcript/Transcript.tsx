@@ -50,6 +50,10 @@ import {
 import { MarkdownContent } from "../../../components/markdown/MarkdownContent";
 import { useHistory } from "./useHistory";
 import { useInlineProse } from "./useInlineProse";
+import { DetachedQuestion } from "./questions/DetachedQuestion";
+import { questionKey } from "./questions/question-key";
+import { useQuestionJump } from "./questions/useQuestionJump";
+import type { Questions } from "./questions/useQuestions";
 
 type Position = ReadingAnchor & {
   readonly reopenPages?: number;
@@ -72,15 +76,17 @@ type Props = {
   readonly child: boolean;
   readonly messages: readonly MessageHistoryItem[];
   readonly working: boolean;
+  readonly questions: Questions;
 };
 
-export function Transcript({ target, provider, child, messages, working }: Props) {
+export function Transcript({ target, provider, child, messages, working, questions }: Props) {
   const providerName = readable(provider);
   const bookmark = `history.${target.runId}.${target.sessionKey}`;
   const [saved] = useState(() => readBookmark(bookmark));
   const [following, setFollowing] = useState(saved?.following ?? true);
   const followBeforeFind = useRef<boolean | undefined>(undefined);
   const viewport = useRef<HTMLDivElement>(null);
+  const questionJump = useQuestionJump(target, viewport, questions.nonblocking);
   const { pinned, selectedText, focusedDiagram, clear } = useHistorySelection(viewport);
   const [groupKeys, setGroupKeys] = useState<ReadonlySet<string>>(() => new Set());
   const [actionNotice, setActionNotice] = useState<string>();
@@ -452,6 +458,7 @@ export function Transcript({ target, provider, child, messages, working }: Props
   }
 
   function latest() {
+    questionJump.cancel();
     setReadingOutput(undefined);
     followBeforeFind.current = undefined;
     leaveReopen();
@@ -583,6 +590,7 @@ export function Transcript({ target, provider, child, messages, working }: Props
         target={target}
         viewport={viewport}
         onOpen={() => {
+          questionJump.cancel();
           followBeforeFind.current = following;
           const reading = visibleAnchor(viewport.current);
           anchor.current = reading && { ...reading, jump: true };
@@ -643,6 +651,7 @@ export function Transcript({ target, provider, child, messages, working }: Props
         onKeyDown={(event) => {
           if (anchor.current?.adjacent) anchor.current = undefined;
           if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey) return;
+          if (event.target instanceof Element && event.target.closest(".question-history")) return;
           if (event.key === "End" && !event.shiftKey && event.target === event.currentTarget) {
             event.preventDefault();
             scrollIntent.current = undefined;
@@ -757,6 +766,8 @@ export function Transcript({ target, provider, child, messages, working }: Props
                           knownTools={knownTools}
                           expanded={expanded}
                           prose={prose}
+                          questions={questions}
+                          observeQuestion={questionJump.observe}
                           toggle={(key, open) =>
                             setExpanded((known) => toggleKey(known, key, open))
                           }
@@ -815,6 +826,7 @@ export function Transcript({ target, provider, child, messages, working }: Props
           hasNewer={history.newer}
           onReturnFocus={() => viewport.current?.focus({ preventScroll: true })}
           onJump={(id, locator) => {
+            questionJump.cancel();
             followBeforeFind.current = undefined;
             leaveReopen();
             setFollowing(false);
@@ -822,12 +834,50 @@ export function Transcript({ target, provider, child, messages, working }: Props
           }}
         />
       )}
-      {(!following || history.waiting) && (
-        <button type="button" className="timeline-jump" onClick={latest}>
-          <span aria-hidden="true">↓ </span>
-          {history.waiting ? "New messages available" : "Jump to latest"}
-        </button>
-      )}
+      <div className="timeline-jump-controls">
+        {questionJump.detached && (
+          <DetachedQuestion
+            key={questionKey(questionJump.detached)}
+            form={questionJump.detached}
+            questions={questions}
+          />
+        )}
+        {questionJump.offscreen && (
+          <button
+            type="button"
+            className="question-jump quiet-button"
+            aria-disabled={questionJump.jumping || undefined}
+            onClick={(event) => {
+              if (!questionJump.offscreen) return;
+              void questionJump.jump(
+                questionJump.offscreen,
+                event.currentTarget,
+                (page, entryId, locator) => {
+                  if (!history.openPrepared(page, { entryId, locator })) return false;
+                  followBeforeFind.current = undefined;
+                  requestedLatest.current = false;
+                  setFollowing(false);
+                  return true;
+                },
+                () => {
+                  leaveReopen();
+                  list.cancelScroll();
+                  scrollIntent.current = undefined;
+                },
+                setActionNotice,
+              );
+            }}
+          >
+            Jump to question
+          </button>
+        )}
+        {(!following || history.waiting) && (
+          <button type="button" className="timeline-jump" onClick={latest}>
+            <span aria-hidden="true">↓ </span>
+            {history.waiting ? "New messages available" : "Jump to latest"}
+          </button>
+        )}
+      </div>
     </section>
   );
 }

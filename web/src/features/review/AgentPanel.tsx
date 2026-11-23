@@ -10,12 +10,13 @@ import { useResource } from "../../hooks/useResource";
 import type { DraftStore } from "../../lib/drafts";
 import { formatActivityTime, formatTime, readable } from "../../lib/presentation";
 import { deliveryLabels } from "./delivery-labels";
-import { Composer } from "./Composer";
 import { ReportedPlan } from "./ReportedPlan";
-import { NativeQuestions } from "./transcript/NativeQuestions";
 import { ProviderMark } from "./transcript/ProviderMark";
+import { AgentInput } from "./transcript/questions/AgentInput";
+import { useQuestions } from "./transcript/questions/useQuestions";
 import { Transcript } from "./transcript/Transcript";
 import "./agent.css";
+import "./transcript/questions/questions.css";
 
 type Props = {
   readonly run: RunDetail;
@@ -44,6 +45,13 @@ export default function AgentPanel({
 }: Props) {
   const target = { runId: run.runId, sessionKey: session.sessionKey };
   const lead = session.sessionKey === run.leadSessionKey;
+  const questions = useQuestions(
+    target,
+    drafts,
+    session.provider === "codex",
+    `Question · ${reviewTitle}`,
+    onTerminal,
+  );
 
   const [cursor, setCursor] = useState<string>();
   const deliveryKeys = [
@@ -149,34 +157,31 @@ export default function AgentPanel({
         provider={session.provider}
         child={!lead}
         messages={outbox.data?.items ?? []}
+        questions={questions}
         working={
-          ["working", "running"].includes(session.metadata.status ?? "") ||
-          (lead && !session.metadata.status && state === "working")
+          !questions.blocking.length &&
+          (["working", "running"].includes(session.metadata.status ?? "") ||
+            (lead && !session.metadata.status && state === "working"))
         }
       />
-      {session.provider === "codex" && (
-        <NativeQuestions
-          target={target}
-          store={drafts}
-          reviewTitle={reviewTitle}
-          sessionName={session.metadata.name ?? (lead ? "lead review" : "subagent")}
-          child={!lead}
-          onTerminal={onTerminal}
-        />
-      )}
-      {lead && (
-        <Composer
-          store={drafts}
-          target={target}
-          label="Follow-up message"
-          placeholder="Message the review agent…"
-          draftLabel={`Message · ${reviewTitle}`}
-          targetLabel="To lead review"
-          targetTitle={`To lead review${session.metadata.name ? ` · ${session.metadata.name}` : ""}`}
-          draftKey={JSON.stringify(["message", run.reviewId, run.runId, run.leadSessionKey])}
-          onAccepted={outbox.retry}
-        />
-      )}
+      <AgentInput
+        questions={questions}
+        {...(lead
+          ? {
+              composer: {
+                store: drafts,
+                target,
+                label: "Follow-up message",
+                placeholder: "Message the review agent…",
+                draftLabel: `Message · ${reviewTitle}`,
+                targetLabel: "To lead review",
+                targetTitle: `To lead review${session.metadata.name ? ` · ${session.metadata.name}` : ""}`,
+                draftKey: JSON.stringify(["message", run.reviewId, run.runId, run.leadSessionKey]),
+                onAccepted: outbox.retry,
+              },
+            }
+          : {})}
+      />
     </div>
   );
 }
