@@ -137,7 +137,7 @@ export function Repositories({
               />
             </label>
             <div className="fields settings-default-skills">
-              {(["claude", "codex"] as const).map((provider) => (
+              {(["codex", "claude"] as const).map((provider) => (
                 <CheckoutSkill
                   key={JSON.stringify([
                     provider,

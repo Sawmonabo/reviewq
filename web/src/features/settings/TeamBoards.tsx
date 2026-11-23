@@ -57,6 +57,7 @@ export function TeamBoards({
   const [statuses, setStatuses] = useState<StatusCatalog>();
   const [statusError, setStatusError] = useState<string>();
   const [readingStatuses, setReadingStatuses] = useState(false);
+  const enabledCount = boards.filter((board) => board.enabled).length;
   const addRequest = useRef<AbortController | undefined>(undefined);
   const statusRequest = useRef<AbortController | undefined>(undefined);
 
@@ -147,7 +148,9 @@ export function TeamBoards({
       )}
       <div className="settings-inline">
         <h3 id="team-boards">Tracked boards</h3>
-        <span className="meta">{boards.filter((board) => board.enabled).length} active boards</span>
+        <span className="meta">
+          {enabledCount} active {enabledCount === 1 ? "board" : "boards"}
+        </span>
       </div>
       {adding && <Loading label={`Loading ${adding}…`} />}
       {addError && <Notice>{addError}</Notice>}
@@ -231,11 +234,11 @@ function BoardEditor({
   );
   const visible = new Set(available.map((item) => item.id));
   const unresolved = board.reviewStatusIds.filter((id) => !visible.has(id));
+  const repositoryCount = repositories.filter((repo) =>
+    boardIncludesRepository(board, repo),
+  ).length;
   const blankStatus = showErrors && board.enabled && !board.reviewStatusIds.length;
-  const blankRepo =
-    showErrors &&
-    board.enabled &&
-    !repositories.some((repo) => boardIncludesRepository(board, repo));
+  const blankRepo = showErrors && board.enabled && !repositoryCount;
 
   return (
     <details
@@ -253,7 +256,7 @@ function BoardEditor({
             {readable(exact?.boardType ?? board.type)} #{board.boardId}
             {!!board.jiraProjectKeys.length && ` · ${board.jiraProjectKeys.join(", ")}`}
             {" · "}
-            {repositories.filter((repo) => boardIncludesRepository(board, repo)).length} repos
+            {repositoryCount} {repositoryCount === 1 ? "repo" : "repos"}
           </small>
         </span>
         <span className="settings-state" data-active={board.enabled || undefined}>

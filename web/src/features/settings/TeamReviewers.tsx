@@ -274,6 +274,7 @@ function ReviewerPicker({
             onKeyDown={(event) => {
               if (event.nativeEvent.isComposing || composing !== null) return;
               if (!["ArrowDown", "ArrowUp", "Enter"].includes(event.key)) return;
+              if (event.key === "Enter") event.preventDefault();
               const options = enabledOptions();
               const option = event.key === "ArrowUp" ? options.at(-1) : options[0];
               if (option) {

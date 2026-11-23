@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import type { KeyboardEvent, ReactNode } from "react";
 import { Icon } from "../../components/Icon";
 
@@ -53,6 +54,16 @@ export function SettingsNavigation({
   readonly active: Page;
   readonly onSelect: (page: Page) => void;
 }) {
+  useEffect(() => {
+    const frame = requestAnimationFrame(() => {
+      document.getElementById(`settings-tab-${active}`)?.scrollIntoView({
+        block: "nearest",
+        inline: "nearest",
+      });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [active]);
+
   function navigate(event: KeyboardEvent<HTMLDivElement>) {
     const current = pages.findIndex(({ id }) => id === active);
     const last = pages.length - 1;

@@ -125,7 +125,7 @@ function SettingsEditor({
     jira: 0,
   });
   const [conflict, setConflict] = useState<SettingsView>();
-  const [saved, setSaved] = useState(false);
+  const [saved, setSaved] = useState<"workspace" | "agents">();
   const [catalog, setCatalog] = useState<"scope" | "repositories">();
   const [showScopeErrors, setShowScopeErrors] = useState(false);
   const [resolvingBoard, setResolvingBoard] = useState(false);
@@ -141,6 +141,18 @@ function SettingsEditor({
     Boolean(tokens.gitlab || tokens.jira) ||
     JSON.stringify(draft) !== JSON.stringify(fromSaved(snapshot).draft);
   const dirty = workspaceDirty || preferences.dirty;
+  const saveArea = active === "appearance" ? undefined : active === "agents" ? active : "workspace";
+  const pageDirty =
+    saveArea === "workspace" ? workspaceDirty : saveArea === "agents" && preferences.dirty;
+  const footerStatus = busy
+    ? "Saving…"
+    : pageDirty
+      ? "Unsaved changes"
+      : saved === saveArea && saved
+        ? "Changes saved"
+        : dirty
+          ? "Unsaved changes on another page"
+          : "";
   const newest =
     conflict && BigInt(conflict.settingsRevision) > BigInt(initial.settingsRevision)
       ? conflict
@@ -160,9 +172,6 @@ function SettingsEditor({
     setActive(page);
     saveValue("settings.page", page);
     requestAnimationFrame(() => {
-      document
-        .getElementById(`settings-tab-${page}`)
-        ?.scrollIntoView({ block: "nearest", inline: "nearest" });
       if (scroller.current) scroller.current.scrollTop = positions.current[page] ?? 0;
     });
   }
@@ -178,7 +187,7 @@ function SettingsEditor({
 
   function edit(update: (current: SettingsDraft) => SettingsDraft) {
     setEditor((previous) => ({ ...previous, draft: update(previous.draft) }));
-    setSaved(false);
+    setSaved(undefined);
   }
 
   function cancelTests() {
@@ -283,11 +292,16 @@ function SettingsEditor({
   }
 
   async function save(disconnect?: Provider) {
-    if (pending.current || (!disconnect && (!dirty || resolvingBoard || (stale && workspaceDirty))))
+    const saveWorkspace = Boolean(disconnect) || saveArea === "workspace";
+    if (
+      pending.current ||
+      (!disconnect && (!pageDirty || (saveWorkspace && (resolvingBoard || stale))))
+    ) {
       return;
+    }
     setNotice(undefined);
-    setSaved(false);
-    if (!disconnect && workspaceDirty) {
+    setSaved(undefined);
+    if (!disconnect && saveWorkspace) {
       const invalid = form.current?.querySelector<HTMLInputElement>(
         "#settings-page-connections input:invalid",
       );
@@ -336,29 +350,29 @@ function SettingsEditor({
           tokens: { ...tokens, [disconnect]: "" },
         });
         onSave();
+      } else if (saveWorkspace) {
+        const { data } = await saveSettings({
+          expectedRevision: snapshot.settingsRevision,
+          draft,
+          tokens: { gitlab: tokenInput(tokens.gitlab), jira: tokenInput(tokens.jira) },
+        });
+        setEditor(fromSaved(data));
+        onSave();
       } else {
-        if (workspaceDirty) {
-          const { data } = await saveSettings({
-            expectedRevision: snapshot.settingsRevision,
-            draft,
-            tokens: { gitlab: tokenInput(tokens.gitlab), jira: tokenInput(tokens.jira) },
-          });
-          setEditor(fromSaved(data));
-          onSave();
-        }
-        if (preferences.dirty) await preferences.save();
+        await preferences.save();
       }
-      if (disconnect || workspaceDirty) {
+      if (saveWorkspace) {
         cancelTests();
         setConflict(undefined);
         setShowScopeErrors(false);
       }
       setConfirm(undefined);
-      setSaved(true);
+      setSaved(saveWorkspace ? "workspace" : "agents");
     } catch (error) {
       setConfirm(undefined);
       setNotice(describeError(error));
       if (
+        saveWorkspace &&
         error instanceof ApiResponseError &&
         ["conflict", "stale_revision"].includes(error.code)
       ) {
@@ -448,7 +462,7 @@ function SettingsEditor({
                     ...previous,
                     tokens: { ...previous.tokens, [provider]: value },
                   }));
-                  setSaved(false);
+                  setSaved(undefined);
                 }}
                 onCheck={(provider) => void check(provider)}
                 onDisconnect={setConfirm}
@@ -595,15 +609,13 @@ function SettingsEditor({
       </div>
       <footer>
         <span className="settings-footer-workspace">Workspace settings</span>
-        <p role="status">
-          {busy ? "Saving…" : dirty ? "Unsaved changes" : saved ? "Changes saved" : ""}
-        </p>
-        {dirty && (
+        <p role="status">{footerStatus}</p>
+        {pageDirty && (
           <button
             type="submit"
             form="workspace-settings"
             className="primary"
-            disabled={busy || resolvingBoard || (stale && workspaceDirty)}
+            disabled={busy || (saveArea === "workspace" && (resolvingBoard || stale))}
           >
             Save changes
           </button>
