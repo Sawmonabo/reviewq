@@ -78,6 +78,7 @@ fn project_titled(values: Vec<TitledQuestion>) -> Option<Vec<Question>> {
                         QuestionOption {
                             label,
                             description: String::new(),
+                            preview: None,
                         },
                     )
                 })
@@ -88,6 +89,7 @@ fn project_titled(values: Vec<TitledQuestion>) -> Option<Vec<Question>> {
                 prompt: value.title,
                 allows_other: true,
                 secret: value.is_secret,
+                multi_select: false,
                 options,
             })
         })
@@ -124,6 +126,7 @@ pub(crate) fn project_questions(input: Vec<NativeQuestion>) -> Option<Vec<Questi
             projected.push(QuestionOption {
                 label: option.label,
                 description: option.description,
+                preview: None,
             });
         }
         questions.push(Question {
@@ -133,6 +136,7 @@ pub(crate) fn project_questions(input: Vec<NativeQuestion>) -> Option<Vec<Questi
             options: projected,
             allows_other: question.is_other,
             secret: question.is_secret,
+            multi_select: false,
         });
     }
     Some(questions)

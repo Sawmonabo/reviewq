@@ -1,11 +1,16 @@
+async function nativeArgv($) {
+  const home = await $.env.get("HOME");
+  const binary = await $.env.get("REVIEWQ_NATIVE_BIN");
+  if (!home?.startsWith("/") || (binary && !binary.startsWith("/"))) {
+    return undefined;
+  }
+  return [binary || `${home}/.local/bin/reviewq`, "internal"];
+}
+
 export async function invoke($, action, id, value) {
   try {
-    const home = await $.env.get("HOME");
-    const binary = await $.env.get("REVIEWQ_NATIVE_BIN");
-    if (!home?.startsWith("/") || (binary && !binary.startsWith("/"))) {
-      return { error: "ReviewQ could not resolve the installed native helper." };
-    }
-    const argv = [binary || `${home}/.local/bin/reviewq`, "internal"];
+    const argv = await nativeArgv($);
+    if (!argv) return { error: "ReviewQ could not resolve the installed native helper." };
     let stdin;
     if (action === "registration") {
       argv.push("claude-companion", id);
@@ -22,4 +27,18 @@ export async function invoke($, action, id, value) {
   } catch {
     return { error: "ReviewQ is unavailable. Check the installed service and plugin." };
   }
+}
+
+export async function waitForQuestion($, id, address) {
+  const argv = await nativeArgv($);
+  if (!argv) return undefined;
+  argv.push("claude-bridge", "question", id);
+  const stream = $.process.spawn({ argv, input: JSON.stringify({ address }), env: await $.process.hookEnv() });
+  let stdout = "";
+  for await (const chunk of stream) {
+    if (chunk.stream !== "stdout") continue;
+    stdout += chunk.text;
+    if (stdout.length > 64 * 1024) return undefined;
+  }
+  return stdout ? JSON.parse(stdout).data : undefined;
 }

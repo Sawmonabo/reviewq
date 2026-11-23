@@ -8,10 +8,10 @@ use reviewq_app::access::{Actor, ActorScope, AppError};
 use reviewq_app::history::HistoryBookmark;
 use reviewq_app::hosts::{
     ObservedAsyncQuestion, Question, QuestionAccess, QuestionAnswer, QuestionForm, QuestionMode,
-    QuestionStatus,
+    QuestionStatus, QuestionsPort,
 };
 use reviewq_domain::identity::{NativeInputId, NativeTurnId, RunId, SessionKey, SubmissionId};
-use reviewq_domain::session::HostProvider;
+use reviewq_domain::session::{HostProvider, NativeIdentity};
 use reviewq_protocol::questions as dto;
 use reviewq_protocol::{
     HistoryEntryIdDto, HistoryTurnIdDto, ResourceIdDto, RunIdDto, SessionKeyDto,
@@ -59,10 +59,7 @@ pub(super) async fn read(
         .store
         .history_session(actor.clone(), run.clone(), session.clone())
         .await?;
-    let host = entry
-        .host
-        .as_ref()
-        .filter(|host| host.supports_questions(stored.value.binding.identity()));
+    let host = question_port(entry, stored.value.binding.identity());
     let mut forms = match host {
         Some(host) => {
             host.questions(
@@ -109,8 +106,10 @@ pub(super) async fn read(
         });
         forms.truncate(8);
     }
-    let can_answer = entry.sends_allowed && host.is_some();
     let local_operator = matches!(actor.scope(), ActorScope::LocalOperator);
+    let can_answer = entry.sends_allowed
+        && host.is_some()
+        && (stored.value.binding.identity().provider() == HostProvider::Codex || local_operator);
     if entry
         .store
         .history_session(actor, run.clone(), session.clone())
@@ -199,23 +198,24 @@ pub(super) async fn respond(
         .store
         .history_session(actor.clone(), run.clone(), session.clone())
         .await?;
-    if stored.value.binding.identity().provider() != HostProvider::Codex {
-        return Err(AppError::Unavailable);
-    }
-    let known = entry
-        .store
-        .observed_async_questions(
-            actor.clone(),
-            stored.value.clone(),
-            Some(input.request.clone()),
-        )
-        .await?
-        .pop();
-    let host = entry
-        .host
-        .as_ref()
-        .filter(|host| host.supports_questions(stored.value.binding.identity()))
-        .ok_or(AppError::Unavailable)?;
+    let identity = stored.value.binding.identity();
+    let known = if identity.provider() == HostProvider::Codex {
+        entry
+            .store
+            .observed_async_questions(
+                actor.clone(),
+                stored.value.clone(),
+                Some(input.request.clone()),
+            )
+            .await?
+            .pop()
+    } else {
+        if input.address.is_none() || !matches!(actor.scope(), ActorScope::LocalOperator) {
+            return Err(AppError::Forbidden);
+        }
+        None
+    };
+    let host = question_port(entry, identity).ok_or(AppError::Unavailable)?;
     let answers = input
         .answers
         .into_iter()
@@ -358,10 +358,12 @@ pub(super) fn project_question(value: &Question) -> dto::Question {
             .map(|option| dto::Choice {
                 label: option.label.clone(),
                 description: option.description.clone(),
+                preview: option.preview.clone(),
             })
             .collect(),
         is_other: value.allows_other,
         is_secret: value.secret,
+        multi_select: value.multi_select,
     }
 }
 
@@ -371,6 +373,14 @@ fn run_id(run: &RunId) -> Result<RunIdDto, AppError> {
 
 fn session_key(session: &SessionKey) -> Result<SessionKeyDto, AppError> {
     SessionKeyDto::new(session.as_str()).ok_or(AppError::Internal)
+}
+
+fn question_port<'a>(entry: &'a Entry, identity: &NativeIdentity) -> Option<&'a dyn QuestionsPort> {
+    let port: &dyn QuestionsPort = match identity.provider() {
+        HostProvider::Codex => entry.host.as_deref()?,
+        HostProvider::Claude => entry.claude.as_deref()?,
+    };
+    port.supports_questions(identity).then_some(port)
 }
 
 fn validate_request(request: Option<&str>) -> Result<(), AppError> {

@@ -3,7 +3,9 @@ use std::os::unix::ffi::OsStrExt;
 use reviewq_app::access::{Actor, AppError, AppFuture};
 use reviewq_app::events::{ResourceKey, Snapshot};
 use reviewq_app::hosts::HostPhase;
-use reviewq_app::hosts::{ClaudeHeartbeat, ClaudeHeartbeatResult, ClaudeStore};
+use reviewq_app::hosts::{
+    ClaudeHeartbeat, ClaudeHeartbeatResult, ClaudeQuestionAddress, ClaudeStore,
+};
 use reviewq_domain::session::{HostProvider, LeadTarget, SessionTarget};
 use rusqlite::params;
 
@@ -22,6 +24,45 @@ mod delivery;
 mod workflow;
 
 impl ClaudeStore for SqliteStore {
+    fn fence_claude_question(
+        &self,
+        lead: LeadTarget,
+        address: ClaudeQuestionAddress,
+        invalidate: bool,
+    ) -> AppFuture<'_, ()> {
+        Box::pin(async move {
+            let verify = move |db: &rusqlite::Connection| -> Result<LeadTarget, StoreError> {
+                workflow::ensure_lead(db, &lead)?;
+                let active: bool = db.prepare_cached(
+                    "SELECT EXISTS(SELECT 1 FROM claude_companions c JOIN sessions s USING(session_key)
+                     WHERE c.session_key=?1 AND c.generation=?2 AND c.turn_id=?3
+                       AND c.seen_at_ms>?4 AND s.host_activity IN ('working','blocked')
+                       AND NOT EXISTS(SELECT 1 FROM claude_turns t WHERE t.session_key=c.session_key AND t.turn_id=c.turn_id))",
+                )?.query_row(params![
+                    lead.session_key().as_str(), address.generation, address.turn.as_str(),
+                    now_ms()?.saturating_sub(COMPANION_FRESH_MS),
+                ], |row| row.get(0))?;
+                if !active {
+                    return Err(AppError::StaleRevision.into());
+                }
+                Ok(lead)
+            };
+            if invalidate {
+                self.write(move |tx| {
+                    let lead = verify(&tx.sql)?;
+                    tx.emit(&[ResourceKey::Session(Some(lead.session_key().clone()))])?;
+                    Ok(())
+                })
+                .await
+                .map_err(StoreError::app)
+            } else {
+                self.read(move |db| verify(db).map(|_| ()))
+                    .await
+                    .map_err(StoreError::app)
+            }
+        })
+    }
+
     fn claude_companion_available(
         &self,
         actor: Actor,

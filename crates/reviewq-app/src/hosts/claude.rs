@@ -1,5 +1,7 @@
 //! Lifecycle observations from the exact registered Claude companion.
 
+use std::collections::BTreeMap;
+
 use reviewq_domain::identity::{
     DeliveryFence, DeliveryId, NativeInputId, NativeSessionId, NativeTurnId, ReportHash,
 };
@@ -53,6 +55,16 @@ impl ClaudeHeartbeat {
 pub struct ClaudeHeartbeatResult {
     pub label: String,
 }
+
+#[derive(Clone, Eq, PartialEq)]
+pub struct ClaudeQuestionAddress {
+    pub generation: String,
+    pub turn: NativeTurnId,
+    pub assistant: NativeInputId,
+    pub call: NativeInputId,
+}
+
+pub type ClaudeQuestionAnswers = BTreeMap<String, String>;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ClaudeOffer {
@@ -136,6 +148,13 @@ pub enum ClaudeClassicEvent {
 }
 
 pub trait ClaudeStore: Send + Sync {
+    fn fence_claude_question(
+        &self,
+        lead: LeadTarget,
+        address: ClaudeQuestionAddress,
+        invalidate: bool,
+    ) -> AppFuture<'_, ()>;
+
     fn claude_companion_available(
         &self,
         actor: Actor,

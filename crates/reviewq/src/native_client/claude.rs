@@ -3,7 +3,7 @@ use std::path::Path;
 
 use reviewq_domain::identity::NativeSessionId;
 
-use super::{Failure, bounded, bridge, client, signed, verify_ready};
+use super::{Failure, bounded, bridge, client, client_with_timeout, signed, verify_ready};
 use crate::runtime;
 
 #[derive(Clone, clap::ValueEnum)]
@@ -11,6 +11,8 @@ pub(crate) enum ClaudeBridgeOperation {
     Heartbeat,
     DeliveryCheck,
     Hook,
+    Question,
+    QuestionFinished,
     Report,
     ReportStatus,
     Action,
@@ -27,6 +29,10 @@ pub(crate) async fn claude_bridge(
         ClaudeBridgeOperation::Heartbeat => ("/api/v1/native/claude/heartbeat", 16_384usize),
         ClaudeBridgeOperation::DeliveryCheck => ("/api/v1/native/claude/delivery-check", 16_384),
         ClaudeBridgeOperation::Hook => ("/api/v1/native/claude/hook", 16_384),
+        ClaudeBridgeOperation::Question => ("/api/v1/native/claude/question", 4096),
+        ClaudeBridgeOperation::QuestionFinished => {
+            ("/api/v1/native/claude/question-finished", 4096)
+        }
         ClaudeBridgeOperation::Report => ("/api/v1/native/reports/handoff", 144 * 1024),
         ClaudeBridgeOperation::ReportStatus => {
             ("/api/v1/native/reports/handoff-status", 144 * 1024)
@@ -83,7 +89,11 @@ pub(crate) async fn claude_bridge(
         }
     }
     let endpoint = runtime::read_native_endpoint(profile)?;
-    let client = client()?;
+    let client = if matches!(operation, ClaudeBridgeOperation::Question) {
+        client_with_timeout(None)?
+    } else {
+        client()?
+    };
     let status = signed(&client, &endpoint, "GET", "/api/v1/status", b"").await?;
     verify_ready(&endpoint, &status)?;
     let result = bridge(&client, &endpoint, path, serde_json::to_vec(&payload)?).await?;
@@ -122,6 +132,7 @@ struct ClassicInput {
     hook_event_name: String,
     agent_id: Option<String>,
     notification_type: Option<String>,
+    tool_name: Option<String>,
     turn_id: Option<String>,
     message_id: Option<String>,
     index: Option<u64>,
@@ -148,7 +159,9 @@ pub(crate) async fn claude_hook(profile: &Path) -> Result<(), Failure> {
     }
     let session: NativeSessionId = hook.session_id.parse()?;
     let event = match hook.hook_event_name.as_str() {
-        "PermissionRequest" => serde_json::json!({"kind": "permission_pending"}),
+        "PermissionRequest" if hook.tool_name.as_deref() != Some("AskUserQuestion") => {
+            serde_json::json!({"kind": "permission_pending"})
+        }
         "Notification" if hook.notification_type.as_deref() == Some("permission_prompt") => {
             serde_json::json!({"kind": "permission_pending"})
         }

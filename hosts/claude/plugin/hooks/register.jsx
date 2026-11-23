@@ -3,6 +3,7 @@ import { deliver, finishTurn, observeFirstStep, observeInput, observeTurn, revie
 import { registerWorkflowTools, reportTurn, stageAction, stageReport } from "./workflow.js";
 import { reconcileChildren } from "./children.js";
 import { currentSettings } from "./settings.js";
+import { answerQuestion, observeQuestion } from "./questions.js";
 
 const HEARTBEAT_MS = 5000;
 const OFFLINE_MS = 30000;
@@ -30,6 +31,7 @@ async function current($) {
       sequence: 0,
       inputRevision: 0,
       childSequence: 0,
+      questionCalls: new Map(),
       linked: false,
       lastSeen: 0,
       label: undefined,
@@ -265,14 +267,12 @@ export function register(on) {
   on("tool.call", { tool: "AskUserQuestion" }, async ($, event, next) => {
     if (event.agentId || !session?.linked) return next(event);
     const state = session;
-    state.question = event.tool_use_id;
-    schedule($);
-    try {
-      return await next(event);
-    } finally {
-      if (state.question === event.tool_use_id) state.question = undefined;
-      if (state === session) schedule($);
-    }
+    return observeQuestion($, state, event, next, () => { if (state === session) schedule($); });
+  });
+
+  on("classic.PermissionRequest", { tool_name: "AskUserQuestion" }, async ($, event, next) => {
+    const state = session;
+    return answerQuestion($, state, event, next, () => heartbeat($, state, false), () => state === session);
   });
 
   on("session.end", async ($, event, next) => {

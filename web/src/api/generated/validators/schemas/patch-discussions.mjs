@@ -5,9 +5,9 @@ import { validate48 } from "./history-cursor-dto.mjs";
 import { validate129 } from "./safe-count-dto.mjs";
 import { validate116 } from "./review-id-dto.mjs";
 import { validate25 } from "./checkpoint-id-dto.mjs";
-import { schema295 } from "../metadata-7.mjs";
-import { validate982 } from "./patch-discussion-text.mjs";
-function validate975(
+import { schema296 } from "../metadata-7.mjs";
+import { validate984 } from "./patch-discussion-text.mjs";
+function validate977(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -31,7 +31,7 @@ function validate975(
         ((data.nextCursor === undefined || !func0.call(data, "nextCursor")) &&
           (missing0 = "nextCursor"))
       ) {
-        validate975.errors = [
+        validate977.errors = [
           {
             instancePath,
             schemaPath: "#/required",
@@ -47,7 +47,7 @@ function validate975(
           if (errors === _errs1) {
             if (Array.isArray(data0)) {
               if (data0.length > 100) {
-                validate975.errors = [
+                validate977.errors = [
                   {
                     instancePath: instancePath + "/items",
                     schemaPath: "#/properties/items/maxItems",
@@ -82,7 +82,7 @@ function validate975(
                 }
               }
             } else {
-              validate975.errors = [
+              validate977.errors = [
                 {
                   instancePath: instancePath + "/items",
                   schemaPath: "#/properties/items/type",
@@ -152,7 +152,7 @@ function validate975(
                 vErrors.push(err1);
               }
               errors++;
-              validate975.errors = vErrors;
+              validate977.errors = vErrors;
               return false;
             } else {
               errors = _errs5;
@@ -250,7 +250,7 @@ function validate975(
                     vErrors.push(err3);
                   }
                   errors++;
-                  validate975.errors = vErrors;
+                  validate977.errors = vErrors;
                   return false;
                 } else {
                   errors = _errs11;
@@ -322,13 +322,13 @@ function validate975(
                       let data7 = data.textProjections;
                       const _errs17 = errors;
                       if (!Array.isArray(data7) && data7 !== null) {
-                        validate975.errors = [
+                        validate977.errors = [
                           {
                             instancePath: instancePath + "/textProjections",
                             schemaPath: "#/properties/textProjections/type",
                             keyword: "type",
                             params: {
-                              type: schema295.properties.textProjections.type,
+                              type: schema296.properties.textProjections.type,
                             },
                           },
                         ];
@@ -337,7 +337,7 @@ function validate975(
                       if (errors === _errs17) {
                         if (Array.isArray(data7)) {
                           if (data7.length > 64) {
-                            validate975.errors = [
+                            validate977.errors = [
                               {
                                 instancePath: instancePath + "/textProjections",
                                 schemaPath:
@@ -353,7 +353,7 @@ function validate975(
                             for (let i1 = 0; i1 < len1; i1++) {
                               const _errs19 = errors;
                               if (
-                                !validate982(data7[i1], {
+                                !validate984(data7[i1], {
                                   instancePath:
                                     instancePath + "/textProjections/" + i1,
                                   parentData: data7,
@@ -363,8 +363,8 @@ function validate975(
                               ) {
                                 vErrors =
                                   vErrors === null
-                                    ? validate982.errors
-                                    : vErrors.concat(validate982.errors);
+                                    ? validate984.errors
+                                    : vErrors.concat(validate984.errors);
                                 errors = vErrors.length;
                               }
                               var valid4 = _errs19 === errors;
@@ -387,7 +387,7 @@ function validate975(
         }
       }
     } else {
-      validate975.errors = [
+      validate977.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -398,7 +398,7 @@ function validate975(
       return false;
     }
   }
-  validate975.errors = vErrors;
+  validate977.errors = vErrors;
   return errors === 0;
 }
-export { validate975 };
+export { validate977 };

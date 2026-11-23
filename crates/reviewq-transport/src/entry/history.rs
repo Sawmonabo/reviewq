@@ -5,13 +5,14 @@ use axum::http::{HeaderMap, header};
 use axum::response::{IntoResponse, Response};
 use reviewq_app::access::{Actor, AppError};
 use reviewq_app::history::{
-    FilePosition, HistorySession, NativeHistoryPage, NativePosition, ToolState, TurnWindow,
-    VisibleEntry, VisibleKind, VisiblePart, VisiblePartKind,
+    FilePosition, HistorySession, NativeHistoryPage, NativePosition, QuestionOutcome, ToolState,
+    TurnWindow, VisibleEntry, VisibleKind, VisiblePart, VisiblePartKind,
 };
 use reviewq_domain::identity::{EventCursor, NativeInputId, ReportHash, RunId, SessionKey};
 use reviewq_protocol::history::{
     Direction, HistoryAvailability, HistoryEntry, HistoryPage, HistoryPageEncodeError,
-    HistoryPageResponse, HistoryPart, HistoryText, HistoryToolState, HistoryWindow,
+    HistoryPageResponse, HistoryPart, HistoryQuestionStatus, HistoryText, HistoryToolState,
+    HistoryWindow,
 };
 use reviewq_protocol::{
     EventCursorDto, HistoryCursorDto, HistoryEntryIdDto, HistoryGenerationDto, HistoryTurnIdDto,
@@ -638,13 +639,28 @@ fn visible_part(
         ToolState::Unknown => HistoryToolState::Unknown,
     };
     Ok(match &part.kind {
-        VisiblePartKind::UserQuestion { request, questions } => HistoryPart::UserQuestion {
+        VisiblePartKind::UserQuestion {
+            request,
+            questions,
+            outcome,
+        } => HistoryPart::UserQuestion {
             native_index: SafeCountDto::new(u64::from(part.native_index)),
             request_id: ResourceIdDto::new(request.as_str()).ok_or(AppError::Internal)?,
             questions: questions
                 .iter()
+                .filter(|question| !question.secret)
                 .map(super::questions::project_question)
                 .collect(),
+            status: outcome.as_ref().map(|outcome| match outcome {
+                QuestionOutcome::Answered(_) => HistoryQuestionStatus::Answered,
+                QuestionOutcome::Closed => HistoryQuestionStatus::Closed,
+            }),
+            selected: outcome.as_ref().and_then(|outcome| match outcome {
+                QuestionOutcome::Answered(selected) if !selected.is_empty() => {
+                    Some(selected.clone())
+                }
+                _ => None,
+            }),
         },
         VisiblePartKind::Text(VisibleKind::User) => HistoryPart::UserPrompt {
             native_index: SafeCountDto::new(u64::from(part.native_index)),

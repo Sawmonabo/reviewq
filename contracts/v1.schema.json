@@ -1513,6 +1513,9 @@
         },
         "label": {
           "type": "string"
+        },
+        "preview": {
+          "type": "string"
         }
       },
       "required": [
@@ -4262,6 +4265,18 @@
             },
             "requestId": {
               "$ref": "#/definitions/ResourceIdDto"
+            },
+            "selected": {
+              "additionalProperties": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "type": "object"
+            },
+            "status": {
+              "$ref": "#/definitions/HistoryQuestionStatus"
             }
           },
           "required": [
@@ -4375,6 +4390,13 @@
       ],
       "title": "HistoryPlanResponse",
       "type": "object"
+    },
+    "HistoryQuestionStatus": {
+      "enum": [
+        "answered",
+        "closed"
+      ],
+      "type": "string"
     },
     "HistoryResult": {
       "properties": {
@@ -7182,6 +7204,9 @@
           "type": "boolean"
         },
         "isSecret": {
+          "type": "boolean"
+        },
+        "multiSelect": {
           "type": "boolean"
         },
         "options": {

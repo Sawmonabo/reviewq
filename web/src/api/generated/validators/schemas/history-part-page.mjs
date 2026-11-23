@@ -3,7 +3,7 @@ import { func0 } from "../runtime.mjs";
 import { validate25 } from "./checkpoint-id-dto.mjs";
 import { validate48 } from "./history-cursor-dto.mjs";
 import { validate711 } from "./history-part.mjs";
-function validate781(
+function validate783(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -20,7 +20,7 @@ function validate781(
         ((data.nextCursor === undefined || !func0.call(data, "nextCursor")) &&
           (missing0 = "nextCursor"))
       ) {
-        validate781.errors = [
+        validate783.errors = [
           {
             instancePath,
             schemaPath: "#/required",
@@ -105,7 +105,7 @@ function validate781(
                 vErrors.push(err1);
               }
               errors++;
-              validate781.errors = vErrors;
+              validate783.errors = vErrors;
               return false;
             } else {
               errors = _errs3;
@@ -151,7 +151,7 @@ function validate781(
                     }
                   }
                 } else {
-                  validate781.errors = [
+                  validate783.errors = [
                     {
                       instancePath: instancePath + "/parts",
                       schemaPath: "#/properties/parts/type",
@@ -170,7 +170,7 @@ function validate781(
         }
       }
     } else {
-      validate781.errors = [
+      validate783.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -181,7 +181,7 @@ function validate781(
       return false;
     }
   }
-  validate781.errors = vErrors;
+  validate783.errors = vErrors;
   return errors === 0;
 }
-export { validate781 };
+export { validate783 };

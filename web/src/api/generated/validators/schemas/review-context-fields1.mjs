@@ -2,10 +2,10 @@
 import { func0 } from "../runtime.mjs";
 import { validate69 } from "./merge-request-iid-dto.mjs";
 import { validate129 } from "./safe-count-dto.mjs";
-import { schema290 } from "../metadata-7.mjs";
+import { schema291 } from "../metadata-7.mjs";
 import { validate116 } from "./review-id-dto.mjs";
 import { validate25 } from "./checkpoint-id-dto.mjs";
-function validate953(
+function validate955(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -62,12 +62,12 @@ function validate953(
             let data2 = data.personalApproval;
             const _errs3 = errors;
             if (typeof data2 !== "boolean" && data2 !== null) {
-              validate953.errors = [
+              validate955.errors = [
                 {
                   instancePath: instancePath + "/personalApproval",
                   schemaPath: "#/properties/personalApproval/type",
                   keyword: "type",
-                  params: { type: schema290.properties.personalApproval.type },
+                  params: { type: schema291.properties.personalApproval.type },
                 },
               ];
               return false;
@@ -83,7 +83,7 @@ function validate953(
             ) {
               const _errs5 = errors;
               if (typeof data.projectPath !== "string") {
-                validate953.errors = [
+                validate955.errors = [
                   {
                     instancePath: instancePath + "/projectPath",
                     schemaPath: "#/properties/projectPath/type",
@@ -128,7 +128,7 @@ function validate953(
                   if (errors === _errs8) {
                     if (Array.isArray(data5)) {
                       if (data5.length > 16) {
-                        validate953.errors = [
+                        validate955.errors = [
                           {
                             instancePath: instancePath + "/ticketKeys",
                             schemaPath: "#/properties/ticketKeys/maxItems",
@@ -163,7 +163,7 @@ function validate953(
                         }
                       }
                     } else {
-                      validate953.errors = [
+                      validate955.errors = [
                         {
                           instancePath: instancePath + "/ticketKeys",
                           schemaPath: "#/properties/ticketKeys/type",
@@ -186,13 +186,13 @@ function validate953(
                     let data7 = data.ticketTitle;
                     const _errs11 = errors;
                     if (typeof data7 !== "string" && data7 !== null) {
-                      validate953.errors = [
+                      validate955.errors = [
                         {
                           instancePath: instancePath + "/ticketTitle",
                           schemaPath: "#/properties/ticketTitle/type",
                           keyword: "type",
                           params: {
-                            type: schema290.properties.ticketTitle.type,
+                            type: schema291.properties.ticketTitle.type,
                           },
                         },
                       ];
@@ -206,7 +206,7 @@ function validate953(
                     if (data.title !== undefined && func0.call(data, "title")) {
                       const _errs13 = errors;
                       if (typeof data.title !== "string") {
-                        validate953.errors = [
+                        validate955.errors = [
                           {
                             instancePath: instancePath + "/title",
                             schemaPath: "#/properties/title/type",
@@ -228,7 +228,7 @@ function validate953(
         }
       }
     } else {
-      validate953.errors = [
+      validate955.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -239,7 +239,7 @@ function validate953(
       return false;
     }
   }
-  validate953.errors = vErrors;
+  validate955.errors = vErrors;
   return errors === 0;
 }
-export { validate953 };
+export { validate955 };

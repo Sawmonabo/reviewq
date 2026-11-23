@@ -605,6 +605,7 @@ export interface Question {
   id: string;
   isOther: boolean;
   isSecret: boolean;
+  multiSelect?: boolean;
   options: Choice[];
   question: string;
   [k: string]: unknown;
@@ -613,5 +614,6 @@ export interface Question {
 export interface Choice {
   description: string;
   label: string;
+  preview?: string;
   [k: string]: unknown;
 }

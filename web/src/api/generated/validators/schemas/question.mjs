@@ -106,45 +106,21 @@ function validate757(
                 var valid0 = true;
               }
               if (valid0) {
-                if (data.options !== undefined && func0.call(data, "options")) {
-                  let data4 = data.options;
+                if (
+                  data.multiSelect !== undefined &&
+                  func0.call(data, "multiSelect")
+                ) {
                   const _errs9 = errors;
-                  if (errors === _errs9) {
-                    if (Array.isArray(data4)) {
-                      var valid1 = true;
-                      const len0 = data4.length;
-                      for (let i0 = 0; i0 < len0; i0++) {
-                        const _errs11 = errors;
-                        if (
-                          !validate758(data4[i0], {
-                            instancePath: instancePath + "/options/" + i0,
-                            parentData: data4,
-                            parentDataProperty: i0,
-                            rootData,
-                          })
-                        ) {
-                          vErrors =
-                            vErrors === null
-                              ? validate758.errors
-                              : vErrors.concat(validate758.errors);
-                          errors = vErrors.length;
-                        }
-                        var valid1 = _errs11 === errors;
-                        if (!valid1) {
-                          break;
-                        }
-                      }
-                    } else {
-                      validate757.errors = [
-                        {
-                          instancePath: instancePath + "/options",
-                          schemaPath: "#/properties/options/type",
-                          keyword: "type",
-                          params: { type: "array" },
-                        },
-                      ];
-                      return false;
-                    }
+                  if (typeof data.multiSelect !== "boolean") {
+                    validate757.errors = [
+                      {
+                        instancePath: instancePath + "/multiSelect",
+                        schemaPath: "#/properties/multiSelect/type",
+                        keyword: "type",
+                        params: { type: "boolean" },
+                      },
+                    ];
+                    return false;
                   }
                   var valid0 = _errs9 === errors;
                 } else {
@@ -152,24 +128,73 @@ function validate757(
                 }
                 if (valid0) {
                   if (
-                    data.question !== undefined &&
-                    func0.call(data, "question")
+                    data.options !== undefined &&
+                    func0.call(data, "options")
                   ) {
-                    const _errs12 = errors;
-                    if (typeof data.question !== "string") {
-                      validate757.errors = [
-                        {
-                          instancePath: instancePath + "/question",
-                          schemaPath: "#/properties/question/type",
-                          keyword: "type",
-                          params: { type: "string" },
-                        },
-                      ];
-                      return false;
+                    let data5 = data.options;
+                    const _errs11 = errors;
+                    if (errors === _errs11) {
+                      if (Array.isArray(data5)) {
+                        var valid1 = true;
+                        const len0 = data5.length;
+                        for (let i0 = 0; i0 < len0; i0++) {
+                          const _errs13 = errors;
+                          if (
+                            !validate758(data5[i0], {
+                              instancePath: instancePath + "/options/" + i0,
+                              parentData: data5,
+                              parentDataProperty: i0,
+                              rootData,
+                            })
+                          ) {
+                            vErrors =
+                              vErrors === null
+                                ? validate758.errors
+                                : vErrors.concat(validate758.errors);
+                            errors = vErrors.length;
+                          }
+                          var valid1 = _errs13 === errors;
+                          if (!valid1) {
+                            break;
+                          }
+                        }
+                      } else {
+                        validate757.errors = [
+                          {
+                            instancePath: instancePath + "/options",
+                            schemaPath: "#/properties/options/type",
+                            keyword: "type",
+                            params: { type: "array" },
+                          },
+                        ];
+                        return false;
+                      }
                     }
-                    var valid0 = _errs12 === errors;
+                    var valid0 = _errs11 === errors;
                   } else {
                     var valid0 = true;
+                  }
+                  if (valid0) {
+                    if (
+                      data.question !== undefined &&
+                      func0.call(data, "question")
+                    ) {
+                      const _errs14 = errors;
+                      if (typeof data.question !== "string") {
+                        validate757.errors = [
+                          {
+                            instancePath: instancePath + "/question",
+                            schemaPath: "#/properties/question/type",
+                            keyword: "type",
+                            params: { type: "string" },
+                          },
+                        ];
+                        return false;
+                      }
+                      var valid0 = _errs14 === errors;
+                    } else {
+                      var valid0 = true;
+                    }
                   }
                 }
               }

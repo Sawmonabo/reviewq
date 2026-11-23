@@ -136,10 +136,16 @@ export type HistoryPart =
       nativeIndex?: SafeCountDto;
       questions: Question[];
       requestId: ResourceIdDto;
+      selected?: {
+        [k: string]: string[];
+      };
+      status?: HistoryQuestionStatus;
       [k: string]: unknown;
     };
 
 export type HistoryToolState = "running" | "completed" | "failed" | "unknown";
+
+export type HistoryQuestionStatus = "answered" | "closed";
 
 export type PlanTaskStatus = "pending" | "in_progress" | "completed";
 

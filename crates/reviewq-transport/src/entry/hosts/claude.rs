@@ -17,12 +17,15 @@ use crate::entry::pages::{parse, success};
 use crate::entry::{ApiError, Entry};
 
 mod delivery;
+mod questions;
 
 pub(in crate::entry) fn routes() -> Router<Arc<Entry>> {
     Router::new()
         .route("/native/claude/heartbeat", post(heartbeat))
         .route("/native/claude/delivery-check", post(delivery::check))
         .route("/native/claude/hook", post(delivery::hook))
+        .route("/native/claude/question", post(questions::watch))
+        .route("/native/claude/question-finished", post(questions::finish))
 }
 
 #[derive(Deserialize)]

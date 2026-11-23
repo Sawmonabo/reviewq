@@ -3,6 +3,7 @@ import { func0 } from "../runtime.mjs";
 import { validate129 } from "./safe-count-dto.mjs";
 import { validate757 } from "./question.mjs";
 import { validate25 } from "./checkpoint-id-dto.mjs";
+import { validate762 } from "./history-question-status.mjs";
 function validate755(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
@@ -151,6 +152,112 @@ function validate755(
                 var valid0 = _errs7 === errors;
               } else {
                 var valid0 = true;
+              }
+              if (valid0) {
+                if (
+                  data.selected !== undefined &&
+                  func0.call(data, "selected")
+                ) {
+                  let data5 = data.selected;
+                  const _errs8 = errors;
+                  if (errors === _errs8) {
+                    if (
+                      data5 &&
+                      typeof data5 == "object" &&
+                      !Array.isArray(data5)
+                    ) {
+                      for (const key0 of Object.keys(data5)) {
+                        let data6 = data5[key0];
+                        const _errs11 = errors;
+                        if (errors === _errs11) {
+                          if (Array.isArray(data6)) {
+                            var valid3 = true;
+                            const len1 = data6.length;
+                            for (let i1 = 0; i1 < len1; i1++) {
+                              const _errs13 = errors;
+                              if (typeof data6[i1] !== "string") {
+                                validate755.errors = [
+                                  {
+                                    instancePath:
+                                      instancePath +
+                                      "/selected/" +
+                                      key0
+                                        .replace(/~/g, "~0")
+                                        .replace(/\//g, "~1") +
+                                      "/" +
+                                      i1,
+                                    schemaPath:
+                                      "#/properties/selected/additionalProperties/items/type",
+                                    keyword: "type",
+                                    params: { type: "string" },
+                                  },
+                                ];
+                                return false;
+                              }
+                              var valid3 = _errs13 === errors;
+                              if (!valid3) {
+                                break;
+                              }
+                            }
+                          } else {
+                            validate755.errors = [
+                              {
+                                instancePath:
+                                  instancePath +
+                                  "/selected/" +
+                                  key0.replace(/~/g, "~0").replace(/\//g, "~1"),
+                                schemaPath:
+                                  "#/properties/selected/additionalProperties/type",
+                                keyword: "type",
+                                params: { type: "array" },
+                              },
+                            ];
+                            return false;
+                          }
+                        }
+                        var valid2 = _errs11 === errors;
+                        if (!valid2) {
+                          break;
+                        }
+                      }
+                    } else {
+                      validate755.errors = [
+                        {
+                          instancePath: instancePath + "/selected",
+                          schemaPath: "#/properties/selected/type",
+                          keyword: "type",
+                          params: { type: "object" },
+                        },
+                      ];
+                      return false;
+                    }
+                  }
+                  var valid0 = _errs8 === errors;
+                } else {
+                  var valid0 = true;
+                }
+                if (valid0) {
+                  if (data.status !== undefined && func0.call(data, "status")) {
+                    const _errs15 = errors;
+                    if (
+                      !validate762(data.status, {
+                        instancePath: instancePath + "/status",
+                        parentData: data,
+                        parentDataProperty: "status",
+                        rootData,
+                      })
+                    ) {
+                      vErrors =
+                        vErrors === null
+                          ? validate762.errors
+                          : vErrors.concat(validate762.errors);
+                      errors = vErrors.length;
+                    }
+                    var valid0 = _errs15 === errors;
+                  } else {
+                    var valid0 = true;
+                  }
+                }
               }
             }
           }

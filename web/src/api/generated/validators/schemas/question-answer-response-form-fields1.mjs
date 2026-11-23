@@ -2,9 +2,9 @@
 import { func0 } from "../runtime.mjs";
 import { validate25 } from "./checkpoint-id-dto.mjs";
 import { validate48 } from "./history-cursor-dto.mjs";
-import { validate1094 } from "./question-answer-response-mode.mjs";
+import { validate1096 } from "./question-answer-response-mode.mjs";
 import { validate757 } from "./question.mjs";
-function validate1091(
+function validate1093(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -15,7 +15,7 @@ function validate1091(
       if (data.answerable !== undefined && func0.call(data, "answerable")) {
         const _errs1 = errors;
         if (typeof data.answerable !== "boolean") {
-          validate1091.errors = [
+          validate1093.errors = [
             {
               instancePath: instancePath + "/answerable",
               schemaPath: "#/properties/answerable/type",
@@ -33,7 +33,7 @@ function validate1091(
         if (data.blocking !== undefined && func0.call(data, "blocking")) {
           const _errs3 = errors;
           if (typeof data.blocking !== "boolean") {
-            validate1091.errors = [
+            validate1093.errors = [
               {
                 instancePath: instancePath + "/blocking",
                 schemaPath: "#/properties/blocking/type",
@@ -93,7 +93,7 @@ function validate1091(
               if (data.mode !== undefined && func0.call(data, "mode")) {
                 const _errs7 = errors;
                 if (
-                  !validate1094(data.mode, {
+                  !validate1096(data.mode, {
                     instancePath: instancePath + "/mode",
                     parentData: data,
                     parentDataProperty: "mode",
@@ -102,8 +102,8 @@ function validate1091(
                 ) {
                   vErrors =
                     vErrors === null
-                      ? validate1094.errors
-                      : vErrors.concat(validate1094.errors);
+                      ? validate1096.errors
+                      : vErrors.concat(validate1096.errors);
                   errors = vErrors.length;
                 }
                 var valid0 = _errs7 === errors;
@@ -143,7 +143,7 @@ function validate1091(
                         }
                       }
                     } else {
-                      validate1091.errors = [
+                      validate1093.errors = [
                         {
                           instancePath: instancePath + "/questions",
                           schemaPath: "#/properties/questions/type",
@@ -211,7 +211,7 @@ function validate1091(
         }
       }
     } else {
-      validate1091.errors = [
+      validate1093.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -222,7 +222,7 @@ function validate1091(
       return false;
     }
   }
-  validate1091.errors = vErrors;
+  validate1093.errors = vErrors;
   return errors === 0;
 }
-export { validate1091 };
+export { validate1093 };

@@ -18,12 +18,14 @@ pub struct Question {
     pub options: Vec<QuestionOption>,
     pub allows_other: bool,
     pub secret: bool,
+    pub multi_select: bool,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct QuestionOption {
     pub label: String,
     pub description: String,
+    pub preview: Option<String>,
 }
 
 #[derive(Clone, Eq, PartialEq)]
@@ -269,6 +271,14 @@ impl QuestionAnswer {
         }
     }
 
+    /// Native reply channels require a captured browser turn and item address.
+    pub fn require_address(&self) -> Result<(), AppError> {
+        self.address
+            .as_ref()
+            .map(|_| ())
+            .ok_or(AppError::InvalidRequest)
+    }
+
     pub fn check_address(
         &self,
         request: &str,
@@ -331,17 +341,27 @@ impl QuestionAnswer {
             return Err(AppError::InvalidRequest);
         }
         for question in &form.questions {
-            let Some([value]) = self.answers.get(&question.id).map(Vec::as_slice) else {
+            let Some(values) = self.answers.get(&question.id) else {
                 return Err(AppError::InvalidRequest);
             };
-            if value.is_empty()
-                || value.len() > 8192
-                || value
-                    .chars()
-                    .any(|ch| ch.is_control() && !matches!(ch, '\n' | '\r' | '\t'))
-                || (!question.allows_other
-                    && !question.options.is_empty()
-                    && !question.options.iter().any(|option| &option.label == value))
+            if values.is_empty()
+                || values.len()
+                    > if question.multi_select {
+                        question.options.len().max(1)
+                    } else {
+                        1
+                    }
+                || values.iter().enumerate().any(|(index, value)| {
+                    value.is_empty()
+                        || value.len() > 8192
+                        || value
+                            .chars()
+                            .any(|ch| ch.is_control() && !matches!(ch, '\n' | '\r' | '\t'))
+                        || values[..index].contains(value)
+                        || ((values.len() > 1
+                            || (!question.allows_other && !question.options.is_empty()))
+                            && !question.options.iter().any(|option| &option.label == value))
+                })
             {
                 return Err(AppError::InvalidRequest);
             }

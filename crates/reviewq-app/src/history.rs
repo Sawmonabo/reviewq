@@ -393,6 +393,7 @@ pub enum VisiblePartKind {
     UserQuestion {
         request: String,
         questions: Vec<Question>,
+        outcome: Option<QuestionOutcome>,
     },
     ToolCall {
         call: NativeInputId,
@@ -406,6 +407,12 @@ pub enum VisiblePartKind {
     },
     Plan,
     Assignment,
+}
+
+#[derive(Clone, Debug)]
+pub enum QuestionOutcome {
+    Answered(BTreeMap<String, Vec<String>>),
+    Closed,
 }
 
 pub struct NativeParts {

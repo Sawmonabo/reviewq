@@ -46,4 +46,5 @@ const schema235 = {
   enum: ["running", "completed", "failed", "unknown"],
   type: "string",
 };
-export { schema197, schema215, schema218, schema219, schema235 };
+const schema242 = { enum: ["answered", "closed"], type: "string" };
+export { schema197, schema215, schema218, schema219, schema235, schema242 };

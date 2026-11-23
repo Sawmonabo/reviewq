@@ -75,6 +75,8 @@ pub struct Question {
     pub options: Vec<Choice>,
     pub is_other: bool,
     pub is_secret: bool,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub multi_select: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -82,6 +84,9 @@ pub struct Question {
 pub struct Choice {
     pub label: String,
     pub description: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "schema", schemars(with = "String"))]
+    pub preview: Option<String>,
 }
 
 #[derive(Serialize)]

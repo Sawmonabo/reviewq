@@ -109,7 +109,10 @@ async fn answered_details_and_jump_survive_copy_to_new_generation() {
         panic!("one message and one question")
     };
     assert_eq!(prose.text, "Preserve this message.");
-    let VisiblePartKind::UserQuestion { request, questions } = &question.kind else {
+    let VisiblePartKind::UserQuestion {
+        request, questions, ..
+    } = &question.kind
+    else {
         panic!("question in its native position")
     };
     assert_eq!(request, &known[0].key.request);
@@ -222,7 +225,10 @@ async fn native_opening_is_located_without_showing_tool_payloads() {
         panic!("only a question marker")
     };
     assert!(part.text.is_empty() && part.content.is_none());
-    let VisiblePartKind::UserQuestion { request, questions } = &part.kind else {
+    let VisiblePartKind::UserQuestion {
+        request, questions, ..
+    } = &part.kind
+    else {
         panic!("proven native question")
     };
     assert_eq!(request, &request_id("thread", turn, id));

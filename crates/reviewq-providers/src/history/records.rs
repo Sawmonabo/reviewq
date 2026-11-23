@@ -10,6 +10,7 @@ use struson::reader::{JsonReader, JsonStreamReader, ValueType};
 use super::reader::NameBudget;
 use super::tools::{self, MAX_NATIVE_PARTS};
 
+mod claude;
 mod questions;
 
 pub(super) const ID_BYTES: u64 = 512;
@@ -115,6 +116,7 @@ struct Message {
     questions: Option<Vec<Question>>,
     final_response: bool,
     claude_tool_parent: Option<NativeInputId>,
+    claude: bool,
     tool_calls: Vec<(NativeInputId, String)>,
     argument_field: Option<String>,
     result_field: Option<String>,
@@ -305,7 +307,7 @@ fn project_to(
     let mut reader = JsonStreamReader::new(NameBudget::new(input));
     let result = match provider {
         HostProvider::Codex => codex(&mut reader, native, window, output),
-        HostProvider::Claude => claude(&mut reader, native, root_session, window, output),
+        HostProvider::Claude => claude::project(&mut reader, native, root_session, window, output),
     };
     let Some((mut item, kind, at_ms, turn)) = result? else {
         return Ok(None);
@@ -471,91 +473,8 @@ fn codex<R: Read>(
     Ok(Some((event.item, kind, stamp, event.turn)))
 }
 
+pub(super) use claude::{ASK_USER_QUESTION, result as claude_question_result};
 pub(super) use questions::{NATIVE_QUESTION_TURN_BYTES, bind_native_question};
-
-fn claude<R: Read>(
-    reader: &mut JsonStreamReader<R>,
-    native: &NativeSessionId,
-    root: Option<&NativeSessionId>,
-    window: Window,
-    output: &mut BodySink<'_>,
-) -> Result<Projection, AppError> {
-    let mut item = Message::default();
-    let mut id = None;
-    let mut record_type = None;
-    let mut message_role = None;
-    let mut stop_reason = None;
-    let mut stamp = None;
-    let mut hidden = false;
-    let mut sidechain = false;
-    let mut session = None;
-    let mut agent = None;
-    let mut secret_answer = false;
-    let mut parent = None;
-    let mut tool_parent = None;
-    object(reader, |name, reader| match name {
-        "type" => string(reader, ID_BYTES).map(|value| record_type = value),
-        "uuid" => string(reader, ID_BYTES).map(|value| id = value),
-        "parentUuid" => string(reader, ID_BYTES).map(|value| parent = value),
-        "sourceToolAssistantUUID" => string(reader, ID_BYTES).map(|value| tool_parent = value),
-        "timestamp" => string(reader, ID_BYTES).map(|value| stamp = date(value)),
-        "sessionId" => string(reader, ID_BYTES).map(|value| session = value),
-        "agentId" => string(reader, ID_BYTES).map(|value| agent = value),
-        "isSidechain" => reader
-            .next_bool()
-            .map(|value| sidechain = value)
-            .map_err(invalid),
-        "isMeta" | "isCompactSummary" | "isVisibleInTranscriptOnly"
-            if reader.peek().map_err(invalid)? == ValueType::Boolean =>
-        {
-            reader
-                .next_bool()
-                .map(|value| hidden |= value)
-                .map_err(invalid)
-        }
-        "toolUseResult" if reader.peek().map_err(invalid)? == ValueType::Object => {
-            object(reader, |name, reader| {
-                secret_answer |= matches!(name, "answers" | "answer" | "secret");
-                reader.skip_value().map_err(invalid)
-            })
-        }
-        "message" if reader.peek().map_err(invalid)? == ValueType::Object => {
-            object(reader, |name, reader| match name {
-                "role" => string(reader, ID_BYTES).map(|value| message_role = value),
-                "stop_reason" => string(reader, ID_BYTES).map(|value| stop_reason = value),
-                "content" => contents(reader, window, &mut item, output),
-                _ => reader.skip_value().map_err(invalid),
-            })
-        }
-        _ => reader.skip_value().map_err(invalid),
-    })?;
-    let matched = match root {
-        Some(root) => {
-            sidechain
-                && session.as_deref() == Some(root.as_str())
-                && agent.as_deref() == Some(native.as_str())
-        }
-        None => !sidechain && session.as_deref() == Some(native.as_str()),
-    };
-    item.final_response =
-        record_type.as_deref() == Some("assistant") && stop_reason.as_deref() == Some("end_turn");
-    if hidden || !matched {
-        return Ok(None);
-    }
-    if secret_answer {
-        item.parts
-            .retain(|part| !matches!(part.kind, VisiblePartKind::ToolResult { .. }));
-    }
-    let kind = match (record_type.as_deref(), message_role.as_deref()) {
-        (Some("user"), Some("user")) if item.text.bytes > 0 => VisibleKind::User,
-        (Some("user"), Some("user")) => VisibleKind::Assistant,
-        (Some("assistant"), Some("assistant")) => VisibleKind::Assistant,
-        _ => return Ok(None),
-    };
-    item.id = id;
-    item.claude_tool_parent = tool_parent.or(parent).and_then(|value| value.parse().ok());
-    Ok(Some((item, kind, stamp, None)))
-}
 
 fn codex_item<R: Read>(
     reader: &mut JsonStreamReader<R>,
@@ -672,12 +591,24 @@ fn block<R: Read>(
             output.for_field(BodyField::TextBlock(index)),
         )
         .map(|value| plain = value),
-        "input" if retained && !output.document => tools::body(
-            reader,
-            preview_window,
-            output.for_field(BodyField::InputBlock(index)),
-        )
-        .map(|value| body = value),
+        "input" if retained && !output.document => {
+            let possibly_question = item.claude
+                && name
+                    .as_deref()
+                    .is_none_or(|name| name == claude::ASK_USER_QUESTION)
+                && output.target.is_none();
+            let input_window = if possibly_question {
+                claude::INPUT_WINDOW
+            } else {
+                preview_window
+            };
+            tools::body(
+                reader,
+                input_window,
+                output.for_field(BodyField::InputBlock(index)),
+            )
+            .map(|value| body = value)
+        }
         "content" if retained && !output.document => tools::body(
             reader,
             preview_window,
@@ -739,6 +670,9 @@ fn block<R: Read>(
                     state: ToolState::Unknown,
                 },
             };
+            if !item.claude || label != "UserQuestion" {
+                body.picked.truncate(preview_window.limit);
+            }
             Part { index, kind, body }
         }
         Some("tool_result") => {

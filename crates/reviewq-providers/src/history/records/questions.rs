@@ -73,6 +73,7 @@ pub(super) fn attach(event: &mut Event, thread: &NativeSessionId, first_part: u1
             kind: VisiblePartKind::UserQuestion {
                 request: request_id(thread.as_str(), turn, id),
                 questions,
+                outcome: None,
             },
             body: Text::default(),
         });
@@ -128,6 +129,7 @@ pub(in crate::history) fn bind_native_question(
         kind: VisiblePartKind::UserQuestion {
             request: request_id(source.native_id.as_str(), turn.as_str(), record.id.as_str()),
             questions: Vec::new(),
+            outcome: None,
         },
         body: Text::default(),
     });

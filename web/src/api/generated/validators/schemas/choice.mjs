@@ -60,6 +60,25 @@ function validate758(
           } else {
             var valid0 = true;
           }
+          if (valid0) {
+            if (data.preview !== undefined && func0.call(data, "preview")) {
+              const _errs5 = errors;
+              if (typeof data.preview !== "string") {
+                validate758.errors = [
+                  {
+                    instancePath: instancePath + "/preview",
+                    schemaPath: "#/properties/preview/type",
+                    keyword: "type",
+                    params: { type: "string" },
+                  },
+                ];
+                return false;
+              }
+              var valid0 = _errs5 === errors;
+            } else {
+              var valid0 = true;
+            }
+          }
         }
       }
     } else {

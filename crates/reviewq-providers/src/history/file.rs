@@ -13,6 +13,7 @@ use reviewq_domain::identity::NativeInputId;
 use reviewq_domain::session::HostProvider;
 use sha2::{Digest, Sha256};
 
+use super::claude_questions::{QUESTION_LOOKAHEAD_BYTES, attach_outcomes};
 use super::locator::Source;
 use super::records;
 
@@ -50,6 +51,8 @@ pub(super) fn page(
     let mut entries = Vec::with_capacity(usize::from(limit));
     let mut tool_proof = ToolProof::new(file, cancelled);
     let mut question_budget = records::NATIVE_QUESTION_TURN_BYTES;
+    let mut claude_question_budget = QUESTION_LOOKAHEAD_BYTES;
+    let mut question_lines = Lines::new(file, cancelled);
     let mut lines = Lines::new(file, cancelled);
     for _ in 0..MAX_RECORDS {
         if cancelled.load(Ordering::Relaxed) {
@@ -81,6 +84,14 @@ pub(super) fn page(
             cancelled,
         ) {
             tool_proof.redact(source, start, &mut record);
+            attach_outcomes(
+                source,
+                &mut question_lines,
+                end,
+                complete,
+                &mut claude_question_budget,
+                &mut record,
+            );
             let text = readable_prefix(&record.text)?
                 .chars()
                 .take(512)
@@ -225,6 +236,14 @@ pub(super) fn parts(
     .filter(|record| record.id == reference.entry)
     .ok_or(AppError::CursorExpired)?;
     ToolProof::new(&source.file, cancelled).redact(source, start, &mut record);
+    attach_outcomes(
+        source,
+        &mut Lines::new(&source.file, cancelled),
+        end,
+        reference.position.high_water,
+        &mut { QUESTION_LOOKAHEAD_BYTES },
+        &mut record,
+    );
     let parts = visible_parts(
         record.parts,
         &reference.generation,

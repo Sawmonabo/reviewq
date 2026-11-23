@@ -1,5 +1,6 @@
 //! Bounded visible page for one exact registered source.
 
+use std::collections::BTreeMap;
 use std::fmt;
 use std::io::{self, Write};
 
@@ -366,7 +367,21 @@ pub enum HistoryPart {
         native_index: Option<SafeCountDto>,
         request_id: ResourceIdDto,
         questions: Vec<Question>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        #[cfg_attr(feature = "schema", schemars(with = "HistoryQuestionStatus"))]
+        status: Option<HistoryQuestionStatus>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        #[cfg_attr(feature = "schema", schemars(with = "BTreeMap<String, Vec<String>>"))]
+        selected: Option<BTreeMap<String, Vec<String>>>,
     },
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub enum HistoryQuestionStatus {
+    Answered,
+    Closed,
 }
 
 #[derive(Debug, Serialize)]

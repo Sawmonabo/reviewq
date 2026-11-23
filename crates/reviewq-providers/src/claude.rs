@@ -8,8 +8,8 @@ use std::sync::atomic::AtomicBool;
 use reviewq_app::access::{AppError, AppFuture};
 use reviewq_app::history::HistorySession;
 use reviewq_app::hosts::{
-    ClaudeAnchor, ClaudeChild, ClaudeCompanion, ClaudeContext, HostProof, MessageBody,
-    ProvenClaudeChild,
+    ClaudeAnchor, ClaudeChild, ClaudeCompanion, ClaudeContext, ClaudeQuestionAddress,
+    ClaudeQuestionAnswers, HostProof, MessageBody, ProvenClaudeChild, QuestionStatus,
 };
 use reviewq_domain::identity::{NativeInputId, NativeSessionId};
 use reviewq_domain::session::{AbsolutePath, HostProvider, NativeBinding, NativeIdentity};
@@ -22,6 +22,7 @@ use crate::history::{
 
 mod cli;
 pub(crate) mod jobs;
+mod questions;
 mod workflow;
 pub use cli::ClaudeCli;
 pub use workflow::ClaudeWorkflow;
@@ -29,6 +30,7 @@ pub use workflow::ClaudeWorkflow;
 pub struct Claude {
     profile: AbsolutePath,
     reads: Arc<Semaphore>,
+    questions: questions::Questions,
 }
 
 impl Claude {
@@ -45,6 +47,7 @@ impl Claude {
         Ok(Self {
             profile: AbsolutePath::from_canonical(profile).map_err(|_| AppError::InvalidRequest)?,
             reads: Arc::new(Semaphore::new(4)),
+            questions: questions::Questions::default(),
         })
     }
 }
@@ -150,6 +153,23 @@ impl ClaudeCompanion for Claude {
         self.read_native(session, move |session, cancelled| {
             claude_confirm_prompt(&session, &anchor, &entry, &text, cancelled)
         })
+    }
+
+    fn open_question(
+        &self,
+        session: HistorySession,
+        address: ClaudeQuestionAddress,
+    ) -> AppFuture<'_, tokio::sync::oneshot::Receiver<ClaudeQuestionAnswers>> {
+        Box::pin(self.watch_question(session, address))
+    }
+
+    fn finish_question(
+        &self,
+        session: &HistorySession,
+        address: &ClaudeQuestionAddress,
+        status: QuestionStatus,
+    ) -> bool {
+        self.settle_question(session, address, status)
     }
 
     fn prove(&self, context: ClaudeContext) -> AppFuture<'_, HostProof> {

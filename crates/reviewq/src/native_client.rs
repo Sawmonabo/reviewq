@@ -410,10 +410,17 @@ pub(crate) async fn bounded(
 }
 
 pub(crate) fn client() -> Result<Client, Failure> {
-    Ok(Client::builder()
+    client_with_timeout(Some(Duration::from_secs(30)))
+}
+
+fn client_with_timeout(timeout: Option<Duration>) -> Result<Client, Failure> {
+    let client = Client::builder()
         .no_proxy()
         .redirect(reqwest::redirect::Policy::none())
-        .connect_timeout(Duration::from_secs(2))
-        .timeout(Duration::from_secs(30))
-        .build()?)
+        .connect_timeout(Duration::from_secs(2));
+    let client = match timeout {
+        Some(timeout) => client.timeout(timeout),
+        None => client,
+    };
+    Ok(client.build()?)
 }

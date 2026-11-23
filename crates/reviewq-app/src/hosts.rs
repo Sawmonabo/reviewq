@@ -25,8 +25,9 @@ mod work;
 
 pub use claude::{
     ClaudeAnchor, ClaudeChild, ClaudeClassicEvent, ClaudeDeliveryAck, ClaudeDeliveryResult,
-    ClaudeHeartbeat, ClaudeHeartbeatResult, ClaudeOffer, ClaudeSend, ClaudeStore, ClaudeTurnResult,
-    ClaudeWorkflowContext, ClaudeWorkflowStore, ProvenClaudeChild,
+    ClaudeHeartbeat, ClaudeHeartbeatResult, ClaudeOffer, ClaudeQuestionAddress,
+    ClaudeQuestionAnswers, ClaudeSend, ClaudeStore, ClaudeTurnResult, ClaudeWorkflowContext,
+    ClaudeWorkflowStore, ProvenClaudeChild,
 };
 pub use messages::{
     MAX_MESSAGE_HISTORY_PAGE, MessageAttachment, MessageHistory, MessageHistoryStore,
@@ -190,7 +191,7 @@ pub trait NativeHost: QuestionsPort + Send + Sync {
 }
 
 /// Resolves the companion's identity against the service-selected Claude profile.
-pub trait ClaudeCompanion: Send + Sync {
+pub trait ClaudeCompanion: QuestionsPort + Send + Sync {
     fn accepts_profile(&self, profile: &AbsolutePath) -> bool;
     fn inspect_lead(&self, session: NativeSessionId) -> AppFuture<'_, HostProof>;
     fn prove(&self, context: ClaudeContext) -> AppFuture<'_, HostProof>;
@@ -207,6 +208,20 @@ pub trait ClaudeCompanion: Send + Sync {
         entry: NativeInputId,
         text: MessageBody,
     ) -> AppFuture<'_, ()>;
+
+    /// Opens a response channel for one witnessed native user question.
+    fn open_question(
+        &self,
+        session: HistorySession,
+        address: ClaudeQuestionAddress,
+    ) -> AppFuture<'_, tokio::sync::oneshot::Receiver<ClaudeQuestionAnswers>>;
+
+    fn finish_question(
+        &self,
+        session: &HistorySession,
+        address: &ClaudeQuestionAddress,
+        status: QuestionStatus,
+    ) -> bool;
 }
 
 pub struct ClaudeContext {
