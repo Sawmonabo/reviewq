@@ -1,187 +1,242 @@
 use std::collections::BTreeSet;
-use std::ops::Range;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
-use serde::{Deserialize, Serialize};
-use serde_json::{Deserializer, json, value::RawValue};
+use super::files::{Existing, read};
+use super::{Failure, git};
 
-use super::Failure;
+mod files;
+mod json;
 
-const WHITESPACE: [char; 4] = [' ', '\t', '\r', '\n'];
-const CONFIG: &str = "Could not parse the Claude profile config.";
-const ENTRY: &str = "The existing Claude MCP entry was preserved.";
-
-enum Field {
-    Present {
-        value: Range<usize>,
-        remove: Range<usize>,
-    },
-    Absent {
-        insert: usize,
-        comma: bool,
-    },
+pub(super) struct Edit {
+    file: PathBuf,
+    retired: Vec<PathBuf>,
+    selected: Option<Selection>,
+    urls: BTreeSet<String>,
+    bearer: String,
+    applied: Option<Applied>,
 }
 
-#[derive(Deserialize, PartialEq, Serialize)]
-#[serde(deny_unknown_fields)]
-struct Server {
-    #[serde(rename = "type")]
-    kind: String,
+struct Selection {
+    checkout: PathBuf,
     url: String,
-    headers: Headers,
+    owned: bool,
 }
 
-#[derive(Deserialize, PartialEq, Serialize)]
-#[serde(deny_unknown_fields)]
-struct Headers {
-    #[serde(rename = "Authorization")]
-    authorization: String,
+struct Applied {
+    before: Option<Existing>,
+    after: Existing,
+    undo: Vec<json::Undo>,
 }
 
-impl Server {
-    fn http(url: &str, bearer: &str) -> Self {
-        Self {
-            kind: "http".to_owned(),
-            url: url.to_owned(),
-            headers: Headers {
-                authorization: format!("Bearer {bearer}"),
-            },
+impl Edit {
+    pub(super) async fn prepare(
+        file: &Path,
+        retired: &[&Path],
+        selected: Option<(&Path, &str, bool)>,
+        urls: &BTreeSet<String>,
+        bearer: &str,
+    ) -> Result<Self, Failure> {
+        if !retired.is_empty() {
+            git::private_config(file, false).await?;
         }
+        let edit = Self {
+            file: file.to_owned(),
+            retired: retired
+                .iter()
+                .map(|checkout| checkout.to_path_buf())
+                .collect(),
+            selected: selected.map(|(checkout, url, owned)| Selection {
+                checkout: checkout.to_owned(),
+                url: url.to_owned(),
+                owned,
+            }),
+            urls: urls.clone(),
+            bearer: bearer.to_owned(),
+            applied: None,
+        };
+        // Find incompatible entries before issuing a grant. The write itself
+        // recalculates the patch from the current file under Claude's lock.
+        edit.changes(read(file)?.as_ref())?;
+        Ok(edit)
     }
-}
 
-pub(super) fn edit(
-    before: Option<&[u8]>,
-    checkout: &Path,
-    owned: &BTreeSet<String>,
-    bearer: &str,
-    url: Option<&str>,
-) -> Result<Option<Vec<u8>>, Failure> {
-    let source = std::str::from_utf8(before.unwrap_or(b"{}\n")).map_err(|_| CONFIG)?;
-    serde_json::from_str::<&RawValue>(source).map_err(|_| CONFIG)?;
-    let checkout = checkout.to_str().ok_or("Expected a UTF-8 checkout path.")?;
-    let path = ["projects", checkout, "mcpServers", "reviewq"];
-    let mut object = skip_whitespace(source, 0);
-    for (index, name) in path.iter().enumerate() {
-        if source.as_bytes()[object] != b'{' {
-            return match url {
-                Some(_) => Err("Claude config contains an incompatible entry.".into()),
-                None => Ok(None),
-            };
-        }
-        let children = &path[index + 1..];
-        match field(source, object, name)? {
-            Field::Present { value, .. } if !children.is_empty() => object = value.start,
-            Field::Present { value, remove } => {
-                let existing = read_server(source, &value)?;
-                if !owned.contains(&existing.url) || existing != Server::http(&existing.url, bearer)
-                {
-                    return Err(ENTRY.into());
-                }
-                return match url {
-                    Some(url) if url == existing.url => Ok(None),
-                    Some(url) => Ok(Some(replace(
-                        source,
-                        value,
-                        &serde_json::to_vec(&Server::http(url, bearer))?,
-                    ))),
-                    None => Ok(Some(replace(source, remove, b""))),
-                };
+    pub(super) fn apply(&mut self) -> Result<(), Failure> {
+        let Some(lock) = files::Lock::acquire(&self.file)? else {
+            if self.selected.is_none() {
+                return Ok(());
             }
-            Field::Absent { insert, comma } => {
-                let Some(url) = url else { return Ok(None) };
-                let mut value = serde_json::to_value(Server::http(url, bearer))?;
-                for &key in children.iter().rev() {
-                    value = json!({key: value});
-                }
-                let mut member = Vec::new();
-                if comma {
-                    member.push(b',');
-                }
-                serde_json::to_writer(&mut member, name)?;
-                member.push(b':');
-                serde_json::to_writer(&mut member, &value)?;
-                return Ok(Some(replace(source, insert..insert, &member)));
-            }
-        }
-    }
-    Ok(None)
-}
-
-fn read_server(source: &str, value: &Range<usize>) -> Result<Server, Failure> {
-    // Serde can also deserialize structs from sequences. Claude's entries are objects.
-    if source.as_bytes()[value.start] != b'{' {
-        return Err(ENTRY.into());
-    }
-    let Field::Present { value: headers, .. } = field(source, value.start, "headers")? else {
-        return Err(ENTRY.into());
-    };
-    if source.as_bytes()[headers.start] != b'{' {
-        return Err(ENTRY.into());
-    }
-    Ok(serde_json::from_str(&source[value.clone()]).map_err(|_| ENTRY)?)
-}
-
-// Walk the members of a validated JSON object. Serde consumes each value without
-// converting its numbers or strings, so a replacement retains the surrounding bytes.
-fn field(source: &str, object: usize, wanted: &str) -> Result<Field, Failure> {
-    let bytes = source.as_bytes();
-    let mut previous_comma = None;
-    let mut start = skip_whitespace(source, object + 1);
-    if bytes[start] == b'}' {
-        return Ok(Field::Absent {
-            insert: object + 1,
-            comma: false,
+            return Err("The selected Claude profile directory is missing.".into());
+        };
+        let before = read(&self.file)?;
+        let (after, undo) = self.changes(before.as_ref())?;
+        let Some(after) = after else {
+            return Ok(());
+        };
+        lock.write(before.as_ref(), Some(&after))?;
+        let verified = lock.readback(Some(&after));
+        self.applied = Some(Applied {
+            before,
+            after,
+            undo,
         });
+        drop(lock);
+        verified?;
+        files::sync_parent(&self.file)
     }
-    let mut found = None;
-    loop {
-        let (name, end) = token::<String>(source, start)?;
-        let colon = skip_whitespace(source, end);
-        let value = skip_whitespace(source, colon + 1);
-        let (_, end) = token::<&RawValue>(source, value)?;
-        let separator = skip_whitespace(source, end);
-        let has_next = bytes[separator] == b',';
-        if name == wanted {
-            if found.is_some() {
-                return Err("The Claude config has more than one matching entry.".into());
+
+    pub(super) fn rollback(&mut self) -> Result<(), Failure> {
+        let Some(applied) = &self.applied else {
+            return Ok(());
+        };
+        let lock = files::Lock::acquire(&self.file)?
+            .ok_or("The Claude profile directory changed during setup.")?;
+        let current = read(&self.file)?;
+        if files::same(current.as_ref(), applied.before.as_ref()) {
+            self.applied = None;
+            return Ok(());
+        }
+        let current = current.ok_or("The Claude profile config changed during setup.")?;
+        let verified = if files::same(Some(&current), Some(&applied.after)) {
+            lock.write(Some(&current), applied.before.as_ref())?;
+            lock.readback(applied.before.as_ref())
+        } else {
+            // A concurrent writer may have changed another project, or Claude
+            // may have reformatted the whole document. Reverse our entries only.
+            let mut bytes = None;
+            for undo in applied.undo.iter().rev() {
+                if let Some(restored) = undo.restore(bytes.as_deref().unwrap_or(&current.bytes))? {
+                    bytes = Some(restored);
+                }
             }
-            let remove = if has_next {
-                start..separator + 1
-            } else {
-                previous_comma.unwrap_or(start)..end
-            };
-            found = Some(Field::Present {
-                value: value..end,
-                remove,
-            });
+            match bytes {
+                Some(bytes) => {
+                    let restored = Existing { bytes, mode: 0o600 };
+                    lock.write(Some(&current), Some(&restored))?;
+                    lock.readback(Some(&restored))
+                }
+                None => Ok(()),
+            }
+        };
+        self.applied = None;
+        drop(lock);
+        verified?;
+        files::sync_parent(&self.file)
+    }
+
+    fn changes(
+        &self,
+        before: Option<&Existing>,
+    ) -> Result<(Option<Existing>, Vec<json::Undo>), Failure> {
+        let original = before.map(|file| file.bytes.as_slice());
+        let mut after = None;
+        let mut undo = Vec::new();
+        if original.is_some() {
+            for checkout in &self.retired {
+                if let Some(patch) = json::edit(
+                    after.as_deref().or(original),
+                    checkout,
+                    &self.urls,
+                    &self.bearer,
+                    None,
+                )? {
+                    after = Some(patch.bytes);
+                    undo.push(patch.undo);
+                }
+            }
         }
-        if !has_next {
-            return Ok(found.unwrap_or(Field::Absent {
-                insert: end,
-                comma: true,
-            }));
+        if let Some(selected) = &self.selected {
+            let empty = BTreeSet::new();
+            let urls = if selected.owned { &self.urls } else { &empty };
+            if let Some(patch) = json::edit(
+                after.as_deref().or(original),
+                &selected.checkout,
+                urls,
+                &self.bearer,
+                Some(&selected.url),
+            )? {
+                after = Some(patch.bytes);
+                undo.push(patch.undo);
+            } else if after.is_none() && before.is_some_and(|file| file.mode != 0o600) {
+                after = original.map(<[u8]>::to_vec);
+            }
         }
-        previous_comma = Some(separator);
-        start = skip_whitespace(source, separator + 1);
+        Ok((after.map(|bytes| Existing { bytes, mode: 0o600 }), undo))
     }
 }
 
-fn skip_whitespace(source: &str, offset: usize) -> usize {
-    source.len() - source[offset..].trim_start_matches(WHITESPACE).len()
-}
+#[cfg(test)]
+mod tests {
+    use std::fs;
+    use std::os::unix::fs::{MetadataExt, PermissionsExt};
 
-fn token<'a, T: Deserialize<'a>>(source: &'a str, offset: usize) -> Result<(T, usize), Failure> {
-    let mut stream = Deserializer::from_str(&source[offset..]).into_iter::<T>();
-    let value = stream.next().ok_or(CONFIG)?.map_err(|_| CONFIG)?;
-    Ok((value, offset + stream.byte_offset()))
-}
+    use super::*;
 
-fn replace(source: &str, range: Range<usize>, value: &[u8]) -> Vec<u8> {
-    let bytes = source.as_bytes();
-    let mut output = Vec::with_capacity(bytes.len() - range.len() + value.len());
-    output.extend_from_slice(&bytes[..range.start]);
-    output.extend_from_slice(value);
-    output.extend_from_slice(&bytes[range.end..]);
-    output
+    #[tokio::test]
+    async fn rollback_preserves_other_checkouts_and_native_changes() -> Result<(), Failure> {
+        let profile = tempfile::tempdir()?;
+        let root = profile.path().canonicalize()?;
+        let file = root.join(".claude.json");
+        let native_lock = root.join(".claude.json.lock");
+        let original = b"{\"metrics\" : [0.1234567890123456789, 9e-5]}\n";
+        fs::write(&file, original)?;
+        fs::set_permissions(&file, fs::Permissions::from_mode(0o600))?;
+        let first_url = "http://127.0.0.1:8765/mcp";
+        let second_url = "http://127.0.0.1:8766/mcp";
+        let mut first = Edit::prepare(
+            &file,
+            &[],
+            Some((Path::new("/repo/first"), first_url, false)),
+            &BTreeSet::new(),
+            "first-test",
+        )
+        .await?;
+        let mut second = Edit::prepare(
+            &file,
+            &[],
+            Some((Path::new("/repo/second"), second_url, false)),
+            &BTreeSet::new(),
+            "second-test",
+        )
+        .await?;
+
+        fs::create_dir(&native_lock)?;
+        assert!(first.apply().unwrap_err().to_string().contains("locked"));
+        assert_eq!(fs::read(&file)?, original);
+        assert!(native_lock.is_dir());
+        fs::remove_dir(&native_lock)?;
+
+        first.apply()?;
+        second.apply()?;
+        let native_update =
+            fs::read_to_string(&file)?.replacen('{', "{\"nativePreference\" : true,", 1);
+        fs::write(&file, &native_update)?;
+        let inode = file.metadata()?.ino();
+        Edit::prepare(
+            &file,
+            &[],
+            Some((Path::new("/repo/second"), second_url, true)),
+            &BTreeSet::from([second_url.to_owned()]),
+            "second-test",
+        )
+        .await?
+        .apply()?;
+        assert_eq!(file.metadata()?.ino(), inode);
+
+        first.rollback()?;
+        let expected = native_update.replacen(
+            r#""reviewq":{"type":"http","url":"http://127.0.0.1:8765/mcp","headers":{"Authorization":"Bearer first-test"}}"#,
+            "",
+            1,
+        );
+        assert_ne!(expected, native_update);
+        assert_eq!(fs::read_to_string(&file)?, expected);
+        assert!(expected.contains(second_url));
+
+        let conflicting = expected.replace(second_url, "https://example.invalid/mcp");
+        fs::write(&file, &conflicting)?;
+        assert!(second.rollback().is_err());
+        assert_eq!(fs::read_to_string(&file)?, conflicting);
+        assert!(!native_lock.try_exists()?);
+        Ok(())
+    }
 }

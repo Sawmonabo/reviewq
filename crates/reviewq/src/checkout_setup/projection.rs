@@ -37,6 +37,7 @@ enum Owned {
 pub(super) struct Plan {
     exclusions: Changes,
     clients: Changes,
+    claude: Vec<claude::Edit>,
     provisional: Inventory,
     current: Inventory,
 }
@@ -66,13 +67,6 @@ impl Inventory {
         .apply()
     }
 
-    pub(super) fn claude_files(&self) -> impl Iterator<Item = &Path> {
-        self.entries.iter().filter_map(|entry| match entry {
-            Owned::Claude { file, .. } => Some(file.as_path()),
-            _ => None,
-        })
-    }
-
     pub(super) async fn has_worktree(&self, worktree: &Path) -> Result<bool, Failure> {
         let file = worktree.join(CODEX[0]);
         let ready = self.entries.contains(&Owned::Codex { file: file.clone() })
@@ -95,6 +89,7 @@ impl Inventory {
             urls: self.urls.clone(),
             ..Self::default()
         };
+        let mut claude_error = None;
         for owned in &self.entries {
             if matches!(owned, Owned::Exclusion { .. }) {
                 let dependencies = unresolved
@@ -113,11 +108,19 @@ impl Inventory {
                     continue;
                 }
             }
-            let result = self
-                .removal(owned, common, bearer)
-                .await
-                .and_then(|edit| edit.map_or(Ok(()), |edit| edit.apply()));
-            if result.is_err() {
+            let result = if let Owned::Claude { file, checkout } = owned {
+                claude::Edit::prepare(file, &[checkout], None, &self.urls, bearer)
+                    .await
+                    .and_then(|mut edit| edit.apply())
+            } else {
+                self.local_removal(owned, common, bearer)
+                    .await
+                    .and_then(|edit| edit.map_or(Ok(()), |edit| edit.apply()))
+            };
+            if let Err(error) = result {
+                if matches!(owned, Owned::Claude { .. }) {
+                    claude_error.get_or_insert(error);
+                }
                 unresolved.entries.insert(owned.clone());
             }
         }
@@ -133,10 +136,14 @@ impl Inventory {
             .iter()
             .map(|entry| entry.file().display().to_string())
             .collect::<Vec<_>>();
-        Err(format!("Cleanup was deferred for {}.", paths.join(", ")).into())
+        let deferred = format!("Cleanup was deferred for {}.", paths.join(", "));
+        match claude_error {
+            Some(error) => Err(format!("{error} {deferred}").into()),
+            None => Err(deferred.into()),
+        }
     }
 
-    async fn removal(
+    async fn local_removal(
         &self,
         owned: &Owned,
         common: &Path,
@@ -146,10 +153,13 @@ impl Inventory {
         let Some(before) = read(file)? else {
             return Ok(None);
         };
-        match owned {
-            Owned::Codex { .. } => git::verify_removal(file, common, CODEX[0]).await?,
-            Owned::Claude { .. } => git::private_config(file, false).await?,
-            Owned::Skill { .. } => {
+        let updated = match owned {
+            Owned::Codex { .. } => {
+                git::verify_removal(file, common, CODEX[0]).await?;
+                codex(Some(&before), &self.urls, bearer, None)?
+                    .unwrap_or_else(|| before.bytes.clone())
+            }
+            Owned::Skill { digest, .. } => {
                 let relative = if file
                     .as_os_str()
                     .as_encoded_bytes()
@@ -160,12 +170,18 @@ impl Inventory {
                     CLAUDE[0]
                 };
                 git::verify_removal(file, common, relative).await?;
+                let actual: [u8; 32] = Sha256::digest(&before.bytes).into();
+                if actual != *digest
+                    && !self.entries.contains(&Owned::Skill {
+                        file: file.to_owned(),
+                        digest: actual,
+                    })
+                {
+                    return Err(conflict(file));
+                }
+                return Ok(Some(Edit::remove(file.to_owned(), before)));
             }
-            Owned::Exclusion { .. } if file == common.join("info/exclude") => (),
-            Owned::Exclusion { .. } => return Err(conflict(file)),
-        }
-        let updated = match owned {
-            Owned::Exclusion { separator, .. } => {
+            Owned::Exclusion { separator, .. } if file == common.join("info/exclude") => {
                 let Some(position) = find(&before.bytes, EXCLUSIONS.as_bytes()) else {
                     if find(&before.bytes, MARKER.as_bytes()).is_some()
                         || find(&before.bytes, b"# ReviewQ checkout files").is_some()
@@ -183,28 +199,8 @@ impl Inventory {
                 updated.drain(start..position + EXCLUSIONS.len());
                 updated
             }
-            Owned::Skill { digest, .. } => {
-                let actual: [u8; 32] = Sha256::digest(&before.bytes).into();
-                if actual != *digest
-                    && !self.entries.contains(&Owned::Skill {
-                        file: file.to_owned(),
-                        digest: actual,
-                    })
-                {
-                    return Err(conflict(file));
-                }
-                return Ok(Some(Edit::remove(file.to_owned(), before)));
-            }
-            Owned::Codex { .. } => codex(Some(&before), &self.urls, bearer, None)?
-                .unwrap_or_else(|| before.bytes.clone()),
-            Owned::Claude { checkout, .. } => {
-                let Some(bytes) =
-                    claude::edit(Some(&before.bytes), checkout, &self.urls, bearer, None)?
-                else {
-                    return Ok(None);
-                };
-                bytes
-            }
+            Owned::Exclusion { .. } => return Err(conflict(file)),
+            Owned::Claude { .. } => return Ok(None),
         };
         if updated == before.bytes {
             return Ok(None);
@@ -216,7 +212,7 @@ impl Inventory {
             file.to_owned(),
             Some(before),
             updated,
-            owned.contains_bearer(),
+            matches!(owned, Owned::Codex { .. }),
         )))
     }
 }
@@ -229,10 +225,6 @@ impl Owned {
             | Self::Skill { file, .. }
             | Self::Exclusion { file, .. } => file,
         }
-    }
-
-    const fn contains_bearer(&self) -> bool {
-        matches!(self, Self::Codex { .. } | Self::Claude { .. })
     }
 }
 
@@ -343,21 +335,27 @@ impl Plan {
                 continue;
             }
             if let Some(edit) = previous
-                .removal(owned, &checkout.common, bearer)
+                .local_removal(owned, &checkout.common, bearer)
                 .await
                 .map_err(|_| conflict(owned.file()))?
             {
                 edits.push(edit);
             }
         }
+        let mut claude_edits = Vec::new();
         for (file, retired) in claude_changes {
-            let selected = (Some(file) == claude_file).then_some(checkout.primary.as_path());
-            if let Some(edit) = plan_claude(file, &retired, selected, &previous, bearer, url)
-                .await
-                .map_err(|_| conflict(file))?
-            {
-                edits.push(edit);
-            }
+            let selected = (Some(file) == claude_file).then(|| {
+                let owned = previous.entries.contains(&Owned::Claude {
+                    file: file.to_owned(),
+                    checkout: checkout.primary.clone(),
+                });
+                (checkout.primary.as_path(), url, owned)
+            });
+            claude_edits.push(
+                claude::Edit::prepare(file, &retired, selected, &previous.urls, bearer)
+                    .await
+                    .map_err(|_| conflict(file))?,
+            );
         }
         let provisional = Inventory {
             urls: previous.urls.union(&current.urls).cloned().collect(),
@@ -369,6 +367,7 @@ impl Plan {
         Ok(Self {
             exclusions: Changes::new(exclusion.into_iter().collect()),
             clients: Changes::new(edits),
+            claude: claude_edits,
             provisional,
             current,
         })
@@ -391,11 +390,12 @@ impl Plan {
                 git::private_config(file, true).await?;
             }
             require_untracked(checkout, claude).await?;
-            self.clients.apply()
+            self.clients.apply()?;
+            self.claude.iter_mut().try_for_each(claude::Edit::apply)
         }
         .await;
-        if result.is_err() && !self.clients.rollback_conflict {
-            self.exclusions.rollback()?;
+        if result.is_err() {
+            self.rollback()?;
         }
         result
     }
@@ -405,60 +405,22 @@ impl Plan {
     }
 
     pub(super) fn rollback(&mut self) -> Result<(), Failure> {
-        self.clients.rollback()?;
-        self.exclusions.rollback()
-    }
-}
-
-async fn plan_claude(
-    file: &Path,
-    retired: &[&Path],
-    selected: Option<&Path>,
-    previous: &Inventory,
-    bearer: &str,
-    url: &str,
-) -> Result<Option<Edit>, Failure> {
-    let before = read(file)?;
-    let original = before.as_ref().map(|file| file.bytes.as_slice());
-    let mut after = None;
-    if original.is_some() && !retired.is_empty() {
-        git::private_config(file, false).await?;
-        for checkout in retired {
-            if let Some(bytes) = claude::edit(
-                after.as_deref().or(original),
-                checkout,
-                &previous.urls,
-                bearer,
-                None,
-            )? {
-                after = Some(bytes);
+        let mut claude_error = None;
+        for edit in self.claude.iter_mut().rev() {
+            if let Err(error) = edit.rollback() {
+                claude_error.get_or_insert(error);
             }
         }
-    }
-    if let Some(checkout) = selected {
-        let owned = Owned::Claude {
-            file: file.to_owned(),
-            checkout: checkout.to_owned(),
-        };
-        let empty = BTreeSet::new();
-        let urls = if previous.entries.contains(&owned) {
-            &previous.urls
-        } else {
-            &empty
-        };
-        if let Some(bytes) = claude::edit(
-            after.as_deref().or(original),
-            checkout,
-            urls,
-            bearer,
-            Some(url),
-        )? {
-            after = Some(bytes);
-        } else if after.is_none() && before.as_ref().is_some_and(|file| file.mode != 0o600) {
-            after = original.map(<[u8]>::to_vec);
+        let clients = self.clients.rollback();
+        if let Some(error) = claude_error {
+            return Err(error);
         }
+        clients?;
+        if !self.clients.rollback_conflict {
+            self.exclusions.rollback()?;
+        }
+        Ok(())
     }
-    Ok(after.map(|bytes| Edit::new(file.to_owned(), before, bytes, true)))
 }
 
 fn exclusion(
