@@ -27,7 +27,7 @@ pub use claude::{
     ClaudeAnchor, ClaudeChild, ClaudeClassicEvent, ClaudeDeliveryAck, ClaudeDeliveryResult,
     ClaudeHeartbeat, ClaudeHeartbeatResult, ClaudeOffer, ClaudeQuestionAddress,
     ClaudeQuestionAnswers, ClaudeSend, ClaudeStore, ClaudeTurnResult, ClaudeWorkflowContext,
-    ClaudeWorkflowStore, ProvenClaudeChild,
+    ClaudeWorkflowStore, ProvenClaudeChild, claude_answer_digest,
 };
 pub use messages::{
     MAX_MESSAGE_HISTORY_PAGE, MessageAttachment, MessageHistory, MessageHistoryStore,
@@ -222,6 +222,7 @@ pub trait ClaudeCompanion: QuestionsPort + Send + Sync {
         session: &HistorySession,
         address: &ClaudeQuestionAddress,
         status: QuestionStatus,
+        answer_digest: Option<ReportHash>,
     ) -> bool;
 }
 

@@ -425,6 +425,7 @@ impl Questions {
                     item,
                     blocking: native.is_blocking,
                     mode: QuestionMode::Native,
+                    answered_elsewhere: false,
                     state: QuestionStatus::Pending,
                     questions,
                     locator: None,

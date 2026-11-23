@@ -21,6 +21,7 @@ export async function observeQuestion($, state, event, next, refresh) {
   state.question = callId;
   refresh();
   let status = "closed";
+  let nativeAnswers;
   try {
     const turnId = state.activeTurn;
     if (turnId && question.signature && !event.answers && !event.annotations) {
@@ -38,13 +39,14 @@ export async function observeQuestion($, state, event, next, refresh) {
     }
     const result = await next(event);
     if (!result.deny && !result.isError) {
-      status = Object.keys(result.result?.answers ?? {}).length || result.result?.response ? "answered" : "unavailable";
+      nativeAnswers = result.result?.answers;
+      status = Object.keys(nativeAnswers ?? {}).length || result.result?.response ? "answered" : "unavailable";
     }
     return result;
   } finally {
     state.questionCalls.delete(callId);
     if (state.question === callId) state.question = state.questionCalls.keys().next().value;
-    if (question.waiting) await invoke($, "question-finished", state.id, { address: question.address, status });
+    if (question.waiting) await invoke($, "question-finished", state.id, { address: question.address, status, nativeAnswers });
     refresh();
   }
 }

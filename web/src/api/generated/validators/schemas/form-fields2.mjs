@@ -2,7 +2,7 @@
 import { func0 } from "../runtime.mjs";
 import { validate25 } from "./checkpoint-id-dto.mjs";
 import { validate1104 } from "./status.mjs";
-function validate1121(
+function validate1120(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -10,13 +10,13 @@ function validate1121(
   let errors = 0;
   if (errors === 0) {
     if (data && typeof data == "object" && !Array.isArray(data)) {
-      if (data.sessionKey !== undefined && func0.call(data, "sessionKey")) {
+      if (data.runId !== undefined && func0.call(data, "runId")) {
         const _errs1 = errors;
         if (
-          !validate25(data.sessionKey, {
-            instancePath: instancePath + "/sessionKey",
+          !validate25(data.runId, {
+            instancePath: instancePath + "/runId",
             parentData: data,
-            parentDataProperty: "sessionKey",
+            parentDataProperty: "runId",
             rootData,
           })
         ) {
@@ -31,20 +31,20 @@ function validate1121(
         var valid0 = true;
       }
       if (valid0) {
-        if (data.status !== undefined && func0.call(data, "status")) {
+        if (data.sessionKey !== undefined && func0.call(data, "sessionKey")) {
           const _errs2 = errors;
           if (
-            !validate1104(data.status, {
-              instancePath: instancePath + "/status",
+            !validate25(data.sessionKey, {
+              instancePath: instancePath + "/sessionKey",
               parentData: data,
-              parentDataProperty: "status",
+              parentDataProperty: "sessionKey",
               rootData,
             })
           ) {
             vErrors =
               vErrors === null
-                ? validate1104.errors
-                : vErrors.concat(validate1104.errors);
+                ? validate25.errors
+                : vErrors.concat(validate25.errors);
             errors = vErrors.length;
           }
           var valid0 = _errs2 === errors;
@@ -52,30 +52,52 @@ function validate1121(
           var valid0 = true;
         }
         if (valid0) {
-          if (data.turnId !== undefined && func0.call(data, "turnId")) {
+          if (data.status !== undefined && func0.call(data, "status")) {
             const _errs3 = errors;
             if (
-              !validate25(data.turnId, {
-                instancePath: instancePath + "/turnId",
+              !validate1104(data.status, {
+                instancePath: instancePath + "/status",
                 parentData: data,
-                parentDataProperty: "turnId",
+                parentDataProperty: "status",
                 rootData,
               })
             ) {
               vErrors =
                 vErrors === null
-                  ? validate25.errors
-                  : vErrors.concat(validate25.errors);
+                  ? validate1104.errors
+                  : vErrors.concat(validate1104.errors);
               errors = vErrors.length;
             }
             var valid0 = _errs3 === errors;
           } else {
             var valid0 = true;
           }
+          if (valid0) {
+            if (data.turnId !== undefined && func0.call(data, "turnId")) {
+              const _errs4 = errors;
+              if (
+                !validate25(data.turnId, {
+                  instancePath: instancePath + "/turnId",
+                  parentData: data,
+                  parentDataProperty: "turnId",
+                  rootData,
+                })
+              ) {
+                vErrors =
+                  vErrors === null
+                    ? validate25.errors
+                    : vErrors.concat(validate25.errors);
+                errors = vErrors.length;
+              }
+              var valid0 = _errs4 === errors;
+            } else {
+              var valid0 = true;
+            }
+          }
         }
       }
     } else {
-      validate1121.errors = [
+      validate1120.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -86,7 +108,7 @@ function validate1121(
       return false;
     }
   }
-  validate1121.errors = vErrors;
+  validate1120.errors = vErrors;
   return errors === 0;
 }
-export { validate1121 };
+export { validate1120 };

@@ -3338,6 +3338,9 @@
         "answerable": {
           "type": "boolean"
         },
+        "answeredElsewhere": {
+          "type": "boolean"
+        },
         "blocking": {
           "type": "boolean"
         },
@@ -7277,6 +7280,9 @@
     "QuestionAnswerResponseForm": {
       "properties": {
         "answerable": {
+          "type": "boolean"
+        },
+        "answeredElsewhere": {
           "type": "boolean"
         },
         "blocking": {

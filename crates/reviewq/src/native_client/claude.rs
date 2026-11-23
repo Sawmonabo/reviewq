@@ -1,6 +1,7 @@
 use std::io::Read;
 use std::path::Path;
 
+use reviewq_app::hosts::{ClaudeQuestionAnswers, claude_answer_digest};
 use reviewq_domain::identity::NativeSessionId;
 
 use super::{Failure, bounded, bridge, client, client_with_timeout, signed, verify_ready};
@@ -31,7 +32,7 @@ pub(crate) async fn claude_bridge(
         ClaudeBridgeOperation::Hook => ("/api/v1/native/claude/hook", 16_384),
         ClaudeBridgeOperation::Question => ("/api/v1/native/claude/question", 64 * 1024),
         ClaudeBridgeOperation::QuestionFinished => {
-            ("/api/v1/native/claude/question-finished", 4096)
+            ("/api/v1/native/claude/question-finished", 128 * 1024)
         }
         ClaudeBridgeOperation::Report => ("/api/v1/native/reports/handoff", 144 * 1024),
         ClaudeBridgeOperation::ReportStatus => {
@@ -49,11 +50,24 @@ pub(crate) async fn claude_bridge(
         return Err("ReviewQ companion input exceeds its limit.".into());
     }
     let mut payload: serde_json::Value = serde_json::from_slice(&input)?;
+    drop(input);
     let fields = payload
         .as_object_mut()
         .ok_or("Invalid ReviewQ companion payload.")?;
     if fields.contains_key("context") {
         return Err("ReviewQ companion context is supplied by the native client.".into());
+    }
+    if matches!(operation, ClaudeBridgeOperation::QuestionFinished) {
+        fields.remove("answerDigest");
+        if let Some(answers) = fields.remove("nativeAnswers")
+            && let Ok(answers) = serde_json::from_value::<ClaudeQuestionAnswers>(answers)
+            && let Some(digest) = claude_answer_digest(&answers)
+        {
+            fields.insert(
+                "answerDigest".into(),
+                serde_json::Value::String(digest.to_string()),
+            );
+        }
     }
     match operation {
         ClaudeBridgeOperation::Report | ClaudeBridgeOperation::ReportStatus => {

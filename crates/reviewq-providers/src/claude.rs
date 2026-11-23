@@ -11,7 +11,7 @@ use reviewq_app::hosts::{
     ClaudeAnchor, ClaudeChild, ClaudeCompanion, ClaudeContext, ClaudeQuestionAddress,
     ClaudeQuestionAnswers, HostProof, MessageBody, ProvenClaudeChild, QuestionStatus,
 };
-use reviewq_domain::identity::{NativeInputId, NativeSessionId};
+use reviewq_domain::identity::{NativeInputId, NativeSessionId, ReportHash};
 use reviewq_domain::session::{AbsolutePath, HostProvider, NativeBinding, NativeIdentity};
 use tokio::sync::Semaphore;
 
@@ -169,8 +169,9 @@ impl ClaudeCompanion for Claude {
         session: &HistorySession,
         address: &ClaudeQuestionAddress,
         status: QuestionStatus,
+        answer_digest: Option<ReportHash>,
     ) -> bool {
-        self.settle_question(session, address, status)
+        self.settle_question(session, address, status, answer_digest)
     }
 
     fn prove(&self, context: ClaudeContext) -> AppFuture<'_, HostProof> {

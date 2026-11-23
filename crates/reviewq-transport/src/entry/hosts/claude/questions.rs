@@ -5,6 +5,7 @@ use axum::extract::State;
 use axum::http::HeaderMap;
 use reviewq_app::access::AppError;
 use reviewq_app::hosts::{ClaudeQuestionAddress, ClaudeQuestionAnswers, QuestionStatus};
+use reviewq_domain::identity::ReportHash;
 use reviewq_protocol::Success;
 use serde::Deserialize;
 
@@ -72,7 +73,7 @@ pub(super) async fn watch(
         .fence_claude_question(lead.clone(), address.clone(), true)
         .await
     {
-        companion.finish_question(&session, &address, QuestionStatus::Unavailable);
+        companion.finish_question(&session, &address, QuestionStatus::Unavailable, None);
         return Err(error.into());
     }
     let mut shutdown = entry.shutdown.clone();
@@ -86,12 +87,12 @@ pub(super) async fn watch(
             .fence_claude_question(lead.clone(), address.clone(), false)
             .await
         {
-            if companion.finish_question(&session, &address, QuestionStatus::Unavailable) {
+            if companion.finish_question(&session, &address, QuestionStatus::Unavailable, None) {
                 let _ = entry.store.fence_claude_question(lead, address, true).await;
             }
             return Err(error.into());
         }
-    } else if companion.finish_question(&session, &address, QuestionStatus::Unavailable) {
+    } else if companion.finish_question(&session, &address, QuestionStatus::Unavailable, None) {
         let _ = entry.store.fence_claude_question(lead, address, true).await;
     }
     Ok(Json(success(result, *entry.commits.borrow())?))
@@ -103,6 +104,7 @@ struct Finish {
     context: ClaudeCommand,
     address: Address,
     status: Outcome,
+    answer_digest: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -131,7 +133,9 @@ pub(super) async fn finish(
         Outcome::Closed => QuestionStatus::Closed,
         Outcome::Unavailable => QuestionStatus::Unavailable,
     };
-    if companion.finish_question(&session, &address, status) {
+    let answer_digest: Option<ReportHash> =
+        command.answer_digest.as_deref().map(parse).transpose()?;
+    if companion.finish_question(&session, &address, status, answer_digest) {
         entry
             .store
             .fence_claude_question(lead, address, true)

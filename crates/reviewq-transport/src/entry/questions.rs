@@ -334,6 +334,7 @@ fn project(
             && !value.questions.is_empty()
             && (!value.questions.iter().any(|question| question.secret)
                 || (value.mode == QuestionMode::Native && value.blocking && local_operator)),
+        answered_elsewhere: value.answered_elsewhere,
         status: match value.state {
             QuestionStatus::Pending => dto::Status::Pending,
             QuestionStatus::Submitting => dto::Status::Submitting,

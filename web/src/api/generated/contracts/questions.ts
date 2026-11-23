@@ -45,6 +45,7 @@ export interface QuestionAnswerResponse {
 
 export interface QuestionAnswerResponseForm {
   answerable: boolean;
+  answeredElsewhere?: boolean;
   blocking: boolean;
   itemId: HistoryEntryIdDto;
   locator?: HistoryCursorDto;
@@ -74,6 +75,7 @@ export interface Forms {
 
 export interface Form {
   answerable: boolean;
+  answeredElsewhere?: boolean;
   blocking: boolean;
   itemId: HistoryEntryIdDto;
   locator?: HistoryCursorDto;

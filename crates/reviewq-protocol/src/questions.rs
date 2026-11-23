@@ -59,6 +59,8 @@ pub struct Form {
     pub mode: Mode,
     pub answerable: bool,
     pub status: Status,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub answered_elsewhere: bool,
     pub questions: Vec<Question>,
     #[serde(skip_serializing_if = "Option::is_none")]
     #[cfg_attr(feature = "schema", schemars(with = "HistoryCursorDto"))]

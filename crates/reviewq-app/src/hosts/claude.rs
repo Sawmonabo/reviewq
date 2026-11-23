@@ -2,6 +2,8 @@
 
 use std::collections::BTreeMap;
 
+use sha2::{Digest, Sha256};
+
 use reviewq_domain::identity::{
     DeliveryFence, DeliveryId, NativeInputId, NativeSessionId, NativeTurnId, ReportHash,
 };
@@ -65,6 +67,24 @@ pub struct ClaudeQuestionAddress {
 }
 
 pub type ClaudeQuestionAnswers = BTreeMap<String, String>;
+
+/// Exact canonical native result, independent of JSON field order.
+pub fn claude_answer_digest(answers: &ClaudeQuestionAnswers) -> Option<ReportHash> {
+    if !(1..=4).contains(&answers.len()) {
+        return None;
+    }
+    let mut digest = Sha256::new();
+    for (prompt, answer) in answers {
+        if prompt.is_empty() || prompt.len() > 8192 || answer.is_empty() || answer.len() > 8192 {
+            return None;
+        }
+        for field in [prompt, answer] {
+            digest.update((field.len() as u64).to_be_bytes());
+            digest.update(field.as_bytes());
+        }
+    }
+    Some(ReportHash::from_sha256(digest.finalize().into()))
+}
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ClaudeOffer {

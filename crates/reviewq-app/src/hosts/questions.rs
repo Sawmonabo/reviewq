@@ -36,6 +36,7 @@ pub struct QuestionForm {
     pub blocking: bool,
     pub mode: QuestionMode,
     pub state: QuestionStatus,
+    pub answered_elsewhere: bool,
     pub questions: Vec<Question>,
     pub locator: Option<SourceAnchor>,
 }
@@ -140,6 +141,7 @@ impl ObservedAsyncQuestion {
             blocking: false,
             mode: QuestionMode::Async,
             state,
+            answered_elsewhere: false,
             questions: Vec::new(),
             locator: None,
         }
@@ -174,6 +176,7 @@ impl QuestionReceipt {
             blocking: self.blocking,
             mode: QuestionMode::Native,
             state: self.state,
+            answered_elsewhere: false,
             questions: Vec::new(),
             locator: None,
         }
