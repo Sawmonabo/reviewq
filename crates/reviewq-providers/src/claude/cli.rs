@@ -14,6 +14,7 @@ mod launch;
 pub struct ClaudeCli {
     executable: PathBuf,
     profile: AbsolutePath,
+    profile_is_explicit: bool,
     plugin: Option<AbsolutePath>,
     catalogue: Mutex<Option<(AbsolutePath, Instant, Arc<catalog::Catalogue>)>>,
 }
@@ -22,6 +23,7 @@ impl ClaudeCli {
     pub fn new(
         executable: PathBuf,
         profile: PathBuf,
+        profile_is_explicit: bool,
         plugin: Option<PathBuf>,
     ) -> Result<Self, AppError> {
         let executable = executable
@@ -43,13 +45,15 @@ impl ClaudeCli {
         Ok(Self {
             executable,
             profile,
+            profile_is_explicit,
             plugin,
             catalogue: Mutex::new(None),
         })
     }
 
     fn command(&self, checkout: &Path) -> Command {
-        super::jobs::native_command(&self.executable, self.profile.as_path(), checkout)
+        let config_dir = self.profile_is_explicit.then_some(self.profile.as_path());
+        super::jobs::native_command(&self.executable, config_dir, checkout)
     }
 
     fn plugin_args(&self, command: &mut Command) {

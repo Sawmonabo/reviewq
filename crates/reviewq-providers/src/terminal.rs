@@ -10,7 +10,7 @@ use reviewq_app::hosts::{NativeTerminal, TerminalHandoff, TerminalInstruction};
 use reviewq_domain::session::HostProvider;
 use tokio::process::Command;
 
-use crate::claude::jobs::{Job, JobKind, claude_job};
+use crate::claude::jobs::{Job, JobKind, claude_job, native_command};
 
 pub struct Terminal {
     codex: Option<TerminalProvider>,
@@ -21,6 +21,7 @@ pub struct Terminal {
 pub struct TerminalProvider {
     pub executable: PathBuf,
     pub profile: PathBuf,
+    pub profile_is_explicit: bool,
 }
 
 impl Terminal {
@@ -77,33 +78,42 @@ impl NativeTerminal for Terminal {
             if !executable.is_file() {
                 return Ok(Instruction(TerminalInstruction::ConfigureProvider));
             }
+            let config_dir = provider.profile_is_explicit.then_some(profile.as_path());
             let (operation, argument) = match native.provider() {
                 HostProvider::Codex => ("resume", id.to_owned()),
-                HostProvider::Claude => match claude_job(&executable, &profile, cwd, id).await? {
-                    Some(Job {
-                        kind: JobKind::Interactive,
-                        pid: Some(_),
-                        ..
-                    }) => return Ok(Instruction(TerminalInstruction::ForegroundClaude)),
-                    Some(Job {
-                        kind: JobKind::Background,
-                        id: Some(job),
-                        pid: Some(_),
-                        ..
-                    }) => ("attach", job),
-                    _ => ("--resume", id.to_owned()),
-                },
+                HostProvider::Claude => {
+                    match claude_job(native_command(&executable, config_dir, cwd), cwd, id).await? {
+                        Some(Job {
+                            kind: JobKind::Interactive,
+                            pid: Some(_),
+                            ..
+                        }) => return Ok(Instruction(TerminalInstruction::ForegroundClaude)),
+                        Some(Job {
+                            kind: JobKind::Background,
+                            id: Some(job),
+                            pid: Some(_),
+                            ..
+                        }) => ("attach", job),
+                        _ => ("--resume", id.to_owned()),
+                    }
+                }
             };
             let cwd = utf8(cwd)?;
-            let assignment = format!("{root_variable}={}", utf8(&profile)?);
-            let argv = ["env", &assignment, utf8(&executable)?, operation, &argument];
+            let assignment;
+            let mut argv = if let Some(config_dir) = config_dir {
+                assignment = format!("{root_variable}={}", utf8(config_dir)?);
+                vec!["env", &assignment]
+            } else {
+                vec!["env", "-u", root_variable]
+            };
+            argv.extend([utf8(&executable)?, operation, &argument]);
             let command = format!(
                 "cd {} && {}",
                 shlex::try_quote(cwd).map_err(|_| AppError::Unavailable)?,
-                shlex::try_join(argv).map_err(|_| AppError::Unavailable)?
+                shlex::try_join(argv.iter().copied()).map_err(|_| AppError::Unavailable)?
             );
             let opened = if open && let Some(distro) = &self.wsl_distribution {
-                open_wsl(distro, cwd, argv).await
+                open_wsl(distro, cwd, &argv).await
             } else {
                 false
             };
@@ -112,12 +122,12 @@ impl NativeTerminal for Terminal {
     }
 }
 
-async fn open_wsl(distro: &str, cwd: &str, argv: [&str; 5]) -> bool {
+async fn open_wsl(distro: &str, cwd: &str, argv: &[&str]) -> bool {
     if distro.starts_with('-')
         || distro.is_empty()
         || [distro, cwd]
             .into_iter()
-            .chain(argv)
+            .chain(argv.iter().copied())
             .any(|value| value.contains(';') || value.chars().any(char::is_control))
     {
         return false;

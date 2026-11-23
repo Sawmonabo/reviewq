@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 use std::fs::{self, OpenOptions, Permissions};
-use std::io;
+use std::io::{self, Read};
 use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 
@@ -29,15 +29,22 @@ fn launcher_target(paths: &Paths) -> PathBuf {
 }
 
 pub(super) fn unit_digest(path: &Path) -> Result<Option<String>, Failure> {
+    Ok(read_unit(path)?.map(|bytes| bundle::hex(&Sha256::digest(bytes))))
+}
+
+pub(super) fn read_unit(path: &Path) -> Result<Option<Vec<u8>>, Failure> {
+    const LIMIT: u64 = 16 * 1024;
     if !paths::exists(path)? {
         return Ok(None);
     }
     let file = bundle::regular(path).map_err(|_| paths::conflict(path))?;
     paths::private(&file, path)?;
-    if file.metadata()?.len() > 16 * 1024 {
+    let mut bytes = Vec::new();
+    file.take(LIMIT + 1).read_to_end(&mut bytes)?;
+    if bytes.len() as u64 > LIMIT {
         return Err(paths::conflict(path));
     }
-    Ok(Some(bundle::digest_file(file)?))
+    Ok(Some(bytes))
 }
 
 pub(super) fn verify_current(paths: &Paths, release: &Release) -> Result<(), Failure> {

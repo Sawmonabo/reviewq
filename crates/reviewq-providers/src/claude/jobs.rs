@@ -30,15 +30,17 @@ pub(crate) enum JobKind {
     Unknown,
 }
 
-pub(super) fn native_command(executable: &Path, profile: &Path, cwd: &Path) -> Command {
+pub(crate) fn native_command(executable: &Path, config_dir: Option<&Path>, cwd: &Path) -> Command {
     let mut command = Command::new(executable);
     command
         .env_clear()
         .current_dir(cwd)
-        .env("CLAUDE_CONFIG_DIR", profile)
         .kill_on_drop(true)
         .stdout(Stdio::piped())
         .stderr(Stdio::null());
+    if let Some(path) = config_dir {
+        command.env("CLAUDE_CONFIG_DIR", path);
+    }
     for key in [
         "HOME",
         "PATH",
@@ -82,12 +84,11 @@ pub(super) fn native_command(executable: &Path, profile: &Path, cwd: &Path) -> C
 }
 
 pub(crate) async fn claude_job(
-    executable: &Path,
-    profile: &Path,
+    mut command: Command,
     cwd: &Path,
     session_id: &str,
 ) -> Result<Option<Job>, AppError> {
-    let mut child = native_command(executable, profile, cwd)
+    let mut child = command
         .args(["agents", "--json", "--all", "--cwd"])
         .arg(cwd)
         .stdin(Stdio::null())

@@ -230,6 +230,8 @@ pub(crate) async fn serve(profile: PathBuf, options: Serve) -> Result<(), Failur
     let host = codex.clone().map(|host| host as Arc<dyn NativeHost>);
     let report_files = Arc::new(RegisteredReportFiles);
     let checkout_claude_profile = options.claude_home.clone();
+    let claude_home_is_explicit =
+        options.claude_home.is_some() || std::env::var_os("CLAUDE_CONFIG_DIR").is_some();
     let claude_home = match options.claude_home {
         Some(home) => Some(home),
         None if !options.validation => claude_home().ok().filter(|path| path.is_dir()),
@@ -257,7 +259,7 @@ pub(crate) async fn serve(profile: PathBuf, options: Serve) -> Result<(), Failur
     let claude_cli = claude_executable
         .clone()
         .zip(claude_home.clone())
-        .map(|(executable, home)| ClaudeCli::new(executable, home, None))
+        .map(|(executable, home)| ClaudeCli::new(executable, home, claude_home_is_explicit, None))
         .transpose()?
         .map(Arc::new);
     let skills = NativeSkills {
@@ -279,14 +281,16 @@ pub(crate) async fn serve(profile: PathBuf, options: Serve) -> Result<(), Failur
         codex: codex.map(|host| host as Arc<dyn NativeLauncher>),
         claude: claude_cli.map(|host| host as Arc<dyn NativeLauncher>),
     };
-    let terminal_provider = |executable: Option<PathBuf>, profile: Option<PathBuf>| {
-        executable
-            .zip(profile)
-            .map(|(executable, profile)| TerminalProvider {
-                executable,
-                profile,
-            })
-    };
+    let terminal_provider =
+        |executable: Option<PathBuf>, profile: Option<PathBuf>, profile_is_explicit| {
+            executable
+                .zip(profile)
+                .map(|(executable, profile)| TerminalProvider {
+                    executable,
+                    profile,
+                    profile_is_explicit,
+                })
+        };
     let distribution = if options.validation {
         None
     } else {
@@ -297,8 +301,8 @@ pub(crate) async fn serve(profile: PathBuf, options: Serve) -> Result<(), Failur
             .or_else(|| std::env::var("WSL_DISTRO_NAME").ok())
     };
     let terminal = Arc::new(Terminal::new(
-        terminal_provider(codex_executable, codex_home),
-        terminal_provider(claude_executable, claude_home),
+        terminal_provider(codex_executable, codex_home, true),
+        terminal_provider(claude_executable, claude_home, claude_home_is_explicit),
         distribution,
     ));
     let (shutdown, wait) = watch::channel(false);

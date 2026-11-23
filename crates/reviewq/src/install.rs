@@ -153,7 +153,13 @@ pub(crate) async fn install(bundle_path: &Path) -> Result<(), Failure> {
     }
     service::manager().await?;
     service::unit_location(&paths).await?;
-    let unit = service::unit(&paths, &bundle.root.join("packaging/reviewq.service.in"))?;
+    let unit = service::unit(
+        &paths,
+        &bundle.root.join("packaging/reviewq.service.in"),
+        paths
+            .claude_home_is_explicit
+            .then_some(paths.claude_home.as_path()),
+    )?;
     let skill = native_command(&paths, "codex", settings.codex_command.as_deref())
         .map(|_| paths.codex_home.join("skills/reviewq"));
     let claude = native_command(&paths, "claude", settings.claude_command.as_deref())
@@ -246,6 +252,12 @@ pub(crate) async fn install(bundle_path: &Path) -> Result<(), Failure> {
     let old = inventory.active.clone();
     let old = old.as_ref();
     files::preflight(&paths, old, Some(&next))?;
+    let previous_unit = if let Some(previous) = old {
+        files::read_unit(&paths.unit)?
+            .filter(|unit| bundle::hex(&sha2::Sha256::digest(unit)) == previous.unit)
+    } else {
+        None
+    };
     bridge::check(&paths, true)?;
     claude::preflight(&paths, old, &next, true).await?;
     files::stage(&paths, &bundle, &pending.staging)?;
@@ -258,7 +270,7 @@ pub(crate) async fn install(bundle_path: &Path) -> Result<(), Failure> {
         Ok(identity) => identity,
         Err(error) => {
             if let Some(previous) = old {
-                rollback(&paths, previous, &pending, &mut inventory).await?;
+                rollback(&paths, previous, previous_unit, &pending, &mut inventory).await?;
                 inventory.pending = None;
                 paths::write_json(&journal(&paths), &inventory)?;
                 if pending.was_running {
@@ -369,6 +381,7 @@ async fn activate(
 async fn rollback(
     paths: &Paths,
     previous: &Release,
+    previous_unit: Option<Vec<u8>>,
     pending: &Activation,
     inventory: &mut Inventory,
 ) -> Result<(), Failure> {
@@ -377,11 +390,10 @@ async fn rollback(
     if bundle.id != previous.id {
         return Err("The previous release could not be verified.".into());
     }
-    let unit = service::unit(paths, &bundle.root.join("packaging/reviewq.service.in"))?;
-    use sha2::{Digest, Sha256};
-    if bundle::hex(&Sha256::digest(&unit)) != previous.unit {
-        return Err("The previous service unit no longer matches its installation.".into());
-    }
+    let unit = match previous_unit {
+        Some(unit) => unit,
+        None => verified_unit(paths, previous, &bundle)?,
+    };
     if service::state().await?.1 {
         service::switch("stop").await?;
     }
@@ -394,7 +406,11 @@ async fn rollback(
     }
     files::set(paths, Some(&pending.next), previous, &unit)?;
     if previous.claude.is_some() {
-        claude::activate(paths, Some(&pending.next), previous).await?;
+        let previous_paths = Paths {
+            claude_home_is_explicit: service::unit_has_claude_override(&unit),
+            ..paths.clone()
+        };
+        claude::activate(&previous_paths, Some(&pending.next), previous).await?;
     } else {
         claude::remove(paths, &pending.next).await?;
     }
@@ -429,8 +445,24 @@ async fn rollback(
     Ok(())
 }
 
+fn verified_unit(paths: &Paths, release: &Release, bundle: &Bundle) -> Result<Vec<u8>, Failure> {
+    let template = bundle.root.join("packaging/reviewq.service.in");
+    let claude_home = release
+        .claude
+        .as_ref()
+        .map_or(paths.claude_home.as_path(), |host| host.home.as_path());
+    // Earlier releases rendered the default Claude directory as an override.
+    for config_dir in [Some(claude_home), None] {
+        let unit = service::unit(paths, &template, config_dir)?;
+        if bundle::hex(&sha2::Sha256::digest(&unit)) == release.unit {
+            return Ok(unit);
+        }
+    }
+    Err("The previous service unit no longer matches its installation.".into())
+}
+
 pub(crate) async fn uninstall() -> Result<(), Failure> {
-    let paths = Paths::resolve()?;
+    let mut paths = Paths::resolve()?;
     let _lock = paths.lock()?;
     let mut inventory = load(&paths)?;
     if inventory.pending.is_some() {
@@ -445,8 +477,11 @@ pub(crate) async fn uninstall() -> Result<(), Failure> {
     };
     service::manager().await?;
     service::unit_location(&paths).await?;
-    if files::unit_digest(&paths.unit)?.is_some_and(|digest| digest != active.unit) {
-        return Err(paths::conflict(&paths.unit));
+    if let Some(unit) = files::read_unit(&paths.unit)? {
+        if bundle::hex(&sha2::Sha256::digest(&unit)) != active.unit {
+            return Err(paths::conflict(&paths.unit));
+        }
+        paths.claude_home_is_explicit = service::unit_has_claude_override(&unit);
     }
     if inventory.removal_stage.is_none() {
         inventory.removal_stage = Some(files::reserve_removal(&paths)?);

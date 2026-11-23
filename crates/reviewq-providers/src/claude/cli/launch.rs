@@ -73,8 +73,7 @@ impl NativeLauncher for ClaudeCli {
                 if delay != 0 {
                     tokio::time::sleep(Duration::from_millis(delay)).await;
                 }
-                match claude_job(&self.executable, self.profile.as_path(), cwd, &reservation).await
-                {
+                match claude_job(self.command(cwd), cwd, &reservation).await {
                     Ok(Some(job)) if matches!(job.kind, JobKind::Background) => {
                         if let Some(id) = job.id {
                             let metadata = reviewq_app::hosts::NativeSessionMetadata {

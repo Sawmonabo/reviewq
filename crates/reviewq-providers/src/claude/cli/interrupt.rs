@@ -85,13 +85,8 @@ impl ClaudeCli {
         {
             return Err(AppError::Forbidden);
         }
-        let job = claude_job(
-            &self.executable,
-            self.profile.as_path(),
-            binding.cwd().as_path(),
-            native.native_id().as_str(),
-        )
-        .await?;
+        let cwd = binding.cwd().as_path();
+        let job = claude_job(self.command(cwd), cwd, native.native_id().as_str()).await?;
         if job.as_ref().is_some_and(|job| {
             !matches!(job.kind, JobKind::Background) || job.id.as_deref() != Some(expected)
         }) {

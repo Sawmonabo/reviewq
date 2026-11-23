@@ -10,8 +10,13 @@ use crate::install::{self, Failure, paths::Paths};
 use crate::{cli::Open, native_client, runtime, runtime_settings};
 
 const UNIT: &str = "reviewq.service";
+const CLAUDE_DEFAULT: &str = "UnsetEnvironment=CLAUDE_CONFIG_DIR";
 
-pub(crate) fn unit(paths: &Paths, template: &Path) -> Result<Vec<u8>, Failure> {
+pub(crate) fn unit(
+    paths: &Paths,
+    template: &Path,
+    claude_config_dir: Option<&Path>,
+) -> Result<Vec<u8>, Failure> {
     let mut text = std::fs::read_to_string(template)?;
     for (placeholder, key, value) in [
         (
@@ -32,25 +37,44 @@ pub(crate) fn unit(paths: &Paths, template: &Path) -> Result<Vec<u8>, Failure> {
         ("@config@", "XDG_CONFIG_HOME=", paths.config_home.clone()),
         ("@state@", "XDG_STATE_HOME=", paths.state_home.clone()),
         ("@codex@", "CODEX_HOME=", paths.codex_home.clone()),
-        ("@claude@", "CLAUDE_CONFIG_DIR=", paths.claude_home.clone()),
     ] {
-        let value = value
-            .to_str()
-            .filter(|text| !text.chars().any(char::is_control))
-            .ok_or("A service path must be UTF-8 without control characters.")?;
-        let arg = format!(
-            "\"{key}{}\"",
-            value
-                .replace('\\', "\\\\")
-                .replace('"', "\\\"")
-                .replace('%', "%%")
-        );
-        if text.matches(placeholder).count() != 1 {
-            return Err(format!("Invalid service template placeholder {placeholder}.").into());
-        }
-        text = text.replace(placeholder, &arg);
+        replace_once(&mut text, placeholder, &unit_arg(key, &value)?)?;
     }
+    // Claude stores default project MCP settings directly under HOME.
+    let claude = match claude_config_dir {
+        Some(path) => format!("Environment={}", unit_arg("CLAUDE_CONFIG_DIR=", path)?),
+        None => CLAUDE_DEFAULT.to_owned(),
+    };
+    replace_once(&mut text, "Environment=@claude@", &claude)?;
     Ok(text.into_bytes())
+}
+
+pub(crate) fn unit_has_claude_override(unit: &[u8]) -> bool {
+    !unit
+        .split(|byte| *byte == b'\n')
+        .any(|line| line == CLAUDE_DEFAULT.as_bytes())
+}
+
+fn unit_arg(key: &str, path: &Path) -> Result<String, Failure> {
+    let value = path
+        .to_str()
+        .filter(|text| !text.chars().any(char::is_control))
+        .ok_or("A service path must be UTF-8 without control characters.")?;
+    Ok(format!(
+        "\"{key}{}\"",
+        value
+            .replace('\\', "\\\\")
+            .replace('"', "\\\"")
+            .replace('%', "%%")
+    ))
+}
+
+fn replace_once(text: &mut String, placeholder: &str, value: &str) -> Result<(), Failure> {
+    if text.matches(placeholder).count() != 1 {
+        return Err(format!("Invalid service template placeholder {placeholder}.").into());
+    }
+    *text = text.replace(placeholder, value);
+    Ok(())
 }
 
 pub(crate) async fn manager() -> Result<(), Failure> {

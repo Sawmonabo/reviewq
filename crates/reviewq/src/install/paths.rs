@@ -8,6 +8,7 @@ use serde::{Serialize, de::DeserializeOwned};
 
 use super::{Failure, bundle};
 
+#[derive(Clone)]
 pub(crate) struct Paths {
     pub home: PathBuf,
     pub profile: PathBuf,
@@ -19,6 +20,7 @@ pub(crate) struct Paths {
     pub unit: PathBuf,
     pub codex_home: PathBuf,
     pub claude_home: PathBuf,
+    pub claude_home_is_explicit: bool,
 }
 
 impl Paths {
@@ -37,7 +39,9 @@ impl Paths {
         let config_home = xdg("XDG_CONFIG_HOME", ".config");
         let state_home = xdg("XDG_STATE_HOME", ".local/state");
         let codex_home = xdg("CODEX_HOME", ".codex");
-        let claude_home = xdg("CLAUDE_CONFIG_DIR", ".claude");
+        let claude_config_dir = env::var_os("CLAUDE_CONFIG_DIR").map(PathBuf::from);
+        let claude_home_is_explicit = claude_config_dir.is_some();
+        let claude_home = claude_config_dir.unwrap_or_else(|| home.join(".claude"));
         for path in [
             &profile,
             &config_home,
@@ -58,6 +62,7 @@ impl Paths {
             state_home,
             codex_home,
             claude_home,
+            claude_home_is_explicit,
         })
     }
 

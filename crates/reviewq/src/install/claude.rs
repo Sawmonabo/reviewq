@@ -217,10 +217,12 @@ impl Registration {
         allow_failure: bool,
     ) -> Result<(bool, String), Failure> {
         let mut command = Command::new(&self.executable);
-        command
-            .args(args)
-            .env("CLAUDE_CONFIG_DIR", &self.home)
-            .current_dir(&paths.state);
+        command.args(args).current_dir(&paths.state);
+        if paths.claude_home_is_explicit || self.home != paths.home.join(".claude") {
+            command.env("CLAUDE_CONFIG_DIR", &self.home);
+        } else {
+            command.env_remove("CLAUDE_CONFIG_DIR");
+        }
         crate::service::output(command, allow_failure).await
     }
 
