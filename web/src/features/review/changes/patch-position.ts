@@ -3,7 +3,7 @@ import type {
   PatchDiscussion,
   PatchPath,
 } from "../../../api/generated/contracts";
-import { savedValue, saveValue } from "../../../lib/view-preferences";
+import { removeValue, savedValue, saveValue } from "../../../lib/view-preferences";
 import { patchDocument } from "./patch-document";
 import type { PatchDocument } from "./patch-document";
 import { indexAtByte, utf8Length } from "./patch-rows";
@@ -27,14 +27,17 @@ type Bookmark = {
   readonly line?: PatchLine;
   readonly source?: SourcePosition;
 };
+type SavedBookmark = Bookmark & { readonly revision: string };
+const MAX_RECENT_BOOKMARKS = 128;
+const recentBookmarks = new Map<string, SavedBookmark>();
 
 export function storedFile(reviewId: string): string | undefined {
-  const value = savedValue(`changes.file.${reviewId}`);
+  const value = recentBookmarks.get(reviewId)?.fileId ?? savedValue(`changes.file.${reviewId}`);
   return typeof value === "string" ? value : undefined;
 }
 
 export function storedPatch(reviewId: string, revision: string): Bookmark | undefined {
-  const value = savedValue(`changes.position.${reviewId}`);
+  const value = recentBookmarks.get(reviewId) ?? savedValue(`changes.position.${reviewId}`);
   if (
     value &&
     typeof value === "object" &&
@@ -75,8 +78,19 @@ export function storedPatch(reviewId: string, revision: string): Bookmark | unde
 }
 
 export function storePatch(reviewId: string, revision: string, position: Bookmark) {
-  saveValue(`changes.file.${reviewId}`, position.fileId);
-  saveValue(`changes.position.${reviewId}`, { revision, ...position });
+  const fileKey = `changes.file.${reviewId}`;
+  const positionKey = `changes.position.${reviewId}`;
+  const bookmark = { revision, ...position };
+  recentBookmarks.delete(reviewId);
+  recentBookmarks.set(reviewId, bookmark);
+  if (recentBookmarks.size > MAX_RECENT_BOOKMARKS) {
+    const oldest = recentBookmarks.keys().next().value;
+    if (oldest !== undefined) recentBookmarks.delete(oldest);
+  }
+
+  // A rejected write can leave an older value readable after the bookmark is evicted.
+  if (!saveValue(fileKey, position.fileId)) removeValue(fileKey);
+  if (!saveValue(positionKey, bookmark)) removeValue(positionKey);
 }
 
 export function lineAt(
