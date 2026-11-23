@@ -40,6 +40,19 @@ impl Workflows {
         }
         .ok_or(AppError::Unavailable)
     }
+
+    fn readiness(&self, lead: LeadTarget, followup: bool) -> AppFuture<'_, WorkflowReadiness> {
+        Box::pin(async move {
+            match self.reader(&lead) {
+                Ok(reader) if followup => reader.followup_readiness(lead).await,
+                Ok(reader) => reader.dispatch_readiness(lead).await,
+                Err(_) if lead.binding().identity().provider() == HostProvider::Claude => {
+                    Ok(WorkflowReadiness::Held(WorkflowHold::MissingCompanion))
+                }
+                Err(_) => Ok(WorkflowReadiness::Held(WorkflowHold::ProviderUnavailable)),
+            }
+        })
+    }
 }
 
 impl NativeWorkflowProof for Workflows {
@@ -87,15 +100,11 @@ impl NativeWorkflowProof for Workflows {
     }
 
     fn dispatch_readiness(&self, lead: LeadTarget) -> AppFuture<'_, WorkflowReadiness> {
-        Box::pin(async move {
-            match self.reader(&lead) {
-                Ok(reader) => reader.dispatch_readiness(lead).await,
-                Err(_) if lead.binding().identity().provider() == HostProvider::Claude => {
-                    Ok(WorkflowReadiness::Held(WorkflowHold::MissingCompanion))
-                }
-                Err(_) => Ok(WorkflowReadiness::Held(WorkflowHold::ProviderUnavailable)),
-            }
-        })
+        self.readiness(lead, false)
+    }
+
+    fn followup_readiness(&self, lead: LeadTarget) -> AppFuture<'_, WorkflowReadiness> {
+        self.readiness(lead, true)
     }
 
     fn ended_and_idle(&self, lead: LeadTarget, turn: NativeTurnId) -> AppFuture<'_, bool> {

@@ -140,7 +140,7 @@ async fn prepare(
             return Err("followup_selected_discussion_unavailable");
         }
     }
-    let ready = match native.dispatch_readiness(check.lead.clone()).await {
+    let ready = match native.followup_readiness(check.lead.clone()).await {
         Ok(WorkflowReadiness::Ready(ready)) => ready,
         Ok(WorkflowReadiness::Held(reason)) => return Err(reason.reason()),
         Err(_) => return Err("native_provider_unavailable"),

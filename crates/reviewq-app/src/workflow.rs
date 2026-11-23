@@ -80,6 +80,7 @@ pub struct ReadyWorkflow {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum WorkflowHold {
     ProviderUnavailable,
+    SessionNotLoaded,
     ActiveWork,
     PendingNativeInput,
     UnknownSettings,
@@ -91,6 +92,7 @@ impl WorkflowHold {
     pub fn reason(self) -> &'static str {
         match self {
             Self::ProviderUnavailable => "native_provider_unavailable",
+            Self::SessionNotLoaded => "native_session_not_loaded",
             Self::ActiveWork => "native_work_active",
             Self::PendingNativeInput => "native_input_required",
             Self::UnknownSettings => "native_settings_unproved",
@@ -260,6 +262,10 @@ pub trait NativeWorkflowProof: Send + Sync {
     /// Proves current idle eligibility and exact effective settings without starting or resuming a turn.
     fn dispatch_readiness(&self, _lead: LeadTarget) -> AppFuture<'_, WorkflowReadiness> {
         Box::pin(async { Ok(WorkflowReadiness::Held(WorkflowHold::ProviderUnavailable)) })
+    }
+
+    fn followup_readiness(&self, lead: LeadTarget) -> AppFuture<'_, WorkflowReadiness> {
+        self.dispatch_readiness(lead)
     }
 
     /// Resolve and verify an actual active lead tool from the selected native source.

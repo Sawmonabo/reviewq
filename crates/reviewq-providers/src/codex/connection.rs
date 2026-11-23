@@ -7,7 +7,7 @@ use std::time::Duration;
 
 use futures_util::{SinkExt, StreamExt};
 use reviewq_app::access::AppError;
-use reviewq_app::hosts::{DispatchGuard, QuestionAnswer, QuestionForm};
+use reviewq_app::hosts::{DispatchGuard, FollowupResume, QuestionAnswer, QuestionForm};
 use reviewq_app::launch::LaunchProgress;
 use serde::Deserialize;
 use serde::de::DeserializeOwned;
@@ -60,11 +60,12 @@ struct Pending {
 
 enum Effect {
     Delivery(DispatchGuard, Option<PathBuf>),
+    FollowupResume(FollowupResume),
     Launch(LaunchProgress),
 }
 
 impl Effect {
-    async fn check(self) -> Result<(), AppError> {
+    async fn check(self, questions: &Mutex<Questions>) -> Result<(), AppError> {
         match self {
             Self::Delivery(guard, question_source) => {
                 if let Some(question) = guard.async_question() {
@@ -79,11 +80,32 @@ impl Effect {
                         return Err(AppError::PreconditionFailed);
                     }
                 }
-                guard.check().await
+                let thread = guard.followup_thread().cloned();
+                guard.check().await?;
+                if let Some(thread) = thread {
+                    ensure_no_question(questions, thread.as_str())?;
+                }
+                Ok(())
+            }
+            Self::FollowupResume(guard) => {
+                let thread = guard.thread().clone();
+                guard.check().await?;
+                ensure_no_question(questions, thread.as_str())
             }
             Self::Launch(guard) => guard.check().await,
         }
     }
+}
+
+fn ensure_no_question(questions: &Mutex<Questions>, thread: &str) -> Result<(), AppError> {
+    if questions
+        .lock()
+        .map_err(|_| AppError::Internal)?
+        .has_pending(thread)
+    {
+        return Err(AppError::PreconditionFailed);
+    }
+    Ok(())
 }
 
 pub(super) enum AnswerError {
@@ -197,6 +219,18 @@ impl Connection {
         )
         .await
         .map(|_| ())
+    }
+
+    pub(super) async fn resume_followup<T: DeserializeOwned>(
+        &self,
+        guard: FollowupResume,
+    ) -> Result<T, AppError> {
+        let params = json!({"threadId":guard.thread().as_str(),"excludeTurns":true});
+        let response = self
+            .call("thread/resume", params, Some(Effect::FollowupResume(guard)))
+            .await
+            .map_err(CallError::app)?;
+        serde_json::from_value(response).map_err(|_| AppError::Unavailable)
     }
 
     pub(super) async fn interrupt(&self, params: Value) -> Result<(), CallError> {
@@ -413,7 +447,10 @@ async fn multiplex(
     id: &mut u64,
 ) {
     let mut pending = HashMap::new();
-    if dispatch(socket, first, id, &mut pending).await.is_err() {
+    if dispatch(socket, first, id, &mut pending, questions)
+        .await
+        .is_err()
+    {
         return;
     }
     let mut last_activity = Instant::now();
@@ -438,7 +475,7 @@ async fn multiplex(
                 last_activity = Instant::now();
                 match work {
                     Some(CommandRequest::Rpc(request)) => {
-                        if dispatch(socket, request, id, &mut pending).await.is_err() { break; }
+                        if dispatch(socket, request, id, &mut pending, questions).await.is_err() { break; }
                     }
                     Some(CommandRequest::Answer(answer, form, reply)) => {
                         if reply.is_closed() { continue; }
@@ -502,12 +539,13 @@ async fn dispatch(
     request: Rpc,
     id: &mut u64,
     pending: &mut HashMap<u64, Pending>,
+    questions: &Mutex<Questions>,
 ) -> Result<(), ()> {
     if request.reply.is_closed() {
         return Ok(());
     }
     if let Some(guard) = request.guard
-        && let Err(error) = guard.check().await
+        && let Err(error) = guard.check(questions).await
     {
         let _ = request.reply.send(Err(CallError::Denied(error)));
         return Ok(());

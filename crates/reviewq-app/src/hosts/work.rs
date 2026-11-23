@@ -1,11 +1,11 @@
 use std::sync::Arc;
 
-use reviewq_domain::identity::{GitSha, RunId, SessionKey, SubmissionId};
+use reviewq_domain::identity::{GitSha, NativeSessionId, RunId, SessionKey, SubmissionId};
 
 use crate::access::{Actor, AppError};
 use crate::events::Snapshot;
 use crate::settings::RuntimeSources;
-use crate::workflow::WorkflowRequirement;
+use crate::workflow::{WorkflowBinding, WorkflowRequirement};
 
 use super::{
     DeliveryClaim, DeliveryReceipt, DeliveryWork, LeadStore, MessageBody, NativeHost,
@@ -18,6 +18,22 @@ pub struct DispatchGuard {
     claim: DeliveryClaim,
     workflow_confirmed: bool,
     sources: Arc<RuntimeSources>,
+}
+
+/// Checks a saved lead's existing follow-up claim before loading it.
+pub struct FollowupResume {
+    store: Arc<dyn LeadStore>,
+    claim: DeliveryClaim,
+}
+
+impl FollowupResume {
+    pub fn thread(&self) -> &NativeSessionId {
+        self.claim.target.binding().identity().native_id()
+    }
+
+    pub async fn check(self) -> Result<(), AppError> {
+        self.store.authorize_dispatch(self.claim).await
+    }
 }
 
 impl DispatchGuard {
@@ -33,6 +49,19 @@ impl DispatchGuard {
             DeliveryWork::Dispatch { workflow, .. } => workflow.as_deref(),
             DeliveryWork::Reconcile { .. } => None,
         }
+    }
+
+    pub fn followup_thread(&self) -> Option<&NativeSessionId> {
+        matches!(self.workflow()?.binding, WorkflowBinding::Followup(_))
+            .then(|| self.claim.target.binding().identity().native_id())
+    }
+
+    pub fn followup_resume(&self) -> Result<FollowupResume, AppError> {
+        self.followup_thread().ok_or(AppError::Forbidden)?;
+        Ok(FollowupResume {
+            store: self.store.clone(),
+            claim: self.claim.clone(),
+        })
     }
 
     pub async fn workflow_requirements(

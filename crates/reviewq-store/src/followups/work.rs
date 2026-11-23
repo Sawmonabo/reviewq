@@ -32,6 +32,20 @@ const ELIGIBLE: &str = "
   AND NOT EXISTS(SELECT 1 FROM messages s WHERE s.run_id=b.run_id AND s.session_key=b.lead_session_key
      AND s.actor_key IS NOT NULL AND s.state IN ('queued','dispatching','uncertain'))";
 
+// The lead's activity is proved by the provider. Cached working states only
+// hold work for verified children of this Codex run and profile.
+pub(crate) const CODEX_CONTEXT_READY: &str = "NOT EXISTS (
+  SELECT 1 FROM sessions lead WHERE lead.run_id=b.run_id
+    AND lead.session_key=b.lead_session_key AND lead.provider='codex' AND (
+      EXISTS(SELECT 1 FROM sessions child WHERE child.run_id=lead.run_id
+         AND child.provider=lead.provider AND child.profile=lead.profile AND child.parent_session_key IS NOT NULL
+         AND child.host_activity='working' AND child.native_status IS NOT 'not_loaded')
+      OR EXISTS(SELECT 1 FROM report_handoffs h WHERE h.run_id=lead.run_id
+         AND h.lead_session_key=lead.session_key AND h.state='pending_completion')
+      OR EXISTS(SELECT 1 FROM sessions s JOIN native_async_questions q USING(run_id,session_key)
+         WHERE s.run_id=lead.run_id AND s.provider=lead.provider AND s.profile=lead.profile
+           AND q.state IN ('pending','submitting','uncertain'))))";
+
 #[derive(Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct FrozenManifest {
@@ -132,7 +146,7 @@ fn due(db: &Connection, limit: u16) -> Result<Vec<PendingCheck>, StoreError> {
     let sql = format!(
         "SELECT b.batch_id,b.review_id,b.run_id,b.generation,b.lead_session_key,m.reviewer_id
          FROM followup_batches b JOIN followup_monitors m USING(review_id) JOIN reviews r USING(review_id)
-         WHERE b.due_at_ms<=?1 AND {ELIGIBLE}
+         WHERE b.due_at_ms<=?1 AND {ELIGIBLE} AND {CODEX_CONTEXT_READY}
          ORDER BY b.due_at_ms,b.batch_id LIMIT ?2");
     let mut statement = db.prepare_cached(&sql)?;
     let mut rows = statement.query(params![now_ms()?, u16::from(slots).min(limit)])?;
@@ -272,7 +286,7 @@ fn reserve(tx: &mut WriteTx<'_>, check: PreparedCheck) -> Result<(), StoreError>
     let sql = format!(
         "SELECT EXISTS(SELECT 1 FROM followup_batches b JOIN followup_monitors m USING(review_id)
          JOIN reviews r USING(review_id) WHERE b.batch_id=?1 AND b.review_id=?2 AND b.run_id=?3
-           AND r.head_sha=?4 AND b.generation=?5 AND b.due_at_ms<=?6 AND {ELIGIBLE})"
+           AND r.head_sha=?4 AND b.generation=?5 AND b.due_at_ms<=?6 AND {ELIGIBLE} AND {CODEX_CONTEXT_READY})"
     );
     let current: bool = db.query_row(
         &sql,

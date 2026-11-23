@@ -335,6 +335,19 @@ fn display_status(durable: QuestionStatus, live: Option<QuestionStatus>) -> Ques
 }
 
 impl Questions {
+    pub(super) fn has_pending(&mut self, thread: &str) -> bool {
+        self.prune();
+        self.0.values().any(|live| {
+            live.thread == thread
+                && matches!(
+                    live.form.state,
+                    QuestionStatus::Pending
+                        | QuestionStatus::Submitting
+                        | QuestionStatus::Uncertain
+                )
+        })
+    }
+
     pub(super) fn frames(&mut self, frame: &Value) {
         match frame.get("method").and_then(Value::as_str) {
             Some("item/tool/requestUserInput") => {

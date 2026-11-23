@@ -13,6 +13,7 @@ use sha2::{Digest, Sha256};
 use super::{emit_delivery, find_receipt, insert_intent, request_digest, validate_target};
 use crate::StoreError;
 use crate::connection::WriteTx;
+use crate::followups::work::CODEX_CONTEXT_READY;
 use crate::queue::{identity_for_review, parse, text};
 use crate::workspace::{actor_key, advance_queue, hash_field, settings_revision};
 
@@ -196,7 +197,7 @@ pub(super) fn current(
             |row|row.get(0),
         )?),
         WorkflowBinding::Followup(batch) => Ok(db.query_row(
-            "SELECT EXISTS(SELECT 1 FROM followup_batches b JOIN followup_monitors m USING(review_id)
+            &format!("SELECT EXISTS(SELECT 1 FROM followup_batches b JOIN followup_monitors m USING(review_id)
              LEFT JOIN report_heads h ON h.run_id=b.run_id
              WHERE b.batch_id=?1 AND b.review_id=?2 AND b.run_id=?3 AND b.lead_session_key=?4
                AND b.submission_id=?5 AND b.source_sha=?6 AND b.authority_verified=1 AND b.state='reserved'
@@ -204,7 +205,8 @@ pub(super) fn current(
                AND m.reason IS NULL AND (m.state='enabled' AND coalesce(m.policy_override,
                  (SELECT automatic FROM followup_preferences WHERE singleton=1),0)=1
                  OR b.manual_requested=1 AND m.state IN ('enabled','paused'))
-               AND b.base_receipt_id IS h.receipt_id AND b.disposition_version=coalesce(h.disposition_version,0))",
+               AND b.base_receipt_id IS h.receipt_id AND b.disposition_version=coalesce(h.disposition_version,0)
+               AND {CODEX_CONTEXT_READY})"),
             params![batch,target.review_id().as_str(),target.run_id().as_str(),target.session_key().as_str(),
                 submission.as_str(),guard.head.as_str()],|row|row.get(0),
         )?),

@@ -3,8 +3,8 @@ use std::path::PathBuf;
 use reviewq_app::access::{AppError, AppFuture};
 use reviewq_app::history::{HistorySession, NativeHistoryPage, NativePosition};
 use reviewq_app::hosts::{
-    DeliveryObservation, DispatchGuard, HostActivity, HostPhase, HostProof, MessageBody,
-    NativeHost, NativeSessionMetadata, ReportRef,
+    DeliveryObservation, DispatchGuard, FollowupResume, HostActivity, HostPhase, HostProof,
+    MessageBody, NativeHost, NativeSessionMetadata, ReportRef,
 };
 use reviewq_domain::identity::{DeliveryId, NativeSessionId};
 use reviewq_domain::session::{
@@ -57,13 +57,7 @@ impl NativeHost for Codex {
         Box::pin(async move {
             validate_native_id(&native_id)?;
             let thread = self.read_thread(&native_id).await?;
-            if thread.parent_thread_id.is_some()
-                || thread
-                    .source
-                    .as_ref()
-                    .and_then(|source| source.get("subAgent"))
-                    .is_some()
-            {
+            if !thread.is_lead() {
                 return Err(AppError::Conflict);
             }
             self.proof(thread, native_id).await
@@ -309,6 +303,33 @@ impl Codex {
         }
         Ok(found.thread)
     }
+
+    pub(super) async fn resume_exact_thread(
+        &self,
+        lead: &LeadTarget,
+        thread: &Thread,
+        followup: Option<FollowupResume>,
+    ) -> Result<Thread, AppError> {
+        let resumed: ThreadRead = if let Some(guard) = followup {
+            if guard.thread().as_str() != thread.id {
+                return Err(AppError::Conflict);
+            }
+            self.connection.resume_followup(guard).await?
+        } else {
+            self.connection
+                .read(
+                    "thread/resume",
+                    json!({"threadId":thread.id,"excludeTurns":true}),
+                )
+                .await?
+        };
+        if resumed.thread.id != thread.id
+            || canonical_cwd(resumed.thread.cwd.clone()).await? != *lead.binding().cwd()
+        {
+            return Err(AppError::Conflict);
+        }
+        Ok(resumed.thread)
+    }
 }
 
 pub(super) async fn retained_cwd(
@@ -344,6 +365,15 @@ fn validate_native_id(id: &NativeSessionId) -> Result<(), AppError> {
 }
 
 impl Thread {
+    pub(super) fn is_lead(&self) -> bool {
+        self.parent_thread_id.is_none()
+            && self
+                .source
+                .as_ref()
+                .and_then(|source| source.get("subAgent"))
+                .is_none()
+    }
+
     pub(super) fn metadata(&self) -> NativeSessionMetadata {
         use crate::settings::safe_label;
         NativeSessionMetadata {

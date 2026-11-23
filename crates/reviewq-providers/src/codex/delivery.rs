@@ -10,7 +10,7 @@ use serde_json::json;
 use super::Codex;
 use super::connection::CallError;
 use super::history::Item;
-use super::session::{ThreadRead, ThreadStatus, canonical_cwd};
+use super::session::{ThreadStatus, canonical_cwd};
 
 impl Codex {
     pub(super) async fn send_to_thread(
@@ -22,6 +22,9 @@ impl Codex {
         guard: DispatchGuard,
     ) -> DeliveryObservation {
         let automatic = guard.workflow().is_some();
+        let followup = guard
+            .workflow()
+            .is_some_and(|workflow| matches!(workflow.binding, WorkflowBinding::Followup(_)));
         let head = if automatic {
             match guard.verify_workflow_source().await {
                 Ok(head) => Some(head),
@@ -46,24 +49,22 @@ impl Codex {
             Err(_) => return DeliveryObservation::NotSubmitted,
         };
         if matches!(thread.status, ThreadStatus::NotLoaded) {
-            if automatic {
-                return DeliveryObservation::NotSubmitted;
-            }
-            let resumed: Result<ThreadRead, _> = self
-                .connection
-                .read(
-                    "thread/resume",
-                    json!({"threadId":thread.id,"excludeTurns":true}),
-                )
-                .await;
-            let Ok(resumed) = resumed else {
-                return DeliveryObservation::NotSubmitted;
+            let resumed = match guard.workflow() {
+                None => self.resume_exact_thread(&lead, &thread, None).await,
+                Some(_) if followup => self.resume_saved_followup(&lead, &thread, &guard).await,
+                Some(_) => return DeliveryObservation::NotSubmitted,
             };
-            let cwd = canonical_cwd(resumed.thread.cwd.clone()).await;
-            if resumed.thread.id != thread.id || cwd.as_ref().ok() != Some(lead.binding().cwd()) {
-                return DeliveryObservation::NotSubmitted;
-            }
-            thread = resumed.thread;
+            thread = match resumed {
+                Ok(resumed) => resumed,
+                Err(
+                    AppError::Conflict
+                    | AppError::StaleRevision
+                    | AppError::NotFound
+                    | AppError::Forbidden
+                    | AppError::PreconditionFailed,
+                ) if followup => return DeliveryObservation::Rejected,
+                Err(_) => return DeliveryObservation::NotSubmitted,
+            };
         }
         let question_source = if let Some(question) = question {
             if thread.parent_thread_id.as_deref()
@@ -143,11 +144,13 @@ impl Codex {
                     _ => return DeliveryObservation::NotSubmitted,
                 }
             } else {
-                let Ok(WorkflowReadiness::Ready(ready)) = self.idle_readiness(&lead, &thread).await
-                else {
-                    return DeliveryObservation::NotSubmitted;
-                };
-                ready
+                match self.idle_readiness(&lead, &thread).await {
+                    Ok(WorkflowReadiness::Ready(ready)) => ready,
+                    Ok(WorkflowReadiness::Held(_)) if followup => {
+                        return DeliveryObservation::Rejected;
+                    }
+                    _ => return DeliveryObservation::NotSubmitted,
+                }
             };
             let expected_status = if recovery.is_some() {
                 "failed"
@@ -163,13 +166,17 @@ impl Codex {
             let Ok(check) = self.turns(&thread.id, None, false, 1, false).await else {
                 return DeliveryObservation::NotSubmitted;
             };
+            let Ok(current) = self.verified_thread(&lead).await else {
+                return DeliveryObservation::NotSubmitted;
+            };
             if check.data.first().is_none_or(|latest| {
                 latest.id != previous.as_str() || latest.status != expected_status
-            }) || !self
-                .verified_thread(&lead)
-                .await
-                .is_ok_and(|thread| matches!(thread.status, ThreadStatus::Idle))
+            }) || !matches!(current.status, ThreadStatus::Idle)
+                || (followup && (current.path != thread.path || !current.is_lead()))
             {
+                if followup {
+                    return DeliveryObservation::Rejected;
+                }
                 return DeliveryObservation::NotSubmitted;
             }
             let Ok(guard) = guard.confirm_workflow(&ready, &head) else {

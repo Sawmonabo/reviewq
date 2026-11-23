@@ -1,6 +1,7 @@
 use std::path::Path;
 
 use reviewq_app::access::{AppError, AppFuture};
+use reviewq_app::hosts::DispatchGuard;
 use reviewq_app::workflow::{
     CompletedReportCall, ExpectedAcknowledgement, NativeCall, NativeWorkflowProof, ReadyWorkflow,
     ReportCompletion, ReportFailureAddress, WorkflowHold, WorkflowReadiness, WorkflowTool,
@@ -12,6 +13,9 @@ use serde::Deserialize;
 use super::Codex;
 use super::history::{Item, Turn, Turns};
 use super::session::{Thread, ThreadStatus};
+
+#[cfg(test)]
+mod tests;
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -31,12 +35,11 @@ impl Acknowledgement {
 
 impl NativeWorkflowProof for Codex {
     fn dispatch_readiness(&self, lead: LeadTarget) -> AppFuture<'_, WorkflowReadiness> {
-        Box::pin(async move {
-            let Ok(thread) = self.verified_thread(&lead).await else {
-                return Ok(WorkflowReadiness::Held(WorkflowHold::ProviderUnavailable));
-            };
-            self.idle_readiness(&lead, &thread).await
-        })
+        Box::pin(async move { self.dispatch_thread_readiness(&lead, false).await })
+    }
+
+    fn followup_readiness(&self, lead: LeadTarget) -> AppFuture<'_, WorkflowReadiness> {
+        Box::pin(async move { self.dispatch_thread_readiness(&lead, true).await })
     }
 
     fn ended_and_idle(&self, lead: LeadTarget, turn: NativeTurnId) -> AppFuture<'_, bool> {
@@ -246,6 +249,78 @@ impl NativeWorkflowProof for Codex {
 }
 
 impl Codex {
+    async fn dispatch_thread_readiness(
+        &self,
+        lead: &LeadTarget,
+        followup: bool,
+    ) -> Result<WorkflowReadiness, AppError> {
+        let Ok(thread) = self.verified_thread(lead).await else {
+            return Ok(WorkflowReadiness::Held(WorkflowHold::ProviderUnavailable));
+        };
+        if followup {
+            self.followup_thread_readiness(lead, &thread).await
+        } else {
+            self.idle_readiness(lead, &thread).await
+        }
+    }
+
+    async fn followup_thread_readiness(
+        &self,
+        lead: &LeadTarget,
+        thread: &Thread,
+    ) -> Result<WorkflowReadiness, AppError> {
+        use WorkflowReadiness::{Held, Ready};
+        if !thread.is_lead() {
+            return Ok(Held(WorkflowHold::ProviderUnavailable));
+        }
+        if !matches!(thread.status, ThreadStatus::NotLoaded) {
+            return self.idle_readiness(lead, thread).await;
+        }
+        // The daemon can attest to the saved turn without loading the session.
+        let readiness = self.workflow_context(lead, thread, None).await?;
+        if matches!(&readiness, Ready(ready) if ready.latest_user_turn_id.is_none()) {
+            return Ok(Held(WorkflowHold::UnknownSettings));
+        }
+        Ok(readiness)
+    }
+
+    pub(super) async fn resume_saved_followup(
+        &self,
+        lead: &LeadTarget,
+        thread: &Thread,
+        guard: &DispatchGuard,
+    ) -> Result<Thread, AppError> {
+        let expected = &guard.workflow().ok_or(AppError::Forbidden)?.ready;
+        self.verify_saved_followup(lead, thread, expected).await?;
+        let current = self.verified_thread(lead).await?;
+        if !current.is_lead()
+            || current.path != thread.path
+            || !matches!(current.status, ThreadStatus::NotLoaded)
+        {
+            return Err(AppError::StaleRevision);
+        }
+        let resumed = self
+            .resume_exact_thread(lead, &current, Some(guard.followup_resume()?))
+            .await?;
+        verify_resumed_followup(thread, &resumed)?;
+        Ok(resumed)
+    }
+
+    async fn verify_saved_followup(
+        &self,
+        lead: &LeadTarget,
+        thread: &Thread,
+        expected: &ReadyWorkflow,
+    ) -> Result<(), AppError> {
+        if !matches!(thread.status, ThreadStatus::NotLoaded)
+            || !matches!(self.followup_thread_readiness(lead, thread).await?,
+                WorkflowReadiness::Ready(ready) if ready == *expected)
+        {
+            return Err(AppError::StaleRevision);
+        }
+        Ok(())
+    }
+
     async fn active_workflow_turn(
         &self,
         lead: &LeadTarget,
@@ -394,15 +469,26 @@ impl Codex {
         thread: &Thread,
         failed: Option<&NativeTurnId>,
     ) -> Result<WorkflowReadiness, AppError> {
-        use WorkflowReadiness::{Held, Ready};
+        use WorkflowReadiness::Held;
         match &thread.status {
             ThreadStatus::Idle => {}
+            ThreadStatus::NotLoaded => return Ok(Held(WorkflowHold::SessionNotLoaded)),
             ThreadStatus::Active { active_flags } if active_flags.is_empty() => {
                 return Ok(Held(WorkflowHold::ActiveWork));
             }
             ThreadStatus::Active { .. } => return Ok(Held(WorkflowHold::PendingNativeInput)),
-            _ => return Ok(Held(WorkflowHold::ProviderUnavailable)),
+            ThreadStatus::SystemError => return Ok(Held(WorkflowHold::ProviderUnavailable)),
         }
+        self.workflow_context(lead, thread, failed).await
+    }
+
+    async fn workflow_context(
+        &self,
+        lead: &LeadTarget,
+        thread: &Thread,
+        failed: Option<&NativeTurnId>,
+    ) -> Result<WorkflowReadiness, AppError> {
+        use WorkflowReadiness::{Held, Ready};
         let mut page = self.turns(&thread.id, None, false, 1, true).await?;
         let Some(turn) = page.data.pop() else {
             return Ok(Held(WorkflowHold::UnknownSettings));
@@ -462,6 +548,16 @@ impl Codex {
             latest_user_entry_id: latest,
         }))
     }
+}
+
+fn verify_resumed_followup(saved: &Thread, resumed: &Thread) -> Result<(), AppError> {
+    if !resumed.is_lead()
+        || resumed.path != saved.path
+        || !matches!(resumed.status, ThreadStatus::Idle)
+    {
+        return Err(AppError::Conflict);
+    }
+    Ok(())
 }
 
 fn report_tool(server: &str, tool: &str) -> bool {

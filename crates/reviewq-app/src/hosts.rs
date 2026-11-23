@@ -38,7 +38,7 @@ pub use questions::{
     QuestionAnchor, QuestionAnswer, QuestionForm, QuestionKey, QuestionMode, QuestionOption,
     QuestionReceipt, QuestionStatus, QuestionStore, QuestionsPort, answer_digest,
 };
-pub use work::{DispatchGuard, receipt, recover_delivery, send_message};
+pub use work::{DispatchGuard, FollowupResume, receipt, recover_delivery, send_message};
 
 const MAX_MESSAGE_CHARACTERS: usize = 12_000;
 const MAX_SAFE_INTEGER: u64 = 9_007_199_254_740_991;

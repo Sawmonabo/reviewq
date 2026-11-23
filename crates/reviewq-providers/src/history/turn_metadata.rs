@@ -117,9 +117,10 @@ async fn scan<T: Send + 'static>(
             .len();
         let mut budget = SEARCH_BYTES;
         let mut end = file::end_of_line(&source.file, length, &mut budget, &stopped)?;
+        let mut lines = file::Lines::new(&source.file, &stopped);
         while end > 0 {
-            let start = file::end_of_line(&source.file, end - 1, &mut budget, &stopped)?;
-            if let Ok(row) = read(file::input(&source.file, start, end, &stopped))
+            let start = lines.previous(end - 1, &mut budget)?;
+            if let Ok(row) = read(lines.input(start, end))
                 && let Some(value) = select(row)
             {
                 return Ok(Some(value));
