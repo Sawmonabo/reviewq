@@ -67,10 +67,7 @@ impl<'a> Lock<'a> {
         before: Option<&Existing>,
         after: Option<&Existing>,
     ) -> Result<(), Failure> {
-        let stage = tempfile::Builder::new()
-            .prefix(".reviewq-claude-")
-            .permissions(Permissions::from_mode(0o700))
-            .tempdir_in(parent(self.config)?)?;
+        let stage = staging_directory(parent(self.config)?)?;
         let candidate = stage.path().join("config");
         if let Some(after) = after {
             stage_file(&candidate, &after.bytes, after.mode)?;
@@ -217,6 +214,16 @@ fn rename(from: &Path, to: &Path, flags: RenameFlags) -> Result<(), rustix::io::
     renameat_with(CWD, from, CWD, to, flags)
 }
 
+fn staging_directory(parent: &Path) -> Result<tempfile::TempDir, Failure> {
+    let stage = tempfile::Builder::new()
+        .prefix(".reviewq-claude-")
+        .permissions(Permissions::from_mode(0o700))
+        .tempdir_in(parent)?;
+    // A custom Claude profile can live in a Git worktree.
+    fs::write(stage.path().join(".gitignore"), b"*\n")?;
+    Ok(stage)
+}
+
 fn stage_file(path: &Path, bytes: &[u8], mode: u32) -> Result<(), Failure> {
     let mut file = OpenOptions::new()
         .write(true)
@@ -257,7 +264,7 @@ mod tests {
         };
         stage_file(&config, &before.bytes, before.mode)?;
         let lock = Lock::acquire(&config)?.expect("profile directory exists");
-        let stage = tempfile::tempdir_in(&directory)?;
+        let stage = staging_directory(&directory)?;
         stage_file(&stage.path().join("config"), &after.bytes, after.mode)?;
         lock.readback(Some(&before))?;
 
