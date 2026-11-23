@@ -2068,6 +2068,8 @@ dependencies = [
  "futures-util",
  "getrandom 0.4.3",
  "hmac",
+ "hyper",
+ "hyper-util",
  "reviewq-app",
  "reviewq-domain",
  "reviewq-protocol",
@@ -2078,6 +2080,7 @@ dependencies = [
  "sha2",
  "subtle",
  "tokio",
+ "tokio-tungstenite",
  "tower-http",
  "url",
 ]

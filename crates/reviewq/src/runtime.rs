@@ -25,7 +25,9 @@ use reviewq_providers::{
     SourceAccounts, SourceNetwork, Terminal, TerminalProvider, Workflows,
 };
 use reviewq_store::SqliteStore;
-use reviewq_transport::{ServiceEndpoint, ServiceIdentity, StartupState, WorkflowIntegration};
+use reviewq_transport::{
+    BrowserDesktop, ServiceEndpoint, ServiceIdentity, StartupState, WorkflowIntegration,
+};
 use sha2::{Digest, Sha256};
 use socket2::{Domain, Protocol, Socket, Type};
 use tokio::net::TcpListener;
@@ -305,6 +307,8 @@ pub(crate) async fn serve(profile: PathBuf, options: Serve) -> Result<(), Failur
     ));
     let (shutdown, wait) = watch::channel(false);
     let (activate, startup) = watch::channel(StartupState::Verifying);
+    let browser_desktop =
+        (!options.validation && settings.desktop_notifications).then(BrowserDesktop::default);
     let windows = managed
         .as_ref()
         .map(install::Managed::windows_sender)
@@ -342,6 +346,7 @@ pub(crate) async fn serve(profile: PathBuf, options: Serve) -> Result<(), Failur
             claude,
             claude_interrupt,
             terminal,
+            browser_desktop: browser_desktop.clone(),
             workflow: WorkflowIntegration {
                 proof: workflow.clone(),
                 report_files: report_files.clone(),
@@ -373,7 +378,6 @@ pub(crate) async fn serve(profile: PathBuf, options: Serve) -> Result<(), Failur
     if let Some(v6) = v6 {
         listeners.spawn(http::serve(v6, router, wait.clone()));
     }
-    let desktop_enabled = !options.validation && settings.desktop_notifications;
     let start = async {
         if let Some(managed) = &managed
             && !managed
@@ -388,7 +392,7 @@ pub(crate) async fn serve(profile: PathBuf, options: Serve) -> Result<(), Failur
         if !options.validation {
             store.recover_report_claims().await?;
         }
-        if desktop_enabled {
+        if browser_desktop.is_some() {
             store.recover_desktop_claims().await?;
         }
         activate.send_replace(StartupState::Recovered);
@@ -435,11 +439,8 @@ pub(crate) async fn serve(profile: PathBuf, options: Serve) -> Result<(), Failur
                 checkout_claude_profile,
             )));
         }
-        if desktop_enabled {
-            match windows {
-                Ok(windows) => workers.extend(desktop::start(store.clone(), browser, windows)),
-                Err(error) => eprintln!("ReviewQ desktop notifications unavailable ({error})."),
-            }
+        if let Some(desktop) = browser_desktop {
+            workers.push(desktop::start(store.clone(), browser, desktop, windows));
         }
         activate.send_replace(StartupState::Operational);
         println!("ReviewQ http://{browser}/");

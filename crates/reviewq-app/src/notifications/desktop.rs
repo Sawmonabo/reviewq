@@ -17,6 +17,22 @@ pub struct DesktopClaim {
     pub event_count: u16,
 }
 
+impl DesktopClaim {
+    pub fn body(&self) -> String {
+        let label: String = self
+            .label
+            .chars()
+            .filter(|ch| !ch.is_control())
+            .take(120)
+            .collect();
+        if self.event_count > 1 {
+            format!("{label}\n{} updates", self.event_count)
+        } else {
+            label
+        }
+    }
+}
+
 pub enum DesktopOutcome {
     Delivered,
     NotStarted(&'static str),

@@ -1,5 +1,7 @@
 //! Inbox occurrence and exact assignment API.
 
+pub mod desktop;
+
 use serde::{Deserialize, Serialize};
 
 use crate::{

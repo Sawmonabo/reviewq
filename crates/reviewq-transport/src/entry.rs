@@ -39,6 +39,7 @@ use tokio::sync::{Notify, Semaphore, watch};
 use tower_http::services::{ServeDir, ServeFile};
 
 mod auth;
+mod browser_desktop;
 mod changes;
 mod checkout;
 mod control;
@@ -64,6 +65,7 @@ mod terminal;
 mod tracking;
 mod workspace;
 
+pub use browser_desktop::{BrowserDesktop, BrowserOffer};
 pub use control::{BridgeDescriptor, ControlRequest, ServiceEndpoint, ServiceIdentity};
 
 use auth::Auth;
@@ -161,6 +163,7 @@ pub(super) struct Entry {
     drawings: diagrams::Cache,
     tables: tables::Cache,
     terminal: Arc<dyn NativeTerminal>,
+    browser_desktop: Option<BrowserDesktop>,
     sends_allowed: bool,
     commits: watch::Receiver<EventCursor>,
     shutdown: watch::Receiver<bool>,
@@ -217,6 +220,7 @@ pub struct ServiceRuntime<'a> {
     pub workflow: WorkflowIntegration,
     pub drawing_renderer: Option<Arc<dyn DrawingRenderer>>,
     pub terminal: Arc<dyn NativeTerminal>,
+    pub browser_desktop: Option<BrowserDesktop>,
     pub commits: watch::Receiver<EventCursor>,
     pub shutdown: watch::Receiver<bool>,
     pub startup: watch::Receiver<StartupState>,
@@ -251,6 +255,7 @@ pub fn router(
         drawings: diagrams::Cache::new(runtime.drawing_renderer, runtime.shutdown.clone()),
         tables: tables::Cache::new(),
         terminal: runtime.terminal,
+        browser_desktop: runtime.browser_desktop,
         sends_allowed: runtime.sends_allowed,
         commits: runtime.commits,
         shutdown: runtime.shutdown,
@@ -283,6 +288,7 @@ pub fn router(
         .route("/checkout/grant", post(checkout::grant))
         .route("/events", get(events::feed))
         .route("/session", get(browser_proof))
+        .route("/notifications/desktop/channel", get(browser_desktop::open))
         .route("/queue", get(workspace::queue))
         .route("/queue/sync", get(refresh::sync))
         .route("/queue/sprints", post(workspace::load_sprints))
