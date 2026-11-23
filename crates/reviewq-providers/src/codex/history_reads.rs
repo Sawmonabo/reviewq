@@ -216,6 +216,7 @@ impl Codex {
         }
         let mut entry = visible(
             item.item,
+            &thread.id,
             &reference.turn,
             item.started_at_ms,
             item.completed_at_ms,
@@ -357,7 +358,15 @@ impl Codex {
         let visible = latest
             .into_iter()
             .flat_map(|page| page.data)
-            .find_map(|item| visible(item.item, &id, item.started_at_ms, item.completed_at_ms))
+            .find_map(|item| {
+                visible(
+                    item.item,
+                    &thread.id,
+                    &id,
+                    item.started_at_ms,
+                    item.completed_at_ms,
+                )
+            })
             .transpose()?;
         let tail = if let Some(item) = visible {
             let mut hash = Sha256::new();
@@ -372,6 +381,11 @@ impl Codex {
                 hash.update(field.as_bytes());
             }
             for part in item.parts {
+                if let VisiblePartKind::ToolCall { state, .. }
+                | VisiblePartKind::ToolResult { state, .. } = part.kind
+                {
+                    hash.update([state as u8]);
+                }
                 hash.update((part.text.len() as u64).to_be_bytes());
                 hash.update(part.text.as_bytes());
             }

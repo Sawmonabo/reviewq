@@ -33,6 +33,7 @@ pub(super) struct Record {
     pub text_blocks: Vec<u16>,
     pub next_part: Option<u16>,
     pub native_question: bool,
+    pub codex_wait: bool,
 }
 
 pub(super) struct Part {
@@ -56,6 +57,7 @@ pub(super) enum BodyField {
     InputBlock(u16),
     ResultBlock(u16),
     CodexField(String),
+    WaitDetail(NativeTurnId, Vec<u8>),
 }
 
 struct BodySink<'a> {
@@ -123,6 +125,8 @@ struct Message {
     text_blocks: Vec<u16>,
     next_part: Option<u16>,
     native_question: bool,
+    sender_thread: Option<String>,
+    codex_wait: bool,
 }
 
 #[derive(Default)]
@@ -189,7 +193,14 @@ pub(super) fn stream_body(
     field: BodyField,
     output: &mut dyn Write,
 ) -> Option<Record> {
-    project_to(
+    let mut sink = BodySink {
+        field,
+        target: Some(output),
+        parts_from: 0,
+        parts_limit: MAX_NATIVE_PARTS,
+        document: false,
+    };
+    let record = project_to(
         provider,
         input,
         native,
@@ -199,16 +210,16 @@ pub(super) fn stream_body(
             limit: 0,
             part: None,
         },
-        &mut BodySink {
-            field,
-            target: Some(output),
-            parts_from: 0,
-            parts_limit: MAX_NATIVE_PARTS,
-            document: false,
-        },
+        &mut sink,
     )
-    .ok()
-    .flatten()
+    .ok()??;
+    if let BodyField::WaitDetail(turn, body) = &sink.field {
+        if !record.codex_wait || record.turn.as_ref() != Some(turn) {
+            return None;
+        }
+        sink.target?.write_all(body).ok()?;
+    }
+    Some(record)
 }
 
 pub(super) fn project_parts(
@@ -357,6 +368,7 @@ fn project_to(
         text_blocks: item.text_blocks,
         next_part: item.next_part,
         native_question: item.native_question,
+        codex_wait: item.codex_wait,
     }))
 }
 
@@ -439,12 +451,26 @@ fn codex<R: Read>(
             else {
                 return Ok(None);
             };
-            let name = event
+            let mut name = event
                 .item
                 .tool
                 .take()
                 .or_else(|| event.item.kind.clone())
                 .unwrap_or_default();
+            if name == "wait"
+                && matches!(
+                    event.item.kind.as_deref(),
+                    Some("CollabAgentToolCall" | "collabAgentToolCall")
+                )
+            {
+                event.item = Message {
+                    id: event.item.id,
+                    status: event.item.status,
+                    codex_wait: event.item.sender_thread.as_deref() == Some(native.as_str()),
+                    ..Message::default()
+                };
+                name = "wait_agent".to_owned();
+            }
             if !display_id(&name) {
                 return Ok(None);
             }
@@ -485,6 +511,7 @@ fn codex_item<R: Read>(
     object(reader, |name, reader| match name {
         "type" => string(reader, ID_BYTES).map(|value| item.kind = value),
         "id" => string(reader, ID_BYTES).map(|value| item.id = value),
+        "sender_thread_id" => string(reader, ID_BYTES).map(|value| item.sender_thread = value),
         "content" => contents(reader, window, &mut item, output),
         "text" => tools::body(reader, window, output.for_field(BodyField::Text))
             .map(|value| item.text = value),

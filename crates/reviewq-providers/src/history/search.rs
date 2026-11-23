@@ -116,7 +116,7 @@ pub(super) fn read(
                 source.root_session.as_ref(),
             ) {
                 Ok(Some(mut record)) => {
-                    proof.redact(source, at.record, &mut record);
+                    proof.project(source, at.record..end, complete, &mut record);
                     let position = file::file_position(&source.file, at.record, complete)?;
                     Some(RecordWindow {
                         end,

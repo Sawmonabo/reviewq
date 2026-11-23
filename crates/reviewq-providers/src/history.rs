@@ -34,6 +34,7 @@ mod search;
 mod task_plan;
 pub(crate) mod tools;
 mod turn_metadata;
+mod wait;
 mod watch;
 
 pub(crate) use claude::{claude_anchor, claude_confirm_prompt};
