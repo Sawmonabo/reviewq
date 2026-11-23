@@ -64,10 +64,6 @@ pub(super) fn hold(profile: &Path, common: &Path) -> Result<File, Failure> {
     Ok(file)
 }
 
-pub(super) fn hold_client(profile: &Path, path: &Path) -> Result<File, Failure> {
-    hold(profile, path)
-}
-
 pub(super) fn inventory(profile: &Path, common: &Path) -> Result<PathBuf, Failure> {
     Ok(credential_path(profile, common)?.with_extension("json"))
 }

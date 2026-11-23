@@ -1,4 +1,3 @@
-use std::collections::BTreeSet;
 use std::fs::File;
 use std::path::{Path, PathBuf};
 
@@ -115,7 +114,6 @@ struct Prepared {
     plan: projection::Plan,
     verifier: [u8; 32],
     _lock: File,
-    _client_locks: Vec<File>,
 }
 
 impl Prepared {
@@ -148,7 +146,6 @@ async fn prepare(
     let key = files::credential(profile, &checkout.common)?;
     let inventory = files::inventory(profile, &checkout.common)?;
     let previous = projection::Inventory::load(&inventory)?;
-    let client_locks = lock_clients(profile, &previous, claude.as_deref())?;
     let plan = projection::Plan::new(
         &checkout,
         url,
@@ -166,22 +163,7 @@ async fn prepare(
         plan,
         verifier: Sha256::digest(key).into(),
         _lock: lock,
-        _client_locks: client_locks,
     })
-}
-
-fn lock_clients(
-    profile: &Path,
-    previous: &projection::Inventory,
-    claude: Option<&Path>,
-) -> Result<Vec<File>, Failure> {
-    previous
-        .claude_files()
-        .chain(claude)
-        .collect::<BTreeSet<_>>()
-        .into_iter()
-        .map(|path| files::hold_client(profile, path))
-        .collect()
 }
 
 fn verify_binding(
@@ -237,7 +219,6 @@ async fn clean_owned(profile: &Path, common: &Path) -> Result<(), Failure> {
     let hooks = hooks::cleanup(profile, common);
     let inventory = files::inventory(profile, common)?;
     let previous = projection::Inventory::load(&inventory)?;
-    let _client_locks = lock_clients(profile, &previous, None)?;
     let key = files::existing_credential(profile, common)?;
     previous
         .cleanup(
