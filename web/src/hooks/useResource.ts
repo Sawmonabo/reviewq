@@ -7,6 +7,7 @@ type Result<T> = {
   readonly key: string;
   readonly data?: T;
   readonly error?: string;
+  readonly errorCause?: unknown;
   readonly confirmedAt?: number;
 };
 
@@ -71,6 +72,7 @@ export function useResource<T>(
             ...(retain && previous?.key === key ? previous : {}),
             key,
             error: errorMessage(error),
+            errorCause: error,
           }));
         }
       },

@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useEffectEvent, useLayoutEffect, useRef, useState } from "react";
-import { PatchSourceChanged } from "../../../api/changes";
+import { isPatchScopeChanged } from "../../../api/changes";
 import type { PatchRange } from "../../../api/changes";
-import { ApiResponseError } from "../../../api/client";
 import type { PatchDiscussion, PatchFile } from "../../../api/generated/contracts";
 import { Empty, Loading, Notice } from "../../../components/PanelState";
 import { PatchDocumentView } from "./PatchDocumentView";
@@ -61,6 +60,7 @@ export function PatchSource({
   const [pages, setPages] = useState<readonly SourcePage[]>([]);
   const [lookahead] = useState(createPatchLookahead);
   const [heldPages, setHeldPages] = useState<readonly SourcePage[]>([]);
+  const [stale, setStale] = useState(false);
   const [copyError, setCopyError] = useState(false);
   const copying = useRef<AbortController | undefined>(undefined);
   useEffect(() => () => copying.current?.abort(), []);
@@ -79,12 +79,12 @@ export function PatchSource({
   if (previousPosition !== position || previousLine !== line) {
     setPreviousPosition(position);
     setPreviousLine(line);
-    if (move?.explicit && (!position || position === "away")) {
+    if (!stale && move?.explicit && (!position || position === "away")) {
       setMove(
         pages.length ? undefined : openingMove(file, undefined, undefined, entrySide === "end"),
       );
       setFailure(undefined);
-    } else if (position && position !== "away") {
+    } else if (!stale && position && position !== "away") {
       setFailure(undefined);
       const first = pages[0];
       const last = pages.at(-1);
@@ -203,7 +203,14 @@ export function PatchSource({
       return [await load({ offset: target.byte, etag: tail.etag })];
     return result;
   });
-  const sourceChanged = useEffectEvent(onSourceChanged);
+  function reportSourceChange() {
+    lookahead.clear();
+    setStale(true);
+    setFailure(undefined);
+    setMove(undefined);
+    onSourceChanged();
+  }
+  const sourceChanged = useEffectEvent(reportSourceChange);
   useLayoutEffect(() => {
     if (!move) return;
     const controller = new AbortController();
@@ -213,11 +220,7 @@ export function PatchSource({
       },
       (error: unknown) => {
         if (controller.signal.aborted) return;
-        if (
-          error instanceof PatchSourceChanged ||
-          (error instanceof ApiResponseError && error.code === "precondition_failed")
-        ) {
-          setMove(undefined);
+        if (isPatchScopeChanged(error)) {
           sourceChanged();
           return;
         }
@@ -264,7 +267,7 @@ export function PatchSource({
   const approach = useEffectEvent((backwards: boolean, travel = 0, prepareOnly = false) => {
     const element = pre.current;
     const scroll = element?.closest<HTMLElement>(".drawer-body");
-    if (!element || !scroll || !head || !tail || failure) return;
+    if (stale || !element || !scroll || !head || !tail || failure) return;
     const box = element.getBoundingClientRect();
     const view = scroll.getBoundingClientRect();
     const ahead = lookahead.distance(scroll.clientHeight);
@@ -334,7 +337,7 @@ export function PatchSource({
   const keepSourceEdge = useEffectEvent(
     (element: HTMLElement, scroll: HTMLElement, previous: number, delta: number) => {
       const backwards = delta < 0;
-      if (!head || !tail) return;
+      if (stale || !head || !tail) return;
       const box = element.getBoundingClientRect();
       const top = sourceReadingTop(element, scroll);
       const bottom = scroll.getBoundingClientRect().bottom;
@@ -372,7 +375,14 @@ export function PatchSource({
 
   const clampWheel = useEffectEvent(
     (event: WheelEvent, element: HTMLElement, scroll: HTMLElement, delta: number) => {
-      if (!head?.rows || !tail || !event.cancelable || event.defaultPrevented || event.ctrlKey)
+      if (
+        stale ||
+        !head?.rows ||
+        !tail ||
+        !event.cancelable ||
+        event.defaultPrevented ||
+        event.ctrlKey
+      )
         return;
       const backwards = delta < 0;
       if (backwards ? head.first === 0 : tail.next === tail.total) return;
@@ -499,7 +509,7 @@ export function PatchSource({
   return (
     <>
       {!head && notice}
-      {!head && !failure && (
+      {!head && !failure && !stale && (
         <div className="patch-waiting">
           <Loading label="Loading patch…" />
         </div>
@@ -514,15 +524,16 @@ export function PatchSource({
               </span>
             </div>
             <div className="actions">
-              <button type="button" onClick={() => seek("start")}>
+              <button type="button" disabled={stale} onClick={() => seek("start")}>
                 Start
               </button>
-              <button type="button" onClick={() => seek("end")}>
+              <button type="button" disabled={stale} onClick={() => seek("end")}>
                 End
               </button>
               {tail.continuesLine && (
                 <button
                   type="button"
+                  disabled={stale}
                   onClick={() => {
                     setFailure(undefined);
                     reentry.current = undefined;
@@ -578,7 +589,13 @@ export function PatchSource({
                   controller.abort();
                   setCopyError(true);
                 };
-                void payload.catch(failed);
+                void payload.catch((error: unknown) => {
+                  if (controller.signal.aborted) return;
+                  if (isPatchScopeChanged(error)) {
+                    controller.abort();
+                    reportSourceChange();
+                  } else failed();
+                });
                 try {
                   void navigator.clipboard
                     .write([new ClipboardItem({ "text/plain": payload })])

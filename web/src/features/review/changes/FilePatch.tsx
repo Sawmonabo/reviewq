@@ -1,7 +1,8 @@
-import { memo, useState } from "react";
+import { memo, useEffect, useState } from "react";
 import { ResponseSizeLimit } from "../../../api/bounded-bytes";
 import {
   downloadPatchUrl,
+  isPatchScopeChanged,
   isRichPatch,
   PatchFormattingLimit,
   readPatch,
@@ -171,6 +172,7 @@ function RichPatch({
   threads,
   visible,
   onLimit,
+  onSourceChanged,
 }: ContentsProps & { readonly onLimit: () => void }) {
   const [seen, setSeen] = useState(visible);
   if (visible && !seen) setSeen(true);
@@ -189,11 +191,15 @@ function RichPatch({
       throw error;
     }
   });
+  const stale = isPatchScopeChanged(patch.errorCause);
+  useEffect(() => {
+    if (stale) onSourceChanged();
+  }, [stale, onSourceChanged]);
   const body = patch.data;
   const ready = Boolean(body && (seen || (file.lineCount ?? 0) <= 128));
   return (
     <>
-      {patch.error && <Notice retry={patch.retry}>{patch.error}</Notice>}
+      {patch.error && !stale && <Notice retry={patch.retry}>{patch.error}</Notice>}
       {(patch.pending || (body && !ready)) && (
         <div className="patch-waiting">
           {patch.pending && visible && <Loading label="Loading patch…" />}

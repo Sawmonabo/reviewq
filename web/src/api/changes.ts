@@ -1,5 +1,5 @@
 import { decodeUtf8, readBoundedBytes } from "./bounded-bytes";
-import { queryString, read, request } from "./client";
+import { ApiResponseError, queryString, read, request } from "./client";
 import type {
   PatchDiscussionNote,
   PatchDiscussionText,
@@ -343,7 +343,15 @@ export type PatchSourceTarget =
   | { readonly before: number }
   | { readonly last: true };
 
-export class PatchSourceChanged extends Error {}
+class PatchSourceChanged extends Error {}
+
+export function isPatchScopeChanged(error: unknown) {
+  return (
+    error instanceof PatchSourceChanged ||
+    (error instanceof ApiResponseError &&
+      (error.code === "stale_revision" || error.code === "precondition_failed"))
+  );
+}
 
 export async function readPatchSource(
   file: PatchFile,

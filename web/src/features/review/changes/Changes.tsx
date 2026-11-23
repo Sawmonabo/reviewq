@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 import { ApiResponseError } from "../../../api/client";
 import { lostDiscussionAccess } from "../../../api/discussion-search";
 import {
+  isPatchScopeChanged,
   PATCH_FILES_PER_PAGE,
   readInitialPatchFiles,
   readPatchDiscussions,
@@ -56,6 +57,11 @@ export default function Changes({
   readonly children?: ReactNode;
 }) {
   const [epoch, setEpoch] = useState(0);
+  const [staleEpoch, setStaleEpoch] = useState(-1);
+  const onSourceChanged = useCallback(
+    () => setStaleEpoch((latest) => Math.max(latest, epoch)),
+    [epoch],
+  );
   const [navigation, setNavigation] = useState<HTMLDivElement | null>(null);
   const toolbar = useRef<HTMLDivElement>(null);
   const [threadJump, setThreadJump] = useState<ThreadJump>();
@@ -94,12 +100,11 @@ export default function Changes({
         : Promise.resolve({ data: null, cursor: "" }),
   );
   const current = useResource(
-    `change-current:${reviewId}:${epoch}`,
+    JSON.stringify(["change-current", reviewId, epoch, revision]),
     (signal) =>
       revision ? readPatchRevision(reviewId, signal) : Promise.resolve({ data: null, cursor: "" }),
-    [{ kind: "changes", id: reviewId }],
+    revision ? [{ kind: "review", id: reviewId }] : [],
   );
-  const changed = Boolean(revision && current.data && current.data.revision !== revision);
   const [threadPage, setThreadPage] = useState(0);
   const [conversationPage, setConversationPage] = useState<{
     readonly number: number;
@@ -163,6 +168,17 @@ export default function Changes({
     requestThreadPage ? [{ kind: "discussions", id: reviewId }] : [],
     lostDiscussionAccess,
   );
+  const staleThreads = isPatchScopeChanged(threads.errorCause);
+  const staleExtraThreads = isPatchScopeChanged(extraThreads.errorCause);
+  const changed = Boolean(
+    revision &&
+    (staleEpoch === epoch ||
+      staleThreads ||
+      staleExtraThreads ||
+      isPatchScopeChanged(current.errorCause) ||
+      (current.data && current.data.revision !== revision)),
+  );
+  if (changed && staleEpoch !== epoch) setStaleEpoch(epoch);
   useLayoutEffect(() => {
     const saved = reading.current;
     if (saved && saved.page === extraThreads.data) {
@@ -292,8 +308,7 @@ export default function Changes({
         </div>
         {changed && (
           <Notice>
-            The source revision changed. The displayed patch remains on{" "}
-            {shown?.headSha.slice(0, 12)}.
+            The patch source changed. The displayed changes are from {shown?.headSha.slice(0, 12)}.
             <button type="button" onClick={refreshIndex}>
               Load current changes
             </button>
@@ -347,6 +362,7 @@ export default function Changes({
             onLoadedAnchors={setLoadedAnchors}
             restore={epoch === 0}
             onReload={refreshIndex}
+            onSourceChanged={onSourceChanged}
             noteGeneration={note.generation}
             noteTarget={note.selected}
             onChooseNote={(hit) => void note.confirm(hit)}
@@ -355,8 +371,10 @@ export default function Changes({
             onNoteFallback={fallbackNote}
           />
         )}
-        {threads.error && <Notice retry={threads.retry}>{threads.error}</Notice>}
-        {extraThreads.error && <Notice retry={extraThreads.retry}>{extraThreads.error}</Notice>}
+        {threads.error && !staleThreads && <Notice retry={threads.retry}>{threads.error}</Notice>}
+        {extraThreads.error && !staleExtraThreads && (
+          <Notice retry={extraThreads.retry}>{extraThreads.error}</Notice>
+        )}
         {threadPending && (
           <p className="meta" role="status">
             Loading more conversations…

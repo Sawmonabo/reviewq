@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { readPatchDiscussions } from "../../../api/changes";
+import { isPatchScopeChanged, readPatchDiscussions } from "../../../api/changes";
 import { lostDiscussionAccess } from "../../../api/discussion-search";
 import type { PatchDiscussion } from "../../../api/generated/contracts";
 import { useResource } from "../../../hooks/useResource";
@@ -70,8 +70,9 @@ export function usePatchDiscussions(
   // Keep only the key once confirmed, so refreshes need no hidden preview snapshots.
   if (resource.data !== undefined && !confirmed) setProgress({ key, data: null });
   else if (progress && progress.key !== key) setProgress(undefined);
+  const keepProgress = !resource.error || isPatchScopeChanged(resource.errorCause);
   const coverage =
-    resource.data ?? (!resource.error && progress?.key === key ? progress.data : undefined);
+    resource.data ?? (keepProgress && progress?.key === key ? progress.data : undefined);
   return {
     ...resource,
     items: coverage?.items ?? EMPTY_DISCUSSIONS,
