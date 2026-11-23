@@ -44,7 +44,7 @@ Place Runs at the right of the drawer tabs when a lead has multiple runs. Keep t
 | Changes | Choose one file, read selectable unified code with both line numbers and addition/deletion markers, open a matching inline discussion, read general/earlier threads and inspect approval requirements. Filter participants and status independently of file search. |
 | Agent | Read the selected lead’s live conversation, grouped tools, plan, delivery receipts and actionable requests. Navigate confirmed user prompts, open children’s read-only Conversation and Result, return to the lead, send a follow-up or answer the exact supported request. |
 | Findings | Read an accepted immutable lead report, its finding cards, previous-thread outcomes, figures, source links and verification limits. Switch versions explicitly, jump by section and send feedback with an optional quote/reference to the report’s lead. On a current finding record a local blocking/publication disposition and its reason. Historical dispositions are read-only. |
-| Settings | Open a right-hand sheet from any view. Agents appears first, followed by connections and team settings. Configure team boards, repositories, local checkout/provider defaults, reviewer identities and automation. Save or dismiss the sheet to return to the same workspace. |
+| Settings | Open Settings from any view. Use the five pages for Connections, Review scope, Repositories, Agents and Appearance. Open a focused picker to add boards, repositories or reviewers. Confirm its choices into the workspace draft and persist them with Save changes. |
 
 ### Opening and restoring a review
 
