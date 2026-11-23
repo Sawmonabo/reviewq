@@ -188,7 +188,7 @@ export function QuestionOptions({
       )}
       {other?.map((answer) => (
         <p className="question-written-answer" key={answer}>
-          <strong>{options.length ? "Other" : "Answer"}</strong> {answer}
+          <strong>Recorded answer</strong> {answer}
         </p>
       ))}
     </>
