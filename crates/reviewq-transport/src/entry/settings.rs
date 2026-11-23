@@ -128,7 +128,14 @@ pub(super) async fn catalog(
     let expected = revision(request.expected_revision)?;
     let saved = entry.store.read_credentials(actor.clone()).await?;
     let kind = catalog_kind(request.kind, request.board_id, request.view)?;
-    let saved_reviewer_ids = if kind == app::CatalogKind::Reviewers && request.q.is_none() {
+    let reviewers = kind == app::CatalogKind::Reviewers;
+    let saved_reviewers = reviewers && request.q.is_none();
+    if reviewers && !matches!(request.provider, dto::Provider::Gitlab)
+        || saved_reviewers && !matches!(&request.token, dto::TokenInput::Keep)
+    {
+        return Err(AppError::InvalidRequest.into());
+    }
+    let saved_reviewer_ids = if saved_reviewers {
         saved.value.scope.additional_reviewers.clone()
     } else {
         Vec::new()
