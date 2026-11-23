@@ -9,7 +9,7 @@ use reviewq_app::hosts::{
     HostPhase, LeadStore, MAX_RECOVERY_LIMIT, MessageReplay, RecoverableDelivery,
     RecoverableDeliveryState, RegisterLead, SubmitMessage,
 };
-use reviewq_domain::identity::{DeliveryId, RunId, SessionKey, SubmissionId};
+use reviewq_domain::identity::{DeliveryId, NativeSessionId, RunId, SessionKey, SubmissionId};
 use reviewq_domain::session::{
     HostProvider, LeadTarget, NativeBinding, NativeIdentity, SessionTarget,
 };
@@ -181,6 +181,18 @@ impl LeadStore for SqliteStore {
     fn authorize_dispatch(&self, claim: DeliveryClaim) -> AppFuture<'_, ()> {
         Box::pin(async move {
             self.read(move |tx| delivery::authorize_dispatch(tx, claim))
+                .await
+                .map_err(StoreError::app)
+        })
+    }
+
+    fn authorize_followup_dispatch(
+        &self,
+        claim: DeliveryClaim,
+        pending_threads: Vec<NativeSessionId>,
+    ) -> AppFuture<'_, ()> {
+        Box::pin(async move {
+            self.read(move |db| delivery::authorize_followup_dispatch(db, claim, pending_threads))
                 .await
                 .map_err(StoreError::app)
         })

@@ -621,6 +621,13 @@ pub trait LeadStore: Send + Sync {
     /// Rechecks the current dispatch fence and authority immediately before native I/O.
     fn authorize_dispatch(&self, claim: DeliveryClaim) -> AppFuture<'_, ()>;
 
+    /// Also checks live Codex input requests against the registered follow-up family.
+    fn authorize_followup_dispatch(
+        &self,
+        claim: DeliveryClaim,
+        pending_threads: Vec<NativeSessionId>,
+    ) -> AppFuture<'_, ()>;
+
     /// Fresh-source proof requirements for exactly one current automatic claim.
     fn workflow_requirements(
         &self,

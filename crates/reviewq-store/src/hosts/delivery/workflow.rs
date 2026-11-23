@@ -1,12 +1,12 @@
 use reviewq_app::access::{Actor, AppError};
 use reviewq_app::events::ResourceKey;
-use reviewq_app::hosts::{DeliveryOutcome, SubmitMessage};
+use reviewq_app::hosts::{DeliveryClaim, DeliveryOutcome, MessagePurpose, SubmitMessage};
 use reviewq_app::workflow::{
     ReadyWorkflow, SelectedDiscussion, WorkflowAdmission, WorkflowBinding, WorkflowGuard,
     WorkflowRequirement, WorkflowRequirements,
 };
-use reviewq_domain::identity::{DeliveryId, Revision, SubmissionId};
-use reviewq_domain::session::LeadTarget;
+use reviewq_domain::identity::{DeliveryId, NativeSessionId, Revision, SubmissionId};
+use reviewq_domain::session::{HostProvider, LeadTarget};
 use rusqlite::{Connection, OptionalExtension, params};
 use sha2::{Digest, Sha256};
 
@@ -14,6 +14,7 @@ use super::{emit_delivery, find_receipt, insert_intent, request_digest, validate
 use crate::StoreError;
 use crate::connection::WriteTx;
 use crate::followups::work::CODEX_CONTEXT_READY;
+use crate::hosts::bytes;
 use crate::queue::{identity_for_review, parse, text};
 use crate::workspace::{actor_key, advance_queue, hash_field, settings_revision};
 
@@ -79,6 +80,34 @@ pub(crate) fn admit_workflow(
     )?;
     emit_delivery(tx, input.target.target())?;
     Ok(id)
+}
+
+pub(in crate::hosts) fn authorize_followup_dispatch(
+    db: &Connection,
+    claim: DeliveryClaim,
+    pending_threads: Vec<NativeSessionId>,
+) -> Result<(), StoreError> {
+    let target = &claim.target;
+    let identity = target.binding().identity();
+    if claim.purpose != MessagePurpose::ThreadFollowup || identity.provider() != HostProvider::Codex
+    {
+        return Err(AppError::Forbidden.into());
+    }
+    if !pending_threads.is_empty() {
+        let ids: Vec<_> = pending_threads
+            .iter()
+            .map(NativeSessionId::as_str)
+            .collect();
+        let ids = serde_json::to_string(&ids).map_err(|_| AppError::Internal)?;
+        let pending: bool = db.prepare_cached(
+            "SELECT EXISTS(SELECT 1 FROM json_each(?3) pending CROSS JOIN sessions s
+             WHERE s.run_id=?1 AND s.provider='codex' AND s.profile=?2 AND s.native_id=pending.value)",
+        )?.query_row(params![target.run_id().as_str(), bytes(identity.profile()), ids], |row| row.get(0))?;
+        if pending {
+            return Err(AppError::PreconditionFailed.into());
+        }
+    }
+    super::authorize_dispatch(db, claim)
 }
 
 fn workflow_digest(guard: &WorkflowGuard, input: &SubmitMessage) -> [u8; 32] {

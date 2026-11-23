@@ -9,6 +9,7 @@ use futures_util::{SinkExt, StreamExt};
 use reviewq_app::access::AppError;
 use reviewq_app::hosts::{DispatchGuard, FollowupResume, QuestionAnswer, QuestionForm};
 use reviewq_app::launch::LaunchProgress;
+use reviewq_domain::identity::NativeSessionId;
 use serde::Deserialize;
 use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
@@ -80,32 +81,24 @@ impl Effect {
                         return Err(AppError::PreconditionFailed);
                     }
                 }
-                let thread = guard.followup_thread().cloned();
-                guard.check().await?;
-                if let Some(thread) = thread {
-                    ensure_no_question(questions, thread.as_str())?;
-                }
-                Ok(())
+                let pending = if guard.is_followup() {
+                    pending_threads(questions)?
+                } else {
+                    Vec::new()
+                };
+                guard.check(pending).await
             }
-            Self::FollowupResume(guard) => {
-                let thread = guard.thread().clone();
-                guard.check().await?;
-                ensure_no_question(questions, thread.as_str())
-            }
+            Self::FollowupResume(guard) => guard.check(pending_threads(questions)?).await,
             Self::Launch(guard) => guard.check().await,
         }
     }
 }
 
-fn ensure_no_question(questions: &Mutex<Questions>, thread: &str) -> Result<(), AppError> {
-    if questions
+fn pending_threads(questions: &Mutex<Questions>) -> Result<Vec<NativeSessionId>, AppError> {
+    Ok(questions
         .lock()
         .map_err(|_| AppError::Internal)?
-        .has_pending(thread)
-    {
-        return Err(AppError::PreconditionFailed);
-    }
-    Ok(())
+        .pending_threads())
 }
 
 pub(super) enum AnswerError {

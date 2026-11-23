@@ -8,6 +8,7 @@ use reviewq_app::hosts::{
     QuestionAccess, QuestionAdmission, QuestionAnswer, QuestionForm, QuestionKey, QuestionMode,
     QuestionReceipt, QuestionStatus, QuestionsPort,
 };
+use reviewq_domain::identity::NativeSessionId;
 use reviewq_domain::session::HostProvider;
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -335,17 +336,24 @@ fn display_status(durable: QuestionStatus, live: Option<QuestionStatus>) -> Ques
 }
 
 impl Questions {
-    pub(super) fn has_pending(&mut self, thread: &str) -> bool {
+    pub(super) fn pending_threads(&mut self) -> Vec<NativeSessionId> {
         self.prune();
-        self.0.values().any(|live| {
-            live.thread == thread
-                && matches!(
+        let mut threads: Vec<_> = self
+            .0
+            .values()
+            .filter(|live| {
+                matches!(
                     live.form.state,
                     QuestionStatus::Pending
                         | QuestionStatus::Submitting
                         | QuestionStatus::Uncertain
                 )
-        })
+            })
+            .filter_map(|live| live.thread.parse().ok())
+            .collect();
+        threads.sort_unstable();
+        threads.dedup();
+        threads
     }
 
     pub(super) fn frames(&mut self, frame: &Value) {

@@ -22,9 +22,7 @@ impl Codex {
         guard: DispatchGuard,
     ) -> DeliveryObservation {
         let automatic = guard.workflow().is_some();
-        let followup = guard
-            .workflow()
-            .is_some_and(|workflow| matches!(workflow.binding, WorkflowBinding::Followup(_)));
+        let followup = guard.is_followup();
         let head = if automatic {
             match guard.verify_workflow_source().await {
                 Ok(head) => Some(head),

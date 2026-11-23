@@ -31,8 +31,10 @@ impl FollowupResume {
         self.claim.target.binding().identity().native_id()
     }
 
-    pub async fn check(self) -> Result<(), AppError> {
-        self.store.authorize_dispatch(self.claim).await
+    pub async fn check(self, pending_threads: Vec<NativeSessionId>) -> Result<(), AppError> {
+        self.store
+            .authorize_followup_dispatch(self.claim, pending_threads)
+            .await
     }
 }
 
@@ -51,13 +53,15 @@ impl DispatchGuard {
         }
     }
 
-    pub fn followup_thread(&self) -> Option<&NativeSessionId> {
-        matches!(self.workflow()?.binding, WorkflowBinding::Followup(_))
-            .then(|| self.claim.target.binding().identity().native_id())
+    pub fn is_followup(&self) -> bool {
+        self.workflow()
+            .is_some_and(|workflow| matches!(workflow.binding, WorkflowBinding::Followup(_)))
     }
 
     pub fn followup_resume(&self) -> Result<FollowupResume, AppError> {
-        self.followup_thread().ok_or(AppError::Forbidden)?;
+        if !self.is_followup() {
+            return Err(AppError::Forbidden);
+        }
         Ok(FollowupResume {
             store: self.store.clone(),
             claim: self.claim.clone(),
@@ -113,11 +117,17 @@ impl DispatchGuard {
         Ok(self)
     }
 
-    pub async fn check(self) -> Result<(), AppError> {
+    pub async fn check(self, pending_threads: Vec<NativeSessionId>) -> Result<(), AppError> {
         if self.workflow().is_some() && !self.workflow_confirmed {
             return Err(AppError::Forbidden);
         }
-        self.store.authorize_dispatch(self.claim).await
+        if self.is_followup() {
+            self.store
+                .authorize_followup_dispatch(self.claim, pending_threads)
+                .await
+        } else {
+            self.store.authorize_dispatch(self.claim).await
+        }
     }
 }
 

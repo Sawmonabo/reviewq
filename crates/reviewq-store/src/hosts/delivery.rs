@@ -8,6 +8,7 @@ use labels::{outcome_label, recoverable_label};
 mod workflow;
 
 pub(crate) use workflow::admit_workflow;
+pub(super) use workflow::authorize_followup_dispatch;
 
 use super::questions::async_answers;
 use crate::StoreError;
