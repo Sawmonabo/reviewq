@@ -45,7 +45,7 @@ pub(super) struct Manifest {
     pub files: Vec<Entry>,
 }
 
-#[derive(Deserialize, Serialize)]
+#[derive(Clone, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub(super) struct Entry {
     pub path: String,
@@ -62,6 +62,13 @@ pub(super) struct Bundle {
 
 impl Bundle {
     pub(super) fn read(path: &Path) -> Result<Self, Failure> {
+        let bundle = Self::inventory(path)?;
+        bundle.verify_supported()?;
+        bundle.verify()?;
+        Ok(bundle)
+    }
+
+    pub(super) fn inventory(path: &Path) -> Result<Self, Failure> {
         if !path.is_absolute() || !path.symlink_metadata()?.is_dir() || path.canonicalize()? != path
         {
             return Err("Use the canonical absolute directory of the release bundle.".into());
@@ -76,27 +83,40 @@ impl Bundle {
         let manifest: Manifest = serde_json::from_slice(&bytes)?;
         let mut canonical = serde_json::to_vec(&manifest)?;
         canonical.push(b'\n');
-        let target = format!("{}-unknown-linux-{}", std::env::consts::ARCH, target_env());
-        if canonical != bytes
-            || manifest.format != 1
-            || manifest.protocol != 1
-            || manifest.store != 2
-            || manifest.target != target
-            || !path_token(&manifest.version)
-            || !hash_string(&manifest.source, 40)
-            || manifest.files.len() > MAX_FILES
-        {
+        if canonical != bytes || manifest.format != 1 || manifest.files.len() > MAX_FILES {
             return Err("Noncanonical or unsupported release manifest.".into());
         }
-        let mut expected = BTreeSet::from(["manifest.json".to_owned()]);
-        let mut actual = BTreeSet::new();
-        walk(path, path, &mut actual)?;
         let mut previous = "";
         for entry in &manifest.files {
             if previous >= entry.path.as_str()
                 || !relative(&entry.path)
-                || !allowed(&entry.path)
                 || !hash_string(&entry.sha256, 64)
+                || entry.mode > 0o777
+            {
+                return Err(format!("Invalid release entry {}", entry.path).into());
+            }
+            previous = &entry.path;
+        }
+        Ok(Self {
+            id: hex(&Sha256::digest(&bytes)),
+            root: path.to_path_buf(),
+            manifest,
+        })
+    }
+
+    fn verify_supported(&self) -> Result<(), Failure> {
+        let target = format!("{}-unknown-linux-{}", std::env::consts::ARCH, target_env());
+        let manifest = &self.manifest;
+        if manifest.protocol != 1
+            || manifest.store != 2
+            || manifest.target != target
+            || !path_token(&manifest.version)
+            || !hash_string(&manifest.source, 40)
+        {
+            return Err("Noncanonical or unsupported release manifest.".into());
+        }
+        for entry in &manifest.files {
+            if !allowed(&entry.path)
                 || entry.mode
                     != if entry.path == "bin/reviewq" {
                         0o700
@@ -106,7 +126,24 @@ impl Bundle {
             {
                 return Err(format!("Invalid release entry {}", entry.path).into());
             }
-            let file = regular(&path.join(&entry.path))?;
+        }
+        if REQUIRED.iter().any(|path| {
+            manifest
+                .files
+                .binary_search_by_key(path, |entry| entry.path.as_str())
+                .is_err()
+        }) {
+            return Err("A required release component is missing.".into());
+        }
+        Ok(())
+    }
+
+    pub(super) fn verify(&self) -> Result<(), Failure> {
+        let mut actual = BTreeSet::new();
+        walk(&self.root, &self.root, &mut actual)?;
+        let mut expected = BTreeSet::from(["manifest.json".to_owned()]);
+        for entry in &self.manifest.files {
+            let file = regular(&self.root.join(&entry.path))?;
             let info = file.metadata()?;
             if info.len() != entry.size
                 || info.permissions().mode() & 0o777 != entry.mode
@@ -115,19 +152,18 @@ impl Bundle {
                 return Err(format!("Release contents changed at {}", entry.path).into());
             }
             expected.insert(entry.path.clone());
-            previous = &entry.path;
-        }
-        if REQUIRED.iter().any(|path| !expected.contains(*path)) {
-            return Err("A required release component is missing.".into());
         }
         if expected != actual {
             return Err("Release inventory differs from the files on disk.".into());
         }
-        Ok(Self {
-            id: hex(&Sha256::digest(&bytes)),
-            root: path.to_path_buf(),
-            manifest,
-        })
+        Ok(())
+    }
+
+    pub(super) fn assets(&self) -> impl Iterator<Item = (&str, &Entry)> {
+        self.manifest
+            .files
+            .iter()
+            .filter_map(|entry| Some((entry.path.strip_prefix("web/assets/")?, entry)))
     }
 }
 
@@ -162,7 +198,7 @@ fn walk(root: &Path, directory: &Path, output: &mut BTreeSet<String>) -> Result<
     Ok(())
 }
 
-fn relative(value: &str) -> bool {
+pub(super) fn relative(value: &str) -> bool {
     value.len() <= 1024
         && value
             .split('/')
@@ -190,7 +226,7 @@ fn allowed(path: &str) -> bool {
             .any(|prefix| path.starts_with(prefix))
 }
 
-fn hash_string(value: &str, size: usize) -> bool {
+pub(super) fn hash_string(value: &str, size: usize) -> bool {
     value.len() == size
         && value
             .bytes()

@@ -71,7 +71,6 @@ impl Paths {
             ensure_dir(path, true)?;
         }
         ensure_dir(&self.profile.join("releases"), true)?;
-        ensure_dir(&self.profile.join("assets"), true)?;
         ensure_dir(parent(&self.launcher)?, false)?;
         ensure_dir(parent(&self.unit)?, false)
     }
@@ -148,14 +147,21 @@ pub(super) fn sync(path: &Path) -> Result<(), Failure> {
 }
 
 pub(super) fn read_json<T: DeserializeOwned>(path: &Path) -> Result<Option<T>, Failure> {
+    read_json_with_limit(path, 4 * 1024 * 1024)
+}
+
+pub(super) fn read_json_with_limit<T: DeserializeOwned>(
+    path: &Path,
+    limit: u64,
+) -> Result<Option<T>, Failure> {
     if !exists(path)? {
         return Ok(None);
     }
     let file = bundle::regular(path)?;
     private(&file, path)?;
     let mut bytes = Vec::new();
-    file.take(4 * 1024 * 1024 + 1).read_to_end(&mut bytes)?;
-    if bytes.len() > 4 * 1024 * 1024 {
+    file.take(limit + 1).read_to_end(&mut bytes)?;
+    if bytes.len() as u64 > limit {
         return Err(conflict(path));
     }
     Ok(Some(serde_json::from_slice(&bytes)?))

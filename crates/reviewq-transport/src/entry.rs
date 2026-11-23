@@ -393,10 +393,11 @@ pub fn router(
     let router = Router::new()
         .merge(mcp::mount(entry.clone()))
         .nest("/api/v1", api);
-    let router = if let Some(assets) = runtime.retained_assets {
-        router.nest_service("/assets", ServeDir::new(assets))
+    let assets = ServeDir::new(web.join("assets"));
+    let router = if let Some(previous) = runtime.retained_assets {
+        router.nest_service("/assets", assets.fallback(ServeDir::new(previous)))
     } else {
-        router
+        router.nest_service("/assets", assets)
     };
     Ok(router
         .fallback_service(

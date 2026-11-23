@@ -77,7 +77,7 @@ pub(crate) async fn serve(profile: PathBuf, options: Serve) -> Result<(), Failur
         None => profile.join("current/web"),
     }
     .canonicalize()?;
-    let retained_assets = profile.join("assets");
+    let retained_assets = profile.join(install::PREVIOUS_ASSETS);
     let retained_assets = (options.web.is_none()
         && retained_assets
             .symlink_metadata()

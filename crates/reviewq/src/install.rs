@@ -13,11 +13,13 @@ mod codex_hook;
 mod files;
 mod managed;
 pub(crate) mod paths;
+mod retention;
 mod windows;
 use crate::{runtime_settings, service};
 use bundle::Bundle;
 pub(crate) use managed::{Managed, StartupPermission};
 use paths::Paths;
+pub(crate) use retention::PREVIOUS_ASSETS;
 use service::StartupCheck;
 
 pub(crate) type Failure = Box<dyn std::error::Error + Send + Sync>;
@@ -196,11 +198,16 @@ pub(crate) async fn install(bundle_path: &Path) -> Result<(), Failure> {
         claude::validate(&paths, &bundle, host).await?;
     }
     let old = inventory.active.as_ref();
-    let pending = match inventory.pending.as_ref() {
-        Some(pending) if pending.next == next => pending,
+    let staging = match inventory.pending.as_ref() {
+        Some(pending) if pending.next == next => pending.staging.clone(),
         Some(_) => {
             return Err("Retry the exact pending bundle before selecting another release.".into());
         }
+        None => files::reserve_stage(&paths)?,
+    };
+    let retention = retention::Plan::prepare(&paths, old, &bundle, &inventory.known, &staging)?;
+    let pending = match inventory.pending.as_ref() {
+        Some(pending) => pending,
         None => {
             files::preflight(&paths, old, None)?;
             bridge::check(&paths, old.is_some())?;
@@ -236,7 +243,7 @@ pub(crate) async fn install(bundle_path: &Path) -> Result<(), Failure> {
             }
             inventory.pending = Some(Activation {
                 next: next.clone(),
-                staging: files::reserve_stage(&paths)?,
+                staging,
                 was_enabled,
                 was_running,
                 store_id,
@@ -261,7 +268,8 @@ pub(crate) async fn install(bundle_path: &Path) -> Result<(), Failure> {
     };
     bridge::check(&paths, true)?;
     claude::preflight(&paths, old, &next, true).await?;
-    files::stage(&paths, &bundle, &pending.staging)?;
+    retention.record(&paths)?;
+    files::stage(&paths, &bundle, &pending.staging, &retention)?;
     let result = async {
         let identity = activate(&paths, old, &next, &unit, pending.store_id.as_deref()).await?;
         authorize_recovery(&paths, &next, &identity, &mut inventory).await
@@ -283,6 +291,10 @@ pub(crate) async fn install(bundle_path: &Path) -> Result<(), Failure> {
                     )
                     .await?;
                 }
+                let preserved = retention.restore(&paths, previous, &next, &mut inventory.known)
+                    .map_err(|cleanup| format!("{error} ReviewQ restored the previous release, but candidate cleanup was interrupted: {cleanup}"))?;
+                paths::write_json(&journal(&paths), &inventory)?;
+                report_preserved(preserved);
             }
             return Err(error);
         }
@@ -298,6 +310,18 @@ pub(crate) async fn install(bundle_path: &Path) -> Result<(), Failure> {
     }
     let endpoint =
         crate::runtime::read_endpoint_with_build(&paths.profile, &identity.build_digest)?;
+    let preserved = retention
+        .finish(&paths, &next, &mut inventory.known)
+        .map_err(|error| {
+            format!("ReviewQ is active, but release cleanup was interrupted: {error}")
+        })?;
+    paths::write_json(&journal(&paths), &inventory)?;
+    for path in preserved {
+        eprintln!(
+            "Preserved a modified installation entry at {}.",
+            path.display()
+        );
+    }
     // A hook is optional and can be installed only after the new release has
     // passed rollback and operational readiness. Keep pending ownership across
     // an interrupted write, independently of the active release.
@@ -332,6 +356,15 @@ pub(crate) async fn install(bundle_path: &Path) -> Result<(), Failure> {
         println!("Use /reload-plugins in open Claude Code sessions to load this release.");
     }
     Ok(())
+}
+
+fn report_preserved(entries: Vec<PathBuf>) {
+    for path in entries {
+        eprintln!(
+            "Preserved a modified installation entry at {}.",
+            path.display()
+        );
+    }
 }
 
 async fn authorize_recovery(
@@ -403,8 +436,9 @@ async fn rollback(
     inventory: &mut Inventory,
 ) -> Result<(), Failure> {
     files::preflight(paths, Some(previous), Some(&pending.next))?;
-    let bundle = Bundle::read(&paths.profile.join("releases").join(&previous.id))?;
-    if bundle.id != previous.id {
+    let bundle = Bundle::inventory(&paths.profile.join("releases").join(&previous.id))?;
+    bundle.verify()?;
+    if bundle.id != previous.id || bundle.manifest.store != previous.store {
         return Err("The previous release could not be verified.".into());
     }
     let unit = match previous_unit {
@@ -537,7 +571,10 @@ pub(crate) async fn uninstall() -> Result<(), Failure> {
         .removal_stage
         .as_deref()
         .ok_or("Missing removal stage.")?;
-    let conflicts = files::remove(&paths, active, &inventory.known, removal)?;
+    let mut conflicts = retention::remove_assets(&paths, &inventory.known)?;
+    if conflicts.is_empty() {
+        conflicts = files::remove(&paths, active, &inventory.known, removal)?;
+    }
     service::reload().await?;
     if !conflicts.is_empty() {
         return Err(format!(
@@ -550,6 +587,7 @@ pub(crate) async fn uninstall() -> Result<(), Failure> {
         )
         .into());
     }
+    retention::clear_assets_journal(&paths)?;
     inventory = Inventory::default();
     paths::write_json(&journal(&paths), &inventory)?;
     println!(

@@ -1,4 +1,3 @@
-use std::collections::BTreeMap;
 use std::fs::{self, OpenOptions, Permissions};
 use std::io::{self, Read};
 use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
@@ -8,8 +7,9 @@ use sha2::{Digest, Sha256};
 
 use super::{
     Failure, Release,
-    bundle::{self, Bundle, Entry},
+    bundle::{self, Bundle},
     paths::{self, Paths},
+    retention,
 };
 
 fn current(paths: &Paths) -> PathBuf {
@@ -121,7 +121,7 @@ pub(super) fn reserve_removal(paths: &Paths) -> Result<String, Failure> {
     reserve_operation(paths, ".remove-")
 }
 
-fn reserve_operation(paths: &Paths, prefix: &str) -> Result<String, Failure> {
+pub(super) fn reserve_operation(paths: &Paths, prefix: &str) -> Result<String, Failure> {
     let mut random = [0; 16];
     getrandom::fill(&mut random).map_err(|_| "Could not reserve release staging.")?;
     let id = bundle::hex(&random);
@@ -132,14 +132,19 @@ fn reserve_operation(paths: &Paths, prefix: &str) -> Result<String, Failure> {
     Ok(id)
 }
 
-fn operation_path(paths: &Paths, prefix: &str, id: &str) -> Result<PathBuf, Failure> {
+pub(super) fn operation_path(paths: &Paths, prefix: &str, id: &str) -> Result<PathBuf, Failure> {
     if id.len() != 32 || !id.bytes().all(|ch| ch.is_ascii_hexdigit()) {
         return Err("Invalid release staging identity.".into());
     }
     Ok(paths.profile.join("releases").join(format!("{prefix}{id}")))
 }
 
-pub(super) fn stage(paths: &Paths, bundle: &Bundle, id: &str) -> Result<(), Failure> {
+pub(super) fn stage(
+    paths: &Paths,
+    bundle: &Bundle,
+    id: &str,
+    retained: &retention::Plan,
+) -> Result<(), Failure> {
     let releases = paths.profile.join("releases");
     let destination = releases.join(&bundle.id);
     let stage = operation_path(paths, ".stage-", id)?;
@@ -180,30 +185,12 @@ pub(super) fn stage(paths: &Paths, bundle: &Bundle, id: &str) -> Result<(), Fail
         )?;
         paths::sync(&releases)?;
     }
-    for (name, entry) in assets(bundle) {
-        let path = paths.profile.join("assets").join(name);
-        if paths::exists(&path)? {
-            verify(&path, entry)?;
-        } else {
-            paths::ensure_dir(paths::parent(&path)?, true)?;
-            let staged_asset = stage.join("asset");
-            copy(&destination.join(&entry.path), &staged_asset, entry.mode)?;
-            verify(&staged_asset, entry)?;
-            rustix::fs::renameat_with(
-                rustix::fs::CWD,
-                &staged_asset,
-                rustix::fs::CWD,
-                &path,
-                rustix::fs::RenameFlags::NOREPLACE,
-            )?;
-            paths::sync(paths::parent(&path)?)?;
-        }
-    }
+    retained.publish(paths, &stage)?;
     fs::remove_dir(&stage)?;
     paths::sync(&releases)
 }
 
-fn copy(from: &Path, to: &Path, mode: u32) -> Result<(), Failure> {
+pub(super) fn copy(from: &Path, to: &Path, mode: u32) -> Result<(), Failure> {
     let mut source = bundle::regular(from)?;
     let mut destination = OpenOptions::new()
         .write(true)
@@ -214,22 +201,6 @@ fn copy(from: &Path, to: &Path, mode: u32) -> Result<(), Failure> {
     io::copy(&mut source, &mut destination)?;
     destination.sync_all()?;
     paths::sync(paths::parent(to)?)
-}
-
-fn assets(bundle: &Bundle) -> impl Iterator<Item = (&str, &Entry)> {
-    bundle
-        .manifest
-        .files
-        .iter()
-        .filter_map(|entry| Some((entry.path.strip_prefix("web/assets/")?, entry)))
-}
-
-fn verify(path: &Path, entry: &Entry) -> Result<(), Failure> {
-    let file = bundle::regular(path).map_err(|_| paths::conflict(path))?;
-    if file.metadata()?.len() != entry.size || bundle::digest_file(file)? != entry.sha256 {
-        return Err(paths::conflict(path));
-    }
-    Ok(())
 }
 
 pub(super) fn set(
@@ -310,41 +281,21 @@ pub(super) fn remove(
     if allowed_link(&paths.launcher, std::iter::once(launcher_target(paths))).is_err() {
         conflicts.push(paths.launcher.clone());
     }
-    let mut owned_assets = BTreeMap::new();
     let mut owned_releases = Vec::new();
     for id in known {
         let directory = paths.profile.join("releases").join(id);
         if !paths::exists(&directory)? {
             continue;
         }
-        let Ok(bundle) = Bundle::read(&directory) else {
+        let Ok(bundle) = Bundle::inventory(&directory) else {
             conflicts.push(directory);
             continue;
         };
-        if &bundle.id != id {
+        if &bundle.id != id || bundle.verify().is_err() {
             conflicts.push(directory);
             continue;
         }
-        for (name, entry) in assets(&bundle) {
-            let copy = paths.profile.join("assets").join(name);
-            if paths::exists(&copy)? {
-                owned_assets.insert(copy, (entry.size, entry.sha256.clone()));
-            }
-        }
         owned_releases.push((id, directory));
-    }
-    for (path, (size, digest)) in owned_assets {
-        let valid = (|| -> Result<bool, Failure> {
-            let file = bundle::regular(&path)?;
-            Ok(file.metadata()?.len() == size && bundle::digest_file(file)? == digest)
-        })()
-        .unwrap_or(false);
-        if valid {
-            fs::remove_file(&path)?;
-            paths::sync(paths::parent(&path)?)?;
-        } else {
-            conflicts.push(path);
-        }
     }
     if !conflicts.is_empty() {
         return Ok(conflicts);
@@ -364,7 +315,7 @@ pub(super) fn remove(
     Ok(conflicts)
 }
 
-fn quarantine(tombstones: &Path, id: &str, source: &Path) -> Result<(), Failure> {
+pub(super) fn quarantine(tombstones: &Path, id: &str, source: &Path) -> Result<(), Failure> {
     rustix::fs::renameat_with(
         rustix::fs::CWD,
         source,
