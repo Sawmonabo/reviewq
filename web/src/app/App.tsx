@@ -11,7 +11,9 @@ import { Icon } from "../components/Icon";
 import { Modal } from "../components/Modal";
 import { PanelBoundary } from "../components/PanelBoundary";
 import { Loading, Notice } from "../components/PanelState";
+import { Wordmark } from "../components/Wordmark";
 import type { LaunchMode, LaunchTarget } from "../features/queue/types";
+import { useAppearance } from "../hooks/useAppearance";
 import { useResource } from "../hooks/useResource";
 import { DraftStore } from "../lib/drafts";
 import { describeError } from "../lib/presentation";
@@ -55,8 +57,7 @@ export function App() {
     return typeof saved === "number" && Number.isFinite(saved) ? saved : REVIEW_LIST_PERCENT;
   });
   const [railSmall, setRailSmall] = useState(savedValue("rail") === true);
-  const [theme, setTheme] = useState(savedValue("theme") === "light" ? "light" : "dark");
-  const [compact, setCompact] = useState(savedValue("compact") === true);
+  const { appearance, change: changeAppearance } = useAppearance();
   const [settings, setSettings] = useState(
     () => savedValue("settings.open") === settingsScope(route),
   );
@@ -176,10 +177,6 @@ export function App() {
       window.removeEventListener("offline", network);
     };
   }, []);
-  useEffect(() => {
-    document.documentElement.dataset.theme = theme;
-    document.documentElement.dataset.density = compact ? "compact" : "regular";
-  }, [theme, compact]);
   useEffect(() => {
     saveValue("settings.open", settings ? settingsAddress : null);
   }, [settings, settingsAddress]);
@@ -345,15 +342,6 @@ export function App() {
     setSplit(next);
     saveValue("split", next);
   }
-  function toggleDensity() {
-    setCompact(!compact);
-    saveValue("compact", !compact);
-  }
-  function toggleTheme() {
-    const next = theme === "dark" ? "light" : "dark";
-    setTheme(next);
-    saveValue("theme", next);
-  }
   function toggleRail() {
     setRailSmall(!railSmall);
     saveValue("rail", !railSmall);
@@ -395,6 +383,15 @@ export function App() {
                     { label: "Pending launches", run: () => menuLaunch("receipts") },
                   ]}
                 />
+              )}
+              {!selection && route.view === "queue" && (
+                <button
+                  type="button"
+                  className="workspace-drafts"
+                  onClick={() => setOverlay({ kind: "drafts" })}
+                >
+                  <Icon name="inbox" size={14} /> Unsent drafts
+                </button>
               )}
             </div>
           )}
@@ -438,12 +435,7 @@ export function App() {
               <img className="brand-monogram" src="/icon.svg" width={32} height={32} alt="" />
             ) : (
               <>
-                <div className="brand-wordmark">
-                  <span>Review</span>
-                  <svg className="brand-q" viewBox="7 3 20 26" aria-hidden="true">
-                    <use href="/icon.svg#reviewq-glyph" />
-                  </svg>
-                </div>
+                <Wordmark />
                 <small>Agentic Code reviews</small>
               </>
             )}
@@ -689,28 +681,8 @@ export function App() {
           )}
           {settings && (
             <SettingsPane
-              displayOptions={
-                <details className="settings-display">
-                  <summary>Appearance</summary>
-                  <div className="actions">
-                    <button type="button" onClick={toggleDensity}>
-                      {compact ? "Regular spacing" : "Compact spacing"}
-                    </button>
-                    <button type="button" onClick={toggleTheme}>
-                      {theme === "dark" ? "Light theme" : "Dark theme"}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setSettings(false);
-                        setOverlay({ kind: "drafts" });
-                      }}
-                    >
-                      Unsent drafts
-                    </button>
-                  </div>
-                </details>
-              }
+              appearance={appearance}
+              onAppearance={changeAppearance}
               onClose={() => setSettings(false)}
               onSave={() => {
                 setRevision((value) => value + 1);

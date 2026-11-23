@@ -330,6 +330,18 @@
   color: var(--text);
   border-color: var(--control-line);
 }
+.workspace-title .workspace-drafts {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 35px;
+  padding-inline: 9px;
+  color: var(--text);
+  background: var(--control);
+  border-color: var(--control-line);
+  font-size: 11px;
+}
+.workspace-title .workspace-drafts:hover,
 .workspace-title .menu-trigger:hover {
   background: var(--control-hover);
   border-color: var(--control-hover-line);
@@ -374,9 +386,6 @@
   font-size: 25px;
   font-weight: 580;
   letter-spacing: -0.8px;
-}
-.settings-display .actions {
-  margin-top: 8px;
 }
 .splitter {
   position: relative;

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useEffectEvent, useRef, useState } from "react";
 import type {
   CatalogItem,
   CatalogResponse,
@@ -6,6 +6,7 @@ import type {
   SaveSettingsRepositoryBinding,
 } from "../../api/generated/contracts/settings";
 import { browseCatalog } from "../../api/settings";
+import { Icon } from "../../components/Icon";
 import { Loading, Notice } from "../../components/PanelState";
 import { useResource } from "../../hooks/useResource";
 import { describeError, readable } from "../../lib/presentation";
@@ -18,30 +19,36 @@ type StatusCatalog = {
   readonly next: string | null;
 };
 type Props = {
+  readonly active: boolean;
   readonly boards: readonly SaveSettingsBoardScope[];
   readonly repositories: readonly SaveSettingsRepositoryBinding[];
   readonly connection: CatalogConnection;
   readonly connectionEpoch: number;
   readonly disabled: boolean;
+  readonly browsing: boolean;
+  readonly onDismissCatalog: () => void;
+  readonly onRepositories: () => void;
   readonly showErrors: boolean;
   readonly onResolving: (resolving: boolean) => void;
   readonly onAdd: (item: CatalogItem) => void;
   readonly onChange: (board: SaveSettingsBoardScope) => void;
   readonly onRemove: (scopeId: string) => void;
-  readonly onMembership: (scopeId: string, projectId: string, include: boolean) => void;
 };
 
 export function TeamBoards({
+  active,
   boards,
   repositories,
   connection,
   connectionEpoch,
   disabled,
+  browsing,
+  onDismissCatalog,
+  onRepositories,
   showErrors,
   onAdd,
   onChange,
   onRemove,
-  onMembership,
   onResolving,
 }: Props) {
   const [adding, setAdding] = useState<string>();
@@ -115,28 +122,41 @@ export function TeamBoards({
     }
   }
 
+  const loadStatuses = useEffectEvent(() => void readStatuses());
+  useEffect(() => {
+    if (!active || !boards.length) return;
+    const frame = requestAnimationFrame(() => loadStatuses());
+    return () => cancelAnimationFrame(frame);
+  }, [active, boards.length]);
+
   return (
     <section className="settings-section stack" aria-labelledby="team-boards">
-      <h3 id="team-boards">Team boards</h3>
-      <p className="meta">
-        Only tickets from the boards and repositories you choose enter your queue.
-      </p>
-      <CatalogPicker
-        connectionEpoch={connectionEpoch}
-        scope={connection}
-        kind="boards"
-        label="Browse Jira boards"
-        inputId="settings-board-search"
-        unavailable={boards.map((board) => board.boardId)}
-        disabled={disabled || Boolean(adding)}
-        onAdd={(item) => void add(item)}
-      />
+      {browsing && (
+        <CatalogPicker
+          connectionEpoch={connectionEpoch}
+          scope={connection}
+          kind="boards"
+          label="Browse Jira boards"
+          inputId="settings-board-search"
+          unavailable={boards.map((board) => board.boardId)}
+          disabled={disabled || Boolean(adding)}
+          embedded
+          onDismiss={onDismissCatalog}
+          onAdd={(item) => void add(item)}
+        />
+      )}
+      <div className="settings-inline">
+        <h3 id="team-boards">Tracked boards</h3>
+        <span className="meta">{boards.filter((board) => board.enabled).length} active boards</span>
+      </div>
       {adding && <Loading label={`Loading ${adding}…`} />}
       {addError && <Notice>{addError}</Notice>}
-      {boards.map((board) => (
+      {boards.map((board, index) => (
         <BoardEditor
           key={board.scopeId}
           board={board}
+          active={active}
+          initiallyOpen={index === 0}
           repositories={repositories}
           connection={connection}
           connectionEpoch={connectionEpoch}
@@ -150,20 +170,20 @@ export function TeamBoards({
           onChange={onChange}
           onRemove={() => {
             onRemove(board.scopeId);
-            settingsFocus("settings-board-search");
+            settingsFocus("settings-add-board");
           }}
-          onMembership={onMembership}
+          onRepositories={onRepositories}
         />
       ))}
-      {!boards.length && (
-        <p className="meta">Registered reviews remain available once connected.</p>
-      )}
+      {!boards.length && <p className="meta">Add a Jira board to configure review scope.</p>}
     </section>
   );
 }
 
 function BoardEditor({
+  active,
   board,
+  initiallyOpen,
   repositories,
   connection,
   connectionEpoch,
@@ -176,9 +196,11 @@ function BoardEditor({
   showErrors,
   onChange,
   onRemove,
-  onMembership,
+  onRepositories,
 }: {
+  readonly active: boolean;
   readonly board: SaveSettingsBoardScope;
+  readonly initiallyOpen: boolean;
   readonly repositories: Props["repositories"];
   readonly connection: CatalogConnection;
   readonly connectionEpoch: number;
@@ -191,9 +213,10 @@ function BoardEditor({
   readonly showErrors: boolean;
   readonly onChange: Props["onChange"];
   readonly onRemove: () => void;
-  readonly onMembership: Props["onMembership"];
+  readonly onRepositories: Props["onRepositories"];
 }) {
-  const [choose, setChoose] = useState(false);
+  const [opened, setOpened] = useState(initiallyOpen);
+  const choose = active && opened;
   const [projectKeys, setProjectKeys] = useState(board.jiraProjectKeys.join(", "));
   const [filterLabel, setFilterLabel] = useState<string>();
   const boardMetadata = useResource(`board-metadata:${board.boardId}:${choose}`, (signal) =>
@@ -215,50 +238,40 @@ function BoardEditor({
     !repositories.some((repo) => boardIncludesRepository(board, repo));
 
   return (
-    <details className="settings-selection" open>
+    <details
+      className="settings-selection"
+      open={initiallyOpen}
+      onToggle={(event) => setOpened(event.currentTarget.open)}
+    >
       <summary id={`settings-board-${board.boardId}`}>
-        <strong>{board.name}</strong>
-        <span>
-          {readable(exact?.boardType ?? board.type)} · #{board.boardId}
-          {!board.enabled && " · Paused"}
+        <span className="settings-resource-icon">
+          <Icon name="board" />
         </span>
+        <span className="settings-resource-name">
+          <strong>{board.name}</strong>
+          <small>
+            {readable(exact?.boardType ?? board.type)} #{board.boardId}
+            {!!board.jiraProjectKeys.length && ` · ${board.jiraProjectKeys.join(", ")}`}
+            {" · "}
+            {repositories.filter((repo) => boardIncludesRepository(board, repo)).length} repos
+          </small>
+        </span>
+        <span className="settings-state" data-active={board.enabled || undefined}>
+          {board.enabled ? "Active" : "Paused"}
+        </span>
+        <Icon name="chevronRight" size={14} />
       </summary>
       <fieldset className="settings-selection-body stack" disabled={disabled}>
-        <div className="settings-inline">
-          <label className="settings-check">
-            <input
-              type="checkbox"
-              checked={board.enabled}
-              onChange={(event) => onChange({ ...board, enabled: event.currentTarget.checked })}
-            />
-            Track this board
-          </label>
-          <button className="quiet-button" type="button" onClick={onRemove}>
-            Remove
-          </button>
-        </div>
-        <div className="settings-inline">
-          <h4>Review statuses</h4>
-          <button
-            className="quiet-button"
-            type="button"
-            aria-expanded={choose}
-            onClick={() => {
-              setChoose(!choose);
-              if (!choose) onReadStatuses();
-            }}
-          >
-            {choose ? "Hide statuses" : "Choose statuses"}
-          </button>
-        </div>
+        <label className="settings-check">
+          <input
+            type="checkbox"
+            checked={board.enabled}
+            onChange={(event) => onChange({ ...board, enabled: event.currentTarget.checked })}
+          />
+          Include this board in the review queue
+        </label>
+        <h4>Ticket statuses in review</h4>
         {blankStatus && <Notice>Choose at least one review status.</Notice>}
-        {!choose && (
-          <p className="meta">
-            {board.reviewStatusIds.length
-              ? `${board.reviewStatusIds.length} review ${board.reviewStatusIds.length === 1 ? "status" : "statuses"} selected`
-              : "Choose the statuses that mean ready for review."}
-          </p>
-        )}
         {choose && (
           <div className="stack">
             {boardMetadata.error && (
@@ -332,28 +345,12 @@ function BoardEditor({
             )}
           </div>
         )}
-        <h4>Repositories for this board</h4>
-        {blankRepo && <Notice>Choose at least one repository.</Notice>}
-        <div className="settings-choices">
-          {repositories.map((repo) => (
-            <label key={repo.projectId} className="settings-check">
-              <input
-                type="checkbox"
-                checked={boardIncludesRepository(board, repo)}
-                disabled={repo.boardSelection === "any"}
-                onChange={(event) =>
-                  onMembership(board.scopeId, repo.projectId, event.currentTarget.checked)
-                }
-              />
-              <span>
-                {repo.path}
-                {repo.boardSelection === "any" && <small> · Any tracked board</small>}
-              </span>
-            </label>
-          ))}
-        </div>
-        {!repositories.length && (
-          <p className="meta">Add repositories below, then select the ones this team uses.</p>
+        {blankRepo && (
+          <Notice>
+            <button type="button" className="quiet-button" onClick={onRepositories}>
+              Manage Jira boards on Repositories
+            </button>
+          </Notice>
         )}
         <details className="settings-advanced">
           <summary>Team restrictions &amp; estimates</summary>
@@ -419,6 +416,9 @@ function BoardEditor({
             />
           </div>
         </details>
+        <button className="quiet-button settings-remove" type="button" onClick={onRemove}>
+          Remove board
+        </button>
       </fieldset>
     </details>
   );
