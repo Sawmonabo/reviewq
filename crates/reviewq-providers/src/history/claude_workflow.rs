@@ -234,8 +234,17 @@ pub(crate) fn claude_workflow_result(
                     })
                     .collect::<String>()
                     .into_bytes();
-                let digest = ReportHash::from_sha256(Sha256::digest(&text).into());
-                if !text.is_empty() && digest == *hash {
+                let matches = |bytes: &[u8]| {
+                    !bytes.is_empty()
+                        && ReportHash::from_sha256(Sha256::digest(bytes).into()) == *hash
+                };
+                // Claude's turn.end answer can omit the final LF present in the
+                // persisted end_turn message. The accepted artifact keeps that LF.
+                if matches(&text)
+                    || (row.message.as_ref().is_some_and(|m| {
+                        m["role"] == "assistant" && m["stop_reason"] == "end_turn"
+                    }) && text.strip_suffix(b"\n").is_some_and(matches))
+                {
                     saved.response = Some(text);
                 }
                 break;
@@ -401,6 +410,30 @@ mod tests {
             claude_workflow_prompt(&session, &prompt, &cancelled).unwrap(),
             anchor
         );
+        let original = "# Report\n\nAuthored  spacing.\n";
+        let row = json!({"type":"assistant","uuid":"final","sessionId":"thread","message":{"role":"assistant","stop_reason":"end_turn","content":[
+            {"type":"text","text":original}
+        ]}});
+        writeln!(file, "{row}").unwrap();
+        let response = |entry: &str, observed: &str| {
+            let hash = ReportHash::from_sha256(Sha256::digest(observed.as_bytes()).into());
+            claude_workflow_result(
+                &session,
+                &call,
+                &ack,
+                Some((entry.parse().unwrap(), hash)),
+                &cancelled,
+            )
+            .unwrap()
+            .unwrap()
+            .response
+        };
+        assert_eq!(
+            response("final", original.strip_suffix('\n').unwrap()).as_deref(),
+            Some(original.as_bytes())
+        );
+        assert_eq!(response("final", "# Report\n\nAuthored spacing."), None);
+        assert_eq!(response("different-entry", original), None);
         let directly_verified = NativeCall {
             source_position: direct.position,
             source_ordinal: direct.ordinal,
