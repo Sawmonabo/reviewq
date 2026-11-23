@@ -1,15 +1,14 @@
 use std::borrow::Cow;
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use toml_edit::{DocumentMut, Item, Table, value};
 
-use super::Failure;
 use super::files::{Changes, Edit, Existing, read, read_limited};
 use super::git::{self, Checkout};
+use super::{Failure, claude};
 
 const MARKER: &str = "# Managed by ReviewQ";
 const EXCLUSIONS: &str = "# ReviewQ checkout files\n/.codex/config.toml\n/.agents/skills/reviewq-manage\n/.claude/skills/reviewq-manage\n# End ReviewQ checkout files\n";
@@ -199,8 +198,12 @@ impl Inventory {
             Owned::Codex { .. } => codex(Some(&before), &self.urls, bearer, None)?
                 .unwrap_or_else(|| before.bytes.clone()),
             Owned::Claude { checkout, .. } => {
-                claude(Some(&before), checkout, &self.urls, bearer, None)?
-                    .unwrap_or_else(|| before.bytes.clone())
+                let Some(bytes) =
+                    claude::edit(Some(&before.bytes), checkout, &self.urls, bearer, None)?
+                else {
+                    return Ok(None);
+                };
+                bytes
             }
         };
         if updated == before.bytes {
@@ -310,24 +313,13 @@ impl Plan {
                 skill,
             )?;
         }
+        let mut claude_changes = BTreeMap::<&Path, Vec<&Path>>::new();
         if let Some(file) = claude_file {
-            let file = file.to_owned();
-            let owned = Owned::Claude {
-                file: file.clone(),
+            claude_changes.entry(file).or_default();
+            current.entries.insert(Owned::Claude {
+                file: file.to_owned(),
                 checkout: checkout.primary.clone(),
-            };
-            let before = read(&file)?;
-            let empty = BTreeSet::new();
-            let urls = if previous.entries.contains(&owned) {
-                &previous.urls
-            } else {
-                &empty
-            };
-            let bytes = claude(before.as_ref(), &checkout.primary, urls, bearer, Some(url))
-                .map_err(|_| conflict(&file))?
-                .ok_or_else(|| conflict(&file))?;
-            current.entries.insert(owned);
-            edits.push(Edit::new(file, before, bytes, true));
+            });
             add_skill(
                 checkout.primary.join(CLAUDE[0]),
                 &previous,
@@ -346,10 +338,23 @@ impl Plan {
                 })
             })
         {
+            if let Owned::Claude { file, checkout } = owned {
+                claude_changes.entry(file).or_default().push(checkout);
+                continue;
+            }
             if let Some(edit) = previous
                 .removal(owned, &checkout.common, bearer)
                 .await
                 .map_err(|_| conflict(owned.file()))?
+            {
+                edits.push(edit);
+            }
+        }
+        for (file, retired) in claude_changes {
+            let selected = (Some(file) == claude_file).then_some(checkout.primary.as_path());
+            if let Some(edit) = plan_claude(file, &retired, selected, &previous, bearer, url)
+                .await
+                .map_err(|_| conflict(file))?
             {
                 edits.push(edit);
             }
@@ -403,6 +408,57 @@ impl Plan {
         self.clients.rollback()?;
         self.exclusions.rollback()
     }
+}
+
+async fn plan_claude(
+    file: &Path,
+    retired: &[&Path],
+    selected: Option<&Path>,
+    previous: &Inventory,
+    bearer: &str,
+    url: &str,
+) -> Result<Option<Edit>, Failure> {
+    let before = read(file)?;
+    let original = before.as_ref().map(|file| file.bytes.as_slice());
+    let mut after = None;
+    if original.is_some() && !retired.is_empty() {
+        git::private_config(file, false).await?;
+        for checkout in retired {
+            if let Some(bytes) = claude::edit(
+                after.as_deref().or(original),
+                checkout,
+                &previous.urls,
+                bearer,
+                None,
+            )? {
+                after = Some(bytes);
+            }
+        }
+    }
+    if let Some(checkout) = selected {
+        let owned = Owned::Claude {
+            file: file.to_owned(),
+            checkout: checkout.to_owned(),
+        };
+        let empty = BTreeSet::new();
+        let urls = if previous.entries.contains(&owned) {
+            &previous.urls
+        } else {
+            &empty
+        };
+        if let Some(bytes) = claude::edit(
+            after.as_deref().or(original),
+            checkout,
+            urls,
+            bearer,
+            Some(url),
+        )? {
+            after = Some(bytes);
+        } else if after.is_none() && before.as_ref().is_some_and(|file| file.mode != 0o600) {
+            after = original.map(<[u8]>::to_vec);
+        }
+    }
+    Ok(after.map(|bytes| Edit::new(file.to_owned(), before, bytes, true)))
 }
 
 fn exclusion(
@@ -563,63 +619,4 @@ fn codex(
         }
     }
     Ok(Some(document.to_string().into_bytes()))
-}
-
-fn claude(
-    before: Option<&Existing>,
-    checkout: &Path,
-    owned: &BTreeSet<String>,
-    bearer: &str,
-    url: Option<&str>,
-) -> Result<Option<Vec<u8>>, Failure> {
-    let mut config: Value = before.map_or_else(
-        || Ok(json!({})),
-        |file| {
-            serde_json::from_slice(&file.bytes)
-                .map_err(|_| "Could not parse the Claude profile config.")
-        },
-    )?;
-    let checkout = checkout.to_str().ok_or("Expected a UTF-8 checkout path.")?;
-    let existing = config
-        .get("projects")
-        .and_then(|value| value.get(checkout))
-        .and_then(|value| value.get("mcpServers"))
-        .and_then(|servers| servers.get("reviewq"));
-    if let Some(existing) = existing {
-        let value = existing
-            .get("url")
-            .and_then(Value::as_str)
-            .ok_or("The existing Claude MCP entry was preserved.")?;
-        if !owned.contains(value) || *existing != claude_entry(value, bearer) {
-            return Err("The existing Claude MCP entry was preserved.".into());
-        }
-        if Some(value) == url {
-            return Ok(before.map(|file| file.bytes.clone()));
-        }
-    } else if url.is_none() {
-        return Ok(None);
-    }
-    let checkout = section(section(&mut config, "projects")?, checkout)?;
-    let servers = section(checkout, "mcpServers")?
-        .as_object_mut()
-        .ok_or("Claude mcpServers is not an object.")?;
-    if let Some(url) = url {
-        servers.insert("reviewq".into(), claude_entry(url, bearer));
-    } else {
-        servers.remove("reviewq");
-    }
-    let mut bytes = serde_json::to_vec_pretty(&config)?;
-    bytes.push(b'\n');
-    Ok(Some(bytes))
-}
-
-fn claude_entry(url: &str, bearer: &str) -> Value {
-    json!({"type":"http", "url":url, "headers":{"Authorization":format!("Bearer {bearer}")}})
-}
-
-fn section<'a>(value: &'a mut Value, key: &str) -> Result<&'a mut Value, Failure> {
-    let map = value
-        .as_object_mut()
-        .ok_or("Claude config contains an incompatible entry.")?;
-    Ok(map.entry(key.to_string()).or_insert_with(|| json!({})))
 }

@@ -11,6 +11,7 @@ use sha2::{Digest, Sha256};
 
 use crate::{native_client, runtime};
 
+mod claude;
 mod files;
 mod git;
 mod hooks;
