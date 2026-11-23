@@ -8,6 +8,7 @@ import { describeError } from "../../../lib/presentation";
 import { historyKey, PAGE_LIMIT, readBookmark } from "./history-window";
 
 type ReadPosition = "older" | "newer" | "latest" | "around";
+type ReadMode = "manual" | "refresh" | "prefill";
 type Anchor = { readonly entryId: string; readonly locator?: string; readonly rowId?: string };
 type Delta = {
   readonly runId: string;
@@ -92,12 +93,13 @@ export function useHistory(
     return entryId !== undefined && focusedDiagram === entryId;
   }
 
-  async function load(position: ReadPosition, wanted?: Anchor, background = false) {
+  async function load(position: ReadPosition, wanted?: Anchor, mode: ReadMode = "manual") {
+    const background = mode !== "manual";
     if (position === "latest" && !background) resetTo.current = undefined;
     const requestedJump =
       !background && (position === "latest" || (position === "around" && wanted !== undefined));
     if (active.current && !requestedJump) {
-      if (background) pending.current = true;
+      if (mode === "refresh") pending.current = true;
       return;
     }
     const cursor =
@@ -148,15 +150,29 @@ export function useHistory(
       if (controller.signal.aborted) return;
       const { data, cursor: eventCursor } = response;
       const replacing = data.reset || !adjacent || data.generation !== generation;
+      if (mode === "prefill" && (replacing || currentView.current.pinned.size)) return;
       if (held(replacing, data)) return;
-      currentView.current.beforeUpdate(position, wanted, !replacing);
+      const previousHead = last?.items[0];
+      const refreshedHead = data.items[0];
+      // Earlier pages still reach the same boundary when a live refresh keeps its head entry.
+      const keepEarlier =
+        mode === "refresh" &&
+        position === "latest" &&
+        pages.length > 1 &&
+        !data.reset &&
+        data.generation === generation &&
+        data.nextCursor !== null &&
+        previousHead !== undefined &&
+        refreshedHead !== undefined &&
+        historyKey(previousHead) === historyKey(refreshedHead);
+      currentView.current.beforeUpdate(position, wanted, !replacing || keepEarlier);
       observeSnapshot(eventCursor);
       setAvailability(data.availability);
       setUpdated(Date.now());
       setError(undefined);
       setWaiting(pending.current);
       if (replacing) {
-        setPages([data]);
+        setPages(keepEarlier ? [...pages.slice(0, -1), data] : [data]);
         setLive((current) =>
           background &&
           current &&
@@ -174,7 +190,7 @@ export function useHistory(
         if (data.items.some((entry) => entry.entryId === live?.entryId)) setLive(undefined);
       }
     } catch (failure) {
-      if (!controller.signal.aborted) {
+      if (!controller.signal.aborted && mode !== "prefill") {
         setError({
           message: describeError(failure),
           connection: isWorkspaceConnectionFailure(failure),
@@ -183,6 +199,7 @@ export function useHistory(
     } finally {
       if (active.current?.controller === controller) {
         active.current = undefined;
+        if (mode === "prefill" && pending.current) setWaiting(true);
         setLoading(false);
       }
     }
@@ -230,7 +247,7 @@ export function useHistory(
       setWaiting(true);
       return;
     }
-    void load(last?.previousCursor && kind !== "reset" ? "newer" : "latest", undefined, true);
+    void load(last?.previousCursor && kind !== "reset" ? "newer" : "latest", undefined, "refresh");
   });
 
   const resumeAfterInterruption = useEffectEvent(() => {
@@ -244,7 +261,7 @@ export function useHistory(
     const wanted = resetTo.current;
     if (!wanted && !following && !diagram) return;
     resetTo.current = undefined;
-    void load(wanted ? "around" : "latest", wanted, !wanted);
+    void load(wanted ? "around" : "latest", wanted, wanted ? "manual" : "refresh");
   });
 
   useEffect(() => {

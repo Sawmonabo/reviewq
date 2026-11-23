@@ -281,6 +281,9 @@
   scrollbar-width: thin;
   scrollbar-color: transparent transparent;
 }
+.timeline-viewport[data-align-end] {
+  align-content: safe end;
+}
 .timeline-viewport:is(.is-scrolling, :focus-visible) {
   scrollbar-color: var(--scroll-thumb) transparent;
 }

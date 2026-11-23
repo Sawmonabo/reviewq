@@ -1,4 +1,3 @@
-import { useVirtualizer } from "@tanstack/react-virtual";
 import type { defaultRangeExtractor } from "@tanstack/react-virtual";
 import {
   useCallback,
@@ -51,6 +50,7 @@ import {
 import { MarkdownContent } from "../../../components/markdown/MarkdownContent";
 import { useHistory } from "./useHistory";
 import { useInlineProse } from "./useInlineProse";
+import { useTimelineList } from "./useTimelineList";
 import { useQuestionJump } from "./questions/useQuestionJump";
 import type { Questions } from "./questions/useQuestions";
 
@@ -133,6 +133,7 @@ export function Transcript({ target, provider, child, messages, working, questio
   const requestedLatest = useRef(false);
   const activeLatest = useRef(false);
   const toolFocus = useRef<ReadTarget | undefined>(undefined);
+  const renderedRows = useRef<readonly VisibleRow[]>([]);
 
   const history = useHistory(
     target,
@@ -145,7 +146,7 @@ export function Transcript({ target, provider, child, messages, working, questio
       setGroupKeys(
         new Set(
           extend
-            ? entries
+            ? renderedRows.current
                 .filter((row) => row.kind === "tool-run" || row.kind === "read-pack")
                 .map((row) => row.id)
             : [],
@@ -177,6 +178,7 @@ export function Transcript({ target, provider, child, messages, working, questio
     },
   );
   const historyEntries = useMemo(() => entriesIn(history.pages), [history.pages]);
+  const showWorking = working && Boolean(history.generation) && !history.newer;
   const knownTools = useMemo(() => toolCatalog(historyEntries), [historyEntries]);
   useEffect(() => () => partsRequest.current?.abort(), [history.generation]);
   const canonical = useMemo(
@@ -217,6 +219,9 @@ export function Transcript({ target, provider, child, messages, working, questio
     knownTools,
     messages,
   ]);
+  useLayoutEffect(() => {
+    renderedRows.current = entries;
+  }, [entries]);
 
   const rangeExtractor = useCallback(
     (range: Parameters<typeof defaultRangeExtractor>[0]) =>
@@ -224,37 +229,30 @@ export function Transcript({ target, provider, child, messages, working, questio
     [entries, pinned, findAnchorEntry],
   );
 
-  const rowKey = useCallback((index: number) => entries[index]?.id ?? index, [entries]);
-
-  // Keep scroll measurements and the TanStack instance within this component.
-  // eslint-disable-next-line react-hooks/incompatible-library
-  const list = useVirtualizer({
-    count: entries.length,
-    getScrollElement: () => viewport.current,
-    getItemKey: rowKey,
-    // Resolve retained row keys against the new window before mounting its visible range.
-    anchorTo: focusedDiagram || (output && readingOutput === output.reference) ? "start" : "end",
-    estimateSize: (index) =>
-      entries[index]?.kind === "tool-run" ? 35 : entries[index]?.kind === "read-pack" ? 55 : 95,
-    paddingStart: history.older ? 40 : 0,
-    paddingEnd: history.newer ? 40 : 0,
-    overscan: 7,
+  const alignEnd = !child && !history.newer && (entries.length > 0 || showWorking);
+  const fillCursor =
+    alignEnd && following && !pinned.size && !history.loading && !history.waiting && !history.error
+      ? (history.pages[0]?.nextCursor ?? undefined)
+      : undefined;
+  const { list, windowHeight, contentHeight } = useTimelineList({
+    viewport,
+    entries,
     rangeExtractor,
+    anchorToStart: Boolean(focusedDiagram || (output && readingOutput === output.reference)),
+    older: history.older,
+    newer: history.newer,
+    fillCursor,
+    onFill: () => {
+      if (anchor.current || scrollIntent.current) return false;
+      void history.load("older", undefined, "prefill");
+      return true;
+    },
   });
-
-  useEffect(() => {
-    // Heights belong to the retained pages. Keep measurements for pinned and overlapping rows.
-    const retained = new Set(entries.map((row) => row.id));
-    for (const key of list.itemSizeCache.keys()) {
-      if (typeof key !== "string" || !retained.has(key)) list.itemSizeCache.delete(key);
-    }
-  }, [entries, list]);
 
   const prompts = useMemo(() => promptRanks(entries), [entries]);
   const virtualRows = list.getVirtualItems();
-  const windowHeight = list.scrollRect?.height ?? 0;
   const windowTop = following
-    ? Math.max(0, list.getTotalSize() - windowHeight)
+    ? Math.max(0, contentHeight - windowHeight)
     : (list.scrollOffset ?? 0);
   const nearby = windowHeight
     ? virtualRows
@@ -284,11 +282,13 @@ export function Transcript({ target, provider, child, messages, working, questio
     void history.load(direction);
   });
 
-  const contentHeight = list.getTotalSize();
   useLayoutEffect(() => {
     if (!entries.length) return;
-    if (requestedLatest.current || (following && !anchor.current && !focusedDiagram)) {
-      list.scrollToIndex(entries.length - 1, { align: "end" });
+    if (
+      requestedLatest.current ||
+      (following && !anchor.current && !selectedText && !focusedDiagram)
+    ) {
+      list.scrollToEnd();
       requestedLatest.current = false;
       anchor.current = undefined;
     } else if (anchor.current) {
@@ -357,7 +357,17 @@ export function Transcript({ target, provider, child, messages, working, questio
       });
       return () => cancelAnimationFrame(frame);
     }
-  }, [entries, following, list, prose, contentHeight, focusedDiagram]);
+  }, [
+    entries,
+    following,
+    list,
+    prose,
+    contentHeight,
+    focusedDiagram,
+    selectedText,
+    showWorking,
+    windowHeight,
+  ]);
 
   const savePosition = useEffectEvent((host: HTMLDivElement | null) => {
     if (anchor.current?.reopenPages !== undefined && !anchor.current.jump) return;
@@ -620,6 +630,7 @@ export function Transcript({ target, provider, child, messages, working, questio
       />
       <div
         className="timeline-viewport"
+        data-align-end={alignEnd ? "" : undefined}
         aria-label="Conversation history"
         role="region"
         ref={viewport}
@@ -684,7 +695,7 @@ export function Transcript({ target, provider, child, messages, working, questio
             !history.error && <Empty title="No native messages are available" />
           ))}
         {entries.length > 0 && (
-          <div className="timeline-spacer" style={{ height: list.getTotalSize() }}>
+          <div className="timeline-spacer" style={{ height: contentHeight }}>
             {history.older && (
               <button
                 className="timeline-boundary older"
@@ -812,7 +823,7 @@ export function Transcript({ target, provider, child, messages, working, questio
             )}
           </div>
         )}
-        {working && history.generation && !history.newer && (
+        {showWorking && (
           <p className="timeline-working" role="status">
             <span className="timeline-working-dots" aria-hidden="true">
               <i />
