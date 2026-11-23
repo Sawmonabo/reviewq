@@ -22,6 +22,7 @@ import { savedValue, saveValue } from "../lib/view-preferences";
 import { WorkspaceWarning } from "./connection/WorkspaceWarning";
 import { useWorkspaceConnection } from "./connection/useWorkspaceConnection";
 import type { WorkspaceConnection } from "./connection/useWorkspaceConnection";
+import { DetailHeader, LoadingDetail } from "./DetailHeader";
 import { readRoute, writeRoute } from "./selection";
 import type { Route } from "./selection";
 import { clampSplit, Splitter } from "./Splitter";
@@ -94,7 +95,11 @@ function Workspace({ warning }: { readonly warning: WorkspaceConnection | undefi
     overlay?.kind === "monitor" || (overlay?.kind === "launch" && overlay.mode !== "receipts");
   const paneOpen = opened || form;
   const phone = useSyncExternalStore(watchDetailViewport, phoneDetailViewport);
-  const detailWarning = warning && phone ? <WorkspaceWarning connection={warning} /> : undefined;
+  const detailWarning = phone && (
+    <div className="detail-warning-slot">
+      {warning && <WorkspaceWarning connection={warning} />}
+    </div>
+  );
   const title = views.find((item) => item.view === route.view)?.label ?? "Review queue";
 
   const drawerModule = useResource(`review-drawer-module:${Boolean(reviewId)}`, async () => ({
@@ -370,8 +375,11 @@ function Workspace({ warning }: { readonly warning: WorkspaceConnection | undefi
 
   function renderHeader(selection?: ReactNode) {
     return (
-      <header className="workspace-title">
-        {route.view !== "notifications" && <p>Your workspace</p>}
+      <header className="workspace-title" data-view={route.view}>
+        <div className="workspace-title-context">
+          {route.view !== "notifications" && <p>Your workspace</p>}
+          {warning && !(phone && paneOpen) && <WorkspaceWarning connection={warning} />}
+        </div>
         <h1 id="view-title" tabIndex={-1}>
           {title}
         </h1>
@@ -403,11 +411,25 @@ function Workspace({ warning }: { readonly warning: WorkspaceConnection | undefi
               <Icon name="inbox" size={14} /> Unsent drafts
             </button>
           )}
-          {warning && !(phone && paneOpen) && <WorkspaceWarning connection={warning} />}
         </div>
       </header>
     );
   }
+
+  const drawerHeader = (
+    <DetailHeader
+      ticket={reviewId ? undefined : ticket}
+      actions={!form && detailWarning}
+      onClose={closeDrawer}
+    />
+  );
+  const formHeader = phone && (
+    <DetailHeader
+      title={overlay?.kind === "monitor" ? "Auto-review updates" : "Review setup"}
+      actions={detailWarning}
+      onClose={closeForm}
+    />
+  );
 
   return (
     <main
@@ -569,8 +591,12 @@ function Workspace({ warning }: { readonly warning: WorkspaceConnection | undefi
             tabIndex={-1}
             aria-label={ticket ? "Ticket details" : "Review details"}
           >
-            <PanelBoundary key={reviewId ?? ticket}>
-              <Suspense fallback={<Loading label="Opening detail panel…" />}>
+            <PanelBoundary key={reviewId ?? ticket} leading={phone && drawerHeader}>
+              <Suspense
+                fallback={
+                  <LoadingDetail header={phone && drawerHeader} label="Opening detail panel…" />
+                }
+              >
                 {overview.data && reviewId && ReviewDrawer ? (
                   <ReviewDrawer
                     overview={overview.data}
@@ -610,15 +636,7 @@ function Workspace({ warning }: { readonly warning: WorkspaceConnection | undefi
                   />
                 ) : reviewId ? (
                   <>
-                    <header className="drawer-header spread">
-                      <h2>Review details</h2>
-                      <div className="actions drawer-header-actions">
-                        <button type="button" aria-label="Close review" onClick={closeDrawer}>
-                          <Icon name="close" />
-                        </button>
-                        {!form && detailWarning}
-                      </div>
-                    </header>
+                    {drawerHeader}
                     {overview.error ? (
                       <Notice retry={overview.retry}>{overview.error}</Notice>
                     ) : overview.unavailable ? (
@@ -632,25 +650,7 @@ function Workspace({ warning }: { readonly warning: WorkspaceConnection | undefi
                 ) : (
                   ticket && (
                     <div className="drawer-surface">
-                      <header className="drawer-header spread">
-                        <div>
-                          <h2>{ticket}</h2>
-                          <span className="row-tag" data-review-kind="thread_reply">
-                            No matching MR
-                          </span>
-                        </div>
-                        <div className="actions drawer-header-actions">
-                          <button
-                            type="button"
-                            className="icon-button"
-                            aria-label="Return to workspace"
-                            onClick={closeDrawer}
-                          >
-                            <Icon name="back" />
-                          </button>
-                          {!form && detailWarning}
-                        </div>
-                      </header>
+                      {drawerHeader}
                       <div className="drawer-body">{renderTickets([ticket])}</div>
                     </div>
                   )
@@ -661,8 +661,8 @@ function Workspace({ warning }: { readonly warning: WorkspaceConnection | undefi
         )}
         {form && (
           <div className="overlay-host" ref={overlayHost}>
-            <PanelBoundary>
-              <Suspense fallback={<Loading label="Opening form…" />}>
+            <PanelBoundary leading={formHeader}>
+              <Suspense fallback={<LoadingDetail header={formHeader} label="Opening form…" />}>
                 {overlay.kind === "launch" ? (
                   <BulkLaunch
                     mode={overlay.mode}

@@ -313,11 +313,24 @@
   gap: 8px 16px;
   margin-bottom: 31px;
 }
-.workspace-title > p {
+.workspace-title-context {
+  position: relative;
   flex-basis: 100%;
+  min-block-size: 1lh;
   color: var(--muted);
   font-size: 11px;
   line-height: 15px;
+}
+.workspace-title[data-view="notifications"] {
+  position: relative;
+}
+.workspace-title[data-view="notifications"] > .workspace-title-context {
+  position: absolute;
+  inset-block: 0;
+  inset-inline-end: 0;
+}
+.workspace-title[data-view="notifications"] > h1 {
+  max-inline-size: calc(100% - 52px);
 }
 .workspace-title > .actions {
   justify-content: flex-end;
@@ -713,7 +726,7 @@
   .workspace-title {
     margin-bottom: 24px;
   }
-  .workspace-title > p {
+  .workspace-title-context {
     letter-spacing: 1px;
     line-height: 1.6;
   }
@@ -744,6 +757,9 @@
   .work-pane .modal-frame > header,
   .work-pane .modal-frame > footer {
     padding-inline: 17px;
+  }
+  .work-pane .modal-frame > header {
+    flex-shrink: 0;
   }
   .drawer-close-phone {
     display: inline;

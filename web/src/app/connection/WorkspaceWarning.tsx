@@ -19,7 +19,7 @@ export function WorkspaceWarning({ connection }: { readonly connection: Workspac
       const active = document.activeElement;
       if (!trigger || (active !== trigger && !popover?.contains(active))) return;
       const header = trigger.closest("header");
-      const fallback = trigger.previousElementSibling ?? header?.querySelector("h1");
+      const fallback = header?.querySelector("h1") ?? trigger.parentElement?.nextElementSibling;
       requestAnimationFrame(() => {
         if (document.activeElement !== document.body) return;
         const next = document.querySelector<HTMLElement>(".workspace-warning-button");

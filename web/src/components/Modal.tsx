@@ -41,13 +41,14 @@ export function ModalFrame({
 }: DialogProps) {
   const titleId = useId();
   const dialog = useRef<HTMLDialogElement>(null);
+  const closeButton = useRef<HTMLButtonElement>(null);
   const backdrop = useRef(false);
   useEffect(() => {
     const node = dialog.current;
     const opener = document.activeElement;
     if (nonmodal) node?.show();
     else node?.showModal();
-    initialFocus?.current?.focus({ preventScroll: true });
+    (initialFocus?.current ?? closeButton.current)?.focus({ preventScroll: true });
     return () => {
       const active = document.activeElement;
       node?.close();
@@ -62,6 +63,7 @@ export function ModalFrame({
   }, [initialFocus, nonmodal]);
   const close = (
     <button
+      ref={closeButton}
       type="button"
       className="icon-button"
       aria-label="Close dialog"
@@ -112,8 +114,8 @@ export function ModalFrame({
           </div>
           {headerActions ? (
             <div className="actions modal-header-actions">
-              {close}
               {headerActions}
+              {close}
             </div>
           ) : (
             close

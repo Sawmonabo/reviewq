@@ -482,6 +482,7 @@ export default function ReviewDrawer({
                   : []),
               ]}
             />
+            {headerActions}
             <button
               type="button"
               className="icon-button"
@@ -491,7 +492,6 @@ export default function ReviewDrawer({
             >
               <Icon name="close" />
             </button>
-            {headerActions}
           </div>
         </div>
         <div className="drawer-heading">
