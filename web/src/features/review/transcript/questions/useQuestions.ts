@@ -61,7 +61,7 @@ export function useQuestions(
       const key = questionKey(form);
       const attempt = attempts.getSnapshot().get(key);
       if (!attempt || needsResponse(form.status)) return;
-      finish(store, attempt, form.status === "answered");
+      finish(store, attempt, form.status === "answered" && !form.answeredElsewhere);
       attempts.set(key, undefined);
     },
     [attempts, store],
@@ -99,7 +99,7 @@ export function useQuestions(
         throw new Error("The native question changed.");
       if (attempts.getSnapshot().get(key) !== started) return;
       if (result.status === "pending" || !needsResponse(result.status)) {
-        finish(store, started, result.status === "answered");
+        finish(store, started, result.status === "answered" && !result.answeredElsewhere);
         attempts.set(
           key,
           result.status === "pending" ? undefined : { status: result.status, drafts: [] },

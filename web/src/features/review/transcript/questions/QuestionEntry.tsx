@@ -81,11 +81,9 @@ export function QuestionEntry({
   const activePrompt = useRef<HTMLDivElement>(null);
   const moveToPrompt = useRef(false);
   const wasFocused = useRef(false);
-  const draftAddress = form ?? address;
-  const prefix = draftAddress ? questionDraftPrefix(target, draftAddress) : null;
-  const hasDraft = useSyncExternalStore(
-    store.subscribe,
-    () => !!prefix && store.getSnapshot().entries.some((draft) => draft.key.startsWith(prefix)),
+  const prefix = questionDraftPrefix(target, form ?? { requestId, itemId, turnId });
+  const hasDraft = useSyncExternalStore(store.subscribe, () =>
+    store.getSnapshot().entries.some((draft) => draft.key.startsWith(prefix)),
   );
   const open = Boolean(actionable && replying);
   const outcome = outcomeLabel(recordedStatus ?? known?.form.status);
@@ -207,7 +205,7 @@ function QuestionDetails({
   readonly items: readonly Question[];
   readonly selected: Readonly<Record<string, readonly string[]>> | undefined;
   readonly form: Form | undefined;
-  readonly prefix: string | null;
+  readonly prefix: string;
   readonly store: Questions["store"];
   readonly reading: boolean;
   readonly error: string | undefined;
@@ -240,7 +238,7 @@ function QuestionDetails({
       {notice && <Notice>{notice}</Notice>}
       {!needsResponse(form?.status ?? "unavailable") &&
         snapshot.entries
-          .filter((draft) => prefix && draft.key.startsWith(prefix))
+          .filter((draft) => draft.key.startsWith(prefix))
           .map((draft) => (
             <div className="actions" key={draft.key}>
               <small className="meta">Unsent answer</small>
