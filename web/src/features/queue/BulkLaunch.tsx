@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import type { ReactNode } from "react";
 import type { KeyboardEvent } from "react";
 import { readOverview } from "../../api/client";
 import type {
@@ -43,6 +44,7 @@ type Props = {
   readonly settingsRevision: number;
   readonly onSettings: () => void;
   readonly onClose: () => void;
+  readonly headerActions?: ReactNode;
   readonly onOpen: (review: string, run: string) => void;
 };
 
@@ -60,6 +62,7 @@ function LaunchEditor({
   settingsRevision,
   onSettings,
   onClose,
+  headerActions,
   onOpen,
 }: Props) {
   const [targets, setTargets] = useState(initialTargets);
@@ -360,6 +363,7 @@ function LaunchEditor({
               : "Launch MR session"
       }
       onClose={onClose}
+      headerActions={headerActions}
       busy={busy}
       footer={
         !choosing && (

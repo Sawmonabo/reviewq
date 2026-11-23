@@ -1,0 +1,60 @@
+button.workspace-warning-button {
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  inline-size: 33px;
+  min-block-size: 35px;
+  padding: 0;
+  color: var(--amber);
+  border-color: transparent;
+  background: transparent;
+}
+button.workspace-warning-button:enabled:is(:hover, [aria-expanded="true"]) {
+  color: var(--amber);
+  border-color: transparent;
+  background: var(--amber-bg);
+}
+.filter-popup.workspace-warning-popup {
+  position-area: block-end span-inline-start;
+  justify-self: end;
+  inline-size: min(312px, calc(100vw - 32px));
+  max-block-size: min(65dvh, 460px);
+  padding: 14px;
+  font-size: 12px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.workspace-warning-popup > h2 {
+  margin: 0;
+  font-size: 14px;
+}
+.workspace-warning-popup > :is(p, dl, footer) {
+  margin: 8px 0 0;
+}
+.workspace-warning-popup > dl {
+  display: grid;
+  gap: 6px;
+}
+.workspace-warning-popup dt {
+  font-weight: 600;
+}
+.workspace-warning-popup dd {
+  margin: 0;
+  color: var(--muted);
+}
+.workspace-warning-popup > footer {
+  display: flex;
+  justify-content: flex-end;
+}
+@media (pointer: coarse) {
+  button.workspace-warning-button {
+    inline-size: 44px;
+    min-block-size: 44px;
+  }
+}
+@supports not (position-area: block-end span-inline-start) {
+  .filter-popup.workspace-warning-popup {
+    inset: 20% 0 auto;
+    margin-inline: auto;
+  }
+}

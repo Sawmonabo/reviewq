@@ -7,7 +7,7 @@ import { assignNotifications, readNotifications } from "../../api/workspace";
 import { Icon } from "../../components/Icon";
 import { Empty, Loading, Notice } from "../../components/PanelState";
 import { ReviewBadges } from "../../components/ReviewRow";
-import { useResource } from "../../hooks/useResource";
+import { useWorkspaceResource } from "../../hooks/useWorkspaceResource";
 import { describeError, formatActivityTime, formatTime, readable } from "../../lib/presentation";
 import { savedValue, saveValue } from "../../lib/view-preferences";
 import "./attention.css";
@@ -67,7 +67,8 @@ export function AttentionView({
   const selectShown = useRef<HTMLInputElement>(null);
   const focusAfterUpdate = useRef<InboxFocus | undefined>(undefined);
   useEffect(() => () => request.current?.abort(), []);
-  const page = useResource(
+  const page = useWorkspaceResource(
+    "Notifications",
     `inbox:${mode}`,
     (signal) => readNotifications({ view: mode }, signal),
     [{ kind: "notification" }, { kind: "review" }, { kind: "queue" }],
@@ -76,7 +77,7 @@ export function AttentionView({
   const headCursor = page.data?.nextCursor;
   // A new head cursor can change the revision, watermark or access scope of every older page.
   const history = older?.headCursor === headCursor ? older : undefined;
-  if (!page.data && page.error && older) setOlder(undefined);
+  if (!page.data && page.errorCause && older) setOlder(undefined);
   const cursor = history ? history.nextCursor : headCursor;
   const byId = new Map((page.data?.items ?? []).map((item) => [item.id, item]));
   for (const item of history?.items ?? []) if (!byId.has(item.id)) byId.set(item.id, item);

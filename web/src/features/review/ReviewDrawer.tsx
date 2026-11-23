@@ -53,6 +53,7 @@ type Props = {
   readonly onDefaultRun: () => void;
   readonly selectionError: string | undefined;
   readonly selectionPending: boolean;
+  readonly selectionUnavailable: boolean;
   readonly tab: Tab;
   readonly drafts: DraftStore;
   readonly ticket: ReactNode;
@@ -60,6 +61,7 @@ type Props = {
   readonly onSession: (session: string | undefined, tab?: Tab) => void;
   readonly onRun: (run: string) => void;
   readonly onClose: () => void;
+  readonly headerActions?: ReactNode;
   readonly onReload: () => void;
   readonly onLaunch: (mode: "prepare" | "register", targets: readonly MergeRequestRow[]) => void;
   readonly onMonitor: (targets: readonly MergeRequestRow[], pause: boolean) => void;
@@ -75,12 +77,14 @@ export default function ReviewDrawer({
   onDefaultRun,
   selectionError,
   selectionPending,
+  selectionUnavailable,
   drafts,
   ticket,
   onTab,
   onSession,
   onRun,
   onClose,
+  headerActions,
   onReload,
   onLaunch,
   onMonitor,
@@ -98,8 +102,11 @@ export default function ReviewDrawer({
   const title = child
     ? (child.metadata.name ?? "Subagent")
     : (review.tickets[0]?.title ?? review.title);
-  const unavailableSession = Boolean(run && !session && !selectionPending && !selectionError);
-  const selected = !selectionPending && !selectionError && !unavailableSession;
+  const unavailableSession = Boolean(
+    run && !session && !selectionPending && !selectionError && !selectionUnavailable,
+  );
+  const selected =
+    !selectionPending && !selectionError && !selectionUnavailable && !unavailableSession;
   const canMutate = selected && review.mrState === "open";
   const snapshot = captureAttention(overview);
   const changedSinceCapture =
@@ -484,6 +491,7 @@ export default function ReviewDrawer({
             >
               <Icon name="close" />
             </button>
+            {headerActions}
           </div>
         </div>
         <div className="drawer-heading">
@@ -694,6 +702,8 @@ export default function ReviewDrawer({
                 />
               ) : selectionPending ? (
                 <Loading label="Resolving selected run…" />
+              ) : selectionUnavailable ? (
+                <Empty title="Review run details are unavailable" />
               ) : (
                 <Empty title="No review run registered">
                   <p>Start or register a review to see its agents.</p>

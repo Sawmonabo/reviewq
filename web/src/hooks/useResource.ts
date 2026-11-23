@@ -1,4 +1,4 @@
-import { useEffect, useEffectEvent, useRef, useState } from "react";
+import { useCallback, useEffect, useEffectEvent, useRef, useState } from "react";
 import { observeSnapshot, watchResources } from "../api/events";
 import type { ResourceKeyDto } from "../api/generated/contracts";
 
@@ -19,6 +19,11 @@ export function useResource<T>(
 ) {
   const [result, setResult] = useState<Result<T>>();
   const [epoch, setEpoch] = useState(0);
+  const inFlight = useRef<AbortController | undefined>(undefined);
+  const retry = useCallback(() => setEpoch((value) => value + 1), []);
+  const retryIfIdle = useCallback(() => {
+    if (!inFlight.current) retry();
+  }, [retry]);
   const readCurrent = useEffectEvent(read);
   const discard = useEffectEvent((error: unknown) => discardOnError?.(error) ?? false);
   const keys = JSON.stringify(resources);
@@ -47,9 +52,12 @@ export function useResource<T>(
   useEffect(() => {
     const controller = new AbortController();
     const registered = lease.current;
-    let pending = true;
+    inFlight.current = controller;
+    function settle() {
+      if (inFlight.current === controller) inFlight.current = undefined;
+    }
     function hide() {
-      if (pending) controller.abort();
+      if (inFlight.current === controller) controller.abort();
     }
     function restore(event: PageTransitionEvent) {
       if (event.persisted && controller.signal.aborted) setEpoch((value) => value + 1);
@@ -58,14 +66,14 @@ export function useResource<T>(
     window.addEventListener("pageshow", restore);
     void readCurrent(controller.signal).then(
       ({ data, cursor }) => {
-        pending = false;
+        settle();
         if (controller.signal.aborted) return;
         setResult({ key, data, confirmedAt: Date.now() });
         if (registered) registered.snapshot(cursor);
         else observeSnapshot(cursor);
       },
       (error: unknown) => {
-        pending = false;
+        settle();
         if (!controller.signal.aborted) {
           const retain = !discard(error);
           setResult((previous) => ({
@@ -79,6 +87,7 @@ export function useResource<T>(
     );
     return () => {
       controller.abort();
+      settle();
       window.removeEventListener("pagehide", hide);
       window.removeEventListener("pageshow", restore);
     };
@@ -88,7 +97,8 @@ export function useResource<T>(
   return {
     ...current,
     pending: current === undefined,
-    retry: () => setEpoch((value) => value + 1),
+    retry,
+    retryIfIdle,
   };
 }
 

@@ -613,7 +613,11 @@ export function Transcript({ target, provider, child, messages, working, questio
       />
       {selectedText && <HistorySelection onClear={clear} onError={setActionNotice} />}
       {actionNotice && <Notice>{actionNotice}</Notice>}
-      <HistoryStatus history={history} onRetry={() => void history.load("latest")} />
+      <HistoryStatus
+        history={history}
+        onRetry={() => void history.load("latest")}
+        onReconnect={history.reconnect}
+      />
       <div
         className="timeline-viewport"
         aria-label="Conversation history"

@@ -1,4 +1,4 @@
-import { useId, useState } from "react";
+import { useId, useRef, useState } from "react";
 import { ApiResponseError } from "../../api/client";
 import type { DeliveryReceipt } from "../../api/generated/contracts/delivery";
 import { readReceipt, sendMessage } from "../../api/history";
@@ -6,6 +6,8 @@ import type { SessionAddress } from "../../api/history";
 import { Icon } from "../../components/Icon";
 import { Notice } from "../../components/PanelState";
 import { useDraft } from "../../hooks/useDraft";
+import { useWorkspaceRecovery } from "../../hooks/useWorkspaceRecovery";
+import { isWorkspaceConnectionFailure } from "../../hooks/useWorkspaceResource";
 import type { DraftStore } from "../../lib/drafts";
 import { describeError } from "../../lib/presentation";
 import { submits } from "../../lib/submit-key";
@@ -18,6 +20,7 @@ type Attempt = {
   readonly accepted?: () => void;
   readonly receipt?: DeliveryReceipt;
   readonly error?: string;
+  readonly lookupInterrupted?: boolean;
 };
 const attempts = new WeakMap<DraftStore, Map<string, Attempt>>();
 const MAX_MESSAGE = 12_000;
@@ -60,6 +63,7 @@ export function Composer({
   });
   const [last, setLast] = useState(() => managed.get(draftKey));
   const [busy, setBusy] = useState(false);
+  const checking = useRef(false);
   const [rejectedEdit, setRejectedEdit] = useState(false);
   const [composition, setComposition] = useState<string>();
   const current = managed.get(draftKey) ?? last;
@@ -88,7 +92,9 @@ export function Composer({
   }
 
   async function reconcile(attempt: Attempt, retry: boolean) {
-    if (busy) return;
+    if (busy || checking.current || managed.get(draftKey)?.submissionId !== attempt.submissionId)
+      return;
+    checking.current = true;
     setFailure(undefined);
     setBusy(true);
     try {
@@ -105,10 +111,21 @@ export function Composer({
           const receipt = await attempt.dispatch();
           finish(attempt, receipt);
         } catch (retryError) {
-          remember({ ...attempt, error: describeError(retryError) });
+          remember({
+            ...attempt,
+            error: describeError(retryError),
+            lookupInterrupted: receiptUnavailable(retryError),
+          });
         }
-      } else remember({ ...attempt, error: describeError(error) });
+      } else {
+        remember({
+          ...attempt,
+          error: describeError(error),
+          lookupInterrupted: receiptUnavailable(error),
+        });
+      }
     } finally {
+      checking.current = false;
       setBusy(false);
     }
   }
@@ -144,8 +161,12 @@ export function Composer({
             attempt,
             await readReceipt(target, attempt.submissionId, AbortSignal.timeout(10_000)),
           );
-        } catch {
-          remember({ ...attempt, error: describeError(error) });
+        } catch (lookupError) {
+          remember({
+            ...attempt,
+            error: describeError(error),
+            lookupInterrupted: receiptUnavailable(lookupError),
+          });
         }
       }
     } finally {
@@ -154,6 +175,11 @@ export function Composer({
   }
 
   const [failure, setFailure] = useState<string>();
+  useWorkspaceRecovery(
+    current?.lookupInterrupted
+      ? { kind: "receipt", label: "Delivery receipt", retry: () => void reconcile(current, false) }
+      : undefined,
+  );
   const sendLabel = "Send to review agent";
   function edit(value: string) {
     setFailure(undefined);
@@ -242,5 +268,12 @@ export function Composer({
         </div>
       </form>
     </div>
+  );
+}
+
+function receiptUnavailable(error: unknown) {
+  return (
+    isWorkspaceConnectionFailure(error) ||
+    (error instanceof DOMException && error.name === "TimeoutError")
   );
 }

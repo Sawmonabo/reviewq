@@ -41,10 +41,13 @@ export default function Tickets({ keys }: { readonly keys: readonly string[] }) 
 }
 
 function TicketDetail({ ticketKey }: { readonly ticketKey: string }) {
-  const { ticket, order, trail, switching, error, select, retry } = useTicket(ticketKey);
+  const { ticket, order, trail, switching, error, unavailable, select, retry } =
+    useTicket(ticketKey);
   if (!ticket)
     return error ? (
       <Notice retry={retry}>{error}</Notice>
+    ) : unavailable ? (
+      <p className="meta">Ticket information is unavailable.</p>
     ) : (
       <Loading label={`Loading ${ticketKey}…`} />
     );

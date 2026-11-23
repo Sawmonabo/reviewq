@@ -247,6 +247,9 @@
   font-weight: 610;
   letter-spacing: normal;
 }
+.work-pane .modal-header-actions {
+  flex-wrap: nowrap;
+}
 .work-pane .modal-frame > header .icon-button {
   border: 0;
   background: transparent;
@@ -310,14 +313,15 @@
   gap: 8px 16px;
   margin-bottom: 31px;
 }
-.workspace-title p {
+.workspace-title > p {
   flex-basis: 100%;
   color: var(--muted);
   font-size: 11px;
   line-height: 15px;
 }
-.workspace-title .actions {
-  margin-left: auto;
+.workspace-title > .actions {
+  justify-content: flex-end;
+  margin-inline-start: auto;
 }
 .workspace-title .menu-trigger {
   width: auto;
@@ -468,6 +472,10 @@
   margin-bottom: 5px;
   color: var(--muted);
   font-size: 12px;
+}
+.drawer-header-actions {
+  flex-wrap: nowrap;
+  margin-inline-start: auto;
 }
 .drawer-header h2 {
   margin-bottom: 10px;
@@ -705,7 +713,7 @@
   .workspace-title {
     margin-bottom: 24px;
   }
-  .workspace-title p {
+  .workspace-title > p {
     letter-spacing: 1px;
     line-height: 1.6;
   }

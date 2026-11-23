@@ -1,4 +1,5 @@
 import { useState } from "react";
+import type { ReactNode } from "react";
 import { readPatchDiscussions, readPatchFiles } from "../../../api/changes";
 import { readOverview } from "../../../api/client";
 import type { FollowupConfigureRequest, PatchDiscussion } from "../../../api/generated/contracts";
@@ -29,10 +30,12 @@ export default function MonitorPane({
   targets,
   pause,
   onClose,
+  headerActions,
 }: {
   readonly targets: readonly Target[];
   readonly pause: boolean;
   readonly onClose: () => void;
+  readonly headerActions?: ReactNode;
 }) {
   const [commands, setCommands] = useState<Readonly<Record<string, Command>>>({});
   const [busy, setBusy] = useState(false);
@@ -88,6 +91,7 @@ export default function MonitorPane({
       nonmodal
       busy={busy}
       onClose={onClose}
+      headerActions={headerActions}
       footer={
         <>
           <button type="button" onClick={onClose} disabled={busy}>

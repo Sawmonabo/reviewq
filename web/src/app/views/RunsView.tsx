@@ -9,7 +9,7 @@ import { providerLabel, ReviewBadges } from "../../components/ReviewRow";
 import { localDateRange, presets } from "../../features/queue/archive-filters";
 import type { DatePreset } from "../../features/queue/archive-filters";
 import type { Launch, LaunchTarget, OpenReview } from "../../features/queue/types";
-import { useResource } from "../../hooks/useResource";
+import { useWorkspaceResource } from "../../hooks/useWorkspaceResource";
 import { formatActivityTime, reviewReasonLabel } from "../../lib/presentation";
 import { savedValue, saveValue } from "../../lib/view-preferences";
 import { SelectionActions } from "../SelectionActions";
@@ -72,12 +72,14 @@ export function RunsView({
     hasAgentQuestions: questions || undefined,
     reasonKind: reason || undefined,
   };
-  const counts = useResource(
+  const counts = useWorkspaceResource(
+    "Review run counts",
     "runs-counts",
     (signal) => readRuns({ stage: "needs_input", limit: 1 }, signal),
     [{ kind: "run" }, { kind: "review" }, { kind: "queue" }],
   );
-  const runs = useResource(
+  const runs = useWorkspaceResource(
+    "Review runs",
     `runs:${JSON.stringify(filters)}`,
     (signal) =>
       stage === "archived"
@@ -85,7 +87,9 @@ export function RunsView({
         : readRuns(filters, signal),
     [{ kind: "run" }, { kind: "review" }, { kind: "queue" }],
   );
-  const sync = useResource("runs-queue-sync", readQueueSync, [{ kind: "queue_sync" }]).data;
+  const sync = useWorkspaceResource("Queue sync status", "runs-queue-sync", readQueueSync, [
+    { kind: "queue_sync" },
+  ]).data;
   const stageCounts = runs.data?.stageCounts ?? counts.data?.stageCounts;
   const eligible = (runs.data?.items ?? []).filter((row) => row.mrState === "open");
   const captured = eligible.filter((row) => checked.includes(row.reviewId));
@@ -350,13 +354,15 @@ function ArchiveView({
     sprintPair,
     cursor: trail.at(-1),
   };
-  const archive = useResource(
+  const archive = useWorkspaceResource(
+    "Archived reviews",
     `archive:${dates.invalid ? "invalid" : JSON.stringify(filters)}`,
     (signal) =>
       dates.invalid ? Promise.resolve({ data: null, cursor: "" }) : readArchive(filters, signal),
     [{ kind: "run" }, { kind: "review" }, { kind: "settings" }],
   );
-  const catalog = useResource(
+  const catalog = useWorkspaceResource(
+    "Archive sprint filters",
     "archive-sprints",
     (signal) => readQueue({ sprint: "any", state: "archive", ownership: "all", limit: 1 }, signal),
     [{ kind: "queue" }, { kind: "settings" }],

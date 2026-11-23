@@ -1,8 +1,9 @@
 import { useEffect, useEffectEvent, useLayoutEffect, useRef, useState } from "react";
-import { observeSnapshot } from "../../../api/events";
+import { observeSnapshot, watchResources } from "../../../api/events";
 import type { HistoryPage, HistoryPageResponse } from "../../../api/generated/contracts";
 import { historyPage, nativeHistoryUrl } from "../../../api/history";
 import type { SessionAddress } from "../../../api/history";
+import { isWorkspaceConnectionFailure } from "../../../hooks/useWorkspaceResource";
 import { describeError } from "../../../lib/presentation";
 import { historyKey, PAGE_LIMIT, readBookmark } from "./history-window";
 
@@ -38,7 +39,7 @@ export function useHistory(
   const { runId, sessionKey } = target;
   const [pages, setPages] = useState<readonly HistoryPage[]>([]);
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string>();
+  const [error, setError] = useState<{ message: string; connection: boolean }>();
   const [online, setOnline] = useState(true);
   const [availability, setAvailability] = useState<string>();
   const [updated, setUpdated] = useState<number>();
@@ -52,6 +53,7 @@ export function useHistory(
     currentView.current = { beforeUpdate, pinned, focusedDiagram };
   }, [beforeUpdate, pinned, focusedDiagram]);
   const pending = useRef(false);
+  const reopen = useRef<(() => void) | undefined>(undefined);
   const resetWhileFocused = useRef(false);
   const resetTo = useRef<Anchor | undefined>(undefined);
   const first = pages[0];
@@ -172,7 +174,12 @@ export function useHistory(
         if (data.items.some((entry) => entry.entryId === live?.entryId)) setLive(undefined);
       }
     } catch (failure) {
-      if (!controller.signal.aborted) setError(describeError(failure));
+      if (!controller.signal.aborted) {
+        setError({
+          message: describeError(failure),
+          connection: isWorkspaceConnectionFailure(failure),
+        });
+      }
     } finally {
       if (active.current?.controller === controller) {
         active.current = undefined;
@@ -226,6 +233,11 @@ export function useHistory(
     void load(last?.previousCursor && kind !== "reset" ? "newer" : "latest", undefined, true);
   });
 
+  const resumeAfterInterruption = useEffectEvent(() => {
+    if (last) notice("reset", {});
+    else initialize();
+  });
+
   const catchup = useEffectEvent(() => {
     const diagram = !resetWhileFocused.current && sameLiveDiagram(live?.entryId);
     if ((!diagram && pinned.size) || !waiting || loading) return;
@@ -247,27 +259,41 @@ export function useHistory(
     }
     const firstRead = window.setTimeout(firstPage, 50);
     let stream: EventSource | undefined;
-    let retry: number | undefined;
+    let pauseTimer: number | undefined;
+    let interrupted = false;
+    function clearPause() {
+      if (pauseTimer !== undefined) window.clearTimeout(pauseTimer);
+      pauseTimer = undefined;
+    }
     function close() {
       stream?.close();
       stream = undefined;
-      if (retry !== undefined) window.clearTimeout(retry);
+      clearPause();
     }
     function open() {
       if (document.hidden) {
         close();
         return;
       }
-      if (stream) return;
+      if (stream && stream.readyState !== EventSource.CLOSED) return;
+      close();
       const next = new EventSource(nativeHistoryUrl({ runId, sessionKey }));
       stream = next;
       next.onopen = () => {
-        if (stream === next) setOnline(true);
+        if (stream !== next) return;
+        clearPause();
+        setOnline(true);
+        if (interrupted && initialized) resumeAfterInterruption();
+        interrupted = false;
       };
       next.onerror = () => {
         if (stream !== next) return;
-        if (retry !== undefined) window.clearTimeout(retry);
-        retry = window.setTimeout(() => setOnline(false), 2600);
+        interrupted = true;
+        if (pauseTimer === undefined) {
+          pauseTimer = window.setTimeout(() => {
+            if (stream === next) setOnline(false);
+          }, 2600);
+        }
       };
       for (const kind of ["changed", "reset", "availability", "delta"]) {
         next.addEventListener(kind, (event: MessageEvent<string>) => {
@@ -283,17 +309,30 @@ export function useHistory(
         });
       }
     }
+    reopen.current = () => {
+      close();
+      open();
+    };
     open();
+    const subscription = watchResources([{ kind: "history", id: sessionKey }], (reason) => {
+      if (reason === "visible" || reason === "reset") open();
+    });
     document.addEventListener("visibilitychange", open);
+    window.addEventListener("online", open);
     window.addEventListener("pagehide", close);
+    window.addEventListener("pageshow", open);
     return () => {
       window.clearTimeout(firstRead);
       const controller = active.current?.controller;
       active.current = undefined;
       controller?.abort();
       close();
+      reopen.current = undefined;
+      subscription.close();
       document.removeEventListener("visibilitychange", open);
+      window.removeEventListener("online", open);
       window.removeEventListener("pagehide", close);
+      window.removeEventListener("pageshow", open);
     };
   }, [runId, sessionKey, bookmark]);
 
@@ -309,13 +348,15 @@ export function useHistory(
     newer: Boolean(last?.previousCursor),
     waiting,
     loading,
-    error,
+    error: error?.message,
+    connectionError: error?.connection ?? false,
     online,
     availability,
     updated,
     live,
     generation,
     cancelOpposite,
+    reconnect: () => reopen.current?.(),
     load,
     openPrepared,
   };

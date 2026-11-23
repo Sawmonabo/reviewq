@@ -7,7 +7,8 @@ import { Icon } from "../../components/Icon";
 import { Pagination } from "../../components/Pagination";
 import { Loading, Notice } from "../../components/PanelState";
 import { ReviewRow, UnmatchedReviewRow } from "../../components/ReviewRow";
-import { useResource } from "../../hooks/useResource";
+import { useWorkspaceRecovery } from "../../hooks/useWorkspaceRecovery";
+import { useWorkspaceResource } from "../../hooks/useWorkspaceResource";
 import { describeError, formatActivityTime, formatTime } from "../../lib/presentation";
 import { savedValue, saveValue } from "../../lib/view-preferences";
 import {
@@ -66,14 +67,18 @@ export function QueueView({
   const search = useRef<HTMLInputElement>(null);
   const sprintRequest = useRef(0);
   const [lastFacets, setLastFacets] = useState<QueueFacets>();
-  const settingsRead = useResource(`queue-settings:${revision}`, readSettings, [
-    { kind: "settings" },
-  ]);
+  const settingsRead = useWorkspaceResource(
+    "Review filters",
+    `queue-settings:${revision}`,
+    readSettings,
+    [{ kind: "settings" }],
+  );
   const settings = settingsRead.data;
   const scope = settings ? resolveQueueScope(filters, settings) : undefined;
   const currentFilters = scope?.filters ?? filters;
   const params = queueParams({ ...currentFilters, q: query }, trail.at(-1));
-  const list = useResource(
+  const list = useWorkspaceResource(
+    "Review queue",
     `queue:${revision}:${JSON.stringify(params)}`,
     async (signal) => {
       const baseline =
@@ -99,7 +104,9 @@ export function QueueView({
     },
     [{ kind: "queue" }, { kind: "settings" }],
   );
-  const sync = useResource(`sync:${revision}`, readQueueSync, [{ kind: "queue_sync" }]);
+  const sync = useWorkspaceResource("Queue sync status", `sync:${revision}`, readQueueSync, [
+    { kind: "queue_sync" },
+  ]);
   useEffect(() => {
     const timer = window.setTimeout(() => setQuery(filters.q), 180);
     return () => window.clearTimeout(timer);
@@ -107,6 +114,20 @@ export function QueueView({
   const page = list.data;
   const facets = page?.facets ?? lastFacets;
   const currentSync = sync.data ?? page?.sync;
+  useWorkspaceRecovery(
+    currentSync?.error
+      ? {
+          kind: "sync",
+          label: "Review sources",
+          message: currentSync.error.message,
+          confirmedAt: currentSync.lastSuccessAt ?? undefined,
+          retry:
+            currentSync.mode === "connected" && currentSync.error.retryable
+              ? () => void refresh(true)
+              : undefined,
+        }
+      : undefined,
+  );
   const eligible = (page?.items ?? []).filter(
     (row): row is Extract<QueueRow, { kind: "mr" }> =>
       row.kind === "mr" && row.mrState === "open" && row.queueState !== "archive",
@@ -146,14 +167,15 @@ export function QueueView({
       update({ ...latestFilters.current, sprint, sprintPairs });
   }
 
-  async function refresh() {
+  async function refresh(keepPage = false) {
+    if (refreshing || currentSync?.active) return;
     setRefreshing(true);
     setNotice(undefined);
     try {
       const { data } = await refreshQueue();
       if (data.error) setNotice(data.error.message);
       sync.retry();
-      if (trail.length) setTrail([]);
+      if (!keepPage && trail.length) setTrail([]);
       list.retry();
     } catch (error) {
       setNotice(describeError(error));
@@ -184,13 +206,6 @@ export function QueueView({
             }}
           />
         ) : undefined,
-      )}
-      {currentSync?.error && (
-        <Notice>
-          {currentSync.error.message}
-          {currentSync.lastSuccessAt &&
-            ` · Last confirmed ${formatActivityTime(currentSync.lastSuccessAt)}`}
-        </Notice>
       )}
       {currentSync && currentSync.mode !== "connected" && (
         <div className="notice queue-setup" role="status">

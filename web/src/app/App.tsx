@@ -2,7 +2,6 @@ import { questionDraftValues } from "../lib/question-draft";
 import { lazy, Suspense, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import type { CSSProperties, ReactNode } from "react";
 import { findRunSession, readOverview, readRun, resolveReview } from "../api/client";
-import { startWorkspaceEvents } from "../api/events";
 import type { Notification, RunDetail, SessionSummary } from "../api/generated/contracts";
 import type { Tab } from "../api/generated/contracts/notifications";
 import { readNotifications } from "../api/workspace";
@@ -15,9 +14,14 @@ import { Wordmark } from "../components/Wordmark";
 import type { LaunchMode, LaunchTarget } from "../features/queue/types";
 import { useAppearance } from "../hooks/useAppearance";
 import { useResource } from "../hooks/useResource";
+import { WorkspaceRecoveryContext } from "../hooks/useWorkspaceRecovery";
+import { useWorkspaceResource } from "../hooks/useWorkspaceResource";
 import { DraftStore } from "../lib/drafts";
 import { describeError } from "../lib/presentation";
 import { savedValue, saveValue } from "../lib/view-preferences";
+import { WorkspaceWarning } from "./connection/WorkspaceWarning";
+import { useWorkspaceConnection } from "./connection/useWorkspaceConnection";
+import type { WorkspaceConnection } from "./connection/useWorkspaceConnection";
 import { readRoute, writeRoute } from "./selection";
 import type { Route } from "./selection";
 import { clampSplit, Splitter } from "./Splitter";
@@ -34,6 +38,7 @@ const BulkLaunch = lazy(() => import("../features/queue/BulkLaunch"));
 const MonitorPane = lazy(() => import("../features/review/followups/MonitorPane"));
 
 const REVIEW_LIST_PERCENT = 47;
+const DETAIL_VIEWPORT = "(max-width: 760px)";
 
 const views = [
   { view: "queue", label: "Review queue" },
@@ -51,6 +56,15 @@ type Overlay =
   | { readonly kind: "drafts" };
 
 export function App() {
+  const { recovery, warning } = useWorkspaceConnection();
+  return (
+    <WorkspaceRecoveryContext value={recovery}>
+      <Workspace warning={warning} />
+    </WorkspaceRecoveryContext>
+  );
+}
+
+function Workspace({ warning }: { readonly warning: WorkspaceConnection | undefined }) {
   const [route, setRoute] = useState(readRoute);
   const [split, setSplit] = useState(() => {
     const saved = savedValue("split");
@@ -66,7 +80,6 @@ export function App() {
   const overlayHost = useRef<HTMLDivElement>(null);
   const formOpener = useRef<HTMLElement | null>(null);
   const [selecting, setSelecting] = useState(false);
-  const [offline, setOffline] = useState(!navigator.onLine);
   const [drafts] = useState(() => new DraftStore());
   const draftsFull = useSyncExternalStore(drafts.subscribe, drafts.isFull);
   const panes = useRef<HTMLDivElement>(null);
@@ -80,6 +93,8 @@ export function App() {
   const form =
     overlay?.kind === "monitor" || (overlay?.kind === "launch" && overlay.mode !== "receipts");
   const paneOpen = opened || form;
+  const phone = useSyncExternalStore(watchDetailViewport, phoneDetailViewport);
+  const detailWarning = warning && phone ? <WorkspaceWarning connection={warning} /> : undefined;
   const title = views.find((item) => item.view === route.view)?.label ?? "Review queue";
 
   const drawerModule = useResource(`review-drawer-module:${Boolean(reviewId)}`, async () => ({
@@ -93,13 +108,15 @@ export function App() {
     cursor: "",
   }));
   const Tickets = ticketModule.data;
-  const overview = useResource(
+  const overview = useWorkspaceResource(
+    "Review details",
     reviewId ?? "",
     (signal) =>
       reviewId ? readOverview(reviewId, signal) : Promise.resolve({ data: null, cursor: "" }),
     reviewId ? [{ kind: "review", id: reviewId }, { kind: "run" }, { kind: "action" }] : [],
   );
-  const selected = useResource<RunDetail | null>(
+  const selected = useWorkspaceResource<RunDetail | null>(
+    "Selected review run",
     JSON.stringify([reviewId, runId]),
     async (signal) => {
       if (!reviewId) return { data: null, cursor: "" };
@@ -125,7 +142,8 @@ export function App() {
   const firstPageSession = selectedRun?.sessions.items.find(
     (item) => item.sessionKey === desiredSession,
   );
-  const activeSession = useResource<SessionSummary | null>(
+  const activeSession = useWorkspaceResource<SessionSummary | null>(
+    "Selected agent session",
     JSON.stringify([
       selectedRun?.runId,
       desiredSession,
@@ -138,13 +156,13 @@ export function App() {
     },
     desiredSession && !firstPageSession ? [{ kind: "session", id: desiredSession }] : [],
   );
-  const unread = useResource(
+  const unread = useWorkspaceResource(
+    "Unread notification count",
     "rail-unread",
     (signal) => readNotifications({ view: "unread", limit: 1 }, signal),
     [{ kind: "notification" }],
   );
 
-  useEffect(startWorkspaceEvents, []);
   useEffect(() => {
     const confirmed = selectedRun;
     if (confirmed && !route.runId && route.reviewId === confirmed.reviewId) {
@@ -160,21 +178,14 @@ export function App() {
       setOverlay(undefined);
       setSelecting(false);
     }
-    function network() {
-      setOffline(!navigator.onLine);
-    }
     function restoreCachedPage(event: PageTransitionEvent) {
       if (event.persisted) restore();
     }
     window.addEventListener("popstate", restore);
     window.addEventListener("pageshow", restoreCachedPage);
-    window.addEventListener("online", network);
-    window.addEventListener("offline", network);
     return () => {
       window.removeEventListener("popstate", restore);
       window.removeEventListener("pageshow", restoreCachedPage);
-      window.removeEventListener("online", network);
-      window.removeEventListener("offline", network);
     };
   }, []);
   useEffect(() => {
@@ -247,7 +258,7 @@ export function App() {
     };
   }, [route.view]);
   useEffect(() => {
-    if (opened && window.matchMedia("(max-width: 760px)").matches) drawer.current?.focus();
+    if (opened && phoneDetailViewport()) drawer.current?.focus();
   }, [opened]);
 
   function move(next: Route) {
@@ -359,45 +370,42 @@ export function App() {
 
   function renderHeader(selection?: ReactNode) {
     return (
-      <>
-        <header className="workspace-title">
-          {route.view !== "notifications" && <p>Your workspace</p>}
-          <h1 id="view-title" tabIndex={-1}>
-            {title}
-          </h1>
-          {route.view !== "notifications" && (
-            <div className={selection ? "actions workspace-selection" : "actions"}>
-              {selection ?? (
-                <ActionMenu
-                  label="New review"
-                  contentClassName="workspace-action-menu"
-                  trigger={
-                    <span className="button-label">
-                      New review <Icon name="chevron" size={12} />
-                    </span>
-                  }
-                  items={[
-                    { label: "Review MR", run: () => menuLaunch("pick") },
-                    { label: "Select MRs", run: () => chooseReviewSelection(true) },
-                    { label: "Register run", run: () => menuLaunch("register") },
-                    { label: "Pending launches", run: () => menuLaunch("receipts") },
-                  ]}
-                />
-              )}
-              {!selection && route.view === "queue" && (
-                <button
-                  type="button"
-                  className="workspace-drafts"
-                  onClick={() => setOverlay({ kind: "drafts" })}
-                >
-                  <Icon name="inbox" size={14} /> Unsent drafts
-                </button>
-              )}
-            </div>
+      <header className="workspace-title">
+        {route.view !== "notifications" && <p>Your workspace</p>}
+        <h1 id="view-title" tabIndex={-1}>
+          {title}
+        </h1>
+        <div className={selection ? "actions workspace-selection" : "actions"}>
+          {route.view !== "notifications" &&
+            (selection ?? (
+              <ActionMenu
+                label="New review"
+                contentClassName="workspace-action-menu"
+                trigger={
+                  <span className="button-label">
+                    New review <Icon name="chevron" size={12} />
+                  </span>
+                }
+                items={[
+                  { label: "Review MR", run: () => menuLaunch("pick") },
+                  { label: "Select MRs", run: () => chooseReviewSelection(true) },
+                  { label: "Register run", run: () => menuLaunch("register") },
+                  { label: "Pending launches", run: () => menuLaunch("receipts") },
+                ]}
+              />
+            ))}
+          {!selection && route.view === "queue" && (
+            <button
+              type="button"
+              className="workspace-drafts"
+              onClick={() => setOverlay({ kind: "drafts" })}
+            >
+              <Icon name="inbox" size={14} /> Unsent drafts
+            </button>
           )}
-        </header>
-        {offline && <Notice>Offline. Showing the last available information.</Notice>}
-      </>
+          {warning && !(phone && paneOpen) && <WorkspaceWarning connection={warning} />}
+        </div>
+      </header>
     );
   }
 
@@ -425,6 +433,9 @@ export function App() {
         }
       }}
     >
+      <span className="sr-only" role="status">
+        {warning && "Workspace connection needs attention."}
+      </span>
       <a className="skip-link" href="#view-title">
         Skip to workspace
       </a>
@@ -470,9 +481,13 @@ export function App() {
               {view === "notifications" && (
                 <span
                   className="rail-count"
-                  aria-label={`${unread.data?.unreadMrCount ?? 0} unread reviews`}
+                  aria-label={
+                    unread.data === undefined
+                      ? "Unread review count unavailable"
+                      : `${unread.data.unreadMrCount} unread reviews`
+                  }
                 >
-                  {unread.data?.unreadMrCount ?? 0}
+                  {unread.data?.unreadMrCount ?? "—"}
                 </span>
               )}
             </button>
@@ -566,6 +581,9 @@ export function App() {
                     selectionError={
                       selected.error ?? (firstPageSession ? undefined : activeSession.error)
                     }
+                    selectionUnavailable={
+                      selected.unavailable || (!firstPageSession && activeSession.unavailable)
+                    }
                     selectionPending={
                       selected.pending ||
                       Boolean(selectedRun && !firstPageSession && activeSession.pending)
@@ -585,20 +603,26 @@ export function App() {
                     }}
                     onRun={(id) => openReview(reviewId, id, route.tab)}
                     onClose={closeDrawer}
+                    headerActions={form ? undefined : detailWarning}
                     onLaunch={menuLaunch}
                     onMonitor={monitor}
                     ticket={renderTickets(overview.data.review.tickets.map((entry) => entry.key))}
                   />
                 ) : reviewId ? (
                   <>
-                    <div className="drawer-header spread">
+                    <header className="drawer-header spread">
                       <h2>Review details</h2>
-                      <button type="button" aria-label="Close review" onClick={closeDrawer}>
-                        <Icon name="close" />
-                      </button>
-                    </div>
+                      <div className="actions drawer-header-actions">
+                        <button type="button" aria-label="Close review" onClick={closeDrawer}>
+                          <Icon name="close" />
+                        </button>
+                        {!form && detailWarning}
+                      </div>
+                    </header>
                     {overview.error ? (
                       <Notice retry={overview.retry}>{overview.error}</Notice>
+                    ) : overview.unavailable ? (
+                      <p className="drawer-body meta">Review details are unavailable.</p>
                     ) : drawerModule.error ? (
                       <Notice retry={drawerModule.retry}>{drawerModule.error}</Notice>
                     ) : (
@@ -615,14 +639,17 @@ export function App() {
                             No matching MR
                           </span>
                         </div>
-                        <button
-                          type="button"
-                          className="icon-button"
-                          aria-label="Return to workspace"
-                          onClick={closeDrawer}
-                        >
-                          <Icon name="back" />
-                        </button>
+                        <div className="actions drawer-header-actions">
+                          <button
+                            type="button"
+                            className="icon-button"
+                            aria-label="Return to workspace"
+                            onClick={closeDrawer}
+                          >
+                            <Icon name="back" />
+                          </button>
+                          {!form && detailWarning}
+                        </div>
                       </header>
                       <div className="drawer-body">{renderTickets([ticket])}</div>
                     </div>
@@ -644,6 +671,7 @@ export function App() {
                     settingsRevision={revision}
                     onSettings={() => setSettings(true)}
                     onClose={closeForm}
+                    headerActions={detailWarning}
                     onOpen={(id, run) => {
                       setOverlay(undefined);
                       setSelecting(false);
@@ -655,6 +683,7 @@ export function App() {
                     targets={overlay.targets}
                     pause={overlay.pause}
                     onClose={closeForm}
+                    headerActions={detailWarning}
                   />
                 )}
               </Suspense>
@@ -704,6 +733,16 @@ export function App() {
       )}
     </main>
   );
+}
+
+function phoneDetailViewport() {
+  return window.matchMedia(DETAIL_VIEWPORT).matches;
+}
+
+function watchDetailViewport(notify: () => void) {
+  const query = window.matchMedia(DETAIL_VIEWPORT);
+  query.addEventListener("change", notify);
+  return () => query.removeEventListener("change", notify);
 }
 
 function settingsScope(route: Route): string {

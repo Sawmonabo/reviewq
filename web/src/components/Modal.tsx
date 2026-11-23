@@ -5,6 +5,7 @@ type DialogProps = {
   readonly title: string;
   readonly eyebrow?: string;
   readonly headingMark?: ReactNode;
+  readonly headerActions?: ReactNode;
   readonly initialFocus?: RefObject<HTMLElement | null>;
   readonly className?: string;
   readonly nonmodal?: boolean;
@@ -30,6 +31,7 @@ export function ModalFrame({
   title,
   eyebrow,
   headingMark,
+  headerActions,
   initialFocus,
   className,
   nonmodal = false,
@@ -58,6 +60,17 @@ export function ModalFrame({
       }
     };
   }, [initialFocus, nonmodal]);
+  const close = (
+    <button
+      type="button"
+      className="icon-button"
+      aria-label="Close dialog"
+      disabled={busy}
+      onClick={onClose}
+    >
+      ×
+    </button>
+  );
   return (
     <dialog
       ref={dialog}
@@ -70,7 +83,13 @@ export function ModalFrame({
         if (!busy) onClose();
       }}
       onKeyDown={(event) => {
-        if (nonmodal && event.key === "Escape" && !event.defaultPrevented && !busy) {
+        if (
+          nonmodal &&
+          event.key === "Escape" &&
+          !event.defaultPrevented &&
+          !busy &&
+          !event.currentTarget.querySelector(":popover-open")
+        ) {
           event.preventDefault();
           event.stopPropagation();
           onClose();
@@ -91,15 +110,14 @@ export function ModalFrame({
             <h2 id={titleId}>{title}</h2>
             {headingMark}
           </div>
-          <button
-            type="button"
-            className="icon-button"
-            aria-label="Close dialog"
-            disabled={busy}
-            onClick={onClose}
-          >
-            ×
-          </button>
+          {headerActions ? (
+            <div className="actions modal-header-actions">
+              {close}
+              {headerActions}
+            </div>
+          ) : (
+            close
+          )}
         </header>
         {children}
       </div>
