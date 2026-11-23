@@ -1,4 +1,5 @@
 import { useId, useLayoutEffect, useRef, useState } from "react";
+import type { FocusEvent } from "react";
 import { Icon } from "../../components/Icon";
 import { formatTime } from "../../lib/presentation";
 import type { WorkspaceConnection } from "./useWorkspaceConnection";
@@ -8,6 +9,7 @@ export function WorkspaceWarning({ connection }: { readonly connection: Workspac
   const id = useId();
   const button = useRef<HTMLButtonElement>(null);
   const panel = useRef<HTMLElement>(null);
+  const blurredWhileHidden = useRef(false);
   const [open, setOpen] = useState(false);
   const { status, issues, retry } = connection;
   const readFailed = issues.some(({ kind }) => kind === "read");
@@ -17,7 +19,11 @@ export function WorkspaceWarning({ connection }: { readonly connection: Workspac
     const popover = panel.current;
     return () => {
       const active = document.activeElement;
-      if (!trigger || (active !== trigger && !popover?.contains(active))) return;
+      const hadFocus =
+        active === trigger ||
+        popover?.contains(active) ||
+        (active === document.body && blurredWhileHidden.current);
+      if (!trigger || !hadFocus) return;
       const header = trigger.closest("header");
       const fallback = header?.querySelector("h1") ?? trigger.parentElement?.nextElementSibling;
       requestAnimationFrame(() => {
@@ -30,10 +36,18 @@ export function WorkspaceWarning({ connection }: { readonly connection: Workspac
     };
   }, []);
 
+  function rememberHiddenFocus({ relatedTarget }: FocusEvent<HTMLElement>) {
+    // The media query can hide this trigger and blur it before React moves it.
+    blurredWhileHidden.current =
+      (relatedTarget === null || relatedTarget === document.body) &&
+      button.current?.getClientRects().length === 0;
+  }
+
   return (
     <>
       <button
         ref={button}
+        onBlur={rememberHiddenFocus}
         className="workspace-warning-button"
         type="button"
         aria-label="Workspace connection warning"
@@ -46,6 +60,7 @@ export function WorkspaceWarning({ connection }: { readonly connection: Workspac
       </button>
       <section
         ref={panel}
+        onBlur={rememberHiddenFocus}
         id={id}
         tabIndex={-1}
         popover="auto"

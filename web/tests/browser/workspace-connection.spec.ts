@@ -80,9 +80,13 @@ test("simultaneous workspace read failures share one recoverable warning", async
 });
 
 test.describe("phone detail", () => {
-  test.use({ viewport: { width: 320, height: 844 }, hasTouch: true });
+  const phone = { width: 320, height: 844 };
+  const split = { width: 900, height: 844 };
+  test.use({ viewport: phone, hasTouch: true });
 
-  test("a loading review reserves the warning slot before Close", async ({ page }) => {
+  test("a loading review keeps the warning and Close reachable across resizes", async ({
+    page,
+  }) => {
     const failReads = holdReads();
     await page.route("**/api/v1/**", async (route) => {
       const { pathname } = new URL(route.request().url());
@@ -97,9 +101,25 @@ test.describe("phone detail", () => {
     const before = await close.boundingBox();
     expect(before).not.toBeNull();
 
-    failReads.release();
     const warning = page.getByRole("button", { name: "Workspace connection warning" });
+    const details = page.getByRole("dialog", { name: "Workspace connection" });
+    await close.focus();
+    await page.setViewportSize(split);
+    await expect(close).toBeFocused();
+    await expect(warning).toHaveCount(0);
+
+    failReads.release();
     await expect(warning).toHaveCount(1);
+    await warning.click();
+    await expect(details).toBeFocused();
+    await page.setViewportSize(phone);
+    await expect(warning).toBeFocused();
+    await expect(details).toBeHidden();
+    await page.setViewportSize(split);
+    await expect(warning).toBeFocused();
+    await page.setViewportSize(phone);
+    await expect(warning).toBeFocused();
+
     expect(await close.boundingBox()).toEqual(before);
     const slot = await warning.boundingBox();
     expect(slot?.width).toBe(44);
@@ -111,11 +131,17 @@ test.describe("phone detail", () => {
     await expect(close).toBeFocused();
 
     await warning.click();
-    const details = page.getByRole("dialog", { name: "Workspace connection" });
     await expect(details).toBeVisible();
     const popup = await details.boundingBox();
     expect(popup?.x).toBeGreaterThanOrEqual(0);
-    expect((popup?.x ?? Infinity) + (popup?.width ?? 0)).toBeLessThanOrEqual(320);
+    expect((popup?.x ?? Infinity) + (popup?.width ?? 0)).toBeLessThanOrEqual(phone.width);
+
+    await page.keyboard.press("Escape");
+    await close.focus();
+    await page.setViewportSize(split);
+    await expect(close).toBeFocused();
+    await page.setViewportSize(phone);
+    await expect(close).toBeFocused();
   });
 });
 
