@@ -1,6 +1,6 @@
 import { invoke } from "./bridge.js";
 import { deliver, finishTurn, observeFirstStep, observeInput, observeTurn, reviewqOrigin } from "./delivery.js";
-import { registerWorkflowTools, reportCallOrdinal, reportTurn, stageAction, stageReport } from "./workflow.js";
+import { observeResponse, registerWorkflowTools, reportCallOrdinal, reportTurn, stageAction, stageReport } from "./workflow.js";
 import { reconcileChildren } from "./children.js";
 import { currentSettings } from "./settings.js";
 import { answerQuestion, observeQuestion } from "./questions.js";
@@ -245,7 +245,7 @@ export function register(on) {
     const result = await next(event);
     if (!event.agentId && result.uuid === event.uuid && session?.activeTurn
         && event.message.role === "assistant" && event.message.content.some(block => block.type === "text")) {
-      session.lastResponse = result.uuid;
+      await observeResponse(session, result.uuid, event.message.content);
     }
     return result;
   });

@@ -66,13 +66,34 @@ export async function stageAction($, state, event) {
   return stringifyResult(result);
 }
 
+async function textDigest(text) {
+  const hash = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
+  return Array.from(new Uint8Array(hash), byte => byte.toString(16).padStart(2, "0")).join("");
+}
+
+export function observeResponse(state, entryId, content) {
+  const selected = { entryId, turnId: state.activeTurn };
+  state.lastResponse = selected;
+  if (!state.reportTurn?.calls.size) return;
+  const blocks = content.filter(block => block.type === "text").map(block => block.text);
+  const raw = blocks.join("");
+  const callback = blocks.join("\n").trim();
+  const rawDigest = textDigest(raw);
+  selected.digests = Promise.all([rawDigest, raw === callback ? rawDigest : textDigest(callback)]).catch(() => null);
+  return selected.digests;
+}
+
 export async function reportTurn($, state, event) {
   let response = null;
-  if (event.reason === "answer" && state.lastResponse && event.answer) {
-    const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(event.answer));
-    response = { entryId: state.lastResponse,
-      sha256: Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, "0")).join(""),
-    };
+  const selected = state.lastResponse;
+  if (event.reason === "answer" && selected?.turnId === event.turnId && event.answer) {
+    const observed = await textDigest(event.answer);
+    if (selected.digests) {
+      const hashes = await selected.digests;
+      if (hashes && hashes[1] === observed) response = { entryId: selected.entryId, sha256: hashes[0] };
+    } else {
+      response = { entryId: selected.entryId, sha256: observed };
+    }
   }
   await invoke($, "hook", state.id, {
     generation: state.generation, turnId: event.turnId, normal: event.reason === "answer", response,

@@ -225,27 +225,27 @@ pub(crate) fn claude_workflow_result(
                 && row.kind == "assistant"
                 && row.uuid.as_deref() == Some(id.as_str())
             {
-                let text = row
+                let blocks: Vec<_> = row
                     .blocks()
                     .filter_map(|block| {
                         (block["type"] == "text")
                             .then(|| block["text"].as_str())
                             .flatten()
                     })
-                    .collect::<String>()
-                    .into_bytes();
-                let matches = |bytes: &[u8]| {
-                    !bytes.is_empty()
-                        && ReportHash::from_sha256(Sha256::digest(bytes).into()) == *hash
+                    .collect();
+                let text = blocks.concat();
+                let matches = |value: &str| {
+                    !value.is_empty()
+                        && ReportHash::from_sha256(Sha256::digest(value.as_bytes()).into()) == *hash
                 };
-                // Claude's turn.end answer can omit the final LF present in the
-                // persisted end_turn message. The accepted artifact keeps that LF.
+                // Earlier Mods hash Claude's turn.complete projection: text
+                // blocks joined by LF, then ECMAScript String.prototype.trim().
                 if matches(&text)
                     || (row.message.as_ref().is_some_and(|m| {
                         m["role"] == "assistant" && m["stop_reason"] == "end_turn"
-                    }) && text.strip_suffix(b"\n").is_some_and(matches))
+                    }) && matches(blocks.join("\n").trim_matches(js_whitespace)))
                 {
-                    saved.response = Some(text);
+                    saved.response = Some(text.into_bytes());
                 }
                 break;
             }
@@ -267,6 +267,10 @@ fn report_block(block: &Value, call: &NativeCall) -> bool {
                 .get("input")
                 .is_some_and(|input| native_arguments_hash(input.clone()).as_ref() == Ok(hash))
         })
+}
+
+fn js_whitespace(c: char) -> bool {
+    c == '\u{feff}' || (c != '\u{85}' && c.is_whitespace())
 }
 
 fn source(session: &HistorySession, cancelled: &AtomicBool) -> Result<Source, AppError> {
@@ -410,9 +414,9 @@ mod tests {
             claude_workflow_prompt(&session, &prompt, &cancelled).unwrap(),
             anchor
         );
-        let original = "# Report\n\nAuthored  spacing.\n";
+        let original = "\u{feff}\n# Report\nAuthored  spacing.  \r\n\n";
         let row = json!({"type":"assistant","uuid":"final","sessionId":"thread","message":{"role":"assistant","stop_reason":"end_turn","content":[
-            {"type":"text","text":original}
+            {"type":"text","text":"\u{feff}\n# Report\n"},{"type":"text","text":"Authored  spacing.  \r\n\n"}
         ]}});
         writeln!(file, "{row}").unwrap();
         let response = |entry: &str, observed: &str| {
@@ -429,7 +433,11 @@ mod tests {
             .response
         };
         assert_eq!(
-            response("final", original.strip_suffix('\n').unwrap()).as_deref(),
+            response("final", "# Report\n\nAuthored  spacing.").as_deref(),
+            Some(original.as_bytes())
+        );
+        assert_eq!(
+            response("final", original).as_deref(),
             Some(original.as_bytes())
         );
         assert_eq!(response("final", "# Report\n\nAuthored spacing."), None);
