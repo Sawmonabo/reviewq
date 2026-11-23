@@ -1,25 +1,31 @@
 import { useEffect, useRef, useState } from "react";
-import type { ReactNode } from "react";
 import { ApiResponseError } from "../../api/client";
 import { disconnectSettings, readSettings, saveSettings, testConnection } from "../../api/settings";
 import type {
   CatalogItem,
   Provider,
   SaveSettingsBoardScope,
-  SaveSettingsRepositoryBinding,
   SettingsDraft,
   SettingsView,
   TokenInput,
 } from "../../api/generated/contracts/settings";
-import { ModalFrame } from "../../components/Modal";
+import { Modal, ModalFrame } from "../../components/Modal";
 import { Loading, Notice } from "../../components/PanelState";
+import { Wordmark } from "../../components/Wordmark";
+import type { Appearance } from "../../hooks/useAppearance";
 import { useResource } from "../../hooks/useResource";
 import { describeError, readable } from "../../lib/presentation";
 import { savedValue, saveValue } from "../../lib/view-preferences";
 import { AgentPreferences } from "./AgentPreferences";
+import { AppearancePage } from "./AppearancePage";
+import { ConnectionsPage } from "./ConnectionsPage";
 import { Repositories } from "./Repositories";
 import { boardIncludesRepository, settingsFocus, toggleMembership } from "./scope-draft";
+import { SettingsNavigation, SettingsPage, savedPage } from "./SettingsNavigation";
+import type { Page } from "./SettingsNavigation";
 import { TeamBoards } from "./TeamBoards";
+import { TeamReviewers } from "./TeamReviewers";
+import { useAgentPreferences } from "./useAgentPreferences";
 import "./settings.css";
 
 type Editor = {
@@ -27,45 +33,74 @@ type Editor = {
   readonly draft: SettingsDraft;
   readonly tokens: Record<Provider, string>;
 };
-type Verified = { readonly identity: string };
 
-export default function SettingsPane({
-  onClose,
-  onSave,
-  displayOptions,
-}: {
+type Props = {
   readonly onClose: () => void;
   readonly onSave: () => void;
-  readonly displayOptions?: ReactNode;
+  readonly appearance: Appearance;
+  readonly onAppearance: (appearance: Appearance) => void;
+};
+
+const settingsMark = (
+  <span className="settings-heading-mark" aria-hidden="true">
+    <span>/</span>
+    <Wordmark className="settings-wordmark" />
+  </span>
+);
+
+export default function SettingsPane(props: Props) {
+  const read = useResource("settings", readSettings, [{ kind: "settings" }]);
+  if (read.data) return <SettingsEditor {...props} initial={read.data} />;
+  return (
+    <UnavailableWorkspace
+      {...props}
+      pending={read.pending}
+      error={read.error}
+      onRetry={read.retry}
+    />
+  );
+}
+
+function UnavailableWorkspace({
+  onClose,
+  appearance,
+  onAppearance,
+  pending,
+  error,
+  onRetry,
+}: Props & {
+  readonly pending: boolean;
+  readonly error: string | undefined;
+  readonly onRetry: () => void;
 }) {
-  const read = useResource("settings", readSettings);
-  const [busy, setBusy] = useState(false);
+  const [active, setActive] = useState(() => savedPage(savedValue("settings.page")));
   return (
     <ModalFrame
       title="Settings"
-      eyebrow="Your workspace"
+      headingMark={settingsMark}
       className="settings-pane"
       onClose={onClose}
-      busy={busy}
     >
-      {read.data ? (
-        <SettingsEditor
-          initial={read.data}
-          onClose={onClose}
-          onSave={onSave}
-          displayOptions={displayOptions}
-          busy={busy}
-          setBusy={setBusy}
+      <div className="settings-layout">
+        <SettingsNavigation
+          active={active}
+          onSelect={(page) => {
+            setActive(page);
+            saveValue("settings.page", page);
+          }}
         />
-      ) : (
-        <div className="modal-body">
-          {read.error ? (
-            <Notice retry={read.retry}>{read.error}</Notice>
-          ) : (
-            <Loading label="Loading workspace settings…" />
-          )}
+        <div className="modal-body settings-body">
+          <SettingsPage page={active} active={active}>
+            {active === "appearance" ? (
+              <AppearancePage appearance={appearance} onChange={onAppearance} />
+            ) : pending ? (
+              <Loading label="Loading workspace settings…" />
+            ) : (
+              <Notice retry={onRetry}>{error}</Notice>
+            )}
+          </SettingsPage>
         </div>
-      )}
+      </div>
     </ModalFrame>
   );
 }
@@ -74,21 +109,15 @@ function SettingsEditor({
   initial,
   onClose,
   onSave,
-  displayOptions,
-  busy,
-  setBusy,
-}: {
-  readonly busy: boolean;
-  readonly setBusy: (busy: boolean) => void;
-  readonly initial: SettingsView;
-  readonly onClose: () => void;
-  readonly onSave: () => void;
-  readonly displayOptions?: ReactNode;
-}) {
+  appearance,
+  onAppearance,
+}: Props & { readonly initial: SettingsView }) {
   const [editor, setEditor] = useState(() => fromSaved(initial));
+  const [active, setActive] = useState(() => savedPage(savedValue("settings.page")));
+  const [busy, setBusy] = useState(false);
   const [testing, setTesting] = useState<Provider>();
-  const [confirmation, setConfirmation] = useState<Provider>();
-  const [verified, setVerified] = useState<Partial<Record<Provider, Verified>>>({});
+  const [confirm, setConfirm] = useState<Provider | "discard">();
+  const [verified, setVerified] = useState<Partial<Record<Provider, string>>>({});
   const [errors, setErrors] = useState<Partial<Record<Provider, string>>>({});
   const [notice, setNotice] = useState<string>();
   const [credentialEpoch, setCredentialEpoch] = useState<Record<Provider, number>>({
@@ -96,80 +125,86 @@ function SettingsEditor({
     jira: 0,
   });
   const [conflict, setConflict] = useState<SettingsView>();
-  const [saved, setSaved] = useState(false);
+  const [saved, setSaved] = useState<"workspace" | "agents">();
+  const [catalog, setCatalog] = useState<"scope" | "repositories">();
   const [showScopeErrors, setShowScopeErrors] = useState(false);
   const [resolvingBoard, setResolvingBoard] = useState(false);
-  const [reviewers, setReviewers] = useState(initial.additionalReviewerIds.join(", "));
+  const preferences = useAgentPreferences();
   const tests = useRef<Partial<Record<Provider, AbortController>>>({});
   const errorSummary = useRef<HTMLDivElement>(null);
-  const scroll = useRef<HTMLDivElement>(null);
+  const form = useRef<HTMLFormElement>(null);
+  const scroller = useRef<HTMLDivElement>(null);
+  const positions = useRef<Partial<Record<Page, number>>>({});
+  const pending = useRef(false);
   const { snapshot, draft, tokens } = editor;
+  const workspaceDirty =
+    Boolean(tokens.gitlab || tokens.jira) ||
+    JSON.stringify(draft) !== JSON.stringify(fromSaved(snapshot).draft);
+  const dirty = workspaceDirty || preferences.dirty;
+  const saveArea = active === "appearance" ? undefined : active === "agents" ? active : "workspace";
+  const pageDirty =
+    saveArea === "workspace" ? workspaceDirty : saveArea === "agents" && preferences.dirty;
+  const footerStatus = busy
+    ? "Saving…"
+    : pageDirty
+      ? "Unsaved changes"
+      : saved === saveArea && saved
+        ? "Changes saved"
+        : dirty
+          ? "Unsaved changes on another page"
+          : "";
+  const newest =
+    conflict && BigInt(conflict.settingsRevision) > BigInt(initial.settingsRevision)
+      ? conflict
+      : initial;
+  const stale = BigInt(newest.settingsRevision) > BigInt(snapshot.settingsRevision);
+
   useEffect(() => {
-    const body = scroll.current;
-    const saved = savedValue("settings.scroll");
-    if (!body || typeof saved !== "number" || !Number.isFinite(saved) || saved <= 0) return;
-    const position = saved;
-    let restoring = true;
-    const observer = new MutationObserver(restore);
-    const frame = requestAnimationFrame(restore);
-    function restore() {
-      if (
-        !restoring ||
-        !body?.clientHeight ||
-        body.querySelector(".agent-preferences[aria-busy='true']")
-      )
-        return;
-      body.scrollTop = position;
-      stop();
-    }
-    function stop() {
-      restoring = false;
-      observer.disconnect();
-      cancelAnimationFrame(frame);
-    }
-    observer.observe(body, { attributes: true, subtree: true, attributeFilter: ["aria-busy"] });
-    body.addEventListener("pointerdown", stop);
-    body.addEventListener("wheel", stop, { passive: true });
-    body.addEventListener("keydown", stop);
+    const activeTests = tests.current;
     return () => {
-      stop();
-      body.removeEventListener("pointerdown", stop);
-      body.removeEventListener("wheel", stop);
-      body.removeEventListener("keydown", stop);
-    };
-  }, []);
-  useEffect(() => {
-    const active = tests.current;
-    return () => {
-      for (const controller of Object.values(active)) controller.abort();
+      for (const controller of Object.values(activeTests)) controller.abort();
     };
   }, []);
 
-  function edit(next: SettingsDraft) {
-    changeDraft(() => next);
+  function select(page: Page) {
+    if (page === active) return;
+    if (scroller.current) positions.current[active] = scroller.current.scrollTop;
+    setActive(page);
+    saveValue("settings.page", page);
+    requestAnimationFrame(() => {
+      if (scroller.current) scroller.current.scrollTop = positions.current[page] ?? 0;
+    });
   }
-  function changeDraft(update: (draft: SettingsDraft) => SettingsDraft) {
+
+  function toggleCatalog(page: "scope" | "repositories") {
+    setCatalog((open) => (open === page ? undefined : page));
+  }
+
+  function dismissCatalog(page: "scope" | "repositories") {
+    setCatalog(undefined);
+    settingsFocus(page === "scope" ? "settings-add-board" : "settings-add-repository");
+  }
+
+  function edit(update: (current: SettingsDraft) => SettingsDraft) {
     setEditor((previous) => ({ ...previous, draft: update(previous.draft) }));
-    setSaved(false);
+    setSaved(undefined);
   }
+
+  function cancelTests() {
+    for (const controller of Object.values(tests.current)) controller.abort();
+    setTesting(undefined);
+    setVerified({});
+    setErrors({});
+  }
+
   function connectionChanged(provider: Provider) {
-    setCredentialEpoch((previous) => ({
-      ...previous,
-      [provider]: previous[provider] + 1,
-    }));
+    setCredentialEpoch((previous) => ({ ...previous, [provider]: previous[provider] + 1 }));
     tests.current[provider]?.abort();
     setTesting((value) => (value === provider ? undefined : value));
     setVerified((previous) => ({ ...previous, [provider]: undefined }));
     setErrors((previous) => ({ ...previous, [provider]: undefined }));
   }
-  function writeToken(provider: Provider, value: string) {
-    connectionChanged(provider);
-    setEditor((previous) => ({
-      ...previous,
-      tokens: { ...previous.tokens, [provider]: value },
-    }));
-    setSaved(false);
-  }
+
   function scoped(provider: Provider) {
     return {
       expectedRevision: snapshot.settingsRevision,
@@ -183,23 +218,16 @@ function SettingsEditor({
     tests.current[provider]?.abort();
     const controller = new AbortController();
     tests.current[provider] = controller;
-    const body = scoped(provider);
     setTesting(provider);
     try {
-      const { data } = await testConnection(body, controller.signal);
+      const { data } = await testConnection(scoped(provider), controller.signal);
       if (!controller.signal.aborted && data.provider === provider) {
-        setVerified((previous) => ({
-          ...previous,
-          [provider]: { identity: data.identity.label },
-        }));
+        setVerified((previous) => ({ ...previous, [provider]: data.identity.label }));
         setErrors((previous) => ({ ...previous, [provider]: undefined }));
       }
     } catch (error) {
       if (!controller.signal.aborted)
-        setErrors((previous) => ({
-          ...previous,
-          [provider]: describeError(error),
-        }));
+        setErrors((previous) => ({ ...previous, [provider]: describeError(error) }));
     } finally {
       if (!controller.signal.aborted) setTesting(undefined);
     }
@@ -219,74 +247,70 @@ function SettingsEditor({
       storyPointsField: null,
       teamFilterId: null,
     };
-    changeDraft((previous) =>
+    edit((previous) =>
       previous.boards.some((known) => known.boardId === board.boardId)
         ? previous
         : { ...previous, boards: [...previous.boards, board] },
     );
+    setCatalog(undefined);
     settingsFocus(`settings-board-${item.id}`);
   }
+
   function addRepo(item: CatalogItem) {
-    if (!item.path || draft.repositories.some((repo) => repo.projectId === item.id)) return;
-    edit({
-      ...draft,
-      repositories: [
-        ...draft.repositories,
-        {
-          projectId: item.id,
-          path: item.path,
-          boardSelection: "selected",
-          checkout: null,
-          defaultSkills: {},
-        },
-      ],
-    });
+    const path = item.path;
+    if (!path) return;
+    edit((previous) =>
+      previous.repositories.some((repo) => repo.projectId === item.id)
+        ? previous
+        : {
+            ...previous,
+            repositories: [
+              ...previous.repositories,
+              {
+                projectId: item.id,
+                path,
+                boardSelection: "selected",
+                checkout: null,
+                defaultSkills: {},
+              },
+            ],
+          },
+    );
+    setCatalog(undefined);
     settingsFocus(`settings-repository-${item.id}`);
   }
-  function patchBoard(board: SaveSettingsBoardScope) {
-    changeDraft((previous) => ({
-      ...previous,
-      boards: previous.boards.map((item) => (item.scopeId === board.scopeId ? board : item)),
-    }));
-  }
-  function patchRepo(repo: SaveSettingsRepositoryBinding) {
-    changeDraft((previous) => ({
-      ...previous,
-      repositories: previous.repositories.map((item) =>
-        item.projectId === repo.projectId ? repo : item,
-      ),
-    }));
-  }
-  function setBoardMembership(scopeId: string, projectId: string, include: boolean) {
-    changeDraft((previous) => ({
+
+  function setMembership(scopeId: string, projectId: string, include: boolean) {
+    edit((previous) => ({
       ...previous,
       boards: previous.boards.map((board) =>
         board.scopeId === scopeId
-          ? {
-              ...board,
-              projectIds: toggleMembership(board.projectIds, projectId, include),
-            }
+          ? { ...board, projectIds: toggleMembership(board.projectIds, projectId, include) }
           : board,
       ),
     }));
   }
-  function removeRepo(projectId: string) {
-    changeDraft((previous) => ({
-      ...previous,
-      repositories: previous.repositories.filter((item) => item.projectId !== projectId),
-      boards: previous.boards.map((board) => ({
-        ...board,
-        projectIds: board.projectIds.filter((id) => id !== projectId),
-      })),
-    }));
-  }
 
-  async function commit(action: "save" | "disconnect") {
-    if (busy || (action === "save" && resolvingBoard)) return;
+  async function save(disconnect?: Provider) {
+    const saveWorkspace = Boolean(disconnect) || saveArea === "workspace";
+    if (
+      pending.current ||
+      (!disconnect && (!pageDirty || (saveWorkspace && (resolvingBoard || stale))))
+    ) {
+      return;
+    }
     setNotice(undefined);
-    setSaved(false);
-    const reviewerIds = splitList(reviewers);
-    if (action === "save") {
+    setSaved(undefined);
+    if (!disconnect && saveWorkspace) {
+      const invalid = form.current?.querySelector<HTMLInputElement>(
+        "#settings-page-connections input:invalid",
+      );
+      if (invalid) {
+        select("connections");
+        setNotice(invalid.validationMessage);
+        requestAnimationFrame(() => invalid.focus());
+        return;
+      }
       setShowScopeErrors(true);
       const missing = draft.boards.find(
         (board) =>
@@ -294,336 +318,344 @@ function SettingsEditor({
           (!board.reviewStatusIds.length ||
             !draft.repositories.some((repo) => boardIncludesRepository(board, repo))),
       );
-      const badReviewer = reviewerIds.some(
-        (id) => !/^[1-9]\d{0,18}$/.test(id) || BigInt(id) > 9_223_372_036_854_775_807n,
-      );
-      if (missing || badReviewer) {
-        setNotice(
-          missing
-            ? `${missing.name} needs review statuses and at least one repository before enabling.`
-            : "Additional reviewers must be GitLab user IDs.",
-        );
-        settingsFocus(missing ? `settings-board-${missing.boardId}` : "settings-reviewer-ids");
+      if (missing) {
+        if (!missing.reviewStatusIds.length) {
+          select("scope");
+          setNotice(`${missing.name} needs at least one review status.`);
+          settingsFocus(`settings-board-${missing.boardId}`);
+        } else {
+          select("repositories");
+          setNotice(`Include ${missing.name} under Jira boards for at least one repository.`);
+          settingsFocus(
+            draft.repositories[0]
+              ? `settings-repository-${draft.repositories[0].projectId}`
+              : "settings-add-repository",
+          );
+        }
         return;
       }
     }
+    pending.current = true;
     setBusy(true);
     try {
-      const result =
-        action === "disconnect" && confirmation
-          ? await disconnectSettings({
-              provider: confirmation,
-              expectedRevision: snapshot.settingsRevision,
-            })
-          : await saveSettings({
-              expectedRevision: snapshot.settingsRevision,
-              draft: { ...draft, additionalReviewerIds: reviewerIds },
-              tokens: {
-                gitlab: tokenInput(tokens.gitlab),
-                jira: tokenInput(tokens.jira),
-              },
-            });
-      setEditor(fromSaved(result.data));
-      setReviewers(result.data.additionalReviewerIds.join(", "));
-      setVerified({});
-      setErrors({});
-      setConflict(undefined);
-      setConfirmation(undefined);
-      setShowScopeErrors(false);
-      setSaved(true);
-      onSave();
-      if (action === "save" && result.data.chatSetup.state === "ready") onClose();
+      if (disconnect) {
+        const { data } = await disconnectSettings({
+          provider: disconnect,
+          expectedRevision: snapshot.settingsRevision,
+        });
+        const next = fromSaved(data);
+        setEditor({
+          ...next,
+          draft: { ...draft, [disconnect]: next.draft[disconnect] },
+          tokens: { ...tokens, [disconnect]: "" },
+        });
+        onSave();
+      } else if (saveWorkspace) {
+        const { data } = await saveSettings({
+          expectedRevision: snapshot.settingsRevision,
+          draft,
+          tokens: { gitlab: tokenInput(tokens.gitlab), jira: tokenInput(tokens.jira) },
+        });
+        setEditor(fromSaved(data));
+        onSave();
+      } else {
+        await preferences.save();
+      }
+      if (saveWorkspace) {
+        cancelTests();
+        setConflict(undefined);
+        setShowScopeErrors(false);
+      }
+      setConfirm(undefined);
+      setSaved(saveWorkspace ? "workspace" : "agents");
     } catch (error) {
+      setConfirm(undefined);
       setNotice(describeError(error));
       if (
+        saveWorkspace &&
         error instanceof ApiResponseError &&
         ["conflict", "stale_revision"].includes(error.code)
       ) {
         try {
           setConflict((await readSettings(AbortSignal.timeout(10000))).data);
         } catch {
-          /* keep dirty form */
+          // Keep the draft available for retry.
         }
       }
       requestAnimationFrame(() => errorSummary.current?.focus());
     } finally {
+      pending.current = false;
       setBusy(false);
     }
   }
 
+  function close() {
+    if (busy) return;
+    if (dirty) setConfirm("discard");
+    else onClose();
+  }
+
   return (
-    <>
-      <div
-        className="modal-body settings-body"
-        ref={scroll}
-        onScroll={(event) => saveValue("settings.scroll", event.currentTarget.scrollTop)}
-      >
-        <AgentPreferences />
-        <form
-          className="stack"
-          id="workspace-settings"
-          onSubmit={(event) => {
-            event.preventDefault();
-            void commit("save");
-          }}
-        >
-          {notice && (
-            <div ref={errorSummary} tabIndex={-1}>
-              <Notice>{notice}</Notice>
-            </div>
-          )}
-          {conflict && (
-            <div className="notice">
-              <span>
-                Settings changed in another tab. Saved revision {conflict.settingsRevision}.
-                Reloading the saved version discards this editor’s changes.
-              </span>
-              <button
-                type="button"
-                onClick={() => {
-                  setEditor(fromSaved(conflict));
-                  setReviewers(conflict.additionalReviewerIds.join(", "));
-                  setConflict(undefined);
-                  setNotice(undefined);
-                  setVerified({});
-                  setShowScopeErrors(false);
-                }}
-              >
-                Load saved revision
-              </button>
-            </div>
-          )}
-          {saved && (
-            <Notice>Saved workspace settings · revision {snapshot.settingsRevision}</Notice>
-          )}
-          {snapshot.chatSetup.state !== "ready" && (
-            <Notice>
-              Native chat setup · {readable(snapshot.chatSetup.state)}
-              {snapshot.chatSetup.issues.length > 0 &&
-                ` · ${snapshot.chatSetup.issues.join(" · ")}`}
-            </Notice>
-          )}
-          <section className="settings-section stack" aria-labelledby="settings-connections">
-            <div className="spread">
-              <h3 id="settings-connections">Connections</h3>
-              {snapshot.mode !== "connected" && (
-                <span className="badge">{readable(snapshot.mode)}</span>
-              )}
-            </div>
-            <div className="connection-grid">
-              {(["gitlab", "jira"] as const).map((provider) => {
-                const connection = snapshot.connections[provider];
-                const confirmationResult = verified[provider];
-                const verifiedLabel = confirmationResult?.identity;
-                return (
-                  <fieldset className="connection-fields" key={provider} disabled={busy}>
-                    <legend className="sr-only">
-                      {provider === "gitlab" ? "GitLab" : "Jira Cloud"}
-                    </legend>
-                    <div className="connection-heading">
-                      <h4>{provider === "gitlab" ? "GitLab" : "Jira Cloud"}</h4>
-                      {connection.configured && (
-                        <button
-                          type="button"
-                          className="quiet-button"
-                          onClick={() => setConfirmation(provider)}
-                        >
-                          Disconnect
-                        </button>
-                      )}
-                    </div>
-                    {provider === "gitlab" ? (
-                      <label className="field">
-                        GitLab address
-                        <input
-                          type="url"
-                          value={draft.gitlab.origin}
-                          onChange={(event) => {
-                            connectionChanged(provider);
-                            edit({
-                              ...draft,
-                              gitlab: { origin: event.currentTarget.value },
-                            });
-                          }}
-                          placeholder="https://gitlab.example.com"
-                        />
-                      </label>
-                    ) : (
-                      <>
-                        <label className="field">
-                          Jira site
-                          <input
-                            type="url"
-                            value={draft.jira.site}
-                            onChange={(event) => {
-                              connectionChanged(provider);
-                              edit({
-                                ...draft,
-                                jira: {
-                                  ...draft.jira,
-                                  site: event.currentTarget.value,
-                                },
-                              });
-                            }}
-                            placeholder="https://team.atlassian.net"
-                          />
-                        </label>
-                        <label className="field">
-                          Account email
-                          <input
-                            type="email"
-                            value={draft.jira.email}
-                            onChange={(event) => {
-                              connectionChanged(provider);
-                              edit({
-                                ...draft,
-                                jira: {
-                                  ...draft.jira,
-                                  email: event.currentTarget.value,
-                                },
-                              });
-                            }}
-                          />
-                        </label>
-                      </>
-                    )}
-                    <div className={provider === "jira" ? "jira-token-fields" : undefined}>
-                      <label className="field">
-                        {provider === "gitlab" ? "Personal access token" : "API token"}
-                        <input
-                          type="password"
-                          value={tokens[provider]}
-                          autoComplete="new-password"
-                          spellCheck={false}
-                          onChange={(event) => writeToken(provider, event.currentTarget.value)}
-                          placeholder={
-                            connection.configured ? "Saved token · leave blank to keep" : ""
-                          }
-                        />
-                      </label>
-                      {provider === "jira" && (
-                        <label className="field">
-                          Token type
-                          <select
-                            value={draft.jira.tokenType}
-                            onChange={(event) => {
-                              connectionChanged(provider);
-                              edit({
-                                ...draft,
-                                jira: {
-                                  ...draft.jira,
-                                  tokenType:
-                                    event.currentTarget.value === "scoped" ? "scoped" : "unscoped",
-                                },
-                              });
-                            }}
-                          >
-                            <option value="unscoped">Unscoped</option>
-                            <option value="scoped">Scoped</option>
-                          </select>
-                        </label>
-                      )}
-                    </div>
-                    <button
-                      type="button"
-                      disabled={Boolean(testing)}
-                      onClick={() => void check(provider)}
-                    >
-                      {testing === provider
-                        ? "Checking…"
-                        : provider === "gitlab"
-                          ? "Test GitLab"
-                          : "Test Jira"}
-                    </button>
-                    {errors[provider] && <Notice>{errors[provider]}</Notice>}
-                    {verifiedLabel && (
-                      <p className="connection-verified" role="status">
-                        Connected as {verifiedLabel}
-                      </p>
-                    )}
-                  </fieldset>
-                );
-              })}
-            </div>
-            {confirmation && (
+    <ModalFrame
+      title="Settings"
+      className="settings-pane"
+      headingMark={settingsMark}
+      onClose={close}
+      busy={busy}
+    >
+      <div className="settings-layout">
+        <SettingsNavigation active={active} onSelect={select} />
+        <div className="modal-body settings-body" ref={scroller}>
+          <form
+            id="workspace-settings"
+            ref={form}
+            className="stack"
+            noValidate
+            onSubmit={(event) => {
+              event.preventDefault();
+              void save();
+            }}
+          >
+            {notice && (
+              <div ref={errorSummary} tabIndex={-1} role="alert">
+                <Notice>{notice}</Notice>
+              </div>
+            )}
+            {stale && (
               <div className="notice">
-                Disconnect {confirmation === "gitlab" ? "GitLab" : "Jira"}? Future source reads
-                pause. Existing review history stays accessible.
-                <button type="button" disabled={busy} onClick={() => void commit("disconnect")}>
-                  Confirm disconnect
-                </button>
-                <button type="button" disabled={busy} onClick={() => setConfirmation(undefined)}>
-                  Keep connection
+                <span>Workspace settings changed in another tab.</span>
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => {
+                    setEditor(fromSaved(newest));
+                    setConflict(undefined);
+                    setNotice(undefined);
+                    cancelTests();
+                    setShowScopeErrors(false);
+                  }}
+                >
+                  {workspaceDirty ? "Discard workspace edits and reload" : "Load saved settings"}
                 </button>
               </div>
             )}
-          </section>
-          <TeamBoards
-            key={`team-boards:${snapshot.settingsRevision}:${credentialEpoch.jira}`}
-            boards={draft.boards}
-            repositories={draft.repositories}
-            connection={scoped("jira")}
-            connectionEpoch={credentialEpoch.jira}
-            disabled={busy}
-            showErrors={showScopeErrors}
-            onResolving={setResolvingBoard}
-            onAdd={addBoard}
-            onChange={patchBoard}
-            onRemove={(scopeId) =>
-              changeDraft((previous) => ({
-                ...previous,
-                boards: previous.boards.filter((board) => board.scopeId !== scopeId),
-              }))
-            }
-            onMembership={setBoardMembership}
-          />
-          <Repositories
-            key={`repositories:${snapshot.settingsRevision}`}
-            boards={draft.boards}
-            repositories={draft.repositories}
-            gitlab={draft.gitlab}
-            connection={scoped("gitlab")}
-            connectionEpoch={credentialEpoch.gitlab}
-            disabled={busy}
-            onAdd={addRepo}
-            onChange={patchRepo}
-            onRemove={removeRepo}
-            onMembership={setBoardMembership}
-          />
-          <details className="settings-advanced settings-reviewers">
-            <summary>Additional reviewers</summary>
-            <label className="field">
-              GitLab user IDs
-              <input
-                id="settings-reviewer-ids"
-                value={reviewers}
-                disabled={busy}
-                placeholder="Optional"
-                onChange={(event) => {
-                  setReviewers(event.currentTarget.value);
-                  setSaved(false);
+            <SettingsPage page="connections" active={active}>
+              <ConnectionsPage
+                snapshot={snapshot}
+                draft={draft}
+                tokens={tokens}
+                testing={testing}
+                verified={verified}
+                errors={errors}
+                busy={busy}
+                onGitLab={(origin) => {
+                  connectionChanged("gitlab");
+                  edit((current) => ({ ...current, gitlab: { origin } }));
                 }}
+                onJira={(jira) => {
+                  connectionChanged("jira");
+                  edit((current) => ({ ...current, jira }));
+                }}
+                onToken={(provider, value) => {
+                  connectionChanged(provider);
+                  setEditor((previous) => ({
+                    ...previous,
+                    tokens: { ...previous.tokens, [provider]: value },
+                  }));
+                  setSaved(undefined);
+                }}
+                onCheck={(provider) => void check(provider)}
+                onDisconnect={setConfirm}
               />
-            </label>
-            <p className="meta">Separate user IDs with commas or spaces.</p>
-          </details>
-        </form>
-        {displayOptions}
+              {snapshot.chatSetup.state !== "ready" && (
+                <Notice>
+                  Native chat setup · {readable(snapshot.chatSetup.state)}
+                  {snapshot.chatSetup.issues.length > 0 &&
+                    ` · ${snapshot.chatSetup.issues.join(" · ")}`}
+                </Notice>
+              )}
+            </SettingsPage>
+            <SettingsPage
+              page="scope"
+              active={active}
+              action={
+                <button
+                  type="button"
+                  id="settings-add-board"
+                  aria-expanded={catalog === "scope"}
+                  disabled={busy}
+                  onClick={() => toggleCatalog("scope")}
+                >
+                  {catalog === "scope" ? "Close catalog" : "+ Add board"}
+                </button>
+              }
+            >
+              <TeamBoards
+                key={`team-boards:${snapshot.settingsRevision}:${credentialEpoch.jira}`}
+                boards={draft.boards}
+                browsing={catalog === "scope"}
+                onDismissCatalog={() => dismissCatalog("scope")}
+                active={active === "scope"}
+                repositories={draft.repositories}
+                connection={scoped("jira")}
+                connectionEpoch={credentialEpoch.jira}
+                disabled={busy}
+                showErrors={showScopeErrors}
+                onResolving={setResolvingBoard}
+                onAdd={addBoard}
+                onChange={(board) =>
+                  edit((previous) => ({
+                    ...previous,
+                    boards: previous.boards.map((item) =>
+                      item.scopeId === board.scopeId ? board : item,
+                    ),
+                  }))
+                }
+                onRemove={(scopeId) =>
+                  edit((previous) => ({
+                    ...previous,
+                    boards: previous.boards.filter((board) => board.scopeId !== scopeId),
+                  }))
+                }
+                onRepositories={() => select("repositories")}
+              />
+              <TeamReviewers
+                key={`reviewers:${credentialEpoch.gitlab}`}
+                active={active === "scope"}
+                connection={scoped("gitlab")}
+                savedConnection={
+                  snapshot.connections.gitlab.configured
+                    ? {
+                        expectedRevision: snapshot.settingsRevision,
+                        provider: "gitlab",
+                        connection: { origin: snapshot.connections.gitlab.origin ?? "" },
+                        token: { action: "keep" },
+                      }
+                    : undefined
+                }
+                savedIds={snapshot.additionalReviewerIds}
+                ids={draft.additionalReviewerIds}
+                canLookUp={
+                  Boolean(tokens.gitlab && draft.gitlab.origin) ||
+                  Boolean(
+                    snapshot.connections.gitlab.configured &&
+                    draft.gitlab.origin === snapshot.connections.gitlab.origin,
+                  )
+                }
+                disabled={busy || stale}
+                onChange={(ids) =>
+                  edit((previous) => ({ ...previous, additionalReviewerIds: ids }))
+                }
+                onConnections={() => select("connections")}
+              />
+            </SettingsPage>
+            <SettingsPage
+              page="repositories"
+              active={active}
+              action={
+                <button
+                  type="button"
+                  id="settings-add-repository"
+                  aria-expanded={catalog === "repositories"}
+                  disabled={busy}
+                  onClick={() => toggleCatalog("repositories")}
+                >
+                  {catalog === "repositories" ? "Close catalog" : "+ Add repository"}
+                </button>
+              }
+            >
+              <Repositories
+                key={`repositories:${snapshot.settingsRevision}`}
+                boards={draft.boards}
+                repositories={draft.repositories}
+                gitlab={draft.gitlab}
+                browsing={catalog === "repositories"}
+                onDismissCatalog={() => dismissCatalog("repositories")}
+                connection={scoped("gitlab")}
+                connectionEpoch={credentialEpoch.gitlab}
+                disabled={busy}
+                onAdd={addRepo}
+                onChange={(repo) =>
+                  edit((previous) => ({
+                    ...previous,
+                    repositories: previous.repositories.map((item) =>
+                      item.projectId === repo.projectId ? repo : item,
+                    ),
+                  }))
+                }
+                onRemove={(projectId) =>
+                  edit((previous) => ({
+                    ...previous,
+                    repositories: previous.repositories.filter(
+                      (item) => item.projectId !== projectId,
+                    ),
+                    boards: previous.boards.map((board) => ({
+                      ...board,
+                      projectIds: board.projectIds.filter((id) => id !== projectId),
+                    })),
+                  }))
+                }
+                onMembership={setMembership}
+              />
+            </SettingsPage>
+            <SettingsPage page="agents" active={active}>
+              <AgentPreferences preferences={preferences} disabled={busy} />
+            </SettingsPage>
+            <SettingsPage page="appearance" active={active}>
+              <AppearancePage appearance={appearance} onChange={onAppearance} />
+            </SettingsPage>
+          </form>
+        </div>
       </div>
       <footer>
-        <button type="button" disabled={busy} onClick={onClose}>
-          {saved ? "Done" : "Cancel"}
-        </button>
-        <button
-          type="submit"
-          form="workspace-settings"
-          className="primary"
-          disabled={busy || resolvingBoard || Boolean(conflict)}
-        >
-          {busy ? "Saving…" : "Save changes"}
-        </button>
+        <span className="settings-footer-workspace">Workspace settings</span>
+        <p role="status">{footerStatus}</p>
+        {pageDirty && (
+          <button
+            type="submit"
+            form="workspace-settings"
+            className="primary"
+            disabled={busy || (saveArea === "workspace" && (resolvingBoard || stale))}
+          >
+            Save changes
+          </button>
+        )}
+        <kbd aria-hidden="true">Esc</kbd>
       </footer>
-    </>
+      {confirm && (
+        <Modal
+          title={
+            confirm === "discard"
+              ? "Discard workspace changes?"
+              : `Disconnect ${confirm === "gitlab" ? "GitLab" : "Jira Cloud"}?`
+          }
+          className="settings-confirm"
+          onClose={() => setConfirm(undefined)}
+          busy={busy}
+          footer={
+            <>
+              <button type="button" disabled={busy} onClick={() => setConfirm(undefined)}>
+                {confirm === "discard" ? "Keep editing" : "Keep connection"}
+              </button>
+              <button
+                type="button"
+                className="primary"
+                disabled={busy}
+                onClick={() => (confirm === "discard" ? onClose() : void save(confirm))}
+              >
+                {confirm === "discard" ? "Discard changes" : "Confirm disconnect"}
+              </button>
+            </>
+          }
+        >
+          <p className="meta">
+            {confirm === "discard"
+              ? "Appearance preferences are already applied."
+              : "Future source checks will pause. Existing review history stays accessible."}
+          </p>
+        </Modal>
+      )}
+    </ModalFrame>
   );
 }
 
@@ -647,15 +679,4 @@ function fromSaved(snapshot: SettingsView): Editor {
 
 function tokenInput(value: string): TokenInput {
   return value ? { action: "replace", value } : { action: "keep" };
-}
-
-function splitList(value: string) {
-  return [
-    ...new Set(
-      value
-        .split(/[\s,]+/)
-        .map((item) => item.trim())
-        .filter(Boolean),
-    ),
-  ];
 }

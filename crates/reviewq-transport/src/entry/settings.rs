@@ -128,10 +128,23 @@ pub(super) async fn catalog(
     let expected = revision(request.expected_revision)?;
     let saved = entry.store.read_credentials(actor.clone()).await?;
     let kind = catalog_kind(request.kind, request.board_id, request.view)?;
+    let reviewers = kind == app::CatalogKind::Reviewers;
+    let saved_reviewers = reviewers && request.q.is_none();
+    if reviewers && !matches!(request.provider, dto::Provider::Gitlab)
+        || saved_reviewers && !matches!(&request.token, dto::TokenInput::Keep)
+    {
+        return Err(AppError::InvalidRequest.into());
+    }
+    let saved_reviewer_ids = if saved_reviewers {
+        saved.value.scope.additional_reviewers.clone()
+    } else {
+        Vec::new()
+    };
     let mut query = app::CatalogQuery {
         kind,
         text: request.q,
         states: request.states,
+        saved_reviewer_ids,
         offset: 0,
     };
     if query.states.len() > 3
@@ -335,6 +348,7 @@ fn catalog_kind(
             Some(dto::ProjectView::Starred) => View::Starred,
             Some(dto::ProjectView::All) => View::All,
         }),
+        (dto::CatalogKind::Reviewers, None, None) => Kind::Reviewers,
         (dto::CatalogKind::Boards, None, None) => Kind::Boards,
         (dto::CatalogKind::Board, Some(board), None) => Kind::Board(parse(board.as_str())?),
         (dto::CatalogKind::Statuses, None, None) => Kind::Statuses,
@@ -464,5 +478,9 @@ fn catalog_item(value: app::CatalogItem) -> Result<dto::CatalogItem, AppError> {
             .map(resource)
             .collect::<Result<Vec<_>, _>>()?,
         estimate_field: value.estimate_field,
+        reviewer: value.reviewer.map(|reviewer| dto::CatalogReviewer {
+            username: reviewer.username,
+            public_email: reviewer.public_email,
+        }),
     })
 }

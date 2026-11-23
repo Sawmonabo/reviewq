@@ -2,7 +2,7 @@
 import { func0 } from "../runtime.mjs";
 import { validate129 } from "./safe-count-dto.mjs";
 import { validate25 } from "./checkpoint-id-dto.mjs";
-function validate630(
+function validate636(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -199,7 +199,7 @@ function validate630(
                         vErrors.push(err1);
                       }
                       errors++;
-                      validate630.errors = vErrors;
+                      validate636.errors = vErrors;
                       return false;
                     } else {
                       errors = _errs8;
@@ -274,7 +274,7 @@ function validate630(
                           vErrors.push(err3);
                         }
                         errors++;
-                        validate630.errors = vErrors;
+                        validate636.errors = vErrors;
                         return false;
                       } else {
                         errors = _errs13;
@@ -298,7 +298,7 @@ function validate630(
         }
       }
     } else {
-      validate630.errors = [
+      validate636.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -309,7 +309,7 @@ function validate630(
       return false;
     }
   }
-  validate630.errors = vErrors;
+  validate636.errors = vErrors;
   return errors === 0;
 }
-export { validate630 };
+export { validate636 };

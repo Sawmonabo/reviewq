@@ -39,7 +39,8 @@ const schema116 = {
   title: "CancelRecoveryResponseState",
   type: "string",
 };
-const schema119 = {
+const schema120 = {
+  type: "object",
   properties: {
     boardId: {
       anyOf: [{ $ref: "#/definitions/CheckpointIdDto" }, { type: "null" }],
@@ -51,33 +52,29 @@ const schema119 = {
     id: { $ref: "#/definitions/CheckpointIdDto" },
     label: { type: "string" },
     path: { type: ["string", "null"] },
-    state: { type: ["string", "null"] },
-    statusIds: {
-      items: { $ref: "#/definitions/CheckpointIdDto" },
-      type: "array",
+    reviewer: {
+      anyOf: [{ $ref: "#/definitions/CatalogReviewer" }, { type: "null" }],
     },
+    state: { type: ["string", "null"] },
   },
-  required: [
-    "id",
-    "label",
-    "path",
-    "boardId",
-    "state",
-    "boardType",
-    "statusIds",
-    "estimateField",
-  ],
+};
+const schema121 = {
+  properties: {
+    publicEmail: { type: ["string", "null"] },
+    username: { type: "string" },
+  },
+  required: ["username", "publicEmail"],
   type: "object",
 };
-const schema125 = {
+const schema128 = {
   enum: ["not_requested", "unknown", "absent", "confirmed"],
   type: "string",
 };
-const schema126 = {
+const schema129 = {
   enum: ["comments", "approval", "both", "cancel"],
   type: "string",
 };
-const schema127 = {
+const schema130 = {
   type: "object",
   properties: {
     lastExecutedSubmissionId: {
@@ -102,7 +99,7 @@ const schema127 = {
     revision: { $ref: "#/definitions/EventCursorDto" },
   },
 };
-const schema129 = {
+const schema132 = {
   enum: [
     "working",
     "checking",
@@ -114,8 +111,8 @@ const schema129 = {
   title: "CurrentActionResponseState",
   type: "string",
 };
-const schema131 = { enum: ["unknown", "absent", "confirmed"], type: "string" };
-const schema145 = {
+const schema134 = { enum: ["unknown", "absent", "confirmed"], type: "string" };
+const schema148 = {
   type: "object",
   properties: {
     endUtf16: { $ref: "#/definitions/SafeCountDto" },
@@ -128,40 +125,23 @@ const schema145 = {
     revision: { $ref: "#/definitions/CheckpointIdDto" },
   },
 };
-const schema146 = {
+const schema149 = {
   enum: ["inline", "general", "outdated", "draft"],
   type: "string",
 };
-const schema151 = { enum: ["text", "file", "other"], type: "string" };
-const schema156 = {
-  type: "object",
-  properties: {
-    author: { type: "string" },
-    authorId: {
-      anyOf: [{ $ref: "#/definitions/MergeRequestIidDto" }, { type: "null" }],
-    },
-    body: { type: "string" },
-    createdAt: {
-      anyOf: [{ $ref: "#/definitions/UtcTimestampDto" }, { type: "null" }],
-    },
-    noteId: { type: "string" },
-    ours: { type: "boolean" },
-    resolvable: { type: ["boolean", "null"] },
-    resolved: { type: ["boolean", "null"] },
-  },
-};
+const schema154 = { enum: ["text", "file", "other"], type: "string" };
 export {
   schema114,
   schema115,
   schema116,
-  schema119,
-  schema125,
-  schema126,
-  schema127,
+  schema120,
+  schema121,
+  schema128,
   schema129,
-  schema131,
-  schema145,
-  schema146,
-  schema151,
-  schema156,
+  schema130,
+  schema132,
+  schema134,
+  schema148,
+  schema149,
+  schema154,
 };

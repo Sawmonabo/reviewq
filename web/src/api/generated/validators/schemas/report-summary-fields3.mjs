@@ -2,12 +2,12 @@
 import { func0 } from "../runtime.mjs";
 import { validate25 } from "./checkpoint-id-dto.mjs";
 import { validate152 } from "./git-sha-dto.mjs";
-import { schema389 } from "../metadata-9.mjs";
-import { validate1346 } from "./semantic-index.mjs";
+import { schema392 } from "../metadata-9.mjs";
+import { validate1352 } from "./semantic-index.mjs";
 import { validate136 } from "./report-hash-dto.mjs";
-import { validate1349 } from "./report-scope.mjs";
+import { validate1355 } from "./report-scope.mjs";
 import { validate129 } from "./safe-count-dto.mjs";
-function validate1343(
+function validate1349(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -90,7 +90,7 @@ function validate1343(
               vErrors.push(err1);
             }
             errors++;
-            validate1343.errors = vErrors;
+            validate1349.errors = vErrors;
             return false;
           } else {
             errors = _errs3;
@@ -114,12 +114,12 @@ function validate1343(
             let data2 = data.revisionReason;
             const _errs7 = errors;
             if (typeof data2 !== "string" && data2 !== null) {
-              validate1343.errors = [
+              validate1349.errors = [
                 {
                   instancePath: instancePath + "/revisionReason",
                   schemaPath: "#/properties/revisionReason/type",
                   keyword: "type",
-                  params: { type: schema389.properties.revisionReason.type },
+                  params: { type: schema392.properties.revisionReason.type },
                 },
               ];
               return false;
@@ -135,7 +135,7 @@ function validate1343(
             ) {
               const _errs9 = errors;
               if (
-                !validate1346(data.semanticIndex, {
+                !validate1352(data.semanticIndex, {
                   instancePath: instancePath + "/semanticIndex",
                   parentData: data,
                   parentDataProperty: "semanticIndex",
@@ -144,8 +144,8 @@ function validate1343(
               ) {
                 vErrors =
                   vErrors === null
-                    ? validate1346.errors
-                    : vErrors.concat(validate1346.errors);
+                    ? validate1352.errors
+                    : vErrors.concat(validate1352.errors);
                 errors = vErrors.length;
               }
               var valid0 = _errs9 === errors;
@@ -184,7 +184,7 @@ function validate1343(
                   let valid2 = false;
                   const _errs13 = errors;
                   if (
-                    !validate1349(data5, {
+                    !validate1355(data5, {
                       instancePath: instancePath + "/structuredScope",
                       parentData: data,
                       parentDataProperty: "structuredScope",
@@ -193,8 +193,8 @@ function validate1343(
                   ) {
                     vErrors =
                       vErrors === null
-                        ? validate1349.errors
-                        : vErrors.concat(validate1349.errors);
+                        ? validate1355.errors
+                        : vErrors.concat(validate1355.errors);
                     errors = vErrors.length;
                   }
                   var _valid1 = _errs13 === errors;
@@ -231,7 +231,7 @@ function validate1343(
                       vErrors.push(err3);
                     }
                     errors++;
-                    validate1343.errors = vErrors;
+                    validate1349.errors = vErrors;
                     return false;
                   } else {
                     errors = _errs12;
@@ -263,13 +263,13 @@ function validate1343(
                       ) &&
                       data6 !== null
                     ) {
-                      validate1343.errors = [
+                      validate1349.errors = [
                         {
                           instancePath: instancePath + "/structuredVersion",
                           schemaPath: "#/properties/structuredVersion/type",
                           keyword: "type",
                           params: {
-                            type: schema389.properties.structuredVersion.type,
+                            type: schema392.properties.structuredVersion.type,
                           },
                         },
                       ];
@@ -278,7 +278,7 @@ function validate1343(
                     if (errors === _errs16) {
                       if (typeof data6 == "number" && isFinite(data6)) {
                         if (data6 > 255 || isNaN(data6)) {
-                          validate1343.errors = [
+                          validate1349.errors = [
                             {
                               instancePath: instancePath + "/structuredVersion",
                               schemaPath:
@@ -290,7 +290,7 @@ function validate1343(
                           return false;
                         } else {
                           if (data6 < 0 || isNaN(data6)) {
-                            validate1343.errors = [
+                            validate1349.errors = [
                               {
                                 instancePath:
                                   instancePath + "/structuredVersion",
@@ -341,7 +341,7 @@ function validate1343(
         }
       }
     } else {
-      validate1343.errors = [
+      validate1349.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -352,7 +352,7 @@ function validate1343(
       return false;
     }
   }
-  validate1343.errors = vErrors;
+  validate1349.errors = vErrors;
   return errors === 0;
 }
-export { validate1343 };
+export { validate1349 };

@@ -14,6 +14,8 @@ type Props = {
   readonly scope: Omit<CatalogRequest, "kind" | "cursor" | "q" | "view">;
   readonly kind: CatalogKind;
   readonly inputId?: string;
+  readonly embedded?: boolean;
+  readonly onDismiss?: () => void;
   readonly disabled?: boolean;
   readonly connectionEpoch: number;
   readonly unavailable: readonly string[];
@@ -25,12 +27,14 @@ export function CatalogPicker({
   scope,
   kind,
   inputId,
+  embedded = false,
+  onDismiss,
   disabled = false,
   unavailable,
   onAdd,
   connectionEpoch,
 }: Props) {
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(embedded);
   const [q, setQuery] = useState("");
   const [view, setView] = useState<ProjectView>("member");
   const [forced, setForced] = useState(0);
@@ -46,6 +50,9 @@ export function CatalogPicker({
   const current = useRef<AbortController | undefined>(undefined);
   const search = useRef<HTMLInputElement>(null);
   const results = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (embedded) search.current?.focus();
+  }, [embedded]);
   const scopeKey = JSON.stringify([
     scope.expectedRevision,
     scope.provider,
@@ -140,8 +147,11 @@ export function CatalogPicker({
         if (event.key === "Escape" && open) {
           event.preventDefault();
           event.stopPropagation();
-          setOpen(false);
-          search.current?.focus();
+          if (onDismiss) onDismiss();
+          else {
+            setOpen(false);
+            search.current?.focus();
+          }
           return;
         }
         if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
@@ -198,18 +208,20 @@ export function CatalogPicker({
             <option value="all">All visible projects</option>
           </select>
         )}
-        <button
-          type="button"
-          disabled={disabled}
-          aria-expanded={open}
-          aria-label={label}
-          onClick={() => {
-            setOpen(!open);
-            if (!open) requestAnimationFrame(() => search.current?.focus());
-          }}
-        >
-          Browse
-        </button>
+        {!embedded && (
+          <button
+            type="button"
+            disabled={disabled}
+            aria-expanded={open}
+            aria-label={label}
+            onClick={() => {
+              setOpen(!open);
+              if (!open) requestAnimationFrame(() => search.current?.focus());
+            }}
+          >
+            Browse
+          </button>
+        )}
       </div>
       {open && (
         <section className="catalog-choices stack" aria-label={label}>

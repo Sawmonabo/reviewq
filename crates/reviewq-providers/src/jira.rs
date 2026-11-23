@@ -414,5 +414,6 @@ fn item(value: &Value, board: Option<u64>) -> Result<CatalogItem, AppError> {
         board_type: None,
         status_ids: Vec::new(),
         estimate_field: None,
+        reviewer: None,
     })
 }

@@ -1,9 +1,11 @@
 import { useEffect, useId, useRef } from "react";
-import type { ReactNode } from "react";
+import type { ReactNode, RefObject } from "react";
 
 type DialogProps = {
   readonly title: string;
   readonly eyebrow?: string;
+  readonly headingMark?: ReactNode;
+  readonly initialFocus?: RefObject<HTMLElement | null>;
   readonly className?: string;
   readonly nonmodal?: boolean;
   readonly children: ReactNode;
@@ -27,6 +29,8 @@ export function Modal({
 export function ModalFrame({
   title,
   eyebrow,
+  headingMark,
+  initialFocus,
   className,
   nonmodal = false,
   children,
@@ -41,6 +45,7 @@ export function ModalFrame({
     const opener = document.activeElement;
     if (nonmodal) node?.show();
     else node?.showModal();
+    initialFocus?.current?.focus({ preventScroll: true });
     return () => {
       const active = document.activeElement;
       node?.close();
@@ -52,7 +57,7 @@ export function ModalFrame({
         opener.focus({ preventScroll: true });
       }
     };
-  }, [nonmodal]);
+  }, [initialFocus, nonmodal]);
   return (
     <dialog
       ref={dialog}
@@ -83,6 +88,7 @@ export function ModalFrame({
           <div>
             {eyebrow && <p className="modal-eyebrow">{eyebrow}</p>}
             <h2 id={titleId}>{title}</h2>
+            {headingMark}
           </div>
           <button
             type="button"

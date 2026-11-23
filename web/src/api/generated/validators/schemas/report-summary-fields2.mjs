@@ -4,7 +4,7 @@ import { validate152 } from "./git-sha-dto.mjs";
 import { validate129 } from "./safe-count-dto.mjs";
 import { validate136 } from "./report-hash-dto.mjs";
 import { validate25 } from "./checkpoint-id-dto.mjs";
-function validate1334(
+function validate1340(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -69,7 +69,7 @@ function validate1334(
             vErrors.push(err1);
           }
           errors++;
-          validate1334.errors = vErrors;
+          validate1340.errors = vErrors;
           return false;
         } else {
           errors = _errs2;
@@ -143,7 +143,7 @@ function validate1334(
               vErrors.push(err3);
             }
             errors++;
-            validate1334.errors = vErrors;
+            validate1340.errors = vErrors;
             return false;
           } else {
             errors = _errs7;
@@ -217,7 +217,7 @@ function validate1334(
                 vErrors.push(err5);
               }
               errors++;
-              validate1334.errors = vErrors;
+              validate1340.errors = vErrors;
               return false;
             } else {
               errors = _errs12;
@@ -285,7 +285,7 @@ function validate1334(
                 ) {
                   const _errs18 = errors;
                   if (typeof data.nativeProvenance !== "boolean") {
-                    validate1334.errors = [
+                    validate1340.errors = [
                       {
                         instancePath: instancePath + "/nativeProvenance",
                         schemaPath: "#/properties/nativeProvenance/type",
@@ -358,7 +358,7 @@ function validate1334(
                         vErrors.push(err7);
                       }
                       errors++;
-                      validate1334.errors = vErrors;
+                      validate1340.errors = vErrors;
                       return false;
                     } else {
                       errors = _errs21;
@@ -433,7 +433,7 @@ function validate1334(
                           vErrors.push(err9);
                         }
                         errors++;
-                        validate1334.errors = vErrors;
+                        validate1340.errors = vErrors;
                         return false;
                       } else {
                         errors = _errs26;
@@ -457,7 +457,7 @@ function validate1334(
         }
       }
     } else {
-      validate1334.errors = [
+      validate1340.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -468,7 +468,7 @@ function validate1334(
       return false;
     }
   }
-  validate1334.errors = vErrors;
+  validate1340.errors = vErrors;
   return errors === 0;
 }
-export { validate1334 };
+export { validate1340 };

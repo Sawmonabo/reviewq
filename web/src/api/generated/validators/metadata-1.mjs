@@ -63,7 +63,15 @@ const schema17 = {
 };
 const schema21 = { enum: ["scoped", "unscoped"], type: "string" };
 const schema23 = {
-  enum: ["projects", "boards", "board", "statuses", "filters", "sprints"],
+  enum: [
+    "projects",
+    "reviewers",
+    "boards",
+    "board",
+    "statuses",
+    "filters",
+    "sprints",
+  ],
   type: "string",
 };
 const schema24 = { enum: ["gitlab", "jira"], type: "string" };

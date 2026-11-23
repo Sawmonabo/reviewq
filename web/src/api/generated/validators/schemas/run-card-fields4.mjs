@@ -7,7 +7,7 @@ import { validate301 } from "./run-stage.mjs";
 import { validate152 } from "./git-sha-dto.mjs";
 import { validate307 } from "./compact-ticket.mjs";
 import { validate129 } from "./safe-count-dto.mjs";
-function validate1560(
+function validate1566(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -47,7 +47,7 @@ function validate1560(
               }
             }
           } else {
-            validate1560.errors = [
+            validate1566.errors = [
               {
                 instancePath: instancePath + "/registeredProviders",
                 schemaPath: "#/properties/registeredProviders/type",
@@ -113,7 +113,7 @@ function validate1560(
                   }
                 }
               } else {
-                validate1560.errors = [
+                validate1566.errors = [
                   {
                     instancePath: instancePath + "/runIds",
                     schemaPath: "#/properties/runIds/type",
@@ -183,7 +183,7 @@ function validate1560(
                   vErrors.push(err1);
                 }
                 errors++;
-                validate1560.errors = vErrors;
+                validate1566.errors = vErrors;
                 return false;
               } else {
                 errors = _errs9;
@@ -253,7 +253,7 @@ function validate1560(
                         }
                       }
                     } else {
-                      validate1560.errors = [
+                      validate1566.errors = [
                         {
                           instancePath: instancePath + "/tickets",
                           schemaPath: "#/properties/tickets/type",
@@ -272,7 +272,7 @@ function validate1560(
                   if (data.title !== undefined && func0.call(data, "title")) {
                     const _errs17 = errors;
                     if (typeof data.title !== "string") {
-                      validate1560.errors = [
+                      validate1566.errors = [
                         {
                           instancePath: instancePath + "/title",
                           schemaPath: "#/properties/title/type",
@@ -318,7 +318,7 @@ function validate1560(
         }
       }
     } else {
-      validate1560.errors = [
+      validate1566.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -329,7 +329,7 @@ function validate1560(
       return false;
     }
   }
-  validate1560.errors = vErrors;
+  validate1566.errors = vErrors;
   return errors === 0;
 }
-export { validate1560 };
+export { validate1566 };

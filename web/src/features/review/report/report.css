@@ -310,7 +310,7 @@
   --thread-heading: #d2c1df;
   --thread-link: #a9bfe9;
 }
-:root[data-theme="light"] .report-authored {
+:root:is([data-theme="light"], [data-palette="violet"]) .report-authored {
   --comparison-before: var(--surface);
   --comparison-after: var(--raised);
   --comparison-border: var(--control-line);

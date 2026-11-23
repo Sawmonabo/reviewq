@@ -5,7 +5,7 @@ import { validate129 } from "./safe-count-dto.mjs";
 import { validate237 } from "./utc-timestamp-dto.mjs";
 import { validate266 } from "./coverage.mjs";
 import { validate152 } from "./git-sha-dto.mjs";
-function validate1325(
+function validate1331(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -94,7 +94,7 @@ function validate1325(
               vErrors.push(err1);
             }
             errors++;
-            validate1325.errors = vErrors;
+            validate1331.errors = vErrors;
             return false;
           } else {
             errors = _errs3;
@@ -213,7 +213,7 @@ function validate1325(
                     vErrors.push(err3);
                   }
                   errors++;
-                  validate1325.errors = vErrors;
+                  validate1331.errors = vErrors;
                   return false;
                 } else {
                   errors = _errs10;
@@ -236,7 +236,7 @@ function validate1325(
                 ) {
                   const _errs14 = errors;
                   if (typeof data.complete !== "boolean") {
-                    validate1325.errors = [
+                    validate1331.errors = [
                       {
                         instancePath: instancePath + "/complete",
                         schemaPath: "#/properties/complete/type",
@@ -333,7 +333,7 @@ function validate1325(
                           vErrors.push(err5);
                         }
                         errors++;
-                        validate1325.errors = vErrors;
+                        validate1331.errors = vErrors;
                         return false;
                       } else {
                         errors = _errs18;
@@ -357,7 +357,7 @@ function validate1325(
         }
       }
     } else {
-      validate1325.errors = [
+      validate1331.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -368,7 +368,7 @@ function validate1325(
       return false;
     }
   }
-  validate1325.errors = vErrors;
+  validate1331.errors = vErrors;
   return errors === 0;
 }
-export { validate1325 };
+export { validate1331 };

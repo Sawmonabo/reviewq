@@ -19,6 +19,7 @@ function validate51(
   }
   if (!(
     data === "projects" ||
+    data === "reviewers" ||
     data === "boards" ||
     data === "board" ||
     data === "statuses" ||

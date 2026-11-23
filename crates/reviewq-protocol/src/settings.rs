@@ -70,6 +70,7 @@ pub struct TestConnection {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub enum CatalogKind {
     Projects,
+    Reviewers,
     Boards,
     Board,
     Statuses,
@@ -250,6 +251,16 @@ pub struct CatalogItem {
     pub board_type: Option<BoardType>,
     pub status_ids: Vec<ResourceIdDto>,
     pub estimate_field: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reviewer: Option<CatalogReviewer>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct CatalogReviewer {
+    pub username: String,
+    pub public_email: Option<String>,
 }
 
 #[derive(Serialize)]
