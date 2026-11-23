@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::{self, BufReader, Read};
+use std::ops::Range;
 use std::os::unix::fs::{FileExt, MetadataExt};
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -14,7 +15,7 @@ use reviewq_domain::session::HostProvider;
 use sha2::{Digest, Sha256};
 
 use super::locator::Source;
-use super::records;
+use super::{records, wait};
 
 mod lines;
 pub(super) use lines::Lines;
@@ -80,7 +81,7 @@ pub(super) fn page(
             &mut question_budget,
             cancelled,
         ) {
-            tool_proof.redact(source, start, &mut record);
+            tool_proof.project(source, start..end, complete, &mut record);
             let text = readable_prefix(&record.text)?
                 .chars()
                 .take(512)
@@ -224,7 +225,15 @@ pub(super) fn parts(
     )
     .filter(|record| record.id == reference.entry)
     .ok_or(AppError::CursorExpired)?;
-    ToolProof::new(&source.file, cancelled).redact(source, start, &mut record);
+    ToolProof::new(&source.file, cancelled).project(
+        source,
+        start..end,
+        reference.position.high_water,
+        &mut record,
+    );
+    if record.codex_wait {
+        record.parts.retain(|part| part.index >= first);
+    }
     let parts = visible_parts(
         record.parts,
         &reference.generation,
@@ -316,7 +325,12 @@ pub(super) fn content_source(
     )
     .filter(|record| record.id == reference.entry)
     .ok_or(AppError::CursorExpired)?;
-    ToolProof::new(&source.file, cancelled).redact(source, start, &mut record);
+    ToolProof::new(&source.file, cancelled).project(
+        source,
+        start..end,
+        reference.position.high_water,
+        &mut record,
+    );
     let (bytes, field) = if let Some(index) = reference.part {
         let part = record
             .parts
@@ -400,6 +414,10 @@ pub(super) fn part_field(
     part: &records::Part,
 ) -> Result<records::BodyField, AppError> {
     use records::BodyField;
+    if record.codex_wait {
+        let turn = record.turn.clone().ok_or(AppError::CursorExpired)?;
+        return Ok(BodyField::WaitDetail(turn, part.body.picked.clone()));
+    }
     Ok(match (&part.kind, provider) {
         (VisiblePartKind::Text(_), HostProvider::Codex) if record.text_blocks.is_empty() => {
             BodyField::Text
@@ -427,6 +445,7 @@ pub(super) fn part_field(
 pub(super) struct ToolProof<'a> {
     parents: HashMap<NativeInputId, Vec<(NativeInputId, String)>>,
     budget: u64,
+    wait_budget: u64,
     lines: Lines<'a>,
 }
 
@@ -435,7 +454,29 @@ impl<'a> ToolProof<'a> {
         Self {
             parents: HashMap::new(),
             budget: 4 * 1024 * 1024,
+            wait_budget: wait::PROOF_BYTES,
             lines: Lines::new(file, cancel),
+        }
+    }
+
+    pub(super) fn project(
+        &mut self,
+        source: &Source,
+        span: Range<u64>,
+        complete: u64,
+        record: &mut records::Record,
+    ) {
+        if record.codex_wait {
+            wait::attach(
+                &mut self.lines,
+                source.native_id.as_str(),
+                span,
+                complete,
+                &mut self.wait_budget,
+                record,
+            );
+        } else {
+            self.redact(source, span.start, record);
         }
     }
 

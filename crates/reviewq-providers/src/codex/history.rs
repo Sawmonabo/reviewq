@@ -77,6 +77,12 @@ pub(super) enum Item {
         arguments: Option<serde_json::Value>,
         result: Option<serde_json::Value>,
     },
+    CollabAgentToolCall {
+        id: String,
+        tool: String,
+        status: String,
+        sender_thread_id: Option<String>,
+    },
     #[serde(other)]
     Other,
 }
@@ -246,7 +252,14 @@ impl Codex {
             .into_iter()
             .filter(|item| !item.output_deferred)
             .filter_map(|item| {
-                visible(item.item, &id, item.started_at_ms, item.completed_at_ms).map(|entry| {
+                visible(
+                    item.item,
+                    &thread.id,
+                    &id,
+                    item.started_at_ms,
+                    item.completed_at_ms,
+                )
+                .map(|entry| {
                     entry.map(|entry| {
                         if previews {
                             super::history_reads::preview(entry, &generation)
@@ -361,6 +374,7 @@ fn within(
 
 pub(super) fn visible(
     item: Item,
+    thread: &str,
     turn: &NativeTurnId,
     started: Option<i64>,
     completed: Option<i64>,
@@ -423,7 +437,23 @@ pub(super) fn visible(
             )?;
             (id, String::new(), VisibleKind::Assistant, completed)
         }
-        Item::Other => return None,
+        Item::CollabAgentToolCall {
+            id,
+            tool,
+            status,
+            sender_thread_id,
+        } if tool == "wait" && sender_thread_id.as_deref() == Some(thread) => {
+            // The native RPC item reports its lifecycle state. Its invocation
+            // arguments and function output are only available in the rollout.
+            parts = rpc_tool(&id, "wait_agent", status, String::new(), None)?;
+            (
+                id,
+                String::new(),
+                VisibleKind::Assistant,
+                completed.or(started),
+            )
+        }
+        Item::CollabAgentToolCall { .. } | Item::Other => return None,
     };
     Some(
         id.parse()

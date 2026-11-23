@@ -149,7 +149,7 @@ impl Drop for Acceleration {
 
 fn scope(source: &Source, owner: &SessionTarget) -> Option<[u8; 32]> {
     let mut digest = Sha256::new();
-    digest.update(b"reviewq-reading-fts5-trigram-v3\0");
+    digest.update(b"reviewq-reading-fts5-trigram-v4\0");
     for field in [owner.run_id().as_str(), owner.session_key().as_str()] {
         digest.update((field.len() as u64).to_be_bytes());
         digest.update(field.as_bytes());
@@ -329,6 +329,14 @@ fn index_record(
     work.check()?;
     remainder.map_err(|_| AppError::Unavailable)?;
     index.begin_record(span.start)?;
+    if record
+        .as_ref()
+        .is_ok_and(|record| record.as_ref().is_some_and(|record| record.codex_wait))
+    {
+        // An output can be appended after the wait's completed item. Search
+        // these rows directly so a reused prefix cannot skip the new detail.
+        return index.commit_record(span.end, false);
+    }
     let certified = if let Ok(Some(mut record)) = record {
         visibility.redact(source, span.start, &mut record);
         let mut left = MAX_RECORD_WORK - bytes;
