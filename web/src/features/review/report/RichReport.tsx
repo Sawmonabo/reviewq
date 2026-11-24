@@ -2,7 +2,7 @@ import { defaultRangeExtractor, useVirtualizer } from "@tanstack/react-virtual";
 import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import type { RootContent } from "hast";
-import type { ReportSummary } from "../../../api/generated/contracts/reports";
+import type { ReportSummary, SourceOrigin } from "../../../api/generated/contracts/reports";
 import { DiagramDisplayContext } from "../../../components/markdown/diagram-cache";
 import { MarkdownTree } from "../../../components/markdown/MarkdownContent";
 import { bookmarkAt, readBookmark, restoreBookmark } from "./report-position";
@@ -33,6 +33,7 @@ export function RichReport({
   bookmark,
   onQuote,
   onSource,
+  onOpenEvidence,
 }: {
   readonly historyAccess: ReactNode;
   readonly document: ReaderDocument;
@@ -41,6 +42,7 @@ export function RichReport({
   readonly bookmark: string;
   readonly onQuote: (text: string, offset: number) => void;
   readonly onSource: (offset: number) => void;
+  readonly onOpenEvidence: (origin: SourceOrigin, offset: number) => void;
 }) {
   const [host, setHost] = useState<HTMLDivElement | null>(null);
   const [scroll, setScroll] = useState<HTMLElement | null>(null);
@@ -239,10 +241,15 @@ export function RichReport({
         inSourceOrder && groups.every((group): group is PreparedGroup => Boolean(group))
           ? selectionSource(selected, groups)
           : undefined;
-      setSelection({
-        fallback: scalarOffset(firstGroup.source, firstGroup.block.offset),
-        ...(exact ? { quote: exact } : {}),
-      });
+      // A card drawn from the findings ledger has no passage in this report to comment on.
+      setSelection(
+        firstGroup.block.offset < 0
+          ? undefined
+          : {
+              fallback: scalarOffset(firstGroup.source, firstGroup.block.offset),
+              ...(exact ? { quote: exact } : {}),
+            },
+      );
       if (usesVirtual) {
         const indexes = [...element.querySelectorAll<HTMLElement>("[data-report-block]")]
           .filter((row) => selected.intersectsNode(row))
@@ -343,6 +350,7 @@ export function RichReport({
     const change = finding?.change;
     const outcome = change ? outcomeLabels[change.conclusion] : undefined;
     const retired = isRetired(change);
+    const earlier = finding?.unanchored?.earlier;
     const card = finding && (
       <article
         className="report-authored report-finding"
@@ -367,7 +375,22 @@ export function RichReport({
             )}
           </div>
           <AuthoredContent nodes={finding.header} />
-          {finding.carried && <p className="meta">Carried from an earlier version</p>}
+          {finding.unanchored && (
+            <p className="meta">
+              {finding.unanchored.earlier
+                ? "Carried from an earlier version"
+                : "Listed in this report's findings"}
+            </p>
+          )}
+          {earlier && (
+            <button
+              className="quiet-button"
+              type="button"
+              onClick={() => onOpenEvidence(earlier.origin, earlier.offset)}
+            >
+              Open finding in earlier report
+            </button>
+          )}
         </header>
         {finding.fields.length > 0 && (
           <dl className="report-finding-fields">

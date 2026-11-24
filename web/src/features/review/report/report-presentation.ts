@@ -1,6 +1,10 @@
 import type { DrawingHint } from "../../../api/generated/contracts/common";
 import type { Element, Root, RootContent } from "hast";
-import type { Descriptor, ReportSummary } from "../../../api/generated/contracts/reports";
+import type {
+  Descriptor,
+  ReportSummary,
+  SourceOrigin,
+} from "../../../api/generated/contracts/reports";
 import { isRetired, reportStructure, reportText as text } from "./report-structure";
 import type { AcceptedFindingChange } from "./report-structure";
 
@@ -12,7 +16,10 @@ type AuthoredFinding = {
   readonly category?: string;
   readonly blocking?: boolean;
   readonly change?: AcceptedFindingChange;
-  readonly carried?: true;
+  // Set on a card drawn from the findings ledger. `earlier` is where a carried card was authored.
+  readonly unanchored?: {
+    readonly earlier?: { readonly origin: SourceOrigin; readonly offset: number };
+  };
   readonly header: readonly RootContent[];
   readonly fields: readonly Field[];
 };
@@ -28,6 +35,7 @@ type Finding = Extract<Descriptor, { kind: "finding" }>;
 const previousThreads =
   /^(?:(?:our )?previous threads|prior(?: review)? threads|discussion outcomes)$/i;
 const findingHeading = /^(F-\d{1,16})(?=$|[\s:.–—-])\s*(?:[·:.–—-]\s*)?(?:(P[0-3])\s*[·–—-]\s*)?/;
+const severityPrefix = /^(P[0-3])\s*[·–—-]\s*/;
 const fieldName =
   /^(Issue|Why it matters|Confirmed|Proposed comment|Location|Evidence|Suggested fix)(?=\s*(?:[:.—]|$))/i;
 
@@ -101,13 +109,22 @@ export function carriedPosition(
   return groups.length;
 }
 
-export function carriedBlock(
+export function unanchoredBlock(
   item: Finding,
   change: AcceptedFindingChange | undefined,
 ): ReportBlock {
   const details = item.details;
   const blocking = item.disposition?.blocking ?? item.blocking;
   const location = details?.location;
+  // A title restated from a heading can still begin with its ID and priority.
+  const heading = findingHeading.exec(item.title);
+  const own = heading?.[1] === item.findingId ? heading : null;
+  let title = own ? item.title.slice(own[0].length) : item.title;
+  const priority = own?.[2] ? undefined : severityPrefix.exec(title);
+  if (priority) title = title.slice(priority[0].length);
+  title = title.trim() || item.title;
+  const severity = item.severity || own?.[2] || priority?.[1];
+  const origin = item.source?.origin;
   const fields: Field[] = details
     ? [
         ...(location
@@ -142,12 +159,19 @@ export function carriedBlock(
     findingId: item.findingId,
     finding: {
       id: item.findingId,
-      title: item.title,
-      ...(item.severity ? { severity: item.severity } : {}),
+      title,
+      ...(severity ? { severity } : {}),
       ...(blocking !== null ? { blocking } : {}),
       ...(change ? { change } : {}),
-      carried: true,
-      header: [hast("h3", [{ type: "text", value: item.title }])],
+      unanchored: item.carriedFrom
+        ? {
+            earlier:
+              origin && item.source
+                ? { origin, offset: item.source.offset }
+                : { origin: item.carriedFrom, offset: 0 },
+          }
+        : {},
+      header: [hast("h3", [{ type: "text", value: title }])],
       fields,
     },
   };

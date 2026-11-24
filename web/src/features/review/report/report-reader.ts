@@ -71,8 +71,8 @@ export function wholeDocument(
   };
 }
 
-// Carried cards have no source in this report: offset -1 keeps them out of
-// bookmarks and quotes, and the windowed reader only sees its own group indexes.
+// Cards drawn from the findings ledger have no source in this report: offset -1 keeps
+// them out of bookmarks and quotes, and the windowed reader only sees its own group indexes.
 export function withCarried(
   reader: ReaderDocument,
   carried: readonly ReportBlock[],

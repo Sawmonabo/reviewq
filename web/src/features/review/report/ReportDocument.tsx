@@ -2,14 +2,12 @@ import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import type { RunDetail } from "../../../api/generated/contracts";
 import type {
-  Descriptor,
   QuoteRef,
   ReportSummary,
   SourceOrigin,
   SourceRange,
 } from "../../../api/generated/contracts/reports";
 import {
-  reportContext,
   reportDownload,
   reportFeedback,
   resolveReportQuote,
@@ -29,16 +27,14 @@ import { ReportDetails } from "./ReportDetails";
 import { ReportSource } from "./ReportSource";
 import { ReportTable } from "./ReportTable";
 import { RichReport } from "./RichReport";
+import { contextItems } from "./report-context";
 import { finishReading, readBookmark } from "./report-position";
-import { carriedBlock } from "./report-presentation";
-import { canWindowReport, wholeDocument, indexedDocument, withCarried } from "./report-reader";
-import type { ReaderDocument } from "./report-reader";
-import { isRetired } from "./report-structure";
+import { canWindowReport, wholeDocument, indexedDocument } from "./report-reader";
 import type { AcceptedFindingChange } from "./report-structure";
+import { useUnanchoredFindings } from "./useUnanchoredFindings";
 import { useVisibleContent } from "./useVisibleContent";
 
 type Quote = { readonly text: string; readonly reference: QuoteRef | null };
-type ReportFinding = Extract<Descriptor, { kind: "finding" }>;
 type Props = {
   readonly historyAccess: ReactNode;
   readonly run: RunDetail;
@@ -119,6 +115,14 @@ export default function ReportDocument({
     },
   );
   const displayed = body.data;
+  const unanchored = useUnanchoredFindings(
+    run.runId,
+    report,
+    admitted,
+    reader,
+    displayed?.reader,
+    displayed?.changes,
+  );
   const resolving = useRef<AbortController | undefined>(undefined);
   useEffect(() => () => resolving.current?.abort(), [quoteKey]);
   const formattingFailure = Boolean(displayed?.formattingFailure);
@@ -248,8 +252,8 @@ export default function ReportDocument({
         {!sourceMode && displayed?.outcomeError && (
           <Notice retry={body.retry}>Accepted finding outcomes are unavailable.</Notice>
         )}
-        {!sourceMode && displayed?.carriedError && (
-          <Notice retry={body.retry}>Carried findings are unavailable.</Notice>
+        {!sourceMode && displayed?.reader && unanchored.error && (
+          <Notice retry={unanchored.retry}>Some findings could not be loaded.</Notice>
         )}
         {sourceMode ? (
           tryTable ? (
@@ -272,10 +276,10 @@ export default function ReportDocument({
           )
         ) : body.pending ? (
           <Loading label="Loading accepted report…" />
-        ) : displayed?.reader ? (
+        ) : unanchored.reader ? (
           <RichReport
             historyAccess={historyAccess}
-            document={displayed.reader}
+            document={unanchored.reader}
             report={report}
             onFallback={fallback}
             bookmark={bookmark}
@@ -284,6 +288,7 @@ export default function ReportDocument({
               openSource(offset);
               setNotice("Select the exact passage in the original Markdown to attach a quote.");
             }}
+            onOpenEvidence={onOpenEvidence}
           />
         ) : (
           <Empty title="Formatted report unavailable">
@@ -491,14 +496,13 @@ async function loadReport(
       signal.throwIfAborted();
     }
     if (indexed) {
-      const carried = await addCarried(runId, report, indexed, outcomes.changes, signal);
       return {
         cursor: entry.cursor,
         data: {
-          reader: carried.reader,
+          reader: indexed,
+          changes: outcomes.changes,
           formattingFailure: false,
           outcomeError: outcomes.error,
-          carriedError: carried.error,
         },
       };
     }
@@ -521,61 +525,18 @@ async function loadReport(
   } catch {
     tree = undefined;
   }
-  const whole =
-    tree && typeof markdown === "string"
-      ? wholeDocument(markdown, tree, report, outcomes.changes, response.data.display)
-      : undefined;
-  const carried = whole
-    ? await addCarried(runId, report, whole, outcomes.changes, signal)
-    : { reader: undefined, error: false };
   return {
     cursor: response.cursor,
     data: {
-      reader: carried.reader,
+      reader:
+        tree && typeof markdown === "string"
+          ? wholeDocument(markdown, tree, report, outcomes.changes, response.data.display)
+          : undefined,
+      changes: outcomes.changes,
       formattingFailure: typeof markdown === "string" && !tree,
       outcomeError: outcomes.error,
-      carriedError: carried.error,
     },
   };
-}
-
-// A follow-up can carry an earlier finding whose card its own Markdown omits.
-// Read the findings only when the summary counts more than the text shows.
-async function addCarried(
-  runId: string,
-  report: ReportSummary,
-  reader: ReaderDocument,
-  changes: ReadonlyMap<string, AcceptedFindingChange> | undefined,
-  signal: AbortSignal,
-) {
-  const cards = new Set(reader.groups.flatMap((group) => group.findingId ?? []));
-  const active = [...cards].filter((id) => !isRetired(changes?.get(id))).length;
-  if (report.findingCount === null || report.findingCount <= active)
-    return { reader, error: false };
-  try {
-    const findings = await contextItems(
-      runId,
-      report,
-      "findings",
-      (item): item is ReportFinding => item.kind === "finding",
-      null,
-      signal,
-    );
-    const carried = [...findings.values()].flatMap((item) => {
-      const change = changes?.get(item.findingId);
-      const origin = item.source?.origin?.report.receiptId;
-      return cards.has(item.findingId) ||
-        isRetired(change) ||
-        !origin ||
-        origin === report.receiptId
-        ? []
-        : [carriedBlock(item, change)];
-    });
-    return { reader: withCarried(reader, carried, changes), error: false };
-  } catch {
-    signal.throwIfAborted();
-    return { reader, error: true };
-  }
 }
 
 function scrollWithinDrawer(element: HTMLElement) {
@@ -621,8 +582,8 @@ function readQuote(value: string): Quote | undefined {
   }
 }
 
-function acceptedChanges(runId: string, report: ReportSummary, signal: AbortSignal) {
-  return contextItems(
+async function acceptedChanges(runId: string, report: ReportSummary, signal: AbortSignal) {
+  const { items } = await contextItems(
     runId,
     report,
     "changes",
@@ -630,45 +591,5 @@ function acceptedChanges(runId: string, report: ReportSummary, signal: AbortSign
     report.changeCount ?? 0,
     signal,
   );
-}
-
-// Reads one report context collection to completion. A known count must match.
-async function contextItems<T extends Descriptor & { readonly findingId: string }>(
-  runId: string,
-  report: ReportSummary,
-  collection: "findings" | "changes",
-  accepts: (item: Descriptor) => item is T,
-  expected: number | null,
-  signal: AbortSignal,
-) {
-  const items = new Map<string, T>();
-  let next: string | undefined;
-  do {
-    // Findings carry details text, so their pages stay well inside the 64 KiB read.
-    const limit = collection === "findings" ? 10 : 20;
-    const result = await reportContext(runId, report.receiptId, collection, next, signal, limit);
-    if (
-      result.data.baseReport?.receiptId !== report.receiptId ||
-      result.data.baseReport.sha256 !== report.sha256
-    ) {
-      throw new Error(`The displayed report ${collection} changed.`);
-    }
-    for (const item of result.data.items) {
-      if (!accepts(item) || items.has(item.findingId))
-        throw new Error(`The accepted report ${collection} are inconsistent.`);
-      items.set(item.findingId, item);
-    }
-    const continuation = result.data.nextCursor;
-    if (
-      continuation &&
-      (!result.data.items.length ||
-        continuation === next ||
-        (expected !== null && items.size >= expected))
-    )
-      throw new Error(`The accepted report ${collection} count changed.`);
-    next = continuation ?? undefined;
-  } while (next);
-  if (expected !== null && items.size !== expected)
-    throw new Error(`The accepted report ${collection} are incomplete.`);
   return items;
 }
