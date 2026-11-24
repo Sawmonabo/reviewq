@@ -117,6 +117,8 @@ fn accepted_report_resolves_every_earlier_delivery_failure() {
             let temp = tempfile::tempdir().unwrap();
             let store = open(&temp).await;
             let lead = store.report_lead("codex:lead".parse().unwrap()).await.unwrap();
+            // The current head and a follow-up batch only satisfy the old rule's head guard and
+            // give it a batch to mismatch; the rule now reads neither.
             store.write(|tx| {
                 tx.sql.execute_batch(&format!(
                     "UPDATE reviews SET head_sha='{REVISION}';
@@ -132,7 +134,7 @@ fn accepted_report_resolves_every_earlier_delivery_failure() {
             assert!(finish(&store, &base, true).await);
 
             // BLITZ-901: a final failed in another follow-up scope than the next accepted final.
-            // It fails once the newer one is staged, so only native order puts it first.
+            // It fails after the newer one is staged, so its own failure time is not the order.
             let superseded = stage(&store, &lead, "superseded", "session", final_report(None)).await;
             let work = claimed(&store, &superseded).await;
             let replacement = stage(&store, &lead, "replacement", "session", final_report(None)).await;
