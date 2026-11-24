@@ -40,7 +40,6 @@ export function groupReportItems<T>(
     readonly label?: string;
     readonly offset?: number;
   },
-  legacy = true,
 ) {
   const groups: { offset: number; items: T[]; name?: string; findingId?: string }[] = [];
   let current = groups.at(-1);
@@ -54,7 +53,7 @@ export function groupReportItems<T>(
       heading ||
       (!current.findingId && current.items.length >= 24 && offset !== undefined)
     ) {
-      const id = legacy && heading && level === 3 ? findingHeading.exec(heading)?.[1] : undefined;
+      const id = heading && level === 3 ? findingHeading.exec(heading)?.[1] : undefined;
       current = {
         offset: offset ?? -1,
         items: [],
@@ -101,9 +100,8 @@ export function reportBlocks(
   changes: ReadonlyMap<string, AcceptedFindingChange> | null | undefined,
   body?: { readonly previousThreads: boolean },
 ): readonly ReportBlock[] {
-  const legacy = report.structuredVersion === undefined;
   const groups = groupReportItems(
-    legacy ? reportStructure(tree.children, source, report, changes, body) : tree.children,
+    reportStructure(tree.children, source, report, changes, body),
     (node) => {
       const level =
         node.type === "element" && /^h[1-3]$/.test(node.tagName)
@@ -114,11 +112,10 @@ export function reportBlocks(
         ...(node.position?.start.offset !== undefined && { offset: node.position.start.offset }),
       };
     },
-    legacy,
   );
   return inDisplayOrder(
     groups.map((group, index) => {
-      const finding = legacy ? authoredFinding(group.items, source, changes) : undefined;
+      const finding = authoredFinding(group.items, source, changes);
       return {
         offset: group.offset,
         sourceOrder: index,

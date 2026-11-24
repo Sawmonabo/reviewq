@@ -93,7 +93,7 @@ export function indexedDocument(
     )
       throw new Error("The report layout contains an invalid range.");
   }
-  const groups = planGroups(layout, changes, base, report.structuredVersion === undefined);
+  const groups = planGroups(layout, changes, base);
   if (groups.length <= 17) throw new Error("This report fits its full formatted view.");
   const owners = new Array<number>(spans.length);
   for (const [index, group] of groups.entries())
@@ -307,12 +307,7 @@ export function indexedDocument(
   };
 }
 
-function planGroups(
-  layout: DisplayLayout,
-  changes: Changes,
-  base: string | undefined,
-  legacy: boolean,
-) {
+function planGroups(layout: DisplayLayout, changes: Changes, base: string | undefined) {
   const spans = layout.blocks;
   const headings = spans.filter((s) => s.kind === "heading" && (s.headingLevel ?? 7) <= 3);
   if (headings.some((h) => !h.headingMarkdown))
@@ -329,7 +324,7 @@ function planGroups(
     labels.set(span.byteStart, {
       level: span.headingLevel!,
       label: reportText(node).trim(),
-      section: legacy ? startsReportBody(node) : node.tagName !== "h1",
+      section: startsReportBody(node),
     });
   }
   const bodyStart = spans.findIndex(
@@ -339,18 +334,14 @@ function planGroups(
   // verdict/count. Keep the complete cover inside its first presentation group.
   if (bodyStart < 1 || bodyStart > 18 || spans[bodyStart]?.kind === "table")
     throw new Error("The report cover needs its full document.");
-  const pieces = groupReportItems(
-    spans,
-    (span) => {
-      const heading =
-        span.byteStart >= spans[bodyStart]!.byteStart ? labels.get(span.byteStart) : undefined;
-      return {
-        offset: span.utf16Start,
-        ...(heading && { level: heading.level, label: heading.label }),
-      };
-    },
-    legacy,
-  );
+  const pieces = groupReportItems(spans, (span) => {
+    const heading =
+      span.byteStart >= spans[bodyStart]!.byteStart ? labels.get(span.byteStart) : undefined;
+    return {
+      offset: span.utf16Start,
+      ...(heading && { level: heading.level, label: heading.label }),
+    };
+  });
   let first = 0;
   let previousThreads = false;
   const result: Group[] = pieces.map((group, index) => {

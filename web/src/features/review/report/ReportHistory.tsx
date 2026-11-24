@@ -179,11 +179,9 @@ function reportHandoffReason(reason: string) {
     case "report_base_changed":
       return "ReviewQ could not confirm this handoff still applies to the report. Check the current Findings before submitting again.";
     case "report_amendment_continuity_unproved":
-      return "An amendment keeps the accepted Markdown, reviewed revision, and verdict. Use an evidence correction for changes that preserve the revision and verdict.";
+      return "An amendment keeps the accepted Markdown, reviewed revision and verdict. Submit a new final for changed content.";
     case "report_unchanged_evidence_mismatch":
       return "An unchanged result uses the current accepted receipt and its original source.";
-    case "report_presentation_evidence_unproved":
-      return "Submit an evidence correction for claims the cited section does not establish.";
     default:
       return readable(reason);
   }

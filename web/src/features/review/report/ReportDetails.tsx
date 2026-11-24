@@ -45,15 +45,7 @@ export function ReportDetails({
   );
   const context = useResource(
     `report-details:${run.runId}:${report.receiptId}:${collection}:${trail.at(-1) ?? ""}`,
-    (signal) =>
-      reportContext(
-        run.runId,
-        report.receiptId,
-        collection,
-        trail.at(-1),
-        signal,
-        collection === "findings" && report.structuredVersion !== undefined ? 6 : undefined,
-      ),
+    (signal) => reportContext(run.runId, report.receiptId, collection, trail.at(-1), signal),
     [{ kind: "report", id: run.runId }],
   );
   const currentVersion = context.data?.userDispositionVersion;
