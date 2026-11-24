@@ -280,7 +280,7 @@ fn unanchored_finding_keeps_details_and_origin_while_carried() {
                 let summary = store.read(move |db| {
                     Ok(crate::reports::version(db, &"run".parse().unwrap(), &receipt)?.summary)
                 }).await.unwrap();
-                assert_eq!((summary.finding_count, summary.carried_finding_count), (Some(1), 1));
+                assert_eq!((summary.finding_count, summary.unanchored_finding_count), (Some(1), 1));
             }
             store.close(Duration::from_secs(1)).await.unwrap();
         });
@@ -339,7 +339,7 @@ async fn assert_carried(store: &SqliteStore, version: &ReportReference, parent: 
         .await
         .unwrap();
     assert_eq!(summary.finding_count, Some(3));
-    assert_eq!(summary.carried_finding_count, 2);
+    assert_eq!(summary.unanchored_finding_count, 2);
 }
 
 async fn context(

@@ -310,10 +310,6 @@ export interface ReportSummary {
   attentionReceiptId: ResourceIdDto;
   byteLength: SafeCountDto;
   capturedAt: UtcTimestampDto;
-  /**
-   * Active findings carried from an earlier version whose card this report omits.
-   */
-  carriedFindingCount: SafeCountDto;
   changeCount: SafeCountDto | null;
   complete: boolean;
   coverage: Coverage;
@@ -332,6 +328,11 @@ export interface ReportSummary {
   semanticIndex: SemanticIndex;
   sha256: ReportHashDto;
   totalCodePoints: SafeCountDto;
+  /**
+   * Active findings with no card in this report's text: carried from an earlier
+   * version, or listed in the findings ledger without an `F-` heading.
+   */
+  unanchoredFindingCount: SafeCountDto;
   verdict: Verdict;
   [k: string]: unknown;
 }

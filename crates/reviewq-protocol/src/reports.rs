@@ -87,8 +87,9 @@ pub struct ReportSummary {
     pub semantic_index: SemanticIndex,
     pub finding_count: Option<SafeCountDto>,
     pub change_count: Option<SafeCountDto>,
-    /// Active findings carried from an earlier version whose card this report omits.
-    pub carried_finding_count: SafeCountDto,
+    /// Active findings with no card in this report's text: carried from an earlier
+    /// version, or listed in the findings ledger without an `F-` heading.
+    pub unanchored_finding_count: SafeCountDto,
     pub captured_at: UtcTimestampDto,
     #[serde(flatten)]
     pub stats: ArtifactStats,

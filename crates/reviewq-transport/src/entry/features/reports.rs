@@ -602,7 +602,7 @@ fn summary(value: app::ReportSummary) -> Result<dto::ReportSummary, AppError> {
         },
         finding_count: value.finding_count.map(count).transpose()?,
         change_count: value.change_count.map(count).transpose()?,
-        carried_finding_count: count(value.carried_finding_count)?,
+        unanchored_finding_count: count(value.unanchored_finding_count)?,
         captured_at: UtcTimestampDto::from_unix_milliseconds(value.captured_at_ms)
             .ok_or(AppError::Internal)?,
         stats: stats(value.stats)?,

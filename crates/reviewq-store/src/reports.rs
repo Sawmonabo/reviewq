@@ -41,8 +41,8 @@ const VERSION_SELECT: &str = "
         v.semantic_index, v.finding_count, v.change_count, v.captured_at_ms, v.artifact_id,
         a.byte_length, a.total_code_points, a.line_count, a.max_line_bytes, a.complete,
         a.original_sha256, v.handoff_receipt_id IS NOT NULL, v.coverage_source_sha, v.coverage_target_sha,
-        (SELECT count(*) FROM report_handoffs h, json_each(h.edits,'$.carry.findings')
-         WHERE h.receipt_id=v.handoff_receipt_id)
+        (SELECT count(*) FROM report_findings f
+         WHERE f.run_id=v.run_id AND f.receipt_id=v.receipt_id AND f.scalar_offset IS NULL)
     FROM report_versions v JOIN artifacts a USING(artifact_id)
     WHERE v.run_id=?1 AND a.sealed=1";
 
@@ -462,7 +462,7 @@ fn decode_version(row: &Row<'_>) -> Result<Version, StoreError> {
             semantic_index: parse(text(row, 9)?)?,
             finding_count: read_optional_count(row, 10)?,
             change_count: read_optional_count(row, 11)?,
-            carried_finding_count: read_count(row, 23)?,
+            unanchored_finding_count: read_count(row, 23)?,
             captured_at_ms: row.get(12)?,
             stats: decode_stats(row, 14)?,
         },

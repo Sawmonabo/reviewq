@@ -8611,14 +8611,6 @@
         "capturedAt": {
           "$ref": "#/definitions/UtcTimestampDto"
         },
-        "carriedFindingCount": {
-          "allOf": [
-            {
-              "$ref": "#/definitions/SafeCountDto"
-            }
-          ],
-          "description": "Active findings carried from an earlier version whose card this report omits."
-        },
         "changeCount": {
           "anyOf": [
             {
@@ -8732,6 +8724,14 @@
         "totalCodePoints": {
           "$ref": "#/definitions/SafeCountDto"
         },
+        "unanchoredFindingCount": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/SafeCountDto"
+            }
+          ],
+          "description": "Active findings with no card in this report's text: carried from an earlier\nversion, or listed in the findings ledger without an `F-` heading."
+        },
         "verdict": {
           "$ref": "#/definitions/Verdict"
         }
@@ -8753,7 +8753,7 @@
         "semanticIndex",
         "findingCount",
         "changeCount",
-        "carriedFindingCount",
+        "unanchoredFindingCount",
         "capturedAt",
         "byteLength",
         "totalCodePoints",

@@ -101,7 +101,6 @@ const schema391 = {
 const schema395 = {
   type: "object",
   properties: {
-    receiptId: { $ref: "#/definitions/CheckpointIdDto" },
     reviewedSha: {
       anyOf: [{ $ref: "#/definitions/GitShaDto" }, { type: "null" }],
     },
@@ -109,6 +108,11 @@ const schema395 = {
     semanticIndex: { $ref: "#/definitions/SemanticIndex" },
     sha256: { $ref: "#/definitions/ReportHashDto" },
     totalCodePoints: { $ref: "#/definitions/SafeCountDto" },
+    unanchoredFindingCount: {
+      allOf: [{ $ref: "#/definitions/SafeCountDto" }],
+      description:
+        "Active findings with no card in this report's text: carried from an earlier\nversion, or listed in the findings ledger without an `F-` heading.",
+    },
     verdict: { $ref: "#/definitions/Verdict" },
   },
 };

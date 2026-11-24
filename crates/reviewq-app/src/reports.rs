@@ -122,8 +122,8 @@ pub struct ReportSummary {
     pub semantic_index: SemanticIndex,
     pub finding_count: Option<u64>,
     pub change_count: Option<u64>,
-    /// Active findings carried from an earlier version without a card in this one.
-    pub carried_finding_count: u64,
+    /// Active findings with no card in this report's text (no heading anchor).
+    pub unanchored_finding_count: u64,
     pub captured_at_ms: i64,
     pub stats: ArtifactStats,
 }

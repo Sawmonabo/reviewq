@@ -107,9 +107,9 @@ function validate1340(
           (missing0 = "findingCount")) ||
         ((data.changeCount === undefined || !func0.call(data, "changeCount")) &&
           (missing0 = "changeCount")) ||
-        ((data.carriedFindingCount === undefined ||
-          !func0.call(data, "carriedFindingCount")) &&
-          (missing0 = "carriedFindingCount")) ||
+        ((data.unanchoredFindingCount === undefined ||
+          !func0.call(data, "unanchoredFindingCount")) &&
+          (missing0 = "unanchoredFindingCount")) ||
         ((data.capturedAt === undefined || !func0.call(data, "capturedAt")) &&
           (missing0 = "capturedAt")) ||
         ((data.byteLength === undefined || !func0.call(data, "byteLength")) &&
