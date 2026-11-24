@@ -51,7 +51,8 @@ struct Heading {
     offset: usize,
     title: String,
     finding_id: Option<String>,
-    /// The open strikethrough spans while the heading's text is read.
+    /// The open strikethrough spans and `<del>`, `<s>` or `<strike>` tags while the
+    /// heading's text is read.
     strike: u32,
     /// The title byte where the first text outside strikethrough starts, other than space.
     plain: Option<usize>,
@@ -125,6 +126,11 @@ pub(super) fn parse(source: &str) -> Option<Vec<Descriptor>> {
             match event {
                 Event::Start(Tag::Strikethrough) => value.strike += 1,
                 Event::End(TagEnd::Strikethrough) => value.strike = value.strike.saturating_sub(1),
+                Event::InlineHtml(ref html) => match strike_tag(html) {
+                    Some(true) => value.strike += 1,
+                    Some(false) => value.strike = value.strike.saturating_sub(1),
+                    None => {}
+                },
                 _ => {}
             }
             if let Some(text) = inline_text(&event, &mut images, value.title.len()) {
@@ -435,6 +441,24 @@ fn inline_text<'a>(
         Event::End(TagEnd::Image) => (images.pop() == Some(length)).then_some("Attachment"),
         _ => None,
     }
+}
+
+/// Whether one inline HTML tag opens (`true`) or closes (`false`) a `<del>`, `<s>` or
+/// `<strike>` element, ignoring case and attributes. The parser emits each tag as its own
+/// event.
+fn strike_tag(html: &str) -> Option<bool> {
+    let rest = html.strip_prefix('<')?;
+    let (opens, rest) = match rest.strip_prefix('/') {
+        Some(rest) => (false, rest),
+        None => (true, rest),
+    };
+    let end = rest
+        .find(|next: char| !next.is_ascii_alphanumeric() && next != '-')
+        .unwrap_or(rest.len());
+    ["del", "s", "strike"]
+        .iter()
+        .any(|tag| rest[..end].eq_ignore_ascii_case(tag))
+        .then_some(opens)
 }
 
 fn limited_append(output: &mut String, text: &str, max: usize) {
