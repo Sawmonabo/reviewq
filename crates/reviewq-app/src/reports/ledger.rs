@@ -62,9 +62,10 @@ pub struct Ledger {
 /// A retiring outcome excludes its ID even when this report keeps its heading. Every other
 /// ID of the parent, the ledger or the headings stays active. Fields come from the ledger,
 /// then the parent, then the heading. Details come from the ledger, with the reviewed
-/// revision as their checked SHA, else from the parent. The anchor is this report's heading.
-/// A parent finding the handoff neither lists, retires nor heads is carried from its origin.
-/// Headings without a source span are ignored.
+/// revision as their checked SHA, else from the parent. The anchor is this report's
+/// top-level heading. A parent finding the handoff neither lists, retires nor heads at the
+/// top level is carried from its origin. A heading without a source span, one nested in a
+/// list item, adds its ID and fields like any heading but leaves a new finding unanchored.
 pub fn derive(
     parent: Vec<ParentFinding>,
     report: &StructuredReport,
@@ -95,7 +96,7 @@ pub fn derive(
                 title,
                 severity,
                 blocking,
-                source: Some(source),
+                source,
                 ..
             } => Some((
                 id.as_str(),
@@ -103,7 +104,7 @@ pub fn derive(
                     title,
                     severity,
                     blocking: *blocking,
-                    source,
+                    source: source.as_ref(),
                 },
             )),
             _ => None,
@@ -142,11 +143,9 @@ pub fn derive(
                 }),
                 None => prior.as_ref().and_then(|finding| finding.details.clone()),
             };
-            let (anchor, evidence_sha256) = match (heading, supplied, prior) {
-                (Some(heading), ..) => (
-                    Anchor::Heading(heading.source.clone()),
-                    Some(heading.source.hash.clone()),
-                ),
+            let span = heading.and_then(|heading| heading.source);
+            let (anchor, evidence_sha256) = match (span, supplied, prior) {
+                (Some(span), ..) => (Anchor::Heading(span.clone()), Some(span.hash.clone())),
                 (None, None, Some(prior)) => (Anchor::Carried(prior.origin), prior.evidence_sha256),
                 (None, ..) => (Anchor::None, None),
             };
@@ -168,8 +167,9 @@ pub fn derive(
 
 /// Checks a final's findings ledger against the parent's active findings while the tool
 /// call is open. An outcome must name a parent finding. A full review lists or gives an
-/// outcome for every parent finding. Each level-three `F-` heading of a file report must be
-/// listed, given an outcome or carried; `headings` is `None` when they are unknown.
+/// outcome for every parent finding. Each level-three `F-` heading of a file report, at the
+/// top level or nested in a list item, must be listed, given an outcome or carried;
+/// `headings` is `None` when they are unknown.
 /// Amendments, unchanged results and questions carry no ledger.
 pub fn check(
     declaration: &Declaration,
@@ -253,17 +253,18 @@ struct Heading<'a> {
     title: &'a String,
     severity: &'a Option<String>,
     blocking: Option<bool>,
-    source: &'a SourceRange,
+    /// `None` for a heading nested in a list item, which the reader draws without a card.
+    source: Option<&'a SourceRange>,
 }
 
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
 
-    use super::{ParentFinding, check};
+    use super::{Anchor, ParentFinding, check, derive};
     use crate::reports::{
-        Declaration, FindingBasis, FindingBasisKind, FindingDetails, ReportEdits, RevisionEvidence,
-        Source, StructuredFinding, StructuredReport, Verdict,
+        Declaration, Descriptor, FindingBasis, FindingBasisKind, FindingDetails, ReportEdits,
+        RevisionEvidence, Source, StructuredFinding, StructuredReport, Verdict, index,
     };
 
     // BLITZ-592: a full re-review listed F-04 and silently dropped F-05 and F-06.
@@ -326,6 +327,90 @@ mod tests {
                     "/handoff/report/findings",
                     "F-06 · Audit log omits the actor was in the last accepted report. List it in report.findings or give its outcome in findingChanges."
                 ),
+            ]
+        );
+    }
+
+    // A report in its own format repeated F-01, said both "Blocking: yes" and "Blocking: no"
+    // under it, and raised F-02 inside a numbered list. The parse must not fail, and F-02,
+    // which the reader draws without a card, must stay a tracked finding.
+    #[test]
+    fn a_nested_heading_and_a_repeated_id_stay_tracked() {
+        let markdown = "# Review of !418
+
+### F-01 · P1 · Session token written to logs
+
+Blocking: yes
+
+Blocking: no
+
+### F-01 · P1 · Session token written to logs
+
+The retry path logs it again.
+
+## Other notes
+
+1. ### F-02 Retry loop never ends
+
+   The loop has no attempt cap.
+";
+        let headings = index::parse(markdown).expect("within the index budget");
+        let sections = headings
+            .iter()
+            .filter(|item| matches!(item, Descriptor::Section { .. }))
+            .count();
+        assert_eq!(sections, 4, "the repeated heading stays a plain section");
+        let ids: Vec<String> = headings
+            .iter()
+            .filter_map(|item| match item {
+                Descriptor::Finding { id, .. } => Some(id.clone()),
+                _ => None,
+            })
+            .collect();
+        let review = Declaration::Final {
+            source: Source::Response,
+            revision: RevisionEvidence::Exact("a".repeat(40).parse().unwrap()),
+            verdict: Verdict::RequestChanges,
+            report: Some(Arc::new(StructuredReport {
+                version: 1,
+                findings: Vec::new(),
+            })),
+            amends: None,
+            edits: ReportEdits::default(),
+            assessments: Vec::new(),
+        };
+        let messages: Vec<_> = check(&review, &[], Some(&ids), true)
+            .into_iter()
+            .map(|error| error.message)
+            .collect();
+        assert_eq!(
+            messages,
+            [
+                "The report has heading F-01, which is missing from report.findings.",
+                "The report has heading F-02, which is missing from report.findings.",
+            ]
+        );
+        let Declaration::Final {
+            report: Some(report),
+            edits,
+            ..
+        } = &review
+        else {
+            unreachable!()
+        };
+        let derived: Vec<_> = derive(Vec::new(), report, edits, None, &headings)
+            .findings
+            .into_iter()
+            .map(|finding| {
+                let anchored = matches!(finding.anchor, Anchor::Heading(_));
+                (finding.id, finding.severity, finding.blocking, anchored)
+            })
+            .collect();
+        assert_eq!(
+            derived,
+            [
+                ("F-01".into(), Some("P1".into()), None, true),
+                ("F-02".into(), None, None, false),
             ]
         );
     }

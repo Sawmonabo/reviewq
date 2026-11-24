@@ -250,7 +250,8 @@ pub trait ReportCaptureStore: Send + Sync {
 pub struct SubmittedFile {
     /// SHA-256 of every byte read. `None` when the file was not read.
     pub hash: Option<ReportHash>,
-    /// The report's level-three `F-` heading IDs, when they could be read without waiting.
+    /// The report's level-three `F-` heading IDs, including those nested in list items,
+    /// when they could be read without waiting.
     pub headings: Option<Vec<String>>,
 }
 
@@ -316,7 +317,7 @@ async fn read_submitted(
             tokio::task::spawn_blocking(move || {
                 let _admission = admission;
                 let source = String::from_utf8(bytes).ok()?;
-                let items = index::parse(&source).ok().flatten()?;
+                let items = index::parse(&source)?;
                 Some(
                     items
                         .into_iter()
@@ -594,14 +595,14 @@ async fn read_source(
         complete: true,
     };
     let display_admitted = stats.require_markdown_budget().is_ok();
-    // A report whose headings cannot be parsed, such as one with a repeated F- heading, is
-    // accepted without a heading index and still renders in the rich reader.
+    // A report with more headings than the index admits is accepted without a heading
+    // index and still renders in the rich reader.
     let (index, display_source) = match index_source {
         Some(source) => {
             let admission = index::admit().await?;
             tokio::task::spawn_blocking(move || {
                 let _admission = admission;
-                let index = index::parse(&source).ok().flatten();
+                let index = index::parse(&source);
                 (index, display_admitted.then_some(source))
             })
             .await
