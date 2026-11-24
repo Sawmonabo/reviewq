@@ -174,8 +174,8 @@ pub(super) fn complete(
                 )
                 .map(|()| false);
             }
-            let install = match (report, current.receipt.as_deref()) {
-                (Some(report), parent) => {
+            let install = match (report, amends, current.receipt.as_deref()) {
+                (Some(report), None, parent) => {
                     let parent = match parent {
                         Some(parent) => structured::parent::active(db, run, parent)?,
                         None => Vec::new(),
@@ -188,11 +188,12 @@ pub(super) fn complete(
                     let derived = ledger::derive(parent, report, edits, reviewed, headings);
                     Install::Ledger(structured::Projection::new(derived)?, report)
                 }
-                (None, Some(parent)) => Install::Amendment {
+                // The continuity check above pinned the amended version as the head.
+                (None, Some(_), Some(parent)) => Install::Amendment {
                     parent,
                     inherited: structured::inherited(db, parent)?,
                 },
-                (None, None) => return Err(AppError::Internal.into()),
+                _ => return Err(AppError::Internal.into()),
             };
             if !structured::fits(
                 db,

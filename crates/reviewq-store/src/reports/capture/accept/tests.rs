@@ -177,7 +177,7 @@ fn followup_carries_findings_its_text_and_ledger_omit() {
                 Ok(())
             }).await.unwrap();
 
-            let followup_call = stage(&store, &lead, "selected-followup", "rollout", ledger_final(
+            let followup_call = stage(&store, &lead, "ledger-followup", "rollout", ledger_final(
                 FOLLOWUP,
                 vec![StructuredFinding {
                     id: "F-05".into(),
@@ -221,6 +221,67 @@ fn followup_carries_findings_its_text_and_ledger_omit() {
             let amendment = store.accepted_report(lead.clone()).await.unwrap().value.unwrap().reference;
             assert_ne!(amendment.receipt_id, followup.receipt_id);
             assert_carried(&store, &amendment, &parent).await;
+            store.close(Duration::from_secs(1)).await.unwrap();
+        });
+}
+
+// A report in another repository's format lists its findings in a table, without F- headings.
+#[test]
+fn unanchored_finding_keeps_details_and_origin_while_carried() {
+    tokio::runtime::Builder::new_current_thread()
+        .enable_time()
+        .build()
+        .unwrap()
+        .block_on(async {
+            let temp = tempfile::tempdir().unwrap();
+            let store = open(&temp).await;
+            let lead = store.report_lead("codex:lead".parse().unwrap()).await.unwrap();
+            let body = "# Review\n\n| ID | Finding |\n| --- | --- |\n| F-01 | Upload size is unbounded |\n";
+            let finding = StructuredFinding {
+                id: "F-01".into(),
+                title: "Upload size is unbounded".into(),
+                severity: "P1".into(),
+                blocking: true,
+                details: FindingDetails {
+                    location: None,
+                    consequence: "A large upload exhausts the worker's memory.".into(),
+                    evidence: FindingBasis {
+                        kind: FindingBasisKind::Gap,
+                        text: "No limit is configured; the load test was not run.".into(),
+                    },
+                    checked_sha: None,
+                    evidence_hash: None,
+                },
+            };
+            let call = stage(&store, &lead, "ledger-only", "rollout",
+                ledger_final(body, vec![finding.clone()], Vec::new(), None)).await;
+            assert!(finish_with(&store, &call, true, body.as_bytes(), index(body, &[("# Review", None)])).await);
+            let authored = store.accepted_report(lead.clone()).await.unwrap().value.unwrap().reference;
+            let mut versions = Vec::new();
+            for (id, body) in [("carry-once", "# Follow-up\n\nNothing new.\n"), ("carry-twice", "# Follow-up\n\nStill nothing new.\n")] {
+                let call = stage(&store, &lead, id, "rollout",
+                    ledger_final(body, Vec::new(), Vec::new(), None)).await;
+                assert!(finish_with(&store, &call, true, body.as_bytes(), Vec::new()).await);
+                versions.push(store.accepted_report(lead.clone()).await.unwrap().value.unwrap().reference);
+            }
+            for version in &versions {
+                let findings = context(&store, version, Collection::Findings).await;
+                let [Descriptor::Finding { id, blocking, source: None, carried_from, details, .. }] = findings.as_slice() else {
+                    panic!("one carried finding without a span");
+                };
+                assert_eq!((id.as_str(), *blocking), ("F-01", Some(true)));
+                assert_eq!(carried_from.as_ref().map(|origin| &origin.report), Some(&authored),
+                    "the origin is the version that authored the card, through a carried parent");
+                let details = details.as_ref().expect("carried details are copied");
+                assert_eq!(details.consequence, finding.details.consequence);
+                assert_eq!(details.checked_sha.as_deref(), Some(REVISION));
+                assert!(details.evidence_hash.is_some());
+                let receipt = version.receipt_id.clone();
+                let summary = store.read(move |db| {
+                    Ok(crate::reports::version(db, &"run".parse().unwrap(), &receipt)?.summary)
+                }).await.unwrap();
+                assert_eq!((summary.finding_count, summary.carried_finding_count), (Some(1), 1));
+            }
             store.close(Duration::from_secs(1)).await.unwrap();
         });
 }
@@ -386,8 +447,11 @@ async fn stage(
         "contested" => 4,
         "before-settlement" => 5,
         "legacy-parent" => 1,
-        "selected-followup" => 2,
+        "ledger-followup" => 2,
         "followup-amend" => 3,
+        "ledger-only" => 1,
+        "carry-once" => 2,
+        "carry-twice" => 3,
         _ => panic!("unknown fixture call"),
     };
     let call = NativeCall {
