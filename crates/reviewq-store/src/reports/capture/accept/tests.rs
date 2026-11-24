@@ -106,7 +106,8 @@ fn report_admission_distinguishes_settled_history_from_competing_handoffs() {
 }
 
 // BLITZ-901 and BLITZ-923: "Report update failed" stayed on a run after a newer report
-// was saved. A failure stays listed, but any accepted report clears the ones before it.
+// was saved. A failure stays listed, but the newest accepted report clears the ones before
+// it, whichever was recorded first.
 #[test]
 fn accepted_report_resolves_every_earlier_delivery_failure() {
     tokio::runtime::Builder::new_current_thread()
@@ -145,24 +146,34 @@ fn accepted_report_resolves_every_earlier_delivery_failure() {
                 Ok(())
             }).await.unwrap();
             assert!(finish(&store, &replacement, true).await);
+
+            // Two finals in one turn: the later one is accepted first, then admission rejects
+            // the earlier one, whose failure must not outlive the newer saved report.
+            let overtaken = stage(&store, &lead, "overtaken", "session", final_report(None)).await;
+            let overtaking = stage(&store, &lead, "overtaking", "session", final_report(None)).await;
+            let mut works = store.claim_report_work(4).await.unwrap();
+            assert_eq!(works.len(), 2);
+            let earlier = works.remove(usize::from(works[0].call != overtaken));
+            assert!(settle(&store, works.remove(0), true, REPORT, Vec::new()).await);
+            assert!(!settle(&store, earlier, true, REPORT, Vec::new()).await);
+            assert_eq!(recorded_state(&store, &overtaken).await, HandoffState::Failed);
             let current = store.accepted_report(lead.clone()).await.unwrap().value.unwrap().reference;
 
-            // BLITZ-923: a turn ended without any handoff, then an unchanged result was accepted.
-            let missing = native_call(&lead, "no-handoff", "session");
-            store.write(move |tx| {
-                failures::note(&tx.sql, &missing, "no-handoff".into(), "turn ended", "report_delivery_failure", now_ms()?)?;
-                tx.sql.execute("UPDATE report_delivery_failures SET identity_verified=0 WHERE native_call_id='no-handoff'", [])?;
-                Ok(())
-            }).await.unwrap();
+            // BLITZ-923: a turn ended without a valid handoff, then an unchanged result was accepted.
+            assert!(store.reserve_report_correction(native_call(&lead, "corrected", "session")).await.unwrap());
             let unchanged = stage(&store, &lead, "unchanged", "session", Declaration::Unchanged {
-                accepted: current.clone(),
+                accepted: current,
                 source: file_source(),
                 assessments: Vec::new(),
             }).await;
-            // A later call asked for a correction before the unchanged result was processed.
-            assert!(store.reserve_report_correction(native_call(&lead, "corrected", "session")).await.unwrap());
+            // A call in a rotated transcript, which native order cannot compare, asked for a
+            // correction after the unchanged result was staged but before it was processed.
+            tokio::time::sleep(Duration::from_millis(2)).await;
+            assert!(store.reserve_report_correction(native_call(&lead, "later-correction", "rotated")).await.unwrap());
             assert!(!finish(&store, &unchanged, false).await);
 
+            // Each failure names the report that cleared it: the overtaken final clears at its
+            // own rejection, not at the next acceptance.
             let resolved = store.read(|db| {
                 let mut statement = db.prepare(
                     "SELECT f.native_call_id,h.call_id FROM report_delivery_failures f
@@ -171,8 +182,9 @@ fn accepted_report_resolves_every_earlier_delivery_failure() {
                 Ok(rows.collect::<Result<Vec<(String, Option<String>)>, _>>()?)
             }).await.unwrap();
             assert_eq!(resolved, [
-                ("corrected".to_owned(), None),
-                ("no-handoff".to_owned(), Some(unchanged.call_id)),
+                ("corrected".to_owned(), Some(unchanged.call_id)),
+                ("later-correction".to_owned(), None),
+                ("overtaken".to_owned(), Some(overtaking.call_id)),
                 ("superseded".to_owned(), Some(replacement.call_id)),
             ]);
             store.close(Duration::from_secs(1)).await.unwrap();
@@ -554,9 +566,11 @@ fn native_call(lead: &LeadTarget, id: &str, generation: &str) -> NativeCall {
         "base" => 1,
         "superseded" => 2,
         "replacement" => 3,
-        "no-handoff" => 4,
-        "unchanged" => 5,
+        "overtaken" => 4,
+        "overtaking" => 5,
         "corrected" => 6,
+        "unchanged" => 7,
+        "later-correction" => 1,
         _ => panic!("unknown fixture call"),
     };
     NativeCall {
@@ -659,15 +673,24 @@ async fn finish_with(
     index: Vec<Descriptor>,
 ) -> bool {
     let work = claimed(store, call).await;
+    settle(store, work, new_version, body, index).await
+}
+
+/// Accepts claimed work, or reports why admission rejected it.
+async fn settle(
+    store: &SqliteStore,
+    work: ReportWork,
+    new_version: bool,
+    body: &[u8],
+    index: Vec<Descriptor>,
+) -> bool {
     let captured = if matches!(&work.declaration, Declaration::NeedsInput { .. }) {
         None
     } else {
         Some(capture(store, &work, new_version, body, index).await)
     };
-    store
-        .accept_report(work, call.call_id.parse().unwrap(), captured)
-        .await
-        .unwrap()
+    let result = work.call.call_id.parse().unwrap();
+    store.accept_report(work, result, captured).await.unwrap()
 }
 
 async fn claimed(store: &SqliteStore, call: &NativeCall) -> ReportWork {
