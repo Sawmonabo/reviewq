@@ -43,10 +43,19 @@ pub fn validate_report_handoff(input: &Value) -> Vec<ReportHandoffFieldError> {
     if hidden > 0 {
         errors.push(ReportHandoffFieldError {
             path: "/handoff".into(),
-            message: format!("{hidden} more errors are not shown. Fix these and submit again."),
+            message: hidden_errors(hidden),
         });
     }
     errors
+}
+
+/// Counts the errors a capped refusal leaves out.
+fn hidden_errors(hidden: usize) -> String {
+    if hidden == 1 {
+        "1 more error is not shown. Fix these and submit again.".to_owned()
+    } else {
+        format!("{hidden} more errors are not shown. Fix these and submit again.")
+    }
 }
 
 fn collect(error: &ValidationError<'_>, errors: &mut BTreeSet<ReportHandoffFieldError>) {

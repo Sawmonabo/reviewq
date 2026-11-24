@@ -70,12 +70,18 @@ impl HandoffFieldError {
         let hidden = errors.len().saturating_sub(MAX_HANDOFF_FIELD_ERRORS);
         if hidden > 0 {
             errors.truncate(MAX_HANDOFF_FIELD_ERRORS);
-            errors.push(Self::new(
-                "/handoff",
-                format!("{hidden} more errors are not shown. Fix these and submit again."),
-            ));
+            errors.push(Self::new("/handoff", hidden_errors(hidden)));
         }
         errors
+    }
+}
+
+/// Counts the errors a capped refusal leaves out.
+fn hidden_errors(hidden: usize) -> String {
+    if hidden == 1 {
+        "1 more error is not shown. Fix these and submit again.".to_owned()
+    } else {
+        format!("{hidden} more errors are not shown. Fix these and submit again.")
     }
 }
 
