@@ -257,8 +257,9 @@ pub struct SubmittedFile {
 /// Reads a submitted report file once. Without a `declared` hash, every byte is hashed and
 /// a read failure is returned. With `headings`, it also parses a file of at most 4 MiB of
 /// UTF-8 for its `F-` heading IDs, but only when the parse admission is free; it never
-/// waits. A declared hash that differs from the bytes, an oversized file, or any failure
-/// after a declared hash yields no headings, and acceptance checks the file instead.
+/// waits. A declared hash that differs from the bytes yields their hash and no headings, so
+/// the caller can name the mismatch. An oversized file, a busy admission or any failure
+/// after a declared hash yields neither, and acceptance checks the file instead.
 pub async fn read_submitted_file(
     files: &dyn ReportFileSource,
     call: NativeCall,

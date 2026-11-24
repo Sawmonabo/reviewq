@@ -261,10 +261,21 @@ pub(in crate::entry) async fn submit_verified(
                         ledger,
                     )
                     .await?;
-                    if declared.is_none()
-                        && let Some(value) = &read.hash
-                    {
-                        *sha256 = Some(hash(value.as_str())?);
+                    match (&declared, &read.hash) {
+                        (None, Some(value)) => *sha256 = Some(hash(value.as_str())?),
+                        // Only bytes actually read can contradict the declared hash.
+                        (Some(declared), Some(actual)) if declared != actual => {
+                            return Err(AppError::InvalidHandoff(vec![
+                                app::HandoffFieldError::new(
+                                    "/handoff/source/sha256",
+                                    format!(
+                                        "The file's SHA-256 is {}; the report changed or the hash is wrong.",
+                                        actual.as_str()
+                                    ),
+                                ),
+                            ]));
+                        }
+                        _ => {}
                     }
                     headings = read.headings;
                 }
