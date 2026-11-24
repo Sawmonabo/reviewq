@@ -16,6 +16,9 @@ const MAX_TITLE_BYTES: usize = 384;
 const MAX_SEVERITY_BYTES: usize = 64;
 /// The text kept from the paragraph under a finding heading, which holds its metadata lines.
 const MAX_CARD_TEXT_BYTES: usize = 384;
+/// The longest line of a paragraph the fallback reads as a `Severity:` or `Blocking:` line,
+/// which fits the label and a 64-unit value.
+const MAX_LINE_BYTES: usize = 384;
 /// The longest category, in UTF-16 units, the reader accepts in a `P1 · Category · blocking`
 /// line.
 const MAX_CATEGORY_UNITS: usize = 80;
@@ -60,6 +63,10 @@ struct Fields {
     /// The first `P1 · Category · blocking` lines' priority and blocking status.
     line_severity: Option<String>,
     line_blocking: Option<bool>,
+    /// The last `Severity:` and `Blocking:` lines within paragraphs before the first labelled
+    /// field, used only when the reader's rules find no value, as the old server read them.
+    fallback_severity: Option<String>,
+    fallback_blocking: Option<bool>,
     /// A labelled field such as `**Evidence:**` has begun, which ends those lines.
     labelled: bool,
 }
@@ -71,6 +78,11 @@ struct Paragraph {
     lead: Option<String>,
     lead_depth: usize,
     images: Vec<usize>,
+    /// The current line, read in full whatever the text limit; `None` once it is too long.
+    line: Option<String>,
+    /// The last `Severity:` and `Blocking:` lines of the paragraph.
+    severity: Option<String>,
+    blocking: Option<bool>,
 }
 
 /// Indexes the report as the reader draws it: its top-level sections and level-three `F-`
@@ -169,12 +181,16 @@ pub(super) fn parse(source: &str) -> Option<Vec<Descriptor>> {
                     lead: None,
                     lead_depth: 0,
                     images: Vec::new(),
+                    line: Some(String::new()),
+                    severity: None,
+                    blocking: None,
                 });
             }
             Event::End(TagEnd::Paragraph) => {
-                if let Some(value) = paragraph.take()
+                if let Some(mut value) = paragraph.take()
                     && let Some(index) = finding
                 {
+                    value.end_line();
                     headings[index].fields.read(value);
                 }
             }
@@ -220,8 +236,12 @@ pub(super) fn parse(source: &str) -> Option<Vec<Descriptor>> {
                 severity: fields
                     .severity
                     .or_else(|| heading_severity(&title))
-                    .or(fields.line_severity),
-                blocking: fields.blocking.or(fields.line_blocking),
+                    .or(fields.line_severity)
+                    .or(fields.fallback_severity),
+                blocking: fields
+                    .blocking
+                    .or(fields.line_blocking)
+                    .or(fields.fallback_blocking),
                 title: title.clone(),
                 source: Some(range.clone()),
                 carried_from: None,
@@ -273,7 +293,39 @@ impl Paragraph {
                     {
                         limited_append(lead, text, MAX_CARD_TEXT_BYTES);
                     }
+                    let mut parts = text.split('\n');
+                    if let Some(first) = parts.next() {
+                        self.extend_line(first);
+                    }
+                    for part in parts {
+                        self.end_line();
+                        self.extend_line(part);
+                    }
                 }
+            }
+        }
+    }
+
+    fn extend_line(&mut self, text: &str) {
+        if let Some(line) = self.line.as_mut() {
+            if line.len() + text.len() <= MAX_LINE_BYTES {
+                line.push_str(text);
+            } else {
+                self.line = None;
+            }
+        }
+    }
+
+    /// Reads the finished line as a `Severity:` or `Blocking:` line and starts the next.
+    fn end_line(&mut self) {
+        if let Some(line) = self.line.replace(String::new()) {
+            let line = line.trim();
+            if let Some(value) = severity_line(line)
+                && value.len() <= MAX_SEVERITY_BYTES
+            {
+                self.severity = Some(value.to_owned());
+            } else if let Some(value) = blocking_line(line) {
+                self.blocking = Some(value);
             }
         }
     }
@@ -283,7 +335,9 @@ impl Fields {
     /// Reads a paragraph as the reader does until the first labelled field: a paragraph that
     /// is a single `Severity:` or `Blocking:` line sets that field, the last one winning.
     /// Otherwise the paragraph or its leading strong span may be the reader's
-    /// `P1 · Category · blocking` line, or a field label that ends these lines.
+    /// `P1 · Category · blocking` line, or a field label that ends these lines. A paragraph
+    /// that does not begin a labelled field also supplies its `Severity:` and `Blocking:`
+    /// lines to the fallback, the last one winning, so a two-line form keeps its values.
     fn read(&mut self, paragraph: Paragraph) {
         if self.labelled {
             return;
@@ -310,6 +364,13 @@ impl Fields {
             }
         } else if paragraph.lead.is_some() && field_label(candidate) {
             self.labelled = true;
+            return;
+        }
+        if paragraph.severity.is_some() {
+            self.fallback_severity = paragraph.severity;
+        }
+        if paragraph.blocking.is_some() {
+            self.fallback_blocking = paragraph.blocking;
         }
     }
 }
