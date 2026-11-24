@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 
+#[cfg(feature = "schema")]
 use super::limits;
 
 #[derive(Debug, Deserialize, Serialize)]
