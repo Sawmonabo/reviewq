@@ -6,7 +6,7 @@ use reviewq_app::access::{Actor, AppError, AppFuture};
 use reviewq_app::events::{ResourceKey, Snapshot};
 use reviewq_app::reports::{
     AcceptedReport, ArtifactChunk, CapturedArtifact, Declaration, HandoffReceipt, ReportAuthority,
-    ReportCaptureStore, ReportReference, ReportWork, RevisionEvidence, Source,
+    ReportCaptureStore, ReportReference, ReportWork, RevisionEvidence, Source, ledger,
 };
 use reviewq_app::workflow::{
     ExpectedAcknowledgement, NativeCall, ReportFailureAddress, WorkflowTool,
@@ -521,13 +521,23 @@ fn stage(
         return Err(AppError::Forbidden.into());
     }
     let assessments = batch::encode(declaration.assessments())?;
-    let structured = matches!(
-        declaration,
+    // The budget check counts the supplied cards; acceptance adds those carried from the parent.
+    let projection = match &declaration {
         Declaration::Final {
-            report: Some(_),
+            report: Some(report),
+            edits,
+            revision,
             ..
+        } => {
+            let reviewed = match revision {
+                RevisionEvidence::Exact(sha) => Some(sha),
+                RevisionEvidence::Unknown(_) => None,
+            };
+            let supplied = ledger::derive(Vec::new(), report, edits, reviewed, &[]);
+            Some(structured::Projection::new(supplied)?)
         }
-    );
+        _ => None,
+    };
     let (form, source, revision, verdict, expected, reason, edits) = match declaration {
         Declaration::Final {
             source,
@@ -592,8 +602,8 @@ fn stage(
         call.arguments_sha256.as_ref(),
         incomparable_recorded,
     )?;
-    if structured
-        && !structured::supplied_projection_fits(db, &edits, head.as_ref().map(|sha| sha.as_str()))?
+    if let Some(projection) = &projection
+        && !structured::fits(db, &edits, projection.metadata())?
     {
         return Err(AppError::PayloadTooLarge.into());
     }

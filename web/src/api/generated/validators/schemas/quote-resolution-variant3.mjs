@@ -2,7 +2,7 @@
 import { func0 } from "../runtime.mjs";
 import { validate129 } from "./safe-count-dto.mjs";
 import { validate132 } from "./offset-unit.mjs";
-function validate1375(
+function validate1381(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -21,7 +21,7 @@ function validate1375(
         ((data.unit === undefined || !func0.call(data, "unit")) &&
           (missing0 = "unit"))
       ) {
-        validate1375.errors = [
+        validate1381.errors = [
           {
             instancePath,
             schemaPath: "#/required",
@@ -77,7 +77,7 @@ function validate1375(
               let data2 = data.state;
               const _errs3 = errors;
               if (typeof data2 !== "string") {
-                validate1375.errors = [
+                validate1381.errors = [
                   {
                     instancePath: instancePath + "/state",
                     schemaPath: "#/properties/state/type",
@@ -88,7 +88,7 @@ function validate1375(
                 return false;
               }
               if ("unique" !== data2) {
-                validate1375.errors = [
+                validate1381.errors = [
                   {
                     instancePath: instancePath + "/state",
                     schemaPath: "#/properties/state/const",
@@ -128,7 +128,7 @@ function validate1375(
         }
       }
     } else {
-      validate1375.errors = [
+      validate1381.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -139,7 +139,7 @@ function validate1375(
       return false;
     }
   }
-  validate1375.errors = vErrors;
+  validate1381.errors = vErrors;
   return errors === 0;
 }
-export { validate1375 };
+export { validate1381 };

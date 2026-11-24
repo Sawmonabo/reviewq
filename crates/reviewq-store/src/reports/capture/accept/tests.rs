@@ -2,7 +2,9 @@ use std::os::unix::fs::PermissionsExt;
 use std::time::Duration;
 
 use reviewq_app::reports::{
-    ArtifactChunk, ArtifactStats, HandoffState, ReportCaptureStore, ReportWork,
+    ArtifactChunk, ArtifactStats, Collection, ContextRequest, Descriptor, FindingBasis,
+    FindingBasisKind, FindingConclusion, FindingDetails, FindingEdit, FindingLocation,
+    HandoffState, ReportCaptureStore, ReportEdits, ReportWork, SourceRange, StructuredFinding,
 };
 use reviewq_app::workflow::{NativeCall, WorkflowTool};
 use reviewq_domain::identity::ReportHash;
@@ -23,22 +25,7 @@ fn report_admission_distinguishes_settled_history_from_competing_handoffs() {
         .unwrap()
         .block_on(async {
             let temp = tempfile::tempdir().unwrap();
-            std::fs::set_permissions(temp.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
-            let path = AbsolutePath::from_canonical(temp.path().join("reports.sqlite3")).unwrap();
-            let store = SqliteStore::open(path).await.unwrap();
-            store.write(|tx| {
-                tx.sql.execute_batch(
-                    "INSERT INTO configured_projects VALUES('https://git.example',1);
-                     INSERT INTO reviews(review_id,origin,project_id,iid,project_path,title,head_sha,state,updated_at_ms)
-                       VALUES('review','https://git.example',1,1,'example/project','Review',printf('%040d',0),'open',0);
-                     INSERT INTO runs VALUES('run','review','codex:lead',0),
-                                            ('fresh','review','codex:new',0);
-                     INSERT INTO sessions(session_key,run_id,provider,profile,native_id,cwd)
-                       VALUES('codex:lead','run','codex',CAST('/codex' AS BLOB),'lead',CAST('/work' AS BLOB)),
-                             ('codex:new','fresh','codex',CAST('/codex' AS BLOB),'new',CAST('/work' AS BLOB));",
-                )?;
-                Ok(())
-            }).await.unwrap();
+            let store = open(&temp).await;
             let lead = store.report_lead("codex:lead".parse().unwrap()).await.unwrap();
             let source = file_source();
             let base = stage(&store, &lead, "initial", "older-file", final_report(None)).await;
@@ -118,6 +105,272 @@ fn report_admission_distinguishes_settled_history_from_competing_handoffs() {
         });
 }
 
+const LEGACY_PARENT: &str = "# Review
+
+### F-01 Session token written to logs
+
+Severity: P1
+Blocking: yes
+
+### F-02 Retry loop never ends
+
+Severity: P1
+Blocking: yes
+
+### F-03 Missing regression test
+
+Severity: P3
+Blocking: no
+
+### F-04 Stale comment
+
+Severity: P3
+Blocking: no
+";
+
+// BLITZ-605: the follow-up's Markdown moved the untouched P1 cards into a table.
+const FOLLOWUP: &str = "# Follow-up review
+
+### F-03 Missing regression test
+
+Added in the retry suite.
+
+### F-05 Cache key ignores tenant
+
+Severity: P2
+Blocking: no
+
+## Earlier findings
+
+| ID | Status |
+| --- | --- |
+| F-01 | Still present |
+| F-02 | Still present |
+";
+
+#[test]
+fn followup_carries_findings_its_text_and_ledger_omit() {
+    tokio::runtime::Builder::new_current_thread()
+        .enable_time()
+        .build()
+        .unwrap()
+        .block_on(async {
+            let temp = tempfile::tempdir().unwrap();
+            let store = open(&temp).await;
+            let lead = store.report_lead("codex:lead".parse().unwrap()).await.unwrap();
+
+            // A version accepted before the ledger kept the F-04 row it retired.
+            let parent_call = stage(&store, &lead, "legacy-parent", "rollout",
+                ledger_final(LEGACY_PARENT, Vec::new(), Vec::new(), None)).await;
+            let parent_index = index(LEGACY_PARENT, &[
+                ("### F-01", Some(("F-01", "P1", true))), ("### F-02", Some(("F-02", "P1", true))),
+                ("### F-03", Some(("F-03", "P3", false))), ("### F-04", Some(("F-04", "P3", false))),
+            ]);
+            assert!(finish_with(&store, &parent_call, true, LEGACY_PARENT.as_bytes(), parent_index).await);
+            let parent = store.accepted_report(lead.clone()).await.unwrap().value.unwrap().reference;
+            let parent_id = parent.receipt_id.to_string();
+            store.write(move |tx| {
+                tx.sql.execute(
+                    "INSERT INTO report_changes VALUES('run',?1,'F-04','fixed','Comment removed.',?2)",
+                    params![parent_id, REVISION],
+                )?;
+                Ok(())
+            }).await.unwrap();
+
+            let followup_call = stage(&store, &lead, "selected-followup", "rollout", ledger_final(
+                FOLLOWUP,
+                vec![StructuredFinding {
+                    id: "F-05".into(),
+                    title: "F-05 Cache key ignores tenant".into(),
+                    severity: "P2".into(),
+                    blocking: false,
+                    details: FindingDetails {
+                        location: Some(FindingLocation { path: "src/cache.rs".into(), line: Some(42) }),
+                        consequence: "One tenant can read another tenant's cached page.".into(),
+                        evidence: FindingBasis {
+                            kind: FindingBasisKind::Observed,
+                            text: "The key is built from the path alone.".into(),
+                        },
+                        checked_sha: None,
+                        evidence_hash: None,
+                    },
+                }],
+                vec![FindingEdit {
+                    finding_id: "F-03".into(),
+                    conclusion: FindingConclusion::Fixed,
+                    reason: "The retry suite now covers it.".into(),
+                    checked_sha: Some(REVISION.parse().unwrap()),
+                    discussion_ids: Vec::new(),
+                }],
+                None,
+            )).await;
+            let followup_index = index(FOLLOWUP, &[
+                ("### F-03", Some(("F-03", "P3", false))), ("### F-05", Some(("F-05", "P2", false))),
+                ("## Earlier", None),
+            ]);
+            assert!(finish_with(&store, &followup_call, true, FOLLOWUP.as_bytes(), followup_index.clone()).await);
+            let followup = store.accepted_report(lead.clone()).await.unwrap().value.unwrap().reference;
+            assert_carried(&store, &followup, &parent).await;
+            let changes = context(&store, &followup, Collection::Changes).await;
+            assert!(matches!(changes.as_slice(), [Descriptor::Change { id, conclusion: FindingConclusion::Fixed, .. }] if id == "F-03"));
+
+            // An amendment keeps the details and origins its rows depend on.
+            let amend_call = stage(&store, &lead, "followup-amend", "rollout",
+                ledger_final(FOLLOWUP, Vec::new(), Vec::new(), Some(followup.clone()))).await;
+            assert!(finish_with(&store, &amend_call, true, FOLLOWUP.as_bytes(), followup_index).await);
+            let amendment = store.accepted_report(lead.clone()).await.unwrap().value.unwrap().reference;
+            assert_ne!(amendment.receipt_id, followup.receipt_id);
+            assert_carried(&store, &amendment, &parent).await;
+            store.close(Duration::from_secs(1)).await.unwrap();
+        });
+}
+
+async fn assert_carried(store: &SqliteStore, version: &ReportReference, parent: &ReportReference) {
+    let findings = context(store, version, Collection::Findings).await;
+    let ids: Vec<&str> = findings
+        .iter()
+        .map(|item| match item {
+            Descriptor::Finding { id, .. } => id.as_str(),
+            _ => panic!("findings collection returned another item"),
+        })
+        .collect();
+    assert_eq!(
+        ids,
+        ["F-01", "F-02", "F-05"],
+        "F-03 is retired and F-04 stays retired"
+    );
+    for item in &findings[..2] {
+        let Descriptor::Finding {
+            blocking,
+            source,
+            carried_from,
+            ..
+        } = item
+        else {
+            unreachable!()
+        };
+        assert_eq!(*blocking, Some(true));
+        assert_eq!(
+            carried_from.as_ref().map(|origin| &origin.report),
+            Some(parent)
+        );
+        let origin = source.as_ref().and_then(|range| range.origin.as_ref());
+        assert_eq!(
+            origin.map(|origin| &origin.report),
+            Some(parent),
+            "the parent's card supplies the span"
+        );
+    }
+    let Descriptor::Finding {
+        details,
+        carried_from: None,
+        source: Some(SourceRange { origin: None, .. }),
+        ..
+    } = &findings[2]
+    else {
+        panic!("F-05 is anchored to this report's heading");
+    };
+    let details = details.as_ref().expect("the ledger's details are kept");
+    assert_eq!(details.checked_sha.as_deref(), Some(REVISION));
+    let receipt = version.receipt_id.clone();
+    let summary = store
+        .read(move |db| Ok(crate::reports::version(db, &"run".parse().unwrap(), &receipt)?.summary))
+        .await
+        .unwrap();
+    assert_eq!(summary.finding_count, Some(3));
+    assert_eq!(summary.carried_finding_count, 2);
+}
+
+async fn context(
+    store: &SqliteStore,
+    version: &ReportReference,
+    collection: Collection,
+) -> Vec<Descriptor> {
+    let receipt = version.receipt_id.clone();
+    store
+        .read(move |db| {
+            Ok(crate::reports::context::read(
+                db,
+                &"run".parse().unwrap(),
+                ContextRequest {
+                    receipt: Some(receipt),
+                    collection,
+                    after: None,
+                    limit: 50,
+                },
+            )?
+            .items)
+        })
+        .await
+        .unwrap()
+}
+
+fn ledger_final(
+    body: &str,
+    findings: Vec<StructuredFinding>,
+    changes: Vec<FindingEdit>,
+    amends: Option<ReportReference>,
+) -> Declaration {
+    Declaration::Final {
+        source: file_source_for(body.as_bytes()),
+        revision: RevisionEvidence::Exact(REVISION.parse().unwrap()),
+        verdict: Verdict::RequestChanges,
+        report: amends.is_none().then(|| {
+            std::sync::Arc::new(StructuredReport {
+                version: 1,
+                findings,
+            })
+        }),
+        amends,
+        edits: ReportEdits { findings: changes },
+        assessments: Vec::new(),
+    }
+}
+
+/// Indexes the named headings of an ASCII report as the app's parser would.
+/// A heading's marker and, for a finding card, its ID, severity and blocking line.
+type Heading<'a> = (&'a str, Option<(&'a str, &'a str, bool)>);
+
+fn index(body: &str, headings: &[Heading<'_>]) -> Vec<Descriptor> {
+    let mut items = Vec::new();
+    for (marker, finding) in headings {
+        let start = body.find(marker).unwrap();
+        let end = body[start + 1..]
+            .find("\n#")
+            .map_or(body.len(), |at| start + 2 + at);
+        let title = body[start..]
+            .lines()
+            .next()
+            .unwrap()
+            .trim_start_matches('#')
+            .trim();
+        let source = SourceRange {
+            offset: start as u64,
+            length: (end - start) as u64,
+            hash: digest(body[start..end].trim_end().as_bytes()),
+            origin: None,
+        };
+        if let Some((id, severity, blocking)) = finding {
+            items.push(Descriptor::Finding {
+                id: (*id).into(),
+                title: title.into(),
+                severity: Some((*severity).into()),
+                blocking: Some(*blocking),
+                source: Some(source.clone()),
+                carried_from: None,
+                details: None,
+                disposition: None,
+            });
+        }
+        items.push(Descriptor::Section {
+            title: title.into(),
+            source,
+            cursor_offset: start as u64,
+        });
+    }
+    items
+}
+
 async fn stage(
     store: &SqliteStore,
     lead: &LeadTarget,
@@ -132,6 +385,9 @@ async fn stage(
         "changed-disposition" => 3,
         "contested" => 4,
         "before-settlement" => 5,
+        "legacy-parent" => 1,
+        "selected-followup" => 2,
+        "followup-amend" => 3,
         _ => panic!("unknown fixture call"),
     };
     let call = NativeCall {
@@ -176,6 +432,16 @@ async fn recorded_state(store: &SqliteStore, call: &NativeCall) -> HandoffState 
 }
 
 async fn finish(store: &SqliteStore, call: &NativeCall, new_version: bool) -> bool {
+    finish_with(store, call, new_version, REPORT, Vec::new()).await
+}
+
+async fn finish_with(
+    store: &SqliteStore,
+    call: &NativeCall,
+    new_version: bool,
+    body: &[u8],
+    index: Vec<Descriptor>,
+) -> bool {
     let work = store
         .claim_report_work(4)
         .await
@@ -186,7 +452,7 @@ async fn finish(store: &SqliteStore, call: &NativeCall, new_version: bool) -> bo
     let captured = if matches!(&work.declaration, Declaration::NeedsInput { .. }) {
         None
     } else {
-        Some(capture(store, &work, new_version, REPORT).await)
+        Some(capture(store, &work, new_version, body, index).await)
     };
     store
         .accept_report(work, call.call_id.parse().unwrap(), captured, Vec::new())
@@ -199,6 +465,7 @@ async fn capture(
     work: &ReportWork,
     install: bool,
     body: &[u8],
+    index: Vec<Descriptor>,
 ) -> CapturedArtifact {
     let bytes = u64::try_from(body.len()).unwrap();
     if install {
@@ -225,7 +492,7 @@ async fn capture(
             max_line_bytes: bytes - 1,
             complete: true,
         },
-        index: Some(Vec::new()),
+        index: Some(index),
     }
 }
 
@@ -247,10 +514,34 @@ fn final_report(amends: Option<ReportReference>) -> Declaration {
 }
 
 fn file_source() -> ReportSource {
+    file_source_for(REPORT)
+}
+
+fn file_source_for(body: &[u8]) -> ReportSource {
     ReportSource::File {
         path: AbsolutePath::from_canonical("/work/report.md".into()).unwrap(),
-        hash: Some(digest(REPORT)),
+        hash: Some(digest(body)),
     }
+}
+
+async fn open(temp: &tempfile::TempDir) -> SqliteStore {
+    std::fs::set_permissions(temp.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
+    let path = AbsolutePath::from_canonical(temp.path().join("reports.sqlite3")).unwrap();
+    let store = SqliteStore::open(path).await.unwrap();
+    store.write(|tx| {
+        tx.sql.execute_batch(
+            "INSERT INTO configured_projects VALUES('https://git.example',1);
+             INSERT INTO reviews(review_id,origin,project_id,iid,project_path,title,head_sha,state,updated_at_ms)
+               VALUES('review','https://git.example',1,1,'example/project','Review',printf('%040d',0),'open',0);
+             INSERT INTO runs VALUES('run','review','codex:lead',0),
+                                    ('fresh','review','codex:new',0);
+             INSERT INTO sessions(session_key,run_id,provider,profile,native_id,cwd)
+               VALUES('codex:lead','run','codex',CAST('/codex' AS BLOB),'lead',CAST('/work' AS BLOB)),
+                     ('codex:new','fresh','codex',CAST('/codex' AS BLOB),'new',CAST('/work' AS BLOB));",
+        )?;
+        Ok(())
+    }).await.unwrap();
+    store
 }
 
 fn digest(bytes: &[u8]) -> ReportHash {

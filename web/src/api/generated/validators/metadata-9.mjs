@@ -22,9 +22,14 @@ const schema363 = {
   ],
   type: "object",
 };
-const schema373 = {
+const schema374 = {
+  type: "object",
   properties: {
     blocking: { type: ["boolean", "null"] },
+    carriedFrom: {
+      anyOf: [{ $ref: "#/definitions/SourceOrigin" }, { type: "null" }],
+      description: "The earlier receipt whose card a carried finding keeps.",
+    },
     details: {
       anyOf: [{ $ref: "#/definitions/FindingDetails" }, { type: "null" }],
     },
@@ -37,13 +42,10 @@ const schema373 = {
     source: {
       anyOf: [{ $ref: "#/definitions/SourceRange" }, { type: "null" }],
     },
-    title: { type: "string" },
   },
-  required: ["kind", "findingId", "title", "severity", "blocking", "source"],
-  type: "object",
 };
-const schema376 = { enum: ["observed", "gap"], type: "string" };
-const schema377 = {
+const schema378 = { enum: ["observed", "gap"], type: "string" };
+const schema379 = {
   additionalProperties: false,
   properties: {
     line: {
@@ -57,7 +59,7 @@ const schema377 = {
   required: ["path"],
   type: "object",
 };
-const schema378 = {
+const schema380 = {
   properties: {
     blocking: { type: ["boolean", "null"] },
     publication: {
@@ -68,7 +70,7 @@ const schema378 = {
   required: ["blocking", "publication", "reason"],
   type: "object",
 };
-const schema382 = {
+const schema384 = {
   properties: {
     blocking: { type: ["boolean", "null"] },
     findingId: { type: "string" },
@@ -81,7 +83,7 @@ const schema382 = {
   required: ["kind", "findingId", "blocking", "publication", "reason"],
   type: "object",
 };
-const schema388 = {
+const schema390 = {
   properties: {
     reason: { type: ["string", "null"] },
     receiptId: {
@@ -92,13 +94,14 @@ const schema388 = {
   required: ["receiptId", "state", "reason"],
   type: "object",
 };
-const schema389 = {
+const schema391 = {
   enum: ["preparing", "saving", "failed", "saved"],
   type: "string",
 };
-const schema393 = {
+const schema395 = {
   type: "object",
   properties: {
+    receiptId: { $ref: "#/definitions/CheckpointIdDto" },
     reviewedSha: {
       anyOf: [{ $ref: "#/definitions/GitShaDto" }, { type: "null" }],
     },
@@ -109,21 +112,21 @@ const schema393 = {
     verdict: { $ref: "#/definitions/Verdict" },
   },
 };
-const schema394 = { enum: ["ready", "source_only"], type: "string" };
-const schema395 = {
+const schema396 = { enum: ["ready", "source_only"], type: "string" };
+const schema397 = {
   enum: ["approve", "request_changes", "blocked", "not_specified"],
   type: "string",
 };
 export {
   schema363,
-  schema373,
-  schema376,
-  schema377,
+  schema374,
   schema378,
-  schema382,
-  schema388,
-  schema389,
-  schema393,
-  schema394,
+  schema379,
+  schema380,
+  schema384,
+  schema390,
+  schema391,
   schema395,
+  schema396,
+  schema397,
 };

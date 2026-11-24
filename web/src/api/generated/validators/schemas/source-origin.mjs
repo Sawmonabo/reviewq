@@ -2,7 +2,7 @@
 import { func0 } from "../runtime.mjs";
 import { validate152 } from "./git-sha-dto.mjs";
 import { validate1275 } from "./report-reference.mjs";
-function validate1297(
+function validate1282(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -17,7 +17,7 @@ function validate1297(
         ((data.checkedSha === undefined || !func0.call(data, "checkedSha")) &&
           (missing0 = "checkedSha"))
       ) {
-        validate1297.errors = [
+        validate1282.errors = [
           {
             instancePath,
             schemaPath: "#/required",
@@ -81,7 +81,7 @@ function validate1297(
               vErrors.push(err1);
             }
             errors++;
-            validate1297.errors = vErrors;
+            validate1282.errors = vErrors;
             return false;
           } else {
             errors = _errs2;
@@ -121,7 +121,7 @@ function validate1297(
         }
       }
     } else {
-      validate1297.errors = [
+      validate1282.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -132,7 +132,7 @@ function validate1297(
       return false;
     }
   }
-  validate1297.errors = vErrors;
+  validate1282.errors = vErrors;
   return errors === 0;
 }
-export { validate1297 };
+export { validate1282 };

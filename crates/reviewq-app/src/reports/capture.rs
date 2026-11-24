@@ -522,17 +522,10 @@ async fn read_source(
         complete: true,
     };
     let display_admitted = stats.require_markdown_budget().is_ok();
-    let legacy = !matches!(
-        &work.declaration,
-        Declaration::Final {
-            report: Some(_),
-            ..
-        }
-    );
     // A report whose headings cannot be parsed is accepted without a heading index.
     let (index, display_source) = match index_source {
         Some(source) => match tokio::task::spawn_blocking(move || {
-            let index = index::parse(&source, legacy)?;
+            let index = index::parse(&source)?;
             Ok::<_, AppError>((index, display_admitted.then_some(source)))
         })
         .await

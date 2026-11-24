@@ -4,6 +4,7 @@ mod capture;
 mod display;
 mod drawings;
 mod index;
+pub mod ledger;
 mod revision;
 mod structured;
 
@@ -121,6 +122,8 @@ pub struct ReportSummary {
     pub semantic_index: SemanticIndex,
     pub finding_count: Option<u64>,
     pub change_count: Option<u64>,
+    /// Active findings carried from an earlier version without a card in this one.
+    pub carried_finding_count: u64,
     pub captured_at_ms: i64,
     pub stats: ArtifactStats,
 }
@@ -217,6 +220,8 @@ pub enum Descriptor {
         severity: Option<String>,
         blocking: Option<bool>,
         source: Option<SourceRange>,
+        /// The receipt where a carried finding's card was last authored.
+        carried_from: Option<Box<SourceOrigin>>,
         details: Option<Box<FindingDetails>>,
         disposition: Option<Box<FindingDisposition>>,
     },

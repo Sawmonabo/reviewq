@@ -87,6 +87,8 @@ pub struct ReportSummary {
     pub semantic_index: SemanticIndex,
     pub finding_count: Option<SafeCountDto>,
     pub change_count: Option<SafeCountDto>,
+    /// Active findings carried from an earlier version whose card this report omits.
+    pub carried_finding_count: SafeCountDto,
     pub captured_at: UtcTimestampDto,
     #[serde(flatten)]
     pub stats: ArtifactStats,
@@ -293,6 +295,9 @@ pub enum Descriptor {
         severity: Option<String>,
         blocking: Option<bool>,
         source: Option<SourceRange>,
+        /// The earlier receipt whose card a carried finding keeps.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        carried_from: Option<Box<SourceOrigin>>,
         #[serde(skip_serializing_if = "Option::is_none")]
         details: Option<Box<FindingDetails>>,
         #[serde(skip_serializing_if = "Option::is_none")]

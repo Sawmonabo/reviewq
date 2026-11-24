@@ -602,6 +602,7 @@ fn summary(value: app::ReportSummary) -> Result<dto::ReportSummary, AppError> {
         },
         finding_count: value.finding_count.map(count).transpose()?,
         change_count: value.change_count.map(count).transpose()?,
+        carried_finding_count: count(value.carried_finding_count)?,
         captured_at: UtcTimestampDto::from_unix_milliseconds(value.captured_at_ms)
             .ok_or(AppError::Internal)?,
         stats: stats(value.stats)?,
@@ -626,20 +627,18 @@ fn delivery(value: app::ReportDelivery) -> Result<dto::ReportDelivery, AppError>
 }
 
 fn descriptor(value: Descriptor) -> Result<dto::Descriptor, AppError> {
+    let origin = |origin: Box<app::SourceOrigin>| -> Result<Box<dto::SourceOrigin>, AppError> {
+        Ok(Box::new(dto::SourceOrigin {
+            report: reference(origin.report)?,
+            checked_sha: origin.checked_sha.as_ref().map(sha).transpose()?,
+        }))
+    };
     let range = |range: app::SourceRange| -> Result<dto::SourceRange, AppError> {
         Ok(dto::SourceRange {
             offset: count(range.offset)?,
             length: count(range.length)?,
             sha256: hash(range.hash.as_str())?,
-            origin: range
-                .origin
-                .map(|origin| {
-                    Ok::<_, AppError>(Box::new(dto::SourceOrigin {
-                        report: reference(origin.report)?,
-                        checked_sha: origin.checked_sha.as_ref().map(sha).transpose()?,
-                    }))
-                })
-                .transpose()?,
+            origin: range.origin.map(origin).transpose()?,
         })
     };
     Ok(match value {
@@ -649,6 +648,7 @@ fn descriptor(value: Descriptor) -> Result<dto::Descriptor, AppError> {
             severity,
             blocking,
             source,
+            carried_from,
             details,
             disposition,
         } => dto::Descriptor::Finding {
@@ -657,6 +657,7 @@ fn descriptor(value: Descriptor) -> Result<dto::Descriptor, AppError> {
             severity,
             blocking,
             source: source.map(range).transpose()?,
+            carried_from: carried_from.map(origin).transpose()?,
             disposition: disposition.map(|value| {
                 Box::new(dto::FindingDisposition {
                     blocking: value.blocking,

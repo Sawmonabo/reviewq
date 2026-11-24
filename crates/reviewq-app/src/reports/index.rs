@@ -19,7 +19,9 @@ struct Heading {
     blocking: Option<bool>,
 }
 
-pub(super) fn parse(source: &str, legacy: bool) -> Result<Option<Vec<Descriptor>>, AppError> {
+/// Indexes the report's sections and its level-three `F-` finding headings. Returns `None`
+/// when the report has more headings than the index admits.
+pub(super) fn parse(source: &str) -> Result<Option<Vec<Descriptor>>, AppError> {
     let mut headings = Vec::new();
     let mut heading = None;
     let mut paragraph = None;
@@ -46,7 +48,7 @@ pub(super) fn parse(source: &str, legacy: bool) -> Result<Option<Vec<Descriptor>
                     return Ok(None);
                 }
                 let mut value = heading.take().ok_or(AppError::Internal)?;
-                if legacy && value.level == 3 {
+                if value.level == 3 {
                     value.finding_id = finding_id(&value.title);
                 }
                 headings.push(value);
@@ -127,6 +129,7 @@ pub(super) fn parse(source: &str, legacy: bool) -> Result<Option<Vec<Descriptor>
                 severity: heading.severity,
                 blocking: heading.blocking,
                 source: Some(range()?),
+                carried_from: None,
                 details: None,
                 disposition: None,
             });

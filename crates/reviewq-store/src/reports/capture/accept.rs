@@ -2,14 +2,14 @@ use reviewq_app::access::AppError;
 use reviewq_app::events::ResourceKey;
 use reviewq_app::notifications::{Kind, Observation, Source};
 use reviewq_app::reports::{
-    CapturedArtifact, Declaration, Descriptor, ReportEdits, ReportReference, ReportWork,
-    RevisionEvidence, Source as ReportSource, StructuredReport, Verdict,
+    CapturedArtifact, Declaration, ReportReference, ReportWork, RevisionEvidence,
+    Source as ReportSource, StructuredReport, Verdict, ledger,
 };
 use reviewq_app::workflow::ReportFailureAddress;
 use reviewq_domain::identity::NativeInputId;
 use rusqlite::{Connection, OptionalExtension, params};
 
-use super::{authority, batch, db_int, edits, ensure_claim, failures, structured};
+use super::{authority, batch, db_int, ensure_claim, failures, structured};
 use crate::StoreError;
 use crate::connection::WriteTx;
 use crate::events::now_ms;
@@ -60,27 +60,29 @@ pub(super) fn complete(
         .map(|()| false);
     }
     let current = head(db, run)?;
-    let (base_receipt, legacy_settings, saved_authority, grant_current) = db.query_row(
-        "SELECT base_receipt_id, settings_revision, json_extract(edits, '$.authority'),
+    let (base_receipt, legacy_settings, saved_authority, grant_current, saved_edits) = db
+        .query_row(
+            "SELECT base_receipt_id, settings_revision, json_extract(edits, '$.authority'),
             json_extract(edits, '$.grantId') IS NULL OR EXISTS (
                 SELECT 1 FROM repo_grants g WHERE g.grant_id=json_extract(h.edits, '$.grantId')
                 AND g.epoch=json_extract(h.edits, '$.grantEpoch') AND g.active=1
-                AND g.origin=?2 AND g.project_id=?3)
+                AND g.origin=?2 AND g.project_id=?3), edits
          FROM report_handoffs h WHERE receipt_id=?1",
-        params![
-            receipt,
-            identity.origin().as_str(),
-            identity.project_id().as_sqlite_integer()
-        ],
-        |row| {
-            Ok((
-                row.get::<_, Option<String>>(0)?,
-                row.get::<_, i64>(1)?,
-                row.get::<_, Option<String>>(2)?,
-                row.get::<_, bool>(3)?,
-            ))
-        },
-    )?;
+            params![
+                receipt,
+                identity.origin().as_str(),
+                identity.project_id().as_sqlite_integer()
+            ],
+            |row| {
+                Ok((
+                    row.get::<_, Option<String>>(0)?,
+                    row.get::<_, i64>(1)?,
+                    row.get::<_, Option<String>>(2)?,
+                    row.get::<_, bool>(3)?,
+                    row.get::<_, Option<String>>(4)?,
+                ))
+            },
+        )?;
     let newer = newer_handoff(db, receipt)?;
     // Receipts staged before scoped authority was recorded retain their original guard.
     let authority_changed = match saved_authority {
@@ -172,30 +174,40 @@ pub(super) fn complete(
                 )
                 .map(|()| false);
             }
-            let projection = if let Some(report) = report {
-                let projection = structured::prepare(
-                    db,
-                    run,
-                    current.receipt.as_deref(),
-                    scoped.is_some(),
-                    report,
-                    revision,
-                    edits,
-                )?;
-                if !projection.fits(db, receipt)? {
-                    return reject(
-                        tx,
-                        &work,
-                        Some(captured),
-                        "report_structured_payload_too_large",
-                        Some(&result),
-                    )
-                    .map(|()| false);
+            let install = match (report, current.receipt.as_deref()) {
+                (Some(report), parent) => {
+                    let parent = match parent {
+                        Some(parent) => structured::parent::active(db, run, parent)?,
+                        None => Vec::new(),
+                    };
+                    let reviewed = match revision {
+                        RevisionEvidence::Exact(sha) => Some(sha),
+                        RevisionEvidence::Unknown(_) => None,
+                    };
+                    let headings = captured.index.as_deref().unwrap_or_default();
+                    let derived = ledger::derive(parent, report, edits, reviewed, headings);
+                    Install::Ledger(structured::Projection::new(derived)?, report)
                 }
-                Some((projection, report))
-            } else {
-                None
+                (None, Some(parent)) => Install::Amendment {
+                    parent,
+                    inherited: structured::inherited(db, parent)?,
+                },
+                (None, None) => return Err(AppError::Internal.into()),
             };
+            if !structured::fits(
+                db,
+                saved_edits.as_deref().unwrap_or("{}"),
+                install.metadata(),
+            )? {
+                return reject(
+                    tx,
+                    &work,
+                    Some(captured),
+                    "report_structured_payload_too_large",
+                    Some(&result),
+                )
+                .map(|()| false);
+            }
             seal(db, artifact_id, captured)?;
             promote(
                 db,
@@ -205,12 +217,8 @@ pub(super) fn complete(
                 &current,
                 revision,
                 *verdict,
-                amends.is_some(),
-                edits,
+                &install,
                 captured,
-                projection
-                    .as_ref()
-                    .map(|(projection, report)| (projection, report.as_ref())),
                 time,
                 scoped
                     .as_ref()
@@ -459,6 +467,22 @@ fn seal(db: &Connection, artifact: &str, captured: &CapturedArtifact) -> Result<
     Ok(())
 }
 
+/// The rows a new final installs: the derived ledger of a report, or an amendment's
+/// copy of the version it amends.
+enum Install<'a> {
+    Ledger(structured::Projection, &'a StructuredReport),
+    Amendment { parent: &'a str, inherited: String },
+}
+
+impl Install<'_> {
+    fn metadata(&self) -> &str {
+        match self {
+            Self::Ledger(projection, _) => projection.metadata(),
+            Self::Amendment { inherited, .. } => inherited,
+        }
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 fn promote(
     db: &Connection,
@@ -468,16 +492,15 @@ fn promote(
     previous: &Head,
     revision: &RevisionEvidence,
     verdict: Verdict,
-    amendment: bool,
-    edits: &ReportEdits,
+    install: &Install<'_>,
     captured: &CapturedArtifact,
-    structured: Option<(&structured::Projection, &StructuredReport)>,
     time: i64,
     scoped: Option<(
         &crate::followups::work::FrozenManifest,
         &[reviewq_app::reports::Assessment],
     )>,
 ) -> Result<(), StoreError> {
+    let amendment = matches!(install, Install::Amendment { .. });
     let (reviewed, reason) = match revision {
         RevisionEvidence::Exact(sha) => (Some(sha.as_str()), None),
         RevisionEvidence::Unknown(reason) => (None, Some(reason.as_str())),
@@ -499,22 +522,18 @@ fn promote(
     } else {
         "full_mr"
     };
-    let changes = if amendment {
-        previous.change_count.unwrap_or(0)
-    } else {
-        edits.findings.len() as i64
-    };
-    let count = if let Some((projection, ..)) = structured {
-        Some(projection.count)
-    } else if amendment {
-        previous.finding_count
-    } else {
-        captured.index.as_ref().map(|items| {
-            items
-                .iter()
-                .filter(|item| matches!(item, Descriptor::Finding { .. }))
-                .count() as i64
-        })
+    // The ledger supplies counts even when the report's headings could not be indexed.
+    let (count, changes) = match install {
+        Install::Ledger(projection, _) => (
+            Some(projection.finding_count()),
+            Some(projection.change_count()),
+        ),
+        Install::Amendment { .. } => (
+            previous.finding_count,
+            previous
+                .finding_count
+                .map(|_| previous.change_count.unwrap_or(0)),
+        ),
     };
     let semantic = if count.is_some() {
         "ready"
@@ -535,53 +554,18 @@ fn promote(
           starting_disposition_version, coverage_source_sha, coverage_target_sha)
          VALUES(?1,?2,?3,?2,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17)",
         params![run, receipt, artifact, previous.receipt, attention, reviewed, reason, known_full,
-            coverage, verdict.to_string(), semantic, count, count.map(|_| changes), time,
+            coverage, verdict.to_string(), semantic, count, changes, time,
             previous.disposition_version,
             if amendment { previous.coverage_source.as_deref() } else { reviewed },
             if amendment { previous.coverage_target.as_deref() } else { scoped.and_then(|(manifest,_)| manifest.target_sha.as_deref()) }],
     )?;
-    if let Some((projection, report)) = structured {
-        projection.install(
-            db,
-            run,
-            receipt,
-            previous.receipt.as_deref(),
-            &report.findings,
-        )?;
-        if let Some(items) = &captured.index {
-            write_index(db, run, receipt, items)?;
+    match install {
+        Install::Ledger(projection, report) => {
+            projection.install(db, run, receipt, report, captured.index.as_deref())?;
         }
-    } else if amendment {
-        let parent = previous.receipt.as_deref().ok_or(AppError::Internal)?;
-        db.execute(
-            "INSERT INTO report_findings
-             SELECT run_id,?3,finding_id,title,severity,blocking,scalar_offset,scalar_length,evidence_sha256
-             FROM report_findings WHERE run_id=?1 AND receipt_id=?2",
-            params![run,parent,receipt],
-        )?;
-        db.execute(
-            "INSERT INTO report_sections
-             SELECT run_id,?3,scalar_offset,scalar_length,title,evidence_sha256
-             FROM report_sections WHERE run_id=?1 AND receipt_id=?2",
-            params![run, parent, receipt],
-        )?;
-    } else if let Some(items) = &captured.index {
-        write_index(db, run, receipt, items)?;
-    }
-    if amendment {
-        let parent = previous.receipt.as_deref().ok_or(AppError::Internal)?;
-        db.execute(
-            "INSERT INTO report_changes
-             SELECT run_id,?3,finding_id,conclusion,reason,checked_sha FROM report_changes WHERE run_id=?1 AND receipt_id=?2",
-            params![run,parent,receipt],
-        )?;
-        db.execute(
-            "INSERT INTO report_change_discussions
-             SELECT run_id,?3,finding_id,discussion_id FROM report_change_discussions WHERE run_id=?1 AND receipt_id=?2",
-            params![run,parent,receipt],
-        )?;
-    } else {
-        edits::write_changes(db, run, receipt, &edits.findings)?;
+        Install::Amendment { parent, inherited } => {
+            structured::copy_parent(db, run, parent, receipt, inherited)?;
+        }
     }
     db.execute(
         "INSERT INTO report_heads(run_id, receipt_id, disposition_version) VALUES(?1, ?2, ?3)
@@ -589,58 +573,6 @@ fn promote(
                        disposition_version=excluded.disposition_version",
         params![run, receipt, previous.disposition_version],
     )?;
-    Ok(())
-}
-
-fn write_index(
-    db: &Connection,
-    run: &str,
-    receipt: &str,
-    items: &[Descriptor],
-) -> Result<(), StoreError> {
-    let mut finding = db.prepare_cached(
-        "INSERT INTO report_findings(run_id, receipt_id, finding_id, title, severity, blocking,
-          scalar_offset, scalar_length, evidence_sha256) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9)",
-    )?;
-    let mut section = db.prepare_cached(
-        "INSERT INTO report_sections(run_id, receipt_id, title, scalar_offset, scalar_length, evidence_sha256)
-         VALUES(?1,?2,?3,?4,?5,?6)",
-    )?;
-    for entry in items {
-        match entry {
-            Descriptor::Finding {
-                id,
-                title,
-                severity,
-                blocking,
-                source: Some(source),
-                ..
-            } => {
-                finding.execute(params![
-                    run,
-                    receipt,
-                    id,
-                    title,
-                    severity,
-                    blocking,
-                    db_int(source.offset)?,
-                    db_int(source.length)?,
-                    source.hash.as_str()
-                ])?;
-            }
-            Descriptor::Section { title, source, .. } => {
-                section.execute(params![
-                    run,
-                    receipt,
-                    title,
-                    db_int(source.offset)?,
-                    db_int(source.length)?,
-                    source.hash.as_str()
-                ])?;
-            }
-            _ => return Err(AppError::Internal.into()),
-        }
-    }
     Ok(())
 }
 

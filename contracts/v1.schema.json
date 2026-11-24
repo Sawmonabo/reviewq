@@ -2163,6 +2163,17 @@
                 "null"
               ]
             },
+            "carriedFrom": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/SourceOrigin"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The earlier receipt whose card a carried finding keeps."
+            },
             "details": {
               "anyOf": [
                 {
@@ -8600,6 +8611,14 @@
         "capturedAt": {
           "$ref": "#/definitions/UtcTimestampDto"
         },
+        "carriedFindingCount": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/SafeCountDto"
+            }
+          ],
+          "description": "Active findings carried from an earlier version whose card this report omits."
+        },
         "changeCount": {
           "anyOf": [
             {
@@ -8734,6 +8753,7 @@
         "semanticIndex",
         "findingCount",
         "changeCount",
+        "carriedFindingCount",
         "capturedAt",
         "byteLength",
         "totalCodePoints",

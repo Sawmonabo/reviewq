@@ -149,22 +149,25 @@ fn query(collection: Collection) -> &'static str {
 }
 
 fn decode(collection: Collection, row: &Row<'_>) -> Result<Descriptor, StoreError> {
+    let origin = |reference: usize| -> Result<Option<Box<SourceOrigin>>, StoreError> {
+        optional(row, reference)?
+            .map(|receipt_id| {
+                Ok(Box::new(SourceOrigin {
+                    report: ReportReference {
+                        receipt_id,
+                        hash: parse(text(row, reference + 1)?)?,
+                    },
+                    checked_sha: optional(row, reference + 2)?,
+                }))
+            })
+            .transpose()
+    };
     let range = |column: usize, reference: usize| -> Result<SourceRange, StoreError> {
         Ok(SourceRange {
             offset: read_count(row, column)?,
             length: read_count(row, column + 1)?,
             hash: parse(text(row, column + 2)?)?,
-            origin: optional(row, reference)?
-                .map(|receipt_id| {
-                    Ok::<_, StoreError>(Box::new(SourceOrigin {
-                        report: ReportReference {
-                            receipt_id,
-                            hash: parse(text(row, reference + 1)?)?,
-                        },
-                        checked_sha: optional(row, reference + 2)?,
-                    }))
-                })
-                .transpose()?,
+            origin: origin(reference)?,
         })
     };
     Ok(match collection {
@@ -176,6 +179,8 @@ fn decode(collection: Collection, row: &Row<'_>) -> Result<Descriptor, StoreErro
             source: (row.get::<_, Option<i64>>(4)?.is_some())
                 .then(|| range(4, 11))
                 .transpose()?,
+            // Every carried finding names its origin, whether or not that card has a span.
+            carried_from: origin(11)?,
             details: text_optional(row, 7)?
                 .map(|value| {
                     let mut details: FindingDetails =

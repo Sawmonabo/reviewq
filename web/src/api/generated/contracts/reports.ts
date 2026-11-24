@@ -30,6 +30,10 @@ export type OffsetUnit = "unicode_codepoints";
 export type Descriptor =
   | {
       blocking: boolean | null;
+      /**
+       * The earlier receipt whose card a carried finding keeps.
+       */
+      carriedFrom?: SourceOrigin | null;
       details?: FindingDetails | null;
       disposition?: FindingDisposition | null;
       findingId: string;
@@ -225,6 +229,12 @@ export interface ReportReference {
   [k: string]: unknown;
 }
 
+export interface SourceOrigin {
+  checkedSha: GitShaDto | null;
+  report: ReportReference;
+  [k: string]: unknown;
+}
+
 export interface FindingDetails {
   checkedSha: GitShaDto | null;
   consequence: string;
@@ -256,12 +266,6 @@ export interface SourceRange {
   offset: SafeCountDto;
   origin?: SourceOrigin | null;
   sha256: ReportHashDto;
-  [k: string]: unknown;
-}
-
-export interface SourceOrigin {
-  checkedSha: GitShaDto | null;
-  report: ReportReference;
   [k: string]: unknown;
 }
 
@@ -306,6 +310,10 @@ export interface ReportSummary {
   attentionReceiptId: ResourceIdDto;
   byteLength: SafeCountDto;
   capturedAt: UtcTimestampDto;
+  /**
+   * Active findings carried from an earlier version whose card this report omits.
+   */
+  carriedFindingCount: SafeCountDto;
   changeCount: SafeCountDto | null;
   complete: boolean;
   coverage: Coverage;
