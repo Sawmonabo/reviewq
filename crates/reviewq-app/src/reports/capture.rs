@@ -180,7 +180,6 @@ pub struct CapturedArtifact {
     pub hash: ReportHash,
     pub stats: ArtifactStats,
     pub index: Option<Vec<Descriptor>>,
-    pub semantic_failure: bool,
 }
 
 pub struct AcceptedReport {
@@ -567,24 +566,24 @@ async fn read_source(
             ..
         }
     );
-    let (index, semantic_failure, display_source) = match index_source {
+    // A heading index that cannot be parsed leaves the version source-only.
+    let (index, display_source) = match index_source {
         Some(source) => match tokio::task::spawn_blocking(move || {
             let index = index::parse(&source, legacy)?;
             Ok::<_, AppError>((index, display_admitted.then_some(source)))
         })
         .await
         {
-            Ok(Ok((index, source))) => (index, false, source),
-            Ok(Err(_)) | Err(_) => (None, true, None),
+            Ok(Ok((index, source))) => (index, source),
+            Ok(Err(_)) | Err(_) => (None, None),
         },
-        None => (None, false, None),
+        None => (None, None),
     };
     Ok((
         CapturedArtifact {
             hash: ReportHash::from_sha256(hash.finalize().into()),
             stats,
             index,
-            semantic_failure,
         },
         display_source,
     ))

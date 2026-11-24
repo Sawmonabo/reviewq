@@ -128,23 +128,9 @@ fn query(collection: Collection) -> &'static str {
              FROM report_changes c WHERE c.run_id=?1 AND c.receipt_id=?2 AND c.finding_id>?3
              ORDER BY c.finding_id LIMIT ?5",
         Collection::Sections =>
-            "WITH available AS (
-                SELECT s.title, s.scalar_offset, s.scalar_length, s.evidence_sha256,
-                       NULL AS origin, NULL AS sha256, NULL AS reviewed_sha, s.scalar_offset AS position
-                FROM report_sections s WHERE s.run_id=?1 AND s.receipt_id=?2
-                UNION ALL
-                SELECT s.title,s.scalar_offset,s.scalar_length,s.evidence_sha256,
-                       origin.receipt_id, original.sha256, origin.reviewed_sha,
-                       current.total_code_points + row_number() OVER (ORDER BY s.receipt_id,s.scalar_offset)
-                FROM report_versions v JOIN artifacts current ON current.artifact_id=v.artifact_id
-                JOIN report_handoffs h ON h.receipt_id=v.handoff_receipt_id
-                JOIN json_each(h.edits,'$.carry.sections') origins JOIN json_each(origins.value) offsets
-                JOIN report_versions origin ON origin.run_id=v.run_id AND origin.receipt_id=origins.key
-                JOIN artifacts original ON original.artifact_id=origin.artifact_id
-                JOIN report_sections s ON s.run_id=origin.run_id AND s.receipt_id=origin.receipt_id
-                                      AND s.scalar_offset=offsets.value
-                WHERE v.run_id=?1 AND v.receipt_id=?2
-             ) SELECT * FROM available WHERE position>?3 ORDER BY position LIMIT ?5",
+            "SELECT title, scalar_offset, scalar_length, evidence_sha256, NULL, NULL, NULL, scalar_offset
+             FROM report_sections WHERE run_id=?1 AND receipt_id=?2 AND scalar_offset>?3
+             ORDER BY scalar_offset LIMIT ?5",
         Collection::Dispositions =>
             "WITH available(finding_id) AS (
                  SELECT finding_id FROM report_findings WHERE run_id=?1 AND receipt_id=?2 AND finding_id>?3

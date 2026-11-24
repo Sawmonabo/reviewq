@@ -326,23 +326,13 @@ impl ReportCaptureStore for SqliteStore {
         &self,
         work: ReportWork,
         result_entry: NativeInputId,
-        mut artifact: Option<CapturedArtifact>,
+        artifact: Option<CapturedArtifact>,
         resolved: Vec<ReportFailureAddress>,
     ) -> AppFuture<'_, bool> {
         Box::pin(async move {
-            let continuity_verified = edits::verify(self, &work, artifact.as_mut()).await?;
-            self.write(move |tx| {
-                accept::complete(
-                    tx,
-                    work,
-                    result_entry,
-                    artifact,
-                    continuity_verified,
-                    resolved,
-                )
-            })
-            .await
-            .map_err(StoreError::app)
+            self.write(move |tx| accept::complete(tx, work, result_entry, artifact, resolved))
+                .await
+                .map_err(StoreError::app)
         })
     }
 

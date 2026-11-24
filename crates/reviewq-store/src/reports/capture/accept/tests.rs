@@ -87,7 +87,7 @@ fn report_admission_distinguishes_settled_history_from_competing_handoffs() {
                 Ok(())
             }).await.unwrap();
             assert!(!finish(&store, &changed_base, false).await);
-            assert_eq!(recorded_state(&store, &changed_base).await, HandoffState::Failed);
+            assert_eq!(recorded_state(&store, &changed_base).await, HandoffState::Recorded);
 
             let contested =
                 stage(&store, &lead, "contested", "rotated-again", exact.clone()).await;
@@ -226,7 +226,6 @@ async fn capture(
             complete: true,
         },
         index: Some(Vec::new()),
-        semantic_failure: false,
     }
 }
 
