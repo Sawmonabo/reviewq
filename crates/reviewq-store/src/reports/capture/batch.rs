@@ -284,12 +284,16 @@ pub(super) fn edit_errors(
         "SELECT EXISTS(SELECT 1 FROM report_findings WHERE run_id=?1 AND receipt_id=?2 AND finding_id=?3)",
     )?;
     let mut errors = Vec::new();
+    let mut findings = BTreeSet::new();
     for (index, edit) in edits.findings.iter().enumerate() {
         let finding = edit.finding_id.as_str();
         let known: bool = existing
             .query_row(params![run, manifest.report_receipt_id, finding], |row| {
                 row.get(0)
             })?;
+        if known {
+            findings.insert(finding);
+        }
         for discussion in linked(&tracked, edit) {
             let covered = assessments.iter().any(|assessment| {
                 assessment.discussion_id == discussion
@@ -312,7 +316,7 @@ pub(super) fn edit_errors(
             ));
         }
     }
-    errors.extend(conclusion_errors(&tracked, edits, assessments));
+    errors.extend(conclusion_errors(&tracked, edits, &findings, assessments));
     Ok(errors)
 }
 
@@ -335,16 +339,22 @@ fn linked<'a>(
 
 /// A discussion's assessment agrees with the findings this handoff retires: retiring when
 /// the handoff retires every finding the discussion tracks, and retiring or
-/// `partly_addressed` when it retires only some of them.
+/// `partly_addressed` when it retires only some of them. Only an outcome for one of
+/// `findings`, the frozen version's findings, retires one; restating the outcome of a
+/// finding an earlier version retired does not. Acceptance requires the frozen version to
+/// be the run's head.
 fn conclusion_errors(
     tracked: &BTreeMap<&str, BTreeSet<&str>>,
     edits: &ReportEdits,
+    findings: &BTreeSet<&str>,
     assessments: &[Assessment],
 ) -> Vec<HandoffFieldError> {
     let retired: BTreeSet<&str> = edits
         .findings
         .iter()
-        .filter(|edit| edit.conclusion.retires_finding())
+        .filter(|edit| {
+            edit.conclusion.retires_finding() && findings.contains(edit.finding_id.as_str())
+        })
         .map(|edit| edit.finding_id.as_str())
         .collect();
     let mut errors = Vec::new();
@@ -410,10 +420,11 @@ mod tests {
                 next_action: NextAction::WaitingAuthor,
             }]
         };
+        let known = BTreeSet::from(["F-01", "F-02"]);
         let partly = assessment(FindingConclusion::PartlyAddressed);
-        assert!(conclusion_errors(&tracked, &fixed(), &partly).is_empty());
+        assert!(conclusion_errors(&tracked, &fixed(), &known, &partly).is_empty());
         let present = assessment(FindingConclusion::StillPresent);
-        let errors = conclusion_errors(&tracked, &fixed(), &present);
+        let errors = conclusion_errors(&tracked, &fixed(), &known, &present);
         assert_eq!(
             errors
                 .iter()
@@ -427,6 +438,16 @@ mod tests {
             ..both.findings[0].clone()
         });
         let partly = assessment(FindingConclusion::PartlyAddressed);
-        assert_eq!(conclusion_errors(&tracked, &both, &partly).len(), 1);
+        assert_eq!(conclusion_errors(&tracked, &both, &known, &partly).len(), 1);
+        // F-01 is not a finding of the frozen version, as when an earlier version retired it,
+        // so restating it as fixed retires nothing and F-02 stays present.
+        let mut restated = fixed();
+        restated.findings.push(FindingEdit {
+            finding_id: "F-02".into(),
+            conclusion: FindingConclusion::StillPresent,
+            ..restated.findings[0].clone()
+        });
+        let known = BTreeSet::from(["F-02"]);
+        assert!(conclusion_errors(&tracked, &restated, &known, &present).is_empty());
     }
 }
