@@ -69,13 +69,16 @@ export function restoreBookmark(
   };
 }
 
-export function finishReading(element: Element | null, signal: AbortSignal) {
+// Waits while the reader holds a selection in `element`, or keyboard focus unless
+// `focus` is false. An update that keeps rows in place by identity needs only the selection.
+export function finishReading(element: Element | null, signal: AbortSignal, focus = true) {
   if (!element) return;
   const host = element;
   function held() {
     const selection = getSelection();
     return (
-      (host.contains(document.activeElement) &&
+      (focus &&
+        host.contains(document.activeElement) &&
         !document.activeElement?.matches(".report-section-nav button[aria-busy=true]")) ||
       Boolean(
         selection?.rangeCount &&

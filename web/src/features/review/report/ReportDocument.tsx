@@ -44,7 +44,7 @@ type Props = {
   readonly reviewTitle: string;
   readonly webUrl: string;
   readonly initialSourceOffset: number | undefined;
-  readonly onOpenEvidence: (origin: SourceOrigin, offset: number) => void;
+  readonly onOpenEvidence: (origin: SourceOrigin, offset?: number) => void;
   readonly onRendered: (receiptId: string) => void;
   readonly onMarkViewed: () => void;
   readonly markingViewed: boolean;

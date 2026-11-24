@@ -1,5 +1,5 @@
 import { defaultRangeExtractor, useVirtualizer } from "@tanstack/react-virtual";
-import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import type { RootContent } from "hast";
 import type { ReportSummary, SourceOrigin } from "../../../api/generated/contracts/reports";
@@ -13,7 +13,7 @@ import {
   reportParagraphQuote,
   selectionSource,
 } from "./report-presentation";
-import type { PreparedGroup, ReportBlock } from "./report-presentation";
+import type { GroupPosition, PreparedGroup, ReportBlock } from "./report-presentation";
 import { isRetired, outcomeLabels } from "./report-structure";
 import type { ReaderDocument } from "./report-reader";
 import { useReportPreparation } from "./useReportPreparation";
@@ -42,18 +42,31 @@ export function RichReport({
   readonly bookmark: string;
   readonly onQuote: (text: string, offset: number) => void;
   readonly onSource: (offset: number) => void;
-  readonly onOpenEvidence: (origin: SourceOrigin, offset: number) => void;
+  readonly onOpenEvidence: (origin: SourceOrigin, offset?: number) => void;
 }) {
   const [host, setHost] = useState<HTMLDivElement | null>(null);
   const [scroll, setScroll] = useState<HTMLElement | null>(null);
   const [margin, setMargin] = useState(0);
-  const [pinned, setPinned] = useState<readonly number[]>([]);
+  const [pinnedKeys, setPinnedKeys] = useState<readonly string[]>([]);
   const [selection, setSelection] = useState<Selection>();
-  const [saved] = useState(() => readBookmark(bookmark));
+  const [saved, setSaved] = useState(() => readBookmark(bookmark));
   const [restored, setRestored] = useState(!saved);
+  // The reader's latest place, recorded while it scrolls.
+  const position = useRef<ReturnType<typeof bookmarkAt>>(undefined);
+  const latestReader = useRef(reader);
   const blocks = reader.groups;
+  const placedGroups = useRef(blocks.length);
+  // Rows, their measured sizes and their toggles follow identity, not index, so ledger
+  // cards joining after the first paint leave every other row as it was.
+  const keys = useMemo(() => blocks.map(blockKey), [blocks]);
+  const indexes = useMemo(() => new Map(keys.map((key, index) => [key, index])), [keys]);
+  const pinned = useMemo(
+    () => pinnedKeys.flatMap((key) => indexes.get(key) ?? []),
+    [pinnedKeys, indexes],
+  );
 
-  const [focused, setFocused] = useState<number>();
+  const [focusedKey, setFocusedKey] = useState<string>();
+  const focused = focusedKey === undefined ? undefined : indexes.get(focusedKey);
   const [navigation, setNavigation] = useState<{
     index: number;
     phase: "hover" | "pressed" | "jump";
@@ -69,7 +82,7 @@ export function RichReport({
     destination !== undefined &&
     Boolean(reader.prepared(destination)) &&
     (nextGroup === undefined || Boolean(reader.prepared(nextGroup)));
-  const openDetails = useRef(new Set<number>());
+  const openDetails = useRef(new Set<string>());
 
   const navigationAfter = Math.max(
     0,
@@ -78,7 +91,11 @@ export function RichReport({
   const sections = blocks.flatMap((block, index) =>
     block.name && !block.findingId ? [{ index, label: block.name }] : [],
   );
-  const usesVirtual = Boolean(reader.prepare) || blocks.length > 17;
+  // Count the ledger cards the summary expects, so the reader keeps its mode when they arrive.
+  const textGroups = blocks.filter((block) => block.sourceOrder >= 0).length;
+  const usesVirtual =
+    Boolean(reader.prepare) ||
+    Math.max(blocks.length, textGroups + report.unanchoredFindingCount) > 17;
   const restoreIndex =
     !restored && saved?.offset !== undefined
       ? blocks.findIndex((block) => block.offset === saved.offset)
@@ -107,7 +124,7 @@ export function RichReport({
     estimateSize: () => 230,
     initialRect: { width: window.innerWidth, height: window.innerHeight },
     getScrollElement: () => scroll,
-    getItemKey: (index) => `${index}:${blocks[index]?.offset ?? -1}`,
+    getItemKey: (index) => keys[index] ?? index,
     scrollMargin: margin,
     overscan: 3,
     rangeExtractor: range,
@@ -179,6 +196,20 @@ export function RichReport({
     };
   }, [host, scroll, usesVirtual]);
 
+  useLayoutEffect(() => {
+    latestReader.current = reader;
+  }, [reader]);
+  // Cards that join after the place was restored move the rows below them. Restore the
+  // latest place again, before the browser paints, so the same row stays aligned.
+  useLayoutEffect(() => {
+    if (placedGroups.current === blocks.length) return;
+    placedGroups.current = blocks.length;
+    const last = position.current;
+    if (!restored || !last) return;
+    setSaved(last);
+    setRestored(false);
+  }, [blocks.length, restored]);
+
   const restoreReady = restoreIndex < 0 || Boolean(reader.prepared(restoreIndex));
   useLayoutEffect(() => {
     if (!host || !scroll || restored || !saved || !restoreReady) return;
@@ -189,15 +220,15 @@ export function RichReport({
     if (!host || !scroll || !restored) return;
     const element = host;
     const container = scroll;
-    let last = bookmarkAt(element, container, reader);
+    position.current = bookmarkAt(element, container, latestReader.current);
     let timer: number | undefined;
     function record() {
-      last = bookmarkAt(element, container, reader);
+      position.current = bookmarkAt(element, container, latestReader.current);
       if (timer !== undefined) window.clearTimeout(timer);
       timer = window.setTimeout(commit, 180);
     }
     function commit() {
-      saveValue(bookmark, last);
+      saveValue(bookmark, position.current);
     }
     container.addEventListener("scroll", record, { passive: true });
     window.addEventListener("pagehide", commit);
@@ -207,7 +238,7 @@ export function RichReport({
       if (timer !== undefined) window.clearTimeout(timer);
       commit();
     };
-  }, [bookmark, host, scroll, restored, reader]);
+  }, [bookmark, host, scroll, restored]);
 
   useEffect(() => {
     if (!host) return;
@@ -217,7 +248,7 @@ export function RichReport({
       if (!active || active.isCollapsed || !active.rangeCount) {
         if (!document.activeElement?.closest(".report-selection-action")) {
           setSelection((current) => (current?.paragraph ? current : undefined));
-          setPinned([]);
+          setPinnedKeys([]);
         }
         return;
       }
@@ -228,7 +259,7 @@ export function RichReport({
       const end = blocks[last];
       if (!start || !end || !element.contains(selected.commonAncestorContainer)) {
         setSelection(undefined);
-        setPinned([]);
+        setPinnedKeys([]);
         return;
       }
       const inSourceOrder = blocks
@@ -251,15 +282,16 @@ export function RichReport({
             },
       );
       if (usesVirtual) {
-        const indexes = [...element.querySelectorAll<HTMLElement>("[data-report-block]")]
-          .filter((row) => selected.intersectsNode(row))
-          .map((row) => Number(row.dataset.reportBlock));
-        setPinned(indexes);
+        setPinnedKeys(
+          [...element.querySelectorAll<HTMLElement>("[data-report-block]")]
+            .filter((row) => selected.intersectsNode(row))
+            .flatMap((row) => keys[Number(row.dataset.reportBlock)] ?? []),
+        );
       }
     }
     document.addEventListener("selectionchange", capture);
     return () => document.removeEventListener("selectionchange", capture);
-  }, [blocks, host, reader, usesVirtual]);
+  }, [blocks, keys, host, reader, usesVirtual]);
 
   useEffect(() => {
     if (!stage || destinationReady || !scroll) return;
@@ -416,10 +448,10 @@ export function RichReport({
           retired ? (
             <details
               className="report-retired-finding"
-              open={openDetails.current.has(index)}
+              open={openDetails.current.has(keys[index]!)}
               onToggle={(event) => {
-                if (event.currentTarget.open) openDetails.current.add(index);
-                else openDetails.current.delete(index);
+                if (event.currentTarget.open) openDetails.current.add(keys[index]!);
+                else openDetails.current.delete(keys[index]!);
               }}
             >
               <summary>
@@ -498,10 +530,10 @@ export function RichReport({
         ref={setRoot}
         onFocusCapture={(event) => {
           const row = event.target.closest<HTMLElement>("[data-report-block]");
-          setFocused(row ? Number(row.dataset.reportBlock) : undefined);
+          setFocusedKey(row ? keys[Number(row.dataset.reportBlock)] : undefined);
         }}
         onBlurCapture={(event) => {
-          if (!event.currentTarget.contains(event.relatedTarget)) setFocused(undefined);
+          if (!event.currentTarget.contains(event.relatedTarget)) setFocusedKey(undefined);
         }}
         onPointerDown={() => {
           setSelection((current) => (current?.paragraph ? undefined : current));
@@ -522,7 +554,8 @@ export function RichReport({
           if (!quote) return;
           const offset = scalarOffset(group.source, quote.offset);
           setSelection({ quote: { text: quote.text, offset }, fallback: offset, paragraph: true });
-          if (usesVirtual) setPinned([blockIndex(paragraph)]);
+          const key = keys[blockIndex(paragraph)];
+          if (usesVirtual && key !== undefined) setPinnedKeys([key]);
         }}
         style={usesVirtual ? { height: virtual.getTotalSize(), position: "relative" } : undefined}
       >
@@ -548,7 +581,7 @@ export function RichReport({
               );
             })
           : blocks.map((block, index) => (
-              <div key={index} data-report-block={index} data-report-offset={block.offset}>
+              <div key={keys[index]} data-report-block={index} data-report-offset={block.offset}>
                 {renderPrepared(index)}
               </div>
             ))}
@@ -580,6 +613,13 @@ const AuthoredContent = memo(function AuthoredContent({
 }) {
   return <MarkdownTree tree={{ type: "root", children: [...nodes] }} />;
 });
+
+// A text group is known by its source offset and a ledger card, which has no source
+// in this report, by its finding ID.
+function blockKey(group: GroupPosition) {
+  if (group.sourceOrder < 0) return `finding:${group.findingId}`;
+  return group.offset >= 0 ? `${group.offset}` : `group:${group.sourceOrder}`;
+}
 
 function blockElement(root: HTMLElement, index: number) {
   return root.querySelector<HTMLElement>(`[data-report-block="${index}"]`);

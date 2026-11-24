@@ -16,9 +16,10 @@ type AuthoredFinding = {
   readonly category?: string;
   readonly blocking?: boolean;
   readonly change?: AcceptedFindingChange;
-  // Set on a card drawn from the findings ledger. `earlier` is where a carried card was authored.
+  // Set on a card drawn from the findings ledger. `earlier` is where a carried card was
+  // authored; the offset is its span there, when the earlier card had one.
   readonly unanchored?: {
-    readonly earlier?: { readonly origin: SourceOrigin; readonly offset: number };
+    readonly earlier?: { readonly origin: SourceOrigin; readonly offset?: number };
   };
   readonly header: readonly RootContent[];
   readonly fields: readonly Field[];
@@ -96,17 +97,18 @@ export function inDisplayOrder<T extends GroupPosition>(
   return active;
 }
 
-export function carriedPosition(
+// Cards drawn from the findings ledger follow the last active authored card. Without one
+// they go where the retired cards begin, after the previous threads, or at the end.
+export function unanchoredPosition(
   groups: readonly GroupPosition[],
   changes: ReadonlyMap<string, AcceptedFindingChange> | null | undefined,
 ) {
-  const threads = afterPreviousThreads(groups);
-  if (threads >= 0) return threads;
   for (let index = groups.length - 1; index >= 0; index--) {
     const id = groups[index]!.findingId;
     if (id && !isRetired(changes?.get(id))) return index + 1;
   }
-  return groups.length;
+  const threads = afterPreviousThreads(groups);
+  return threads < 0 ? groups.length : threads;
 }
 
 export function unanchoredBlock(
@@ -122,7 +124,8 @@ export function unanchoredBlock(
   let title = own ? item.title.slice(own[0].length) : item.title;
   const priority = own?.[2] ? undefined : severityPrefix.exec(title);
   if (priority) title = title.slice(priority[0].length);
-  title = title.trim() || item.title;
+  // A title that is only the ID leaves the ID in the kicker alone.
+  title = title.trim();
   const severity = item.severity || own?.[2] || priority?.[1];
   const origin = item.source?.origin;
   const fields: Field[] = details
@@ -168,10 +171,10 @@ export function unanchoredBlock(
             earlier:
               origin && item.source
                 ? { origin, offset: item.source.offset }
-                : { origin: item.carriedFrom, offset: 0 },
+                : { origin: item.carriedFrom },
           }
         : {},
-      header: [hast("h3", [{ type: "text", value: title }])],
+      header: title ? [hast("h3", [{ type: "text", value: title }])] : [],
       fields,
     },
   };

@@ -12,10 +12,10 @@ import type {
 import { parseMarkdown } from "../../../components/markdown/parse-markdown";
 import { parseSettledMarkdown, tableCost } from "../../../components/markdown/settled";
 import {
-  carriedPosition,
   groupReportItems,
   inDisplayOrder,
   reportBlocks,
+  unanchoredPosition,
 } from "./report-presentation";
 import type { GroupPosition, PreparedGroup, ReportBlock } from "./report-presentation";
 import { isThreadSection, reportText, startsReportBody } from "./report-structure";
@@ -73,25 +73,26 @@ export function wholeDocument(
 
 // Cards drawn from the findings ledger have no source in this report: offset -1 keeps
 // them out of bookmarks and quotes, and the windowed reader only sees its own group indexes.
-export function withCarried(
+export function withUnanchored(
   reader: ReaderDocument,
-  carried: readonly ReportBlock[],
+  unanchored: readonly ReportBlock[],
   changes: Changes,
 ): ReaderDocument {
-  if (!carried.length) return reader;
-  const at = carriedPosition(reader.groups, changes);
+  if (!unanchored.length) return reader;
+  const at = unanchoredPosition(reader.groups, changes);
+  const count = unanchored.length;
   const inner = (index: number) =>
-    index < at ? index : index >= at + carried.length ? index - carried.length : undefined;
-  const outer = (index: number) => (index < at ? index : index + carried.length);
+    index < at ? index : index >= at + count ? index - count : undefined;
+  const outer = (index: number) => (index < at ? index : index + count);
   const own = (indexes: readonly number[]) =>
     indexes.flatMap((index) => {
       const value = inner(index);
       return value === undefined ? [] : [value];
     });
-  const cards = carried.map((block) => ({ block, source: { text: "", utf16: 0, scalar: 0 } }));
+  const cards = unanchored.map((block) => ({ block, source: { text: "", utf16: 0, scalar: 0 } }));
   const { byteAt, prepare } = reader;
   return {
-    groups: [...reader.groups.slice(0, at), ...carried, ...reader.groups.slice(at)],
+    groups: [...reader.groups.slice(0, at), ...unanchored, ...reader.groups.slice(at)],
     prepared: (index) => {
       const value = inner(index);
       return value === undefined ? cards[index - at] : reader.prepared(value);

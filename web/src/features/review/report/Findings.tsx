@@ -322,7 +322,13 @@ export default function Findings({
                 : undefined
             }
             onOpenEvidence={(origin, offset) =>
-              choose(origin.report.receiptId, true, undefined, { report: origin.report, offset })
+              // Without a span, the earlier version opens formatted so its own card shows.
+              choose(
+                origin.report.receiptId,
+                true,
+                undefined,
+                offset === undefined ? undefined : { report: origin.report, offset },
+              )
             }
             onRendered={(id) => void acknowledge(id, undefined, true)}
             onMarkViewed={() => void acknowledge(report.receiptId)}

@@ -5,7 +5,7 @@ import { useResource } from "../../../hooks/useResource";
 import { contextItems } from "./report-context";
 import { finishReading } from "./report-position";
 import { unanchoredBlock } from "./report-presentation";
-import { withCarried } from "./report-reader";
+import { withUnanchored } from "./report-reader";
 import type { ReaderDocument } from "./report-reader";
 import { isRetired } from "./report-structure";
 import type { AcceptedFindingChange } from "./report-structure";
@@ -37,22 +37,23 @@ export function useUnanchoredFindings(
         null,
         signal,
       );
-      // Inserting cards moves later rows, so wait while the reader holds a selection or focus.
-      await finishReading(host.current?.querySelector(".report-blocks") ?? null, signal);
+      // Rows keep their identity and the reader's place when the cards join, but a card
+      // inserted inside a native selection would join it, so wait while the reader holds one.
+      await finishReading(host.current?.querySelector(".report-blocks") ?? null, signal, false);
       signal.throwIfAborted();
       return { cursor, data: items };
     },
     wanted ? [{ kind: "report", id: runId }] : [],
   );
   const items = findings.data;
-  const document = useMemo(() => {
+  const withCards = useMemo(() => {
     if (!reader || !items) return reader;
     const cards = new Set(reader.groups.flatMap((group) => group.findingId ?? []));
     const blocks = [...items.values()].flatMap((item) => {
       const change = changes?.get(item.findingId);
       return cards.has(item.findingId) || isRetired(change) ? [] : [unanchoredBlock(item, change)];
     });
-    return withCarried(reader, blocks, changes);
+    return withUnanchored(reader, blocks, changes);
   }, [reader, items, changes]);
-  return { reader: document, error: Boolean(findings.error), retry: findings.retry };
+  return { reader: withCards, error: Boolean(findings.error), retry: findings.retry };
 }
