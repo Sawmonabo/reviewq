@@ -1,23 +1,15 @@
 use serde::{Deserialize, Serialize};
 
+use super::limits;
+
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct StructuredReport {
     #[cfg_attr(feature = "schema", schemars(range(min = 1, max = 1)))]
     pub version: u8,
-    pub scope: ReportScope,
-    #[cfg_attr(feature = "schema", schemars(length(max = 50)))]
+    #[cfg_attr(feature = "schema", schemars(length(max = limits::MAX_FINDINGS)))]
     pub findings: Vec<StructuredFinding>,
-}
-
-#[derive(Debug, Deserialize, Serialize)]
-#[serde(rename_all = "snake_case")]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-pub enum ReportScope {
-    FullReview,
-    SelectedThreads,
-    Amendment,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -29,14 +21,14 @@ pub struct StructuredFinding {
         schemars(regex(pattern = "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"))
     )]
     pub id: String,
-    #[cfg_attr(feature = "schema", schemars(length(min = 1, max = 384)))]
+    #[cfg_attr(feature = "schema", schemars(length(min = 1, max = limits::MAX_TITLE_BYTES)))]
     pub title: String,
-    #[cfg_attr(feature = "schema", schemars(length(min = 1, max = 64)))]
+    #[cfg_attr(feature = "schema", schemars(length(min = 1, max = limits::MAX_SEVERITY_BYTES)))]
     pub severity: String,
     pub blocking: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub location: Option<FindingLocation>,
-    #[cfg_attr(feature = "schema", schemars(length(min = 1, max = 1024)))]
+    #[cfg_attr(feature = "schema", schemars(length(min = 1, max = limits::MAX_CONSEQUENCE_BYTES)))]
     pub consequence: String,
     pub evidence: FindingBasis,
 }
@@ -45,7 +37,7 @@ pub struct StructuredFinding {
 #[serde(deny_unknown_fields)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct FindingLocation {
-    #[cfg_attr(feature = "schema", schemars(length(min = 1, max = 512)))]
+    #[cfg_attr(feature = "schema", schemars(length(min = 1, max = limits::MAX_PATH_BYTES)))]
     pub path: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     #[cfg_attr(feature = "schema", schemars(range(min = 1, max = 4294967295_u32)))]
@@ -57,7 +49,7 @@ pub struct FindingLocation {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct FindingBasis {
     pub kind: FindingBasisKind,
-    #[cfg_attr(feature = "schema", schemars(length(min = 1, max = 2048)))]
+    #[cfg_attr(feature = "schema", schemars(length(min = 1, max = limits::MAX_EVIDENCE_BYTES)))]
     pub text: String,
 }
 

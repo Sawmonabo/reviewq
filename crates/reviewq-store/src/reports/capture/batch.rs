@@ -216,14 +216,6 @@ pub(super) fn edits_match(
         .iter()
         .map(|member| member.discussion_id.as_str())
         .collect();
-    if edits.sections.iter().any(|section| {
-        section
-            .discussion_ids
-            .iter()
-            .any(|id| !originals.contains(id.as_str()))
-    }) {
-        return Ok(false);
-    }
     let mut existing = db.prepare_cached(
         "SELECT EXISTS(SELECT 1 FROM report_findings WHERE run_id=?1 AND receipt_id=?2 AND finding_id=?3)",
     )?;

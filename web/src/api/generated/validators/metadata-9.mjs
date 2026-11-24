@@ -99,31 +99,18 @@ const schema389 = {
 const schema393 = {
   type: "object",
   properties: {
-    receiptId: { $ref: "#/definitions/CheckpointIdDto" },
     reviewedSha: {
       anyOf: [{ $ref: "#/definitions/GitShaDto" }, { type: "null" }],
     },
     revisionReason: { type: ["string", "null"] },
     semanticIndex: { $ref: "#/definitions/SemanticIndex" },
     sha256: { $ref: "#/definitions/ReportHashDto" },
-    structuredScope: {
-      anyOf: [{ $ref: "#/definitions/ReportScope" }, { type: "null" }],
-    },
-    structuredVersion: {
-      format: "uint8",
-      maximum: 255,
-      minimum: 0,
-      type: ["integer", "null"],
-    },
     totalCodePoints: { $ref: "#/definitions/SafeCountDto" },
+    verdict: { $ref: "#/definitions/Verdict" },
   },
 };
 const schema394 = { enum: ["ready", "source_only"], type: "string" };
 const schema395 = {
-  enum: ["full_review", "selected_threads", "amendment"],
-  type: "string",
-};
-const schema397 = {
   enum: ["approve", "request_changes", "blocked", "not_specified"],
   type: "string",
 };
@@ -139,5 +126,4 @@ export {
   schema393,
   schema394,
   schema395,
-  schema397,
 };

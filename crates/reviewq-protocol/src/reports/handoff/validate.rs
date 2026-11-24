@@ -5,6 +5,10 @@ use jsonschema::{ValidationError, Validator, error::ValidationErrorKind};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use super::limits::{
+    MAX_CONSEQUENCE_BYTES, MAX_DISCUSSION_ID_BYTES, MAX_EVIDENCE_BYTES, MAX_ID_BYTES,
+    MAX_PATH_BYTES, MAX_REASON_BYTES, MAX_SEVERITY_BYTES, MAX_TITLE_BYTES,
+};
 use super::{REPORT_AMENDMENT_SOURCE_MESSAGE, REPORT_HANDOFF_SCHEMA, ReportHashDto};
 
 static VALIDATOR: LazyLock<Validator> = LazyLock::new(|| {
@@ -123,18 +127,27 @@ fn collect(error: &ValidationError<'_>, errors: &mut BTreeSet<ReportHandoffField
 
 fn validate_values(input: &Value, errors: &mut BTreeSet<ReportHandoffFieldError>) {
     let handoff = &input["handoff"];
-    for (path, value) in [
-        ("/handoff/reason", &handoff["reason"]),
-        ("/handoff/revision/reason", &handoff["revision"]["reason"]),
-    ] {
-        if value
-            .as_str()
-            .is_some_and(|value| value.trim().is_empty() || value.len() > 1024)
-        {
-            record(
+    reason(errors, "/handoff/reason".into(), &handoff["reason"]);
+    reason(
+        errors,
+        "/handoff/revision/reason".into(),
+        &handoff["revision"]["reason"],
+    );
+    for (index, assessment) in entries(&handoff["assessments"]).iter().enumerate() {
+        let path = format!("/handoff/assessments/{index}");
+        reason(errors, child(&path, "reason"), &assessment["reason"]);
+        bounded_id(
+            errors,
+            child(&path, "discussionId"),
+            &assessment["discussionId"],
+            MAX_DISCUSSION_ID_BYTES,
+        );
+        for (position, id) in entries(&assessment["findingIds"]).iter().enumerate() {
+            bounded_id(
                 errors,
-                path,
-                "Use a non-blank reason of at most 1024 bytes.",
+                format!("{path}/findingIds/{position}"),
+                id,
+                MAX_ID_BYTES,
             );
         }
     }
@@ -143,45 +156,20 @@ fn validate_values(input: &Value, errors: &mut BTreeSet<ReportHandoffFieldError>
         return;
     }
     let report = &handoff["report"];
-    let scoped = handoff["assessments"]
-        .as_array()
-        .is_some_and(|items| !items.is_empty());
-    let amendment = handoff["amendsReport"].is_object() || handoff["correctsReport"].is_object();
-    let expected = match (scoped, amendment) {
-        (true, false) => "selected_threads",
-        (false, true) => "amendment",
-        (false, false) => "full_review",
-        (true, true) => {
-            record(
-                errors,
-                "/handoff/report/scope",
-                "A selected-thread result cannot amend a report.",
-            );
-            "selected_threads"
-        }
-    };
-    if report["scope"]
-        .as_str()
-        .is_some_and(|scope| scope != expected)
-    {
-        record(
+    match (handoff["amendsReport"].is_object(), report.is_null()) {
+        (false, true) => record(errors, "/handoff/report", "Required."),
+        (true, false) => record(
             errors,
-            "/handoff/report/scope",
-            format!("Use {expected} for the supplied handoff fields."),
-        );
+            "/handoff/report",
+            "Omit report when amendsReport is present.",
+        ),
+        _ => {}
     }
-    if scoped && handoff["revision"]["sha"].is_null() {
+    if !entries(&handoff["assessments"]).is_empty() && handoff["revision"]["sha"].is_null() {
         record(
             errors,
             "/handoff/revision/sha",
             "A selected-thread result requires an exact reviewed SHA.",
-        );
-    }
-    if handoff["amendsReport"].is_object() && handoff["correctsReport"].is_object() {
-        record(
-            errors,
-            "/handoff/correctsReport",
-            "Supply an amendment or a correction.",
         );
     }
     let hash = |value: &Value| value.as_str().and_then(ReportHashDto::new);
@@ -192,42 +180,76 @@ fn validate_values(input: &Value, errors: &mut BTreeSet<ReportHandoffFieldError>
     {
         errors.insert(report_amendment_source_error());
     }
-    for field in ["findingChanges", "sectionChanges"] {
-        if handoff[field]
-            .as_array()
-            .is_some_and(|items| !items.is_empty())
-            && !scoped
-            && !handoff["correctsReport"].is_object()
+    let mut retired = BTreeSet::new();
+    for (index, change) in entries(&handoff["findingChanges"]).iter().enumerate() {
+        let path = format!("/handoff/findingChanges/{index}");
+        reason(errors, child(&path, "reason"), &change["reason"]);
+        bounded_id(
+            errors,
+            child(&path, "findingId"),
+            &change["findingId"],
+            MAX_ID_BYTES,
+        );
+        let mut discussions = BTreeSet::new();
+        for (position, id) in entries(&change["discussionIds"]).iter().enumerate() {
+            let id_path = format!("{path}/discussionIds/{position}");
+            if id.as_str().is_some_and(|id| !discussions.insert(id)) {
+                record(
+                    errors,
+                    id_path.clone(),
+                    "ID is already used in this collection.",
+                );
+            }
+            bounded_id(errors, id_path, id, MAX_DISCUSSION_ID_BYTES);
+        }
+        if let Some(id) = change["findingId"].as_str()
+            && change["conclusion"]
+                .as_str()
+                .is_some_and(|conclusion| RETIRING.contains(&conclusion))
         {
-            record(
-                errors,
-                child("/handoff", field),
-                "Supply changes only for a selected-thread result or a correction.",
-            );
+            retired.insert(id);
         }
     }
     unique_ids(handoff, "findingChanges", "findingId", errors);
-    let Some(findings) = report["findings"].as_array() else {
-        return;
-    };
     let mut ids = BTreeSet::new();
-    for (index, finding) in findings.iter().enumerate() {
+    for (index, finding) in entries(&report["findings"]).iter().enumerate() {
         let path = format!("/handoff/report/findings/{index}");
-        if let Some(id) = finding["id"].as_str()
-            && !ids.insert(id)
-        {
-            record(
-                errors,
-                child(&path, "id"),
-                "Finding ID is already used in this handoff.",
-            );
+        if let Some(id) = finding["id"].as_str() {
+            if !ids.insert(id) {
+                record(
+                    errors,
+                    child(&path, "id"),
+                    "Finding ID is already used in this handoff.",
+                );
+            }
+            if retired.contains(id) {
+                record(
+                    errors,
+                    child(&path, "id"),
+                    format!(
+                        "{id} is retired by findingChanges; remove it from report.findings or use a keeping outcome."
+                    ),
+                );
+            }
         }
         for (field, value, limit) in [
-            ("title", &finding["title"], 384),
-            ("severity", &finding["severity"], 64),
-            ("consequence", &finding["consequence"], 1024),
-            ("evidence/text", &finding["evidence"]["text"], 2048),
-            ("location/path", &finding["location"]["path"], 512),
+            ("title", &finding["title"], MAX_TITLE_BYTES),
+            ("severity", &finding["severity"], MAX_SEVERITY_BYTES),
+            (
+                "consequence",
+                &finding["consequence"],
+                MAX_CONSEQUENCE_BYTES,
+            ),
+            (
+                "evidence/text",
+                &finding["evidence"]["text"],
+                MAX_EVIDENCE_BYTES,
+            ),
+            (
+                "location/path",
+                &finding["location"]["path"],
+                MAX_PATH_BYTES,
+            ),
         ] {
             if value.as_str().is_some_and(|value| {
                 value.trim().is_empty()
@@ -244,6 +266,36 @@ fn validate_values(input: &Value, errors: &mut BTreeSet<ReportHandoffFieldError>
                 );
             }
         }
+    }
+}
+
+const RETIRING: [&str; 3] = ["fixed", "clarified_withdrawn", "superseded"];
+
+fn entries(value: &Value) -> &[Value] {
+    value.as_array().map_or(&[], Vec::as_slice)
+}
+
+fn reason(errors: &mut BTreeSet<ReportHandoffFieldError>, path: String, value: &Value) {
+    if value
+        .as_str()
+        .is_some_and(|value| value.trim().is_empty() || value.len() > MAX_REASON_BYTES)
+    {
+        record(
+            errors,
+            path,
+            format!("Use a non-blank reason of at most {MAX_REASON_BYTES} bytes."),
+        );
+    }
+}
+
+fn bounded_id(
+    errors: &mut BTreeSet<ReportHandoffFieldError>,
+    path: String,
+    value: &Value,
+    limit: usize,
+) {
+    if value.as_str().is_some_and(|value| value.len() > limit) {
+        record(errors, path, format!("Use an ID of at most {limit} bytes."));
     }
 }
 
@@ -302,14 +354,16 @@ mod tests {
         assert!(validate_report_handoff(&input).is_empty());
 
         input["handoff"]["report"]["version"] = json!(2);
-        input["handoff"]["report"]["scope"] = json!("selected_threads");
-        input["handoff"]["report"]["findings"] = json!([card, {"id":"F-1","blocking":"yes"}]);
+        input["handoff"]["report"]["findings"] = json!([card, {"id":"F-01","blocking":"yes"}]);
         input["handoff"]["report"]["findings"][0]["location"]["line"] = json!(4294967296_u64);
+        input["handoff"]["findingChanges"] = json!([{
+            "findingId":"F-01","conclusion":"fixed","reason":"The retry now reuses its key."
+        }]);
         input["handoff"]["source"] = json!({"kind":"file","sha256":false});
         let errors = validate_report_handoff(&input);
         for path in [
             "/handoff/report/version",
-            "/handoff/report/scope",
+            "/handoff/report/findings/0/id",
             "/handoff/report/findings/0/location/line",
             "/handoff/report/findings/1/id",
             "/handoff/report/findings/1/blocking",
@@ -327,11 +381,13 @@ mod tests {
                 "{path} missing in {errors:?}"
             );
         }
+        assert!(errors.iter().any(|error| error.message
+            == "F-01 is retired by findingChanges; remove it from report.findings or use a keeping outcome."));
         input["handoff"]["report"] = Value::Null;
         assert!(
             validate_report_handoff(&input)
                 .iter()
-                .any(|error| error.path == "/handoff/report")
+                .any(|error| error.path == "/handoff/report" && error.message == "Required.")
         );
         assert!(!validate_report_handoff(&json!({"handoff":{"outcome":"needs_input","reason":"Awaiting target revision","verdict":"approve"}})).is_empty());
     }
@@ -342,11 +398,11 @@ mod tests {
         let accepted = "a".repeat(64);
         let changed = "b".repeat(64);
         let handoff = &mut input["handoff"];
+        let report = handoff.as_object_mut().unwrap().remove("report").unwrap();
         handoff["amendsReport"] = json!({"receiptId":"accepted-receipt","sha256":accepted});
-        handoff["report"]["scope"] = json!("amendment");
-        handoff["report"]["findings"] = json!([]);
         handoff["source"] = json!({"kind":"file","path":"/tmp/report.md","sha256":accepted});
         assert!(validate_report_handoff(&input).is_empty());
+        assert!(serde_json::from_value::<ReportHandoffInput>(input.clone()).is_ok());
 
         input["handoff"]["source"]["sha256"] = json!(changed);
         let errors = validate_report_handoff(&input);
@@ -360,16 +416,15 @@ mod tests {
         let parsed: ReportHandoffInput = serde_json::from_value(input.clone()).unwrap();
         assert!(parsed.handoff.changes_amended_source());
 
-        let handoff = input["handoff"].as_object_mut().unwrap();
-        handoff.remove("amendsReport");
-        handoff.insert(
-            "correctsReport".into(),
-            json!({
-                "receiptId":"accepted-receipt","sha256":accepted,"kind":"evidence",
-                "reason":"Clarify the cited evidence.","findingIds":["F-1"],
-                "evidence":[{"findingId":"F-1","sha256":"c".repeat(64)}]
-            }),
+        input["handoff"]["source"]["sha256"] = json!(accepted);
+        input["handoff"]["report"] = report;
+        assert_eq!(
+            validate_report_handoff(&input),
+            vec![ReportHandoffFieldError {
+                path: "/handoff/report".into(),
+                message: "Omit report when amendsReport is present.".into(),
+            }]
         );
-        assert!(validate_report_handoff(&input).is_empty());
+        assert!(serde_json::from_value::<ReportHandoffInput>(input).is_err());
     }
 }

@@ -2,7 +2,6 @@
 import { validate1336 } from "./report-summary-fields1.mjs";
 import { validate1345 } from "./report-summary-fields2.mjs";
 import { validate1354 } from "./report-summary-fields3.mjs";
-import { validate1364 } from "./report-summary-fields4.mjs";
 import { func0 } from "../runtime.mjs";
 function validate1335(
   data,
@@ -60,24 +59,6 @@ function validate1335(
         errors = vErrors.length;
       }
       var valid0 = _errs3 === errors;
-      if (valid0) {
-        const _errs4 = errors;
-        if (
-          !validate1364(data, {
-            instancePath,
-            parentData,
-            parentDataProperty,
-            rootData,
-          })
-        ) {
-          vErrors =
-            vErrors === null
-              ? validate1364.errors
-              : vErrors.concat(validate1364.errors);
-          errors = vErrors.length;
-        }
-        var valid0 = _errs4 === errors;
-      }
     }
   }
   if (errors === 0) {

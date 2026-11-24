@@ -85,12 +85,6 @@ pub struct ReportSummary {
     pub coverage_target_sha: Option<GitShaDto>,
     pub verdict: Verdict,
     pub semantic_index: SemanticIndex,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub structured_version: Option<u8>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub structured_scope: Option<ReportScope>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub blocking_finding_count: Option<SafeCountDto>,
     pub finding_count: Option<SafeCountDto>,
     pub change_count: Option<SafeCountDto>,
     pub captured_at: UtcTimestampDto,
@@ -496,11 +490,11 @@ pub struct FeedbackRequest {
 
 mod handoff;
 pub use handoff::{
-    AcceptedReference, AcceptedReport, Assessment, CodexCommand, Correction, CorrectionKind,
-    EvidenceReference, FindingBasis, FindingBasisKind, FindingEdit, FindingLocation, Handoff,
-    HandoffCommand, HandoffReceipt, HandoffState, NativeContext, NativeReportAddress,
-    REPORT_AMENDMENT_SOURCE_MESSAGE, REPORT_HANDOFF_DESCRIPTION, REPORT_HANDOFF_EXAMPLE,
-    REPORT_HANDOFF_SCHEMA, ReportHandoffFieldError, ReportHandoffInput, ReportRevision,
-    ReportScope, ReportSource, ReportVerdict, SectionEdit, StructuredFinding, StructuredReport,
-    report_amendment_source_error, validate_report_handoff,
+    AcceptedReference, AcceptedReport, Assessment, CodexCommand, FindingBasis, FindingBasisKind,
+    FindingEdit, FindingLocation, Handoff, HandoffCommand, HandoffReceipt, HandoffState,
+    NativeContext, NativeReportAddress, REPORT_AMENDMENT_SOURCE_MESSAGE,
+    REPORT_HANDOFF_DESCRIPTION, REPORT_HANDOFF_EXAMPLE, REPORT_HANDOFF_SCHEMA,
+    ReportHandoffFieldError, ReportHandoffInput, ReportRevision, ReportSource, ReportVerdict,
+    StructuredFinding, StructuredReport, limits, report_amendment_source_error,
+    validate_report_handoff,
 };

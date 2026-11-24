@@ -153,7 +153,15 @@ async fn prepare(
         return Err("native_settings_unproved");
     }
     let mut prompt = format!(
-        "Privately reassess selected ReviewQ discussions for {} !{} at source SHA {}. Batch {}.          Read each identified discussion and the current code. Preserve unrelated findings, questions, qualifications and user dispositions.          Do not post or edit GitLab notes, approve, merge, resolve discussions, or change Jira.          Return one evidence-backed assessment for every listed discussion, binding this batch and its exact observations.",
+        concat!(
+            "Privately reassess selected ReviewQ discussions for {} !{} at source SHA {}. Batch {}. ",
+            "Read each identified discussion and the current code. ",
+            "Preserve unrelated findings, questions, qualifications and user dispositions. ",
+            "Do not post or edit GitLab notes, approve, merge, resolve discussions, or change Jira. ",
+            "Submit report_handoff with one evidence-backed assessment for every listed discussion, ",
+            "covering its finding IDs, and an outcome in findingChanges for each finding you re-assess. ",
+            "Findings you do not re-assess are carried unchanged."
+        ),
         source.review.project_path,
         source.review.identity.iid(),
         source.review.head_sha,
@@ -161,8 +169,8 @@ async fn prepare(
     );
     if let Some(base) = &check.base {
         prompt.push_str(&format!(
-            "\nAccepted baseline receipt {} (SHA-256 {}), disposition revision {}.",
-            base.receipt_id, base.hash, check.disposition_version
+            "\nAccepted baseline receipt {} (SHA-256 {}).",
+            base.receipt_id, base.hash
         ));
     }
     for member in &check.members {

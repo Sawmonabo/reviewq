@@ -669,10 +669,7 @@ fn reviewq_command(command: &str, tool: WorkflowTool) -> bool {
     match tool {
         WorkflowTool::Report => {
             category == "report"
-                && matches!(
-                    operation.as_str(),
-                    "complete" | "unchanged" | "needs-input" | "handoff"
-                )
+                && matches!(operation.as_str(), "unchanged" | "needs-input" | "handoff")
         }
         WorkflowTool::Action => {
             category == "action" && matches!(operation.as_str(), "declare" | "reconcile")

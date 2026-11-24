@@ -4,8 +4,8 @@ use std::io::{self, Write};
 use reviewq_protocol::GitShaDto;
 use reviewq_protocol::reports::{
     FindingBasis, FindingBasisKind, FindingLocation, Handoff, REPORT_HANDOFF_DESCRIPTION,
-    ReportHandoffInput, ReportRevision, ReportScope, ReportSource, ReportVerdict,
-    StructuredFinding, StructuredReport,
+    ReportHandoffInput, ReportRevision, ReportSource, ReportVerdict, StructuredFinding,
+    StructuredReport,
 };
 use schemars::generate::SchemaSettings;
 
@@ -55,9 +55,8 @@ fn example() -> ReportHandoffInput {
             verdict: ReportVerdict::RequestChanges,
             report: Some(StructuredReport {
                 version: 1,
-                scope: ReportScope::FullReview,
                 findings: vec![StructuredFinding {
-                    id: "F-1".into(),
+                    id: "F-01".into(),
                     title: "Retry writes the same invoice twice".into(),
                     severity: "high".into(),
                     blocking: true,
@@ -74,9 +73,7 @@ fn example() -> ReportHandoffInput {
                 }],
             }),
             amends: None,
-            corrects: None,
             finding_changes: Vec::new(),
-            section_changes: Vec::new(),
             assessments: Vec::new(),
         },
     }

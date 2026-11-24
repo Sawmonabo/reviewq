@@ -31,7 +31,7 @@
           "items": {
             "$ref": "#/definitions/ResourceIdDto"
           },
-          "maxItems": 50,
+          "maxItems": 100,
           "type": "array"
         },
         "nextAction": {
@@ -51,61 +51,6 @@
         "nextAction"
       ],
       "type": "object"
-    },
-    "Correction": {
-      "additionalProperties": false,
-      "properties": {
-        "evidence": {
-          "items": {
-            "$ref": "#/definitions/EvidenceReference"
-          },
-          "type": "array"
-        },
-        "findingIds": {
-          "items": {
-            "$ref": "#/definitions/ResourceIdDto"
-          },
-          "type": "array"
-        },
-        "kind": {
-          "$ref": "#/definitions/CorrectionKind"
-        },
-        "reason": {
-          "type": "string"
-        },
-        "receiptId": {
-          "$ref": "#/definitions/ResourceIdDto"
-        },
-        "sha256": {
-          "$ref": "#/definitions/ReportHashDto"
-        }
-      },
-      "required": [
-        "receiptId",
-        "sha256",
-        "kind",
-        "reason",
-        "findingIds",
-        "evidence"
-      ],
-      "type": "object"
-    },
-    "CorrectionKind": {
-      "enum": [
-        "presentation",
-        "evidence"
-      ],
-      "type": "string"
-    },
-    "EvidenceReference": {
-      "anyOf": [
-        {
-          "$ref": "#/definitions/FindingEvidence"
-        },
-        {
-          "$ref": "#/definitions/SectionEvidence"
-        }
-      ]
     },
     "FindingBasis": {
       "additionalProperties": false,
@@ -146,9 +91,6 @@
     "FindingEdit": {
       "additionalProperties": false,
       "properties": {
-        "checkedSha": {
-          "$ref": "#/definitions/GitShaDto"
-        },
         "conclusion": {
           "$ref": "#/definitions/FindingConclusion"
         },
@@ -156,36 +98,22 @@
           "items": {
             "$ref": "#/definitions/ResourceIdDto"
           },
+          "maxItems": 10,
           "type": "array"
         },
         "findingId": {
           "$ref": "#/definitions/ResourceIdDto"
         },
         "reason": {
+          "maxLength": 1024,
+          "minLength": 1,
           "type": "string"
         }
       },
       "required": [
         "findingId",
         "conclusion",
-        "reason",
-        "checkedSha"
-      ],
-      "type": "object"
-    },
-    "FindingEvidence": {
-      "additionalProperties": false,
-      "properties": {
-        "findingId": {
-          "$ref": "#/definitions/ResourceIdDto"
-        },
-        "sha256": {
-          "$ref": "#/definitions/ReportHashDto"
-        }
-      },
-      "required": [
-        "findingId",
-        "sha256"
+        "reason"
       ],
       "type": "object"
     },
@@ -239,21 +167,11 @@
               "maxItems": 10,
               "type": "array"
             },
-            "correctsReport": {
-              "anyOf": [
-                {
-                  "$ref": "#/definitions/Correction"
-                },
-                {
-                  "type": "null"
-                }
-              ]
-            },
             "findingChanges": {
               "items": {
                 "$ref": "#/definitions/FindingEdit"
               },
-              "maxItems": 50,
+              "maxItems": 100,
               "type": "array"
             },
             "outcome": {
@@ -261,41 +179,18 @@
               "type": "string"
             },
             "report": {
-              "additionalProperties": false,
-              "properties": {
-                "findings": {
-                  "items": {
-                    "$ref": "#/definitions/StructuredFinding"
-                  },
-                  "maxItems": 50,
-                  "type": "array"
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/StructuredReport"
                 },
-                "scope": {
-                  "$ref": "#/definitions/ReportScope"
-                },
-                "version": {
-                  "format": "uint8",
-                  "maximum": 1,
-                  "minimum": 1,
-                  "type": "integer"
+                {
+                  "type": "null"
                 }
-              },
-              "required": [
-                "version",
-                "scope",
-                "findings"
               ],
-              "type": "object"
+              "description": "Required unless `amendsReport` is present, and omitted when it is."
             },
             "revision": {
               "$ref": "#/definitions/ReportRevision"
-            },
-            "sectionChanges": {
-              "items": {
-                "$ref": "#/definitions/SectionEdit"
-              },
-              "maxItems": 20,
-              "type": "array"
             },
             "source": {
               "$ref": "#/definitions/ReportSource"
@@ -308,8 +203,7 @@
             "outcome",
             "source",
             "revision",
-            "verdict",
-            "report"
+            "verdict"
           ],
           "type": "object"
         },
@@ -415,14 +309,6 @@
         }
       ]
     },
-    "ReportScope": {
-      "enum": [
-        "full_review",
-        "selected_threads",
-        "amendment"
-      ],
-      "type": "string"
-    },
     "ReportSource": {
       "oneOf": [
         {
@@ -485,58 +371,6 @@
       "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f]+$",
       "type": "string"
     },
-    "SectionEdit": {
-      "additionalProperties": false,
-      "properties": {
-        "baselineSha256": {
-          "$ref": "#/definitions/ReportHashDto"
-        },
-        "baselineTitle": {
-          "type": "string"
-        },
-        "conclusion": {
-          "$ref": "#/definitions/FindingConclusion"
-        },
-        "discussionIds": {
-          "items": {
-            "$ref": "#/definitions/ResourceIdDto"
-          },
-          "type": "array"
-        },
-        "reason": {
-          "type": "string"
-        },
-        "replacementTitle": {
-          "type": [
-            "string",
-            "null"
-          ]
-        }
-      },
-      "required": [
-        "baselineTitle",
-        "baselineSha256",
-        "conclusion",
-        "reason"
-      ],
-      "type": "object"
-    },
-    "SectionEvidence": {
-      "additionalProperties": false,
-      "properties": {
-        "sectionTitle": {
-          "type": "string"
-        },
-        "sha256": {
-          "$ref": "#/definitions/ReportHashDto"
-        }
-      },
-      "required": [
-        "sectionTitle",
-        "sha256"
-      ],
-      "type": "object"
-    },
     "StructuredFinding": {
       "additionalProperties": false,
       "properties": {
@@ -583,6 +417,29 @@
         "blocking",
         "consequence",
         "evidence"
+      ],
+      "type": "object"
+    },
+    "StructuredReport": {
+      "additionalProperties": false,
+      "properties": {
+        "findings": {
+          "items": {
+            "$ref": "#/definitions/StructuredFinding"
+          },
+          "maxItems": 100,
+          "type": "array"
+        },
+        "version": {
+          "format": "uint8",
+          "maximum": 1,
+          "minimum": 1,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "version",
+        "findings"
       ],
       "type": "object"
     }

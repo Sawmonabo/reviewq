@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 use super::ReportHashDto;
 use crate::{GitShaDto, HistoryTurnIdDto, ResourceIdDto, SessionKeyDto};
 
+pub mod limits;
 mod structured;
 mod validate;
 pub use structured::*;
@@ -14,9 +15,9 @@ pub const REPORT_HANDOFF_SCHEMA: &str =
     include_str!("../../../../contracts/report-handoff.schema.json");
 pub const REPORT_HANDOFF_EXAMPLE: &str =
     include_str!("../../../../fixtures/contracts/report-handoff.json");
-pub const REPORT_HANDOFF_DESCRIPTION: &str = "Submit the exact Markdown report or final native response and versioned finding cards for this linked ReviewQ lead. Set a reviewed SHA or an explicit unknown reason and a verdict. An empty findings list is valid. Use amendsReport for disposition or publication updates that preserve the accepted Markdown, revision, and verdict. For changed content with the same reviewed revision and verdict, use correctsReport with kind evidence and cite the accepted report. For a fresh review, use full_review or a bound selected_threads follow-up and supply the reviewed SHA. Selected-thread results include only findings updated by findingChanges and assessments of the frozen discussions. Unchanged retains the accepted receipt. Needs input records the reason. ReviewQ verifies native completion before accepting the report.";
+pub const REPORT_HANDOFF_DESCRIPTION: &str = "Submit the finished review once, after following the repository's own review instructions and output format; do not change the review for ReviewQ. Point source at the exact report (an absolute file path, or response for your final message) and give the reviewed SHA, or {sha: null, reason}, and the verdict. In report.findings list every finding the report raises (blocking and nonblocking, functional, security and quality) with its ID, title, severity, blocking, consequence, evidence or evidence gap, and location when applicable. Use the report's own IDs (F-01, F-02, ...) or assign them; keep an ID for the same concern across versions and give a new concern the next unused ID. findings: [] means nothing was found. In findingChanges give an outcome for each finding of the last accepted report that you re-assessed: fixed, clarified_withdrawn or superseded retire it; partly_addressed, still_present or unverified keep it. A full review must list or retire every finding of the last accepted report. In a selected-thread follow-up add one assessment per listed discussion; findings you did not re-assess are carried unchanged. amendsReport records a publication edit on the current report and omits report. Use unchanged to keep the accepted report, or needs_input with a reason. If ReviewQ returns field errors, fix them and submit again in this turn.";
 
-pub const REPORT_AMENDMENT_SOURCE_MESSAGE: &str = "amendsReport requires the accepted Markdown bytes. Use a correctsReport evidence correction for changed content with the same reviewed revision and verdict. For a fresh assessment, submit a review using its reviewed SHA.";
+pub const REPORT_AMENDMENT_SOURCE_MESSAGE: &str = "amendsReport keeps the accepted report's exact bytes. For changed content, submit a final with its findings and reviewed SHA.";
 
 /// Tool input and the exact JSON file accepted by the native CLI.
 #[derive(Debug, Deserialize, Serialize)]
@@ -27,14 +28,26 @@ pub struct ReportHandoffInput {
     pub handoff: Handoff,
 }
 
+/// A final carries its findings ledger unless it amends the accepted report.
 fn require_structured_final<'de, D: serde::Deserializer<'de>>(
     deserializer: D,
 ) -> Result<Handoff, D::Error> {
     let handoff = Handoff::deserialize(deserializer)?;
-    if matches!(handoff, Handoff::Final { report: None, .. }) {
-        return Err(serde::de::Error::missing_field("report"));
+    match &handoff {
+        Handoff::Final {
+            report: None,
+            amends: None,
+            ..
+        } => Err(serde::de::Error::missing_field("report")),
+        Handoff::Final {
+            report: Some(_),
+            amends: Some(_),
+            ..
+        } => Err(serde::de::Error::custom(
+            "Omit report when amendsReport is present.",
+        )),
+        _ => Ok(handoff),
     }
-    Ok(handoff)
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -55,6 +68,7 @@ pub enum HandoffCommand {
 pub struct CodexCommand {
     pub session_key: SessionKeyDto,
     pub call_id: ResourceIdDto,
+    #[serde(deserialize_with = "require_structured_final")]
     pub handoff: Handoff,
 }
 
@@ -84,43 +98,34 @@ pub enum Handoff {
         source: ReportSource,
         revision: ReportRevision,
         verdict: ReportVerdict,
+        /// Required unless `amendsReport` is present, and omitted when it is.
         #[serde(skip_serializing_if = "Option::is_none")]
-        #[cfg_attr(feature = "schema", schemars(required))]
         report: Option<StructuredReport>,
         #[serde(rename = "amendsReport", skip_serializing_if = "Option::is_none")]
         amends: Option<AcceptedReference>,
-        #[serde(rename = "correctsReport", skip_serializing_if = "Option::is_none")]
-        corrects: Option<Box<Correction>>,
         #[serde(
             rename = "findingChanges",
             default,
             skip_serializing_if = "Vec::is_empty"
         )]
-        #[cfg_attr(feature = "schema", schemars(length(max = 50)))]
+        #[cfg_attr(feature = "schema", schemars(length(max = limits::MAX_FINDING_CHANGES)))]
         finding_changes: Vec<FindingEdit>,
-        #[serde(
-            rename = "sectionChanges",
-            default,
-            skip_serializing_if = "Vec::is_empty"
-        )]
-        #[cfg_attr(feature = "schema", schemars(length(max = 20)))]
-        section_changes: Vec<SectionEdit>,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
-        #[cfg_attr(feature = "schema", schemars(length(max = 10)))]
+        #[cfg_attr(feature = "schema", schemars(length(max = limits::MAX_ASSESSMENTS)))]
         assessments: Vec<Assessment>,
     },
     Unchanged {
         accepted: AcceptedReference,
         source: ReportSource,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
-        #[cfg_attr(feature = "schema", schemars(length(max = 10)))]
+        #[cfg_attr(feature = "schema", schemars(length(max = limits::MAX_ASSESSMENTS)))]
         assessments: Vec<Assessment>,
     },
     NeedsInput {
-        #[cfg_attr(feature = "schema", schemars(length(min = 1, max = 1024)))]
+        #[cfg_attr(feature = "schema", schemars(length(min = 1, max = limits::MAX_REASON_BYTES)))]
         reason: String,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
-        #[cfg_attr(feature = "schema", schemars(length(max = 10)))]
+        #[cfg_attr(feature = "schema", schemars(length(max = limits::MAX_ASSESSMENTS)))]
         assessments: Vec<Assessment>,
     },
 }
@@ -145,55 +150,11 @@ impl Handoff {
 pub struct Assessment {
     pub discussion_id: ResourceIdDto,
     pub conclusion: super::FindingConclusion,
-    #[cfg_attr(feature = "schema", schemars(length(min = 1, max = 1024)))]
+    #[cfg_attr(feature = "schema", schemars(length(min = 1, max = limits::MAX_REASON_BYTES)))]
     pub reason: String,
-    #[cfg_attr(feature = "schema", schemars(length(max = 50)))]
+    #[cfg_attr(feature = "schema", schemars(length(max = limits::MAX_ASSESSMENT_FINDING_IDS)))]
     pub finding_ids: Vec<ResourceIdDto>,
     pub next_action: crate::followups::NextAction,
-}
-
-#[derive(Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-pub struct Correction {
-    pub receipt_id: ResourceIdDto,
-    pub sha256: ReportHashDto,
-    pub kind: CorrectionKind,
-    pub reason: String,
-    pub finding_ids: Vec<ResourceIdDto>,
-    pub evidence: Vec<EvidenceReference>,
-}
-
-#[derive(Debug, Deserialize, Serialize)]
-#[serde(rename_all = "snake_case")]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-pub enum CorrectionKind {
-    Presentation,
-    Evidence,
-}
-
-#[derive(Debug, Deserialize, Serialize)]
-#[serde(untagged)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-pub enum EvidenceReference {
-    Finding(FindingEvidence),
-    Section(SectionEvidence),
-}
-
-#[derive(Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-pub struct FindingEvidence {
-    pub finding_id: ResourceIdDto,
-    pub sha256: ReportHashDto,
-}
-
-#[derive(Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-pub struct SectionEvidence {
-    pub section_title: String,
-    pub sha256: ReportHashDto,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -202,22 +163,10 @@ pub struct SectionEvidence {
 pub struct FindingEdit {
     pub finding_id: ResourceIdDto,
     pub conclusion: super::FindingConclusion,
-    pub reason: String,
-    pub checked_sha: GitShaDto,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub discussion_ids: Vec<ResourceIdDto>,
-}
-
-#[derive(Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-pub struct SectionEdit {
-    pub baseline_title: String,
-    pub baseline_sha256: ReportHashDto,
-    pub replacement_title: Option<String>,
-    pub conclusion: super::FindingConclusion,
+    #[cfg_attr(feature = "schema", schemars(length(min = 1, max = limits::MAX_REASON_BYTES)))]
     pub reason: String,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[cfg_attr(feature = "schema", schemars(length(max = limits::MAX_DISCUSSION_IDS)))]
     pub discussion_ids: Vec<ResourceIdDto>,
 }
 
@@ -244,7 +193,7 @@ pub enum ReportRevision {
     },
     Unknown {
         sha: (),
-        #[cfg_attr(feature = "schema", schemars(length(min = 1, max = 1024)))]
+        #[cfg_attr(feature = "schema", schemars(length(min = 1, max = limits::MAX_REASON_BYTES)))]
         reason: String,
     },
 }

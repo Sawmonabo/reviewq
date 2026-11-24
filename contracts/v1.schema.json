@@ -8515,14 +8515,6 @@
       ],
       "type": "object"
     },
-    "ReportScope": {
-      "enum": [
-        "full_review",
-        "selected_threads",
-        "amendment"
-      ],
-      "type": "string"
-    },
     "ReportSection": {
       "properties": {
         "complete": {
@@ -8601,16 +8593,6 @@
       "properties": {
         "attentionReceiptId": {
           "$ref": "#/definitions/ResourceIdDto"
-        },
-        "blockingFindingCount": {
-          "anyOf": [
-            {
-              "$ref": "#/definitions/SafeCountDto"
-            },
-            {
-              "type": "null"
-            }
-          ]
         },
         "byteLength": {
           "$ref": "#/definitions/SafeCountDto"
@@ -8727,25 +8709,6 @@
         },
         "sha256": {
           "$ref": "#/definitions/ReportHashDto"
-        },
-        "structuredScope": {
-          "anyOf": [
-            {
-              "$ref": "#/definitions/ReportScope"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "structuredVersion": {
-          "format": "uint8",
-          "maximum": 255,
-          "minimum": 0,
-          "type": [
-            "integer",
-            "null"
-          ]
         },
         "totalCodePoints": {
           "$ref": "#/definitions/SafeCountDto"

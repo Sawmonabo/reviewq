@@ -5,6 +5,7 @@ use axum::http::StatusCode;
 use axum::http::request::Parts;
 use axum::response::{IntoResponse, Response};
 use reviewq_app::access::AppError;
+use reviewq_protocol::reports::{ReportHandoffFieldError, report_amendment_source_error};
 use reviewq_protocol::{ErrorCode, ErrorDto, Failure};
 use serde::de::DeserializeOwned;
 
@@ -12,6 +13,8 @@ pub(super) enum ApiError {
     Application(AppError),
     // The proof gate rejected the request before performing the operation.
     BrowserProofRejected,
+    // The report handoff broke these schema or value rules; the agent corrects them in its turn.
+    InvalidHandoff(Vec<ReportHandoffFieldError>),
 }
 
 pub(super) struct ApiPath<T>(pub(super) T);
@@ -67,24 +70,31 @@ impl From<AppError> for ApiError {
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
         match self {
+            Self::Application(AppError::ReportAmendmentSourceChanged) => field_errors(
+                AppError::ReportAmendmentSourceChanged,
+                &[report_amendment_source_error()],
+            ),
             Self::Application(error) => {
                 let (status, failure) = failure(error);
-                if error == AppError::ReportAmendmentSourceChanged {
-                    let body = serde_json::json!({
-                        "cursor": failure.cursor,
-                        "error": failure.error,
-                        "fieldErrors": [reviewq_protocol::reports::report_amendment_source_error()],
-                    });
-                    return (status, Json(body)).into_response();
-                }
                 (status, Json(failure)).into_response()
             }
+            Self::InvalidHandoff(errors) => field_errors(AppError::InvalidRequest, &errors),
             Self::BrowserProofRejected => {
                 let (status, failure) = failure(AppError::Forbidden);
                 (status, [("x-reviewq-csrf-rejected", "1")], Json(failure)).into_response()
             }
         }
     }
+}
+
+fn field_errors(error: AppError, errors: &[ReportHandoffFieldError]) -> Response {
+    let (status, failure) = failure(error);
+    let body = serde_json::json!({
+        "cursor": failure.cursor,
+        "error": failure.error,
+        "fieldErrors": errors,
+    });
+    (status, Json(body)).into_response()
 }
 
 pub(super) fn failure(error: AppError) -> (StatusCode, Failure) {

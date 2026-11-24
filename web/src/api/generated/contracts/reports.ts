@@ -71,8 +71,6 @@ export type DeliveryState = "preparing" | "saving" | "failed" | "saved";
 
 export type SemanticIndex = "ready" | "source_only";
 
-export type ReportScope = "full_review" | "selected_threads" | "amendment";
-
 export type Verdict =
   "approve" | "request_changes" | "blocked" | "not_specified";
 
@@ -306,7 +304,6 @@ export interface ReportDelivery {
 
 export interface ReportSummary {
   attentionReceiptId: ResourceIdDto;
-  blockingFindingCount?: SafeCountDto | null;
   byteLength: SafeCountDto;
   capturedAt: UtcTimestampDto;
   changeCount: SafeCountDto | null;
@@ -326,8 +323,6 @@ export interface ReportSummary {
   revisionReason: string | null;
   semanticIndex: SemanticIndex;
   sha256: ReportHashDto;
-  structuredScope?: ReportScope | null;
-  structuredVersion?: number | null;
   totalCodePoints: SafeCountDto;
   verdict: Verdict;
   [k: string]: unknown;

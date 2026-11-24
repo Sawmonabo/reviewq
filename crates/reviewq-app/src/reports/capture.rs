@@ -14,8 +14,8 @@ use crate::workflow::{
 
 use super::index;
 use super::{
-    ArtifactStats, Descriptor, FindingConclusion, ReportEdits, ReportReference, ReportScope,
-    StructuredReport, Verdict,
+    ArtifactStats, Descriptor, FindingConclusion, ReportEdits, ReportReference, StructuredReport,
+    Verdict,
 };
 
 pub const CHUNK_BYTES: usize = 64 * 1024;
@@ -87,67 +87,30 @@ impl Declaration {
         }
     }
 
+    /// Checks the invariants acceptance relies on. The transport validates the wire
+    /// fields and their bounds before projecting a declaration.
     pub fn validate(&self) -> Result<(), AppError> {
-        if matches!(
-            self,
+        match self {
             Self::Final {
                 source: Source::File { hash: None, .. },
                 ..
-            } | Self::Unchanged {
+            }
+            | Self::Unchanged {
                 source: Source::File { hash: None, .. },
                 ..
-            }
-        ) {
-            return Err(AppError::InvalidRequest);
-        }
-        if let Self::Final {
-            amends,
-            edits,
-            revision,
-            assessments,
-            report,
-            ..
-        } = self
-        {
-            edits.validate(amends.as_ref(), revision, !assessments.is_empty())?;
-            if let Some(report) = report {
-                report.validate(if !assessments.is_empty() {
-                    ReportScope::SelectedThreads
-                } else if amends.is_some() || edits.correction.is_some() {
-                    ReportScope::Amendment
-                } else {
-                    ReportScope::FullReview
-                })?;
-            }
-        }
-        let mut discussions = std::collections::HashSet::new();
-        if self.assessments().len() > 10
-            || self.assessments().iter().any(|assessment| {
-                assessment.discussion_id.is_empty()
-                    || assessment.discussion_id.len() > 256
-                    || !discussions.insert(&assessment.discussion_id)
-                    || assessment.reason.trim().is_empty()
-                    || assessment.reason.len() > 1024
-                    || assessment.finding_ids.len() > 50
-                    || assessment.finding_ids.iter().any(|id| {
-                        id.is_empty() || id.len() > 64 || id.chars().any(char::is_control)
-                    })
-            })
-        {
-            return Err(AppError::InvalidRequest);
-        }
-        let reason = match self {
+            } => Err(AppError::InvalidRequest),
             Self::Final {
-                revision: RevisionEvidence::Unknown(reason),
+                report,
+                amends,
+                edits,
                 ..
+            } if report.is_some() == amends.is_some()
+                || (amends.is_some() && !edits.is_empty()) =>
+            {
+                Err(AppError::InvalidRequest)
             }
-            | Self::NeedsInput { reason, .. } => Some(reason),
-            _ => None,
-        };
-        if reason.is_some_and(|reason| reason.trim().is_empty() || reason.len() > 1024) {
-            return Err(AppError::InvalidRequest);
+            _ => Ok(()),
         }
-        Ok(())
     }
 }
 

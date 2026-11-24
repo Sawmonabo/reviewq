@@ -43,12 +43,12 @@ pub(super) fn bind(
         .and_then(Actor::grant_epoch)
         .map(|value| value.as_sqlite_integer());
     let metadata: String = db.query_row(
-        r#"SELECT json_set(coalesce(?1, '{"findings":[],"sections":[]}'), '$.authority', ?2,
+        r#"SELECT json_set(coalesce(?1, '{"findings":[]}'), '$.authority', ?2,
               '$.grantId', ?3, '$.grantEpoch', ?4, '$.argumentsSha256', ?5, '$.incomparableRecorded', ?6)"#,
         params![edits, authority.0.as_str(), grant, epoch, arguments.map(ReportHash::as_str), incomparable_recorded],
         |row| row.get(0),
     )?;
-    if metadata.len() > 128 * 1024 {
+    if metadata.len() > reviewq_app::reports::METADATA_BYTES {
         return Err(AppError::PayloadTooLarge.into());
     }
     Ok(metadata)

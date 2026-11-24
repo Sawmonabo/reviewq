@@ -2,29 +2,6 @@
 const schema448 = {
   type: "object",
   properties: {
-    author: {
-      anyOf: [{ $ref: "#/definitions/NamedUpstreamId" }, { type: "null" }],
-    },
-    coverage: { anyOf: [{ $ref: "#/definitions/Coverage" }, { type: "null" }] },
-    currentDisposition: {
-      anyOf: [{ $ref: "#/definitions/Disposition" }, { type: "null" }],
-    },
-    draft: { type: "boolean" },
-    focusSessionKey: {
-      anyOf: [{ $ref: "#/definitions/CheckpointIdDto" }, { type: "null" }],
-    },
-    focusedActivity: {
-      anyOf: [{ $ref: "#/definitions/FocusedActivity" }, { type: "null" }],
-    },
-    focusedLaunch: {
-      anyOf: [{ $ref: "#/definitions/FocusedLaunch" }, { type: "null" }],
-    },
-    focusedLeadName: { type: ["string", "null"] },
-  },
-};
-const schema450 = {
-  type: "object",
-  properties: {
     ourComments: { $ref: "#/definitions/SafeCountDto" },
     own: { type: "boolean" },
     personalApproval: { type: ["boolean", "null"] },
@@ -35,7 +12,7 @@ const schema450 = {
     registeredLeadCount: { $ref: "#/definitions/SafeCountDto" },
   },
 };
-const schema456 = {
+const schema454 = {
   properties: {
     defaultEffort: { type: ["string", "null"] },
     efforts: { items: { type: "string" }, type: "array" },
@@ -46,7 +23,7 @@ const schema456 = {
   required: ["id", "label", "isDefault", "defaultEffort", "efforts"],
   type: "object",
 };
-const schema457 = {
+const schema455 = {
   properties: {
     description: { type: ["string", "null"] },
     name: { type: "string" },
@@ -55,7 +32,7 @@ const schema457 = {
   required: ["name", "path"],
   type: "object",
 };
-const schema461 = {
+const schema459 = {
   properties: {
     context: { type: ["string", "null"] },
     invocation: { $ref: "#/definitions/Invocation" },
@@ -78,7 +55,7 @@ const schema461 = {
   ],
   type: "object",
 };
-const schema463 = {
+const schema461 = {
   additionalProperties: false,
   properties: {
     args: { type: ["string", "null"] },
@@ -89,7 +66,7 @@ const schema463 = {
   required: ["kind", "name", "path", "args"],
   type: "object",
 };
-const schema465 = {
+const schema463 = {
   properties: {
     effort: { type: ["string", "null"] },
     model: { type: ["string", "null"] },
@@ -102,7 +79,7 @@ const schema465 = {
   required: ["name", "status", "startedAt", "model", "effort"],
   type: "object",
 };
-const schema466 = {
+const schema464 = {
   properties: {
     input: {
       anyOf: [{ $ref: "#/definitions/RequestInput" }, { type: "null" }],
@@ -114,11 +91,11 @@ const schema466 = {
   required: ["requestedModel", "requestedEffort", "skillName", "input"],
   type: "object",
 };
-const schema468 = {
+const schema466 = {
   enum: ["review_request", "skill_arguments"],
   type: "string",
 };
-const schema474 = {
+const schema472 = {
   type: "object",
   properties: {
     checkout: { type: "string" },
@@ -131,7 +108,7 @@ const schema474 = {
     reviewId: { $ref: "#/definitions/ReviewIdDto" },
   },
 };
-const schema477 = {
+const schema475 = {
   properties: {
     file: { $ref: "#/definitions/PatchFile" },
     nextCursor: {
@@ -159,7 +136,7 @@ const schema477 = {
   ],
   type: "object",
 };
-const schema480 = {
+const schema478 = {
   additionalProperties: false,
   properties: {
     boardId: true,
@@ -191,7 +168,7 @@ const schema480 = {
     { $ref: "#/definitions/BoardScopeFields2" },
   ],
 };
-const schema481 = {
+const schema479 = {
   type: "object",
   properties: {
     boardId: { $ref: "#/definitions/CheckpointIdDto" },
@@ -210,18 +187,65 @@ const schema481 = {
     storyPointsField: { type: ["string", "null"] },
   },
 };
+const schema482 = {
+  enum: ["ready", "pending", "cleanup_conflict"],
+  type: "string",
+};
+const schema484 = {
+  properties: {
+    configured: { type: "boolean" },
+    identity: { anyOf: [{ $ref: "#/definitions/Identity" }, { type: "null" }] },
+    origin: { type: ["string", "null"] },
+  },
+  required: ["origin", "configured", "identity"],
+  type: "object",
+};
+const schema486 = {
+  properties: {
+    configured: { type: "boolean" },
+    email: { type: ["string", "null"] },
+    identity: { anyOf: [{ $ref: "#/definitions/Identity" }, { type: "null" }] },
+    site: { type: ["string", "null"] },
+    tokenType: {
+      anyOf: [{ $ref: "#/definitions/TokenType" }, { type: "null" }],
+    },
+  },
+  required: ["site", "email", "tokenType", "configured", "identity"],
+  type: "object",
+};
+const schema487 = {
+  additionalProperties: false,
+  properties: {
+    boardSelection: { $ref: "#/definitions/BoardSelection" },
+    checkout: { type: ["string", "null"] },
+    defaultSkills: { $ref: "#/definitions/DefaultSkills" },
+    path: { type: "string" },
+    projectId: { $ref: "#/definitions/MergeRequestIidDto" },
+  },
+  required: [
+    "projectId",
+    "path",
+    "checkout",
+    "boardSelection",
+    "defaultSkills",
+  ],
+  type: "object",
+};
 export {
   schema448,
-  schema450,
-  schema456,
-  schema457,
+  schema454,
+  schema455,
+  schema459,
   schema461,
   schema463,
-  schema465,
+  schema464,
   schema466,
-  schema468,
-  schema474,
-  schema477,
-  schema480,
-  schema481,
+  schema472,
+  schema475,
+  schema478,
+  schema479,
+  schema482,
+  schema484,
+  schema486,
+  schema487,
 };

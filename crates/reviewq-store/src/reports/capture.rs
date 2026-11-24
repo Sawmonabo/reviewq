@@ -154,7 +154,6 @@ impl ReportCaptureStore for SqliteStore {
         checkout: Option<Actor>,
     ) -> AppFuture<'_, Snapshot<HandoffReceipt>> {
         Box::pin(async move {
-            declaration.validate()?;
             self.write(move |tx| {
                 if let Some(actor) = &checkout {
                     let host = call.lead.binding().identity();
@@ -522,6 +521,13 @@ fn stage(
         return Err(AppError::Forbidden.into());
     }
     let assessments = batch::encode(declaration.assessments())?;
+    let structured = matches!(
+        declaration,
+        Declaration::Final {
+            report: Some(_),
+            ..
+        }
+    );
     let (form, source, revision, verdict, expected, reason, edits) = match declaration {
         Declaration::Final {
             source,
@@ -538,7 +544,7 @@ fn stage(
                 Some(source),
                 Some(revision),
                 Some(verdict),
-                amends.or_else(|| edits.correction.map(|value| value.base)),
+                amends,
                 None,
                 metadata,
             )
@@ -586,7 +592,9 @@ fn stage(
         call.arguments_sha256.as_ref(),
         incomparable_recorded,
     )?;
-    if !structured::full_projection_fits(db, &edits, head.as_ref().map(|sha| sha.as_str()))? {
+    if structured
+        && !structured::supplied_projection_fits(db, &edits, head.as_ref().map(|sha| sha.as_str()))?
+    {
         return Err(AppError::PayloadTooLarge.into());
     }
     let receipt_id = Uuid::new_v4().to_string();
@@ -711,7 +719,7 @@ fn declaration(row: &Row<'_>) -> Result<Declaration, StoreError> {
     Ok(match text(row, 8)? {
         "final" => {
             let metadata: Option<String> = row.get(21)?;
-            let (edits, report) = edits::decode(metadata.as_deref(), expected.as_ref())?;
+            let (edits, report) = edits::decode(metadata.as_deref())?;
             Declaration::Final {
                 source: source.ok_or(AppError::Internal)?,
                 revision: match optional(row, 12)? {
@@ -720,11 +728,7 @@ fn declaration(row: &Row<'_>) -> Result<Declaration, StoreError> {
                 },
                 verdict: parse(text(row, 14)?)?,
                 report,
-                amends: if edits.correction.is_some() {
-                    None
-                } else {
-                    expected
-                },
+                amends: expected,
                 assessments,
                 edits,
             }

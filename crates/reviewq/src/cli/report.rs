@@ -2,14 +2,12 @@ use std::io::Read;
 use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 
-use clap::{ArgGroup, Args, Subcommand, ValueEnum};
-use reviewq_domain::identity::{GitSha, ReportHash};
-use reviewq_protocol::GitShaDto;
+use clap::Subcommand;
+use reviewq_domain::identity::ReportHash;
 use reviewq_protocol::reports::{
-    AcceptedReference, AcceptedReport, Assessment, CodexCommand, Correction, FindingEdit, Handoff,
-    HandoffReceipt, HandoffState, NativeReportAddress, REPORT_AMENDMENT_SOURCE_MESSAGE,
-    REPORT_HANDOFF_EXAMPLE, ReportHandoffInput, ReportHashDto, ReportRevision, ReportSource,
-    ReportVerdict, SectionEdit, validate_report_handoff,
+    AcceptedReference, AcceptedReport, Assessment, CodexCommand, Handoff, HandoffReceipt,
+    HandoffState, NativeReportAddress, REPORT_AMENDMENT_SOURCE_MESSAGE, REPORT_HANDOFF_EXAMPLE,
+    ReportHandoffInput, ReportHashDto, ReportSource, validate_report_handoff,
 };
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
@@ -33,8 +31,6 @@ pub(super) enum Report {
         #[arg(long, value_name = "JSON")]
         file: PathBuf,
     },
-    /// Stage an exact file or the current turn's final response.
-    Complete(Complete),
     /// Record a completed review that leaves the accepted report unchanged.
     Unchanged {
         #[arg(long, value_name = "JSON")]
@@ -51,70 +47,20 @@ pub(super) enum Report {
     Accepted,
 }
 
-#[derive(Args)]
-#[command(group(ArgGroup::new("source").required(true).args(["file", "response"])))]
-#[command(group(ArgGroup::new("revision").required(true).args(["reviewed_sha", "unknown_revision"])))]
-pub(super) struct Complete {
-    #[arg(long, value_name = "FILE")]
-    file: Option<PathBuf>,
-    #[arg(long)]
-    response: bool,
-    #[arg(long)]
-    reviewed_sha: Option<GitSha>,
-    #[arg(long, value_parser = reason)]
-    unknown_revision: Option<String>,
-    #[arg(long, value_enum)]
-    verdict: Verdict,
-    #[arg(long, value_name = "JSON")]
-    assessment_file: Option<PathBuf>,
-    #[arg(long)]
-    amend_current: bool,
-}
-
-#[derive(Clone, Copy, ValueEnum)]
-#[value(rename_all = "snake_case")]
-enum Verdict {
-    Approve,
-    RequestChanges,
-    Blocked,
-    NotSpecified,
-}
-
-impl From<Verdict> for ReportVerdict {
-    fn from(value: Verdict) -> Self {
-        match value {
-            Verdict::Approve => Self::Approve,
-            Verdict::RequestChanges => Self::RequestChanges,
-            Verdict::Blocked => Self::Blocked,
-            Verdict::NotSpecified => Self::NotSpecified,
-        }
-    }
-}
-
+/// The assessment file holds only thread assessments.
 #[derive(Default, Deserialize)]
-#[serde(default, rename_all = "camelCase", deny_unknown_fields)]
+#[serde(default, deny_unknown_fields)]
 struct Metadata {
     assessments: Vec<Assessment>,
-    corrects_report: Option<Correction>,
-    finding_changes: Vec<FindingEdit>,
-    section_changes: Vec<SectionEdit>,
 }
 
 impl Metadata {
-    fn read(path: Option<&Path>) -> Result<Self, Failure> {
-        path.map(|path| workflow::json_file(path, MAX_METADATA_BYTES))
-            .transpose()
-            .map(|value| value.unwrap_or_default())
-    }
-
-    fn assessments(self) -> Result<Vec<Assessment>, Failure> {
-        if self.corrects_report.is_some()
-            || !self.finding_changes.is_empty()
-            || !self.section_changes.is_empty()
-        {
-            return Err("Report corrections require report complete.".into());
-        }
-        Ok(self.assessments)
+    fn assessments(path: Option<&Path>) -> Result<Vec<Assessment>, Failure> {
+        Ok(path
+            .map(|path| workflow::json_file::<Self>(path, MAX_METADATA_BYTES))
+            .transpose()?
+            .unwrap_or_default()
+            .assessments)
     }
 }
 
@@ -140,9 +86,8 @@ pub(super) async fn execute(
     let handoff = match command {
         Report::Example | Report::Handoff { .. } => unreachable!(),
         Report::Accepted => return workflow::print(&accepted(&context).await?, false),
-        Report::Complete(input) => complete(&context, input).await?,
         Report::Unchanged { assessment_file } => {
-            let assessments = Metadata::read(assessment_file.as_deref())?.assessments()?;
+            let assessments = Metadata::assessments(assessment_file.as_deref())?;
             let report = accepted(&context)
                 .await?
                 .ok_or("This lead has no accepted report to retain.")?;
@@ -162,9 +107,10 @@ pub(super) async fn execute(
             assessment_file,
         } => Handoff::NeedsInput {
             reason,
-            assessments: Metadata::read(assessment_file.as_deref())?.assessments()?,
+            assessments: Metadata::assessments(assessment_file.as_deref())?,
         },
     };
+    check(&serde_json::json!({ "handoff": serde_json::to_value(&handoff)? }))?;
     submit(&context, handoff).await
 }
 
@@ -204,7 +150,14 @@ async fn accepted(context: &Context) -> Result<Option<AcceptedReport>, Failure> 
 
 fn read_handoff(file: &Path) -> Result<Handoff, Failure> {
     let input = workflow::json_file(file, MAX_HANDOFF_BYTES)?;
-    let errors = validate_report_handoff(&input);
+    check(&input)?;
+    let ReportHandoffInput { handoff } = serde_json::from_value(input)?;
+    Ok(handoff)
+}
+
+/// Reports every schema and value error of a tool input as `path message` lines.
+fn check(input: &serde_json::Value) -> Result<(), Failure> {
+    let errors = validate_report_handoff(input);
     if !errors.is_empty() {
         let messages = errors
             .into_iter()
@@ -219,8 +172,7 @@ fn read_handoff(file: &Path) -> Result<Handoff, Failure> {
             .collect::<Vec<_>>();
         return Err(format!("Invalid report handoff.\n{}", messages.join("\n")).into());
     }
-    let ReportHandoffInput { handoff } = serde_json::from_value(input)?;
-    Ok(handoff)
+    Ok(())
 }
 
 fn bind_handoff_source(handoff: &mut Handoff) -> Result<(), Failure> {
@@ -236,53 +188,6 @@ fn bind_handoff_source(handoff: &mut Handoff) -> Result<(), Failure> {
         *source = bound;
     }
     Ok(())
-}
-
-async fn complete(context: &Context, input: Complete) -> Result<Handoff, Failure> {
-    let metadata = Metadata::read(input.assessment_file.as_deref())?;
-    if input.amend_current
-        && (metadata.corrects_report.is_some()
-            || !metadata.finding_changes.is_empty()
-            || !metadata.section_changes.is_empty())
-    {
-        return Err("Submit structured report corrections without --amend-current.".into());
-    }
-    let source = match (input.file, input.response) {
-        (Some(path), false) => report_file(&path)?,
-        (None, true) => ReportSource::Response,
-        _ => return Err("Choose one report source.".into()),
-    };
-    let sha = input
-        .reviewed_sha
-        .as_ref()
-        .map(|sha| GitShaDto::new(sha.as_str()).ok_or("Invalid reviewed SHA."))
-        .transpose()?;
-    let amends = if input.amend_current {
-        let report = accepted(context)
-            .await?
-            .ok_or("This lead has no accepted report to amend.")?;
-        Some(AcceptedReference {
-            receipt_id: report.receipt_id,
-            sha256: report.sha256,
-        })
-    } else {
-        None
-    };
-    Ok(Handoff::Final {
-        source,
-        revision: match (sha, input.unknown_revision) {
-            (Some(sha), None) => ReportRevision::Exact { sha },
-            (None, Some(reason)) => ReportRevision::Unknown { sha: (), reason },
-            _ => return Err("Choose one reviewed revision or unknown revision reason.".into()),
-        },
-        verdict: input.verdict.into(),
-        report: None,
-        amends,
-        corrects: metadata.corrects_report.map(Box::new),
-        finding_changes: metadata.finding_changes,
-        section_changes: metadata.section_changes,
-        assessments: metadata.assessments,
-    })
 }
 
 fn report_file(path: &Path) -> Result<ReportSource, Failure> {

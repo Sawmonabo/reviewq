@@ -87,6 +87,19 @@ async fn receive(
     lookup: bool,
 ) -> Result<Json<Success<dto::HandoffReceipt>>, ApiError> {
     authenticate(entry, headers)?;
+    // Both native bodies wrap the same tool input. Field errors return to the agent's open turn.
+    let raw = serde_json::from_slice::<serde_json::Value>(bytes)
+        .ok()
+        .and_then(|mut body| {
+            let handoff = body.as_object_mut()?.remove("handoff")?;
+            Some(serde_json::json!({ "handoff": handoff }))
+        });
+    if !lookup && let Some(raw) = &raw {
+        let errors = dto::validate_report_handoff(raw);
+        if !errors.is_empty() {
+            return Err(ApiError::InvalidHandoff(errors));
+        }
+    }
     let command = match serde_json::from_slice::<dto::HandoffCommand>(bytes) {
         Ok(command) => command,
         Err(_) if !lookup => return Err(malformed_handoff(entry, bytes).await.into()),
@@ -112,9 +125,7 @@ async fn receive(
     };
     if expected == HostProvider::Claude {
         // Claude's native tool hook supplies the session and turn that its HTTP MCP client omits.
-        let mut wire: serde_json::Value =
-            serde_json::from_slice(bytes).map_err(|_| AppError::InvalidRequest)?;
-        let raw = serde_json::json!({"handoff": wire["handoff"].take()});
+        let raw = raw.ok_or(AppError::InvalidRequest)?;
         let arguments = serde_json::to_vec(&raw).map_err(|_| AppError::InvalidRequest)?;
         let lead = entry.store.report_lead(parse(session.as_str())?).await?;
         if lead.binding().identity().provider() != expected {
@@ -197,7 +208,7 @@ pub(in crate::entry) async fn submit_verified(
     let proof = workflow.proof.as_ref();
     let expected = verified.lead.binding().identity().provider();
     let canonical = serde_json::to_vec(&handoff).map_err(|_| AppError::Internal)?;
-    if canonical.len() > 128 * 1024 {
+    if canonical.len() > app::METADATA_BYTES {
         return Err(AppError::PayloadTooLarge);
     }
     let request_sha256 = ReportHash::from_sha256(Sha256::digest(canonical).into());
@@ -213,11 +224,7 @@ pub(in crate::entry) async fn submit_verified(
                 && sha256.is_none()
             {
                 if mcp.is_none() && expected != HostProvider::Claude {
-                    return Err(if mcp.is_some() {
-                        AppError::InvalidRequest
-                    } else {
-                        request_correction(entry, &verified).await
-                    });
+                    return Err(request_correction(entry, &verified).await);
                 }
                 let path = match absolute_path(path) {
                     Ok(path) => path,
@@ -440,38 +447,35 @@ fn declaration(input: dto::Handoff, provider: HostProvider) -> Result<Declaratio
             verdict,
             report,
             amends,
-            corrects,
             finding_changes,
-            section_changes,
             assessments,
-        } => Declaration::Final {
-            source: project_source(source, provider)?,
-            revision: match revision {
+        } => {
+            let revision = match revision {
                 dto::ReportRevision::Exact { sha } => RevisionEvidence::Exact(parse(sha.as_str())?),
                 dto::ReportRevision::Unknown { reason, .. } => RevisionEvidence::Unknown(reason),
-            },
-            verdict: match verdict {
-                dto::ReportVerdict::Approve => Verdict::Approve,
-                dto::ReportVerdict::RequestChanges => Verdict::RequestChanges,
-                dto::ReportVerdict::Blocked => Verdict::Blocked,
-                dto::ReportVerdict::NotSpecified => Verdict::NotSpecified,
-            },
-            report: report.map(|report| Arc::new(structured_report(report))),
-            assessments: project_assessments(assessments)?,
-            edits: project_edits(
-                corrects.map(|correction| *correction),
-                finding_changes,
-                section_changes,
-            )?,
-            amends: amends
-                .map(|base| -> Result<_, AppError> {
-                    Ok(ReportReference {
-                        receipt_id: parse(base.receipt_id.as_str())?,
-                        hash: parse(base.sha256.as_str())?,
+            };
+            Declaration::Final {
+                source: project_source(source, provider)?,
+                verdict: match verdict {
+                    dto::ReportVerdict::Approve => Verdict::Approve,
+                    dto::ReportVerdict::RequestChanges => Verdict::RequestChanges,
+                    dto::ReportVerdict::Blocked => Verdict::Blocked,
+                    dto::ReportVerdict::NotSpecified => Verdict::NotSpecified,
+                },
+                report: report.map(|report| Arc::new(structured_report(report))),
+                assessments: project_assessments(assessments)?,
+                edits: project_edits(finding_changes, &revision),
+                revision,
+                amends: amends
+                    .map(|base| -> Result<_, AppError> {
+                        Ok(ReportReference {
+                            receipt_id: parse(base.receipt_id.as_str())?,
+                            hash: parse(base.sha256.as_str())?,
+                        })
                     })
-                })
-                .transpose()?,
-        },
+                    .transpose()?,
+            }
+        }
         dto::Handoff::Unchanged {
             accepted,
             source,
@@ -497,11 +501,6 @@ fn declaration(input: dto::Handoff, provider: HostProvider) -> Result<Declaratio
 fn structured_report(report: dto::StructuredReport) -> app::StructuredReport {
     app::StructuredReport {
         version: report.version,
-        scope: match report.scope {
-            dto::ReportScope::FullReview => app::ReportScope::FullReview,
-            dto::ReportScope::SelectedThreads => app::ReportScope::SelectedThreads,
-            dto::ReportScope::Amendment => app::ReportScope::Amendment,
-        },
         findings: report
             .findings
             .into_iter()
@@ -568,82 +567,28 @@ fn project_conclusion(value: dto::FindingConclusion) -> app::FindingConclusion {
     }
 }
 
-fn project_edits(
-    correction: Option<dto::Correction>,
-    findings: Vec<dto::FindingEdit>,
-    sections: Vec<dto::SectionEdit>,
-) -> Result<app::ReportEdits, AppError> {
-    let ids = |values: Vec<reviewq_protocol::ResourceIdDto>| {
-        values
-            .into_iter()
-            .map(|value| value.as_str().to_owned())
-            .collect()
+/// Outcomes are checked at the exact reviewed revision, which ReviewQ records for each one.
+fn project_edits(findings: Vec<dto::FindingEdit>, revision: &RevisionEvidence) -> app::ReportEdits {
+    let checked_sha = match revision {
+        RevisionEvidence::Exact(sha) => Some(sha.clone()),
+        RevisionEvidence::Unknown(_) => None,
     };
-    Ok(app::ReportEdits {
-        correction: correction
-            .map(|value| {
-                Ok::<_, AppError>(app::Correction {
-                    base: ReportReference {
-                        receipt_id: parse(value.receipt_id.as_str())?,
-                        hash: parse(value.sha256.as_str())?,
-                    },
-                    kind: match value.kind {
-                        dto::CorrectionKind::Presentation => app::CorrectionKind::Presentation,
-                        dto::CorrectionKind::Evidence => app::CorrectionKind::Evidence,
-                    },
-                    reason: value.reason,
-                    finding_ids: ids(value.finding_ids),
-                    evidence: value
-                        .evidence
-                        .into_iter()
-                        .map(|reference| {
-                            let (target, hash) = match reference {
-                                dto::EvidenceReference::Finding(value) => (
-                                    app::EvidenceTarget::Finding(
-                                        value.finding_id.as_str().to_owned(),
-                                    ),
-                                    value.sha256,
-                                ),
-                                dto::EvidenceReference::Section(value) => (
-                                    app::EvidenceTarget::Section(value.section_title),
-                                    value.sha256,
-                                ),
-                            };
-                            Ok(app::EvidenceReference {
-                                target,
-                                hash: parse(hash.as_str())?,
-                            })
-                        })
-                        .collect::<Result<_, AppError>>()?,
-                })
-            })
-            .transpose()?,
+    app::ReportEdits {
         findings: findings
             .into_iter()
-            .map(|value| {
-                Ok(app::FindingEdit {
-                    finding_id: value.finding_id.as_str().to_owned(),
-                    conclusion: project_conclusion(value.conclusion),
-                    reason: value.reason,
-                    checked_sha: parse(value.checked_sha.as_str())?,
-                    discussion_ids: ids(value.discussion_ids),
-                })
+            .map(|value| app::FindingEdit {
+                finding_id: value.finding_id.as_str().to_owned(),
+                conclusion: project_conclusion(value.conclusion),
+                reason: value.reason,
+                checked_sha: checked_sha.clone(),
+                discussion_ids: value
+                    .discussion_ids
+                    .into_iter()
+                    .map(|id| id.as_str().to_owned())
+                    .collect(),
             })
-            .collect::<Result<_, AppError>>()?,
-        sections: sections
-            .into_iter()
-            .map(|value| {
-                Ok(app::SectionEdit {
-                    baseline_title: value.baseline_title,
-                    baseline_hash: parse(value.baseline_sha256.as_str())?,
-                    replacement_title: value.replacement_title,
-                    conclusion: project_conclusion(value.conclusion),
-                    reason: value.reason,
-                    discussion_ids: ids(value.discussion_ids),
-                })
-            })
-            .collect::<Result<_, AppError>>()?,
-    })
+            .collect(),
+    }
 }
 
 fn source_mut(handoff: &mut dto::Handoff) -> Option<&mut dto::ReportSource> {

@@ -2,9 +2,9 @@
 import { func0 } from "../runtime.mjs";
 import { validate1330 } from "./report-delivery.mjs";
 import { validate594 } from "./document-display.mjs";
-import { schema415 } from "../metadata-10.mjs";
+import { schema413 } from "../metadata-10.mjs";
 import { validate1335 } from "./report-summary.mjs";
-function validate1427(
+function validate1422(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -19,7 +19,7 @@ function validate1427(
         ((data.delivery === undefined || !func0.call(data, "delivery")) &&
           (missing0 = "delivery"))
       ) {
-        validate1427.errors = [
+        validate1422.errors = [
           {
             instancePath,
             schemaPath: "#/required",
@@ -83,7 +83,7 @@ function validate1427(
               vErrors.push(err1);
             }
             errors++;
-            validate1427.errors = vErrors;
+            validate1422.errors = vErrors;
             return false;
           } else {
             errors = _errs2;
@@ -154,7 +154,7 @@ function validate1427(
                 vErrors.push(err3);
               }
               errors++;
-              validate1427.errors = vErrors;
+              validate1422.errors = vErrors;
               return false;
             } else {
               errors = _errs7;
@@ -175,12 +175,12 @@ function validate1427(
               let data2 = data.markdown;
               const _errs11 = errors;
               if (typeof data2 !== "string" && data2 !== null) {
-                validate1427.errors = [
+                validate1422.errors = [
                   {
                     instancePath: instancePath + "/markdown",
                     schemaPath: "#/properties/markdown/type",
                     keyword: "type",
-                    params: { type: schema415.properties.markdown.type },
+                    params: { type: schema413.properties.markdown.type },
                   },
                 ];
                 return false;
@@ -244,7 +244,7 @@ function validate1427(
                     vErrors.push(err5);
                   }
                   errors++;
-                  validate1427.errors = vErrors;
+                  validate1422.errors = vErrors;
                   return false;
                 } else {
                   errors = _errs14;
@@ -265,7 +265,7 @@ function validate1427(
         }
       }
     } else {
-      validate1427.errors = [
+      validate1422.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -276,7 +276,7 @@ function validate1427(
       return false;
     }
   }
-  validate1427.errors = vErrors;
+  validate1422.errors = vErrors;
   return errors === 0;
 }
-export { validate1427 };
+export { validate1422 };

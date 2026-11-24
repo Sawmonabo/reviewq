@@ -10,10 +10,9 @@
     "verdict": "request_changes",
     "report": {
       "version": 1,
-      "scope": "full_review",
       "findings": [
         {
-          "id": "F-1",
+          "id": "F-01",
           "title": "Retry writes the same invoice twice",
           "severity": "high",
           "blocking": true,

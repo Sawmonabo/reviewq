@@ -600,13 +600,6 @@ fn summary(value: app::ReportSummary) -> Result<dto::ReportSummary, AppError> {
             app::SemanticIndex::Ready => dto::SemanticIndex::Ready,
             app::SemanticIndex::SourceOnly => dto::SemanticIndex::SourceOnly,
         },
-        structured_version: value.structured_version,
-        structured_scope: value.structured_scope.map(|scope| match scope {
-            app::ReportScope::FullReview => dto::ReportScope::FullReview,
-            app::ReportScope::SelectedThreads => dto::ReportScope::SelectedThreads,
-            app::ReportScope::Amendment => dto::ReportScope::Amendment,
-        }),
-        blocking_finding_count: value.blocking_finding_count.map(count).transpose()?,
         finding_count: value.finding_count.map(count).transpose()?,
         change_count: value.change_count.map(count).transpose()?,
         captured_at: UtcTimestampDto::from_unix_milliseconds(value.captured_at_ms)

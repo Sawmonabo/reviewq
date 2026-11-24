@@ -177,6 +177,7 @@ pub(super) fn complete(
                     db,
                     run,
                     current.receipt.as_deref(),
+                    scoped.is_some(),
                     report,
                     revision,
                     edits,
@@ -275,10 +276,8 @@ pub(super) fn complete(
     if let Declaration::Final {
         revision: RevisionEvidence::Exact(sha),
         amends: None,
-        edits,
         ..
     } = &work.declaration
-        && edits.correction.is_none()
     {
         failures::resolve(db, &work, sha, resolved)?;
     }

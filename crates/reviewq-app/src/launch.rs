@@ -221,9 +221,10 @@ impl LaunchPreparation {
 pub fn report_guidance() -> &'static str {
     concat!(
         "Follow the repository's review instructions and keep its requested output. ",
-        "When finished, submit once with ReviewQ's report_handoff tool from this linked lead conversation. ",
-        "Use the tool schema to map your own conclusions to its finding fields. ",
-        "Use an empty findings list for a clean review. A pending receipt will be verified after the native turn completes. ",
+        "When the review is complete, submit it once with ReviewQ's report_handoff tool from this linked lead conversation ",
+        "and add the findings ledger the tool describes: every finding the report raises, ",
+        "and an outcome for each earlier finding you re-assessed. ",
+        "ReviewQ verifies the handoff after the native turn completes. ",
         "GitLab publication requires separate explicit human authorization.\nExample handoff:\n",
         include_str!("../../../fixtures/contracts/report-handoff.json"),
     )

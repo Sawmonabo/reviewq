@@ -4,15 +4,12 @@ mod capture;
 mod display;
 mod drawings;
 mod index;
-mod presentation;
 mod revision;
 mod structured;
 
-pub use presentation::{presentation_matches, presentation_source};
-
 pub use structured::{
-    FindingBasis, FindingBasisKind, FindingDetails, FindingLocation, ReportScope,
-    StructuredFinding, StructuredReport,
+    FindingBasis, FindingBasisKind, FindingDetails, FindingLocation, StructuredFinding,
+    StructuredReport,
 };
 
 pub use display::{
@@ -24,10 +21,7 @@ pub use drawings::{
     DRAWING_RECIPE, DrawingOutput, DrawingRenderer, MAX_DRAWING_BYTES, mermaid_sources,
 };
 
-pub use revision::{
-    Correction, CorrectionKind, EvidenceReference, EvidenceTarget, FindingEdit, ReportEdits,
-    SectionEdit,
-};
+pub use revision::{FindingEdit, ReportEdits};
 
 pub use capture::{
     AcceptedReport, ArtifactChunk, Assessment, CHUNK_BYTES, CapturedArtifact, Declaration,
@@ -42,6 +36,8 @@ use crate::events::Snapshot;
 use crate::hosts::MessageBody;
 
 pub const MAX_REPORT_PAGE: u16 = 50;
+/// Budget for a handoff's stored metadata. The schema's 131072-byte CHECKs must match it.
+pub const METADATA_BYTES: usize = 128 * 1024;
 pub const MAX_SECTION_SCALARS: u32 = 12_000;
 const MAX_MARKDOWN_LINE_BYTES: usize = 16 * 1024;
 
@@ -123,9 +119,6 @@ pub struct ReportSummary {
     pub coverage_target_sha: Option<GitSha>,
     pub verdict: Verdict,
     pub semantic_index: SemanticIndex,
-    pub structured_version: Option<u8>,
-    pub structured_scope: Option<ReportScope>,
-    pub blocking_finding_count: Option<u64>,
     pub finding_count: Option<u64>,
     pub change_count: Option<u64>,
     pub captured_at_ms: i64,

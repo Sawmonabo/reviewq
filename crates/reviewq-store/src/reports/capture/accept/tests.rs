@@ -234,7 +234,12 @@ fn final_report(amends: Option<ReportReference>) -> Declaration {
         source: file_source(),
         revision: RevisionEvidence::Exact(REVISION.parse().unwrap()),
         verdict: Verdict::RequestChanges,
-        report: None,
+        report: amends.is_none().then(|| {
+            std::sync::Arc::new(StructuredReport {
+                version: 1,
+                findings: Vec::new(),
+            })
+        }),
         amends,
         edits: ReportEdits::default(),
         assessments: Vec::new(),

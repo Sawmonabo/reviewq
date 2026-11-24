@@ -2,8 +2,8 @@
 import { func0 } from "../runtime.mjs";
 import { validate129 } from "./safe-count-dto.mjs";
 import { validate1335 } from "./report-summary.mjs";
-import { validate1444 } from "./display-result.mjs";
-function validate1441(
+import { validate1439 } from "./display-result.mjs";
+function validate1436(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -20,7 +20,7 @@ function validate1441(
         ((data.result === undefined || !func0.call(data, "result")) &&
           (missing0 = "result"))
       ) {
-        validate1441.errors = [
+        validate1436.errors = [
           {
             instancePath,
             schemaPath: "#/required",
@@ -75,7 +75,7 @@ function validate1441(
             if (data.result !== undefined && func0.call(data, "result")) {
               const _errs3 = errors;
               if (
-                !validate1444(data.result, {
+                !validate1439(data.result, {
                   instancePath: instancePath + "/result",
                   parentData: data,
                   parentDataProperty: "result",
@@ -84,8 +84,8 @@ function validate1441(
               ) {
                 vErrors =
                   vErrors === null
-                    ? validate1444.errors
-                    : vErrors.concat(validate1444.errors);
+                    ? validate1439.errors
+                    : vErrors.concat(validate1439.errors);
                 errors = vErrors.length;
               }
               var valid0 = _errs3 === errors;
@@ -96,7 +96,7 @@ function validate1441(
         }
       }
     } else {
-      validate1441.errors = [
+      validate1436.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -107,7 +107,7 @@ function validate1441(
       return false;
     }
   }
-  validate1441.errors = vErrors;
+  validate1436.errors = vErrors;
   return errors === 0;
 }
-export { validate1441 };
+export { validate1436 };

@@ -109,7 +109,7 @@ pub(in crate::entry::features) async fn record(
     let turn: NativeTurnId = parse(hook.turn_id.as_str())?;
     let call = hook.call_id.as_str().to_owned();
     let arguments = canonical_arguments(hook.arguments)?;
-    if arguments.len() > 128 * 1024 {
+    if arguments.len() > reviewq_app::reports::METADATA_BYTES {
         return Err(AppError::PayloadTooLarge.into());
     }
     let stored = entry

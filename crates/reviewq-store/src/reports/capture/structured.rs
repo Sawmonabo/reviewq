@@ -2,7 +2,8 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use reviewq_app::access::AppError;
 use reviewq_app::reports::{
-    FindingDetails, ReportEdits, ReportScope, RevisionEvidence, StructuredFinding, StructuredReport,
+    FindingDetails, METADATA_BYTES, ReportEdits, RevisionEvidence, StructuredFinding,
+    StructuredReport,
 };
 use reviewq_domain::identity::ReportHash;
 use rusqlite::{Connection, OptionalExtension, params};
@@ -12,6 +13,8 @@ use sha2::{Digest, Sha256};
 use crate::StoreError;
 
 mod carry;
+
+const METADATA_LIMIT: i64 = METADATA_BYTES as i64;
 
 pub(super) struct Projection {
     pub count: i64,
@@ -29,16 +32,16 @@ struct AcceptedMetadata {
 }
 
 /// Installs the submitted cards over the parent's active findings. A scoped
-/// result also carries the parent cards it neither rewrites nor retires.
+/// follow-up also carries the parent cards it neither rewrites nor retires.
 pub(super) fn prepare(
     db: &Connection,
     run: &str,
     previous: Option<&str>,
+    retain: bool,
     report: &StructuredReport,
     revision: &RevisionEvidence,
     edits: &ReportEdits,
 ) -> Result<Projection, StoreError> {
-    let retain = report.scope != ReportScope::FullReview;
     let previous = previous.filter(|_| retain);
     let mut prior = BTreeSet::new();
     let mut details: BTreeMap<String, FindingDetails> = BTreeMap::new();
@@ -89,20 +92,20 @@ pub(super) fn prepare(
     })
 }
 
-pub(super) fn full_projection_fits(
+/// Whether the submitted cards alone fit the accepted metadata budget.
+pub(super) fn supplied_projection_fits(
     db: &Connection,
     pending: &str,
     reviewed_sha: Option<&str>,
 ) -> Result<bool, StoreError> {
     Ok(db.query_row(
-        "SELECT CASE WHEN json_extract(?1,'$.structured.scope')='full_review' THEN
-          length(CAST(json_set(json_remove(?1,'$.structured.findings'),'$.acceptedDetails',(
+        "SELECT length(CAST(json_set(json_remove(?1,'$.structured.findings'),'$.acceptedDetails',(
             SELECT json_group_object(json_extract(value,'$.id'), json(CASE WHEN ?2 IS NULL
               THEN json_extract(value,'$.details')
               ELSE json_set(json_extract(value,'$.details'),'$.checkedSha',?2) END))
             FROM json_each(?1,'$.structured.findings')
-          )) AS BLOB))<=131072 ELSE 1 END",
-        params![pending, reviewed_sha],
+          )) AS BLOB))<=?3",
+        params![pending, reviewed_sha, METADATA_LIMIT],
         |row| row.get(0),
     )?)
 }
@@ -111,8 +114,8 @@ impl Projection {
     pub(super) fn fits(&self, db: &Connection, receipt: &str) -> Result<bool, StoreError> {
         Ok(db.query_row(
             "SELECT length(CAST(json_patch(json_remove(edits,'$.structured.findings'),?2)
-                  AS BLOB))<=131072 FROM report_handoffs WHERE receipt_id=?1",
-            params![receipt, self.metadata],
+                  AS BLOB))<=?3 FROM report_handoffs WHERE receipt_id=?1",
+            params![receipt, self.metadata, METADATA_LIMIT],
             |row| row.get(0),
         )?)
     }
