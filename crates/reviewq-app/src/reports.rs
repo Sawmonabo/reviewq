@@ -52,12 +52,30 @@ pub struct HandoffFieldError {
     pub message: String,
 }
 
+/// Equals the protocol's `limits::MAX_FIELD_ERRORS`, which keeps a refusal within every
+/// client's reply cap.
+const MAX_HANDOFF_FIELD_ERRORS: usize = 50;
+
 impl HandoffFieldError {
     pub fn new(path: impl Into<String>, message: impl Into<String>) -> Self {
         Self {
             path: path.into(),
             message: message.into(),
         }
+    }
+
+    /// Keeps the first `MAX_HANDOFF_FIELD_ERRORS` errors and, when there are more, adds one
+    /// `/handoff` error that counts the rest.
+    pub fn bounded(mut errors: Vec<Self>) -> Vec<Self> {
+        let hidden = errors.len().saturating_sub(MAX_HANDOFF_FIELD_ERRORS);
+        if hidden > 0 {
+            errors.truncate(MAX_HANDOFF_FIELD_ERRORS);
+            errors.push(Self::new(
+                "/handoff",
+                format!("{hidden} more errors are not shown. Fix these and submit again."),
+            ));
+        }
+        errors
     }
 }
 

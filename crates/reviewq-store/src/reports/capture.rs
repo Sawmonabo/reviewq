@@ -5,8 +5,9 @@ use std::path::PathBuf;
 use reviewq_app::access::{Actor, AppError, AppFuture};
 use reviewq_app::events::{ResourceKey, Snapshot};
 use reviewq_app::reports::{
-    AcceptedReport, ArtifactChunk, CapturedArtifact, Declaration, HandoffReceipt, ReportAuthority,
-    ReportCaptureStore, ReportReference, ReportWork, RevisionEvidence, Source,
+    AcceptedReport, ArtifactChunk, CapturedArtifact, Declaration, HandoffFieldError,
+    HandoffReceipt, ReportAuthority, ReportCaptureStore, ReportReference, ReportWork,
+    RevisionEvidence, Source,
 };
 use reviewq_app::workflow::{
     ExpectedAcknowledgement, NativeCall, ReportFailureAddress, WorkflowTool,
@@ -513,17 +514,16 @@ fn stage(
         return Err(hold.into());
     }
     let scoped_batch = batch::bound(db, &call)?;
-    // A bound batch's missing assessments are field errors below; an amendment cannot
-    // complete the batch at all.
-    if (!declaration.assessments().is_empty() && scoped_batch.is_none())
-        || (scoped_batch.is_some()
-            && matches!(
-                declaration,
-                Declaration::Final {
-                    amends: Some(_),
-                    ..
-                }
-            ))
+    // Assessments without a bound batch and a bound batch's missing assessments are field
+    // errors below; an amendment cannot complete the batch at all.
+    if scoped_batch.is_some()
+        && matches!(
+            declaration,
+            Declaration::Final {
+                amends: Some(_),
+                ..
+            }
+        )
     {
         return Err(AppError::Conflict.into());
     }
@@ -541,6 +541,9 @@ fn stage(
         &declaration,
         headings,
     )?;
+    if scoped_batch.is_none() && !declaration.assessments().is_empty() {
+        errors.push(checks::unbound_assessments());
+    }
     let (form, source, revision, verdict, expected, reason, edits) = match declaration {
         Declaration::Final {
             source,
@@ -611,7 +614,7 @@ fn stage(
         errors.push(checks::too_large());
     }
     if !errors.is_empty() {
-        return Err(AppError::InvalidHandoff(errors).into());
+        return Err(AppError::InvalidHandoff(HandoffFieldError::bounded(errors)).into());
     }
     let receipt_id = Uuid::new_v4().to_string();
     let time = now_ms()?;

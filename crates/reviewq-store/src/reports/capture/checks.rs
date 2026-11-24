@@ -81,3 +81,11 @@ pub(super) fn too_large() -> HandoffFieldError {
         ),
     )
 }
+
+/// Assessments answer a selected-thread batch, and this review has none bound.
+pub(super) fn unbound_assessments() -> HandoffFieldError {
+    HandoffFieldError::new(
+        "/handoff/assessments",
+        "This review has no selected-thread batch. Omit assessments.",
+    )
+}

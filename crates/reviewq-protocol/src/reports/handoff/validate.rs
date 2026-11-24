@@ -6,8 +6,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use super::limits::{
-    MAX_CONSEQUENCE_BYTES, MAX_DISCUSSION_ID_BYTES, MAX_EVIDENCE_BYTES, MAX_ID_BYTES,
-    MAX_PATH_BYTES, MAX_REASON_BYTES, MAX_SEVERITY_BYTES, MAX_TITLE_BYTES,
+    MAX_CONSEQUENCE_BYTES, MAX_DISCUSSION_ID_BYTES, MAX_EVIDENCE_BYTES, MAX_FIELD_ERRORS,
+    MAX_ID_BYTES, MAX_PATH_BYTES, MAX_REASON_BYTES, MAX_SEVERITY_BYTES, MAX_TITLE_BYTES,
 };
 use super::{REPORT_AMENDMENT_SOURCE_MESSAGE, REPORT_HANDOFF_SCHEMA, ReportHashDto};
 
@@ -30,14 +30,23 @@ pub fn report_amendment_source_error() -> ReportHandoffFieldError {
     }
 }
 
-/// Validate public tool input before consuming its native workflow context.
+/// Validate public tool input before consuming its native workflow context. Lists at most
+/// `MAX_FIELD_ERRORS` errors, then one `/handoff` error that counts the rest.
 pub fn validate_report_handoff(input: &Value) -> Vec<ReportHandoffFieldError> {
     let mut errors = BTreeSet::new();
     for error in VALIDATOR.iter_errors(input) {
         collect(&error, &mut errors);
     }
     validate_values(input, &mut errors);
-    errors.into_iter().collect()
+    let hidden = errors.len().saturating_sub(MAX_FIELD_ERRORS);
+    let mut errors: Vec<_> = errors.into_iter().take(MAX_FIELD_ERRORS).collect();
+    if hidden > 0 {
+        errors.push(ReportHandoffFieldError {
+            path: "/handoff".into(),
+            message: format!("{hidden} more errors are not shown. Fix these and submit again."),
+        });
+    }
+    errors
 }
 
 fn collect(error: &ValidationError<'_>, errors: &mut BTreeSet<ReportHandoffFieldError>) {
@@ -51,11 +60,14 @@ fn collect(error: &ValidationError<'_>, errors: &mut BTreeSet<ReportHandoffField
         ),
         Kind::AdditionalProperties { unexpected } => {
             for key in unexpected {
-                record(
-                    errors,
-                    child(&path, key),
-                    "Unexpected field for this outcome.",
-                );
+                // A name longer than any schema field is reported at its object, so the
+                // reply never echoes an arbitrarily long key.
+                let path = if key.len() <= MAX_ID_BYTES {
+                    child(&path, key)
+                } else {
+                    path.clone()
+                };
+                record(errors, path, "Unexpected field for this outcome.");
             }
         }
         Kind::OneOfNotValid { context } | Kind::AnyOf { context } => {
@@ -238,7 +250,7 @@ fn validate_values(input: &Value, errors: &mut BTreeSet<ReportHandoffFieldError>
                     "Finding ID is already used in this handoff.",
                 );
             }
-            if retired.contains(id) {
+            if retired.contains(id) && id.len() <= MAX_ID_BYTES {
                 record(
                     errors,
                     child(&path, "id"),

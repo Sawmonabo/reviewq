@@ -2,7 +2,10 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use reviewq_app::access::AppError;
 use reviewq_app::events::ResourceKey;
-use reviewq_app::reports::{Assessment, Declaration, HandoffFieldError, ReportEdits, ReportWork};
+use reviewq_app::reports::{
+    Assessment, Declaration, FindingConclusion, FindingEdit, HandoffFieldError, ReportEdits,
+    ReportWork,
+};
 use reviewq_app::workflow::NativeCall;
 use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
@@ -143,18 +146,27 @@ pub(super) fn frozen(db: &Connection, batch: &str) -> Result<FrozenManifest, Sto
     serde_json::from_str(&source).map_err(|_| AppError::Internal.into())
 }
 
+/// The finding IDs one "Include" error names before counting the rest.
+const MAX_NAMED_IDS: usize = 20;
+
+/// The finding IDs each batch discussion tracks, across its observations.
+fn tracked(manifest: &FrozenManifest) -> BTreeMap<&str, BTreeSet<&str>> {
+    let mut tracked = BTreeMap::<&str, BTreeSet<&str>>::new();
+    for item in &manifest.observations {
+        tracked
+            .entry(&item.discussion_id)
+            .or_default()
+            .extend(item.finding_ids.iter().map(String::as_str));
+    }
+    tracked
+}
+
 /// One assessment per batch discussion, each covering the finding IDs its discussion tracks.
 pub(super) fn assessment_errors(
     manifest: &FrozenManifest,
     declared: &[Assessment],
 ) -> Vec<HandoffFieldError> {
-    let mut expected = BTreeMap::<&str, BTreeSet<&str>>::new();
-    for item in &manifest.observations {
-        expected
-            .entry(&item.discussion_id)
-            .or_default()
-            .extend(item.finding_ids.iter().map(String::as_str));
-    }
+    let expected = tracked(manifest);
     let mut assessed = BTreeSet::new();
     let mut errors = Vec::new();
     for (index, assessment) in declared.iter().enumerate() {
@@ -180,12 +192,15 @@ pub(super) fn assessment_errors(
             .filter(|id| !assessment.finding_ids.iter().any(|actual| actual == id))
             .collect();
         if !missing.is_empty() {
+            // Name a bounded number of IDs so one error stays small.
+            let more = missing.len().saturating_sub(MAX_NAMED_IDS);
+            let mut named = missing[..missing.len().min(MAX_NAMED_IDS)].join(", ");
+            if more > 0 {
+                named.push_str(&format!(" and {more} more"));
+            }
             errors.push(HandoffFieldError::new(
                 format!("{path}/findingIds"),
-                format!(
-                    "Include {} for discussion {discussion}.",
-                    missing.join(", ")
-                ),
+                format!("Include {named} for discussion {discussion}."),
             ));
         }
     }
@@ -249,8 +264,9 @@ pub(super) fn complete(
 }
 
 /// Each outcome's discussion links name batch discussions that track its finding, and each
-/// linked discussion's assessment covers the finding, retiring it when the outcome does.
-/// An outcome without links is linked to every batch discussion that tracks its finding.
+/// linked discussion's assessment covers the finding. An outcome without links is linked to
+/// every batch discussion that tracks its finding. A discussion's assessment must then agree
+/// with the findings this handoff retires; see [`conclusion_errors`].
 pub(super) fn edit_errors(
     db: &Connection,
     run: &str,
@@ -258,16 +274,11 @@ pub(super) fn edit_errors(
     edits: &ReportEdits,
     assessments: &[Assessment],
 ) -> Result<Vec<HandoffFieldError>, StoreError> {
-    let originals: BTreeSet<&str> = manifest
-        .observations
-        .iter()
-        .map(|member| member.discussion_id.as_str())
-        .collect();
+    let tracked = tracked(manifest);
     let tracks = |discussion: &str, finding: &str| {
-        manifest.observations.iter().any(|observation| {
-            observation.discussion_id == discussion
-                && observation.finding_ids.iter().any(|id| id == finding)
-        })
+        tracked
+            .get(discussion)
+            .is_some_and(|ids| ids.contains(finding))
     };
     let mut existing = db.prepare_cached(
         "SELECT EXISTS(SELECT 1 FROM report_findings WHERE run_id=?1 AND receipt_id=?2 AND finding_id=?3)",
@@ -279,34 +290,18 @@ pub(super) fn edit_errors(
             .query_row(params![run, manifest.report_receipt_id, finding], |row| {
                 row.get(0)
             })?;
-        let linked: BTreeSet<&str> = if edit.discussion_ids.is_empty() {
-            originals
-                .iter()
-                .copied()
-                .filter(|discussion| tracks(discussion, finding))
-                .collect()
-        } else {
-            edit.discussion_ids.iter().map(String::as_str).collect()
-        };
-        for discussion in linked {
-            let covering = |retiring: bool| {
-                assessments.iter().any(|assessment| {
-                    assessment.discussion_id == discussion
-                        && assessment.finding_ids.iter().any(|id| id == finding)
-                        && (!retiring || assessment.conclusion.retires_finding())
-                })
-            };
-            let message = if !originals.contains(discussion) {
+        for discussion in linked(&tracked, edit) {
+            let covered = assessments.iter().any(|assessment| {
+                assessment.discussion_id == discussion
+                    && assessment.finding_ids.iter().any(|id| id == finding)
+            });
+            let message = if !tracked.contains_key(discussion) {
                 format!("{discussion} is not a discussion of the selected-thread batch.")
             } else if known && !tracks(discussion, finding) {
                 format!("Discussion {discussion} does not track {finding}.")
-            } else if !covering(false) {
+            } else if !covered {
                 format!(
                     "The assessment of discussion {discussion} must list {finding} in findingIds."
-                )
-            } else if !covering(edit.conclusion.retires_finding()) {
-                format!(
-                    "{finding} is retired here, so the assessment of discussion {discussion} needs a retiring conclusion."
                 )
             } else {
                 continue;
@@ -317,5 +312,126 @@ pub(super) fn edit_errors(
             ));
         }
     }
+    errors.extend(conclusion_errors(&tracked, edits, assessments));
     Ok(errors)
+}
+
+/// The discussions an outcome concerns: its explicit links, or else every batch discussion
+/// that tracks its finding.
+fn linked<'a>(
+    tracked: &BTreeMap<&'a str, BTreeSet<&str>>,
+    edit: &'a FindingEdit,
+) -> BTreeSet<&'a str> {
+    if edit.discussion_ids.is_empty() {
+        tracked
+            .iter()
+            .filter(|(_, ids)| ids.contains(edit.finding_id.as_str()))
+            .map(|(discussion, _)| *discussion)
+            .collect()
+    } else {
+        edit.discussion_ids.iter().map(String::as_str).collect()
+    }
+}
+
+/// A discussion linked to a retiring outcome for a finding it tracks has an assessment that
+/// agrees: retiring when this handoff retires every finding the discussion tracks, and
+/// retiring or `partly_addressed` when it retires only some of them.
+fn conclusion_errors(
+    tracked: &BTreeMap<&str, BTreeSet<&str>>,
+    edits: &ReportEdits,
+    assessments: &[Assessment],
+) -> Vec<HandoffFieldError> {
+    let retiring = || {
+        edits
+            .findings
+            .iter()
+            .filter(|edit| edit.conclusion.retires_finding())
+    };
+    let retired: BTreeSet<&str> = retiring().map(|edit| edit.finding_id.as_str()).collect();
+    let mut errors = Vec::new();
+    for (index, assessment) in assessments.iter().enumerate() {
+        let discussion = assessment.discussion_id.as_str();
+        let Some(ids) = tracked.get(discussion) else {
+            continue;
+        };
+        if !retiring().any(|edit| {
+            ids.contains(edit.finding_id.as_str()) && linked(tracked, edit).contains(discussion)
+        }) {
+            continue;
+        }
+        let conclusion = assessment.conclusion;
+        let message = if ids.is_subset(&retired) {
+            if conclusion.retires_finding() {
+                continue;
+            }
+            format!(
+                "This handoff retires every finding discussion {discussion} tracks, so use fixed, clarified_withdrawn or superseded."
+            )
+        } else {
+            if conclusion.retires_finding() || conclusion == FindingConclusion::PartlyAddressed {
+                continue;
+            }
+            format!(
+                "This handoff retires some of the findings discussion {discussion} tracks, so use partly_addressed, fixed, clarified_withdrawn or superseded."
+            )
+        };
+        errors.push(HandoffFieldError::new(
+            format!("/handoff/assessments/{index}/conclusion"),
+            message,
+        ));
+    }
+    errors
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::{BTreeMap, BTreeSet};
+
+    use reviewq_app::followups::NextAction;
+    use reviewq_app::reports::{Assessment, FindingConclusion, FindingEdit, ReportEdits};
+
+    use super::conclusion_errors;
+
+    #[test]
+    fn a_thread_retires_one_of_its_two_findings_as_partly_addressed() {
+        let tracked = BTreeMap::from([("D1", BTreeSet::from(["F-01", "F-02"]))]);
+        let fixed = |discussion_ids: Vec<String>| ReportEdits {
+            findings: vec![FindingEdit {
+                finding_id: "F-01".into(),
+                conclusion: FindingConclusion::Fixed,
+                reason: "The retry is bounded.".into(),
+                checked_sha: None,
+                discussion_ids,
+            }],
+        };
+        let assessment = |conclusion| {
+            vec![Assessment {
+                discussion_id: "D1".into(),
+                conclusion,
+                reason: "F-01 is fixed; F-02 is still present.".into(),
+                finding_ids: vec!["F-01".into(), "F-02".into()],
+                next_action: NextAction::WaitingAuthor,
+            }]
+        };
+        for edits in [fixed(Vec::new()), fixed(vec!["D1".into()])] {
+            let partly = assessment(FindingConclusion::PartlyAddressed);
+            assert!(conclusion_errors(&tracked, &edits, &partly).is_empty());
+            let present = assessment(FindingConclusion::StillPresent);
+            let errors = conclusion_errors(&tracked, &edits, &present);
+            assert_eq!(
+                errors
+                    .iter()
+                    .map(|error| error.path.as_str())
+                    .collect::<Vec<_>>(),
+                ["/handoff/assessments/0/conclusion"]
+            );
+        }
+        let mut both = fixed(Vec::new());
+        both.findings.push(FindingEdit {
+            finding_id: "F-02".into(),
+            ..both.findings[0].clone()
+        });
+        let partly = assessment(FindingConclusion::PartlyAddressed);
+        assert_eq!(conclusion_errors(&tracked, &both, &partly).len(), 1);
+    }
 }
