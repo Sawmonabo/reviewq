@@ -30,9 +30,17 @@ pub struct Parent {
     /// The parent's active findings.
     pub findings: Vec<ParentFinding>,
     /// IDs a retiring outcome of this or an earlier version retired and the parent does not
-    /// hold active. A report that keeps such a heading, struck through or not, records
-    /// history rather than a finding.
+    /// hold active. A report that keeps such a heading struck through records history
+    /// rather than a finding; one that is not struck through raises the finding again.
     pub retired: BTreeSet<String>,
+}
+
+/// A level-three `F-` heading that a submit read from a file report.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SubmittedHeading {
+    pub id: String,
+    /// The ID sits inside a strikethrough span, as a resolved finding's heading may.
+    pub struck: bool,
 }
 
 /// Where a derived finding's card is found.
@@ -70,9 +78,10 @@ pub struct Ledger {
 
 /// Derives the next version's active findings.
 ///
-/// A retiring outcome excludes its ID even when this report keeps its heading. A heading
-/// whose ID the run retired before adds nothing; listing that ID re-raises it as a new
-/// finding, anchored at its heading. Every other ID of the parent, the ledger or the
+/// A retiring outcome excludes its ID even when this report keeps its heading. A struck
+/// heading whose ID the run retired before adds nothing; listing that ID, or keeping the
+/// heading without strikethrough, re-raises it as a new finding, anchored at its heading.
+/// Every other ID of the parent, the ledger or the
 /// headings stays active. Fields come from the ledger, then the parent, then the heading.
 /// Details come from the ledger, with the reviewed revision as their checked SHA, else
 /// from the parent. The anchor is this report's top-level heading. A parent finding the
@@ -114,6 +123,7 @@ pub fn derive(
                 severity,
                 blocking,
                 source,
+                struck,
                 ..
             } => Some((
                 id.as_str(),
@@ -122,6 +132,7 @@ pub fn derive(
                     severity,
                     blocking: *blocking,
                     source: source.as_ref(),
+                    struck: *struck,
                 },
             )),
             _ => None,
@@ -133,9 +144,9 @@ pub fn derive(
         .chain(ledger.keys().map(|id| (*id).to_owned()))
         .chain(
             headings
-                .keys()
-                .filter(|id| !earlier.contains(**id))
-                .map(|id| (*id).to_owned()),
+                .iter()
+                .filter(|(id, heading)| !(heading.struck && earlier.contains(**id)))
+                .map(|(id, _)| (*id).to_owned()),
         )
         .filter(|id| !retired.contains(id.as_str()))
         .collect();
@@ -189,15 +200,16 @@ pub fn derive(
 
 /// Checks a final's findings ledger against the parent's active findings while the tool
 /// call is open. An outcome must name a parent finding, except a retiring outcome that
-/// restates a finding the run retired before. A full review lists or gives an
-/// outcome for every parent finding. Each level-three `F-` heading of a file report, at the
-/// top level or nested in a list item, must be listed, given an outcome or carried, unless
-/// the run retired its ID before; `headings` is `None` when they are unknown.
-/// Amendments, unchanged results and questions carry no ledger.
+/// restates a finding the run retired before or one this report lists again. A full review
+/// lists or gives an outcome for every parent finding. Each level-three `F-` heading of a
+/// file report, at the top level or nested in a list item, must be listed, given an outcome
+/// or carried, unless it is struck through and the run retired its ID before; `headings` is
+/// `None` when they are unknown. Amendments, unchanged results and questions carry no
+/// ledger.
 pub fn check(
     declaration: &Declaration,
     parent: &Parent,
-    headings: Option<&[String]>,
+    headings: Option<&[SubmittedHeading]>,
     full_review: bool,
 ) -> Vec<HandoffFieldError> {
     let Declaration::Final {
@@ -232,7 +244,7 @@ pub fn check(
         // Restating that an earlier version's retired finding is still resolved is harmless
         // and is recorded as given; only a keeping outcome needs the finding raised again.
         let message = match parent.retired.contains(id) {
-            true if edit.conclusion.retires_finding() => continue,
+            true if edit.conclusion.retires_finding() || listed.contains(id) => continue,
             true => format!(
                 "{id} was retired in an earlier version. List it in report.findings to raise it again."
             ),
@@ -257,18 +269,19 @@ pub fn check(
             }
         }
     }
-    for id in headings.unwrap_or_default() {
-        let id = id.as_str();
-        if !listed.contains(id)
-            && !outcomes.contains(id)
-            && !active.contains(id)
-            && !parent.retired.contains(id)
-        {
-            errors.push(HandoffFieldError::new(
-                "/handoff/source",
-                format!("The report has heading {id}, which is missing from report.findings."),
-            ));
+    for heading in headings.unwrap_or_default() {
+        let id = heading.id.as_str();
+        if listed.contains(id) || outcomes.contains(id) || active.contains(id) {
+            continue;
         }
+        let message = match parent.retired.contains(id) {
+            true if heading.struck => continue,
+            true => format!(
+                "The report has heading {id}, which an earlier version retired. List it in report.findings if it is raised again, or restate its outcome in findingChanges."
+            ),
+            false => format!("The report has heading {id}, which is missing from report.findings."),
+        };
+        errors.push(HandoffFieldError::new("/handoff/source", message));
     }
     errors
 }
@@ -294,13 +307,14 @@ struct Heading<'a> {
     blocking: Option<bool>,
     /// `None` for a heading nested in a list item, which the reader draws as a ledger card.
     source: Option<&'a SourceRange>,
+    struck: bool,
 }
 
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
 
-    use super::{Anchor, Parent, ParentFinding, check, derive};
+    use super::{Anchor, Parent, ParentFinding, SubmittedHeading, check, derive};
     use crate::reports::{
         Declaration, Descriptor, FindingBasis, FindingBasisKind, FindingConclusion, FindingDetails,
         FindingEdit, ReportEdits, RevisionEvidence, Source, StructuredFinding, StructuredReport,
@@ -378,12 +392,15 @@ mod tests {
     // A report in its own format wrote F-01's ID in inline code, repeated F-01, said both
     // "Blocking: yes" and "Blocking: no" under it, raised F-02 inside a numbered list, gave
     // F-03 its severity and blocking status in one two-line paragraph, and kept a struck
-    // heading for F-04, which an earlier version had retired as fixed, restating that outcome
-    // and claiming F-07, another retired finding, is still present.
+    // heading for F-04, which an earlier version had retired as fixed. It kept a struck
+    // heading for F-08, also retired, then raised F-08 again under a plain heading without
+    // listing it, listed F-07, another retired finding, as still present, and restated that
+    // F-09, retired before, is fixed.
     // The parse must not fail, F-01 takes the last Blocking line before its first labelled
     // field, as its card shows, and F-02, which the reader draws as a ledger card, must stay
-    // a tracked finding. F-03 keeps P1 and blocking, F-04 neither needs listing nor comes
-    // back active, and only F-07's keeping outcome asks for the finding to be raised again.
+    // a tracked finding. F-03 keeps P1 and blocking, and F-04 neither needs listing nor comes
+    // back active. F-07 and F-09 need no change, and F-08 comes back active from its plain
+    // heading, which the error asks the agent to list.
     #[test]
     fn a_nested_heading_and_a_repeated_id_stay_tracked() {
         let markdown = "# Review of !418
@@ -409,6 +426,14 @@ Blocking: yes
 
 ### ~~F-04 · P3 · Stale comment~~ — fixed in v2
 
+### ~~F-08 · P2 · Token logged~~ — fixed in v3
+
+### F-08 · P1 · Token logged again
+
+Blocking: yes
+
+**Evidence:** The retry path logs the bearer header again.
+
 ## Other notes
 
 1. ### F-02 Retry loop never ends
@@ -420,18 +445,31 @@ Blocking: yes
             .iter()
             .filter(|item| matches!(item, Descriptor::Section { .. }))
             .count();
-        assert_eq!(sections, 6, "the repeated heading stays a plain section");
-        let ids: Vec<String> = headings
+        assert_eq!(sections, 8, "each repeated heading stays a plain section");
+        let submitted: Vec<SubmittedHeading> = headings
             .iter()
             .filter_map(|item| match item {
-                Descriptor::Finding { id, .. } => Some(id.clone()),
+                Descriptor::Finding { id, struck, .. } => Some(SubmittedHeading {
+                    id: id.clone(),
+                    struck: *struck,
+                }),
                 _ => None,
             })
             .collect();
+        let ids: Vec<_> = submitted
+            .iter()
+            .map(|heading| (heading.id.as_str(), heading.struck))
+            .collect();
         assert_eq!(
             ids,
-            ["F-01", "F-03", "F-04", "F-02"],
-            "the struck heading keeps its ID"
+            [
+                ("F-01", false),
+                ("F-03", false),
+                ("F-04", true),
+                ("F-08", false),
+                ("F-02", false)
+            ],
+            "the struck heading keeps its ID, and a plain heading claims a repeated one"
         );
         let review = Declaration::Final {
             source: Source::Response,
@@ -439,13 +477,28 @@ Blocking: yes
             verdict: Verdict::RequestChanges,
             report: Some(Arc::new(StructuredReport {
                 version: 1,
-                findings: Vec::new(),
+                findings: vec![StructuredFinding {
+                    id: "F-07".into(),
+                    title: "Webhook retries skip the signature check".into(),
+                    severity: "P1".into(),
+                    blocking: true,
+                    details: FindingDetails {
+                        location: None,
+                        consequence: "A forged webhook is accepted on retry.".into(),
+                        evidence: FindingBasis {
+                            kind: FindingBasisKind::Observed,
+                            text: "The retry handler calls process before verify.".into(),
+                        },
+                        checked_sha: None,
+                        evidence_hash: None,
+                    },
+                }],
             })),
             amends: None,
             edits: ReportEdits {
                 findings: [
-                    ("F-04", FindingConclusion::Fixed),
                     ("F-07", FindingConclusion::StillPresent),
+                    ("F-09", FindingConclusion::Fixed),
                 ]
                 .map(|(id, conclusion)| FindingEdit {
                     finding_id: id.into(),
@@ -460,18 +513,18 @@ Blocking: yes
         };
         let parent = Parent {
             findings: Vec::new(),
-            retired: ["F-04".to_owned(), "F-07".to_owned()].into(),
+            retired: ["F-04", "F-07", "F-08", "F-09"].map(String::from).into(),
         };
-        let messages: Vec<_> = check(&review, &parent, Some(&ids), true)
+        let messages: Vec<_> = check(&review, &parent, Some(&submitted), true)
             .into_iter()
             .map(|error| error.message)
             .collect();
         assert_eq!(
             messages,
             [
-                "F-07 was retired in an earlier version. List it in report.findings to raise it again.",
                 "The report has heading F-01, which is missing from report.findings.",
                 "The report has heading F-03, which is missing from report.findings.",
+                "The report has heading F-08, which an earlier version retired. List it in report.findings if it is raised again, or restate its outcome in findingChanges.",
                 "The report has heading F-02, which is missing from report.findings.",
             ]
         );
@@ -497,6 +550,8 @@ Blocking: yes
                 ("F-01".into(), Some("P1".into()), Some(false), true),
                 ("F-02".into(), None, None, false),
                 ("F-03".into(), Some("P1".into()), Some(true), true),
+                ("F-07".into(), Some("P1".into()), Some(true), false),
+                ("F-08".into(), Some("P1".into()), Some(true), true),
             ]
         );
     }

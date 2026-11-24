@@ -648,6 +648,7 @@ fn descriptor(value: Descriptor) -> Result<dto::Descriptor, AppError> {
             severity,
             blocking,
             source,
+            struck: _,
             carried_from,
             details,
             disposition,

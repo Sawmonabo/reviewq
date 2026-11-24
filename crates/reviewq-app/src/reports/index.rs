@@ -51,6 +51,12 @@ struct Heading {
     offset: usize,
     title: String,
     finding_id: Option<String>,
+    /// The open strikethrough spans while the heading's text is read.
+    strike: u32,
+    /// The title byte where the first text outside strikethrough starts, other than space.
+    plain: Option<usize>,
+    /// The `F-` ID sits inside strikethrough.
+    struck: bool,
     fields: Fields,
 }
 
@@ -90,11 +96,12 @@ struct Paragraph {
 /// footnote or definition is skipped, except that a level-three `F-` heading in a list item
 /// outside any quote yields a finding without a span, carrying only its title and heading
 /// priority, so it is still tracked. A repeated `F-` ID anchors at its first top-level
-/// heading; later ones are plain sections. Returns `None` only when the report has more
-/// headings than the index admits.
+/// heading, or at its first heading whose ID is not struck through when one exists; later
+/// ones are plain sections. Returns `None` only when the report has more headings than the
+/// index admits.
 pub(super) fn parse(source: &str) -> Option<Vec<Descriptor>> {
     let mut headings: Vec<Heading> = Vec::new();
-    let mut nested: Vec<(String, String)> = Vec::new();
+    let mut nested: Vec<(String, String, bool)> = Vec::new();
     let mut heading: Option<(Heading, bool)> = None;
     let mut images = Vec::new();
     // The finding whose card the next paragraph or level-four to six heading joins: the
@@ -115,8 +122,19 @@ pub(super) fn parse(source: &str) -> Option<Vec<Descriptor>> {
         if let Some((value, _)) = heading.as_mut()
             && !matches!(event, Event::End(TagEnd::Heading(_)))
         {
+            match event {
+                Event::Start(Tag::Strikethrough) => value.strike += 1,
+                Event::End(TagEnd::Strikethrough) => value.strike = value.strike.saturating_sub(1),
+                _ => {}
+            }
             if let Some(text) = inline_text(&event, &mut images, value.title.len()) {
+                let start = value.title.len();
                 limited_append(&mut value.title, text, MAX_TITLE_BYTES);
+                if value.strike == 0 && value.plain.is_none() {
+                    value.plain = value.title[start..]
+                        .find(|next: char| !next.is_whitespace())
+                        .map(|at| start + at);
+                }
             }
             continue;
         }
@@ -142,6 +160,9 @@ pub(super) fn parse(source: &str) -> Option<Vec<Descriptor>> {
                     offset: offset.start,
                     title: String::new(),
                     finding_id: None,
+                    strike: 0,
+                    plain: None,
+                    struck: false,
                     fields: Fields::default(),
                 };
                 heading = Some((value, items != 0));
@@ -153,12 +174,17 @@ pub(super) fn parse(source: &str) -> Option<Vec<Descriptor>> {
                 let id = (value.level == 3)
                     .then(|| finding_id(&value.title))
                     .flatten();
+                if let Some(id) = &id {
+                    // The ID starts at the title's first character other than space.
+                    let end = value.title.len() - value.title.trim_start().len() + id.len();
+                    value.struck = value.plain.is_none_or(|plain| plain >= end);
+                }
                 if (!in_item || id.is_some()) && headings.len() + nested.len() == MAX_DESCRIPTORS {
                     return None;
                 }
                 if in_item {
                     if let Some(id) = id {
-                        nested.push((id, value.title));
+                        nested.push((id, value.title, value.struck));
                     }
                     continue;
                 }
@@ -208,6 +234,18 @@ pub(super) fn parse(source: &str) -> Option<Vec<Descriptor>> {
             .unwrap_or(source.len());
         next[heading.level] = heading.offset;
     }
+    // A struck heading for a resolved finding gives way to a heading that raises its ID.
+    let raised: HashSet<String> = headings
+        .iter()
+        .filter(|heading| !heading.struck)
+        .filter_map(|heading| heading.finding_id.clone())
+        .chain(
+            nested
+                .iter()
+                .filter(|(_, _, struck)| !struck)
+                .map(|(id, ..)| id.clone()),
+        )
+        .collect();
     let mut seen = HashSet::new();
     let mut descriptors = Vec::new();
     let mut last_byte = 0;
@@ -228,6 +266,7 @@ pub(super) fn parse(source: &str) -> Option<Vec<Descriptor>> {
             heading.title
         };
         if let Some(id) = heading.finding_id
+            && !(heading.struck && raised.contains(&id))
             && seen.insert(id.clone())
         {
             let fields = heading.fields;
@@ -244,6 +283,7 @@ pub(super) fn parse(source: &str) -> Option<Vec<Descriptor>> {
                     .or(fields.fallback_blocking),
                 title: title.clone(),
                 source: Some(range.clone()),
+                struck: heading.struck,
                 carried_from: None,
                 details: None,
                 disposition: None,
@@ -257,14 +297,15 @@ pub(super) fn parse(source: &str) -> Option<Vec<Descriptor>> {
     }
     // The reader reads no metadata lines under a nested heading, so it carries only its title
     // and heading priority.
-    for (id, title) in nested {
-        if seen.insert(id.clone()) {
+    for (id, title, struck) in nested {
+        if !(struck && raised.contains(&id)) && seen.insert(id.clone()) {
             descriptors.push(Descriptor::Finding {
                 id,
                 severity: heading_severity(&title),
                 blocking: None,
                 title,
                 source: None,
+                struck,
                 carried_from: None,
                 details: None,
                 disposition: None,

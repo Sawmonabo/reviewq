@@ -18,7 +18,7 @@ pub(super) fn ledger(
     head: Option<&str>,
     batch: Option<&str>,
     declaration: &Declaration,
-    headings: Option<&[String]>,
+    headings: Option<&[ledger::SubmittedHeading]>,
 ) -> Result<(Vec<HandoffFieldError>, Option<structured::Projection>), StoreError> {
     let mut errors = Vec::new();
     let manifest = batch.map(|id| batch::frozen(db, id)).transpose()?;

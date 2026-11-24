@@ -419,6 +419,7 @@ fn index(body: &str, headings: &[Heading<'_>]) -> Vec<Descriptor> {
                 severity: Some((*severity).into()),
                 blocking: Some(*blocking),
                 source: Some(source.clone()),
+                struck: false,
                 carried_from: None,
                 details: None,
                 disposition: None,

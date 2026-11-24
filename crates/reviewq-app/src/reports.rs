@@ -261,6 +261,9 @@ pub enum Descriptor {
         severity: Option<String>,
         blocking: Option<bool>,
         source: Option<SourceRange>,
+        /// The heading's `F-` ID sits inside a strikethrough span, as in
+        /// `### ~~F-04 · P3 · Stale comment~~ — fixed in v2`. Only the index sets it.
+        struck: bool,
         /// The receipt where a carried finding's card was last authored.
         carried_from: Option<Box<SourceOrigin>>,
         details: Option<Box<FindingDetails>>,

@@ -179,6 +179,7 @@ fn decode(collection: Collection, row: &Row<'_>) -> Result<Descriptor, StoreErro
             source: (row.get::<_, Option<i64>>(4)?.is_some())
                 .then(|| range(4, 11))
                 .transpose()?,
+            struck: false,
             // Every carried finding names its origin, whether or not that card has a span.
             carried_from: origin(11)?,
             details: text_optional(row, 7)?

@@ -4,6 +4,7 @@ use std::path::PathBuf;
 
 use reviewq_app::access::{Actor, AppError, AppFuture};
 use reviewq_app::events::{ResourceKey, Snapshot};
+use reviewq_app::reports::ledger::SubmittedHeading;
 use reviewq_app::reports::{
     AcceptedReport, ArtifactChunk, CapturedArtifact, Declaration, HandoffFieldError,
     HandoffReceipt, ReportAuthority, ReportCaptureStore, ReportReference, ReportWork,
@@ -154,7 +155,7 @@ impl ReportCaptureStore for SqliteStore {
         declaration_sha256: ReportHash,
         source_authority: Option<ReportAuthority>,
         checkout: Option<Actor>,
-        headings: Option<Vec<String>>,
+        headings: Option<Vec<SubmittedHeading>>,
     ) -> AppFuture<'_, Snapshot<HandoffReceipt>> {
         Box::pin(async move {
             self.write(move |tx| {
@@ -488,7 +489,7 @@ fn stage(
     declaration_sha256: ReportHash,
     source_authority: Option<ReportAuthority>,
     checkout: Option<&Actor>,
-    headings: Option<&[String]>,
+    headings: Option<&[SubmittedHeading]>,
 ) -> Result<Snapshot<HandoffReceipt>, StoreError> {
     let db = &tx.sql;
     check_call(db, &call)?;

@@ -13,6 +13,7 @@ use crate::workflow::{
 };
 
 use super::index;
+use super::ledger::SubmittedHeading;
 use super::{
     ArtifactStats, Descriptor, FindingConclusion, ReportEdits, ReportReference, StructuredReport,
     Verdict,
@@ -194,8 +195,8 @@ pub trait ReportCaptureStore: Send + Sync {
         declaration_sha256: ReportHash,
         source_authority: Option<ReportAuthority>,
         checkout: Option<Actor>,
-        // The file report's level-three `F-` heading IDs, when the submit could read them.
-        headings: Option<Vec<String>>,
+        // The file report's level-three `F-` headings, when the submit could read them.
+        headings: Option<Vec<SubmittedHeading>>,
     ) -> AppFuture<'_, Snapshot<HandoffReceipt>>;
 
     fn reserve_report_correction(&self, call: NativeCall) -> AppFuture<'_, bool>;
@@ -250,14 +251,14 @@ pub trait ReportCaptureStore: Send + Sync {
 pub struct SubmittedFile {
     /// SHA-256 of every byte. `None` when the read failed or the file changed during it.
     pub hash: Option<ReportHash>,
-    /// The report's level-three `F-` heading IDs, including those nested in list items,
+    /// The report's level-three `F-` headings, including those nested in list items,
     /// when they could be read without waiting.
-    pub headings: Option<Vec<String>>,
+    pub headings: Option<Vec<SubmittedHeading>>,
 }
 
 /// Reads a submitted report file once and streams every byte through SHA-256. Without a
 /// `declared` hash, a read failure is returned. With `headings`, a file of at most 4 MiB of
-/// UTF-8 is also buffered and parsed for its `F-` heading IDs, but only when the parse
+/// UTF-8 is also buffered and parsed for its `F-` headings, but only when the parse
 /// admission is free; it never waits. A declared hash that differs from the bytes yields
 /// their hash and no headings, so the caller can name the mismatch. After a declared hash,
 /// a read failure or a file that changes during the read yields neither, and acceptance
@@ -320,7 +321,9 @@ async fn read_submitted(
                     items
                         .into_iter()
                         .filter_map(|item| match item {
-                            Descriptor::Finding { id, .. } => Some(id),
+                            Descriptor::Finding { id, struck, .. } => {
+                                Some(SubmittedHeading { id, struck })
+                            }
                             _ => None,
                         })
                         .collect(),
