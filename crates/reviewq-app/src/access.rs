@@ -69,9 +69,11 @@ impl Actor {
 }
 
 /// Safe application outcomes translated into protocol errors by transport.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum AppError {
     InvalidRequest,
+    /// Report handoff fields the agent corrects in its open turn. Nothing was staged.
+    InvalidHandoff(Vec<crate::reports::HandoffFieldError>),
     ReportCorrectionRequired,
     ReportAmendmentSourceChanged,
     TicketUnverified,
@@ -97,6 +99,7 @@ impl Display for AppError {
     fn fmt(&self, output: &mut Formatter<'_>) -> fmt::Result {
         let message = match self {
             Self::InvalidRequest => "invalid request",
+            Self::InvalidHandoff(_) => "Invalid report handoff.",
             Self::ReportCorrectionRequired => REPORT_CORRECTION_MESSAGE,
             Self::ReportAmendmentSourceChanged => "report amendment source changed",
             Self::TicketUnverified => {

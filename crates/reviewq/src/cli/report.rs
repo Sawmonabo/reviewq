@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 
 use clap::Subcommand;
 use reviewq_domain::identity::ReportHash;
+use reviewq_protocol::reports::limits::MAX_REASON_BYTES;
 use reviewq_protocol::reports::{
     AcceptedReference, AcceptedReport, Assessment, CodexCommand, Handoff, HandoffReceipt,
     HandoffState, NativeReportAddress, REPORT_AMENDMENT_SOURCE_MESSAGE, REPORT_HANDOFF_EXAMPLE,
@@ -19,8 +20,7 @@ const ACCEPTED: &str = "/api/v1/native/reports/accepted";
 const HANDOFF: &str = "/api/v1/native/reports/handoff";
 const STATUS: &str = "/api/v1/native/reports/handoff-status";
 const MAX_METADATA_BYTES: u64 = 96 * 1024;
-
-const MAX_HANDOFF_BYTES: u64 = 128 * 1024;
+const MAX_HANDOFF_BYTES: u64 = reviewq_app::reports::METADATA_BYTES as u64;
 
 #[derive(Subcommand)]
 pub(super) enum Report {
@@ -159,18 +159,7 @@ fn read_handoff(file: &Path) -> Result<Handoff, Failure> {
 fn check(input: &serde_json::Value) -> Result<(), Failure> {
     let errors = validate_report_handoff(input);
     if !errors.is_empty() {
-        let messages = errors
-            .into_iter()
-            .map(|error| {
-                let path = if error.path.is_empty() {
-                    "/"
-                } else {
-                    &error.path
-                };
-                format!("{path} {}", error.message)
-            })
-            .collect::<Vec<_>>();
-        return Err(format!("Invalid report handoff.\n{}", messages.join("\n")).into());
+        return Err(workflow::invalid_handoff(errors));
     }
     Ok(())
 }
@@ -223,9 +212,9 @@ fn report_file(path: &Path) -> Result<ReportSource, Failure> {
     })
 }
 
-fn reason(value: &str) -> Result<String, &'static str> {
-    if value.trim().is_empty() || value.len() > 1024 {
-        return Err("Provide a reason of 1–1,024 bytes.");
+fn reason(value: &str) -> Result<String, String> {
+    if value.trim().is_empty() || value.len() > MAX_REASON_BYTES {
+        return Err(format!("Provide a reason of 1–{MAX_REASON_BYTES} bytes."));
     }
     Ok(value.into())
 }

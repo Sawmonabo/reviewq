@@ -347,7 +347,7 @@ pub(super) async fn discussions(
         Ok((response, limit, anchor))
     };
     let (response, limit, anchor) = match read.await {
-        Err(error) if loses_access(error) => {
+        Err(error) if loses_access(&error) => {
             entry
                 .store
                 .invalidate_discussions(
@@ -496,7 +496,7 @@ async fn check_discussions(
     Ok(())
 }
 
-fn loses_access(error: AppError) -> bool {
+fn loses_access(error: &AppError) -> bool {
     matches!(
         error,
         AppError::Forbidden | AppError::Unauthorized | AppError::NotFound

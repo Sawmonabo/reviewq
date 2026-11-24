@@ -20,9 +20,11 @@ pub(super) fn export(mode: &str) -> Result<(), Box<dyn Error>> {
                 .to_value();
             // The native tool inputs are decoded as UTF-8. UTF-16 surrogate
             // code units cannot reach this schema, and Rust regex rejects them.
-            let pattern = &mut schema["definitions"]["ResourceIdDto"]["pattern"];
-            if let Some(value) = pattern.as_str() {
-                *pattern = serde_json::Value::String(value.replace(r"\ud800-\udfff", ""));
+            for definition in ["ResourceIdDto", "FindingIdDto", "DiscussionIdDto"] {
+                let pattern = &mut schema["definitions"][definition]["pattern"];
+                if let Some(value) = pattern.as_str() {
+                    *pattern = serde_json::Value::String(value.replace(r"\ud800-\udfff", ""));
+                }
             }
             if mode == "--claude-report-handoff" {
                 writeln!(

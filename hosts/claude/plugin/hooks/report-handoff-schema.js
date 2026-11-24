@@ -27,11 +27,11 @@ export const inputSchema = {
           "$ref": "#/definitions/FindingConclusion"
         },
         "discussionId": {
-          "$ref": "#/definitions/ResourceIdDto"
+          "$ref": "#/definitions/DiscussionIdDto"
         },
         "findingIds": {
           "items": {
-            "$ref": "#/definitions/ResourceIdDto"
+            "$ref": "#/definitions/FindingIdDto"
           },
           "maxItems": 100,
           "type": "array"
@@ -53,6 +53,12 @@ export const inputSchema = {
         "nextAction"
       ],
       "type": "object"
+    },
+    "DiscussionIdDto": {
+      "description": "A GitLab discussion ID of a selected-thread batch.",
+      "maxUtf8Bytes": 256,
+      "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f]+$",
+      "type": "string"
     },
     "FindingBasis": {
       "additionalProperties": false,
@@ -98,13 +104,13 @@ export const inputSchema = {
         },
         "discussionIds": {
           "items": {
-            "$ref": "#/definitions/ResourceIdDto"
+            "$ref": "#/definitions/DiscussionIdDto"
           },
           "maxItems": 10,
           "type": "array"
         },
         "findingId": {
-          "$ref": "#/definitions/ResourceIdDto"
+          "$ref": "#/definitions/FindingIdDto"
         },
         "reason": {
           "maxLength": 1024,
@@ -118,6 +124,12 @@ export const inputSchema = {
         "reason"
       ],
       "type": "object"
+    },
+    "FindingIdDto": {
+      "description": "A report finding ID, such as `F-01`, as an outcome or assessment names it.",
+      "maxUtf8Bytes": 64,
+      "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f]+$",
+      "type": "string"
     },
     "FindingLocation": {
       "additionalProperties": false,

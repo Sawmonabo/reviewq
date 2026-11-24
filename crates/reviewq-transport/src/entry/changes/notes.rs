@@ -154,7 +154,7 @@ pub(in crate::entry) async fn note_destination(
         .await;
     let destination = match target.and_then(|target| resolve(target, &witness, &source)) {
         Ok(destination) => destination,
-        Err(error) if invalidates(error) => {
+        Err(error) if invalidates(&error) => {
             entry
                 .store
                 .invalidate_discussions(
@@ -280,7 +280,7 @@ fn note_kind(outdated: bool, positioned: bool) -> dto::NoteKind {
     }
 }
 
-fn invalidates(error: AppError) -> bool {
+fn invalidates(error: &AppError) -> bool {
     matches!(
         error,
         AppError::CursorExpired | AppError::NotFound | AppError::Forbidden | AppError::Unauthorized

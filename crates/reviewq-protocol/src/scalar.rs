@@ -85,6 +85,18 @@ opaque_dto!(
     /// A Jira issue key.
     TicketKeyDto
 );
+string_dto!(
+    /// A report finding ID, such as `F-01`, as an outcome or assessment names it.
+    FindingIdDto,
+    |value: &str| bounded_text(value, 64),
+    "finding_id_schema"
+);
+string_dto!(
+    /// A GitLab discussion ID of a selected-thread batch.
+    DiscussionIdDto,
+    |value: &str| bounded_text(value, 256),
+    "discussion_id_schema"
+);
 
 string_dto!(
     /// One opaque, path-safe ReviewQ review ID.
@@ -265,6 +277,16 @@ fn read_decimal(value: &str) -> Option<u64> {
 #[cfg(feature = "schema")]
 fn opaque_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
     bounded_text_schema(512)
+}
+
+#[cfg(feature = "schema")]
+fn finding_id_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
+    bounded_text_schema(64)
+}
+
+#[cfg(feature = "schema")]
+fn discussion_id_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
+    bounded_text_schema(256)
 }
 
 #[cfg(feature = "schema")]

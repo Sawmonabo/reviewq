@@ -118,7 +118,7 @@ pub(super) fn complete(
             || scope.report_hash != current.hash
             || ((!matches!(work.declaration, Declaration::NeedsInput { .. })
                 || !work.declaration.assessments().is_empty())
-                && !batch::assessments_match(scope, work.declaration.assessments())))
+                && !batch::assessment_errors(scope, work.declaration.assessments()).is_empty()))
     {
         return reject(
             tx,
@@ -141,8 +141,10 @@ pub(super) fn complete(
             let captured = artifact.as_ref().ok_or(AppError::Internal)?;
             let artifact_id = stage.as_deref().ok_or(AppError::Conflict)?;
             if let Some(scope) = &scoped
-                && (!batch::edits_match(db, run, scope, edits, work.declaration.assessments())?
-                    || !matches!(revision, RevisionEvidence::Exact(sha) if sha.as_str() == scope.source_sha))
+                && (!batch::edit_errors(db, run, scope, edits, work.declaration.assessments())?
+                    .is_empty()
+                    || !matches!(revision, RevisionEvidence::Exact(sha) if sha.as_str() == scope.source_sha)
+                    || amends.is_some())
             {
                 return reject(
                     tx,

@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 use clap::Args;
 use reqwest::{Client, StatusCode};
 use reviewq_domain::identity::NativeSessionId;
+use reviewq_protocol::reports::ReportHandoffFieldError;
 use reviewq_protocol::{ResourceIdDto, SessionKeyDto, Success};
 use reviewq_transport::ServiceEndpoint;
 use rustix::fs::{Mode, OFlags};
@@ -32,6 +33,8 @@ pub(super) struct Context {
 
 pub(super) enum ReplyError {
     Rejected(StatusCode),
+    // The service refused these handoff fields; the agent corrects them in its turn.
+    InvalidHandoff(Vec<ReportHandoffFieldError>),
     ReplyLost,
 }
 
@@ -111,8 +114,16 @@ impl Context {
         let response = native_client::bridge(&self.client, &self.endpoint, path, body.to_vec())
             .await
             .map_err(|_| ReplyError::ReplyLost)?;
-        if !response.status().is_success() {
-            return Err(ReplyError::Rejected(response.status()));
+        let status = response.status();
+        if status == StatusCode::BAD_REQUEST {
+            return Err(native_client::bounded(response, 144 * 1024)
+                .await
+                .ok()
+                .and_then(|body| field_errors(&body))
+                .map_or(ReplyError::Rejected(status), ReplyError::InvalidHandoff));
+        }
+        if !status.is_success() {
+            return Err(ReplyError::Rejected(status));
         }
         let bytes = native_client::bounded(response, 144 * 1024)
             .await
@@ -134,10 +145,40 @@ impl ReplyError {
         match self {
             Self::Rejected(status) if status == reqwest::StatusCode::UNPROCESSABLE_ENTITY =>
                 reviewq_app::access::REPORT_CORRECTION_MESSAGE.into(),
+            Self::InvalidHandoff(errors) => invalid_handoff(errors),
             Self::Rejected(status) => format!("ReviewQ {operation} for lead {} returned HTTP {}.", session.as_str(), status.as_u16()).into(),
             Self::ReplyLost => format!("ReviewQ could not confirm {operation} for lead {}. Read the saved state before retrying.", session.as_str()).into(),
         }
     }
+}
+
+/// The field errors of a refused report handoff body.
+fn field_errors(body: &[u8]) -> Option<Vec<ReportHandoffFieldError>> {
+    #[derive(serde::Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Invalid {
+        field_errors: Vec<ReportHandoffFieldError>,
+    }
+    serde_json::from_slice::<Invalid>(body)
+        .ok()
+        .map(|invalid| invalid.field_errors)
+        .filter(|errors| !errors.is_empty())
+}
+
+/// Lists handoff field errors as `path message` lines.
+pub(super) fn invalid_handoff(errors: Vec<ReportHandoffFieldError>) -> Failure {
+    let messages = errors
+        .into_iter()
+        .map(|error| {
+            let path = if error.path.is_empty() {
+                "/"
+            } else {
+                &error.path
+            };
+            format!("{path} {}", error.message)
+        })
+        .collect::<Vec<_>>();
+    format!("Invalid report handoff.\n{}", messages.join("\n")).into()
 }
 
 pub(super) fn regular_file(path: &Path) -> Result<File, Failure> {

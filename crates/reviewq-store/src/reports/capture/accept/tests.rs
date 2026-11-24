@@ -128,7 +128,7 @@ Severity: P3
 Blocking: no
 ";
 
-// BLITZ-605: the follow-up's Markdown moved the untouched P1 cards into a table.
+// BLITZ-605: a selected-thread follow-up's Markdown moved the untouched P1 cards into a table.
 const FOLLOWUP: &str = "# Follow-up review
 
 ### F-03 Missing regression test
@@ -177,7 +177,7 @@ fn followup_carries_findings_its_text_and_ledger_omit() {
                 Ok(())
             }).await.unwrap();
 
-            let followup_call = stage(&store, &lead, "ledger-followup", "rollout", ledger_final(
+            let followup_call = stage_followup(&store, &lead, "ledger-followup", "rollout", ledger_final(
                 FOLLOWUP,
                 vec![StructuredFinding {
                     id: "F-05".into(),
@@ -203,7 +203,7 @@ fn followup_carries_findings_its_text_and_ledger_omit() {
                     discussion_ids: Vec::new(),
                 }],
                 None,
-            )).await;
+            ), &["F-01", "F-02"]).await;
             let followup_index = index(FOLLOWUP, &[
                 ("### F-03", Some(("F-03", "P3", false))), ("### F-05", Some(("F-05", "P2", false))),
                 ("## Earlier", None),
@@ -259,8 +259,8 @@ fn unanchored_finding_keeps_details_and_origin_while_carried() {
             let authored = store.accepted_report(lead.clone()).await.unwrap().value.unwrap().reference;
             let mut versions = Vec::new();
             for (id, body) in [("carry-once", "# Follow-up\n\nNothing new.\n"), ("carry-twice", "# Follow-up\n\nStill nothing new.\n")] {
-                let call = stage(&store, &lead, id, "rollout",
-                    ledger_final(body, Vec::new(), Vec::new(), None)).await;
+                let call = stage_followup(&store, &lead, id, "rollout",
+                    ledger_final(body, Vec::new(), Vec::new(), None), &["F-01"]).await;
                 assert!(finish_with(&store, &call, true, body.as_bytes(), Vec::new()).await);
                 versions.push(store.accepted_report(lead.clone()).await.unwrap().value.unwrap().reference);
             }
@@ -480,10 +480,76 @@ async fn stage(
             digest,
             authority,
             None,
+            None,
         )
         .await
         .unwrap();
     call
+}
+
+/// Stages a selected-thread follow-up's ledger, which carries each parent finding it
+/// neither lists nor retires. Without a frozen batch the submit checks treat it as a full
+/// review and name those findings, so the fixture lists them while staging and then stores
+/// the follow-up's own ledger in their place.
+async fn stage_followup(
+    store: &SqliteStore,
+    lead: &LeadTarget,
+    id: &str,
+    generation: &str,
+    declaration: Declaration,
+    carried: &[&str],
+) -> NativeCall {
+    let Declaration::Final {
+        report: Some(report),
+        ..
+    } = &declaration
+    else {
+        panic!("a follow-up final carries a ledger");
+    };
+    let ledger = serde_json::to_string(report.as_ref()).unwrap();
+    let mut listed = declaration.clone();
+    if let Declaration::Final {
+        report: Some(report),
+        ..
+    } = &mut listed
+    {
+        let report = std::sync::Arc::make_mut(report);
+        report
+            .findings
+            .extend(carried.iter().map(|id| listed_finding(id)));
+    }
+    let call = stage(store, lead, id, generation, listed).await;
+    let call_id = call.call_id.clone();
+    store
+        .write(move |tx| {
+            tx.sql.execute(
+                "UPDATE report_handoffs SET edits=json_set(edits,'$.structured',json(?2)) WHERE call_id=?1",
+                params![call_id, ledger],
+            )?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+    call
+}
+
+fn listed_finding(id: &str) -> StructuredFinding {
+    StructuredFinding {
+        id: id.into(),
+        title: "Listed only while staging".into(),
+        severity: "P3".into(),
+        blocking: false,
+        details: FindingDetails {
+            location: None,
+            consequence: "Replaced by the follow-up's own ledger.".into(),
+            evidence: FindingBasis {
+                kind: FindingBasisKind::Gap,
+                text: "Not part of the fixture's ledger.".into(),
+            },
+            checked_sha: None,
+            evidence_hash: None,
+        },
+    }
 }
 
 async fn recorded_state(store: &SqliteStore, call: &NativeCall) -> HandoffState {

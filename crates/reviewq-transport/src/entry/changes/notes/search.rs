@@ -135,7 +135,7 @@ pub(in crate::entry) async fn search_notes(
         After::Published { page, limit, point } => {
             let (read, current, physical_limit) =
                 match read_search_page(&source, &scope, page, limit, point).await {
-                    Err(error) if loses_access(error) => {
+                    Err(error) if loses_access(&error) => {
                         entry
                             .store
                             .invalidate_discussions(

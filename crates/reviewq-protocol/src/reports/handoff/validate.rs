@@ -165,6 +165,22 @@ fn validate_values(input: &Value, errors: &mut BTreeSet<ReportHandoffFieldError>
         ),
         _ => {}
     }
+    if handoff["amendsReport"].is_object() {
+        if !entries(&handoff["assessments"]).is_empty() {
+            record(
+                errors,
+                "/handoff/amendsReport",
+                "An amendment cannot complete a selected-thread check.",
+            );
+        }
+        if !entries(&handoff["findingChanges"]).is_empty() {
+            record(
+                errors,
+                "/handoff/findingChanges",
+                "Omit findingChanges when amendsReport is present.",
+            );
+        }
+    }
     if !entries(&handoff["assessments"]).is_empty() && handoff["revision"]["sha"].is_null() {
         record(
             errors,
@@ -425,6 +441,28 @@ mod tests {
                 message: "Omit report when amendsReport is present.".into(),
             }]
         );
-        assert!(serde_json::from_value::<ReportHandoffInput>(input).is_err());
+        assert!(serde_json::from_value::<ReportHandoffInput>(input.clone()).is_err());
+
+        input["handoff"].as_object_mut().unwrap().remove("report");
+        input["handoff"]["assessments"] = json!([{
+            "discussionId":"discussion-1","conclusion":"fixed","reason":"The key is now scoped.",
+            "findingIds":["F-01"],"nextAction":"review"
+        }]);
+        input["handoff"]["findingChanges"] = json!([{
+            "findingId":"F-01","conclusion":"fixed","reason":"The key is now scoped."
+        }]);
+        assert_eq!(
+            validate_report_handoff(&input),
+            vec![
+                ReportHandoffFieldError {
+                    path: "/handoff/amendsReport".into(),
+                    message: "An amendment cannot complete a selected-thread check.".into(),
+                },
+                ReportHandoffFieldError {
+                    path: "/handoff/findingChanges".into(),
+                    message: "Omit findingChanges when amendsReport is present.".into(),
+                },
+            ]
+        );
     }
 }

@@ -220,14 +220,29 @@ pub(in crate::entry) async fn submit_verified(
     let stored = match existing {
         Ok(stored) => stored,
         Err(AppError::NotFound) if !lookup => {
+            // A file final's headings are checked against its ledger before staging.
+            let ledger = matches!(
+                &handoff,
+                dto::Handoff::Final {
+                    report: Some(_),
+                    ..
+                }
+            );
+            let mut headings = None;
             if let Some(dto::ReportSource::File { path, sha256 }) = source_mut(&mut handoff)
-                && sha256.is_none()
+                && (sha256.is_none() || ledger)
             {
-                if mcp.is_none() && expected != HostProvider::Claude {
+                let declared = sha256
+                    .as_ref()
+                    .map(|value| parse::<ReportHash>(value.as_str()))
+                    .transpose()?;
+                if declared.is_none() && mcp.is_none() && expected != HostProvider::Claude {
                     return Err(request_correction(entry, &verified).await);
                 }
                 let path = match absolute_path(path) {
-                    Ok(path) => path,
+                    Ok(path) => Some(path),
+                    // The declaration below reports the path itself.
+                    Err(AppError::InvalidRequest) if declared.is_some() => None,
                     Err(AppError::InvalidRequest) => {
                         return Err(if mcp.is_some() {
                             AppError::InvalidRequest
@@ -237,10 +252,22 @@ pub(in crate::entry) async fn submit_verified(
                     }
                     Err(error) => return Err(error),
                 };
-                let hash_value =
-                    app::hash_report_file(workflow.report_files.as_ref(), verified.clone(), path)
-                        .await?;
-                *sha256 = Some(hash(hash_value.as_str())?);
+                if let Some(path) = path {
+                    let read = app::read_submitted_file(
+                        workflow.report_files.as_ref(),
+                        verified.clone(),
+                        path,
+                        declared.as_ref(),
+                        ledger,
+                    )
+                    .await?;
+                    if declared.is_none()
+                        && let Some(value) = &read.hash
+                    {
+                        *sha256 = Some(hash(value.as_str())?);
+                    }
+                    headings = read.headings;
+                }
             }
             if handoff.changes_amended_source() {
                 return Err(AppError::ReportAmendmentSourceChanged);
@@ -297,6 +324,7 @@ pub(in crate::entry) async fn submit_verified(
                     declaration_sha256,
                     settings,
                     mcp.and_then(|context| context.actor),
+                    headings,
                 )
                 .await?
         }

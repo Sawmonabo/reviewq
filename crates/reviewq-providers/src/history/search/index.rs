@@ -586,7 +586,7 @@ impl Write for Chunks<'_> {
                 && self.bytes.len() >= DECODE_BLOCK
                 && let Err(error) = self.flush_chunk(false)
             {
-                self.error = Some(error);
+                self.error = Some(error.clone());
                 return Err(io::Error::other(error));
             }
         }

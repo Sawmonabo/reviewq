@@ -3,12 +3,32 @@ use std::collections::HashSet;
 use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
 use reviewq_domain::identity::ReportHash;
 use sha2::{Digest, Sha256};
+use tokio::sync::{Semaphore, SemaphorePermit};
 
 use crate::access::AppError;
 
 use super::{Descriptor, SourceRange};
 
 const MAX_DESCRIPTORS: usize = 4096;
+/// Equals the protocol's `limits::MAX_TITLE_BYTES`, so a heading title fits a ledger title.
+const MAX_TITLE_BYTES: usize = 384;
+/// Equals the protocol's `limits::MAX_SEVERITY_BYTES`.
+const MAX_SEVERITY_BYTES: usize = 64;
+/// The text kept from the paragraph under a finding heading, which holds its metadata lines.
+const MAX_CARD_TEXT_BYTES: usize = 384;
+
+/// Admits one full Markdown parse at a time in this service.
+static ADMISSION: Semaphore = Semaphore::const_new(1);
+
+/// Waits for the parse admission, as acceptance does.
+pub(super) async fn admit() -> Result<SemaphorePermit<'static>, AppError> {
+    ADMISSION.acquire().await.map_err(|_| AppError::Internal)
+}
+
+/// Takes the parse admission only when no other parse holds it, as a submit does.
+pub(super) fn try_admit() -> Option<SemaphorePermit<'static>> {
+    ADMISSION.try_acquire().ok()
+}
 
 struct Heading {
     level: usize,
@@ -69,10 +89,10 @@ pub(super) fn parse(source: &str) -> Result<Option<Vec<Descriptor>>, AppError> {
             }
             Event::Text(text) => {
                 if let Some(value) = heading.as_mut() {
-                    limited_append(&mut value.title, &text, 384);
+                    limited_append(&mut value.title, &text, MAX_TITLE_BYTES);
                 }
                 if let Some(value) = paragraph.as_mut() {
-                    limited_append(value, &text, 384);
+                    limited_append(value, &text, MAX_CARD_TEXT_BYTES);
                 }
             }
             Event::Code(_) | Event::InlineHtml(_) => {
@@ -80,7 +100,7 @@ pub(super) fn parse(source: &str) -> Result<Option<Vec<Descriptor>>, AppError> {
             }
             Event::SoftBreak | Event::HardBreak => {
                 if let Some(value) = paragraph.as_mut() {
-                    limited_append(value, "\n", 384);
+                    limited_append(value, "\n", MAX_CARD_TEXT_BYTES);
                 }
             }
             _ => {}
@@ -181,7 +201,7 @@ fn metadata(heading: &mut Heading, text: &str) -> Result<(), AppError> {
         }
         if let Some(value) = line.strip_prefix("Severity:").map(str::trim)
             && !value.is_empty()
-            && value.len() <= 64
+            && value.len() <= MAX_SEVERITY_BYTES
         {
             heading.severity = Some(value.to_owned());
         }

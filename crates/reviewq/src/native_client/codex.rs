@@ -14,7 +14,8 @@ use crate::runtime;
 
 const TOOL: &str = "mcp__reviewq__report_handoff";
 const EVENT_LIMIT: usize = 144 * 1024;
-const ARGUMENTS_LIMIT: usize = 128 * 1024;
+// The service refuses larger arguments when it records the witness.
+const ARGUMENTS_LIMIT: usize = reviewq_app::reports::METADATA_BYTES;
 
 #[derive(Deserialize)]
 struct Event<'a> {

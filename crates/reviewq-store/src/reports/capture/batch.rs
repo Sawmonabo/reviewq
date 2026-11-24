@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use reviewq_app::access::AppError;
 use reviewq_app::events::ResourceKey;
-use reviewq_app::reports::{Assessment, Declaration, ReportEdits, ReportWork};
+use reviewq_app::reports::{Assessment, Declaration, HandoffFieldError, ReportEdits, ReportWork};
 use reviewq_app::workflow::NativeCall;
 use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
@@ -130,16 +130,24 @@ pub(super) fn manifest(
     if bound(db, &work.call)?.as_deref() != Some(expected.as_str()) {
         return Err(AppError::Conflict.into());
     }
-    let source: String = db.query_row(
-        "SELECT private_manifest FROM followup_batches WHERE batch_id=?1",
-        [expected],
-        |row| row.get(0),
-    )?;
-    let value: FrozenManifest = serde_json::from_str(&source).map_err(|_| AppError::Internal)?;
-    Ok(Some(value))
+    frozen(db, &expected).map(Some)
 }
 
-pub(super) fn assessments_match(manifest: &FrozenManifest, declared: &[Assessment]) -> bool {
+/// The private manifest frozen when the batch started.
+pub(super) fn frozen(db: &Connection, batch: &str) -> Result<FrozenManifest, StoreError> {
+    let source: String = db.query_row(
+        "SELECT private_manifest FROM followup_batches WHERE batch_id=?1",
+        [batch],
+        |row| row.get(0),
+    )?;
+    serde_json::from_str(&source).map_err(|_| AppError::Internal.into())
+}
+
+/// One assessment per batch discussion, each covering the finding IDs its discussion tracks.
+pub(super) fn assessment_errors(
+    manifest: &FrozenManifest,
+    declared: &[Assessment],
+) -> Vec<HandoffFieldError> {
     let mut expected = BTreeMap::<&str, BTreeSet<&str>>::new();
     for item in &manifest.observations {
         expected
@@ -147,13 +155,49 @@ pub(super) fn assessments_match(manifest: &FrozenManifest, declared: &[Assessmen
             .or_default()
             .extend(item.finding_ids.iter().map(String::as_str));
     }
-    expected.len() == declared.len()
-        && declared.iter().all(|a| {
-            expected.get(a.discussion_id.as_str()).is_some_and(|ids| {
-                ids.iter()
-                    .all(|id| a.finding_ids.iter().any(|actual| actual == id))
-            })
-        })
+    let mut assessed = BTreeSet::new();
+    let mut errors = Vec::new();
+    for (index, assessment) in declared.iter().enumerate() {
+        let discussion = assessment.discussion_id.as_str();
+        let path = format!("/handoff/assessments/{index}");
+        let Some(ids) = expected.get(discussion) else {
+            errors.push(HandoffFieldError::new(
+                format!("{path}/discussionId"),
+                format!("{discussion} is not a discussion of the selected-thread batch."),
+            ));
+            continue;
+        };
+        if !assessed.insert(discussion) {
+            errors.push(HandoffFieldError::new(
+                format!("{path}/discussionId"),
+                "ID is already used in this collection.",
+            ));
+            continue;
+        }
+        let missing: Vec<&str> = ids
+            .iter()
+            .copied()
+            .filter(|id| !assessment.finding_ids.iter().any(|actual| actual == id))
+            .collect();
+        if !missing.is_empty() {
+            errors.push(HandoffFieldError::new(
+                format!("{path}/findingIds"),
+                format!(
+                    "Include {} for discussion {discussion}.",
+                    missing.join(", ")
+                ),
+            ));
+        }
+    }
+    for discussion in expected.keys() {
+        if !assessed.contains(discussion) {
+            errors.push(HandoffFieldError::new(
+                "/handoff/assessments",
+                format!("Add an assessment for discussion {discussion}."),
+            ));
+        }
+    }
+    errors
 }
 
 pub(super) fn complete(
@@ -204,42 +248,74 @@ pub(super) fn complete(
     Ok(())
 }
 
-pub(super) fn edits_match(
+/// Each outcome's discussion links name batch discussions that track its finding, and each
+/// linked discussion's assessment covers the finding, retiring it when the outcome does.
+/// An outcome without links is linked to every batch discussion that tracks its finding.
+pub(super) fn edit_errors(
     db: &Connection,
     run: &str,
     manifest: &FrozenManifest,
     edits: &ReportEdits,
     assessments: &[Assessment],
-) -> Result<bool, StoreError> {
+) -> Result<Vec<HandoffFieldError>, StoreError> {
     let originals: BTreeSet<&str> = manifest
         .observations
         .iter()
         .map(|member| member.discussion_id.as_str())
         .collect();
+    let tracks = |discussion: &str, finding: &str| {
+        manifest.observations.iter().any(|observation| {
+            observation.discussion_id == discussion
+                && observation.finding_ids.iter().any(|id| id == finding)
+        })
+    };
     let mut existing = db.prepare_cached(
         "SELECT EXISTS(SELECT 1 FROM report_findings WHERE run_id=?1 AND receipt_id=?2 AND finding_id=?3)",
     )?;
-    for edit in &edits.findings {
-        let known: bool = existing.query_row(
-            params![run, manifest.report_receipt_id, edit.finding_id],
-            |row| row.get(0),
-        )?;
-        if edit.discussion_ids.iter().any(|id| {
-            !originals.contains(id.as_str())
-                || (known
-                    && !manifest.observations.iter().any(|observation| {
-                        &observation.discussion_id == id
-                            && observation.finding_ids.contains(&edit.finding_id)
-                    }))
-                || !assessments.iter().any(|assessment| {
-                    &assessment.discussion_id == id
-                        && assessment.finding_ids.contains(&edit.finding_id)
-                        && (!edit.conclusion.retires_finding()
-                            || assessment.conclusion.retires_finding())
+    let mut errors = Vec::new();
+    for (index, edit) in edits.findings.iter().enumerate() {
+        let finding = edit.finding_id.as_str();
+        let known: bool = existing
+            .query_row(params![run, manifest.report_receipt_id, finding], |row| {
+                row.get(0)
+            })?;
+        let linked: BTreeSet<&str> = if edit.discussion_ids.is_empty() {
+            originals
+                .iter()
+                .copied()
+                .filter(|discussion| tracks(discussion, finding))
+                .collect()
+        } else {
+            edit.discussion_ids.iter().map(String::as_str).collect()
+        };
+        for discussion in linked {
+            let covering = |retiring: bool| {
+                assessments.iter().any(|assessment| {
+                    assessment.discussion_id == discussion
+                        && assessment.finding_ids.iter().any(|id| id == finding)
+                        && (!retiring || assessment.conclusion.retires_finding())
                 })
-        }) {
-            return Ok(false);
+            };
+            let message = if !originals.contains(discussion) {
+                format!("{discussion} is not a discussion of the selected-thread batch.")
+            } else if known && !tracks(discussion, finding) {
+                format!("Discussion {discussion} does not track {finding}.")
+            } else if !covering(false) {
+                format!(
+                    "The assessment of discussion {discussion} must list {finding} in findingIds."
+                )
+            } else if !covering(edit.conclusion.retires_finding()) {
+                format!(
+                    "{finding} is retired here, so the assessment of discussion {discussion} needs a retiring conclusion."
+                )
+            } else {
+                continue;
+            };
+            errors.push(HandoffFieldError::new(
+                format!("/handoff/findingChanges/{index}/discussionIds"),
+                message,
+            ));
         }
     }
-    Ok(true)
+    Ok(errors)
 }

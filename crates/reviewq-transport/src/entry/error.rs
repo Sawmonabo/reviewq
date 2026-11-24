@@ -63,8 +63,24 @@ impl<S: Send + Sync> FromRequest<S> for ApiBytes {
 
 impl From<AppError> for ApiError {
     fn from(error: AppError) -> Self {
-        Self::Application(error)
+        match error {
+            AppError::InvalidHandoff(errors) => Self::InvalidHandoff(handoff_field_errors(errors)),
+            error => Self::Application(error),
+        }
     }
+}
+
+/// The wire form of field errors found after the handoff's schema and value rules passed.
+pub(super) fn handoff_field_errors(
+    errors: Vec<reviewq_app::reports::HandoffFieldError>,
+) -> Vec<ReportHandoffFieldError> {
+    errors
+        .into_iter()
+        .map(|error| ReportHandoffFieldError {
+            path: error.path,
+            message: error.message,
+        })
+        .collect()
 }
 
 impl IntoResponse for ApiError {
@@ -99,7 +115,9 @@ fn field_errors(error: AppError, errors: &[ReportHandoffFieldError]) -> Response
 
 pub(super) fn failure(error: AppError) -> (StatusCode, Failure) {
     let (status, code) = match error {
-        AppError::InvalidRequest | AppError::ReportAmendmentSourceChanged => {
+        AppError::InvalidRequest
+        | AppError::InvalidHandoff(_)
+        | AppError::ReportAmendmentSourceChanged => {
             (StatusCode::BAD_REQUEST, ErrorCode::InvalidRequest)
         }
         AppError::TicketUnverified => (

@@ -28,8 +28,9 @@ pub use hosts::{
     TerminalResult,
 };
 pub use scalar::{
-    CheckpointIdDto, EventCursorDto, FileIdDto, GitShaDto, HistoryCursorDto, HistoryEntryIdDto,
-    HistoryGenerationDto, HistoryTurnIdDto, MergeRequestIidDto, PageCursorDto, PatchETagDto,
-    PatchRevisionDto, ProjectIdDto, ResourceIdDto, ReviewIdDto, RevisionDto, RunIdDto,
-    SafeCountDto, SessionKeyDto, SubmissionIdDto, TicketKeyDto, UpstreamIdDto,
+    CheckpointIdDto, DiscussionIdDto, EventCursorDto, FileIdDto, FindingIdDto, GitShaDto,
+    HistoryCursorDto, HistoryEntryIdDto, HistoryGenerationDto, HistoryTurnIdDto,
+    MergeRequestIidDto, PageCursorDto, PatchETagDto, PatchRevisionDto, ProjectIdDto, ResourceIdDto,
+    ReviewIdDto, RevisionDto, RunIdDto, SafeCountDto, SessionKeyDto, SubmissionIdDto, TicketKeyDto,
+    UpstreamIdDto,
 };

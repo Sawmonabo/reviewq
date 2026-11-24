@@ -1,7 +1,9 @@
 use serde::{Deserialize, Serialize};
 
 use super::ReportHashDto;
-use crate::{GitShaDto, HistoryTurnIdDto, ResourceIdDto, SessionKeyDto};
+use crate::{
+    DiscussionIdDto, FindingIdDto, GitShaDto, HistoryTurnIdDto, ResourceIdDto, SessionKeyDto,
+};
 
 pub mod limits;
 mod structured;
@@ -148,12 +150,12 @@ impl Handoff {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct Assessment {
-    pub discussion_id: ResourceIdDto,
+    pub discussion_id: DiscussionIdDto,
     pub conclusion: super::FindingConclusion,
     #[cfg_attr(feature = "schema", schemars(length(min = 1, max = limits::MAX_REASON_BYTES)))]
     pub reason: String,
     #[cfg_attr(feature = "schema", schemars(length(max = limits::MAX_ASSESSMENT_FINDING_IDS)))]
-    pub finding_ids: Vec<ResourceIdDto>,
+    pub finding_ids: Vec<FindingIdDto>,
     pub next_action: crate::followups::NextAction,
 }
 
@@ -161,13 +163,13 @@ pub struct Assessment {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct FindingEdit {
-    pub finding_id: ResourceIdDto,
+    pub finding_id: FindingIdDto,
     pub conclusion: super::FindingConclusion,
     #[cfg_attr(feature = "schema", schemars(length(min = 1, max = limits::MAX_REASON_BYTES)))]
     pub reason: String,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     #[cfg_attr(feature = "schema", schemars(length(max = limits::MAX_DISCUSSION_IDS)))]
-    pub discussion_ids: Vec<ResourceIdDto>,
+    pub discussion_ids: Vec<DiscussionIdDto>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]

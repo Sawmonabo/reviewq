@@ -60,6 +60,9 @@ pub(super) async fn submit(
         Err(AppError::ReportAmendmentSourceChanged) => {
             return invalid_handoff(&[report_amendment_source_error()]);
         }
+        Err(AppError::InvalidHandoff(errors)) => {
+            return invalid_handoff(&crate::entry::error::handoff_field_errors(errors));
+        }
         result => result?,
     };
     super::bounded_result(&serde_json::to_value(receipt.data).map_err(|_| AppError::Internal)?)

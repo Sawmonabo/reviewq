@@ -229,7 +229,7 @@ impl Listener {
         let value = tokio::task::spawn_blocking(move || decode(Box::new(input)))
             .await
             .map_err(|_| AppError::Unavailable)?;
-        if let Some(end) = *ended.borrow() {
+        if let Some(end) = ended.borrow().clone() {
             return with_end(value, end);
         }
         // A local parser failure can detach without interrupting the other readers.
@@ -237,7 +237,7 @@ impl Listener {
             return Err(error);
         }
         ended.changed().await.map_err(|_| AppError::Unavailable)?;
-        let end = (*ended.borrow()).ok_or(AppError::Internal)?;
+        let end = ended.borrow().clone().ok_or(AppError::Internal)?;
         with_end(value, end)
     }
 }

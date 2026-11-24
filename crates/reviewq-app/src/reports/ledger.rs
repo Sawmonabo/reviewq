@@ -5,7 +5,10 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use reviewq_domain::identity::{GitSha, ReceiptId, ReportHash};
 
-use super::{Descriptor, FindingDetails, FindingEdit, ReportEdits, SourceRange, StructuredReport};
+use super::{
+    Declaration, Descriptor, FindingDetails, FindingEdit, HandoffFieldError, ReportEdits,
+    SourceRange, StructuredReport,
+};
 
 /// An active finding of the parent version.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -163,9 +166,167 @@ pub fn derive(
     Ledger { findings, changes }
 }
 
+/// Checks a final's findings ledger against the parent's active findings while the tool
+/// call is open. An outcome must name a parent finding. A full review lists or gives an
+/// outcome for every parent finding. Each level-three `F-` heading of a file report must be
+/// listed, given an outcome or carried; `headings` is `None` when they are unknown.
+/// Amendments, unchanged results and questions carry no ledger.
+pub fn check(
+    declaration: &Declaration,
+    parent: &[ParentFinding],
+    headings: Option<&[String]>,
+    full_review: bool,
+) -> Vec<HandoffFieldError> {
+    let Declaration::Final {
+        report: Some(report),
+        edits,
+        ..
+    } = declaration
+    else {
+        return Vec::new();
+    };
+    let active: BTreeSet<&str> = parent.iter().map(|finding| finding.id.as_str()).collect();
+    let listed: BTreeSet<&str> = report
+        .findings
+        .iter()
+        .map(|finding| finding.id.as_str())
+        .collect();
+    let outcomes: BTreeSet<&str> = edits
+        .findings
+        .iter()
+        .map(|edit| edit.finding_id.as_str())
+        .collect();
+    let mut errors = Vec::new();
+    for (index, edit) in edits.findings.iter().enumerate() {
+        if !active.contains(edit.finding_id.as_str()) {
+            errors.push(HandoffFieldError::new(
+                format!("/handoff/findingChanges/{index}/findingId"),
+                format!(
+                    "{} is not a finding of the last accepted report.",
+                    edit.finding_id
+                ),
+            ));
+        }
+    }
+    if full_review {
+        for finding in parent {
+            let id = finding.id.as_str();
+            if !listed.contains(id) && !outcomes.contains(id) {
+                errors.push(HandoffFieldError::new(
+                    "/handoff/report/findings",
+                    format!(
+                        "{id} · {} was in the last accepted report. List it in report.findings or give its outcome in findingChanges.",
+                        untagged(id, &finding.title)
+                    ),
+                ));
+            }
+        }
+    }
+    for id in headings.unwrap_or_default() {
+        let id = id.as_str();
+        if !listed.contains(id) && !outcomes.contains(id) && !active.contains(id) {
+            errors.push(HandoffFieldError::new(
+                "/handoff/source",
+                format!("The report has heading {id}, which is missing from report.findings."),
+            ));
+        }
+    }
+    errors
+}
+
+/// A title without the leading ID that a heading-derived title repeats, such as
+/// "F-02 Retry loop never ends".
+fn untagged<'a>(id: &str, title: &'a str) -> &'a str {
+    match title.strip_prefix(id) {
+        Some(rest)
+            if rest.starts_with(|next: char| next.is_whitespace() || ":.-–—".contains(next)) =>
+        {
+            let rest = rest
+                .trim_start_matches(|next: char| next.is_whitespace() || ":.-–—".contains(next));
+            if rest.is_empty() { title } else { rest }
+        }
+        _ => title,
+    }
+}
+
 struct Heading<'a> {
     title: &'a String,
     severity: &'a Option<String>,
     blocking: Option<bool>,
     source: &'a SourceRange,
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use super::{ParentFinding, check};
+    use crate::reports::{
+        Declaration, FindingBasis, FindingBasisKind, FindingDetails, ReportEdits, RevisionEvidence,
+        Source, StructuredFinding, StructuredReport, Verdict,
+    };
+
+    // BLITZ-592: a full re-review listed F-04 and silently dropped F-05 and F-06.
+    #[test]
+    fn a_full_review_names_each_parent_finding_it_leaves_out() {
+        let parent = [
+            ("F-04", "Retry reuses a spent key"),
+            ("F-05", "Webhook signature is not verified"),
+            ("F-06", "Audit log omits the actor"),
+        ]
+        .map(|(id, title)| ParentFinding {
+            id: id.into(),
+            title: title.into(),
+            severity: Some("P1".into()),
+            blocking: Some(true),
+            details: None,
+            evidence_sha256: None,
+            origin: "receipt-591".parse().unwrap(),
+        });
+        let review = Declaration::Final {
+            source: Source::Response,
+            revision: RevisionEvidence::Exact("a".repeat(40).parse().unwrap()),
+            verdict: Verdict::RequestChanges,
+            report: Some(Arc::new(StructuredReport {
+                version: 1,
+                findings: vec![StructuredFinding {
+                    id: "F-04".into(),
+                    title: "Retry reuses a spent key".into(),
+                    severity: "P1".into(),
+                    blocking: true,
+                    details: FindingDetails {
+                        location: None,
+                        consequence: "A retried payment charges twice.".into(),
+                        evidence: FindingBasis {
+                            kind: FindingBasisKind::Observed,
+                            text: "The retry path reads the consumed key.".into(),
+                        },
+                        checked_sha: None,
+                        evidence_hash: None,
+                    },
+                }],
+            })),
+            amends: None,
+            edits: ReportEdits::default(),
+            assessments: Vec::new(),
+        };
+        let errors = check(&review, &parent, None, true);
+        let messages: Vec<_> = errors
+            .iter()
+            .map(|error| (error.path.as_str(), error.message.as_str()))
+            .collect();
+        assert_eq!(
+            messages,
+            [
+                (
+                    "/handoff/report/findings",
+                    "F-05 · Webhook signature is not verified was in the last accepted report. List it in report.findings or give its outcome in findingChanges."
+                ),
+                (
+                    "/handoff/report/findings",
+                    "F-06 · Audit log omits the actor was in the last accepted report. List it in report.findings or give its outcome in findingChanges."
+                ),
+            ]
+        );
+    }
 }

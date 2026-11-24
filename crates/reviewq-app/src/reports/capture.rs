@@ -185,6 +185,7 @@ pub trait ReportCaptureStore: Send + Sync {
 
     fn accepted_report(&self, lead: LeadTarget) -> AppFuture<'_, Snapshot<Option<AcceptedReport>>>;
 
+    #[allow(clippy::too_many_arguments)]
     fn stage_report(
         &self,
         call: NativeCall,
@@ -193,6 +194,8 @@ pub trait ReportCaptureStore: Send + Sync {
         declaration_sha256: ReportHash,
         source_authority: Option<ReportAuthority>,
         checkout: Option<Actor>,
+        // The file report's level-three `F-` heading IDs, when the submit could read them.
+        headings: Option<Vec<String>>,
     ) -> AppFuture<'_, Snapshot<HandoffReceipt>>;
 
     fn reserve_report_correction(&self, call: NativeCall) -> AppFuture<'_, bool>;
@@ -242,16 +245,55 @@ pub trait ReportCaptureStore: Send + Sync {
     ) -> AppFuture<'_, ()>;
 }
 
-pub async fn hash_report_file(
+/// What a submit-time read of a report file found.
+#[derive(Default)]
+pub struct SubmittedFile {
+    /// SHA-256 of every byte read. `None` when the file was not read.
+    pub hash: Option<ReportHash>,
+    /// The report's level-three `F-` heading IDs, when they could be read without waiting.
+    pub headings: Option<Vec<String>>,
+}
+
+/// Reads a submitted report file once. Without a `declared` hash, every byte is hashed and
+/// a read failure is returned. With `headings`, it also parses a file of at most 4 MiB of
+/// UTF-8 for its `F-` heading IDs, but only when the parse admission is free; it never
+/// waits. A declared hash that differs from the bytes, an oversized file, or any failure
+/// after a declared hash yields no headings, and acceptance checks the file instead.
+pub async fn read_submitted_file(
     files: &dyn ReportFileSource,
     call: NativeCall,
     path: AbsolutePath,
-) -> Result<ReportHash, AppError> {
+    declared: Option<&ReportHash>,
+    headings: bool,
+) -> Result<SubmittedFile, AppError> {
+    let read = read_submitted(files, call, path, declared, headings).await;
+    match declared {
+        None => read,
+        Some(_) => Ok(read.unwrap_or_default()),
+    }
+}
+
+async fn read_submitted(
+    files: &dyn ReportFileSource,
+    call: NativeCall,
+    path: AbsolutePath,
+    declared: Option<&ReportHash>,
+    headings: bool,
+) -> Result<SubmittedFile, AppError> {
     let source = files.open_report(call, path).await?;
     let total = source.byte_length();
     if total == 0 || total > i64::MAX as u64 {
         return Err(AppError::InvalidRequest);
     }
+    let admission = (headings && total <= SEMANTIC_BYTES)
+        .then(index::try_admit)
+        .flatten();
+    if declared.is_some() && admission.is_none() {
+        return Ok(SubmittedFile::default());
+    }
+    let mut text = admission
+        .as_ref()
+        .map(|_| Vec::with_capacity(total as usize));
     let mut digest = Sha256::new();
     let mut offset = 0;
     while offset < total {
@@ -260,11 +302,40 @@ pub async fn hash_report_file(
         if bytes.len() != length {
             return Err(AppError::Conflict);
         }
-        digest.update(bytes);
+        digest.update(&bytes);
+        if let Some(text) = text.as_mut() {
+            text.extend_from_slice(&bytes);
+        }
         offset += length as u64;
     }
     source.verify_unchanged().await?;
-    Ok(ReportHash::from_sha256(digest.finalize().into()))
+    let hash = ReportHash::from_sha256(digest.finalize().into());
+    let headings = match (admission, text) {
+        (Some(admission), Some(bytes)) if declared.is_none_or(|declared| declared == &hash) => {
+            tokio::task::spawn_blocking(move || {
+                let _admission = admission;
+                let source = String::from_utf8(bytes).ok()?;
+                let items = index::parse(&source).ok().flatten()?;
+                Some(
+                    items
+                        .into_iter()
+                        .filter_map(|item| match item {
+                            Descriptor::Finding { id, .. } => Some(id),
+                            _ => None,
+                        })
+                        .collect(),
+                )
+            })
+            .await
+            .ok()
+            .flatten()
+        }
+        _ => None,
+    };
+    Ok(SubmittedFile {
+        hash: Some(hash),
+        headings,
+    })
 }
 
 pub async fn reconcile_reports(
@@ -525,12 +596,16 @@ async fn read_source(
     // A report whose headings cannot be parsed, such as one with a repeated F- heading, is
     // accepted without a heading index and still renders in the rich reader.
     let (index, display_source) = match index_source {
-        Some(source) => tokio::task::spawn_blocking(move || {
-            let index = index::parse(&source).ok().flatten();
-            (index, display_admitted.then_some(source))
-        })
-        .await
-        .unwrap_or((None, None)),
+        Some(source) => {
+            let admission = index::admit().await?;
+            tokio::task::spawn_blocking(move || {
+                let _admission = admission;
+                let index = index::parse(&source).ok().flatten();
+                (index, display_admitted.then_some(source))
+            })
+            .await
+            .unwrap_or((None, None))
+        }
         None => (None, None),
     };
     Ok((

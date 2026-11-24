@@ -6,7 +6,7 @@ use reviewq_app::access::{Actor, AppError, AppFuture};
 use reviewq_app::events::{ResourceKey, Snapshot};
 use reviewq_app::reports::{
     AcceptedReport, ArtifactChunk, CapturedArtifact, Declaration, HandoffReceipt, ReportAuthority,
-    ReportCaptureStore, ReportReference, ReportWork, RevisionEvidence, Source, ledger,
+    ReportCaptureStore, ReportReference, ReportWork, RevisionEvidence, Source,
 };
 use reviewq_app::workflow::{
     ExpectedAcknowledgement, NativeCall, ReportFailureAddress, WorkflowTool,
@@ -26,6 +26,7 @@ use crate::{SqliteStore, StoreError};
 mod accept;
 mod authority;
 mod batch;
+mod checks;
 mod edits;
 mod failures;
 mod reconciliation;
@@ -152,6 +153,7 @@ impl ReportCaptureStore for SqliteStore {
         declaration_sha256: ReportHash,
         source_authority: Option<ReportAuthority>,
         checkout: Option<Actor>,
+        headings: Option<Vec<String>>,
     ) -> AppFuture<'_, Snapshot<HandoffReceipt>> {
         Box::pin(async move {
             self.write(move |tx| {
@@ -175,6 +177,7 @@ impl ReportCaptureStore for SqliteStore {
                     declaration_sha256,
                     source_authority,
                     checkout.as_ref(),
+                    headings.as_deref(),
                 )
             })
             .await
@@ -475,6 +478,7 @@ fn saved(
     }))
 }
 
+#[allow(clippy::too_many_arguments)]
 fn stage(
     tx: &mut WriteTx<'_>,
     call: NativeCall,
@@ -483,6 +487,7 @@ fn stage(
     declaration_sha256: ReportHash,
     source_authority: Option<ReportAuthority>,
     checkout: Option<&Actor>,
+    headings: Option<&[String]>,
 ) -> Result<Snapshot<HandoffReceipt>, StoreError> {
     let db = &tx.sql;
     check_call(db, &call)?;
@@ -521,23 +526,14 @@ fn stage(
         return Err(AppError::Forbidden.into());
     }
     let assessments = batch::encode(declaration.assessments())?;
-    // The budget check counts the supplied cards; acceptance adds those carried from the parent.
-    let projection = match &declaration {
-        Declaration::Final {
-            report: Some(report),
-            edits,
-            revision,
-            ..
-        } => {
-            let reviewed = match revision {
-                RevisionEvidence::Exact(sha) => Some(sha),
-                RevisionEvidence::Unknown(_) => None,
-            };
-            let supplied = ledger::derive(Vec::new(), report, edits, reviewed, &[]);
-            Some(structured::Projection::new(supplied)?)
-        }
-        _ => None,
-    };
+    let (mut errors, projection) = checks::ledger(
+        db,
+        run.as_str(),
+        base.as_deref(),
+        scoped_batch.as_deref(),
+        &declaration,
+        headings,
+    )?;
     let (form, source, revision, verdict, expected, reason, edits) = match declaration {
         Declaration::Final {
             source,
@@ -605,7 +601,10 @@ fn stage(
     if let Some(projection) = &projection
         && !structured::fits(db, &edits, projection.metadata())?
     {
-        return Err(AppError::PayloadTooLarge.into());
+        errors.push(checks::too_large());
+    }
+    if !errors.is_empty() {
+        return Err(AppError::InvalidHandoff(errors).into());
     }
     let receipt_id = Uuid::new_v4().to_string();
     let time = now_ms()?;

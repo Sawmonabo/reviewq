@@ -27,7 +27,7 @@ pub use revision::{FindingEdit, ReportEdits};
 pub use capture::{
     AcceptedReport, ArtifactChunk, Assessment, CHUNK_BYTES, CapturedArtifact, Declaration,
     HandoffReceipt, HandoffState, ReportAuthority, ReportCaptureStore, ReportFileSource,
-    ReportWork, RevisionEvidence, Source, hash_report_file, reconcile_reports,
+    ReportWork, RevisionEvidence, Source, SubmittedFile, read_submitted_file, reconcile_reports,
 };
 
 use reviewq_domain::identity::{GitSha, ReceiptId, ReportHash, Revision, RunId};
@@ -43,6 +43,23 @@ pub const MAX_SECTION_SCALARS: u32 = 12_000;
 const MAX_MARKDOWN_LINE_BYTES: usize = 16 * 1024;
 
 use crate::labels::labels;
+
+/// A report handoff field that breaks a rule, with the correction the agent can make in
+/// its open turn. The path is a JSON pointer into the tool input.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct HandoffFieldError {
+    pub path: String,
+    pub message: String,
+}
+
+impl HandoffFieldError {
+    pub fn new(path: impl Into<String>, message: impl Into<String>) -> Self {
+        Self {
+            path: path.into(),
+            message: message.into(),
+        }
+    }
+}
 
 labels!(Verdict {
     Approve => "approve",
