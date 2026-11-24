@@ -80,7 +80,7 @@ A carried finding keeps its last fields and details and links to the accepted re
 ReviewQ owns finding state across versions and never infers it from prose. A final handoff other than an amendment carries a ledger:
 
 - `report.findings` lists every finding the report raises, blocking and nonblocking, functional, security and quality. Each entry has a stable ID, title, severity, blocking status, consequence, and evidence or an explicit evidence gap, plus a location when applicable. `findings: []` means the review found nothing.
-- `findingChanges` gives the outcome for a finding of the last accepted version that the agent re-assessed: `fixed`, `clarified_withdrawn` or `superseded` retire it, and `partly_addressed`, `still_present` or `unverified` keep it active. Outcomes are allowed in every phase. An outcome names a finding of the last accepted version and needs an exact reviewed SHA. A retired ID cannot also be listed in `report.findings`.
+- `findingChanges` gives the outcome for a finding of the last accepted version that the agent re-assessed: `fixed`, `clarified_withdrawn` or `superseded` retire it, and `partly_addressed`, `still_present` or `unverified` keep it active. Outcomes are allowed in every phase. An outcome names a finding of the last accepted version; its checked revision is the handoff's reviewed SHA, or unknown with the revision. A retired ID cannot also be listed in `report.findings`.
 
 IDs are the report's own (`F-01`) when it has them. The same concern keeps its ID across versions and a new concern takes the next unused ID.
 
@@ -106,13 +106,13 @@ On first admission, persist a service-issued receipt with the validated declarat
 The synthetic report text `"# Review\n\nChecked RQ-41.\n"` decoded as a JSON string has 25 UTF-8 bytes and SHA-256 `637026d0865ac604c088096fb651fe8a885f19009b7d7fcfeffe4743d3fb2c89`. For a reproducible declaration-digest example, take the UTF-8 bytes on the following single line, excluding its trailing newline.
 
 ```json
-{"outcome":"final","source":{"kind":"file","path":"/tmp/reviewq-worked/RQ-41.md","sha256":"637026d0865ac604c088096fb651fe8a885f19009b7d7fcfeffe4743d3fb2c89"},"revision":{"sha":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},"verdict":"approve"}
+{"outcome":"final","source":{"kind":"file","path":"/tmp/reviewq-worked/RQ-41.md","sha256":"637026d0865ac604c088096fb651fe8a885f19009b7d7fcfeffe4743d3fb2c89"},"revision":{"sha":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},"verdict":"approve","report":{"version":1,"findings":[]}}
 ```
 
 With synthetic receipt ID `receipt-rq41`, the native helper would write this service acknowledgement within the successful tool call.
 
 ```json
-{"receiptId":"receipt-rq41","state":"pending_completion","declarationSha256":"5d8a21867dc7aceb55d24b25ab19aa68201e0c6d1b74fac4d6918475302d1f7f"}
+{"receiptId":"receipt-rq41","state":"pending_completion","declarationSha256":"1138164963a108391201b88a9578e1a6127496deb0fda14b52083b5d3e14727c"}
 ```
 
 Bind that receipt to the verified native call before accepting the artifact. Recompute the declaration digest when the fixture path or content changes.
