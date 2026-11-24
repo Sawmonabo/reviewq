@@ -529,7 +529,7 @@ async fn read_source(
             ..
         }
     );
-    // A heading index that cannot be parsed leaves the version source-only.
+    // A report whose headings cannot be parsed is accepted without a heading index.
     let (index, display_source) = match index_source {
         Some(source) => match tokio::task::spawn_blocking(move || {
             let index = index::parse(&source, legacy)?;
