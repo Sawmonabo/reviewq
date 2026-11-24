@@ -254,7 +254,7 @@ struct Heading<'a> {
     title: &'a String,
     severity: &'a Option<String>,
     blocking: Option<bool>,
-    /// `None` for a heading nested in a list item, which the reader draws without a card.
+    /// `None` for a heading nested in a list item, which the reader draws as a ledger card.
     source: Option<&'a SourceRange>,
 }
 
@@ -335,7 +335,7 @@ mod tests {
     // A report in its own format wrote F-01's ID in inline code, repeated F-01, said both
     // "Blocking: yes" and "Blocking: no" under it, and raised F-02 inside a numbered list.
     // The parse must not fail, F-01 takes the last Blocking line before its first labelled
-    // field, as its card shows, and F-02, which the reader draws without a card, must stay
+    // field, as its card shows, and F-02, which the reader draws as a ledger card, must stay
     // a tracked finding.
     #[test]
     fn a_nested_heading_and_a_repeated_id_stay_tracked() {
