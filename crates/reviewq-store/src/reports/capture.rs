@@ -513,10 +513,17 @@ fn stage(
         return Err(hold.into());
     }
     let scoped_batch = batch::bound(db, &call)?;
+    // A bound batch's missing assessments are field errors below; an amendment cannot
+    // complete the batch at all.
     if (!declaration.assessments().is_empty() && scoped_batch.is_none())
         || (scoped_batch.is_some()
-            && declaration.assessments().is_empty()
-            && !matches!(declaration, Declaration::NeedsInput { .. }))
+            && matches!(
+                declaration,
+                Declaration::Final {
+                    amends: Some(_),
+                    ..
+                }
+            ))
     {
         return Err(AppError::Conflict.into());
     }
