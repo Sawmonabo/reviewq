@@ -11,8 +11,13 @@ import type {
 } from "../../../api/generated/contracts/reports";
 import { parseMarkdown } from "../../../components/markdown/parse-markdown";
 import { parseSettledMarkdown, tableCost } from "../../../components/markdown/settled";
-import { groupReportItems, inDisplayOrder, reportBlocks } from "./report-presentation";
-import type { GroupPosition, PreparedGroup } from "./report-presentation";
+import {
+  carriedPosition,
+  groupReportItems,
+  inDisplayOrder,
+  reportBlocks,
+} from "./report-presentation";
+import type { GroupPosition, PreparedGroup, ReportBlock } from "./report-presentation";
 import { isThreadSection, reportText, startsReportBody } from "./report-structure";
 import type { AcceptedFindingChange } from "./report-structure";
 
@@ -63,6 +68,56 @@ export function wholeDocument(
       const block = groups[index];
       return block ? { block, source: slice, drawings: display?.drawings } : undefined;
     },
+  };
+}
+
+// Carried cards have no source in this report: offset -1 keeps them out of
+// bookmarks and quotes, and the windowed reader only sees its own group indexes.
+export function withCarried(
+  reader: ReaderDocument,
+  carried: readonly ReportBlock[],
+  changes: Changes,
+): ReaderDocument {
+  if (!carried.length) return reader;
+  const at = carriedPosition(reader.groups, changes);
+  const inner = (index: number) =>
+    index < at ? index : index >= at + carried.length ? index - carried.length : undefined;
+  const outer = (index: number) => (index < at ? index : index + carried.length);
+  const own = (indexes: readonly number[]) =>
+    indexes.flatMap((index) => {
+      const value = inner(index);
+      return value === undefined ? [] : [value];
+    });
+  const cards = carried.map((block) => ({ block, source: { text: "", utf16: 0, scalar: 0 } }));
+  const { byteAt, prepare } = reader;
+  return {
+    groups: [...reader.groups.slice(0, at), ...carried, ...reader.groups.slice(at)],
+    prepared: (index) => {
+      const value = inner(index);
+      return value === undefined ? cards[index - at] : reader.prepared(value);
+    },
+    ...(byteAt && {
+      byteAt: (index: number) => {
+        const value = inner(index);
+        return value === undefined ? undefined : byteAt(value);
+      },
+    }),
+    ...(prepare && {
+      prepare: (
+        indexes: readonly number[],
+        signal: AbortSignal,
+        publish: () => void,
+        current: (preparing?: number) => boolean,
+        pinned: readonly number[],
+      ) =>
+        prepare(
+          own(indexes),
+          signal,
+          publish,
+          (preparing) => current(preparing === undefined ? undefined : outer(preparing)),
+          own(pinned),
+        ),
+    }),
   };
 }
 

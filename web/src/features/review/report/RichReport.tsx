@@ -367,6 +367,7 @@ export function RichReport({
             )}
           </div>
           <AuthoredContent nodes={finding.header} />
+          {finding.carried && <p className="meta">Carried from an earlier version</p>}
         </header>
         {finding.fields.length > 0 && (
           <dl className="report-finding-fields">

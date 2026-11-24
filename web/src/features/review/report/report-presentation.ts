@@ -1,6 +1,6 @@
 import type { DrawingHint } from "../../../api/generated/contracts/common";
 import type { Element, Root, RootContent } from "hast";
-import type { ReportSummary } from "../../../api/generated/contracts/reports";
+import type { Descriptor, ReportSummary } from "../../../api/generated/contracts/reports";
 import { isRetired, reportStructure, reportText as text } from "./report-structure";
 import type { AcceptedFindingChange } from "./report-structure";
 
@@ -12,6 +12,7 @@ type AuthoredFinding = {
   readonly category?: string;
   readonly blocking?: boolean;
   readonly change?: AcceptedFindingChange;
+  readonly carried?: true;
   readonly header: readonly RootContent[];
   readonly fields: readonly Field[];
 };
@@ -22,6 +23,10 @@ export type ReportBlock = GroupPosition & {
   readonly finding?: AuthoredFinding;
 };
 
+type Finding = Extract<Descriptor, { kind: "finding" }>;
+
+const previousThreads =
+  /^(?:(?:our )?previous threads|prior(?: review)? threads|discussion outcomes)$/i;
 const findingHeading = /^(F-\d{1,16})(?=$|[\s:.–—-])\s*(?:[·:.–—-]\s*)?(?:(P[0-3])\s*[·–—-]\s*)?/;
 const fieldName =
   /^(Issue|Why it matters|Confirmed|Proposed comment|Location|Evidence|Suggested fix)(?=\s*(?:[:.—]|$))/i;
@@ -78,19 +83,106 @@ export function inDisplayOrder<T extends GroupPosition>(
   );
   if (!retired.length) return groups;
   const active = groups.filter((group) => !retired.includes(group));
-  const previous = active.findIndex(
-    (group) =>
-      group.name &&
-      /^(?:(?:our )?previous threads|prior(?: review)? threads|discussion outcomes)$/i.test(
-        group.name,
-      ),
-  );
-  const next =
-    previous < 0
-      ? -1
-      : active.findIndex((group, index) => index > previous && (group.name || group.findingId));
+  const next = afterPreviousThreads(active);
   active.splice(next < 0 ? active.length : next, 0, ...retired);
   return active;
+}
+
+export function carriedPosition(
+  groups: readonly GroupPosition[],
+  changes: ReadonlyMap<string, AcceptedFindingChange> | null | undefined,
+) {
+  const threads = afterPreviousThreads(groups);
+  if (threads >= 0) return threads;
+  for (let index = groups.length - 1; index >= 0; index--) {
+    const id = groups[index]!.findingId;
+    if (id && !isRetired(changes?.get(id))) return index + 1;
+  }
+  return groups.length;
+}
+
+export function carriedBlock(
+  item: Finding,
+  change: AcceptedFindingChange | undefined,
+): ReportBlock {
+  const details = item.details;
+  const blocking = item.disposition?.blocking ?? item.blocking;
+  const location = details?.location;
+  const fields: Field[] = details
+    ? [
+        ...(location
+          ? [
+              {
+                label: "Location",
+                nodes: [
+                  hast("p", [
+                    hast("code", [
+                      {
+                        type: "text",
+                        value: `${location.path}${location.line ? `:${location.line}` : ""}`,
+                      },
+                    ]),
+                  ]),
+                ],
+              },
+            ]
+          : []),
+        { label: "Why it matters", nodes: plainParagraphs(details.consequence) },
+        {
+          label: details.evidence.kind === "gap" ? "Evidence gap" : "Evidence",
+          nodes: plainParagraphs(details.evidence.text),
+        },
+      ]
+    : [];
+  return {
+    offset: -1,
+    sourceOrder: -1,
+    end: -1,
+    nodes: [],
+    findingId: item.findingId,
+    finding: {
+      id: item.findingId,
+      title: item.title,
+      ...(item.severity ? { severity: item.severity } : {}),
+      ...(blocking !== null ? { blocking } : {}),
+      ...(change ? { change } : {}),
+      carried: true,
+      header: [hast("h3", [{ type: "text", value: item.title }])],
+      fields,
+    },
+  };
+}
+
+function afterPreviousThreads(groups: readonly GroupPosition[]) {
+  const previous = groups.findIndex((group) => group.name && previousThreads.test(group.name));
+  if (previous < 0) return -1;
+  const next = groups.findIndex(
+    (group, index) => index > previous && (group.name || group.findingId),
+  );
+  return next < 0 ? groups.length : next;
+}
+
+function plainParagraphs(value: string): RootContent[] {
+  return value
+    .split(/\n\s*\n/)
+    .filter((part) => part.trim())
+    .map((part) =>
+      hast(
+        "p",
+        part
+          .trim()
+          .split("\n")
+          .flatMap((line, index): Element["children"] =>
+            index
+              ? [hast("br", []), { type: "text", value: line }]
+              : [{ type: "text", value: line }],
+          ),
+      ),
+    );
+}
+
+function hast(tagName: string, children: Element["children"]): Element {
+  return { type: "element", tagName, properties: {}, children };
 }
 
 export function reportBlocks(

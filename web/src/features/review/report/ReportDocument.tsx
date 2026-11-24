@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import type { RunDetail } from "../../../api/generated/contracts";
 import type {
+  Descriptor,
   QuoteRef,
   ReportSummary,
   SourceOrigin,
@@ -29,11 +30,15 @@ import { ReportSource } from "./ReportSource";
 import { ReportTable } from "./ReportTable";
 import { RichReport } from "./RichReport";
 import { finishReading, readBookmark } from "./report-position";
-import { canWindowReport, wholeDocument, indexedDocument } from "./report-reader";
+import { carriedBlock } from "./report-presentation";
+import { canWindowReport, wholeDocument, indexedDocument, withCarried } from "./report-reader";
+import type { ReaderDocument } from "./report-reader";
+import { isRetired } from "./report-structure";
 import type { AcceptedFindingChange } from "./report-structure";
 import { useVisibleContent } from "./useVisibleContent";
 
 type Quote = { readonly text: string; readonly reference: QuoteRef | null };
+type ReportFinding = Extract<Descriptor, { kind: "finding" }>;
 type Props = {
   readonly historyAccess: ReactNode;
   readonly run: RunDetail;
@@ -243,6 +248,9 @@ export default function ReportDocument({
         {!sourceMode && displayed?.outcomeError && (
           <Notice retry={body.retry}>Accepted finding outcomes are unavailable.</Notice>
         )}
+        {!sourceMode && displayed?.carriedError && (
+          <Notice retry={body.retry}>Carried findings are unavailable.</Notice>
+        )}
         {sourceMode ? (
           tryTable ? (
             <ReportTable
@@ -446,7 +454,7 @@ async function loadReport(
   const [outcomes, entry] = await Promise.all([
     report.changeCount
       ? acceptedChanges(runId, report, signal)
-          .then((result) => ({ changes: result.data, error: false }))
+          .then((changes) => ({ changes, error: false }))
           .catch(() => {
             signal.throwIfAborted();
             return { changes: undefined, error: true };
@@ -469,8 +477,9 @@ async function loadReport(
   ]);
   signal.throwIfAborted();
   if (entry && "window" in entry && entry.window.state === "ready" && entry.window.layout) {
+    let indexed;
     try {
-      const reader = indexedDocument(
+      indexed = indexedDocument(
         runId,
         report,
         entry.window,
@@ -478,16 +487,20 @@ async function loadReport(
         base,
         position?.offset,
       );
+    } catch {
+      signal.throwIfAborted();
+    }
+    if (indexed) {
+      const carried = await addCarried(runId, report, indexed, outcomes.changes, signal);
       return {
         cursor: entry.cursor,
         data: {
-          reader,
+          reader: carried.reader,
           formattingFailure: false,
           outcomeError: outcomes.error,
+          carriedError: carried.error,
         },
       };
-    } catch {
-      signal.throwIfAborted();
     }
   }
   const response =
@@ -508,17 +521,61 @@ async function loadReport(
   } catch {
     tree = undefined;
   }
+  const whole =
+    tree && typeof markdown === "string"
+      ? wholeDocument(markdown, tree, report, outcomes.changes, response.data.display)
+      : undefined;
+  const carried = whole
+    ? await addCarried(runId, report, whole, outcomes.changes, signal)
+    : { reader: undefined, error: false };
   return {
     cursor: response.cursor,
     data: {
-      reader:
-        tree && typeof markdown === "string"
-          ? wholeDocument(markdown, tree, report, outcomes.changes, response.data.display)
-          : undefined,
+      reader: carried.reader,
       formattingFailure: typeof markdown === "string" && !tree,
       outcomeError: outcomes.error,
+      carriedError: carried.error,
     },
   };
+}
+
+// A follow-up can carry an earlier finding whose card its own Markdown omits.
+// Read the findings only when the summary counts more than the text shows.
+async function addCarried(
+  runId: string,
+  report: ReportSummary,
+  reader: ReaderDocument,
+  changes: ReadonlyMap<string, AcceptedFindingChange> | undefined,
+  signal: AbortSignal,
+) {
+  const cards = new Set(reader.groups.flatMap((group) => group.findingId ?? []));
+  const active = [...cards].filter((id) => !isRetired(changes?.get(id))).length;
+  if (report.findingCount === null || report.findingCount <= active)
+    return { reader, error: false };
+  try {
+    const findings = await contextItems(
+      runId,
+      report,
+      "findings",
+      (item): item is ReportFinding => item.kind === "finding",
+      null,
+      signal,
+    );
+    const carried = [...findings.values()].flatMap((item) => {
+      const change = changes?.get(item.findingId);
+      const origin = item.source?.origin?.report.receiptId;
+      return cards.has(item.findingId) ||
+        isRetired(change) ||
+        !origin ||
+        origin === report.receiptId
+        ? []
+        : [carriedBlock(item, change)];
+    });
+    return { reader: withCarried(reader, carried, changes), error: false };
+  } catch {
+    signal.throwIfAborted();
+    return { reader, error: true };
+  }
 }
 
 function scrollWithinDrawer(element: HTMLElement) {
@@ -564,35 +621,54 @@ function readQuote(value: string): Quote | undefined {
   }
 }
 
-async function acceptedChanges(runId: string, report: ReportSummary, signal: AbortSignal) {
-  const changes = new Map<string, AcceptedFindingChange>();
+function acceptedChanges(runId: string, report: ReportSummary, signal: AbortSignal) {
+  return contextItems(
+    runId,
+    report,
+    "changes",
+    (item): item is AcceptedFindingChange => item.kind === "change",
+    report.changeCount ?? 0,
+    signal,
+  );
+}
+
+// Reads one report context collection to completion. A known count must match.
+async function contextItems<T extends Descriptor & { readonly findingId: string }>(
+  runId: string,
+  report: ReportSummary,
+  collection: "findings" | "changes",
+  accepts: (item: Descriptor) => item is T,
+  expected: number | null,
+  signal: AbortSignal,
+) {
+  const items = new Map<string, T>();
   let next: string | undefined;
-  let cursor: string;
   do {
-    const result = await reportContext(runId, report.receiptId, "changes", next, signal, 20);
+    // Findings carry details text, so their pages stay well inside the 64 KiB read.
+    const limit = collection === "findings" ? 10 : 20;
+    const result = await reportContext(runId, report.receiptId, collection, next, signal, limit);
     if (
       result.data.baseReport?.receiptId !== report.receiptId ||
       result.data.baseReport.sha256 !== report.sha256
     ) {
-      throw new Error("The displayed report outcomes changed.");
+      throw new Error(`The displayed report ${collection} changed.`);
     }
     for (const item of result.data.items) {
-      if (item.kind !== "change" || changes.has(item.findingId))
-        throw new Error("The accepted finding outcomes are inconsistent.");
-      changes.set(item.findingId, item);
+      if (!accepts(item) || items.has(item.findingId))
+        throw new Error(`The accepted report ${collection} are inconsistent.`);
+      items.set(item.findingId, item);
     }
-    cursor = result.cursor;
     const continuation = result.data.nextCursor;
     if (
       continuation &&
       (!result.data.items.length ||
         continuation === next ||
-        changes.size >= (report.changeCount ?? 0))
+        (expected !== null && items.size >= expected))
     )
-      throw new Error("The accepted finding outcome count changed.");
+      throw new Error(`The accepted report ${collection} count changed.`);
     next = continuation ?? undefined;
   } while (next);
-  if (changes.size !== report.changeCount)
-    throw new Error("The accepted finding outcomes are incomplete.");
-  return { data: changes, cursor };
+  if (expected !== null && items.size !== expected)
+    throw new Error(`The accepted report ${collection} are incomplete.`);
+  return items;
 }
