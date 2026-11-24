@@ -124,6 +124,7 @@ export function unanchoredPosition(
 export function unanchoredBlock(
   item: Finding,
   change: AcceptedFindingChange | undefined,
+  base: string | undefined,
 ): ReportBlock {
   const details = item.details;
   const blocking = item.disposition?.blocking ?? item.blocking;
@@ -157,10 +158,10 @@ export function unanchoredBlock(
               },
             ]
           : []),
-        { label: "Why it matters", nodes: ledgerParagraphs(details.consequence) },
+        { label: "Why it matters", nodes: ledgerParagraphs(details.consequence, base) },
         {
           label: details.evidence.kind === "gap" ? "Evidence gap" : "Evidence",
-          nodes: ledgerParagraphs(details.evidence.text),
+          nodes: ledgerParagraphs(details.evidence.text, base),
         },
       ]
     : [];
@@ -202,14 +203,17 @@ function afterPreviousThreads(groups: readonly GroupPosition[]) {
 // Ledger text renders the inline Markdown of an authored card's paragraph, through the
 // same parser, and keeps its line breaks. Raw HTML shows as its literal text, and so does
 // a paragraph that parses as a block, such as a list or a fence.
-function ledgerParagraphs(value: string): RootContent[] {
+function ledgerParagraphs(value: string, base: string | undefined): RootContent[] {
   return value
     .split(/\n\s*\n/)
     .flatMap((part) => part.trim() || [])
-    .map((part) => inlineParagraph(part) ?? hast("p", lineBreaks([{ type: "text", value: part }])));
+    .map(
+      (part) =>
+        inlineParagraph(part, base) ?? hast("p", lineBreaks([{ type: "text", value: part }])),
+    );
 }
 
-function inlineParagraph(part: string) {
+function inlineParagraph(part: string, base: string | undefined) {
   let source = part;
   // Escaping the `<` that opens raw HTML leaves it as text, such as `Vec<u8>`. Each pass
   // escapes at least one, and HTML a block hid can surface in the next.
@@ -225,7 +229,7 @@ function inlineParagraph(part: string) {
       continue;
     }
     if (syntax.children.length !== 1 || syntax.children[0]?.type !== "paragraph") return;
-    const paragraph = parseMarkdown(source)?.children.find(
+    const paragraph = parseMarkdown(source, base)?.children.find(
       (node): node is Element => node.type === "element" && node.tagName === "p",
     );
     return paragraph && { ...paragraph, children: lineBreaks(paragraph.children) };

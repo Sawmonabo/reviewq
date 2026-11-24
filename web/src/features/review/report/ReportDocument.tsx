@@ -122,6 +122,7 @@ export default function ReportDocument({
     reader,
     displayed?.reader,
     displayed?.changes,
+    safeUrl(webUrl),
   );
   const resolving = useRef<AbortController | undefined>(undefined);
   useEffect(() => () => resolving.current?.abort(), [quoteKey]);

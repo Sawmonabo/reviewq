@@ -23,6 +23,7 @@ export function useUnanchoredFindings(
   host: RefObject<HTMLElement | null>,
   reader: ReaderDocument | undefined,
   changes: ReadonlyMap<string, AcceptedFindingChange> | undefined,
+  base: string | undefined,
 ) {
   const wanted = admitted && report.unanchoredFindingCount > 0;
   const findings = useResource(
@@ -51,9 +52,11 @@ export function useUnanchoredFindings(
     const cards = new Set(reader.groups.flatMap((group) => group.findingId ?? []));
     const blocks = [...items.values()].flatMap((item) => {
       const change = changes?.get(item.findingId);
-      return cards.has(item.findingId) || isRetired(change) ? [] : [unanchoredBlock(item, change)];
+      return cards.has(item.findingId) || isRetired(change)
+        ? []
+        : [unanchoredBlock(item, change, base)];
     });
     return withUnanchored(reader, blocks, changes);
-  }, [reader, items, changes]);
+  }, [reader, items, changes, base]);
   return { reader: withCards, error: Boolean(findings.error), retry: findings.retry };
 }
