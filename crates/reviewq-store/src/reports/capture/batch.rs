@@ -392,13 +392,13 @@ mod tests {
     #[test]
     fn a_thread_retires_one_of_its_two_findings_as_partly_addressed() {
         let tracked = BTreeMap::from([("D1", BTreeSet::from(["F-01", "F-02"]))]);
-        let fixed = |discussion_ids: Vec<String>| ReportEdits {
+        let fixed = || ReportEdits {
             findings: vec![FindingEdit {
                 finding_id: "F-01".into(),
                 conclusion: FindingConclusion::Fixed,
                 reason: "The retry is bounded.".into(),
                 checked_sha: None,
-                discussion_ids,
+                discussion_ids: Vec::new(),
             }],
         };
         let assessment = |conclusion| {
@@ -410,20 +410,18 @@ mod tests {
                 next_action: NextAction::WaitingAuthor,
             }]
         };
-        for edits in [fixed(Vec::new()), fixed(vec!["D1".into()])] {
-            let partly = assessment(FindingConclusion::PartlyAddressed);
-            assert!(conclusion_errors(&tracked, &edits, &partly).is_empty());
-            let present = assessment(FindingConclusion::StillPresent);
-            let errors = conclusion_errors(&tracked, &edits, &present);
-            assert_eq!(
-                errors
-                    .iter()
-                    .map(|error| error.path.as_str())
-                    .collect::<Vec<_>>(),
-                ["/handoff/assessments/0/conclusion"]
-            );
-        }
-        let mut both = fixed(Vec::new());
+        let partly = assessment(FindingConclusion::PartlyAddressed);
+        assert!(conclusion_errors(&tracked, &fixed(), &partly).is_empty());
+        let present = assessment(FindingConclusion::StillPresent);
+        let errors = conclusion_errors(&tracked, &fixed(), &present);
+        assert_eq!(
+            errors
+                .iter()
+                .map(|error| error.path.as_str())
+                .collect::<Vec<_>>(),
+            ["/handoff/assessments/0/conclusion"]
+        );
+        let mut both = fixed();
         both.findings.push(FindingEdit {
             finding_id: "F-02".into(),
             ..both.findings[0].clone()

@@ -542,7 +542,8 @@ fn stage(
         headings,
     )?;
     if scoped_batch.is_none() && !declaration.assessments().is_empty() {
-        errors.push(checks::unbound_assessments());
+        // First, so the cap never hides the cause of the full-review errors.
+        errors.insert(0, checks::unbound_assessments());
     }
     let (form, source, revision, verdict, expected, reason, edits) = match declaration {
         Declaration::Final {
