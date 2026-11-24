@@ -265,8 +265,8 @@ pub(super) fn complete(
 
 /// Each outcome's discussion links name batch discussions that track its finding, and each
 /// linked discussion's assessment covers the finding. An outcome without links is linked to
-/// every batch discussion that tracks its finding. A discussion's assessment must then agree
-/// with the findings this handoff retires; see [`conclusion_errors`].
+/// every batch discussion that tracks its finding. Each assessment must also agree with the
+/// findings this handoff retires; see [`conclusion_errors`].
 pub(super) fn edit_errors(
     db: &Connection,
     run: &str,
@@ -333,30 +333,27 @@ fn linked<'a>(
     }
 }
 
-/// A discussion linked to a retiring outcome for a finding it tracks has an assessment that
-/// agrees: retiring when this handoff retires every finding the discussion tracks, and
-/// retiring or `partly_addressed` when it retires only some of them.
+/// A discussion's assessment agrees with the findings this handoff retires: retiring when
+/// the handoff retires every finding the discussion tracks, and retiring or
+/// `partly_addressed` when it retires only some of them.
 fn conclusion_errors(
     tracked: &BTreeMap<&str, BTreeSet<&str>>,
     edits: &ReportEdits,
     assessments: &[Assessment],
 ) -> Vec<HandoffFieldError> {
-    let retiring = || {
-        edits
-            .findings
-            .iter()
-            .filter(|edit| edit.conclusion.retires_finding())
-    };
-    let retired: BTreeSet<&str> = retiring().map(|edit| edit.finding_id.as_str()).collect();
+    let retired: BTreeSet<&str> = edits
+        .findings
+        .iter()
+        .filter(|edit| edit.conclusion.retires_finding())
+        .map(|edit| edit.finding_id.as_str())
+        .collect();
     let mut errors = Vec::new();
     for (index, assessment) in assessments.iter().enumerate() {
         let discussion = assessment.discussion_id.as_str();
         let Some(ids) = tracked.get(discussion) else {
             continue;
         };
-        if !retiring().any(|edit| {
-            ids.contains(edit.finding_id.as_str()) && linked(tracked, edit).contains(discussion)
-        }) {
+        if ids.is_disjoint(&retired) {
             continue;
         }
         let conclusion = assessment.conclusion;
