@@ -229,6 +229,15 @@ pub(in crate::entry) async fn submit_verified(
                     ..
                 }
             );
+            // An unchanged result or an amendment points at the accepted report's file.
+            let accepted_file = matches!(
+                &handoff,
+                dto::Handoff::Unchanged { .. }
+                    | dto::Handoff::Final {
+                        amends: Some(_),
+                        ..
+                    }
+            );
             let mut headings = None;
             if let Some(dto::ReportSource::File { path, sha256 }) = source_mut(&mut handoff) {
                 let declared = sha256
@@ -264,11 +273,13 @@ pub(in crate::entry) async fn submit_verified(
                         (None, Some(value)) => *sha256 = Some(hash(value.as_str())?),
                         // Only bytes actually read can contradict the declared hash.
                         (Some(declared), Some(actual)) if declared != actual => {
+                            let message = if accepted_file {
+                                "The file at source.path no longer matches the accepted report. Submit a final with its findings instead."
+                            } else {
+                                "The file at source.path does not match source.sha256. Point source at the finished report and compute the hash after its last edit."
+                            };
                             return Err(AppError::InvalidHandoff(vec![
-                                app::HandoffFieldError::new(
-                                    "/handoff/source/sha256",
-                                    "The file at source.path does not match source.sha256. Point source at the finished report and compute the hash after its last edit.",
-                                ),
+                                app::HandoffFieldError::new("/handoff/source/sha256", message),
                             ]));
                         }
                         _ => {}
