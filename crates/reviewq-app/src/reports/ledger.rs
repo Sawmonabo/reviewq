@@ -188,7 +188,8 @@ pub fn derive(
 }
 
 /// Checks a final's findings ledger against the parent's active findings while the tool
-/// call is open. An outcome must name a parent finding. A full review lists or gives an
+/// call is open. An outcome must name a parent finding, except a retiring outcome that
+/// restates a finding the run retired before. A full review lists or gives an
 /// outcome for every parent finding. Each level-three `F-` heading of a file report, at the
 /// top level or nested in a list item, must be listed, given an outcome or carried, unless
 /// the run retired its ID before; `headings` is `None` when they are unknown.
@@ -224,15 +225,23 @@ pub fn check(
         .collect();
     let mut errors = Vec::new();
     for (index, edit) in edits.findings.iter().enumerate() {
-        if !active.contains(edit.finding_id.as_str()) {
-            errors.push(HandoffFieldError::new(
-                format!("/handoff/findingChanges/{index}/findingId"),
-                format!(
-                    "{} is not a finding of the last accepted report.",
-                    edit.finding_id
-                ),
-            ));
+        let id = edit.finding_id.as_str();
+        if active.contains(id) {
+            continue;
         }
+        // Restating that an earlier version's retired finding is still resolved is harmless
+        // and is recorded as given; only a keeping outcome needs the finding raised again.
+        let message = match parent.retired.contains(id) {
+            true if edit.conclusion.retires_finding() => continue,
+            true => format!(
+                "{id} was retired in an earlier version. List it in report.findings to raise it again."
+            ),
+            false => format!("{id} is not a finding of the last accepted report."),
+        };
+        errors.push(HandoffFieldError::new(
+            format!("/handoff/findingChanges/{index}/findingId"),
+            message,
+        ));
     }
     if full_review {
         for finding in &parent.findings {
@@ -293,8 +302,9 @@ mod tests {
 
     use super::{Anchor, Parent, ParentFinding, check, derive};
     use crate::reports::{
-        Declaration, Descriptor, FindingBasis, FindingBasisKind, FindingDetails, ReportEdits,
-        RevisionEvidence, Source, StructuredFinding, StructuredReport, Verdict, index,
+        Declaration, Descriptor, FindingBasis, FindingBasisKind, FindingConclusion, FindingDetails,
+        FindingEdit, ReportEdits, RevisionEvidence, Source, StructuredFinding, StructuredReport,
+        Verdict, index,
     };
 
     // BLITZ-592: a full re-review listed F-04 and silently dropped F-05 and F-06.
@@ -368,11 +378,12 @@ mod tests {
     // A report in its own format wrote F-01's ID in inline code, repeated F-01, said both
     // "Blocking: yes" and "Blocking: no" under it, raised F-02 inside a numbered list, gave
     // F-03 its severity and blocking status in one two-line paragraph, and kept a struck
-    // heading for F-04, which an earlier version had retired as fixed.
+    // heading for F-04, which an earlier version had retired as fixed, restating that outcome
+    // and claiming F-07, another retired finding, is still present.
     // The parse must not fail, F-01 takes the last Blocking line before its first labelled
     // field, as its card shows, and F-02, which the reader draws as a ledger card, must stay
-    // a tracked finding. F-03 keeps P1 and blocking, and F-04 neither needs listing nor
-    // comes back active.
+    // a tracked finding. F-03 keeps P1 and blocking, F-04 neither needs listing nor comes
+    // back active, and only F-07's keeping outcome asks for the finding to be raised again.
     #[test]
     fn a_nested_heading_and_a_repeated_id_stay_tracked() {
         let markdown = "# Review of !418
@@ -431,12 +442,25 @@ Blocking: yes
                 findings: Vec::new(),
             })),
             amends: None,
-            edits: ReportEdits::default(),
+            edits: ReportEdits {
+                findings: [
+                    ("F-04", FindingConclusion::Fixed),
+                    ("F-07", FindingConclusion::StillPresent),
+                ]
+                .map(|(id, conclusion)| FindingEdit {
+                    finding_id: id.into(),
+                    conclusion,
+                    reason: "Checked again at this revision.".into(),
+                    checked_sha: None,
+                    discussion_ids: Vec::new(),
+                })
+                .into(),
+            },
             assessments: Vec::new(),
         };
         let parent = Parent {
             findings: Vec::new(),
-            retired: ["F-04".to_owned()].into(),
+            retired: ["F-04".to_owned(), "F-07".to_owned()].into(),
         };
         let messages: Vec<_> = check(&review, &parent, Some(&ids), true)
             .into_iter()
@@ -445,6 +469,7 @@ Blocking: yes
         assert_eq!(
             messages,
             [
+                "F-07 was retired in an earlier version. List it in report.findings to raise it again.",
                 "The report has heading F-01, which is missing from report.findings.",
                 "The report has heading F-03, which is missing from report.findings.",
                 "The report has heading F-02, which is missing from report.findings.",
