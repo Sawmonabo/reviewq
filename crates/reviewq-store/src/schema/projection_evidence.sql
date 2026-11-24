@@ -13,7 +13,6 @@ CREATE TABLE report_delivery_failures (
     native_turn_id TEXT NOT NULL,
     native_call_id TEXT,
     kind TEXT NOT NULL CHECK (kind IN ('report_delivery_failure', 'report_delivery_rejection')),
-    identity_verified INTEGER NOT NULL CHECK (identity_verified IN (0,1)),
     reason TEXT NOT NULL CHECK (length(CAST(reason AS BLOB)) BETWEEN 1 AND 2048),
     occurred_at_ms INTEGER NOT NULL,
     resolved_by_receipt_id TEXT,

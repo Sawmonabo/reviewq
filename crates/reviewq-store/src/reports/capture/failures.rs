@@ -34,8 +34,8 @@ pub(super) fn note(
     if let Some(notification) = &notification {
         db.execute(
             "INSERT INTO report_delivery_failures(notification_id,run_id,lead_session_key,
-                native_turn_id,native_call_id,kind,identity_verified,reason,occurred_at_ms)
-             VALUES(?1,?2,?3,?4,?5,?6,1,?7,?8)",
+                native_turn_id,native_call_id,kind,reason,occurred_at_ms)
+             VALUES(?1,?2,?3,?4,?5,?6,?7,?8)",
             params![
                 notification.as_str(),
                 call.lead.run_id().as_str(),
