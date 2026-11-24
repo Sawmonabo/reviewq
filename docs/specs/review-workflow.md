@@ -84,7 +84,7 @@ ReviewQ owns finding state across versions and never infers it from prose. A fin
 
 IDs are the report's own (`F-01`) when it has them. The same concern keeps its ID across versions and a new concern takes the next unused ID.
 
-Acceptance derives the next version by ID from the ledger, the report's level-three `F-` headings and the parent version. A top-level heading anchors its finding's card; a heading nested in a list item still counts as a finding but has no anchor. A repeated heading ID anchors at its first heading. Severity and blocking read from a heading follow the reader's rules, so the counted value matches the card: an explicit single-line `Severity:` or `Blocking:` paragraph before the first labelled field (the last one wins), then the heading's P-level, then a `P1 · Category · blocking` line. The report is never refused for its format:
+Acceptance derives the next version by ID from the ledger, the report's level-three `F-` headings and the parent version. A top-level heading anchors its finding's card; a heading nested in a list item still counts as a finding but has no anchor. A repeated heading ID anchors at its first heading. Severity and blocking read from a heading follow the reader's rules, so the counted value matches the card: an explicit single-line `Severity:` or `Blocking:` paragraph before the first labelled field (the last one wins), then the heading's P-level, then a `P1 · Category · blocking` line; when none of these gives a value, a `Severity:` or `Blocking:` line before the first labelled field still counts. A heading for an ID the run retired in an earlier version, such as a struck-through resolved card, is ignored. The report is never refused for its format:
 
 | State | Rule |
 |---|---|
