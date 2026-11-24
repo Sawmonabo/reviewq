@@ -61,8 +61,13 @@ export function wholeDocument(
   changes: Changes,
   display: DocumentDisplay | null | undefined,
 ): ReaderDocument {
-  const groups = reportBlocks(tree, source, report, changes).map((block) =>
-    block.struckId ? { ...block, scalarStart: [...source.slice(0, block.offset)].length } : block,
+  const blocks = reportBlocks(tree, source, report, changes);
+  const starts = scalarStarts(
+    source,
+    blocks.flatMap((block) => (block.struckId ? [block.offset] : [])),
+  );
+  const groups = blocks.map((block) =>
+    block.struckId ? { ...block, scalarStart: starts.get(block.offset)! } : block,
   );
   const slice = { text: source, utf16: 0, scalar: 0 };
   return {
@@ -72,6 +77,22 @@ export function wholeDocument(
       return block ? { block, source: slice, drawings: display?.drawings } : undefined;
     },
   };
+}
+
+// A struck card matches the server's anchor, which counts code points from the start of the
+// raw text, including a leading byte-order mark that Markdown positions leave out. One pass
+// over the sorted offsets keeps this linear in the report's length.
+function scalarStarts(source: string, offsets: readonly number[]) {
+  const shift = source.startsWith("\uFEFF") ? 1 : 0;
+  const starts = new Map<number, number>();
+  let utf16 = 0;
+  let scalar = 0;
+  for (const offset of [...new Set(offsets)].sort((a, b) => a - b)) {
+    for (; utf16 < offset + shift; scalar += 1)
+      utf16 += source.codePointAt(utf16)! > 0xffff ? 2 : 1;
+    starts.set(offset, scalar);
+  }
+  return starts;
 }
 
 // Cards drawn from the findings ledger have no source in this report: offset -1 keeps
@@ -419,7 +440,13 @@ function planGroups(layout: DisplayLayout, changes: Changes, base: string | unde
       previousThreads,
       ...(group.name && { name: group.name }),
       ...(group.findingId && { findingId: group.findingId }),
-      ...(group.struckId && { struckId: group.struckId, scalarStart: spans[first]!.scalarStart }),
+      // The server anchors a heading at its `#`, after any indent; spans start at the line.
+      ...(group.struckId && {
+        struckId: group.struckId,
+        scalarStart:
+          spans[first]!.scalarStart +
+          /^ {0,3}/.exec(spans[first]!.headingMarkdown ?? "")![0].length,
+      }),
     };
     if (group.name) previousThreads = isThreadSection(group.name);
     first = last + 1;
