@@ -230,14 +230,14 @@ pub(in crate::entry) async fn submit_verified(
                 }
             );
             // An unchanged result or an amendment points at the accepted report's file.
-            let accepted_file = matches!(
-                &handoff,
-                dto::Handoff::Unchanged { .. }
-                    | dto::Handoff::Final {
-                        amends: Some(_),
-                        ..
-                    }
-            );
+            let accepted_sha256 = match &handoff {
+                dto::Handoff::Unchanged { accepted, .. }
+                | dto::Handoff::Final {
+                    amends: Some(accepted),
+                    ..
+                } => Some(accepted.sha256.as_str().to_owned()),
+                _ => None,
+            };
             let mut headings = None;
             if let Some(dto::ReportSource::File { path, sha256 }) = source_mut(&mut handoff) {
                 let declared = sha256
@@ -273,11 +273,7 @@ pub(in crate::entry) async fn submit_verified(
                         (None, Some(value)) => *sha256 = Some(hash(value.as_str())?),
                         // Only bytes actually read can contradict the declared hash.
                         (Some(declared), Some(actual)) if declared != actual => {
-                            let message = if accepted_file {
-                                "The file at source.path no longer matches the accepted report. Submit a final with its findings instead."
-                            } else {
-                                "The file at source.path does not match source.sha256. Point source at the finished report and compute the hash after its last edit."
-                            };
+                            let message = mismatch_message(accepted_sha256.as_deref(), actual);
                             return Err(AppError::InvalidHandoff(vec![
                                 app::HandoffFieldError::new("/handoff/source/sha256", message),
                             ]));
@@ -634,6 +630,20 @@ fn project_edits(findings: Vec<dto::FindingEdit>, revision: &RevisionEvidence) -
                     .collect(),
             })
             .collect(),
+    }
+}
+
+/// Why a file contradicts its declared hash. An unchanged result or an amendment whose file
+/// no longer holds the accepted report's bytes needs a final; otherwise the declared hash
+/// is wrong.
+fn mismatch_message(accepted_sha256: Option<&str>, actual: &ReportHash) -> &'static str {
+    match accepted_sha256 {
+        Some(accepted) if accepted != actual.as_str() => {
+            "The file at source.path no longer matches the accepted report. Submit a final with its findings instead."
+        }
+        _ => {
+            "The file at source.path does not match source.sha256. Point source at the finished report and compute the hash after its last edit."
+        }
     }
 }
 
