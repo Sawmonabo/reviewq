@@ -2,6 +2,8 @@
 
 use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
 
+use crate::reports::limits::{MAX_DISCUSSION_ID_BYTES, MAX_ID_BYTES};
+
 const MAX_SQLITE_INTEGER: u64 = i64::MAX as u64;
 const MAX_JSON_INTEGER: u64 = 9_007_199_254_740_991;
 
@@ -88,13 +90,13 @@ opaque_dto!(
 string_dto!(
     /// A report finding ID, such as `F-01`, as an outcome or assessment names it.
     FindingIdDto,
-    |value: &str| bounded_text(value, 64),
+    |value: &str| bounded_text(value, MAX_ID_BYTES),
     "finding_id_schema"
 );
 string_dto!(
     /// A GitLab discussion ID of a selected-thread batch.
     DiscussionIdDto,
-    |value: &str| bounded_text(value, 256),
+    |value: &str| bounded_text(value, MAX_DISCUSSION_ID_BYTES),
     "discussion_id_schema"
 );
 
@@ -281,12 +283,12 @@ fn opaque_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
 
 #[cfg(feature = "schema")]
 fn finding_id_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
-    bounded_text_schema(64)
+    bounded_text_schema(MAX_ID_BYTES)
 }
 
 #[cfg(feature = "schema")]
 fn discussion_id_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
-    bounded_text_schema(256)
+    bounded_text_schema(MAX_DISCUSSION_ID_BYTES)
 }
 
 #[cfg(feature = "schema")]

@@ -128,7 +128,8 @@ Severity: P3
 Blocking: no
 ";
 
-// BLITZ-605: a selected-thread follow-up's Markdown moved the untouched P1 cards into a table.
+// BLITZ-605: a follow-up's Markdown moved the untouched P1 cards into a table. The test
+// stages it with `stage_seeded_review`, as a full review with no batch bound.
 const FOLLOWUP: &str = "# Follow-up review
 
 ### F-03 Missing regression test
@@ -177,7 +178,7 @@ fn followup_carries_findings_its_text_and_ledger_omit() {
                 Ok(())
             }).await.unwrap();
 
-            let followup_call = stage_followup(&store, &lead, "ledger-followup", "rollout", ledger_final(
+            let followup_call = stage_seeded_review(&store, &lead, "ledger-followup", "rollout", ledger_final(
                 FOLLOWUP,
                 vec![StructuredFinding {
                     id: "F-05".into(),
@@ -259,7 +260,7 @@ fn unanchored_finding_keeps_details_and_origin_while_carried() {
             let authored = store.accepted_report(lead.clone()).await.unwrap().value.unwrap().reference;
             let mut versions = Vec::new();
             for (id, body) in [("carry-once", "# Follow-up\n\nNothing new.\n"), ("carry-twice", "# Follow-up\n\nStill nothing new.\n")] {
-                let call = stage_followup(&store, &lead, id, "rollout",
+                let call = stage_seeded_review(&store, &lead, id, "rollout",
                     ledger_final(body, Vec::new(), Vec::new(), None), &["F-01"]).await;
                 assert!(finish_with(&store, &call, true, body.as_bytes(), Vec::new()).await);
                 versions.push(store.accepted_report(lead.clone()).await.unwrap().value.unwrap().reference);
@@ -487,11 +488,11 @@ async fn stage(
     call
 }
 
-/// Stages a selected-thread follow-up's ledger, which carries each parent finding it
-/// neither lists nor retires. Without a frozen batch the submit checks treat it as a full
-/// review and name those findings, so the fixture lists them while staging and then stores
-/// the follow-up's own ledger in their place.
-async fn stage_followup(
+/// Stages a full review seeded past the submit check; no batch is bound. The submit check
+/// names each parent finding the ledger neither lists nor retires, so the fixture lists
+/// the `carried` IDs while staging, then stores the declaration's own ledger in their place
+/// so acceptance carries them.
+async fn stage_seeded_review(
     store: &SqliteStore,
     lead: &LeadTarget,
     id: &str,
