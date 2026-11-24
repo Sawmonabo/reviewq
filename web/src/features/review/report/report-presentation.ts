@@ -1,10 +1,14 @@
 import type { DrawingHint } from "../../../api/generated/contracts/common";
 import type { Element, Root, RootContent } from "hast";
+import remarkGfm from "remark-gfm";
+import remarkParse from "remark-parse";
+import { unified } from "unified";
 import type {
   Descriptor,
   ReportSummary,
   SourceOrigin,
 } from "../../../api/generated/contracts/reports";
+import { parseMarkdown } from "../../../components/markdown/parse-markdown";
 import { isRetired, reportStructure, reportText as text } from "./report-structure";
 import type { AcceptedFindingChange } from "./report-structure";
 
@@ -32,6 +36,11 @@ export type ReportBlock = GroupPosition & {
 };
 
 type Finding = Extract<Descriptor, { kind: "finding" }>;
+type SyntaxNode = {
+  readonly type: string;
+  readonly position?: { readonly start: { readonly offset?: number | undefined } } | undefined;
+  readonly children?: readonly SyntaxNode[];
+};
 
 const previousThreads =
   /^(?:(?:our )?previous threads|prior(?: review)? threads|discussion outcomes)$/i;
@@ -39,6 +48,7 @@ const findingHeading = /^(F-\d{1,16})(?=$|[\s:.–—-])\s*(?:[·:.–—-]\s*)?
 const severityPrefix = /^(P[0-3])\s*[·–—-]\s*/;
 const fieldName =
   /^(Issue|Why it matters|Confirmed|Proposed comment|Location|Evidence|Suggested fix)(?=\s*(?:[:.—]|$))/i;
+const markdownSyntax = unified().use(remarkParse).use(remarkGfm);
 
 export type GroupPosition = {
   readonly sourceOrder: number;
@@ -147,10 +157,10 @@ export function unanchoredBlock(
               },
             ]
           : []),
-        { label: "Why it matters", nodes: plainParagraphs(details.consequence) },
+        { label: "Why it matters", nodes: ledgerParagraphs(details.consequence) },
         {
           label: details.evidence.kind === "gap" ? "Evidence gap" : "Evidence",
-          nodes: plainParagraphs(details.evidence.text),
+          nodes: ledgerParagraphs(details.evidence.text),
         },
       ]
     : [];
@@ -189,23 +199,63 @@ function afterPreviousThreads(groups: readonly GroupPosition[]) {
   return next < 0 ? groups.length : next;
 }
 
-function plainParagraphs(value: string): RootContent[] {
+// Ledger text renders the inline Markdown of an authored card's paragraph, through the
+// same parser, and keeps its line breaks. Raw HTML shows as its literal text, and so does
+// a paragraph that parses as a block, such as a list or a fence.
+function ledgerParagraphs(value: string): RootContent[] {
   return value
     .split(/\n\s*\n/)
-    .filter((part) => part.trim())
-    .map((part) =>
-      hast(
-        "p",
-        part
-          .trim()
-          .split("\n")
-          .flatMap((line, index): Element["children"] =>
-            index
-              ? [hast("br", []), { type: "text", value: line }]
-              : [{ type: "text", value: line }],
-          ),
-      ),
+    .flatMap((part) => part.trim() || [])
+    .map((part) => inlineParagraph(part) ?? hast("p", lineBreaks([{ type: "text", value: part }])));
+}
+
+function inlineParagraph(part: string) {
+  let source = part;
+  // Escaping the `<` that opens raw HTML leaves it as text, such as `Vec<u8>`. Each pass
+  // escapes at least one, and HTML a block hid can surface in the next.
+  for (let pass = 0; pass < 16; pass++) {
+    const syntax = markdownSyntax.parse(source);
+    const html = htmlStarts(syntax).flatMap((start) => {
+      const at = source.indexOf("<", start);
+      return at < 0 ? [] : [at];
+    });
+    if (html.length) {
+      for (const at of html.sort((a, b) => b - a))
+        source = `${source.slice(0, at)}\\${source.slice(at)}`;
+      continue;
+    }
+    if (syntax.children.length !== 1 || syntax.children[0]?.type !== "paragraph") return;
+    const paragraph = parseMarkdown(source)?.children.find(
+      (node): node is Element => node.type === "element" && node.tagName === "p",
     );
+    return paragraph && { ...paragraph, children: lineBreaks(paragraph.children) };
+  }
+}
+
+function htmlStarts(node: SyntaxNode): number[] {
+  const at = node.position?.start.offset;
+  if (node.type === "html") return at === undefined ? [] : [at];
+  return node.children?.flatMap(htmlStarts) ?? [];
+}
+
+// A soft line break becomes a visible one. A hard break is already a `br`, followed by the
+// newline that ended its line.
+function lineBreaks(children: Element["children"]): Element["children"] {
+  return children.flatMap((node, index): Element["children"] => {
+    if (node.type === "element")
+      return node.tagName === "code" ? [node] : [{ ...node, children: lineBreaks(node.children) }];
+    if (node.type !== "text") return [node];
+    const before = children[index - 1];
+    const value =
+      before?.type === "element" && before.tagName === "br"
+        ? node.value.replace(/^\n/, "")
+        : node.value;
+    return value
+      .split("\n")
+      .flatMap((line, at): Element["children"] =>
+        at ? [hast("br", []), { type: "text", value: line }] : [{ type: "text", value: line }],
+      );
+  });
 }
 
 function hast(tagName: string, children: Element["children"]): Element {

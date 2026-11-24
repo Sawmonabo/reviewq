@@ -67,13 +67,15 @@ export function RichReport({
 
   const [focusedKey, setFocusedKey] = useState<string>();
   const focused = focusedKey === undefined ? undefined : indexes.get(focusedKey);
+  // A section jump names its destination by identity, so ledger cards that join while it
+  // aligns move the index it resolves to, not the row it lands on.
   const [navigation, setNavigation] = useState<{
-    index: number;
+    key: string;
     phase: "hover" | "pressed" | "jump";
   }>();
   const hoverTimer = useRef<number | undefined>(undefined);
   useEffect(() => () => window.clearTimeout(hoverTimer.current), []);
-  const destination = navigation?.index;
+  const destination = navigation && indexes.get(navigation.key);
   // A section title may occupy its entire group, followed immediately by a card or table.
   const nextGroup =
     destination !== undefined && destination + 1 < blocks.length ? destination + 1 : undefined;
@@ -341,23 +343,25 @@ export function RichReport({
   ]);
 
   function hint(index: number, priority: "hover" | "pressed", immediate: boolean) {
-    if (!reader.prepare) return;
+    const key = keys[index];
+    if (!reader.prepare || key === undefined) return;
     window.clearTimeout(hoverTimer.current);
-    function start() {
+    const start = () =>
       setNavigation((current) =>
-        current?.phase === "jump" || (current?.index === index && current.phase === "pressed")
+        current?.phase === "jump" || (current?.key === key && current.phase === "pressed")
           ? current
-          : { index, phase: priority },
+          : { key, phase: priority },
       );
-    }
     if (immediate) start();
     else hoverTimer.current = window.setTimeout(start, 65);
   }
 
   function leave(index: number) {
+    const key = keys[index];
     window.clearTimeout(hoverTimer.current);
+    if (key === undefined) return;
     setNavigation((current) =>
-      current?.index === index && current.phase !== "jump" ? undefined : current,
+      current?.key === key && current.phase !== "jump" ? undefined : current,
     );
   }
 
@@ -366,7 +370,8 @@ export function RichReport({
     window.clearTimeout(hoverTimer.current);
     setRestored(true);
     if (reader.prepare) {
-      setNavigation({ index, phase: "jump" });
+      const key = keys[index];
+      if (key !== undefined) setNavigation({ key, phase: "jump" });
       return;
     }
     if (usesVirtual) virtual.scrollToIndex(index, { align: "start" });
