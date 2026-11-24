@@ -65,7 +65,8 @@ pub struct Ledger {
 /// revision as their checked SHA, else from the parent. The anchor is this report's
 /// top-level heading. A parent finding the handoff neither lists, retires nor heads at the
 /// top level is carried from its origin. A heading without a source span, one nested in a
-/// list item, adds its ID and fields like any heading but leaves a new finding unanchored.
+/// list item, adds its ID, title and heading priority, with no blocking status, and leaves
+/// a new finding unanchored.
 pub fn derive(
     parent: Vec<ParentFinding>,
     report: &StructuredReport,
@@ -331,18 +332,24 @@ mod tests {
         );
     }
 
-    // A report in its own format repeated F-01, said both "Blocking: yes" and "Blocking: no"
-    // under it, and raised F-02 inside a numbered list. The parse must not fail, and F-02,
-    // which the reader draws without a card, must stay a tracked finding.
+    // A report in its own format wrote F-01's ID in inline code, repeated F-01, said both
+    // "Blocking: yes" and "Blocking: no" under it, and raised F-02 inside a numbered list.
+    // The parse must not fail, F-01 takes the last Blocking line before its first labelled
+    // field, as its card shows, and F-02, which the reader draws without a card, must stay
+    // a tracked finding.
     #[test]
     fn a_nested_heading_and_a_repeated_id_stay_tracked() {
         let markdown = "# Review of !418
 
-### F-01 · P1 · Session token written to logs
+### `F-01` · P1 · Session token written to logs
 
 Blocking: yes
 
 Blocking: no
+
+**Evidence:** The request logger writes the bearer header.
+
+Blocking: yes
 
 ### F-01 · P1 · Session token written to logs
 
@@ -409,7 +416,7 @@ The retry path logs it again.
         assert_eq!(
             derived,
             [
-                ("F-01".into(), Some("P1".into()), None, true),
+                ("F-01".into(), Some("P1".into()), Some(false), true),
                 ("F-02".into(), None, None, false),
             ]
         );

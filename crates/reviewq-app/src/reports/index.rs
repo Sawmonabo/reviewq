@@ -16,8 +16,9 @@ const MAX_TITLE_BYTES: usize = 384;
 const MAX_SEVERITY_BYTES: usize = 64;
 /// The text kept from the paragraph under a finding heading, which holds its metadata lines.
 const MAX_CARD_TEXT_BYTES: usize = 384;
-/// The longest category the reader accepts in a `P1 · Category · blocking` line.
-const MAX_CATEGORY_CHARS: usize = 80;
+/// The longest category, in UTF-16 units, the reader accepts in a `P1 · Category · blocking`
+/// line.
+const MAX_CATEGORY_UNITS: usize = 80;
 /// The field labels that end a finding card's metadata lines in the reader.
 const FIELD_LABELS: [&str; 7] = [
     "Issue",
@@ -53,56 +54,58 @@ struct Heading {
 /// What a finding section's metadata lines say, kept by kind until the section ends.
 #[derive(Default)]
 struct Fields {
-    /// The last `Severity:` line.
+    /// The last `Severity:` and `Blocking:` lines, which override the others.
     severity: Option<String>,
-    blocking: Explicit,
-    /// The first `P1 · Category · blocking` line's priority and blocking status.
+    blocking: Option<bool>,
+    /// The first `P1 · Category · blocking` lines' priority and blocking status.
     line_severity: Option<String>,
     line_blocking: Option<bool>,
     /// A labelled field such as `**Evidence:**` has begun, which ends those lines.
     labelled: bool,
 }
 
-/// The section's `Blocking:` lines. Once two disagree, the field stays unknown.
-#[derive(Default)]
-enum Explicit {
-    #[default]
-    Unset,
-    Set(bool),
-    Conflict,
-}
-
-/// A paragraph under a finding heading. `text` is `None` once inline code or HTML makes
-/// the paragraph unusable for metadata, and `lead` is `None` once it does so to a leading
-/// strong span.
+/// A paragraph under a finding heading, with the text of its leading strong span if any.
 struct Paragraph {
-    text: Option<String>,
+    text: String,
     started: bool,
-    leading: bool,
     lead: Option<String>,
     lead_depth: usize,
+    images: Vec<usize>,
 }
 
 /// Indexes the report as the reader draws it: its top-level sections and level-three `F-`
 /// finding headings with their metadata lines. Content nested in a quote, list item,
 /// footnote or definition is skipped, except that a level-three `F-` heading in a list item
-/// outside any quote yields a finding without a span, so it is still tracked. A repeated
-/// `F-` ID anchors at its first top-level heading; later ones are plain sections. Returns
-/// `None` only when the report has more headings than the index admits.
+/// outside any quote yields a finding without a span, carrying only its title and heading
+/// priority, so it is still tracked. A repeated `F-` ID anchors at its first top-level
+/// heading; later ones are plain sections. Returns `None` only when the report has more
+/// headings than the index admits.
 pub(super) fn parse(source: &str) -> Option<Vec<Descriptor>> {
     let mut headings: Vec<Heading> = Vec::new();
     let mut nested: Vec<(String, String)> = Vec::new();
     let mut heading: Option<(Heading, bool)> = None;
+    let mut images = Vec::new();
+    // The finding whose card the next paragraph or level-four to six heading joins: the
+    // reader's card runs to the next top-level heading of level one to three.
+    let mut finding: Option<usize> = None;
     let mut paragraph: Option<Paragraph> = None;
     let mut quotes = 0_u32;
     let mut items = 0_u32;
-    for (event, offset) in
-        Parser::new_ext(source, Options::ENABLE_GFM | Options::ENABLE_TABLES).into_offset_iter()
-    {
+    // Strikethrough matches the reader's GFM, which drops the tildes from heading text.
+    let options = Options::ENABLE_GFM | Options::ENABLE_TABLES | Options::ENABLE_STRIKETHROUGH;
+    for (event, offset) in Parser::new_ext(source, options).into_offset_iter() {
         if let Some(value) = paragraph.as_mut()
             && !matches!(event, Event::End(TagEnd::Paragraph))
         {
             value.push(&event);
+            continue;
+        }
+        if let Some((value, _)) = heading.as_mut()
+            && !matches!(event, Event::End(TagEnd::Heading(_)))
+        {
+            if let Some(text) = inline_text(&event, &mut images, value.title.len()) {
+                limited_append(&mut value.title, text, MAX_TITLE_BYTES);
+            }
             continue;
         }
         match event {
@@ -141,37 +144,38 @@ pub(super) fn parse(source: &str) -> Option<Vec<Descriptor>> {
                 if (!in_item || id.is_some()) && headings.len() + nested.len() == MAX_DESCRIPTORS {
                     return None;
                 }
-                if !in_item {
-                    value.finding_id = id;
-                    headings.push(value);
-                } else if let Some(id) = id {
-                    nested.push((id, value.title));
+                if in_item {
+                    if let Some(id) = id {
+                        nested.push((id, value.title));
+                    }
+                    continue;
                 }
-            }
-            Event::Text(text) if heading.is_some() => {
-                if let Some((value, _)) = heading.as_mut() {
-                    limited_append(&mut value.title, &text, MAX_TITLE_BYTES);
+                if value.level <= 3 {
+                    finding = id.is_some().then_some(headings.len());
+                } else if let Some(index) = finding
+                    && field_label(value.title.trim())
+                {
+                    // The reader takes a level-four to six field label as a labelled field.
+                    headings[index].fields.labelled = true;
                 }
+                value.finding_id = id;
+                headings.push(value);
             }
             _ if quotes + items != 0 => {}
-            Event::Start(Tag::Paragraph)
-                if headings
-                    .last()
-                    .is_some_and(|value| value.finding_id.is_some()) =>
-            {
+            Event::Start(Tag::Paragraph) if finding.is_some() => {
                 paragraph = Some(Paragraph {
-                    text: Some(String::new()),
+                    text: String::new(),
                     started: false,
-                    leading: false,
                     lead: None,
                     lead_depth: 0,
+                    images: Vec::new(),
                 });
             }
             Event::End(TagEnd::Paragraph) => {
                 if let Some(value) = paragraph.take()
-                    && let Some(heading) = headings.last_mut()
+                    && let Some(index) = finding
                 {
-                    heading.fields.read(value);
+                    headings[index].fields.read(value);
                 }
             }
             _ => {}
@@ -217,11 +221,7 @@ pub(super) fn parse(source: &str) -> Option<Vec<Descriptor>> {
                     .severity
                     .or_else(|| heading_severity(&title))
                     .or(fields.line_severity),
-                blocking: match fields.blocking {
-                    Explicit::Set(value) => Some(value),
-                    Explicit::Conflict => None,
-                    Explicit::Unset => fields.line_blocking,
-                },
+                blocking: fields.blocking.or(fields.line_blocking),
                 title: title.clone(),
                 source: Some(range.clone()),
                 carried_from: None,
@@ -235,6 +235,8 @@ pub(super) fn parse(source: &str) -> Option<Vec<Descriptor>> {
             cursor_offset: scalar,
         });
     }
+    // The reader reads no metadata lines under a nested heading, so it carries only its title
+    // and heading priority.
     for (id, title) in nested {
         if seen.insert(id.clone()) {
             descriptors.push(Descriptor::Finding {
@@ -258,75 +260,47 @@ impl Paragraph {
         self.started = true;
         match event {
             Event::Start(Tag::Strong) if first => {
-                self.leading = true;
                 self.lead = Some(String::new());
                 self.lead_depth = 1;
             }
             Event::Start(Tag::Strong) if self.lead_depth > 0 => self.lead_depth += 1,
             Event::End(TagEnd::Strong) if self.lead_depth > 0 => self.lead_depth -= 1,
-            Event::Text(text) => self.append(text),
-            Event::SoftBreak | Event::HardBreak => self.append("\n"),
-            Event::Code(_) | Event::InlineHtml(_) => {
-                self.text = None;
-                if self.lead_depth > 0 {
-                    self.lead = None;
+            _ => {
+                if let Some(text) = inline_text(event, &mut self.images, self.text.len()) {
+                    limited_append(&mut self.text, text, MAX_CARD_TEXT_BYTES);
+                    if self.lead_depth > 0
+                        && let Some(lead) = self.lead.as_mut()
+                    {
+                        limited_append(lead, text, MAX_CARD_TEXT_BYTES);
+                    }
                 }
             }
-            _ => {}
-        }
-    }
-
-    fn append(&mut self, text: &str) {
-        if let Some(value) = self.text.as_mut() {
-            limited_append(value, text, MAX_CARD_TEXT_BYTES);
-        }
-        if self.lead_depth > 0
-            && let Some(value) = self.lead.as_mut()
-        {
-            limited_append(value, text, MAX_CARD_TEXT_BYTES);
         }
     }
 }
 
 impl Fields {
-    /// Reads `Severity:` and `Blocking:` lines anywhere in the paragraph. Before the first
-    /// labelled field, a paragraph or its leading strong span may instead be the reader's
-    /// `P1 · Category · blocking` line.
+    /// Reads a paragraph as the reader does until the first labelled field: a paragraph that
+    /// is a single `Severity:` or `Blocking:` line sets that field, the last one winning.
+    /// Otherwise the paragraph or its leading strong span may be the reader's
+    /// `P1 · Category · blocking` line, or a field label that ends these lines.
     fn read(&mut self, paragraph: Paragraph) {
-        if let Some(text) = &paragraph.text {
-            for line in text.lines().map(str::trim) {
-                if let Some(value) = line.strip_prefix("Blocking:").map(str::trim) {
-                    let blocking = match value {
-                        "true" | "yes" => true,
-                        "false" | "no" => false,
-                        _ => continue,
-                    };
-                    self.blocking = match self.blocking {
-                        Explicit::Unset => Explicit::Set(blocking),
-                        Explicit::Set(previous) if previous == blocking => Explicit::Set(blocking),
-                        Explicit::Set(_) | Explicit::Conflict => Explicit::Conflict,
-                    };
-                }
-                if let Some(value) = line.strip_prefix("Severity:").map(str::trim)
-                    && !value.is_empty()
-                    && value.len() <= MAX_SEVERITY_BYTES
-                {
-                    self.severity = Some(value.to_owned());
-                }
-            }
-        }
         if self.labelled {
             return;
         }
-        let candidate = if paragraph.leading {
-            paragraph.lead
-        } else {
-            paragraph.text
-        };
-        let Some(candidate) = candidate else {
+        let text = paragraph.text.trim();
+        if let Some(value) = severity_line(text) {
+            // The reader allows 64 UTF-16 units; a longer value in bytes cannot be stored.
+            if value.len() <= MAX_SEVERITY_BYTES {
+                self.severity = Some(value.to_owned());
+            }
             return;
-        };
-        let candidate = candidate.trim();
+        }
+        if let Some(value) = blocking_line(text) {
+            self.blocking = Some(value);
+            return;
+        }
+        let candidate = paragraph.lead.as_deref().map_or(text, str::trim);
         if let Some((severity, blocking)) = metadata_line(candidate) {
             if self.line_severity.is_none() {
                 self.line_severity = severity;
@@ -334,9 +308,30 @@ impl Fields {
             if self.line_blocking.is_none() {
                 self.line_blocking = Some(blocking);
             }
-        } else if paragraph.leading && field_label(candidate) {
+        } else if paragraph.lead.is_some() && field_label(candidate) {
             self.labelled = true;
         }
+    }
+}
+
+/// The text an inline event adds as the reader's `reportText` keeps it: text and inline
+/// code, line breaks as newlines, and `Attachment` for an image without alt text. An HTML
+/// tag adds nothing, while the text between tags still counts. `images` holds the text
+/// length at each open image.
+fn inline_text<'a>(
+    event: &'a Event<'_>,
+    images: &mut Vec<usize>,
+    length: usize,
+) -> Option<&'a str> {
+    match event {
+        Event::Text(text) | Event::Code(text) => Some(text),
+        Event::SoftBreak | Event::HardBreak => Some("\n"),
+        Event::Start(Tag::Image { .. }) => {
+            images.push(length);
+            None
+        }
+        Event::End(TagEnd::Image) => (images.pop() == Some(length)).then_some("Attachment"),
+        _ => None,
     }
 }
 
@@ -344,6 +339,36 @@ fn limited_append(output: &mut String, text: &str, max: usize) {
     let available = max.saturating_sub(output.len());
     let end = text.floor_char_boundary(available.min(text.len()));
     output.push_str(&text[..end]);
+}
+
+/// Strips a label such as `Severity:` from the start of the text, ignoring case.
+fn strip_label<'a>(text: &'a str, label: &str) -> Option<&'a str> {
+    text.get(..label.len())
+        .filter(|prefix| prefix.eq_ignore_ascii_case(label))
+        .map(|_| &text[label.len()..])
+}
+
+/// The reader's `Severity: value` paragraph: one line of at most 64 UTF-16 units after the
+/// label, kept as written.
+fn severity_line(text: &str) -> Option<&str> {
+    let value = strip_label(text, "Severity:")?.trim_start();
+    (!value.is_empty() && !value.contains('\n') && value.encode_utf16().count() <= 64)
+        .then_some(value)
+}
+
+/// The reader's `Blocking: yes` paragraph: `true`, `yes`, `false` or `no`, ignoring case,
+/// with an optional trailing `.`.
+fn blocking_line(text: &str) -> Option<bool> {
+    let value = strip_label(text, "Blocking:")?.trim_start();
+    let value = value.strip_suffix('.').unwrap_or(value);
+    let is = |word: &str| value.eq_ignore_ascii_case(word);
+    if is("true") || is("yes") {
+        Some(true)
+    } else if is("false") || is("no") {
+        Some(false)
+    } else {
+        None
+    }
 }
 
 fn finding_id(title: &str) -> Option<String> {
@@ -378,7 +403,7 @@ fn heading_severity(title: &str) -> Option<String> {
 }
 
 /// Reads the reader's `P1 · Category · blocking` line: an optional priority, a category of
-/// at most 80 characters, and `blocking` or `nonblocking`, separated by `·`, ignoring case.
+/// at most 80 UTF-16 units, and `blocking` or `nonblocking`, separated by `·`, ignoring case.
 /// Returns the priority as written and the blocking status.
 fn metadata_line(text: &str) -> Option<(Option<String>, bool)> {
     let text = text.strip_suffix('.').unwrap_or(text);
@@ -403,7 +428,7 @@ fn metadata_line(text: &str) -> Option<(Option<String>, bool)> {
                 .chars()
                 .any(|next| next.is_whitespace() && next != '\n')
         } else {
-            !core.contains(['·', '\n']) && core.chars().count() <= MAX_CATEGORY_CHARS
+            !core.contains(['·', '\n']) && core.encode_utf16().count() <= MAX_CATEGORY_UNITS
         }
     };
     let priority = head
