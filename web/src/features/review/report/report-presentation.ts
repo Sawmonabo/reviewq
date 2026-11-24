@@ -38,6 +38,7 @@ const previousThreads =
   /^(?:(?:our )?previous threads|prior(?: review)? threads|discussion outcomes)$/i;
 const findingHeading = /^(F-\d{1,16})(?=$|[\s:.–—-])\s*(?:[·:.–—-]\s*)?(?:(P[0-3])\s*[·–—-]\s*)?/;
 const severityPrefix = /^(P[0-3])\s*[·–—-]\s*/;
+const struckTags = new Set(["del", "s", "strike"]);
 const fieldName =
   /^(Issue|Why it matters|Confirmed|Proposed comment|Location|Evidence|Suggested fix)(?=\s*(?:[:.—]|$))/i;
 
@@ -48,6 +49,9 @@ export type GroupPosition = {
   readonly findingId?: string;
   // The heading's finding ID is struck through, as in `~~F-04 · Stale comment~~ — fixed`.
   readonly struckId?: true;
+  // Where a struck heading begins in the report, in code points as the findings ledger
+  // counts, so a finding the service anchored at that card is matched to it.
+  readonly scalarStart?: number;
 };
 
 export function groupReportItems<T>(
@@ -145,8 +149,9 @@ export function expectedLedgerCards(
   return Math.max(report.unanchoredFindingCount, (report.findingCount ?? 0) - cards.size);
 }
 
-// Whether every character of the finding ID that begins a heading's text is inside a `del`
-// element. The ID is read from the trimmed text as `groupReportItems` reads it.
+// Whether every character of the finding ID that begins a heading's text is inside a `del`,
+// `s` or `strike` element, as the service reads it. The ID is read from the trimmed text as
+// `groupReportItems` reads it.
 export function struckFindingId(heading: Element) {
   const label = text(heading);
   const id = findingHeading.exec(label.trim())?.[1];
@@ -161,12 +166,38 @@ export function struckFindingId(heading: Element) {
       at += node.value.length;
       if (!inside && from < end && at > start) struck = false;
     } else if ("children" in node) {
-      const within = inside || (node.type === "element" && node.tagName === "del");
+      const within = inside || (node.type === "element" && struckTags.has(node.tagName));
       for (const child of node.children) visit(child, within);
     }
   };
   for (const child of heading.children) visit(child, false);
   return struck;
+}
+
+// Ledger findings that need a card of their own. An unstruck card covers its ID. A struck
+// card is resolved, so it covers only a finding the service anchored at it; a finding raised
+// again elsewhere, such as inside `<details>` or with no heading, still gets a card.
+export function ledgerFindings(
+  groups: readonly GroupPosition[],
+  items: Iterable<Finding>,
+  changes: ReadonlyMap<string, AcceptedFindingChange> | null | undefined,
+) {
+  const cards = new Set<string>();
+  const struck = new Map<string, number[]>();
+  for (const { findingId, struckId, scalarStart } of groups) {
+    if (!findingId) continue;
+    if (!struckId) cards.add(findingId);
+    else if (scalarStart !== undefined)
+      struck.set(findingId, [...(struck.get(findingId) ?? []), scalarStart]);
+  }
+  return [...items].filter((item) => {
+    // A carried finding's span is in its earlier version, so it never matches this text.
+    const anchored =
+      item.source &&
+      !item.source.origin &&
+      struck.get(item.findingId)?.includes(item.source.offset);
+    return !cards.has(item.findingId) && !anchored && !isRetired(changes?.get(item.findingId));
+  });
 }
 
 export function unanchoredBlock(

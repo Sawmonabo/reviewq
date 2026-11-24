@@ -4,10 +4,9 @@ import type { Descriptor, ReportSummary } from "../../../api/generated/contracts
 import { useResource } from "../../../hooks/useResource";
 import { contextItems } from "./report-context";
 import { finishReading } from "./report-position";
-import { expectedLedgerCards, unanchoredBlock } from "./report-presentation";
+import { expectedLedgerCards, ledgerFindings, unanchoredBlock } from "./report-presentation";
 import { withUnanchored } from "./report-reader";
 import type { ReaderDocument } from "./report-reader";
-import { isRetired } from "./report-structure";
 import type { AcceptedFindingChange } from "./report-structure";
 
 type Finding = Extract<Descriptor, { kind: "finding" }>;
@@ -54,13 +53,9 @@ export function useUnanchoredFindings(
   const items = findings.data;
   const withCards = useMemo(() => {
     if (!reader || !items) return reader;
-    const cards = new Set(reader.groups.flatMap((group) => group.findingId ?? []));
-    const blocks = [...items.values()].flatMap((item) => {
-      const change = changes?.get(item.findingId);
-      return cards.has(item.findingId) || isRetired(change)
-        ? []
-        : [unanchoredBlock(item, change, base)];
-    });
+    const blocks = ledgerFindings(reader.groups, items.values(), changes).map((item) =>
+      unanchoredBlock(item, changes?.get(item.findingId), base),
+    );
     return withUnanchored(reader, blocks, changes);
   }, [reader, items, changes, base]);
   return {

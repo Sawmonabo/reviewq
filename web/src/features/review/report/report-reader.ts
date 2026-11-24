@@ -61,7 +61,9 @@ export function wholeDocument(
   changes: Changes,
   display: DocumentDisplay | null | undefined,
 ): ReaderDocument {
-  const groups = reportBlocks(tree, source, report, changes);
+  const groups = reportBlocks(tree, source, report, changes).map((block) =>
+    block.struckId ? { ...block, scalarStart: [...source.slice(0, block.offset)].length } : block,
+  );
   const slice = { text: source, utf16: 0, scalar: 0 };
   return {
     groups,
@@ -417,7 +419,7 @@ function planGroups(layout: DisplayLayout, changes: Changes, base: string | unde
       previousThreads,
       ...(group.name && { name: group.name }),
       ...(group.findingId && { findingId: group.findingId }),
-      ...(group.struckId && { struckId: group.struckId }),
+      ...(group.struckId && { struckId: group.struckId, scalarStart: spans[first]!.scalarStart }),
     };
     if (group.name) previousThreads = isThreadSection(group.name);
     first = last + 1;
