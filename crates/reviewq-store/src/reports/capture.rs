@@ -10,9 +10,7 @@ use reviewq_app::reports::{
     HandoffReceipt, ReportAuthority, ReportCaptureStore, ReportReference, ReportWork,
     RevisionEvidence, Source,
 };
-use reviewq_app::workflow::{
-    ExpectedAcknowledgement, NativeCall, ReportFailureAddress, WorkflowTool,
-};
+use reviewq_app::workflow::{ExpectedAcknowledgement, NativeCall, WorkflowTool};
 use reviewq_domain::identity::{MrIdentity, NativeInputId, ReportHash, RunId, SessionKey};
 use reviewq_domain::session::{AbsolutePath, LeadTarget};
 use rusqlite::{Connection, OptionalExtension, Row, params};
@@ -331,10 +329,9 @@ impl ReportCaptureStore for SqliteStore {
         work: ReportWork,
         result_entry: NativeInputId,
         artifact: Option<CapturedArtifact>,
-        resolved: Vec<ReportFailureAddress>,
     ) -> AppFuture<'_, bool> {
         Box::pin(async move {
-            self.write(move |tx| accept::complete(tx, work, result_entry, artifact, resolved))
+            self.write(move |tx| accept::complete(tx, work, result_entry, artifact))
                 .await
                 .map_err(StoreError::app)
         })
@@ -350,20 +347,6 @@ impl ReportCaptureStore for SqliteStore {
             self.cache_report_display(run, reference, source)
                 .await
                 .map_err(StoreError::app)
-        })
-    }
-
-    fn unresolved_report_failures(
-        &self,
-        call: NativeCall,
-    ) -> AppFuture<'_, Vec<ReportFailureAddress>> {
-        Box::pin(async move {
-            self.read(move |db| {
-                check_call(db, &call)?;
-                failures::unresolved(db, &call)
-            })
-            .await
-            .map_err(StoreError::app)
         })
     }
 

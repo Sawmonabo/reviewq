@@ -5,7 +5,6 @@ use reviewq_app::reports::{
     CapturedArtifact, Declaration, ReportReference, ReportWork, RevisionEvidence,
     Source as ReportSource, StructuredReport, Verdict, ledger,
 };
-use reviewq_app::workflow::ReportFailureAddress;
 use reviewq_domain::identity::NativeInputId;
 use rusqlite::{Connection, OptionalExtension, params};
 
@@ -22,7 +21,6 @@ pub(super) fn complete(
     work: ReportWork,
     result: NativeInputId,
     artifact: Option<CapturedArtifact>,
-    resolved: Vec<ReportFailureAddress>,
 ) -> Result<bool, StoreError> {
     let db = &tx.sql;
     let stage = ensure_claim(db, &work)?;
@@ -284,14 +282,6 @@ pub(super) fn complete(
             updated_at_ms=max(updated_at_ms, ?3) WHERE receipt_id=?1",
         params![receipt, result.as_str(), time],
     )?;
-    if let Declaration::Final {
-        revision: RevisionEvidence::Exact(sha),
-        amends: None,
-        ..
-    } = &work.declaration
-    {
-        failures::resolve(db, &work, sha, resolved)?;
-    }
     if let Some(manifest) = &scoped {
         match &work.declaration {
             Declaration::Final { .. } => batch::complete(tx, &work, manifest, receipt, time)?,
@@ -309,7 +299,10 @@ pub(super) fn complete(
             }
         }
     }
+    // A final, amendment or unchanged result leaves the run with a current report; a
+    // question saves none.
     if !matches!(work.declaration, Declaration::NeedsInput { .. }) {
+        failures::resolve(&tx.sql, receipt)?;
         crate::hosts::recovery::complete_turn(tx, &work.call.lead, &work.call.turn_id)?;
     }
     emit(tx, &work, time, notification)?;

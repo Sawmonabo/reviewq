@@ -105,6 +105,78 @@ fn report_admission_distinguishes_settled_history_from_competing_handoffs() {
         });
 }
 
+// BLITZ-901 and BLITZ-923: "Report update failed" stayed on a run after a newer report
+// was saved. A failure stays listed, but any accepted report clears the ones before it.
+#[test]
+fn accepted_report_resolves_every_earlier_delivery_failure() {
+    tokio::runtime::Builder::new_current_thread()
+        .enable_time()
+        .build()
+        .unwrap()
+        .block_on(async {
+            let temp = tempfile::tempdir().unwrap();
+            let store = open(&temp).await;
+            let lead = store.report_lead("codex:lead".parse().unwrap()).await.unwrap();
+            store.write(|tx| {
+                tx.sql.execute_batch(&format!(
+                    "UPDATE reviews SET head_sha='{REVISION}';
+                     INSERT INTO followup_monitors(review_id,run_id,generation,state,binding_verified,updated_at_ms)
+                       VALUES('review','run',1,'paused',0,0);
+                     INSERT INTO followup_batches(batch_id,review_id,run_id,lead_session_key,generation,state,
+                       authority_verified,holds_slot,first_observed_at_ms,latest_observed_at_ms)
+                       VALUES('batch','review','run','codex:lead',1,'completed',1,0,0,0);"
+                ))?;
+                Ok(())
+            }).await.unwrap();
+            let base = stage(&store, &lead, "base", "session", final_report(None)).await;
+            assert!(finish(&store, &base, true).await);
+
+            // BLITZ-901: a final failed in another follow-up scope than the next accepted final.
+            // It fails once the newer one is staged, so only native order puts it first.
+            let superseded = stage(&store, &lead, "superseded", "session", final_report(None)).await;
+            let work = claimed(&store, &superseded).await;
+            let replacement = stage(&store, &lead, "replacement", "session", final_report(None)).await;
+            tokio::time::sleep(Duration::from_millis(2)).await;
+            store.reject_report(work, None, "report_base_changed", None).await.unwrap();
+            store.write(|tx| {
+                tx.sql.execute("UPDATE report_handoffs SET batch_id='batch' WHERE call_id='superseded'", [])?;
+                Ok(())
+            }).await.unwrap();
+            assert!(finish(&store, &replacement, true).await);
+            let current = store.accepted_report(lead.clone()).await.unwrap().value.unwrap().reference;
+
+            // BLITZ-923: a turn ended without any handoff, then an unchanged result was accepted.
+            let missing = native_call(&lead, "no-handoff", "session");
+            store.write(move |tx| {
+                failures::note(&tx.sql, &missing, "no-handoff".into(), "turn ended", "report_delivery_failure", now_ms()?)?;
+                tx.sql.execute("UPDATE report_delivery_failures SET identity_verified=0 WHERE native_call_id='no-handoff'", [])?;
+                Ok(())
+            }).await.unwrap();
+            let unchanged = stage(&store, &lead, "unchanged", "session", Declaration::Unchanged {
+                accepted: current.clone(),
+                source: file_source(),
+                assessments: Vec::new(),
+            }).await;
+            // A later call asked for a correction before the unchanged result was processed.
+            assert!(store.reserve_report_correction(native_call(&lead, "corrected", "session")).await.unwrap());
+            assert!(!finish(&store, &unchanged, false).await);
+
+            let resolved = store.read(|db| {
+                let mut statement = db.prepare(
+                    "SELECT f.native_call_id,h.call_id FROM report_delivery_failures f
+                     LEFT JOIN report_handoffs h ON h.receipt_id=f.resolved_by_receipt_id ORDER BY 1")?;
+                let rows = statement.query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?;
+                Ok(rows.collect::<Result<Vec<(String, Option<String>)>, _>>()?)
+            }).await.unwrap();
+            assert_eq!(resolved, [
+                ("corrected".to_owned(), None),
+                ("no-handoff".to_owned(), Some(unchanged.call_id)),
+                ("superseded".to_owned(), Some(replacement.call_id)),
+            ]);
+            store.close(Duration::from_secs(1)).await.unwrap();
+        });
+}
+
 const LEGACY_PARENT: &str = "# Review
 
 ### F-01 Session token written to logs
@@ -441,33 +513,7 @@ async fn stage(
     generation: &str,
     declaration: Declaration,
 ) -> NativeCall {
-    let source_position = match id {
-        "initial" | "retain" | "pending" | "fresh" | "resumed-full" | "question" => 1,
-        "amend" => 2,
-        "stale" => 3,
-        "changed-disposition" => 3,
-        "contested" => 4,
-        "before-settlement" => 5,
-        "legacy-parent" => 1,
-        "ledger-followup" => 2,
-        "followup-amend" => 3,
-        "ledger-only" => 1,
-        "carry-once" => 2,
-        "carry-twice" => 3,
-        _ => panic!("unknown fixture call"),
-    };
-    let call = NativeCall {
-        lead: lead.clone(),
-        turn_id: id.parse().unwrap(),
-        root_turn_id: None,
-        call_id: id.into(),
-        source_generation: generation.into(),
-        source_position,
-        source_ordinal: 0,
-        arguments_sha256: None,
-        request_entry_id: None,
-        tool: WorkflowTool::Report,
-    };
+    let call = native_call(lead, id, generation);
     let authority = if declaration.requires_review_refresh() {
         Some(store.report_source(lead.clone()).await.unwrap().1)
     } else {
@@ -487,6 +533,42 @@ async fn stage(
         .await
         .unwrap();
     call
+}
+
+fn native_call(lead: &LeadTarget, id: &str, generation: &str) -> NativeCall {
+    let source_position = match id {
+        "initial" | "retain" | "pending" | "fresh" | "resumed-full" | "question" => 1,
+        "amend" => 2,
+        "stale" => 3,
+        "changed-disposition" => 3,
+        "contested" => 4,
+        "before-settlement" => 5,
+        "legacy-parent" => 1,
+        "ledger-followup" => 2,
+        "followup-amend" => 3,
+        "ledger-only" => 1,
+        "carry-once" => 2,
+        "carry-twice" => 3,
+        "base" => 1,
+        "superseded" => 2,
+        "replacement" => 3,
+        "no-handoff" => 4,
+        "unchanged" => 5,
+        "corrected" => 6,
+        _ => panic!("unknown fixture call"),
+    };
+    NativeCall {
+        lead: lead.clone(),
+        turn_id: id.parse().unwrap(),
+        root_turn_id: None,
+        call_id: id.into(),
+        source_generation: generation.into(),
+        source_position,
+        source_ordinal: 0,
+        arguments_sha256: None,
+        request_entry_id: None,
+        tool: WorkflowTool::Report,
+    }
 }
 
 /// Stages a full review seeded past the submit check; no batch is bound. The submit check
@@ -574,22 +656,26 @@ async fn finish_with(
     body: &[u8],
     index: Vec<Descriptor>,
 ) -> bool {
-    let work = store
-        .claim_report_work(4)
-        .await
-        .unwrap()
-        .into_iter()
-        .find(|work| &work.call == call)
-        .expect("exact staged report can be claimed");
+    let work = claimed(store, call).await;
     let captured = if matches!(&work.declaration, Declaration::NeedsInput { .. }) {
         None
     } else {
         Some(capture(store, &work, new_version, body, index).await)
     };
     store
-        .accept_report(work, call.call_id.parse().unwrap(), captured, Vec::new())
+        .accept_report(work, call.call_id.parse().unwrap(), captured)
         .await
         .unwrap()
+}
+
+async fn claimed(store: &SqliteStore, call: &NativeCall) -> ReportWork {
+    store
+        .claim_report_work(4)
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|work| &work.call == call)
+        .expect("exact staged report can be claimed")
 }
 
 async fn capture(

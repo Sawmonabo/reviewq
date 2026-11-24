@@ -5,9 +5,7 @@ use std::sync::atomic::AtomicBool;
 
 use reviewq_app::access::AppError;
 use reviewq_app::history::{FileContentRef, NativeTerminalFailure};
-use reviewq_app::workflow::{
-    ExpectedAcknowledgement, NativeCall, ReportContent, ReportFailureAddress,
-};
+use reviewq_app::workflow::{ExpectedAcknowledgement, NativeCall, ReportContent};
 use reviewq_domain::identity::NativeInputId;
 use sha2::{Digest, Sha256};
 use struson::reader::{JsonReader, JsonStreamReader, ValueType};
@@ -59,62 +57,6 @@ pub(crate) async fn codex_report_terminal(
         result_seen,
         response,
     }))
-}
-
-pub(crate) async fn codex_earlier_report_failures(
-    call: NativeCall,
-    path: PathBuf,
-    mut candidates: Vec<ReportFailureAddress>,
-) -> Result<Vec<ReportFailureAddress>, AppError> {
-    let cancel = Cancel(Arc::new(AtomicBool::new(false)));
-    let stopped = cancel.0.clone();
-    tokio::task::spawn_blocking(move || {
-        let source = locator::verify(call.lead.binding(), None, &path, &stopped)?
-            .ok_or(AppError::Unavailable)?;
-        if file::generation(&source)? != call.source_generation
-            || !file::boundary(&source.file, call.source_position)?
-        {
-            return Err(AppError::StaleRevision);
-        }
-        let mut matched = Vec::new();
-        let mut offset = call.source_position;
-        let mut budget = 64 * 1024 * 1024;
-        let mut lines = file::Lines::new(&source.file, &stopped);
-        for _ in 0..16_384 {
-            if offset == 0 || candidates.is_empty() {
-                break;
-            }
-            let start = match lines.previous(offset - 1, &mut budget) {
-                Ok(start) => start,
-                Err(AppError::PayloadTooLarge) => break,
-                Err(error) => return Err(error),
-            };
-            let record = event(lines.input(start, offset))?;
-            offset = start;
-            if record.kind.as_deref() != Some("item_completed")
-                || record.thread.as_deref() != Some(source.native_id.as_str())
-                || record.item.restricted
-                || !(matches!(
-                    record.item.kind.as_deref(),
-                    Some("CommandExecution" | "McpToolCall")
-                ) || (record.item.kind.as_deref() == Some("AgentMessage")
-                    && record.item.phase.as_deref() == Some("final_answer")))
-            {
-                continue;
-            }
-            candidates.retain(|candidate| {
-                let is_exact = record.turn.as_deref() == Some(candidate.turn.as_str())
-                    && record.item.id.as_deref() == Some(candidate.item.as_str());
-                if is_exact {
-                    matched.push(candidate.clone());
-                }
-                !is_exact
-            });
-        }
-        Ok(matched)
-    })
-    .await
-    .map_err(|_| AppError::Unavailable)?
 }
 
 /// Inspect the last lifecycle boundary in the verified Codex transcript. A

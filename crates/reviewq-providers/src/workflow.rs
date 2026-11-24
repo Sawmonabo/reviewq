@@ -174,16 +174,4 @@ impl NativeWorkflowProof for Workflows {
                 .await
         })
     }
-
-    fn earlier_report_failures(
-        &self,
-        call: NativeCall,
-        candidates: Vec<reviewq_app::workflow::ReportFailureAddress>,
-    ) -> AppFuture<'_, Vec<reviewq_app::workflow::ReportFailureAddress>> {
-        Box::pin(async move {
-            self.reader(&call.lead)?
-                .earlier_report_failures(call, candidates)
-                .await
-        })
-    }
 }
