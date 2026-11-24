@@ -39,20 +39,34 @@ struct Heading {
     blocking: Option<bool>,
 }
 
-/// Indexes the report's sections and its level-three `F-` finding headings. Returns `None`
-/// when the report has more headings than the index admits.
+/// Indexes the report's top-level sections and level-three `F-` finding headings, as the
+/// reader draws them. Content nested in a quote, list item, footnote or definition is
+/// skipped, along with its headings and metadata lines. Returns `None` when the report has
+/// more headings than the index admits.
 pub(super) fn parse(source: &str) -> Result<Option<Vec<Descriptor>>, AppError> {
     let mut headings = Vec::new();
     let mut heading = None;
     let mut paragraph = None;
-    let mut quote_depth = 0_u32;
+    let mut nesting = 0_u32;
     for (event, offset) in
         Parser::new_ext(source, Options::ENABLE_GFM | Options::ENABLE_TABLES).into_offset_iter()
     {
         match event {
-            Event::Start(Tag::BlockQuote(_)) => quote_depth += 1,
-            Event::End(TagEnd::BlockQuote(_)) => quote_depth -= 1,
-            _ if quote_depth != 0 => {}
+            // Every tag whose content holds blocks. Footnotes and definition lists are
+            // parsed only with their own options, so those arms guard a later option change.
+            Event::Start(
+                Tag::BlockQuote(_)
+                | Tag::Item
+                | Tag::FootnoteDefinition(_)
+                | Tag::DefinitionListDefinition,
+            ) => nesting += 1,
+            Event::End(
+                TagEnd::BlockQuote(_)
+                | TagEnd::Item
+                | TagEnd::FootnoteDefinition
+                | TagEnd::DefinitionListDefinition,
+            ) => nesting -= 1,
+            _ if nesting != 0 => {}
             Event::Start(Tag::Heading { level, .. }) => {
                 heading = Some(Heading {
                     level: level as usize,
