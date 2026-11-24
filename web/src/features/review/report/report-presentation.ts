@@ -112,6 +112,24 @@ export function unanchoredPosition(
   return threads < 0 ? groups.length : threads;
 }
 
+// Ledger cards this report should draw: the summary's count, or more when the text's own
+// cards cover fewer active findings than the ledger holds. The service anchors a heading
+// inside `<details>` at the top level, while the formatted text nests it and draws no card.
+export function expectedLedgerCards(
+  report: ReportSummary,
+  groups: readonly GroupPosition[],
+  changes: ReadonlyMap<string, AcceptedFindingChange> | null | undefined,
+) {
+  const cards = new Set(
+    groups.flatMap((group) =>
+      group.sourceOrder >= 0 && group.findingId && !isRetired(changes?.get(group.findingId))
+        ? [group.findingId]
+        : [],
+    ),
+  );
+  return Math.max(report.unanchoredFindingCount, (report.findingCount ?? 0) - cards.size);
+}
+
 export function unanchoredBlock(
   item: Finding,
   change: AcceptedFindingChange | undefined,
@@ -192,9 +210,10 @@ function afterPreviousThreads(groups: readonly GroupPosition[]) {
 }
 
 // Ledger text renders through the report's own Markdown pipeline, so inline code, emphasis,
-// links and sanitizing match the authored cards. Text over the formatting budget stays plain.
+// links and sanitizing match the authored cards. HTML-looking text such as `Vec<u8>` stays
+// as written, and text over the formatting budget stays plain.
 function ledgerParagraphs(value: string, base: string | undefined): RootContent[] {
-  const tree = parseMarkdown(value, base);
+  const tree = parseMarkdown(value, base, { literalHtml: true });
   if (tree) return tree.children.filter((node) => node.type !== "text" || node.value.trim());
   return value
     .split(/\n\s*\n/)

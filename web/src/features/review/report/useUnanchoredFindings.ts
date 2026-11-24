@@ -4,7 +4,7 @@ import type { Descriptor, ReportSummary } from "../../../api/generated/contracts
 import { useResource } from "../../../hooks/useResource";
 import { contextItems } from "./report-context";
 import { finishReading } from "./report-position";
-import { unanchoredBlock } from "./report-presentation";
+import { expectedLedgerCards, unanchoredBlock } from "./report-presentation";
 import { withUnanchored } from "./report-reader";
 import type { ReaderDocument } from "./report-reader";
 import { isRetired } from "./report-structure";
@@ -12,10 +12,12 @@ import type { AcceptedFindingChange } from "./report-structure";
 
 type Finding = Extract<Descriptor, { kind: "finding" }>;
 
-// Every active finding gets a card, including one carried from an earlier version
-// or listed in the findings ledger without a heading in this report's text. The
-// report renders first; the cards join it when the findings arrive, and refresh
-// after a disposition save.
+// Every active finding gets a card, including one carried from an earlier version,
+// listed in the findings ledger without a heading in this report's text, or headed
+// inside an element such as `<details>`. The report renders first; the cards join it
+// when the findings arrive, and refresh after a disposition save. A summary that
+// expects cards starts the read beside the report's; a finding count above the
+// text's own cards starts it once the text is formatted.
 export function useUnanchoredFindings(
   runId: string,
   report: ReportSummary,
@@ -25,7 +27,10 @@ export function useUnanchoredFindings(
   changes: ReadonlyMap<string, AcceptedFindingChange> | undefined,
   base: string | undefined,
 ) {
-  const wanted = admitted && report.unanchoredFindingCount > 0;
+  const expected = reader
+    ? expectedLedgerCards(report, reader.groups, changes)
+    : report.unanchoredFindingCount;
+  const wanted = admitted && expected > 0;
   const findings = useResource(
     JSON.stringify(["unanchored-findings", runId, report.receiptId, report.sha256, wanted]),
     async (signal) => {
@@ -58,5 +63,10 @@ export function useUnanchoredFindings(
     });
     return withUnanchored(reader, blocks, changes);
   }, [reader, items, changes, base]);
-  return { reader: withCards, error: Boolean(findings.error), retry: findings.retry };
+  return {
+    reader: withCards,
+    expected,
+    error: Boolean(findings.error),
+    retry: findings.retry,
+  };
 }

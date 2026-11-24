@@ -281,6 +281,7 @@ export default function ReportDocument({
           <RichReport
             historyAccess={historyAccess}
             document={unanchored.reader}
+            ledgerCards={unanchored.expected}
             report={report}
             onFallback={fallback}
             bookmark={bookmark}

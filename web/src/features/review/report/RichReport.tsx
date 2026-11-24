@@ -28,6 +28,7 @@ type Selection = {
 export function RichReport({
   historyAccess,
   document: reader,
+  ledgerCards,
   onFallback,
   report,
   bookmark,
@@ -37,6 +38,7 @@ export function RichReport({
 }: {
   readonly historyAccess: ReactNode;
   readonly document: ReaderDocument;
+  readonly ledgerCards: number;
   readonly onFallback: () => void;
   readonly report: ReportSummary;
   readonly bookmark: string;
@@ -93,11 +95,10 @@ export function RichReport({
   const sections = blocks.flatMap((block, index) =>
     block.name && !block.findingId ? [{ index, label: block.name }] : [],
   );
-  // Count the ledger cards the summary expects, so the reader keeps its mode when they arrive.
+  // Count the ledger cards the report expects, so the reader keeps its mode when they arrive.
   const textGroups = blocks.filter((block) => block.sourceOrder >= 0).length;
   const usesVirtual =
-    Boolean(reader.prepare) ||
-    Math.max(blocks.length, textGroups + report.unanchoredFindingCount) > 17;
+    Boolean(reader.prepare) || Math.max(blocks.length, textGroups + ledgerCards) > 17;
   const restoreIndex =
     !restored && saved?.offset !== undefined
       ? blocks.findIndex((block) => block.offset === saved.offset)

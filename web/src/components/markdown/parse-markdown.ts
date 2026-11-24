@@ -15,29 +15,49 @@ type MarkdownNode = {
 };
 
 export type PreparedMarkdown = { readonly tree: Root; readonly nodes: number };
+type MarkdownOptions = {
+  // Shows HTML-looking text as written, such as `Vec<u8>` or `<script>`, instead of
+  // reading it as markup. Authored reports keep their HTML.
+  readonly literalHtml?: boolean;
+};
+type SyntaxTree = ReturnType<typeof syntax.parse>;
+type SyntaxNode = SyntaxTree | SyntaxTree["children"][number];
 
 const MAX_DEPTH = 128;
 export const MAX_MARKDOWN_NODES = 60_000;
 const MARKDOWN_SYNTAX = /[*_`~[<>&\\|#]|^(?:[ \t]*[+-]|\d+[.)])[ \t]/m;
 const blockNodes = new Set(["root", "list", "listItem", "blockquote", "table"]);
+// Parents whose children are blocks, so literal HTML there becomes its own paragraph.
+const flowParents = new Set(["root", "blockquote", "listItem", "footnoteDefinition"]);
+const sanitizeSchema = {
+  ...defaultSchema,
+  tagNames: [...(defaultSchema.tagNames ?? []), "details", "summary"],
+  attributes: { ...defaultSchema.attributes, details: ["open"] },
+  protocols: { ...defaultSchema.protocols, href: ["https", "http", "mailto"] },
+};
 const syntax = unified().use(remarkParse).use(remarkGfm);
 const rich = syntax()
   .use(remarkRehype, { allowDangerousHtml: true })
   .use(rehypeRaw)
-  .use(rehypeSanitize, {
-    ...defaultSchema,
-    tagNames: [...(defaultSchema.tagNames ?? []), "details", "summary"],
-    attributes: { ...defaultSchema.attributes, details: ["open"] },
-    protocols: { ...defaultSchema.protocols, href: ["https", "http", "mailto"] },
-  });
+  .use(rehypeSanitize, sanitizeSchema);
+const literal = syntax().use(literalHtml).use(remarkRehype).use(rehypeSanitize, sanitizeSchema);
 
-export function parseMarkdown(source: string, base?: string): Root | undefined {
-  return prepareMarkdown(source, base)?.tree;
+export function parseMarkdown(
+  source: string,
+  base?: string,
+  options?: MarkdownOptions,
+): Root | undefined {
+  return prepareMarkdown(source, base, options)?.tree;
 }
 
-export function prepareMarkdown(source: string, base?: string): PreparedMarkdown | undefined {
+export function prepareMarkdown(
+  source: string,
+  base?: string,
+  options?: MarkdownOptions,
+): PreparedMarkdown | undefined {
   if (!admitMarkdown(source)) return;
-  const tree = rich.runSync(rich.parse(source));
+  const processor = options?.literalHtml ? literal : rich;
+  const tree = processor.runSync(processor.parse(source));
   const pending: { node: Root | RootContent; depth: number }[] = [{ node: tree, depth: 0 }];
   let count = 0;
   while (pending.length) {
@@ -108,6 +128,29 @@ function textContent(node: MarkdownNode, depth: number, budget: { remaining: num
       );
     }
   }
+}
+
+// Turns each HTML node into text with the same value before it reaches HTML.
+function literalHtml() {
+  return (tree: SyntaxTree) => {
+    const pending: SyntaxNode[] = [tree];
+    for (let node = pending.pop(); node; node = pending.pop()) {
+      if (!("children" in node)) continue;
+      const flow = flowParents.has(node.type);
+      // Each replacement is valid where the HTML node stood: text in phrasing, a paragraph in flow.
+      const children: unknown[] = node.children;
+      for (const [index, child] of node.children.entries()) {
+        if (child.type !== "html") {
+          pending.push(child);
+          continue;
+        }
+        const text = { type: "text", value: child.value, position: child.position };
+        children[index] = flow
+          ? { type: "paragraph", children: [text], position: child.position }
+          : text;
+      }
+    }
+  };
 }
 
 function imageLabel(alt: unknown): string {
