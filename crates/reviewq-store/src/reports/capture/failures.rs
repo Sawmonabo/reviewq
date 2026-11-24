@@ -51,20 +51,26 @@ pub(super) fn note(
     Ok(notification)
 }
 
-/// Resolves every unresolved failure on `run` that came before the run's newest accepted
-/// final, amendment or unchanged result. The failures stay listed.
+/// Resolves every unresolved failure on `run` that came before an accepted final, amendment
+/// or unchanged result. The failure rows are kept.
 ///
-/// Acceptance calls this for the handoff it just recorded, which admission keeps newest. A
-/// rejection calls it too: an earlier attempt can fail after a later one was accepted.
+/// Acceptance passes the receipt it just recorded as `accepted`. A rejection passes `None`
+/// and compares against the run's newest accepted report, because an earlier attempt can
+/// fail after a later one was accepted.
 ///
 /// A failure takes its native position from the handoff or correction request at its
 /// address. Without a comparable position, that attempt (or the failure itself) must
 /// predate the accepted handoff's staging, so a later attempt's failure stays unresolved.
-pub(super) fn resolve(db: &Connection, run: &str) -> Result<(), StoreError> {
+pub(super) fn resolve(
+    db: &Connection,
+    run: &str,
+    accepted: Option<&str>,
+) -> Result<(), StoreError> {
     db.prepare_cached(
         "WITH a AS (
            SELECT receipt_id,run_id,source_generation,source_position,created_at_ms FROM report_handoffs
            WHERE run_id=?1 AND state='recorded' AND form<>'needs_input'
+             AND (?2 IS NULL OR receipt_id=?2)
            ORDER BY created_at_ms DESC,receipt_id DESC LIMIT 1)
          UPDATE report_delivery_failures SET resolved_by_receipt_id=(SELECT receipt_id FROM a)
          WHERE notification_id IN (
@@ -80,6 +86,6 @@ pub(super) fn resolve(db: &Connection, run: &str) -> Result<(), StoreError> {
                  coalesce(h.source_position,c.source_position),a.source_generation,a.source_position)<=0 END,
              coalesce(h.created_at_ms,c.requested_at_ms,f.occurred_at_ms)<=a.created_at_ms))",
     )?
-    .execute([run])?;
+    .execute(params![run, accepted])?;
     Ok(())
 }

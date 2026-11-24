@@ -302,7 +302,7 @@ pub(super) fn complete(
     // A final, amendment or unchanged result leaves the run with a current report; a
     // question saves none.
     if !matches!(work.declaration, Declaration::NeedsInput { .. }) {
-        failures::resolve(&tx.sql, run)?;
+        failures::resolve(&tx.sql, run, Some(receipt))?;
         crate::hosts::recovery::complete_turn(tx, &work.call.lead, &work.call.turn_id)?;
     }
     emit(tx, &work, time, notification)?;
@@ -378,7 +378,7 @@ pub(super) fn reject(
         )? {
             tx.emit(&[ResourceKey::Notification(Some(notification))])?;
         }
-        failures::resolve(&tx.sql, work.call.lead.run_id().as_str())?;
+        failures::resolve(&tx.sql, work.call.lead.run_id().as_str(), None)?;
         emit(tx, work, time, None)
     } else {
         emit(

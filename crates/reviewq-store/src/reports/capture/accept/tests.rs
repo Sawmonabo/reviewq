@@ -147,7 +147,7 @@ fn accepted_report_resolves_every_earlier_delivery_failure() {
             }).await.unwrap();
             assert!(finish(&store, &replacement, true).await);
 
-            // Two finals in one turn: the later one is accepted first, then admission rejects
+            // Two finals staged together: the later one is accepted first, then admission rejects
             // the earlier one, whose failure must not outlive the newer saved report.
             let overtaken = stage(&store, &lead, "overtaken", "session", final_report(None)).await;
             let overtaking = stage(&store, &lead, "overtaking", "session", final_report(None)).await;
@@ -676,7 +676,7 @@ async fn finish_with(
     settle(store, work, new_version, body, index).await
 }
 
-/// Accepts claimed work, or reports why admission rejected it.
+/// Accepts claimed work and returns whether admission accepted it.
 async fn settle(
     store: &SqliteStore,
     work: ReportWork,
