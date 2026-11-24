@@ -220,7 +220,8 @@ pub(in crate::entry) async fn submit_verified(
     let stored = match existing {
         Ok(stored) => stored,
         Err(AppError::NotFound) if !lookup => {
-            // A file final's headings are checked against its ledger before staging.
+            // Every file report is hashed before staging, and a file final's headings are
+            // checked against its ledger.
             let ledger = matches!(
                 &handoff,
                 dto::Handoff::Final {
@@ -229,9 +230,7 @@ pub(in crate::entry) async fn submit_verified(
                 }
             );
             let mut headings = None;
-            if let Some(dto::ReportSource::File { path, sha256 }) = source_mut(&mut handoff)
-                && (sha256.is_none() || ledger)
-            {
+            if let Some(dto::ReportSource::File { path, sha256 }) = source_mut(&mut handoff) {
                 let declared = sha256
                     .as_ref()
                     .map(|value| parse::<ReportHash>(value.as_str()))
