@@ -15,6 +15,7 @@ import {
   groupReportItems,
   inDisplayOrder,
   reportBlocks,
+  struckFindingId,
   unanchoredPosition,
 } from "./report-presentation";
 import type { GroupPosition, PreparedGroup, ReportBlock } from "./report-presentation";
@@ -372,7 +373,10 @@ function planGroups(layout: DisplayLayout, changes: Changes, base: string | unde
   const nodes = tree?.children.filter((n) => n.type === "element");
   if (!nodes || nodes.length !== headings.length)
     throw new Error("The report headings require full-document formatting.");
-  const labels = new Map<number, { level: number; label: string; section: boolean }>();
+  const labels = new Map<
+    number,
+    { level: number; label: string; section: boolean; struck: boolean }
+  >();
   for (const [index, span] of headings.entries()) {
     const node = nodes[index]!;
     if (node.type !== "element" || node.tagName !== `h${span.headingLevel}`)
@@ -381,6 +385,7 @@ function planGroups(layout: DisplayLayout, changes: Changes, base: string | unde
       level: span.headingLevel!,
       label: reportText(node).trim(),
       section: startsReportBody(node),
+      struck: span.headingLevel === 3 && struckFindingId(node),
     });
   }
   const bodyStart = spans.findIndex(
@@ -395,7 +400,7 @@ function planGroups(layout: DisplayLayout, changes: Changes, base: string | unde
       span.byteStart >= spans[bodyStart]!.byteStart ? labels.get(span.byteStart) : undefined;
     return {
       offset: span.utf16Start,
-      ...(heading && { level: heading.level, label: heading.label }),
+      ...(heading && { level: heading.level, label: heading.label, struck: heading.struck }),
     };
   });
   let first = 0;
@@ -412,6 +417,7 @@ function planGroups(layout: DisplayLayout, changes: Changes, base: string | unde
       previousThreads,
       ...(group.name && { name: group.name }),
       ...(group.findingId && { findingId: group.findingId }),
+      ...(group.struckId && { struckId: group.struckId }),
     };
     if (group.name) previousThreads = isThreadSection(group.name);
     first = last + 1;

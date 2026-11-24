@@ -46,6 +46,8 @@ export type GroupPosition = {
   readonly offset: number;
   readonly name?: string;
   readonly findingId?: string;
+  // The heading's finding ID is struck through, as in `~~F-04 · Stale comment~~ — fixed`.
+  readonly struckId?: true;
 };
 
 export function groupReportItems<T>(
@@ -54,13 +56,20 @@ export function groupReportItems<T>(
     readonly level?: number;
     readonly label?: string;
     readonly offset?: number;
+    readonly struck?: boolean;
   },
 ) {
-  const groups: { offset: number; items: T[]; name?: string; findingId?: string }[] = [];
+  const groups: {
+    offset: number;
+    items: T[];
+    name?: string;
+    findingId?: string;
+    struckId?: true;
+  }[] = [];
   let current = groups.at(-1);
   let hasSection = false;
   for (const item of items) {
-    const { level, label, offset } = describe(item);
+    const { level, label, offset, struck } = describe(item);
     const heading =
       level !== undefined && level >= (hasSection ? 1 : 2) && level <= 3 ? label : undefined;
     if (
@@ -74,6 +83,7 @@ export function groupReportItems<T>(
         items: [],
         ...(heading && level === 2 && { name: heading }),
         ...(id && { findingId: id }),
+        ...(id && struck && { struckId: true as const }),
       };
       groups.push(current);
     }
@@ -115,6 +125,8 @@ export function unanchoredPosition(
 // Ledger cards this report should draw: the summary's count, or more when the text's own
 // cards cover fewer active findings than the ledger holds. The service anchors a heading
 // inside `<details>` at the top level, while the formatted text nests it and draws no card.
+// The service also skips a struck heading for a finding retired in an earlier version, so
+// a struck card is not counted as covering one.
 export function expectedLedgerCards(
   report: ReportSummary,
   groups: readonly GroupPosition[],
@@ -122,12 +134,39 @@ export function expectedLedgerCards(
 ) {
   const cards = new Set(
     groups.flatMap((group) =>
-      group.sourceOrder >= 0 && group.findingId && !isRetired(changes?.get(group.findingId))
+      group.sourceOrder >= 0 &&
+      group.findingId &&
+      !group.struckId &&
+      !isRetired(changes?.get(group.findingId))
         ? [group.findingId]
         : [],
     ),
   );
   return Math.max(report.unanchoredFindingCount, (report.findingCount ?? 0) - cards.size);
+}
+
+// Whether every character of the finding ID that begins a heading's text is inside a `del`
+// element. The ID is read from the trimmed text as `groupReportItems` reads it.
+export function struckFindingId(heading: Element) {
+  const label = text(heading);
+  const id = findingHeading.exec(label.trim())?.[1];
+  if (!id) return false;
+  const start = label.length - label.trimStart().length;
+  const end = start + id.length;
+  let at = 0;
+  let struck = true;
+  const visit = (node: RootContent, inside: boolean) => {
+    if (node.type === "text") {
+      const from = at;
+      at += node.value.length;
+      if (!inside && from < end && at > start) struck = false;
+    } else if ("children" in node) {
+      const within = inside || (node.type === "element" && node.tagName === "del");
+      for (const child of node.children) visit(child, within);
+    }
+  };
+  for (const child of heading.children) visit(child, false);
+  return struck;
 }
 
 export function unanchoredBlock(
@@ -240,6 +279,7 @@ export function reportBlocks(
           : undefined;
       return {
         ...(level && { level, label: text(node).trim() }),
+        ...(level === 3 && node.type === "element" && { struck: struckFindingId(node) }),
         ...(node.position?.start.offset !== undefined && { offset: node.position.start.offset }),
       };
     },
@@ -254,6 +294,7 @@ export function reportBlocks(
         nodes: finding ? [] : annotate(group.items),
         ...(group.name && { name: group.name }),
         ...(finding && { finding, findingId: finding.id }),
+        ...(finding && group.struckId && { struckId: true as const }),
       };
     }),
     changes,
