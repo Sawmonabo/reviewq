@@ -24,6 +24,17 @@ pub struct ParentFinding {
     pub origin: ReceiptId,
 }
 
+/// The parent version a final's ledger builds on.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct Parent {
+    /// The parent's active findings.
+    pub findings: Vec<ParentFinding>,
+    /// IDs a retiring outcome of this or an earlier version retired and the parent does not
+    /// hold active. A report that keeps such a heading, struck through or not, records
+    /// history rather than a finding.
+    pub retired: BTreeSet<String>,
+}
+
 /// Where a derived finding's card is found.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum Anchor {
@@ -59,16 +70,17 @@ pub struct Ledger {
 
 /// Derives the next version's active findings.
 ///
-/// A retiring outcome excludes its ID even when this report keeps its heading. Every other
-/// ID of the parent, the ledger or the headings stays active. Fields come from the ledger,
-/// then the parent, then the heading. Details come from the ledger, with the reviewed
-/// revision as their checked SHA, else from the parent. The anchor is this report's
-/// top-level heading. A parent finding the handoff neither lists, retires nor heads at the
-/// top level is carried from its origin. A heading without a source span, one nested in a
-/// list item, adds its ID, title and heading priority, with no blocking status, and leaves
-/// a new finding unanchored.
+/// A retiring outcome excludes its ID even when this report keeps its heading. A heading
+/// whose ID the run retired before adds nothing; listing that ID re-raises it as a new
+/// finding, anchored at its heading. Every other ID of the parent, the ledger or the
+/// headings stays active. Fields come from the ledger, then the parent, then the heading.
+/// Details come from the ledger, with the reviewed revision as their checked SHA, else
+/// from the parent. The anchor is this report's top-level heading. A parent finding the
+/// handoff neither lists, retires nor heads at the top level is carried from its origin. A
+/// heading without a source span, one nested in a list item, adds its ID, title and
+/// heading priority, with no blocking status, and leaves a new finding unanchored.
 pub fn derive(
-    parent: Vec<ParentFinding>,
+    parent: Parent,
     report: &StructuredReport,
     edits: &ReportEdits,
     reviewed_sha: Option<&GitSha>,
@@ -80,6 +92,10 @@ pub fn derive(
         .filter(|edit| edit.conclusion.retires_finding())
         .map(|edit| edit.finding_id.as_str())
         .collect();
+    let Parent {
+        findings: parent,
+        retired: earlier,
+    } = parent;
     let mut parent: BTreeMap<String, ParentFinding> = parent
         .into_iter()
         .map(|finding| (finding.id.clone(), finding))
@@ -115,7 +131,12 @@ pub fn derive(
         .keys()
         .cloned()
         .chain(ledger.keys().map(|id| (*id).to_owned()))
-        .chain(headings.keys().map(|id| (*id).to_owned()))
+        .chain(
+            headings
+                .keys()
+                .filter(|id| !earlier.contains(**id))
+                .map(|id| (*id).to_owned()),
+        )
         .filter(|id| !retired.contains(id.as_str()))
         .collect();
     let findings = ids
@@ -169,12 +190,12 @@ pub fn derive(
 /// Checks a final's findings ledger against the parent's active findings while the tool
 /// call is open. An outcome must name a parent finding. A full review lists or gives an
 /// outcome for every parent finding. Each level-three `F-` heading of a file report, at the
-/// top level or nested in a list item, must be listed, given an outcome or carried;
-/// `headings` is `None` when they are unknown.
+/// top level or nested in a list item, must be listed, given an outcome or carried, unless
+/// the run retired its ID before; `headings` is `None` when they are unknown.
 /// Amendments, unchanged results and questions carry no ledger.
 pub fn check(
     declaration: &Declaration,
-    parent: &[ParentFinding],
+    parent: &Parent,
     headings: Option<&[String]>,
     full_review: bool,
 ) -> Vec<HandoffFieldError> {
@@ -186,7 +207,11 @@ pub fn check(
     else {
         return Vec::new();
     };
-    let active: BTreeSet<&str> = parent.iter().map(|finding| finding.id.as_str()).collect();
+    let active: BTreeSet<&str> = parent
+        .findings
+        .iter()
+        .map(|finding| finding.id.as_str())
+        .collect();
     let listed: BTreeSet<&str> = report
         .findings
         .iter()
@@ -210,7 +235,7 @@ pub fn check(
         }
     }
     if full_review {
-        for finding in parent {
+        for finding in &parent.findings {
             let id = finding.id.as_str();
             if !listed.contains(id) && !outcomes.contains(id) {
                 errors.push(HandoffFieldError::new(
@@ -225,7 +250,11 @@ pub fn check(
     }
     for id in headings.unwrap_or_default() {
         let id = id.as_str();
-        if !listed.contains(id) && !outcomes.contains(id) && !active.contains(id) {
+        if !listed.contains(id)
+            && !outcomes.contains(id)
+            && !active.contains(id)
+            && !parent.retired.contains(id)
+        {
             errors.push(HandoffFieldError::new(
                 "/handoff/source",
                 format!("The report has heading {id}, which is missing from report.findings."),
@@ -262,7 +291,7 @@ struct Heading<'a> {
 mod tests {
     use std::sync::Arc;
 
-    use super::{Anchor, ParentFinding, check, derive};
+    use super::{Anchor, Parent, ParentFinding, check, derive};
     use crate::reports::{
         Declaration, Descriptor, FindingBasis, FindingBasisKind, FindingDetails, ReportEdits,
         RevisionEvidence, Source, StructuredFinding, StructuredReport, Verdict, index,
@@ -312,6 +341,10 @@ mod tests {
             edits: ReportEdits::default(),
             assessments: Vec::new(),
         };
+        let parent = Parent {
+            findings: parent.to_vec(),
+            retired: Default::default(),
+        };
         let errors = check(&review, &parent, None, true);
         let messages: Vec<_> = errors
             .iter()
@@ -333,10 +366,13 @@ mod tests {
     }
 
     // A report in its own format wrote F-01's ID in inline code, repeated F-01, said both
-    // "Blocking: yes" and "Blocking: no" under it, and raised F-02 inside a numbered list.
+    // "Blocking: yes" and "Blocking: no" under it, raised F-02 inside a numbered list, gave
+    // F-03 its severity and blocking status in one two-line paragraph, and kept a struck
+    // heading for F-04, which an earlier version had retired as fixed.
     // The parse must not fail, F-01 takes the last Blocking line before its first labelled
     // field, as its card shows, and F-02, which the reader draws as a ledger card, must stay
-    // a tracked finding.
+    // a tracked finding. F-03 keeps P1 and blocking, and F-04 neither needs listing nor
+    // comes back active.
     #[test]
     fn a_nested_heading_and_a_repeated_id_stay_tracked() {
         let markdown = "# Review of !418
@@ -355,6 +391,13 @@ Blocking: yes
 
 The retry path logs it again.
 
+### F-03 Webhook secret compared with ==
+
+Severity: P1
+Blocking: yes
+
+### ~~F-04 · P3 · Stale comment~~ — fixed in v2
+
 ## Other notes
 
 1. ### F-02 Retry loop never ends
@@ -366,7 +409,7 @@ The retry path logs it again.
             .iter()
             .filter(|item| matches!(item, Descriptor::Section { .. }))
             .count();
-        assert_eq!(sections, 4, "the repeated heading stays a plain section");
+        assert_eq!(sections, 6, "the repeated heading stays a plain section");
         let ids: Vec<String> = headings
             .iter()
             .filter_map(|item| match item {
@@ -386,7 +429,11 @@ The retry path logs it again.
             edits: ReportEdits::default(),
             assessments: Vec::new(),
         };
-        let messages: Vec<_> = check(&review, &[], Some(&ids), true)
+        let parent = Parent {
+            findings: Vec::new(),
+            retired: ["F-04".to_owned()].into(),
+        };
+        let messages: Vec<_> = check(&review, &parent, Some(&ids), true)
             .into_iter()
             .map(|error| error.message)
             .collect();
@@ -394,6 +441,7 @@ The retry path logs it again.
             messages,
             [
                 "The report has heading F-01, which is missing from report.findings.",
+                "The report has heading F-03, which is missing from report.findings.",
                 "The report has heading F-02, which is missing from report.findings.",
             ]
         );
@@ -405,7 +453,7 @@ The retry path logs it again.
         else {
             unreachable!()
         };
-        let derived: Vec<_> = derive(Vec::new(), report, edits, None, &headings)
+        let derived: Vec<_> = derive(parent, report, edits, None, &headings)
             .findings
             .into_iter()
             .map(|finding| {
@@ -418,6 +466,7 @@ The retry path logs it again.
             [
                 ("F-01".into(), Some("P1".into()), Some(false), true),
                 ("F-02".into(), None, None, false),
+                ("F-03".into(), Some("P1".into()), Some(true), true),
             ]
         );
     }

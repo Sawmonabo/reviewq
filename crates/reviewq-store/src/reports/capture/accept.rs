@@ -179,8 +179,8 @@ pub(super) fn complete(
             let install = match (report, amends, current.receipt.as_deref()) {
                 (Some(report), None, parent) => {
                     let parent = match parent {
-                        Some(parent) => structured::parent::active(db, run, parent)?,
-                        None => Vec::new(),
+                        Some(parent) => structured::parent::read(db, run, parent)?,
+                        None => ledger::Parent::default(),
                     };
                     let reviewed = match revision {
                         RevisionEvidence::Exact(sha) => Some(sha),

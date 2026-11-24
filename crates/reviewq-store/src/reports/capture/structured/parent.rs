@@ -1,21 +1,46 @@
+use std::collections::BTreeSet;
+
 use reviewq_app::access::AppError;
 use reviewq_app::reports::FindingConclusion;
-use reviewq_app::reports::ledger::ParentFinding;
+use reviewq_app::reports::ledger::{Parent, ParentFinding};
 use rusqlite::{Connection, params};
 
 use crate::StoreError;
 use crate::queue::parse;
 use crate::reports::optional;
 
-/// Reads the active findings of an accepted version: its rows minus the IDs its own
-/// outcomes retire. A version accepted before the findings ledger kept rows for retired
-/// cards whose headings stayed in its text. Each finding's origin is the receipt whose
-/// card it carries, else this version.
-pub(in crate::reports::capture) fn active(
+/// Reads the parent a final builds on: the active findings of the accepted version and the
+/// IDs this run's retiring outcomes retired that it does not hold active.
+///
+/// The active findings are the version's rows minus the IDs its own outcomes retire. A
+/// version accepted before the findings ledger kept rows for retired cards whose headings
+/// stayed in its text. Each finding's origin is the receipt whose card it carries, else
+/// this version. Both callers pass the run's head, and acceptance makes each new version
+/// the head with the previous head as its parent, so the run's outcomes are exactly those
+/// of the parent and its ancestors.
+pub(in crate::reports::capture) fn read(
     db: &Connection,
     run: &str,
     receipt: &str,
-) -> Result<Vec<ParentFinding>, StoreError> {
+) -> Result<Parent, StoreError> {
+    let findings = active(db, run, receipt)?;
+    let mut query =
+        db.prepare_cached("SELECT finding_id, conclusion FROM report_changes WHERE run_id=?1")?;
+    let mut rows = query.query([run])?;
+    let mut retired = BTreeSet::new();
+    while let Some(row) = rows.next()? {
+        let conclusion: Option<FindingConclusion> = optional(row, 1)?;
+        if conclusion.is_some_and(FindingConclusion::retires_finding) {
+            retired.insert(row.get::<_, String>(0)?);
+        }
+    }
+    for finding in &findings {
+        retired.remove(&finding.id);
+    }
+    Ok(Parent { findings, retired })
+}
+
+fn active(db: &Connection, run: &str, receipt: &str) -> Result<Vec<ParentFinding>, StoreError> {
     let mut query = db.prepare_cached(
         "SELECT f.finding_id, f.title, f.severity, f.blocking, f.evidence_sha256, details.value,
                 coalesce(inherited.value, f.receipt_id), c.conclusion

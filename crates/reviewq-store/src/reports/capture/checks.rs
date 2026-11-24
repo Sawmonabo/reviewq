@@ -54,8 +54,8 @@ pub(super) fn ledger(
         return Ok((errors, None));
     };
     let parent = match head {
-        Some(head) => structured::parent::active(db, run, head)?,
-        None => Vec::new(),
+        Some(head) => structured::parent::read(db, run, head)?,
+        None => ledger::Parent::default(),
     };
     errors.extend(ledger::check(
         declaration,
