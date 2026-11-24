@@ -522,17 +522,15 @@ async fn read_source(
         complete: true,
     };
     let display_admitted = stats.require_markdown_budget().is_ok();
-    // A report whose headings cannot be parsed is accepted without a heading index.
+    // A report whose headings cannot be parsed, such as one with a repeated F- heading, is
+    // accepted without a heading index and still renders in the rich reader.
     let (index, display_source) = match index_source {
-        Some(source) => match tokio::task::spawn_blocking(move || {
-            let index = index::parse(&source)?;
-            Ok::<_, AppError>((index, display_admitted.then_some(source)))
+        Some(source) => tokio::task::spawn_blocking(move || {
+            let index = index::parse(&source).ok().flatten();
+            (index, display_admitted.then_some(source))
         })
         .await
-        {
-            Ok(Ok((index, source))) => (index, source),
-            Ok(Err(_)) | Err(_) => (None, None),
-        },
+        .unwrap_or((None, None)),
         None => (None, None),
     };
     Ok((
