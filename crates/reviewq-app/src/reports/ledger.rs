@@ -417,6 +417,11 @@ Blocking: yes
                 _ => None,
             })
             .collect();
+        assert_eq!(
+            ids,
+            ["F-01", "F-03", "F-04", "F-02"],
+            "the struck heading keeps its ID"
+        );
         let review = Declaration::Final {
             source: Source::Response,
             revision: RevisionEvidence::Exact("a".repeat(40).parse().unwrap()),
