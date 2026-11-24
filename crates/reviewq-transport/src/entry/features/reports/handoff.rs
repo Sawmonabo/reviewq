@@ -268,10 +268,7 @@ pub(in crate::entry) async fn submit_verified(
                             return Err(AppError::InvalidHandoff(vec![
                                 app::HandoffFieldError::new(
                                     "/handoff/source/sha256",
-                                    format!(
-                                        "The file's SHA-256 is {}; the report changed or the hash is wrong.",
-                                        actual.as_str()
-                                    ),
+                                    "The file at source.path does not match source.sha256. Point source at the finished report and compute the hash after its last edit.",
                                 ),
                             ]));
                         }

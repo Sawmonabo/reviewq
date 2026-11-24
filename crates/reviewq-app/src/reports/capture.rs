@@ -248,19 +248,20 @@ pub trait ReportCaptureStore: Send + Sync {
 /// What a submit-time read of a report file found.
 #[derive(Default)]
 pub struct SubmittedFile {
-    /// SHA-256 of every byte read. `None` when the file was not read.
+    /// SHA-256 of every byte. `None` when the read failed or the file changed during it.
     pub hash: Option<ReportHash>,
     /// The report's level-three `F-` heading IDs, including those nested in list items,
     /// when they could be read without waiting.
     pub headings: Option<Vec<String>>,
 }
 
-/// Reads a submitted report file once. Without a `declared` hash, every byte is hashed and
-/// a read failure is returned. With `headings`, it also parses a file of at most 4 MiB of
-/// UTF-8 for its `F-` heading IDs, but only when the parse admission is free; it never
-/// waits. A declared hash that differs from the bytes yields their hash and no headings, so
-/// the caller can name the mismatch. An oversized file, a busy admission or any failure
-/// after a declared hash yields neither, and acceptance checks the file instead.
+/// Reads a submitted report file once and streams every byte through SHA-256. Without a
+/// `declared` hash, a read failure is returned. With `headings`, a file of at most 4 MiB of
+/// UTF-8 is also buffered and parsed for its `F-` heading IDs, but only when the parse
+/// admission is free; it never waits. A declared hash that differs from the bytes yields
+/// their hash and no headings, so the caller can name the mismatch. After a declared hash,
+/// a read failure or a file that changes during the read yields neither, and acceptance
+/// checks the file instead.
 pub async fn read_submitted_file(
     files: &dyn ReportFileSource,
     call: NativeCall,
@@ -290,9 +291,6 @@ async fn read_submitted(
     let admission = (headings && total <= SEMANTIC_BYTES)
         .then(index::try_admit)
         .flatten();
-    if declared.is_some() && admission.is_none() {
-        return Ok(SubmittedFile::default());
-    }
     let mut text = admission
         .as_ref()
         .map(|_| Vec::with_capacity(total as usize));
