@@ -232,7 +232,7 @@ One writer. Work top-down so each step compiles: callers first, then what they c
 
 - `compose::compose(&LedgerSnapshot) -> Composed` with the text, its SHA-256, the line statistics, and one span (scalar offset and length) per card and section.
 - `publish::finish_review(store, caller, input) -> Result<FinishReceipt, AppError>`: the closing-call checks, compose, commit, at most 3 recomposes on a stale snapshot, then the display index call after commit. `Invalid` from the commit returns its field errors to the caller.
-- `publish::settle(store, run)` and `publish::settle_due(store)`: apply the domain's `settle` decision. Publish an update, or record `unfinished_review` once. An update that cannot publish records `update_failed`.
+- `publish::settle_due(store)`: apply the domain's `settle` decision to every run that is due. Publish an update, or record `unfinished_review` once. An update that cannot publish records `update_failed`.
 
 **Steps**
 
@@ -310,9 +310,9 @@ One writer. Work top-down so each step compiles: callers first, then what they c
 - [ ] Put the bridge-credential and content-type check in one function and use it from the ledger routes, the action routes and the host routes. Remove the two copies that exist.
 - [ ] Add the six tool routes. Each reads `{binding,input}`, validates `input` with `validate_ledger_input`, maps the DTO to the app request field by field, and returns the result or `fieldErrors`.
 - [ ] Add `gate` and `readback`. `gate` notes the stop hook's report and returns the app's gate decision.
-- [ ] In the Claude hook route, in the `ClaudeClassicEvent::Stopping` arm that C1 left empty, answer `stopping` with the same gate reply, taking `stopHookActive` from the hook input, and settle the run on the turn signal. This is the only Claude path for both.
+- [ ] In the Claude hook route, answer `stopping` with the same gate reply, taking `stopHookActive` from the hook input, and `compacted` with the read-back. The turn signal only records the turn; the attention loop settles the run.
 - [ ] Return the stop hook's report state with the link reply in `entry/hosts.rs`.
-- [ ] Add the six MCP tools from `LEDGER_TOOLS`. Bind the caller from `_meta`: `threadId`, `callId`, `itemId`, and `turn_id` and `parent_thread_id` from `x-codex-turn-metadata` when present. Build the same `{binding,input}` and call the same handler as the routes, so the binding and the error mapping exist once. A Claude client's tool list omits the six tools, because the plugin registers them. Give `finish_review` a 60-second deadline and the others the default.
+- [ ] Add the six MCP tools from `LEDGER_TOOLS`. Bind the caller from `_meta`: `threadId`, `callId`, and `turn_id` and `parent_thread_id` from `x-codex-turn-metadata` when present. Build the same `{binding,input}` and call the same handler as the routes, so the binding and the error mapping exist once. A Claude client's tool list omits the six tools, because the plugin registers them. Give `finish_review` a 60-second deadline and the others the default.
 - [ ] Return a field error to the model as a tool error whose text lists each field and message, so the agent can correct it in the same turn.
 - [ ] Run `cargo check --locked -p reviewq-transport` and `make rust-check`.
 
