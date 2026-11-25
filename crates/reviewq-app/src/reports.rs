@@ -8,6 +8,7 @@ pub use display::{
     DISPLAY_INDEX_FORMAT, DisplayBlock, DisplayBlockKind, DisplayFallback, DisplayIndex,
     DisplayLayout, DisplayWindow, DisplayWindowBlock, DisplayWindowPosition, DisplayWindowState,
     MAX_DISPLAY_BLOCKS, MAX_DISPLAY_HEADING_BYTES, MAX_DISPLAY_HEADINGS_BYTES, build_display_index,
+    build_report_display_index,
 };
 pub use drawings::{
     DRAWING_RECIPE, DrawingOutput, DrawingRenderer, MAX_DRAWING_BYTES, mermaid_sources,
@@ -112,7 +113,6 @@ pub struct ArtifactChunk {
 /// Counts lines and the longest line, in bytes without a line's trailing CR, as text is
 /// appended.
 #[derive(Default)]
-#[expect(dead_code, reason = "K1 computes the line statistics of composed text")]
 pub(crate) struct LineStats {
     line: u64,
     lines: u64,
@@ -120,7 +120,6 @@ pub(crate) struct LineStats {
     last_cr: bool,
 }
 
-#[expect(dead_code, reason = "K1 computes the line statistics of composed text")]
 impl LineStats {
     pub(crate) fn push(&mut self, bytes: &[u8]) {
         for &byte in bytes {

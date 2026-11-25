@@ -66,7 +66,19 @@ struct BlockStart {
     literal_markers: usize,
 }
 
-pub(super) fn cut(source: &str) -> Result<DisplayLayout, DisplayFallback> {
+/// How the caller's reader renders raw HTML, which decides whether HTML can be cut out of its
+/// document.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum HtmlRendering {
+    /// Report text, whose reader shows HTML as text: an HTML block reads as a paragraph and
+    /// inline HTML as words, so neither needs the rest of the document.
+    Text,
+    /// Transcripts, whose reader renders HTML as markup that can open in one block and close
+    /// in another, so any HTML leaves the document to the full reader.
+    Markup,
+}
+
+pub(super) fn cut(source: &str, html: HtmlRendering) -> Result<DisplayLayout, DisplayFallback> {
     // The parser strips a leading BOM on each parse. Bare CR and NUL also need
     // special browser handling. Keep those inputs on the existing reader.
     if source.contains(['\u{feff}', '\0'])
@@ -103,7 +115,7 @@ pub(super) fn cut(source: &str) -> Result<DisplayLayout, DisplayFallback> {
         loop {
             let to = window_end(source, from, window_bytes)?;
             let window = &source[from..to];
-            let candidates = parse_window(window)?;
+            let candidates = parse_window(window, html)?;
             let finished = to == source.len();
             let keep = if finished {
                 candidates.len()
@@ -250,7 +262,7 @@ fn window_end(source: &str, from: usize, bytes: usize) -> Result<usize, DisplayF
         .ok_or(DisplayFallback::InvalidBoundary)
 }
 
-fn parse_window(window: &str) -> Result<Vec<BlockStart>, DisplayFallback> {
+fn parse_window(window: &str, html: HtmlRendering) -> Result<Vec<BlockStart>, DisplayFallback> {
     let parser = Parser::new_ext(window, REPORT_MARKDOWN);
     if parser.reference_definitions().iter().next().is_some() {
         return Err(DisplayFallback::DocumentContext);
@@ -281,10 +293,14 @@ fn parse_window(window: &str) -> Result<Vec<BlockStart>, DisplayFallback> {
             0
         };
         let kind = match event {
-            Event::Start(Tag::FootnoteDefinition(_) | Tag::HtmlBlock)
-            | Event::FootnoteReference(_)
-            | Event::Html(_)
-            | Event::InlineHtml(_) => return Err(DisplayFallback::DocumentContext),
+            Event::Start(Tag::FootnoteDefinition(_)) | Event::FootnoteReference(_) => {
+                return Err(DisplayFallback::DocumentContext);
+            }
+            Event::Start(Tag::HtmlBlock) | Event::Html(_) | Event::InlineHtml(_)
+                if html == HtmlRendering::Markup =>
+            {
+                return Err(DisplayFallback::DocumentContext);
+            }
             Event::Start(ref tag) => {
                 depth += 1;
                 if depth > MAX_DEPTH {
@@ -344,7 +360,8 @@ fn parse_window(window: &str) -> Result<Vec<BlockStart>, DisplayFallback> {
 
 fn block_kind(tag: &Tag<'_>) -> Result<DisplayBlockKind, DisplayFallback> {
     Ok(match tag {
-        Tag::Paragraph => DisplayBlockKind::Paragraph,
+        // Reached only for `HtmlRendering::Text`, whose reader shows the block as a paragraph.
+        Tag::Paragraph | Tag::HtmlBlock => DisplayBlockKind::Paragraph,
         Tag::Heading { level, .. } => DisplayBlockKind::Heading(*level as u8),
         Tag::BlockQuote(_) => DisplayBlockKind::BlockQuote,
         Tag::CodeBlock(_) => DisplayBlockKind::Code,
