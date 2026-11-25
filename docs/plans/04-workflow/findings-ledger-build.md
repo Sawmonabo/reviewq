@@ -74,7 +74,7 @@ Tasks use these names exactly. F1 and F2 give them their Rust types. Later tasks
 |---|---|
 | Tools | `record_finding`, `assess_finding`, `record_note`, `review_ledger`, `finish_review`, `needs_input` |
 | Routes under `/api/v1/native/ledger/` | `record-finding`, `assess-finding`, `record-note`, `list`, `finish`, `needs-input`, `gate`, `readback` |
-| Tool route body and replies | `{binding:{sessionKey,callId,turnId?,agentId?},input:{…}}`. Success is the tool's result. A refused input is `{fieldErrors:[{field,message}]}`. The binding never travels inside `input`. |
+| Tool route body and replies | `{binding:{sessionKey,callId,turnId?,agentId?},input:{…}}`. Success is the tool's result. A refused input is the existing error reply of `entry/error.rs` with `fieldErrors:[{path,message}]`; no second error shape is added. The binding never travels inside `input`. |
 | Gate and read-back bodies | Gate: `{sessionKey,turnId?,stopHookActive}` returning `{block:false}` or `{block:true,reason}`. Read-back: `{sessionKey}` returning `{text}`. |
 | Claude bridge action | `reviewq internal claude-bridge ledger <tool> <session>`, input JSON on stdin, one JSON reply on stdout |
 | Hook helpers | `reviewq internal claude-hook` (existing, now also answers `Stop` and `SessionStart`), `reviewq internal codex-hook` (new, replaces `codex-report-witness`) |
@@ -144,11 +144,12 @@ One writer. Work top-down so each step compiles: callers first, then what they c
 **Files**
 
 - Create: `crates/reviewq-domain/src/ledger.rs`, `crates/reviewq-app/src/ledger.rs`, `crates/reviewq-app/src/ledger/markdown.rs`, and `crates/reviewq-app/src/ledger/{record,passes,compose,publish,readback}.rs` holding only their module documentation.
-- Modify: the two `lib.rs` files, one `pub mod ledger;` line each. App `reports.rs`, `reports/revision.rs` and transport `entry/followups.rs`, so the outcome type has one definition.
+- Modify: the two `lib.rs` files, one `pub mod ledger;` line each. App `access.rs` and transport `entry/error.rs`, so the field-error cap has one owner.
 
 **Produces**
 
-- Domain types with checked constructors: `FindingId` (`F-01`, never reused, ordered by number), `RecordRevision`, `Severity`, `FindingSection`, `EvidenceKind`, `Outcome` with `retires()`, `NoteSection`, `PassKind`, `PassState` (`Open`, `Waiting`, `Closed`), `VersionKind`, `VersionState` (`New`, `Updated`, `Retired`, `Carried`), `FailureKind`, `Tool`, `CallerRole` (`Lead`, `Child`). `Outcome` replaces the app's `FindingConclusion` and `retires_finding`. Delete those and point their callers at the domain type.
+- Domain types with checked constructors, built with the identity macros where they fit and labelled the way `RunStage` is: `FindingId` (`F-01`, never reused, ordered by number), `RecordRevision`, `PassKind`, `PassState` (`Open`, `Waiting`, `Closed`), `VersionKind`, `VersionState` (`New`, `Updated`, `Retired`, `Carried`), `FailureKind`, `Tool`, `CallerRole` (`Lead`, `Child`).
+- The app's `reports.rs` already owns `Verdict`, `Severity`, `FindingSection`, `FindingBasisKind` and `FindingConclusion` with `retires_finding`. The ledger uses them as its severity, section, evidence kind and outcome. Define none of them again. Add `NoteSection` beside the app's ledger types with the `labels!` macro.
 - Domain rules as pure functions over small input structs:
   - `may_call(Tool, CallerRole) -> bool`. Only the lead may call `finish_review` and `needs_input`.
   - `opens_pass(...) -> Option<PassKind>` for a launch start, a delivered batch and the first record of a run with no version.
@@ -157,7 +158,7 @@ One writer. Work top-down so each step compiles: callers first, then what they c
   - `closing_kind(ClosingFacts) -> Result<VersionKind, ClosingError>` covering a first version, an open pass of each kind, `fullReview`, and assessments without a selected-thread pass.
   - `untouched_findings(parent_active, touched) -> Vec<FindingId>` for the full-review check.
   - `version_state(parent_revision, current_revision, retired) -> VersionState`.
-- App field checks in `ledger/markdown.rs`, on the parser the display cutter already uses (`reports/display/cutter.rs`):
+- App field checks in `ledger/markdown.rs`, on `satteri_pulldown_cmark` and its `into_offset_iter` source ranges, as the display cutter uses them (`reports/display/cutter.rs`):
   - `check_field(kind, text) -> Result<(), FieldProblem>` with the line where a problem starts. It applies the 8 KiB line limit, the stand-alone rule, the begins-with-a-paragraph rule for `issue`, `consequence`, evidence text and `proposedComment`, and the rules for `summary` (at most four plain paragraphs) and `rationale` (one): no other block kind, and no paragraph that starts with bold text or with a label the header uses.
   - `shift_headings(text) -> Cow<str>`: ATX and setext headings become ATX with the shallowest at level four and a floor of six. Every other line is returned unchanged.
 - App types in `ledger.rs`: `Caller` (run, role, provider, native session, call ID, optional turn and agent), the request and receipt types of the six operations, `LedgerSnapshot` (what publishing reads), `PublishCommit`, and `PublishOutcome` with `Published`, `Unchanged`, `Stale` and `Invalid(Vec<FieldError>)`.
@@ -168,6 +169,7 @@ One writer. Work top-down so each step compiles: callers first, then what they c
 - [ ] Write the domain types and rules. The domain crate uses only the standard library.
 - [ ] Write the stand-alone check: parse the field followed by a blank line and a sentinel heading, and require the last block to be that heading. Find the offending line from the block that swallowed it. Do not hand-scan fences.
 - [ ] Write the app types and the `LedgerStore` port against the existing `Actor`, `AppFuture`, `Snapshot`, `AppError`, `FieldError` and ID types. Give every public item a one-line description of its outcome and failures.
+- [ ] Remove the app's `FieldError::bounded` and `MAX_FIELD_ERRORS`. In the transport's `entry/error.rs`, pass the converted app errors through the protocol's `bounded_field_errors`, so every refusal is capped once, where the reply is written.
 - [ ] Add test `settle_and_gate_decisions` in the domain: one table over the settle facts (a child still working, a waiting pass, a pending recovery, unpublished records with no pass) and the gate sequence (two blocks, then release; a fresh stop starts again; a waiting pass is never blocked).
 - [ ] Add test `stand_alone_fields` in the app: an open top-level fence is refused with its line, an open fence inside a list item is accepted, an unclosed HTML comment is refused, a setext heading is shifted, and a summary paragraph that starts with `Scope:` is refused.
 - [ ] Run `make crate-deps`, `cargo check --locked --workspace`, then `make test-package PACKAGE=reviewq-domain` and `make test-package PACKAGE=reviewq-app`.
@@ -204,7 +206,7 @@ One writer. Work top-down so each step compiles: callers first, then what they c
 **Files**
 
 - Delete: `web/src/features/review/report/useUnanchoredFindings.ts`.
-- Modify: `report-presentation.ts`, `report-structure.ts`, `report-reader.ts`, `RichReport.tsx`, `ReportDocument.tsx`, `ReportTable.tsx`, `ReportHistory.tsx`, `ReportDetails.tsx`, `Findings.tsx`, `report.css`, `web/src/components/markdown/{parse-markdown,settled,table-page}.ts`, the queue tag table that names `report_saving`, and the generated types under `web/src/api/generated/`.
+- Modify: `report-presentation.ts`, `report-structure.ts`, `report-reader.ts`, `RichReport.tsx`, `ReportDocument.tsx`, `ReportTable.tsx`, `ReportHistory.tsx`, `ReportDetails.tsx`, `Findings.tsx`, `report.css`, `web/src/components/markdown/{parse-markdown,settled,table-page}.ts`, and the queue tag table that names `report_saving`. The generated types under `web/src/api/generated/` are F2's: C1 regenerated them, and only `make contracts` writes them.
 
 **Steps**
 
@@ -245,7 +247,7 @@ One writer. Work top-down so each step compiles: callers first, then what they c
 - Create: `crates/reviewq-store/src/ledger.rs`, `ledger/{records,passes,publish,settle}.rs`, `schema/ledger.sql`.
 - Modify: `lib.rs`, `connection/database.rs` (add the schema file), `reports.rs` (`read_delivery`), `reports/context.rs` (finding details from `ledger_changes`), `reports/failures.rs`, `followups/completion.rs`, `launches.rs` and `hosts/delivery/workflow.rs` (open a pass inside the existing confirmation transactions), the batch-creation code and `queue/archive.rs` (end a pass), `hosts/recovery/dispatch.rs` (recovery eligibility), `schema/queue.sql` (the report state of `review_activity`).
 
-**Consumes** F1's port and types. `WriteTx`, `tx.emit`, `insert_notification`, `reports/artifact.rs`, `reports/authority.rs`, `followups/completion.rs`, `cache_report_display`. The native-call replay in `actions/commands.rs` is tied to the actions table: follow its pattern, do not call it.
+**Consumes** F1's port and types. `WriteTx`, `tx.emit`, `insert_notification`, `reports/artifact.rs`, `reports/authority.rs`, `followups/completion.rs`, `cache_report_display`, `recovery::complete_turn`. C1 left each of these under `#[expect(dead_code)]`; remove the attribute as each gains its caller. The native-call replay in `actions/commands.rs` is tied to the actions table: follow its pattern, do not call it.
 
 **Produces** the `LedgerStore` implementation on `SqliteStore`:
 
@@ -266,7 +268,7 @@ One writer. Work top-down so each step compiles: callers first, then what they c
 - [ ] Write `schema/ledger.sql` with the keys and partial unique indexes that enforce one open pass per run, one row per failure key and one stored result per call.
 - [ ] Write the transactions with cached prepared statements. No statement scans a run's change history on the write path.
 - [ ] Add test `ledger_writes_are_idempotent`: the same call replays its result, an equal create under a new call returns the same ID and revision, a stale revision is refused with the current revision and field names, and a reopened database keeps both records.
-- [ ] Add test `publish_is_conditional`: a record written after the snapshot, then a disposition saved after the snapshot, each make the commit report a stale snapshot and change nothing. A commit on a current snapshot stores the version, closes the pass and resolves the failure. A full review that leaves an earlier finding untouched is refused before it. A selected-thread close that changed nothing completes the batch as `unchanged` and adds no version.
+- [ ] Add test `publish_is_conditional`: a record written after the snapshot, then a disposition saved after the snapshot, each make the commit report a stale snapshot and change nothing. A commit on a current snapshot stores the version, closes the pass and resolves the failure. A full review that leaves an earlier finding untouched is refused before it. A selected-thread close that changed nothing completes the batch as `unchanged` and adds no version. Read the stored version, its history row and a finding's context back through the production reads, so each changed query runs on real rows.
 - [ ] Keep the relocated `conclusion_errors` test passing against the domain `Outcome`.
 - [ ] Run `cargo check --locked -p reviewq-store` and `make test-package PACKAGE=reviewq-store`. Open a fresh database and reopen it.
 
@@ -281,7 +283,7 @@ One writer. Work top-down so each step compiles: callers first, then what they c
 
 **Produces**
 
-- `record::{record_finding, assess_finding, record_note, review_ledger}`: check the Markdown fields and the per-run limits, return every field error capped by `FieldError::bounded`, then one port call. Field sizes were checked by the protocol and are not checked again.
+- `record::{record_finding, assess_finding, record_note, review_ledger}`: check the Markdown fields and the per-run limits, return every field error, then one port call. The transport caps the list. Field sizes were checked by the protocol and are not checked again.
 - `passes::needs_input(store, caller, reason)` and `passes::gate(store, request) -> GateDecision`. The block reason names what is owed and how many findings are on file.
 - `readback::RULE`: the rule text, written once. `readback::read_back(store, session) -> String` within 4,000 characters: the rule, the open pass and what it owes, then one line per active finding, newest change first, with a count of lines left out.
 - The launch input and the selected-thread prompt append `RULE` after the user's own text.
@@ -305,7 +307,7 @@ One writer. Work top-down so each step compiles: callers first, then what they c
 - [ ] Put the bridge-credential and content-type check in one function and use it from the ledger routes, the action routes and the host routes. Remove the two copies that exist.
 - [ ] Add the six tool routes. Each reads `{binding,input}`, validates `input` with `validate_ledger_input`, maps the DTO to the app request field by field, and returns the result or `fieldErrors`.
 - [ ] Add `gate` and `readback`. `gate` notes the stop hook's report and returns the app's gate decision.
-- [ ] In the Claude hook route, answer `stopping` with the same gate reply, taking `stopHookActive` from the hook input, and settle the run on the turn signal. This is the only Claude path for both.
+- [ ] In the Claude hook route, in the `ClaudeClassicEvent::Stopping` arm that C1 left empty, answer `stopping` with the same gate reply, taking `stopHookActive` from the hook input, and settle the run on the turn signal. This is the only Claude path for both.
 - [ ] Return the stop hook's report state with the link reply in `entry/hosts.rs`.
 - [ ] Add the six MCP tools from `LEDGER_TOOLS`. Bind the caller from `_meta`: `threadId`, `callId`, `itemId`, and `turn_id` and `parent_thread_id` from `x-codex-turn-metadata` when present. Build the same `{binding,input}` and call the same handler as the routes, so the binding and the error mapping exist once. A Claude client's tool list omits the six tools, because the plugin registers them. Give `finish_review` a 60-second deadline and the others the default.
 - [ ] Return a field error to the model as a tool error whose text lists each field and message, so the agent can correct it in the same turn.
@@ -323,7 +325,7 @@ One writer. Work top-down so each step compiles: callers first, then what they c
 - [ ] Add the bridge action `ledger <tool>`: read `{binding,input}` from stdin, make one POST to the tool's route and print the reply. Make no status request and no transcript check on this path.
 - [ ] Make `claude-hook` print what the hook route answers: the block reply for `Stop`, and the read-back text for a `SessionStart` whose source is `compact`. Send the hook input's `stop_hook_active`. Keep ignoring subagent hooks.
 - [ ] Add `codex-hook`: read the hook JSON from stdin, send `Stop` to `gate` and a `compact` `SessionStart` to `readback`, print the replies in the same form through the same printing function `claude-hook` uses, and exit 0 on every failure so a session is never broken.
-- [ ] Rewrite the installer to own two entries in `$CODEX_HOME/hooks.json`, `Stop` and `SessionStart` with matcher `^compact$`, each recorded with its event, with no output redirect. Never write trust state. The installer and `reviewq link` say so while the stop hook has never reported on this installation. Rewrite the one installer test for the two entries, and remove the `#[expect(dead_code)]` C1 left.
+- [ ] Rewrite the installer to own two entries in `$CODEX_HOME/hooks.json`, `Stop` and `SessionStart` with matcher `^compact$`, each recorded with its event, with no output redirect. Retarget `install/codex_hook/json.rs` from `PreToolUse` to the two events and restore the `reconcile` calls on install and on both uninstall paths, which C1 removed. Never write trust state. The installer and `reviewq link` say so while the stop hook has never reported on this installation. Rewrite the one installer test for the two entries, and remove the `#[expect(dead_code)]` C1 left.
 - [ ] Wire settling in `runtime/workflow.rs`: call `publish::settle_due` in the existing 10-second loop, before the branch that skips a tick when sources are unavailable, and once at startup. Add no new timer. The Claude turn signal and a ledger write settle their own run through E1 and K1.
 - [ ] Return the rule from the terminal link as text the model reads. Add `ledger.js` and `ledger-schema.js` to the plugin file list in `install/bundle.rs`.
 - [ ] Run `make rust-check`.
@@ -367,7 +369,7 @@ No code path stores a report version from fixture files, and none is added. Fixt
 
 ## Reviews
 
-- **Review A** covers C1, F1, F2 and W1: nothing of the earlier path remains, the relocated items have one owner each, the domain rules match the spec's tables row by row, and the tool schemas match the spec's fields and limits.
+- **Review A** covers C1, F1, F2 and W1: nothing of the earlier path remains, the relocated items have one owner each, the domain rules match the spec's tables row by row, and the tool schemas match the spec's fields and limits. It also compares every SELECT that C1 changed with its row decoder column by column, because those reads have not run on stored rows yet, and judges two behaviour changes C1 made: `failures::resolve` resolves every open failure of the run, and the archive time reads versions of kind `full_review`.
 - **Review B** covers K1–K3 and E1–E3: each transaction is short and conditional, no transcript or provider read sits on a ledger call, the composer's output matches the spec's layout line for line, the gate and settle paths cannot loop or double-record, and nothing is duplicated between the Claude and Codex paths.
 - **Final review** reads the whole branch against `main` for dead code, repeated logic, files over the size limit and tests that do not guard a regression.
 - Each review reports findings with a file, a line and a failing scenario. The lead fixes confirmed findings before the next stage.
