@@ -10,6 +10,7 @@ import { useReadingInset } from "../../../hooks/useReadingInset";
 import { useResource } from "../../../hooks/useResource";
 import { annotate, selectionSource } from "./report-presentation";
 import { finishReading } from "./report-position";
+import { reportMarkdown } from "./report-reader";
 import { useVisibleContent } from "./useVisibleContent";
 
 export function ReportTable({
@@ -46,7 +47,9 @@ export function ReportTable({
       const table = range.content.kind === "table" ? range.content.page : undefined;
       const markdown =
         range.content.kind === "table" ? range.content.page.markdown : range.content.markdown;
-      const native = table ? tablePageTree(table, base) : parseMarkdown(markdown, base);
+      const native = table
+        ? tablePageTree(table, base, reportMarkdown)
+        : parseMarkdown(markdown, base, reportMarkdown);
       if (!native) return { data: null, cursor };
       await finishReading(content.current, signal);
       signal.throwIfAborted();

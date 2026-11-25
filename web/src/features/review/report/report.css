@@ -298,14 +298,6 @@
 .report-count[data-report-count="nonblocking"] .report-count-amount {
   color: var(--link);
 }
-.rich-report .report-authored .report-metadata {
-  margin-bottom: 11px;
-  color: var(--muted);
-  font-size: 12px;
-}
-.report-metadata strong {
-  color: var(--text);
-}
 .report-authored {
   --comparison-before: #111113;
   --comparison-after: #131116;
@@ -429,28 +421,6 @@
 }
 .report-previous-threads [data-report-thread-status="attention"] {
   color: var(--amber);
-}
-.report-previous-threads .report-thread-outcome {
-  display: block;
-  font-size: 10px;
-  font-weight: 600;
-}
-.report-previous-threads .report-thread-outcome:first-child {
-  margin-bottom: 4px;
-}
-.report-previous-threads .report-thread-outcome:last-child {
-  margin-top: 4px;
-}
-.report-retired-finding {
-  padding: 4px 0;
-  color: var(--muted);
-  font-size: 10px;
-}
-.report-retired-finding[open] > summary {
-  margin-bottom: 12px;
-}
-.report-retired-finding .report-finding {
-  margin-top: 12px;
 }
 .report-finding-assessment {
   color: var(--amber);

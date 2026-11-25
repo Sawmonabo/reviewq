@@ -2,7 +2,7 @@ import { defaultRangeExtractor, useVirtualizer } from "@tanstack/react-virtual";
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import type { RootContent } from "hast";
-import type { ReportSummary, SourceOrigin } from "../../../api/generated/contracts/reports";
+import type { ReportSummary } from "../../../api/generated/contracts/reports";
 import { DiagramDisplayContext } from "../../../components/markdown/diagram-cache";
 import { MarkdownTree } from "../../../components/markdown/MarkdownContent";
 import { bookmarkAt, readBookmark, restoreBookmark } from "./report-position";
@@ -14,7 +14,7 @@ import {
   selectionSource,
 } from "./report-presentation";
 import type { GroupPosition, PreparedGroup, ReportBlock } from "./report-presentation";
-import { isRetired, outcomeLabels } from "./report-structure";
+import { outcomeLabels } from "./report-structure";
 import type { ReaderDocument } from "./report-reader";
 import { useReportPreparation } from "./useReportPreparation";
 
@@ -28,23 +28,19 @@ type Selection = {
 export function RichReport({
   historyAccess,
   document: reader,
-  ledgerCards,
   onFallback,
   report,
   bookmark,
   onQuote,
   onSource,
-  onOpenEvidence,
 }: {
   readonly historyAccess: ReactNode;
   readonly document: ReaderDocument;
-  readonly ledgerCards: number;
   readonly onFallback: () => void;
   readonly report: ReportSummary;
   readonly bookmark: string;
   readonly onQuote: (text: string, offset: number) => void;
   readonly onSource: (offset: number) => void;
-  readonly onOpenEvidence: (origin: SourceOrigin, offset?: number) => void;
 }) {
   const [host, setHost] = useState<HTMLDivElement | null>(null);
   const [scroll, setScroll] = useState<HTMLElement | null>(null);
@@ -58,8 +54,7 @@ export function RichReport({
   const latestReader = useRef(reader);
   const blocks = reader.groups;
   const placedGroups = useRef(blocks.length);
-  // Rows, their measured sizes and their toggles follow identity, not index, so ledger
-  // cards joining after the first paint leave every other row as it was.
+  // Rows and their measured sizes follow identity, not index.
   const keys = useMemo(() => blocks.map(blockKey), [blocks]);
   const indexes = useMemo(() => new Map(keys.map((key, index) => [key, index])), [keys]);
   const pinned = useMemo(
@@ -69,8 +64,7 @@ export function RichReport({
 
   const [focusedKey, setFocusedKey] = useState<string>();
   const focused = focusedKey === undefined ? undefined : indexes.get(focusedKey);
-  // A section jump names its destination by identity, so ledger cards that join while it
-  // aligns move the index it resolves to, not the row it lands on.
+  // A section jump names its destination by identity, not by index.
   const [navigation, setNavigation] = useState<{
     key: string;
     phase: "hover" | "pressed" | "jump";
@@ -86,7 +80,6 @@ export function RichReport({
     destination !== undefined &&
     Boolean(reader.prepared(destination)) &&
     (nextGroup === undefined || Boolean(reader.prepared(nextGroup)));
-  const openDetails = useRef(new Set<string>());
 
   const navigationAfter = Math.max(
     0,
@@ -95,10 +88,7 @@ export function RichReport({
   const sections = blocks.flatMap((block, index) =>
     block.name && !block.findingId ? [{ index, label: block.name }] : [],
   );
-  // Count the ledger cards the report expects, so the reader keeps its mode when they arrive.
-  const textGroups = blocks.filter((block) => block.sourceOrder >= 0).length;
-  const usesVirtual =
-    Boolean(reader.prepare) || Math.max(blocks.length, textGroups + ledgerCards) > 17;
+  const usesVirtual = Boolean(reader.prepare) || blocks.length > 17;
   const restoreIndex =
     !restored && saved?.offset !== undefined
       ? blocks.findIndex((block) => block.offset === saved.offset)
@@ -202,8 +192,8 @@ export function RichReport({
   useLayoutEffect(() => {
     latestReader.current = reader;
   }, [reader]);
-  // Cards that join after the place was restored move the rows below them. Restore the
-  // latest place again, before the browser paints, so the same row stays aligned.
+  // The whole document replacing a windowed one after the place was restored can move rows.
+  // Restore the latest place again, before the browser paints, so the same row stays aligned.
   useLayoutEffect(() => {
     if (placedGroups.current === blocks.length) return;
     placedGroups.current = blocks.length;
@@ -265,25 +255,16 @@ export function RichReport({
         setPinnedKeys([]);
         return;
       }
-      const inSourceOrder = blocks
-        .slice(first, last + 1)
-        .every((block, index) => block.sourceOrder === start.sourceOrder + index);
       const groups = blocks.slice(first, last + 1).map((_, i) => reader.prepared(first + i));
       const firstGroup = groups[0];
       if (!firstGroup) return;
-      const exact =
-        inSourceOrder && groups.every((group): group is PreparedGroup => Boolean(group))
-          ? selectionSource(selected, groups)
-          : undefined;
-      // A card drawn from the findings ledger has no passage in this report to comment on.
-      setSelection(
-        firstGroup.block.offset < 0
-          ? undefined
-          : {
-              fallback: scalarOffset(firstGroup.source, firstGroup.block.offset),
-              ...(exact ? { quote: exact } : {}),
-            },
-      );
+      const exact = groups.every((group): group is PreparedGroup => Boolean(group))
+        ? selectionSource(selected, groups)
+        : undefined;
+      setSelection({
+        fallback: scalarOffset(firstGroup.source, firstGroup.block.offset),
+        ...(exact ? { quote: exact } : {}),
+      });
       if (usesVirtual) {
         setPinnedKeys(
           [...element.querySelectorAll<HTMLElement>("[data-report-block]")]
@@ -387,8 +368,6 @@ export function RichReport({
     const finding = block.finding;
     const change = finding?.change;
     const outcome = change ? outcomeLabels[change.conclusion] : undefined;
-    const retired = isRetired(change);
-    const earlier = finding?.unanchored?.earlier;
     const card = finding && (
       <article
         className="report-authored report-finding"
@@ -407,28 +386,12 @@ export function RichReport({
             )}
             {outcome && (
               <span className="report-finding-assessment" title={change?.reason}>
-                {!retired && change?.checkedSha === report.reviewedSha ? "Updated · " : ""}
+                {change?.checkedSha === report.reviewedSha ? "Updated · " : ""}
                 {outcome}
               </span>
             )}
           </div>
           <AuthoredContent nodes={finding.header} />
-          {finding.unanchored && (
-            <p className="meta">
-              {finding.unanchored.earlier
-                ? "Carried from an earlier version"
-                : "Listed in this report's findings"}
-            </p>
-          )}
-          {earlier && (
-            <button
-              className="quiet-button"
-              type="button"
-              onClick={() => onOpenEvidence(earlier.origin, earlier.offset)}
-            >
-              Open finding in earlier report
-            </button>
-          )}
         </header>
         {finding.fields.length > 0 && (
           <dl className="report-finding-fields">
@@ -450,29 +413,7 @@ export function RichReport({
     );
     return (
       <>
-        {finding ? (
-          retired ? (
-            <details
-              className="report-retired-finding"
-              open={openDetails.current.has(keys[index]!)}
-              onToggle={(event) => {
-                if (event.currentTarget.open) openDetails.current.add(keys[index]!);
-                else openDetails.current.delete(keys[index]!);
-              }}
-            >
-              <summary>
-                <strong>
-                  {finding.id} · {outcome}
-                </strong>
-                {finding.title && ` · ${finding.title}`}
-              </summary>
-              {change?.reason && <p className="meta">{change.reason}</p>}
-              {card}
-            </details>
-          ) : (
-            card
-          )
-        ) : (
+        {card ?? (
           <div className="report-authored">
             <AuthoredContent nodes={block.nodes} />
           </div>
@@ -620,10 +561,8 @@ const AuthoredContent = memo(function AuthoredContent({
   return <MarkdownTree tree={{ type: "root", children: [...nodes] }} />;
 });
 
-// A text group is known by its source offset and a ledger card, which has no source
-// in this report, by its finding ID.
+// A group is known by its source offset.
 function blockKey(group: GroupPosition) {
-  if (group.sourceOrder < 0) return `finding:${group.findingId}`;
   return group.offset >= 0 ? `${group.offset}` : `group:${group.sourceOrder}`;
 }
 

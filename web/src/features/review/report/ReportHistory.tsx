@@ -81,12 +81,12 @@ export function ReportHistory({
         {update?.state === "failed" && (
           <section className="report-update-status" aria-label="Report update failed">
             <h3>Report update failed</h3>
-            {update.reason && <p>{reportHandoffReason(update.reason)}</p>}
+            {update.reason && <p>{update.reason}</p>}
             {accepted && (
               <p className="meta">
                 Latest accepted report ·{" "}
-                <time dateTime={accepted.capturedAt}>
-                  {formatActivityTime(accepted.capturedAt)}
+                <time dateTime={accepted.publishedAt}>
+                  {formatActivityTime(accepted.publishedAt)}
                 </time>
                 {accepted.reviewedSha && (
                   <>
@@ -124,8 +124,8 @@ export function ReportHistory({
               aria-pressed={selected === version.receiptId}
               onClick={() => onVersion(version.receiptId, version, currentReceipt)}
             >
-              <time dateTime={version.capturedAt} title={formatTime(version.capturedAt)}>
-                {formatActivityTime(version.capturedAt)}
+              <time dateTime={version.publishedAt} title={formatTime(version.publishedAt)}>
+                {formatActivityTime(version.publishedAt)}
               </time>
               <span className="meta" title={`${readable(version.verdict)} · ${version.sha256}`}>
                 {version.receiptId === currentReceipt ? "Latest" : "Earlier findings"}
@@ -172,17 +172,4 @@ async function earlierEvidence(runId: string, report: ReportSummary, signal: Abo
   throw new Error(
     "The earlier evidence could not be confirmed. Choose an accepted version from History.",
   );
-}
-
-function reportHandoffReason(reason: string) {
-  switch (reason) {
-    case "report_base_changed":
-      return "ReviewQ could not confirm this handoff still applies to the report. Check the current Findings before submitting again.";
-    case "report_amendment_continuity_unproved":
-      return "An amendment keeps the accepted Markdown, reviewed revision and verdict. Submit a new final for changed content.";
-    case "report_unchanged_evidence_mismatch":
-      return "An unchanged result uses the current accepted receipt and its original source.";
-    default:
-      return readable(reason);
-  }
 }

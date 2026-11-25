@@ -80,14 +80,12 @@ export function ReportDetails({
           return (
             <button
               className="report-version"
-              key={JSON.stringify([item.source.origin?.report.receiptId, item.source.offset])}
+              key={item.source.offset}
               type="button"
               onClick={() => onSource(item.source)}
             >
               <strong>{item.title}</strong>
-              <span className="meta">
-                {item.source.origin ? "Open source in earlier report" : "Open original source"}
-              </span>
+              <span className="meta">Open original source</span>
             </button>
           );
         if (item.kind !== "finding") return null;
@@ -167,7 +165,7 @@ function FindingCard({
   const label = `Disposition · ${item.findingId} · ${reviewTitle}`;
   const draft = useDraft(drafts, draftKey);
   const edit = decode(draft);
-  const patch = item.source;
+  const blocking = saved?.blocking ?? item.blocking;
 
   function change(next: DispositionDraft) {
     setNotice(
@@ -222,12 +220,10 @@ function FindingCard({
       <div className="spread">
         <div className="actions">
           <span className="ticket-key">{item.findingId}</span>
-          {item.severity && <span className="badge amber">{item.severity}</span>}
-          {(saved?.blocking ?? item.blocking) !== null && (
-            <span className={`badge ${(saved?.blocking ?? item.blocking) ? "rose" : ""}`}>
-              {(saved?.blocking ?? item.blocking) ? "Blocking" : "Nonblocking"}
-            </span>
-          )}
+          <span className="badge amber">{item.severity}</span>
+          <span className={`badge ${blocking ? "rose" : ""}`}>
+            {blocking ? "Blocking" : "Nonblocking"}
+          </span>
           {saved?.publication && <span className="badge">{readable(saved.publication)}</span>}
         </div>
         {current && version && (
@@ -245,14 +241,19 @@ function FindingCard({
       <h3>{item.title}</h3>
       {item.details && (
         <dl className="finding-details">
-          {item.details.location && (
+          {item.details.locations.length > 0 && (
             <div>
               <dt>Location</dt>
               <dd>
-                <code>
-                  {item.details.location.path}
-                  {item.details.location.line ? `:${item.details.location.line}` : ""}
-                </code>
+                {item.details.locations.map((location, index) => (
+                  <span key={index}>
+                    {index > 0 && ", "}
+                    <code>
+                      {location.path}
+                      {location.line ? `:${location.line}` : ""}
+                    </code>
+                  </span>
+                ))}
               </dd>
             </div>
           )}
@@ -264,27 +265,12 @@ function FindingCard({
             <dt>{item.details.evidence.kind === "gap" ? "Evidence gap" : "Evidence"}</dt>
             <dd>{item.details.evidence.text}</dd>
           </div>
-          {item.details.checkedSha && (
-            <div>
-              <dt>Checked at</dt>
-              <dd>
-                <code>{item.details.checkedSha}</code>
-              </dd>
-            </div>
-          )}
         </dl>
       )}
       {saved?.reason && <p className="meta">Local disposition · {saved.reason}</p>}
-      {!item.details?.checkedSha && patch?.origin?.checkedSha && (
-        <p className="meta">
-          Checked at <code>{patch.origin.checkedSha}</code>
-        </p>
-      )}
-      {patch && (
-        <button className="quiet-button" type="button" onClick={() => onSource(patch)}>
-          Open finding in original report
-        </button>
-      )}
+      <button className="quiet-button" type="button" onClick={() => onSource(item.source)}>
+        Open finding in original report
+      </button>
       {notice && <Notice>{notice}</Notice>}
       {editing && current && (
         <form

@@ -1,12 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import type { RunDetail } from "../../../api/generated/contracts";
-import type {
-  QuoteRef,
-  ReportSummary,
-  SourceOrigin,
-  SourceRange,
-} from "../../../api/generated/contracts/reports";
+import type { QuoteRef, ReportSummary } from "../../../api/generated/contracts/reports";
 import {
   reportDownload,
   reportFeedback,
@@ -29,9 +24,8 @@ import { ReportTable } from "./ReportTable";
 import { RichReport } from "./RichReport";
 import { contextItems } from "./report-context";
 import { finishReading, readBookmark } from "./report-position";
-import { canWindowReport, wholeDocument, indexedDocument } from "./report-reader";
+import { canWindowReport, wholeDocument, indexedDocument, reportMarkdown } from "./report-reader";
 import type { AcceptedFindingChange } from "./report-structure";
-import { useUnanchoredFindings } from "./useUnanchoredFindings";
 import { useVisibleContent } from "./useVisibleContent";
 
 type Quote = { readonly text: string; readonly reference: QuoteRef | null };
@@ -43,8 +37,6 @@ type Props = {
   readonly drafts: DraftStore;
   readonly reviewTitle: string;
   readonly webUrl: string;
-  readonly initialSourceOffset: number | undefined;
-  readonly onOpenEvidence: (origin: SourceOrigin, offset?: number) => void;
   readonly onRendered: (receiptId: string) => void;
   readonly onMarkViewed: () => void;
   readonly markingViewed: boolean;
@@ -58,14 +50,12 @@ export default function ReportDocument({
   drafts,
   reviewTitle,
   webUrl,
-  initialSourceOffset,
-  onOpenEvidence,
   onRendered,
   onMarkViewed,
   markingViewed,
 }: Props) {
-  const [source, setSource] = useState(initialSourceOffset !== undefined);
-  const [sourceOffset, setSourceOffset] = useState(initialSourceOffset ?? 0);
+  const [source, setSource] = useState(false);
+  const [sourceOffset, setSourceOffset] = useState(0);
   const [tableSource, setTableSource] = useState<{ sha256: string; byte: number }>();
   const [notice, setNotice] = useState<string>();
   const [feedbackNotice, setFeedbackNotice] = useState<string>();
@@ -79,19 +69,13 @@ export default function ReportDocument({
   const feedback = useRef<HTMLElement>(null);
   const reader = useRef<HTMLDivElement>(null);
   const reportActions = useRef<HTMLButtonElement>(null);
-  useEffect(() => {
-    if (initialSourceOffset !== undefined && reader.current) scrollWithinDrawer(reader.current);
-  }, [initialSourceOffset]);
   const address = [run.reviewId, run.runId, run.leadSessionKey, report.receiptId, report.sha256];
   const quoteKey = JSON.stringify(["quote", ...address]);
   const quoteLabel = `Quote · ${reviewTitle}`;
   const quoteDraft = useDraft(drafts, quoteKey);
   const quote = readQuote(quoteDraft);
   const admitted =
-    report.semanticIndex === "ready" &&
-    report.byteLength <= 1024 * 1024 &&
-    report.lineCount <= 10_000 &&
-    report.maxLineBytes <= 16_384;
+    report.byteLength <= 1024 * 1024 && report.lineCount <= 10_000 && report.maxLineBytes <= 16_384;
   const bookmark = `findings.position.${run.runId}.${report.receiptId}.${report.sha256}`;
   const full = useRef(false);
   const body = useResource(
@@ -115,15 +99,6 @@ export default function ReportDocument({
     },
   );
   const displayed = body.data;
-  const unanchored = useUnanchoredFindings(
-    run.runId,
-    report,
-    admitted,
-    reader,
-    displayed?.reader,
-    displayed?.changes,
-    safeUrl(webUrl),
-  );
   const resolving = useRef<AbortController | undefined>(undefined);
   useEffect(() => () => resolving.current?.abort(), [quoteKey]);
   const formattingFailure = Boolean(displayed?.formattingFailure);
@@ -206,7 +181,6 @@ export default function ReportDocument({
   const tryTable =
     !source &&
     (!admitted || formattingFailure) &&
-    report.complete &&
     report.byteLength >= 8 * 1024 &&
     report.byteLength <= 32 * 1024 * 1024;
   function openSource(offset = 0) {
@@ -219,11 +193,6 @@ export default function ReportDocument({
       });
   }
 
-  function openEvidence(range: SourceRange) {
-    if (range.origin) onOpenEvidence(range.origin, range.offset);
-    else openSource(range.offset);
-  }
-
   const sourceView = (
     <ReportSource
       historyAccess={historyAccess}
@@ -232,9 +201,7 @@ export default function ReportDocument({
       requestedOffset={sourceOffset}
       reason={
         !admitted
-          ? report.semanticIndex === "source_only"
-            ? "Semantic index unavailable · Original source"
-            : "Large report · source view"
+          ? "Large report · source view"
           : formattingFailure
             ? "Report formatting limit · Original source"
             : body.error
@@ -252,9 +219,6 @@ export default function ReportDocument({
         {notice && <Notice>{notice}</Notice>}
         {!sourceMode && displayed?.outcomeError && (
           <Notice retry={body.retry}>Accepted finding outcomes are unavailable.</Notice>
-        )}
-        {!sourceMode && displayed?.reader && unanchored.error && (
-          <Notice retry={unanchored.retry}>Some findings could not be loaded.</Notice>
         )}
         {sourceMode ? (
           tryTable ? (
@@ -277,11 +241,10 @@ export default function ReportDocument({
           )
         ) : body.pending ? (
           <Loading label="Loading accepted report…" />
-        ) : unanchored.reader ? (
+        ) : displayed?.reader ? (
           <RichReport
             historyAccess={historyAccess}
-            document={unanchored.reader}
-            ledgerCards={unanchored.expected}
+            document={displayed.reader}
             report={report}
             onFallback={fallback}
             bookmark={bookmark}
@@ -290,7 +253,6 @@ export default function ReportDocument({
               openSource(offset);
               setNotice("Select the exact passage in the original Markdown to attach a quote.");
             }}
-            onOpenEvidence={onOpenEvidence}
           />
         ) : (
           <Empty title="Formatted report unavailable">
@@ -323,15 +285,13 @@ export default function ReportDocument({
           trigger={<Icon name="more" />}
           triggerRef={reportActions}
           items={[
-            ...(report.semanticIndex === "ready" && report.findingCount !== 0
+            ...(report.findingCount !== 0
               ? [{ label: "Finding dispositions", run: () => setContext("findings") }]
               : []),
-            ...(report.semanticIndex === "ready" && report.changeCount !== 0
+            ...(report.changeCount !== 0
               ? [{ label: "Finding outcomes", run: () => setContext("changes") }]
               : []),
-            ...(report.semanticIndex === "ready"
-              ? [{ label: "Source sections", run: () => setContext("sections") }]
-              : []),
+            { label: "Source sections", run: () => setContext("sections") },
             { label: "Download Markdown", href: reportDownload(run.runId, report.receiptId) },
             { label: "Mark findings viewed", run: onMarkViewed, disabled: markingViewed },
           ]}
@@ -360,16 +320,16 @@ export default function ReportDocument({
             current={current}
             drafts={drafts}
             reviewTitle={reviewTitle}
-            onSource={openEvidence}
+            onSource={(range) => openSource(range.offset)}
           />
         </section>
       )}
       <span className="sr-only">
-        {current ? "Current" : "Historical"} · {formatTime(report.capturedAt)} ·{" "}
+        {current ? "Current" : "Historical"} · {formatTime(report.publishedAt)} ·{" "}
         {readable(report.coverage)}
         {report.reviewedSha && ` · Reviewed revision ${report.reviewedSha}`}
-        {report.findingCount !== null && ` · ${report.findingCount} indexed findings`}
-        {report.changeCount !== null && ` · ${report.changeCount} declared changes`}
+        {` · ${report.findingCount} indexed findings`}
+        {` · ${report.changeCount} declared changes`}
         {` · SHA-256 ${report.sha256}`}
         {report.revisionReason && ` · ${report.revisionReason}`}
       </span>
@@ -502,7 +462,6 @@ async function loadReport(
         cursor: entry.cursor,
         data: {
           reader: indexed,
-          changes: outcomes.changes,
           formattingFailure: false,
           outcomeError: outcomes.error,
         },
@@ -523,6 +482,7 @@ async function loadReport(
         markdown,
         [{ markdown, table: response.data.display?.table }],
         base,
+        reportMarkdown,
       );
   } catch {
     tree = undefined;
@@ -534,7 +494,6 @@ async function loadReport(
         tree && typeof markdown === "string"
           ? wholeDocument(markdown, tree, report, outcomes.changes, response.data.display)
           : undefined,
-      changes: outcomes.changes,
       formattingFailure: typeof markdown === "string" && !tree,
       outcomeError: outcomes.error,
     },
@@ -584,14 +543,12 @@ function readQuote(value: string): Quote | undefined {
   }
 }
 
-async function acceptedChanges(runId: string, report: ReportSummary, signal: AbortSignal) {
-  const { items } = await contextItems(
+function acceptedChanges(runId: string, report: ReportSummary, signal: AbortSignal) {
+  return contextItems(
     runId,
     report,
-    "changes",
     (item): item is AcceptedFindingChange => item.kind === "change",
-    report.changeCount ?? 0,
+    report.changeCount,
     signal,
   );
-  return items;
 }

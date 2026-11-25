@@ -8,6 +8,7 @@ import {
   parseMarkdown,
   prepareMarkdown,
 } from "./parse-markdown";
+import type { MarkdownOptions } from "./parse-markdown";
 
 type Piece = { readonly markdown: string; readonly table?: PreparedTable | null | undefined };
 type Point = NonNullable<Element["position"]>["start"];
@@ -21,8 +22,9 @@ export function parseSettledMarkdown(
   text: string,
   pieces: readonly Piece[],
   base?: string,
+  options?: MarkdownOptions,
 ): Root | undefined {
-  if (!pieces.some((piece) => piece.table)) return parseMarkdown(text, base);
+  if (!pieces.some((piece) => piece.table)) return parseMarkdown(text, base, options);
   if (!admitMarkdown(text)) return;
   const children: RootContent[] = [];
   let count = 1;
@@ -40,7 +42,7 @@ export function parseSettledMarkdown(
 
   function flush(end: number) {
     if (start === end) return true;
-    const parsed = prepareMarkdown(text.slice(start, end), base);
+    const parsed = prepareMarkdown(text.slice(start, end), base, options);
     if (!parsed) return false;
     shiftNodes(parsed.tree.children, { offset: start, line: startLine });
     append(parsed.tree.children, parsed.nodes - 1);

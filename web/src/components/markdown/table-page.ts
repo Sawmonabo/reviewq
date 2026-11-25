@@ -2,10 +2,15 @@ import type { Element, Root, RootContent } from "hast";
 import type { TablePage } from "../../api/generated/contracts/common";
 import { shiftNodes } from "./live/positions";
 import { parseMarkdown } from "./parse-markdown";
+import type { MarkdownOptions } from "./parse-markdown";
 
-export function tablePageTree(page: TablePage, base?: string): Root | undefined {
+export function tablePageTree(
+  page: TablePage,
+  base?: string,
+  options?: MarkdownOptions,
+): Root | undefined {
   const input = page.headerInSource ? page.markdown : page.header + page.markdown;
-  const result = parseMarkdown(input, base);
+  const result = parseMarkdown(input, base, options);
   const table = result?.children[0];
   if (result?.children.length !== 1 || table?.type !== "element" || table.tagName !== "table")
     return;

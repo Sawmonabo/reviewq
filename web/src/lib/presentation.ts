@@ -44,7 +44,6 @@ const reviewReasons: Readonly<Record<string, string>> = {
   action_verifying: "Verifying review action",
   report_failed: "Report update failed",
   followup_ready: "Follow-up ready",
-  report_saving: "Saving findings",
   recovery_pending: "Recovery pending",
   recovery_required: "Recovery required",
   recovery_uncertain: "Recovery uncertain",

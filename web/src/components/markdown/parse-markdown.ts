@@ -15,9 +15,9 @@ type MarkdownNode = {
 };
 
 export type PreparedMarkdown = { readonly tree: Root; readonly nodes: number };
-type MarkdownOptions = {
-  // Shows HTML-looking text as written, such as `Vec<u8>` or `<script>`, instead of
-  // reading it as markup. Authored reports keep their HTML.
+export type MarkdownOptions = {
+  // Shows HTML-looking text as written, such as `Vec<u8>` or `<runner>`, instead of
+  // reading it as markup. A lone `<br>` stays a line break. Report text uses it.
   readonly literalHtml?: boolean;
 };
 type SyntaxTree = ReturnType<typeof syntax.parse>;
@@ -29,6 +29,7 @@ const MARKDOWN_SYNTAX = /[*_`~[<>&\\|#]|^(?:[ \t]*[+-]|\d+[.)])[ \t]/m;
 const blockNodes = new Set(["root", "list", "listItem", "blockquote", "table"]);
 // Parents whose children are blocks, so literal HTML there becomes its own paragraph.
 const flowParents = new Set(["root", "blockquote", "listItem", "footnoteDefinition"]);
+const lineBreak = /^<br ?\/?>$/;
 const sanitizeSchema = {
   ...defaultSchema,
   tagNames: [...(defaultSchema.tagNames ?? []), "details", "summary"],
@@ -130,7 +131,8 @@ function textContent(node: MarkdownNode, depth: number, budget: { remaining: num
   }
 }
 
-// Turns each HTML node into text with the same value before it reaches HTML.
+// Turns each HTML node into text with the same value before it reaches HTML, and a lone
+// `<br>` into a line break.
 function literalHtml() {
   return (tree: SyntaxTree) => {
     const pending: SyntaxNode[] = [tree];
@@ -144,10 +146,12 @@ function literalHtml() {
           pending.push(child);
           continue;
         }
-        const text = { type: "text", value: child.value, position: child.position };
+        const inline = lineBreak.test(child.value)
+          ? { type: "break", position: child.position }
+          : { type: "text", value: child.value, position: child.position };
         children[index] = flow
-          ? { type: "paragraph", children: [text], position: child.position }
-          : text;
+          ? { type: "paragraph", children: [inline], position: child.position }
+          : inline;
       }
     }
   };

@@ -1,27 +1,16 @@
 import type { DrawingHint } from "../../../api/generated/contracts/common";
 import type { Element, Root, RootContent } from "hast";
-import type {
-  Descriptor,
-  ReportSummary,
-  SourceOrigin,
-} from "../../../api/generated/contracts/reports";
-import { parseMarkdown } from "../../../components/markdown/parse-markdown";
-import { isRetired, reportStructure, reportText as text } from "./report-structure";
+import type { ReportSummary } from "../../../api/generated/contracts/reports";
+import { reportStructure, reportText as text } from "./report-structure";
 import type { AcceptedFindingChange } from "./report-structure";
 
 type Field = { readonly label: string; readonly nodes: readonly RootContent[] };
 type AuthoredFinding = {
   readonly id: string;
-  readonly title: string;
   readonly severity?: string;
   readonly category?: string;
   readonly blocking?: boolean;
   readonly change?: AcceptedFindingChange;
-  // Set on a card drawn from the findings ledger. `earlier` is where a carried card was
-  // authored; the offset is its span there, when the earlier card had one.
-  readonly unanchored?: {
-    readonly earlier?: { readonly origin: SourceOrigin; readonly offset?: number };
-  };
   readonly header: readonly RootContent[];
   readonly fields: readonly Field[];
 };
@@ -32,26 +21,25 @@ export type ReportBlock = GroupPosition & {
   readonly finding?: AuthoredFinding;
 };
 
-type Finding = Extract<Descriptor, { kind: "finding" }>;
-
-const previousThreads =
-  /^(?:(?:our )?previous threads|prior(?: review)? threads|discussion outcomes)$/i;
-const findingHeading = /^(F-\d{1,16})(?=$|[\s:.–—-])\s*(?:[·:.–—-]\s*)?(?:(P[0-3])\s*[·–—-]\s*)?/;
-const severityPrefix = /^(P[0-3])\s*[·–—-]\s*/;
-const struckTags = new Set(["del", "s", "strike"]);
-const fieldName =
-  /^(Issue|Why it matters|Confirmed|Proposed comment|Location|Evidence|Suggested fix)(?=\s*(?:[:.—]|$))/i;
+// The composed card: `### F-01 · {title}`, then `**P1 · {category} · Blocking**`.
+const findingHeading = /^(F-\d{2,}) · /;
+const cardLine = /^(P[0-3]) · ([^·\n]+) · (Blocking|Nonblocking)$/;
+// The composed field labels in the order ReviewQ writes them. A label out of this order,
+// such as one quoted inside a card's details, stays part of the field before it.
+const fieldOrder = new Map([
+  ["Location", 0],
+  ["Issue", 1],
+  ["Why it matters", 2],
+  ["Confirmed", 3],
+  ["Evidence", 3],
+  ["Proposed comment", 4],
+]);
 
 export type GroupPosition = {
   readonly sourceOrder: number;
   readonly offset: number;
   readonly name?: string;
   readonly findingId?: string;
-  // The heading's finding ID is struck through, as in `~~F-04 · Stale comment~~ — fixed`.
-  readonly struckId?: true;
-  // Where a struck heading begins in the report, in code points as the findings ledger
-  // counts, so a finding the service anchored at that card is matched to it.
-  readonly scalarStart?: number;
 };
 
 export function groupReportItems<T>(
@@ -60,20 +48,13 @@ export function groupReportItems<T>(
     readonly level?: number;
     readonly label?: string;
     readonly offset?: number;
-    readonly struck?: boolean;
   },
 ) {
-  const groups: {
-    offset: number;
-    items: T[];
-    name?: string;
-    findingId?: string;
-    struckId?: true;
-  }[] = [];
+  const groups: { offset: number; items: T[]; name?: string; findingId?: string }[] = [];
   let current = groups.at(-1);
   let hasSection = false;
   for (const item of items) {
-    const { level, label, offset, struck } = describe(item);
+    const { level, label, offset } = describe(item);
     const heading =
       level !== undefined && level >= (hasSection ? 1 : 2) && level <= 3 ? label : undefined;
     if (
@@ -87,7 +68,6 @@ export function groupReportItems<T>(
         items: [],
         ...(heading && level === 2 && { name: heading }),
         ...(id && { findingId: id }),
-        ...(id && struck && { struckId: true as const }),
       };
       groups.push(current);
     }
@@ -98,202 +78,6 @@ export function groupReportItems<T>(
   return groups;
 }
 
-export function inDisplayOrder<T extends GroupPosition>(
-  groups: readonly T[],
-  changes: ReadonlyMap<string, AcceptedFindingChange> | null | undefined,
-) {
-  const retired = groups.filter(
-    (group) => group.findingId && isRetired(changes?.get(group.findingId)),
-  );
-  if (!retired.length) return groups;
-  const active = groups.filter((group) => !retired.includes(group));
-  const next = afterPreviousThreads(active);
-  active.splice(next < 0 ? active.length : next, 0, ...retired);
-  return active;
-}
-
-// Cards drawn from the findings ledger follow the last active authored card. Without one
-// they go where the retired cards begin, after the previous threads, or at the end.
-export function unanchoredPosition(
-  groups: readonly GroupPosition[],
-  changes: ReadonlyMap<string, AcceptedFindingChange> | null | undefined,
-) {
-  for (let index = groups.length - 1; index >= 0; index--) {
-    const id = groups[index]!.findingId;
-    if (id && !isRetired(changes?.get(id))) return index + 1;
-  }
-  const threads = afterPreviousThreads(groups);
-  return threads < 0 ? groups.length : threads;
-}
-
-// Ledger cards this report should draw: the summary's count, or more when the text's own
-// cards cover fewer active findings than the ledger holds. The service anchors a heading
-// inside `<details>` at the top level, while the formatted text nests it and draws no card.
-// The service also skips a struck heading for a finding retired in an earlier version, so
-// a struck card is not counted as covering one.
-export function expectedLedgerCards(
-  report: ReportSummary,
-  groups: readonly GroupPosition[],
-  changes: ReadonlyMap<string, AcceptedFindingChange> | null | undefined,
-) {
-  const cards = new Set(
-    groups.flatMap((group) =>
-      group.sourceOrder >= 0 &&
-      group.findingId &&
-      !group.struckId &&
-      !isRetired(changes?.get(group.findingId))
-        ? [group.findingId]
-        : [],
-    ),
-  );
-  return Math.max(report.unanchoredFindingCount, (report.findingCount ?? 0) - cards.size);
-}
-
-// Whether every character of the finding ID that begins a heading's text is inside a `del`,
-// `s` or `strike` element, as the service reads it. The ID is read from the trimmed text as
-// `groupReportItems` reads it.
-export function struckFindingId(heading: Element) {
-  const label = text(heading);
-  const id = findingHeading.exec(label.trim())?.[1];
-  if (!id) return false;
-  const start = label.length - label.trimStart().length;
-  const end = start + id.length;
-  let at = 0;
-  let struck = true;
-  const visit = (node: RootContent, inside: boolean) => {
-    if (node.type === "text") {
-      const from = at;
-      at += node.value.length;
-      if (!inside && from < end && at > start) struck = false;
-    } else if ("children" in node) {
-      const within = inside || (node.type === "element" && struckTags.has(node.tagName));
-      for (const child of node.children) visit(child, within);
-    }
-  };
-  for (const child of heading.children) visit(child, false);
-  return struck;
-}
-
-// Ledger findings that need a card of their own. An unstruck card covers its ID. A struck
-// card is resolved, so it covers only a finding the service anchored at it; a finding raised
-// again elsewhere, such as inside `<details>` or with no heading, still gets a card.
-export function ledgerFindings(
-  groups: readonly GroupPosition[],
-  items: Iterable<Finding>,
-  changes: ReadonlyMap<string, AcceptedFindingChange> | null | undefined,
-) {
-  const cards = new Set<string>();
-  const struck = new Map<string, number[]>();
-  for (const { findingId, struckId, scalarStart } of groups) {
-    if (!findingId) continue;
-    if (!struckId) cards.add(findingId);
-    else if (scalarStart !== undefined)
-      struck.set(findingId, [...(struck.get(findingId) ?? []), scalarStart]);
-  }
-  return [...items].filter((item) => {
-    // A carried finding's span is in its earlier version, so it never matches this text.
-    const anchored =
-      item.source &&
-      !item.source.origin &&
-      struck.get(item.findingId)?.includes(item.source.offset);
-    return !cards.has(item.findingId) && !anchored && !isRetired(changes?.get(item.findingId));
-  });
-}
-
-export function unanchoredBlock(
-  item: Finding,
-  change: AcceptedFindingChange | undefined,
-  base: string | undefined,
-): ReportBlock {
-  const details = item.details;
-  const blocking = item.disposition?.blocking ?? item.blocking;
-  const location = details?.location;
-  // A title restated from a heading can still begin with its ID and priority.
-  const heading = findingHeading.exec(item.title);
-  const own = heading?.[1] === item.findingId ? heading : null;
-  let title = own ? item.title.slice(own[0].length) : item.title;
-  const priority = own?.[2] ? undefined : severityPrefix.exec(title);
-  if (priority) title = title.slice(priority[0].length);
-  // A title that is only the ID leaves the ID in the kicker alone.
-  title = title.trim();
-  const severity = item.severity || own?.[2] || priority?.[1];
-  const origin = item.source?.origin;
-  const fields: Field[] = details
-    ? [
-        ...(location
-          ? [
-              {
-                label: "Location",
-                nodes: [
-                  hast("p", [
-                    hast("code", [
-                      {
-                        type: "text",
-                        value: `${location.path}${location.line ? `:${location.line}` : ""}`,
-                      },
-                    ]),
-                  ]),
-                ],
-              },
-            ]
-          : []),
-        { label: "Why it matters", nodes: ledgerParagraphs(details.consequence, base) },
-        {
-          label: details.evidence.kind === "gap" ? "Evidence gap" : "Evidence",
-          nodes: ledgerParagraphs(details.evidence.text, base),
-        },
-      ]
-    : [];
-  return {
-    offset: -1,
-    sourceOrder: -1,
-    end: -1,
-    nodes: [],
-    findingId: item.findingId,
-    finding: {
-      id: item.findingId,
-      title,
-      ...(severity ? { severity } : {}),
-      ...(blocking !== null ? { blocking } : {}),
-      ...(change ? { change } : {}),
-      unanchored: item.carriedFrom
-        ? {
-            earlier:
-              origin && item.source
-                ? { origin, offset: item.source.offset }
-                : { origin: item.carriedFrom },
-          }
-        : {},
-      header: title ? [hast("h3", [{ type: "text", value: title }])] : [],
-      fields,
-    },
-  };
-}
-
-function afterPreviousThreads(groups: readonly GroupPosition[]) {
-  const previous = groups.findIndex((group) => group.name && previousThreads.test(group.name));
-  if (previous < 0) return -1;
-  const next = groups.findIndex(
-    (group, index) => index > previous && (group.name || group.findingId),
-  );
-  return next < 0 ? groups.length : next;
-}
-
-// Ledger text renders through the report's own Markdown pipeline, so inline code, emphasis,
-// links and sanitizing match the authored cards. HTML-looking text such as `Vec<u8>` stays
-// as written, and text over the formatting budget stays plain.
-function ledgerParagraphs(value: string, base: string | undefined): RootContent[] {
-  const tree = parseMarkdown(value, base, { literalHtml: true });
-  if (tree) return tree.children.filter((node) => node.type !== "text" || node.value.trim());
-  return value
-    .split(/\n\s*\n/)
-    .flatMap((part) => (part.trim() ? [hast("p", [{ type: "text", value: part.trim() }])] : []));
-}
-
-function hast(tagName: string, children: Element["children"]): Element {
-  return { type: "element", tagName, properties: {}, children };
-}
-
 export function reportBlocks(
   tree: Root,
   source: string,
@@ -301,35 +85,27 @@ export function reportBlocks(
   changes: ReadonlyMap<string, AcceptedFindingChange> | null | undefined,
   body?: { readonly previousThreads: boolean },
 ): readonly ReportBlock[] {
-  const groups = groupReportItems(
-    reportStructure(tree.children, source, report, changes, body),
-    (node) => {
-      const level =
-        node.type === "element" && /^h[1-3]$/.test(node.tagName)
-          ? Number(node.tagName[1])
-          : undefined;
-      return {
-        ...(level && { level, label: text(node).trim() }),
-        ...(level === 3 && node.type === "element" && { struck: struckFindingId(node) }),
-        ...(node.position?.start.offset !== undefined && { offset: node.position.start.offset }),
-      };
-    },
-  );
-  return inDisplayOrder(
-    groups.map((group, index) => {
-      const finding = authoredFinding(group.items, source, changes);
-      return {
-        offset: group.offset,
-        sourceOrder: index,
-        end: groups[index + 1]?.offset ?? source.length,
-        nodes: finding ? [] : annotate(group.items),
-        ...(group.name && { name: group.name }),
-        ...(finding && { finding, findingId: finding.id }),
-        ...(finding && group.struckId && { struckId: true as const }),
-      };
-    }),
-    changes,
-  );
+  const groups = groupReportItems(reportStructure(tree.children, source, report, body), (node) => {
+    const level =
+      node.type === "element" && /^h[1-3]$/.test(node.tagName)
+        ? Number(node.tagName[1])
+        : undefined;
+    return {
+      ...(level && { level, label: text(node).trim() }),
+      ...(node.position?.start.offset !== undefined && { offset: node.position.start.offset }),
+    };
+  });
+  return groups.map((group, index) => {
+    const finding = authoredFinding(group.items, source, changes);
+    return {
+      offset: group.offset,
+      sourceOrder: index,
+      end: groups[index + 1]?.offset ?? source.length,
+      nodes: finding ? [] : annotate(group.items),
+      ...(group.name && { name: group.name }),
+      ...(finding && { finding, findingId: finding.id }),
+    };
+  });
 }
 
 export type ReportText = { readonly text: string; readonly utf16: number; readonly scalar: number };
@@ -435,62 +211,24 @@ function authoredFinding(
   const match = findingHeading.exec(name);
   const id = match?.[1];
   if (!id || !match) return;
-  const title = name.slice(match[0].length).trim();
   const change = changes?.get(id);
-  let severity = match[2];
-  let category: string | undefined;
-  let blocking: boolean | undefined;
+  const card = cardMetadata(rest[0]);
   const lead = [...stripPrefix(heading, match[0].length, source)];
   const fields: { label: string; nodes: RootContent[] }[] = [];
-  for (const node of rest) {
-    const label = text(node).trim();
-    if (node.type === "element" && node.tagName === "p" && fields.length === 0) {
-      const severityLine = /^Severity:\s*([^\n]{1,64})$/i.exec(label)?.[1]?.trim();
-      const blockingLine = /^Blocking:\s*(true|yes|false|no)[.]?$/i.exec(label)?.[1]?.toLowerCase();
-      if (severityLine) {
-        severity = severityLine;
-        continue;
-      }
-      if (blockingLine) {
-        blocking = blockingLine === "true" || blockingLine === "yes";
-        continue;
-      }
-      const first = node.children[0];
-      const emphasis = first?.type === "element" && first.tagName === "strong";
-      const metadata =
-        /^(?:(P[0-3])\s*·\s*)?([^·\n]{1,80}?)\s*·\s*(nonblocking|blocking)[.]?$/i.exec(
-          emphasis ? text(first).trim() : label,
-        );
-      if (metadata?.[2] && metadata[3]) {
-        severity ??= metadata[1];
-        category = metadata[2];
-        blocking ??= metadata[3].toLowerCase() === "blocking";
-        if (emphasis && node.children.length > 1)
-          lead.push({ ...node, children: node.children.slice(1) });
-        continue;
-      }
-    }
+  let rank = -1;
+  for (const node of card ? rest.slice(1) : rest) {
     const first = node.type === "element" && node.tagName === "p" ? node.children[0] : undefined;
-    const headingField = node.type === "element" && /^h[4-6]$/.test(node.tagName);
-    const labelNode = headingField
-      ? node
-      : first?.type === "element" && first.tagName === "strong"
-        ? first
+    const label =
+      first?.type === "element" && first.tagName === "strong"
+        ? /^(.+):$/.exec(text(first))?.[1]
         : undefined;
-    const field = labelNode ? fieldName.exec(text(labelNode).trim()) : undefined;
-    if (field?.[1]) {
-      const fieldLabel = field[1];
-      const content: RootContent[] = [];
-      const inline =
-        labelNode &&
-        text(labelNode)
-          .trim()
-          .slice(fieldLabel.length)
-          .replace(/^[:.\s—]+/, "");
-      if (inline) content.push(node);
-      else if (!headingField && node.type === "element" && node.children.length > 1)
-        content.push({ ...node, children: node.children.slice(1) });
-      fields.push({ label: fieldLabel, nodes: content });
+    const order = label === undefined ? undefined : fieldOrder.get(label);
+    if (label && order !== undefined && order > rank && node.type === "element") {
+      rank = order;
+      fields.push({
+        label,
+        nodes: node.children.length > 1 ? [{ ...node, children: node.children.slice(1) }] : [],
+      });
     } else {
       (fields.at(-1)?.nodes ?? lead).push(node);
     }
@@ -498,44 +236,48 @@ function authoredFinding(
 
   return {
     id,
-    title,
-    ...(category ? { category } : {}),
     ...(change ? { change } : {}),
-    ...(severity ? { severity } : {}),
-    ...(blocking !== undefined ? { blocking } : {}),
+    ...(card ? { severity: card[1], category: card[2], blocking: card[3] === "Blocking" } : {}),
     header: annotate(lead),
     fields: fields.map(({ label, nodes }) => ({ label, nodes: annotate(nodes) })),
   };
 }
 
+function cardMetadata(node: RootContent | undefined) {
+  if (node?.type !== "element" || node.tagName !== "p" || node.children.length !== 1) return;
+  const [only] = node.children;
+  return only?.type === "element" && only.tagName === "strong"
+    ? cardLine.exec(text(only))
+    : undefined;
+}
+
+// Drops the `F-01 · ` prefix from the heading's first text node, which ends there when the
+// title begins with code, emphasis or a link.
 function stripPrefix(heading: Element, length: number, source: string): RootContent[] {
-  const first = heading.children[0];
-  if (first?.type !== "text" || length >= first.value.length) return [heading];
-  const start = first.position?.start.offset;
-  const end = first.position?.end.offset;
+  const [first, ...others] = heading.children;
+  const start = first?.position?.start.offset;
   if (
+    first?.type !== "text" ||
+    !first.position ||
     start === undefined ||
-    end === undefined ||
-    source.slice(start, end) !== first.value ||
-    !first.position
+    length > first.value.length ||
+    source.slice(start, start + length) !== first.value.slice(0, length)
   )
     return [heading];
-  return [
-    {
-      ...heading,
-      children: [
-        {
-          ...first,
-          value: first.value.slice(length),
-          position: {
-            start: { ...first.position.start, offset: start + length },
-            end: first.position.end,
+  const remainder =
+    length < first.value.length
+      ? [
+          {
+            ...first,
+            value: first.value.slice(length),
+            position: {
+              start: { ...first.position.start, offset: start + length },
+              end: first.position.end,
+            },
           },
-        },
-        ...heading.children.slice(1),
-      ],
-    },
-  ];
+        ]
+      : [];
+  return [{ ...heading, children: [...remainder, ...others] }];
 }
 
 export function annotate(nodes: readonly RootContent[]) {

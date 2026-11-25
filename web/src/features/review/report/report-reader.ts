@@ -11,14 +11,8 @@ import type {
 } from "../../../api/generated/contracts/reports";
 import { parseMarkdown } from "../../../components/markdown/parse-markdown";
 import { parseSettledMarkdown, tableCost } from "../../../components/markdown/settled";
-import {
-  groupReportItems,
-  inDisplayOrder,
-  reportBlocks,
-  struckFindingId,
-  unanchoredPosition,
-} from "./report-presentation";
-import type { GroupPosition, PreparedGroup, ReportBlock } from "./report-presentation";
+import { groupReportItems, reportBlocks } from "./report-presentation";
+import type { GroupPosition, PreparedGroup } from "./report-presentation";
 import { isThreadSection, reportText, startsReportBody } from "./report-structure";
 import type { AcceptedFindingChange } from "./report-structure";
 
@@ -46,6 +40,8 @@ const MAX_GROUP_BYTES = 128 * 1024;
 const MAX_RETAINED_BYTES = 320 * 1024;
 const RANGE_BYTES = 64 * 1024;
 const utf8 = new TextEncoder();
+// Report text shows raw HTML as written, such as `Vec<u8>`, with `<br>` as a line break.
+export const reportMarkdown = { literalHtml: true } as const;
 
 export function canWindowReport(report: ReportSummary) {
   return (
@@ -61,14 +57,7 @@ export function wholeDocument(
   changes: Changes,
   display: DocumentDisplay | null | undefined,
 ): ReaderDocument {
-  const blocks = reportBlocks(tree, source, report, changes);
-  const starts = scalarStarts(
-    source,
-    blocks.flatMap((block) => (block.struckId ? [block.offset] : [])),
-  );
-  const groups = blocks.map((block) =>
-    block.struckId ? { ...block, scalarStart: starts.get(block.offset)! } : block,
-  );
+  const groups = reportBlocks(tree, source, report, changes);
   const slice = { text: source, utf16: 0, scalar: 0 };
   return {
     groups,
@@ -76,73 +65,6 @@ export function wholeDocument(
       const block = groups[index];
       return block ? { block, source: slice, drawings: display?.drawings } : undefined;
     },
-  };
-}
-
-// A struck card matches the server's anchor, which counts code points from the start of the
-// raw text, including a leading byte-order mark that Markdown positions leave out. One pass
-// over the sorted offsets keeps this linear in the report's length.
-function scalarStarts(source: string, offsets: readonly number[]) {
-  const shift = source.startsWith("\uFEFF") ? 1 : 0;
-  const starts = new Map<number, number>();
-  let utf16 = 0;
-  let scalar = 0;
-  for (const offset of [...new Set(offsets)].sort((a, b) => a - b)) {
-    for (; utf16 < offset + shift; scalar += 1)
-      utf16 += source.codePointAt(utf16)! > 0xffff ? 2 : 1;
-    starts.set(offset, scalar);
-  }
-  return starts;
-}
-
-// Cards drawn from the findings ledger have no source in this report: offset -1 keeps
-// them out of bookmarks and quotes, and the windowed reader only sees its own group indexes.
-export function withUnanchored(
-  reader: ReaderDocument,
-  unanchored: readonly ReportBlock[],
-  changes: Changes,
-): ReaderDocument {
-  if (!unanchored.length) return reader;
-  const at = unanchoredPosition(reader.groups, changes);
-  const count = unanchored.length;
-  const inner = (index: number) =>
-    index < at ? index : index >= at + count ? index - count : undefined;
-  const outer = (index: number) => (index < at ? index : index + count);
-  const own = (indexes: readonly number[]) =>
-    indexes.flatMap((index) => {
-      const value = inner(index);
-      return value === undefined ? [] : [value];
-    });
-  const cards = unanchored.map((block) => ({ block, source: { text: "", utf16: 0, scalar: 0 } }));
-  const { byteAt, prepare } = reader;
-  return {
-    groups: [...reader.groups.slice(0, at), ...unanchored, ...reader.groups.slice(at)],
-    prepared: (index) => {
-      const value = inner(index);
-      return value === undefined ? cards[index - at] : reader.prepared(value);
-    },
-    ...(byteAt && {
-      byteAt: (index: number) => {
-        const value = inner(index);
-        return value === undefined ? undefined : byteAt(value);
-      },
-    }),
-    ...(prepare && {
-      prepare: (
-        indexes: readonly number[],
-        signal: AbortSignal,
-        publish: () => void,
-        current: (preparing?: number) => boolean,
-        pinned: readonly number[],
-      ) =>
-        prepare(
-          own(indexes),
-          signal,
-          publish,
-          (preparing) => current(preparing === undefined ? undefined : outer(preparing)),
-          own(pinned),
-        ),
-    }),
   };
 }
 
@@ -173,7 +95,7 @@ export function indexedDocument(
     )
       throw new Error("The report layout contains an invalid range.");
   }
-  const groups = planGroups(layout, changes, base);
+  const groups = planGroups(layout, base);
   if (groups.length <= 17) throw new Error("This report fits its full formatted view.");
   const owners = new Array<number>(spans.length);
   for (const [index, group] of groups.entries())
@@ -225,8 +147,9 @@ export function indexedDocument(
           text,
           parts.map((part) => ({ markdown: part.markdown, table: part.display?.table })),
           base,
+          reportMarkdown,
         )
-      : parseMarkdown(text, base);
+      : parseMarkdown(text, base, reportMarkdown);
     if (!tree) throw new Error("The report group exceeded its formatting limits.");
     const blocks = reportBlocks(
       tree,
@@ -387,19 +310,20 @@ export function indexedDocument(
   };
 }
 
-function planGroups(layout: DisplayLayout, changes: Changes, base: string | undefined) {
+function planGroups(layout: DisplayLayout, base: string | undefined) {
   const spans = layout.blocks;
   const headings = spans.filter((s) => s.kind === "heading" && (s.headingLevel ?? 7) <= 3);
   if (headings.some((h) => !h.headingMarkdown))
     throw new Error("The report outline is incomplete.");
-  const tree = parseMarkdown(headings.map((h) => h.headingMarkdown).join("\n\n"), base);
+  const tree = parseMarkdown(
+    headings.map((h) => h.headingMarkdown).join("\n\n"),
+    base,
+    reportMarkdown,
+  );
   const nodes = tree?.children.filter((n) => n.type === "element");
   if (!nodes || nodes.length !== headings.length)
     throw new Error("The report headings require full-document formatting.");
-  const labels = new Map<
-    number,
-    { level: number; label: string; section: boolean; struck: boolean }
-  >();
+  const labels = new Map<number, { level: number; label: string; section: boolean }>();
   for (const [index, span] of headings.entries()) {
     const node = nodes[index]!;
     if (node.type !== "element" || node.tagName !== `h${span.headingLevel}`)
@@ -408,7 +332,6 @@ function planGroups(layout: DisplayLayout, changes: Changes, base: string | unde
       level: span.headingLevel!,
       label: reportText(node).trim(),
       section: startsReportBody(node),
-      struck: span.headingLevel === 3 && struckFindingId(node),
     });
   }
   const bodyStart = spans.findIndex(
@@ -423,12 +346,12 @@ function planGroups(layout: DisplayLayout, changes: Changes, base: string | unde
       span.byteStart >= spans[bodyStart]!.byteStart ? labels.get(span.byteStart) : undefined;
     return {
       offset: span.utf16Start,
-      ...(heading && { level: heading.level, label: heading.label, struck: heading.struck }),
+      ...(heading && { level: heading.level, label: heading.label }),
     };
   });
   let first = 0;
   let previousThreads = false;
-  const result: Group[] = pieces.map((group, index) => {
+  return pieces.map((group, index): Group => {
     const last = first + group.items.length - 1;
     if (spans[last]!.byteEnd - spans[first]!.byteStart > MAX_GROUP_BYTES)
       throw new Error("The report section needs full-document formatting.");
@@ -440,17 +363,9 @@ function planGroups(layout: DisplayLayout, changes: Changes, base: string | unde
       previousThreads,
       ...(group.name && { name: group.name }),
       ...(group.findingId && { findingId: group.findingId }),
-      // The server anchors a heading at its `#`, after any indent; spans start at the line.
-      ...(group.struckId && {
-        struckId: group.struckId,
-        scalarStart:
-          spans[first]!.scalarStart +
-          /^ {0,3}/.exec(spans[first]!.headingMarkdown ?? "")![0].length,
-      }),
     };
     if (group.name) previousThreads = isThreadSection(group.name);
     first = last + 1;
     return entry;
   });
-  return inDisplayOrder(result, changes);
 }
