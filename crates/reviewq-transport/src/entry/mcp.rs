@@ -8,13 +8,15 @@ use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use reviewq_app::access::{Actor, AppError};
+use reviewq_protocol::ledger::LedgerTool;
 use reviewq_protocol::mcp::{
     AnswerReviewQuestion, ConfigureFollowups, GetReview, ListReviews, ReadTranscript,
     SendReviewMessage, StartReview,
 };
 use rmcp::model::{
     CallToolRequestParams, CallToolResponse, CallToolResult, ContentBlock, Implementation,
-    JsonObject, ListToolsResult, PaginatedRequestParams, ServerCapabilities, ServerConfig, Tool,
+    JsonObject, ListToolsResult, PaginatedRequestParams, RequestMetaObject, ServerCapabilities,
+    ServerConfig, Tool,
 };
 use rmcp::service::RequestContext;
 use rmcp::transport::streamable_http_server::session::never::NeverSessionManager;
@@ -28,6 +30,7 @@ use sha2::{Digest, Sha256};
 use super::{ApiError, Entry};
 
 mod gates;
+mod ledger;
 mod operations;
 mod workflow;
 use gates::Gates;
@@ -74,7 +77,9 @@ pub(super) fn mount(entry: Arc<Entry>) -> Router<Arc<Entry>> {
                 "Configure review follow-ups for an exact registered lead.",
             ),
         ]
-        .into(),
+        .into_iter()
+        .chain(ledger::tools())
+        .collect(),
     };
     let sdk = StreamableHttpService::new(
         move || Ok(application.clone()),
@@ -152,15 +157,24 @@ impl ServerHandler for Server {
             .with_server_info(Implementation::new("reviewq", env!("CARGO_PKG_VERSION")))
     }
 
+    /// Lists every tool, except the ledger tools for a Claude client, whose plugin registers
+    /// its own.
     async fn list_tools(
         &self,
         request: Option<PaginatedRequestParams>,
-        _context: RequestContext<RoleServer>,
+        context: RequestContext<RoleServer>,
     ) -> Result<ListToolsResult, ErrorData> {
         if request.is_some_and(|page| page.cursor.is_some()) {
             return Err(ErrorData::invalid_params("invalid tool cursor", None));
         }
-        Ok(ListToolsResult::with_all_items(self.tools.to_vec()))
+        let claude = ledger::claude_client(&context);
+        let tools = self
+            .tools
+            .iter()
+            .filter(|tool| !claude || LedgerTool::from_name(&tool.name).is_none())
+            .cloned()
+            .collect();
+        Ok(ListToolsResult::with_all_items(tools))
     }
 
     fn get_tool(&self, name: &str) -> Option<Tool> {
@@ -178,25 +192,23 @@ impl ServerHandler for Server {
             .and_then(|parts| parts.extensions.get::<Actor>())
             .cloned()
             .ok_or_else(|| ErrorData::invalid_request("checkout authorization required", None))?;
-        let deadline = if matches!(
-            request.name.as_ref(),
-            "SendReviewMessage" | "StartReview" | "ConfigureFollowups"
-        ) {
-            60
-        } else {
-            30
+        let deadline = match (LedgerTool::from_name(&request.name), request.name.as_ref()) {
+            (Some(LedgerTool::FinishReview), _)
+            | (None, "SendReviewMessage" | "StartReview" | "ConfigureFollowups") => 60,
+            _ => 30,
         };
+        let meta = context.meta;
         let cancelled = context.ct;
         let result = tokio::select! {
             _ = cancelled.cancelled() => return Err(ErrorData::internal_error("request cancelled", None)),
-            result = tokio::time::timeout(Duration::from_secs(deadline), self.call(request, actor)) => {
-                result.unwrap_or(Err(AppError::Busy))
+            result = tokio::time::timeout(Duration::from_secs(deadline), self.call(request, &meta, actor)) => {
+                result.unwrap_or(Err(AppError::Busy.into()))
             }
         };
         let output = match result {
             Ok(output) => output,
             Err(error) => CallToolResult::error(vec![ContentBlock::text(
-                super::error::tool_error_text(error.into()),
+                super::error::tool_error_text(error),
             )]),
         };
         Ok(output.into())
@@ -214,13 +226,20 @@ fn bounded_result(value: &Value) -> Result<CallToolResult, AppError> {
 }
 
 impl Server {
+    /// Runs one tool call. A ledger tool binds its caller from the request's `_meta`.
     async fn call(
         &self,
         request: CallToolRequestParams,
+        meta: &RequestMetaObject,
         actor: Actor,
-    ) -> Result<CallToolResult, AppError> {
+    ) -> Result<CallToolResult, ApiError> {
         let _permit = self.gates.enter(&actor).await?;
         let input = request.arguments.unwrap_or_default();
+        if let Some(tool) = LedgerTool::from_name(&request.name) {
+            let result = ledger::call(&self.entry, tool, meta, actor, input).await?;
+            let value = serde_json::to_value(result).map_err(|_| AppError::Internal)?;
+            return Ok(bounded_result(&value)?);
+        }
         let result = match request.name.as_ref() {
             "ListReviews" => operations::list(&self.entry, actor, arguments(input)?).await,
             "GetReview" => operations::get(&self.entry, actor, arguments(input)?).await,
@@ -233,7 +252,7 @@ impl Server {
             }
             _ => Err(AppError::NotFound),
         }?;
-        bounded_result(&result)
+        Ok(bounded_result(&result)?)
     }
 }
 

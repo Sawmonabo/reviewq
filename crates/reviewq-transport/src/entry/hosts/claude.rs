@@ -6,12 +6,12 @@ use axum::routing::post;
 use axum::{Json, Router};
 use reviewq_app::access::{Actor, AppError};
 use reviewq_app::history::HistorySession;
-use reviewq_app::hosts::{ClaudeHeartbeat, ClaudeOffer, HostActivity, HostPhase};
+use reviewq_app::hosts::{ClaudeContext, ClaudeHeartbeat, ClaudeOffer, HostActivity, HostPhase};
 use reviewq_domain::session::{HostProvider, LeadTarget, NativeBinding, NativeIdentity};
 use reviewq_protocol::Success;
 use serde::{Deserialize, Serialize};
 
-use super::{ClaudeCommand, bridge_command};
+use super::ClaudeCommand;
 use crate::entry::error::ApiBytes;
 use crate::entry::pages::{parse, success};
 use crate::entry::{ApiError, Entry};
@@ -68,7 +68,7 @@ async fn heartbeat(
     headers: HeaderMap,
     ApiBytes(bytes): ApiBytes,
 ) -> Result<Json<Success<HeartbeatResponse>>, ApiError> {
-    let command: Heartbeat = bridge_command(&entry, &headers, &bytes, 16_384)?;
+    let command: Heartbeat = entry.auth.bridge_command(&headers, &bytes, 16_384)?;
     let (lead, _) = verified_context(&entry, command.context).await?;
     let activity = command.phase.map(|phase| HostActivity {
         phase: match phase {
@@ -120,17 +120,21 @@ async fn heartbeat(
     )?))
 }
 
-pub(super) async fn verified_context(
+/// The registered lead a hook's context names, its context and its binding, read from the
+/// store alone: no transcript is read. Fails with `NotFound` when the session leads no
+/// review, `PreconditionFailed` for another protocol version and `InvalidRequest` for a
+/// context that names a target or an invalid path.
+pub(super) async fn registered_lead(
     entry: &Entry,
-    command: ClaudeCommand,
-) -> Result<(LeadTarget, HistorySession), AppError> {
+    command: &ClaudeCommand,
+) -> Result<(LeadTarget, ClaudeContext, NativeBinding), AppError> {
     if command.protocol_version != 1 {
         return Err(AppError::PreconditionFailed);
     }
     if command.target.is_some() {
         return Err(AppError::InvalidRequest);
     }
-    let mut context = command.context()?;
+    let context = command.context()?;
     let binding = NativeBinding::new(
         NativeIdentity::new(
             HostProvider::Claude,
@@ -145,6 +149,17 @@ pub(super) async fn verified_context(
         .await?
         .value
         .ok_or(AppError::NotFound)?;
+    Ok((registered, context, binding))
+}
+
+/// The registered lead a hook's context names and its history session, after proving the
+/// session's transcript with the Claude companion. Fails as `registered_lead` does, and with
+/// `Forbidden` when the proof names another session or no transcript.
+pub(super) async fn verified_context(
+    entry: &Entry,
+    command: ClaudeCommand,
+) -> Result<(LeadTarget, HistorySession), AppError> {
+    let (registered, mut context, binding) = registered_lead(entry, &command).await?;
     let mut history = entry
         .store
         .history_session(

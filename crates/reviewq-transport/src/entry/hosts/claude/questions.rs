@@ -9,7 +9,7 @@ use reviewq_domain::identity::ReportHash;
 use reviewq_protocol::Success;
 use serde::Deserialize;
 
-use super::{ClaudeCommand, bridge_command, verified_context};
+use super::{ClaudeCommand, verified_context};
 use crate::entry::error::ApiBytes;
 use crate::entry::pages::{parse, success};
 use crate::entry::{ApiError, Entry};
@@ -55,7 +55,7 @@ pub(super) async fn watch(
     headers: HeaderMap,
     ApiBytes(bytes): ApiBytes,
 ) -> Result<Json<Success<Option<ClaudeQuestionAnswers>>>, ApiError> {
-    let command: Watch = bridge_command(&entry, &headers, &bytes, 64 * 1024)?;
+    let command: Watch = entry.auth.bridge_command(&headers, &bytes, 64 * 1024)?;
     if !entry.sends_allowed {
         return Err(AppError::Unavailable.into());
     }
@@ -120,7 +120,7 @@ pub(super) async fn finish(
     headers: HeaderMap,
     ApiBytes(bytes): ApiBytes,
 ) -> Result<Json<Success<()>>, ApiError> {
-    let command: Finish = bridge_command(&entry, &headers, &bytes, 4096)?;
+    let command: Finish = entry.auth.bridge_command(&headers, &bytes, 4096)?;
     let address = command.address.checked()?;
     let (lead, session) = verified_context(&entry, command.context).await?;
     let companion = entry.claude.as_ref().ok_or(AppError::Unavailable)?;

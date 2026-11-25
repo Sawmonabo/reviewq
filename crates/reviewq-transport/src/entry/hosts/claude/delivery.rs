@@ -3,17 +3,21 @@ use std::sync::Arc;
 use axum::Json;
 use axum::extract::State;
 use axum::http::HeaderMap;
+use axum::response::{IntoResponse, Response};
 use reviewq_app::access::AppError;
 use reviewq_app::hosts::{
     ClaudeChild, ClaudeClassicEvent, ClaudeDeliveryAck, ClaudeDeliveryResult, ClaudeTurnResult,
     DeliveryWork, ObservedInput,
 };
+use reviewq_app::ledger::{GateRequest, HookSession, publish};
 use reviewq_domain::session::AbsolutePath;
 use reviewq_protocol::Success;
+use reviewq_protocol::ledger::{GateReply, ReadbackReply};
 use serde::{Deserialize, Serialize};
 
-use super::{ClaudeCommand, ClaudeOffer, bridge_command, verified_context};
+use super::{ClaudeCommand, ClaudeOffer, registered_lead, verified_context};
 use crate::entry::error::ApiBytes;
+use crate::entry::features::ledger::{answer_gate, read_back};
 use crate::entry::pages::{parse, success};
 use crate::entry::{ApiError, Entry};
 
@@ -75,7 +79,7 @@ pub(super) async fn check(
     headers: HeaderMap,
     ApiBytes(bytes): ApiBytes,
 ) -> Result<Json<Success<Effect>>, ApiError> {
-    let command: Check = bridge_command(&entry, &headers, &bytes, 16_384)?;
+    let command: Check = entry.auth.bridge_command(&headers, &bytes, 16_384)?;
     if !entry.sends_allowed {
         return Err(AppError::Unavailable.into());
     }
@@ -236,7 +240,14 @@ enum Classic {
         #[serde(rename = "finalChunk")]
         final_chunk: bool,
     },
-    Stopping,
+    /// Claude's `Stop` hook. Answered with the gate's reply; `stopHookActive` is the hook
+    /// input's `stop_hook_active`, true when this stop follows a block.
+    Stopping {
+        #[serde(rename = "stopHookActive")]
+        stop_hook_active: bool,
+    },
+    /// Claude's `SessionStart` hook after compaction. Answered with the read-back.
+    Compacted,
     Disconnected {
         generation: String,
     },
@@ -249,6 +260,20 @@ enum Hook {
     Turn(TurnHook),
     Child(ChildHook),
     Classic(ClassicHook),
+}
+
+impl Hook {
+    /// The gate and the read-back, which send nothing to the session and so are answered
+    /// even while sends are off.
+    fn asks_ledger(&self) -> bool {
+        matches!(
+            self,
+            Self::Classic(ClassicHook {
+                classic: Classic::Stopping { .. } | Classic::Compacted,
+                ..
+            })
+        )
+    }
 }
 
 #[derive(Deserialize)]
@@ -266,22 +291,28 @@ enum Outcome {
     },
 }
 
+/// The Claude plugin's hook events. Replies `{data:null}`, except `stopping`, which gets the
+/// gate's `GateReply`, and `compacted`, which gets the read-back's `ReadbackReply`. A session
+/// that leads no review gets `{block:false}` and an empty text for those two. A turn signal
+/// also settles the session's run.
 pub(super) async fn hook(
     State(entry): State<Arc<Entry>>,
     headers: HeaderMap,
     ApiBytes(bytes): ApiBytes,
-) -> Result<Json<Success<()>>, ApiError> {
-    let command: Hook = bridge_command(&entry, &headers, &bytes, 16_384)?;
-    if !entry.sends_allowed {
+) -> Result<Response, ApiError> {
+    let command: Hook = entry.auth.bridge_command(&headers, &bytes, 16_384)?;
+    if !entry.sends_allowed && !command.asks_ledger() {
         return Err(AppError::Unavailable.into());
     }
     let command = match command {
         Hook::Delivery(delivery) => delivery,
         Hook::Classic(call) => {
-            let (lead, _) = verified_context(&entry, call.context).await?;
             let event = match call.classic {
+                Classic::Stopping { stop_hook_active } => {
+                    return gate_hook(&entry, &call.context, stop_hook_active).await;
+                }
+                Classic::Compacted => return read_back_hook(&entry, &call.context).await,
                 Classic::PermissionPending => ClaudeClassicEvent::PermissionPending,
-                Classic::Stopping => ClaudeClassicEvent::Stopping,
                 Classic::Disconnected { generation } => {
                     ClaudeClassicEvent::Disconnected { generation }
                 }
@@ -297,8 +328,9 @@ pub(super) async fn hook(
                     final_chunk,
                 },
             };
+            let (lead, _) = verified_context(&entry, call.context).await?;
             entry.store.record_claude_classic(lead, event).await?;
-            return Ok(Json(success((), *entry.commits.borrow())?));
+            return answered(&entry, ());
         }
         Hook::Child(child) => {
             let (root, history) = verified_context(&entry, child.context).await?;
@@ -329,10 +361,11 @@ pub(super) async fn hook(
                 )
                 .await?;
             entry.store.record_claude_child(root, proof).await?;
-            return Ok(Json(success((), *entry.commits.borrow())?));
+            return answered(&entry, ());
         }
         Hook::Turn(turn) => {
             let (lead, _) = verified_context(&entry, turn.context).await?;
+            let run = lead.run_id().clone();
             entry
                 .store
                 .record_claude_turn(
@@ -344,7 +377,10 @@ pub(super) async fn hook(
                     },
                 )
                 .await?;
-            return Ok(Json(success((), *entry.commits.borrow())?));
+            // The turn is recorded. A run that fails to settle here is settled by the periodic
+            // settle tick, so the hook still succeeds.
+            let _ = publish::settle(entry.store.as_ref(), run).await;
+            return answered(&entry, ());
         }
     };
     let (lead, session) = verified_context(&entry, command.context).await?;
@@ -369,7 +405,7 @@ pub(super) async fn hook(
             .replay_claude_delivery(lead.clone(), offer.clone(), replay)
             .await?
     {
-        return Ok(Json(success((), *entry.commits.borrow())?));
+        return answered(&entry, ());
     }
     let result = match command.outcome {
         Outcome::Deferred => ClaudeDeliveryResult::Deferred,
@@ -406,5 +442,56 @@ pub(super) async fn hook(
         .store
         .finish_claude_delivery(lead, offer, result)
         .await?;
-    Ok(Json(success((), *entry.commits.borrow())?))
+    answered(&entry, ())
+}
+
+/// `stopping`: the gate's reply for the session's lead, or a release when the session leads
+/// no review. The hook names no turn, so the gate counts its blocks per stop sequence.
+async fn gate_hook(
+    entry: &Entry,
+    context: &ClaudeCommand,
+    stop_hook_active: bool,
+) -> Result<Response, ApiError> {
+    let reply = match ledger_session(entry, context).await? {
+        Some(session) => {
+            let request = GateRequest {
+                session,
+                turn: None,
+                stop_hook_active,
+            };
+            answer_gate(entry, request).await?
+        }
+        None => GateReply::allow(),
+    };
+    answered(entry, reply)
+}
+
+/// `compacted`: the read-back for the session's lead, or an empty text when the session
+/// leads no review.
+async fn read_back_hook(entry: &Entry, context: &ClaudeCommand) -> Result<Response, ApiError> {
+    let reply = match ledger_session(entry, context).await? {
+        Some(session) => read_back(entry, session).await?,
+        None => ReadbackReply {
+            text: String::new(),
+        },
+    };
+    answered(entry, reply)
+}
+
+/// The linked session a gate or read-back hook names, from the store alone: neither reads the
+/// transcript. `None` when the session leads no review.
+async fn ledger_session(
+    entry: &Entry,
+    context: &ClaudeCommand,
+) -> Result<Option<HookSession>, AppError> {
+    match registered_lead(entry, context).await {
+        Ok((lead, ..)) => Ok(Some(HookSession::Claude(lead.session_key().clone()))),
+        Err(AppError::NotFound) => Ok(None),
+        Err(error) => Err(error),
+    }
+}
+
+/// The hook reply: `data` in the common envelope.
+fn answered<T: Serialize>(entry: &Entry, data: T) -> Result<Response, ApiError> {
+    Ok(Json(success(data, *entry.commits.borrow())?).into_response())
 }

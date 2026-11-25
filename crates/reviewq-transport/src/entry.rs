@@ -20,6 +20,7 @@ use reviewq_app::hosts::{
     NativeTerminal,
 };
 use reviewq_app::launch::{LaunchStore, NativeLaunchers, NativeModels};
+use reviewq_app::ledger::LedgerStore;
 use reviewq_app::notifications::InboxStore;
 use reviewq_app::queue::{
     ArchiveStore, QueueStore, ReviewLookup, SprintStore, TrackingStore, WorkspaceQueue,
@@ -97,6 +98,7 @@ pub trait Store:
     + FollowupCommands
     + SettingsStore
     + LaunchStore
+    + LedgerStore
     + reviewq_app::hosts::recovery::RecoveryStore
 {
 }
@@ -127,6 +129,7 @@ impl<
         + FollowupCommands
         + SettingsStore
         + LaunchStore
+        + LedgerStore
         + reviewq_app::hosts::recovery::RecoveryStore,
 > Store for S
 {

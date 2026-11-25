@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use axum::Json;
 use axum::extract::State;
-use axum::http::{HeaderMap, header};
+use axum::http::HeaderMap;
 use reviewq_app::access::AppError;
 use reviewq_app::actions::{
     ActionDeclaration, CommentTarget, Intent, declare_publication, reconcile_publication,
@@ -17,14 +17,20 @@ use crate::entry::error::ApiBytes;
 use crate::entry::pages::{parse, success};
 use crate::entry::{ApiError, Entry};
 
+/// Largest declare body, as the route's body limit allows.
+pub(in crate::entry::features) const MAX_DECLARE_BODY_BYTES: usize = 80 * 1024;
+/// Largest reconcile body, as the API's default body limit allows.
+const MAX_RECONCILE_BODY_BYTES: usize = 64 * 1024;
+
 pub(in crate::entry::features) async fn declare(
     State(entry): State<Arc<Entry>>,
     headers: HeaderMap,
     ApiBytes(bytes): ApiBytes,
 ) -> Result<Json<Success<dto::Action>>, ApiError> {
-    authenticate(&entry, &headers)?;
     let command: dto::DeclareCommand =
-        serde_json::from_slice(&bytes).map_err(|_| AppError::InvalidRequest)?;
+        entry
+            .auth
+            .bridge_command(&headers, &bytes, MAX_DECLARE_BODY_BYTES)?;
     let encoded = serde_json::to_vec(&command.declaration).map_err(|_| AppError::Internal)?;
     if encoded.len() > 64 * 1024 {
         return Err(AppError::PayloadTooLarge.into());
@@ -94,9 +100,10 @@ pub(in crate::entry::features) async fn reconcile(
     headers: HeaderMap,
     ApiBytes(bytes): ApiBytes,
 ) -> Result<Json<Success<Option<dto::Action>>>, ApiError> {
-    authenticate(&entry, &headers)?;
     let command: dto::ReconcileCommand =
-        serde_json::from_slice(&bytes).map_err(|_| AppError::InvalidRequest)?;
+        entry
+            .auth
+            .bridge_command(&headers, &bytes, MAX_RECONCILE_BODY_BYTES)?;
     let proof = entry.workflow.proof.as_ref();
     let source = entry.source_reader().await?;
     let lead = entry
@@ -118,16 +125,4 @@ pub(in crate::entry::features) async fn reconcile(
         data: None,
         cursor: entry.head().await?,
     }))
-}
-
-fn authenticate(entry: &Entry, headers: &HeaderMap) -> Result<(), AppError> {
-    entry.auth.endpoint.verify_bridge(headers)?;
-    if !headers
-        .get(header::CONTENT_TYPE)
-        .and_then(|value| value.to_str().ok())
-        .is_some_and(|value| value.split(';').next() == Some("application/json"))
-    {
-        return Err(AppError::InvalidRequest);
-    }
-    Ok(())
 }

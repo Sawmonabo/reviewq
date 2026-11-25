@@ -1,6 +1,6 @@
 mod native;
 
-pub(super) use native::{declare, reconcile};
+pub(super) use native::{MAX_DECLARE_BODY_BYTES, declare, reconcile};
 
 use std::sync::Arc;
 

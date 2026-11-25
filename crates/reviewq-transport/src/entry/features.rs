@@ -3,6 +3,7 @@
 pub(super) mod actions;
 pub(super) mod decisions;
 pub(super) mod followups;
+pub(super) mod ledger;
 pub(super) mod notifications;
 pub(super) mod recovery;
 pub(super) mod reports;
@@ -17,6 +18,7 @@ use super::Entry;
 pub(super) fn routes() -> Router<Arc<Entry>> {
     Router::new()
         .merge(recovery::routes())
+        .merge(ledger::routes())
         .route(
             "/followups/preferences",
             get(followups::preferences).put(followups::save_preferences),
@@ -49,7 +51,8 @@ pub(super) fn routes() -> Router<Arc<Entry>> {
         .route("/runs/{run_id}/action", get(actions::current))
         .route(
             "/native/actions/declare",
-            axum::routing::post(actions::declare).layer(DefaultBodyLimit::max(80 * 1024)),
+            axum::routing::post(actions::declare)
+                .layer(DefaultBodyLimit::max(actions::MAX_DECLARE_BODY_BYTES)),
         )
         .route(
             "/native/actions/reconcile",

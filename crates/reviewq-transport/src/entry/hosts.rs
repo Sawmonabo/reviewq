@@ -2,12 +2,13 @@ use std::sync::Arc;
 
 use axum::Json;
 use axum::extract::State;
-use axum::http::{HeaderMap, StatusCode, header};
+use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use reviewq_app::access::AppError;
 use reviewq_app::hosts::{ClaudeContext, NativeLink, link_codex, link_proven};
-use reviewq_domain::session::{AbsolutePath, LeadTarget};
-use reviewq_protocol::queue::{ReviewSelection, ReviewSelectionResponse};
+use reviewq_app::ledger::readback::RULE;
+use reviewq_domain::session::{AbsolutePath, HostProvider, LeadTarget};
+use reviewq_protocol::queue::ReviewSelection;
 use reviewq_protocol::{EventCursorDto, Failure, ReviewIdDto, RunIdDto, SessionKeyDto, Success};
 use serde::{Deserialize, Serialize};
 
@@ -44,7 +45,7 @@ pub(super) async fn link(
     headers: HeaderMap,
     ApiBytes(bytes): ApiBytes,
 ) -> Result<Response, ApiError> {
-    let command: LinkCommand = bridge_command(&entry, &headers, &bytes, 4_096)?;
+    let command: LinkCommand = entry.auth.bridge_command(&headers, &bytes, 4_096)?;
     protocol(command.protocol_version)?;
     let source = entry.source_reader().await?;
     let host = entry.host.as_deref().ok_or(AppError::Unavailable)?;
@@ -52,16 +53,15 @@ pub(super) async fn link(
         .thread_id
         .parse()
         .map_err(|_| AppError::InvalidRequest)?;
-    link_response(
-        link_codex(
-            entry.store.as_ref(),
-            source.as_ref(),
-            host,
-            thread,
-            command.target,
-        )
-        .await?,
+    let linked = link_codex(
+        entry.store.as_ref(),
+        source.as_ref(),
+        host,
+        thread,
+        command.target,
     )
+    .await?;
+    link_response(&entry, HostProvider::Codex, linked).await
 }
 
 pub(super) async fn codex_registration(
@@ -69,7 +69,7 @@ pub(super) async fn codex_registration(
     headers: HeaderMap,
     ApiBytes(bytes): ApiBytes,
 ) -> Result<Json<Success<ReviewSelection>>, ApiError> {
-    let input: CodexAddress = bridge_command(&entry, &headers, &bytes, 4096)?;
+    let input: CodexAddress = entry.auth.bridge_command(&headers, &bytes, 4096)?;
     protocol(input.protocol_version)?;
     let host = entry.host.as_deref().ok_or(AppError::Unavailable)?;
     let proof = host
@@ -129,7 +129,7 @@ pub(super) async fn claude_registration(
     headers: HeaderMap,
     ApiBytes(bytes): ApiBytes,
 ) -> Result<Response, ApiError> {
-    let command: ClaudeCommand = bridge_command(&entry, &headers, &bytes, 16_384)?;
+    let command: ClaudeCommand = entry.auth.bridge_command(&headers, &bytes, 16_384)?;
     protocol(command.protocol_version)?;
     if command.target.is_some() {
         return Err(AppError::InvalidRequest.into());
@@ -174,31 +174,14 @@ pub(super) async fn claude_link(
     headers: HeaderMap,
     ApiBytes(bytes): ApiBytes,
 ) -> Result<Response, ApiError> {
-    let command: ClaudeCommand = bridge_command(&entry, &headers, &bytes, 16_384)?;
+    let command: ClaudeCommand = entry.auth.bridge_command(&headers, &bytes, 16_384)?;
     protocol(command.protocol_version)?;
     let companion = entry.claude.as_deref().ok_or(AppError::Unavailable)?;
     let source = entry.source_reader().await?;
     let proof = companion.prove(command.context()?).await?;
     let target = command.target.ok_or(AppError::InvalidRequest)?;
-    link_response(link_proven(entry.store.as_ref(), source.as_ref(), proof, target).await?)
-}
-
-fn bridge_command<T: serde::de::DeserializeOwned>(
-    entry: &Entry,
-    headers: &HeaderMap,
-    body: &[u8],
-    limit: usize,
-) -> Result<T, ApiError> {
-    entry.auth.endpoint.verify_bridge(headers)?;
-    if body.len() > limit
-        || !headers
-            .get(header::CONTENT_TYPE)
-            .and_then(|value| value.to_str().ok())
-            .is_some_and(|value| value.split(';').next() == Some("application/json"))
-    {
-        return Err(AppError::InvalidRequest.into());
-    }
-    serde_json::from_slice(body).map_err(|_| AppError::InvalidRequest.into())
+    let linked = link_proven(entry.store.as_ref(), source.as_ref(), proof, target).await?;
+    link_response(&entry, HostProvider::Claude, linked).await
 }
 
 fn protocol(version: u16) -> Result<(), ApiError> {
@@ -208,7 +191,26 @@ fn protocol(version: u16) -> Result<(), ApiError> {
     Ok(())
 }
 
-fn link_response(result: NativeLink) -> Result<Response, ApiError> {
+/// The reply to a successful link: the linked review, the rule the model reads once linked,
+/// and for Codex whether its stop hook has reported on this installation, which it does only
+/// after the user trusts the hook.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct Linked {
+    #[serde(flatten)]
+    selection: ReviewSelection,
+    rule: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    stop_hook_reported: Option<bool>,
+}
+
+/// Answers a link: `Linked` for one review, or `409` with the candidates when the target named
+/// several.
+async fn link_response(
+    entry: &Entry,
+    provider: HostProvider,
+    result: NativeLink,
+) -> Result<Response, ApiError> {
     let registered = match result {
         NativeLink::Linked(registered) => registered,
         NativeLink::Ambiguous(candidates) => {
@@ -223,8 +225,22 @@ fn link_response(result: NativeLink) -> Result<Response, ApiError> {
                 .into_response());
         }
     };
-    let response: ReviewSelectionResponse = Success {
-        data: selection(&registered.value)?,
+    let stop_hook_reported = match provider {
+        HostProvider::Codex => Some(
+            entry
+                .store
+                .last_stop_hook_report(HostProvider::Codex)
+                .await?
+                .is_some(),
+        ),
+        HostProvider::Claude => None,
+    };
+    let response = Success {
+        data: Linked {
+            selection: selection(&registered.value)?,
+            rule: RULE,
+            stop_hook_reported,
+        },
         cursor: EventCursorDto::new(registered.cursor.get()).ok_or(AppError::Internal)?,
     };
     Ok(Json(response).into_response())

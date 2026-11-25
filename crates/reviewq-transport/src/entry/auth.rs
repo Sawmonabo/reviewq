@@ -5,6 +5,7 @@ use std::time::{Duration, Instant};
 use axum::http::{HeaderMap, header};
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use reviewq_app::access::{Actor, AppError};
+use serde::de::DeserializeOwned;
 use subtle::ConstantTimeEq;
 
 use super::control::{ControlRequest, MAX_CONTROL_AGE, ServiceEndpoint, decode, random, value};
@@ -68,6 +69,29 @@ impl Auth {
             now + Duration::from_secs(MAX_CONTROL_AGE * 2 + 1),
         );
         Ok(request)
+    }
+
+    /// Reads a native bridge request: the bridge credential, a JSON content type and a body of
+    /// at most `limit` bytes, decoded as `T`. Every native bridge route calls it first.
+    ///
+    /// Fails with the credential's error, or with `InvalidRequest` for another content type,
+    /// a longer body or a body that does not decode.
+    pub(super) fn bridge_command<T: DeserializeOwned>(
+        &self,
+        headers: &HeaderMap,
+        body: &[u8],
+        limit: usize,
+    ) -> Result<T, AppError> {
+        self.endpoint.verify_bridge(headers)?;
+        if body.len() > limit
+            || !headers
+                .get(header::CONTENT_TYPE)
+                .and_then(|value| value.to_str().ok())
+                .is_some_and(|value| value.split(';').next() == Some("application/json"))
+        {
+            return Err(AppError::InvalidRequest);
+        }
+        serde_json::from_slice(body).map_err(|_| AppError::InvalidRequest)
     }
 
     pub(super) fn browser_actor(
