@@ -71,8 +71,6 @@ impl Context {
             return Err("The active service does not match the requested isolated port.".into());
         }
         let client = native_client::client()?;
-        let ready = native_client::signed(&client, &endpoint, "GET", "/api/v1/status", b"").await?;
-        native_client::verify_ready(&endpoint, &ready)?;
         let body = serde_json::to_vec(
             &serde_json::json!({"protocolVersion":1,"threadId":thread.as_str()}),
         )?;

@@ -1,3 +1,4 @@
+use std::io::Read;
 use std::path::Path;
 use std::time::Duration;
 
@@ -13,7 +14,10 @@ use crate::cli::Open;
 use crate::runtime;
 
 mod claude;
+mod codex_hook;
+mod hook;
 pub(crate) use claude::{ClaudeBridgeOperation, claude_bridge, claude_hook};
+pub(crate) use codex_hook::codex_hook;
 
 type Failure = Box<dyn std::error::Error + Send + Sync>;
 
@@ -46,6 +50,13 @@ struct Linked {
     review_id: String,
     run_id: String,
     lead_session_key: String,
+    /// The rule the model reads after linking, absent from a reply that carries none.
+    #[serde(default)]
+    rule: Option<String>,
+    /// Whether a Codex `Stop` hook has reported on this installation; only a Codex link
+    /// reply carries it.
+    #[serde(default)]
+    stop_hook_reported: bool,
 }
 
 #[derive(Deserialize)]
@@ -60,16 +71,23 @@ pub(crate) async fn link(profile: &Path, target: String) -> Result<(), Failure> 
         .ok_or("Run reviewq link from inside the Codex conversation you want to link.")?;
     let endpoint = runtime::read_native_endpoint(profile)?;
     let client = client()?;
-    let status = signed(&client, &endpoint, "GET", "/api/v1/status", b"").await?;
-    verify_ready(&endpoint, &status)?;
     let body = serde_json::to_vec(&serde_json::json!({
         "protocolVersion": 1, "threadId": native.as_str(), "target": target
     }))?;
     let linked =
         link_result(bridge(&client, &endpoint, "/api/v1/native/codex/link", body).await?).await?;
-    println!("{}", link_text(&endpoint, linked, HostProvider::Codex)?);
+    println!("{}", link_text(&endpoint, &linked, HostProvider::Codex)?);
+    if let Some(rule) = &linked.rule {
+        println!("\n{rule}");
+    }
+    if !linked.stop_hook_reported {
+        println!("\n{CODEX_HOOKS_PENDING}");
+    }
     Ok(())
 }
+
+/// Shown after a Codex link while no Codex `Stop` hook has reported on this installation.
+const CODEX_HOOKS_PENDING: &str = "The ReviewQ hooks have not run in Codex yet: open /hooks in Codex to review and trust them. Until then the review still files, closes and shows as unfinished when it is not closed; only the end-of-turn reminder and the reminder after compaction are missing.";
 
 pub(crate) async fn claude(
     profile: &Path,
@@ -79,8 +97,6 @@ pub(crate) async fn claude(
     let native: NativeSessionId = session_id.parse()?;
     let endpoint = runtime::read_native_endpoint(profile)?;
     let client = client()?;
-    let status = signed(&client, &endpoint, "GET", "/api/v1/status", b"").await?;
-    verify_ready(&endpoint, &status)?;
     let cwd = std::env::current_dir()?.canonicalize()?;
     let home = runtime::claude_home()?.canonicalize()?;
     let body = serde_json::to_vec(&serde_json::json!({
@@ -90,14 +106,15 @@ pub(crate) async fn claude(
         "profile": home,
         "target": target,
     }))?;
-    let (linked, pending_launch, message) = if target.is_some() {
+    let (linked, pending_launch, message, rule) = if target.is_some() {
         let linked =
             link_result(bridge(&client, &endpoint, "/api/v1/native/claude/link", body).await?)
                 .await?;
         (
             true,
             false,
-            link_text(&endpoint, linked, HostProvider::Claude)?,
+            link_text(&endpoint, &linked, HostProvider::Claude)?,
+            linked.rule,
         )
     } else {
         #[derive(Deserialize)]
@@ -124,34 +141,46 @@ pub(crate) async fn claude(
                 true,
                 false,
                 format!("ReviewQ · linked to {}", linked.review_id),
+                None,
             )
         } else if data.pending_launch {
             (
                 false,
                 true,
                 "ReviewQ is confirming this managed Claude launch.".to_owned(),
+                None,
             )
         } else {
             (
                 false,
                 false,
                 "ReviewQ · use /reviewq <merge request or ticket> to link this session.".to_owned(),
+                None,
             )
         }
     };
     println!(
         "{}",
-        serde_json::json!({"linked": linked, "pendingLaunch": pending_launch, "message": message})
+        serde_json::json!({
+            "linked": linked, "pendingLaunch": pending_launch, "message": message, "rule": rule,
+        })
     );
     Ok(())
 }
 
+/// Posts `body` to the native route `path` with the bridge credential, once a signed status
+/// request has proved that the listener is this installation's service instance and that it
+/// is ready. The credential is never sent, and no reply is read, without that proof. Fails
+/// without posting when the status reply is unsigned, names another instance or reports a
+/// service still starting, and fails when either request fails.
 pub(crate) async fn bridge(
     client: &Client,
     endpoint: &ServiceEndpoint,
     path: &str,
     body: Vec<u8>,
 ) -> Result<reqwest::Response, Failure> {
+    let status = signed(client, endpoint, "GET", "/api/v1/status", b"").await?;
+    verify_ready(endpoint, &status)?;
     Ok(client
         .post(format!("http://{}{path}", endpoint.native()))
         .headers(endpoint.bridge_headers()?)
@@ -187,7 +216,7 @@ async fn link_result(response: reqwest::Response) -> Result<Linked, Failure> {
 
 fn link_text(
     endpoint: &ServiceEndpoint,
-    linked: Linked,
+    linked: &Linked,
     provider: HostProvider,
 ) -> Result<String, Failure> {
     let review: ReviewId = linked.review_id.parse()?;
@@ -366,6 +395,19 @@ pub(crate) fn verify_service(
         return Err("service response identifies a different instance".into());
     }
     Ok(ready.state)
+}
+
+/// Reads all of stdin, refusing more than `limit` bytes.
+fn read_input(limit: usize) -> Result<Vec<u8>, Failure> {
+    let mut input = Vec::new();
+    std::io::stdin()
+        .lock()
+        .take((limit + 1) as u64)
+        .read_to_end(&mut input)?;
+    if input.len() > limit {
+        return Err("ReviewQ companion input exceeds its limit.".into());
+    }
+    Ok(input)
 }
 
 pub(crate) async fn bounded(

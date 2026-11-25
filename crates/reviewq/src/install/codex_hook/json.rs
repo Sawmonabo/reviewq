@@ -1,4 +1,5 @@
-//! Preserve the existing JSON bytes and matcher positions when editing hooks.json.
+//! Preserve the existing JSON bytes and matcher positions when editing one event's array in
+//! hooks.json.
 
 use std::ops::Range;
 
@@ -7,11 +8,10 @@ use serde_json::value::RawValue;
 
 use crate::json_edit::{self, Field};
 
-use super::{Failure, TIMEOUT_SECONDS};
+use super::{Event, Failure, TIMEOUT_SECONDS};
 
-const EVENT_PATH: &[&str] = &["hooks", "PreToolUse"];
 const CHANGED: &str = "The Codex hook has changed. ReviewQ preserved the current hooks.";
-const INVALID: &str = "Expected a Codex hooks object with a PreToolUse array.";
+const INVALID: &str = "Expected a Codex hooks object whose Stop and SessionStart are arrays.";
 
 type Change = Option<Option<Vec<u8>>>;
 
@@ -27,6 +27,8 @@ pub(super) enum Added {
 #[derive(Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 struct Group<'a> {
+    #[serde(borrow, default, skip_serializing_if = "Option::is_none")]
+    matcher: Option<&'a str>,
     #[serde(borrow)]
     hooks: [Command<'a>; 1],
 }
@@ -63,56 +65,62 @@ enum Position {
 }
 
 impl Added {
-    fn from_position(position: &Position) -> Self {
+    fn from_position(position: &Position, event: Event) -> Self {
         match position {
-            Position::Absent { names, .. } if *names == EVENT_PATH => Self::HookMap,
+            Position::Absent { names, .. } if *names == event.path() => Self::HookMap,
             Position::Absent { .. } => Self::Event,
             Position::Present { .. } => Self::Matcher,
         }
     }
 }
 
-pub(super) fn plan(bytes: Option<&[u8]>, command: &str) -> Result<Option<Added>, Failure> {
+/// What installing `event`'s entry would add to `bytes`, or `None` when it is already there.
+pub(super) fn plan(
+    bytes: Option<&[u8]>,
+    event: Event,
+    command: &str,
+) -> Result<Option<Added>, Failure> {
     let Some(bytes) = bytes else {
         return Ok(Some(Added::Document));
     };
     let source = json_edit::source(bytes)?;
-    let position = position(source)?;
+    let position = position(source, event)?;
     if let Position::Present { array, .. } = &position {
         let items = items(source, array.start)?;
-        if owned(source, &items, command)?.is_some() {
+        if owned(source, &items, event, command)?.is_some() {
             return Ok(None);
         }
     }
-    Ok(Some(Added::from_position(&position)))
+    Ok(Some(Added::from_position(&position, event)))
 }
 
 pub(super) fn install(
     bytes: Option<&[u8]>,
+    event: Event,
     command: &str,
     added: Added,
     applied: bool,
 ) -> Result<Change, Failure> {
-    let group = serde_json::to_vec(&group(command))?;
+    let group = serde_json::to_vec(&group(event, command))?;
     let Some(bytes) = bytes else {
         return if added == Added::Document && !applied {
-            Ok(Some(Some(document(&group))))
+            Ok(Some(Some(document(event, &group))))
         } else {
             Err(CHANGED.into())
         };
     };
     let source = json_edit::source(bytes)?;
-    let position = position(source)?;
+    let position = position(source, event)?;
     let next = match &position {
         Position::Absent { names, at, comma } => {
-            if applied || Added::from_position(&position) != added {
+            if applied || Added::from_position(&position, event) != added {
                 return Err(CHANGED.into());
             }
             json_edit::insert(source, *at, *comma, names, &array(&group))?
         }
         Position::Present { array, .. } => {
             let items = items(source, array.start)?;
-            if owned(source, &items, command)?.is_some() {
+            if owned(source, &items, event, command)?.is_some() {
                 return Ok(None);
             }
             if applied || added != Added::Matcher {
@@ -130,7 +138,12 @@ pub(super) fn install(
     Ok(Some(Some(next)))
 }
 
-pub(super) fn remove(bytes: Option<&[u8]>, command: &str, added: Added) -> Result<Change, Failure> {
+pub(super) fn remove(
+    bytes: Option<&[u8]>,
+    event: Event,
+    command: &str,
+    added: Added,
+) -> Result<Change, Failure> {
     let Some(bytes) = bytes else {
         return Ok(None);
     };
@@ -138,25 +151,25 @@ pub(super) fn remove(bytes: Option<&[u8]>, command: &str, added: Added) -> Resul
     let Position::Present {
         array,
         remove_event,
-    } = position(source)?
+    } = position(source, event)?
     else {
         return Ok(None);
     };
     let items = items(source, array.start)?;
-    let Some(owned) = owned(source, &items, command)? else {
+    let Some(owned) = owned(source, &items, event, command)? else {
         return Ok(None);
     };
     if items.len() == 1 {
-        let group = serde_json::to_vec(&group(command))?;
-        if added == Added::Document && bytes == document(&group) {
+        let group = serde_json::to_vec(&group(event, command))?;
+        if added == Added::Document && bytes == document(event, &group) {
             return Ok(Some(None));
         }
         if matches!(added, Added::Document | Added::HookMap)
             && let Some((Field::Present { value, remove }, _)) =
-                json_edit::locate(source, &EVENT_PATH[..1])?
+                json_edit::locate(source, &event.path()[..1])?
         {
             let canonical: serde_json::Value =
-                serde_json::json!({"PreToolUse":[group_value(command)]});
+                serde_json::json!({event.name(): [group_value(event, command)]});
             if serde_json::from_str::<serde_json::Value>(&source[value])
                 .ok()
                 .as_ref()
@@ -183,8 +196,8 @@ pub(super) fn remove(bytes: Option<&[u8]>, command: &str, added: Added) -> Resul
     Ok(Some(Some(json_edit::replace(source, range, replacement))))
 }
 
-fn position(source: &str) -> Result<Position, Failure> {
-    match json_edit::locate(source, EVENT_PATH)? {
+fn position(source: &str, event: Event) -> Result<Position, Failure> {
+    match json_edit::locate(source, event.path())? {
         Some((Field::Present { value, remove }, _)) if source.as_bytes()[value.start] == b'[' => {
             Ok(Position::Present {
                 array: value,
@@ -216,9 +229,14 @@ fn items(source: &str, array: usize) -> Result<Vec<Range<usize>>, Failure> {
     Ok(entries)
 }
 
-fn owned(source: &str, items: &[Range<usize>], command: &str) -> Result<Option<usize>, Failure> {
+fn owned(
+    source: &str,
+    items: &[Range<usize>],
+    event: Event,
+    command: &str,
+) -> Result<Option<usize>, Failure> {
     let mut owned = None;
-    let expected = group_value(command);
+    let expected = group_value(event, command);
     for (index, range) in items.iter().enumerate() {
         let item = &source[range.clone()];
         if serde_json::from_str::<serde_json::Value>(item)
@@ -242,8 +260,9 @@ fn owned(source: &str, items: &[Range<usize>], command: &str) -> Result<Option<u
     Ok(owned)
 }
 
-fn group(command: &str) -> Group<'_> {
+fn group(event: Event, command: &str) -> Group<'_> {
     Group {
+        matcher: event.matcher(),
         hooks: [Command {
             kind: "command",
             command: command.into(),
@@ -252,13 +271,15 @@ fn group(command: &str) -> Group<'_> {
     }
 }
 
-fn group_value(command: &str) -> serde_json::Value {
-    serde_json::json!(group(command))
+fn group_value(event: Event, command: &str) -> serde_json::Value {
+    serde_json::json!(group(event, command))
 }
 
-fn document(group: &[u8]) -> Vec<u8> {
+fn document(event: Event, group: &[u8]) -> Vec<u8> {
     [
-        br#"{"hooks":{"PreToolUse":"#.as_slice(),
+        br#"{"hooks":{""#.as_slice(),
+        event.name().as_bytes(),
+        br#"":"#,
         &array(group),
         b"}}\n",
     ]

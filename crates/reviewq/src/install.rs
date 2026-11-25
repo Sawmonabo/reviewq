@@ -9,13 +9,6 @@ use sha2::Digest;
 pub(crate) mod bridge;
 mod bundle;
 mod claude;
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "E2 installs the Codex turn-end and compaction hooks"
-    )
-)]
 mod codex_hook;
 mod files;
 mod managed;
@@ -329,6 +322,10 @@ pub(crate) async fn install(bundle_path: &Path) -> Result<(), Failure> {
             path.display()
         );
     }
+    // The hooks are optional and are installed only after the new release has passed
+    // rollback and operational readiness. Their ownership survives an interrupted write,
+    // independently of the active release.
+    let codex_hooks = codex_hook::reconcile(&paths, next.skill.is_some());
     println!(
         "ReviewQ {}\nBundle {}\nDashboard http://{}/\nRuntime configuration {}",
         bundle.manifest.version,
@@ -340,6 +337,20 @@ pub(crate) async fn install(bundle_path: &Path) -> Result<(), Failure> {
         println!(
             "Codex unavailable. Set codexCommand in runtime.json and retry install to enable its skill."
         );
+    }
+    match (next.skill.is_some(), codex_hooks) {
+        (_, Ok(codex_hook::Reconciled::Unreadable(ownership))) => eprintln!(
+            "ReviewQ left the Codex hooks unchanged because it cannot read {}. Remove that file and install again.",
+            ownership.display()
+        ),
+        (true, Ok(codex_hook::Reconciled::Done)) => println!(
+            "Codex runs the ReviewQ Stop and SessionStart hooks only after you review and trust them in /hooks. Without them a review still files, closes and shows as unfinished when it is not closed; only the end-of-turn reminder and the reminder after compaction are missing."
+        ),
+        (true, Err(error)) => eprintln!(
+            "ReviewQ could not configure its Codex hooks: {error} Reviews still file and close without them."
+        ),
+        (false, Err(error)) => eprintln!("ReviewQ preserved its previous Codex hooks: {error}"),
+        (false, Ok(codex_hook::Reconciled::Done)) => {}
     }
     if next.claude.is_none() {
         println!("Claude Code unavailable. Set claudeCommand in runtime.json and retry install.");
@@ -503,6 +514,20 @@ fn verified_unit(paths: &Paths, release: &Release, bundle: &Bundle) -> Result<Ve
     Err("The previous service unit no longer matches its installation.".into())
 }
 
+/// Removes ReviewQ's Codex hooks while uninstalling. When the ownership file cannot be read,
+/// it says what to remove by hand and lets the uninstall continue. Fails when an owned entry
+/// was changed by the user.
+fn retire_codex_hooks(paths: &Paths) -> Result<(), Failure> {
+    if let codex_hook::Reconciled::Unreadable(ownership) = codex_hook::reconcile(paths, false)? {
+        eprintln!(
+            "ReviewQ left its Codex hooks in {} because it cannot read {}. Remove ReviewQ's entries there and that file.",
+            paths.codex_home.join("hooks.json").display(),
+            ownership.display()
+        );
+    }
+    Ok(())
+}
+
 pub(crate) async fn uninstall() -> Result<(), Failure> {
     let mut paths = Paths::resolve()?;
     let _lock = paths.lock()?;
@@ -511,6 +536,7 @@ pub(crate) async fn uninstall() -> Result<(), Failure> {
         return Err("Finish the interrupted activation before uninstalling.".into());
     }
     let Some(active) = inventory.active.as_ref() else {
+        retire_codex_hooks(&paths)?;
         println!(
             "ReviewQ is already removed. Retained data {}",
             paths.profile.display()
@@ -551,6 +577,7 @@ pub(crate) async fn uninstall() -> Result<(), Failure> {
     let removed = crate::checkout_setup::remove_installation(&paths.profile, &store).await;
     store.close(std::time::Duration::from_secs(10)).await?;
     removed?;
+    retire_codex_hooks(&paths)?;
     claude::remove(&paths, active).await?;
     if let Some(windows) = &active.windows {
         windows.remove().await?;

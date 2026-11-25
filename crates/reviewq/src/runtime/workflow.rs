@@ -4,12 +4,17 @@ use std::time::Duration;
 use reviewq_app::actions::run_due_publications;
 use reviewq_app::followups::{poll_monitored_reviews, run_due_followups};
 use reviewq_app::hosts::recovery::run_due_recoveries;
+use reviewq_app::ledger::publish::settle_due;
 use reviewq_app::notifications::poll_native_attention;
 use reviewq_app::settings::RuntimeSources;
 use reviewq_app::workflow::NativeWorkflowProof;
 use reviewq_store::SqliteStore;
 use tokio::sync::watch;
 
+/// Every 10 seconds until shutdown: reads native attention, settles the ledger runs that are
+/// due, which it also does once on start, then polls the configured sources and runs the due
+/// follow-ups, recoveries and publications. A step's error skips that step for the tick, as a
+/// settle error does.
 pub(super) async fn run(
     store: Arc<SqliteStore>,
     sources: Arc<RuntimeSources>,
@@ -19,6 +24,13 @@ pub(super) async fn run(
     let mut cursor = None;
     let mut revision = None;
     let mut native_cursor = None;
+    if *shutdown.borrow_and_update() {
+        return;
+    }
+    tokio::select! {
+        _ = shutdown.changed() => return,
+        _ = settle_due(store.as_ref()) => {},
+    }
     while !*shutdown.borrow_and_update() {
         tokio::select! {
             _ = shutdown.changed() => break,
@@ -30,6 +42,10 @@ pub(super) async fn run(
         };
         if let Ok(next) = attention {
             native_cursor = next;
+        }
+        tokio::select! {
+            _ = shutdown.changed() => break,
+            _ = settle_due(store.as_ref()) => {},
         }
         let Ok(context) = sources.current().await else {
             continue;
