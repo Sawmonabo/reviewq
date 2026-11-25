@@ -6,9 +6,9 @@ import type { AcceptedFindingChange } from "./report-structure";
 type Field = { readonly label: string; readonly nodes: readonly RootContent[] };
 type AuthoredFinding = {
   readonly id: string;
-  readonly severity?: string;
-  readonly category?: string;
-  readonly blocking?: boolean;
+  readonly severity: string;
+  readonly category: string;
+  readonly blocking: boolean;
   readonly change?: AcceptedFindingChange;
   readonly header: readonly RootContent[];
   readonly fields: readonly Field[];
@@ -83,7 +83,7 @@ export function reportBlocks(
   changes: ReadonlyMap<string, AcceptedFindingChange> | null | undefined,
   body?: { readonly previousThreads: boolean },
 ): readonly ReportBlock[] {
-  const groups = groupReportItems(reportStructure(tree.children, source, body), (node) => {
+  const groups = groupReportItems(reportStructure(tree.children, source, changes, body), (node) => {
     const level =
       node.type === "element" && /^h[1-3]$/.test(node.tagName)
         ? Number(node.tagName[1])
@@ -208,24 +208,28 @@ function authoredFinding(
   const name = text(heading).trim();
   const match = findingHeading.exec(name);
   const id = match?.[1];
-  if (!id || !match) return;
-  const change = changes?.get(id);
   const card = cardMetadata(rest[0]);
+  if (!id || !match || !card) return;
+  const change = changes?.get(id);
   const lead = [...stripPrefix(heading, match[0].length, source)];
   const fields: { label: string; nodes: RootContent[] }[] = [];
   let rank = -1;
-  for (const node of card ? rest.slice(1) : rest) {
-    const first = node.type === "element" && node.tagName === "p" ? node.children[0] : undefined;
+  for (const node of rest.slice(1)) {
+    const paragraph = node.type === "element" && node.tagName === "p" ? node : undefined;
+    const first = paragraph?.children[0];
     const label =
       first?.type === "element" && first.tagName === "strong"
         ? /^(.+):$/.exec(text(first))?.[1]
         : undefined;
     const order = label === undefined ? undefined : fieldOrder.get(label);
-    if (label && order !== undefined && order > rank && node.type === "element") {
+    if (paragraph && label && order !== undefined && order > rank) {
       rank = order;
       fields.push({
         label,
-        nodes: node.children.length > 1 ? [{ ...node, children: node.children.slice(1) }] : [],
+        nodes:
+          paragraph.children.length > 1
+            ? [{ ...paragraph, children: paragraph.children.slice(1) }]
+            : [],
       });
     } else {
       (fields.at(-1)?.nodes ?? lead).push(node);
@@ -235,7 +239,7 @@ function authoredFinding(
   return {
     id,
     ...(change ? { change } : {}),
-    ...(card ? { severity: card[1], category: card[2], blocking: card[3] === "Blocking" } : {}),
+    ...card,
     header: annotate(lead),
     fields: fields.map(({ label, nodes }) => ({ label, nodes: annotate(nodes) })),
   };
@@ -244,9 +248,11 @@ function authoredFinding(
 function cardMetadata(node: RootContent | undefined) {
   if (node?.type !== "element" || node.tagName !== "p" || node.children.length !== 1) return;
   const [only] = node.children;
-  return only?.type === "element" && only.tagName === "strong"
-    ? cardLine.exec(text(only))
-    : undefined;
+  const match =
+    only?.type === "element" && only.tagName === "strong" ? cardLine.exec(text(only)) : null;
+  if (!match) return;
+  const [, severity = "", category = "", blocking] = match;
+  return { severity, category, blocking: blocking === "Blocking" };
 }
 
 // Drops the `F-01 · ` prefix from the heading's first text node, which ends there when the

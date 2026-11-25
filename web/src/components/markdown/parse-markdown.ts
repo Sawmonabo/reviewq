@@ -17,11 +17,12 @@ type MarkdownNode = {
 export type PreparedMarkdown = { readonly tree: Root; readonly nodes: number };
 export type MarkdownOptions = {
   // Shows HTML-looking text as written, such as `Vec<u8>` or `<runner>`, instead of
-  // reading it as markup. A lone `<br>` stays a line break. Report text uses it.
+  // reading it as markup. Each `<br>` stays a line break. Report text uses it.
   readonly literalHtml?: boolean;
 };
 type SyntaxTree = ReturnType<typeof syntax.parse>;
 type SyntaxNode = SyntaxTree | SyntaxTree["children"][number];
+type SyntaxPosition = NonNullable<SyntaxTree["position"]>;
 
 const MAX_DEPTH = 128;
 export const MAX_MARKDOWN_NODES = 60_000;
@@ -29,7 +30,7 @@ const MARKDOWN_SYNTAX = /[*_`~[<>&\\|#]|^(?:[ \t]*[+-]|\d+[.)])[ \t]/m;
 const blockNodes = new Set(["root", "list", "listItem", "blockquote", "table"]);
 // Parents whose children are blocks, so literal HTML there becomes its own paragraph.
 const flowParents = new Set(["root", "blockquote", "listItem", "footnoteDefinition"]);
-const lineBreak = /^<br ?\/?>$/;
+const lineBreak = /<br ?\/?>/g;
 const sanitizeSchema = {
   ...defaultSchema,
   tagNames: [...(defaultSchema.tagNames ?? []), "details", "summary"],
@@ -58,7 +59,7 @@ export function prepareMarkdown(
 ): PreparedMarkdown | undefined {
   if (!admitMarkdown(source)) return;
   const processor = options?.literalHtml ? literal : rich;
-  const tree = processor.runSync(processor.parse(source));
+  const tree = processor.runSync(processor.parse(source), source);
   const pending: { node: Root | RootContent; depth: number }[] = [{ node: tree, depth: 0 }];
   let count = 0;
   while (pending.length) {
@@ -131,29 +132,65 @@ function textContent(node: MarkdownNode, depth: number, budget: { remaining: num
   }
 }
 
-// Turns each HTML node into text with the same value before it reaches HTML, and a lone
-// `<br>` into a line break.
+// Turns each HTML node into text with the same value before it reaches HTML, with each
+// `<br>`, `<br/>` or `<br />` in it as a line break.
 function literalHtml() {
-  return (tree: SyntaxTree) => {
+  return (tree: SyntaxTree, file: { readonly value: unknown }) => {
+    const source = String(file.value);
     const pending: SyntaxNode[] = [tree];
     for (let node = pending.pop(); node; node = pending.pop()) {
       if (!("children" in node)) continue;
       const flow = flowParents.has(node.type);
-      // Each replacement is valid where the HTML node stood: text in phrasing, a paragraph in flow.
-      const children: unknown[] = node.children;
-      for (const [index, child] of node.children.entries()) {
+      // Each replacement is valid where the HTML node stood: phrasing, or a paragraph in flow.
+      const replaced: unknown[] = [];
+      for (const child of node.children) {
         if (child.type !== "html") {
           pending.push(child);
+          replaced.push(child);
           continue;
         }
-        const inline = lineBreak.test(child.value)
-          ? { type: "break", position: child.position }
-          : { type: "text", value: child.value, position: child.position };
-        children[index] = flow
-          ? { type: "paragraph", children: [inline], position: child.position }
-          : inline;
+        const inline = literalPieces(child.value, child.position, source);
+        if (flow) replaced.push({ type: "paragraph", children: inline, position: child.position });
+        else replaced.push(...inline);
       }
+      const children: unknown[] = node.children;
+      children.splice(0, children.length, ...replaced);
     }
+  };
+}
+
+// Text and line breaks for one HTML node. Pieces carry their own source positions when the
+// node's value is its exact source text.
+function literalPieces(value: string, position: SyntaxPosition | undefined, source: string) {
+  const breaks = [...value.matchAll(lineBreak)];
+  if (!breaks.length) return [{ type: "text", value, position }];
+  const start = position?.start.offset;
+  const exact =
+    position && start !== undefined && source.slice(start, position.end.offset) === value
+      ? position
+      : undefined;
+  const span = (from: number, to: number) =>
+    exact && { position: { start: pointAt(exact, value, from), end: pointAt(exact, value, to) } };
+  const pieces: unknown[] = [];
+  let at = 0;
+  for (const found of breaks) {
+    if (found.index > at)
+      pieces.push({ type: "text", value: value.slice(at, found.index), ...span(at, found.index) });
+    at = found.index + found[0].length;
+    pieces.push({ type: "break", ...span(found.index, at) });
+  }
+  if (at < value.length)
+    pieces.push({ type: "text", value: value.slice(at), ...span(at, value.length) });
+  return pieces;
+}
+
+function pointAt(position: SyntaxPosition, value: string, at: number) {
+  const before = value.slice(0, at);
+  const lastLine = before.lastIndexOf("\n");
+  return {
+    line: position.start.line + before.split("\n").length - 1,
+    column: lastLine < 0 ? position.start.column + at : at - lastLine,
+    offset: (position.start.offset ?? 0) + at,
   };
 }
 

@@ -335,8 +335,8 @@ function planGroups(layout: DisplayLayout, base: string | undefined) {
   const bodyStart = spans.findIndex(
     (span) => span.kind === "table" || labels.get(span.byteStart)?.section,
   );
-  // Cover transformations can combine or hide authored paragraphs and add a
-  // verdict/count. Keep the complete cover inside its first presentation group.
+  // Cover transformations hide the cover lines and join the verdict to its rationale.
+  // Keep the complete cover inside its first presentation group.
   if (bodyStart < 1 || bodyStart > 18 || spans[bodyStart]?.kind === "table")
     throw new Error("The report cover needs its full document.");
   const pieces = groupReportItems(spans, (span) => {

@@ -11,12 +11,6 @@ export const outcomeLabels: Readonly<Record<FindingConclusion, string>> = {
   still_present: "Still present",
   unverified: "Unverified",
 };
-const retiringOutcomes = new Set([
-  outcomeLabels.fixed,
-  outcomeLabels.clarified_withdrawn,
-  outcomeLabels.superseded,
-]);
-const outcomeNames = new Set(Object.values(outcomeLabels));
 // The composed verdict line, which is left out for an unspecified verdict.
 const verdictLines: ReadonlyMap<string, Verdict> = new Map([
   ["APPROVE", "approve"],
@@ -24,16 +18,16 @@ const verdictLines: ReadonlyMap<string, Verdict> = new Map([
   ["BLOCKED", "blocked"],
 ]);
 const threadSection = "Our previous threads";
-const threadColumns = ["Finding", "Outcome and verification", "Thread or evidence"];
-const countLabel =
-  "(?:P[0-3](?: findings?)?|(?:nonblocking|blocking)(?: findings?)?|(?:functional|quality|scale)(?: findings?)?)";
-const countToken = new RegExp(`(?:\\d+\\s+${countLabel}|${countLabel}\\s*:\\s*\\d+)`, "gi");
+// The composed counts line and its six counts.
+const countsLine = /^P0: \d+ · P1: \d+ · P2: \d+ · P3: \d+ · Blocking: \d+ · Nonblocking: \d+$/;
+const countToken = /(?:P[0-3]|Blocking|Nonblocking): (\d+)/g;
 // The four cover lines of a composed version, which the formatted view leaves out.
 const coverLabels = new Set(["Scope:", "Reviewed source:", "Reviewed target:", "Checked at:"]);
 
 export function reportStructure(
   nodes: readonly RootContent[],
   source: string,
+  changes: ReadonlyMap<string, AcceptedFindingChange> | null | undefined,
   body?: { readonly previousThreads: boolean },
 ): readonly RootContent[] {
   const article = nodes.filter((node) => node.type !== "text" || node.value.trim());
@@ -79,7 +73,7 @@ export function reportStructure(
       }
     }
     if (node.tagName === "h2") previousThreads = isThreadSection(reportText(node).trim());
-    output.push(node.tagName === "table" ? reportTable(node, previousThreads) : node);
+    output.push(node.tagName === "table" ? reportTable(node, previousThreads, changes) : node);
   }
   return output;
 }
@@ -127,17 +121,11 @@ function isCoverLine(node: Element) {
 }
 
 function isCounts(text: string) {
-  return (
-    [...text.matchAll(countToken)].length > 0 && /^[\s·•,|/]*$/.test(text.replace(countToken, ""))
-  );
+  return countsLine.test(text);
 }
 
 function authoredCounts(node: Element, source: string) {
-  const child = node.children[0];
-  const first =
-    child?.type === "element" && child.tagName === "strong" && child.children.length === 1
-      ? child.children[0]
-      : child;
+  const first = node.children[0];
   const begin = first?.position?.start.offset;
   const end = first?.position?.end.offset;
   if (
@@ -154,61 +142,63 @@ function authoredCounts(node: Element, source: string) {
     const start = entry.index;
     if (start > offset)
       children.push(element("span", "report-count-separator", [textRange(first, offset, start)]));
-    const label = entry[0];
-    const digits = /^\d+/.exec(label) ?? /\d+$/.exec(label);
-    if (!digits) continue;
-    const numberStart = start + digits.index;
-    const numberEnd = numberStart + digits[0].length;
+    const [label, digits = ""] = entry;
     offset = start + label.length;
-    const parts: ElementContent[] = [];
-    if (numberStart > start) parts.push(textRange(first, start, numberStart));
-    parts.push(
-      element("strong", "report-count-amount", [textRange(first, numberStart, numberEnd)]),
-    );
-    if (numberEnd < offset) parts.push(textRange(first, numberEnd, offset));
+    const numberStart = offset - digits.length;
     children.push({
-      ...element("span", "report-count", parts),
+      ...element("span", "report-count", [
+        textRange(first, start, numberStart),
+        element("strong", "report-count-amount", [textRange(first, numberStart, offset)]),
+      ]),
       properties: {
         className: ["report-count"],
         dataReportCount: countTone(label),
-        dataReportCountValue: Number(digits[0]),
+        dataReportCountValue: Number(digits),
       },
     });
   }
-  if (offset < first.value.length) children.push(textRange(first, offset, first.value.length));
   return { ...styled(node, "report-counts"), children };
 }
 
 function countTone(label: string) {
-  return /\bnonblocking\b/i.test(label)
+  return label.startsWith("Nonblocking")
     ? "nonblocking"
-    : /\bblocking\b/i.test(label)
+    : label.startsWith("Blocking")
       ? "blocking"
-      : (/\bP[0-3]\b/i.exec(label)?.[0].toLowerCase() ?? "neutral");
+      : label.slice(0, 2).toLowerCase();
 }
 
-function reportTable(node: Element, previousThreads: boolean): Element {
+function reportTable(
+  node: Element,
+  previousThreads: boolean,
+  changes: ReadonlyMap<string, AcceptedFindingChange> | null | undefined,
+): Element {
   const head = node.children.find((child) => child.type === "element" && child.tagName === "thead");
   const rows =
     head?.type === "element" ? head.children.filter((child) => child.type === "element") : [];
   const cells = rows[0]?.children.filter((child) => child.type === "element");
-  const headings = cells?.map((cell) => reportText(cell).trim());
+  const headings = cells?.map((cell) => reportText(cell).trim().toLowerCase());
   if (
     rows.length === 1 &&
     headings?.length === 2 &&
-    headings[0]?.toLowerCase() === "before" &&
-    headings[1]?.toLowerCase() === "after" &&
+    headings[0] === "before" &&
+    headings[1] === "after" &&
     twoColumnBody(node)
   )
     return styled(node, "report-before-after");
   if (!previousThreads) return node;
+  const statusColumns = headings?.flatMap((label, index) =>
+    /^(?:status|assessment|conclusion|outcome(?: and verification)?|gitlab)$/.test(label)
+      ? [index]
+      : [],
+  );
+  const findingColumn = headings?.findIndex((label) => /^(?:finding|id)$/.test(label)) ?? -1;
+  const outcomeColumn =
+    headings?.findIndex((label) =>
+      /^(?:assessment|conclusion|outcome(?: and verification)?)$/.test(label),
+    ) ?? -1;
   const table = styled(node, "report-previous-threads");
-  if (
-    rows.length !== 1 ||
-    headings?.length !== threadColumns.length ||
-    headings.some((label, index) => label !== threadColumns[index])
-  )
-    return table;
+  if (!statusColumns?.length && findingColumn < 0) return table;
   return {
     ...table,
     children: table.children.map((body) =>
@@ -217,7 +207,16 @@ function reportTable(node: Element, previousThreads: boolean): Element {
             ...body,
             children: body.children.map((row) =>
               row.type === "element" && row.tagName === "tr"
-                ? { ...row, children: toneOutcome(row.children) }
+                ? {
+                    ...row,
+                    children: styleStatuses(
+                      row.children,
+                      statusColumns ?? [],
+                      findingColumn,
+                      outcomeColumn,
+                      changes,
+                    ),
+                  }
                 : row,
             ),
           }
@@ -250,24 +249,55 @@ function twoColumnBody(table: Element) {
   );
 }
 
-// The outcome cell begins with the outcome in bold, such as `**Fixed.**`. Colour it as
-// retiring or still needing attention.
-function toneOutcome(cells: ElementContent[]) {
-  const outcome = cells.filter((cell) => cell.type === "element" && cell.tagName === "td")[1];
-  const lead = outcome?.type === "element" ? outcome.children[0] : undefined;
-  if (outcome?.type !== "element" || lead?.type !== "element" || lead.tagName !== "strong")
-    return cells;
-  const name = reportText(lead).trim().replace(/\.$/, "");
-  if (!outcomeNames.has(name)) return cells;
-  const toned: Element = {
-    ...lead,
-    properties: {
-      ...lead.properties,
-      dataReportThreadStatus: retiringOutcomes.has(name) ? "confirmed" : "attention",
-    },
-  };
-  return cells.map((cell) =>
-    cell === outcome ? { ...outcome, children: [toned, ...outcome.children.slice(1)] } : cell,
+function styleStatuses(
+  cells: ElementContent[],
+  columns: number[],
+  findingColumn: number,
+  outcomeColumn: number,
+  changes: ReadonlyMap<string, AcceptedFindingChange> | null | undefined,
+) {
+  const identity = cells.filter((cell) => cell.type === "element" && cell.tagName === "td")[
+    findingColumn
+  ];
+  const id = identity && /^(F-\d+)\b/.exec(reportText(identity).trim())?.[1];
+  const accepted = id ? changes?.get(id) : undefined;
+  let column = 0;
+  return cells.map((cell) => {
+    if (cell.type !== "element" || cell.tagName !== "td") return cell;
+    const index = column++;
+    const label = reportText(cell).trim();
+    if (accepted && index === (outcomeColumn >= 0 ? outcomeColumn : findingColumn)) {
+      const badge = {
+        ...element("span", "report-thread-outcome", [literal(outcomeLabels[accepted.conclusion])]),
+        properties: {
+          className: ["report-thread-outcome"],
+          title: accepted.reason,
+          dataReportThreadStatus: isRetired(accepted) ? "confirmed" : "attention",
+        },
+      };
+      return {
+        ...cell,
+        children: outcomeColumn >= 0 ? [badge, ...cell.children] : [...cell.children, badge],
+      };
+    }
+    if (!columns.includes(index)) return cell;
+    const tone =
+      /^(?:fixed(?: in code)?|resolved(?: in GitLab)?|clarified(?: and withdrawn)?|withdrawn|superseded)$/i.test(
+        label,
+      )
+        ? "confirmed"
+        : /^(?:still present|open|unresolved|partly addressed|unverified)$/i.test(label)
+          ? "attention"
+          : "neutral";
+    return { ...cell, properties: { ...cell.properties, dataReportThreadStatus: tone } };
+  });
+}
+
+function isRetired(change: AcceptedFindingChange) {
+  return (
+    change.conclusion === "fixed" ||
+    change.conclusion === "clarified_withdrawn" ||
+    change.conclusion === "superseded"
   );
 }
 

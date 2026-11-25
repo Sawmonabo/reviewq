@@ -28,7 +28,6 @@ type Selection = {
 export function RichReport({
   historyAccess,
   document: reader,
-  userBlocking,
   onFallback,
   report,
   bookmark,
@@ -37,7 +36,6 @@ export function RichReport({
 }: {
   readonly historyAccess: ReactNode;
   readonly document: ReaderDocument;
-  readonly userBlocking: ReadonlyMap<string, boolean> | undefined;
   readonly onFallback: () => void;
   readonly report: ReportSummary;
   readonly bookmark: string;
@@ -370,21 +368,18 @@ export function RichReport({
     const finding = block.finding;
     const change = finding?.change;
     const outcome = change ? outcomeLabels[change.conclusion] : undefined;
-    const blocking = finding && (userBlocking?.get(finding.id) ?? finding.blocking);
     const card = finding && (
       <article
         className="report-authored report-finding"
-        data-blocking={blocking}
+        data-blocking={finding.blocking}
         aria-label={finding.id}
       >
         <header className="report-finding-header">
           <div className="report-finding-kicker">
             <strong>{finding.id}</strong>
-            {finding.severity && (
-              <span className="report-finding-severity">{finding.severity}</span>
-            )}
-            {finding.category && <span>{finding.category}</span>}
-            {blocking !== undefined && <span>{blocking ? "Blocking" : "Nonblocking"}</span>}
+            <span className="report-finding-severity">{finding.severity}</span>
+            <span>{finding.category}</span>
+            <span>{finding.blocking ? "Blocking" : "Nonblocking"}</span>
             {outcome && (
               <span className="report-finding-assessment" title={change?.reason}>
                 {change?.checkedSha === report.reviewedSha ? "Updated · " : ""}
@@ -564,7 +559,7 @@ const AuthoredContent = memo(function AuthoredContent({
 
 // A group is known by its source offset.
 function blockKey(group: GroupPosition) {
-  return group.offset >= 0 ? `${group.offset}` : `group:${group.sourceOrder}`;
+  return `${group.offset}`;
 }
 
 function blockElement(root: HTMLElement, index: number) {
