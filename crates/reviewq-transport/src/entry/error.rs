@@ -5,7 +5,7 @@ use axum::http::StatusCode;
 use axum::http::request::Parts;
 use axum::response::{IntoResponse, Response};
 use reviewq_app::access::AppError;
-use reviewq_protocol::field_errors::FieldError;
+use reviewq_protocol::field_errors::{FieldError, bounded_field_errors};
 use reviewq_protocol::{ErrorCode, ErrorDto, Failure};
 use serde::de::DeserializeOwned;
 
@@ -64,12 +64,12 @@ impl<S: Send + Sync> FromRequest<S> for ApiBytes {
 impl From<AppError> for ApiError {
     fn from(error: AppError) -> Self {
         match error {
-            AppError::InvalidFields(errors) => Self::InvalidFields(
+            AppError::InvalidFields(errors) => Self::InvalidFields(bounded_field_errors(
                 errors
                     .into_iter()
                     .map(|error| FieldError::new(error.path, error.message))
                     .collect(),
-            ),
+            )),
             error => Self::Application(error),
         }
     }

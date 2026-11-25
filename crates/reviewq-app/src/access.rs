@@ -76,9 +76,6 @@ pub struct FieldError {
     pub message: String,
 }
 
-/// Field errors one refusal lists, which keeps a refusal within every client's reply cap.
-const MAX_FIELD_ERRORS: usize = 50;
-
 impl FieldError {
     pub fn new(path: impl Into<String>, message: impl Into<String>) -> Self {
         Self {
@@ -86,33 +83,14 @@ impl FieldError {
             message: message.into(),
         }
     }
-
-    /// Keeps the first `MAX_FIELD_ERRORS` errors and, when there are more, adds one root
-    /// error that counts the rest.
-    pub fn bounded(mut errors: Vec<Self>) -> Vec<Self> {
-        let hidden = errors.len().saturating_sub(MAX_FIELD_ERRORS);
-        if hidden > 0 {
-            errors.truncate(MAX_FIELD_ERRORS);
-            errors.push(Self::new("", hidden_errors(hidden)));
-        }
-        errors
-    }
-}
-
-/// Counts the errors a capped refusal leaves out.
-fn hidden_errors(hidden: usize) -> String {
-    if hidden == 1 {
-        "1 more error is not shown. Fix these and call again.".to_owned()
-    } else {
-        format!("{hidden} more errors are not shown. Fix these and call again.")
-    }
 }
 
 /// Safe application outcomes translated into protocol errors by transport.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum AppError {
     InvalidRequest,
-    /// Tool input fields the agent corrects in its open turn. Nothing was written.
+    /// Tool input fields the agent corrects in its open turn. Nothing was written. Return
+    /// every error found; the transport caps the list where it writes the reply.
     InvalidFields(Vec<FieldError>),
     TicketUnverified,
     Unauthorized,

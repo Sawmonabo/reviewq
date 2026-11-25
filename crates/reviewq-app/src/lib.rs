@@ -10,6 +10,7 @@ pub mod history;
 pub mod hosts;
 mod labels;
 pub mod launch;
+pub mod ledger;
 pub mod notifications;
 pub mod queue;
 pub mod reading;
