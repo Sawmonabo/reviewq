@@ -8,7 +8,7 @@ use reviewq_app::events::Snapshot;
 use reviewq_app::reports::{
     DISPLAY_INDEX_FORMAT, DisplayBlock, DisplayFallback, DisplayIndex, DisplayLayout,
     DisplayWindow, DisplayWindowBlock, DisplayWindowPosition, DisplayWindowState,
-    MAX_DISPLAY_BLOCKS, MAX_DISPLAY_HEADINGS_BYTES, ReportReference, build_display_index,
+    MAX_DISPLAY_BLOCKS, MAX_DISPLAY_HEADINGS_BYTES, ReportReference, build_report_display_index,
 };
 use reviewq_domain::identity::{ReportHash, RunId};
 use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
@@ -59,7 +59,6 @@ struct BuildState {
 
 #[derive(Clone, Copy)]
 enum Lane {
-    #[expect(dead_code, reason = "K2 indexes a version after its publish commits")]
     Publish,
     Cold,
 }
@@ -169,7 +168,6 @@ impl SqliteStore {
         .await
     }
 
-    #[expect(dead_code, reason = "K2 indexes a version after its publish commits")]
     pub(super) async fn build_published_index(
         &self,
         profile: Arc<Profile>,
@@ -314,7 +312,7 @@ fn build_and_publish(
         if ReportHash::from_sha256(Sha256::digest(source.as_bytes()).into()) != key.hash {
             return Err(AppError::PreconditionFailed.into());
         }
-        std::panic::catch_unwind(|| build_display_index(&source))
+        std::panic::catch_unwind(|| build_report_display_index(&source))
             .unwrap_or(DisplayIndex::Fallback(DisplayFallback::ParserFailed))
     } else {
         DisplayIndex::Fallback(DisplayFallback::DocumentBudget)

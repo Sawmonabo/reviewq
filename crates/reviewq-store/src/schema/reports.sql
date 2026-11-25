@@ -38,6 +38,7 @@ CREATE TABLE report_versions (
     finding_count INTEGER NOT NULL CHECK (finding_count >= 0),
     change_count INTEGER NOT NULL CHECK (change_count >= 0),
     published_at_ms INTEGER NOT NULL,
+    checked_at_ms INTEGER NOT NULL,
     starting_disposition_version INTEGER NOT NULL CHECK (starting_disposition_version >= 0),
     closing_disposition_version INTEGER CHECK (closing_disposition_version >= starting_disposition_version),
     CHECK ((reviewed_sha IS NULL) <> (revision_reason IS NULL)),
@@ -81,7 +82,8 @@ CREATE TABLE report_sections (
     receipt_id TEXT NOT NULL,
     scalar_offset INTEGER NOT NULL CHECK (scalar_offset >= 0),
     scalar_length INTEGER NOT NULL CHECK (scalar_length > 0),
-    title TEXT NOT NULL CHECK (length(CAST(title AS BLOB)) BETWEEN 1 AND 384),
+    -- A section heading or an extra note's title: at most 120 characters of up to 4 bytes.
+    title TEXT NOT NULL CHECK (length(CAST(title AS BLOB)) BETWEEN 1 AND 480),
     evidence_sha256 TEXT NOT NULL CHECK (length(evidence_sha256) = 64),
     PRIMARY KEY (run_id, receipt_id, scalar_offset),
     FOREIGN KEY (run_id, receipt_id) REFERENCES report_versions(run_id, receipt_id)

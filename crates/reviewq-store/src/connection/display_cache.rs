@@ -69,7 +69,6 @@ CREATE TABLE display_spans (
 impl SqliteStore {
     /// Builds the display index of a sealed published version, from `source` when the caller
     /// still holds the text. `NotFound` unless the version and its sealed artifact match.
-    #[expect(dead_code, reason = "K2 indexes a version after its publish commits")]
     pub(crate) async fn cache_report_display(
         &self,
         run: RunId,

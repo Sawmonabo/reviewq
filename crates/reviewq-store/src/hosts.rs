@@ -279,12 +279,7 @@ pub(crate) fn register(
         }
         if let Some(activity) = input.activity {
             let (phase, questions) = activity_columns(Some(activity));
-            let changed = tx.sql.execute(
-                "UPDATE sessions SET host_activity=?2,host_questions=?3
-                 WHERE session_key=?1 AND (host_activity,host_questions) IS DISTINCT FROM (?2,?3)",
-                params![target.session_key().as_str(), phase, questions],
-            )?;
-            if changed != 0 {
+            if record_activity(&tx.sql, target.session_key().as_str(), phase, questions)? {
                 advance_queue(&tx.sql)?;
                 tx.emit(&[
                     ResourceKey::Queue,
@@ -389,6 +384,46 @@ fn allow_target(
         return Err(AppError::NotFound.into());
     }
     Ok(())
+}
+
+/// Stores a session's observed activity and returns whether it changed. When the session is
+/// its run's lead and starts working from anything but working or blocked, the run's open pass
+/// records that its lead started a turn and a held pass reopens; blocked to working is the same
+/// turn continuing.
+pub(crate) fn record_activity(
+    db: &Connection,
+    session: &str,
+    phase: Option<&str>,
+    questions: bool,
+) -> Result<bool, StoreError> {
+    let before = db
+        .prepare_cached(
+            "SELECT s.run_id, s.host_activity, r.lead_session_key IS s.session_key
+             FROM sessions s LEFT JOIN runs r ON r.run_id=s.run_id
+             WHERE s.session_key=?1 AND (s.host_activity,s.host_questions) IS DISTINCT FROM (?2,?3)",
+        )?
+        .query_row(params![session, phase, questions], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, Option<String>>(1)?,
+                row.get::<_, bool>(2)?,
+            ))
+        })
+        .optional()?;
+    let Some((run, previous, lead)) = before else {
+        return Ok(false);
+    };
+    db.prepare_cached(
+        "UPDATE sessions SET host_activity=?2,host_questions=?3 WHERE session_key=?1",
+    )?
+    .execute(params![session, phase, questions])?;
+    if lead
+        && phase == Some("working")
+        && !matches!(previous.as_deref(), Some("working" | "blocked"))
+    {
+        crate::ledger::passes::lead_started(db, &run, now_ms()?)?;
+    }
+    Ok(true)
 }
 
 pub(crate) fn activity_columns(activity: Option<HostActivity>) -> (Option<&'static str>, bool) {

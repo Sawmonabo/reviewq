@@ -1,6 +1,6 @@
 //! Scoped reads over accepted report versions and their immutable bytes.
 
-mod artifact;
+pub(crate) mod artifact;
 pub(crate) mod authority;
 mod context;
 pub(crate) mod failures;
@@ -15,7 +15,8 @@ use reviewq_app::reports::{
     MAX_SECTION_SCALARS, QuoteResolution, ReportContext, ReportDelivery, ReportHistory,
     ReportPosition, ReportReference, ReportSection, ReportStore, ReportSummary, ReportView,
 };
-use reviewq_domain::identity::{ReceiptId, RunId};
+use reviewq_domain::identity::{ReceiptId, Revision, RunId};
+use reviewq_domain::ledger::VersionKind;
 use rusqlite::{Connection, OptionalExtension, Row, params};
 
 use crate::events::snapshot;
@@ -26,6 +27,11 @@ use crate::{SqliteStore, StoreError};
 pub(crate) struct Version {
     pub(crate) summary: ReportSummary,
     pub(crate) artifact_id: String,
+    pub(crate) kind: VersionKind,
+    /// The ledger sequence the version published.
+    pub(crate) ledger_sequence: Revision,
+    /// The cover's `Checked at` time, in Unix milliseconds.
+    pub(crate) checked_at_ms: i64,
 }
 
 struct SectionSource<'a> {
@@ -39,7 +45,7 @@ const VERSION_SELECT: &str = "
         v.reviewed_sha, v.revision_reason, v.full_mr_reviewed_sha, v.coverage, v.verdict,
         v.finding_count, v.change_count, v.published_at_ms, v.artifact_id,
         a.byte_length, a.total_code_points, a.line_count, a.max_line_bytes,
-        v.coverage_source_sha, v.coverage_target_sha
+        v.coverage_source_sha, v.coverage_target_sha, v.kind, v.ledger_sequence, v.checked_at_ms
     FROM report_versions v JOIN artifacts a USING(artifact_id)
     WHERE v.run_id=?1 AND a.sealed=1";
 
@@ -336,8 +342,8 @@ fn read_delivery(
     let mut statement = connection.prepare_cached(
         "WITH failure AS (
             SELECT NULL AS receipt_id, 'failed' AS delivery, reason, 0 AS priority
-            FROM report_delivery_failures WHERE run_id=?1 AND resolved_by_receipt_id IS NULL
-            ORDER BY occurred_at_ms DESC, notification_id DESC LIMIT 1
+            FROM report_delivery_failures WHERE run_id=?1 AND resolved_at_ms IS NULL
+            ORDER BY occurred_at_ms DESC, failure_id DESC LIMIT 1
          ), head AS (
             SELECT receipt_id, 'saved' AS delivery, NULL AS reason, 1 AS priority
             FROM report_heads WHERE run_id=?1
@@ -386,6 +392,10 @@ pub(crate) fn version(
 fn decode_version(row: &Row<'_>) -> Result<Version, StoreError> {
     Ok(Version {
         artifact_id: row.get(12)?,
+        kind: VersionKind::from_label(text(row, 19)?).ok_or(AppError::Internal)?,
+        ledger_sequence: Revision::try_from(row.get::<_, i64>(20)?)
+            .map_err(|_| AppError::Internal)?,
+        checked_at_ms: row.get(21)?,
         summary: ReportSummary {
             reference: ReportReference {
                 receipt_id: parse(text(row, 0)?)?,

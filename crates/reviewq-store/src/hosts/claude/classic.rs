@@ -49,10 +49,7 @@ pub(super) fn record(
                 params![key, active],
             )?;
             if changed != 0 {
-                db.execute(
-                    "UPDATE sessions SET host_activity='blocked',host_questions=1 WHERE session_key=?1",
-                    [key],
-                )?;
+                crate::hosts::record_activity(db, key, Some("blocked"), true)?;
                 let occurrence = reviewq_app::notifications::NativeOccurrence {
                     kind: reviewq_app::notifications::Kind::AgentPermission,
                     native_ref: active,

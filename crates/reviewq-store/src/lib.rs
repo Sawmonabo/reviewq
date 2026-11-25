@@ -9,6 +9,7 @@ mod followups;
 mod history;
 mod hosts;
 mod launches;
+mod ledger;
 mod notifications;
 mod queue;
 mod refresh;

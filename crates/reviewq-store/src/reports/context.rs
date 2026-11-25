@@ -8,6 +8,7 @@ use rusqlite::{Connection, Row, params};
 
 use super::{current_receipt, optional, read_count, version};
 use crate::StoreError;
+use crate::ledger::details_at;
 use crate::queue::{parse, text};
 
 pub(super) fn read(
@@ -87,7 +88,24 @@ pub(super) fn read(
             });
             break;
         }
-        items.push(decode(collection, row)?);
+        let mut item = decode(collection, row)?;
+        if let Descriptor::Finding {
+            id,
+            record_revision,
+            details,
+            ..
+        } = &mut item
+            && let Ok(finding) = id.parse()
+        {
+            *details = details_at(
+                connection,
+                run.as_str(),
+                finding,
+                record_revision.as_sqlite_integer(),
+            )?
+            .map(Box::new);
+        }
+        items.push(item);
     }
     Ok(ReportContext {
         report: Some(report),
@@ -141,8 +159,8 @@ fn query(collection: Collection) -> &'static str {
     }
 }
 
-/// Decodes one row of `query(collection)`. A finding's details stay `None` until K2 reads
-/// them from the record revision in `ledger_changes`.
+/// Decodes one row of `query(collection)`. A finding's details are read from its record
+/// revision in `ledger_changes` afterwards.
 fn decode(collection: Collection, row: &Row<'_>) -> Result<Descriptor, StoreError> {
     let range = |column: usize| -> Result<SourceRange, StoreError> {
         Ok(SourceRange {

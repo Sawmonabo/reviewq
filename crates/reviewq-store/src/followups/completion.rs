@@ -16,10 +16,6 @@ use crate::StoreError;
 use crate::connection::WriteTx;
 
 /// The private manifest frozen when the batch started.
-#[expect(
-    dead_code,
-    reason = "K2 reads the frozen batch for the publish snapshot"
-)]
 pub(crate) fn frozen(db: &Connection, batch: &str) -> Result<FrozenManifest, StoreError> {
     let source: String = db.query_row(
         "SELECT private_manifest FROM followup_batches WHERE batch_id=?1",
@@ -45,7 +41,6 @@ fn tracked(manifest: &FrozenManifest) -> BTreeMap<&str, BTreeSet<&str>> {
 }
 
 /// One assessment per batch discussion, each covering the finding IDs its discussion tracks.
-#[expect(dead_code, reason = "K2 checks the closing call's assessments")]
 pub(crate) fn assessment_errors(
     manifest: &FrozenManifest,
     declared: &[Assessment],
@@ -102,7 +97,6 @@ pub(crate) fn assessment_errors(
 /// Records the batch's result and assessments, moves it from executing to completed and
 /// reconciles the earlier observations it covers. `Conflict` when the batch is no longer
 /// executing; nothing is written then.
-#[expect(dead_code, reason = "K2 completes the batch inside the publish commit")]
 pub(crate) fn complete(
     tx: &mut WriteTx<'_>,
     lead: &LeadTarget,
@@ -150,7 +144,6 @@ pub(crate) fn complete(
 /// linked discussion's assessment covers the finding. An outcome without links is linked to
 /// every batch discussion that tracks its finding. Each assessment must also agree with the
 /// findings this version retires; see [`conclusion_errors`].
-#[expect(dead_code, reason = "K2 checks the outcomes against the assessments")]
 pub(crate) fn edit_errors(
     db: &Connection,
     run: &str,
@@ -169,7 +162,7 @@ pub(crate) fn edit_errors(
     )?;
     let mut errors = Vec::new();
     let mut findings = BTreeSet::new();
-    for (index, edit) in edits.findings.iter().enumerate() {
+    for edit in &edits.findings {
         let finding = edit.finding_id.as_str();
         let known: bool = existing
             .query_row(params![run, manifest.report_receipt_id, finding], |row| {
@@ -184,9 +177,13 @@ pub(crate) fn edit_errors(
                     && assessment.finding_ids.iter().any(|id| id == finding)
             });
             let message = if !tracked.contains_key(discussion) {
-                format!("{discussion} is not a discussion of the selected-thread batch.")
+                format!(
+                    "The outcome of {finding} links {discussion}, which is not a discussion of the selected-thread batch. Assess {finding} again without it."
+                )
             } else if known && !tracks(discussion, finding) {
-                format!("Discussion {discussion} does not track {finding}.")
+                format!(
+                    "The outcome of {finding} links discussion {discussion}, which does not track {finding}. Assess {finding} again without it."
+                )
             } else if !covered {
                 format!(
                     "The assessment of discussion {discussion} must list {finding} in findingIds."
@@ -194,10 +191,7 @@ pub(crate) fn edit_errors(
             } else {
                 continue;
             };
-            errors.push(FieldError::new(
-                format!("/findingChanges/{index}/discussionIds"),
-                message,
-            ));
+            errors.push(FieldError::new("/assessments", message));
         }
     }
     errors.extend(conclusion_errors(&tracked, edits, &findings, assessments));

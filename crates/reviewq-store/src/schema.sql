@@ -128,6 +128,7 @@ CREATE TABLE sessions (
 
 CREATE UNIQUE INDEX sessions_one_lead ON sessions(run_id) WHERE parent_session_key IS NULL;
 CREATE INDEX sessions_parent_scope ON sessions(run_id, parent_session_key, session_key);
+CREATE INDEX sessions_native ON sessions(native_id, provider);
 
 CREATE TABLE mutation_receipts (
     actor_key BLOB NOT NULL CHECK (length(actor_key) = 32),

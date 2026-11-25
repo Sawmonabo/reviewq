@@ -45,6 +45,8 @@ const SCHEMA: &str = concat!(
     "\n",
     include_str!("../schema/claude.sql"),
     "\n",
+    include_str!("../schema/ledger.sql"),
+    "\n",
     include_str!("../schema/projection_evidence.sql"),
     "\n",
     include_str!("../schema/queue.sql"),

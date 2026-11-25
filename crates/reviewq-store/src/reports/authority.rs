@@ -12,10 +12,6 @@ use crate::queue::{lead_for_run, parse};
 
 /// Hashes the configured project, its GitLab principal and its checkout, or `None` when the
 /// project is not configured. A changed hash means the report's authority changed.
-#[expect(
-    dead_code,
-    reason = "K2 binds a ledger caller to the project authority"
-)]
 pub(crate) fn for_project(
     db: &Connection,
     mr: &MrIdentity,
@@ -38,7 +34,6 @@ pub(crate) fn for_project(
 /// The lead whose native session `native_id` is registered in a checkout the actor's active
 /// grant covers. `Unauthorized` without a grant, `NotFound` or `Conflict` unless exactly one
 /// lead matches.
-#[expect(dead_code, reason = "K2 binds a Codex MCP caller to its lead")]
 pub(crate) fn checkout_lead(
     db: &Connection,
     actor: &Actor,
@@ -75,7 +70,9 @@ pub(crate) fn checkout_lead(
 pub(crate) fn run_lead(db: &Connection, session: &SessionKey) -> Result<LeadTarget, StoreError> {
     let run = db
         .query_row(
-            "SELECT run_id FROM runs WHERE lead_session_key=?1",
+            "SELECT r.run_id FROM sessions s
+             JOIN runs r ON r.run_id=s.run_id AND r.lead_session_key=s.session_key
+             WHERE s.session_key=?1",
             [session.as_str()],
             |row| row.get::<_, String>(0),
         )

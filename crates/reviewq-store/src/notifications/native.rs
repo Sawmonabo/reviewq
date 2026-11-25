@@ -103,11 +103,8 @@ fn record(
         return Err(AppError::StaleRevision.into());
     }
     let (phase, questions) = crate::hosts::activity_columns(observed.activity);
-    let changed = db.execute(
-        "UPDATE sessions SET host_activity=?2,host_questions=?3 WHERE session_key=?1
-           AND (host_activity,host_questions) IS DISTINCT FROM (?2,?3)",
-        params![target.session_key().as_str(), phase, questions],
-    )? != 0;
+    let changed =
+        crate::hosts::record_activity(db, target.session_key().as_str(), phase, questions)?;
     let metadata = crate::hosts::metadata::record(
         db,
         target.session_key().as_str(),

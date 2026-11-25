@@ -330,12 +330,7 @@ fn heartbeat(
         {
             attention.push(id);
         }
-        let changed = db.execute(
-            "UPDATE sessions SET host_activity=?2, host_questions=?3
-             WHERE session_key=?1 AND (host_activity,host_questions) IS DISTINCT FROM (?2,?3)",
-            params![key, phase, questions],
-        )?;
-        visible |= changed != 0;
+        visible |= crate::hosts::record_activity(db, key, phase, questions)?;
     }
     if visible {
         advance_queue(db)?;

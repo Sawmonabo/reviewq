@@ -235,6 +235,8 @@ pub(super) fn current(
                  (SELECT automatic FROM followup_preferences WHERE singleton=1),0)=1
                  OR b.manual_requested=1 AND m.state IN ('enabled','paused'))
                AND b.base_receipt_id IS h.receipt_id AND b.disposition_version=coalesce(h.disposition_version,0)
+               AND NOT EXISTS(SELECT 1 FROM review_passes p WHERE p.run_id=b.run_id
+                   AND p.kind='full_review' AND p.state<>'closed')
                AND {CODEX_CONTEXT_READY})"),
             params![batch,target.review_id().as_str(),target.run_id().as_str(),target.session_key().as_str(),
                 submission.as_str(),guard.head.as_str()],|row|row.get(0),
@@ -393,6 +395,13 @@ pub(super) fn advance(
             };
             if rejected && changed != 0 {
                 crate::followups::observations::retry_batch(
+                    &tx.sql,
+                    target.review_id(),
+                    batch,
+                    timestamp,
+                )?;
+            } else if changed != 0 {
+                crate::ledger::passes::open_for_batch(
                     &tx.sql,
                     target.review_id(),
                     batch,

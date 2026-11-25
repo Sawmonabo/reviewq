@@ -30,7 +30,9 @@ const ELIGIBLE: &str = "
                  AND q.state IN ('reserved','executing'))
   AND EXISTS(SELECT 1 FROM configured_projects p WHERE p.origin=r.origin AND p.project_id=r.project_id)
   AND NOT EXISTS(SELECT 1 FROM messages s WHERE s.run_id=b.run_id AND s.session_key=b.lead_session_key
-     AND s.actor_key IS NOT NULL AND s.state IN ('queued','dispatching','uncertain'))";
+     AND s.actor_key IS NOT NULL AND s.state IN ('queued','dispatching','uncertain'))
+  AND NOT EXISTS(SELECT 1 FROM review_passes p WHERE p.run_id=b.run_id AND p.kind='full_review'
+     AND p.state<>'closed')";
 
 // The lead's activity is proved by the provider. Cached working states only
 // hold work for verified children of this Codex run and profile.

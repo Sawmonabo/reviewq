@@ -7,21 +7,27 @@ CREATE TABLE review_reviewer_activity (
 ) STRICT, WITHOUT ROWID;
 
 CREATE TABLE report_delivery_failures (
-    notification_id TEXT PRIMARY KEY REFERENCES notifications(notification_id),
-    run_id TEXT NOT NULL,
-    lead_session_key TEXT NOT NULL,
-    native_turn_id TEXT NOT NULL,
-    native_call_id TEXT,
-    pass_id TEXT,
+    failure_id INTEGER PRIMARY KEY,
+    notification_id TEXT UNIQUE REFERENCES notifications(notification_id),
+    run_id TEXT NOT NULL REFERENCES runs(run_id),
+    pass_id INTEGER REFERENCES review_passes(pass_id),
     kind TEXT NOT NULL CHECK (kind IN ('unfinished_review', 'closing_refused', 'update_failed')),
+    native_turn_id TEXT CHECK (length(CAST(native_turn_id AS BLOB)) BETWEEN 1 AND 512),
     reason TEXT NOT NULL CHECK (length(CAST(reason AS BLOB)) BETWEEN 1 AND 2048),
+    ledger_sequence INTEGER NOT NULL CHECK (ledger_sequence >= 0),
     occurred_at_ms INTEGER NOT NULL,
+    updated_at_ms INTEGER NOT NULL CHECK (updated_at_ms >= occurred_at_ms),
+    resolved_at_ms INTEGER,
     resolved_by_receipt_id TEXT,
-    FOREIGN KEY (run_id, lead_session_key) REFERENCES runs(run_id, lead_session_key)
-) STRICT, WITHOUT ROWID;
+    FOREIGN KEY (run_id, resolved_by_receipt_id) REFERENCES report_versions(run_id, receipt_id),
+    CHECK (resolved_by_receipt_id IS NULL OR resolved_at_ms IS NOT NULL),
+    CHECK (notification_id IS NOT NULL OR resolved_at_ms IS NOT NULL)
+) STRICT;
 
-CREATE INDEX report_delivery_failure_pending ON report_delivery_failures(run_id, occurred_at_ms DESC, notification_id)
-    WHERE resolved_by_receipt_id IS NULL;
+CREATE UNIQUE INDEX report_delivery_failure_key
+    ON report_delivery_failures(run_id, coalesce(pass_id, 0), kind) WHERE resolved_at_ms IS NULL;
+CREATE INDEX report_delivery_failure_pending ON report_delivery_failures(run_id, occurred_at_ms DESC, failure_id DESC)
+    WHERE resolved_at_ms IS NULL;
 
 CREATE TABLE native_async_questions (
     run_id TEXT NOT NULL,

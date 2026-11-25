@@ -311,11 +311,13 @@ impl LaunchStore for SqliteStore {
                 // if its original MR head or settings changed after launch.
                 let settings = settings_revision(&tx.sql)?;
                 register_bound(tx, actor, &value.id, Bound { review: review.clone(), settings }, proof)?;
+                let time = now_ms()?;
                 tx.sql.execute(
                     "UPDATE launch_attempts SET state='confirmed',profile=?2,native_id=?3,native_job_id=?4,
                       updated_at_ms=max(updated_at_ms,?5) WHERE id=?1 AND state='uncertain'",
-                    params![value.id.as_str(), bytes(native.profile()), native.native_id().as_str(), job, now_ms()?],
+                    params![value.id.as_str(), bytes(native.profile()), native.native_id().as_str(), job, time],
                 )?;
+                crate::ledger::passes::open_for_launch(&tx.sql, value.id.as_str(), time)?;
                 tx.emit(&[ResourceKey::Review(Some(review))])?;
                 snapshot(&tx.sql, receipt_by_id(&tx.sql, &value.id)?)
             }).await.map_err(StoreError::app)
@@ -334,6 +336,7 @@ impl LaunchStore for SqliteStore {
                     NativeLaunchResult::Rejected => "rejected",
                     NativeLaunchResult::Uncertain => "uncertain",
                 };
+                let time = now_ms()?;
                 let changed = tx.sql.execute(
                     "UPDATE launch_attempts SET state=CASE ?2
                         WHEN 'confirmed' THEN CASE WHEN run_id IS NULL OR (provider='codex' AND native_turn_id IS NULL)
@@ -342,10 +345,11 @@ impl LaunchStore for SqliteStore {
                         ELSE 'uncertain' END,
                         updated_at_ms=max(updated_at_ms,?3)
                      WHERE id=?1 AND (state='pending' OR (state='uncertain' AND ?2='confirmed'))",
-                    params![id.to_string(), state, now_ms()?],
+                    params![id.to_string(), state, time],
                 )?;
                 let value = receipt_by_id(&tx.sql, &id)?;
                 if changed != 0 {
+                    crate::ledger::passes::open_for_launch(&tx.sql, id.as_str(), time)?;
                     tx.emit(&[ResourceKey::Review(Some(value.review.clone()))])?;
                 }
                 snapshot(&tx.sql, value)

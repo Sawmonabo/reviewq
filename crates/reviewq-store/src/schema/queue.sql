@@ -74,7 +74,7 @@ CREATE VIEW review_activity_evidence AS
          AND n.host_activity='failed') AS family_failed,
       action.state AS action_state, action.intent AS action_intent,
       CASE WHEN EXISTS (SELECT 1 FROM report_delivery_failures f WHERE f.run_id=x.run_id
-                        AND f.resolved_by_receipt_id IS NULL) THEN 'failed' END AS report_state,
+                        AND f.resolved_at_ms IS NULL) THEN 'failed' END AS report_state,
       coalesce((SELECT batch.state FROM followup_batches batch JOIN followup_monitors monitor USING(review_id)
          WHERE batch.review_id=r.review_id AND batch.generation=monitor.generation AND monitor.state='enabled'
            AND batch.authority_verified=1 AND batch.state IN ('pending','reserved','executing','reconciliation')
