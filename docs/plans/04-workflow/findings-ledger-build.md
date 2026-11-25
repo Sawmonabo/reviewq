@@ -74,8 +74,8 @@ Tasks use these names exactly. F1 and F2 give them their Rust types. Later tasks
 |---|---|
 | Tools | `record_finding`, `assess_finding`, `record_note`, `review_ledger`, `finish_review`, `needs_input` |
 | Routes under `/api/v1/native/ledger/` | `record-finding`, `assess-finding`, `record-note`, `list`, `finish`, `needs-input`, `gate`, `readback` |
-| Tool route body and replies | `{binding:{sessionKey,callId,turnId?,agentId?},input:{…}}`. Success is the tool's result. A refused input is the existing error reply of `entry/error.rs` with `fieldErrors:[{path,message}]`; no second error shape is added. The binding never travels inside `input`. |
-| Gate and read-back bodies | Gate: `{sessionKey,turnId?,stopHookActive}` returning `{block:false}` or `{block:true,reason}`. Read-back: `{sessionKey}` returning `{text}`. |
+| Tool route body and replies | Claude's bridge only: `{binding:{sessionKey,callId,turnId?,agentId?},input:{…}}`. Codex reaches the same operations through the MCP server, which builds the app's `HostSession::Codex` from the request metadata and its actor. Success is the tool's result. A refused input is the existing error reply of `entry/error.rs` with `fieldErrors:[{path,message}]`; no second error shape is added. The binding never travels inside `input`. |
+| Gate and read-back bodies | Codex hooks only. Gate: `{threadId,turnId?,stopHookActive}` returning `{block:false}` or `{block:true,reason}`. Read-back: `{threadId}` returning `{text}`. Claude's hook route returns the same two replies. |
 | Claude bridge action | `reviewq internal claude-bridge ledger <tool> <session>`, input JSON on stdin, one JSON reply on stdout |
 | Hook helpers | `reviewq internal claude-hook` (existing, now also answers `Stop` and `SessionStart`), `reviewq internal codex-hook` (new, replaces `codex-report-witness`) |
 | Hook replies | Stop block: `{"decision":"block","reason":"…"}` on stdout. Read-back: the text on stdout. Nothing on stdout means no effect. |
@@ -237,7 +237,7 @@ One writer. Work top-down so each step compiles: callers first, then what they c
 
 - [ ] Write the composer as one pass that appends to a `String` reserved from the record sizes, recording spans as it writes. Escape `|` in table cells. Write locations as code spans with a fence longer than any backtick run in the path. Place the details after the evidence and `Proposed comment` last. Write a gap under `Evidence`, beginning `Not confirmed.` Leave out the verdict line for `not_specified`. Parse nothing here: fields were checked when filed.
 - [ ] Write `finish_review` and `settle` over the port. They hold no SQLite transaction while composing.
-- [ ] In `reports/display/cutter.rs`, treat an HTML block and inline HTML as ordinary content instead of falling back to the whole document. The reader now shows report HTML as text, so it needs no document context, and a large report that mentions `Vec<u8>` outside code keeps the windowed reader. Share the parser options with `ledger/markdown.rs` through one constant.
+- [ ] In `reports/display/cutter.rs`, treat an HTML block and inline HTML as ordinary content instead of falling back to the whole document. The reader now shows report HTML as text, so it needs no document context, and a large report that mentions `Vec<u8>` outside code keeps the windowed reader.
 - [ ] Add test `composed_worked_set_matches`: build the worked snapshot in the test, compose it, compare with `worked.md` byte for byte, and check that each recorded span slices exactly its card or section. The snapshot includes a subagent's finding, a gap, a retired finding, a user disposition, an extra note, a title that starts with a code span, a `|` in a reason, an authored level-two heading, and a line with `Vec<u8>` and `<runner>` outside code.
 - [ ] Run `cargo check --locked -p reviewq-app` and `make test-package PACKAGE=reviewq-app`.
 
@@ -246,7 +246,7 @@ One writer. Work top-down so each step compiles: callers first, then what they c
 **Files**
 
 - Create: `crates/reviewq-store/src/ledger.rs`, `ledger/{records,passes,publish,settle}.rs`, `schema/ledger.sql`.
-- Modify: `lib.rs`, `connection/database.rs` (add the schema file), `reports.rs` (`read_delivery`), `reports/context.rs` (finding details from `ledger_changes`), `reports/failures.rs`, `followups/completion.rs`, `launches.rs` and `hosts/delivery/workflow.rs` (open a pass inside the existing confirmation transactions), the batch-creation code and `queue/archive.rs` (end a pass), `hosts/recovery/dispatch.rs` (recovery eligibility), `schema/queue.sql` (the report state of `review_activity`).
+- Modify: `lib.rs`, `connection/database.rs` (add the schema file), `reports.rs` (`read_delivery`), `reports/context.rs` (finding details from `ledger_changes`), `reports/failures.rs` and the `report_delivery_failures` table in `schema/projection_evidence.sql` (an integer pass, an optional turn, the ledger sequence the failure was recorded at, and one unresolved row per run, pass and kind), `followups/completion.rs`, `launches.rs` and `hosts/delivery/workflow.rs` (open a pass inside the existing confirmation transactions), the batch-creation code and `queue/archive.rs` (end a pass), `hosts/recovery/dispatch.rs` (recovery eligibility), `schema/queue.sql` (the report state of `review_activity`).
 
 **Consumes** F1's port and types. `WriteTx`, `tx.emit`, `insert_notification`, `reports/artifact.rs`, `reports/authority.rs`, `followups/completion.rs`, `cache_report_display`, `recovery::complete_turn`. C1 left each of these under `#[expect(dead_code)]`; remove the attribute as each gains its caller. The native-call replay in `actions/commands.rs` is tied to the actions table: follow its pattern, do not call it.
 
@@ -269,8 +269,8 @@ One writer. Work top-down so each step compiles: callers first, then what they c
 - [ ] Write `schema/ledger.sql` with the keys and partial unique indexes that enforce one open pass per run, one row per failure key and one stored result per call.
 - [ ] Write the transactions with cached prepared statements. No statement scans a run's change history on the write path.
 - [ ] Add test `ledger_writes_are_idempotent`: the same call replays its result, an equal create under a new call returns the same ID and revision, a stale revision is refused with the current revision and field names, and a reopened database keeps both records.
-- [ ] Add test `publish_is_conditional`: a record written after the snapshot, then a disposition saved after the snapshot, each make the commit report a stale snapshot and change nothing. A commit on a current snapshot stores the version, closes the pass and resolves the failure. A full review that leaves an earlier finding untouched is refused before it. A selected-thread close that changed nothing completes the batch as `unchanged` and adds no version. Read the stored version, its history row and a finding's context back through the production reads, so each changed query runs on real rows.
-- [ ] Keep the relocated `conclusion_errors` test passing against the domain `Outcome`.
+- [ ] Add test `publish_is_conditional`: a record written after the snapshot, then a disposition saved after the snapshot, each make the commit report a stale snapshot and change nothing. A commit on a current snapshot stores the version, closes the pass and resolves the failure. A selected-thread close that changed nothing completes the batch as `unchanged` and adds no version. Read the stored version, its history row and a finding's context back through the production reads, so each changed query runs on real rows.
+- [ ] Keep the relocated `conclusion_errors` test passing.
 - [ ] Run `cargo check --locked -p reviewq-store` and `make test-package PACKAGE=reviewq-store`. Open a fresh database and reopen it.
 
 ### K3: Record tools, passes, gate, rule and read-back
