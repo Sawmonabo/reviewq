@@ -245,20 +245,11 @@
   background: currentColor;
   content: "";
 }
-.report-verdict-caption {
-  font-size: 10px;
-  font-weight: 500;
-  opacity: 0.8;
-}
-.rich-report .report-authored .report-verdict-reason,
-.rich-report .report-authored .report-verdict-recorded {
+.rich-report .report-authored .report-verdict-reason {
   margin: 4px 0 0;
   color: var(--text);
   font-size: 11px;
   line-height: 1.7;
-}
-.rich-report .report-authored .report-verdict-recorded {
-  color: var(--muted);
 }
 .rich-report .report-authored .report-counts {
   display: flex;

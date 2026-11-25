@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import type { RunDetail } from "../../../api/generated/contracts";
-import type { QuoteRef, ReportSummary } from "../../../api/generated/contracts/reports";
+import type { Descriptor, QuoteRef, ReportSummary } from "../../../api/generated/contracts/reports";
 import {
   reportDownload,
   reportFeedback,
@@ -29,6 +29,7 @@ import type { AcceptedFindingChange } from "./report-structure";
 import { useVisibleContent } from "./useVisibleContent";
 
 type Quote = { readonly text: string; readonly reference: QuoteRef | null };
+type Disposition = Extract<Descriptor, { kind: "disposition" }>;
 type Props = {
   readonly historyAccess: ReactNode;
   readonly run: RunDetail;
@@ -99,6 +100,15 @@ export default function ReportDocument({
     },
   );
   const displayed = body.data;
+  // The user's blocking choices at this version overlay the cards' own blocking values.
+  const dispositions = useResource(
+    JSON.stringify(["report-dispositions", run.runId, report.receiptId, report.sha256, admitted]),
+    async (signal) =>
+      admitted && report.findingCount
+        ? userBlocking(run.runId, report, signal)
+        : { cursor: "", data: null },
+    [{ kind: "report", id: run.runId }],
+  );
   const resolving = useRef<AbortController | undefined>(undefined);
   useEffect(() => () => resolving.current?.abort(), [quoteKey]);
   const formattingFailure = Boolean(displayed?.formattingFailure);
@@ -220,6 +230,9 @@ export default function ReportDocument({
         {!sourceMode && displayed?.outcomeError && (
           <Notice retry={body.retry}>Accepted finding outcomes are unavailable.</Notice>
         )}
+        {!sourceMode && displayed?.reader && dispositions.error && (
+          <Notice retry={dispositions.retry}>Local dispositions are unavailable.</Notice>
+        )}
         {sourceMode ? (
           tryTable ? (
             <ReportTable
@@ -245,6 +258,7 @@ export default function ReportDocument({
           <RichReport
             historyAccess={historyAccess}
             document={displayed.reader}
+            userBlocking={dispositions.data ?? undefined}
             report={report}
             onFallback={fallback}
             bookmark={bookmark}
@@ -492,7 +506,7 @@ async function loadReport(
     data: {
       reader:
         tree && typeof markdown === "string"
-          ? wholeDocument(markdown, tree, report, outcomes.changes, response.data.display)
+          ? wholeDocument(markdown, tree, outcomes.changes, response.data.display)
           : undefined,
       formattingFailure: typeof markdown === "string" && !tree,
       outcomeError: outcomes.error,
@@ -543,12 +557,28 @@ function readQuote(value: string): Quote | undefined {
   }
 }
 
-function acceptedChanges(runId: string, report: ReportSummary, signal: AbortSignal) {
-  return contextItems(
+async function acceptedChanges(runId: string, report: ReportSummary, signal: AbortSignal) {
+  const { items } = await contextItems(
     runId,
     report,
+    "changes",
     (item): item is AcceptedFindingChange => item.kind === "change",
     report.changeCount,
     signal,
   );
+  return items;
+}
+
+async function userBlocking(runId: string, report: ReportSummary, signal: AbortSignal) {
+  const { items, cursor } = await contextItems(
+    runId,
+    report,
+    "dispositions",
+    (item): item is Disposition => item.kind === "disposition",
+    null,
+    signal,
+  );
+  const blocking = new Map<string, boolean>();
+  for (const [id, item] of items) if (item.blocking !== null) blocking.set(id, item.blocking);
+  return { cursor, data: blocking };
 }

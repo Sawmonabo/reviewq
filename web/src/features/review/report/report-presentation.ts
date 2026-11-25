@@ -1,6 +1,5 @@
 import type { DrawingHint } from "../../../api/generated/contracts/common";
 import type { Element, Root, RootContent } from "hast";
-import type { ReportSummary } from "../../../api/generated/contracts/reports";
 import { reportStructure, reportText as text } from "./report-structure";
 import type { AcceptedFindingChange } from "./report-structure";
 
@@ -81,11 +80,10 @@ export function groupReportItems<T>(
 export function reportBlocks(
   tree: Root,
   source: string,
-  report: ReportSummary,
   changes: ReadonlyMap<string, AcceptedFindingChange> | null | undefined,
   body?: { readonly previousThreads: boolean },
 ): readonly ReportBlock[] {
-  const groups = groupReportItems(reportStructure(tree.children, source, report, body), (node) => {
+  const groups = groupReportItems(reportStructure(tree.children, source, body), (node) => {
     const level =
       node.type === "element" && /^h[1-3]$/.test(node.tagName)
         ? Number(node.tagName[1])

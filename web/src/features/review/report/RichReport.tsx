@@ -28,6 +28,7 @@ type Selection = {
 export function RichReport({
   historyAccess,
   document: reader,
+  userBlocking,
   onFallback,
   report,
   bookmark,
@@ -36,6 +37,7 @@ export function RichReport({
 }: {
   readonly historyAccess: ReactNode;
   readonly document: ReaderDocument;
+  readonly userBlocking: ReadonlyMap<string, boolean> | undefined;
   readonly onFallback: () => void;
   readonly report: ReportSummary;
   readonly bookmark: string;
@@ -368,10 +370,11 @@ export function RichReport({
     const finding = block.finding;
     const change = finding?.change;
     const outcome = change ? outcomeLabels[change.conclusion] : undefined;
+    const blocking = finding && (userBlocking?.get(finding.id) ?? finding.blocking);
     const card = finding && (
       <article
         className="report-authored report-finding"
-        data-blocking={finding.blocking}
+        data-blocking={blocking}
         aria-label={finding.id}
       >
         <header className="report-finding-header">
@@ -381,9 +384,7 @@ export function RichReport({
               <span className="report-finding-severity">{finding.severity}</span>
             )}
             {finding.category && <span>{finding.category}</span>}
-            {finding.blocking !== undefined && (
-              <span>{finding.blocking ? "Blocking" : "Nonblocking"}</span>
-            )}
+            {blocking !== undefined && <span>{blocking ? "Blocking" : "Nonblocking"}</span>}
             {outcome && (
               <span className="report-finding-assessment" title={change?.reason}>
                 {change?.checkedSha === report.reviewedSha ? "Updated · " : ""}

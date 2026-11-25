@@ -53,11 +53,10 @@ export function canWindowReport(report: ReportSummary) {
 export function wholeDocument(
   source: string,
   tree: NonNullable<ReturnType<typeof parseMarkdown>>,
-  report: ReportSummary,
   changes: Changes,
   display: DocumentDisplay | null | undefined,
 ): ReaderDocument {
-  const groups = reportBlocks(tree, source, report, changes);
+  const groups = reportBlocks(tree, source, changes);
   const slice = { text: source, utf16: 0, scalar: 0 };
   return {
     groups,
@@ -154,7 +153,6 @@ export function indexedDocument(
     const blocks = reportBlocks(
       tree,
       text,
-      report,
       changes,
       group.sourceOrder === 0 ? undefined : { previousThreads: group.previousThreads },
     );

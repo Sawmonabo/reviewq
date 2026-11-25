@@ -1,10 +1,8 @@
 import type { Element, ElementContent, RootContent, Text } from "hast";
-import type { Descriptor, ReportSummary, Verdict } from "../../../api/generated/contracts/reports";
+import type { Descriptor, Verdict } from "../../../api/generated/contracts/reports";
 import type { FindingConclusion } from "../../../api/generated/contracts/common";
 
-type ReportHeader = Pick<ReportSummary, "verdict" | "findingCount" | "changeCount">;
 export type AcceptedFindingChange = Extract<Descriptor, { kind: "change" }>;
-type Tone = "approve" | "request_changes" | "blocked" | "neutral";
 export const outcomeLabels: Readonly<Record<FindingConclusion, string>> = {
   fixed: "Fixed",
   clarified_withdrawn: "Clarified and withdrawn",
@@ -19,12 +17,12 @@ const retiringOutcomes = new Set([
   outcomeLabels.superseded,
 ]);
 const outcomeNames = new Set(Object.values(outcomeLabels));
-const verdictLabels: Readonly<Record<Verdict, string>> = {
-  approve: "Approve",
-  request_changes: "Request changes",
-  blocked: "Blocked",
-  not_specified: "Verdict unspecified",
-};
+// The composed verdict line, which is left out for an unspecified verdict.
+const verdictLines: ReadonlyMap<string, Verdict> = new Map([
+  ["APPROVE", "approve"],
+  ["REQUEST CHANGES", "request_changes"],
+  ["BLOCKED", "blocked"],
+]);
 const threadSection = "Our previous threads";
 const threadColumns = ["Finding", "Outcome and verification", "Thread or evidence"];
 const countLabel =
@@ -36,46 +34,13 @@ const coverLabels = new Set(["Scope:", "Reviewed source:", "Reviewed target:", "
 export function reportStructure(
   nodes: readonly RootContent[],
   source: string,
-  summary: ReportHeader,
   body?: { readonly previousThreads: boolean },
 ): readonly RootContent[] {
   const article = nodes.filter((node) => node.type !== "text" || node.value.trim());
   const output: RootContent[] = [];
   const firstSection = body ? 0 : article.findIndex(startsReportBody);
   const introEnd = firstSection < 0 ? article.length : firstSection;
-  const introduction = article.slice(0, introEnd);
-  const hasAuthoredVerdict = introduction.some(
-    (node) => node.type === "element" && authoredVerdict(node),
-  );
-  const hasAuthoredCounts = introduction.some(
-    (node) => paragraph(node) && isCounts(reportText(node)),
-  );
-  let addedVerdict = false;
-  let addedCounts = false;
   let previousThreads = body?.previousThreads ?? false;
-
-  function addSummary() {
-    if (!addedVerdict && !hasAuthoredVerdict && summary.verdict !== "not_specified") {
-      output.push(verdict(summary.verdict));
-      addedVerdict = true;
-    }
-    if (!addedCounts && !hasAuthoredCounts) {
-      const items = [
-        [summary.findingCount, "indexed finding"],
-        [summary.changeCount, "declared change"],
-      ] as const;
-      output.push(
-        element(
-          "div",
-          "report-counts",
-          items.map(([amount, label]) =>
-            countBadge(String(amount), label + (amount === 1 ? "" : "s")),
-          ),
-        ),
-      );
-      addedCounts = true;
-    }
-  }
 
   for (let index = 0; index < article.length; index++) {
     const node = article[index];
@@ -85,45 +50,16 @@ export function reportStructure(
     }
     const next = article[index + 1];
     const previous = article[index - 1];
-    if (!body && index === introEnd) addSummary();
     if (index < introEnd) {
-      const recognized = authoredVerdict(node);
-      if (recognized) {
-        const explicit =
-          next?.type === "element" && !recognized.tone && recognized.inline.length === 0
-            ? authoredVerdict(next)
-            : undefined;
-        const consumesLabel = explicit?.tone !== undefined;
-        const { tone, label, inline } = consumesLabel ? explicit : recognized;
-        if (consumesLabel) index++;
-        const afterLabel = article[index + 1];
-        const following =
-          inline.length === 0 &&
-          paragraph(afterLabel) &&
-          !isCounts(reportText(afterLabel)) &&
-          !authoredVerdict(afterLabel);
-        const rationale = inline.length
-          ? [element("p", "", inline)]
-          : following
-            ? [afterLabel]
-            : [];
-        const recorded =
-          tone && tone !== summary.verdict && summary.verdict !== "not_specified"
-            ? summary.verdict
-            : undefined;
-        const card = verdict(tone ?? summary.verdict, label, rationale, recorded);
-        const labelContainer = card.children[0];
-        if (consumesLabel && labelContainer?.type === "element") {
-          labelContainer.children.unshift(styled(recognized.label, "report-verdict-caption"));
-        }
-        if (node.position) card.position = node.position;
-        output.push(card);
-        if (following) index++;
+      const tone = authoredVerdict(node);
+      if (tone) {
+        const rationale = paragraph(next) && !isCounts(reportText(next)) ? next : undefined;
+        output.push(verdict(node, tone, rationale));
+        if (rationale) index++;
         continue;
       }
 
       if (paragraph(node) && isCounts(reportText(node))) {
-        addSummary();
         output.push(authoredCounts(node, source));
         continue;
       }
@@ -145,75 +81,38 @@ export function reportStructure(
     if (node.tagName === "h2") previousThreads = isThreadSection(reportText(node).trim());
     output.push(node.tagName === "table" ? reportTable(node, previousThreads) : node);
   }
-  if (firstSection < 0) addSummary();
   return output;
 }
 
 export function startsReportBody(node: RootContent) {
-  return (
-    node.type === "element" &&
-    (/^h[23]$/.test(node.tagName) || node.tagName === "table") &&
-    !authoredVerdict(node)
-  );
+  return node.type === "element" && (/^h[23]$/.test(node.tagName) || node.tagName === "table");
 }
 export function isThreadSection(label: string) {
   return label === threadSection;
 }
 
-function authoredVerdict(node: Element):
-  | {
-      tone?: Tone;
-      label: Element;
-      inline: ElementContent[];
-    }
-  | undefined {
-  const first = node.children[0];
-  const label =
-    node.tagName === "h2"
-      ? node
-      : paragraph(node) && first?.type === "element" && first.tagName === "strong"
-        ? first
-        : undefined;
-  if (!label) return;
-  const text = reportText(label).trim().replace(/:$/, "").toUpperCase();
-  const inline = label === node ? [] : node.children.slice(1);
-  const supplied = { label: { ...label, tagName: "span" }, inline };
-  if (text === "VERDICT") return supplied;
-  if (text === "APPROVE") return { ...supplied, tone: "approve" };
-  if (text === "REQUEST CHANGES") return { ...supplied, tone: "request_changes" };
-  if (/^BLOCKED(?:\s*[-–—]\s*INSUFFICIENT EVIDENCE)?$/.test(text))
-    return { ...supplied, tone: "blocked" };
-  if (/^(?:NEEDS CLARIFICATION|COMMENT ONLY|INCOMPLETE)$/.test(text))
-    return { ...supplied, tone: "neutral" };
+// A paragraph that is only the bold verdict, such as `**REQUEST CHANGES**`.
+function authoredVerdict(node: Element) {
+  const [only] = node.children;
+  if (!paragraph(node) || node.children.length !== 1) return;
+  return only?.type === "element" && only.tagName === "strong"
+    ? verdictLines.get(reportText(only))
+    : undefined;
 }
 
-function verdict(
-  tone: Verdict | Tone,
-  authored?: Element,
-  rationale: Element[] = [],
-  recorded?: Verdict,
-): Element {
-  const usesReceipt =
-    authored && reportText(authored).trim().replace(/:$/, "").toUpperCase() === "VERDICT";
-  const label =
-    usesReceipt && tone !== "not_specified" && tone !== "neutral"
-      ? [styled(authored, "report-verdict-caption"), literal(verdictLabels[tone])]
-      : authored
-        ? [authored]
-        : [literal(tone === "neutral" ? "Verdict" : verdictLabels[tone])];
+function verdict(node: Element, tone: Verdict, rationale: Element | undefined): Element {
+  const label = node.children[0];
   return {
     ...element("div", "report-verdict", [
-      element("div", "report-verdict-label", label),
-      ...rationale.map((node) => styled(node, "report-verdict-reason")),
-      ...(recorded
-        ? [
-            element("p", "report-verdict-recorded", [
-              literal(`Recorded verdict · ${verdictLabels[recorded]}`),
-            ]),
-          ]
-        : []),
+      element(
+        "div",
+        "report-verdict-label",
+        label?.type === "element" ? [{ ...label, tagName: "span" }] : [],
+      ),
+      ...(rationale ? [styled(rationale, "report-verdict-reason")] : []),
     ]),
     properties: { className: ["report-verdict"], dataReportVerdict: tone },
+    ...(node.position && { position: node.position }),
   };
 }
 
@@ -286,13 +185,6 @@ function countTone(label: string) {
     : /\bblocking\b/i.test(label)
       ? "blocking"
       : (/\bP[0-3]\b/i.exec(label)?.[0].toLowerCase() ?? "neutral");
-}
-
-function countBadge(amount: string, label: string) {
-  return element("span", "report-count", [
-    element("strong", "report-count-amount", [literal(amount)]),
-    literal(` ${label}`),
-  ]);
 }
 
 function reportTable(node: Element, previousThreads: boolean): Element {
