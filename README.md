@@ -22,9 +22,7 @@ The first command installs and starts the user service. The second opens the das
 
 The installer prints the runtime configuration path and reports missing native providers by name. Configure exact native executables there with `codexCommand` and `claudeCommand` if they live outside `~/.local/bin`. In an open Claude Code session, use `/reload-plugins` after installation or an update. Run `reviewq notify-test` to check the local desktop notification service. [Runtime configuration and recovery](docs/specs/operations.md)
 
-An independent Codex terminal using Code Mode can verify ReviewQ report handoffs through the optional user hook. Open `/hooks` in Codex and review and trust the ReviewQ `PreToolUse` entry for `mcp__reviewq__report_handoff`. ReviewQ leaves Codex's trust settings to you. ReviewQ-managed Codex sessions and calls with direct native evidence can verify handoffs without this hook. [Codex hook trust](https://learn.chatgpt.com/docs/hooks#review-and-trust-hooks)
-
-If you already uninstalled with a bundle released before the hook was added, run `bin/reviewq uninstall` from a bundle that supports the hook to remove its leftover registration.
+ReviewQ adds two user hooks to Codex, `Stop` and `SessionStart`. The first reminds a lead that ends its turn without closing its review, and the second gives it the filed findings again after its context is compacted. Codex runs them only after you open `/hooks` and review and trust them. ReviewQ leaves Codex's trust settings to you. Without the hooks a review still files and closes its findings, and shows as unfinished when it is not closed. [Codex hook trust](https://learn.chatgpt.com/docs/hooks#review-and-trust-hooks)
 
 ## Develop
 
