@@ -3,6 +3,7 @@
 import json
 
 from .bundle import encode_json, index_files
+from .ledger import specimen_sessions
 from .native import fixture_id
 from .source import STAMP, worked_files
 
@@ -75,6 +76,7 @@ def initial_source(preset):
              "state": "completed", "parent": None},
         ])
         timeline.append({"action": "append-seventh-page", "lead": "reader"})
+        sessions.extend(specimen_sessions(preset))
     if preset == "rich":
         timeline.append({"action": "change-head", "review": "review-2"})
     values = {"reviews": reviews, "sessions": sessions, "history": history,

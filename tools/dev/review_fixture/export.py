@@ -1,9 +1,10 @@
 """Assemble source files and versioned provider inputs."""
 
 from .bundle import encode_json, index_files, record_extents
-from .documents import RICH_REPORT, clipboard_sources, patch_documents, report_sources
+from .documents import clipboard_sources, patch_documents
 from .gitlab import CHANGED_HEAD, discussion_id, gitlab_sources
 from .jira import jira_records
+from .ledger import LEDGER_VERSIONS, QUOTE, QUOTE_TEXT, ledger_plans
 from .native import native_inventory, registrations
 from .presets import initial_source
 
@@ -26,15 +27,14 @@ def bundle_files(preset):
     source_files, records, outbox = initial_source(preset)
     registered = registrations(records["sessions"])
     patches = patch_documents(preset) if records["reviews"] else {}
-    reports, report_index = report_sources(records["reviews"], preset)
     profiles = profile_records(registered, preset)
     provider_files = {
-        **patches, **reports, **native_inventory(registered, records["history"]),
+        **patches, **native_inventory(registered, records["history"]),
         "gitlab.json": encode_json(gitlab_sources(records, preset)),
         "jira.json": encode_json(jira_records(records["reviews"], preset)),
         "presets.json": encode_json({"preset": preset, "profiles": profiles}),
         "registrations.json": encode_json(registered),
-        "report-sources.json": encode_json(report_index),
+        "ledger.json": encode_json(ledger_plans(records["reviews"], registered)),
         "timeline.json": encode_json(records["timeline"]),
         "outbox.json": encode_json(outbox),
     }
@@ -48,7 +48,9 @@ def bundle_files(preset):
             name: record_extents(source_files[name]) for name in ("quiet.patch", "active.patch", "large.patch")
             if name in source_files
         },
-        "document_extents": {name: record_extents(data) for name, data in {**patches, **reports}.items()},
+        "document_extents": {name: record_extents(data) for name, data in patches.items()},
+        "ledger_versions": {plan: LEDGER_VERSIONS[plan] for plan in LEDGER_VERSIONS
+                            if plan in {row["alias"] for row in registered}},
         "visual_specimens": {
             "wide": {"width": 1440, "height": 1000, "review": "review-0", "file": "src/example.ts"},
             "narrow": {"width": 420, "height": 900, "review": "review-0", "file": "src/example.ts"},
@@ -64,8 +66,9 @@ def bundle_files(preset):
             "long_output_bytes": 320 * 1024, "long_output_end": "READER-OUTPUT-TAIL",
         }
     if preset == "rich":
-        expected.update({"clipboard": clipboard_sources(), "changed_head": CHANGED_HEAD,
-                         "tail_report": RICH_REPORT})
+        expected.update({"clipboard": clipboard_sources(), "changed_head": CHANGED_HEAD})
+    if preset in ("reader", "rich"):
+        expected["quote"] = {"source": QUOTE, "text": QUOTE_TEXT}
     provider_files["manifest.json"] = encode_json({
         "version": 1, "preset": preset, "files": index_files(provider_files), "expected": expected,
     })

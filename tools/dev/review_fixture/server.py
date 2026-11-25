@@ -142,9 +142,7 @@ class Handler(BaseHTTPRequestHandler):
                 return json_response(replay.status())
             if path == "/fixture/registrations":
                 return json_response(list(replay.registrations.values()))
-            if path in ("/fixture/report-sources", "/fixture/outbox", "/fixture/timeline"):
-                if path == "/fixture/report-sources" and replay.profile != "populated":
-                    return json_response([])
+            if path in ("/fixture/outbox", "/fixture/timeline"):
                 return json_response(replay.provider_json(path.split("/")[-1] + ".json"))
             if path == "/fixture/events":
                 return self.send_stream("all", query)

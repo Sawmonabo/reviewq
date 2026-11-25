@@ -17,7 +17,7 @@ The version-1 source inputs live in [`fixtures/reviews/worked/`](../../../fixtur
 | Review | Inputs | Independent expectations |
 | --- | --- | --- |
 | Active, `forge/alpha!41`, ticket `RQ-41` | Working Codex lead, a child and an earlier completed run. The current file is `src/example.ts`, 1,200 additions. Start with current inline discussions at new lines 8 and 600. | New line 820 reads `export const example819 = 819;`. During reading, publish a same-revision update with identical data, then insert a thread at 1060, then one at 12. The target stays at its reading offset. Native Find reaches `example1199 = 1199`. |
-| Quiet, `forge/beta!41`, ticket `RQ-42` | Different project, same displayed IID and similar MR title. Completed run, 20 additions, short history, a saved report, no pending activity or live output. | Exactly 20 added lines. The last line contains `example19 = 19`. The run, report and draft differ from Active. Reading this review never starts a turn. |
+| Quiet, `forge/beta!41`, ticket `RQ-42` | Different project, same displayed IID and similar MR title. Completed run, 20 additions, short history, two published report versions, no pending activity or live output. | Exactly 20 added lines. The last line contains `example19 = 19`. The run, report and draft differ from Active. Reading this review never starts a turn. |
 | Large, `forge/alpha!43`, ticket `RQ-43` | 12,000 additions in `src/example.ts`, discussions at 8 and 600, a separate mixed/wrapped file and a long read-only history. | One selected patch with 12,000 code lines plus the hunk header. Find reaches `example11999 = 11999` before visiting the last screen. A switch to the mixed file transfers only that file's patch. |
 
 | Patch | Raw bytes | SHA-256 | Zero-based byte ranges for added lines, excluding LF |
@@ -30,7 +30,7 @@ The ranges start at the patch's `+` prefix. Each patch has one hunk header and e
 
 ### Provider replay and release profiles
 
-The worked export supplies the source observations and cues. The provider driver maps them to real revision-bound thread positions and provider-native shapes. It also supplies Quiet's saved report and Large's mixed file and long history. To trigger an interruption, use controls on the driver's listener and the actual browser reconnect path.
+The worked export supplies the source observations and cues. The provider driver maps them to real revision-bound thread positions and provider-native shapes. It also supplies Large's mixed file and long history. Report versions come from the product's ledger, as [Publish the reports](#publish-the-reports) describes. To trigger an interruption, use controls on the driver's listener and the actual browser reconnect path.
 
 Bind each worked review to a distinct GitLab instance/project ID/IID, revision triple, path, ReviewQ run, native root/session, turn/item and report receipt. Deliver both additional items to Active. For the real native exercise, register actual host IDs, verify delivery from native evidence and record their mapping to the synthetic review aliases in private output.
 
@@ -55,7 +55,7 @@ Use `--profile populated` for the three-review workflow. `--profile measurement-
 
 Point the production GitLab adapter at `gitlab` and Jira at `jira`. The GitLab read endpoints are `/api/v4/user`, `/api/v4/projects`, `/api/v4/merge_requests` and `/api/v4/projects/{id}/merge_requests/{iid}` with `diffs`, `discussions`, `versions`, `approvals` and `approval_state`. GitLab lists honor `page` and `per_page` and return its pagination headers. For example `/api/v4/projects/11/merge_requests/43/diffs?unidiff=true&per_page=1&page=2` returns the mixed file alone. Jira exposes v2 issue/issue comment/search and Agile board/sprint reads. Its fixture search supports the preset's project, sprint and exact issue-key scopes. [GitLab MR API](https://docs.gitlab.com/api/merge_requests/) · [GitLab discussions](https://docs.gitlab.com/api/discussions/) · [Jira REST v2](https://developer.atlassian.com/cloud/jira/platform/rest/v2/api-group-issues/)
 
-The harness exposes registration intents at `GET /fixture/registrations`, report references at `GET /fixture/report-sources`, and queued intents at `GET /fixture/outbox`. The isolated launcher applies those intents through normal application registration, receipt and persistence paths. Native replay reads `GET /fixture/native/{alias}` for original NDJSON followed by new observations. `GET /fixture/native/{alias}/stream` streams that lead's live records. `GET /fixture/events` streams all harness changes. Both accept `after` and `Last-Event-ID`. Harness events describe which provider data changed. Use product routes and native host evidence for the terminal-to-browser qualification. [SLICE](first-review.md) · [Codex App Server](https://developers.openai.com/codex/app-server/) · [Claude transcript hooks](https://code.claude.com/docs/en/hooks)
+The harness exposes registration intents at `GET /fixture/registrations` and queued intents at `GET /fixture/outbox`. The isolated launcher applies those intents through normal application registration, receipt and persistence paths. Native replay reads `GET /fixture/native/{alias}` for original NDJSON followed by new observations. `GET /fixture/native/{alias}/stream` streams that lead's live records. `GET /fixture/events` streams all harness changes. Both accept `after` and `Last-Event-ID`. Harness events describe which provider data changed. Use product routes and native host evidence for the terminal-to-browser qualification. [SLICE](first-review.md) · [Codex App Server](https://developers.openai.com/codex/app-server/) · [Claude transcript hooks](https://code.claude.com/docs/en/hooks)
 
 ### Operator controls
 
@@ -71,6 +71,12 @@ Read `"$controls/status"` for the timeline position, upstream request counts, he
 | `{"action":"drop-next-ack","lead":"active"}` | Accepts the next synthetic Codex input and closes that request before sending its response. Read the receipt and exact native item, then replay the same intent to verify one acceptance. |
 
 For the acknowledgement exercise, obtain Active's `native_id` from registrations. POST to `/fixture/native/active/messages` with `threadId`, an unused UUID `clientUserMessageId` and `input: [{"type":"text","text":"Fixture message"}]`. Text accepts up to 12,000 Unicode scalar values, including JSON-escaped text. The connection ends without a response after acceptance. Read `GET /fixture/native/active/messages/{submissionId}` to compare `threadId`, `turnId`, `itemId` and `submissionId` against the matching native `item/completed` event. Its user-message correlation field is `clientId`. A replay of the same request returns the same receipt. Changed text with that UUID returns 409.
+
+## Publish the reports
+
+The export holds no report text. `provider/ledger.json` lists, per Claude lead, the ledger calls that file its records and close each version, and the dispositions saved between versions. Run `tools/dev/publish-reviews --inputs "$new_directory" --root <new-directory>` from the checkout. It builds `reviewq`, starts the provider and `reviewq serve --validation` in `<root>/profile` with a synthetic Claude profile in `<root>/claude`, links each lead with the plugin's link helper, and sends every call through `reviewq internal claude-bridge ledger`, the plugin's client of the native ledger routes. A disposition goes through the browser's disposition route. The product composes and stores every version. The tool reads each one back through the summary, source download and section routes, checks the summary and ETag against the stored bytes, and compares the sizes and marker offsets with the values pinned in `tools/dev/review_fixture/ledger.py`. It prints the profile, runs and receipts as JSON and exits 1 on any difference. `--serve` keeps the service until Ctrl+C. Afterwards `pnpm --dir web run dev --profile <root>/profile --validation` opens the populated profile.
+
+Five-digit provider ports keep the MR link, and so the byte offsets, fixed. Receipts, SHA-256 digests and the checked time differ on every run, so the manifest pins measurements, not digests. Every preset except `empty` publishes Quiet's two versions: a full review, then an update after a disposition on F-02. Together they file the records of the worked ledger example in `crates/reviewq-app/src/ledger/compose/tests.rs`. `reader` adds the `reader-report` lead and `rich` adds it and the specimen leads, all on Large.
 
 ## Handoff
 
@@ -94,7 +100,7 @@ for name, expected in files.items():
     assert hashlib.sha256(data).hexdigest() == expected["sha256"], name
 provider = root / "provider"
 provider_manifest = (provider / "manifest.json").read_bytes()
-assert hashlib.sha256(provider_manifest).hexdigest() == "c43aacc7e36daee946ae21a4fa3fa11ff70948ec7148ceee71ed880a0528ea8a"
+assert hashlib.sha256(provider_manifest).hexdigest() == "c5fae1d827c49a0f4dcea5219be77100e5590ced6183b4e348abd692b4a81818"
 companion = json.loads(provider_manifest)
 assert {p.relative_to(provider).as_posix() for p in provider.rglob("*") if p.is_file()} == {"manifest.json", *companion["files"]}
 for name, expected in companion["files"].items():
@@ -111,15 +117,30 @@ Generate `empty`, `busy`, `busy-filter`, `rich` and `reader` with the same comma
 
 | Preset | MRs / registrations / queued intents | Provider manifest SHA-256 |
 | --- | --- | --- |
-| `empty` | 0 / 0 / 0 | `6e3101bd90a4eb076a380ac73a247af4b7886129e4df67e792b7e71c626a3edd` |
-| `worked` | 12 / 5 / 0 | `c43aacc7e36daee946ae21a4fa3fa11ff70948ec7148ceee71ed880a0528ea8a` |
-| `busy` | 67 / 506 / 200 | `6bb286d09f9ea0133298eed4db70da72f3d5a10905479dc8930a50e37c52d85a` |
-| `busy-filter` | 300 / 506 / 200 | `dd9087ab1f3663014f02bc59185f30deb12c3bc1fd952c86d850997751d38e72` |
-| `reader` | 12 / 8 / 0 | `8c5df173bbb5da318db365dcfb18a812761344e61df91fe5ccc949c47615b893` |
-| `rich` | 12 / 8 / 0 | `b4d7d17ab5e2c695623d72ffcdeabd32e7e7b782a66d3858101691f798addb45` |
+| `empty` | 0 / 0 / 0 | `e9fa6cc39852f216d32e056cba7677daa0ef93886f27d9ef1ce8ff7f3128e5c6` |
+| `worked` | 12 / 5 / 0 | `c5fae1d827c49a0f4dcea5219be77100e5590ced6183b4e348abd692b4a81818` |
+| `busy` | 67 / 506 / 200 | `d49db6928bd2d9f600b6b7455cc549d2dd6f141b66649d55eda84ffc3d7d5306` |
+| `busy-filter` | 300 / 506 / 200 | `284929ff9f7692179fcf6dbf2afdd7f7eff13451083fa8f2c979cc1c842fb6d4` |
+| `reader` | 12 / 9 / 0 | `d48d916ab99ef3588ce609b4e01a2c8bf62f3dd116193f9fad5fba1eca98318c` |
+| `rich` | 12 / 18 / 0 | `16860cff217dba4db61cf1e15b8ea4903a20307a649f83eaa04b283d868ac7c1` |
 
-- Active's native source ID is `af785ec1-cf3a-56f6-8329-0a800b8ef407` and run ID is `9eeca80e-4e18-5c48-a465-5dc4acbbff92`. Its child uses the same run and names Active as its native parent. Quiet's native source ID is `ca43678e-b86c-593f-8e90-3dc74f835451` and report receipt is `fixture-quiet-report-1`. It has one Claude assistant record containing `Quiet complete`. Large has 240 initial Codex items and its own run.
+- Active's native source ID is `af785ec1-cf3a-56f6-8329-0a800b8ef407` and run ID is `9eeca80e-4e18-5c48-a465-5dc4acbbff92`. Its child uses the same run and names Active as its native parent. Quiet's native source ID is `ca43678e-b86c-593f-8e90-3dc74f835451`. It has one Claude assistant record containing `Quiet complete`. Its published versions measure 2,353 bytes in 91 lines, then 3,238 bytes in 107 lines, each with three findings. Large has 240 initial Codex items and its own run.
 - Busy queues 200 distinct leads. `busy-5` has a pending native question. The two closed branch-only MRs use `feature/RQ-641-fix` and `feature/RQ-6410-fix`. Match only the first to Jira `RQ-641`. Busy-filter has 15 titles with the prefix `Review the parser ` and 200 Active messages of 12,000 ASCII bytes each.
 - Reader has 10,000 completed items and 400 matching command starts. Each 25th item is a user prompt, with equal text at 25 and 50 and distinct item IDs. The first, middle and last IDs are `reader-item-0`, `reader-item-5000` and `reader-item-9999`. Item 5's decoded output is exactly 327,680 bytes and ends with `READER-OUTPUT-TAIL`. The explicit page cue ends at `reader-item-10099`.
 - Rich's renamed mixed patch is 6,482 bytes with 244 physical lines. Its initial large review has 205 discussions, including 200 distributed over the mixed file. The `crlf-limit.patch` longest line is exactly 16,384 bytes before CRLF. `over-bytes.patch` is 2,249,289 bytes, `over-lines.patch` has 20,002 physical lines, and `unicode-line.patch` has a 16,819-byte line. The provider manifest records each document's digest, line measurements and exact final bytes.
-- Rich's `reports/rich.md` has 1,056,499 bytes and ends in `REPORT-BYTE-TAIL\n`. Its second quote is at byte range `[1056459, 1056481)` and scalar range `[1056453, 1056472)`. The source is `**one** &amp; two 🧪`, and the visible text is `one & two 🧪`. `provider/report-sources.json` binds source and quote to receipt `fixture-rich-report-3`. Every fixture version is composed from fixture ledger records. The size-limit specimens use records sized to cross each limit, and their pinned sizes and offsets are regenerated with them. The manifest also records expected clipboard bytes, accessible reading order and viewport settings for the wide, narrow, wrapped and reduced-motion specimens. Record actual presentation through the browser.
+- Reader adds the Claude lead `reader-report` on Large. Its first version, 1,218 bytes, holds a finding whose issue contains `**one** &amp; two 🧪` at byte 679 (scalar 670), with visible text `one & two 🧪`, and whose details hold a blockquote and a Mermaid diagram. Its second version, 1,054 bytes, retires that finding as fixed and approves, so its digest differs.
+- Rich adds one Claude lead per reader limit on Large. Each version is composed from ledger records within the ledger's own limits and ends in a unique marker. The server refuses the rich view of the first three; the browser parser counts 73,851 nodes in `specimen-nodes` and depth 132 in `specimen-depth`, and the diagrams hold 650 edges and 32,693 characters:
+
+| Lead | Limit crossed | Bytes / lines / longest line | Marker, byte (scalar) offset |
+| --- | --- | --- | --- |
+| `specimen-bytes` | 1 MiB | 1,075,960 / 773 / 2,052 | `**one** &amp; two 🧪` 1,075,919 (1,075,844), then `REPORT-BYTE-TAIL` |
+| `specimen-lines` | 10,000 lines | 131,689 / 10,123 / 76 | `REPORT-LINES-TAIL` 131,671 (131,665) |
+| `specimen-line` | 16 KiB line | 17,293 / 57 / 16,404 | `REPORT-LINE-TAIL` 17,276 (5,003) |
+| `specimen-edges` | 500 diagram edges | 11,098 / 709 / 76 | `REPORT-EDGES-TAIL` 11,080 (11,071) |
+| `specimen-characters` | 30,000 diagram characters | 33,409 / 105 / 593 | `REPORT-CHARACTERS-TAIL` 33,386 (33,380) |
+| `specimen-nodes` | 60,000 nodes | 100,162 / 123 / 8,187 | `REPORT-NODES-TAIL` 100,144 (100,120) |
+| `specimen-depth` | 128 nesting levels | 1,148 / 57 / 264 | `REPORT-DEPTH-TAIL` 1,130 (1,121) |
+| `specimen-windowed` | windowed reader at 64 KiB | 71,266 / 2,045 / 167 | `REPORT-WINDOWED-TAIL` 71,245 (70,639) |
+| `specimen-changes` | windowed reader at 24 KiB with changes | 35,765 / 1,045 / 165, then 35,642 / 1,037 / 171 after one finding is fixed | `REPORT-CHANGES-TAIL` 35,745 (35,439), then 35,622 (35,317) |
+
+  A field line is limited to 8 KiB, so the only line over 16 KiB is the composed `**Location:**` line of eight long Unicode paths. The manifest also records expected clipboard bytes, accessible reading order and viewport settings for the wide, narrow, wrapped and reduced-motion specimens. Record actual presentation through the browser.

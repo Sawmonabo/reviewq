@@ -1,0 +1,61 @@
+#!/usr/bin/env python3
+"""Publish a fixture export's report versions through a development service's ledger routes.
+
+Builds the checkout's binary, starts the fixture providers and a `serve --validation` service
+in a new directory, links each Claude lead that has a ledger plan, files its records and closes
+its review through the plugin's bridge, then measures every published version. The profile it
+leaves under `<root>/profile` opens with `pnpm --dir web run dev --profile <root>/profile
+--validation`.
+"""
+
+import argparse
+import json
+import signal
+import sys
+from pathlib import Path
+
+sys.dont_write_bytecode = True
+
+from review_fixture.bundle import read_manifest
+from review_fixture.publish import Refused, run_plan, verify
+from review_fixture.service import DevService, build_binary
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("--inputs", type=Path, required=True, help="directory produced by seed-review")
+    parser.add_argument("--root", type=Path, required=True, help="new directory with an existing parent")
+    parser.add_argument("--serve", action="store_true", help="keep the service running until interrupted")
+    args = parser.parse_args()
+    try:
+        manifest = read_manifest(args.inputs / "provider")
+        read_manifest(args.inputs)
+        plans = json.loads((args.inputs / "provider" / "ledger.json").read_bytes())
+        sessions = {row["alias"]: row for row in json.loads((args.inputs / "provider" / "registrations.json").read_bytes())}
+        pinned = manifest["expected"].get("ledger_versions", {})
+        with DevService(args.root, args.inputs, build_binary()) as service:
+            service.refresh()
+            runs, problems = [], []
+            for plan in plans:
+                result = run_plan(service, plan, sessions[plan["lead"]]["native_id"])
+                measured, found = verify(service, result, plan["markers"], pinned.get(plan["lead"], []))
+                runs.append({**result, "versions": measured})
+                problems.extend(found)
+            print(json.dumps({"profile": str(service.profile), "browser": service.browser,
+                              "runs": runs, "problems": problems}, ensure_ascii=False, indent=2), flush=True)
+            if args.serve:
+                signal.signal(signal.SIGTERM, signal.default_int_handler)
+                try:
+                    signal.pause()
+                except KeyboardInterrupt:
+                    pass
+    except (OSError, ValueError, KeyError, RuntimeError, Refused) as error:
+        parser.exit(1, f"{parser.prog}: {error}\n")
+    except KeyboardInterrupt:
+        parser.exit(130, f"{parser.prog}: interrupted\n")
+    if problems:
+        parser.exit(1, f"{parser.prog}: {len(problems)} published versions differ from the pinned values\n")
+
+
+if __name__ == "__main__":
+    main()
