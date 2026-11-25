@@ -77,7 +77,7 @@ Tasks use these names exactly. F1 and F2 give them their Rust types. Later tasks
 | Routes under `/api/v1/native/ledger/` | `record-finding`, `assess-finding`, `record-note`, `list`, `finish`, `needs-input`, `gate`, `readback` |
 | Tool route body and replies | Claude's bridge only: `{binding:{sessionKey,callId,turnId?,agentId?},input:{…}}`. Codex reaches the same operations through the MCP server, which builds the app's `HostSession::Codex` from the request metadata and its actor. Success is the tool's result. A refused input is the existing error reply of `entry/error.rs` with `fieldErrors:[{path,message}]`; no second error shape is added. The binding never travels inside `input`. |
 | Gate and read-back bodies | Codex hooks only. Gate: `{threadId,turnId?,stopHookActive}` returning `{block:false}` or `{block:true,reason}`. Read-back: `{threadId}` returning `{text}`. Claude's hook route returns the same two replies. |
-| Claude bridge action | `reviewq internal claude-bridge ledger <tool> <session>`, input JSON on stdin, one JSON reply on stdout |
+| Claude bridge action | `reviewq internal claude-bridge ledger <id>`, with the tool, the call's identity and the input as one JSON object on stdin, and the route's reply on stdout |
 | Hook helpers | `reviewq internal claude-hook` (existing, now also answers `Stop` and `SessionStart`), `reviewq internal codex-hook` (new, replaces `codex-report-witness`) |
 | Hook replies | Stop block: `{"decision":"block","reason":"…"}` on stdout. Read-back: the text on stdout. Nothing on stdout means no effect. |
 | Generated contract files | `contracts/ledger-tools.schema.json`, `fixtures/contracts/ledger-tools.json`, `hosts/claude/plugin/hooks/ledger-schema.js` |
@@ -325,7 +325,7 @@ One writer. Work top-down so each step compiles: callers first, then what they c
 
 **Steps**
 
-- [ ] Add the bridge action `ledger <tool>`: read `{binding,input}` from stdin, make one POST to the tool's route and print the reply. Make no status request and no transcript check on this path.
+- [ ] Add the bridge action `ledger <id>`: read `{tool,callId,turnId?,agentId?,input}` from stdin, verify the service with the signed status request, make one POST to the tool's route and print the reply. Every path that sends the bridge key verifies the service first, through one function. Make no transcript check on this path.
 - [ ] Make `claude-hook` print what the hook route answers: the block reply for `Stop`, and the read-back text for a `SessionStart` whose source is `compact`. Send the hook input's `stop_hook_active`. Keep ignoring subagent hooks.
 - [ ] Add `codex-hook`: read the hook JSON from stdin, send `Stop` to `gate` and a `compact` `SessionStart` to `readback`, print the replies in the same form through the same printing function `claude-hook` uses, and exit 0 on every failure so a session is never broken.
 - [ ] Rewrite the installer to own two entries in `$CODEX_HOME/hooks.json`, `Stop` and `SessionStart` with matcher `^compact$`, each recorded with its event, with no output redirect. Retarget `install/codex_hook/json.rs` from `PreToolUse` to the two events and restore the `reconcile` calls on install and on both uninstall paths, which C1 removed. Never write trust state. The installer and `reviewq link` say so while the stop hook has never reported on this installation. Rewrite the one installer test for the two entries, and remove the `#[expect(dead_code)]` C1 left.
@@ -343,7 +343,7 @@ One writer. Work top-down so each step compiles: callers first, then what they c
 **Steps**
 
 - [ ] Register the six tools from `ledger-schema.js`.
-- [ ] Handle a call with one bridge spawn that sends `{binding,input}`: the tool-use ID, the active turn, and the subagent's ID when the event has one. Send no heartbeat and no status request for a ledger call. Accept subagent calls for the four record tools and refuse the two closing tools from a subagent with a message that says the lead closes.
+- [ ] Handle a call with one bridge spawn that sends the tool, the tool-use ID, the active turn, the subagent's ID when the event has one, and the input. Send no heartbeat for a ledger call. Accept subagent calls for the four record tools and refuse the two closing tools from a subagent with a message that says the lead closes.
 - [ ] Return a result as the tool result and field errors as an error the model can read. Deny only an unlinked session.
 - [ ] Return the link's rule as text the model reads, not as a display-only notice.
 - [ ] Add the `SessionStart` entry to `hooks.json`. Give `finish_review` a longer bridge timeout than the 5 seconds the other calls keep.
