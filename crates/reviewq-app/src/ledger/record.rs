@@ -1,12 +1,15 @@
 //! The four record tools: `record_finding`, `assess_finding`, `record_note` and `review_ledger`.
 //! Each checks its Markdown fields with `markdown::check_field`, returns every field error
-//! together, then makes one `LedgerStore` call and words a `WriteRefusal` as a field error. The
-//! protocol checked field shapes, sizes and titles; the transport caps the error list.
+//! together, then makes one `LedgerStore` call and words a `WriteRefusal`, or a caller the
+//! store cannot bind, as a field error. The protocol checked field shapes, sizes and titles;
+//! the transport caps the error list. Text of only whitespace counts as empty wherever empty
+//! text removes something.
 
-use reviewq_domain::ledger::{FindingId, RecordRevision};
+use reviewq_domain::ledger::{FindingId, RecordRevision, Tool};
 
 use super::layout::repeats_fixed_heading;
 use super::markdown::{FieldProblem, MarkdownField, check_field};
+use super::refusal::for_agent;
 use super::{
     CallBinding, FindingAssessment, FindingFields, FindingPatch, LedgerPage, LedgerRead,
     LedgerStore, MAX_ACTIVE_FINDINGS, MAX_EXTRA_NOTES, NoteKey, NoteWrite, RecordField,
@@ -28,20 +31,23 @@ pub enum FindingInput {
 }
 
 /// Files or changes one finding. Returns the record's ID and revision, and the run so the
-/// caller can settle it.
+/// caller can settle it. A `proposedComment` or `details` of only whitespace is left out of
+/// a new finding and removes the field in a change.
 ///
 /// Fails with `InvalidFields` listing every Markdown field that breaks a rule, with nothing
 /// written; or with one field error for a store refusal: an unknown ID, a stale revision, a
-/// duplicate of an active finding, or a run already at `MAX_ACTIVE_FINDINGS`. Any other store
-/// error, such as `Forbidden` for a caller that is neither the run's lead nor a verified child
-/// of it, passes through.
+/// duplicate of an active finding, a run already at `MAX_ACTIVE_FINDINGS`, or a caller that is
+/// neither the run's lead nor a verified child of it. Other store errors pass through.
 pub async fn record_finding(
     store: &(impl LedgerStore + ?Sized),
     binding: CallBinding,
     input: FindingInput,
 ) -> Result<Recorded, AppError> {
     let (subject, write) = match input {
-        FindingInput::New(fields) => {
+        FindingInput::New(mut fields) => {
+            let body = &mut fields.body;
+            body.proposed_comment = body.proposed_comment.take().filter(|text| !blank(text));
+            body.details = body.details.take().filter(|text| !blank(text));
             checked(new_finding_errors(&fields))?;
             (
                 Subject::NewFinding,
@@ -51,8 +57,15 @@ pub async fn record_finding(
         FindingInput::Change {
             id,
             expected_revision,
-            patch,
+            mut patch,
         } => {
+            for field in [&mut patch.proposed_comment, &mut patch.details] {
+                if let Some(text) = field
+                    && text.as_deref().is_some_and(blank)
+                {
+                    *text = None;
+                }
+            }
             checked(patch_errors(&patch))?;
             let write = RecordWrite::ChangeFinding {
                 id,
@@ -68,8 +81,9 @@ pub async fn record_finding(
 /// Records what became of a finding already on the run. A retiring outcome removes it from
 /// the active set; a keeping outcome on a retired finding reopens it.
 ///
-/// Fails with one field error for an unknown ID, a stale revision, or a reopened finding that
-/// would take the run past `MAX_ACTIVE_FINDINGS`. Other store errors pass through.
+/// Fails with one field error for an unknown ID, a stale revision, a reopened finding that
+/// would take the run past `MAX_ACTIVE_FINDINGS`, or a caller the store cannot bind. Other
+/// store errors pass through.
 pub async fn assess_finding(
     store: &(impl LedgerStore + ?Sized),
     binding: CallBinding,
@@ -85,17 +99,22 @@ pub async fn assess_finding(
     .await
 }
 
-/// Replaces one note, or removes it with an empty body. A removal is not checked.
+/// Replaces one note, or removes it with a body that is empty or only whitespace. A removal
+/// is not checked.
 ///
 /// Fails with `InvalidFields` when the body breaks a Markdown rule for its section or an
 /// `extra` note's title repeats a fixed section's heading, with nothing written; or with one
 /// field error for a store refusal: a missing or stale expected revision, removing a note that
-/// is not on file, or a run already at `MAX_EXTRA_NOTES`. Other store errors pass through.
+/// is not on file, a run already at `MAX_EXTRA_NOTES`, or a caller the store cannot bind.
+/// Other store errors pass through.
 pub async fn record_note(
     store: &(impl LedgerStore + ?Sized),
     binding: CallBinding,
-    note: NoteWrite,
+    mut note: NoteWrite,
 ) -> Result<Recorded, AppError> {
+    if blank(&note.body) {
+        note.body.clear();
+    }
     let mut errors = Vec::new();
     if note.key.title().is_some_and(repeats_fixed_heading) {
         errors.push(FieldError::new(
@@ -117,23 +136,22 @@ pub async fn record_note(
 /// so only the binding's session is used.
 ///
 /// Fails with `InvalidFields` for a requested ID that names no finding of the run or a cursor
-/// issued for another read, and with a field error at `/cursor` when the ledger changed since
-/// the cursor was issued. Other store errors pass through.
+/// issued for another read, with a field error at `/cursor` when the ledger changed since the
+/// cursor was issued, and with a root field error for a caller the store cannot bind. Other
+/// store errors pass through.
 pub async fn review_ledger(
     store: &(impl LedgerStore + ?Sized),
     binding: CallBinding,
     read: LedgerRead,
 ) -> Result<LedgerPage, AppError> {
-    store
-        .read_ledger(binding.session, read)
-        .await
-        .map_err(|error| match error {
-            AppError::CursorExpired => AppError::InvalidFields(vec![FieldError::new(
-                "/cursor",
-                "The ledger changed after this cursor was issued. Read again without cursor to start from the first page.",
-            )]),
-            error => error,
-        })
+    match store.read_ledger(binding.session.clone(), read).await {
+        Ok(page) => Ok(page),
+        Err(AppError::CursorExpired) => Err(AppError::InvalidFields(vec![FieldError::new(
+            "/cursor",
+            "The ledger changed after this cursor was issued. Read again without cursor to start from the first page.",
+        )])),
+        Err(error) => Err(for_agent(store, &binding.session, Tool::ReviewLedger, error).await),
+    }
 }
 
 /// The record a write names, for wording a refusal.
@@ -158,17 +176,26 @@ impl Subject {
     }
 }
 
-/// Makes the store call and words its refusal as the one field error of the call.
+/// Makes the store call and words its refusal, or a caller it cannot bind, as the one field
+/// error of the call.
 async fn write_record(
     store: &(impl LedgerStore + ?Sized),
     binding: CallBinding,
     subject: Subject,
     write: RecordWrite,
 ) -> Result<Recorded, AppError> {
-    store
-        .write_record(binding, write)
-        .await?
-        .map_err(|refusal| AppError::InvalidFields(vec![refusal_error(&refusal, &subject)]))
+    let session = binding.session.clone();
+    let tool = write.tool();
+    match store.write_record(binding, write).await {
+        Ok(written) => written
+            .map_err(|refusal| AppError::InvalidFields(vec![refusal_error(&refusal, &subject)])),
+        Err(error) => Err(for_agent(store, &session, tool, error).await),
+    }
+}
+
+/// Whether authored text is empty or only whitespace, which means no text.
+fn blank(text: &str) -> bool {
+    text.trim().is_empty()
 }
 
 /// `Ok` when no field broke a rule, otherwise every error at once.
@@ -318,7 +345,7 @@ fn changed_fields(changed: &[RecordField]) -> String {
 }
 
 /// `name` with its first letter in upper case, to start a sentence.
-fn capitalized(name: &str) -> String {
+pub(super) fn capitalized(name: &str) -> String {
     let mut chars = name.chars();
     chars.next().map_or_else(String::new, |first| {
         first.to_uppercase().chain(chars).collect()

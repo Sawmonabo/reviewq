@@ -564,17 +564,9 @@ fn descriptor(value: Descriptor) -> Result<dto::Descriptor, AppError> {
         } => dto::Descriptor::Finding {
             finding_id: id,
             title,
-            severity: match severity {
-                app::Severity::P0 => dto::Severity::P0,
-                app::Severity::P1 => dto::Severity::P1,
-                app::Severity::P2 => dto::Severity::P2,
-                app::Severity::P3 => dto::Severity::P3,
-            },
+            severity: project_severity(severity),
             blocking,
-            section: match section {
-                app::FindingSection::Functional => dto::FindingSection::Functional,
-                app::FindingSection::Quality => dto::FindingSection::Quality,
-            },
+            section: project_finding_section(section),
             category,
             record_revision: RevisionDto::new(record_revision.get()).ok_or(AppError::Internal)?,
             source: range(source)?,
@@ -591,20 +583,11 @@ fn descriptor(value: Descriptor) -> Result<dto::Descriptor, AppError> {
                         locations: details
                             .locations
                             .into_iter()
-                            .map(|location| dto::FindingLocation {
-                                path: location.path,
-                                line: location.line,
-                            })
+                            .map(project_location)
                             .collect(),
                         issue: details.issue,
                         consequence: details.consequence,
-                        evidence: dto::FindingBasis {
-                            kind: match details.evidence.kind {
-                                app::FindingBasisKind::Observed => dto::FindingBasisKind::Observed,
-                                app::FindingBasisKind::Gap => dto::FindingBasisKind::Gap,
-                            },
-                            text: details.evidence.text,
-                        },
+                        evidence: project_basis(details.evidence),
                         proposed_comment: details.proposed_comment,
                         details: details.details,
                     }))
@@ -629,16 +612,7 @@ fn descriptor(value: Descriptor) -> Result<dto::Descriptor, AppError> {
                 .iter()
                 .map(|id| resource(id))
                 .collect::<Result<_, _>>()?,
-            conclusion: match conclusion {
-                app::FindingConclusion::Fixed => dto::FindingConclusion::Fixed,
-                app::FindingConclusion::ClarifiedWithdrawn => {
-                    dto::FindingConclusion::ClarifiedWithdrawn
-                }
-                app::FindingConclusion::Superseded => dto::FindingConclusion::Superseded,
-                app::FindingConclusion::PartlyAddressed => dto::FindingConclusion::PartlyAddressed,
-                app::FindingConclusion::StillPresent => dto::FindingConclusion::StillPresent,
-                app::FindingConclusion::Unverified => dto::FindingConclusion::Unverified,
-            },
+            conclusion: project_conclusion(conclusion),
         },
         Descriptor::Disposition {
             id,
@@ -652,6 +626,50 @@ fn descriptor(value: Descriptor) -> Result<dto::Descriptor, AppError> {
             publication: publication.map(project_publication),
         },
     })
+}
+
+pub(super) fn project_severity(value: app::Severity) -> dto::Severity {
+    match value {
+        app::Severity::P0 => dto::Severity::P0,
+        app::Severity::P1 => dto::Severity::P1,
+        app::Severity::P2 => dto::Severity::P2,
+        app::Severity::P3 => dto::Severity::P3,
+    }
+}
+
+pub(super) fn project_finding_section(value: app::FindingSection) -> dto::FindingSection {
+    match value {
+        app::FindingSection::Functional => dto::FindingSection::Functional,
+        app::FindingSection::Quality => dto::FindingSection::Quality,
+    }
+}
+
+pub(super) fn project_location(value: app::FindingLocation) -> dto::FindingLocation {
+    dto::FindingLocation {
+        path: value.path,
+        line: value.line,
+    }
+}
+
+pub(super) fn project_basis(value: app::FindingBasis) -> dto::FindingBasis {
+    dto::FindingBasis {
+        kind: match value.kind {
+            app::FindingBasisKind::Observed => dto::FindingBasisKind::Observed,
+            app::FindingBasisKind::Gap => dto::FindingBasisKind::Gap,
+        },
+        text: value.text,
+    }
+}
+
+pub(super) fn project_conclusion(value: app::FindingConclusion) -> dto::FindingConclusion {
+    match value {
+        app::FindingConclusion::Fixed => dto::FindingConclusion::Fixed,
+        app::FindingConclusion::ClarifiedWithdrawn => dto::FindingConclusion::ClarifiedWithdrawn,
+        app::FindingConclusion::Superseded => dto::FindingConclusion::Superseded,
+        app::FindingConclusion::PartlyAddressed => dto::FindingConclusion::PartlyAddressed,
+        app::FindingConclusion::StillPresent => dto::FindingConclusion::StillPresent,
+        app::FindingConclusion::Unverified => dto::FindingConclusion::Unverified,
+    }
 }
 
 fn project_publication(publication: app::Publication) -> dto::Publication {

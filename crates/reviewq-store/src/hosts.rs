@@ -387,9 +387,10 @@ fn allow_target(
 }
 
 /// Stores a session's observed activity and returns whether it changed. When the session is
-/// its run's lead and starts working from anything but working or blocked, the run's open pass
-/// records that its lead started a turn and a held pass reopens; blocked to working is the same
-/// turn continuing.
+/// its run's lead and becomes working or blocked from anything else, it started a turn: the
+/// run's open pass records that its lead started and a held pass reopens. Moving between
+/// working and blocked is the same turn continuing. A lead that becomes failed has started the
+/// pass too, without reopening a hold.
 pub(crate) fn record_activity(
     db: &Connection,
     session: &str,
@@ -417,11 +418,13 @@ pub(crate) fn record_activity(
         "UPDATE sessions SET host_activity=?2,host_questions=?3 WHERE session_key=?1",
     )?
     .execute(params![session, phase, questions])?;
-    if lead
-        && phase == Some("working")
-        && !matches!(previous.as_deref(), Some("working" | "blocked"))
-    {
-        crate::ledger::passes::lead_started(db, &run, now_ms()?)?;
+    if lead {
+        let in_turn = |phase: Option<&str>| matches!(phase, Some("working" | "blocked"));
+        if in_turn(phase) && !in_turn(previous.as_deref()) {
+            crate::ledger::passes::lead_started(db, &run, now_ms()?)?;
+        } else if phase == Some("failed") {
+            crate::ledger::passes::mark_started(db, &run, now_ms()?)?;
+        }
     }
     Ok(true)
 }

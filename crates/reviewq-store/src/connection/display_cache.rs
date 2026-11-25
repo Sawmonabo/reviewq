@@ -9,13 +9,14 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use reviewq_app::access::AppError;
-use reviewq_app::reports::{DisplayFallback, DisplayIndex, ReportReference};
-use reviewq_domain::identity::RunId;
-use rusqlite::{Connection, OpenFlags, OptionalExtension, TransactionBehavior, params};
+use reviewq_app::reports::{DisplayFallback, DisplayIndex};
+use reviewq_domain::identity::{ReceiptId, RunId};
+use rusqlite::{Connection, OpenFlags, TransactionBehavior, params};
 use uuid::Uuid;
 
 use super::profile::Profile;
 use super::staging::{self, Stage};
+use crate::reports::{read_markdown, version};
 use crate::{SqliteStore, StoreError};
 
 const SUFFIX: &str = ".findings-display-v2";
@@ -67,32 +68,37 @@ CREATE TABLE display_spans (
 ";
 
 impl SqliteStore {
-    /// Builds the display index of a sealed published version, from `source` when the caller
-    /// still holds the text. `NotFound` unless the version and its sealed artifact match.
+    /// Builds the display index of a sealed published version from its stored text, under the
+    /// reader's document budget. A version over the budget is left unindexed, because the
+    /// reader answers it with the `document_budget` fallback without consulting the cache.
+    /// `NotFound` unless the version and its sealed artifact exist.
     pub(crate) async fn cache_report_display(
         &self,
         run: RunId,
-        reference: ReportReference,
-        source: Option<String>,
+        receipt: ReceiptId,
     ) -> Result<(), StoreError> {
-        let hash = reference.hash;
-        let confirmed_hash = hash.clone();
-        // Resolve the sealed artifact on the normal reader and release its queue slot
-        // before opening or writing the independent cache.
-        let (artifact_id, profile) = self
+        // Read the text on the normal reader and release its queue slot before opening or
+        // writing the independent cache.
+        let source = self
             .submit(false, move |db, profile| {
-                let artifact_id: String = db
-                    .query_row(
-                        "SELECT a.artifact_id FROM report_versions v JOIN artifacts a USING(artifact_id)
-                         WHERE v.run_id=?1 AND v.receipt_id=?2 AND a.sha256=?3 AND a.sealed=1",
-                        params![run.as_str(), reference.receipt_id.as_str(), confirmed_hash.as_str()],
-                        |row| row.get(0),
-                    )
-                    .optional()?
-                    .ok_or(AppError::NotFound)?;
-                Ok((artifact_id, profile.clone()))
+                let tx = db.transaction_with_behavior(TransactionBehavior::Deferred)?;
+                let version = version(&tx, &run, &receipt)?;
+                if version.summary.stats.require_markdown_budget().is_err() {
+                    return Ok(None);
+                }
+                let source = read_markdown(&tx, &version)?;
+                tx.commit()?;
+                Ok(Some((
+                    profile.clone(),
+                    version.artifact_id,
+                    version.summary.reference.hash,
+                    source,
+                )))
             })
             .await?;
+        let Some((profile, artifact_id, hash, source)) = source else {
+            return Ok(());
+        };
         self.build_published_index(profile, artifact_id, hash, source)
             .await
     }

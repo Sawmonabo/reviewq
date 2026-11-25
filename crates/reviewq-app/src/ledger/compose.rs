@@ -1,8 +1,9 @@
 //! Composes a version's text from a snapshot's cover facts, findings and notes and the
 //! version's own facts, in one pass that records each card's and section's span as it
-//! writes. It parses nothing: fields were checked when filed, and their headings are shifted
-//! with `markdown::shift_headings`. A span runs from its heading to the end of its last line,
-//! without the line ending; a section's span holds its cards.
+//! writes. Fields were checked when filed, so composing cannot fail. The only parsing is
+//! `markdown::shift_headings`, which parses each Markdown field to find its headings. A span
+//! runs from its heading to the end of its last line, without the line ending; a section's
+//! span holds its cards.
 
 mod output;
 #[cfg(test)]
@@ -14,9 +15,9 @@ use reviewq_domain::identity::GitSha;
 use reviewq_domain::ledger::{VersionState, version_state};
 
 use super::layout::{
-    CHECKED_REVISION_LABEL, COVER_LABELS, CardLabel, DISCUSSIONS_LABEL, FixedSection, GAP_OPENING,
-    NO_LINKED_DISCUSSION, PUBLICATION_LABEL, SEPARATOR, THREADS_HEADER, UNKNOWN_REVISION,
-    blocking_word, outcome_label, scope, verdict_line,
+    CHECKED_REVISION_LABEL, COVER_LABELS, CardLabel, CountsLine, DISCUSSIONS_LABEL, FixedSection,
+    GAP_OPENING, NO_LINKED_DISCUSSION, PUBLICATION_LABEL, SEPARATOR, THREADS_HEADER,
+    UNKNOWN_REVISION, blocking_word, outcome_label, scope, verdict_line,
 };
 use super::markdown::shift_headings;
 use super::{
@@ -188,11 +189,9 @@ impl Report<'_> {
     fn header(&self, out: &mut Output) -> fmt::Result {
         let cover = self.cover;
         out.block()?;
-        write!(
-            out,
-            "[{}{SEPARATOR}!{}]({})",
-            cover.project_path, cover.iid, cover.mr_url
-        )?;
+        out.write_char('[')?;
+        write_literal(out, &cover.project_path)?;
+        write!(out, "{SEPARATOR}!{}]({})", cover.iid, cover.mr_url)?;
         out.block()?;
         out.write_str("# ")?;
         let title = self
@@ -216,9 +215,11 @@ impl Report<'_> {
     }
 
     fn counts(&self, out: &mut Output) -> fmt::Result {
-        let mut severities = [0_u32; 4];
-        let mut blocking = 0_u32;
-        let mut total = 0_u32;
+        let mut line = CountsLine {
+            severities: [0; 4],
+            blocking: 0,
+            nonblocking: 0,
+        };
         for finding in self.active() {
             let index = match finding.record.fields.severity {
                 Severity::P0 => 0,
@@ -226,24 +227,15 @@ impl Report<'_> {
                 Severity::P2 => 2,
                 Severity::P3 => 3,
             };
-            severities[index] += 1;
-            blocking += u32::from(effective_blocking(finding));
-            total += 1;
+            line.severities[index] += 1;
+            if effective_blocking(finding) {
+                line.blocking += 1;
+            } else {
+                line.nonblocking += 1;
+            }
         }
         out.block()?;
-        for (severity, count) in [Severity::P0, Severity::P1, Severity::P2, Severity::P3]
-            .into_iter()
-            .zip(severities)
-        {
-            write!(out, "{severity}: {count}{SEPARATOR}")?;
-        }
-        write!(
-            out,
-            "{}: {blocking}{SEPARATOR}{}: {}",
-            blocking_word(true),
-            blocking_word(false),
-            total - blocking
-        )
+        write!(out, "{line}")
     }
 
     fn cover_lines(&self, out: &mut Output) -> fmt::Result {
@@ -326,11 +318,11 @@ impl Report<'_> {
         outcome: &FindingOutcome,
     ) -> fmt::Result {
         write!(out, "\n| {}{SEPARATOR}", finding.record.id)?;
-        Cell(out).write_str(&finding.record.fields.title)?;
+        Cell::new(out).write_str(&finding.record.fields.title)?;
         write!(out, " | **{}.** ", outcome_label(outcome.conclusion))?;
-        Cell(out).write_str(&outcome.reason)?;
+        Cell::new(out).write_str(&outcome.reason)?;
         out.write_str(" | ")?;
-        let mut cell = Cell(out);
+        let mut cell = Cell::new(out);
         if outcome.discussion_ids.is_empty() {
             cell.write_str(NO_LINKED_DISCUSSION)?;
         }
@@ -465,13 +457,19 @@ fn labelled_field(out: &mut Output, label: CardLabel, text: &str) -> fmt::Result
     out.authored(&shift_headings(text))
 }
 
-/// Gap evidence under `Evidence`, beginning `Not confirmed.` unless the agent began it so.
+/// Gap evidence under `Evidence`, beginning `Not confirmed.` unless the agent already began
+/// with that phrase in any ASCII case, followed by `.` or `:`.
 fn gap_field(out: &mut Output, text: &str) -> fmt::Result {
     out.block()?;
     write!(out, "**{}** ", CardLabel::Evidence.text())?;
     let shifted = shift_headings(text);
     let text = without_blank_lines(&shifted);
-    if !text.starts_with(GAP_OPENING) {
+    let phrase = GAP_OPENING.trim_end_matches('.');
+    let opens = text
+        .get(..phrase.len())
+        .is_some_and(|start| start.eq_ignore_ascii_case(phrase))
+        && matches!(text.as_bytes().get(phrase.len()), Some(b'.' | b':'));
+    if !opens {
         write!(out, "{GAP_OPENING} ")?;
     }
     out.write_str(text)

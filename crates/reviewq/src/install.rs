@@ -343,9 +343,18 @@ pub(crate) async fn install(bundle_path: &Path) -> Result<(), Failure> {
             "ReviewQ left the Codex hooks unchanged because it cannot read {}. Remove that file and install again.",
             ownership.display()
         ),
-        (true, Ok(codex_hook::Reconciled::Done)) => println!(
-            "Codex runs the ReviewQ Stop and SessionStart hooks only after you review and trust them in /hooks. Without them a review still files, closes and shows as unfinished when it is not closed; only the end-of-turn reminder and the reminder after compaction are missing."
-        ),
+        (true, Ok(codex_hook::Reconciled::Done)) => println!("{CODEX_HOOKS_TRUST}"),
+        (has_codex, Ok(codex_hook::Reconciled::Kept { files, reason })) => {
+            for file in files {
+                eprintln!(
+                    "ReviewQ kept a Codex hook entry it no longer uses in {}: {reason} Remove that changed entry there, then install again.",
+                    file.display()
+                );
+            }
+            if has_codex {
+                println!("{CODEX_HOOKS_TRUST}");
+            }
+        }
         (true, Err(error)) => eprintln!(
             "ReviewQ could not configure its Codex hooks: {error} Reviews still file and close without them."
         ),
@@ -359,6 +368,9 @@ pub(crate) async fn install(bundle_path: &Path) -> Result<(), Failure> {
     }
     Ok(())
 }
+
+/// Printed after the Codex hooks are installed.
+const CODEX_HOOKS_TRUST: &str = "Codex runs the ReviewQ Stop and SessionStart hooks only after you review and trust them in /hooks. Without them a review still files, closes and shows as unfinished when it is not closed; only the end-of-turn reminder and the reminder after compaction are missing.";
 
 fn report_preserved(entries: Vec<PathBuf>) {
     for path in entries {
@@ -514,18 +526,45 @@ fn verified_unit(paths: &Paths, release: &Release, bundle: &Bundle) -> Result<Ve
     Err("The previous service unit no longer matches its installation.".into())
 }
 
-/// Removes ReviewQ's Codex hooks while uninstalling. When the ownership file cannot be read,
-/// it says what to remove by hand and lets the uninstall continue. Fails when an owned entry
-/// was changed by the user.
-fn retire_codex_hooks(paths: &Paths) -> Result<(), Failure> {
-    if let codex_hook::Reconciled::Unreadable(ownership) = codex_hook::reconcile(paths, false)? {
-        eprintln!(
-            "ReviewQ left its Codex hooks in {} because it cannot read {}. Remove ReviewQ's entries there and that file.",
-            paths.codex_home.join("hooks.json").display(),
-            ownership.display()
-        );
+/// Removes ReviewQ's Codex hooks while uninstalling and returns the `hooks.json` files that
+/// still hold an entry it could not remove, usually because the user changed it, after
+/// saying what to remove there. When the ownership file cannot be read, it says what to
+/// remove by hand and returns nothing. Either way the uninstall continues. Fails when the
+/// ownership file cannot be written.
+fn retire_codex_hooks(paths: &Paths) -> Result<Vec<PathBuf>, Failure> {
+    match codex_hook::reconcile(paths, false)? {
+        codex_hook::Reconciled::Done => Ok(Vec::new()),
+        codex_hook::Reconciled::Unreadable(ownership) => {
+            eprintln!(
+                "ReviewQ left its Codex hooks in {} because it cannot read {}. Remove ReviewQ's entries there and that file.",
+                paths.codex_home.join("hooks.json").display(),
+                ownership.display()
+            );
+            Ok(Vec::new())
+        }
+        codex_hook::Reconciled::Kept { files, reason } => {
+            for file in &files {
+                eprintln!(
+                    "ReviewQ left its Codex hooks in {}: {reason} Remove the Stop and SessionStart entries there that run \"internal codex-hook\".",
+                    file.display()
+                );
+            }
+            Ok(files)
+        }
     }
-    Ok(())
+}
+
+/// The uninstall's failure when `entries` were left in place for the user to resolve.
+fn preserved_entries(entries: &[PathBuf]) -> Failure {
+    format!(
+        "Preserved modified installation entries: {}",
+        entries
+            .iter()
+            .map(|path| path.display().to_string())
+            .collect::<Vec<_>>()
+            .join(", ")
+    )
+    .into()
 }
 
 pub(crate) async fn uninstall() -> Result<(), Failure> {
@@ -536,7 +575,10 @@ pub(crate) async fn uninstall() -> Result<(), Failure> {
         return Err("Finish the interrupted activation before uninstalling.".into());
     }
     let Some(active) = inventory.active.as_ref() else {
-        retire_codex_hooks(&paths)?;
+        let kept_hooks = retire_codex_hooks(&paths)?;
+        if !kept_hooks.is_empty() {
+            return Err(preserved_entries(&kept_hooks));
+        }
         println!(
             "ReviewQ is already removed. Retained data {}",
             paths.profile.display()
@@ -577,7 +619,7 @@ pub(crate) async fn uninstall() -> Result<(), Failure> {
     let removed = crate::checkout_setup::remove_installation(&paths.profile, &store).await;
     store.close(std::time::Duration::from_secs(10)).await?;
     removed?;
-    retire_codex_hooks(&paths)?;
+    let kept_hooks = retire_codex_hooks(&paths)?;
     claude::remove(&paths, active).await?;
     if let Some(windows) = &active.windows {
         windows.remove().await?;
@@ -593,16 +635,11 @@ pub(crate) async fn uninstall() -> Result<(), Failure> {
     }
     service::reload().await?;
     if !conflicts.is_empty() {
-        return Err(format!(
-            "Preserved modified installation entries: {}",
-            conflicts
-                .iter()
-                .map(|path| path.display().to_string())
-                .collect::<Vec<_>>()
-                .join(", ")
-        )
-        .into());
+        conflicts.extend(kept_hooks);
+        return Err(preserved_entries(&conflicts));
     }
+    // The launcher and releases are gone, so a kept hook entry no longer holds the uninstall
+    // open: it is reported once the removal is recorded, and stays in the ownership file.
     retention::clear_assets_journal(&paths)?;
     inventory = Inventory::default();
     paths::write_json(&journal(&paths), &inventory)?;
@@ -611,6 +648,9 @@ pub(crate) async fn uninstall() -> Result<(), Failure> {
         paths.profile.display(),
         runtime_settings::config_path(&paths.profile, false).display()
     );
+    if !kept_hooks.is_empty() {
+        return Err(preserved_entries(&kept_hooks));
+    }
     Ok(())
 }
 

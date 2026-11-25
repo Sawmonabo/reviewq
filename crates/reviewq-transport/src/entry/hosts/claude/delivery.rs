@@ -9,10 +9,10 @@ use reviewq_app::hosts::{
     ClaudeChild, ClaudeClassicEvent, ClaudeDeliveryAck, ClaudeDeliveryResult, ClaudeTurnResult,
     DeliveryWork, ObservedInput,
 };
-use reviewq_app::ledger::{GateRequest, HookSession, publish};
+use reviewq_app::ledger::{GateRequest, HookSession};
 use reviewq_domain::session::AbsolutePath;
 use reviewq_protocol::Success;
-use reviewq_protocol::ledger::{GateReply, ReadbackReply};
+use reviewq_protocol::ledger::GateReply;
 use serde::{Deserialize, Serialize};
 
 use super::{ClaudeCommand, ClaudeOffer, registered_lead, verified_context};
@@ -293,8 +293,7 @@ enum Outcome {
 
 /// The Claude plugin's hook events. Replies `{data:null}`, except `stopping`, which gets the
 /// gate's `GateReply`, and `compacted`, which gets the read-back's `ReadbackReply`. A session
-/// that leads no review gets `{block:false}` and an empty text for those two. A turn signal
-/// also settles the session's run.
+/// that leads no review gets `{block:false}` and an empty text for those two.
 pub(super) async fn hook(
     State(entry): State<Arc<Entry>>,
     headers: HeaderMap,
@@ -365,7 +364,6 @@ pub(super) async fn hook(
         }
         Hook::Turn(turn) => {
             let (lead, _) = verified_context(&entry, turn.context).await?;
-            let run = lead.run_id().clone();
             entry
                 .store
                 .record_claude_turn(
@@ -377,9 +375,6 @@ pub(super) async fn hook(
                     },
                 )
                 .await?;
-            // The turn is recorded. A run that fails to settle here is settled by the periodic
-            // settle tick, so the hook still succeeds.
-            let _ = publish::settle(entry.store.as_ref(), run).await;
             return answered(&entry, ());
         }
     };
@@ -469,12 +464,7 @@ async fn gate_hook(
 /// `compacted`: the read-back for the session's lead, or an empty text when the session
 /// leads no review.
 async fn read_back_hook(entry: &Entry, context: &ClaudeCommand) -> Result<Response, ApiError> {
-    let reply = match ledger_session(entry, context).await? {
-        Some(session) => read_back(entry, session).await?,
-        None => ReadbackReply {
-            text: String::new(),
-        },
-    };
+    let reply = read_back(entry, ledger_session(entry, context).await?).await?;
     answered(entry, reply)
 }
 

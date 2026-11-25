@@ -17,7 +17,9 @@ use reviewq_app::reports::{
     RevisionEvidence, Severity, Verdict,
 };
 use reviewq_domain::identity::{GitSha, ReportHash, Revision, RunId};
-use reviewq_domain::ledger::{FailureKind, FindingId, PassKind, RecordRevision, VersionKind};
+use reviewq_domain::ledger::{
+    FailureKind, FindingId, PassKind, PassState, RecordRevision, VersionKind,
+};
 use reviewq_domain::session::AbsolutePath;
 use sha2::{Digest, Sha256};
 
@@ -304,6 +306,56 @@ fn publish_is_conditional() {
     });
 }
 
+#[test]
+fn pass_hold_and_start_follow_lead_activity() {
+    run(async {
+        let temp = tempfile::tempdir().unwrap();
+        std::fs::set_permissions(temp.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
+        let path = AbsolutePath::from_canonical(temp.path().join("passes.sqlite3")).unwrap();
+        let store = open(path).await;
+
+        // The lead was seen working before its launch's pass opened, so the pass has started
+        // and settles once the lead is idle.
+        activity(&store, "working").await;
+        store
+            .write(|tx| {
+                tx.sql.execute(
+                    "INSERT INTO launch_attempts(id,actor,submission_id,review_id,request_digest,
+                       settings_revision,source_sha,provider,checkout,common_dir,invocation,profile,
+                       native_id,run_id,session_key,state,created_at_ms,updated_at_ms)
+                     VALUES('launch',zeroblob(32),'launch','review',zeroblob(32),0,?1,'claude',
+                       CAST('/work' AS BLOB),CAST('/work' AS BLOB),'{}',CAST('/claude' AS BLOB),'lead',
+                       'run','claude:lead','confirmed',0,0)",
+                    [SHA],
+                )?;
+                crate::ledger::passes::open_for_launch(&tx.sql, "launch", 0)
+            })
+            .await
+            .unwrap();
+        activity(&store, "idle").await;
+        assert_eq!(lead_idle(&store).await, [true]);
+
+        // A hold made before the host reported its turn as working survives the host's first
+        // sight of that turn, and reopens when the next turn starts without any call.
+        store
+            .hold_pass(call("ask"), "Which branch is the base?".into())
+            .await
+            .unwrap()
+            .unwrap();
+        let state = async || {
+            let page = store.read_ledger(lead(), short()).await.unwrap();
+            page.pass.map(|pass| pass.state)
+        };
+        activity(&store, "working").await;
+        assert_eq!(state().await, Some(PassState::Waiting));
+        activity(&store, "idle").await;
+        assert_eq!(state().await, Some(PassState::Waiting));
+        activity(&store, "working").await;
+        assert_eq!(state().await, Some(PassState::Open));
+        store.close(Duration::from_secs(1)).await.unwrap();
+    });
+}
+
 fn run(test: impl std::future::Future<Output = ()>) {
     tokio::runtime::Builder::new_current_thread()
         .enable_time()
@@ -482,7 +534,7 @@ fn span(text: &str, start: usize) -> Span {
 
 /// The settle read's `lead_idle` for each candidate run.
 async fn lead_idle(store: &SqliteStore) -> Vec<bool> {
-    let candidates = store.runs_to_settle(None).await.unwrap();
+    let candidates = store.runs_to_settle().await.unwrap();
     candidates.iter().map(|run| run.facts.lead_idle).collect()
 }
 

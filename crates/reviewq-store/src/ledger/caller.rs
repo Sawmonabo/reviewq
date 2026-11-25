@@ -4,7 +4,6 @@
 use reviewq_app::access::{Actor, AppError};
 use reviewq_app::ledger::{CallBinding, Caller, CallingAgent, HookSession, HostSession};
 use reviewq_domain::identity::{NativeSessionId, RunId, SessionKey};
-use reviewq_domain::ledger::CallerRole;
 use reviewq_domain::session::{HostProvider, LeadTarget};
 use rusqlite::{Connection, params};
 
@@ -205,14 +204,6 @@ pub(super) fn hook(
     match rows.as_slice() {
         [(run, session, lead)] => Ok(Some((parse(run)?, parse(session)?, *lead))),
         _ => Ok(None),
-    }
-}
-
-/// The role of a call from `agent`: only the lead itself is the lead.
-pub(super) fn role(agent: &CallingAgent) -> CallerRole {
-    match agent {
-        CallingAgent::Lead => CallerRole::Lead,
-        CallingAgent::ClaudeSubagent(_) | CallingAgent::CodexThread(_) => CallerRole::Child,
     }
 }
 

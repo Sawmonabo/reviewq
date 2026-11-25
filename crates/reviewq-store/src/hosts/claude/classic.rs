@@ -89,7 +89,6 @@ pub(super) fn record(
                 tx.emit(&[ResourceKey::History(Some(lead.session_key().clone()))])?;
             }
         }
-        ClaudeClassicEvent::Stopping => {}
         _ => return Err(AppError::Conflict.into()),
     }
     Ok(())

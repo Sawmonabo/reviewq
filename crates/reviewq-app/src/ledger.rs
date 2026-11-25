@@ -6,13 +6,14 @@
 //! replay and the counts behind the per-run limits, because only its transaction sees them.
 //! Composing happens outside every transaction.
 
-pub mod compose;
+mod compose;
 mod layout;
 pub(crate) mod markdown;
 pub mod passes;
 pub mod publish;
 pub mod readback;
 pub mod record;
+mod refusal;
 mod version;
 
 pub use version::{
@@ -164,13 +165,19 @@ pub struct Caller {
     pub turn: Option<NativeTurnId>,
 }
 
-impl Caller {
-    /// `Lead` only for `CallingAgent::Lead`; every subagent and descendant thread is a child.
+impl CallingAgent {
+    /// `Lead` only for the lead itself; every subagent and descendant thread is a child.
     pub fn role(&self) -> CallerRole {
-        match self.agent {
-            CallingAgent::Lead => CallerRole::Lead,
-            CallingAgent::ClaudeSubagent(_) | CallingAgent::CodexThread(_) => CallerRole::Child,
+        match self {
+            Self::Lead => CallerRole::Lead,
+            Self::ClaudeSubagent(_) | Self::CodexThread(_) => CallerRole::Child,
         }
+    }
+}
+
+impl Caller {
+    pub fn role(&self) -> CallerRole {
+        self.agent.role()
     }
 
     pub fn provider(&self) -> HostProvider {
@@ -648,8 +655,9 @@ pub trait LedgerStore: Send + Sync {
     /// has no current workspace or grant authority.
     fn update_snapshot(&self, run: RunId) -> AppFuture<'_, LedgerSnapshot>;
 
-    /// Commits a publish after rechecking its guard. The first rule that applies decides, and
-    /// each but the last writes nothing:
+    /// Commits a publish after rechecking its guard. A closing call whose call ID is already
+    /// stored is `Stale`, so the next snapshot replays its acknowledgement. Otherwise the first
+    /// rule that applies decides, and each but the last writes nothing:
     ///
     /// 1. A changed ledger sequence, disposition revision or head is `Stale`, even when the
     ///    pass or batch changed too, so a closing call that lost a race recomposes instead of
@@ -672,10 +680,11 @@ pub trait LedgerStore: Send + Sync {
     fn index_version(&self, run: RunId, receipt: ReceiptId) -> AppFuture<'_, ()>;
 
     /// The runs with an open pass or unpublished records, with their settle facts from
-    /// stored session state, in one indexed read. `Some(run)` reads only that run. Leaves out
-    /// a run whose unresolved failure was recorded at its current ledger sequence, so a run
-    /// found unfinished, or whose update failed, is not reworked until something changes.
-    fn runs_to_settle(&self, run: Option<RunId>) -> AppFuture<'_, Vec<SettleCandidate>>;
+    /// stored session state, in one indexed read. Leaves out a run whose unresolved failure of
+    /// the kind settling would record (`unfinished_review` for its open pass, `update_failed`
+    /// when it has none) was recorded at its current ledger sequence, so it is not reworked
+    /// until a record write or closing call changes it.
+    fn runs_to_settle(&self) -> AppFuture<'_, Vec<SettleCandidate>>;
 
     /// Records a failure with one notification when first seen for its run, pass and kind.
     /// A repeat updates the reason and sequence in place and raises nothing. A failure for a

@@ -20,7 +20,7 @@ pub(super) fn read(
     read: LedgerRead,
 ) -> Result<LedgerPage, StoreError> {
     let (lead, agent) = caller::attribute(db, session)?;
-    if !may_call(Tool::ReviewLedger, caller::role(&agent)) {
+    if !may_call(Tool::ReviewLedger, agent.role()) {
         return Err(AppError::Forbidden.into());
     }
     let run = lead.run_id();

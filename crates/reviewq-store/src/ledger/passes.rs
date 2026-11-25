@@ -1,5 +1,5 @@
 //! Review passes: opened inside the launch confirmation, the batch delivery and the first
-//! record write, held by `needs_input`, reopened by the lead's next input, ended by a
+//! record write, held by `needs_input`, reopened by the lead's next turn, ended by a
 //! successor batch or archiving. Also the stop gate, the read-back and the hook reports.
 
 use reviewq_app::access::AppError;
@@ -52,6 +52,8 @@ pub(super) struct PassRow {
     pub(super) state: PassState,
     /// The ledger sequence when it opened.
     pub(super) opened_sequence: i64,
+    /// When it opened, in Unix milliseconds.
+    pub(super) opened_at_ms: i64,
     pub(super) batch: Option<String>,
     gate_turn: Option<String>,
     gate_blocks: u8,
@@ -60,7 +62,7 @@ pub(super) struct PassRow {
 pub(super) fn current(db: &Connection, run: &str) -> Result<Option<PassRow>, StoreError> {
     let sql = format!(
         "SELECT p.pass_id, p.kind, {PASS_STATE}, p.opened_sequence, p.batch_id, p.gate_turn_id,
-           p.gate_blocks
+           p.gate_blocks, p.opened_at_ms
          FROM review_passes p WHERE p.run_id=?1 AND p.state<>'closed'"
     );
     let mut statement = db.prepare_cached(&sql)?;
@@ -76,6 +78,7 @@ pub(super) fn current(db: &Connection, run: &str) -> Result<Option<PassRow>, Sto
         batch: row.get(4)?,
         gate_turn: row.get(5)?,
         gate_blocks: u8::try_from(row.get::<_, i64>(6)?).map_err(|_| AppError::Internal)?,
+        opened_at_ms: row.get(7)?,
     }))
 }
 
@@ -143,19 +146,31 @@ pub(super) fn open(
     Ok(())
 }
 
+/// The open time when the lead of the run in `run` is already stored as working or blocked,
+/// else NULL: a lead seen in its turn before the pass opened has started the pass. A lead
+/// still idle, as registration left it, has not. `time` names the open time's parameter.
+fn started_at_open(run: &str, time: &str) -> String {
+    format!(
+        "(SELECT {time} FROM runs r JOIN sessions s ON s.session_key=r.lead_session_key
+          WHERE r.run_id={run} AND s.host_activity IN ('working','blocked'))"
+    )
+}
+
 /// Opens the full-review pass of a launch that just became confirmed. Inside the launch's
 /// confirmation transaction; opens nothing when the launch is not confirmed or bound to a run.
 pub(crate) fn open_for_launch(db: &Connection, launch: &str, time: i64) -> Result<(), StoreError> {
     let Some(kind) = opens_pass(PassEvent::ReviewStarted) else {
         return Ok(());
     };
-    db.prepare_cached(
-        "INSERT INTO review_passes(run_id, kind, state, opened_by, launch_id, opened_sequence, opened_at_ms)
+    let started = started_at_open("l.run_id", "?3");
+    db.prepare_cached(&format!(
+        "INSERT INTO review_passes(run_id, kind, state, opened_by, launch_id, opened_sequence,
+           opened_at_ms, lead_started_at_ms)
          SELECT l.run_id, ?2, 'open', 'launch', l.id,
-           coalesce((SELECT sequence FROM ledger_runs s WHERE s.run_id=l.run_id), 0), ?3
+           coalesce((SELECT sequence FROM ledger_runs s WHERE s.run_id=l.run_id), 0), ?3, {started}
          FROM launch_attempts l WHERE l.id=?1 AND l.state='confirmed' AND l.run_id IS NOT NULL
-         ON CONFLICT DO NOTHING",
-    )?
+         ON CONFLICT DO NOTHING"
+    ))?
     .execute(params![launch, kind.as_str(), time])?;
     Ok(())
 }
@@ -177,14 +192,15 @@ pub(crate) fn open_for_batch(
            AND kind='selected_threads' AND state<>'closed'",
     )?
     .execute(params![review.as_str(), batch, time])?;
-    db.prepare_cached(
+    let started = started_at_open("b.run_id", "?4");
+    db.prepare_cached(&format!(
         "INSERT INTO review_passes(run_id, kind, state, opened_by, review_id, batch_id,
-           opened_sequence, opened_at_ms)
+           opened_sequence, opened_at_ms, lead_started_at_ms)
          SELECT b.run_id, ?3, 'open', 'batch', b.review_id, b.batch_id,
-           coalesce((SELECT sequence FROM ledger_runs s WHERE s.run_id=b.run_id), 0), ?4
+           coalesce((SELECT sequence FROM ledger_runs s WHERE s.run_id=b.run_id), 0), ?4, {started}
          FROM followup_batches b WHERE b.review_id=?1 AND b.batch_id=?2 AND b.state='executing'
-         ON CONFLICT DO NOTHING",
-    )?
+         ON CONFLICT DO NOTHING"
+    ))?
     .execute(params![review.as_str(), batch, kind.as_str(), time])?;
     Ok(())
 }
@@ -215,14 +231,18 @@ pub(super) fn lead_seen(
     reopen(db, run, turn, false)
 }
 
-/// The run's lead started working from idle: the open pass records that its lead started,
-/// and a held pass reopens. Inside the transaction that stores the lead's activity.
+/// The run's lead started a turn, as its stored activity shows: the open pass records that
+/// its lead started, and a held pass reopens. Inside the transaction that stores the lead's
+/// activity. A hold records its lead as working first, so the activity that follows the
+/// holding turn is a change only once the lead was seen out of that turn.
 pub(crate) fn lead_started(db: &Connection, run: &str, time: i64) -> Result<(), StoreError> {
     mark_started(db, run, time)?;
     reopen(db, run, None, true)
 }
 
-fn mark_started(db: &Connection, run: &str, time: i64) -> Result<(), StoreError> {
+/// The open pass records that its lead started, once: the lead started a turn, called, or
+/// failed. Settling waits for it.
+pub(crate) fn mark_started(db: &Connection, run: &str, time: i64) -> Result<(), StoreError> {
     db.prepare_cached(
         "UPDATE review_passes SET lead_started_at_ms=?2
          WHERE run_id=?1 AND state<>'closed' AND lead_started_at_ms IS NULL",
@@ -231,9 +251,9 @@ fn mark_started(db: &Connection, run: &str, time: i64) -> Result<(), StoreError>
     Ok(())
 }
 
-/// Stores the reopening of a held pass: the lead started a new turn (`input`), its next
-/// input is newer than the hold, or it calls in a turn other than the one that held it. A
-/// batch still waiting for the lead keeps its slot again.
+/// Stores the reopening of a held pass: the lead's stored activity started a new turn
+/// (`input`), its next input is newer than the hold, or it calls in a turn other than the one
+/// that held it. A batch still waiting for the lead keeps its slot again.
 pub(super) fn reopen(
     db: &Connection,
     run: &str,
@@ -280,7 +300,11 @@ pub(super) fn release_batch(db: &Connection, row: &PassRow) -> Result<(), StoreE
     Ok(())
 }
 
-/// `needs_input`: holds the open pass until the lead's next input and raises the question.
+/// `needs_input`: holds the open pass until the lead's next turn and raises the question once
+/// per hold. The call proves its turn is running, so the lead is stored as working unless it
+/// already is or is blocked; the host's later sight of the same turn is then no change and
+/// cannot reopen the hold. A repeat while the pass still waits keeps the hold and updates its
+/// reason.
 pub(super) fn hold(
     tx: &mut WriteTx<'_>,
     binding: &CallBinding,
@@ -298,26 +322,38 @@ pub(super) fn hold(
     let run = lead.run_id().as_str();
     let time = now_ms()?;
     lead_seen(db, run, caller.turn.as_ref(), time)?;
+    let working = lead_working(db, run)?;
     let receipt = match current(db, run)? {
         None => None,
         Some(row) => {
-            db.prepare_cached(
-                "UPDATE review_passes SET state='waiting', held_turn_id=?2, held_at_ms=?3,
-                   hold_reason=?4 WHERE pass_id=?1",
-            )?
-            .execute(params![
-                row.id.get(),
-                caller.turn.as_ref().map(|turn| turn.as_str()),
-                time,
-                reason
-            ])?;
+            let held_at: i64 = db
+                .prepare_cached(
+                    "UPDATE review_passes SET hold_reason=?4,
+                       held_turn_id=CASE WHEN state='waiting' THEN coalesce(held_turn_id, ?2) ELSE ?2 END,
+                       held_at_ms=CASE WHEN state='waiting' THEN held_at_ms ELSE ?3 END,
+                       state='waiting'
+                     WHERE pass_id=?1 RETURNING held_at_ms",
+                )?
+                .query_row(
+                    params![
+                        row.id.get(),
+                        caller.turn.as_ref().map(|turn| turn.as_str()),
+                        time,
+                        reason
+                    ],
+                    |row| row.get(0),
+                )?;
             release_batch(db, &row)?;
-            Some(HoldReceipt {
-                pass: row.kind,
-                unpublished: unpublished(db, run)?,
-            })
+            Some((
+                HoldReceipt {
+                    pass: row.kind,
+                    unpublished: unpublished(db, run)?,
+                },
+                format!("needs_input:{}:{held_at}", row.id.get()),
+            ))
         }
     };
+    let (receipt, occurrence) = receipt.unzip();
     let result = calls::hold_json(receipt.as_ref());
     calls::store(
         db,
@@ -328,13 +364,7 @@ pub(super) fn hold(
         &result,
         time,
     )?;
-    if receipt.is_some() {
-        let occurrence = format!(
-            "needs_input:{}:{}:{}",
-            provider_label(caller.provider()),
-            caller.native_session(),
-            caller.call_id
-        );
+    if let Some(occurrence) = occurrence {
         let notification = insert_notification(
             db,
             Observation {
@@ -359,8 +389,33 @@ pub(super) fn hold(
             ResourceKey::Review(Some(review)),
             ResourceKey::Run(Some(run)),
         ])?;
+    } else if working {
+        advance_queue(&tx.sql)?;
+        tx.emit(&[
+            ResourceKey::Queue,
+            ResourceKey::Run(Some(lead.run_id().clone())),
+        ])?;
     }
     Ok(receipt)
+}
+
+/// Stores the run's lead as working, through the one activity writer, unless it is already
+/// working or blocked. Returns whether the stored activity changed.
+fn lead_working(db: &Connection, run: &str) -> Result<bool, StoreError> {
+    let lead: Option<(String, bool)> = db
+        .prepare_cached(
+            "SELECT s.session_key, s.host_questions FROM runs r
+             JOIN sessions s ON s.session_key=r.lead_session_key
+             WHERE r.run_id=?1 AND coalesce(s.host_activity, '') NOT IN ('working','blocked')",
+        )?
+        .query_row([run], |row| Ok((row.get(0)?, row.get(1)?)))
+        .optional()?;
+    match lead {
+        Some((session, questions)) => {
+            crate::hosts::record_activity(db, &session, Some("working"), questions)
+        }
+        None => Ok(false),
+    }
 }
 
 /// The target `needs_input` and `finish_review` store: the run, since neither names a record.

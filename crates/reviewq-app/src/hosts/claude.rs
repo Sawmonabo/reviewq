@@ -161,7 +161,6 @@ pub enum ClaudeClassicEvent {
         index: u64,
         final_chunk: bool,
     },
-    Stopping,
     Disconnected {
         generation: String,
     },

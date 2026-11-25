@@ -2,8 +2,7 @@
 
 mod cutter;
 
-use cutter::HtmlRendering;
-pub use cutter::{DisplayBlock, DisplayBlockKind, DisplayFallback};
+pub use cutter::{DisplayBlock, DisplayBlockKind, DisplayFallback, HtmlRendering};
 
 use super::ReportSummary;
 
@@ -59,16 +58,18 @@ pub struct DisplayWindowBlock {
 /// for a reader that renders raw HTML as markup, such as a transcript's: any HTML falls back
 /// to the whole document. Run this operation on a blocking worker.
 pub fn build_display_index(source: &str) -> DisplayIndex {
-    index(source, HtmlRendering::Markup)
+    display_index(source, HtmlRendering::Markup)
 }
 
 /// Index a published report version's text, whose reader shows raw HTML as text, so HTML
 /// keeps the windowed reader. Otherwise as `build_display_index`.
 pub fn build_report_display_index(source: &str) -> DisplayIndex {
-    index(source, HtmlRendering::Text)
+    display_index(source, HtmlRendering::Text)
 }
 
-fn index(source: &str, html: HtmlRendering) -> DisplayIndex {
+/// Index `source` for a reader that renders raw HTML as `html` says: `build_display_index`
+/// for `Markup` and `build_report_display_index` for `Text`. For a caller that serves both.
+pub(crate) fn display_index(source: &str, html: HtmlRendering) -> DisplayIndex {
     match cutter::cut(source, html) {
         Ok(layout) => DisplayIndex::Indexed(layout),
         Err(reason) => DisplayIndex::Fallback(reason),

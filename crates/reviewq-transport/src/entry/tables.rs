@@ -6,7 +6,9 @@ use std::time::{Duration, Instant};
 use reviewq_app::access::AppError;
 use reviewq_app::reading::table::paged::{self, Index};
 use reviewq_app::reading::table::{self, Column, Inline, MIN_TABLE_BYTES};
-use reviewq_app::reports::{DisplayBlockKind, DisplayIndex, build_display_index};
+use reviewq_app::reports::{
+    DisplayBlockKind, DisplayIndex, HtmlRendering, build_report_display_index,
+};
 use reviewq_domain::identity::ReportHash;
 use reviewq_protocol::reports::{DocumentDisplay, PreparedTable, TableColumn, TableInline};
 use sha2::{Digest, Sha256};
@@ -95,7 +97,7 @@ impl Cache {
         let (input, mut chunks) = mpsc::channel::<Vec<u8>>(2);
         let expected = hash.clone();
         let worker = tokio::task::spawn_blocking(move || {
-            let mut builder = paged::Builder::default();
+            let mut builder = paged::Builder::new(HtmlRendering::Text);
             let mut digest = Sha256::new();
             let mut seen = 0;
             while let Some(raw) = chunks.blocking_recv() {
@@ -196,8 +198,10 @@ fn lookup(entries: &Mutex<Entries>, key: &Key) -> Option<Option<Arc<PreparedTabl
     Some(result)
 }
 
+/// The first table of a report version that the table reader can show, at its place in the
+/// whole text. Report text shows raw HTML as text, so the report index is used.
 fn prepare_document(source: &str) -> Option<PreparedTable> {
-    let DisplayIndex::Indexed(layout) = build_display_index(source) else {
+    let DisplayIndex::Indexed(layout) = build_report_display_index(source) else {
         return None;
     };
     for block in layout.blocks {

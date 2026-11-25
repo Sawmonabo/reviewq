@@ -173,7 +173,7 @@ impl SqliteStore {
         profile: Arc<Profile>,
         artifact: String,
         hash: ReportHash,
-        source: Option<String>,
+        source: String,
     ) -> Result<(), StoreError> {
         let key = IndexKey { artifact, hash };
         let mut released = self.display_builds.released.subscribe();
@@ -236,7 +236,7 @@ impl SqliteStore {
             let source = read_markdown(&tx, &version)?;
             tx.commit()?;
             runtime.spawn_blocking(move || {
-                if build_and_publish(&profile, store_id, &key, Some(source)).is_err() {
+                if build_and_publish(&profile, store_id, &key, source).is_err() {
                     build.cool_down();
                 }
             });
@@ -302,21 +302,17 @@ fn build_and_publish(
     profile: &Profile,
     store_id: Uuid,
     key: &IndexKey,
-    source: Option<String>,
+    source: String,
 ) -> Result<(), StoreError> {
     let mut cache = open(profile, store_id, true)?.ok_or(AppError::Internal)?;
     if cache_entry(&cache, key)?.is_some() {
         return Ok(());
     }
-    let index = if let Some(source) = source {
-        if ReportHash::from_sha256(Sha256::digest(source.as_bytes()).into()) != key.hash {
-            return Err(AppError::PreconditionFailed.into());
-        }
-        std::panic::catch_unwind(|| build_report_display_index(&source))
-            .unwrap_or(DisplayIndex::Fallback(DisplayFallback::ParserFailed))
-    } else {
-        DisplayIndex::Fallback(DisplayFallback::DocumentBudget)
-    };
+    if ReportHash::from_sha256(Sha256::digest(source.as_bytes()).into()) != key.hash {
+        return Err(AppError::PreconditionFailed.into());
+    }
+    let index = std::panic::catch_unwind(|| build_report_display_index(&source))
+        .unwrap_or(DisplayIndex::Fallback(DisplayFallback::ParserFailed));
     publish(
         &mut cache,
         &key.artifact,

@@ -9,7 +9,7 @@ use reviewq_app::ledger::{
     SnapshotGuard, default_category,
 };
 use reviewq_app::notifications::{Kind, Observation, Source};
-use reviewq_app::reports::{CHUNK_BYTES, FindingSection, ReportReference, RevisionEvidence};
+use reviewq_app::reports::{CHUNK_BYTES, FindingSection, RevisionEvidence};
 use reviewq_domain::identity::{ReceiptId, ReportHash, RunId};
 use reviewq_domain::ledger::Tool;
 use reviewq_domain::session::LeadTarget;
@@ -40,6 +40,13 @@ pub(super) fn commit(
     let PublishCommit { guard, kind } = commit;
     let db = &tx.sql;
     let run = guard.lead.run_id().as_str();
+    // A closing call already stored, by a concurrent request with its call ID: the next
+    // snapshot replays its acknowledgement.
+    if let CommitKind::Closing(closing) = &kind
+        && calls::replay(db, &closing.call, Tool::FinishReview, RUN_TARGET)?.is_some()
+    {
+        return Ok(PublishOutcome::Stale);
+    }
     // 1. A record, a disposition or the head moved.
     let head: Option<(String, i64)> = db
         .prepare_cached("SELECT receipt_id, disposition_version FROM report_heads WHERE run_id=?1")?
@@ -73,9 +80,6 @@ pub(super) fn commit(
         || pass.as_ref().and_then(|row| row.batch.as_ref()) != guard.batch.as_ref()
     {
         return Err(AppError::Conflict.into());
-    }
-    if calls::replay(db, &closing.call, Tool::FinishReview, RUN_TARGET)?.is_some() {
-        return Ok(PublishOutcome::Stale);
     }
     // 4. The assessments must cover the frozen batch.
     let manifest = guard
@@ -473,25 +477,5 @@ pub(super) async fn index(
     run: RunId,
     receipt: ReceiptId,
 ) -> Result<(), StoreError> {
-    let (lookup_run, lookup_receipt) = (run.clone(), receipt.clone());
-    let hash: String = store
-        .read(move |db| {
-            Ok(db
-                .prepare_cached(
-                    "SELECT a.sha256 FROM report_versions v JOIN artifacts a USING(artifact_id)
-                     WHERE v.run_id=?1 AND v.receipt_id=?2 AND a.sealed=1",
-                )?
-                .query_row(
-                    params![lookup_run.as_str(), lookup_receipt.as_str()],
-                    |row| row.get(0),
-                )
-                .optional()?
-                .ok_or(AppError::NotFound)?)
-        })
-        .await?;
-    let reference = ReportReference {
-        receipt_id: receipt,
-        hash: parse(&hash)?,
-    };
-    store.cache_report_display(run, reference, None).await
+    store.cache_report_display(run, receipt).await
 }

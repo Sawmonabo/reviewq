@@ -189,6 +189,7 @@ CREATE UNIQUE INDEX messages_observed_input ON messages(session_key, native_turn
 
 CREATE INDEX messages_native_history ON messages(run_id, session_key, native_input_id)
     WHERE state='started' AND actor_key IS NOT NULL;
+CREATE INDEX messages_started ON messages(run_id, session_key, updated_at_ms) WHERE state='started';
 
 CREATE TABLE outbox (
     delivery_id TEXT PRIMARY KEY REFERENCES messages(message_id),

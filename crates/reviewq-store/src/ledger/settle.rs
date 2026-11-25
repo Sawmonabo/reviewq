@@ -4,9 +4,9 @@
 use reviewq_app::access::AppError;
 use reviewq_app::events::ResourceKey;
 use reviewq_app::ledger::{FailureRecord, PassId, SettleCandidate};
-use reviewq_domain::identity::{Revision, RunId};
+use reviewq_domain::identity::Revision;
 use reviewq_domain::ledger::{FailureKind, PassState, SettleFacts};
-use rusqlite::{Connection, params};
+use rusqlite::Connection;
 
 use super::passes::{self, PASS_STATE};
 use crate::StoreError;
@@ -20,19 +20,20 @@ use crate::workspace::advance_queue;
 /// A session that is working, blocked or asking is not idle. Reads `review_active_sessions`,
 /// the same evidence the stage classifier reads. A lead not yet seen starting a turn for the
 /// open pass is not idle either: it has not begun the work the pass waits for.
+///
+/// `candidates` leaves out a run whose unresolved failure of the kind settling would record
+/// (unfinished review for its pass, failed update without one) was recorded at its current
+/// ledger sequence, so it is not reworked until a record write or closing call changes it.
 const BUSY: &str = "(s.host_activity IN ('working','blocked') OR s.host_questions=1)";
 
 /// Recovery states that keep a run from settling.
 const RECOVERING: &str = "('waiting','queued','started','uncertain')";
 
-pub(super) fn candidates(
-    db: &Connection,
-    run: Option<&RunId>,
-) -> Result<Vec<SettleCandidate>, StoreError> {
+pub(super) fn candidates(db: &Connection) -> Result<Vec<SettleCandidate>, StoreError> {
     let sql = format!(
         "WITH candidates(run_id) AS (
-           SELECT run_id FROM ledger_runs WHERE sequence>published_sequence AND (?1 IS NULL OR run_id=?1)
-           UNION SELECT run_id FROM review_passes WHERE state<>'closed' AND (?1 IS NULL OR run_id=?1))
+           SELECT run_id FROM ledger_runs WHERE sequence>published_sequence
+           UNION SELECT run_id FROM review_passes WHERE state<>'closed')
          SELECT x.run_id, coalesce(l.sequence, 0), p.pass_id, {PASS_STATE},
            (SELECT count(*) FROM ledger_findings f WHERE f.run_id=x.run_id AND f.active=1),
            (p.pass_id IS NULL OR p.lead_started_at_ms IS NOT NULL)
@@ -47,11 +48,13 @@ pub(super) fn candidates(
          LEFT JOIN ledger_runs l ON l.run_id=x.run_id
          LEFT JOIN review_passes p ON p.run_id=x.run_id AND p.state<>'closed'
          WHERE NOT EXISTS(SELECT 1 FROM report_delivery_failures d WHERE d.run_id=x.run_id
+             AND coalesce(d.pass_id, 0)=coalesce(p.pass_id, 0)
+             AND d.kind=CASE WHEN p.pass_id IS NULL THEN 'update_failed' ELSE 'unfinished_review' END
              AND d.resolved_at_ms IS NULL AND d.ledger_sequence=coalesce(l.sequence, 0))
          ORDER BY x.run_id"
     );
     let mut statement = db.prepare_cached(&sql)?;
-    let mut rows = statement.query(params![run.map(RunId::as_str)])?;
+    let mut rows = statement.query([])?;
     let mut candidates = Vec::new();
     while let Some(row) = rows.next()? {
         let pass: Option<i64> = row.get(2)?;

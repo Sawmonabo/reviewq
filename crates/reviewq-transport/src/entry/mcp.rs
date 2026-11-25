@@ -27,6 +27,7 @@ use serde::de::DeserializeOwned;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 
+use super::features::ledger::MAX_TOOL_BODY_BYTES;
 use super::{ApiError, Entry};
 
 mod gates;
@@ -52,7 +53,7 @@ pub(super) fn mount(entry: Arc<Entry>) -> Router<Arc<Entry>> {
         .enforce_origin_validation()
         .with_legacy_session_mode(false)
         .with_json_response(true)
-        .with_max_request_body_bytes(160 * 1024);
+        .with_max_request_body_bytes(MAX_TOOL_BODY_BYTES);
     let application = Server {
         entry: entry.clone(),
         gates: Arc::new(Gates::default()),

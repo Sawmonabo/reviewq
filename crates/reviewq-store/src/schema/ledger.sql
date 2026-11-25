@@ -143,6 +143,8 @@ CREATE TABLE ledger_calls (
 ) STRICT;
 
 CREATE INDEX ledger_call_closing ON ledger_calls(run_id, native_turn_id) WHERE tool = 'finish_review';
+CREATE INDEX ledger_call_findings ON ledger_calls(run_id, accepted_at_ms)
+    WHERE tool IN ('record_finding', 'assess_finding');
 
 CREATE TABLE hook_reports (
     provider TEXT NOT NULL CHECK (provider IN ('codex', 'claude')),

@@ -98,9 +98,9 @@ impl LedgerStore for SqliteStore {
         })
     }
 
-    fn runs_to_settle(&self, run: Option<RunId>) -> AppFuture<'_, Vec<SettleCandidate>> {
+    fn runs_to_settle(&self) -> AppFuture<'_, Vec<SettleCandidate>> {
         Box::pin(async move {
-            self.read(move |db| settle::candidates(db, run.as_ref()))
+            self.read(|db| settle::candidates(db))
                 .await
                 .map_err(StoreError::app)
         })

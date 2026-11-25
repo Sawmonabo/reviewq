@@ -137,20 +137,40 @@ impl Write for Output {
     }
 }
 
-/// Writes into a table cell, escaping each `|` so it cannot end the cell.
-pub(super) struct Cell<'a>(pub(super) &'a mut Output);
+/// Writes into a table cell so no `|` ends it. A `|` after an odd run of backslashes is
+/// already escaped and stays as written; any other gets a backslash. The run is counted
+/// across writes, because a formatted write arrives in pieces.
+pub(super) struct Cell<'a> {
+    out: &'a mut Output,
+    /// Backslashes written since the last other character.
+    backslashes: usize,
+}
+
+impl<'a> Cell<'a> {
+    pub(super) fn new(out: &'a mut Output) -> Self {
+        Self {
+            out,
+            backslashes: 0,
+        }
+    }
+}
 
 impl Write for Cell<'_> {
     fn write_str(&mut self, piece: &str) -> fmt::Result {
-        let mut parts = piece.split('|');
-        if let Some(first) = parts.next() {
-            self.0.write_str(first)?;
+        let mut copied = 0;
+        for (index, byte) in piece.bytes().enumerate() {
+            match byte {
+                b'\\' => self.backslashes += 1,
+                b'|' if self.backslashes.is_multiple_of(2) => {
+                    self.out.write_str(&piece[copied..index])?;
+                    self.out.write_char('\\')?;
+                    copied = index;
+                    self.backslashes = 0;
+                }
+                _ => self.backslashes = 0,
+            }
         }
-        for part in parts {
-            self.0.write_str("\\|")?;
-            self.0.write_str(part)?;
-        }
-        Ok(())
+        self.out.write_str(&piece[copied..])
     }
 }
 

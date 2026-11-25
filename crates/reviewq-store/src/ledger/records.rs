@@ -271,11 +271,16 @@ fn write_note(
         }
     };
     let present = stored.as_ref().is_some_and(|(present, _)| *present);
-    if body.is_empty() && !present {
+    if body.is_empty() && stored.is_none() {
         return Ok(Err(WriteRefusal::UnknownNote));
     }
-    if let Some((true, current)) = &stored
-        && current.body == body
+    // An equal write, including the removal of a removed note, returns the current receipt.
+    if let Some((present, current)) = &stored
+        && (if *present {
+            current.body == body
+        } else {
+            body.is_empty()
+        })
     {
         return Ok(Ok(Planned::Note {
             revision: current.revision,

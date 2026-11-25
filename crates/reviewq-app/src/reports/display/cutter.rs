@@ -69,7 +69,7 @@ struct BlockStart {
 /// How the caller's reader renders raw HTML, which decides whether HTML can be cut out of its
 /// document.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(super) enum HtmlRendering {
+pub enum HtmlRendering {
     /// Report text, whose reader shows HTML as text: an HTML block reads as a paragraph and
     /// inline HTML as words, so neither needs the rest of the document.
     Text,

@@ -2,7 +2,7 @@
 
 use std::ops::Range;
 
-use crate::reports::{DisplayBlockKind, DisplayIndex, build_display_index};
+use crate::reports::{DisplayBlockKind, DisplayIndex, HtmlRendering, display_index};
 
 use super::{Inline, fragment};
 
@@ -14,11 +14,14 @@ const MAX_GROUP_ROWS: usize = 48;
 const MAX_GROUPS: usize = 1024;
 pub const MAX_INDEXED_BYTES: u64 = 32 * 1024 * 1024;
 
-#[derive(Default)]
+/// Finds the row groups of a source's one long table as its text is pushed in order. The
+/// context around the table is proved with the display index for the source's reader, so
+/// report text, whose reader shows HTML as text, keeps its row groups around raw HTML.
 pub struct Builder {
     position: u64,
     partial: String,
     state: State,
+    html: HtmlRendering,
 }
 
 #[derive(Default)]
@@ -145,6 +148,16 @@ impl Index {
 }
 
 impl Builder {
+    /// A builder for a source whose reader renders raw HTML as `html` says.
+    pub fn new(html: HtmlRendering) -> Self {
+        Self {
+            position: 0,
+            partial: String::new(),
+            state: State::default(),
+            html,
+        }
+    }
+
     pub fn push(&mut self, source: &str) {
         if matches!(self.state, State::Declined) {
             return;
@@ -181,10 +194,12 @@ impl Builder {
         }
         match self.state {
             State::Rows(mut table) => {
-                table.flush(self.position)?;
+                table.flush(self.position, self.html)?;
                 Some(table.index)
             }
-            State::After(mut index, suffix) if suffix.trim().is_empty() || context(&suffix) => {
+            State::After(mut index, suffix)
+                if suffix.trim().is_empty() || context(&suffix, self.html) =>
+            {
                 index.conclusion = !suffix.trim().is_empty();
                 Some(index)
             }
@@ -232,7 +247,7 @@ impl Builder {
                     if table.rows >= MAX_GROUP_ROWS
                         || table.markdown.len() + line.len() > MAX_GROUP_BYTES
                     {
-                        if table.flush(at).is_none() {
+                        if table.flush(at, self.html).is_none() {
                             self.state = State::Declined;
                             return;
                         }
@@ -241,7 +256,7 @@ impl Builder {
                     table.markdown.push_str(line);
                     table.rows += 1;
                     State::Rows(table)
-                } else if line.trim().is_empty() && table.flush(at).is_some() {
+                } else if line.trim().is_empty() && table.flush(at, self.html).is_some() {
                     State::After(table.index, line.to_owned())
                 } else {
                     State::Declined
@@ -287,7 +302,7 @@ fn header_start(before: &str, line: &str) -> Option<usize> {
 }
 
 impl Rows {
-    fn flush(&mut self, end: u64) -> Option<()> {
+    fn flush(&mut self, end: u64, html: HtmlRendering) -> Option<()> {
         if self.rows == 0 {
             return (!self.index.groups.is_empty()).then_some(());
         }
@@ -305,7 +320,7 @@ impl Rows {
             let before = self.prefix.len();
             self.index.introduction = !self.prefix.trim().is_empty();
             self.prefix.push_str(&joined);
-            let DisplayIndex::Indexed(layout) = build_display_index(&self.prefix) else {
+            let DisplayIndex::Indexed(layout) = display_index(&self.prefix, html) else {
                 return None;
             };
             if !layout.blocks.last().is_some_and(|block| {
@@ -362,6 +377,6 @@ impl Rows {
     }
 }
 
-fn context(markdown: &str) -> bool {
-    matches!(build_display_index(markdown), DisplayIndex::Indexed(_))
+fn context(markdown: &str, html: HtmlRendering) -> bool {
+    matches!(display_index(markdown, html), DisplayIndex::Indexed(_))
 }

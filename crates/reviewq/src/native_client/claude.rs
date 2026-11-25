@@ -17,11 +17,14 @@ const LEDGER_CALL_LIMIT: usize = MAX_TOOL_INPUT_BYTES + 4096;
 /// Largest ledger reply: a `review_ledger` page or a list of field errors, escaped.
 const LEDGER_REPLY_LIMIT: usize = 256 * 1024;
 /// The status check and the call together, for `finish_review`, which composes and publishes
-/// a version; the plugin waits 60 seconds for it.
+/// a version. The plugin waits 5 seconds longer, so this limit is always the one reached.
 const FINISH_TIMEOUT: Duration = Duration::from_secs(55);
-/// The status check and the call together, for every other tool: the default request time,
-/// though the plugin stops waiting after 5 seconds.
+/// The status check and the call together, for every other tool. The plugin waits 5 seconds
+/// longer, so this limit is always the one reached.
 const RECORD_TIMEOUT: Duration = Duration::from_secs(30);
+/// What the model reads when a ledger call runs out of time: the service may still have
+/// stored it, so a blind repeat of a revision-guarded call would be refused as stale.
+const LEDGER_TIMED_OUT: &str = "ReviewQ did not answer this ledger call in time, but it may have stored it. Read the ledger with review_ledger before repeating the call.";
 
 #[derive(Clone, clap::ValueEnum)]
 pub(crate) enum ClaudeBridgeOperation {
@@ -130,8 +133,8 @@ struct LedgerCall {
 /// the reply body unchanged, a result or a refusal with its field errors alike. It makes the
 /// signed status check and that one call, within the tool's deadline, and nothing else. Fails,
 /// with the message on stderr, when the call on stdin cannot be read or names no ledger tool,
-/// when the listener is not this installation's ready service, or when ReviewQ cannot be
-/// reached in time or gives no reply.
+/// when the listener is not this installation's ready service, when ReviewQ cannot be reached
+/// or gives no reply, or with `LEDGER_TIMED_OUT` when the tool's deadline passes.
 async fn ledger(profile: &Path, native: &NativeSessionId) -> Result<(), Failure> {
     let call: LedgerCall = serde_json::from_slice(&read_input(LEDGER_CALL_LIMIT)?)?;
     let tool = LedgerTool::from_name(&call.tool).ok_or("Unknown ReviewQ ledger tool.")?;
@@ -154,7 +157,8 @@ async fn ledger(profile: &Path, native: &NativeSessionId) -> Result<(), Failure>
         | LedgerTool::ReviewLedger
         | LedgerTool::NeedsInput => RECORD_TIMEOUT,
     };
-    let client = client_with_timeout(Some(deadline))?;
+    // The deadline below is the one limit, so a slow call always ends with its message.
+    let client = client_with_timeout(None)?;
     let path = format!("/api/v1/native/ledger/{}", tool.route());
     let reply = tokio::time::timeout(deadline, async {
         bounded(
@@ -164,7 +168,7 @@ async fn ledger(profile: &Path, native: &NativeSessionId) -> Result<(), Failure>
         .await
     })
     .await
-    .map_err(|_| "ReviewQ did not answer this ledger call in time.")??;
+    .map_err(|_| LEDGER_TIMED_OUT)??;
     if reply.is_empty() {
         return Err("ReviewQ gave no reply to this ledger call.".into());
     }

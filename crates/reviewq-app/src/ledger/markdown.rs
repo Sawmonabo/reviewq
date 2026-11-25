@@ -4,14 +4,6 @@
 //! field as its own block and shifts its headings, so a field that passes here cannot open or
 //! swallow a section or card of the report.
 
-#![cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "K3 checks each field when it is filed and K1 shifts headings when composing"
-    )
-)]
-
 use std::borrow::Cow;
 use std::fmt::{self, Display, Formatter};
 use std::ops::Range;
@@ -19,7 +11,7 @@ use std::ops::Range;
 use satteri_pulldown_cmark::{Event, Parser, Tag, TagEnd};
 
 use super::NoteSection;
-use super::layout::{COVER_LABELS, CardLabel};
+use super::layout::{COVER_LABELS, CardLabel, CountsLine};
 use crate::reports::REPORT_MARKDOWN;
 
 /// Longest line of an authored field, in UTF-8 bytes without its line ending.
@@ -47,14 +39,18 @@ pub(crate) enum MarkdownField {
     Evidence,
     /// Begins with a paragraph, which follows the card's `Proposed comment` label.
     ProposedComment,
-    /// A finding's `details`, which may begin with any block.
+    /// A finding's `details`, written after the evidence, which may end in a list. It may
+    /// begin with any block but a list or indented text, which would join that list.
     Details,
     /// At most four plain paragraphs.
     Summary,
     /// One plain paragraph.
     Rationale,
+    /// The `publication` note, written after ReviewQ's list of disposition lines. Like
+    /// `details`, it begins with no list or indented text.
+    Publication,
     /// The body of any other Markdown note: `flow`, `changes`, `threads`, `questions`,
-    /// `verification`, `publication` or an `extra` note.
+    /// `verification` or an `extra` note.
     Note,
 }
 
@@ -71,8 +67,8 @@ impl MarkdownField {
             | NoteSection::Threads
             | NoteSection::Questions
             | NoteSection::Verification
-            | NoteSection::Publication
             | NoteSection::Extra => Some(Self::Note),
+            NoteSection::Publication => Some(Self::Publication),
         }
     }
 }
@@ -105,6 +101,9 @@ pub(crate) enum ProblemKind {
     Empty,
     /// The field must begin with a paragraph but begins with another block here.
     NoOpeningParagraph,
+    /// The field follows a list in the report and begins with a list or indented text here,
+    /// which would join that list.
+    JoinsList,
     /// A `summary` or `rationale` holds a block other than a paragraph here.
     NotPlain,
     /// A `summary` or `rationale` holds a paragraph beyond its limit here.
@@ -113,6 +112,8 @@ pub(crate) enum ProblemKind {
     BoldStart,
     /// A `summary` or `rationale` paragraph starts with a label the report header uses.
     LabelStart(&'static str),
+    /// A `summary` or `rationale` paragraph reads as the report's counts line.
+    CountsLine,
     /// A finding field's paragraph starts with one of the card's bold labels here.
     CardLabel(CardLabel),
 }
@@ -152,6 +153,10 @@ impl Display for FieldProblem {
                 output,
                 "Line {line}: begin with a sentence, because the first words follow the card's label. Put headings, lists, tables, quotes and code after it."
             ),
+            ProblemKind::JoinsList => write!(
+                output,
+                "Line {line}: begin with a sentence that is not indented. In the report this text can follow a list, and a list or indented text here would join it. Put lists after the first sentence."
+            ),
             ProblemKind::NotPlain => write!(
                 output,
                 "Line {line}: use plain paragraphs only, with no heading, list, table, quote, code or HTML."
@@ -170,6 +175,10 @@ impl Display for FieldProblem {
                 output,
                 "Line {line}: start the paragraph with plain words, not \"{label}\", which the report header uses."
             ),
+            ProblemKind::CountsLine => write!(
+                output,
+                "Line {line}: this paragraph reads as the report's line of finding counts, which ReviewQ writes itself. Say it in a sentence instead."
+            ),
             ProblemKind::CardLabel(label) => write!(
                 output,
                 "Line {line}: start the paragraph with plain words, not \"**{}**\", which the card shows as a field label.",
@@ -183,8 +192,9 @@ impl Display for FieldProblem {
 /// `MAX_FIELD_LINE_BYTES`, stands alone (a heading written after it still reads as a heading,
 /// so an open code fence or an HTML block that never ends is refused), defines no link
 /// reference and holds no footnote. `field` adds its own rules: a finding's fields begin no
-/// paragraph with a card's bold label, and all but `details` begin with a paragraph. Returns
-/// the first problem found.
+/// paragraph with a card's bold label, all but `details` begin with a paragraph, and
+/// `details` and the `publication` note begin with no list or indented text. Returns the
+/// first problem found.
 ///
 /// A removal is never passed here: an empty note body removes the note, and a change that
 /// removes `proposedComment` or `details` carries no text.
@@ -212,9 +222,10 @@ pub(crate) fn check_field(field: MarkdownField, text: &str) -> Result<(), FieldP
             let kind = match kind {
                 BlockKind::Code => ProblemKind::OpenFence,
                 BlockKind::Html => ProblemKind::OpenHtml,
-                BlockKind::Paragraph { .. } | BlockKind::Heading | BlockKind::Other => {
-                    ProblemKind::OpenBlock
-                }
+                BlockKind::Paragraph { .. }
+                | BlockKind::Heading
+                | BlockKind::List
+                | BlockKind::Other => ProblemKind::OpenBlock,
             };
             return Err(FieldProblem {
                 line: line_of(text, start),
@@ -252,14 +263,20 @@ pub(crate) fn check_field(field: MarkdownField, text: &str) -> Result<(), FieldP
         | MarkdownField::Evidence
         | MarkdownField::ProposedComment => match first.kind {
             BlockKind::Paragraph { .. } => card_labels(text, &blocks),
-            BlockKind::Heading | BlockKind::Code | BlockKind::Html | BlockKind::Other => {
-                Err(FieldProblem {
-                    line: line_of(text, first.start),
-                    kind: ProblemKind::NoOpeningParagraph,
-                })
-            }
+            BlockKind::Heading
+            | BlockKind::List
+            | BlockKind::Code
+            | BlockKind::Html
+            | BlockKind::Other => Err(FieldProblem {
+                line: line_of(text, first.start),
+                kind: ProblemKind::NoOpeningParagraph,
+            }),
         },
-        MarkdownField::Details => card_labels(text, &blocks),
+        MarkdownField::Details => {
+            joins_list(text, first)?;
+            card_labels(text, &blocks)
+        }
+        MarkdownField::Publication => joins_list(text, first),
         MarkdownField::Summary => plain_paragraphs(text, &blocks, MAX_SUMMARY_PARAGRAPHS),
         MarkdownField::Rationale => plain_paragraphs(text, &blocks, 1),
         MarkdownField::Note => Ok(()),
@@ -346,8 +363,12 @@ enum BlockKind {
     Paragraph {
         /// The text of the strong emphasis the paragraph begins with, if it begins with one.
         bold: Option<String>,
+        /// The paragraph's text as the reader shows it: its text, code and raw HTML, with a
+        /// line break at each soft or hard break.
+        text: String,
     },
     Heading,
+    List,
     Code,
     Html,
     Other,
@@ -368,7 +389,24 @@ fn top_level_blocks(parse: Parse<'_>) -> (Vec<Block>, Option<usize>) {
     let mut paragraph_opened = false;
     // The text of a top-level paragraph's leading strong emphasis while it is read.
     let mut bold: Option<String> = None;
+    // Whether a top-level paragraph is being read.
+    let mut in_paragraph = false;
     for (event, range) in parse.events() {
+        if in_paragraph
+            && let Some(Block {
+                kind: BlockKind::Paragraph { text, .. },
+                ..
+            }) = blocks.last_mut()
+        {
+            match &event {
+                Event::Text(value)
+                | Event::Code(value)
+                | Event::Html(value)
+                | Event::InlineHtml(value) => text.push_str(value),
+                Event::SoftBreak | Event::HardBreak => text.push('\n'),
+                _ => {}
+            }
+        }
         if footnote.is_none()
             && matches!(
                 event,
@@ -386,9 +424,14 @@ fn top_level_blocks(parse: Parse<'_>) -> (Vec<Block>, Option<usize>) {
                     let kind = match tag {
                         Tag::Paragraph => {
                             paragraph_opened = true;
-                            BlockKind::Paragraph { bold: None }
+                            in_paragraph = true;
+                            BlockKind::Paragraph {
+                                bold: None,
+                                text: String::new(),
+                            }
                         }
                         Tag::Heading { .. } => BlockKind::Heading,
+                        Tag::List(..) => BlockKind::List,
                         Tag::CodeBlock(_) => BlockKind::Code,
                         Tag::HtmlBlock => BlockKind::Html,
                         _ => BlockKind::Other,
@@ -402,11 +445,14 @@ fn top_level_blocks(parse: Parse<'_>) -> (Vec<Block>, Option<usize>) {
             }
             Event::End(_) => {
                 depth = depth.saturating_sub(1);
+                if depth == 0 {
+                    in_paragraph = false;
+                }
                 // The leading strong opened inside the paragraph, at depth 1, and ends here.
                 if depth == 1
                     && let Some(text) = bold.take()
                     && let Some(Block {
-                        kind: BlockKind::Paragraph { bold },
+                        kind: BlockKind::Paragraph { bold, .. },
                         ..
                     }) = blocks.last_mut()
                 {
@@ -434,7 +480,9 @@ fn top_level_blocks(parse: Parse<'_>) -> (Vec<Block>, Option<usize>) {
 /// reader matches it.
 fn card_labels(text: &str, blocks: &[Block]) -> Result<(), FieldProblem> {
     for block in blocks {
-        if let BlockKind::Paragraph { bold: Some(bold) } = &block.kind
+        if let BlockKind::Paragraph {
+            bold: Some(bold), ..
+        } = &block.kind
             && let Some(label) = CardLabel::ALL
                 .into_iter()
                 .find(|label| label.text() == bold)
@@ -448,22 +496,43 @@ fn card_labels(text: &str, blocks: &[Block]) -> Result<(), FieldProblem> {
     Ok(())
 }
 
-/// Every block is a paragraph that starts with plain words, and there are at most `max`.
+/// Every block is a paragraph that starts with plain words and does not read as the counts
+/// line, and there are at most `max`.
 fn plain_paragraphs(text: &str, blocks: &[Block], max: usize) -> Result<(), FieldProblem> {
     for (index, block) in blocks.iter().enumerate() {
         let line = line_of(text, block.start);
-        let kind = match block.kind {
-            BlockKind::Heading | BlockKind::Code | BlockKind::Html | BlockKind::Other => {
-                Some(ProblemKind::NotPlain)
-            }
-            BlockKind::Paragraph { bold: Some(_) } => Some(ProblemKind::BoldStart),
-            BlockKind::Paragraph { bold: None } => header_label(&text[block.start..])
+        let kind = match &block.kind {
+            BlockKind::Heading
+            | BlockKind::List
+            | BlockKind::Code
+            | BlockKind::Html
+            | BlockKind::Other => Some(ProblemKind::NotPlain),
+            BlockKind::Paragraph { bold: Some(_), .. } => Some(ProblemKind::BoldStart),
+            BlockKind::Paragraph {
+                bold: None,
+                text: shown,
+            } => header_label(&text[block.start..])
                 .map(ProblemKind::LabelStart)
+                .or(CountsLine::matches(shown).then_some(ProblemKind::CountsLine))
                 .or((index >= max).then_some(ProblemKind::TooManyParagraphs { max })),
         };
         if let Some(kind) = kind {
             return Err(FieldProblem { line, kind });
         }
+    }
+    Ok(())
+}
+
+/// Refuses a field that follows a list in the report when its first block, `first`, is a list
+/// or starts on an indented line: either would continue that list.
+fn joins_list(text: &str, first: &Block) -> Result<(), FieldProblem> {
+    let line_start = text[..first.start].rfind('\n').map_or(0, |index| index + 1);
+    let indented = text[line_start..].starts_with([' ', '\t']);
+    if matches!(first.kind, BlockKind::List) || indented {
+        return Err(FieldProblem {
+            line: line_of(text, first.start),
+            kind: ProblemKind::JoinsList,
+        });
     }
     Ok(())
 }
@@ -597,6 +666,30 @@ mod tests {
                 MarkdownField::Note,
                 "Retries are unbounded.\n\n[^1]: Seen in the worker log.\n",
                 refused(3, ProblemKind::Footnote),
+            ),
+            (
+                "a publication note that begins with a list",
+                MarkdownField::Publication,
+                "- Posted F-01 on the merge request.\n",
+                refused(1, ProblemKind::JoinsList),
+            ),
+            (
+                "details that begin with a sentence and then a list",
+                MarkdownField::Details,
+                "The replay steps:\n\n- drop the reply\n- retry\n",
+                Ok(()),
+            ),
+            (
+                "a summary paragraph that reads as the counts line",
+                MarkdownField::Summary,
+                "Adds retries.\n\nP0: 1 · P1: 0 · P2: 0 · P3: 0 · Blocking: 1 · Nonblocking: *0*",
+                refused(3, ProblemKind::CountsLine),
+            ),
+            (
+                "a rationale that states the counts within a sentence",
+                MarkdownField::Rationale,
+                "One finding blocks: P0: 1 · P1: 0 · P2: 0 · P3: 0 · Blocking: 1 · Nonblocking: 0",
+                Ok(()),
             ),
         ];
         for (case, field, text, expected) in cases {

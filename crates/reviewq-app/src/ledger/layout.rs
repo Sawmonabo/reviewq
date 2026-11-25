@@ -1,11 +1,13 @@
 //! The fixed words of the composed report, as the spec's composed layout writes them: the
-//! eight section headings with the line an empty one shows, the four cover labels and the
-//! card's field labels. The composer writes them and the field checks refuse authored text
-//! that a reader could take for them.
+//! eight section headings with the line an empty one shows, the four cover labels, the counts
+//! line and the card's field labels. The composer writes them and the field checks refuse
+//! authored text that a reader could take for them.
+
+use std::fmt::{self, Display, Formatter};
 
 use reviewq_domain::ledger::VersionKind;
 
-use crate::reports::{FindingConclusion, Verdict};
+use crate::reports::{FindingConclusion, Severity, Verdict};
 
 /// One of the eight sections every version shows, in layout order.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -145,6 +147,67 @@ pub(crate) const fn scope(kind: VersionKind) -> &'static str {
 /// disposition line.
 pub(crate) const fn blocking_word(blocking: bool) -> &'static str {
     if blocking { "Blocking" } else { "Nonblocking" }
+}
+
+/// The counts line: `P0: {n} · P1: {n} · P2: {n} · P3: {n} · Blocking: {n} · Nonblocking: {n}`,
+/// the active findings by severity and by effective blocking value. `Display` writes it, and
+/// `matches` recognises text of its shape, so the field checks refuse a paragraph the reader
+/// would take for it.
+pub(crate) struct CountsLine {
+    /// Active findings at P0, P1, P2 and P3.
+    pub(crate) severities: [u32; 4],
+    pub(crate) blocking: u32,
+    pub(crate) nonblocking: u32,
+}
+
+impl CountsLine {
+    /// The label before each count, in the line's order.
+    fn labels() -> impl Iterator<Item = String> {
+        [Severity::P0, Severity::P1, Severity::P2, Severity::P3]
+            .into_iter()
+            .map(|severity| severity.to_string())
+            .chain([true, false].map(|blocking| blocking_word(blocking).to_owned()))
+    }
+
+    /// Whether `text` reads as a counts line: every label in order, each followed by `: ` and
+    /// one or more ASCII digits, joined by `SEPARATOR`, with nothing before or after.
+    pub(crate) fn matches(text: &str) -> bool {
+        let mut rest = text;
+        for (index, label) in Self::labels().enumerate() {
+            if index > 0 {
+                let Some(after) = rest.strip_prefix(SEPARATOR) else {
+                    return false;
+                };
+                rest = after;
+            }
+            let Some(after) = rest
+                .strip_prefix(label.as_str())
+                .and_then(|after| after.strip_prefix(": "))
+            else {
+                return false;
+            };
+            let digits = after.len() - after.trim_start_matches(|c: char| c.is_ascii_digit()).len();
+            if digits == 0 {
+                return false;
+            }
+            rest = &after[digits..];
+        }
+        rest.is_empty()
+    }
+}
+
+impl Display for CountsLine {
+    fn fmt(&self, output: &mut Formatter<'_>) -> fmt::Result {
+        let [p0, p1, p2, p3] = self.severities;
+        let counts = [p0, p1, p2, p3, self.blocking, self.nonblocking];
+        for (index, (label, count)) in Self::labels().zip(counts).enumerate() {
+            if index > 0 {
+                output.write_str(SEPARATOR)?;
+            }
+            write!(output, "{label}: {count}")?;
+        }
+        Ok(())
+    }
 }
 
 /// What the cover's reviewed source or target says when ReviewQ does not know the SHA, and

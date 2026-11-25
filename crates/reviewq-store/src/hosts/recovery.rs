@@ -368,14 +368,30 @@ pub(crate) fn observe_failure(
         |row| row.get(0),
     )?;
     let wait = 30_000_i64.saturating_mul(1 << attempts.min(4)).min(300_000);
+    // A closing call accepted in the failed turn ended its recovery eligibility.
+    let closed: bool = db.query_row(
+        "SELECT EXISTS(SELECT 1 FROM ledger_calls WHERE run_id=?1 AND tool='finish_review'
+           AND native_turn_id=?2)",
+        params![lead.run_id().as_str(), failure.turn.as_str()],
+        |row| row.get(0),
+    )?;
+    let (state, reason, due) = if closed {
+        ("complete", None, None)
+    } else if stopped {
+        ("cancelled", Some("prior_recovery_cancelled"), None)
+    } else if automatic {
+        ("waiting", None, Some(observed.saturating_add(wait)))
+    } else {
+        ("disabled", Some("recovery_disabled"), None)
+    };
     db.execute(
         "INSERT INTO recovery_episodes(episode_id,review_id,run_id,lead_session_key,failed_turn_id,kind,state,
          revision,head_sha,settings_revision,attempted_count,observed_at_ms,due_at_ms,reason,account_hash,model_provider)
          VALUES(?1,?2,?3,?4,?5,?6,?7,1,?8,?9,?10,?11,?12,?13,?14,?15)",
         params![Uuid::new_v4().to_string(),lead.review_id().as_str(),lead.run_id().as_str(),lead.session_key().as_str(),
-            failure.turn.as_str(),failure.kind.to_string(),if stopped {"cancelled"} else if automatic {"waiting"} else {"disabled"},
-            head,settings_revision(db)?.as_sqlite_integer(),attempts,observed,(automatic && !stopped).then_some(observed.saturating_add(wait)),
-            if stopped {Some("prior_recovery_cancelled")} else if automatic {None} else {Some("recovery_disabled")},failure.account.as_ref().map(|hash|hash.as_str()),failure.model_provider],
+            failure.turn.as_str(),failure.kind.to_string(),state,
+            head,settings_revision(db)?.as_sqlite_integer(),attempts,observed,due,
+            reason,failure.account.as_ref().map(|hash|hash.as_str()),failure.model_provider],
     )?;
     emit(tx, &lead)?;
     Ok(())

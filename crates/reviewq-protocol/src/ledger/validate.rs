@@ -207,9 +207,12 @@ impl Rules<'_> {
             _ => {}
         }
         self.one_line("/title");
+        // A body of only whitespace removes the note, so it is not held to the title's shape.
         if self.readable("/body") && self.text("/section") == Some("title") {
             let body = self.text("/body").unwrap_or_default();
-            if body.chars().any(breaks_line) || body.chars().count() > MAX_TITLE_CHARS {
+            let removes = body.trim().is_empty();
+            if !removes && (body.chars().any(breaks_line) || body.chars().count() > MAX_TITLE_CHARS)
+            {
                 self.refuse(
                     "/body",
                     &format!(

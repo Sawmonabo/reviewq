@@ -75,8 +75,8 @@ pub(super) fn closing(db: &Connection, binding: &CallBinding) -> Result<ClosingR
     }
     let last_closing = db
         .prepare_cached(
-            "SELECT result, sequence FROM ledger_calls
-             WHERE run_id=?1 AND tool='finish_review' ORDER BY rowid DESC LIMIT 1",
+            "SELECT result, sequence FROM ledger_calls WHERE rowid=(SELECT max(rowid)
+               FROM ledger_calls WHERE run_id=?1 AND tool='finish_review')",
         )?
         .query_row([caller.lead.run_id().as_str()], |row| {
             Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
@@ -155,13 +155,26 @@ fn read(db: &Connection, lead: LeadTarget) -> Result<Option<LedgerSnapshot>, Sto
     let since = parent
         .as_ref()
         .map_or(0, |parent| parent.sequence.as_sqlite_integer());
-    let touched_after = row.as_ref().map_or(since, |row| row.opened_sequence);
+    let touched = match &row {
+        Some(row) => Touched {
+            after_sequence: row.opened_sequence,
+            from_ms: row.opened_at_ms,
+        },
+        None => Touched {
+            after_sequence: since,
+            from_ms: head
+                .as_ref()
+                .map(|receipt| published_at(db, run, receipt.as_str()))
+                .transpose()?
+                .unwrap_or(0),
+        },
+    };
     let findings = findings(
         db,
         &lead,
         head.as_ref().map(|receipt| receipt.as_str()),
         since,
-        touched_after,
+        &touched,
         disposition_revision,
     )?;
     let notes = notes(db, run)?;
@@ -203,6 +216,24 @@ fn cover(
     })
 }
 
+/// Where the work a full review is checked against begins: the open pass's opening, or the
+/// parent version's publication when no pass is open.
+struct Touched {
+    /// A finding whose change sequence is above this was changed or assessed in it.
+    after_sequence: i64,
+    /// An accepted `record_finding` or `assess_finding` call from this time on also touched
+    /// its finding, even when it equalled the stored record and so advanced nothing.
+    from_ms: i64,
+}
+
+fn published_at(db: &Connection, run: &str, receipt: &str) -> Result<i64, StoreError> {
+    Ok(db
+        .prepare_cached(
+            "SELECT published_at_ms FROM report_versions WHERE run_id=?1 AND receipt_id=?2",
+        )?
+        .query_row(params![run, receipt], |row| row.get(0))?)
+}
+
 /// Every active finding, every finding on the parent version and every finding changed
 /// since it, in ID order.
 fn findings(
@@ -210,7 +241,7 @@ fn findings(
     lead: &LeadTarget,
     head: Option<&str>,
     since: i64,
-    touched_after: i64,
+    touched: &Touched,
     disposition: Revision,
 ) -> Result<Vec<SnapshotFinding>, StoreError> {
     let run = lead.run_id().as_str();
@@ -243,6 +274,13 @@ fn findings(
         )?
         .query_map(params![run, since], |row| row.get(0))?
         .collect::<Result<_, _>>()?;
+    let called: HashSet<i64> = db
+        .prepare_cached(
+            "SELECT json_extract(result, '$.id') FROM ledger_calls
+             WHERE run_id=?1 AND tool IN ('record_finding','assess_finding') AND accepted_at_ms>=?2",
+        )?
+        .query_map(params![run, touched.from_ms], |row| row.get(0))?
+        .collect::<Result<_, _>>()?;
     let sql = format!(
         "SELECT {FINDING_COLUMNS}, f.sequence, f.outcome_sequence
          FROM ledger_findings f JOIN ledger_changes c ON c.run_id=f.run_id AND c.sequence=f.sequence
@@ -261,7 +299,7 @@ fn findings(
         findings.push(SnapshotFinding {
             parent: parent.get(&key).copied(),
             outcome_is_new: outcome.is_some_and(|outcome| outcome > since),
-            touched: changed > touched_after,
+            touched: changed > touched.after_sequence || called.contains(&i64::from(key)),
             by_subagent: by_subagents.contains(&i64::from(key)),
             disposition: dispositions.remove(&key),
             discussion_ids: discussions.remove(&key).unwrap_or_default(),

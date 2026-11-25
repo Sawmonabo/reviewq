@@ -69,6 +69,13 @@ pub(super) enum Reconciled {
     Done,
     /// The ownership file at this path cannot be read, so nothing was changed.
     Unreadable(PathBuf),
+    /// Entries ReviewQ no longer wants are still in these `hooks.json` files, usually because
+    /// the user changed them; ReviewQ keeps owning them, `reason` is the last refusal, and every
+    /// other entry was reconciled.
+    Kept {
+        files: Vec<PathBuf>,
+        reason: Failure,
+    },
 }
 
 /// Makes ReviewQ own exactly its `Stop` and `SessionStart` entries in
@@ -76,9 +83,10 @@ pub(super) enum Reconciled {
 /// file or command is removed first, so an upgrade replaces ReviewQ's entries; a user's other
 /// hooks and Codex's trust state are never touched. The release journal is read by older
 /// binaries during rollback, so ownership lives in its own file under the same installation
-/// lock. When that file cannot be read, `hooks.json` is left as it is. Fails when an owned
-/// entry was changed by the user: removal still tries every other entry, while installation
-/// stops at the first entry it cannot write.
+/// lock. When that file cannot be read, `hooks.json` is left as it is. An owned entry that
+/// cannot be removed, usually because the user changed it, is kept and reported as `Kept`
+/// after every other entry was tried. Fails when the ownership file cannot be written or an
+/// entry cannot be installed; installation stops at the first entry it cannot write.
 pub(super) fn reconcile(paths: &Paths, has_codex: bool) -> Result<Reconciled, Failure> {
     let sidecar = paths.state.join(OWNERSHIP);
     let Ok(owned) = paths::read_json::<Vec<Registration>>(&sidecar) else {
@@ -95,6 +103,7 @@ pub(super) fn reconcile(paths: &Paths, has_codex: bool) -> Result<Reconciled, Fa
             .as_ref()
             .is_some_and(|(path, command)| hook.path == *path && hook.command == *command)
     };
+    let mut kept = Vec::new();
     let mut retire_error = None;
     let original_count = owned.len();
     // Newest first, so the entry that created the document removes it last.
@@ -106,7 +115,12 @@ pub(super) fn reconcile(paths: &Paths, has_codex: bool) -> Result<Reconciled, Fa
             Ok(()) => {
                 owned.remove(index);
             }
-            Err(error) => retire_error = Some(error),
+            Err(error) => {
+                if !kept.contains(&owned[index].path) {
+                    kept.push(owned[index].path.clone());
+                }
+                retire_error = Some(error);
+            }
         }
     }
     if owned.len() != original_count {
@@ -141,7 +155,13 @@ pub(super) fn reconcile(paths: &Paths, has_codex: bool) -> Result<Reconciled, Fa
             }
         }
     }
-    retire_error.map_or(Ok(Reconciled::Done), Err)
+    Ok(match retire_error {
+        Some(reason) => Reconciled::Kept {
+            files: kept,
+            reason,
+        },
+        None => Reconciled::Done,
+    })
 }
 
 /// The installed launcher running `internal codex-hook` for the installed profile. `|| :`
@@ -312,10 +332,13 @@ mod tests {
         assert!(!with_hooks.contains(&command) && with_hooks.contains("0.123456789012345678901"));
         assert_eq!(fs::metadata(&file)?.permissions().mode() & 0o777, 0o640);
 
-        // An entry the user edited is preserved and reported.
+        // An entry the user edited is preserved and reported with its file.
         let edited = with_hooks.replace("\"timeout\":5", "\"timeout\":7");
         fs::write(&file, &edited)?;
-        assert!(reconcile(&upgraded, false).is_err());
+        assert!(matches!(
+            reconcile(&upgraded, false)?,
+            Reconciled::Kept { files, .. } if files == [file.clone()]
+        ));
         assert_eq!(fs::read_to_string(&file)?, edited);
 
         // A later user entry keeps its slot, which Codex's trust keys name.

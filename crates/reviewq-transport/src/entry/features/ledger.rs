@@ -29,8 +29,9 @@ use crate::entry::error::ApiBytes;
 use crate::entry::pages::{parse, success};
 use crate::entry::{ApiError, Entry};
 
-/// Largest tool route body: a 128 KiB input with its binding, as the MCP server allows.
-const MAX_TOOL_BODY_BYTES: usize = 160 * 1024;
+/// Largest ledger tool call body: a 128 KiB input with its binding on a tool route, or with
+/// its envelope on the MCP server, which allows this much for every request.
+pub(in crate::entry) const MAX_TOOL_BODY_BYTES: usize = 160 * 1024;
 /// Largest `gate` or `readback` body.
 const MAX_HOOK_BODY_BYTES: usize = 4 * 1024;
 
@@ -122,13 +123,16 @@ pub(in crate::entry) async fn answer_gate(
     Ok(reason.map_or_else(dto::GateReply::allow, dto::GateReply::block))
 }
 
-/// Answers a host's hook after compaction with the read-back text, which is empty unless the
-/// session leads a review.
+/// Answers a host's hook after compaction with the read-back text, which is empty when
+/// `session` is `None` or leads no review.
 pub(in crate::entry) async fn read_back(
     entry: &Entry,
-    session: HookSession,
+    session: Option<HookSession>,
 ) -> Result<dto::ReadbackReply, AppError> {
-    let text = readback::read_back(entry.store.as_ref(), session).await?;
+    let text = match session {
+        Some(session) => readback::read_back(entry.store.as_ref(), session).await?,
+        None => None,
+    };
     Ok(dto::ReadbackReply {
         text: text.unwrap_or_default(),
     })
@@ -201,6 +205,6 @@ async fn read_back_route(
             .auth
             .bridge_command(&headers, &bytes, MAX_HOOK_BODY_BYTES)?;
     let session = HookSession::Codex(parse(request.thread_id.as_str())?);
-    let reply = read_back(&entry, session).await?;
+    let reply = read_back(&entry, Some(session)).await?;
     Ok(Json(success(reply, *entry.commits.borrow())?))
 }

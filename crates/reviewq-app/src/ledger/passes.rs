@@ -1,33 +1,31 @@
 //! `needs_input`, which holds the open pass, and the stop gate, whose block reason names what
 //! the pass owes and how many findings are on file.
 
-use reviewq_domain::ledger::{GateDecision, PassKind};
+use reviewq_domain::ledger::{GateDecision, PassKind, PassState, Tool};
 
+use super::record::capitalized;
+use super::refusal::{for_agent, root};
 use super::{CallBinding, GateAnswer, GateRequest, HoldReceipt, LedgerStore, OpenPass};
-use crate::access::{AppError, FieldError};
+use crate::access::AppError;
 
 /// Holds the run's open pass with `reason`, the question the reviewer must answer, until the
 /// lead's next turn starts. Completes no assessment and lets the turn end.
 ///
-/// Fails with a field error when no pass is open, or when the call does not come from the
-/// run's lead: from a child, or from a session the store attributes to no run. Other store
+/// Fails with a root field error when no pass is open, or when the call does not come from
+/// the run's lead: from a child, or from a session the store attributes to no run. Other store
 /// errors pass through.
 pub async fn needs_input(
     store: &(impl LedgerStore + ?Sized),
     binding: CallBinding,
     reason: String,
 ) -> Result<HoldReceipt, AppError> {
+    let session = binding.session.clone();
     match store.hold_pass(binding, reason).await {
         Ok(Some(receipt)) => Ok(receipt),
-        Ok(None) => Err(AppError::InvalidFields(vec![FieldError::new(
-            "",
+        Ok(None) => Err(root(
             "Nothing is waiting to be closed, so there is nothing to hold. Ask your question in your reply instead.",
-        )])),
-        Err(AppError::Forbidden) => Err(AppError::InvalidFields(vec![FieldError::new(
-            "",
-            "Only the review's lead can call needs_input, and this call does not come from it. Subagents file findings and notes and leave closing the review to the lead.",
-        )])),
-        Err(error) => Err(error),
+        )),
+        Err(error) => Err(for_agent(store, &session, Tool::NeedsInput, error).await),
     }
 }
 
@@ -53,19 +51,37 @@ fn block_reason(answer: &GateAnswer) -> Option<String> {
         1 => "1 finding is on file".to_owned(),
         count => format!("{count} findings are on file"),
     };
+    let owed = answer
+        .pass
+        .as_ref()
+        .map_or_else(|| "Call finish_review.".to_owned(), owed);
     Some(format!(
-        "This review is not closed yet, and {on_file}. Before you stop, {}, or call needs_input if the review must wait for the reviewer's answer. The reviewer sees nothing you filed until then.",
-        closing_call(answer.pass.as_ref()),
+        "This review is not closed yet, and {on_file}. {owed} Do this before you stop: the reviewer sees nothing you filed until then."
     ))
+}
+
+/// What `pass` owes, as one sentence for an agent: the closing call with what it needs, and
+/// `needs_input` for a review that must wait on the reviewer, or, while the pass already
+/// waits, the closing call once the reviewer answers. The gate, the read-back and
+/// `review_ledger`'s open pass all state it in these words.
+pub fn owed(pass: &OpenPass) -> String {
+    let closing = closing_call(pass);
+    match pass.state {
+        PassState::Waiting => format!("Once the reviewer answers, {closing}."),
+        PassState::Open | PassState::Closed => {
+            let mut sentence = capitalized(&closing);
+            sentence.push_str(
+                ", or call needs_input if the review must wait for the reviewer's answer.",
+            );
+            sentence
+        }
+    }
 }
 
 /// The closing call `pass` owes, as an instruction: `call finish_review with …`. A full
 /// review needs a verdict and the reviewed commit; a selected-thread check needs one
-/// assessment per selected discussion. Shared by the gate and the read-back.
-pub(super) fn closing_call(pass: Option<&OpenPass>) -> String {
-    let Some(pass) = pass else {
-        return "call finish_review".to_owned();
-    };
+/// assessment per selected discussion.
+fn closing_call(pass: &OpenPass) -> String {
     match pass.kind {
         PassKind::FullReview => {
             "call finish_review with your verdict and the reviewed commit".to_owned()

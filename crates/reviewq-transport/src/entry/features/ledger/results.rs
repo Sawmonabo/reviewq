@@ -1,23 +1,23 @@
 //! The app's ledger results mapped field by field to the tools' result DTOs.
 
 use reviewq_app::access::AppError;
-use reviewq_app::followups::ResultKind;
+use reviewq_app::ledger::passes::owed;
 use reviewq_app::ledger::{
     Author, FindingLine, FindingRecord, FinishReceipt, HoldReceipt, LedgerEntries, LedgerPage,
     NoteKey, NoteLine, NoteRecord, NoteSection, OpenPass, RecordReceipt, default_category,
 };
-use reviewq_app::reports::{
-    FindingBasisKind, FindingConclusion, FindingLocation, FindingSection, Severity,
-};
 use reviewq_domain::identity::GitSha;
 use reviewq_domain::ledger::{FindingId, PassKind, PassState};
-use reviewq_protocol::followups as followup_dto;
 use reviewq_protocol::ledger as dto;
 use reviewq_protocol::reports as report_dto;
 use reviewq_protocol::{DiscussionIdDto, FindingIdDto, GitShaDto, ResourceIdDto};
 
 use super::{LedgerResult, cursor};
 use crate::entry::ServiceEndpoint;
+use crate::entry::features::followups::project_result_kind;
+use crate::entry::features::reports::{
+    project_basis, project_conclusion, project_finding_section, project_location, project_severity,
+};
 
 /// The result of an accepted, equal or replayed record write.
 pub(super) fn receipt(receipt: RecordReceipt) -> Result<LedgerResult, AppError> {
@@ -90,10 +90,7 @@ pub(super) fn finish(receipt: FinishReceipt) -> Result<dto::FinishReceipt, AppEr
         receipt_id: resource(receipt.receipt.as_str())?,
         sha256: report_dto::ReportHashDto::new(receipt.sha256.as_str())
             .ok_or(AppError::Internal)?,
-        result: match summary.result {
-            ResultKind::Final => followup_dto::ResultKind::Final,
-            ResultKind::Unchanged => followup_dto::ResultKind::Unchanged,
-        },
+        result: project_result_kind(summary.result),
         new: ids(summary.new)?,
         updated: ids(summary.updated)?,
         retired: ids(summary.retired)?,
@@ -119,7 +116,7 @@ fn pass(pass: OpenPass) -> Result<dto::LedgerPass, AppError> {
     Ok(dto::LedgerPass {
         kind: pass_kind(pass.kind),
         waiting: pass.state == PassState::Waiting,
-        owes: owes(pass.kind).to_owned(),
+        owes: owed(&pass),
         discussion_ids: pass
             .batch
             .map(|batch| batch.discussion_ids)
@@ -130,21 +127,11 @@ fn pass(pass: OpenPass) -> Result<dto::LedgerPass, AppError> {
     })
 }
 
-/// What the closing call of a pass of `kind` must supply.
-fn owes(kind: PassKind) -> &'static str {
-    match kind {
-        PassKind::FullReview => "Call finish_review with your verdict and the reviewed commit.",
-        PassKind::SelectedThreads => {
-            "Call finish_review with one assessment for each selected discussion."
-        }
-    }
-}
-
 fn finding_line(line: FindingLine) -> Result<dto::FindingLine, AppError> {
     Ok(dto::FindingLine {
         id: finding_id(line.id)?,
         revision: line.revision.get(),
-        severity: severity(line.severity),
+        severity: project_severity(line.severity),
         blocking: line.blocking,
         title: line.title,
         author: author(line.author),
@@ -171,29 +158,23 @@ fn finding_record(record: FindingRecord) -> Result<dto::FindingRecord, AppError>
         active,
         author: author(record.author),
         title: fields.title,
-        severity: severity(fields.severity),
+        severity: project_severity(fields.severity),
         blocking: fields.blocking,
-        section: section(fields.section),
+        section: project_finding_section(fields.section),
         category: fields
             .category
             .unwrap_or_else(|| default_category(fields.section).to_owned()),
-        locations: body.locations.into_iter().map(location).collect(),
+        locations: body.locations.into_iter().map(project_location).collect(),
         issue: body.issue,
         consequence: body.consequence,
-        evidence: report_dto::FindingBasis {
-            kind: match body.evidence.kind {
-                FindingBasisKind::Observed => report_dto::FindingBasisKind::Observed,
-                FindingBasisKind::Gap => report_dto::FindingBasisKind::Gap,
-            },
-            text: body.evidence.text,
-        },
+        evidence: project_basis(body.evidence),
         proposed_comment: body.proposed_comment,
         details: body.details,
         outcome: record
             .outcome
             .map(|outcome| {
                 Ok::<_, AppError>(dto::RecordedOutcome {
-                    outcome: conclusion(outcome.conclusion),
+                    outcome: project_conclusion(outcome.conclusion),
                     reason: outcome.reason,
                     discussion_ids: outcome
                         .discussion_ids
@@ -241,44 +222,10 @@ fn git_sha(sha: GitSha) -> Result<GitShaDto, AppError> {
     GitShaDto::new(sha.as_str()).ok_or(AppError::Internal)
 }
 
-fn location(value: FindingLocation) -> report_dto::FindingLocation {
-    report_dto::FindingLocation {
-        path: value.path,
-        line: value.line,
-    }
-}
-
 fn pass_kind(kind: PassKind) -> dto::PassKind {
     match kind {
         PassKind::FullReview => dto::PassKind::FullReview,
         PassKind::SelectedThreads => dto::PassKind::SelectedThreads,
-    }
-}
-
-fn severity(value: Severity) -> report_dto::Severity {
-    match value {
-        Severity::P0 => report_dto::Severity::P0,
-        Severity::P1 => report_dto::Severity::P1,
-        Severity::P2 => report_dto::Severity::P2,
-        Severity::P3 => report_dto::Severity::P3,
-    }
-}
-
-fn section(value: FindingSection) -> report_dto::FindingSection {
-    match value {
-        FindingSection::Functional => report_dto::FindingSection::Functional,
-        FindingSection::Quality => report_dto::FindingSection::Quality,
-    }
-}
-
-fn conclusion(value: FindingConclusion) -> report_dto::FindingConclusion {
-    match value {
-        FindingConclusion::Fixed => report_dto::FindingConclusion::Fixed,
-        FindingConclusion::ClarifiedWithdrawn => report_dto::FindingConclusion::ClarifiedWithdrawn,
-        FindingConclusion::Superseded => report_dto::FindingConclusion::Superseded,
-        FindingConclusion::PartlyAddressed => report_dto::FindingConclusion::PartlyAddressed,
-        FindingConclusion::StillPresent => report_dto::FindingConclusion::StillPresent,
-        FindingConclusion::Unverified => report_dto::FindingConclusion::Unverified,
     }
 }
 

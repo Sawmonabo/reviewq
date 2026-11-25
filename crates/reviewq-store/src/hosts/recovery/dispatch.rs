@@ -27,8 +27,6 @@ const READY: &str = "
         AND (s.host_questions=1 OR s.host_activity IN ('blocked','working')))
    AND NOT EXISTS(SELECT 1 FROM action_heads h JOIN actions a USING(run_id,action_id)
        WHERE h.run_id=e.run_id AND a.state IN ('working','checking','retry_wait'))
-   AND NOT EXISTS(SELECT 1 FROM ledger_calls c WHERE c.run_id=e.run_id AND c.tool='finish_review'
-       AND c.native_turn_id=e.failed_turn_id)
    AND NOT EXISTS(SELECT 1 FROM followup_batches b WHERE b.run_id=e.run_id AND b.authority_verified=1
        AND (b.state='reserved' OR b.state='executing' AND (
           coalesce(b.continuation_turn_id,b.native_turn_id)<>e.failed_turn_id OR

@@ -7,7 +7,7 @@ use reviewq_domain::identity::ReportHash;
 use crate::access::AppError;
 use crate::reading::table::paged::{self, TablePage};
 use crate::reports::{
-    ArtifactStats, DisplayFallback, DisplayIndex, DisplayLayout, DisplayWindowBlock,
+    ArtifactStats, DisplayFallback, DisplayIndex, DisplayLayout, DisplayWindowBlock, HtmlRendering,
     build_display_index,
 };
 
@@ -74,7 +74,7 @@ impl SourcePages {
         Self {
             table: (MAX_INDEX_BYTES as u64 + 1..=paged::MAX_INDEXED_BYTES)
                 .contains(&bytes)
-                .then(paged::Builder::default),
+                .then(|| paged::Builder::new(HtmlRendering::Markup)),
             ..Self::default()
         }
     }
@@ -161,7 +161,7 @@ impl Index {
                 {
                     return None;
                 }
-                let mut table = paged::Builder::default();
+                let mut table = paged::Builder::new(HtmlRendering::Markup);
                 table.push(text);
                 table
                     .finish()

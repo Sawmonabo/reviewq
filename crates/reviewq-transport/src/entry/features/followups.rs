@@ -15,16 +15,15 @@ use reviewq_app::followups::{
     self as app, AssessmentPosition, AssessmentSelection, MAX_ASSESSMENTS, MAX_RESULTS,
     ResultPosition,
 };
-use reviewq_app::reports::FindingConclusion;
 use reviewq_domain::identity::{GitSha, Revision, RunId};
 use reviewq_protocol::followups as dto;
-use reviewq_protocol::reports::FindingConclusion as ConclusionDto;
 use reviewq_protocol::{
     GitShaDto, Page, PageCursorDto, ResourceIdDto, RevisionDto, RunIdDto, SubmissionIdDto, Success,
     UtcTimestampDto,
 };
 use serde::{Deserialize, Serialize};
 
+use super::reports::project_conclusion;
 use crate::entry::error::{ApiPath as Path, ApiQuery as Query};
 use crate::entry::pages::{count, parse, success};
 use crate::entry::{ApiError, Entry};
@@ -316,10 +315,7 @@ fn result(value: app::ResultSummary) -> Result<dto::ResultSummary, AppError> {
             .report
             .map(|receipt| resource(receipt.as_str()))
             .transpose()?,
-        kind: match value.kind {
-            app::ResultKind::Final => dto::ResultKind::Final,
-            app::ResultKind::Unchanged => dto::ResultKind::Unchanged,
-        },
+        kind: project_result_kind(value.kind),
         checked_sha: value.checked_sha.map(sha).transpose()?,
         completed_at: time(value.completed_at_ms)?,
         concern_count: count(value.concern_count)?,
@@ -341,14 +337,7 @@ fn assessment(value: app::Assessment) -> Result<dto::Assessment, AppError> {
             .map(|id| resource(id.as_str()))
             .transpose()?,
         discussion_id: resource(value.discussion_id)?,
-        conclusion: match value.conclusion {
-            FindingConclusion::Fixed => ConclusionDto::Fixed,
-            FindingConclusion::ClarifiedWithdrawn => ConclusionDto::ClarifiedWithdrawn,
-            FindingConclusion::Superseded => ConclusionDto::Superseded,
-            FindingConclusion::PartlyAddressed => ConclusionDto::PartlyAddressed,
-            FindingConclusion::StillPresent => ConclusionDto::StillPresent,
-            FindingConclusion::Unverified => ConclusionDto::Unverified,
-        },
+        conclusion: project_conclusion(value.conclusion),
         reason: value.reason,
         next_action: match value.next_action {
             app::NextAction::Review => dto::NextAction::Review,
@@ -360,6 +349,13 @@ fn assessment(value: app::Assessment) -> Result<dto::Assessment, AppError> {
             .map(resource)
             .collect::<Result<_, _>>()?,
     })
+}
+
+pub(super) fn project_result_kind(value: app::ResultKind) -> dto::ResultKind {
+    match value {
+        app::ResultKind::Final => dto::ResultKind::Final,
+        app::ResultKind::Unchanged => dto::ResultKind::Unchanged,
+    }
 }
 
 fn resource(value: impl Into<Box<str>>) -> Result<ResourceIdDto, AppError> {

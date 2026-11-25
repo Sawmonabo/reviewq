@@ -8,11 +8,12 @@ use std::fmt::{self, Display, Formatter};
 
 use reviewq_domain::identity::{GitSha, ReceiptId, ReportHash, Revision, RunId};
 use reviewq_domain::ledger::{
-    ClosingError, ClosingFacts, FailureKind, Settlement, VersionKind, VersionState, closing_kind,
-    settle as settlement, untouched_findings,
+    ClosingError, ClosingFacts, FailureKind, Settlement, Tool, VersionKind, VersionState,
+    closing_kind, settle as settlement, untouched_findings,
 };
 
 use super::compose::{self, checked_revision, finding_bytes, recorded_outcome, state};
+use super::refusal::{for_agent, root};
 use super::{
     CallBinding, ClosingCommit, ClosingRead, ClosingSnapshot, ClosingSummary, CommitKind,
     FailureRecord, FinishReceipt, FinishReview, LedgerSnapshot, LedgerStore, NewVersion,
@@ -42,6 +43,10 @@ const REPORTED_NOTES: [NoteSection; 5] = [
 const CLOSING_REFUSED: &str = "ReviewQ refused the lead's closing call because this run's workspace, repository grant, settings or follow-up batch changed, or the run's lead changed. The filed findings are kept. Check the run, then ask the lead to call finish_review again.";
 const UPDATE_REFUSED: &str = "ReviewQ could not publish an update because this run's workspace, repository grant, settings or lead changed. The filed findings are kept, and ReviewQ tries again the next time the run settles.";
 const UPDATE_KEPT_CHANGING: &str = "ReviewQ could not publish an update because the findings kept changing while it was composed. They are kept, and ReviewQ tries again the next time the run settles.";
+/// What the lead reads when its closing call is refused; the user reads `CLOSING_REFUSED`.
+const CLOSING_REFUSED_FOR_AGENT: &str = "ReviewQ could not close this review because its workspace, repository access, settings or follow-up batch changed, or the review's lead changed. Every finding and note is kept, and ReviewQ already shows the user why. Stop here and tell the user the review could not be closed; do not call finish_review again until they have looked.";
+/// What the lead reads when the records kept changing through every recompose.
+const KEPT_CHANGING_FOR_AGENT: &str = "Findings or notes kept changing while ReviewQ composed the report, so nothing was published yet, and every record is kept. If subagents are still filing, wait for them to finish, then call finish_review again.";
 
 /// Closes the run's review for the lead and publishes, from a snapshot read in one short
 /// transaction and committed conditionally; nothing is held open while composing. A repeat of
@@ -53,15 +58,29 @@ const UPDATE_KEPT_CHANGING: &str = "ReviewQ could not publish an update because 
 /// Fails with `InvalidFields` for anything the lead corrects in its turn: a missing verdict
 /// or revision, `fullReview` or assessments that do not fit the open pass, a revision other
 /// than the selected-thread batch's, findings a full review left untouched, assessments that
-/// do not cover the batch, or text over 4 MiB. Fails with `Conflict` after recording
-/// `closing_refused` when the run's workspace, grant, settings, follow-up binding or lead
-/// changed; with `Forbidden` for a child or an unattributed call, which records nothing; and
-/// with the retryable `Busy` when the records kept changing through three recomposes. Calls
+/// do not cover the batch, or text over 4 MiB. Every other refusal is also one root field
+/// error worded for the agent: after recording `closing_refused` when the run's workspace,
+/// grant, settings, follow-up binding or lead changed; for a child or an unattributed call,
+/// which records nothing; and when the records kept changing through three recomposes. Calls
 /// for different runs may run at once; a call that loses a race on its own run recomposes.
 pub async fn finish_review(
     store: &(impl LedgerStore + ?Sized),
     binding: CallBinding,
     input: FinishReview,
+) -> Result<FinishReceipt, AppError> {
+    let session = binding.session.clone();
+    match close(store, binding, &input).await {
+        Err(error) => Err(for_agent(store, &session, Tool::FinishReview, error).await),
+        closed => closed,
+    }
+}
+
+/// `finish_review` up to its refusals for a caller the store cannot bind, which it returns
+/// as the store's `Forbidden`.
+async fn close(
+    store: &(impl LedgerStore + ?Sized),
+    binding: CallBinding,
+    input: &FinishReview,
 ) -> Result<FinishReceipt, AppError> {
     for _ in 0..=MAX_RECOMPOSES {
         let closing = match store.closing_snapshot(binding.clone()).await? {
@@ -77,15 +96,14 @@ pub async fn finish_review(
                         turn: refused.turn,
                     })
                     .await?;
-                return Err(AppError::Conflict);
+                return Err(root(CLOSING_REFUSED_FOR_AGENT));
             }
             ClosingRead::Current(closing) => *closing,
         };
-        if let Some(ack) = repeated(&closing, &input).or_else(|| restates_current(&closing, &input))
-        {
+        if let Some(ack) = repeated(&closing, input).or_else(|| restates_current(&closing, input)) {
             return Ok(ack);
         }
-        let prepared = prepare_closing(closing, &input)?;
+        let prepared = prepare_closing(closing, input)?;
         match store.commit_publish(prepared.commit).await {
             Ok(PublishOutcome::Published(receipt)) => {
                 // The version is readable without its index, so a failure here is ignored.
@@ -107,31 +125,22 @@ pub async fn finish_review(
             Ok(PublishOutcome::Invalid(errors)) => return Err(AppError::InvalidFields(errors)),
             Err(AppError::Conflict) => {
                 store.record_failure(prepared.refusal).await?;
-                return Err(AppError::Conflict);
+                return Err(root(CLOSING_REFUSED_FOR_AGENT));
             }
             Err(error) => return Err(error),
         }
     }
-    Err(AppError::Busy)
+    Err(root(KEPT_CHANGING_FOR_AGENT))
 }
 
-/// Settles `run` from its stored state: publishes the update it owes, or records
-/// `unfinished_review` for an open pass its idle lead left, or does nothing. Call it when the
-/// run's lead or a child becomes idle, when a record is written while they are idle and when
-/// a recovery ends. A run already handled costs one read and no write, so calls may overlap.
-pub async fn settle(store: &(impl LedgerStore + ?Sized), run: RunId) -> Result<(), AppError> {
-    for candidate in store.runs_to_settle(Some(run)).await? {
-        settle_run(store, candidate).await?;
-    }
-    Ok(())
-}
-
-/// Settles every run that may need it, as `settle` does for one: at startup and on the
-/// periodic tick. One run's error does not stop the others; the first is returned after all
-/// were tried.
+/// Settles every run that may need it from its stored state: publishes the update a run owes,
+/// or records `unfinished_review` for an open pass its idle lead left, or does nothing. Runs at
+/// startup and on the periodic tick. A run already handled costs one read and no write, so
+/// calls may overlap. One run's error does not stop the others; the first is returned after
+/// all were tried.
 pub async fn settle_due(store: &(impl LedgerStore + ?Sized)) -> Result<(), AppError> {
     let mut first = None;
-    for candidate in store.runs_to_settle(None).await? {
+    for candidate in store.runs_to_settle().await? {
         if let Err(error) = settle_run(store, candidate).await {
             first.get_or_insert(error);
         }
@@ -426,7 +435,7 @@ fn untouched_errors(snapshot: &LedgerSnapshot) -> Vec<FieldError> {
         })
         .map(|finding| {
             FieldError::new(
-                "/fullReview",
+                "",
                 format!(
                     "{} \"{}\" is on the current version but this review neither changed nor assessed it. Record what became of it with assess_finding, or change it with record_finding.",
                     finding.record.id, finding.record.fields.title
