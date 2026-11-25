@@ -23,6 +23,9 @@ use reviewq_protocol::{
 use schemars::{JsonSchema, generate::SchemaSettings};
 use serde_json::{Value, json};
 
+#[path = "export-schema/ledger.rs"]
+mod ledger;
+
 const DRAFT_07: &str = "http://json-schema.org/draft-07/schema#";
 
 #[derive(Default)]
@@ -34,7 +37,7 @@ struct Registry {
 
 fn main() -> Result<(), Box<dyn Error>> {
     if let Some(mode) = std::env::args().nth(1) {
-        return Err(format!("unknown export mode {mode}").into());
+        return ledger::export(&mode);
     }
     let mut registry = Registry::default();
     registry.request::<EventCursorDto>("common", "EventReplayCursor")?;

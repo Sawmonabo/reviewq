@@ -61,8 +61,9 @@ pub enum Severity {
 
 /// Longest location path, in characters.
 pub const MAX_PATH_CHARS: usize = 512;
-/// Longest evidence text, in characters (8 KiB).
-pub const MAX_EVIDENCE_CHARS: usize = 8 * 1024;
+/// Longest issue, consequence, evidence text or proposed comment: 8 KiB of UTF-8. The schema
+/// states the same number as its character maximum.
+pub const MAX_FINDING_TEXT_BYTES: usize = 8 * 1024;
 /// Longest outcome or assessment reason, in characters.
 pub const MAX_REASON_CHARS: usize = 1024;
 /// Most finding IDs one assessment names.
@@ -86,23 +87,29 @@ pub struct FindingLocation {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct FindingBasis {
     pub kind: FindingBasisKind,
-    #[cfg_attr(feature = "schema", schemars(length(min = 1, max = MAX_EVIDENCE_CHARS)))]
+    #[cfg_attr(feature = "schema", schemars(length(min = 1, max = MAX_FINDING_TEXT_BYTES)))]
     pub text: String,
 }
 
-/// The reviewed revision: an exact SHA, or `{sha: null, reason}` when it is unknown.
+/// The reviewed revision: `{sha}` with the exact full SHA, or `{sha: null, reason}` when it is
+/// unknown.
 #[derive(Debug, serde::Deserialize, Serialize)]
-#[serde(untagged, deny_unknown_fields)]
+#[serde(deny_unknown_fields)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-pub enum ReportRevision {
-    Exact {
-        sha: GitShaDto,
-    },
-    Unknown {
-        sha: (),
-        #[cfg_attr(feature = "schema", schemars(length(min = 1, max = MAX_REASON_CHARS)))]
-        reason: String,
-    },
+pub struct ReportRevision {
+    /// The full SHA of the reviewed commit, or null when it is unknown.
+    #[cfg_attr(
+        feature = "schema",
+        schemars(required, schema_with = "crate::scalar::nullable_git_sha_schema")
+    )]
+    pub sha: Option<GitShaDto>,
+    /// Why the reviewed commit is unknown. Only with a null sha.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(
+        feature = "schema",
+        schemars(with = "String", length(min = 1, max = MAX_REASON_CHARS))
+    )]
+    pub reason: Option<String>,
 }
 
 /// The lead's conclusion on one selected discussion of a follow-up batch.

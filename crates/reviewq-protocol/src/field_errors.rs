@@ -6,7 +6,7 @@ use jsonschema::{ValidationError, Validator, error::ValidationErrorKind};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::scalar::MAX_ID_BYTES;
+use crate::scalar::{FINDING_ID_PATTERN, GIT_SHA_PATTERN, MAX_ID_BYTES};
 
 /// Field errors one reply lists before a single summary of the rest, which keeps a refusal
 /// within the bridge's 256 KiB and MCP's 512 KiB reply caps.
@@ -97,6 +97,8 @@ fn collect(error: &ValidationError<'_>, errors: &mut BTreeSet<FieldError>) {
         Kind::Enum { options } => record(errors, path, format!("Use one of {options}.")),
         Kind::Constant { expected_value } => record(errors, path, format!("Use {expected_value}.")),
         Kind::MaxItems { limit } => record(errors, path, format!("Use at most {limit} entries.")),
+        Kind::UniqueItems => record(errors, path, "Remove the repeated entries."),
+        Kind::Custom { message, .. } => record(errors, path, message.clone()),
         Kind::MaxLength { limit } => {
             record(errors, path, format!("Use at most {limit} characters."))
         }
@@ -105,9 +107,17 @@ fn collect(error: &ValidationError<'_>, errors: &mut BTreeSet<FieldError>) {
         }
         Kind::Maximum { limit } => record(errors, path, format!("Use at most {limit}.")),
         Kind::Minimum { limit } => record(errors, path, format!("Use at least {limit}.")),
-        Kind::Pattern { .. } => record(errors, path, "Value does not match the required format."),
+        Kind::Pattern { pattern } => record(errors, path, pattern_message(pattern)),
         Kind::Type { .. } => record(errors, path, "Value has the wrong JSON type."),
         _ => record(errors, path, "Value does not match the tool schema."),
+    }
+}
+
+fn pattern_message(pattern: &str) -> &'static str {
+    match pattern {
+        FINDING_ID_PATTERN => "Use a finding ID such as F-01.",
+        GIT_SHA_PATTERN => "Use the full 40- or 64-character SHA of a commit.",
+        _ => "Value does not match the required format.",
     }
 }
 

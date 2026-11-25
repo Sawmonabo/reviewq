@@ -7,8 +7,13 @@ pub(crate) const MAX_ID_BYTES: usize = 64;
 /// Longest GitLab discussion ID a batch or an assessment names.
 pub(crate) const MAX_DISCUSSION_ID_BYTES: usize = 256;
 
+/// The schema pattern of a finding ID, which field errors name in plain words.
+pub(crate) const FINDING_ID_PATTERN: &str = "^F-[0-9]{2,}$";
+/// The schema pattern of a full Git SHA, which field errors name in plain words.
+pub(crate) const GIT_SHA_PATTERN: &str = "^([0-9A-Fa-f]{40}|[0-9A-Fa-f]{64})$";
+
 const MAX_SQLITE_INTEGER: u64 = i64::MAX as u64;
-const MAX_JSON_INTEGER: u64 = 9_007_199_254_740_991;
+pub(crate) const MAX_JSON_INTEGER: u64 = 9_007_199_254_740_991;
 
 macro_rules! string_dto {
     ($(#[$doc:meta])* $name:ident, $check:expr, $schema:literal) => {
@@ -295,7 +300,7 @@ fn opaque_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
 fn finding_id_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
     schemars::json_schema!({
         "type": "string",
-        "pattern": "^F-[0-9]{2,}$",
+        "pattern": FINDING_ID_PATTERN,
         "maxLength": MAX_ID_BYTES,
     })
 }
@@ -326,7 +331,17 @@ fn review_id_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
 
 #[cfg(feature = "schema")]
 fn git_sha_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
-    schemars::json_schema!({ "type": "string", "pattern": "^([0-9A-Fa-f]{40}|[0-9A-Fa-f]{64})$" })
+    schemars::json_schema!({ "type": "string", "pattern": GIT_SHA_PATTERN })
+}
+
+/// A full Git SHA, or null where the revision is unknown.
+#[cfg(feature = "schema")]
+pub(crate) fn nullable_git_sha_schema(
+    generator: &mut schemars::SchemaGenerator,
+) -> schemars::Schema {
+    let mut schema = git_sha_schema(generator);
+    schema.insert("type".into(), serde_json::json!(["string", "null"]));
+    schema
 }
 
 #[cfg(feature = "schema")]

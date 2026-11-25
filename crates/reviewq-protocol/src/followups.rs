@@ -86,7 +86,7 @@ pub struct Batch {
     pub completed_at: Option<UtcTimestampDto>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, serde::Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub enum ResultKind {
