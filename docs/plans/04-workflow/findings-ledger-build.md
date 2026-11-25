@@ -346,7 +346,7 @@ One writer. Work top-down so each step compiles: callers first, then what they c
 - [ ] Handle a call with one bridge spawn that sends the tool, the tool-use ID, the active turn, the subagent's ID when the event has one, and the input. Send no heartbeat for a ledger call. Accept subagent calls for the four record tools and refuse the two closing tools from a subagent with a message that says the lead closes.
 - [ ] Return a result as the tool result and field errors as an error the model can read. Deny only an unlinked session.
 - [ ] Return the link's rule as text the model reads, not as a display-only notice.
-- [ ] Add the `SessionStart` entry to `hooks.json`. Give `finish_review` a longer bridge timeout than the 5 seconds the other calls keep.
+- [ ] Add the `SessionStart` entry to `hooks.json` with the `compact` matcher, and end every hook command with a guard so a wrong binary can never block a turn. The plugin outlasts the bridge on every ledger call: the bridge allows 30 seconds for a record call and 55 for `finish_review`, and the plugin waits 5 seconds longer.
 - [ ] Keep `register.jsx` at or below its current size by moving the ledger handlers into `ledger.js`. Run `node --check` on `ledger.js`, `workflow.js` and `bridge.js`.
 
 ### X1: Fixtures and the populated view
