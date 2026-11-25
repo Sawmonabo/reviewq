@@ -12,8 +12,6 @@ use crate::hosts::allow_target;
 use crate::queue::{lead_for_run, parse};
 use crate::{SqliteStore, StoreError};
 
-// Native turn completion may precede the final JSONL flush.
-
 impl ClaudeWorkflowStore for SqliteStore {
     fn claude_workflow_context(
         &self,
@@ -131,10 +129,10 @@ fn finish_turn(
         return Err(AppError::Conflict.into());
     }
     let written = db.execute(
-        "INSERT INTO claude_turns(session_key,turn_id,companion_generation,normal,recorded_at_ms)
-         VALUES(?1,?2,?3,?4,?5)
+        "INSERT INTO claude_turns(session_key,turn_id,companion_generation,normal)
+         VALUES(?1,?2,?3,?4)
          ON CONFLICT(session_key,turn_id) DO NOTHING",
-        params![key, id, result.generation, result.normal, now_ms()?],
+        params![key, id, result.generation, result.normal],
     )?;
     if written == 0 {
         let same: bool = db.query_row(

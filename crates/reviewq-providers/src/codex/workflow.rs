@@ -3,7 +3,7 @@ use std::path::Path;
 use reviewq_app::access::{AppError, AppFuture};
 use reviewq_app::hosts::DispatchGuard;
 use reviewq_app::workflow::{
-    NativeCall, NativeWorkflowProof, ReadyWorkflow, WorkflowHold, WorkflowReadiness, WorkflowTool,
+    NativeCall, NativeWorkflowProof, ReadyWorkflow, WorkflowHold, WorkflowReadiness,
 };
 use reviewq_domain::identity::{NativeInputId, NativeTurnId};
 use reviewq_domain::session::LeadTarget;
@@ -48,11 +48,10 @@ impl NativeWorkflowProof for Codex {
         lead: LeadTarget,
         turn: Option<NativeTurnId>,
         call_id: String,
-        tool: WorkflowTool,
     ) -> AppFuture<'_, NativeCall> {
         Box::pin(async move {
             let (thread, active) = self.active_workflow_turn(&lead, turn.as_ref()).await?;
-            let index = call_position(&active, &call_id, tool).ok_or(AppError::NotFound)?;
+            let index = call_position(&active, &call_id).ok_or(AppError::NotFound)?;
             if !matches!(&active.items[index], Item::CommandExecution { status, .. } if status == "inProgress")
             {
                 return Err(AppError::NotFound);
@@ -67,12 +66,10 @@ impl NativeWorkflowProof for Codex {
             Ok(NativeCall {
                 lead,
                 turn_id: active.id.parse().map_err(|_| AppError::Unavailable)?,
-                root_turn_id: root_turn(&active)?,
                 call_id,
                 source_generation: generation,
                 source_position: position,
                 request_entry_id: request_address(&active, index)?,
-                tool,
             })
         })
     }
@@ -276,13 +273,6 @@ fn verify_resumed_followup(saved: &Thread, resumed: &Thread) -> Result<(), AppEr
     Ok(())
 }
 
-fn root_turn(turn: &Turn) -> Result<Option<NativeTurnId>, AppError> {
-    turn.root_turn_id
-        .as_ref()
-        .map(|id| id.parse().map_err(|_| AppError::Unavailable))
-        .transpose()
-}
-
 async fn workflow_source(
     lead: &LeadTarget,
     thread: &Thread,
@@ -299,10 +289,10 @@ async fn workflow_source(
     .await
 }
 
-fn call_position(turn: &Turn, call_id: &str, expected: WorkflowTool) -> Option<usize> {
+fn call_position(turn: &Turn, call_id: &str) -> Option<usize> {
     turn.items.iter().position(|item| matches!(item,
         Item::CommandExecution { id, command, source, .. }
-            if id == call_id && matches!(source.as_deref(), Some("agent" | "unifiedExecStartup")) && reviewq_command(command, expected)))
+            if id == call_id && matches!(source.as_deref(), Some("agent" | "unifiedExecStartup")) && action_command(command)))
 }
 
 fn request_address(turn: &Turn, index: usize) -> Result<Option<NativeInputId>, AppError> {
@@ -316,7 +306,9 @@ fn request_address(turn: &Turn, index: usize) -> Result<Option<NativeInputId>, A
         .transpose()
 }
 
-fn reviewq_command(command: &str, tool: WorkflowTool) -> bool {
+/// Whether `command` runs `reviewq action declare` or `reviewq action reconcile`, alone or
+/// through one shell, with at most one output redirect.
+fn action_command(command: &str) -> bool {
     if command.len() > 8192 {
         return false;
     }
@@ -362,9 +354,5 @@ fn reviewq_command(command: &str, tool: WorkflowTool) -> bool {
     {
         return false;
     }
-    match tool {
-        WorkflowTool::Action => {
-            category == "action" && matches!(operation.as_str(), "declare" | "reconcile")
-        }
-    }
+    category == "action" && matches!(operation.as_str(), "declare" | "reconcile")
 }

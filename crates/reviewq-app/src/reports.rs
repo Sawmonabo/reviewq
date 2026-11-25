@@ -16,6 +16,7 @@ pub use drawings::{
 pub use revision::{FindingEdit, ReportEdits};
 
 use reviewq_domain::identity::{GitSha, ReceiptId, ReportHash, Revision, RunId};
+use satteri_pulldown_cmark::Options;
 
 use crate::access::{Actor, AppError, AppFuture};
 use crate::events::Snapshot;
@@ -26,6 +27,13 @@ pub const MAX_SECTION_SCALARS: u32 = 12_000;
 const MAX_MARKDOWN_LINE_BYTES: usize = 16 * 1024;
 /// Largest stored chunk of a report's text.
 pub const CHUNK_BYTES: usize = 64 * 1024;
+/// The parser options for report text, shared by the display index, the drawing finder and
+/// the ledger's field checks, so a field is judged as the reader parses the report.
+pub(crate) const REPORT_MARKDOWN: Options = Options::ENABLE_GFM
+    .union(Options::ENABLE_TABLES)
+    .union(Options::ENABLE_STRIKETHROUGH)
+    .union(Options::ENABLE_TASKLISTS)
+    .union(Options::ENABLE_FOOTNOTES);
 
 use crate::labels::labels;
 

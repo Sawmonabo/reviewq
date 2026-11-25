@@ -7,7 +7,6 @@ use reviewq_app::access::AppError;
 use reviewq_app::actions::{
     ActionDeclaration, CommentTarget, Intent, declare_publication, reconcile_publication,
 };
-use reviewq_app::workflow::WorkflowTool;
 use reviewq_domain::identity::ReportHash;
 use reviewq_protocol::Success;
 use reviewq_protocol::actions as dto;
@@ -46,7 +45,6 @@ pub(in crate::entry::features) async fn declare(
             lead.clone(),
             turn.clone(),
             command.call_id.as_str().to_owned(),
-            WorkflowTool::Action,
         )
         .await?;
     if native.lead != lead
@@ -55,7 +53,6 @@ pub(in crate::entry::features) async fn declare(
         || command.request_entry_id.as_ref().is_some_and(|requested| {
             native.request_entry_id.as_ref().map(|id| id.as_str()) != Some(requested.as_str())
         })
-        || native.tool != WorkflowTool::Action
     {
         return Err(AppError::NotFound.into());
     }
@@ -107,17 +104,9 @@ pub(in crate::entry::features) async fn reconcile(
         .run_lead(parse(command.session_key.as_str())?)
         .await?;
     let verified = proof
-        .verify_active_call(
-            lead.clone(),
-            None,
-            command.call_id.as_str().to_owned(),
-            WorkflowTool::Action,
-        )
+        .verify_active_call(lead.clone(), None, command.call_id.as_str().to_owned())
         .await?;
-    if verified.lead != lead
-        || verified.call_id != command.call_id.as_str()
-        || verified.tool != WorkflowTool::Action
-    {
+    if verified.lead != lead || verified.call_id != command.call_id.as_str() {
         return Err(AppError::NotFound.into());
     }
     if let Some(stored) =

@@ -4,7 +4,9 @@
 
 use std::ops::Range;
 
-use reviewq_domain::identity::{GitSha, MergeRequestIid, ReceiptId, ReportHash, Revision};
+use reviewq_domain::identity::{
+    GitSha, MergeRequestIid, NativeTurnId, ReceiptId, ReportHash, Revision, RunId,
+};
 use reviewq_domain::ledger::{FindingId, RecordRevision, VersionKind};
 use reviewq_domain::session::LeadTarget;
 
@@ -58,6 +60,23 @@ pub enum ClosingRead {
     /// The same call was already answered. Return its acknowledgement unchanged.
     Replayed(FinishReceipt),
     Current(Box<ClosingSnapshot>),
+    /// The lead may not close the run now. Record `closing_refused`, then refuse the call
+    /// with `Conflict`.
+    Refused(RefusedClosing),
+}
+
+/// A closing call from a run's lead that the store refuses, with what its `closing_refused`
+/// failure records. It names the run rather than a `Caller`, because the calling session may
+/// no longer be the run's registered lead.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RefusedClosing {
+    pub run: RunId,
+    /// The call's native turn, when the host named it.
+    pub turn: Option<NativeTurnId>,
+    /// The run's pass that is not closed, which the failure names.
+    pub pass: Option<PassId>,
+    /// The run's ledger sequence, which the failure is recorded at.
+    pub sequence: Revision,
 }
 
 /// A new closing call with the snapshot it composes from.
@@ -122,7 +141,8 @@ pub struct CoverFacts {
     pub mr_title: String,
     /// The MR's target-branch SHA, when ReviewQ knows it.
     pub target_sha: Option<GitSha>,
-    /// When the snapshot was read, in Unix milliseconds: the version's `Checked at` time.
+    /// When the snapshot was read, in Unix milliseconds: the `Checked at` time of a version
+    /// that does not carry its parent's (`VersionFacts::checked_at_ms`).
     pub read_at_ms: i64,
 }
 
@@ -133,6 +153,9 @@ pub struct ParentVersion {
     pub kind: VersionKind,
     /// The ledger sequence it published.
     pub sequence: Revision,
+    /// Its `Checked at` time, in Unix milliseconds. An update carries it unless its closing
+    /// call states a new revision.
+    pub checked_at_ms: i64,
 }
 
 /// A finding with what composing needs beyond its record.
@@ -211,6 +234,10 @@ pub struct VersionFacts {
     pub coverage_target_sha: Option<GitSha>,
     /// Advanced only by a full review; otherwise the parent's.
     pub full_mr_reviewed_sha: Option<GitSha>,
+    /// The cover's `Checked at` time, in Unix milliseconds, stored with the version: the
+    /// parent's for an update whose closing call states no new revision, otherwise the
+    /// snapshot's `read_at_ms`.
+    pub checked_at_ms: i64,
     /// The version takes its own attention identity and raises its notification. An update
     /// whose active findings, blocking values and verdict equal its parent's keeps the
     /// parent's.
@@ -251,16 +278,17 @@ pub struct Span {
     pub scalar_length: u64,
 }
 
-/// How a publish commit ended. A changed lead, authority, pass or frozen batch is
-/// `Err(AppError::Conflict)` instead.
+/// How a publish commit ended, by the rules `LedgerStore::commit_publish` states; a refused
+/// commit is `Err(AppError::Conflict)` instead.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum PublishOutcome {
     /// The version was stored under this receipt.
     Published(ReceiptId),
     /// The batch completed `unchanged`; no version was added.
     Unchanged,
-    /// A record or disposition changed after the snapshot, or another version took the head.
-    /// Nothing was written; read a new snapshot and compose again.
+    /// A record or disposition changed after the snapshot, another version took the head, or
+    /// a pass opened before an update committed. Nothing was written; read a new snapshot and
+    /// decide again.
     Stale,
     /// The assessments do not match the frozen batch. Nothing was written.
     Invalid(Vec<FieldError>),

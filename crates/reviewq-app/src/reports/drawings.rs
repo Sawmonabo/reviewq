@@ -1,6 +1,7 @@
 use reviewq_domain::identity::ReportHash;
-use satteri_pulldown_cmark::{CodeBlockKind, Event, Options, Parser, Tag, TagEnd};
+use satteri_pulldown_cmark::{CodeBlockKind, Event, Parser, Tag, TagEnd};
 
+use super::REPORT_MARKDOWN;
 use crate::access::{AppError, AppFuture};
 
 const SOURCE_BYTES: usize = 64 * 1024;
@@ -33,14 +34,7 @@ pub fn mermaid_sources(markdown: &str) -> Vec<String> {
     }
     let mut drawings = Vec::new();
     let mut source = None;
-    let parser = Parser::new_ext(
-        markdown,
-        Options::ENABLE_GFM
-            | Options::ENABLE_TABLES
-            | Options::ENABLE_STRIKETHROUGH
-            | Options::ENABLE_TASKLISTS
-            | Options::ENABLE_FOOTNOTES,
-    );
+    let parser = Parser::new_ext(markdown, REPORT_MARKDOWN);
     for event in parser {
         match event {
             Event::Start(Tag::CodeBlock(CodeBlockKind::Fenced(info)))

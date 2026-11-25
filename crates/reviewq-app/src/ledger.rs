@@ -7,7 +7,8 @@
 //! Composing happens outside every transaction.
 
 pub mod compose;
-pub mod markdown;
+mod layout;
+pub(crate) mod markdown;
 pub mod passes;
 pub mod publish;
 pub mod readback;
@@ -17,8 +18,8 @@ mod version;
 pub use version::{
     CardSpan, ClosingCommit, ClosingRead, ClosingSnapshot, ClosingSummary, CommitKind, Composed,
     CoverFacts, FinishReceipt, FinishReview, LastClosing, LedgerSnapshot, NewVersion,
-    ParentFinding, ParentVersion, PublishCommit, PublishOutcome, SectionSpan, SnapshotFinding,
-    SnapshotGuard, Span, VersionFacts,
+    ParentFinding, ParentVersion, PublishCommit, PublishOutcome, RefusedClosing, SectionSpan,
+    SnapshotFinding, SnapshotGuard, Span, VersionFacts,
 };
 
 use reviewq_domain::identity::{
@@ -30,7 +31,7 @@ use reviewq_domain::ledger::{
 };
 use reviewq_domain::session::{HostProvider, LeadTarget};
 
-use crate::access::AppFuture;
+use crate::access::{Actor, AppFuture};
 use crate::labels::labels;
 use crate::reports::{
     FindingBasis, FindingConclusion, FindingDetails, FindingLocation, FindingSection, Severity,
@@ -41,8 +42,9 @@ pub const MAX_ACTIVE_FINDINGS: u32 = 200;
 /// `extra` notes one run may hold. The store refuses a write that would exceed it.
 pub const MAX_EXTRA_NOTES: u32 = 12;
 /// Budget of one `review_ledger` page: the sum of the UTF-8 bytes of the text fields of the
-/// records on it. A page always holds at least one record, which the field limits keep within
-/// the budget.
+/// records on it. A page holds whole records within the budget, and always at least one: a
+/// record whose fields are all at their limits can exceed the budget alone, and then fills a
+/// page by itself.
 pub const MAX_LEDGER_PAGE_BYTES: usize = 64 * 1024;
 
 labels!(NoteSection {
@@ -85,29 +87,53 @@ pub fn default_category(section: FindingSection) -> &'static str {
     }
 }
 
-/// The calling session as the call itself names it. The store attributes it to a run's lead
-/// or a verified child, or refuses it.
+/// The calling session as a tool call names it. The store attributes the call to the run's
+/// lead or to a verified child of it, or refuses it.
+///
+/// | Caller | Claude | Codex |
+/// |---|---|---|
+/// | Lead | the lead's session, no agent ID | the lead's own thread |
+/// | Child | the lead's session and the subagent's ID | its own thread, whose parent is the lead |
+/// | Grandchild | the lead's session and its own subagent ID | its own thread, whose parent is a child |
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum HostSession {
-    /// Claude's plugin: the ReviewQ session key of the linked lead conversation, and the
-    /// subagent's ID when a subagent calls.
+    /// Claude's plugin: the ReviewQ session key of the linked lead conversation, which every
+    /// subagent of it calls through too, and the subagent's ID when a subagent calls. A call
+    /// without an agent ID is the lead's own.
     Claude {
         session: SessionKey,
         agent: Option<String>,
     },
-    /// Codex's MCP request: the calling thread, and its parent thread from the turn metadata
-    /// when present. A child is verified from that parent, when it is the lead or an already
-    /// bound child of the run, or else from the children ReviewQ discovered.
+    /// Codex's MCP request: the calling thread, its parent thread from the turn metadata when
+    /// present, and the request's actor. The store resolves the run's lead only inside a
+    /// checkout the actor's active grant covers (`checkout_lead`). The calling thread is the
+    /// lead when it is the lead's registered thread. Any other thread is a child, verified as
+    /// descending from the lead: through `parent` when that is the lead or an already bound
+    /// child of the run, otherwise through the children ReviewQ discovered.
     Codex {
         thread: NativeSessionId,
         parent: Option<NativeSessionId>,
+        actor: Actor,
     },
+}
+
+/// The session a host hook names: the stop gate and the read-back after compaction. A hook
+/// carries no grant and always speaks for the session's own agent, never for a subagent, so
+/// only a run's lead session gets a block or a read-back.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum HookSession {
+    /// Claude's hook: the ReviewQ session key of the linked conversation.
+    Claude(SessionKey),
+    /// Codex's hook: the thread it ran for.
+    Codex(NativeSessionId),
 }
 
 /// One ledger call's identity. A repeat with the same session and call ID returns the stored
 /// result.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CallBinding {
+    /// Who calls, as the call names it. The store decides from it whether the lead or a
+    /// child calls.
     pub session: HostSession,
     /// Claude's tool-use ID, or the Codex MCP call ID.
     pub call_id: String,
@@ -115,31 +141,51 @@ pub struct CallBinding {
     pub turn: Option<NativeTurnId>,
 }
 
+/// Which agent of a run made a call, as the store attributed it from the `HostSession`.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum CallingAgent {
+    /// The run's registered lead itself: a Claude call without a subagent ID, or a Codex call
+    /// from the lead's registered thread.
+    Lead,
+    /// A Claude subagent at any depth, by the ID the plugin supplied. It calls through the
+    /// lead's session.
+    ClaudeSubagent(String),
+    /// A Codex child or grandchild, by its own thread, which descends from the lead's thread.
+    CodexThread(NativeSessionId),
+}
+
 /// A call the store attributed to a run's lead or to one of its verified children.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Caller {
     /// The run's registered lead.
     pub lead: LeadTarget,
-    /// The calling native session: the lead's own for Claude, the calling thread for Codex.
-    pub session: NativeSessionId,
-    /// The Claude subagent's ID when a subagent calls.
-    pub agent: Option<String>,
+    pub agent: CallingAgent,
     pub call_id: String,
     pub turn: Option<NativeTurnId>,
 }
 
 impl Caller {
-    /// The lead only when its own session calls without a subagent ID.
+    /// `Lead` only for `CallingAgent::Lead`; every subagent and descendant thread is a child.
     pub fn role(&self) -> CallerRole {
-        if self.agent.is_none() && &self.session == self.lead.binding().identity().native_id() {
-            CallerRole::Lead
-        } else {
-            CallerRole::Child
+        match self.agent {
+            CallingAgent::Lead => CallerRole::Lead,
+            CallingAgent::ClaudeSubagent(_) | CallingAgent::CodexThread(_) => CallerRole::Child,
         }
     }
 
     pub fn provider(&self) -> HostProvider {
         self.lead.binding().identity().provider()
+    }
+
+    /// The native session the call came from: the lead's own for the lead and for a Claude
+    /// subagent, and the child's thread for a Codex child.
+    pub fn native_session(&self) -> &NativeSessionId {
+        match &self.agent {
+            CallingAgent::Lead | CallingAgent::ClaudeSubagent(_) => {
+                self.lead.binding().identity().native_id()
+            }
+            CallingAgent::CodexThread(thread) => thread,
+        }
     }
 }
 
@@ -154,14 +200,10 @@ pub enum Author {
 impl Author {
     /// The author of a change `caller` made.
     pub fn of(caller: &Caller) -> Self {
-        match caller.role() {
-            CallerRole::Lead => Self::Lead,
-            CallerRole::Child => Self::Subagent(
-                caller
-                    .agent
-                    .clone()
-                    .unwrap_or_else(|| caller.session.as_str().to_owned()),
-            ),
+        match &caller.agent {
+            CallingAgent::Lead => Self::Lead,
+            CallingAgent::ClaudeSubagent(agent) => Self::Subagent(agent.clone()),
+            CallingAgent::CodexThread(thread) => Self::Subagent(thread.as_str().to_owned()),
         }
     }
 }
@@ -201,7 +243,14 @@ pub struct FindingFields {
     pub body: FindingDetails,
 }
 
-/// The fields a change gives. A field left `None` keeps its value.
+/// The fields a change gives. Each field is `None` when the input left it out, which keeps
+/// the stored value, and `Some(value)` when the input gave it, which stores `value` in the
+/// field of the same name in `FindingFields`. So applying a patch is one assignment per given
+/// field.
+///
+/// The optional fields can be removed: a present empty list clears the locations
+/// (`Some(vec![])`), and a present empty string removes `proposedComment` or `details`
+/// (`Some(None)`). `Some(Some(text))` never holds empty text.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct FindingPatch {
     pub title: Option<String>,
@@ -213,8 +262,8 @@ pub struct FindingPatch {
     pub issue: Option<String>,
     pub consequence: Option<String>,
     pub evidence: Option<FindingBasis>,
-    pub proposed_comment: Option<String>,
-    pub details: Option<String>,
+    pub proposed_comment: Option<Option<String>>,
+    pub details: Option<Option<String>>,
 }
 
 /// What became of a finding, as `assess_finding` recorded it. A retiring conclusion
@@ -392,7 +441,7 @@ pub enum WriteRefusal {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct LedgerRead {
     pub selection: LedgerSelection,
-    /// The `next` cursor of the previous page.
+    /// The `next` cursor of the previous page, sent with the same selection.
     pub after: Option<LedgerCursor>,
 }
 
@@ -407,10 +456,13 @@ pub enum LedgerSelection {
     Notes(Vec<NoteSection>),
 }
 
-/// Where the next page starts: the index of its first entry in the selection's order. Valid
-/// while the run's ledger sequence stays at `sequence`; a later read returns `CursorExpired`.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+/// Where the next page starts, bound to the run and the selection it was issued for: the
+/// index of its first entry in the selection's order. It continues only a read of the same run
+/// and selection, while the run's ledger sequence stays at `sequence`.
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct LedgerCursor {
+    pub run: RunId,
+    pub selection: LedgerSelection,
     pub sequence: Revision,
     pub position: u32,
 }
@@ -421,8 +473,6 @@ pub struct LedgerPage {
     pub receipt: Option<ReceiptId>,
     pub pass: Option<OpenPass>,
     pub entries: LedgerEntries,
-    /// Requested IDs that name no finding of this run.
-    pub unknown: Vec<FindingId>,
     pub next: Option<LedgerCursor>,
 }
 
@@ -490,10 +540,10 @@ pub struct HoldReceipt {
     pub unpublished: u32,
 }
 
-/// A host's stop hook asking whether the turn may end.
+/// A host's stop hook asking whether the session's turn may end.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct GateRequest {
-    pub session: HostSession,
+    pub session: HookSession,
     pub turn: Option<NativeTurnId>,
     /// The host's `stopHookActive`: this stop follows a block.
     pub stop_hook_active: bool,
@@ -515,20 +565,24 @@ pub struct ReadBack {
     pub findings: Vec<FindingLine>,
 }
 
-/// A run that may need settling, with the facts `settle` decides from.
+/// A run that may need settling, with the facts `settle` decides from and what a failure it
+/// finds records.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SettleCandidate {
     pub run: RunId,
-    /// The run's ledger sequence when read.
+    /// The run's ledger sequence when read. A failure found by settling is recorded at it.
     pub sequence: Revision,
-    /// The pass `facts.pass` describes.
+    /// The pass `facts.pass` describes: the pass an `unfinished_review` names. `None` with no
+    /// pass, when an `update_failed` names only the run.
     pub pass: Option<PassId>,
     /// Findings on file, for an `unfinished_review` reason.
     pub active_findings: u32,
     pub facts: SettleFacts,
 }
 
-/// A delivery failure to record once per run, pass and kind.
+/// A delivery failure, recorded once per run, pass and kind: `unfinished_review` for a pass
+/// found unfinished by settling, `closing_refused` for a refused closing call and its pass if
+/// one is open, `update_failed` for an update of a run with no pass.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct FailureRecord {
     pub run: RunId,
@@ -536,15 +590,17 @@ pub struct FailureRecord {
     pub kind: FailureKind,
     /// Shown with the failed delivery: 1–2,048 bytes.
     pub reason: String,
-    /// The ledger sequence the failure was seen at.
+    /// The run's ledger sequence the failure was found at. Settling leaves out a run whose
+    /// unresolved failure carries the current sequence.
     pub sequence: Revision,
-    /// The refused closing call, for `closing_refused`.
-    pub call: Option<Caller>,
+    /// The native turn of a refused closing call, when the host named it. `None` for a
+    /// failure found by settling, which belongs to no call.
+    pub turn: Option<NativeTurnId>,
 }
 
 /// The ledger's storage. Each write is one short transaction and each read one read
-/// transaction; none reads a transcript or asks a provider. A call that cannot be attributed
-/// to the run's lead or a verified child fails with `Forbidden`.
+/// transaction; none reads a transcript or asks a provider. A tool call that cannot be
+/// attributed to the run's lead or a verified child fails with `Forbidden`.
 pub trait LedgerStore: Send + Sync {
     /// Applies one record write. A known call returns its stored result, or
     /// `IdempotencyConflict` when that call made another write. Checks the duplicate rules,
@@ -560,8 +616,10 @@ pub trait LedgerStore: Send + Sync {
     ) -> AppFuture<'_, Result<Recorded, WriteRefusal>>;
 
     /// Reads one page of the run's ledger, holding whole records up to
-    /// `MAX_LEDGER_PAGE_BYTES`. `CursorExpired` when the ledger sequence moved since `after`
-    /// was issued.
+    /// `MAX_LEDGER_PAGE_BYTES` and at least one. A requested ID that names no finding of the
+    /// run is `InvalidFields` with one error at `/ids/N` for each, N being its index in the
+    /// input; a cursor issued for another run or selection is `InvalidFields` at `/cursor`.
+    /// `CursorExpired` when the ledger sequence moved since `after` was issued.
     fn read_ledger(&self, session: HostSession, read: LedgerRead) -> AppFuture<'_, LedgerPage>;
 
     /// Holds the run's open pass for `needs_input` until the lead's next turn starts, and
@@ -572,29 +630,41 @@ pub trait LedgerStore: Send + Sync {
 
     /// Answers one stop request: applies `gate` to the stored facts, stores the decision's
     /// block count for the turn on the pass, and notes that the provider's stop hook
-    /// reported, rewriting that time only when it is more than an hour old. The report is
-    /// noted even for a session in no run, because the Codex hook runs for every session; such
-    /// a session is released.
+    /// reported, rewriting that time only when it is more than an hour old. The session is
+    /// the lead when it is a run's lead session and a child otherwise, which is released. The
+    /// report is noted even for a session in no run, because the Codex hook runs for every
+    /// session; such a session is released too.
     fn answer_gate(&self, request: GateRequest) -> AppFuture<'_, GateAnswer>;
 
-    /// Reads what `finish_review` composes from. `Forbidden` unless the caller is the run's
-    /// lead itself. A known call returns `Replayed`. `Conflict` when the run has no current
-    /// workspace or grant authority.
+    /// Reads what `finish_review` composes from. A known call returns `Replayed`. A call from
+    /// a run's lead returns `Current`, or `Refused` when the run's workspace, grant or
+    /// settings authority or its follow-up binding changed, or the calling session is no
+    /// longer the run's registered lead; the caller then records `closing_refused` and
+    /// refuses the call. A call from a child is `Forbidden`, and so is one attributed to no
+    /// run's lead or child; neither records a failure.
     fn closing_snapshot(&self, binding: CallBinding) -> AppFuture<'_, ClosingRead>;
 
     /// Reads what an update composes from. `NotFound` for an unknown run, `Conflict` when it
     /// has no current workspace or grant authority.
     fn update_snapshot(&self, run: RunId) -> AppFuture<'_, LedgerSnapshot>;
 
-    /// Commits a publish after rechecking its guard, in this order. A changed ledger
-    /// sequence, disposition revision or head is `Stale`, even when the pass or batch changed
-    /// too, so a closing call that lost a race recomposes instead of being refused. Then a
-    /// changed lead, authority, pass or frozen batch is `Conflict`. Then assessments that do
-    /// not cover the frozen batch are `Invalid`. Each writes nothing. Otherwise, in one transaction: seals the text in `CHUNK_BYTES` chunks,
-    /// appends the version with its finding, section and outcome rows, moves the head, binds
-    /// the disposition revisions, closes the pass, completes the batch, resolves earlier
-    /// failures, stores the closing acknowledgement for replay, inserts the notification and
-    /// emits the change events.
+    /// Commits a publish after rechecking its guard. The first rule that applies decides, and
+    /// each but the last writes nothing:
+    ///
+    /// 1. A changed ledger sequence, disposition revision or head is `Stale`, even when the
+    ///    pass or batch changed too, so a closing call that lost a race recomposes instead of
+    ///    being refused.
+    /// 2. For an update, a pass opened after the snapshot is `Stale`: the next snapshot shows
+    ///    the pass, and settling then publishes nothing.
+    /// 3. A changed lead or authority, or for a closing call a changed pass or frozen batch,
+    ///    is `Err(Conflict)`. The closing caller records `closing_refused`.
+    /// 4. Assessments that do not cover the frozen batch are `Invalid`.
+    /// 5. Otherwise, in one transaction: seals the text in `CHUNK_BYTES` chunks, appends the
+    ///    version with its finding, section and outcome rows, moves the head, binds the
+    ///    disposition revisions, closes the pass, completes the batch, resolves earlier
+    ///    failures, stores the closing acknowledgement for replay, inserts the notification
+    ///    and emits the change events. That is `Published`, or `Unchanged` for a closing
+    ///    commit without a version.
     fn commit_publish(&self, commit: PublishCommit) -> AppFuture<'_, PublishOutcome>;
 
     /// Builds the reader's display index for a version that just committed. A failure
@@ -612,8 +682,8 @@ pub trait LedgerStore: Send + Sync {
     /// pass that is already closed is stored resolved.
     fn record_failure(&self, failure: FailureRecord) -> AppFuture<'_, ()>;
 
-    /// What the read-back shows, or `None` unless `session` is a run's lead itself.
-    fn read_back(&self, session: HostSession) -> AppFuture<'_, Option<ReadBack>>;
+    /// What the read-back shows, or `None` unless `session` is a run's lead session.
+    fn read_back(&self, session: HookSession) -> AppFuture<'_, Option<ReadBack>>;
 
     /// When the provider's stop hook last reported on this installation, in Unix
     /// milliseconds, or `None` if it never has.

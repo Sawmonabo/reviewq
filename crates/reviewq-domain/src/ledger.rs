@@ -8,17 +8,18 @@
 use std::fmt::{self, Display, Formatter};
 use std::str::FromStr;
 
-use crate::identity::InvalidIdentity;
+use crate::identity::{InvalidIdentity, bounded_integer};
 
 /// Blocks the stop gate allows in one stop sequence. The next stop request of that sequence
 /// lets the turn end.
 pub const MAX_GATE_BLOCKS: u8 = 2;
 
-const MAX_SQLITE_INTEGER: u64 = i64::MAX as u64;
+/// The largest finding number, the most nine digits hold: `F-999999999`.
+const MAX_FINDING_NUMBER: u32 = 999_999_999;
 
-/// A finding's ID within its run: `F-01`, `F-02`, … `F-100`. The store assigns the next
-/// unused number per run and never reuses one. IDs order by number, so `F-99` sorts before
-/// `F-100`.
+/// A finding's ID within its run: `F-01`, `F-02`, … `F-100`, up to `F-999999999`. The store
+/// assigns the next unused number per run and never reuses one. IDs order by number, so
+/// `F-99` sorts before `F-100`.
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct FindingId(u32);
 
@@ -26,9 +27,9 @@ impl FindingId {
     /// The first ID of a run.
     pub const FIRST: Self = Self(1);
 
-    /// The ID with this number. Fails for zero.
+    /// The ID with this number. Fails for zero and past 999,999,999.
     pub fn new(number: u32) -> Result<Self, InvalidIdentity> {
-        if number == 0 {
+        if !(1..=MAX_FINDING_NUMBER).contains(&number) {
             return Err(InvalidIdentity);
         }
         Ok(Self(number))
@@ -38,17 +39,18 @@ impl FindingId {
         self.0
     }
 
-    /// The ID after this one, or `None` past `u32::MAX`.
+    /// The ID after this one, or `None` past `F-999999999`.
     pub fn next(self) -> Option<Self> {
-        self.0.checked_add(1).map(Self)
+        Self::new(self.0 + 1).ok()
     }
 }
 
 impl FromStr for FindingId {
     type Err = InvalidIdentity;
 
-    /// Accepts only the canonical form `Display` writes: `F-` and at least two digits with no
-    /// extra leading zero. `F-1`, `F-00` and `F-001` fail.
+    /// Accepts only the canonical form `Display` writes: `F-` and two to nine digits with no
+    /// extra leading zero, the protocol's `^F-(0[1-9]|[1-9][0-9]{1,8})$`. `F-1`, `F-00`,
+    /// `F-001` and `F-1000000000` fail.
     fn from_str(value: &str) -> Result<Self, Self::Err> {
         let digits = value.strip_prefix("F-").ok_or(InvalidIdentity)?;
         if digits.len() < 2
@@ -75,52 +77,20 @@ impl Display for FindingId {
     }
 }
 
-/// The revision of one finding or note. It starts at 1 and advances with each accepted
-/// change; a write equal to the stored record leaves it unchanged.
-#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
-pub struct RecordRevision(u64);
+bounded_integer!(
+    /// The revision of one finding or note. It starts at 1 and advances with each accepted
+    /// change; a write equal to the stored record leaves it unchanged.
+    RecordRevision,
+    1
+);
 
 impl RecordRevision {
     /// The revision of a newly filed record.
     pub const FIRST: Self = Self(1);
 
-    pub const fn get(self) -> u64 {
-        self.0
-    }
-
-    pub fn as_sqlite_integer(self) -> i64 {
-        self.0 as i64
-    }
-
     /// The revision after this one, or `None` past SQLite's integer range.
     pub fn next(self) -> Option<Self> {
         Self::try_from(self.0.checked_add(1)?).ok()
-    }
-}
-
-impl TryFrom<u64> for RecordRevision {
-    type Error = InvalidIdentity;
-
-    /// Fails for zero and for values beyond SQLite's integer range.
-    fn try_from(value: u64) -> Result<Self, Self::Error> {
-        if !(1..=MAX_SQLITE_INTEGER).contains(&value) {
-            return Err(InvalidIdentity);
-        }
-        Ok(Self(value))
-    }
-}
-
-impl TryFrom<i64> for RecordRevision {
-    type Error = InvalidIdentity;
-
-    fn try_from(value: i64) -> Result<Self, Self::Error> {
-        Self::try_from(u64::try_from(value).map_err(|_| InvalidIdentity)?)
-    }
-}
-
-impl Display for RecordRevision {
-    fn fmt(&self, output: &mut Formatter<'_>) -> fmt::Result {
-        Display::fmt(&self.0, output)
     }
 }
 

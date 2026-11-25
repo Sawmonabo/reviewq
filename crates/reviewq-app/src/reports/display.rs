@@ -1,4 +1,4 @@
-//! Native source spans for a captured report. Browser admission still uses its own validator.
+//! Native source spans for a published report version. Browser admission still uses its own validator.
 
 mod cutter;
 

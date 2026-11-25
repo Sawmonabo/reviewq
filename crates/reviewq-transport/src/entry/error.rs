@@ -14,6 +14,8 @@ pub(super) enum ApiError {
     // The proof gate rejected the request before performing the operation.
     BrowserProofRejected,
     // The tool input broke these schema or value rules; the agent corrects them in its turn.
+    // The list is uncapped, from the validator or the app alike, and is capped once where the
+    // reply is written.
     InvalidFields(Vec<FieldError>),
 }
 
@@ -64,12 +66,12 @@ impl<S: Send + Sync> FromRequest<S> for ApiBytes {
 impl From<AppError> for ApiError {
     fn from(error: AppError) -> Self {
         match error {
-            AppError::InvalidFields(errors) => Self::InvalidFields(bounded_field_errors(
+            AppError::InvalidFields(errors) => Self::InvalidFields(
                 errors
                     .into_iter()
                     .map(|error| FieldError::new(error.path, error.message))
                     .collect(),
-            )),
+            ),
             error => Self::Application(error),
         }
     }
@@ -82,7 +84,7 @@ impl IntoResponse for ApiError {
                 let (status, failure) = failure(error);
                 (status, Json(failure)).into_response()
             }
-            Self::InvalidFields(errors) => field_errors(AppError::InvalidRequest, &errors),
+            Self::InvalidFields(errors) => field_errors(AppError::InvalidRequest, &capped(errors)),
             Self::BrowserProofRejected => {
                 let (status, failure) = failure(AppError::Forbidden);
                 (status, [("x-reviewq-csrf-rejected", "1")], Json(failure)).into_response()
@@ -99,6 +101,40 @@ fn field_errors(error: AppError, errors: &[FieldError]) -> Response {
         "fieldErrors": errors,
     });
     (status, Json(body)).into_response()
+}
+
+/// The text of an MCP tool error, which the model reads to correct its call: for refused
+/// fields, one line per field with its path and message, capped as the HTTP reply is; for any
+/// other failure, the protocol's error object as JSON.
+pub(super) fn tool_error_text(error: ApiError) -> String {
+    let error = match error {
+        ApiError::InvalidFields(errors) => {
+            let mut text = format!(
+                "{} Correct these fields and call again.",
+                AppError::InvalidFields(Vec::new())
+            );
+            for error in capped(errors) {
+                text.push('\n');
+                if !error.path.is_empty() {
+                    text.push_str(&error.path);
+                    text.push_str(": ");
+                }
+                text.push_str(&error.message);
+            }
+            return text;
+        }
+        ApiError::Application(error) => error,
+        ApiError::BrowserProofRejected => AppError::Forbidden,
+    };
+    let (_status, failure) = failure(error);
+    serde_json::to_string(&failure.error).unwrap_or(failure.error.message)
+}
+
+/// Caps a refusal's field errors exactly once, whether they came from the protocol's validator
+/// or from the app: at most `MAX_FIELD_ERRORS` in field order, then one entry that counts the
+/// rest.
+fn capped(errors: Vec<FieldError>) -> Vec<FieldError> {
+    bounded_field_errors(errors.into_iter().collect())
 }
 
 pub(super) fn failure(error: AppError) -> (StatusCode, Failure) {

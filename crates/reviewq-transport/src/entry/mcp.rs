@@ -195,12 +195,9 @@ impl ServerHandler for Server {
         };
         let output = match result {
             Ok(output) => output,
-            Err(error) => {
-                let (_status, failure) = super::error::failure(error);
-                let text = serde_json::to_string(&failure.error)
-                    .map_err(|_| ErrorData::internal_error("response unavailable", None))?;
-                CallToolResult::error(vec![ContentBlock::text(text)])
-            }
+            Err(error) => CallToolResult::error(vec![ContentBlock::text(
+                super::error::tool_error_text(error.into()),
+            )]),
         };
         Ok(output.into())
     }

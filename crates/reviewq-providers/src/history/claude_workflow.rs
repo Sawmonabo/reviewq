@@ -3,7 +3,6 @@ use std::sync::atomic::AtomicBool;
 
 use reviewq_app::access::AppError;
 use reviewq_app::history::{HistorySession, VisibleKind};
-use reviewq_app::workflow::WorkflowTool;
 use reviewq_domain::identity::NativeInputId;
 use reviewq_domain::session::HostProvider;
 use serde::Deserialize;
@@ -14,6 +13,8 @@ use super::{file, locator, records};
 
 const SCAN_BYTES: u64 = 16 * 1024 * 1024;
 const MAX_ROW: u64 = 8 * 1024 * 1024;
+/// The name Claude records for a call of ReviewQ's publication action tool.
+const ACTION_TOOL: &str = "mcp__reviewq__review_action";
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -46,15 +47,11 @@ pub(crate) struct ClaudeOpening {
 pub(crate) fn claude_workflow_opening(
     session: &HistorySession,
     call_id: &str,
-    tool: WorkflowTool,
     cancelled: &AtomicBool,
 ) -> Result<ClaudeOpening, AppError> {
     let source = source(session, cancelled)?;
     let mut budget = SCAN_BYTES;
     let mut end = complete_end(&source, &mut budget, cancelled)?;
-    let name = match tool {
-        WorkflowTool::Action => "mcp__reviewq__review_action",
-    };
     let mut opening = None;
     while end > 0 {
         let start = file::end_of_line(&source.file, end - 1, &mut budget, cancelled)?;
@@ -71,7 +68,7 @@ pub(crate) fn claude_workflow_opening(
                     .blocks()
                     .filter(|block| block["type"] == "tool_use" && block["id"] == call_id)
                 {
-                    if block["name"] != name || opening.replace(start).is_some() {
+                    if block["name"] != ACTION_TOOL || opening.replace(start).is_some() {
                         return Err(AppError::Conflict);
                     }
                 }

@@ -7,12 +7,12 @@
 //! The source stays verbatim. ReviewQ uses the pinned parser's native offset events,
 //! records block kinds and original source coordinates, and leaves unsafe cuts to the full reader.
 
-use satteri_pulldown_cmark::{Event, Options, Parser, Tag};
+use satteri_pulldown_cmark::{Event, Parser, Tag};
 
 use super::{
     DisplayLayout, MAX_DISPLAY_BLOCKS, MAX_DISPLAY_HEADING_BYTES, MAX_DISPLAY_HEADINGS_BYTES,
 };
-use crate::reports::MAX_MARKDOWN_LINE_BYTES;
+use crate::reports::{MAX_MARKDOWN_LINE_BYTES, REPORT_MARKDOWN};
 
 const CUT_WINDOW_BYTES: usize = 64 * 1024;
 const SETTLE_LAG_BLOCKS: usize = 2;
@@ -251,14 +251,7 @@ fn window_end(source: &str, from: usize, bytes: usize) -> Result<usize, DisplayF
 }
 
 fn parse_window(window: &str) -> Result<Vec<BlockStart>, DisplayFallback> {
-    let parser = Parser::new_ext(
-        window,
-        Options::ENABLE_GFM
-            | Options::ENABLE_TABLES
-            | Options::ENABLE_STRIKETHROUGH
-            | Options::ENABLE_TASKLISTS
-            | Options::ENABLE_FOOTNOTES,
-    );
+    let parser = Parser::new_ext(window, REPORT_MARKDOWN);
     if parser.reference_definitions().iter().next().is_some() {
         return Err(DisplayFallback::DocumentContext);
     }

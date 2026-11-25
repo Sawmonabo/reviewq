@@ -4,7 +4,7 @@ use std::fmt::{self, Display, Formatter};
 use std::str::FromStr;
 
 const MAX_ID_BYTES: usize = 512;
-const MAX_SQLITE_INTEGER: u64 = i64::MAX as u64;
+pub(crate) const MAX_SQLITE_INTEGER: u64 = i64::MAX as u64;
 
 /// An identity or counter is outside its supported representation.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -180,6 +180,7 @@ impl Display for GitSha {
     }
 }
 
+/// A non-negative counter or identity that fits SQLite's signed integer, at least `$minimum`.
 macro_rules! bounded_integer {
     ($(#[$doc:meta])* $name:ident, $minimum:literal) => {
         $(#[$doc])*
@@ -197,26 +198,26 @@ macro_rules! bounded_integer {
         }
 
         impl TryFrom<u64> for $name {
-            type Error = InvalidIdentity;
+            type Error = $crate::identity::InvalidIdentity;
 
             fn try_from(value: u64) -> Result<Self, Self::Error> {
-                if !($minimum..=MAX_SQLITE_INTEGER).contains(&value) {
-                    return Err(InvalidIdentity);
+                if !($minimum..=$crate::identity::MAX_SQLITE_INTEGER).contains(&value) {
+                    return Err($crate::identity::InvalidIdentity);
                 }
                 Ok(Self(value))
             }
         }
 
         impl TryFrom<i64> for $name {
-            type Error = InvalidIdentity;
+            type Error = $crate::identity::InvalidIdentity;
 
             fn try_from(value: i64) -> Result<Self, Self::Error> {
-                Self::try_from(u64::try_from(value).map_err(|_| InvalidIdentity)?)
+                Self::try_from(u64::try_from(value).map_err(|_| $crate::identity::InvalidIdentity)?)
             }
         }
 
-        impl FromStr for $name {
-            type Err = InvalidIdentity;
+        impl ::std::str::FromStr for $name {
+            type Err = $crate::identity::InvalidIdentity;
 
             fn from_str(value: &str) -> Result<Self, Self::Err> {
                 if value.is_empty()
@@ -224,19 +225,25 @@ macro_rules! bounded_integer {
                     || (value.len() > 1 && value.starts_with('0'))
                     || !value.bytes().all(|byte| byte.is_ascii_digit())
                 {
-                    return Err(InvalidIdentity);
+                    return Err($crate::identity::InvalidIdentity);
                 }
-                Self::try_from(value.parse::<u64>().map_err(|_| InvalidIdentity)?)
+                Self::try_from(
+                    value
+                        .parse::<u64>()
+                        .map_err(|_| $crate::identity::InvalidIdentity)?,
+                )
             }
         }
 
-        impl Display for $name {
-            fn fmt(&self, output: &mut Formatter<'_>) -> fmt::Result {
-                Display::fmt(&self.0, output)
+        impl ::std::fmt::Display for $name {
+            fn fmt(&self, output: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+                ::std::fmt::Display::fmt(&self.0, output)
             }
         }
     };
 }
+
+pub(crate) use bounded_integer;
 
 bounded_integer!(
     /// A positive numeric project ID scoped to one verified GitLab origin.

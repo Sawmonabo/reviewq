@@ -246,7 +246,7 @@ async fn read_report(
         ReportRead::Summary { receipt_id } => {
             let receipt = receipt_id.map(|id| parse(id.as_str())).transpose()?;
             let stored = entry.store.read_report(actor, run, receipt, false).await?;
-            Ok(json!({"kind":"accepted_summary","value":reports::project_view(stored.value)?}))
+            Ok(json!({"kind":"summary","value":reports::project_view(stored.value)?}))
         }
         ReportRead::Section {
             receipt_id,
@@ -264,7 +264,7 @@ async fn read_report(
                     characters.unwrap_or(6000),
                 )
                 .await?;
-            Ok(json!({"kind":"accepted_section","value":reports::project_section(stored.value)?}))
+            Ok(json!({"kind":"section","value":reports::project_section(stored.value)?}))
         }
     }
 }

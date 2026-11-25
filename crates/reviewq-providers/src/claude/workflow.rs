@@ -2,9 +2,7 @@ use std::sync::Arc;
 
 use reviewq_app::access::{AppError, AppFuture};
 use reviewq_app::hosts::ClaudeWorkflowStore;
-use reviewq_app::workflow::{
-    NativeCall, NativeWorkflowProof, WorkflowHold, WorkflowReadiness, WorkflowTool,
-};
+use reviewq_app::workflow::{NativeCall, NativeWorkflowProof, WorkflowHold, WorkflowReadiness};
 use reviewq_domain::identity::NativeTurnId;
 use reviewq_domain::session::LeadTarget;
 
@@ -49,19 +47,6 @@ impl NativeWorkflowProof for ClaudeWorkflow {
         lead: LeadTarget,
         turn: Option<NativeTurnId>,
         call_id: String,
-        tool: WorkflowTool,
-    ) -> AppFuture<'_, NativeCall> {
-        self.verify_opening(lead, turn, call_id, tool)
-    }
-}
-
-impl ClaudeWorkflow {
-    fn verify_opening(
-        &self,
-        lead: LeadTarget,
-        turn: Option<NativeTurnId>,
-        call_id: String,
-        tool: WorkflowTool,
     ) -> AppFuture<'_, NativeCall> {
         Box::pin(async move {
             let context = self
@@ -76,7 +61,7 @@ impl ClaudeWorkflow {
             let opening = self
                 .native
                 .read_native(context.session, move |session, cancelled| {
-                    claude_workflow_opening(&session, &id, tool, cancelled)
+                    claude_workflow_opening(&session, &id, cancelled)
                 })
                 .await?;
             if context.request.is_none() || context.request != opening.request {
@@ -85,9 +70,7 @@ impl ClaudeWorkflow {
             Ok(NativeCall {
                 lead,
                 turn_id,
-                root_turn_id: None,
                 call_id,
-                tool,
                 source_generation: opening.generation,
                 source_position: opening.position,
                 request_entry_id: opening.request,

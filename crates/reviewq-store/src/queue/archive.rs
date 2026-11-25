@@ -149,7 +149,7 @@ fn archive(
             UNION ALL
             SELECT x.review_id,v.published_at_ms,'report' FROM selected s JOIN runs x USING(review_id)
             JOIN report_versions v USING(run_id) JOIN artifacts a USING(artifact_id)
-            WHERE a.sealed=1 AND v.coverage='full_mr' AND v.kind='full_review'
+            WHERE a.sealed=1 AND v.kind<>'selected_threads' AND v.attention_receipt_id=v.receipt_id
             UNION ALL
             SELECT f.review_id,f.completed_at_ms,'followup' FROM followup_results f JOIN selected s USING(review_id)),
          ranked AS (

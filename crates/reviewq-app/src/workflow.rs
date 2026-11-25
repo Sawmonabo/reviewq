@@ -9,21 +9,14 @@ use crate::access::{AppError, AppFuture};
 use crate::hosts::{MessageBody, MessagePurpose};
 use crate::queue::MergeRequestState;
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum WorkflowTool {
-    Action,
-}
-
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct NativeCall {
     pub lead: LeadTarget,
     pub turn_id: NativeTurnId,
-    pub root_turn_id: Option<NativeTurnId>,
     pub call_id: String,
     pub source_generation: String,
     pub source_position: u64,
     pub request_entry_id: Option<NativeInputId>,
-    pub tool: WorkflowTool,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -230,12 +223,11 @@ pub trait NativeWorkflowProof: Send + Sync {
         Box::pin(async { Ok(false) })
     }
 
-    /// Resolve and verify an actual active lead tool from the selected native source.
+    /// Resolve and verify an actual active lead action call from the selected native source.
     fn verify_active_call(
         &self,
         lead: LeadTarget,
         turn: Option<NativeTurnId>,
         call_id: String,
-        tool: WorkflowTool,
     ) -> AppFuture<'_, NativeCall>;
 }

@@ -3,9 +3,7 @@
 use std::sync::Arc;
 
 use reviewq_app::access::{AppError, AppFuture};
-use reviewq_app::workflow::{
-    NativeCall, NativeWorkflowProof, WorkflowHold, WorkflowReadiness, WorkflowTool,
-};
+use reviewq_app::workflow::{NativeCall, NativeWorkflowProof, WorkflowHold, WorkflowReadiness};
 use reviewq_domain::identity::NativeTurnId;
 use reviewq_domain::session::{HostProvider, LeadTarget};
 
@@ -115,11 +113,10 @@ impl NativeWorkflowProof for Workflows {
         lead: LeadTarget,
         turn: Option<NativeTurnId>,
         call_id: String,
-        tool: WorkflowTool,
     ) -> AppFuture<'_, NativeCall> {
         Box::pin(async move {
             self.reader(&lead)?
-                .verify_active_call(lead, turn, call_id, tool)
+                .verify_active_call(lead, turn, call_id)
                 .await
         })
     }

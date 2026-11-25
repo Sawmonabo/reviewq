@@ -7,7 +7,7 @@ use reviewq_app::events::{ResourceKey, Snapshot};
 use reviewq_app::notifications::{Kind, Observation, Source};
 use reviewq_app::queue::MergeRequestState;
 use reviewq_app::sources::WorkflowSnapshot;
-use reviewq_app::workflow::{NativeCall, WorkflowAdmission, WorkflowBinding, WorkflowTool};
+use reviewq_app::workflow::{NativeCall, WorkflowAdmission, WorkflowBinding};
 use reviewq_domain::identity::{MrIdentity, ReportHash, Revision, SubmissionId};
 use reviewq_domain::session::LeadTarget;
 use rusqlite::{Connection, OptionalExtension, params};
@@ -172,8 +172,7 @@ fn declare(
     if let Some(previous) = replay(db, &call, &digest)? {
         return snapshot(db, previous);
     }
-    if call.tool != WorkflowTool::Action
-        || call.source_generation.is_empty()
+    if call.source_generation.is_empty()
         || call.source_generation.len() > 512
         || call.call_id.is_empty()
         || call.call_id.len() > 512

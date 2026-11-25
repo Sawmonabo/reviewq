@@ -7,7 +7,7 @@ use crate::access::{AppError, AppFuture};
 use crate::events::Snapshot;
 use crate::queue::MergeRequestState;
 use crate::sources::{ReviewSourceReader, WorkflowDiscussion, WorkflowNote, WorkflowSnapshot};
-use crate::workflow::{NativeCall, NativeWorkflowProof, WorkflowTool};
+use crate::workflow::{NativeCall, NativeWorkflowProof};
 
 use super::{Action, Approval, Evidence, Intent};
 
@@ -107,7 +107,7 @@ pub async fn declare_publication(
 ) -> Result<Snapshot<Action>, AppError> {
     input.validate()?;
     let request_entry = call.request_entry_id.as_ref().ok_or(AppError::Conflict)?;
-    if request_entry.as_str().is_empty() || call.tool != WorkflowTool::Action {
+    if request_entry.as_str().is_empty() {
         return Err(AppError::Forbidden);
     }
     if let Some(previous) = store.declared_action(call.clone(), digest.clone()).await? {
@@ -133,7 +133,6 @@ pub async fn declare_publication(
             call.lead.clone(),
             Some(call.turn_id.clone()),
             call.call_id.clone(),
-            WorkflowTool::Action,
         )
         .await?;
     if current != call {
@@ -164,7 +163,6 @@ pub async fn reconcile_publication(
             call.lead.clone(),
             Some(call.turn_id.clone()),
             call.call_id.clone(),
-            WorkflowTool::Action,
         )
         .await?;
     if current != call {

@@ -4,28 +4,29 @@
 //! field as its own block and shifts its headings, so a field that passes here cannot open or
 //! swallow a section or card of the report.
 
+#![cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "K3 checks each field when it is filed and K1 shifts headings when composing"
+    )
+)]
+
 use std::borrow::Cow;
 use std::fmt::{self, Display, Formatter};
 use std::ops::Range;
 
-use satteri_pulldown_cmark::{Event, Options, Parser, Tag};
+use satteri_pulldown_cmark::{Event, Parser, Tag, TagEnd};
 
 use super::NoteSection;
+use super::layout::{COVER_LABELS, CardLabel};
+use crate::reports::REPORT_MARKDOWN;
 
 /// Longest line of an authored field, in UTF-8 bytes without its line ending.
-pub const MAX_FIELD_LINE_BYTES: usize = 8 * 1024;
+pub(crate) const MAX_FIELD_LINE_BYTES: usize = 8 * 1024;
 
 /// Paragraphs a `summary` note may hold. A `rationale` holds one.
 const MAX_SUMMARY_PARAGRAPHS: usize = 4;
-
-/// Labels the report's cover lines use. The reader recognizes a paragraph that starts with
-/// one of them as a cover line.
-const HEADER_LABELS: [&str; 4] = [
-    "Scope:",
-    "Reviewed source:",
-    "Reviewed target:",
-    "Checked at:",
-];
 
 /// Appended after a field to test that a heading written after it still reads as one. Only
 /// its byte offset identifies it, so its text cannot collide with a field's own heading.
@@ -36,8 +37,12 @@ const SENTINEL_GAP: usize = 2;
 
 /// The kind of authored field, which decides the rules beyond the line limit and the
 /// stand-alone rule that every field follows.
+#[cfg_attr(
+    test,
+    expect(dead_code, reason = "K3 checks every kind of field when it is filed")
+)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum MarkdownField {
+pub(crate) enum MarkdownField {
     /// Begins with a paragraph, which follows the card's `Issue` label.
     Issue,
     /// Begins with a paragraph, which follows the card's `Why it matters` label.
@@ -46,7 +51,7 @@ pub enum MarkdownField {
     Evidence,
     /// Begins with a paragraph, which follows the card's `Proposed comment` label.
     ProposedComment,
-    /// A finding's `details`.
+    /// A finding's `details`, which may begin with any block.
     Details,
     /// At most four plain paragraphs.
     Summary,
@@ -60,7 +65,11 @@ pub enum MarkdownField {
 impl MarkdownField {
     /// The rules for a note's body. `None` for the `title` note, which is one line of plain
     /// text that the protocol checks.
-    pub fn for_note(section: NoteSection) -> Option<Self> {
+    #[cfg_attr(
+        test,
+        expect(dead_code, reason = "K3 checks a note's body when it is filed")
+    )]
+    pub(crate) fn for_note(section: NoteSection) -> Option<Self> {
         match section {
             NoteSection::Title => None,
             NoteSection::Summary => Some(Self::Summary),
@@ -79,13 +88,13 @@ impl MarkdownField {
 /// The first rule a field breaks, at the 1-based line of the field where the problem starts.
 /// `Display` writes the message the caller returns as the field's error.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct FieldProblem {
-    pub line: usize,
-    pub kind: ProblemKind,
+pub(crate) struct FieldProblem {
+    pub(crate) line: usize,
+    pub(crate) kind: ProblemKind,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum ProblemKind {
+pub(crate) enum ProblemKind {
     /// The line exceeds `MAX_FIELD_LINE_BYTES`.
     LongLine,
     /// A code fence opens here and never closes, so it would swallow what follows the field.
@@ -94,6 +103,9 @@ pub enum ProblemKind {
     OpenHtml,
     /// Another block starts here and runs past the end of the field.
     OpenBlock,
+    /// A link reference definition starts here. Once the report is composed it would apply
+    /// to every field, and it makes the reader index the whole document at once.
+    ReferenceDefinition,
     /// The field holds no Markdown block, only blank space.
     Empty,
     /// The field must begin with a paragraph but begins with another block here.
@@ -106,6 +118,8 @@ pub enum ProblemKind {
     BoldStart,
     /// A `summary` or `rationale` paragraph starts with a label the report header uses.
     LabelStart(&'static str),
+    /// A finding field's paragraph starts with one of the card's bold labels here.
+    CardLabel(CardLabel),
 }
 
 impl Display for FieldProblem {
@@ -127,6 +141,10 @@ impl Display for FieldProblem {
             ProblemKind::OpenBlock => write!(
                 output,
                 "Line {line} starts a block that never ends, so it would swallow the rest of the report. Close it."
+            ),
+            ProblemKind::ReferenceDefinition => write!(
+                output,
+                "Line {line} defines a link reference, which would apply to the whole report. Write the link inline as [text](url)."
             ),
             ProblemKind::Empty => {
                 output.write_str("The text is blank. Write it, or leave the field out.")
@@ -153,16 +171,24 @@ impl Display for FieldProblem {
                 output,
                 "Line {line}: start the paragraph with plain words, not \"{label}\", which the report header uses."
             ),
+            ProblemKind::CardLabel(label) => write!(
+                output,
+                "Line {line}: start the paragraph with plain words, not \"**{}**\", which the card shows as a field label.",
+                label.text()
+            ),
         }
     }
 }
 
 /// Checks one non-empty authored field. Every field keeps each line within
-/// `MAX_FIELD_LINE_BYTES` and stands alone: a heading written after it still reads as a
-/// heading, so an open code fence or an HTML block that never ends is refused. `field` adds
-/// its own rules. Returns the first problem found. An empty note body removes the note and
-/// is not checked.
-pub fn check_field(field: MarkdownField, text: &str) -> Result<(), FieldProblem> {
+/// `MAX_FIELD_LINE_BYTES`, stands alone (a heading written after it still reads as a heading,
+/// so an open code fence or an HTML block that never ends is refused) and defines no link
+/// reference. `field` adds its own rules: a finding's fields begin no paragraph with a card's
+/// bold label, and all but `details` begin with a paragraph. Returns the first problem found.
+///
+/// A removal is never passed here: an empty note body removes the note, and a change that
+/// removes `proposedComment` or `details` carries no text.
+pub(crate) fn check_field(field: MarkdownField, text: &str) -> Result<(), FieldProblem> {
     if let Some(line) = long_line(text) {
         return Err(FieldProblem {
             line,
@@ -173,7 +199,9 @@ pub fn check_field(field: MarkdownField, text: &str) -> Result<(), FieldProblem>
     source.push_str(text);
     source.push_str(SENTINEL);
     let sentinel = text.len() + SENTINEL_GAP;
-    let mut blocks = top_level_blocks(&source);
+    let parse = Parse::new(&source);
+    let definition = parse.first_definition();
+    let mut blocks = top_level_blocks(parse);
     match blocks.pop() {
         Some(Block {
             start,
@@ -200,6 +228,12 @@ pub fn check_field(field: MarkdownField, text: &str) -> Result<(), FieldProblem>
             });
         }
     }
+    if let Some(start) = definition {
+        return Err(FieldProblem {
+            line: line_of(text, start),
+            kind: ProblemKind::ReferenceDefinition,
+        });
+    }
     let Some(first) = blocks.first() else {
         return Err(FieldProblem {
             line: 1,
@@ -211,7 +245,7 @@ pub fn check_field(field: MarkdownField, text: &str) -> Result<(), FieldProblem>
         | MarkdownField::Consequence
         | MarkdownField::Evidence
         | MarkdownField::ProposedComment => match first.kind {
-            BlockKind::Paragraph { .. } => Ok(()),
+            BlockKind::Paragraph { .. } => card_labels(text, &blocks),
             BlockKind::Heading | BlockKind::Code | BlockKind::Html | BlockKind::Other => {
                 Err(FieldProblem {
                     line: line_of(text, first.start),
@@ -219,9 +253,10 @@ pub fn check_field(field: MarkdownField, text: &str) -> Result<(), FieldProblem>
                 })
             }
         },
+        MarkdownField::Details => card_labels(text, &blocks),
         MarkdownField::Summary => plain_paragraphs(text, &blocks, MAX_SUMMARY_PARAGRAPHS),
         MarkdownField::Rationale => plain_paragraphs(text, &blocks, 1),
-        MarkdownField::Details | MarkdownField::Note => Ok(()),
+        MarkdownField::Note => Ok(()),
     }
 }
 
@@ -232,7 +267,7 @@ pub fn check_field(field: MarkdownField, text: &str) -> Result<(), FieldProblem>
 /// A heading inside a quote or list item is rewritten in place and keeps its container
 /// markers. Setext text over several lines is joined into one line with single spaces. Text
 /// that ends in `#` gets a closing ` #`, so the ATX form keeps that character.
-pub fn shift_headings(text: &str) -> Cow<'_, str> {
+pub(crate) fn shift_headings(text: &str) -> Cow<'_, str> {
     let headings = headings(text);
     let Some(shallowest) = headings.iter().map(|heading| heading.level).min() else {
         return Cow::Borrowed(text);
@@ -245,9 +280,9 @@ pub fn shift_headings(text: &str) -> Cow<'_, str> {
         shifted.extend(std::iter::repeat_n('#', usize::from(level)));
         let mut wrote = false;
         for line in heading
-            .content
+            .lines
             .iter()
-            .flat_map(|piece| text[piece.clone()].split('\n'))
+            .flat_map(|line| text[line.clone()].split('\n'))
             .map(str::trim)
             .filter(|line| !line.is_empty())
         {
@@ -264,27 +299,48 @@ pub fn shift_headings(text: &str) -> Cow<'_, str> {
     Cow::Owned(shifted)
 }
 
-/// The parser's offset events for `text`, with the options of the reader's display index
-/// (`reports/display/cutter.rs`), so a field is judged as the reader will parse the report.
-/// The parser drops a leading byte-order mark and reports offsets without it, so leading marks
-/// are skipped here and their length added back to every range.
-fn events(text: &str) -> impl Iterator<Item = (Event<'_>, Range<usize>)> {
-    let skip = text.len() - text.trim_start_matches('\u{feff}').len();
-    Parser::new_ext(
-        &text[skip..],
-        Options::ENABLE_GFM
-            | Options::ENABLE_TABLES
-            | Options::ENABLE_STRIKETHROUGH
-            | Options::ENABLE_TASKLISTS
-            | Options::ENABLE_FOOTNOTES,
-    )
-    .into_offset_iter()
-    .map(move |(event, range)| (event, range.start + skip..range.end + skip))
+/// `text` parsed with the reader's options (`REPORT_MARKDOWN`), so a field is judged as the
+/// reader will parse the report. The parser drops a leading byte-order mark and reports
+/// offsets without it, so leading marks are skipped here and their length added back to every
+/// offset.
+struct Parse<'a> {
+    parser: Parser<'a>,
+    skip: usize,
 }
 
-#[derive(Clone, Copy)]
+impl<'a> Parse<'a> {
+    fn new(text: &'a str) -> Self {
+        let skip = text.len() - text.trim_start_matches('\u{feff}').len();
+        Self {
+            parser: Parser::new_ext(&text[skip..], REPORT_MARKDOWN),
+            skip,
+        }
+    }
+
+    /// Where the first link reference definition starts. Definitions emit no event, so the
+    /// parser's table of them is read before the events.
+    fn first_definition(&self) -> Option<usize> {
+        self.parser
+            .reference_definitions()
+            .iter()
+            .map(|(_, definition)| definition.span.start + self.skip)
+            .min()
+    }
+
+    /// The parser's events, each with its source range.
+    fn events(self) -> impl Iterator<Item = (Event<'a>, Range<usize>)> {
+        let skip = self.skip;
+        self.parser
+            .into_offset_iter()
+            .map(move |(event, range)| (event, range.start + skip..range.end + skip))
+    }
+}
+
 enum BlockKind {
-    Paragraph { bold_start: bool },
+    Paragraph {
+        /// The text of the strong emphasis the paragraph begins with, if it begins with one.
+        bold: Option<String>,
+    },
     Heading,
     Code,
     Html,
@@ -297,19 +353,15 @@ struct Block {
 }
 
 /// The document's top-level blocks in order, each with its starting byte.
-fn top_level_blocks(source: &str) -> Vec<Block> {
+fn top_level_blocks(parse: Parse<'_>) -> Vec<Block> {
     let mut blocks = Vec::new();
     let mut depth = 0_usize;
     let mut paragraph_opened = false;
-    for (event, range) in events(source) {
-        if std::mem::take(&mut paragraph_opened)
-            && matches!(event, Event::Start(Tag::Strong))
-            && let Some(Block {
-                kind: BlockKind::Paragraph { bold_start },
-                ..
-            }) = blocks.last_mut()
-        {
-            *bold_start = true;
+    // The text of a top-level paragraph's leading strong emphasis while it is read.
+    let mut bold: Option<String> = None;
+    for (event, range) in parse.events() {
+        if std::mem::take(&mut paragraph_opened) && matches!(event, Event::Start(Tag::Strong)) {
+            bold = Some(String::new());
         }
         match event {
             Event::Start(tag) => {
@@ -317,7 +369,7 @@ fn top_level_blocks(source: &str) -> Vec<Block> {
                     let kind = match tag {
                         Tag::Paragraph => {
                             paragraph_opened = true;
-                            BlockKind::Paragraph { bold_start: false }
+                            BlockKind::Paragraph { bold: None }
                         }
                         Tag::Heading { .. } => BlockKind::Heading,
                         Tag::CodeBlock(_) => BlockKind::Code,
@@ -331,7 +383,24 @@ fn top_level_blocks(source: &str) -> Vec<Block> {
                 }
                 depth += 1;
             }
-            Event::End(_) => depth = depth.saturating_sub(1),
+            Event::End(_) => {
+                depth = depth.saturating_sub(1);
+                // The leading strong opened inside the paragraph, at depth 1, and ends here.
+                if depth == 1
+                    && let Some(text) = bold.take()
+                    && let Some(Block {
+                        kind: BlockKind::Paragraph { bold },
+                        ..
+                    }) = blocks.last_mut()
+                {
+                    *bold = Some(text);
+                }
+            }
+            Event::Text(text) | Event::Code(text) if bold.is_some() => {
+                if let Some(bold) = bold.as_mut() {
+                    bold.push_str(&text);
+                }
+            }
             // A leaf block such as a thematic break.
             _ if depth == 0 => blocks.push(Block {
                 start: range.start,
@@ -343,6 +412,25 @@ fn top_level_blocks(source: &str) -> Vec<Block> {
     blocks
 }
 
+/// No top-level paragraph begins with a card's bold label, such as `**Issue:**`, which the
+/// reader would take for a field of the card. The label must be the whole strong text, as the
+/// reader matches it.
+fn card_labels(text: &str, blocks: &[Block]) -> Result<(), FieldProblem> {
+    for block in blocks {
+        if let BlockKind::Paragraph { bold: Some(bold) } = &block.kind
+            && let Some(label) = CardLabel::ALL
+                .into_iter()
+                .find(|label| label.text() == bold)
+        {
+            return Err(FieldProblem {
+                line: line_of(text, block.start),
+                kind: ProblemKind::CardLabel(label),
+            });
+        }
+    }
+    Ok(())
+}
+
 /// Every block is a paragraph that starts with plain words, and there are at most `max`.
 fn plain_paragraphs(text: &str, blocks: &[Block], max: usize) -> Result<(), FieldProblem> {
     for (index, block) in blocks.iter().enumerate() {
@@ -351,8 +439,8 @@ fn plain_paragraphs(text: &str, blocks: &[Block], max: usize) -> Result<(), Fiel
             BlockKind::Heading | BlockKind::Code | BlockKind::Html | BlockKind::Other => {
                 Some(ProblemKind::NotPlain)
             }
-            BlockKind::Paragraph { bold_start: true } => Some(ProblemKind::BoldStart),
-            BlockKind::Paragraph { bold_start: false } => header_label(&text[block.start..])
+            BlockKind::Paragraph { bold: Some(_) } => Some(ProblemKind::BoldStart),
+            BlockKind::Paragraph { bold: None } => header_label(&text[block.start..])
                 .map(ProblemKind::LabelStart)
                 .or((index >= max).then_some(ProblemKind::TooManyParagraphs { max })),
         };
@@ -363,9 +451,9 @@ fn plain_paragraphs(text: &str, blocks: &[Block], max: usize) -> Result<(), Fiel
     Ok(())
 }
 
-/// The header label `paragraph` starts with, ignoring ASCII case.
+/// The cover label `paragraph` starts with, ignoring ASCII case.
 fn header_label(paragraph: &str) -> Option<&'static str> {
-    HEADER_LABELS.into_iter().find(|label| {
+    COVER_LABELS.into_iter().find(|label| {
         paragraph
             .get(..label.len())
             .is_some_and(|start| start.eq_ignore_ascii_case(label))
@@ -393,51 +481,56 @@ struct Heading {
     level: u8,
     /// The heading's source without its final line ending.
     replace: Range<usize>,
-    /// Its inline text, split at line breaks. Each piece is one contiguous source slice, so
-    /// escapes and code spans stay as written.
-    content: Vec<Range<usize>>,
+    /// Its inline text, one source slice per line, so escapes and code spans stay as written.
+    /// A line starts at its first inline, after any quote marker or indentation the
+    /// containers put before it.
+    lines: Vec<Range<usize>>,
 }
 
 /// Every heading of `text`, in source order.
 fn headings(text: &str) -> Vec<Heading> {
     let mut found = Vec::new();
     let mut current: Option<Heading> = None;
-    let mut piece: Option<Range<usize>> = None;
-    let mut depth = 0_usize;
-    for (event, range) in events(text) {
+    let mut line: Option<Range<usize>> = None;
+    // Where the current line's text may start: past the last line break.
+    let mut floor = 0;
+    for (event, range) in Parse::new(text).events() {
         let Some(heading) = current.as_mut() else {
             if let Event::Start(Tag::Heading { level, .. }) = event {
                 let mut end = range.end;
                 while end > range.start && matches!(text.as_bytes()[end - 1], b'\n' | b'\r') {
                     end -= 1;
                 }
+                floor = range.start;
                 current = Some(Heading {
                     level: level as u8,
                     replace: range.start..end,
-                    content: Vec::new(),
+                    lines: Vec::new(),
                 });
             }
             continue;
         };
         match event {
-            Event::End(_) if depth == 0 => {
-                heading.content.extend(piece.take());
+            Event::End(TagEnd::Heading(_)) => {
+                heading.lines.extend(line.take());
                 found.extend(current.take());
             }
-            Event::End(_) => depth -= 1,
-            Event::SoftBreak | Event::HardBreak if depth == 0 => {
-                heading.content.extend(piece.take());
+            // A break at any depth ends the line, even inside emphasis or a link that goes
+            // on, so the next line's container markers are never part of its text.
+            Event::SoftBreak | Event::HardBreak => {
+                heading.lines.extend(
+                    line.take()
+                        .map(|open| open.start..open.end.min(range.start)),
+                );
+                floor = range.end;
             }
-            event => {
-                if depth == 0 {
-                    piece = Some(match piece.take() {
-                        Some(open) => open.start..range.end.max(open.end),
-                        None => range,
-                    });
-                }
-                if matches!(event, Event::Start(_)) {
-                    depth += 1;
-                }
+            // An inline that opened on an earlier line reports its whole range, so a line
+            // starts no earlier than the break before it.
+            _ => {
+                line = Some(match line.take() {
+                    Some(open) => open.start..open.end.max(range.end),
+                    None => range.start.max(floor)..range.end,
+                });
             }
         }
     }
@@ -476,14 +569,30 @@ mod tests {
                 "Adds retries to invoice writes.\n\nScope: the invoice path only.",
                 refused(3, ProblemKind::LabelStart("Scope:")),
             ),
+            (
+                "a details paragraph that starts with a card label",
+                MarkdownField::Details,
+                "Context.\n\n**Proposed comment:** Ship it.",
+                refused(3, ProblemKind::CardLabel(CardLabel::ProposedComment)),
+            ),
         ];
         for (case, field, text, expected) in cases {
             assert_eq!(check_field(field, text), expected, "{case}");
         }
-        assert_eq!(
-            shift_headings("Intro.\n\nPlan\n====\n\nBody.\n"),
-            "Intro.\n\n#### Plan\n\nBody.\n",
-            "a setext heading is shifted"
-        );
+        let shifted = [
+            (
+                "a setext heading is shifted",
+                "Intro.\n\nPlan\n====\n\nBody.\n",
+                "Intro.\n\n#### Plan\n\nBody.\n",
+            ),
+            (
+                "a quoted setext heading over two lines keeps one quote marker",
+                "> *foo\n> bar*\n> ===",
+                "> #### *foo bar*",
+            ),
+        ];
+        for (case, text, expected) in shifted {
+            assert_eq!(shift_headings(text), expected, "{case}");
+        }
     }
 }
