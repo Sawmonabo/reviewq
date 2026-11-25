@@ -7,7 +7,7 @@ async function nativeArgv($) {
   return [binary || `${home}/.local/bin/reviewq`, "internal"];
 }
 
-export async function invoke($, action, id, value) {
+export async function invoke($, action, id, value, timeoutMs = 5000) {
   try {
     const argv = await nativeArgv($);
     if (!argv) return { error: "ReviewQ could not resolve the installed native helper." };
@@ -19,7 +19,7 @@ export async function invoke($, action, id, value) {
       argv.push("claude-bridge", action, id);
       stdin = JSON.stringify(value);
     }
-    const result = await $.process.run(argv, { stdin, timeoutMs: 5000, env: await $.process.hookEnv() });
+    const result = await $.process.run(argv, { stdin, timeoutMs, env: await $.process.hookEnv() });
     if (result.exitCode === 0 && !result.isStdoutTruncated) {
       return JSON.parse(result.stdout);
     }

@@ -37,6 +37,17 @@
         ]
       }
     ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "if [ -n \"${REVIEWQ_CLAUDE_LINKED:-}\" ]; then \"${REVIEWQ_NATIVE_BIN:-$HOME/.local/bin/reviewq}\" internal claude-hook; fi",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
     "Stop": [
       {
         "hooks": [

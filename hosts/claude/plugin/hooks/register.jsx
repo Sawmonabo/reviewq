@@ -1,6 +1,7 @@
 import { invoke } from "./bridge.js";
 import { deliver, finishTurn, observeFirstStep, observeInput, observeTurn, reviewqOrigin } from "./delivery.js";
 import { registerWorkflowTools, reportTurn, stageAction } from "./workflow.js";
+import { callLedger, ledgerToolIds, registerLedgerTools } from "./ledger.js";
 import { reconcileChildren } from "./children.js";
 import { currentSettings } from "./settings.js";
 import { answerQuestion, observeQuestion } from "./questions.js";
@@ -127,6 +128,7 @@ function schedule($, delay = 0, registration = false) {
 export function register(on) {
   on("session.start", async ($, event, next) => {
     await registerWorkflowTools($);
+    await registerLedgerTools($);
     await $.command.register({
       name: "reviewq",
       description: "Show ReviewQ status or link this session to a merge request",
@@ -139,7 +141,7 @@ export function register(on) {
   on("command.run", { command: "reviewq" }, async ($, event) => {
     const result = await refresh($, (event.args ?? "").trim());
     if (session?.linked) schedule($);
-    return { text: result.message ?? result.error, isTextDisplayOnly: true };
+    return result.rule ? { text: `${result.message}\n\n${result.rule}` } : { text: result.message ?? result.error, isTextDisplayOnly: true };
   });
 
   on("prompt.submit", async ($, event, next) => {
@@ -160,9 +162,7 @@ export function register(on) {
 
   on("turn.start", async ($, event, next) => {
     if (event.agentId) {
-      if (session?.linked) {
-        schedule($);
-      }
+      if (session?.linked) schedule($);
       return next(event);
     }
     const state = await current($);
@@ -197,9 +197,7 @@ export function register(on) {
 
   on("turn.complete", async ($, event, next) => {
     const result = await next(event);
-    if (event.agentId && session?.linked) {
-      schedule($);
-    }
+    if (event.agentId && session?.linked) schedule($);
     if (!event.agentId && session?.turnId === event.turnId) {
       const state = session;
       if (state.linked) {
@@ -217,9 +215,7 @@ export function register(on) {
 
   on("agent.spawn", async ($, event, next) => {
     const result = await next(event);
-    if (result.agentId && session?.linked) {
-      schedule($);
-    }
+    if (result.agentId && session?.linked) schedule($);
     return result;
   });
 
@@ -244,6 +240,10 @@ export function register(on) {
     await heartbeat($, state, false);
     return stageAction($, state, event);
   });
+
+  for (const tool of ledgerToolIds) {
+    on("tool.call", { tool }, async ($, event) => callLedger($, event.agentId ? session : await workflowLead($), event));
+  }
 
   on("tool.call", { tool: "AskUserQuestion" }, async ($, event, next) => {
     if (event.agentId || !session?.linked) return next(event);

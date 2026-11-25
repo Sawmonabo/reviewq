@@ -38,7 +38,7 @@ export async function stageAction($, state, event) {
     context.declaration = event.declaration;
   }
   const result = await invoke($, declare ? "action" : "action-status", state.id, context);
-  return stringifyResult(result);
+  return toolResult(result);
 }
 
 export async function reportTurn($, state, event) {
@@ -47,12 +47,14 @@ export async function reportTurn($, state, event) {
   });
 }
 
-function stringifyResult(result) {
-  if (result.error || !Object.hasOwn(result, "data")) {
-    const message = Array.isArray(result.fieldErrors) ?
-      JSON.stringify({ error: result.error, fieldErrors: result.fieldErrors }) :
-      result.error ?? "ReviewQ did not record this native tool call.";
-    return { result: message, isError: true };
+// A reply's `data` becomes the tool result. `error` is a string from `invoke` or the service's
+// error object; refused fields follow one per line so the model can correct the call.
+export function toolResult(result) {
+  if (!result.error && Object.hasOwn(result, "data")) return { result: JSON.stringify(result.data) };
+  if (Array.isArray(result.fieldErrors)) {
+    const lines = result.fieldErrors.map(({ path, message }) => path ? `${path}: ${message}` : message);
+    return { result: ["Invalid tool input. Correct these fields and call again.", ...lines].join("\n"), isError: true };
   }
-  return { result: JSON.stringify(result.data) };
+  const error = typeof result.error === "string" ? result.error : result.error && JSON.stringify(result.error);
+  return { result: error || "ReviewQ returned no result for this call.", isError: true };
 }
