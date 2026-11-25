@@ -5,6 +5,7 @@ use reviewq_domain::session::LeadTarget;
 
 use crate::access::{AppError, AppFuture};
 use crate::hosts::MessageBody;
+use crate::ledger::readback::append_rule;
 use crate::queue::MergeRequestState;
 use crate::reports::ReportReference;
 use crate::sources::ReviewSourceReader;
@@ -157,7 +158,8 @@ async fn prepare(
             "Privately reassess selected ReviewQ discussions for {} !{} at source SHA {}. Batch {}. ",
             "Read each identified discussion and the current code. ",
             "Preserve unrelated findings, questions, qualifications and user dispositions. ",
-            "Do not post or edit GitLab notes, approve, merge, resolve discussions, or change Jira."
+            "Do not post or edit GitLab notes, approve, merge, resolve discussions, or change Jira. ",
+            "Close this check with finish_review and one assessment per listed discussion, each covering that discussion's finding IDs."
         ),
         source.review.project_path,
         source.review.identity.iid(),
@@ -191,6 +193,7 @@ async fn prepare(
             ));
         }
     }
+    append_rule(&mut prompt);
     let prompt = MessageBody::new(&prompt).map_err(|_| "followup_prompt_too_large")?;
     Ok((source.review.head_sha, ready, prompt))
 }

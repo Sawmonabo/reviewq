@@ -9,6 +9,7 @@ use reviewq_domain::settings::{CheckoutBinding, NativeSkill};
 use crate::settings::NativeSkillOption;
 
 use crate::access::{AppError, AppFuture};
+use crate::ledger::readback::append_rule;
 use crate::queue::{MergeRequestState, ReviewSource};
 
 mod effects;
@@ -124,6 +125,8 @@ pub struct LaunchInput {
 }
 
 impl LaunchInput {
+    /// The text the lead receives: the invocation, the user's context, the MR to review and,
+    /// last, ReviewQ's rule for filing.
     pub fn prompt(&self) -> String {
         let mut text = match &self.invocation {
             Invocation::Custom { prompt } => prompt.clone(),
@@ -150,6 +153,7 @@ impl LaunchInput {
             self.source.identity.iid(),
             self.source.head_sha,
         ));
+        append_rule(&mut text);
         text
     }
 }

@@ -37,10 +37,6 @@ const SENTINEL_GAP: usize = 2;
 
 /// The kind of authored field, which decides the rules beyond the line limit and the
 /// stand-alone rule that every field follows.
-#[cfg_attr(
-    test,
-    expect(dead_code, reason = "K3 checks every kind of field when it is filed")
-)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum MarkdownField {
     /// Begins with a paragraph, which follows the card's `Issue` label.
@@ -65,10 +61,6 @@ pub(crate) enum MarkdownField {
 impl MarkdownField {
     /// The rules for a note's body. `None` for the `title` note, which is one line of plain
     /// text that the protocol checks.
-    #[cfg_attr(
-        test,
-        expect(dead_code, reason = "K3 checks a note's body when it is filed")
-    )]
     pub(crate) fn for_note(section: NoteSection) -> Option<Self> {
         match section {
             NoteSection::Title => None,
@@ -106,6 +98,9 @@ pub(crate) enum ProblemKind {
     /// A link reference definition starts here. Once the report is composed it would apply
     /// to every field, and it makes the reader index the whole document at once.
     ReferenceDefinition,
+    /// A footnote definition or reference starts here. Like a link reference definition, it
+    /// would resolve across fields once the report is composed.
+    Footnote,
     /// The field holds no Markdown block, only blank space.
     Empty,
     /// The field must begin with a paragraph but begins with another block here.
@@ -146,6 +141,10 @@ impl Display for FieldProblem {
                 output,
                 "Line {line} defines a link reference, which would apply to the whole report. Write the link inline as [text](url)."
             ),
+            ProblemKind::Footnote => write!(
+                output,
+                "Line {line} uses a footnote, which would apply to the whole report. Write the note as a sentence or in parentheses instead."
+            ),
             ProblemKind::Empty => {
                 output.write_str("The text is blank. Write it, or leave the field out.")
             }
@@ -182,9 +181,10 @@ impl Display for FieldProblem {
 
 /// Checks one non-empty authored field. Every field keeps each line within
 /// `MAX_FIELD_LINE_BYTES`, stands alone (a heading written after it still reads as a heading,
-/// so an open code fence or an HTML block that never ends is refused) and defines no link
-/// reference. `field` adds its own rules: a finding's fields begin no paragraph with a card's
-/// bold label, and all but `details` begin with a paragraph. Returns the first problem found.
+/// so an open code fence or an HTML block that never ends is refused), defines no link
+/// reference and holds no footnote. `field` adds its own rules: a finding's fields begin no
+/// paragraph with a card's bold label, and all but `details` begin with a paragraph. Returns
+/// the first problem found.
 ///
 /// A removal is never passed here: an empty note body removes the note, and a change that
 /// removes `proposedComment` or `details` carries no text.
@@ -201,7 +201,7 @@ pub(crate) fn check_field(field: MarkdownField, text: &str) -> Result<(), FieldP
     let sentinel = text.len() + SENTINEL_GAP;
     let parse = Parse::new(&source);
     let definition = parse.first_definition();
-    let mut blocks = top_level_blocks(parse);
+    let (mut blocks, footnote) = top_level_blocks(parse);
     match blocks.pop() {
         Some(Block {
             start,
@@ -232,6 +232,12 @@ pub(crate) fn check_field(field: MarkdownField, text: &str) -> Result<(), FieldP
         return Err(FieldProblem {
             line: line_of(text, start),
             kind: ProblemKind::ReferenceDefinition,
+        });
+    }
+    if let Some(start) = footnote {
+        return Err(FieldProblem {
+            line: line_of(text, start),
+            kind: ProblemKind::Footnote,
         });
     }
     let Some(first) = blocks.first() else {
@@ -352,14 +358,25 @@ struct Block {
     kind: BlockKind,
 }
 
-/// The document's top-level blocks in order, each with its starting byte.
-fn top_level_blocks(parse: Parse<'_>) -> Vec<Block> {
+/// The document's top-level blocks in order, each with its starting byte, and where the first
+/// footnote definition or reference starts at any depth. The parser emits a reference only when
+/// its definition is in the same text, so a lone `[^1]` reads as text and is not reported.
+fn top_level_blocks(parse: Parse<'_>) -> (Vec<Block>, Option<usize>) {
     let mut blocks = Vec::new();
+    let mut footnote = None;
     let mut depth = 0_usize;
     let mut paragraph_opened = false;
     // The text of a top-level paragraph's leading strong emphasis while it is read.
     let mut bold: Option<String> = None;
     for (event, range) in parse.events() {
+        if footnote.is_none()
+            && matches!(
+                event,
+                Event::Start(Tag::FootnoteDefinition(_)) | Event::FootnoteReference(_)
+            )
+        {
+            footnote = Some(range.start);
+        }
         if std::mem::take(&mut paragraph_opened) && matches!(event, Event::Start(Tag::Strong)) {
             bold = Some(String::new());
         }
@@ -409,7 +426,7 @@ fn top_level_blocks(parse: Parse<'_>) -> Vec<Block> {
             _ => {}
         }
     }
-    blocks
+    (blocks, footnote)
 }
 
 /// No top-level paragraph begins with a card's bold label, such as `**Issue:**`, which the
@@ -574,6 +591,12 @@ mod tests {
                 MarkdownField::Details,
                 "Context.\n\n**Proposed comment:** Ship it.",
                 refused(3, ProblemKind::CardLabel(CardLabel::ProposedComment)),
+            ),
+            (
+                "a footnote definition",
+                MarkdownField::Note,
+                "Retries are unbounded.\n\n[^1]: Seen in the worker log.\n",
+                refused(3, ProblemKind::Footnote),
             ),
         ];
         for (case, field, text, expected) in cases {
