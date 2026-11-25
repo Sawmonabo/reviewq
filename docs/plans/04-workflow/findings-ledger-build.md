@@ -60,6 +60,7 @@ Stages run in order. Tasks inside a stage run at the same time in the primary ch
 
 - Implementers run on Opus 5.5 at high effort and reviewers on Opus 5.5 at xhigh. A reviewer gets the diff and the spec, never the implementer's summary.
 - An implementer edits only the paths its task owns. A needed change elsewhere is reported to the lead with the reason, and the lead assigns it.
+- C1 and the review fixes left `#[expect(dead_code)]` on items that wait for a caller, some at module level in `ledger/layout.rs` and `ledger/markdown.rs`. A task removes the attribute from an item it starts to call when the file is its own. The lead removes the shared ones at the stage check.
 - Tasks of one stage share one tree, so a package check can fail on a sibling's half-written file. An implementer that sees an error outside its own files waits and checks again, never repairs it, and reports it if it persists. The lead runs the stage's full check once every task of the stage has reported.
 - Implementers run no Git command that writes. The lead checks each task's paths, runs the stage checks and commits one task per commit. The branch is pushed after each accepted stage and is never merged by this plan.
 - An implementer never signals a process it did not start and starts no service on the default profile. Checks use `cargo check --locked -p <package>` while editing and the Make targets named in the task before reporting.
@@ -112,7 +113,7 @@ One writer. Work top-down so each step compiles: callers first, then what they c
 | App `capture.rs`: `CHUNK_BYTES`, `ArtifactChunk`, `LineStats`, `Assessment`, `RevisionEvidence`, `ReportAuthority` | `crates/reviewq-app/src/reports.rs` | Used by reads and by K1. |
 | App `HandoffFieldError::bounded` | `crates/reviewq-app/src/access.rs` as `FieldError::bounded`; `AppError::InvalidHandoff` becomes `AppError::InvalidFields` | One field-error type for every tool. |
 | Protocol `validate.rs`: the jsonschema error collector and its cap | `crates/reviewq-protocol/src/field_errors.rs` | F2 validates six inputs with it. |
-| Protocol `limits.rs`: `MAX_ID_BYTES`, `MAX_DISCUSSION_ID_BYTES` | `crates/reviewq-protocol/src/scalar.rs` | Imported there already. |
+| Protocol `limits.rs`: `MAX_DISCUSSION_ID_BYTES` | `crates/reviewq-protocol/src/scalar.rs` | Imported there already. |
 | Protocol `ReportRevision`, `Assessment`, `FindingLocation`, `FindingBasis` and its kind | `crates/reviewq-protocol/src/reports.rs`, beside `Verdict` and `FindingConclusion` | `FindingDetails` uses the last two today. F2 reuses all of them. |
 | Store `cache_report_display` and what it calls | stays in `connection/display_cache.rs` | Its one caller is deleted here. K2 calls it after a publish commits. |
 | Provider `codex_report.rs`: `latest_failure` and `event()` | `crates/reviewq-providers/src/history/file.rs` or its recovery owner | Recovery reads them. |
@@ -124,7 +125,7 @@ One writer. Work top-down so each step compiles: callers first, then what they c
 - `Descriptor::Finding` has `severity` as `P0`–`P3`, a required `blocking`, `section`, `category` and `recordRevision`. `struck`, `carriedFrom` and `evidenceSha256` go. `FindingDetails` mirrors the record: `locations`, `issue`, `consequence`, `evidence`, `proposedComment`, `details`. Its store query returns no details until K2 reads them from `ledger_changes`.
 - `CandidateReport`, `ReportRead::Candidate`, the candidates route, `DisplayFallback::IncompleteSource` and `ArtifactStats.complete` go.
 - `report_versions` drops `handoff_receipt_id` and `semantic_index`, renames `captured_at_ms` to `published_at_ms`, and gains `kind` and `ledger_sequence`. `report_findings` gains `record_revision`, `section` and `category`, and its offsets become required. `artifacts` drops `original_sha256`, `complete` and the staging index. `report_handoffs` and `report_correction_requests` go. `report_delivery_failures` gains `pass_id` and the three kinds, and loses the rejection kind. `claude_turns` loses `response_id` and `response_sha256`, and the plugin's turn report stops sending the response.
-- The finding-ID pattern in `scalar.rs` is `F-` followed by at least two digits.
+- A finding ID is `F-` and a number from 1 to 999,999,999, written with at least two digits and no further leading zero: `^F-(0[1-9]|[1-9][0-9]{1,8})$`. The domain's `FindingId` and the protocol's scalar accept exactly this.
 
 **Steps**
 
@@ -190,7 +191,7 @@ One writer. Work top-down so each step compiles: callers first, then what they c
 - Result DTOs: `{id,revision,unpublished}`, `{section,title?,revision,unpublished}`, the ledger page with its `cursor`, the closing acknowledgement, and the held reply.
 - The route bodies from the shared names table: the `{binding,input}` envelope, the `fieldErrors` reply, and the gate and read-back bodies. The plugin, the bridge, the hook helpers and the routes all use these and define none of their own.
 - `LEDGER_TOOLS`: name, description and schema for each tool, in the order of the table above. A description says in two or three sentences when to call the tool, what comes back and what a field error means. It repeats no limit the schema already states.
-- `validate_ledger_input(tool, &serde_json::Value)` returning the typed input or the capped field errors, built on `field_errors.rs`. The schema carries character maxima. This function also enforces the byte limits, the one-line fields and the title rule, so no other layer checks a field's size.
+- `validate_ledger_input(tool, &serde_json::Value)` returning the typed input or every field error in field order, built on `field_errors.rs`. The transport caps the list once. The schema carries character maxima. This function also enforces the byte limits, the one-line fields and the title rule, so no other layer checks a field's size.
 - The filled example file: one valid input per tool, taken from the spec's worked calls.
 
 **Steps**
@@ -235,7 +236,7 @@ One writer. Work top-down so each step compiles: callers first, then what they c
 
 **Steps**
 
-- [ ] Write the composer as one pass that appends to a `String` reserved from the record sizes, recording spans as it writes. Escape `|` in table cells. Write locations as code spans with a fence longer than any backtick run in the path. Place the details after the evidence and `Proposed comment` last. Write a gap under `Evidence`, beginning `Not confirmed.` Leave out the verdict line for `not_specified`. Parse nothing here: fields were checked when filed.
+- [ ] Write the composer as one pass that appends to a `String` reserved from the record sizes, recording spans as it writes. Escape `|` in table cells. Write locations as code spans with a fence longer than any backtick run in the path. Place the details after the evidence and `Proposed comment` last. Take every fixed word from `ledger/layout.rs`. Escape an extra note's title so it reads as written in a heading, including a trailing `#`. Write a gap under `Evidence`, beginning `Not confirmed.` Leave out the verdict line for `not_specified`. Parse nothing here: fields were checked when filed.
 - [ ] Write `finish_review` and `settle` over the port. They hold no SQLite transaction while composing.
 - [ ] In `reports/display/cutter.rs`, treat an HTML block and inline HTML as ordinary content instead of falling back to the whole document. The reader now shows report HTML as text, so it needs no document context, and a large report that mentions `Vec<u8>` outside code keeps the windowed reader.
 - [ ] Add test `composed_worked_set_matches`: build the worked snapshot in the test, compose it, compare with `worked.md` byte for byte, and check that each recorded span slices exactly its card or section. The snapshot includes a subagent's finding, a gap, a retired finding, a user disposition, an extra note, a title that starts with a code span, a `|` in a reason, an authored level-two heading, and a line with `Vec<u8>` and `<runner>` outside code.
@@ -246,7 +247,7 @@ One writer. Work top-down so each step compiles: callers first, then what they c
 **Files**
 
 - Create: `crates/reviewq-store/src/ledger.rs`, `ledger/{records,passes,publish,settle}.rs`, `schema/ledger.sql`.
-- Modify: `lib.rs`, `connection/database.rs` (add the schema file), `reports.rs` (`read_delivery`), `reports/context.rs` (finding details from `ledger_changes`), `reports/failures.rs` and the `report_delivery_failures` table in `schema/projection_evidence.sql` (an integer pass, an optional turn, the ledger sequence the failure was recorded at, and one unresolved row per run, pass and kind), `followups/completion.rs`, `launches.rs` and `hosts/delivery/workflow.rs` (open a pass inside the existing confirmation transactions), the batch-creation code and `queue/archive.rs` (end a pass), `hosts/recovery/dispatch.rs` (recovery eligibility), `schema/queue.sql` (the report state of `review_activity`).
+- Modify: `lib.rs`, `connection/database.rs` (add the schema file), `reports.rs` (`read_delivery`), `reports/context.rs` (finding details from `ledger_changes`), `reports/failures.rs` and the `report_delivery_failures` table in `schema/projection_evidence.sql` (an integer pass, an optional turn, the ledger sequence the failure was recorded at, and one unresolved row per run, pass and kind), the checked time of a version in `schema/reports.sql` and its reads, `followups/completion.rs`, `launches.rs` and `hosts/delivery/workflow.rs` (open a pass inside the existing confirmation transactions), the batch-creation code and `queue/archive.rs` (end a pass), `hosts/recovery/dispatch.rs` (recovery eligibility), `schema/queue.sql` (the report state of `review_activity`).
 
 **Consumes** F1's port and types. `WriteTx`, `tx.emit`, `insert_notification`, `reports/artifact.rs`, `reports/authority.rs`, `followups/completion.rs`, `cache_report_display`, `recovery::complete_turn`. C1 left each of these under `#[expect(dead_code)]`; remove the attribute as each gains its caller. The native-call replay in `actions/commands.rs` is tied to the actions table: follow its pattern, do not call it.
 
@@ -278,7 +279,7 @@ One writer. Work top-down so each step compiles: callers first, then what they c
 **Files**
 
 - Fill: `crates/reviewq-app/src/ledger/{record,passes,readback}.rs`.
-- Modify: `crates/reviewq-app/src/launch.rs`, `followups/work.rs`.
+- Modify: `crates/reviewq-app/src/launch.rs`, `followups/work.rs`, and `ledger/markdown.rs` for the footnote check only.
 
 **Consumes** F1's types, port and `markdown::check_field`.
 
@@ -292,7 +293,8 @@ One writer. Work top-down so each step compiles: callers first, then what they c
 **Steps**
 
 - [ ] Write the rule as five short imperative sentences from the spec's Rule paragraph. Name the tools. Say that only what is filed is shown and that the lead closes. Do not mention the gate.
-- [ ] Write the four record operations and the two pass operations over the port.
+- [ ] Write the four record operations and the two pass operations over the port. Check an extra note's title with `layout::repeats_fixed_heading`.
+- [ ] In `check_field`, refuse a footnote definition or reference the way a link reference definition is refused, and add one row to the `stand_alone_fields` table.
 - [ ] Write the read-back with a hard character cap and a deterministic order.
 - [ ] Run `cargo check --locked -p reviewq-app`.
 
