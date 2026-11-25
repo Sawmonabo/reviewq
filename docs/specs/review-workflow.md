@@ -34,7 +34,7 @@ Paths below are under `/api/v1`. The shared envelope wraps each data shape in `{
 | POST `native/actions/declare`, `native/actions/reconcile`, `native/actions/input` | Native lead proof as below. Declare takes `{sessionKey,callId,turnId?,requestEntryId?,declaration:{intent,reviewedSha,comments}}` and returns Action. Reconcile takes `{sessionKey,callId}` and returns Action or null. Input is an authenticated Claude prompt callback bound to that exact native session/occurrence. It supersedes the previous authority once. |
 | GET `runs/{runId}/action` | Current Action or null. Action includes actionId, runId, reviewer request entry/turn/call, reviewedSha, intent, typed targets with evidence, approval, state, attempts, pending submission, last executed submission/turn, next check and reason. All reads expose only the selected run. |
 | POST `native/ledger/{record-finding,assess-finding,record-note,list,finish,needs-input}`, `native/ledger/{turn-end,readback}` | Each tool route takes the caller binding `{sessionKey,callId,turnId?,agentId?}` and the tool's input from [Ledger tools](#ledger-tools). Return the tool's result or its field errors. A repeat of the same call identity returns the stored result. Turn-end takes `{sessionKey,turnId,normal,stopping}` from the host's turn-end signal or stop hook. Return `{block:false}` or `{block:true,reason}` under the [gate](#rule-read-back-and-gate) rules, and publish a due update when the turn has ended. Readback takes `{sessionKey}` and returns the rule and the short ledger list. |
-| GET `runs/{runId}/report`, `…/history`, `…/versions/{receiptId}` | Current `{report,delivery}`, newest-first summary page (limit 1–50, currentReceiptId and delivery), or exact immutable version. Default `view=summary` on current/version returns metadata only. `view=markdown` is explicit and applies the rich-view limits below. Unknown run/version is missing, known run without a published version returns report null. Delivery can be absent before work or preparing/saving/failed/saved with receipt/reason. The summary includes receiptId, attentionReceiptId, sha256, reviewedSha or revisionReason, coverage, fullMrReviewedSha, parentReceiptId, verdict, capturedAt, and counts of active findings and recorded outcomes. Summary also carries byteLength, lineCount, maxLineBytes and totalCodePoints. Only an eligible selected report explicitly requested as Markdown includes the report text. |
+| GET `runs/{runId}/report`, `…/history`, `…/versions/{receiptId}` | Current `{report,delivery}`, newest-first summary page (limit 1–50, currentReceiptId and delivery), or exact immutable version. Default `view=summary` on current/version returns metadata only. `view=markdown` is explicit and applies the rich-view limits below. Unknown run/version is missing, known run without a published version returns report null. Delivery is absent, `saved` or `failed`, with its receipt and reason. The summary includes receiptId, attentionReceiptId, sha256, reviewedSha or revisionReason, coverage, fullMrReviewedSha, parentReceiptId, verdict, publishedAt, and counts of active findings and recorded outcomes. Summary also carries byteLength, lineCount, maxLineBytes and totalCodePoints. Only an eligible selected report explicitly requested as Markdown includes the report text. |
 | GET `runs/{runId}/report/context`, `…/section` | Context returns baseReport (receipt/hash or null), userDispositionVersion, a bounded page of the version's finding records, outcomes, dispositions or section titles/hashes via the `collection` query parameter. Default to dispositions. Pin the receipt on all pages and the disposition revision for mutable dispositions. Return items and nextCursor, at most 50 descriptors and 64 KiB of serialized page data. Bound display previews and link to source offsets for the full text. Report history uses compact summaries with a 64 KiB page budget and continuation. Sections accept optional receiptId, offset ≥0, characters 1–12,000 (default 6,000). Return text, receipt/hash, offset, nextOffset or null, totalCodePoints, offsetUnit `unicode_codepoints`. Pin receiptId after first page. The browser reads published versions only. Unpublished records are read through `review_ledger`. |
 | GET `runs/{runId}/report/versions/{receiptId}/source?download=1` | Authenticate the same-origin request and immutable version. Stream the version's stored UTF-8 bytes as an attachment with a safe service-generated filename, `nosniff`, known content length and digest/receipt identity. Use browser-native download facilities or a guarded streaming sink. |
 | PUT `runs/{runId}/report/dispositions` | `{submissionId,expectedVersion,receiptId,findingId,disposition:{blocking?,publication?,reason}}`. Require current receipt and known current finding, nonempty reason, at least one choice. Publication is withheld, authorized or published as recorded by the user. Apply only stated fields, advance the disposition version and return the edited finding and new revision. Refresh affected pages through the context read. A local label cannot execute or verify a GitLab action. |
@@ -61,20 +61,20 @@ ReviewQ owns the findings of a run. The lead and its subagents file each finding
 
 ### Ledger tools
 
-Both providers expose the same six tools from one generated set of input schemas: Claude through the plugin's registered tools and Codex through the ReviewQ MCP server. Every input is a flat object.
+Both providers expose the same six tools from one generated set of input schemas: Claude through the plugin's registered tools and Codex through the ReviewQ MCP server. Every input is one JSON object whose root has no alternative shapes.
 
 | Tool | Caller | Input and effect |
 |---|---|---|
 | `record_finding` | Lead or subagent | Files or changes one finding. Without `id`, ReviewQ assigns the next unused ID and the input needs `title`, `severity`, `blocking`, `section`, `issue`, `consequence` and `evidence`. With `id` and `expectedRevision`, only the fields given change. Changing a retired finding reopens it. Returns `{id,revision,unpublished}`. |
-| `assess_finding` | Lead or subagent | `{id,expectedRevision,outcome,reason,discussionIds?,checkedSha?}` records what became of a finding already on the run. `fixed`, `clarified_withdrawn` and `superseded` retire it. `partly_addressed`, `still_present` and `unverified` keep it active. Reason is 1–1,024 characters and at most 10 discussion IDs apply. Returns `{id,revision,unpublished}`. |
-| `record_note` | Lead or subagent | `{section,title?,body,expectedRevision?}` replaces one review note. An empty body clears it. `expectedRevision` is required once the note exists. Returns `{section,revision,unpublished}`. |
-| `review_ledger` | Lead or subagent | Read only. With no input it returns the short list: the current version's receipt, the open pass and what it owes, one line per active finding (ID, revision, severity, blocking, title and author) and one per note (section, revision and length). `{ids}` with at most 10 IDs, or `{sections}`, returns those records in full. A result holds at most 64 KiB and carries a cursor for the rest. |
+| `assess_finding` | Lead or subagent | `{id,expectedRevision,outcome,reason,discussionIds?,checkedSha?}` records what became of a finding already on the run. `fixed`, `clarified_withdrawn` and `superseded` retire it. `partly_addressed`, `still_present` and `unverified` keep it active. Reason is one line of 1–1,024 characters and at most 10 discussion IDs apply. Returns `{id,revision,unpublished}`. |
+| `record_note` | Lead or subagent | `{section,title?,body,expectedRevision?}` replaces one review note. An `extra` note is identified by its `title`. An empty body removes the note. `expectedRevision` is required once the note exists. Returns `{section,title?,revision,unpublished}`. |
+| `review_ledger` | Lead or subagent | Read only. With no input it returns the short list: the current version's receipt, the open pass and what it owes, one line per active finding (ID, revision, severity, blocking, title and author) and one per note (section, revision and length). `{ids}` with at most 10 IDs, or `{sections}`, returns those records in full, and `extra` returns every extra note. A result holds whole records up to 64 KiB, which always fits one, and a `cursor` to pass back for the rest. |
 | `finish_review` | Lead | `{verdict?,revision?,fullReview?,assessments?}` closes the review and publishes. See [Publishing a version](#publishing-a-version). |
-| `needs_input` | Lead | `{reason}` of 1–1,024 characters records a question the reviewer must answer before the review can finish. It holds the open pass and its scope, completes no assessment and lets the turn end. |
+| `needs_input` | Lead | `{reason}` of 1–1,024 characters records a question the reviewer must answer before the review can finish. It holds the open pass and its scope, completes no assessment and lets the turn end. The pass waits on the reviewer until the lead's next turn starts. From then it is open again and owes its closing call. Without an open pass the call is refused. |
 
 | Finding field | Rule |
 |---|---|
-| `title` | One line of 1–200 characters. |
+| `title` | One line of 1–200 characters. It does not begin with a severity label such as `P1 –`, because severity has its own field. |
 | `severity` | `P0`, `P1`, `P2` or `P3`, most severe first. |
 | `blocking` | Boolean. Whether the lead holds the merge on this finding. |
 | `section` | `functional` or `quality`. Security and correctness concerns are functional. |
@@ -83,40 +83,43 @@ Both providers expose the same six tools from one generated set of input schemas
 | `issue`, `consequence` | Markdown up to 8 KiB each: what is wrong, and why it matters. |
 | `evidence` | `{kind,text}`. `observed` states what the agent confirmed. `gap` states what it could not verify. Text is Markdown up to 8 KiB. |
 | `proposedComment` | Optional Markdown up to 8 KiB: the comment the lead would post. |
-| `details` | Optional Markdown up to 16 KiB for diagrams, tables and longer reasoning. |
+| `details` | Optional Markdown up to 16 KiB for diagrams, tables and longer reasoning. It is shown after the evidence. |
 
-A note's `section` is `title` (one line of 1–200 characters), `summary`, `flow`, `changes`, `threads`, `questions`, `verification`, `publication` or `extra`. An `extra` note needs its own one-line `title` of 1–120 characters, which names it. A run holds at most 12 extra notes. A note body is Markdown up to 64 KiB.
+A note's `section` is `title` (one line of 1–200 characters), `summary`, `rationale`, `flow`, `changes`, `threads`, `questions`, `verification`, `publication` or `extra`. `summary` says what the MR does in at most four plain paragraphs, and `rationale` gives the reason for the verdict in one. Neither holds a heading, list, table, quote or code block. An `extra` note needs its own one-line `title` of 1–120 characters. The title identifies the note and cannot repeat the heading of a fixed section. A run holds at most 12 extra notes. A note body is Markdown up to 32 KiB.
 
 IDs are `F-01`, `F-02` and so on. ReviewQ assigns them per run and never reuses one, and the same concern keeps its ID across versions. Every record has a revision that starts at 1 and advances with each accepted change. A change names the revision the caller last read. A stale revision is refused with the current revision and the names of the fields that changed, so the caller reads the record again and retries. A user's disposition is not a record change. It advances no revision and refuses no call.
 
-Three rules stop a repeated call from making a duplicate. A repeat of the same native call returns its stored result. A write whose content equals the stored record succeeds without a new revision, whatever revision it names. A new finding whose title and first location match an active finding is refused with that finding's ID.
+Three rules stop a repeated call from making a duplicate. A repeat of the same native call returns its stored result. A write whose content equals the stored record succeeds without a new revision, whatever revision it names. A new finding matches an active one when their titles and first locations are equal, or their titles are equal and neither has a location. When the rest of its content is equal too, the call returns that finding's ID and revision. Otherwise it is refused with that ID, so the caller changes the finding instead.
 
-Schema and value errors return while the call is open and name each field, capped at 50 errors plus one entry that counts the rest. A refused call changes nothing. No line of a body may exceed 16 KiB, a run holds at most 200 active findings, and one tool input fits 128 KiB. Markdown is stored as written. A finding leaves the active set only through a retiring outcome. A finding withdrawn before any version published it is left out of the report and kept in the ledger's history. An outcome's checked revision is its `checkedSha` when given, otherwise the reviewed SHA of the closing call that publishes it, otherwise unknown.
+Schema and value errors return while the call is open and name each field, capped at 50 errors plus one entry that counts the rest. A refused call changes nothing. No line of a body may exceed 8 KiB, a run holds at most 200 active findings, and one tool input fits 128 KiB. Markdown is stored as written. Each Markdown field must stand alone, which means a heading written after it still reads as a heading. A code fence left open fails this, and so does an HTML block that never ends, such as an unclosed comment or `<pre>`. ReviewQ tests it with the Markdown parser it already uses, never with its own scanner. `issue`, `consequence`, the evidence text and `proposedComment` each begin with a paragraph, so their first words follow the card's label. A field that breaks a rule is refused with the line where the problem starts. A finding leaves the active set only through a retiring outcome. A finding withdrawn before any version published it is left out of the report and kept in the ledger's history. An outcome's checked revision is its `checkedSha` when given, otherwise the reviewed SHA of the closing call that publishes it, otherwise unknown.
 
-ReviewQ binds every call to its provider, native session, turn, call and calling agent from what the call itself carries. Claude's plugin supplies the session, the active turn, the tool-use ID and the subagent's ID when a subagent calls. Codex's MCP request supplies the thread, call and item identity, and a thread other than the registered lead's must be a verified descendant of that lead in the same run. An independent Codex terminal supplies the turn and agent through ReviewQ's `PreToolUse` hook. A ledger call reads no transcript and resumes no thread. Lead-only tools also require that the caller is the run's registered lead and that the lead's active turn is unchanged when the call returns. A write is durable when its transaction commits and the tool result says so. ReviewQ reads nothing back from the provider afterwards. Terminal output, ordinary replies and text that resembles a receipt carry no authority.
+ReviewQ binds every call to its provider, native session, turn, call and calling agent from what the call itself carries. Claude's plugin supplies the session, the active turn, the tool-use ID and the subagent's ID when a subagent calls. Codex's MCP request names the calling thread, call and item, and carries the turn in its turn metadata. A Codex subagent calls from its own thread, which must be a verified descendant of the registered lead in the same run. A ledger call reads no transcript and resumes no thread. A lead-only tool is accepted only from the registered lead itself: a Claude call without a subagent ID, or a Codex call from the lead's own thread. The lead's active turn must be unchanged when the call returns. A call that cannot be attributed to the lead or a verified child is refused. A write is durable when its transaction commits and the tool result says so. ReviewQ reads nothing back from the provider afterwards. Terminal output, ordinary replies and text that resembles a receipt carry no authority.
 
 ### When a closing call is owed
 
-ReviewQ decides when a closing call is owed. The agent never labels a turn. A pass is review work on a run that ReviewQ is waiting to have closed.
+ReviewQ decides when a closing call is owed. The agent never labels a turn. A pass is review work on a run that ReviewQ is waiting to have closed. A run has at most one open pass.
 
 1. Starting a review from ReviewQ opens a pass. Start opens a full-review pass, and a delivered selected-thread batch opens a selected-thread pass. ReviewQ records the native turn of that delivery for both providers.
 2. Filing a record on a run that has no published version opens a full-review pass, because a first version needs a verdict and a reviewed revision.
-3. Nothing else is owed. This covers a message the reviewer types or sends from the dashboard, report feedback and a publication action.
+3. Nothing else opens a pass. This covers a message the reviewer types or sends from the dashboard, report feedback and a publication action.
 
-An open pass owes one closing call from the lead: `finish_review`, or `needs_input` to hold it. While a pass is open, only its closing call publishes.
+An open pass owes one closing call from the lead: `finish_review`, or `needs_input` to hold it. It owes that call at the end of every lead turn until it is closed, whoever started the turn. While a pass is open, only its closing call publishes.
 
 | Lead turn | Owed | State when the turn ends |
 |---|---|---|
-| A review ReviewQ started | A closing call | Closed: the version or batch result is published. Not closed: the [gate](#rule-read-back-and-gate) asks, then the review shows as unfinished. |
-| A review the reviewer typed in a linked session | A closing call once the first record is filed on a run with no version. Otherwise nothing. | With no version and nothing filed, the run has no findings and its finished lead needs a decision. With a version, the records the turn changed are published as an update. `finish_review` with `fullReview:true` makes it a full review. |
-| A chat turn that changes no record | Nothing | No version, no failure and no notice. |
-| A chat turn that changes a record | Nothing | ReviewQ publishes an update that carries the parent's verdict, reviewed revision and coverage. |
+| Any turn while a pass is open: a review ReviewQ started, a first review the reviewer typed, or a later chat turn before the pass is closed | A closing call | Closed: the version or batch result is published. Not closed: the [gate](#rule-read-back-and-gate) asks, then the review shows as unfinished. Its records stay unpublished until the pass closes. |
+| No open pass, and the turn changes a record on a run with a version | Nothing | ReviewQ publishes an update that carries the parent's verdict, reviewed revision and coverage. `finish_review` in the turn can state a new verdict or revision, and with `fullReview:true` makes it a full review. |
+| No open pass, and the turn changes no record | Nothing | No version, no failure and no notice. On a run with no version, the finished lead needs a decision. |
 
-ReviewQ publishes an update when the lead's turn ends normally with unpublished records and no open pass. A record that a subagent files while the lead is idle waits for the lead's next turn to end. Startup repeats the check for a turn that ended while the service was down. The lead can call `finish_review` in such a turn to state a new verdict or reviewed revision.
+ReviewQ settles a run from its state, never from a single event. It checks when the lead or a child becomes idle, when a record is written while they are idle, when a recovery ends and at startup. A run is settled when its lead and every known child are idle and no recovery is pending. A settled run with unpublished records and no open pass gets an update. A settled run with an open pass that is not waiting on the reviewer is unfinished. The stage classifier and this check read the same idle evidence.
 
-An unfinished review is a state. A run is unfinished while it has an open pass that is not waiting on the reviewer, its lead is idle and no recovery is pending. Its delivery is `failed` with a reason that says the lead ended without finishing and how many findings are on file. The previous version stays readable. A first review shows the explicit empty state, which is distinct from a published review with zero findings. The filed records stay in the ledger and the next closing call publishes them. A turn that ends early through an interrupt or a provider failure leaves the pass open and follows the session recovery rules first. A pass ends when it is closed, when a later pass that ReviewQ starts on the run takes over its records, or when the run is archived.
+An update has no open call to return an error to. One that cannot be published, because its text would exceed the size limit or the records kept changing, leaves every record in place, shows `failed` with its reason and is tried again the next time the run settles.
 
-Delivery is absent before any pass or version. It is `preparing` while a pass is open or records are unpublished and the lead or a child works, `saving` while a version is composed and stored, `saved` when the current version holds every record, and `failed` for an unfinished review or a refused closing call.
+An unfinished review's delivery is `failed`, with a reason that says the lead ended without finishing and how many findings are on file. The previous version stays readable. A first review shows the explicit empty state, which is distinct from a published review with zero findings. The filed records stay in the ledger and the next closing call publishes them. A turn that ends early through an interrupt or a provider failure leaves the pass open and follows the session recovery rules first. A pass ends when it is closed, when the successor of an ended selected-thread attempt takes over its records, or when the run is archived. Any later turn of the same lead can close it.
+
+ReviewQ records a failure once. It writes one row and one notification when an unfinished review, a refused closing call or a failed update is first seen for its pass or run. Seeing the same failure again updates its reason in place and raises nothing.
+
+Delivery describes the result of publishing. It is absent before any version or failure, `saved` when the current version is stored and nothing has failed since, and `failed` for an unfinished review, a refused closing call or an update that could not be published. Filing records does not change delivery, so Findings shows the previous version without a notice while a review is in progress.
 
 ### Rule, read-back and gate
 
@@ -124,24 +127,24 @@ Delivery is absent before any pass or version. It is `preparing` while a pass is
 
 **Read-back.** When the host compacts the lead's conversation, a `SessionStart` hook for the `compact` source returns the rule and the short list from `review_ledger`. The text holds at most 4,000 characters: the rule, the open pass and what it owes, then one line per active finding with its ID, revision, severity, blocking value and a title cut to 80 characters, newest change first, and a count of any lines left out. It reaches the lead only. A subagent reads the ledger with `review_ledger`.
 
-**Gate.** When the lead's turn is about to end normally with an open pass that is not waiting on the reviewer, the host's stop hook asks ReviewQ. ReviewQ answers with a block and a reason that names what is owed and what is on file. ReviewQ counts blocks per session and turn and allows two. The third request lets the turn end. It never blocks a subagent's turn, a turn that owes nothing, a turn in which `needs_input` was accepted, or a turn with a pending blocking question or permission. Detecting an unfinished review does not depend on the gate.
+**Gate.** When any lead turn is about to end normally with an open pass that is not waiting on the reviewer, the host's stop hook asks ReviewQ. ReviewQ answers with a block and a reason that names what is owed and what is on file. ReviewQ counts blocks per session and turn and allows two. The third request lets the turn end. It never blocks a subagent's turn, a turn that owes nothing, a turn in which `needs_input` was accepted, or a turn with a pending blocking question or permission. Detecting an unfinished review does not depend on the gate.
 
-**Host hooks.** Claude uses the plugin's tool handlers for the six tools, its turn-complete event as the turn-end signal, its `Stop` hook as the gate and a `SessionStart` hook for read-back. Codex uses the MCP server for the tools and three user hooks: `PreToolUse` matching every ledger tool, `Stop` and `SessionStart`. A Codex turn end is also read from its rollout. Codex runs a hook only after the user reviews and trusts it, and skips an untrusted hook without notice. ReviewQ never writes that trust state. Each hook reports to ReviewQ when it runs. The installer and `reviewq link` name a hook that is installed but has not reported for the linked session. Without the Codex hooks a review still files, closes and shows as unfinished when it should. Only the gate and the read-back are missing.
+**Host hooks.** Claude uses the plugin's tool handlers for the six tools, its turn-complete event as the turn-end signal, its `Stop` hook as the gate and a `SessionStart` hook for read-back. Codex uses the MCP server for the tools and two user hooks, `Stop` and `SessionStart`. A Codex turn end is also read from its rollout. Codex runs a hook only after the user reviews and trusts it, and skips an untrusted hook without notice. ReviewQ never writes that trust state. Each hook reports to ReviewQ when it runs. The installer and `reviewq link` name a hook that is installed but has not reported for the linked session. Without the Codex hooks a review still files, closes and shows as unfinished when it should. Only the gate and the read-back are missing.
 
 ### Publishing a version
 
 The lead's `finish_review` publishes a version, and so does ReviewQ for an update that owes nothing.
 
-`finish_review` takes a verdict (approve, request_changes, blocked or not_specified) and a revision, which is an exact full SHA or `{sha:null,reason}`. Both are required for a first version and for a full review. Otherwise each defaults to the current version's value. `assessments` belongs to a selected-thread pass, holds at most 10 entries, and each supplies discussionId, conclusion, reason, findingIds and nextAction `review` or `waiting_author`. These checks run while the call is open and return field errors the lead corrects in the same turn:
+`finish_review` takes a verdict (approve, request_changes, blocked or not_specified) and a revision, which is an exact full SHA or `{sha:null,reason}`. Both are required for a first version and for a full review. On a run with no version the call is a full review whether or not a pass is open, so a review with no findings can be published. In a selected-thread pass ReviewQ binds the frozen batch's checked SHA itself, and the verdict defaults to the current version's. With no open pass on a run with a version, each defaults to the current version's value, and the call publishes an update, or a full review when `fullReview` is true. `fullReview` is refused in a selected-thread pass. `assessments` belongs to a selected-thread pass, holds at most 10 entries, and each supplies discussionId, conclusion, reason, findingIds and nextAction `review` or `waiting_author`. These checks run while the call is open and return field errors the lead corrects in the same turn:
 
 - A full review leaves an active finding of the last version neither changed nor assessed in this pass. The error names each ID and title, and the lead answers with `assess_finding`.
-- A selected-thread pass lacks exactly one assessment per selected discussion covering that discussion's finding IDs, states a reviewed SHA other than the frozen batch's, or links an outcome to a discussion outside the batch.
+- A selected-thread pass lacks exactly one assessment per selected discussion covering that discussion's finding IDs, states a revision other than the frozen batch's checked SHA, or links an outcome to a discussion outside the batch.
 - Assessments arrive without a selected-thread pass.
 - The composed text would exceed 4 MiB. The error names the largest records.
 
-The call is refused, with every record kept, only when the workspace, repository grant, settings authority or follow-up binding changed, or the lead or its turn changed during the call. A repeated `finish_review` with nothing changed returns the current version's acknowledgement. The acknowledgement is `{receiptId,sha256,result,new,updated,retired,carried,bySubagents,emptySections}`: the IDs in each state, the count of carried findings, the IDs that subagents filed or changed, and the fixed sections that have no note.
+The call is refused, with every record kept, only when the workspace, repository grant, settings authority or follow-up binding changed, or the lead or its turn changed during the call. A repeated `finish_review` with nothing changed returns the acknowledgement of the lead's last closing call. This includes a repeat of the assessments that closed a selected-thread pass. The acknowledgement is `{receiptId,sha256,result,new,updated,retired,carried,bySubagents,emptySections}`: the IDs in each state, the count of carried findings, the IDs that subagents filed or changed, and which of the `summary`, `rationale`, `flow`, `changes` and `verification` notes are missing.
 
-Publishing reads every record at its current revision together with the run's ledger sequence, composes the text outside SQLite and commits in one conditional transaction. The transaction checks the ledger sequence, the current receipt, run membership and the frozen batch if present. It appends the version, seals the text in chunks of at most 64 KiB with its SHA-256 and size statistics, stores one row per finding and section with its record revision and scalar offsets, and advances the current pointer by compare-and-set. In the same commit it binds the disposition revisions, closes the pass, saves the batch completion and covered observations, resolves earlier failures and inserts the due notification. A changed ledger sequence recomposes, at most three times, then returns a retryable error. Invalidations and the dispatch wake follow the commit. The text is composed once and stored. An earlier version is never composed again.
+Publishing reads every record at its current revision together with the run's ledger sequence, composes the text outside SQLite and commits in one conditional transaction. The transaction checks the ledger sequence, the disposition revision, the current receipt, run membership and the frozen batch if present. It appends the version, seals the text in chunks of at most 64 KiB with its SHA-256 and size statistics, stores one row per finding and section with its record revision and scalar offsets, and advances the current pointer by compare-and-set. In the same commit it binds the disposition revisions, closes the pass, saves the batch completion and covered observations, resolves earlier failures and inserts the due notification. A changed ledger sequence or disposition revision recomposes, at most three times, then returns a retryable error. Invalidations and the dispatch wake follow the commit. The text is composed once and stored. An earlier version is never composed again.
 
 | State | Rule |
 |---|---|
@@ -153,7 +156,7 @@ Publishing reads every record at its current revision together with the run's le
 | Version | Continuity |
 |---|---|
 | Full review | Establishes a new complete-MR baseline at the stated reviewed SHA, or keeps the unknown reason. It always publishes a version. Registration's requested SHA, the current head, the verdict and GitLab approval are independent facts. |
-| Selected threads | Binds FOLLOW's exact batch, frozen submission, monitor generation, current or proven descendant native turn, baseline receipt and hash, checked source and target, every observation ID and version, and lineage. When the pass retires every finding a discussion tracks, that discussion's assessment must be retiring. When it retires only some, the assessment must be retiring or `partly_addressed`. Untouched findings are carried. When no record, verdict or revision differs from the current version, ReviewQ records the batch result as `unchanged` against that version and adds no version. Otherwise the result is `final`. |
+| Selected threads | Binds FOLLOW's exact batch, frozen submission, monitor generation, registered lead, baseline receipt and hash, checked source and target, every observation ID and version, and lineage. When the pass retires every finding a discussion tracks, that discussion's assessment must be retiring. When it retires only some, the assessment must be retiring or `partly_addressed`. Untouched findings are carried. When no record changed in the pass and the verdict equals the current version's, ReviewQ records the batch result as `unchanged` against that version and adds no version. Otherwise the result is `final`, with the batch's checked SHA as its reviewed revision. |
 | Update | Carries the parent's verdict, reviewed revision and coverage unless `finish_review` states new ones. Untouched findings and notes are carried. It completes no batch. |
 
 Only a full review advances fullMrReviewedSha. A full review and a selected-thread result raise their notification. An update takes a new attention identity and raises the ready notification only when its active findings, blocking values or verdict differ from its parent's. Otherwise it keeps the parent's attentionReceiptId. Publishing binds the configured project, checkout and GitLab identity. An unrelated board or automation edit can proceed while a pass is open.
@@ -163,9 +166,17 @@ Only a full review advances fullMrReviewedSha. A full review and a selected-thre
 Every version has the same layout, which ReviewQ writes from the records. The reader, History, quotes and downloads work on this stored text.
 
 ```markdown
+[{project path} · !{MR IID}]({MR URL})
+
 # {title}
 
 {summary}
+
+**{APPROVE | REQUEST CHANGES | BLOCKED}**
+
+{rationale}
+
+P0: {n} · P1: {n} · P2: {n} · P3: {n} · Blocking: {n} · Nonblocking: {n}
 
 **Scope:** {Full review | Selected threads | Update}
 
@@ -178,13 +189,18 @@ Every version has the same layout, which ReviewQ writes from the records. The re
 ## Principal code / data flow
 ## What changes across the MR
 ## Our previous threads
+
+| Finding | Outcome and verification | Thread or evidence |
+| --- | --- | --- |
+| F-03 · {title} | **Fixed.** {reason} | {discussions and checked revision} |
+
 ## Functional findings
 
 ### F-01 · {title}
 
 **P1 · {category} · Blocking**
 
-**Location:** {path:line, …}
+**Location:** `{path:line}`, …
 
 **Issue:** {issue}
 
@@ -192,9 +208,9 @@ Every version has the same layout, which ReviewQ writes from the records. The re
 
 **Confirmed:** {evidence}
 
-**Proposed comment:** {proposedComment}
-
 {details}
+
+**Proposed comment:** {proposedComment}
 
 ## Quality findings
 ## Open questions and decisions
@@ -203,15 +219,17 @@ Every version has the same layout, which ReviewQ writes from the records. The re
 ## Publication and dispositions
 ```
 
-- The title is the `title` note, or the MR title when there is none. The four cover lines come from ReviewQ's own facts for the version.
-- The eight fixed sections always appear in this order. `flow`, `changes`, `questions` and `verification` fill their sections. An empty section says `Not recorded.`, `No earlier threads.`, `No functional findings.`, `No quality findings.` or `No open questions.` as fits.
-- Cards appear in ID order within their section. The card line states the severity, the category and the effective blocking value at publish: the user's disposition when one exists, otherwise the lead's. `Location` and `Proposed comment` appear only when given.
-- `Confirmed` holds observed evidence. A gap is written as `Not confirmed.` followed by the gap.
-- `Our previous threads` holds a table with the columns Finding, Outcome and verification, and Thread or evidence, with one row per outcome recorded on this version, then the `threads` note. A retired finding has a row and no card. Its last card stays readable in the earlier version.
+- The first line names the project and MR and links to the MR. The title is the `title` note, or the MR title when there is none. `summary` and `rationale` appear only when recorded.
+- The verdict line states the version's verdict in capitals and is left out for `not_specified`. The counts line counts the active findings by severity and by effective blocking value. The four cover lines come from ReviewQ's own facts for the version.
+- The eight fixed sections always appear in this order. `flow`, `changes`, `questions` and `verification` fill their sections. An empty section says `Not recorded.`, `No earlier threads.`, `No functional findings.`, `No quality findings.`, `No open questions.` or `No publication or disposition changes recorded.` as fits.
+- Cards appear in ID order within their section. The card line states the severity, the category, and `Blocking` or `Nonblocking` from the effective blocking value at publish: the user's disposition when one exists, otherwise the lead's. Locations are written as code. `Location`, the details and `Proposed comment` appear only when given, and `Proposed comment` is always the last field.
+- `Confirmed` holds observed evidence. A gap is written under `Evidence` instead and begins `Not confirmed.`
+- `Our previous threads` holds the table above with one row per outcome recorded on this version, then the `threads` note. The Finding cell starts with the ID. The outcome cell starts with the outcome in bold (`Fixed`, `Clarified and withdrawn`, `Superseded`, `Partly addressed`, `Still present` or `Unverified`), followed by its reason. The last cell lists the linked discussions and the checked revision. ReviewQ escapes `|` in a cell. A retired finding has a row and no card. Its last card stays readable in the earlier version.
 - Extra notes follow `Verification and limits` as level-two sections in the order first filed.
 - `Publication and dispositions` holds one line per active finding that has a user disposition or a monitored discussion link at the version's starting disposition revision, then the `publication` note.
-- Headings inside an authored body are shifted so that the shallowest is level four. No authored text can open a section or a card. Raw HTML is shown literally.
-- ReviewQ writes authored lines unchanged and records each card's and section's scalar offset and length as it writes them.
+- Headings inside an authored field, ATX or setext, are written as ATX headings shifted so that the shallowest is level four, with deeper levels stopping at six. Together with the stand-alone rule, no authored text can open or swallow a section or a card.
+- Raw HTML is shown as text. Only `<br>` keeps its meaning, as a line break.
+- Apart from the heading shift, ReviewQ writes authored lines unchanged and puts a blank line between blocks. It records each card's and section's scalar offset and length as it writes them.
 
 ### Worked ledger calls
 
@@ -236,7 +254,7 @@ The lead then closes the review.
 With synthetic receipt ID `receipt-rq41`, ReviewQ publishes the first version and answers with the digest of the composed text.
 
 ```json
-{"receiptId":"receipt-rq41","sha256":"<SHA-256 of the composed text>","result":"final","new":["F-01"],"updated":[],"retired":[],"carried":0,"bySubagents":[],"emptySections":["flow","changes","verification"]}
+{"receiptId":"receipt-rq41","sha256":"<SHA-256 of the composed text>","result":"final","new":["F-01"],"updated":[],"retired":[],"carried":0,"bySubagents":[],"emptySections":["summary","rationale","flow","changes","verification"]}
 ```
 
 The functional section of that version reads as follows.
@@ -248,7 +266,7 @@ The functional section of that version reads as follows.
 
 **P1 · Functional · Blocking**
 
-**Location:** src/invoices.rs:74
+**Location:** `src/invoices.rs:74`
 
 **Issue:** The retry builds a fresh idempotency key after the first insert commits.
 
@@ -285,9 +303,9 @@ Global default off, per-MR enabled/disabled overrides win. Monitor states are en
 | Reply, edited external body, resolution or reopen | Compare exact selected discussion and known original IDs on a complete snapshot. Record observation ID, discussion version/fingerprint, action kinds, actors where known, note and finding IDs. Exclude own identified actions, system notes and timestamp-only changes. Incomplete reads or ambiguous/missing originals cannot supply negative evidence. Commit-only changes, unrelated feedback and old read/dismiss history never schedule by themselves. Polling cannot reconstruct an event wholly between two snapshots. |
 | Configure, pause, resume, review-now | Observe retained selections before editing. Advance generation for a meaningful edit. Carry remaining unstarted observations into the new generation, retain exclusions, and validate every selected reviewer note. Pause holds known pending work. Resume requires fresh MR and approval state. Manual Check Now admits all selected available concerns at their observed versions immediately, even with no new reply. An unavailable selected thread or empty selection returns a named reason. Bulk configure/pause uses a per-target preview and exact per-target commands, reporting skipped/failed targets separately. |
 | Approval, closure or loss of identity | A confirmed approval by a configured monitored reviewer pauses automatic work. Unrelated approvals have no effect. Unknown approval holds. Preserve pending/uncertain delivery for exact reconciliation, cancel proven-unstarted ineligible work. Already executing private work may deliver its frozen result. Merge/close archives the monitor, reopening requires explicit resume. A changed reviewer identity requires revalidation. |
-| Due work | Set due time to min(last observation + 60 s, first + 180 s). Run a coalesced due pass at startup, after relevant commits and about every 10 s. One active/reserved attempt per MR. Respect the 1–8 global active cap, default 2. Distinguish active native execution/reservation from a confirmed idle question-held or ended run. Retain exact binding for a later answer even when freeing its global slot. Unknown provider state, uncertain submission and unfinished proof still reserve capacity. |
+| Due work | Set due time to min(last observation + 60 s, first + 180 s). Run a coalesced due pass at startup, after relevant commits and about every 10 s. One active/reserved attempt per MR. Respect the 1–8 global active cap, default 2. Distinguish active native execution/reservation from a confirmed idle question-held or ended run. Retain exact binding for a later answer even when freeing its global slot. Unknown provider state and uncertain submission still reserve capacity. An unfinished selected-thread pass keeps its binding and frees its slot. |
 | Freeze and deliver | Fetch fresh MR and recheck saved Settings revision, open/unapproved state, monitor, recipient, actual thread availability and HOST eligibility. Freeze bounded groups (start with 10 observations, maximum 12,000-character prompt, carry unsent remainder). Commit exact members, checked head, target SHA if actually known, parent/disposition version, submission ID, private prompt and outbox together. Wake HOST after commit. A reservation is pending. Only an exact accepted native turn changes its state to executing. A new event after freeze goes to a successor. |
-| Finish, stop, recover | Complete only the exact executing batch when REPORT accepts its closing call. Needs-input holds its scope and claims zero completed assessments. Unknown send stays owned while exact native history is inspected. If a known-unstarted submission is rejected release it and requeue only still-eligible members. Explicit stop pauses monitoring. An attempt that ended without its closing call, or whose closing call was refused because its frozen scope went stale, keeps its filed records in the ledger and shows as unfinished. A successor carrying the original observations and lineage can reconcile it. Mark the earlier attempt reconciled only once completed groups cover every original observation ID, version and discussion. An unrelated manual turn never consumes a batch. |
+| Finish, stop, recover | Complete only the exact executing batch when REPORT accepts its closing call. Needs-input holds its scope and claims zero completed assessments. Unknown send stays owned while exact native history is inspected. If a known-unstarted submission is rejected release it and requeue only still-eligible members. Explicit stop pauses monitoring. An attempt that ended without its closing call, or whose closing call was refused because its frozen scope went stale, keeps its filed records in the ledger and shows as unfinished. A later turn of the same lead can still close it with the batch's assessments while its frozen scope is current. A successor carrying the original observations and lineage can reconcile it. Mark the earlier attempt reconciled only once completed groups cover every original observation ID, version and discussion. A turn that supplies no assessments never consumes a batch. |
 
 For example, suppose a monitor links original note 91 in discussion D7 to finding F-01. A reply creates observation O4 at discussion version 3. The current version also contains F-02 under an explicit nonblocking disposition. A check that changes no record closes with `finish_review` and the following input.
 
@@ -297,7 +315,7 @@ For example, suppose a monitor links original note 91 in discussion D7 to findin
 
 The server binds O4/version 3 and the checked source SHA from the frozen batch. The lead never supplies an observation or turn. ReviewQ sees that no record changed, so the result is `unchanged`: one completed batch and zero report versions. F-02 remains an outstanding card with its earlier checked revision and disposition. A later reply creating O5 remains eligible even if it arrives before the first result is viewed.
 
-Every automatic delivery checks pending questions/permissions, busy related sessions, an open review pass, manual send/unknown receipt, provider readiness, preserved native model/effort and current eligibility at claim and send. Native model/permission recovery uses HOST's same outbox and only legal capacity evidence. It can extend an existing batch to the exact acknowledged resumed turn or an unambiguous same-session Codex root turn in the original executing lineage. A prior permission to publish never broadens a private check. Threads are evidence. The prompt authorizes reading and drafting only. Closing the drawer, viewing a result or losing the HTTP response cannot reauthorize a send.
+Every automatic delivery checks pending questions/permissions, busy related sessions, an open full-review pass on the run, manual send/unknown receipt, provider readiness, preserved native model/effort and current eligibility at claim and send. Native model/permission recovery uses HOST's same outbox and only legal capacity evidence. It can extend an existing batch to the exact acknowledged resumed turn or an unambiguous same-session Codex root turn in the original executing lineage. A prior permission to publish never broadens a private check. Threads are evidence. The prompt authorizes reading and drafting only. Closing the drawer, viewing a result or losing the HTTP response cannot reauthorize a send.
 
 ## Verification
 
