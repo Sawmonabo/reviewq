@@ -93,7 +93,9 @@ impl LedgerTool {
     pub const fn caller(self) -> LedgerCaller {
         match self {
             Self::FinishReview | Self::NeedsInput => LedgerCaller::Lead,
-            _ => LedgerCaller::LeadOrSubagent,
+            Self::RecordFinding | Self::AssessFinding | Self::RecordNote | Self::ReviewLedger => {
+                LedgerCaller::LeadOrSubagent
+            }
         }
     }
 
@@ -101,22 +103,22 @@ impl LedgerTool {
     pub const fn description(self) -> &'static str {
         match self {
             Self::RecordFinding => {
-                "Files one confirmed finding of this review, or changes one already on file. Call it as soon as a finding is confirmed: without id ReviewQ assigns the next ID, and with id and expectedRevision only the fields you give change. Returns the finding's ID, its revision and how many records wait to be published. A field error names what to fix, so correct it and call again."
+                "Files one confirmed finding of this review, or changes one already on file. Call it as soon as a finding is confirmed: leave out id to file a new finding, or give id and expectedRevision to change only the fields you give. Returns the finding's ID, its revision and how many records wait to be published. A refused call returns the fields to correct and files nothing."
             }
             Self::AssessFinding => {
-                "Records what became of a finding already on file, such as one from an earlier version of the report. Call it when you have checked the finding again: fixed, clarified_withdrawn and superseded retire it, while partly_addressed, still_present and unverified keep it active. Returns the finding's ID, its revision and how many records wait to be published."
+                "Records what became of a finding already on file, such as one from an earlier version of the report. Call it when you have checked the finding again: fixed, clarified_withdrawn and superseded retire it, while partly_addressed, still_present and unverified keep it active. Returns the finding's ID, its revision and how many records wait to be published. A refused call returns the fields to correct and files nothing."
             }
             Self::RecordNote => {
-                "Writes one review note, replacing its earlier text: the report's title, summary, rationale, flow, changes, threads, questions, verification, publication, or an extra note named by its title. An empty body removes the note, and expectedRevision is needed once the note exists. Returns the note's section, its revision and how many records wait to be published."
+                "Writes one review note, replacing its earlier text: the report's title, summary, rationale, flow, changes, threads, questions, verification, publication, or an extra note named by its title. Call it whenever a note's text changes: an empty body removes the note, and expectedRevision is needed once the note exists. Returns the note's section, its revision and how many records wait to be published. A refused call returns the fields to correct and files nothing."
             }
             Self::ReviewLedger => {
-                "Reads the findings and notes filed for this review, including those not yet published. With no input it returns a short list: the current version, the open review pass and what it still needs, and one line per active finding and note. Give ids or sections to read those records in full, and pass a returned cursor back with the same input to read the rest."
+                "Reads the findings and notes filed for this review, including those not yet published. With no input it returns a short list: the current version, the open review pass and what it still needs, and one line per active finding and note. Give ids or sections, not both, to read those records in full, and pass a returned cursor back with the same input to read the rest. A refused call returns the fields to correct and files nothing."
             }
             Self::FinishReview => {
-                "Closes the review and publishes a new version of the report from the findings and notes on file. For the lead agent only, as the last call of its review: give the verdict and revision for a first or full review, or one assessment per selected discussion in a selected-thread check. Returns the version's receipt and which findings are new, updated, retired or carried. A field error lists what must change before the review can close, so fix it and call again."
+                "Closes the review and publishes a new version of the report from the findings and notes on file. For the lead agent only, as the last call of its review: give the verdict and revision for a first or full review, or one assessment per selected discussion in a selected-thread check. Returns the version's receipt and which findings are new, updated, retired or carried. A refused call returns the fields to correct and files nothing."
             }
             Self::NeedsInput => {
-                "Records a question the reviewer must answer before the review can finish, and lets your turn end without publishing. For the lead agent only, instead of finish_review when you cannot finish. Returns the held review pass. Your next turn continues the review and closes it with finish_review."
+                "Records a question the reviewer must answer before the review can finish, and lets your turn end without publishing. For the lead agent only, instead of finish_review when you cannot finish, and refused when no review is open. Returns the held review pass, and your next turn continues the review and closes it with finish_review. A refused call returns the fields to correct and files nothing."
             }
         }
     }

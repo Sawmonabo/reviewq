@@ -22,9 +22,9 @@
         "type": "string"
       },
       "FindingIdDto": {
-        "description": "A report finding ID: `F-` followed by at least two digits, such as `F-01`.",
-        "maxLength": 64,
-        "pattern": "^F-[0-9]{2,}$",
+        "description": "A report finding ID: `F-` and the finding's number, written with at least two digits and no other leading zero, such as `F-01` or `F-100`.",
+        "maxLength": 11,
+        "pattern": "^F-(0[1-9]|[1-9][0-9]{1,8})$",
         "type": "string"
       },
       "GitShaDto": {
@@ -144,9 +144,9 @@
         "type": "string"
       },
       "FindingIdDto": {
-        "description": "A report finding ID: `F-` followed by at least two digits, such as `F-01`.",
-        "maxLength": 64,
-        "pattern": "^F-[0-9]{2,}$",
+        "description": "A report finding ID: `F-` and the finding's number, written with at least two digits and no other leading zero, such as `F-01` or `F-100`.",
+        "maxLength": 11,
+        "pattern": "^F-(0[1-9]|[1-9][0-9]{1,8})$",
         "type": "string"
       },
       "NextAction": {
@@ -273,9 +273,9 @@
         "type": "string"
       },
       "FindingIdDto": {
-        "description": "A report finding ID: `F-` followed by at least two digits, such as `F-01`.",
-        "maxLength": 64,
-        "pattern": "^F-[0-9]{2,}$",
+        "description": "A report finding ID: `F-` and the finding's number, written with at least two digits and no other leading zero, such as `F-01` or `F-100`.",
+        "maxLength": 11,
+        "pattern": "^F-(0[1-9]|[1-9][0-9]{1,8})$",
         "type": "string"
       },
       "FindingLocation": {
@@ -463,9 +463,9 @@
     "additionalProperties": false,
     "definitions": {
       "FindingIdDto": {
-        "description": "A report finding ID: `F-` followed by at least two digits, such as `F-01`.",
-        "maxLength": 64,
-        "pattern": "^F-[0-9]{2,}$",
+        "description": "A report finding ID: `F-` and the finding's number, written with at least two digits and no other leading zero, such as `F-01` or `F-100`.",
+        "maxLength": 11,
+        "pattern": "^F-(0[1-9]|[1-9][0-9]{1,8})$",
         "type": "string"
       },
       "NoteSection": {
@@ -492,7 +492,7 @@
         "type": "string"
       }
     },
-    "description": "Reads the ledger. With no field it returns the short list.",
+    "description": "Reads the ledger. With no field it returns the short list. Give `ids` or `sections`, not both.",
     "properties": {
       "cursor": {
         "allOf": [
@@ -500,10 +500,10 @@
             "$ref": "#/definitions/PageCursorDto"
           }
         ],
-        "description": "The cursor a previous result returned. Send it with the same ids and sections."
+        "description": "The cursor a previous result returned. Send it with the same `ids` or `sections`."
       },
       "ids": {
-        "description": "Findings to read in full.",
+        "description": "Findings to read in full. Leave out `sections` when you give these.",
         "items": {
           "$ref": "#/definitions/FindingIdDto"
         },
@@ -512,7 +512,7 @@
         "uniqueItems": true
       },
       "sections": {
-        "description": "Note sections to read in full. `extra` reads every extra note.",
+        "description": "Note sections to read in full. `extra` reads every extra note. Leave out `ids` when you give these.",
         "items": {
           "$ref": "#/definitions/NoteSection"
         },

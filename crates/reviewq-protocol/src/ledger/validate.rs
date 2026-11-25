@@ -1,5 +1,5 @@
-//! The one check of a ledger tool input's shape and size. The app checks the Markdown and the
-//! per-run limits, and the store checks revisions and duplicates.
+//! The one check of a ledger tool input's shape and size. The app checks the Markdown, the
+//! report layout and the per-run limits, and the store checks revisions and duplicates.
 
 use std::collections::BTreeSet;
 use std::io;
@@ -14,7 +14,7 @@ use super::inputs::{
     MAX_TITLE_CHARS, MAX_TOOL_INPUT_BYTES, NeedsInput, RecordFinding, RecordNote, ReviewLedger,
 };
 use super::{LEDGER_TOOLS, LedgerTool};
-use crate::field_errors::{FieldError, bounded_field_errors, collect_schema_errors};
+use crate::field_errors::{FieldError, collect_schema_errors};
 use crate::reports::MAX_FINDING_TEXT_BYTES;
 
 /// The fields a finding filed without `id` must give.
@@ -26,18 +26,6 @@ const NEW_FINDING_FIELDS: [&str; 7] = [
     "issue",
     "consequence",
     "evidence",
-];
-
-/// The composed report's fixed section headings, which an extra note's title may not repeat.
-const FIXED_HEADINGS: [&str; 8] = [
-    "Principal code / data flow",
-    "What changes across the MR",
-    "Our previous threads",
-    "Functional findings",
-    "Quality findings",
-    "Open questions and decisions",
-    "Verification and limits",
-    "Publication and dispositions",
 ];
 
 /// Byte limits of the Markdown fields. The schema states each as a character maximum.
@@ -58,8 +46,9 @@ static VALIDATORS: LazyLock<[(LedgerTool, Validator); 6]> = LazyLock::new(|| {
 });
 
 /// Checks `input` for `tool` and returns it typed. A refusal lists every field that breaks a
-/// rule, at its JSON Pointer within `input`, capped at `MAX_FIELD_ERRORS` plus one entry that
-/// counts the rest. It reads no stored state, so a valid input can still be refused later.
+/// rule, at its JSON Pointer within `input`, in field order and uncapped: the transport caps
+/// the reply with `bounded_field_errors`. It reads no stored state, so a valid input can still
+/// be refused later.
 pub fn validate_ledger_input(
     tool: LedgerTool,
     input: &Value,
@@ -122,12 +111,15 @@ fn check(
                 rules.one_line("/reason");
             }
             LedgerTool::RecordNote => rules.record_note(),
+            LedgerTool::ReviewLedger => rules.review_ledger(),
             LedgerTool::FinishReview => rules.finish_review(),
-            LedgerTool::ReviewLedger | LedgerTool::NeedsInput => {}
+            LedgerTool::NeedsInput => {
+                rules.written("/reason");
+            }
         }
     }
     if !errors.is_empty() {
-        return Err(bounded_field_errors(errors));
+        return Err(errors.into_iter().collect());
     }
     decode(tool, input).map_err(|_| {
         vec![FieldError::new(
@@ -148,8 +140,8 @@ fn decode(tool: LedgerTool, input: &Value) -> Result<LedgerInput, serde_json::Er
     })
 }
 
-/// The rules a flat schema cannot state: fields required by another field's value, one-line
-/// text, the title rule and the byte limits.
+/// The rules a flat schema cannot state: fields required or excluded by another field, text
+/// the reader cannot show, one-line and blank text, the title rule and the byte limits.
 struct Rules<'a> {
     input: &'a Map<String, Value>,
     errors: &'a mut BTreeSet<FieldError>,
@@ -202,6 +194,7 @@ impl Rules<'_> {
             self.one_line(&format!("/locations/{index}/path"));
         }
         for (pointer, limit) in FINDING_TEXT_LIMITS {
+            self.readable(pointer);
             self.bytes(pointer, limit);
         }
     }
@@ -213,18 +206,8 @@ impl Rules<'_> {
             (false, true) => self.refuse("/title", "Give title only for an extra note."),
             _ => {}
         }
-        if self.one_line("/title")
-            && let Some(title) = self.text("/title")
-            && FIXED_HEADINGS
-                .iter()
-                .any(|heading| heading.eq_ignore_ascii_case(title.trim()))
-        {
-            self.refuse(
-                "/title",
-                "Choose a title that is not a fixed section's heading.",
-            );
-        }
-        if self.text("/section") == Some("title") {
+        self.one_line("/title");
+        if self.readable("/body") && self.text("/section") == Some("title") {
             let body = self.text("/body").unwrap_or_default();
             if body.chars().any(breaks_line) || body.chars().count() > MAX_TITLE_CHARS {
                 self.refuse(
@@ -238,43 +221,91 @@ impl Rules<'_> {
         self.bytes("/body", MAX_NOTE_BODY_BYTES);
     }
 
-    fn finish_review(&mut self) {
-        let Some(revision) = self.input.get("revision").and_then(Value::as_object) else {
-            return;
+    fn review_ledger(&mut self) {
+        let listed = |field: &str| {
+            self.input
+                .get(field)
+                .and_then(Value::as_array)
+                .is_some_and(|items| !items.is_empty())
         };
-        match (revision.get("sha"), revision.contains_key("reason")) {
-            (Some(Value::Null), false) => {
-                self.refuse(
-                    "/revision/reason",
-                    "Required when sha is null: say why the reviewed commit is unknown.",
-                );
-            }
-            (Some(Value::String(_)), true) => {
-                self.refuse("/revision/reason", "Leave out reason when sha is given.");
-            }
-            _ => {}
+        if listed("ids") && listed("sections") {
+            self.refuse(
+                "/sections",
+                "Give ids or sections, not both: read each in its own call.",
+            );
         }
-        self.one_line("/revision/reason");
     }
 
-    /// Refuses a line break, control character or blank text at `pointer`. Returns whether the
-    /// field is absent or passed.
+    fn finish_review(&mut self) {
+        if let Some(revision) = self.input.get("revision").and_then(Value::as_object) {
+            match (revision.get("sha"), revision.contains_key("reason")) {
+                (Some(Value::Null), false) => {
+                    self.refuse(
+                        "/revision/reason",
+                        "Required when sha is null: say why the reviewed commit is unknown.",
+                    );
+                }
+                (Some(Value::String(_)), true) => {
+                    self.refuse("/revision/reason", "Leave out reason when sha is given.");
+                }
+                _ => {}
+            }
+            self.one_line("/revision/reason");
+        }
+        let assessments = self
+            .input
+            .get("assessments")
+            .and_then(Value::as_array)
+            .map_or(0, Vec::len);
+        for index in 0..assessments {
+            self.written(&format!("/assessments/{index}/reason"));
+        }
+    }
+
+    /// Refuses unreadable characters, a line break, a control character or blank text at
+    /// `pointer`. Returns whether the field is absent or passed.
     fn one_line(&mut self, pointer: &str) -> bool {
-        let Some(text) = self.text(pointer) else {
-            return true;
-        };
-        if text.chars().any(breaks_line) {
+        if !self.written(pointer) {
+            return false;
+        }
+        if self
+            .text(pointer)
+            .is_some_and(|text| text.chars().any(breaks_line))
+        {
             self.refuse(
                 pointer,
                 "Write this on one line, without line breaks or control characters.",
             );
-            false
-        } else if !text.is_empty() && text.trim().is_empty() {
-            self.refuse(pointer, "Write words here, not only spaces.");
-            false
-        } else {
-            true
+            return false;
         }
+        true
+    }
+
+    /// Refuses unreadable characters or text of only spaces at `pointer`. An empty string is
+    /// left to the schema. Returns whether the field is absent or passed.
+    fn written(&mut self, pointer: &str) -> bool {
+        if !self.readable(pointer) {
+            return false;
+        }
+        if self
+            .text(pointer)
+            .is_some_and(|text| !text.is_empty() && text.trim().is_empty())
+        {
+            self.refuse(pointer, "Write words here, not only spaces.");
+            return false;
+        }
+        true
+    }
+
+    /// Refuses a character that breaks the reader at `pointer`: a byte-order mark, a NUL or a
+    /// carriage return without a line feed after it. CRLF line endings pass. Returns whether
+    /// the field is absent or passed.
+    fn readable(&mut self, pointer: &str) -> bool {
+        let Some(problem) = self.text(pointer).and_then(unreadable) else {
+            return true;
+        };
+        self.refuse(pointer, problem);
+        false
     }
 
     fn bytes(&mut self, pointer: &str, limit: usize) {
@@ -319,6 +350,22 @@ fn starts_with_severity(title: &str) -> bool {
     matches!(chars.next(), Some('P' | 'p'))
         && matches!(chars.next(), Some('0'..='3'))
         && chars.next().is_none_or(|c| !c.is_alphanumeric())
+}
+
+/// What to remove from `text` so the reader can show it, if anything.
+fn unreadable(text: &str) -> Option<&'static str> {
+    if text.contains('\u{feff}') {
+        Some("Remove the byte-order mark (U+FEFF) from this text.")
+    } else if text.contains('\0') {
+        Some("Remove the NUL character (U+0000) from this text.")
+    } else if text
+        .match_indices('\r')
+        .any(|(index, _)| !text[index + 1..].starts_with('\n'))
+    {
+        Some("Remove each carriage return (U+000D) that no line feed follows.")
+    } else {
+        None
+    }
 }
 
 fn breaks_line(c: char) -> bool {

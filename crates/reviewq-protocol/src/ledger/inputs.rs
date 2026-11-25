@@ -192,26 +192,28 @@ pub struct RecordNote {
     pub expected_revision: Option<u64>,
 }
 
-/// Reads the ledger. With no field it returns the short list.
+/// Reads the ledger. With no field it returns the short list. Give `ids` or `sections`, not
+/// both.
 #[derive(Debug, Default, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct ReviewLedger {
-    /// Findings to read in full.
+    /// Findings to read in full. Leave out `sections` when you give these.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     #[cfg_attr(
         feature = "schema",
         schemars(length(max = MAX_READ_IDS), extend("uniqueItems" = true))
     )]
     pub ids: Vec<FindingIdDto>,
-    /// Note sections to read in full. `extra` reads every extra note.
+    /// Note sections to read in full. `extra` reads every extra note. Leave out `ids` when you
+    /// give these.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     #[cfg_attr(
         feature = "schema",
         schemars(length(max = NOTE_SECTIONS), extend("uniqueItems" = true))
     )]
     pub sections: Vec<NoteSection>,
-    /// The cursor a previous result returned. Send it with the same ids and sections.
+    /// The cursor a previous result returned. Send it with the same `ids` or `sections`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[cfg_attr(feature = "schema", schemars(with = "PageCursorDto"))]
     pub cursor: Option<PageCursorDto>,

@@ -2,13 +2,16 @@
 
 use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
 
-/// Longest finding ID: `F-` and its number.
-pub(crate) const MAX_ID_BYTES: usize = 64;
 /// Longest GitLab discussion ID a batch or an assessment names.
 pub(crate) const MAX_DISCUSSION_ID_BYTES: usize = 256;
 
-/// The schema pattern of a finding ID, which field errors name in plain words.
-pub(crate) const FINDING_ID_PATTERN: &str = "^F-[0-9]{2,}$";
+/// Longest finding ID: `F-` and the nine digits of the largest number, 999,999,999.
+#[cfg(feature = "schema")]
+const MAX_FINDING_ID_CHARS: usize = 11;
+/// The schema pattern of a finding ID, which field errors name in plain words. It matches what
+/// `valid_finding_id` accepts: `F-01` to `F-09`, then 10 up to 999,999,999 without a leading
+/// zero.
+pub(crate) const FINDING_ID_PATTERN: &str = "^F-(0[1-9]|[1-9][0-9]{1,8})$";
 /// The schema pattern of a full Git SHA, which field errors name in plain words.
 pub(crate) const GIT_SHA_PATTERN: &str = "^([0-9A-Fa-f]{40}|[0-9A-Fa-f]{64})$";
 
@@ -96,7 +99,8 @@ opaque_dto!(
     TicketKeyDto
 );
 string_dto!(
-    /// A report finding ID: `F-` followed by at least two digits, such as `F-01`.
+    /// A report finding ID: `F-` and the finding's number, written with at least two digits and
+    /// no other leading zero, such as `F-01` or `F-100`.
     FindingIdDto,
     valid_finding_id,
     "finding_id_schema"
@@ -249,11 +253,17 @@ fn bounded_text(value: &str, max_bytes: usize) -> bool {
     !value.is_empty() && value.len() <= max_bytes && !value.chars().any(char::is_control)
 }
 
+/// The domain's canonical finding ID, numbered 1 up to 999,999,999: `F-1`, `F-00` and `F-001`
+/// fail.
 fn valid_finding_id(value: &str) -> bool {
-    value.len() <= MAX_ID_BYTES
-        && value
-            .strip_prefix("F-")
-            .is_some_and(|number| number.len() >= 2 && number.bytes().all(|b| b.is_ascii_digit()))
+    value.strip_prefix("F-").is_some_and(|digits| {
+        let canonical = match digits.len() {
+            2 => digits != "00",
+            3..=9 => !digits.starts_with('0'),
+            _ => false,
+        };
+        canonical && digits.bytes().all(|byte| byte.is_ascii_digit())
+    })
 }
 
 fn valid_review_id(value: &str) -> bool {
@@ -301,7 +311,7 @@ fn finding_id_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
     schemars::json_schema!({
         "type": "string",
         "pattern": FINDING_ID_PATTERN,
-        "maxLength": MAX_ID_BYTES,
+        "maxLength": MAX_FINDING_ID_CHARS,
     })
 }
 

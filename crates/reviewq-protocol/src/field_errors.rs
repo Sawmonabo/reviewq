@@ -1,4 +1,5 @@
-//! Field errors a tool input's JSON Schema reports, one per field and capped for every reply.
+//! Field errors a tool input's JSON Schema reports, one per field, and the one cap a reply
+//! applies to them.
 
 use std::collections::BTreeSet;
 
@@ -6,11 +7,13 @@ use jsonschema::{ValidationError, Validator, error::ValidationErrorKind};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::scalar::{FINDING_ID_PATTERN, GIT_SHA_PATTERN, MAX_ID_BYTES};
+use crate::scalar::{FINDING_ID_PATTERN, GIT_SHA_PATTERN};
 
 /// Field errors one reply lists before a single summary of the rest, which keeps a refusal
 /// within the bridge's 256 KiB and MCP's 512 KiB reply caps.
 pub const MAX_FIELD_ERRORS: usize = 50;
+/// Longest unexpected field name an error repeats. Every schema field name is shorter.
+const MAX_ECHOED_NAME_BYTES: usize = 64;
 
 /// One refused field: its JSON Pointer and what to change.
 #[derive(Clone, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
@@ -41,7 +44,7 @@ pub fn collect_schema_errors(
 }
 
 /// Lists at most `MAX_FIELD_ERRORS` errors in field order, then one root error that counts the
-/// rest.
+/// rest. The transport calls it once on every refusal it returns, and nothing else caps.
 pub fn bounded_field_errors(errors: BTreeSet<FieldError>) -> Vec<FieldError> {
     let hidden = errors.len().saturating_sub(MAX_FIELD_ERRORS);
     let mut errors: Vec<_> = errors.into_iter().take(MAX_FIELD_ERRORS).collect();
@@ -73,7 +76,7 @@ fn collect(error: &ValidationError<'_>, errors: &mut BTreeSet<FieldError>) {
             for key in unexpected {
                 // A name longer than any schema field is reported at its object, so the
                 // reply never echoes an arbitrarily long key.
-                let path = if key.len() <= MAX_ID_BYTES {
+                let path = if key.len() <= MAX_ECHOED_NAME_BYTES {
                     child(&path, key)
                 } else {
                     path.clone()
