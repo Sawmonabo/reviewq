@@ -1,10 +1,11 @@
-//! Browser projections for accepted report versions and labeled candidates.
+//! Browser projections for published report versions.
 
 use serde::Serialize;
 
 pub use crate::scalar::ReportHashDto;
 use crate::{
-    GitShaDto, HistoryTurnIdDto, Page, ResourceIdDto, RevisionDto, SafeCountDto, UtcTimestampDto,
+    DiscussionIdDto, FindingIdDto, GitShaDto, Page, ResourceIdDto, RevisionDto, SafeCountDto,
+    UtcTimestampDto,
 };
 
 macro_rules! wire_enum {
@@ -26,13 +27,7 @@ wire_enum!(Coverage {
     FullMr,
     SelectedThreads
 });
-wire_enum!(SemanticIndex { Ready, SourceOnly });
-wire_enum!(DeliveryState {
-    Preparing,
-    Saving,
-    Failed,
-    Saved
-});
+wire_enum!(DeliveryState { Failed, Saved });
 wire_enum!(Publication {
     Withheld,
     Authorized,
@@ -47,6 +42,82 @@ wire_enum!(FindingConclusion {
     Unverified,
 });
 wire_enum!(OffsetUnit { UnicodeCodepoints });
+wire_enum!(FindingSection {
+    Functional,
+    Quality
+});
+wire_enum!(FindingBasisKind { Observed, Gap });
+
+/// A finding's severity, most severe first.
+#[derive(Clone, Debug, serde::Deserialize, Serialize)]
+#[serde(rename_all = "UPPERCASE")]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub enum Severity {
+    P0,
+    P1,
+    P2,
+    P3,
+}
+
+/// Longest location path, in characters.
+pub const MAX_PATH_CHARS: usize = 512;
+/// Longest evidence text, in characters (8 KiB).
+pub const MAX_EVIDENCE_CHARS: usize = 8 * 1024;
+/// Longest outcome or assessment reason, in characters.
+pub const MAX_REASON_CHARS: usize = 1024;
+/// Most finding IDs one assessment names.
+pub const MAX_ASSESSMENT_FINDING_IDS: usize = 100;
+
+/// A file a finding points at, with an optional 1-based line.
+#[derive(Debug, serde::Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct FindingLocation {
+    #[cfg_attr(feature = "schema", schemars(length(min = 1, max = MAX_PATH_CHARS)))]
+    pub path: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "schema", schemars(range(min = 1, max = 4294967295_u32)))]
+    pub line: Option<u32>,
+}
+
+/// What the agent confirmed (`observed`) or could not verify (`gap`).
+#[derive(Debug, serde::Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct FindingBasis {
+    pub kind: FindingBasisKind,
+    #[cfg_attr(feature = "schema", schemars(length(min = 1, max = MAX_EVIDENCE_CHARS)))]
+    pub text: String,
+}
+
+/// The reviewed revision: an exact SHA, or `{sha: null, reason}` when it is unknown.
+#[derive(Debug, serde::Deserialize, Serialize)]
+#[serde(untagged, deny_unknown_fields)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub enum ReportRevision {
+    Exact {
+        sha: GitShaDto,
+    },
+    Unknown {
+        sha: (),
+        #[cfg_attr(feature = "schema", schemars(length(min = 1, max = MAX_REASON_CHARS)))]
+        reason: String,
+    },
+}
+
+/// The lead's conclusion on one selected discussion of a follow-up batch.
+#[derive(Debug, serde::Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct Assessment {
+    pub discussion_id: DiscussionIdDto,
+    pub conclusion: FindingConclusion,
+    #[cfg_attr(feature = "schema", schemars(length(min = 1, max = MAX_REASON_CHARS)))]
+    pub reason: String,
+    #[cfg_attr(feature = "schema", schemars(length(max = MAX_ASSESSMENT_FINDING_IDS)))]
+    pub finding_ids: Vec<FindingIdDto>,
+    pub next_action: crate::followups::NextAction,
+}
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -56,7 +127,6 @@ pub struct ArtifactStats {
     pub total_code_points: SafeCountDto,
     pub line_count: SafeCountDto,
     pub max_line_bytes: SafeCountDto,
-    pub complete: bool,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -73,8 +143,6 @@ pub struct ReportReference {
 pub struct ReportSummary {
     #[serde(flatten)]
     pub reference: ReportReference,
-    pub original_sha256: Option<ReportHashDto>,
-    pub native_provenance: bool,
     pub parent_receipt_id: Option<ResourceIdDto>,
     pub attention_receipt_id: ResourceIdDto,
     pub reviewed_sha: Option<GitShaDto>,
@@ -84,13 +152,9 @@ pub struct ReportSummary {
     pub coverage_source_sha: Option<GitShaDto>,
     pub coverage_target_sha: Option<GitShaDto>,
     pub verdict: Verdict,
-    pub semantic_index: SemanticIndex,
-    pub finding_count: Option<SafeCountDto>,
-    pub change_count: Option<SafeCountDto>,
-    /// Active findings with no card in this report's text: carried from an earlier
-    /// version, or listed in the findings ledger without an `F-` heading.
-    pub unanchored_finding_count: SafeCountDto,
-    pub captured_at: UtcTimestampDto,
+    pub finding_count: SafeCountDto,
+    pub change_count: SafeCountDto,
+    pub published_at: UtcTimestampDto,
     #[serde(flatten)]
     pub stats: ArtifactStats,
 }
@@ -161,7 +225,6 @@ wire_enum!(DisplayFallback {
     UnsupportedSource,
     InvalidBoundary,
     ParserFailed,
-    IncompleteSource,
     CacheUnavailable,
 });
 
@@ -254,8 +317,6 @@ pub struct ReportHistory<I = ReportSummary> {
 pub struct ReportSection {
     #[serde(flatten)]
     pub report: ReportReference,
-    pub complete: bool,
-    pub original_sha256: Option<ReportHashDto>,
     pub text: String,
     pub offset: SafeCountDto,
     pub next_offset: Option<SafeCountDto>,
@@ -270,16 +331,6 @@ pub struct SourceRange {
     pub offset: SafeCountDto,
     pub length: SafeCountDto,
     pub sha256: ReportHashDto,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub origin: Option<Box<SourceOrigin>>,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-pub struct SourceOrigin {
-    pub report: ReportReference,
-    pub checked_sha: Option<GitShaDto>,
 }
 
 #[derive(Debug, Serialize)]
@@ -293,12 +344,12 @@ pub enum Descriptor {
     Finding {
         finding_id: String,
         title: String,
-        severity: Option<String>,
-        blocking: Option<bool>,
-        source: Option<SourceRange>,
-        /// The earlier receipt whose card a carried finding keeps.
-        #[serde(skip_serializing_if = "Option::is_none")]
-        carried_from: Option<Box<SourceOrigin>>,
+        severity: Severity,
+        blocking: bool,
+        section: FindingSection,
+        category: String,
+        record_revision: RevisionDto,
+        source: SourceRange,
         #[serde(skip_serializing_if = "Option::is_none")]
         details: Option<Box<FindingDetails>>,
         #[serde(skip_serializing_if = "Option::is_none")]
@@ -327,12 +378,14 @@ pub enum Descriptor {
 #[serde(rename_all = "camelCase")]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct FindingDetails {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub location: Option<FindingLocation>,
+    pub locations: Vec<FindingLocation>,
+    pub issue: String,
     pub consequence: String,
     pub evidence: FindingBasis,
-    pub checked_sha: Option<GitShaDto>,
-    pub evidence_sha256: ReportHashDto,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub proposed_comment: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub details: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -352,21 +405,6 @@ pub struct ReportContext<I = Descriptor> {
     pub user_disposition_version: RevisionDto,
     #[serde(flatten)]
     pub page: Page<I>,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-pub struct CandidateReport {
-    pub accepted: bool,
-    #[serde(flatten)]
-    pub section: ReportSection,
-    pub stats: ArtifactStats,
-    pub turn_id: HistoryTurnIdDto,
-    pub call_id: ResourceIdDto,
-    pub declaration_sha256: ReportHashDto,
-    pub reconciled_by_batch_id: Option<ResourceIdDto>,
-    pub reason: String,
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -493,14 +531,3 @@ pub struct FeedbackRequest {
     pub quote_ref: Option<QuoteRef>,
     pub text: crate::MessageTextDto,
 }
-
-mod handoff;
-pub use handoff::{
-    AcceptedReference, AcceptedReport, Assessment, CodexCommand, FindingBasis, FindingBasisKind,
-    FindingEdit, FindingLocation, Handoff, HandoffCommand, HandoffReceipt, HandoffState,
-    NativeContext, NativeReportAddress, REPORT_AMENDMENT_SOURCE_MESSAGE,
-    REPORT_HANDOFF_DESCRIPTION, REPORT_HANDOFF_EXAMPLE, REPORT_HANDOFF_SCHEMA,
-    ReportHandoffFieldError, ReportHandoffInput, ReportRevision, ReportSource, ReportVerdict,
-    StructuredFinding, StructuredReport, limits, report_amendment_source_error,
-    validate_report_handoff,
-};

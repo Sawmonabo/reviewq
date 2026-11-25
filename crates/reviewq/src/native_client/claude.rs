@@ -14,8 +14,6 @@ pub(crate) enum ClaudeBridgeOperation {
     Hook,
     Question,
     QuestionFinished,
-    Report,
-    ReportStatus,
     Action,
     ActionStatus,
 }
@@ -33,10 +31,6 @@ pub(crate) async fn claude_bridge(
         ClaudeBridgeOperation::Question => ("/api/v1/native/claude/question", 64 * 1024),
         ClaudeBridgeOperation::QuestionFinished => {
             ("/api/v1/native/claude/question-finished", 128 * 1024)
-        }
-        ClaudeBridgeOperation::Report => ("/api/v1/native/reports/handoff", 144 * 1024),
-        ClaudeBridgeOperation::ReportStatus => {
-            ("/api/v1/native/reports/handoff-status", 144 * 1024)
         }
         ClaudeBridgeOperation::Action => ("/api/v1/native/actions/declare", 80 * 1024),
         ClaudeBridgeOperation::ActionStatus => ("/api/v1/native/actions/reconcile", 16_384),
@@ -70,47 +64,6 @@ pub(crate) async fn claude_bridge(
         }
     }
     match operation {
-        ClaudeBridgeOperation::Report | ClaudeBridgeOperation::ReportStatus => {
-            let turn = fields
-                .remove("turnId")
-                .ok_or("Missing native Claude turn.")?;
-            let call = fields
-                .remove("callId")
-                .ok_or("Missing native Claude call.")?;
-            let witness = fields.remove("witnessOrdinal");
-            if witness.as_ref().is_some_and(|value| {
-                !value
-                    .as_u64()
-                    .is_some_and(|ordinal| (1..=u64::from(u32::MAX)).contains(&ordinal))
-            }) {
-                return Err("Invalid native Claude report call ordinal.".into());
-            }
-            if matches!(operation, ClaudeBridgeOperation::Report) {
-                let input = serde_json::Value::Object(std::mem::take(fields));
-                let errors = reviewq_protocol::reports::validate_report_handoff(&input);
-                if !errors.is_empty() {
-                    println!(
-                        "{}",
-                        serde_json::json!({
-                            "error": "Invalid report handoff.",
-                            "fieldErrors": errors,
-                            "correctionRequested": true,
-                        })
-                    );
-                    return Ok(());
-                }
-                if let serde_json::Value::Object(input) = input {
-                    *fields = input;
-                }
-            }
-            let mut context = serde_json::json!({
-                "sessionKey": format!("claude:{native}"), "turnId": turn, "callId": call
-            });
-            if let Some(witness) = witness {
-                context["witnessOrdinal"] = witness;
-            }
-            fields.insert("context".into(), context);
-        }
         ClaudeBridgeOperation::Action | ClaudeBridgeOperation::ActionStatus => {
             fields.insert(
                 "sessionKey".into(),
@@ -140,51 +93,11 @@ pub(crate) async fn claude_bridge(
     let result = bridge(&client, &endpoint, path, serde_json::to_vec(&payload)?).await?;
     let status = result.status();
     let body = bounded(result, 256 * 1024).await?;
-    #[derive(serde::Deserialize)]
-    #[serde(rename_all = "camelCase")]
-    struct InvalidReport {
-        field_errors: Vec<reviewq_protocol::reports::ReportHandoffFieldError>,
-    }
-    if status == reqwest::StatusCode::BAD_REQUEST
-        && matches!(operation, ClaudeBridgeOperation::Report)
-        && let Ok(response) = serde_json::from_slice::<InvalidReport>(&body)
-        && !response.field_errors.is_empty()
-    {
-        println!(
-            "{}",
-            serde_json::json!({
-                "error": "Invalid report handoff.",
-                "fieldErrors": response.field_errors,
-                "correctionRequested": true,
-            })
-        );
-        return Ok(());
-    }
-    if status == reqwest::StatusCode::UNPROCESSABLE_ENTITY
-        && matches!(operation, ClaudeBridgeOperation::Report)
-    {
-        println!(
-            "{}",
-            serde_json::json!({
-                "error":reviewq_app::access::REPORT_CORRECTION_MESSAGE,
-                "correctionRequested":true,
-            })
-        );
-        return Ok(());
-    }
     if !status.is_success() {
-        let report = matches!(
-            operation,
-            ClaudeBridgeOperation::Report | ClaudeBridgeOperation::ReportStatus
-        );
-        let detail = match (status.as_u16(), report) {
-            (404, true) => "ReviewQ could not verify the active Claude lead, turn, or report call.",
-            (409, true) => {
-                "The report handoff conflicts with the recorded native call or report state."
-            }
-            (404, false) => "This Claude session has no verified ReviewQ binding.",
-            (409, false) => "Another ReviewQ companion owns this Claude session.",
-            (412, _) => "Reload the ReviewQ plugin in this Claude session.",
+        let detail = match status.as_u16() {
+            404 => "This Claude session has no verified ReviewQ binding.",
+            409 => "Another ReviewQ companion owns this Claude session.",
+            412 => "Reload the ReviewQ plugin in this Claude session.",
             _ => "ReviewQ could not record this Claude session observation.",
         };
         return Err(detail.into());

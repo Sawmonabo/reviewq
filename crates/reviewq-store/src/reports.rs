@@ -1,8 +1,9 @@
 //! Scoped reads over accepted report versions and their immutable bytes.
 
-pub(crate) mod address;
-mod capture;
+mod artifact;
+pub(crate) mod authority;
 mod context;
+pub(crate) mod failures;
 mod mutations;
 mod quote;
 
@@ -10,12 +11,11 @@ use reviewq_app::access::{Actor, ActorScope, AppError, AppFuture};
 use reviewq_app::events::Snapshot;
 use reviewq_app::hosts::MessageBody;
 use reviewq_app::reports::{
-    ArtifactStats, CandidateReport, ContextRequest, DisplayWindow, DisplayWindowPosition,
-    MAX_REPORT_PAGE, MAX_SECTION_SCALARS, QuoteResolution, ReportContext, ReportDelivery,
-    ReportHistory, ReportPosition, ReportReference, ReportSection, ReportStore, ReportSummary,
-    ReportView,
+    ArtifactStats, ContextRequest, DisplayWindow, DisplayWindowPosition, MAX_REPORT_PAGE,
+    MAX_SECTION_SCALARS, QuoteResolution, ReportContext, ReportDelivery, ReportHistory,
+    ReportPosition, ReportReference, ReportSection, ReportStore, ReportSummary, ReportView,
 };
-use reviewq_domain::identity::{ReceiptId, ReportHash, RunId};
+use reviewq_domain::identity::{ReceiptId, RunId};
 use rusqlite::{Connection, OptionalExtension, Row, params};
 
 use crate::events::snapshot;
@@ -31,18 +31,15 @@ pub(crate) struct Version {
 struct SectionSource<'a> {
     artifact_id: &'a str,
     reference: ReportReference,
-    original_sha256: Option<ReportHash>,
     stats: &'a ArtifactStats,
 }
 
 const VERSION_SELECT: &str = "
     SELECT v.receipt_id, a.sha256, v.parent_receipt_id, v.attention_receipt_id,
         v.reviewed_sha, v.revision_reason, v.full_mr_reviewed_sha, v.coverage, v.verdict,
-        v.semantic_index, v.finding_count, v.change_count, v.captured_at_ms, v.artifact_id,
-        a.byte_length, a.total_code_points, a.line_count, a.max_line_bytes, a.complete,
-        a.original_sha256, v.handoff_receipt_id IS NOT NULL, v.coverage_source_sha, v.coverage_target_sha,
-        (SELECT count(*) FROM report_findings f
-         WHERE f.run_id=v.run_id AND f.receipt_id=v.receipt_id AND f.scalar_offset IS NULL)
+        v.finding_count, v.change_count, v.published_at_ms, v.artifact_id,
+        a.byte_length, a.total_code_points, a.line_count, a.max_line_bytes,
+        v.coverage_source_sha, v.coverage_target_sha
     FROM report_versions v JOIN artifacts a USING(artifact_id)
     WHERE v.run_id=?1 AND a.sealed=1";
 
@@ -129,12 +126,12 @@ impl ReportStore for SqliteStore {
             self.read(move |tx| {
                 authorize_run(tx, &actor, &run)?;
                 let (time, receipt) = after.as_ref().map_or((None, ""), |p| {
-                    (Some(p.captured_at_ms), p.receipt_id.as_str())
+                    (Some(p.published_at_ms), p.receipt_id.as_str())
                 });
                 let sql = format!(
                     "{VERSION_SELECT}
-                    AND (?2 IS NULL OR (v.captured_at_ms, v.receipt_id) < (?2, ?3))
-                    ORDER BY v.captured_at_ms DESC, v.receipt_id DESC LIMIT ?4"
+                    AND (?2 IS NULL OR (v.published_at_ms, v.receipt_id) < (?2, ?3))
+                    ORDER BY v.published_at_ms DESC, v.receipt_id DESC LIMIT ?4"
                 );
                 let mut statement = tx.prepare_cached(&sql)?;
                 let mut rows = statement.query(params![run.as_str(), time, receipt, limit + 1])?;
@@ -143,7 +140,7 @@ impl ReportStore for SqliteStore {
                 while let Some(row) = rows.next()? {
                     if items.len() == usize::from(limit) {
                         next = items.last().map(|item: &ReportSummary| ReportPosition {
-                            captured_at_ms: item.captured_at_ms,
+                            published_at_ms: item.published_at_ms,
                             receipt_id: item.reference.receipt_id.clone(),
                         });
                         break;
@@ -205,7 +202,6 @@ impl ReportStore for SqliteStore {
                     SectionSource {
                         artifact_id: &version.artifact_id,
                         reference: version.summary.reference,
-                        original_sha256: version.summary.original_sha256,
                         stats: &version.summary.stats,
                     },
                     offset,
@@ -231,8 +227,7 @@ impl ReportStore for SqliteStore {
             }
             self.read(move |tx| {
                 let version = authorized_version(tx, &actor, &run, &report)?;
-                if !version.summary.stats.complete || bytes.end > version.summary.stats.byte_length
-                {
+                if bytes.end > version.summary.stats.byte_length {
                     return Err(AppError::CursorExpired.into());
                 }
                 let part = read_artifact_bytes(tx, &version.artifact_id, bytes.start, bytes.end)?;
@@ -277,51 +272,6 @@ impl ReportStore for SqliteStore {
             })
             .await
             .map_err(StoreError::app)
-        })
-    }
-
-    fn read_report_candidate(
-        &self,
-        actor: Actor,
-        run: RunId,
-        receipt: ReceiptId,
-        offset: u64,
-        characters: u32,
-    ) -> AppFuture<'_, Snapshot<CandidateReport>> {
-        Box::pin(async move {
-            if !(1..=MAX_SECTION_SCALARS).contains(&characters) {
-                return Err(AppError::InvalidRequest);
-            }
-            self.read(move |tx| {
-                authorize_run(tx, &actor, &run)?;
-                let mut statement = tx.prepare_cached(
-                    "SELECT h.artifact_id, a.sha256, h.turn_id, h.call_id, h.declaration_sha256,
-                       h.reason, a.byte_length, a.total_code_points, a.line_count, a.max_line_bytes, a.complete,
-                       a.original_sha256, h.reconciled_by_batch_id
-                     FROM report_handoffs h JOIN artifacts a USING(artifact_id)
-                     WHERE h.run_id=?1 AND h.receipt_id=?2 AND h.state='failed' AND a.sealed=1"
-                )?;
-                let mut rows = statement.query(params![run.as_str(), receipt.as_str()])?;
-                let row = rows.next()?.ok_or(AppError::NotFound)?;
-                let reference = ReportReference { receipt_id: receipt, hash: parse(text(row, 1)?)? };
-                let stats = decode_stats(row, 6)?;
-                let candidate = CandidateReport {
-                    section: section(tx, SectionSource {
-                        artifact_id: text(row, 0)?,
-                        reference: reference.clone(),
-                        original_sha256: optional(row, 11)?,
-                        stats: &stats,
-                    }, offset, characters)?,
-                    reference,
-                    stats,
-                    turn_id: row.get(2)?,
-                    call_id: row.get(3)?,
-                    declaration_sha256: parse(text(row, 4)?)?,
-                    reason: row.get(5)?,
-                    reconciled_by_batch_id: row.get(12)?,
-                };
-                snapshot(tx, candidate)
-            }).await.map_err(StoreError::app)
         })
     }
 }
@@ -384,23 +334,16 @@ fn read_delivery(
     run: &RunId,
 ) -> Result<Option<ReportDelivery>, StoreError> {
     let mut statement = connection.prepare_cached(
-        "WITH latest AS (
-            SELECT receipt_id, CASE state
-              WHEN 'pending_completion' THEN CASE WHEN artifact_id IS NULL THEN 'preparing' ELSE 'saving' END
-              WHEN 'recorded' THEN 'saved' ELSE 'failed' END AS delivery, reason,
-              CASE WHEN state='pending_completion' THEN 0 ELSE 2 END AS priority
-            FROM report_handoffs WHERE run_id=?1 AND reconciled_by_batch_id IS NULL
-            ORDER BY created_at_ms DESC, receipt_id DESC LIMIT 1
-         ), failure AS (
-            SELECT h.receipt_id, 'failed' AS delivery, f.reason, 1 AS priority
-            FROM report_delivery_failures f
-            LEFT JOIN report_handoffs h ON (h.run_id,h.lead_session_key,h.turn_id,h.call_id)=
-                (f.run_id,f.lead_session_key,f.native_turn_id,f.native_call_id) AND h.state='failed'
-            WHERE f.run_id=?1 AND f.resolved_by_receipt_id IS NULL
-            ORDER BY f.occurred_at_ms DESC, f.notification_id DESC LIMIT 1
+        "WITH failure AS (
+            SELECT NULL AS receipt_id, 'failed' AS delivery, reason, 0 AS priority
+            FROM report_delivery_failures WHERE run_id=?1 AND resolved_by_receipt_id IS NULL
+            ORDER BY occurred_at_ms DESC, notification_id DESC LIMIT 1
+         ), head AS (
+            SELECT receipt_id, 'saved' AS delivery, NULL AS reason, 1 AS priority
+            FROM report_heads WHERE run_id=?1
          )
-         SELECT receipt_id, delivery, reason, priority FROM latest
-         UNION ALL SELECT receipt_id, delivery, reason, priority FROM failure
+         SELECT receipt_id, delivery, reason, priority FROM failure
+         UNION ALL SELECT receipt_id, delivery, reason, priority FROM head
          ORDER BY priority LIMIT 1",
     )?;
     let mut rows = statement.query([run.as_str()])?;
@@ -442,29 +385,25 @@ pub(crate) fn version(
 
 fn decode_version(row: &Row<'_>) -> Result<Version, StoreError> {
     Ok(Version {
-        artifact_id: row.get(13)?,
+        artifact_id: row.get(12)?,
         summary: ReportSummary {
             reference: ReportReference {
                 receipt_id: parse(text(row, 0)?)?,
                 hash: parse(text(row, 1)?)?,
             },
-            original_sha256: optional(row, 19)?,
-            native_provenance: row.get(20)?,
             parent_receipt_id: optional(row, 2)?,
             attention_receipt_id: parse(text(row, 3)?)?,
             reviewed_sha: optional(row, 4)?,
             revision_reason: row.get(5)?,
             full_mr_reviewed_sha: optional(row, 6)?,
             coverage: parse(text(row, 7)?)?,
-            coverage_source_sha: optional(row, 21)?,
-            coverage_target_sha: optional(row, 22)?,
+            coverage_source_sha: optional(row, 17)?,
+            coverage_target_sha: optional(row, 18)?,
             verdict: parse(text(row, 8)?)?,
-            semantic_index: parse(text(row, 9)?)?,
-            finding_count: read_optional_count(row, 10)?,
-            change_count: read_optional_count(row, 11)?,
-            unanchored_finding_count: read_count(row, 23)?,
-            captured_at_ms: row.get(12)?,
-            stats: decode_stats(row, 14)?,
+            finding_count: read_count(row, 9)?,
+            change_count: read_count(row, 10)?,
+            published_at_ms: row.get(11)?,
+            stats: decode_stats(row, 13)?,
         },
     })
 }
@@ -481,20 +420,12 @@ fn read_count(row: &Row<'_>, column: usize) -> Result<u64, StoreError> {
     u64::try_from(row.get::<_, i64>(column)?).map_err(|_| AppError::Internal.into())
 }
 
-fn read_optional_count(row: &Row<'_>, column: usize) -> Result<Option<u64>, StoreError> {
-    row.get::<_, Option<i64>>(column)?
-        .map(u64::try_from)
-        .transpose()
-        .map_err(|_| AppError::Internal.into())
-}
-
 fn decode_stats(row: &Row<'_>, start: usize) -> Result<ArtifactStats, StoreError> {
     Ok(ArtifactStats {
         byte_length: read_count(row, start)?,
         total_code_points: read_count(row, start + 1)?,
         line_count: read_count(row, start + 2)?,
         max_line_bytes: read_count(row, start + 3)?,
-        complete: row.get(start + 4)?,
     })
 }
 
@@ -578,8 +509,6 @@ fn section(
     let (text, end) = section_text(connection, source.artifact_id, total, offset, characters)?;
     Ok(ReportSection {
         report: source.reference,
-        complete: source.stats.complete,
-        original_sha256: source.original_sha256,
         text,
         offset,
         next_offset: (end < total).then_some(end),

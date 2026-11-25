@@ -1,8 +1,10 @@
 //! Scoped enrollment, exact retained batch outcomes and unread assessment pages.
 
 mod commands;
+pub(crate) mod completion;
 pub(crate) mod observations;
 mod poll;
+mod reconciliation;
 pub(crate) mod work;
 
 use reviewq_app::access::{Actor, AppError, AppFuture};

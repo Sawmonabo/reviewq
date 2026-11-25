@@ -22,8 +22,8 @@ const ACTIVE: &str = "
 const ASSIGNED_RUN: &str = "coalesce(
     (SELECT x.run_id FROM runs x JOIN report_heads h USING(run_id)
       JOIN report_versions v USING(run_id,receipt_id) JOIN artifacts a USING(artifact_id)
-      WHERE x.review_id=r.review_id AND a.sealed=1 AND a.complete=1
-      ORDER BY v.captured_at_ms DESC,v.receipt_id DESC LIMIT 1),
+      WHERE x.review_id=r.review_id AND a.sealed=1
+      ORDER BY v.published_at_ms DESC,v.receipt_id DESC LIMIT 1),
     (SELECT min(x.run_id) FROM runs x WHERE x.review_id=r.review_id HAVING count(*)=1))";
 const DISCOVERY_REFRESH_MS: i64 = 5 * 60 * 1000;
 const DISCOVERY_RETRY_MS: i64 = 60 * 1000;

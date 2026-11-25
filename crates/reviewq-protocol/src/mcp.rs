@@ -62,11 +62,6 @@ pub enum ReportRead {
         offset: Option<crate::SafeCountDto>,
         characters: Option<u32>,
     },
-    Candidate {
-        receipt_id: ResourceIdDto,
-        offset: Option<crate::SafeCountDto>,
-        characters: Option<u32>,
-    },
 }
 
 #[derive(Deserialize)]

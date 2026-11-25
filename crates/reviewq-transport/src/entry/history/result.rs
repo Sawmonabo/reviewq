@@ -46,7 +46,7 @@ pub(super) async fn read(
                 followed_by_lead_report: report
                     .value
                     .report
-                    .is_some_and(|report| report.captured_at_ms > failure.completed_at_ms),
+                    .is_some_and(|report| report.published_at_ms > failure.completed_at_ms),
             })
         }
         _ => None,

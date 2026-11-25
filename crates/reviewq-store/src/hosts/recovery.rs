@@ -381,6 +381,10 @@ pub(crate) fn observe_failure(
     Ok(())
 }
 
+#[expect(
+    dead_code,
+    reason = "K2 completes the recovered turn when its closing call publishes"
+)]
 pub(crate) fn complete_turn(
     tx: &mut WriteTx<'_>,
     lead: &LeadTarget,

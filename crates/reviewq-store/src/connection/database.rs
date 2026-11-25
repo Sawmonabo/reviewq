@@ -110,7 +110,6 @@ pub(super) fn probe(path: &AbsolutePath) -> Result<StoreIdentity, StoreError> {
 
 fn configure(connection: &Connection, read_only: bool) -> Result<(), StoreError> {
     crate::queue::stage::register(connection)?;
-    crate::reports::address::register(connection)?;
     connection.busy_timeout(BUSY_TIMEOUT)?;
     // SQLite creates WAL/SHM using the already-owner-only database mode.
     // Memory-backed temp storage keeps independent scratch files off disk.

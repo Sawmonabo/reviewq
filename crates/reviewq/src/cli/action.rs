@@ -89,5 +89,5 @@ pub(super) async fn execute(
         .post(route, &body)
         .await
         .map_err(|error| error.report("publication state", &context.session))?;
-    workflow::print(&reply, false)
+    workflow::print(&reply)
 }

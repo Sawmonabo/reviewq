@@ -57,24 +57,23 @@ pub(in crate::entry) async fn read(
     let mut range = None;
     let mut table_start = None;
     let mut table_end = None;
-    if report.stats.complete
-        && let Some(index) = entry
-            .tables
-            .ranges(
-                reference.hash.clone(),
-                report.stats.byte_length,
-                |ordinal| {
-                    let (entry, actor, run, reference) =
-                        (entry.clone(), actor.clone(), run.clone(), reference.clone());
-                    async move {
-                        entry
-                            .store
-                            .read_report_chunk(actor, run, reference, ordinal)
-                            .await
-                    }
-                },
-            )
-            .await?
+    if let Some(index) = entry
+        .tables
+        .ranges(
+            reference.hash.clone(),
+            report.stats.byte_length,
+            |ordinal| {
+                let (entry, actor, run, reference) =
+                    (entry.clone(), actor.clone(), run.clone(), reference.clone());
+                async move {
+                    entry
+                        .store
+                        .read_report_chunk(actor, run, reference, ordinal)
+                        .await
+                }
+            },
+        )
+        .await?
     {
         table_start = Some(count(index.start)?);
         table_end = Some(count(index.end)?);

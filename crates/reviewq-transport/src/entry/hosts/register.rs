@@ -5,7 +5,6 @@ use axum::extract::State;
 use axum::http::HeaderMap;
 use reviewq_app::access::AppError;
 use reviewq_app::hosts::{authorize_registration, register_proven};
-use reviewq_app::launch::report_guidance;
 use reviewq_domain::identity::NativeSessionId;
 use reviewq_domain::session::HostProvider;
 use reviewq_protocol::registration::{
@@ -89,7 +88,6 @@ pub(in crate::entry) async fn register(
                 .to_string_lossy()
                 .into_owned(),
             review_checkout: checkout,
-            report_guidance: report_guidance(),
         },
         registered.cursor,
     )?))

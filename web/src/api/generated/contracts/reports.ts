@@ -9,7 +9,6 @@ import type {
   EventCursorDto,
   FindingConclusion,
   GitShaDto,
-  HistoryTurnIdDto,
   MessageTextDto,
   PageCursorDto,
   ReportHashDto,
@@ -25,21 +24,18 @@ export type PublicationChoice = "withheld" | "authorized" | "published";
 
 export type QuoteUnit = "unicode_codepoints";
 
-export type OffsetUnit = "unicode_codepoints";
-
 export type Descriptor =
   | {
-      blocking: boolean | null;
-      /**
-       * The earlier receipt whose card a carried finding keeps.
-       */
-      carriedFrom?: SourceOrigin | null;
+      blocking: boolean;
+      category: string;
       details?: FindingDetails | null;
       disposition?: FindingDisposition | null;
       findingId: string;
       kind: "finding";
-      severity: string | null;
-      source: SourceRange | null;
+      recordRevision: RevisionDto;
+      section: FindingSection;
+      severity: Severity;
+      source: SourceRange;
       title: string;
       [k: string]: unknown;
     }
@@ -71,9 +67,11 @@ export type FindingBasisKind = "observed" | "gap";
 
 export type Publication = "withheld" | "authorized" | "published";
 
-export type DeliveryState = "preparing" | "saving" | "failed" | "saved";
+export type FindingSection = "functional" | "quality";
 
-export type SemanticIndex = "ready" | "source_only";
+export type Severity = "P0" | "P1" | "P2" | "P3";
+
+export type DeliveryState = "failed" | "saved";
 
 export type Verdict =
   "approve" | "request_changes" | "blocked" | "not_specified";
@@ -94,6 +92,8 @@ export type QuoteResolution =
       unit: QuoteUnit;
       [k: string]: unknown;
     };
+
+export type OffsetUnit = "unicode_codepoints";
 
 export type ReportTableContent =
   | {
@@ -171,41 +171,6 @@ export interface ReportViewedRequest {
   submissionId: SubmissionIdDto;
 }
 
-export interface ReportCandidateResponse {
-  cursor: EventCursorDto;
-  data: CandidateReport;
-  [k: string]: unknown;
-}
-
-export interface CandidateReport {
-  accepted: boolean;
-  callId: ResourceIdDto;
-  complete: boolean;
-  declarationSha256: ReportHashDto;
-  nextOffset: SafeCountDto | null;
-  offset: SafeCountDto;
-  offsetUnit: OffsetUnit;
-  originalSha256: ReportHashDto | null;
-  reason: string;
-  receiptId: ResourceIdDto;
-  reconciledByBatchId: ResourceIdDto | null;
-  sha256: ReportHashDto;
-  stats: ArtifactStats;
-  text: string;
-  totalCodePoints: SafeCountDto;
-  turnId: HistoryTurnIdDto;
-  [k: string]: unknown;
-}
-
-export interface ArtifactStats {
-  byteLength: SafeCountDto;
-  complete: boolean;
-  lineCount: SafeCountDto;
-  maxLineBytes: SafeCountDto;
-  totalCodePoints: SafeCountDto;
-  [k: string]: unknown;
-}
-
 export interface ReportContextResponse {
   cursor: EventCursorDto;
   data: ReportContext;
@@ -229,18 +194,13 @@ export interface ReportReference {
   [k: string]: unknown;
 }
 
-export interface SourceOrigin {
-  checkedSha: GitShaDto | null;
-  report: ReportReference;
-  [k: string]: unknown;
-}
-
 export interface FindingDetails {
-  checkedSha: GitShaDto | null;
   consequence: string;
+  details?: string | null;
   evidence: FindingBasis;
-  evidenceSha256: ReportHashDto;
-  location?: FindingLocation | null;
+  issue: string;
+  locations: FindingLocation[];
+  proposedComment?: string | null;
   [k: string]: unknown;
 }
 
@@ -264,7 +224,6 @@ export interface FindingDisposition {
 export interface SourceRange {
   length: SafeCountDto;
   offset: SafeCountDto;
-  origin?: SourceOrigin | null;
   sha256: ReportHashDto;
   [k: string]: unknown;
 }
@@ -309,30 +268,21 @@ export interface ReportDelivery {
 export interface ReportSummary {
   attentionReceiptId: ResourceIdDto;
   byteLength: SafeCountDto;
-  capturedAt: UtcTimestampDto;
-  changeCount: SafeCountDto | null;
-  complete: boolean;
+  changeCount: SafeCountDto;
   coverage: Coverage;
   coverageSourceSha: GitShaDto | null;
   coverageTargetSha: GitShaDto | null;
-  findingCount: SafeCountDto | null;
+  findingCount: SafeCountDto;
   fullMrReviewedSha: GitShaDto | null;
   lineCount: SafeCountDto;
   maxLineBytes: SafeCountDto;
-  nativeProvenance: boolean;
-  originalSha256: ReportHashDto | null;
   parentReceiptId: ResourceIdDto | null;
+  publishedAt: UtcTimestampDto;
   receiptId: ResourceIdDto;
   reviewedSha: GitShaDto | null;
   revisionReason: string | null;
-  semanticIndex: SemanticIndex;
   sha256: ReportHashDto;
   totalCodePoints: SafeCountDto;
-  /**
-   * Active findings with no card in this report's text: carried from an earlier
-   * version, or listed in the findings ledger without an `F-` heading.
-   */
-  unanchoredFindingCount: SafeCountDto;
   verdict: Verdict;
   [k: string]: unknown;
 }
@@ -357,11 +307,9 @@ export interface ReportSectionResponse {
 }
 
 export interface ReportSection {
-  complete: boolean;
   nextOffset: SafeCountDto | null;
   offset: SafeCountDto;
   offsetUnit: OffsetUnit;
-  originalSha256: ReportHashDto | null;
   receiptId: ResourceIdDto;
   sha256: ReportHashDto;
   text: string;

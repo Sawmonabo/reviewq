@@ -5,7 +5,6 @@ use std::path::{Path, PathBuf};
 use clap::Args;
 use reqwest::{Client, StatusCode};
 use reviewq_domain::identity::NativeSessionId;
-use reviewq_protocol::reports::ReportHandoffFieldError;
 use reviewq_protocol::{ResourceIdDto, SessionKeyDto, Success};
 use reviewq_transport::ServiceEndpoint;
 use rustix::fs::{Mode, OFlags};
@@ -33,8 +32,6 @@ pub(super) struct Context {
 
 pub(super) enum ReplyError {
     Rejected(StatusCode),
-    // The service refused these handoff fields; the agent corrects them in its turn.
-    InvalidHandoff(Vec<ReportHandoffFieldError>),
     ReplyLost,
 }
 
@@ -115,13 +112,6 @@ impl Context {
             .await
             .map_err(|_| ReplyError::ReplyLost)?;
         let status = response.status();
-        if status == StatusCode::BAD_REQUEST {
-            return Err(native_client::bounded(response, 144 * 1024)
-                .await
-                .ok()
-                .and_then(|body| field_errors(&body))
-                .map_or(ReplyError::Rejected(status), ReplyError::InvalidHandoff));
-        }
         if !status.is_success() {
             return Err(ReplyError::Rejected(status));
         }
@@ -143,42 +133,10 @@ impl Context {
 impl ReplyError {
     pub(super) fn report(self, operation: &str, session: &SessionKeyDto) -> Failure {
         match self {
-            Self::Rejected(status) if status == reqwest::StatusCode::UNPROCESSABLE_ENTITY =>
-                reviewq_app::access::REPORT_CORRECTION_MESSAGE.into(),
-            Self::InvalidHandoff(errors) => invalid_handoff(errors),
             Self::Rejected(status) => format!("ReviewQ {operation} for lead {} returned HTTP {}.", session.as_str(), status.as_u16()).into(),
             Self::ReplyLost => format!("ReviewQ could not confirm {operation} for lead {}. Read the saved state before retrying.", session.as_str()).into(),
         }
     }
-}
-
-/// The field errors of a refused report handoff body.
-fn field_errors(body: &[u8]) -> Option<Vec<ReportHandoffFieldError>> {
-    #[derive(serde::Deserialize)]
-    #[serde(rename_all = "camelCase")]
-    struct Invalid {
-        field_errors: Vec<ReportHandoffFieldError>,
-    }
-    serde_json::from_slice::<Invalid>(body)
-        .ok()
-        .map(|invalid| invalid.field_errors)
-        .filter(|errors| !errors.is_empty())
-}
-
-/// Lists handoff field errors as `path message` lines.
-pub(super) fn invalid_handoff(errors: Vec<ReportHandoffFieldError>) -> Failure {
-    let messages = errors
-        .into_iter()
-        .map(|error| {
-            let path = if error.path.is_empty() {
-                "/"
-            } else {
-                &error.path
-            };
-            format!("{path} {}", error.message)
-        })
-        .collect::<Vec<_>>();
-    format!("Invalid report handoff.\n{}", messages.join("\n")).into()
 }
 
 pub(super) fn regular_file(path: &Path) -> Result<File, Failure> {
@@ -205,18 +163,7 @@ pub(super) fn json_file<T: DeserializeOwned>(path: &Path, max: u64) -> Result<T,
         .map_err(|_| "The metadata file does not match the expected JSON fields.")?)
 }
 
-pub(super) fn print(
-    value: &impl Serialize,
-    capture_redirected_output: bool,
-) -> Result<(), Failure> {
-    let encoded = serde_json::to_string(value)?;
-    println!("{encoded}");
-    if capture_redirected_output
-        && rustix::fs::fstat(std::io::stdout())
-            .ok()
-            .is_some_and(|stat| rustix::fs::FileType::from_raw_mode(stat.st_mode).is_file())
-    {
-        eprintln!("{encoded}");
-    }
+pub(super) fn print(value: &impl Serialize) -> Result<(), Failure> {
+    println!("{}", serde_json::to_string(value)?);
     Ok(())
 }

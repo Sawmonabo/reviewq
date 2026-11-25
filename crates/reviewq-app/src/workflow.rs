@@ -1,10 +1,7 @@
-//! Provider-established native call identity and completion evidence.
-
-use std::sync::Arc;
+//! Provider-established native call identity and workflow readiness.
 
 use reviewq_domain::identity::{
-    ActionId, GitSha, MrIdentity, NativeInputId, NativeTurnId, ReceiptId, ReportHash, Revision,
-    SubmissionId,
+    ActionId, GitSha, MrIdentity, NativeInputId, NativeTurnId, Revision, SubmissionId,
 };
 use reviewq_domain::session::LeadTarget;
 
@@ -14,7 +11,6 @@ use crate::queue::MergeRequestState;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum WorkflowTool {
-    Report,
     Action,
 }
 
@@ -26,39 +22,8 @@ pub struct NativeCall {
     pub call_id: String,
     pub source_generation: String,
     pub source_position: u64,
-    /// Order within a shared native opening, or zero for an ordinary standalone call.
-    pub source_ordinal: u32,
-    /// Original native MCP input for an opening witnessed before its transcript row was flushed.
-    pub arguments_sha256: Option<ReportHash>,
     pub request_entry_id: Option<NativeInputId>,
     pub tool: WorkflowTool,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ExpectedAcknowledgement {
-    pub receipt_id: ReceiptId,
-    pub declaration_sha256: ReportHash,
-}
-
-pub enum ReportCompletion {
-    Pending,
-    Unproved,
-    Confirmed(Box<CompletedReportCall>),
-}
-
-pub struct CompletedReportCall {
-    pub call: NativeCall,
-    pub acknowledged: ExpectedAcknowledgement,
-    pub result_entry_id: NativeInputId,
-    pub normal_turn_completion: bool,
-    pub final_response: Option<Arc<dyn ReportContent>>,
-}
-
-/// One confirmed private native source. A reader keeps the source generation fixed.
-pub trait ReportContent: Send + Sync {
-    fn byte_length(&self) -> u64;
-    fn read(&self, offset: u64, length: usize) -> AppFuture<'_, Vec<u8>>;
-    fn verify_unchanged(&self) -> AppFuture<'_, ()>;
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -260,12 +225,12 @@ pub trait NativeWorkflowProof: Send + Sync {
         self.dispatch_readiness(lead)
     }
 
-    /// Resolve and verify an actual active lead tool from the selected native source.
     /// Reads current idle state and proves this exact turn has ended.
     fn ended_and_idle(&self, _lead: LeadTarget, _turn: NativeTurnId) -> AppFuture<'_, bool> {
         Box::pin(async { Ok(false) })
     }
 
+    /// Resolve and verify an actual active lead tool from the selected native source.
     fn verify_active_call(
         &self,
         lead: LeadTarget,
@@ -273,36 +238,4 @@ pub trait NativeWorkflowProof: Send + Sync {
         call_id: String,
         tool: WorkflowTool,
     ) -> AppFuture<'_, NativeCall>;
-
-    /// Match a registered lead's active MCP call and the original JSON argument object.
-    fn verify_mcp_report_call(
-        &self,
-        _lead: LeadTarget,
-        _call_id: String,
-        _arguments: Vec<u8>,
-        _origin_item_id: Option<String>,
-    ) -> AppFuture<'_, NativeCall> {
-        Box::pin(async { Err(AppError::Unavailable) })
-    }
-
-    /// Verify a private host callback against its exact registered turn and durable prompt.
-    fn verify_witnessed_report_call(
-        &self,
-        _lead: LeadTarget,
-        _turn: NativeTurnId,
-        _call_id: String,
-        _arguments: Vec<u8>,
-        _ordinal: u32,
-        _origin_item_id: Option<String>,
-    ) -> AppFuture<'_, NativeCall> {
-        Box::pin(async { Err(AppError::Unavailable) })
-    }
-
-    /// Verify the matching structured acknowledgement from this exact completed call.
-    fn report_completion(
-        &self,
-        call: NativeCall,
-        acknowledgement: ExpectedAcknowledgement,
-        include_response: bool,
-    ) -> AppFuture<'_, ReportCompletion>;
 }

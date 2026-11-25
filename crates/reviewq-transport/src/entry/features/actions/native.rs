@@ -34,7 +34,7 @@ pub(in crate::entry::features) async fn declare(
     let source = entry.source_reader().await?;
     let lead = entry
         .store
-        .report_lead(parse(command.session_key.as_str())?)
+        .run_lead(parse(command.session_key.as_str())?)
         .await?;
     let turn = command
         .turn_id
@@ -104,7 +104,7 @@ pub(in crate::entry::features) async fn reconcile(
     let source = entry.source_reader().await?;
     let lead = entry
         .store
-        .report_lead(parse(command.session_key.as_str())?)
+        .run_lead(parse(command.session_key.as_str())?)
         .await?;
     let verified = proof
         .verify_active_call(

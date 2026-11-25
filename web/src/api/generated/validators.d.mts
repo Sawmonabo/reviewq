@@ -75,7 +75,6 @@ import type {
   RecoveryStateResponse,
   RefreshResponse,
   RegisteredSessionResponse,
-  ReportCandidateResponse,
   ReportContextResponse,
   ReportDispositionResponse,
   ReportHistoryResponse,
@@ -292,9 +291,6 @@ export function isRefreshResponse(value: unknown): value is RefreshResponse;
 export function isRegisteredSessionResponse(
   value: unknown,
 ): value is RegisteredSessionResponse;
-export function isReportCandidateResponse(
-  value: unknown,
-): value is ReportCandidateResponse;
 export function isReportContextResponse(
   value: unknown,
 ): value is ReportContextResponse;

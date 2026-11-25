@@ -147,12 +147,9 @@ fn archive(
             JOIN selected s USING(review_id)
             WHERE d.operation IN ('review_decision','terminal_review_decision') AND d.reviewed_at_ms IS NOT NULL
             UNION ALL
-            SELECT x.review_id,v.captured_at_ms,'report' FROM selected s JOIN runs x USING(review_id)
+            SELECT x.review_id,v.published_at_ms,'report' FROM selected s JOIN runs x USING(review_id)
             JOIN report_versions v USING(run_id) JOIN artifacts a USING(artifact_id)
-            LEFT JOIN report_handoffs h ON h.run_id=v.run_id AND h.receipt_id=v.handoff_receipt_id
-            WHERE a.sealed=1 AND v.coverage='full_mr'
-              AND ((v.handoff_receipt_id IS NULL AND v.attention_receipt_id=v.receipt_id)
-                   OR (a.complete=1 AND h.form='final' AND h.expected_receipt_id IS NULL))
+            WHERE a.sealed=1 AND v.coverage='full_mr' AND v.kind='full_review'
             UNION ALL
             SELECT f.review_id,f.completed_at_ms,'followup' FROM followup_results f JOIN selected s USING(review_id)),
          ranked AS (

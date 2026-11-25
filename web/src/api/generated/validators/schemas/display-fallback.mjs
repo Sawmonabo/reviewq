@@ -25,7 +25,6 @@ function validate670(
     data === "unsupported_source" ||
     data === "invalid_boundary" ||
     data === "parser_failed" ||
-    data === "incomplete_source" ||
     data === "cache_unavailable"
   )) {
     validate670.errors = [

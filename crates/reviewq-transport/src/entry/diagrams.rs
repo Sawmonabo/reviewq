@@ -317,9 +317,10 @@ async fn authorized(
                 .read_report(actor, parse(run)?, Some(parse(receipt)?), false)
                 .await?
                 .value;
-            if value.report.is_none_or(|report| {
-                !report.stats.complete || report.reference.hash.as_str() != report_hash
-            }) {
+            if value
+                .report
+                .is_none_or(|report| report.reference.hash.as_str() != report_hash)
+            {
                 return Err(AppError::CursorExpired);
             }
         }

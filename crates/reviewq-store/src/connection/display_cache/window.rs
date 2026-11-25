@@ -52,14 +52,15 @@ impl Default for Builds {
 
 #[derive(Default)]
 struct BuildState {
-    capture: Option<IndexKey>,
+    publish: Option<IndexKey>,
     cold: Option<IndexKey>,
     cooling_until: Option<Instant>,
 }
 
 #[derive(Clone, Copy)]
 enum Lane {
-    Capture,
+    #[expect(dead_code, reason = "K2 indexes a version after its publish commits")]
+    Publish,
     Cold,
 }
 
@@ -136,9 +137,7 @@ impl SqliteStore {
             profile,
             slot: slot.clone(),
         };
-        let window = if !version.summary.stats.complete {
-            CacheWindow::Fallback(DisplayFallback::IncompleteSource)
-        } else if version.summary.stats.require_markdown_budget().is_err() {
+        let window = if version.summary.stats.require_markdown_budget().is_err() {
             CacheWindow::Fallback(DisplayFallback::DocumentBudget)
         } else {
             lookup(cache_read.clone(), store_id, key.clone(), position).await?
@@ -170,7 +169,8 @@ impl SqliteStore {
         .await
     }
 
-    pub(super) async fn build_captured_index(
+    #[expect(dead_code, reason = "K2 indexes a version after its publish commits")]
+    pub(super) async fn build_published_index(
         &self,
         profile: Arc<Profile>,
         artifact: String,
@@ -181,7 +181,7 @@ impl SqliteStore {
         let mut released = self.display_builds.released.subscribe();
         let build = loop {
             released.borrow_and_update();
-            match self.display_builds.claim(&key, Lane::Capture)? {
+            match self.display_builds.claim(&key, Lane::Publish)? {
                 Claim::Started(build) => break build,
                 // Keep the source until a concurrent cold build has published
                 // or released its slot after a canceled request.
@@ -217,7 +217,7 @@ impl SqliteStore {
         };
 
         let store_id = self.identity().store_id;
-        // An earlier worker or normal capture may have published after our
+        // An earlier worker or normal publish may have published after our
         // first lookup and before this request reserved the build slot.
         match lookup(cache_read.clone(), store_id, key.clone(), position).await? {
             CacheWindow::Missing => {}
@@ -235,9 +235,6 @@ impl SqliteStore {
             } = cache_read;
             let tx = db.transaction_with_behavior(TransactionBehavior::Deferred)?;
             let version = authorized_version(&tx, &actor, &run, &reference)?;
-            if !version.summary.stats.complete {
-                return Err(AppError::PreconditionFailed.into());
-            }
             let source = read_markdown(&tx, &version)?;
             tx.commit()?;
             runtime.spawn_blocking(move || {
@@ -255,7 +252,7 @@ impl SqliteStore {
 impl Builds {
     fn claim(self: &Arc<Self>, key: &IndexKey, lane: Lane) -> Result<Claim, StoreError> {
         let mut state = self.state.lock().map_err(|_| AppError::Internal)?;
-        if state.capture.as_ref() == Some(key) || state.cold.as_ref() == Some(key) {
+        if state.publish.as_ref() == Some(key) || state.cold.as_ref() == Some(key) {
             return Ok(Claim::Pending);
         }
         if matches!(lane, Lane::Cold)
@@ -280,7 +277,7 @@ impl Builds {
 impl BuildState {
     fn active(&mut self, lane: Lane) -> &mut Option<IndexKey> {
         match lane {
-            Lane::Capture => &mut self.capture,
+            Lane::Publish => &mut self.publish,
             Lane::Cold => &mut self.cold,
         }
     }
@@ -710,7 +707,6 @@ fn parse_fallback(reason: &str) -> Result<DisplayFallback, StoreError> {
         "unsupported_source" => DisplayFallback::UnsupportedSource,
         "invalid_boundary" => DisplayFallback::InvalidBoundary,
         "parser_failed" => DisplayFallback::ParserFailed,
-        "incomplete_source" => DisplayFallback::IncompleteSource,
         "cache_unavailable" => DisplayFallback::CacheUnavailable,
         _ => return Err(AppError::Internal.into()),
     })

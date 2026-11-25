@@ -42,7 +42,6 @@ pub struct SqliteStore {
     workers: Mutex<Workers>,
     wakeup: watch::Sender<EventCursor>,
     delivery_wakeup: watch::Sender<()>,
-    report_wakeup: watch::Sender<()>,
     desktop_wakeup: watch::Sender<()>,
     projection_wakeup: watch::Sender<()>,
 }
@@ -51,7 +50,6 @@ pub(crate) struct WriteTx<'connection> {
     pub(crate) sql: Transaction<'connection>,
     pub(crate) wakeup: Option<EventCursor>,
     pub(crate) delivery_changed: bool,
-    pub(crate) report_changed: bool,
     pub(crate) desktop_changed: bool,
     pub(crate) projection_changed: bool,
 }
@@ -64,7 +62,6 @@ impl SqliteStore {
             let head = read_head(&reader)?;
             let (wakeup, _) = watch::channel(head);
             let (delivery_wakeup, _) = watch::channel(());
-            let (report_wakeup, _) = watch::channel(());
             let (desktop_wakeup, _) = watch::channel(());
             let (projection_wakeup, _) = watch::channel(());
             let profile = Arc::new(profile);
@@ -78,7 +75,6 @@ impl SqliteStore {
                 workers: Mutex::new(Workers { reader, writer }),
                 wakeup,
                 delivery_wakeup,
-                report_wakeup,
                 desktop_wakeup,
                 projection_wakeup,
             })
@@ -112,11 +108,6 @@ impl SqliteStore {
     /// Wake the delivery dispatcher only after a committed outbox change.
     pub fn subscribe_deliveries(&self) -> watch::Receiver<()> {
         self.delivery_wakeup.subscribe()
-    }
-
-    /// Wake the capture worker after a new report handoff is committed.
-    pub fn subscribe_reports(&self) -> watch::Receiver<()> {
-        self.report_wakeup.subscribe()
     }
 
     pub fn subscribe_desktop(&self) -> watch::Receiver<()> {
@@ -195,7 +186,6 @@ impl SqliteStore {
     {
         let wakeup = self.wakeup.clone();
         let delivery_wakeup = self.delivery_wakeup.clone();
-        let report_wakeup = self.report_wakeup.clone();
         let desktop_wakeup = self.desktop_wakeup.clone();
         let projection_wakeup = self.projection_wakeup.clone();
         self.submit(true, move |connection, _| {
@@ -205,7 +195,6 @@ impl SqliteStore {
                 sql,
                 wakeup: None,
                 delivery_changed: false,
-                report_changed: false,
                 desktop_changed: false,
                 projection_changed: false,
             };
@@ -216,9 +205,6 @@ impl SqliteStore {
             }
             if tx.delivery_changed {
                 delivery_wakeup.send_replace(());
-            }
-            if tx.report_changed {
-                report_wakeup.send_replace(());
             }
             if tx.desktop_changed {
                 desktop_wakeup.send_replace(());

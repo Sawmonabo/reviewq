@@ -189,7 +189,7 @@ pub(super) fn final_response(
         return Err(AppError::Unavailable);
     }
     let failure = if source.provider == HostProvider::Codex {
-        super::codex_report::latest_failure(source, complete, cancelled)
+        super::codex_failure::latest_failure(source, complete, cancelled)
     } else {
         None
     };

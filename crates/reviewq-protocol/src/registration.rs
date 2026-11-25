@@ -24,7 +24,6 @@ pub struct RegisteredSession {
     pub native_id: ResourceIdDto,
     pub cwd: String,
     pub review_checkout: Option<String>,
-    pub report_guidance: &'static str,
 }
 
 pub type RegisteredSessionResponse = Success<RegisteredSession>;

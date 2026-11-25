@@ -154,7 +154,6 @@ export type DisplayFallback =
   | "unsupported_source"
   | "invalid_boundary"
   | "parser_failed"
-  | "incomplete_source"
   | "cache_unavailable";
 
 export type State = "pending" | "confirmed" | "rejected" | "uncertain";

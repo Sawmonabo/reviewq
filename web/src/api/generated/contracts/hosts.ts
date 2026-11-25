@@ -68,7 +68,6 @@ export interface RegisteredSession {
   leadSessionKey: SessionKeyDto;
   nativeId: ResourceIdDto;
   provider: HostProviderDto;
-  reportGuidance: string;
   reviewCheckout: string | null;
   reviewId: ReviewIdDto;
   runId: RunIdDto;

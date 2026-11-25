@@ -40,8 +40,6 @@ pub(crate) const CODEX_CONTEXT_READY: &str = "NOT EXISTS (
       EXISTS(SELECT 1 FROM sessions child WHERE child.run_id=lead.run_id
          AND child.provider=lead.provider AND child.profile=lead.profile AND child.parent_session_key IS NOT NULL
          AND child.host_activity='working' AND child.native_status IS NOT 'not_loaded')
-      OR EXISTS(SELECT 1 FROM report_handoffs h WHERE h.run_id=lead.run_id
-         AND h.lead_session_key=lead.session_key AND h.state='pending_completion')
       OR EXISTS(SELECT 1 FROM sessions s JOIN native_async_questions q USING(run_id,session_key)
          WHERE s.run_id=lead.run_id AND s.provider=lead.provider AND s.profile=lead.profile
            AND q.state IN ('pending','submitting','uncertain'))))";
@@ -196,7 +194,7 @@ fn baseline(
     let mut statement = db.prepare_cached(
         "SELECT h.receipt_id,a.sha256,h.disposition_version FROM report_heads h
          JOIN report_versions v USING(run_id,receipt_id) JOIN artifacts a USING(artifact_id)
-         WHERE h.run_id=?1 AND a.sealed=1 AND a.complete=1",
+         WHERE h.run_id=?1 AND a.sealed=1",
     )?;
     let mut rows = statement.query([run.as_str()])?;
     if let Some(row) = rows.next()? {

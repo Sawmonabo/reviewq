@@ -1,7 +1,7 @@
 use reviewq_app::access::AppError;
 use reviewq_app::reports::{
-    Collection, ContextKey, ContextPosition, ContextRequest, Descriptor, FindingDetails,
-    FindingDisposition, ReportContext, ReportReference, SourceOrigin, SourceRange,
+    Collection, ContextKey, ContextPosition, ContextRequest, Descriptor, FindingDisposition,
+    ReportContext, SourceRange,
 };
 use reviewq_domain::identity::{Revision, RunId};
 use rusqlite::{Connection, Row, params};
@@ -100,17 +100,10 @@ pub(super) fn read(
 fn query(collection: Collection) -> &'static str {
     match collection {
         Collection::Findings =>
-            "SELECT f.finding_id, f.title, f.severity, f.blocking,
-                    coalesce(prior.scalar_offset,f.scalar_offset), coalesce(prior.scalar_length,f.scalar_length),
-                    f.evidence_sha256, details.value, d.blocking, d.publication, d.reason,
-                    v.receipt_id, artifact.sha256, v.reviewed_sha
-             FROM report_findings f LEFT JOIN report_handoffs h ON h.receipt_id=f.receipt_id
-             LEFT JOIN json_each(h.edits, '$.acceptedDetails') details ON details.key=f.finding_id
-             LEFT JOIN json_each(h.edits,'$.carry.findings') inherited ON inherited.key=f.finding_id
-             LEFT JOIN report_versions v ON v.run_id=f.run_id AND v.receipt_id=inherited.value
-             LEFT JOIN artifacts artifact ON artifact.artifact_id=v.artifact_id
-             LEFT JOIN report_findings prior ON prior.run_id=v.run_id AND prior.receipt_id=v.receipt_id
-                                            AND prior.finding_id=f.finding_id
+            "SELECT f.finding_id, f.title, f.severity, f.blocking, f.section, f.category,
+                    f.record_revision, f.scalar_offset, f.scalar_length, f.evidence_sha256,
+                    d.blocking, d.publication, d.reason
+             FROM report_findings f
              LEFT JOIN finding_dispositions d ON d.run_id=f.run_id AND d.finding_id=f.finding_id
                AND d.removed=0 AND d.disposition_version=(
                  SELECT MAX(a.disposition_version) FROM finding_dispositions a
@@ -128,7 +121,7 @@ fn query(collection: Collection) -> &'static str {
              FROM report_changes c WHERE c.run_id=?1 AND c.receipt_id=?2 AND c.finding_id>?3
              ORDER BY c.finding_id LIMIT ?5",
         Collection::Sections =>
-            "SELECT title, scalar_offset, scalar_length, evidence_sha256, NULL, NULL, NULL, scalar_offset
+            "SELECT title, scalar_offset, scalar_length, evidence_sha256
              FROM report_sections WHERE run_id=?1 AND receipt_id=?2 AND scalar_offset>?3
              ORDER BY scalar_offset LIMIT ?5",
         Collection::Dispositions =>
@@ -148,54 +141,33 @@ fn query(collection: Collection) -> &'static str {
     }
 }
 
+/// Decodes one row of `query(collection)`. A finding's details stay `None` until K2 reads
+/// them from the record revision in `ledger_changes`.
 fn decode(collection: Collection, row: &Row<'_>) -> Result<Descriptor, StoreError> {
-    let origin = |reference: usize| -> Result<Option<Box<SourceOrigin>>, StoreError> {
-        optional(row, reference)?
-            .map(|receipt_id| {
-                Ok(Box::new(SourceOrigin {
-                    report: ReportReference {
-                        receipt_id,
-                        hash: parse(text(row, reference + 1)?)?,
-                    },
-                    checked_sha: optional(row, reference + 2)?,
-                }))
-            })
-            .transpose()
-    };
-    let range = |column: usize, reference: usize| -> Result<SourceRange, StoreError> {
+    let range = |column: usize| -> Result<SourceRange, StoreError> {
         Ok(SourceRange {
             offset: read_count(row, column)?,
             length: read_count(row, column + 1)?,
             hash: parse(text(row, column + 2)?)?,
-            origin: origin(reference)?,
         })
     };
     Ok(match collection {
         Collection::Findings => Descriptor::Finding {
             id: row.get(0)?,
             title: row.get(1)?,
-            severity: row.get(2)?,
+            severity: parse(text(row, 2)?)?,
             blocking: row.get(3)?,
-            source: (row.get::<_, Option<i64>>(4)?.is_some())
-                .then(|| range(4, 11))
-                .transpose()?,
-            struck: false,
-            // Every carried finding names its origin, whether or not that card has a span.
-            carried_from: origin(11)?,
-            details: text_optional(row, 7)?
-                .map(|value| {
-                    let mut details: FindingDetails =
-                        serde_json::from_str(value).map_err(|_| AppError::Internal)?;
-                    details.evidence_hash = row.get(6)?;
-                    Ok::<_, StoreError>(Box::new(details))
-                })
-                .transpose()?,
+            section: parse(text(row, 4)?)?,
+            category: row.get(5)?,
+            record_revision: revision(row.get(6)?)?,
+            source: range(7)?,
+            details: None,
             disposition: row
-                .get::<_, Option<String>>(10)?
+                .get::<_, Option<String>>(12)?
                 .map(|reason| {
                     Ok::<_, StoreError>(Box::new(FindingDisposition {
-                        blocking: row.get(8)?,
-                        publication: optional(row, 9)?,
+                        blocking: row.get(10)?,
+                        publication: optional(row, 11)?,
                         reason,
                     }))
                 })
@@ -210,8 +182,8 @@ fn decode(collection: Collection, row: &Row<'_>) -> Result<Descriptor, StoreErro
         },
         Collection::Sections => Descriptor::Section {
             title: row.get(0)?,
-            source: range(1, 4)?,
-            cursor_offset: read_count(row, 7)?,
+            source: range(1)?,
+            cursor_offset: read_count(row, 1)?,
         },
         Collection::Dispositions => Descriptor::Disposition {
             id: row.get(0)?,
@@ -220,13 +192,6 @@ fn decode(collection: Collection, row: &Row<'_>) -> Result<Descriptor, StoreErro
             reason: row.get(3)?,
         },
     })
-}
-
-fn text_optional<'a>(row: &'a Row<'_>, column: usize) -> Result<Option<&'a str>, StoreError> {
-    Ok(row
-        .get_ref(column)?
-        .as_str_or_null()
-        .map_err(rusqlite::Error::from)?)
 }
 
 fn revision(value: i64) -> Result<Revision, StoreError> {

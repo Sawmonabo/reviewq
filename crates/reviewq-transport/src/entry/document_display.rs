@@ -109,7 +109,6 @@ pub(super) fn project_fallback(reason: DisplayFallback) -> dto::DisplayFallback 
         DisplayFallback::UnsupportedSource => Reason::UnsupportedSource,
         DisplayFallback::InvalidBoundary => Reason::InvalidBoundary,
         DisplayFallback::ParserFailed => Reason::ParserFailed,
-        DisplayFallback::IncompleteSource => Reason::IncompleteSource,
         DisplayFallback::CacheUnavailable => Reason::CacheUnavailable,
     }
 }

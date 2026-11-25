@@ -1,18 +1,11 @@
-mod handoff;
 mod mutations;
 mod quote;
 mod table;
 mod window;
-mod witness;
-pub(super) use witness::record as codex_witness;
-pub(in crate::entry) use witness::{ReportWitnesses, canonical_arguments};
 
 pub(super) use quote::resolve as resolve_quote;
 pub(super) use table::read as read_table;
 pub(super) use window::read as read_window;
-
-pub(in crate::entry) use handoff::{McpReportProof, submit_verified};
-pub(super) use handoff::{accepted, handoff, handoff_status};
 
 pub(in crate::entry) use mutations::feedback_reference;
 pub(super) use mutations::{feedback, set_disposition, viewed};
@@ -33,8 +26,7 @@ use reviewq_app::reports::{
 use reviewq_domain::identity::{ReceiptId, Revision, RunId};
 use reviewq_protocol::reports::{self as dto, ReportHashDto};
 use reviewq_protocol::{
-    GitShaDto, HistoryTurnIdDto, Page, PageCursorDto, ResourceIdDto, RevisionDto, Success,
-    UtcTimestampDto,
+    GitShaDto, Page, PageCursorDto, ResourceIdDto, RevisionDto, Success, UtcTimestampDto,
 };
 use serde::{Deserialize, Serialize};
 
@@ -167,7 +159,6 @@ async fn view(
         .value
         .report
         .as_ref()
-        .filter(|report| report.stats.complete)
         .zip(stored.value.markdown.as_deref())
     {
         display = diagrams::observe(
@@ -211,7 +202,7 @@ pub(super) async fn history(
         .map(|cursor| {
             let HistoryCursor(time, receipt) = endpoint.decode_cursor(scope.as_bytes(), cursor)?;
             Ok::<_, AppError>(ReportPosition {
-                captured_at_ms: time,
+                published_at_ms: time,
                 receipt_id: parse(&receipt)?,
             })
         })
@@ -231,7 +222,7 @@ pub(super) async fn history(
         .into_iter()
         .map(|item| {
             let position =
-                HistoryCursor(item.captured_at_ms, item.reference.receipt_id.to_string());
+                HistoryCursor(item.published_at_ms, item.reference.receipt_id.to_string());
             Ok::<_, AppError>((summary(item)?, position))
         })
         .collect::<Result<Vec<_>, _>>()?;
@@ -358,50 +349,6 @@ pub(super) async fn section(
     )?))
 }
 
-pub(super) async fn candidate(
-    State(entry): State<Arc<Entry>>,
-    headers: HeaderMap,
-    Path((run, receipt)): Path<(String, String)>,
-    Query(query): Query<SectionQuery>,
-) -> Result<Json<Success<dto::CandidateReport>>, ApiError> {
-    let actor = entry.auth.browser_actor(&headers, false)?;
-    if query.receipt_id.is_some() {
-        return Err(AppError::InvalidRequest.into());
-    }
-    let stored = entry
-        .store
-        .read_report_candidate(
-            actor,
-            parse(&run)?,
-            parse(&receipt)?,
-            query.offset.unwrap_or(0),
-            query.characters.unwrap_or(6000),
-        )
-        .await?;
-    Ok(Json(success(
-        project_candidate(stored.value)?,
-        stored.cursor,
-    )?))
-}
-
-pub(in crate::entry) fn project_candidate(
-    candidate: app::CandidateReport,
-) -> Result<dto::CandidateReport, AppError> {
-    Ok(dto::CandidateReport {
-        accepted: false,
-        section: project_section(candidate.section)?,
-        stats: stats(candidate.stats)?,
-        turn_id: HistoryTurnIdDto::new(candidate.turn_id).ok_or(AppError::Internal)?,
-        call_id: ResourceIdDto::new(candidate.call_id).ok_or(AppError::Internal)?,
-        declaration_sha256: hash(candidate.declaration_sha256.as_str())?,
-        reason: candidate.reason,
-        reconciled_by_batch_id: candidate
-            .reconciled_by_batch_id
-            .map(|id| ResourceIdDto::new(id).ok_or(AppError::Internal))
-            .transpose()?,
-    })
-}
-
 pub(super) async fn source(
     State(entry): State<Arc<Entry>>,
     headers: HeaderMap,
@@ -427,8 +374,6 @@ pub(super) async fn source(
         return Err(AppError::PreconditionFailed.into());
     }
     let len = report.stats.byte_length;
-    let complete = report.stats.complete;
-    let original_hash = report.original_sha256;
     let reference = report.reference;
     let receipt_value = reference.receipt_id.to_string();
     let body = Body::from_stream(try_unfold((0_u64, len), move |(ordinal, remaining)| {
@@ -449,28 +394,18 @@ pub(super) async fn source(
             Ok::<_, AppError>(Some((chunk, (ordinal + 1, next))))
         }
     }));
-    let mut response = Response::builder()
+    Response::builder()
         .header(header::CONTENT_TYPE, "text/markdown; charset=utf-8")
         .header(
             header::CONTENT_DISPOSITION,
-            if complete {
-                "attachment; filename=review-report.md"
-            } else {
-                "attachment; filename=review-report-retained.md"
-            },
+            "attachment; filename=review-report.md",
         )
         .header(header::X_CONTENT_TYPE_OPTIONS, "nosniff")
         .header(header::CONTENT_LENGTH, len)
         .header(header::ETAG, etag)
         .header("x-reviewq-report-receipt", receipt_value)
-        .header(
-            "x-reviewq-report-complete",
-            if complete { "true" } else { "false" },
-        );
-    if let Some(original_hash) = original_hash {
-        response = response.header("x-reviewq-original-sha256", original_hash.as_str());
-    }
-    response.body(body).map_err(|_| AppError::Internal.into())
+        .body(body)
+        .map_err(|_| AppError::Internal.into())
 }
 
 fn page_limit(limit: Option<u16>) -> Result<u16, AppError> {
@@ -544,7 +479,6 @@ fn stats(value: app::ArtifactStats) -> Result<dto::ArtifactStats, AppError> {
         total_code_points: count(value.total_code_points)?,
         line_count: count(value.line_count)?,
         max_line_bytes: count(value.max_line_bytes)?,
-        complete: value.complete,
     })
 }
 
@@ -553,12 +487,6 @@ pub(in crate::entry) fn project_section(
 ) -> Result<dto::ReportSection, AppError> {
     Ok(dto::ReportSection {
         report: reference(value.report)?,
-        complete: value.complete,
-        original_sha256: value
-            .original_sha256
-            .as_ref()
-            .map(|value| hash(value.as_str()))
-            .transpose()?,
         text: value.text,
         offset: count(value.offset)?,
         next_offset: value.next_offset.map(count).transpose()?,
@@ -570,12 +498,6 @@ pub(in crate::entry) fn project_section(
 fn summary(value: app::ReportSummary) -> Result<dto::ReportSummary, AppError> {
     Ok(dto::ReportSummary {
         reference: reference(value.reference)?,
-        original_sha256: value
-            .original_sha256
-            .as_ref()
-            .map(|value| hash(value.as_str()))
-            .transpose()?,
-        native_provenance: value.native_provenance,
         parent_receipt_id: value
             .parent_receipt_id
             .map(|id| resource(id.as_str()))
@@ -596,14 +518,9 @@ fn summary(value: app::ReportSummary) -> Result<dto::ReportSummary, AppError> {
             app::Verdict::Blocked => dto::Verdict::Blocked,
             app::Verdict::NotSpecified => dto::Verdict::NotSpecified,
         },
-        semantic_index: match value.semantic_index {
-            app::SemanticIndex::Ready => dto::SemanticIndex::Ready,
-            app::SemanticIndex::SourceOnly => dto::SemanticIndex::SourceOnly,
-        },
-        finding_count: value.finding_count.map(count).transpose()?,
-        change_count: value.change_count.map(count).transpose()?,
-        unanchored_finding_count: count(value.unanchored_finding_count)?,
-        captured_at: UtcTimestampDto::from_unix_milliseconds(value.captured_at_ms)
+        finding_count: count(value.finding_count)?,
+        change_count: count(value.change_count)?,
+        published_at: UtcTimestampDto::from_unix_milliseconds(value.published_at_ms)
             .ok_or(AppError::Internal)?,
         stats: stats(value.stats)?,
     })
@@ -617,8 +534,6 @@ fn delivery(value: app::ReportDelivery) -> Result<dto::ReportDelivery, AppError>
             .map(|id| resource(id.as_str()))
             .transpose()?,
         state: match value.state {
-            app::ReportDeliveryState::Preparing => dto::DeliveryState::Preparing,
-            app::ReportDeliveryState::Saving => dto::DeliveryState::Saving,
             app::ReportDeliveryState::Failed => dto::DeliveryState::Failed,
             app::ReportDeliveryState::Saved => dto::DeliveryState::Saved,
         },
@@ -627,18 +542,11 @@ fn delivery(value: app::ReportDelivery) -> Result<dto::ReportDelivery, AppError>
 }
 
 fn descriptor(value: Descriptor) -> Result<dto::Descriptor, AppError> {
-    let origin = |origin: Box<app::SourceOrigin>| -> Result<Box<dto::SourceOrigin>, AppError> {
-        Ok(Box::new(dto::SourceOrigin {
-            report: reference(origin.report)?,
-            checked_sha: origin.checked_sha.as_ref().map(sha).transpose()?,
-        }))
-    };
     let range = |range: app::SourceRange| -> Result<dto::SourceRange, AppError> {
         Ok(dto::SourceRange {
             offset: count(range.offset)?,
             length: count(range.length)?,
             sha256: hash(range.hash.as_str())?,
-            origin: range.origin.map(origin).transpose()?,
         })
     };
     Ok(match value {
@@ -647,18 +555,29 @@ fn descriptor(value: Descriptor) -> Result<dto::Descriptor, AppError> {
             title,
             severity,
             blocking,
+            section,
+            category,
+            record_revision,
             source,
-            struck: _,
-            carried_from,
             details,
             disposition,
         } => dto::Descriptor::Finding {
             finding_id: id,
             title,
-            severity,
+            severity: match severity {
+                app::Severity::P0 => dto::Severity::P0,
+                app::Severity::P1 => dto::Severity::P1,
+                app::Severity::P2 => dto::Severity::P2,
+                app::Severity::P3 => dto::Severity::P3,
+            },
             blocking,
-            source: source.map(range).transpose()?,
-            carried_from: carried_from.map(origin).transpose()?,
+            section: match section {
+                app::FindingSection::Functional => dto::FindingSection::Functional,
+                app::FindingSection::Quality => dto::FindingSection::Quality,
+            },
+            category,
+            record_revision: RevisionDto::new(record_revision.get()).ok_or(AppError::Internal)?,
+            source: range(source)?,
             disposition: disposition.map(|value| {
                 Box::new(dto::FindingDisposition {
                     blocking: value.blocking,
@@ -669,10 +588,15 @@ fn descriptor(value: Descriptor) -> Result<dto::Descriptor, AppError> {
             details: details
                 .map(|details| {
                     Ok::<_, AppError>(Box::new(dto::FindingDetails {
-                        location: details.location.map(|location| dto::FindingLocation {
-                            path: location.path,
-                            line: location.line,
-                        }),
+                        locations: details
+                            .locations
+                            .into_iter()
+                            .map(|location| dto::FindingLocation {
+                                path: location.path,
+                                line: location.line,
+                            })
+                            .collect(),
+                        issue: details.issue,
                         consequence: details.consequence,
                         evidence: dto::FindingBasis {
                             kind: match details.evidence.kind {
@@ -681,13 +605,8 @@ fn descriptor(value: Descriptor) -> Result<dto::Descriptor, AppError> {
                             },
                             text: details.evidence.text,
                         },
-                        checked_sha: details
-                            .checked_sha
-                            .map(|sha| GitShaDto::new(sha).ok_or(AppError::Internal))
-                            .transpose()?,
-                        evidence_sha256: hash(
-                            details.evidence_hash.as_deref().ok_or(AppError::Internal)?,
-                        )?,
+                        proposed_comment: details.proposed_comment,
+                        details: details.details,
                     }))
                 })
                 .transpose()?,

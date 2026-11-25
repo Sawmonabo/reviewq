@@ -6,9 +6,6 @@ TEST_THREADS ?= 2
 PACKAGE ?= reviewq
 override CONTRACT_SCHEMA := contracts/v1.schema.json
 override CONTRACT_OUTPUT := web/src/api/generated
-override REPORT_CONTRACT_SCHEMA := contracts/report-handoff.schema.json
-override REPORT_CONTRACT_EXAMPLE := fixtures/contracts/report-handoff.json
-override CLAUDE_REPORT_CONTRACT := hosts/claude/plugin/hooks/report-handoff-schema.js
 ifeq ($(CARGO_DRIVER),mbx)
 # Cached build-script artifacts can be read-only when plain Cargo recompiles them.
 RUST_COMMAND = CARGO_TARGET_DIR="$(or $(CARGO_TARGET_DIR),target)/mbx" mbx
@@ -24,13 +21,13 @@ check: crate-deps rust-check web-check contracts-check contracts-verify
 contracts contracts-check:
 	@set -eu; \
 		if [ "$@" = contracts ]; then \
-			if [ -L contracts ] || [ -L "$(CONTRACT_SCHEMA)" ] || [ -L "$(CONTRACT_OUTPUT)" ] || [ -L "$(REPORT_CONTRACT_SCHEMA)" ] || [ -L "$(REPORT_CONTRACT_EXAMPLE)" ] || [ -L "$(CLAUDE_REPORT_CONTRACT)" ]; then \
+			if [ -L contracts ] || [ -L "$(CONTRACT_SCHEMA)" ] || [ -L "$(CONTRACT_OUTPUT)" ]; then \
 				printf '%s\n' 'Refusing to write symlinked contract outputs' >&2; exit 1; \
 			fi; \
 			mkdir -p contracts; \
 			scratch=$$(mktemp -d contracts/.generate.XXXXXX); \
 		else \
-			unexpected_schemas=$$(find "$(dir $(CONTRACT_SCHEMA))" -maxdepth 1 -name '*.schema.json' ! -path "$(CONTRACT_SCHEMA)" ! -path "$(REPORT_CONTRACT_SCHEMA)" -print); \
+			unexpected_schemas=$$(find "$(dir $(CONTRACT_SCHEMA))" -maxdepth 1 -name '*.schema.json' ! -path "$(CONTRACT_SCHEMA)" -print); \
 			if [ -n "$$unexpected_schemas" ]; then \
 				printf 'Unexpected contract schemas\n%s\n' "$$unexpected_schemas" >&2; exit 1; \
 			fi; \
@@ -38,15 +35,9 @@ contracts contracts-check:
 		fi; \
 		trap 'find "$$scratch" -depth -delete' EXIT; \
 		cargo run --locked --quiet -p reviewq-protocol --features schema --bin export-schema > "$$scratch/v1.schema.json"; \
-		cargo run --locked --quiet -p reviewq-protocol --features schema --bin export-schema -- --report-handoff-schema > "$$scratch/report-handoff.schema.json"; \
-		cargo run --locked --quiet -p reviewq-protocol --features schema --bin export-schema -- --report-handoff-example > "$$scratch/report-handoff.json"; \
-		cargo run --locked --quiet -p reviewq-protocol --features schema --bin export-schema -- --claude-report-handoff > "$$scratch/report-handoff-schema.js"; \
 		node web/tools/generate-contracts.mjs --schema "$$scratch/v1.schema.json" --out "$$scratch/generated"; \
 		if [ "$@" = contracts-check ]; then \
 			diff -u "$(CONTRACT_SCHEMA)" "$$scratch/v1.schema.json"; \
-			diff -u "$(REPORT_CONTRACT_SCHEMA)" "$$scratch/report-handoff.schema.json"; \
-			diff -u "$(REPORT_CONTRACT_EXAMPLE)" "$$scratch/report-handoff.json"; \
-			diff -u "$(CLAUDE_REPORT_CONTRACT)" "$$scratch/report-handoff-schema.js"; \
 			diff -ru "$(CONTRACT_OUTPUT)" "$$scratch/generated"; \
 		else \
 			mkdir -p "$(dir $(CONTRACT_OUTPUT))"; \
@@ -55,9 +46,6 @@ contracts contracts-check:
 			fi; \
 			if mv -T -- "$$scratch/generated" "$(CONTRACT_OUTPUT)"; then \
 				if mv -T -- "$$scratch/v1.schema.json" "$(CONTRACT_SCHEMA)"; then \
-					mv -T -- "$$scratch/report-handoff.schema.json" "$(REPORT_CONTRACT_SCHEMA)"; \
-					mv -T -- "$$scratch/report-handoff.json" "$(REPORT_CONTRACT_EXAMPLE)"; \
-					mv -T -- "$$scratch/report-handoff-schema.js" "$(CLAUDE_REPORT_CONTRACT)"; \
 					exit 0; \
 				fi; \
 				mv -T -- "$(CONTRACT_OUTPUT)" "$$scratch/generated"; \

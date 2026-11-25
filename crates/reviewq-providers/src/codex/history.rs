@@ -62,7 +62,6 @@ pub(super) enum Item {
         command: String,
         source: Option<String>,
         status: String,
-        exit_code: Option<i32>,
         aggregated_output: Option<String>,
     },
     Plan {

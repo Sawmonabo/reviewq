@@ -5,9 +5,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use reviewq_app::access::AppError;
-use reviewq_app::access::AppFuture;
 use reviewq_app::history::{FileContentRef, NativeContent};
-use reviewq_app::workflow::ReportContent;
 use reviewq_domain::identity::SessionKey;
 use sha2::{Digest, Sha256};
 use tokio::sync::{Mutex as AsyncMutex, mpsc, oneshot};
@@ -210,57 +208,6 @@ impl Read {
             self.buffer.extend(part);
         }
         Ok(())
-    }
-}
-
-/// A report consumes the same native body decoder sequentially, but may split UTF-8.
-pub(super) async fn report_content(
-    source: Source,
-    reference: FileContentRef,
-    record_digest: [u8; 32],
-) -> Result<Arc<dyn ReportContent>, AppError> {
-    let read = Read::start(source, reference, 0, Some(record_digest)).await?;
-    Ok(Arc::new(Response {
-        length: read.length,
-        reader: AsyncMutex::new(read),
-    }))
-}
-
-struct Response {
-    length: u64,
-    reader: AsyncMutex<Read>,
-}
-
-impl ReportContent for Response {
-    fn byte_length(&self) -> u64 {
-        self.length
-    }
-
-    fn read(&self, offset: u64, length: usize) -> AppFuture<'_, Vec<u8>> {
-        Box::pin(async move {
-            let mut read = self.reader.lock().await;
-            if length > 65_536 || offset != read.at || length as u64 > self.length - read.at {
-                return Err(AppError::InvalidRequest);
-            }
-            read.fill(length).await?;
-            let bytes = read.buffer.drain(..length).collect();
-            read.at += length as u64;
-            Ok(bytes)
-        })
-    }
-
-    fn verify_unchanged(&self) -> AppFuture<'_, ()> {
-        Box::pin(async move {
-            let mut read = self.reader.lock().await;
-            if read.at != self.length || !read.buffer.is_empty() {
-                return Err(AppError::Conflict);
-            }
-            match read.output.recv().await {
-                None => Ok(()),
-                Some(Err(error)) => Err(error),
-                Some(Ok(_)) => Err(AppError::Conflict),
-            }
-        })
     }
 }
 

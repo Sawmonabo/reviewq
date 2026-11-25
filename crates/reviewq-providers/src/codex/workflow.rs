@@ -3,35 +3,17 @@ use std::path::Path;
 use reviewq_app::access::{AppError, AppFuture};
 use reviewq_app::hosts::DispatchGuard;
 use reviewq_app::workflow::{
-    CompletedReportCall, ExpectedAcknowledgement, NativeCall, NativeWorkflowProof, ReadyWorkflow,
-    ReportCompletion, WorkflowHold, WorkflowReadiness, WorkflowTool,
+    NativeCall, NativeWorkflowProof, ReadyWorkflow, WorkflowHold, WorkflowReadiness, WorkflowTool,
 };
 use reviewq_domain::identity::{NativeInputId, NativeTurnId};
 use reviewq_domain::session::LeadTarget;
-use serde::Deserialize;
 
 use super::Codex;
-use super::history::{Item, Turn, Turns};
+use super::history::{Item, Turn};
 use super::session::{Thread, ThreadStatus};
 
 #[cfg(test)]
 mod tests;
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub(crate) struct Acknowledgement {
-    receipt_id: String,
-    declaration_sha256: String,
-    state: String,
-}
-
-impl Acknowledgement {
-    pub(crate) fn matches(&self, expected: &ExpectedAcknowledgement) -> bool {
-        matches!(self.state.as_str(), "pending_completion" | "recorded")
-            && self.receipt_id == expected.receipt_id.as_str()
-            && self.declaration_sha256 == expected.declaration_sha256.as_str()
-    }
-}
 
 impl NativeWorkflowProof for Codex {
     fn dispatch_readiness(&self, lead: LeadTarget) -> AppFuture<'_, WorkflowReadiness> {
@@ -89,149 +71,9 @@ impl NativeWorkflowProof for Codex {
                 call_id,
                 source_generation: generation,
                 source_position: position,
-                arguments_sha256: None,
-                source_ordinal: 0,
                 request_entry_id: request_address(&active, index)?,
                 tool,
             })
-        })
-    }
-
-    fn verify_mcp_report_call(
-        &self,
-        lead: LeadTarget,
-        call_id: String,
-        arguments: Vec<u8>,
-        origin_item_id: Option<String>,
-    ) -> AppFuture<'_, NativeCall> {
-        self.mcp_report_call(lead, call_id, arguments, origin_item_id, None)
-    }
-
-    fn verify_witnessed_report_call(
-        &self,
-        lead: LeadTarget,
-        turn: NativeTurnId,
-        call_id: String,
-        arguments: Vec<u8>,
-        ordinal: u32,
-        origin_item_id: Option<String>,
-    ) -> AppFuture<'_, NativeCall> {
-        self.mcp_report_call(
-            lead,
-            call_id,
-            arguments,
-            origin_item_id,
-            Some((turn, ordinal)),
-        )
-    }
-
-    fn report_completion(
-        &self,
-        call: NativeCall,
-        acknowledgement: ExpectedAcknowledgement,
-        include_response: bool,
-    ) -> AppFuture<'_, ReportCompletion> {
-        Box::pin(async move {
-            if call.tool != WorkflowTool::Report {
-                return Err(AppError::Forbidden);
-            }
-            let thread = self.retained_thread(&call.lead).await?;
-            let path = thread.path.ok_or(AppError::Unavailable)?;
-            let result_entry: NativeInputId =
-                call.call_id.parse().map_err(|_| AppError::Conflict)?;
-            if call.arguments_sha256.is_some() {
-                let evidence = crate::history::codex_report_terminal(
-                    call.clone(),
-                    path,
-                    include_response,
-                    Some(acknowledgement.clone()),
-                )
-                .await?;
-                let Some(evidence) = evidence else {
-                    return Ok(ReportCompletion::Pending);
-                };
-                if !evidence.result_seen {
-                    return Ok(ReportCompletion::Unproved);
-                }
-                return Ok(ReportCompletion::Confirmed(Box::new(CompletedReportCall {
-                    call,
-                    acknowledged: acknowledgement,
-                    result_entry_id: result_entry,
-                    normal_turn_completion: evidence.normal,
-                    final_response: evidence.response,
-                })));
-            }
-            let result = self
-                .exact_item(&thread.id, &call.turn_id, &result_entry)
-                .await;
-            let item = match result {
-                Ok(item) => item.item,
-                Err(AppError::NotFound) => {
-                    let ended =
-                        crate::history::codex_report_terminal(call, path, false, None).await?;
-                    return Ok(if ended.is_some() {
-                        ReportCompletion::Unproved
-                    } else {
-                        ReportCompletion::Pending
-                    });
-                }
-                Err(error) => return Err(error),
-            };
-            let mcp = matches!(&item, Item::McpToolCall { .. });
-            let (status, acknowledged) = match item {
-                Item::McpToolCall {
-                    id,
-                    server,
-                    tool,
-                    status,
-                    result,
-                    ..
-                } if id == call.call_id && report_tool(&server, &tool) => {
-                    (status, result.as_ref().and_then(mcp_acknowledgement))
-                }
-                Item::CommandExecution {
-                    id,
-                    status,
-                    command,
-                    source,
-                    exit_code,
-                    aggregated_output,
-                } if id == call.call_id
-                    && matches!(source.as_deref(), Some("agent" | "unifiedExecStartup"))
-                    && reviewq_command(&command, call.tool) =>
-                {
-                    let acknowledgement = aggregated_output
-                        .as_deref()
-                        .filter(|_| exit_code == Some(0))
-                        .and_then(read_acknowledgement);
-                    (status, acknowledgement)
-                }
-                _ => return Ok(ReportCompletion::Unproved),
-            };
-            if status == "inProgress" {
-                return Ok(ReportCompletion::Pending);
-            }
-            if status != "completed"
-                || !acknowledged.is_some_and(|ack| ack.matches(&acknowledgement))
-            {
-                return Ok(ReportCompletion::Unproved);
-            }
-            let Some(evidence) =
-                crate::history::codex_report_terminal(call.clone(), path, include_response, None)
-                    .await?
-            else {
-                return Ok(ReportCompletion::Pending);
-            };
-            if mcp && !evidence.result_seen {
-                return Ok(ReportCompletion::Unproved);
-            }
-            Ok(ReportCompletion::Confirmed(Box::new(CompletedReportCall {
-                call,
-                acknowledged: acknowledgement,
-                result_entry_id: result_entry,
-                normal_turn_completion: evidence.normal,
-                final_response: evidence.response,
-            })))
         })
     }
 }
@@ -328,120 +170,6 @@ impl Codex {
             })
             .ok_or(AppError::NotFound)?;
         Ok((thread, active))
-    }
-
-    fn mcp_report_call(
-        &self,
-        lead: LeadTarget,
-        call_id: String,
-        arguments: Vec<u8>,
-        origin: Option<String>,
-        witness: Option<(NativeTurnId, u32)>,
-    ) -> AppFuture<'_, NativeCall> {
-        Box::pin(async move {
-            let arguments: serde_json::Value =
-                serde_json::from_slice(&arguments).map_err(|_| AppError::InvalidRequest)?;
-            let thread = self.verified_thread(&lead).await?;
-            if thread.parent_thread_id.is_some() {
-                return Err(AppError::Forbidden);
-            }
-            let opening = crate::history::codex_mcp_opening(
-                lead.binding().clone(),
-                thread.path.clone().ok_or(AppError::Unavailable)?,
-                call_id.clone(),
-                origin,
-                arguments.clone(),
-                witness.as_ref().map(|(turn, _)| turn.clone()),
-            )
-            .await?;
-            let source_ordinal = if !opening.nested {
-                0
-            } else if let Some((_, ordinal)) = witness {
-                if ordinal == 0 {
-                    return Err(AppError::InvalidRequest);
-                }
-                ordinal
-            } else {
-                self.live_mcp_ordinal(&thread, &opening.turn, &call_id, &arguments)
-                    .await?
-            };
-            Ok(NativeCall {
-                lead,
-                turn_id: opening.turn,
-                root_turn_id: opening.root,
-                call_id,
-                tool: WorkflowTool::Report,
-                source_generation: opening.generation,
-                source_position: opening.position,
-                source_ordinal,
-                arguments_sha256: Some(crate::history::native_arguments_hash(arguments)?),
-                request_entry_id: opening.request,
-            })
-        })
-    }
-
-    /// History reads omit running nested calls. Attaching to the already-running thread
-    /// with no configuration overrides returns its live items in native creation order.
-    async fn live_mcp_ordinal(
-        &self,
-        thread: &Thread,
-        turn: &NativeTurnId,
-        call: &str,
-        arguments: &serde_json::Value,
-    ) -> Result<u32, AppError> {
-        if !matches!(thread.status, ThreadStatus::Active { .. }) {
-            return Err(AppError::NotFound);
-        }
-        #[derive(Deserialize)]
-        #[serde(rename_all = "camelCase")]
-        struct Resumed {
-            thread: Thread,
-            initial_turns_page: Turns,
-        }
-        let response: Resumed = self.connection.read("thread/resume", serde_json::json!({
-            "threadId":thread.id, "excludeTurns":true, "initialTurnsPage":{"limit":1,"sortDirection":"desc","itemsView":"full"}
-        })).await?;
-        if response.thread.id != thread.id
-            || response.thread.path != thread.path
-            || response.thread.cwd != thread.cwd
-            || response.thread.parent_thread_id.is_some()
-            || !matches!(response.thread.status, ThreadStatus::Active { .. })
-        {
-            return Err(AppError::Conflict);
-        }
-        let [active]: [Turn; 1] = response
-            .initial_turns_page
-            .data
-            .try_into()
-            .map_err(|_| AppError::NotFound)?;
-        if active.id != turn.as_str() || active.status != "inProgress" {
-            return Err(AppError::NotFound);
-        }
-        let mut matched = None;
-        for (i, item) in active.items.iter().enumerate() {
-            match item {
-                Item::McpToolCall {
-                    id,
-                    server,
-                    tool,
-                    status,
-                    arguments: native,
-                    ..
-                } if id == call => {
-                    if matched.is_some()
-                        || !report_tool(server, tool)
-                        || status != "inProgress"
-                        || native.as_ref() != Some(arguments)
-                    {
-                        return Err(AppError::Conflict);
-                    }
-                    matched = Some(u32::try_from(i + 1).map_err(|_| AppError::Unavailable)?);
-                }
-                Item::UserMessage { .. } if matched.is_some() => return Err(AppError::Conflict),
-                _ => {}
-            }
-        }
-        matched.ok_or(AppError::NotFound)
     }
 
     pub(super) async fn idle_readiness(
@@ -548,26 +276,6 @@ fn verify_resumed_followup(saved: &Thread, resumed: &Thread) -> Result<(), AppEr
     Ok(())
 }
 
-fn report_tool(server: &str, tool: &str) -> bool {
-    server == "reviewq" && tool == "report_handoff"
-}
-
-fn mcp_acknowledgement(result: &serde_json::Value) -> Option<Acknowledgement> {
-    let [block] = result.get("content")?.as_array()?.as_slice() else {
-        return None;
-    };
-    if block.get("type")?.as_str()? != "text" {
-        return None;
-    }
-    read_acknowledgement(block.get("text")?.as_str()?)
-}
-
-fn read_acknowledgement(text: &str) -> Option<Acknowledgement> {
-    (text.len() <= 8192)
-        .then(|| serde_json::from_str(text).ok())
-        .flatten()
-}
-
 fn root_turn(turn: &Turn) -> Result<Option<NativeTurnId>, AppError> {
     turn.root_turn_id
         .as_ref()
@@ -655,10 +363,6 @@ fn reviewq_command(command: &str, tool: WorkflowTool) -> bool {
         return false;
     }
     match tool {
-        WorkflowTool::Report => {
-            category == "report"
-                && matches!(operation.as_str(), "unchanged" | "needs-input" | "handoff")
-        }
         WorkflowTool::Action => {
             category == "action" && matches!(operation.as_str(), "declare" | "reconcile")
         }

@@ -1,13 +1,22 @@
+//! Who may write a run's report: the configured project and grant, and the run's lead.
+
 use reviewq_app::access::{Actor, ActorScope, AppError};
 use reviewq_app::reports::ReportAuthority;
-use reviewq_domain::identity::{MrIdentity, ReportHash};
+use reviewq_domain::identity::{MrIdentity, ReportHash, SessionKey};
 use reviewq_domain::session::{HostProvider, LeadTarget};
 use rusqlite::{Connection, OptionalExtension, params};
 use sha2::{Digest, Sha256};
 
 use crate::StoreError;
+use crate::queue::{lead_for_run, parse};
 
-pub(super) fn for_project(
+/// Hashes the configured project, its GitLab principal and its checkout, or `None` when the
+/// project is not configured. A changed hash means the report's authority changed.
+#[expect(
+    dead_code,
+    reason = "K2 binds a ledger caller to the project authority"
+)]
+pub(crate) fn for_project(
     db: &Connection,
     mr: &MrIdentity,
 ) -> Result<Option<ReportAuthority>, StoreError> {
@@ -26,35 +35,11 @@ pub(super) fn for_project(
     )
 }
 
-pub(super) fn bind(
-    db: &Connection,
-    edits: Option<&str>,
-    authority: &ReportAuthority,
-    checkout: Option<&Actor>,
-    arguments: Option<&ReportHash>,
-    incomparable_recorded: i64,
-) -> Result<String, StoreError> {
-    let grant = match checkout.map(Actor::scope) {
-        Some(ActorScope::CheckoutGrant(id)) => Some(id.as_str()),
-        Some(_) => return Err(AppError::Forbidden.into()),
-        None => None,
-    };
-    let epoch = checkout
-        .and_then(Actor::grant_epoch)
-        .map(|value| value.as_sqlite_integer());
-    let metadata: String = db.query_row(
-        r#"SELECT json_set(coalesce(?1, '{"findings":[]}'), '$.authority', ?2,
-              '$.grantId', ?3, '$.grantEpoch', ?4, '$.argumentsSha256', ?5, '$.incomparableRecorded', ?6)"#,
-        params![edits, authority.0.as_str(), grant, epoch, arguments.map(ReportHash::as_str), incomparable_recorded],
-        |row| row.get(0),
-    )?;
-    if metadata.len() > reviewq_app::reports::METADATA_BYTES {
-        return Err(AppError::PayloadTooLarge.into());
-    }
-    Ok(metadata)
-}
-
-pub(super) fn checkout_lead(
+/// The lead whose native session `native_id` is registered in a checkout the actor's active
+/// grant covers. `Unauthorized` without a grant, `NotFound` or `Conflict` unless exactly one
+/// lead matches.
+#[expect(dead_code, reason = "K2 binds a Codex MCP caller to its lead")]
+pub(crate) fn checkout_lead(
     db: &Connection,
     actor: &Actor,
     provider: HostProvider,
@@ -83,5 +68,22 @@ pub(super) fn checkout_lead(
     if rows.next()?.is_some() {
         return Err(AppError::Conflict.into());
     }
-    super::lead_for_session(db, &crate::queue::parse(&key)?)
+    run_lead(db, &parse(&key)?)
+}
+
+/// The lead of the run whose registered lead session is `session`, or `NotFound`.
+pub(crate) fn run_lead(db: &Connection, session: &SessionKey) -> Result<LeadTarget, StoreError> {
+    let run = db
+        .query_row(
+            "SELECT run_id FROM runs WHERE lead_session_key=?1",
+            [session.as_str()],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()?
+        .ok_or(AppError::NotFound)?;
+    let lead = lead_for_run(db, &parse(&run)?)?.ok_or(AppError::NotFound)?;
+    if lead.session_key() != session {
+        return Err(AppError::NotFound.into());
+    }
+    Ok(lead)
 }

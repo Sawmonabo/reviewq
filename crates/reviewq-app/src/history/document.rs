@@ -357,7 +357,6 @@ fn admitted(text: &str) -> bool {
         total_code_points: 0,
         line_count: lines,
         max_line_bytes: maximum as u64,
-        complete: true,
     }
     .require_markdown_budget()
     .is_ok()

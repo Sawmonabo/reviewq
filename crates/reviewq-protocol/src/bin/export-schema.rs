@@ -23,9 +23,6 @@ use reviewq_protocol::{
 use schemars::{JsonSchema, generate::SchemaSettings};
 use serde_json::{Value, json};
 
-#[path = "export-schema/report.rs"]
-mod report_handoff;
-
 const DRAFT_07: &str = "http://json-schema.org/draft-07/schema#";
 
 #[derive(Default)]
@@ -37,7 +34,7 @@ struct Registry {
 
 fn main() -> Result<(), Box<dyn Error>> {
     if let Some(mode) = std::env::args().nth(1) {
-        return report_handoff::export(&mode);
+        return Err(format!("unknown export mode {mode}").into());
     }
     let mut registry = Registry::default();
     registry.request::<EventCursorDto>("common", "EventReplayCursor")?;
@@ -235,7 +232,6 @@ fn main() -> Result<(), Box<dyn Error>> {
     registry.response::<Success<reports::ReportSection>>("reports", "ReportSectionResponse")?;
     registry.response::<Success<reports::ReportWindow>>("reports", "ReportWindowResponse")?;
     registry.response::<reports::ReportTableResponse>("reports", "ReportTableResponse")?;
-    registry.response::<Success<reports::CandidateReport>>("reports", "ReportCandidateResponse")?;
     registry.response::<Success<reports::ReportContext>>("reports", "ReportContextResponse")?;
     registry.request::<reports::FeedbackRequest>("reports", "ReportFeedbackRequest")?;
     registry.request::<reports::DispositionRequest>("reports", "ReportDispositionRequest")?;

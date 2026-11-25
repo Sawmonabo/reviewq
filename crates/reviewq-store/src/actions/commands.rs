@@ -23,6 +23,14 @@ use crate::workspace::{advance_queue, configured, settings_revision};
 use crate::{SqliteStore, StoreError};
 
 impl ActionCommandStore for SqliteStore {
+    fn run_lead(&self, session: reviewq_domain::identity::SessionKey) -> AppFuture<'_, LeadTarget> {
+        Box::pin(async move {
+            self.read(move |db| crate::reports::authority::run_lead(db, &session))
+                .await
+                .map_err(StoreError::app)
+        })
+    }
+
     fn action_source(&self, lead: LeadTarget) -> AppFuture<'_, (MrIdentity, Revision)> {
         Box::pin(async move {
             self.read(move |db| {

@@ -1,4 +1,4 @@
-//! Optional Codex report hook installed alongside the stable user launcher.
+//! Optional Codex hooks installed alongside the stable user launcher.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -12,7 +12,6 @@ use super::{Failure, Paths, paths};
 
 mod json;
 
-const MATCHER: &str = "^mcp__reviewq__report_handoff$";
 const TIMEOUT_SECONDS: u32 = 5;
 const OWNERSHIP: &str = "codex-hooks.json";
 
@@ -26,8 +25,9 @@ struct Registration {
 }
 
 /// The release journal is read by older binaries during rollback. Track the
-/// optional hook separately under the same installation lock.
-pub(super) fn reconcile(paths: &Paths, has_codex: bool) -> Result<(), Failure> {
+/// optional hook separately under the same installation lock. `command` is the
+/// hook's shell command, built with `shell_path`.
+pub(super) fn reconcile(paths: &Paths, has_codex: bool, command: &str) -> Result<(), Failure> {
     let sidecar = paths.state.join(OWNERSHIP);
     let mut owned = paths::read_json::<Vec<Registration>>(&sidecar)?.unwrap_or_default();
     let wanted = has_codex.then(|| paths.codex_home.join("hooks.json"));
@@ -57,7 +57,7 @@ pub(super) fn reconcile(paths: &Paths, has_codex: bool) -> Result<(), Failure> {
         let location = owned.iter().position(|hook| hook.path == wanted);
         let index = if let Some(index) = location {
             Some(index)
-        } else if let Some(hook) = Registration::plan(paths, &wanted)? {
+        } else if let Some(hook) = Registration::plan(&wanted, command)? {
             owned.push(hook);
             paths::write_json(&sidecar, &owned)?;
             Some(owned.len() - 1)
@@ -77,20 +77,12 @@ pub(super) fn reconcile(paths: &Paths, has_codex: bool) -> Result<(), Failure> {
 }
 
 impl Registration {
-    fn plan(paths: &Paths, path: &Path) -> Result<Option<Self>, Failure> {
-        // Codex interprets exit 2 as a denial. Older launchers can exit 2 for
-        // this unknown subcommand after a downgrade.
-        let command = format!(
-            "{} --profile {} internal codex-report-witness --codex-home {} >/dev/null 2>&1 || :",
-            shell_path(&paths.launcher)?,
-            shell_path(&paths.profile)?,
-            shell_path(&paths.codex_home)?,
-        );
+    fn plan(path: &Path, command: &str) -> Result<Option<Self>, Failure> {
         let file = read(path)?;
-        let plan = json::plan(file.as_ref().map(|file| file.bytes.as_slice()), &command)?;
+        let plan = json::plan(file.as_ref().map(|file| file.bytes.as_slice()), command)?;
         Ok(plan.map(|added| Self {
             path: path.to_owned(),
-            command,
+            command: command.to_owned(),
             added,
             applied: false,
         }))
@@ -165,15 +157,16 @@ mod tests {
             claude_home_is_explicit: false,
         };
         let file = codex_home.join("hooks.json");
+        let command = format!("{} --version", shell_path(&paths.launcher)?);
         let config = codex_home.join("config.toml");
         let trust = b"[hooks.state.example]\nenabled = false\n";
         fs::write(&config, trust)?;
 
-        let mut fresh = Registration::plan(&paths, &file)?.expect("hook to be installed");
+        let mut fresh = Registration::plan(&file, &command)?.expect("hook to be installed");
         fresh.install()?;
         let created = fs::read(&file)?;
         assert_eq!(fs::metadata(&file)?.permissions().mode() & 0o777, 0o600);
-        assert!(Registration::plan(&paths, &file)?.is_none());
+        assert!(Registration::plan(&file, &command)?.is_none());
         fresh.applied = true;
         fresh.install()?;
         assert_eq!(fs::read(&file)?, created);
@@ -189,7 +182,7 @@ mod tests {
         );
         fs::write(&file, &original)?;
         fs::set_permissions(&file, fs::Permissions::from_mode(0o640))?;
-        let mut installed = Registration::plan(&paths, &file)?.expect("owned hook to append");
+        let mut installed = Registration::plan(&file, &command)?.expect("owned hook to append");
         installed.install()?;
         let with_hook = fs::read_to_string(&file)?;
         let doc: serde_json::Value = serde_json::from_str(&with_hook)?;
@@ -209,7 +202,7 @@ mod tests {
         fs::write(&file, &with_hook)?;
         installed.remove()?;
         assert_eq!(fs::read_to_string(&file)?, original);
-        let installed = Registration::plan(&paths, &file)?.expect("hook to append");
+        let installed = Registration::plan(&file, &command)?.expect("hook to append");
         installed.install()?;
         let changed_by_user = format!(
             "{{ \"metadata\": 1.123456789012345678901, \"hooks\" : {{ \"PreToolUse\" : [ {earlier},{owned_group},{later} ] }} }}\n"
@@ -228,34 +221,14 @@ mod tests {
         let release_journal = paths.state.join("install.json");
         let release_bytes = b"{\"active\":null,\"store_id\":null,\"pending\":null,\"known\":[],\"removing\":false}\n";
         fs::write(&release_journal, release_bytes)?;
-        reconcile(&paths, true)?;
+        reconcile(&paths, true, &command)?;
         let sidecar = paths.state.join(OWNERSHIP);
         assert_eq!(fs::metadata(&sidecar)?.permissions().mode() & 0o777, 0o600);
         let registrations =
             paths::read_json::<Vec<Registration>>(&sidecar)?.expect("hook ownership");
         assert!(registrations[0].applied);
 
-        // A previous release can continue to use its existing journal and run
-        // the trusted hook with an old or absent launcher.
-        let run_hook = || {
-            std::process::Command::new("/bin/sh")
-                .args(["-c", &registrations[0].command])
-                .output()
-        };
-        let missing = run_hook()?;
-        assert!(missing.status.success() && missing.stdout.is_empty() && missing.stderr.is_empty());
-        fs::create_dir(paths.launcher.parent().expect("launcher directory"))?;
-        fs::write(
-            &paths.launcher,
-            b"#!/bin/sh\nprintf old_stdout\nprintf old_error >&2\nexit 2\n",
-        )?;
-        fs::set_permissions(&paths.launcher, fs::Permissions::from_mode(0o700))?;
-        let previous = run_hook()?;
-        assert!(
-            previous.status.success() && previous.stdout.is_empty() && previous.stderr.is_empty()
-        );
-
-        reconcile(&paths, false)?;
+        reconcile(&paths, false, &command)?;
         assert!(!sidecar.try_exists()?);
         assert_eq!(fs::read(&release_journal)?, release_bytes);
         assert_eq!(fs::read(&config)?, trust);

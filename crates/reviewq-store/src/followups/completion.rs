@@ -1,143 +1,26 @@
+//! Completes the executing follow-up batch a published version closes, after checking that
+//! its assessments cover the frozen batch.
+
 use std::collections::{BTreeMap, BTreeSet};
 
-use reviewq_app::access::AppError;
+use reviewq_app::access::{AppError, FieldError};
 use reviewq_app::events::ResourceKey;
-use reviewq_app::reports::{
-    Assessment, Declaration, FindingConclusion, FindingEdit, HandoffFieldError, ReportEdits,
-    ReportWork,
-};
-use reviewq_app::workflow::NativeCall;
-use rusqlite::{Connection, OptionalExtension, params};
-use serde::{Deserialize, Serialize};
+use reviewq_app::followups::ResultKind;
+use reviewq_app::reports::{Assessment, FindingConclusion, FindingEdit, ReportEdits};
+use reviewq_domain::session::LeadTarget;
+use rusqlite::{Connection, params};
 
+use super::reconciliation;
+use super::work::FrozenManifest;
 use crate::StoreError;
 use crate::connection::WriteTx;
-use crate::followups::work::FrozenManifest;
-use crate::queue::parse;
-
-#[derive(Serialize, Deserialize)]
-struct StoredAssessment {
-    discussion_id: String,
-    conclusion: String,
-    reason: String,
-    finding_ids: Vec<String>,
-    next_action: String,
-}
-
-pub(super) fn encode(values: &[Assessment]) -> Result<String, StoreError> {
-    serde_json::to_string(
-        &values
-            .iter()
-            .map(|a| StoredAssessment {
-                discussion_id: a.discussion_id.clone(),
-                conclusion: a.conclusion.to_string(),
-                reason: a.reason.clone(),
-                finding_ids: a.finding_ids.clone(),
-                next_action: a.next_action.to_string(),
-            })
-            .collect::<Vec<_>>(),
-    )
-    .map_err(|_| AppError::Internal.into())
-}
-
-pub(super) fn decode(source: &str) -> Result<Vec<Assessment>, StoreError> {
-    let values: Vec<StoredAssessment> =
-        serde_json::from_str(source).map_err(|_| AppError::Internal)?;
-    values
-        .into_iter()
-        .map(|a| {
-            Ok(Assessment {
-                discussion_id: a.discussion_id,
-                conclusion: parse(&a.conclusion)?,
-                reason: a.reason,
-                finding_ids: a.finding_ids,
-                next_action: parse(&a.next_action)?,
-            })
-        })
-        .collect()
-}
-
-pub(super) fn bound(db: &Connection, call: &NativeCall) -> Result<Option<String>, StoreError> {
-    let root = call.root_turn_id.as_ref().filter(|root| {
-        call.lead.binding().identity().provider() == reviewq_domain::session::HostProvider::Codex
-            && *root != &call.turn_id
-    });
-    Ok(db.query_row(
-        "SELECT b.batch_id FROM followup_batches b JOIN workflow_dispatch w ON w.batch_id=b.batch_id
-         JOIN messages m ON m.message_id=w.delivery_id
-         WHERE b.review_id=?1 AND b.run_id=?2 AND b.lead_session_key=?3 AND b.state='executing'
-           AND b.authority_verified=1 AND b.native_turn_id=m.native_turn_id AND m.state='started'
-           AND (
-               b.native_turn_id=?4 AND b.continuation_turn_id IS NULL OR
-               b.continuation_turn_id=?4 AND b.native_turn_id=?5 AND EXISTS(
-                 SELECT 1 FROM recovery_episodes e JOIN messages resumed ON resumed.message_id=e.delivery_id
-                 WHERE e.run_id=b.run_id AND e.lead_session_key=b.lead_session_key
-                   AND e.root_turn_id=?5 AND e.resumed_turn_id=?4 AND e.state='started'
-                   AND resumed.state='started' AND resumed.native_turn_id=?4
-               ) OR
-               b.native_turn_id=?5 AND EXISTS(
-                   SELECT 1 FROM followup_monitors active WHERE active.review_id=b.review_id
-                     AND active.run_id=b.run_id AND active.generation=b.generation
-                     AND active.state='enabled' AND active.binding_verified=1
-                     AND coalesce(active.policy_override,(SELECT automatic FROM followup_preferences WHERE singleton=1),0)=1
-               ) AND EXISTS(
-                   SELECT 1 FROM report_handoffs prior WHERE prior.batch_id=b.batch_id AND prior.form='needs_input'
-                     AND prior.state='recorded' AND prior.source_generation=?6 AND prior.source_position<?7
-                     AND (b.continuation_turn_id=?4 OR
-                          b.hold_reason='followup_native_input_required' AND
-                          prior.turn_id=coalesce(b.continuation_turn_id,b.native_turn_id))
-               )
-           )",
-        params![call.lead.review_id().as_str(),call.lead.run_id().as_str(),
-            call.lead.session_key().as_str(),call.turn_id.as_str(),root.map(|turn|turn.as_str()),
-            call.source_generation,super::db_int(call.source_position)?],|row|row.get(0),
-    ).optional()?)
-}
-
-pub(super) fn continue_on_turn(
-    db: &Connection,
-    batch: &str,
-    call: &NativeCall,
-) -> Result<bool, StoreError> {
-    let updated = db.execute(
-        "UPDATE followup_batches SET continuation_turn_id=?2,holds_slot=1,hold_reason=NULL
-         WHERE batch_id=?1 AND state='executing' AND native_turn_id<>?2
-           AND continuation_turn_id IS NOT ?2",
-        params![batch, call.turn_id.as_str()],
-    )?;
-    Ok(updated == 1)
-}
-
-pub(super) fn action_turn(db: &Connection, call: &NativeCall) -> Result<bool, StoreError> {
-    Ok(db.query_row(
-        "SELECT EXISTS(SELECT 1 FROM workflow_dispatch w JOIN messages m ON m.message_id=w.delivery_id
-         WHERE w.action_id IS NOT NULL AND m.run_id=?1 AND m.session_key=?2 AND m.native_turn_id=?3
-           AND m.state='started')",
-        params![call.lead.run_id().as_str(),call.lead.session_key().as_str(),call.turn_id.as_str()],
-        |row|row.get(0),
-    )?)
-}
-
-pub(super) fn manifest(
-    db: &Connection,
-    work: &ReportWork,
-) -> Result<Option<FrozenManifest>, StoreError> {
-    let expected: Option<String> = db.query_row(
-        "SELECT batch_id FROM report_handoffs WHERE receipt_id=?1",
-        [work.acknowledgement.receipt_id.as_str()],
-        |row| row.get(0),
-    )?;
-    let Some(expected) = expected else {
-        return Ok(None);
-    };
-    if bound(db, &work.call)?.as_deref() != Some(expected.as_str()) {
-        return Err(AppError::Conflict.into());
-    }
-    frozen(db, &expected).map(Some)
-}
 
 /// The private manifest frozen when the batch started.
-pub(super) fn frozen(db: &Connection, batch: &str) -> Result<FrozenManifest, StoreError> {
+#[expect(
+    dead_code,
+    reason = "K2 reads the frozen batch for the publish snapshot"
+)]
+pub(crate) fn frozen(db: &Connection, batch: &str) -> Result<FrozenManifest, StoreError> {
     let source: String = db.query_row(
         "SELECT private_manifest FROM followup_batches WHERE batch_id=?1",
         [batch],
@@ -162,25 +45,26 @@ fn tracked(manifest: &FrozenManifest) -> BTreeMap<&str, BTreeSet<&str>> {
 }
 
 /// One assessment per batch discussion, each covering the finding IDs its discussion tracks.
-pub(super) fn assessment_errors(
+#[expect(dead_code, reason = "K2 checks the closing call's assessments")]
+pub(crate) fn assessment_errors(
     manifest: &FrozenManifest,
     declared: &[Assessment],
-) -> Vec<HandoffFieldError> {
+) -> Vec<FieldError> {
     let expected = tracked(manifest);
     let mut assessed = BTreeSet::new();
     let mut errors = Vec::new();
     for (index, assessment) in declared.iter().enumerate() {
         let discussion = assessment.discussion_id.as_str();
-        let path = format!("/handoff/assessments/{index}");
+        let path = format!("/assessments/{index}");
         let Some(ids) = expected.get(discussion) else {
-            errors.push(HandoffFieldError::new(
+            errors.push(FieldError::new(
                 format!("{path}/discussionId"),
                 format!("{discussion} is not a discussion of the selected-thread batch."),
             ));
             continue;
         };
         if !assessed.insert(discussion) {
-            errors.push(HandoffFieldError::new(
+            errors.push(FieldError::new(
                 format!("{path}/discussionId"),
                 "ID is already used in this collection.",
             ));
@@ -198,7 +82,7 @@ pub(super) fn assessment_errors(
             if more > 0 {
                 named.push_str(&format!(" and {more} more"));
             }
-            errors.push(HandoffFieldError::new(
+            errors.push(FieldError::new(
                 format!("{path}/findingIds"),
                 format!("Include {named} for discussion {discussion}."),
             ));
@@ -206,8 +90,8 @@ pub(super) fn assessment_errors(
     }
     for discussion in expected.keys() {
         if !assessed.contains(discussion) {
-            errors.push(HandoffFieldError::new(
-                "/handoff/assessments",
+            errors.push(FieldError::new(
+                "/assessments",
                 format!("Add an assessment for discussion {discussion}."),
             ));
         }
@@ -215,27 +99,28 @@ pub(super) fn assessment_errors(
     errors
 }
 
-pub(super) fn complete(
+/// Records the batch's result and assessments, moves it from executing to completed and
+/// reconciles the earlier observations it covers. `Conflict` when the batch is no longer
+/// executing; nothing is written then.
+#[expect(dead_code, reason = "K2 completes the batch inside the publish commit")]
+pub(crate) fn complete(
     tx: &mut WriteTx<'_>,
-    work: &ReportWork,
+    lead: &LeadTarget,
+    kind: ResultKind,
+    assessments: &[Assessment],
     manifest: &FrozenManifest,
-    accepted_receipt: &str,
+    receipt: &str,
     time: i64,
 ) -> Result<(), StoreError> {
     let db = &tx.sql;
-    let review = work.call.lead.review_id().as_str();
-    let run = work.call.lead.run_id().as_str();
-    let kind = match work.declaration {
-        Declaration::Final { .. } => "final",
-        Declaration::Unchanged { .. } => "unchanged",
-        Declaration::NeedsInput { .. } => return Err(AppError::Internal.into()),
-    };
+    let review = lead.review_id().as_str();
+    let run = lead.run_id().as_str();
     db.execute(
         "INSERT INTO followup_results(review_id,batch_id,run_id,receipt_id,kind,checked_sha,completed_at_ms)
          VALUES(?1,?2,?3,?4,?5,?6,?7)",
-         params![review,manifest.batch_id,run,accepted_receipt,kind,manifest.source_sha,time],
+         params![review,manifest.batch_id,run,receipt,kind.to_string(),manifest.source_sha,time],
     )?;
-    for assessment in work.declaration.assessments() {
+    for assessment in assessments {
         db.prepare_cached(
             "INSERT INTO followup_assessments(review_id,batch_id,discussion_id,conclusion,reason,next_action)
              VALUES(?1,?2,?3,?4,?5,?6)",
@@ -256,24 +141,23 @@ pub(super) fn complete(
     if changed != 1 {
         return Err(AppError::Conflict.into());
     }
-    super::reconciliation::accept(db, review, &manifest.batch_id)?;
-    tx.emit(&[ResourceKey::Followup(Some(
-        work.call.lead.review_id().clone(),
-    ))])?;
+    reconciliation::accept(db, review, &manifest.batch_id)?;
+    tx.emit(&[ResourceKey::Followup(Some(lead.review_id().clone()))])?;
     Ok(())
 }
 
 /// Each outcome's discussion links name batch discussions that track its finding, and each
 /// linked discussion's assessment covers the finding. An outcome without links is linked to
 /// every batch discussion that tracks its finding. Each assessment must also agree with the
-/// findings this handoff retires; see [`conclusion_errors`].
-pub(super) fn edit_errors(
+/// findings this version retires; see [`conclusion_errors`].
+#[expect(dead_code, reason = "K2 checks the outcomes against the assessments")]
+pub(crate) fn edit_errors(
     db: &Connection,
     run: &str,
     manifest: &FrozenManifest,
     edits: &ReportEdits,
     assessments: &[Assessment],
-) -> Result<Vec<HandoffFieldError>, StoreError> {
+) -> Result<Vec<FieldError>, StoreError> {
     let tracked = tracked(manifest);
     let tracks = |discussion: &str, finding: &str| {
         tracked
@@ -310,8 +194,8 @@ pub(super) fn edit_errors(
             } else {
                 continue;
             };
-            errors.push(HandoffFieldError::new(
-                format!("/handoff/findingChanges/{index}/discussionIds"),
+            errors.push(FieldError::new(
+                format!("/findingChanges/{index}/discussionIds"),
                 message,
             ));
         }
@@ -337,8 +221,8 @@ fn linked<'a>(
     }
 }
 
-/// A discussion's assessment agrees with the findings this handoff retires: retiring when
-/// the handoff retires every finding the discussion tracks, and retiring or
+/// A discussion's assessment agrees with the findings this version retires: retiring when
+/// the version retires every finding the discussion tracks, and retiring or
 /// `partly_addressed` when it retires only some of them. Only an outcome for one of
 /// `findings`, the frozen version's findings, retires one; restating the outcome of a
 /// finding an earlier version retired does not. Acceptance requires the frozen version to
@@ -348,7 +232,7 @@ fn conclusion_errors(
     edits: &ReportEdits,
     findings: &BTreeSet<&str>,
     assessments: &[Assessment],
-) -> Vec<HandoffFieldError> {
+) -> Vec<FieldError> {
     let retired: BTreeSet<&str> = edits
         .findings
         .iter()
@@ -372,18 +256,18 @@ fn conclusion_errors(
                 continue;
             }
             format!(
-                "This handoff retires every finding discussion {discussion} tracks, so use fixed, clarified_withdrawn or superseded."
+                "This version retires every finding discussion {discussion} tracks, so use fixed, clarified_withdrawn or superseded."
             )
         } else {
             if conclusion.retires_finding() || conclusion == FindingConclusion::PartlyAddressed {
                 continue;
             }
             format!(
-                "This handoff retires some of the findings discussion {discussion} tracks, so use partly_addressed, fixed, clarified_withdrawn or superseded."
+                "This version retires some of the findings discussion {discussion} tracks, so use partly_addressed, fixed, clarified_withdrawn or superseded."
             )
         };
-        errors.push(HandoffFieldError::new(
-            format!("/handoff/assessments/{index}/conclusion"),
+        errors.push(FieldError::new(
+            format!("/assessments/{index}/conclusion"),
             message,
         ));
     }
@@ -430,7 +314,7 @@ mod tests {
                 .iter()
                 .map(|error| error.path.as_str())
                 .collect::<Vec<_>>(),
-            ["/handoff/assessments/0/conclusion"]
+            ["/assessments/0/conclusion"]
         );
         let mut both = fixed();
         both.findings.push(FindingEdit {

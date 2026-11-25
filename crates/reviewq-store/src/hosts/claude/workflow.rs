@@ -13,7 +13,6 @@ use crate::queue::{lead_for_run, parse};
 use crate::{SqliteStore, StoreError};
 
 // Native turn completion may precede the final JSONL flush.
-const TRANSCRIPT_FLUSH_MS: i64 = 30_000;
 
 impl ClaudeWorkflowStore for SqliteStore {
     fn claude_workflow_context(
@@ -89,43 +88,20 @@ fn context(
         } else {
             (None, None, None, false, None)
         };
-    let (terminal, terminal_settling) = if let Some(turn) = turn {
-        let row = db
-            .query_row(
-                "SELECT companion_generation,normal,response_id,response_sha256,recorded_at_ms>=?3 FROM claude_turns
-             WHERE session_key=?1 AND turn_id=?2",
-                params![key, turn.as_str(), now_ms()?.saturating_sub(TRANSCRIPT_FLUSH_MS)],
-                |row| {
-                    Ok((
-                        row.get::<_, String>(0)?,
-                        row.get::<_, bool>(1)?,
-                        row.get::<_, Option<String>>(2)?,
-                        row.get::<_, Option<String>>(3)?,
-                        row.get::<_, bool>(4)?,
-                    ))
-                },
-            )
-            .optional()?;
-        row.map(|(generation, normal, id, hash, settling)| {
-            let response = match (id, hash) {
-                (Some(id), Some(hash)) => Some((parse(&id)?, parse(&hash)?)),
-                (None, None) => None,
-                _ => return Err(StoreError::from(AppError::Internal)),
-            };
-            Ok((
-                Some(ClaudeTurnResult {
-                    turn,
-                    generation,
-                    normal,
-                    response,
-                }),
-                settling,
-            ))
+    let terminal = if let Some(turn) = turn {
+        db.query_row(
+            "SELECT companion_generation,normal FROM claude_turns WHERE session_key=?1 AND turn_id=?2",
+            params![key, turn.as_str()],
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, bool>(1)?)),
+        )
+        .optional()?
+        .map(|(generation, normal)| ClaudeTurnResult {
+            turn,
+            generation,
+            normal,
         })
-        .transpose()?
-        .unwrap_or((None, false))
     } else {
-        (None, false)
+        None
     };
     Ok(ClaudeWorkflowContext {
         session,
@@ -135,7 +111,6 @@ fn context(
         request,
         ready,
         terminal,
-        terminal_settling,
     })
 }
 
@@ -155,18 +130,17 @@ fn finish_turn(
     if !live {
         return Err(AppError::Conflict.into());
     }
-    let response = result.response.as_ref();
     let written = db.execute(
-        "INSERT INTO claude_turns(session_key,turn_id,companion_generation,normal,response_id,response_sha256,recorded_at_ms)
-         VALUES(?1,?2,?3,?4,?5,?6,?7)
+        "INSERT INTO claude_turns(session_key,turn_id,companion_generation,normal,recorded_at_ms)
+         VALUES(?1,?2,?3,?4,?5)
          ON CONFLICT(session_key,turn_id) DO NOTHING",
-        params![key,id,result.generation,result.normal,response.map(|r|r.0.as_str()),response.map(|r|r.1.as_str()),now_ms()?],
+        params![key, id, result.generation, result.normal, now_ms()?],
     )?;
     if written == 0 {
         let same: bool = db.query_row(
-            "SELECT companion_generation=?3 AND normal=?4 AND response_id IS ?5 AND response_sha256 IS ?6
+            "SELECT companion_generation=?3 AND normal=?4
              FROM claude_turns WHERE session_key=?1 AND turn_id=?2",
-            params![key,id,result.generation,result.normal,response.map(|r|r.0.as_str()),response.map(|r|r.1.as_str())],
+            params![key, id, result.generation, result.normal],
             |row| row.get(0),
         )?;
         if !same {
@@ -178,7 +152,6 @@ fn finish_turn(
          WHERE session_key=?1 AND turn_id=?2 AND generation=?3 AND permission_turn_id=?2",
         params![key, id, result.generation],
     )?;
-    tx.report_changed = written != 0;
     Ok(())
 }
 

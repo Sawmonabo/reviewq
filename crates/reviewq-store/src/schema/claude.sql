@@ -39,10 +39,7 @@ CREATE TABLE claude_turns (
     turn_id TEXT NOT NULL,
     companion_generation TEXT NOT NULL CHECK (length(companion_generation)=32),
     normal INTEGER NOT NULL CHECK (normal IN (0,1)),
-    response_id TEXT,
-    response_sha256 TEXT CHECK (length(response_sha256)=64),
     recorded_at_ms INTEGER NOT NULL,
-    CHECK ((response_id IS NULL) = (response_sha256 IS NULL)),
     PRIMARY KEY(session_key,turn_id)
 ) STRICT, WITHOUT ROWID;
 

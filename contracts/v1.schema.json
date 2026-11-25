@@ -588,33 +588,6 @@
       "title": "ArchivePageResponse",
       "type": "object"
     },
-    "ArtifactStats": {
-      "properties": {
-        "byteLength": {
-          "$ref": "#/definitions/SafeCountDto"
-        },
-        "complete": {
-          "type": "boolean"
-        },
-        "lineCount": {
-          "$ref": "#/definitions/SafeCountDto"
-        },
-        "maxLineBytes": {
-          "$ref": "#/definitions/SafeCountDto"
-        },
-        "totalCodePoints": {
-          "$ref": "#/definitions/SafeCountDto"
-        }
-      },
-      "required": [
-        "byteLength",
-        "totalCodePoints",
-        "lineCount",
-        "maxLineBytes",
-        "complete"
-      ],
-      "type": "object"
-    },
     "Assessment": {
       "properties": {
         "batchId": {
@@ -1044,98 +1017,6 @@
       ],
       "title": "CancelRecoveryResponseState",
       "type": "string"
-    },
-    "CandidateReport": {
-      "properties": {
-        "accepted": {
-          "type": "boolean"
-        },
-        "callId": {
-          "$ref": "#/definitions/ResourceIdDto"
-        },
-        "complete": {
-          "type": "boolean"
-        },
-        "declarationSha256": {
-          "$ref": "#/definitions/ReportHashDto"
-        },
-        "nextOffset": {
-          "anyOf": [
-            {
-              "$ref": "#/definitions/SafeCountDto"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "offset": {
-          "$ref": "#/definitions/SafeCountDto"
-        },
-        "offsetUnit": {
-          "$ref": "#/definitions/OffsetUnit"
-        },
-        "originalSha256": {
-          "anyOf": [
-            {
-              "$ref": "#/definitions/ReportHashDto"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "reason": {
-          "type": "string"
-        },
-        "receiptId": {
-          "$ref": "#/definitions/ResourceIdDto"
-        },
-        "reconciledByBatchId": {
-          "anyOf": [
-            {
-              "$ref": "#/definitions/ResourceIdDto"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "sha256": {
-          "$ref": "#/definitions/ReportHashDto"
-        },
-        "stats": {
-          "$ref": "#/definitions/ArtifactStats"
-        },
-        "text": {
-          "type": "string"
-        },
-        "totalCodePoints": {
-          "$ref": "#/definitions/SafeCountDto"
-        },
-        "turnId": {
-          "$ref": "#/definitions/HistoryTurnIdDto"
-        }
-      },
-      "required": [
-        "accepted",
-        "receiptId",
-        "sha256",
-        "complete",
-        "originalSha256",
-        "text",
-        "offset",
-        "nextOffset",
-        "totalCodePoints",
-        "offsetUnit",
-        "stats",
-        "turnId",
-        "callId",
-        "declarationSha256",
-        "reconciledByBatchId",
-        "reason"
-      ],
-      "type": "object"
     },
     "Catalog": {
       "properties": {
@@ -2146,8 +2027,6 @@
     },
     "DeliveryState": {
       "enum": [
-        "preparing",
-        "saving",
         "failed",
         "saved"
       ],
@@ -2158,21 +2037,10 @@
         {
           "properties": {
             "blocking": {
-              "type": [
-                "boolean",
-                "null"
-              ]
+              "type": "boolean"
             },
-            "carriedFrom": {
-              "anyOf": [
-                {
-                  "$ref": "#/definitions/SourceOrigin"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "The earlier receipt whose card a carried finding keeps."
+            "category": {
+              "type": "string"
             },
             "details": {
               "anyOf": [
@@ -2201,21 +2069,17 @@
               "const": "finding",
               "type": "string"
             },
+            "recordRevision": {
+              "$ref": "#/definitions/RevisionDto"
+            },
+            "section": {
+              "$ref": "#/definitions/FindingSection"
+            },
             "severity": {
-              "type": [
-                "string",
-                "null"
-              ]
+              "$ref": "#/definitions/Severity"
             },
             "source": {
-              "anyOf": [
-                {
-                  "$ref": "#/definitions/SourceRange"
-                },
-                {
-                  "type": "null"
-                }
-              ]
+              "$ref": "#/definitions/SourceRange"
             },
             "title": {
               "type": "string"
@@ -2227,6 +2091,9 @@
             "title",
             "severity",
             "blocking",
+            "section",
+            "category",
+            "recordRevision",
             "source"
           ],
           "type": "object"
@@ -2639,7 +2506,6 @@
         "unsupported_source",
         "invalid_boundary",
         "parser_failed",
-        "incomplete_source",
         "cache_unavailable"
       ],
       "type": "string"
@@ -3092,12 +2958,13 @@
     },
     "FindingBasis": {
       "additionalProperties": false,
+      "description": "What the agent confirmed (`observed`) or could not verify (`gap`).",
       "properties": {
         "kind": {
           "$ref": "#/definitions/FindingBasisKind"
         },
         "text": {
-          "maxLength": 2048,
+          "maxLength": 8192,
           "minLength": 1,
           "type": "string"
         }
@@ -3128,41 +2995,39 @@
     },
     "FindingDetails": {
       "properties": {
-        "checkedSha": {
-          "anyOf": [
-            {
-              "$ref": "#/definitions/GitShaDto"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
         "consequence": {
           "type": "string"
+        },
+        "details": {
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "evidence": {
           "$ref": "#/definitions/FindingBasis"
         },
-        "evidenceSha256": {
-          "$ref": "#/definitions/ReportHashDto"
+        "issue": {
+          "type": "string"
         },
-        "location": {
-          "anyOf": [
-            {
-              "$ref": "#/definitions/FindingLocation"
-            },
-            {
-              "type": "null"
-            }
+        "locations": {
+          "items": {
+            "$ref": "#/definitions/FindingLocation"
+          },
+          "type": "array"
+        },
+        "proposedComment": {
+          "type": [
+            "string",
+            "null"
           ]
         }
       },
       "required": [
+        "locations",
+        "issue",
         "consequence",
-        "evidence",
-        "checkedSha",
-        "evidenceSha256"
+        "evidence"
       ],
       "type": "object"
     },
@@ -3197,6 +3062,7 @@
     },
     "FindingLocation": {
       "additionalProperties": false,
+      "description": "A file a finding points at, with an optional 1-based line.",
       "properties": {
         "line": {
           "format": "uint32",
@@ -3217,6 +3083,13 @@
         "path"
       ],
       "type": "object"
+    },
+    "FindingSection": {
+      "enum": [
+        "functional",
+        "quality"
+      ],
+      "type": "string"
     },
     "FocusedActivity": {
       "description": "Most recent verified phase on the focused native session.",
@@ -8152,9 +8025,6 @@
         "provider": {
           "$ref": "#/definitions/HostProviderDto"
         },
-        "reportGuidance": {
-          "type": "string"
-        },
         "reviewCheckout": {
           "type": [
             "string",
@@ -8175,8 +8045,7 @@
         "provider",
         "nativeId",
         "cwd",
-        "reviewCheckout",
-        "reportGuidance"
+        "reviewCheckout"
       ],
       "type": "object"
     },
@@ -8214,23 +8083,6 @@
         "receiptId",
         "attentionReceiptId"
       ],
-      "type": "object"
-    },
-    "ReportCandidateResponse": {
-      "description": "The resource and event head from the same authorized snapshot.",
-      "properties": {
-        "cursor": {
-          "$ref": "#/definitions/EventCursorDto"
-        },
-        "data": {
-          "$ref": "#/definitions/CandidateReport"
-        }
-      },
-      "required": [
-        "data",
-        "cursor"
-      ],
-      "title": "ReportCandidateResponse",
       "type": "object"
     },
     "ReportContext": {
@@ -8407,7 +8259,7 @@
       "type": "object"
     },
     "ReportHashDto": {
-      "description": "SHA-256 of exact report bytes or their declaration.",
+      "description": "SHA-256 of exact report bytes.",
       "pattern": "^[0-9a-f]{64}$",
       "type": "string"
     },
@@ -8528,9 +8380,6 @@
     },
     "ReportSection": {
       "properties": {
-        "complete": {
-          "type": "boolean"
-        },
         "nextOffset": {
           "anyOf": [
             {
@@ -8546,16 +8395,6 @@
         },
         "offsetUnit": {
           "$ref": "#/definitions/OffsetUnit"
-        },
-        "originalSha256": {
-          "anyOf": [
-            {
-              "$ref": "#/definitions/ReportHashDto"
-            },
-            {
-              "type": "null"
-            }
-          ]
         },
         "receiptId": {
           "$ref": "#/definitions/ResourceIdDto"
@@ -8573,8 +8412,6 @@
       "required": [
         "receiptId",
         "sha256",
-        "complete",
-        "originalSha256",
         "text",
         "offset",
         "nextOffset",
@@ -8608,21 +8445,8 @@
         "byteLength": {
           "$ref": "#/definitions/SafeCountDto"
         },
-        "capturedAt": {
-          "$ref": "#/definitions/UtcTimestampDto"
-        },
         "changeCount": {
-          "anyOf": [
-            {
-              "$ref": "#/definitions/SafeCountDto"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "complete": {
-          "type": "boolean"
+          "$ref": "#/definitions/SafeCountDto"
         },
         "coverage": {
           "$ref": "#/definitions/Coverage"
@@ -8648,14 +8472,7 @@
           ]
         },
         "findingCount": {
-          "anyOf": [
-            {
-              "$ref": "#/definitions/SafeCountDto"
-            },
-            {
-              "type": "null"
-            }
-          ]
+          "$ref": "#/definitions/SafeCountDto"
         },
         "fullMrReviewedSha": {
           "anyOf": [
@@ -8673,19 +8490,6 @@
         "maxLineBytes": {
           "$ref": "#/definitions/SafeCountDto"
         },
-        "nativeProvenance": {
-          "type": "boolean"
-        },
-        "originalSha256": {
-          "anyOf": [
-            {
-              "$ref": "#/definitions/ReportHashDto"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
         "parentReceiptId": {
           "anyOf": [
             {
@@ -8695,6 +8499,9 @@
               "type": "null"
             }
           ]
+        },
+        "publishedAt": {
+          "$ref": "#/definitions/UtcTimestampDto"
         },
         "receiptId": {
           "$ref": "#/definitions/ResourceIdDto"
@@ -8715,22 +8522,11 @@
             "null"
           ]
         },
-        "semanticIndex": {
-          "$ref": "#/definitions/SemanticIndex"
-        },
         "sha256": {
           "$ref": "#/definitions/ReportHashDto"
         },
         "totalCodePoints": {
           "$ref": "#/definitions/SafeCountDto"
-        },
-        "unanchoredFindingCount": {
-          "allOf": [
-            {
-              "$ref": "#/definitions/SafeCountDto"
-            }
-          ],
-          "description": "Active findings with no card in this report's text: carried from an earlier\nversion, or listed in the findings ledger without an `F-` heading."
         },
         "verdict": {
           "$ref": "#/definitions/Verdict"
@@ -8739,8 +8535,6 @@
       "required": [
         "receiptId",
         "sha256",
-        "originalSha256",
-        "nativeProvenance",
         "parentReceiptId",
         "attentionReceiptId",
         "reviewedSha",
@@ -8750,16 +8544,13 @@
         "coverageSourceSha",
         "coverageTargetSha",
         "verdict",
-        "semanticIndex",
         "findingCount",
         "changeCount",
-        "unanchoredFindingCount",
-        "capturedAt",
+        "publishedAt",
         "byteLength",
         "totalCodePoints",
         "lineCount",
-        "maxLineBytes",
-        "complete"
+        "maxLineBytes"
       ],
       "type": "object"
     },
@@ -10698,13 +10489,6 @@
       ],
       "type": "object"
     },
-    "SemanticIndex": {
-      "enum": [
-        "ready",
-        "source_only"
-      ],
-      "type": "string"
-    },
     "SendMessageRequest": {
       "additionalProperties": false,
       "description": "The browser body for POST /runs/{runId}/sessions/{sessionKey}/messages.",
@@ -10919,6 +10703,16 @@
       ],
       "type": "object"
     },
+    "Severity": {
+      "description": "A finding's severity, most severe first.",
+      "enum": [
+        "P0",
+        "P1",
+        "P2",
+        "P3"
+      ],
+      "type": "string"
+    },
     "Skill": {
       "additionalProperties": false,
       "properties": {
@@ -10935,28 +10729,6 @@
       ],
       "type": "object"
     },
-    "SourceOrigin": {
-      "properties": {
-        "checkedSha": {
-          "anyOf": [
-            {
-              "$ref": "#/definitions/GitShaDto"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "report": {
-          "$ref": "#/definitions/ReportReference"
-        }
-      },
-      "required": [
-        "report",
-        "checkedSha"
-      ],
-      "type": "object"
-    },
     "SourceRange": {
       "properties": {
         "length": {
@@ -10964,16 +10736,6 @@
         },
         "offset": {
           "$ref": "#/definitions/SafeCountDto"
-        },
-        "origin": {
-          "anyOf": [
-            {
-              "$ref": "#/definitions/SourceOrigin"
-            },
-            {
-              "type": "null"
-            }
-          ]
         },
         "sha256": {
           "$ref": "#/definitions/ReportHashDto"
@@ -12082,7 +11844,6 @@
     "RefreshResponse": "queue",
     "RegisterSessionRequest": "hosts",
     "RegisteredSessionResponse": "hosts",
-    "ReportCandidateResponse": "reports",
     "ReportContextResponse": "reports",
     "ReportDispositionRequest": "reports",
     "ReportDispositionResponse": "reports",
@@ -12203,7 +11964,6 @@
       "RecoveryStateResponse": "#/definitions/RecoveryStateResponse",
       "RefreshResponse": "#/definitions/RefreshResponse",
       "RegisteredSessionResponse": "#/definitions/RegisteredSessionResponse",
-      "ReportCandidateResponse": "#/definitions/ReportCandidateResponse",
       "ReportContextResponse": "#/definitions/ReportContextResponse",
       "ReportDispositionResponse": "#/definitions/ReportDispositionResponse",
       "ReportHistoryResponse": "#/definitions/ReportHistoryResponse",

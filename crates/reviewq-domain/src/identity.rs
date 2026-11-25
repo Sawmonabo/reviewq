@@ -88,12 +88,12 @@ text_identity!(
     opaque_id
 );
 text_identity!(
-    /// The service receipt identifying one captured report version.
+    /// The service receipt identifying one published report version.
     ReceiptId,
     opaque_id
 );
 text_identity!(
-    /// Full SHA-256 of the original UTF-8 report bytes.
+    /// Full SHA-256 of the exact UTF-8 report bytes.
     ReportHash,
     |value: &str| lowercase_hex(value, 64)
 );

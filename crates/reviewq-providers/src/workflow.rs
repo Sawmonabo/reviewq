@@ -4,8 +4,7 @@ use std::sync::Arc;
 
 use reviewq_app::access::{AppError, AppFuture};
 use reviewq_app::workflow::{
-    ExpectedAcknowledgement, NativeCall, NativeWorkflowProof, ReportCompletion, WorkflowHold,
-    WorkflowReadiness, WorkflowTool,
+    NativeCall, NativeWorkflowProof, WorkflowHold, WorkflowReadiness, WorkflowTool,
 };
 use reviewq_domain::identity::NativeTurnId;
 use reviewq_domain::session::{HostProvider, LeadTarget};
@@ -121,56 +120,6 @@ impl NativeWorkflowProof for Workflows {
         Box::pin(async move {
             self.reader(&lead)?
                 .verify_active_call(lead, turn, call_id, tool)
-                .await
-        })
-    }
-
-    fn verify_mcp_report_call(
-        &self,
-        lead: LeadTarget,
-        call_id: String,
-        arguments: Vec<u8>,
-        origin_item_id: Option<String>,
-    ) -> AppFuture<'_, NativeCall> {
-        Box::pin(async move {
-            self.reader(&lead)?
-                .verify_mcp_report_call(lead, call_id, arguments, origin_item_id)
-                .await
-        })
-    }
-
-    fn verify_witnessed_report_call(
-        &self,
-        lead: LeadTarget,
-        turn: NativeTurnId,
-        call_id: String,
-        arguments: Vec<u8>,
-        ordinal: u32,
-        origin_item_id: Option<String>,
-    ) -> AppFuture<'_, NativeCall> {
-        Box::pin(async move {
-            self.reader(&lead)?
-                .verify_witnessed_report_call(
-                    lead,
-                    turn,
-                    call_id,
-                    arguments,
-                    ordinal,
-                    origin_item_id,
-                )
-                .await
-        })
-    }
-
-    fn report_completion(
-        &self,
-        call: NativeCall,
-        acknowledgement: ExpectedAcknowledgement,
-        include_response: bool,
-    ) -> AppFuture<'_, ReportCompletion> {
-        Box::pin(async move {
-            self.reader(&call.lead)?
-                .report_completion(call, acknowledgement, include_response)
                 .await
         })
     }

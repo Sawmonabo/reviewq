@@ -1,3 +1,5 @@
+//! Settles earlier follow-up observations that a completed batch covers.
+
 use rusqlite::{Connection, params};
 
 use crate::StoreError;
@@ -40,15 +42,6 @@ pub(super) fn accept(db: &Connection, review: &str, current: &str) -> Result<(),
          )
          INSERT INTO followup_reconciled_observations(review_id,batch_id,observation_id,assessment_batch_id)
          SELECT ?1,batch_id,observation_id,?2 FROM ancestors WHERE true ON CONFLICT DO NOTHING",
-        params![review,current],
-    )?;
-    db.execute(
-        "UPDATE report_handoffs AS h SET reconciled_by_batch_id=?2
-         WHERE h.state='failed' AND h.artifact_id IS NOT NULL AND h.reconciled_by_batch_id IS NULL
-           AND h.batch_id IN (SELECT batch_id FROM followup_reconciled_observations WHERE review_id=?1 AND assessment_batch_id=?2)
-           AND NOT EXISTS (SELECT 1 FROM followup_members m WHERE m.review_id=?1 AND m.batch_id=h.batch_id
-               AND NOT EXISTS (SELECT 1 FROM followup_reconciled_observations a
-                   WHERE a.review_id=m.review_id AND a.batch_id=m.batch_id AND a.observation_id=m.observation_id))",
         params![review,current],
     )?;
     Ok(())

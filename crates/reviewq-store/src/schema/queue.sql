@@ -73,10 +73,8 @@ CREATE VIEW review_activity_evidence AS
       EXISTS (SELECT 1 FROM review_active_sessions n WHERE n.run_id=x.run_id
          AND n.host_activity='failed') AS family_failed,
       action.state AS action_state, action.intent AS action_intent,
-      CASE WHEN delivery.state='pending_completion' THEN delivery.state
-           WHEN EXISTS (SELECT 1 FROM report_delivery_failures f WHERE f.run_id=x.run_id
-                        AND f.resolved_by_receipt_id IS NULL) THEN 'failed'
-           ELSE delivery.state END AS report_state,
+      CASE WHEN EXISTS (SELECT 1 FROM report_delivery_failures f WHERE f.run_id=x.run_id
+                        AND f.resolved_by_receipt_id IS NULL) THEN 'failed' END AS report_state,
       coalesce((SELECT batch.state FROM followup_batches batch JOIN followup_monitors monitor USING(review_id)
          WHERE batch.review_id=r.review_id AND batch.generation=monitor.generation AND monitor.state='enabled'
            AND batch.authority_verified=1 AND batch.state IN ('pending','reserved','executing','reconciliation')
@@ -119,7 +117,7 @@ CREATE VIEW review_activity_evidence AS
                         WHEN EXISTS (SELECT 1 FROM native_async_questions q WHERE q.run_id=x.run_id
                             AND q.session_key=s.session_key AND q.state='pending') THEN 5 ELSE 6 END,
                    s.session_key LIMIT 1), x.lead_session_key) AS focus_session,
-      max(coalesce(x.started_at_ms,0),coalesce(action.updated_at_ms,0),coalesce(report.captured_at_ms,0),
+      max(coalesce(x.started_at_ms,0),coalesce(action.updated_at_ms,0),coalesce(report.published_at_ms,0),
           coalesce((SELECT n.occurred_at_ms FROM notifications n WHERE n.review_id=r.review_id
              ORDER BY n.occurred_at_ms DESC LIMIT 1),0)) AS last_activity
     FROM reviews r
@@ -132,9 +130,6 @@ CREATE VIEW review_activity_evidence AS
        AND s.settings_revision=(SELECT settings_revision FROM service_state WHERE singleton=1)
     LEFT JOIN review_reviewer_activity ra ON ra.review_id=r.review_id AND ra.source_sha=r.head_sha
        AND ra.settings_revision=(SELECT settings_revision FROM service_state WHERE singleton=1)
-    LEFT JOIN report_handoffs delivery ON delivery.receipt_id=(SELECT h.receipt_id FROM report_handoffs h
-        WHERE h.run_id=x.run_id AND h.reconciled_by_batch_id IS NULL
-        ORDER BY h.created_at_ms DESC,h.receipt_id DESC LIMIT 1)
     LEFT JOIN report_heads h ON h.run_id=x.run_id
     LEFT JOIN report_versions report ON (report.run_id,report.receipt_id)=(h.run_id,h.receipt_id)
     LEFT JOIN action_heads ah ON ah.run_id=x.run_id

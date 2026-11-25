@@ -24,9 +24,7 @@ use reviewq_app::notifications::InboxStore;
 use reviewq_app::queue::{
     ArchiveStore, QueueStore, ReviewLookup, SprintStore, TrackingStore, WorkspaceQueue,
 };
-use reviewq_app::reports::{
-    DrawingRenderer, ReportCaptureStore, ReportFileSource, ReportMutationStore, ReportStore,
-};
+use reviewq_app::reports::{DrawingRenderer, ReportMutationStore, ReportStore};
 use reviewq_app::settings::{ConnectionSources, NativeSkills, RuntimeSources, SettingsStore};
 use reviewq_app::sources::SourceRefreshStore;
 use reviewq_app::workflow::NativeWorkflowProof;
@@ -90,7 +88,6 @@ pub trait Store:
     + SourceRefreshStore
     + ReportStore
     + ReportMutationStore
-    + ReportCaptureStore
     + MessageHistoryStore
     + InboxStore
     + DecisionStore
@@ -121,7 +118,6 @@ impl<
         + SourceRefreshStore
         + ReportStore
         + ReportMutationStore
-        + ReportCaptureStore
         + MessageHistoryStore
         + InboxStore
         + DecisionStore
@@ -136,10 +132,9 @@ impl<
 {
 }
 
-/// Native proof and guarded artifact reads for the workflow routes.
+/// Native proof for the workflow routes.
 pub struct WorkflowIntegration {
     pub proof: Arc<dyn NativeWorkflowProof>,
-    pub report_files: Arc<dyn ReportFileSource>,
 }
 
 pub(super) struct Entry {
@@ -158,7 +153,6 @@ pub(super) struct Entry {
     claude_interrupt: Option<Arc<dyn reviewq_app::hosts::recovery::NativeJobInterrupt>>,
     file_history: Arc<dyn NativeHistoryReader>,
     history_watches: history::Watchers,
-    report_witnesses: features::reports::ReportWitnesses,
     workflow: WorkflowIntegration,
     drawings: diagrams::Cache,
     tables: tables::Cache,
@@ -249,7 +243,6 @@ pub fn router(
         claude: runtime.claude,
         claude_interrupt: runtime.claude_interrupt,
         file_history,
-        report_witnesses: Default::default(),
         history_watches: history::Watchers::default(),
         workflow: runtime.workflow,
         drawings: diagrams::Cache::new(runtime.drawing_renderer, runtime.shutdown.clone()),

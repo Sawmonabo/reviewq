@@ -5,7 +5,6 @@ const schema363 = {
     leadSessionKey: { $ref: "#/definitions/CheckpointIdDto" },
     nativeId: { $ref: "#/definitions/CheckpointIdDto" },
     provider: { $ref: "#/definitions/HostProviderDto" },
-    reportGuidance: { type: "string" },
     reviewCheckout: { type: ["string", "null"] },
     reviewId: { $ref: "#/definitions/ReviewIdDto" },
     runId: { $ref: "#/definitions/CheckpointIdDto" },
@@ -18,35 +17,28 @@ const schema363 = {
     "nativeId",
     "cwd",
     "reviewCheckout",
-    "reportGuidance",
   ],
   type: "object",
 };
-const schema374 = {
-  type: "object",
+const schema370 = {
   properties: {
-    blocking: { type: ["boolean", "null"] },
-    carriedFrom: {
-      anyOf: [{ $ref: "#/definitions/SourceOrigin" }, { type: "null" }],
-      description: "The earlier receipt whose card a carried finding keeps.",
+    consequence: { type: "string" },
+    details: { type: ["string", "null"] },
+    evidence: { $ref: "#/definitions/FindingBasis" },
+    issue: { type: "string" },
+    locations: {
+      items: { $ref: "#/definitions/FindingLocation" },
+      type: "array",
     },
-    details: {
-      anyOf: [{ $ref: "#/definitions/FindingDetails" }, { type: "null" }],
-    },
-    disposition: {
-      anyOf: [{ $ref: "#/definitions/FindingDisposition" }, { type: "null" }],
-    },
-    findingId: { type: "string" },
-    kind: { const: "finding", type: "string" },
-    severity: { type: ["string", "null"] },
-    source: {
-      anyOf: [{ $ref: "#/definitions/SourceRange" }, { type: "null" }],
-    },
+    proposedComment: { type: ["string", "null"] },
   },
+  required: ["locations", "issue", "consequence", "evidence"],
+  type: "object",
 };
-const schema378 = { enum: ["observed", "gap"], type: "string" };
-const schema379 = {
+const schema372 = { enum: ["observed", "gap"], type: "string" };
+const schema373 = {
   additionalProperties: false,
+  description: "A file a finding points at, with an optional 1-based line.",
   properties: {
     line: {
       format: "uint32",
@@ -59,7 +51,7 @@ const schema379 = {
   required: ["path"],
   type: "object",
 };
-const schema380 = {
+const schema374 = {
   properties: {
     blocking: { type: ["boolean", "null"] },
     publication: {
@@ -70,7 +62,13 @@ const schema380 = {
   required: ["blocking", "publication", "reason"],
   type: "object",
 };
-const schema384 = {
+const schema375 = { enum: ["functional", "quality"], type: "string" };
+const schema377 = {
+  description: "A finding's severity, most severe first.",
+  enum: ["P0", "P1", "P2", "P3"],
+  type: "string",
+};
+const schema380 = {
   properties: {
     blocking: { type: ["boolean", "null"] },
     findingId: { type: "string" },
@@ -83,7 +81,7 @@ const schema384 = {
   required: ["kind", "findingId", "blocking", "publication", "reason"],
   type: "object",
 };
-const schema390 = {
+const schema386 = {
   properties: {
     reason: { type: ["string", "null"] },
     receiptId: {
@@ -94,43 +92,56 @@ const schema390 = {
   required: ["receiptId", "state", "reason"],
   type: "object",
 };
-const schema391 = {
-  enum: ["preparing", "saving", "failed", "saved"],
-  type: "string",
-};
-const schema395 = {
+const schema387 = { enum: ["failed", "saved"], type: "string" };
+const schema390 = {
   type: "object",
   properties: {
+    lineCount: { $ref: "#/definitions/SafeCountDto" },
+    maxLineBytes: { $ref: "#/definitions/SafeCountDto" },
+    parentReceiptId: {
+      anyOf: [{ $ref: "#/definitions/CheckpointIdDto" }, { type: "null" }],
+    },
+    publishedAt: { $ref: "#/definitions/UtcTimestampDto" },
+    receiptId: { $ref: "#/definitions/CheckpointIdDto" },
     reviewedSha: {
       anyOf: [{ $ref: "#/definitions/GitShaDto" }, { type: "null" }],
     },
     revisionReason: { type: ["string", "null"] },
-    semanticIndex: { $ref: "#/definitions/SemanticIndex" },
     sha256: { $ref: "#/definitions/ReportHashDto" },
-    totalCodePoints: { $ref: "#/definitions/SafeCountDto" },
-    unanchoredFindingCount: {
-      allOf: [{ $ref: "#/definitions/SafeCountDto" }],
-      description:
-        "Active findings with no card in this report's text: carried from an earlier\nversion, or listed in the findings ledger without an `F-` heading.",
-    },
-    verdict: { $ref: "#/definitions/Verdict" },
   },
 };
-const schema396 = { enum: ["ready", "source_only"], type: "string" };
-const schema397 = {
+const schema392 = {
   enum: ["approve", "request_changes", "blocked", "not_specified"],
   type: "string",
 };
+const schema408 = {
+  properties: {
+    delivery: {
+      anyOf: [{ $ref: "#/definitions/ReportDelivery" }, { type: "null" }],
+    },
+    display: {
+      anyOf: [{ $ref: "#/definitions/DocumentDisplay" }, { type: "null" }],
+    },
+    markdown: { type: ["string", "null"] },
+    report: {
+      anyOf: [{ $ref: "#/definitions/ReportSummary" }, { type: "null" }],
+    },
+  },
+  required: ["report", "delivery"],
+  type: "object",
+};
 export {
   schema363,
+  schema370,
+  schema372,
+  schema373,
   schema374,
-  schema378,
-  schema379,
+  schema375,
+  schema377,
   schema380,
-  schema384,
+  schema386,
+  schema387,
   schema390,
-  schema391,
-  schema395,
-  schema396,
-  schema397,
+  schema392,
+  schema408,
 };

@@ -145,12 +145,11 @@ impl LaunchInput {
             text.push_str("\n\n");
         }
         text.push_str(&format!(
-            "Review {}!{} at {}. ",
+            "Review {}!{} at {}.",
             self.source.project_path,
             self.source.identity.iid(),
             self.source.head_sha,
         ));
-        text.push_str(report_guidance());
         text
     }
 }
@@ -216,18 +215,6 @@ impl LaunchPreparation {
             context: selection.context,
         })
     }
-}
-
-pub fn report_guidance() -> &'static str {
-    concat!(
-        "Follow the repository's review instructions and keep its requested output. ",
-        "When the review is complete, submit it once with ReviewQ's report_handoff tool from this linked lead conversation ",
-        "and add the findings ledger the tool describes: every finding the report raises, ",
-        "and an outcome for each earlier finding you re-assessed. ",
-        "ReviewQ verifies the handoff after the native turn completes. ",
-        "GitLab publication requires separate explicit human authorization.\nExample handoff:\n",
-        include_str!("../../../fixtures/contracts/report-handoff.json"),
-    )
 }
 
 fn select_model(

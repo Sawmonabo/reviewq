@@ -29,10 +29,7 @@ function validate1240(
           (missing0 = "cwd")) ||
         ((data.reviewCheckout === undefined ||
           !func0.call(data, "reviewCheckout")) &&
-          (missing0 = "reviewCheckout")) ||
-        ((data.reportGuidance === undefined ||
-          !func0.call(data, "reportGuidance")) &&
-          (missing0 = "reportGuidance"))
+          (missing0 = "reviewCheckout"))
       ) {
         validate1240.errors = [
           {
@@ -129,17 +126,20 @@ function validate1240(
               }
               if (valid0) {
                 if (
-                  data.reportGuidance !== undefined &&
-                  func0.call(data, "reportGuidance")
+                  data.reviewCheckout !== undefined &&
+                  func0.call(data, "reviewCheckout")
                 ) {
+                  let data4 = data.reviewCheckout;
                   const _errs6 = errors;
-                  if (typeof data.reportGuidance !== "string") {
+                  if (typeof data4 !== "string" && data4 !== null) {
                     validate1240.errors = [
                       {
-                        instancePath: instancePath + "/reportGuidance",
-                        schemaPath: "#/properties/reportGuidance/type",
+                        instancePath: instancePath + "/reviewCheckout",
+                        schemaPath: "#/properties/reviewCheckout/type",
                         keyword: "type",
-                        params: { type: "string" },
+                        params: {
+                          type: schema363.properties.reviewCheckout.type,
+                        },
                       },
                     ];
                     return false;
@@ -150,76 +150,48 @@ function validate1240(
                 }
                 if (valid0) {
                   if (
-                    data.reviewCheckout !== undefined &&
-                    func0.call(data, "reviewCheckout")
+                    data.reviewId !== undefined &&
+                    func0.call(data, "reviewId")
                   ) {
-                    let data5 = data.reviewCheckout;
                     const _errs8 = errors;
-                    if (typeof data5 !== "string" && data5 !== null) {
-                      validate1240.errors = [
-                        {
-                          instancePath: instancePath + "/reviewCheckout",
-                          schemaPath: "#/properties/reviewCheckout/type",
-                          keyword: "type",
-                          params: {
-                            type: schema363.properties.reviewCheckout.type,
-                          },
-                        },
-                      ];
-                      return false;
+                    if (
+                      !validate116(data.reviewId, {
+                        instancePath: instancePath + "/reviewId",
+                        parentData: data,
+                        parentDataProperty: "reviewId",
+                        rootData,
+                      })
+                    ) {
+                      vErrors =
+                        vErrors === null
+                          ? validate116.errors
+                          : vErrors.concat(validate116.errors);
+                      errors = vErrors.length;
                     }
                     var valid0 = _errs8 === errors;
                   } else {
                     var valid0 = true;
                   }
                   if (valid0) {
-                    if (
-                      data.reviewId !== undefined &&
-                      func0.call(data, "reviewId")
-                    ) {
-                      const _errs10 = errors;
+                    if (data.runId !== undefined && func0.call(data, "runId")) {
+                      const _errs9 = errors;
                       if (
-                        !validate116(data.reviewId, {
-                          instancePath: instancePath + "/reviewId",
+                        !validate25(data.runId, {
+                          instancePath: instancePath + "/runId",
                           parentData: data,
-                          parentDataProperty: "reviewId",
+                          parentDataProperty: "runId",
                           rootData,
                         })
                       ) {
                         vErrors =
                           vErrors === null
-                            ? validate116.errors
-                            : vErrors.concat(validate116.errors);
+                            ? validate25.errors
+                            : vErrors.concat(validate25.errors);
                         errors = vErrors.length;
                       }
-                      var valid0 = _errs10 === errors;
+                      var valid0 = _errs9 === errors;
                     } else {
                       var valid0 = true;
-                    }
-                    if (valid0) {
-                      if (
-                        data.runId !== undefined &&
-                        func0.call(data, "runId")
-                      ) {
-                        const _errs11 = errors;
-                        if (
-                          !validate25(data.runId, {
-                            instancePath: instancePath + "/runId",
-                            parentData: data,
-                            parentDataProperty: "runId",
-                            rootData,
-                          })
-                        ) {
-                          vErrors =
-                            vErrors === null
-                              ? validate25.errors
-                              : vErrors.concat(validate25.errors);
-                          errors = vErrors.length;
-                        }
-                        var valid0 = _errs11 === errors;
-                      } else {
-                        var valid0 = true;
-                      }
                     }
                   }
                 }

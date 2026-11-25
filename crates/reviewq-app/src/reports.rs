@@ -1,17 +1,8 @@
 //! Review reports, immutable source reads and finding projections.
 
-mod capture;
 mod display;
 mod drawings;
-mod index;
-pub mod ledger;
 mod revision;
-mod structured;
-
-pub use structured::{
-    FindingBasis, FindingBasisKind, FindingDetails, FindingLocation, StructuredFinding,
-    StructuredReport,
-};
 
 pub use display::{
     DISPLAY_INDEX_FORMAT, DisplayBlock, DisplayBlockKind, DisplayFallback, DisplayIndex,
@@ -24,12 +15,6 @@ pub use drawings::{
 
 pub use revision::{FindingEdit, ReportEdits};
 
-pub use capture::{
-    AcceptedReport, ArtifactChunk, Assessment, CHUNK_BYTES, CapturedArtifact, Declaration,
-    HandoffReceipt, HandoffState, ReportAuthority, ReportCaptureStore, ReportFileSource,
-    ReportWork, RevisionEvidence, Source, SubmittedFile, read_submitted_file, reconcile_reports,
-};
-
 use reviewq_domain::identity::{GitSha, ReceiptId, ReportHash, Revision, RunId};
 
 use crate::access::{Actor, AppError, AppFuture};
@@ -37,53 +22,12 @@ use crate::events::Snapshot;
 use crate::hosts::MessageBody;
 
 pub const MAX_REPORT_PAGE: u16 = 50;
-/// Budget for a handoff's stored metadata. The schema's 131072-byte CHECKs must match it.
-pub const METADATA_BYTES: usize = 128 * 1024;
 pub const MAX_SECTION_SCALARS: u32 = 12_000;
 const MAX_MARKDOWN_LINE_BYTES: usize = 16 * 1024;
+/// Largest stored chunk of a report's text.
+pub const CHUNK_BYTES: usize = 64 * 1024;
 
 use crate::labels::labels;
-
-/// A report handoff field that breaks a rule, with the correction the agent can make in
-/// its open turn. The path is a JSON pointer into the tool input.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct HandoffFieldError {
-    pub path: String,
-    pub message: String,
-}
-
-/// Equals the protocol's `limits::MAX_FIELD_ERRORS`, which keeps a refusal within every
-/// client's reply cap.
-const MAX_HANDOFF_FIELD_ERRORS: usize = 50;
-
-impl HandoffFieldError {
-    pub fn new(path: impl Into<String>, message: impl Into<String>) -> Self {
-        Self {
-            path: path.into(),
-            message: message.into(),
-        }
-    }
-
-    /// Keeps the first `MAX_HANDOFF_FIELD_ERRORS` errors and, when there are more, adds one
-    /// `/handoff` error that counts the rest.
-    pub fn bounded(mut errors: Vec<Self>) -> Vec<Self> {
-        let hidden = errors.len().saturating_sub(MAX_HANDOFF_FIELD_ERRORS);
-        if hidden > 0 {
-            errors.truncate(MAX_HANDOFF_FIELD_ERRORS);
-            errors.push(Self::new("/handoff", hidden_errors(hidden)));
-        }
-        errors
-    }
-}
-
-/// Counts the errors a capped refusal leaves out.
-fn hidden_errors(hidden: usize) -> String {
-    if hidden == 1 {
-        "1 more error is not shown. Fix these and submit again.".to_owned()
-    } else {
-        format!("{hidden} more errors are not shown. Fix these and submit again.")
-    }
-}
 
 labels!(Verdict {
     Approve => "approve",
@@ -95,13 +39,7 @@ labels!(Coverage {
     FullMr => "full_mr",
     SelectedThreads => "selected_threads",
 });
-labels!(SemanticIndex {
-    Ready => "ready",
-    SourceOnly => "source_only",
-});
 labels!(ReportDeliveryState {
-    Preparing => "preparing",
-    Saving => "saving",
     Failed => "failed",
     Saved => "saved",
 });
@@ -118,6 +56,87 @@ labels!(FindingConclusion {
     StillPresent => "still_present",
     Unverified => "unverified",
 });
+labels!(Severity {
+    P0 => "P0",
+    P1 => "P1",
+    P2 => "P2",
+    P3 => "P3",
+});
+labels!(FindingSection {
+    Functional => "functional",
+    Quality => "quality",
+});
+labels!(FindingBasisKind {
+    Observed => "observed",
+    Gap => "gap",
+});
+
+/// The reviewed revision a version or a closing call names.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum RevisionEvidence {
+    Exact(GitSha),
+    Unknown(String),
+}
+
+/// The lead's conclusion on one selected discussion of a follow-up batch.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct Assessment {
+    pub discussion_id: String,
+    pub conclusion: FindingConclusion,
+    pub reason: String,
+    pub finding_ids: Vec<String>,
+    pub next_action: crate::followups::NextAction,
+}
+
+/// Identifies the configured project, GitLab principal and checkout used by a report.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ReportAuthority(pub ReportHash);
+
+/// One stored chunk of a report's text, at its byte and scalar offsets.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ArtifactChunk {
+    pub ordinal: u64,
+    pub byte_start: u64,
+    pub scalar_start: u64,
+    pub bytes: Vec<u8>,
+}
+
+/// Counts lines and the longest line, in bytes without a line's trailing CR, as text is
+/// appended.
+#[derive(Default)]
+#[expect(dead_code, reason = "K1 computes the line statistics of composed text")]
+pub(crate) struct LineStats {
+    line: u64,
+    lines: u64,
+    max: u64,
+    last_cr: bool,
+}
+
+#[expect(dead_code, reason = "K1 computes the line statistics of composed text")]
+impl LineStats {
+    pub(crate) fn push(&mut self, bytes: &[u8]) {
+        for &byte in bytes {
+            if byte == b'\n' {
+                self.max = self
+                    .max
+                    .max(self.line.saturating_sub(u64::from(self.last_cr)));
+                self.lines += 1;
+                self.line = 0;
+            } else {
+                self.line += 1;
+            }
+            self.last_cr = byte == b'\r';
+        }
+    }
+
+    /// The line count and the longest line's length.
+    pub(crate) fn finish(self) -> (u64, u64) {
+        (
+            self.lines + u64::from(self.line > 0),
+            self.max.max(self.line),
+        )
+    }
+}
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ArtifactStats {
@@ -125,7 +144,6 @@ pub struct ArtifactStats {
     pub total_code_points: u64,
     pub line_count: u64,
     pub max_line_bytes: u64,
-    pub complete: bool,
 }
 
 impl ArtifactStats {
@@ -149,8 +167,6 @@ pub struct ReportReference {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ReportSummary {
     pub reference: ReportReference,
-    pub original_sha256: Option<ReportHash>,
-    pub native_provenance: bool,
     pub parent_receipt_id: Option<ReceiptId>,
     pub attention_receipt_id: ReceiptId,
     pub reviewed_sha: Option<GitSha>,
@@ -160,12 +176,9 @@ pub struct ReportSummary {
     pub coverage_source_sha: Option<GitSha>,
     pub coverage_target_sha: Option<GitSha>,
     pub verdict: Verdict,
-    pub semantic_index: SemanticIndex,
-    pub finding_count: Option<u64>,
-    pub change_count: Option<u64>,
-    /// Active findings with no card in this report's text (no heading anchor).
-    pub unanchored_finding_count: u64,
-    pub captured_at_ms: i64,
+    pub finding_count: u64,
+    pub change_count: u64,
+    pub published_at_ms: i64,
     pub stats: ArtifactStats,
 }
 
@@ -183,7 +196,7 @@ pub struct ReportView {
 
 #[derive(Clone)]
 pub struct ReportPosition {
-    pub captured_at_ms: i64,
+    pub published_at_ms: i64,
     pub receipt_id: ReceiptId,
 }
 
@@ -196,8 +209,6 @@ pub struct ReportHistory {
 
 pub struct ReportSection {
     pub report: ReportReference,
-    pub complete: bool,
-    pub original_sha256: Option<ReportHash>,
     pub text: String,
     pub offset: u64,
     pub next_offset: Option<u64>,
@@ -237,13 +248,31 @@ pub struct SourceRange {
     pub offset: u64,
     pub length: u64,
     pub hash: ReportHash,
-    pub origin: Option<Box<SourceOrigin>>,
 }
 
+/// A file a finding points at, with an optional 1-based line.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct SourceOrigin {
-    pub report: ReportReference,
-    pub checked_sha: Option<GitSha>,
+pub struct FindingLocation {
+    pub path: String,
+    pub line: Option<u32>,
+}
+
+/// What the agent confirmed (`Observed`) or could not verify (`Gap`).
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct FindingBasis {
+    pub kind: FindingBasisKind,
+    pub text: String,
+}
+
+/// A finding record's fields as a card shows them.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct FindingDetails {
+    pub locations: Vec<FindingLocation>,
+    pub issue: String,
+    pub consequence: String,
+    pub evidence: FindingBasis,
+    pub proposed_comment: Option<String>,
+    pub details: Option<String>,
 }
 
 #[derive(Clone)]
@@ -258,15 +287,12 @@ pub enum Descriptor {
     Finding {
         id: String,
         title: String,
-        severity: Option<String>,
-        blocking: Option<bool>,
-        source: Option<SourceRange>,
-        /// The heading's `F-` ID sits inside a strikethrough span or a `<del>`, `<s>` or
-        /// `<strike>` tag, as in `### ~~F-04 · P3 · Stale comment~~ — fixed in v2`. Only
-        /// the index sets it.
-        struck: bool,
-        /// The receipt where a carried finding's card was last authored.
-        carried_from: Option<Box<SourceOrigin>>,
+        severity: Severity,
+        blocking: bool,
+        section: FindingSection,
+        category: String,
+        record_revision: Revision,
+        source: SourceRange,
         details: Option<Box<FindingDetails>>,
         disposition: Option<Box<FindingDisposition>>,
     },
@@ -306,17 +332,6 @@ pub struct ReportContext {
     pub disposition_version: Revision,
     pub items: Vec<Descriptor>,
     pub next: Option<ContextPosition>,
-}
-
-pub struct CandidateReport {
-    pub reference: ReportReference,
-    pub stats: ArtifactStats,
-    pub turn_id: String,
-    pub call_id: String,
-    pub declaration_sha256: ReportHash,
-    pub reconciled_by_batch_id: Option<String>,
-    pub reason: String,
-    pub section: ReportSection,
 }
 
 pub enum QuoteResolution {
@@ -387,14 +402,6 @@ pub trait ReportStore: Send + Sync {
         report: ReportReference,
         ordinal: u64,
     ) -> AppFuture<'_, Option<Vec<u8>>>;
-    fn read_report_candidate(
-        &self,
-        actor: Actor,
-        run: RunId,
-        receipt: ReceiptId,
-        offset: u64,
-        characters: u32,
-    ) -> AppFuture<'_, Snapshot<CandidateReport>>;
 }
 
 #[derive(Clone)]

@@ -6,7 +6,6 @@ use reviewq_domain::identity::{GitSha, NotificationId, ProjectId, SubmissionId};
 use crate::{checkout_setup, install, native_client, runtime, service};
 
 mod action;
-mod report;
 mod workflow;
 mod workspace;
 
@@ -66,13 +65,6 @@ enum Command {
         #[arg(required = true, num_args = 1..=2000)]
         ids: Vec<NotificationId>,
     },
-    /// Deliver a report from the current registered Codex tool call.
-    Report {
-        #[command(flatten)]
-        scope: workflow::Profile,
-        #[command(subcommand)]
-        command: report::Report,
-    },
     /// Record or reconcile publication intent for the current registered lead.
     Action {
         #[command(flatten)]
@@ -99,10 +91,6 @@ enum Internal {
         common_dir: PathBuf,
     },
     ClaudeHook,
-    CodexReportWitness {
-        #[arg(long)]
-        codex_home: Option<PathBuf>,
-    },
     ClaudeBridge {
         #[arg(value_enum)]
         operation: native_client::ClaudeBridgeOperation,
@@ -249,9 +237,6 @@ async fn execute(options: CommandLine) -> Result<(), Failure> {
         Some(Command::Ack { ids }) => {
             workspace::ack(&runtime::profile(options.profile)?, ids).await
         }
-        Some(Command::Report { scope, command }) => {
-            report::execute(options.profile, scope, command).await
-        }
         Some(Command::Action { scope, command }) => {
             action::execute(options.profile, scope, command).await
         }
@@ -274,13 +259,6 @@ async fn execute(options: CommandLine) -> Result<(), Failure> {
         Some(Command::Internal(Internal::ClaudeHook)) => {
             if let Ok(profile) = runtime::profile(options.profile) {
                 let _ = native_client::claude_hook(&profile).await;
-            }
-            Ok(())
-        }
-        Some(Command::Internal(Internal::CodexReportWitness { codex_home })) => {
-            if let Ok(profile) = runtime::profile(options.profile) {
-                let _ = native_client::codex::codex_report_witness(&profile, codex_home.as_deref())
-                    .await;
             }
             Ok(())
         }

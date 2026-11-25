@@ -24,7 +24,6 @@ const REQUIRED: &[&str] = &[
     "hosts/claude/plugin/hooks/delivery.js",
     "hosts/claude/plugin/hooks/register.jsx",
     "hosts/claude/plugin/hooks/workflow.js",
-    "hosts/claude/plugin/hooks/report-handoff-schema.js",
     "hosts/codex/skills/reviewq/SKILL.md",
     "hosts/codex/skills/reviewq/agents/openai.yaml",
     "hosts/shared/skills/reviewq-manage/SKILL.md",

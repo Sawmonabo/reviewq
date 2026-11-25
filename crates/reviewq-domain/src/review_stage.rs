@@ -64,7 +64,6 @@ pub fn classify_review(evidence: &WorkspaceEvidence<'_>) -> Option<Stage> {
         e if e.any_question => (NeedsInput, "agent_input"),
         e if matches!(e.action, Some("working" | "checking")) => (Working, "action_verifying"),
         e if e.report_state == Some("failed") => (NeedsInput, "report_failed"),
-        e if e.report_state == Some("pending_completion") => (Working, "report_saving"),
         e if matches!(e.recovery, Some("waiting" | "queued")) => (Waiting, "recovery_pending"),
         e if matches!(e.recovery, Some("disabled" | "cancelled")) => {
             (NeedsInput, "recovery_required")

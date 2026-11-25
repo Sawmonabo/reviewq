@@ -213,7 +213,7 @@ fn viewed(
     super::version(db, &view.run, &view.receipt)?;
     let previous = db.query_row(
         "SELECT v.receipt_id FROM report_reads m JOIN report_versions v USING(run_id, receipt_id)
-         WHERE m.viewer_key=?1 AND m.run_id=?2 ORDER BY v.captured_at_ms DESC, v.receipt_id DESC LIMIT 1",
+         WHERE m.viewer_key=?1 AND m.run_id=?2 ORDER BY v.published_at_ms DESC, v.receipt_id DESC LIMIT 1",
         params![key.as_slice(), view.run.as_str()], |row| row.get::<_, String>(0),
     ).optional()?;
     let time = now_ms()?;

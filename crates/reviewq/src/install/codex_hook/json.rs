@@ -7,10 +7,10 @@ use serde_json::value::RawValue;
 
 use crate::json_edit::{self, Field};
 
-use super::{Failure, MATCHER, TIMEOUT_SECONDS};
+use super::{Failure, TIMEOUT_SECONDS};
 
 const EVENT_PATH: &[&str] = &["hooks", "PreToolUse"];
-const CHANGED: &str = "The Codex report hook has changed. ReviewQ preserved the current hooks.";
+const CHANGED: &str = "The Codex hook has changed. ReviewQ preserved the current hooks.";
 const INVALID: &str = "Expected a Codex hooks object with a PreToolUse array.";
 
 type Change = Option<Option<Vec<u8>>>;
@@ -27,7 +27,6 @@ pub(super) enum Added {
 #[derive(Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 struct Group<'a> {
-    matcher: &'a str,
     #[serde(borrow)]
     hooks: [Command<'a>; 1],
 }
@@ -245,7 +244,6 @@ fn owned(source: &str, items: &[Range<usize>], command: &str) -> Result<Option<u
 
 fn group(command: &str) -> Group<'_> {
     Group {
-        matcher: MATCHER,
         hooks: [Command {
             kind: "command",
             command: command.into(),

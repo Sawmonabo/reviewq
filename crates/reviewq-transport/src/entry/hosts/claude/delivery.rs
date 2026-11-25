@@ -165,14 +165,6 @@ struct TurnHook {
     generation: String,
     turn_id: String,
     normal: bool,
-    response: Option<FinalResponse>,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct FinalResponse {
-    entry_id: String,
-    sha256: String,
 }
 
 #[derive(Deserialize)]
@@ -341,10 +333,6 @@ pub(super) async fn hook(
         }
         Hook::Turn(turn) => {
             let (lead, _) = verified_context(&entry, turn.context).await?;
-            let response = turn
-                .response
-                .map(|value| Ok::<_, AppError>((parse(&value.entry_id)?, parse(&value.sha256)?)))
-                .transpose()?;
             entry
                 .store
                 .record_claude_turn(
@@ -353,7 +341,6 @@ pub(super) async fn hook(
                         turn: parse(&turn.turn_id)?,
                         generation: turn.generation,
                         normal: turn.normal,
-                        response,
                     },
                 )
                 .await?;

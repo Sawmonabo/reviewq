@@ -15,14 +15,14 @@ use reviewq_app::launch::{
     LaunchStore, NativeLauncher, NativeLaunchers, NativeModelReader, NativeModels,
 };
 use reviewq_app::notifications::DesktopStore;
-use reviewq_app::reports::{DrawingRenderer, reconcile_reports};
+use reviewq_app::reports::DrawingRenderer;
 use reviewq_app::settings::{NativeSkillReader, NativeSkills, RuntimeSources};
 use reviewq_app::sources::{ReviewSourceReader, SourceRefreshStore};
 use reviewq_app::workspace::{WorkspaceConfig, WorkspaceStore};
 use reviewq_domain::session::{AbsolutePath, HostProvider};
 use reviewq_providers::{
-    Claude, ClaudeCli, ClaudeWorkflow, Codex, FileHistory, GitLab, RegisteredReportFiles,
-    SourceAccounts, SourceNetwork, Terminal, TerminalProvider, Workflows,
+    Claude, ClaudeCli, ClaudeWorkflow, Codex, FileHistory, GitLab, SourceAccounts, SourceNetwork,
+    Terminal, TerminalProvider, Workflows,
 };
 use reviewq_store::SqliteStore;
 use reviewq_transport::{
@@ -228,7 +228,6 @@ pub(crate) async fn serve(profile: PathBuf, options: Serve) -> Result<(), Failur
         _ => None,
     };
     let host = codex.clone().map(|host| host as Arc<dyn NativeHost>);
-    let report_files = Arc::new(RegisteredReportFiles);
     let checkout_claude_profile = options.claude_home.clone();
     let claude_home_is_explicit =
         options.claude_home.is_some() || std::env::var_os("CLAUDE_CONFIG_DIR").is_some();
@@ -349,7 +348,6 @@ pub(crate) async fn serve(profile: PathBuf, options: Serve) -> Result<(), Failur
             browser_desktop: browser_desktop.clone(),
             workflow: WorkflowIntegration {
                 proof: workflow.clone(),
-                report_files: report_files.clone(),
             },
             endpoint: endpoint.clone(),
             web: &web,
@@ -389,9 +387,6 @@ pub(crate) async fn serve(profile: PathBuf, options: Serve) -> Result<(), Failur
         store.recover_refresh(Actor::local_operator()).await?;
         store.recover_delivery_claims().await?;
         store.recover_launches().await?;
-        if !options.validation {
-            store.recover_report_claims().await?;
-        }
         if browser_desktop.is_some() {
             store.recover_desktop_claims().await?;
         }
@@ -421,11 +416,6 @@ pub(crate) async fn serve(profile: PathBuf, options: Serve) -> Result<(), Failur
             )));
         }
         if !options.validation {
-            workers.push(tokio::spawn(capture_reports(
-                store.clone(),
-                workflow.clone(),
-                report_files,
-            )));
             workers.push(tokio::spawn(workflow::run(
                 store.clone(),
                 source,
@@ -459,40 +449,6 @@ pub(crate) async fn serve(profile: PathBuf, options: Serve) -> Result<(), Failur
         install::bridge::clear(&endpoint)?;
     }
     start.map(|_| ())
-}
-
-async fn capture_reports(
-    store: Arc<SqliteStore>,
-    workflow: Arc<Workflows>,
-    report_files: Arc<RegisteredReportFiles>,
-) {
-    let mut commits = store.subscribe_reports();
-    loop {
-        commits.borrow_and_update();
-        if reconcile_reports(store.as_ref(), workflow.as_ref(), report_files.as_ref())
-            .await
-            .is_err()
-        {
-            tokio::time::sleep(Duration::from_secs(1)).await;
-            continue;
-        }
-        let due = match store.next_report_due().await {
-            Ok(due) => due,
-            Err(_) => {
-                tokio::time::sleep(Duration::from_secs(1)).await;
-                continue;
-            }
-        };
-        tokio::select! {
-            result = commits.changed() => if result.is_err() { break; },
-            () = wait_until_due(due) => {},
-        }
-    }
-}
-
-pub(crate) fn codex_home() -> Result<PathBuf, Failure> {
-    chosen_profile("CODEX_HOME", ".codex")
-        .ok_or_else(|| "cannot resolve the Codex configuration directory".into())
 }
 
 pub(crate) fn claude_home() -> Result<PathBuf, Failure> {

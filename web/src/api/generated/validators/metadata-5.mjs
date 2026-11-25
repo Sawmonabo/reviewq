@@ -37,7 +37,6 @@ const schema222 = {
     "unsupported_source",
     "invalid_boundary",
     "parser_failed",
-    "incomplete_source",
     "cache_unavailable",
   ],
   type: "string",

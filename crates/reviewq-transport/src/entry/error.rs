@@ -5,7 +5,7 @@ use axum::http::StatusCode;
 use axum::http::request::Parts;
 use axum::response::{IntoResponse, Response};
 use reviewq_app::access::AppError;
-use reviewq_protocol::reports::{ReportHandoffFieldError, report_amendment_source_error};
+use reviewq_protocol::field_errors::FieldError;
 use reviewq_protocol::{ErrorCode, ErrorDto, Failure};
 use serde::de::DeserializeOwned;
 
@@ -13,8 +13,8 @@ pub(super) enum ApiError {
     Application(AppError),
     // The proof gate rejected the request before performing the operation.
     BrowserProofRejected,
-    // The report handoff broke these schema or value rules; the agent corrects them in its turn.
-    InvalidHandoff(Vec<ReportHandoffFieldError>),
+    // The tool input broke these schema or value rules; the agent corrects them in its turn.
+    InvalidFields(Vec<FieldError>),
 }
 
 pub(super) struct ApiPath<T>(pub(super) T);
@@ -64,37 +64,25 @@ impl<S: Send + Sync> FromRequest<S> for ApiBytes {
 impl From<AppError> for ApiError {
     fn from(error: AppError) -> Self {
         match error {
-            AppError::InvalidHandoff(errors) => Self::InvalidHandoff(handoff_field_errors(errors)),
+            AppError::InvalidFields(errors) => Self::InvalidFields(
+                errors
+                    .into_iter()
+                    .map(|error| FieldError::new(error.path, error.message))
+                    .collect(),
+            ),
             error => Self::Application(error),
         }
     }
 }
 
-/// The wire form of field errors found after the handoff's schema and value rules passed.
-pub(super) fn handoff_field_errors(
-    errors: Vec<reviewq_app::reports::HandoffFieldError>,
-) -> Vec<ReportHandoffFieldError> {
-    errors
-        .into_iter()
-        .map(|error| ReportHandoffFieldError {
-            path: error.path,
-            message: error.message,
-        })
-        .collect()
-}
-
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
         match self {
-            Self::Application(AppError::ReportAmendmentSourceChanged) => field_errors(
-                AppError::ReportAmendmentSourceChanged,
-                &[report_amendment_source_error()],
-            ),
             Self::Application(error) => {
                 let (status, failure) = failure(error);
                 (status, Json(failure)).into_response()
             }
-            Self::InvalidHandoff(errors) => field_errors(AppError::InvalidRequest, &errors),
+            Self::InvalidFields(errors) => field_errors(AppError::InvalidRequest, &errors),
             Self::BrowserProofRejected => {
                 let (status, failure) = failure(AppError::Forbidden);
                 (status, [("x-reviewq-csrf-rejected", "1")], Json(failure)).into_response()
@@ -103,7 +91,7 @@ impl IntoResponse for ApiError {
     }
 }
 
-fn field_errors(error: AppError, errors: &[ReportHandoffFieldError]) -> Response {
+fn field_errors(error: AppError, errors: &[FieldError]) -> Response {
     let (status, failure) = failure(error);
     let body = serde_json::json!({
         "cursor": failure.cursor,
@@ -115,18 +103,13 @@ fn field_errors(error: AppError, errors: &[ReportHandoffFieldError]) -> Response
 
 pub(super) fn failure(error: AppError) -> (StatusCode, Failure) {
     let (status, code) = match error {
-        AppError::InvalidRequest
-        | AppError::InvalidHandoff(_)
-        | AppError::ReportAmendmentSourceChanged => {
+        AppError::InvalidRequest | AppError::InvalidFields(_) => {
             (StatusCode::BAD_REQUEST, ErrorCode::InvalidRequest)
         }
         AppError::TicketUnverified => (
             StatusCode::UNPROCESSABLE_ENTITY,
             ErrorCode::TicketUnverified,
         ),
-        AppError::ReportCorrectionRequired => {
-            (StatusCode::UNPROCESSABLE_ENTITY, ErrorCode::InvalidRequest)
-        }
         AppError::Unauthorized => (StatusCode::UNAUTHORIZED, ErrorCode::Unauthorized),
         AppError::Forbidden => (StatusCode::FORBIDDEN, ErrorCode::Forbidden),
         AppError::NotFound => (StatusCode::NOT_FOUND, ErrorCode::NotFound),

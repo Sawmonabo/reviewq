@@ -5,6 +5,7 @@ pub mod changes;
 mod common;
 pub mod decisions;
 pub mod events;
+pub mod field_errors;
 pub mod followups;
 pub mod history;
 mod hosts;

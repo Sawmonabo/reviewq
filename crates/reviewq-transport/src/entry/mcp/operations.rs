@@ -266,23 +266,6 @@ async fn read_report(
                 .await?;
             Ok(json!({"kind":"accepted_section","value":reports::project_section(stored.value)?}))
         }
-        ReportRead::Candidate {
-            receipt_id,
-            offset,
-            characters,
-        } => {
-            let stored = entry
-                .store
-                .read_report_candidate(
-                    actor,
-                    run,
-                    parse(receipt_id.as_str())?,
-                    offset.map_or(0, |size| size.get()),
-                    characters.unwrap_or(6000),
-                )
-                .await?;
-            Ok(json!({"kind":"candidate","value":reports::project_candidate(stored.value)?}))
-        }
     }
 }
 

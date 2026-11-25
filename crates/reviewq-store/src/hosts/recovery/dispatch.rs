@@ -25,8 +25,6 @@ const READY: &str = "
         AND (e.delivery_id IS NULL OR m.message_id<>e.delivery_id))
    AND NOT EXISTS(SELECT 1 FROM sessions s WHERE s.run_id=e.run_id
         AND (s.host_questions=1 OR s.host_activity IN ('blocked','working')))
-   AND NOT EXISTS(SELECT 1 FROM report_handoffs h WHERE h.run_id=e.run_id
-       AND (h.state='pending_completion' OR h.turn_id=e.failed_turn_id AND h.state='recorded'))
    AND NOT EXISTS(SELECT 1 FROM action_heads h JOIN actions a USING(run_id,action_id)
        WHERE h.run_id=e.run_id AND a.state IN ('working','checking','retry_wait'))
    AND NOT EXISTS(SELECT 1 FROM followup_batches b WHERE b.run_id=e.run_id AND b.authority_verified=1
@@ -104,7 +102,7 @@ pub(super) fn reserve(tx: &mut WriteTx<'_>, input: PreparedRecovery) -> Result<(
             target: lead.clone(),
             submission,
             body: MessageBody::new(
-                "Resume the interrupted private ReviewQ review using the previously established scope. Continue the unfinished analysis and complete the report handoff. Preserve unrelated findings and user decisions. Do not publish or edit notes, approve, merge, resolve discussions, or change Jira without a new explicit user request.",
+                "Resume the interrupted private ReviewQ review using the previously established scope. Continue the unfinished analysis and finish the review. Preserve unrelated findings and user decisions. Do not publish or edit notes, approve, merge, resolve discussions, or change Jira without a new explicit user request.",
             )?,
             binding: WorkflowBinding::Recovery(authorization),
             settings: candidate.settings,

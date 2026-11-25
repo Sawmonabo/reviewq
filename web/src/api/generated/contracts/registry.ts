@@ -75,7 +75,6 @@ import type {
 } from "./hosts.js";
 
 import type {
-  ReportCandidateResponse,
   ReportContextResponse,
   ReportDispositionRequest,
   ReportDispositionResponse,
@@ -221,7 +220,6 @@ export interface Contracts {
   RecoveryStateResponse: RecoveryStateResponse;
   RefreshResponse: RefreshResponse;
   RegisteredSessionResponse: RegisteredSessionResponse;
-  ReportCandidateResponse: ReportCandidateResponse;
   ReportContextResponse: ReportContextResponse;
   ReportDispositionResponse: ReportDispositionResponse;
   ReportHistoryResponse: ReportHistoryResponse;

@@ -13,9 +13,6 @@ pub(super) fn resolve(
     text: &str,
 ) -> Result<QuoteResolution, StoreError> {
     let stats = &version.summary.stats;
-    if !stats.complete {
-        return Err(AppError::PreconditionFailed.into());
-    }
     stats.require_markdown_budget()?;
     if text.trim().is_empty() {
         return Err(AppError::InvalidRequest.into());

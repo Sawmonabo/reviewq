@@ -157,10 +157,7 @@ async fn prepare(
             "Privately reassess selected ReviewQ discussions for {} !{} at source SHA {}. Batch {}. ",
             "Read each identified discussion and the current code. ",
             "Preserve unrelated findings, questions, qualifications and user dispositions. ",
-            "Do not post or edit GitLab notes, approve, merge, resolve discussions, or change Jira. ",
-            "Submit report_handoff with one evidence-backed assessment for every listed discussion, ",
-            "covering its finding IDs, and an outcome in findingChanges for each finding you re-assess. ",
-            "Findings you do not re-assess are carried unchanged."
+            "Do not post or edit GitLab notes, approve, merge, resolve discussions, or change Jira."
         ),
         source.review.project_path,
         source.review.identity.iid(),

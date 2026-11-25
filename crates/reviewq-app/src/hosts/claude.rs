@@ -111,7 +111,6 @@ pub struct ClaudeTurnResult {
     pub turn: NativeTurnId,
     pub generation: String,
     pub normal: bool,
-    pub response: Option<(NativeInputId, ReportHash)>,
 }
 
 pub struct ClaudeWorkflowContext {
@@ -122,7 +121,6 @@ pub struct ClaudeWorkflowContext {
     pub request: Option<NativeInputId>,
     pub ready: Option<ReadyWorkflow>,
     pub terminal: Option<ClaudeTurnResult>,
-    pub terminal_settling: bool,
 }
 
 pub trait ClaudeWorkflowStore: Send + Sync {

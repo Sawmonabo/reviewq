@@ -67,6 +67,9 @@ pub struct PublicationEvidence {
 }
 
 pub trait ActionCommandStore: Send + Sync {
+    /// Returns the lead of the run whose registered lead is `session`, or `NotFound`.
+    fn run_lead(&self, session: reviewq_domain::identity::SessionKey) -> AppFuture<'_, LeadTarget>;
+
     fn action_source(&self, lead: LeadTarget) -> AppFuture<'_, (MrIdentity, Revision)>;
 
     fn declared_action(

@@ -67,6 +67,9 @@ CREATE TABLE display_spans (
 ";
 
 impl SqliteStore {
+    /// Builds the display index of a sealed published version, from `source` when the caller
+    /// still holds the text. `NotFound` unless the version and its sealed artifact match.
+    #[expect(dead_code, reason = "K2 indexes a version after its publish commits")]
     pub(crate) async fn cache_report_display(
         &self,
         run: RunId,
@@ -82,7 +85,7 @@ impl SqliteStore {
                 let artifact_id: String = db
                     .query_row(
                         "SELECT a.artifact_id FROM report_versions v JOIN artifacts a USING(artifact_id)
-                         WHERE v.run_id=?1 AND v.receipt_id=?2 AND a.sha256=?3 AND a.sealed=1 AND a.complete=1",
+                         WHERE v.run_id=?1 AND v.receipt_id=?2 AND a.sha256=?3 AND a.sealed=1",
                         params![run.as_str(), reference.receipt_id.as_str(), confirmed_hash.as_str()],
                         |row| row.get(0),
                     )
@@ -91,7 +94,7 @@ impl SqliteStore {
                 Ok((artifact_id, profile.clone()))
             })
             .await?;
-        self.build_captured_index(profile, artifact_id, hash, source)
+        self.build_published_index(profile, artifact_id, hash, source)
             .await
     }
 }
@@ -230,7 +233,6 @@ fn fallback_label(reason: DisplayFallback) -> &'static str {
         DisplayFallback::UnsupportedSource => "unsupported_source",
         DisplayFallback::InvalidBoundary => "invalid_boundary",
         DisplayFallback::ParserFailed => "parser_failed",
-        DisplayFallback::IncompleteSource => "incomplete_source",
         DisplayFallback::CacheUnavailable => "cache_unavailable",
     }
 }

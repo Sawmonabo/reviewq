@@ -68,14 +68,52 @@ impl Actor {
     }
 }
 
+/// A tool input field that breaks a rule, with the change the agent can make in its
+/// open turn. The path is a JSON pointer into the tool input.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct FieldError {
+    pub path: String,
+    pub message: String,
+}
+
+/// Field errors one refusal lists, which keeps a refusal within every client's reply cap.
+const MAX_FIELD_ERRORS: usize = 50;
+
+impl FieldError {
+    pub fn new(path: impl Into<String>, message: impl Into<String>) -> Self {
+        Self {
+            path: path.into(),
+            message: message.into(),
+        }
+    }
+
+    /// Keeps the first `MAX_FIELD_ERRORS` errors and, when there are more, adds one root
+    /// error that counts the rest.
+    pub fn bounded(mut errors: Vec<Self>) -> Vec<Self> {
+        let hidden = errors.len().saturating_sub(MAX_FIELD_ERRORS);
+        if hidden > 0 {
+            errors.truncate(MAX_FIELD_ERRORS);
+            errors.push(Self::new("", hidden_errors(hidden)));
+        }
+        errors
+    }
+}
+
+/// Counts the errors a capped refusal leaves out.
+fn hidden_errors(hidden: usize) -> String {
+    if hidden == 1 {
+        "1 more error is not shown. Fix these and call again.".to_owned()
+    } else {
+        format!("{hidden} more errors are not shown. Fix these and call again.")
+    }
+}
+
 /// Safe application outcomes translated into protocol errors by transport.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum AppError {
     InvalidRequest,
-    /// Report handoff fields the agent corrects in its open turn. Nothing was staged.
-    InvalidHandoff(Vec<crate::reports::HandoffFieldError>),
-    ReportCorrectionRequired,
-    ReportAmendmentSourceChanged,
+    /// Tool input fields the agent corrects in its open turn. Nothing was written.
+    InvalidFields(Vec<FieldError>),
     TicketUnverified,
     Unauthorized,
     Forbidden,
@@ -92,16 +130,11 @@ pub enum AppError {
     Internal,
 }
 
-pub const REPORT_CORRECTION_MESSAGE: &str =
-    "Correct the report handoff metadata in this active turn, then submit it again.";
-
 impl Display for AppError {
     fn fmt(&self, output: &mut Formatter<'_>) -> fmt::Result {
         let message = match self {
             Self::InvalidRequest => "invalid request",
-            Self::InvalidHandoff(_) => "Invalid report handoff.",
-            Self::ReportCorrectionRequired => REPORT_CORRECTION_MESSAGE,
-            Self::ReportAmendmentSourceChanged => "report amendment source changed",
+            Self::InvalidFields(_) => "Invalid tool input.",
             Self::TicketUnverified => {
                 "Could not verify a Jira key in this merge request. Check the Jira connection and issue access."
             }

@@ -2,7 +2,10 @@
 
 use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
 
-use crate::reports::limits::{MAX_DISCUSSION_ID_BYTES, MAX_ID_BYTES};
+/// Longest finding ID: `F-` and its number.
+pub(crate) const MAX_ID_BYTES: usize = 64;
+/// Longest GitLab discussion ID a batch or an assessment names.
+pub(crate) const MAX_DISCUSSION_ID_BYTES: usize = 256;
 
 const MAX_SQLITE_INTEGER: u64 = i64::MAX as u64;
 const MAX_JSON_INTEGER: u64 = 9_007_199_254_740_991;
@@ -88,9 +91,9 @@ opaque_dto!(
     TicketKeyDto
 );
 string_dto!(
-    /// A report finding ID, such as `F-01`, as an outcome or assessment names it.
+    /// A report finding ID: `F-` followed by at least two digits, such as `F-01`.
     FindingIdDto,
-    |value: &str| bounded_text(value, MAX_ID_BYTES),
+    valid_finding_id,
     "finding_id_schema"
 );
 string_dto!(
@@ -132,7 +135,7 @@ string_dto!(
 );
 
 string_dto!(
-    /// SHA-256 of exact report bytes or their declaration.
+    /// SHA-256 of exact report bytes.
     ReportHashDto,
     |value: &str| value.len() == 64
         && value
@@ -241,6 +244,13 @@ fn bounded_text(value: &str, max_bytes: usize) -> bool {
     !value.is_empty() && value.len() <= max_bytes && !value.chars().any(char::is_control)
 }
 
+fn valid_finding_id(value: &str) -> bool {
+    value.len() <= MAX_ID_BYTES
+        && value
+            .strip_prefix("F-")
+            .is_some_and(|number| number.len() >= 2 && number.bytes().all(|b| b.is_ascii_digit()))
+}
+
 fn valid_review_id(value: &str) -> bool {
     !value.is_empty()
         && value.len() <= 512
@@ -283,7 +293,11 @@ fn opaque_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
 
 #[cfg(feature = "schema")]
 fn finding_id_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
-    bounded_text_schema(MAX_ID_BYTES)
+    schemars::json_schema!({
+        "type": "string",
+        "pattern": "^F-[0-9]{2,}$",
+        "maxLength": MAX_ID_BYTES,
+    })
 }
 
 #[cfg(feature = "schema")]

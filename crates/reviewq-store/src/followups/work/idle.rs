@@ -11,10 +11,7 @@ use crate::queue::{lead_for_run, parse};
 const AWAITING_IDLE: &str = "
     b.state='executing' AND b.authority_verified=1 AND b.native_turn_id IS NOT NULL
     AND (r.state='open' AND b.holds_slot=1 AND b.hold_reason='followup_native_input_required'
-         OR (r.state IN ('closed','merged') OR b.hold_reason='followup_reconciliation_pending')
-             AND NOT EXISTS (
-                SELECT 1 FROM report_handoffs h WHERE h.batch_id=b.batch_id AND h.state='pending_completion'
-             ))";
+         OR r.state IN ('closed','merged') OR b.hold_reason='followup_reconciliation_pending')";
 
 pub(super) fn checks(db: &Connection) -> Result<Vec<ExecutingCheck>, StoreError> {
     let sql = format!(

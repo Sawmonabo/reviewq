@@ -2,10 +2,9 @@
 import { func0 } from "../runtime.mjs";
 import { validate25 } from "./checkpoint-id-dto.mjs";
 import { validate129 } from "./safe-count-dto.mjs";
-import { validate237 } from "./utc-timestamp-dto.mjs";
 import { validate266 } from "./coverage.mjs";
 import { validate152 } from "./git-sha-dto.mjs";
-function validate1341(
+function validate1314(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -58,20 +57,23 @@ function validate1341(
           var valid0 = true;
         }
         if (valid0) {
-          if (data.capturedAt !== undefined && func0.call(data, "capturedAt")) {
+          if (
+            data.changeCount !== undefined &&
+            func0.call(data, "changeCount")
+          ) {
             const _errs3 = errors;
             if (
-              !validate237(data.capturedAt, {
-                instancePath: instancePath + "/capturedAt",
+              !validate129(data.changeCount, {
+                instancePath: instancePath + "/changeCount",
                 parentData: data,
-                parentDataProperty: "capturedAt",
+                parentDataProperty: "changeCount",
                 rootData,
               })
             ) {
               vErrors =
                 vErrors === null
-                  ? validate237.errors
-                  : vErrors.concat(validate237.errors);
+                  ? validate129.errors
+                  : vErrors.concat(validate129.errors);
               errors = vErrors.length;
             }
             var valid0 = _errs3 === errors;
@@ -79,211 +81,214 @@ function validate1341(
             var valid0 = true;
           }
           if (valid0) {
-            if (
-              data.changeCount !== undefined &&
-              func0.call(data, "changeCount")
-            ) {
-              let data3 = data.changeCount;
+            if (data.coverage !== undefined && func0.call(data, "coverage")) {
               const _errs4 = errors;
-              const _errs5 = errors;
-              let valid1 = false;
-              const _errs6 = errors;
               if (
-                !validate129(data3, {
-                  instancePath: instancePath + "/changeCount",
+                !validate266(data.coverage, {
+                  instancePath: instancePath + "/coverage",
                   parentData: data,
-                  parentDataProperty: "changeCount",
+                  parentDataProperty: "coverage",
                   rootData,
                 })
               ) {
                 vErrors =
                   vErrors === null
-                    ? validate129.errors
-                    : vErrors.concat(validate129.errors);
+                    ? validate266.errors
+                    : vErrors.concat(validate266.errors);
                 errors = vErrors.length;
-              }
-              var _valid0 = _errs6 === errors;
-              valid1 = valid1 || _valid0;
-              if (!valid1) {
-                const _errs7 = errors;
-                if (data3 !== null) {
-                  const err0 = {
-                    instancePath: instancePath + "/changeCount",
-                    schemaPath: "#/properties/changeCount/anyOf/1/type",
-                    keyword: "type",
-                    params: { type: "null" },
-                  };
-                  if (vErrors === null) {
-                    vErrors = [err0];
-                  } else {
-                    vErrors.push(err0);
-                  }
-                  errors++;
-                }
-                var _valid0 = _errs7 === errors;
-                valid1 = valid1 || _valid0;
-              }
-              if (!valid1) {
-                const err1 = {
-                  instancePath: instancePath + "/changeCount",
-                  schemaPath: "#/properties/changeCount/anyOf",
-                  keyword: "anyOf",
-                  params: {},
-                };
-                if (vErrors === null) {
-                  vErrors = [err1];
-                } else {
-                  vErrors.push(err1);
-                }
-                errors++;
-                validate1341.errors = vErrors;
-                return false;
-              } else {
-                errors = _errs5;
-                if (vErrors !== null) {
-                  if (_errs5) {
-                    vErrors.length = _errs5;
-                  } else {
-                    vErrors = null;
-                  }
-                }
               }
               var valid0 = _errs4 === errors;
             } else {
               var valid0 = true;
             }
             if (valid0) {
-              if (data.complete !== undefined && func0.call(data, "complete")) {
-                const _errs9 = errors;
-                if (typeof data.complete !== "boolean") {
-                  validate1341.errors = [
-                    {
-                      instancePath: instancePath + "/complete",
-                      schemaPath: "#/properties/complete/type",
-                      keyword: "type",
-                      params: { type: "boolean" },
-                    },
-                  ];
-                  return false;
+              if (
+                data.coverageSourceSha !== undefined &&
+                func0.call(data, "coverageSourceSha")
+              ) {
+                let data4 = data.coverageSourceSha;
+                const _errs5 = errors;
+                const _errs6 = errors;
+                let valid1 = false;
+                const _errs7 = errors;
+                if (
+                  !validate152(data4, {
+                    instancePath: instancePath + "/coverageSourceSha",
+                    parentData: data,
+                    parentDataProperty: "coverageSourceSha",
+                    rootData,
+                  })
+                ) {
+                  vErrors =
+                    vErrors === null
+                      ? validate152.errors
+                      : vErrors.concat(validate152.errors);
+                  errors = vErrors.length;
                 }
-                var valid0 = _errs9 === errors;
+                var _valid0 = _errs7 === errors;
+                valid1 = valid1 || _valid0;
+                if (!valid1) {
+                  const _errs8 = errors;
+                  if (data4 !== null) {
+                    const err0 = {
+                      instancePath: instancePath + "/coverageSourceSha",
+                      schemaPath: "#/properties/coverageSourceSha/anyOf/1/type",
+                      keyword: "type",
+                      params: { type: "null" },
+                    };
+                    if (vErrors === null) {
+                      vErrors = [err0];
+                    } else {
+                      vErrors.push(err0);
+                    }
+                    errors++;
+                  }
+                  var _valid0 = _errs8 === errors;
+                  valid1 = valid1 || _valid0;
+                }
+                if (!valid1) {
+                  const err1 = {
+                    instancePath: instancePath + "/coverageSourceSha",
+                    schemaPath: "#/properties/coverageSourceSha/anyOf",
+                    keyword: "anyOf",
+                    params: {},
+                  };
+                  if (vErrors === null) {
+                    vErrors = [err1];
+                  } else {
+                    vErrors.push(err1);
+                  }
+                  errors++;
+                  validate1314.errors = vErrors;
+                  return false;
+                } else {
+                  errors = _errs6;
+                  if (vErrors !== null) {
+                    if (_errs6) {
+                      vErrors.length = _errs6;
+                    } else {
+                      vErrors = null;
+                    }
+                  }
+                }
+                var valid0 = _errs5 === errors;
               } else {
                 var valid0 = true;
               }
               if (valid0) {
                 if (
-                  data.coverage !== undefined &&
-                  func0.call(data, "coverage")
+                  data.coverageTargetSha !== undefined &&
+                  func0.call(data, "coverageTargetSha")
                 ) {
+                  let data5 = data.coverageTargetSha;
+                  const _errs10 = errors;
                   const _errs11 = errors;
+                  let valid2 = false;
+                  const _errs12 = errors;
                   if (
-                    !validate266(data.coverage, {
-                      instancePath: instancePath + "/coverage",
+                    !validate152(data5, {
+                      instancePath: instancePath + "/coverageTargetSha",
                       parentData: data,
-                      parentDataProperty: "coverage",
+                      parentDataProperty: "coverageTargetSha",
                       rootData,
                     })
                   ) {
                     vErrors =
                       vErrors === null
-                        ? validate266.errors
-                        : vErrors.concat(validate266.errors);
+                        ? validate152.errors
+                        : vErrors.concat(validate152.errors);
                     errors = vErrors.length;
                   }
-                  var valid0 = _errs11 === errors;
+                  var _valid1 = _errs12 === errors;
+                  valid2 = valid2 || _valid1;
+                  if (!valid2) {
+                    const _errs13 = errors;
+                    if (data5 !== null) {
+                      const err2 = {
+                        instancePath: instancePath + "/coverageTargetSha",
+                        schemaPath:
+                          "#/properties/coverageTargetSha/anyOf/1/type",
+                        keyword: "type",
+                        params: { type: "null" },
+                      };
+                      if (vErrors === null) {
+                        vErrors = [err2];
+                      } else {
+                        vErrors.push(err2);
+                      }
+                      errors++;
+                    }
+                    var _valid1 = _errs13 === errors;
+                    valid2 = valid2 || _valid1;
+                  }
+                  if (!valid2) {
+                    const err3 = {
+                      instancePath: instancePath + "/coverageTargetSha",
+                      schemaPath: "#/properties/coverageTargetSha/anyOf",
+                      keyword: "anyOf",
+                      params: {},
+                    };
+                    if (vErrors === null) {
+                      vErrors = [err3];
+                    } else {
+                      vErrors.push(err3);
+                    }
+                    errors++;
+                    validate1314.errors = vErrors;
+                    return false;
+                  } else {
+                    errors = _errs11;
+                    if (vErrors !== null) {
+                      if (_errs11) {
+                        vErrors.length = _errs11;
+                      } else {
+                        vErrors = null;
+                      }
+                    }
+                  }
+                  var valid0 = _errs10 === errors;
                 } else {
                   var valid0 = true;
                 }
                 if (valid0) {
                   if (
-                    data.coverageSourceSha !== undefined &&
-                    func0.call(data, "coverageSourceSha")
+                    data.findingCount !== undefined &&
+                    func0.call(data, "findingCount")
                   ) {
-                    let data6 = data.coverageSourceSha;
-                    const _errs12 = errors;
-                    const _errs13 = errors;
-                    let valid2 = false;
-                    const _errs14 = errors;
+                    const _errs15 = errors;
                     if (
-                      !validate152(data6, {
-                        instancePath: instancePath + "/coverageSourceSha",
+                      !validate129(data.findingCount, {
+                        instancePath: instancePath + "/findingCount",
                         parentData: data,
-                        parentDataProperty: "coverageSourceSha",
+                        parentDataProperty: "findingCount",
                         rootData,
                       })
                     ) {
                       vErrors =
                         vErrors === null
-                          ? validate152.errors
-                          : vErrors.concat(validate152.errors);
+                          ? validate129.errors
+                          : vErrors.concat(validate129.errors);
                       errors = vErrors.length;
                     }
-                    var _valid1 = _errs14 === errors;
-                    valid2 = valid2 || _valid1;
-                    if (!valid2) {
-                      const _errs15 = errors;
-                      if (data6 !== null) {
-                        const err2 = {
-                          instancePath: instancePath + "/coverageSourceSha",
-                          schemaPath:
-                            "#/properties/coverageSourceSha/anyOf/1/type",
-                          keyword: "type",
-                          params: { type: "null" },
-                        };
-                        if (vErrors === null) {
-                          vErrors = [err2];
-                        } else {
-                          vErrors.push(err2);
-                        }
-                        errors++;
-                      }
-                      var _valid1 = _errs15 === errors;
-                      valid2 = valid2 || _valid1;
-                    }
-                    if (!valid2) {
-                      const err3 = {
-                        instancePath: instancePath + "/coverageSourceSha",
-                        schemaPath: "#/properties/coverageSourceSha/anyOf",
-                        keyword: "anyOf",
-                        params: {},
-                      };
-                      if (vErrors === null) {
-                        vErrors = [err3];
-                      } else {
-                        vErrors.push(err3);
-                      }
-                      errors++;
-                      validate1341.errors = vErrors;
-                      return false;
-                    } else {
-                      errors = _errs13;
-                      if (vErrors !== null) {
-                        if (_errs13) {
-                          vErrors.length = _errs13;
-                        } else {
-                          vErrors = null;
-                        }
-                      }
-                    }
-                    var valid0 = _errs12 === errors;
+                    var valid0 = _errs15 === errors;
                   } else {
                     var valid0 = true;
                   }
                   if (valid0) {
                     if (
-                      data.coverageTargetSha !== undefined &&
-                      func0.call(data, "coverageTargetSha")
+                      data.fullMrReviewedSha !== undefined &&
+                      func0.call(data, "fullMrReviewedSha")
                     ) {
-                      let data7 = data.coverageTargetSha;
+                      let data7 = data.fullMrReviewedSha;
+                      const _errs16 = errors;
                       const _errs17 = errors;
-                      const _errs18 = errors;
                       let valid3 = false;
-                      const _errs19 = errors;
+                      const _errs18 = errors;
                       if (
                         !validate152(data7, {
-                          instancePath: instancePath + "/coverageTargetSha",
+                          instancePath: instancePath + "/fullMrReviewedSha",
                           parentData: data,
-                          parentDataProperty: "coverageTargetSha",
+                          parentDataProperty: "fullMrReviewedSha",
                           rootData,
                         })
                       ) {
@@ -293,15 +298,15 @@ function validate1341(
                             : vErrors.concat(validate152.errors);
                         errors = vErrors.length;
                       }
-                      var _valid2 = _errs19 === errors;
+                      var _valid2 = _errs18 === errors;
                       valid3 = valid3 || _valid2;
                       if (!valid3) {
-                        const _errs20 = errors;
+                        const _errs19 = errors;
                         if (data7 !== null) {
                           const err4 = {
-                            instancePath: instancePath + "/coverageTargetSha",
+                            instancePath: instancePath + "/fullMrReviewedSha",
                             schemaPath:
-                              "#/properties/coverageTargetSha/anyOf/1/type",
+                              "#/properties/fullMrReviewedSha/anyOf/1/type",
                             keyword: "type",
                             params: { type: "null" },
                           };
@@ -312,13 +317,13 @@ function validate1341(
                           }
                           errors++;
                         }
-                        var _valid2 = _errs20 === errors;
+                        var _valid2 = _errs19 === errors;
                         valid3 = valid3 || _valid2;
                       }
                       if (!valid3) {
                         const err5 = {
-                          instancePath: instancePath + "/coverageTargetSha",
-                          schemaPath: "#/properties/coverageTargetSha/anyOf",
+                          instancePath: instancePath + "/fullMrReviewedSha",
+                          schemaPath: "#/properties/fullMrReviewedSha/anyOf",
                           keyword: "anyOf",
                           params: {},
                         };
@@ -328,19 +333,19 @@ function validate1341(
                           vErrors.push(err5);
                         }
                         errors++;
-                        validate1341.errors = vErrors;
+                        validate1314.errors = vErrors;
                         return false;
                       } else {
-                        errors = _errs18;
+                        errors = _errs17;
                         if (vErrors !== null) {
-                          if (_errs18) {
-                            vErrors.length = _errs18;
+                          if (_errs17) {
+                            vErrors.length = _errs17;
                           } else {
                             vErrors = null;
                           }
                         }
                       }
-                      var valid0 = _errs17 === errors;
+                      var valid0 = _errs16 === errors;
                     } else {
                       var valid0 = true;
                     }
@@ -352,7 +357,7 @@ function validate1341(
         }
       }
     } else {
-      validate1341.errors = [
+      validate1314.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -363,7 +368,7 @@ function validate1341(
       return false;
     }
   }
-  validate1341.errors = vErrors;
+  validate1314.errors = vErrors;
   return errors === 0;
 }
-export { validate1341 };
+export { validate1314 };

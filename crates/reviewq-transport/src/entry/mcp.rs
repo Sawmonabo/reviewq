@@ -29,7 +29,6 @@ use super::{ApiError, Entry};
 
 mod gates;
 mod operations;
-mod report;
 mod workflow;
 use gates::Gates;
 
@@ -55,7 +54,6 @@ pub(super) fn mount(entry: Arc<Entry>) -> Router<Arc<Entry>> {
         entry: entry.clone(),
         gates: Arc::new(Gates::default()),
         tools: vec![
-            report::tool(),
             tool::<ListReviews>("ListReviews", "List scoped review summaries."),
             tool::<GetReview>("GetReview", "Read a registered review and its native runs."),
             tool::<ReadTranscript>(
@@ -157,28 +155,12 @@ impl ServerHandler for Server {
     async fn list_tools(
         &self,
         request: Option<PaginatedRequestParams>,
-        context: RequestContext<RoleServer>,
+        _context: RequestContext<RoleServer>,
     ) -> Result<ListToolsResult, ErrorData> {
         if request.is_some_and(|page| page.cursor.is_some()) {
             return Err(ErrorData::invalid_params("invalid tool cursor", None));
         }
-        // Claude supplies this same tool through its session-aware native hook.
-        let claude = context
-            .client_info()
-            .is_some_and(|client| client.name == "claude-code")
-            || context
-                .extensions
-                .get::<Parts>()
-                .and_then(|parts| parts.headers.get(header::USER_AGENT))
-                .and_then(|header| header.to_str().ok())
-                .is_some_and(|agent| agent.starts_with("claude-code/"));
-        let tools = self
-            .tools
-            .iter()
-            .filter(|tool| !claude || tool.name != "report_handoff")
-            .cloned()
-            .collect();
-        Ok(ListToolsResult::with_all_items(tools))
+        Ok(ListToolsResult::with_all_items(self.tools.to_vec()))
     }
 
     fn get_tool(&self, name: &str) -> Option<Tool> {
@@ -207,7 +189,7 @@ impl ServerHandler for Server {
         let cancelled = context.ct;
         let result = tokio::select! {
             _ = cancelled.cancelled() => return Err(ErrorData::internal_error("request cancelled", None)),
-            result = tokio::time::timeout(Duration::from_secs(deadline), self.call(request, actor, context.meta)) => {
+            result = tokio::time::timeout(Duration::from_secs(deadline), self.call(request, actor)) => {
                 result.unwrap_or(Err(AppError::Busy))
             }
         };
@@ -239,12 +221,10 @@ impl Server {
         &self,
         request: CallToolRequestParams,
         actor: Actor,
-        meta: rmcp::model::RequestMetaObject,
     ) -> Result<CallToolResult, AppError> {
         let _permit = self.gates.enter(&actor).await?;
         let input = request.arguments.unwrap_or_default();
         let result = match request.name.as_ref() {
-            "report_handoff" => return report::submit(&self.entry, actor, &meta, input).await,
             "ListReviews" => operations::list(&self.entry, actor, arguments(input)?).await,
             "GetReview" => operations::get(&self.entry, actor, arguments(input)?).await,
             "ReadTranscript" => operations::transcript(&self.entry, actor, arguments(input)?).await,
