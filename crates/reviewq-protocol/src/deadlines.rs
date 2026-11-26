@@ -33,7 +33,8 @@ pub const GRANT_CHECK_LIMIT: Duration = SHORT;
 // ReviewQ's answer, not the host's timeout, ends every call, with time left to carry it back.
 const _: () = assert!(LONG.as_secs() + 5 <= HOST_TOOL_TIMEOUT.as_secs());
 
-/// What the model reads when a ledger call passes its deadline. The service may still have
+/// What the model reads when a ledger call that records something passes its deadline;
+/// `review_ledger` only reads, so it gets the read's sentence. The service may still have
 /// stored the call, so a blind repeat of a revision-guarded call would be refused as stale.
 const LEDGER_TIMED_OUT: &str = "ReviewQ did not answer this ledger call in time, but it may have stored it. Read the ledger with review_ledger before repeating the call.";
 /// What the model reads when a management call that changes something passes its deadline.
@@ -71,6 +72,7 @@ impl ToolDeadline {
 pub fn tool_deadline(name: &str) -> ToolDeadline {
     let (limit, timed_out) = match (LedgerTool::from_name(name), name) {
         (Some(LedgerTool::FinishReview), _) => (LONG, LEDGER_TIMED_OUT),
+        (Some(LedgerTool::ReviewLedger), _) => (SHORT, READ_TIMED_OUT),
         (Some(_), _) => (SHORT, LEDGER_TIMED_OUT),
         (
             None,

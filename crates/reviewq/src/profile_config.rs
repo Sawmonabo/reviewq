@@ -29,7 +29,7 @@ impl Profile {
     }
 }
 
-pub(crate) struct Lock<'a> {
+struct Lock<'a> {
     config: &'a Path,
     native: Option<NativeLock>,
     profile: Profile,
@@ -122,7 +122,7 @@ fn profile_directory(config: &Path, profile: Profile) -> Result<Option<&Path>, F
 }
 
 impl<'a> Lock<'a> {
-    pub(crate) fn acquire(config: &'a Path, profile: Profile) -> Result<Option<Self>, Failure> {
+    fn acquire(config: &'a Path, profile: Profile) -> Result<Option<Self>, Failure> {
         if profile_directory(config, profile)?.is_none() {
             return Ok(None);
         }
