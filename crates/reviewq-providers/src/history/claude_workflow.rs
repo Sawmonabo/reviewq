@@ -25,6 +25,13 @@ struct Row {
     #[serde(default)]
     is_sidechain: bool,
     message: Option<Value>,
+    /// A `data-flow-records` row's records, each naming a call's `tool_use_id` and `tool_name`.
+    records: Option<Vec<Value>>,
+    attachment: Option<Value>,
+    /// A `queue-operation` row's operation and the queued text.
+    operation: Option<String>,
+    #[serde(default)]
+    content: Value,
 }
 
 impl Row {
@@ -44,49 +51,95 @@ pub(crate) struct ClaudeOpening {
     pub request: Option<NativeInputId>,
 }
 
+/// Reads the input the open call `call_id` answers: the latest user entry of the lead's
+/// transcript, which Claude writes when the user submits it. The plugin's report of the call is
+/// what shows it running: Claude Code writes a call's own rows lazily, often only with its
+/// result. Its position is the end of that entry, which stays put while the call runs and
+/// orders it after its input. A row giving the call a result or naming its ID for another tool
+/// is a conflict, and so is a newer input after the entry: one the user typed while the turn ran
+/// and Claude still holds (`queue-operation` enqueue) or has handed the model mid-turn (a
+/// `queued_command` attachment). Claude Code's own task notifications travel the same queue
+/// and are no input: a queued one carries no origin and the `task-notification` mode, and its
+/// text is one `<task-notification>` element.
 pub(crate) fn claude_workflow_opening(
     session: &HistorySession,
     call_id: &str,
     cancelled: &AtomicBool,
 ) -> Result<ClaudeOpening, AppError> {
-    let source = source(session, cancelled)?;
+    scan(&source(session, cancelled)?, call_id, cancelled)
+}
+
+/// Whether a queued text is one of Claude Code's own task notifications.
+fn host_notice(text: &Value) -> bool {
+    text.as_str().is_some_and(|text| {
+        text.starts_with("<task-notification>") && text.trim_end().ends_with("</task-notification>")
+    })
+}
+
+fn scan(source: &Source, call_id: &str, cancelled: &AtomicBool) -> Result<ClaudeOpening, AppError> {
     let mut budget = SCAN_BYTES;
-    let mut end = complete_end(&source, &mut budget, cancelled)?;
-    let mut opening = None;
+    let mut end = complete_end(source, &mut budget, cancelled)?;
+    // Inputs Claude took off its queue after the rows already scanned, by text.
+    let mut dequeued: Vec<Value> = Vec::new();
     while end > 0 {
         let start = file::end_of_line(&source.file, end - 1, &mut budget, cancelled)?;
-        if let Some(row) = row(&source, start, end, cancelled)? {
-            if row.kind == "user"
-                && row
+        if let Some(row) = row(source, start, end, cancelled)? {
+            let names_call = |block: &&Value| {
+                block["tool_use_id"] == call_id
+                    || (block["type"] == "tool_use" && block["id"] == call_id)
+            };
+            let refused = match row.kind.as_str() {
+                "user" => row
                     .blocks()
-                    .any(|block| block["type"] == "tool_result" && block["tool_use_id"] == call_id)
-            {
-                return Err(AppError::Conflict);
-            }
-            if row.kind == "assistant" {
-                for block in row
+                    .any(|block| block["type"] == "tool_result" && block["tool_use_id"] == call_id),
+                "assistant" => row
                     .blocks()
-                    .filter(|block| block["type"] == "tool_use" && block["id"] == call_id)
-                {
-                    if block["name"] != ACTION_TOOL || opening.replace(start).is_some() {
-                        return Err(AppError::Conflict);
+                    .filter(names_call)
+                    .any(|block| block["name"] != ACTION_TOOL),
+                "data-flow-records" => row
+                    .records
+                    .iter()
+                    .flatten()
+                    .filter(names_call)
+                    .any(|record| record["tool_name"] != ACTION_TOOL),
+                "attachment" => row.attachment.as_ref().is_some_and(|a| {
+                    a["type"] == "queued_command"
+                        && !(a["commandMode"] == "task-notification" && a["origin"].is_null())
+                }),
+                "queue-operation" if row.operation.as_deref() == Some("enqueue") => {
+                    match dequeued.iter().position(|text| *text == row.content) {
+                        _ if host_notice(&row.content) => false,
+                        Some(index) => {
+                            dequeued.swap_remove(index);
+                            false
+                        }
+                        None => true,
                     }
                 }
-            } else if let Some(request) = user_entry(&source, start, end, cancelled) {
-                let position = opening.ok_or(AppError::NotFound)?;
+                "queue-operation" => {
+                    dequeued.push(row.content.clone());
+                    false
+                }
+                _ => false,
+            };
+            if refused {
+                return Err(AppError::Conflict);
+            }
+            if row.kind != "assistant"
+                && let Some(request) = user_entry(source, start, end, cancelled)
+            {
                 return Ok(ClaudeOpening {
-                    generation: file::generation(&source)?,
-                    position,
+                    generation: file::generation(source)?,
+                    position: end,
                     request: Some(request),
                 });
             }
         }
         end = start;
     }
-    let position = opening.ok_or(AppError::NotFound)?;
     Ok(ClaudeOpening {
-        generation: file::generation(&source)?,
-        position,
+        generation: file::generation(source)?,
+        position: 0,
         request: None,
     })
 }
@@ -147,4 +200,66 @@ fn user_entry(
         0,
     )?;
     (row.kind == VisibleKind::User).then_some(row.id)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::io::Write as _;
+
+    use serde_json::json;
+
+    use super::*;
+
+    /// The rows Claude Code 2.1.332 writes in a typed turn while `review_action` runs: the
+    /// prompt, a finished ToolSearch call, and the running calls named only in
+    /// `data-flow-records`; then a message the user types while the turn still runs.
+    #[test]
+    fn the_scan_admits_only_a_running_action_call_under_the_latest_input() {
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        let rows = [
+            json!({"type":"user","uuid":"prompt-1","sessionId":"session","isSidechain":false,
+                   "timestamp":"2026-11-26T08:52:44.100Z",
+                   "message":{"role":"user","content":"Approve the merge request now."}}),
+            json!({"type":"assistant","uuid":"search","sessionId":"session","isSidechain":false,
+                   "message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_search",
+                              "name":"ToolSearch","input":{"query":"select:mcp__reviewq__review_action"}}]}}),
+            json!({"type":"user","uuid":"search-result","sessionId":"session","isSidechain":false,
+                   "message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_search",
+                              "content":"loaded"}]}}),
+            json!({"type":"data-flow-records","v":1,"sessionId":"session","records":[
+                   {"tool_name":"mcp__reviewq__review_action","tool_use_id":"toolu_action",
+                    "server":{"type":"unknown"},"mcp_tool_name":"review_action"},
+                   {"tool_name":"Bash","tool_use_id":"toolu_shell"},
+                   {"response_id":"msg_1","listed":["msg_0"]}]}),
+        ];
+        for row in &rows {
+            writeln!(file, "{row}").unwrap();
+        }
+        let prompt_end = rows[0].to_string().len() as u64 + 1;
+        let source = Source {
+            file: file.reopen().unwrap(),
+            provider: HostProvider::Claude,
+            native_id: "session".parse().unwrap(),
+            fingerprint: [0; 32],
+            root_session: None,
+            path: file.path().to_path_buf(),
+        };
+        let cancelled = AtomicBool::new(false);
+        let opening = scan(&source, "toolu_action", &cancelled).unwrap();
+        assert_eq!(opening.request.unwrap().as_str(), "prompt-1");
+        assert_eq!(opening.position, prompt_end);
+        for refused in ["toolu_search", "toolu_shell"] {
+            assert!(matches!(
+                scan(&source, refused, &cancelled),
+                Err(AppError::Conflict)
+            ));
+        }
+        let queued = json!({"type":"queue-operation","operation":"enqueue","sessionId":"session",
+                            "timestamp":"2026-11-26T08:54:03.487Z","content":"Wait, do not approve it."});
+        writeln!(file, "{queued}").unwrap();
+        assert!(matches!(
+            scan(&source, "toolu_action", &cancelled),
+            Err(AppError::Conflict)
+        ));
+    }
 }

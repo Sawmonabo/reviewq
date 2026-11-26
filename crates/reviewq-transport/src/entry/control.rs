@@ -16,6 +16,9 @@ const NONCE: &str = "x-reviewq-nonce";
 const ISSUED: &str = "x-reviewq-issued";
 const PROOF: &str = "x-reviewq-control";
 const BRIDGE: &str = "x-reviewq-native-bridge";
+/// The Claude plugin's companion proof: a secret its module made with its generation and keeps
+/// only in memory, which reaches the helper on standard input.
+const COMPANION: &str = "x-reviewq-companion-proof";
 
 type HmacSha256 = Hmac<Sha256>;
 
@@ -48,12 +51,12 @@ pub struct BridgeDescriptor {
 #[serde(rename_all = "camelCase")]
 pub struct ServiceIdentity {
     pub build_digest: String,
-    pub profile_id: String,
-    pub store_id: String,
-    pub store_application_id: i64,
     /// The running executable's file, as `device:inode:size:mtime:ctime` with nanosecond
     /// times, so a helper that runs the same file can skip hashing itself.
     pub executable_file: String,
+    pub profile_id: String,
+    pub store_id: String,
+    pub store_application_id: i64,
     pub store_schema: i64,
 }
 
@@ -120,6 +123,16 @@ impl ServiceEndpoint {
             .get_mut(BRIDGE)
             .ok_or(AppError::Internal)?
             .set_sensitive(true);
+        Ok(headers)
+    }
+
+    /// The bridge headers with the Claude plugin's companion proof, 32 bytes in lowercase hex.
+    pub fn companion_headers(&self, proof: &str) -> Result<HeaderMap, AppError> {
+        if !lower_hex(proof, 64) {
+            return Err(AppError::InvalidRequest);
+        }
+        let mut headers = self.bridge_headers()?;
+        put(&mut headers, COMPANION, proof)?;
         Ok(headers)
     }
 
@@ -349,9 +362,34 @@ pub(super) fn decode(raw: &str) -> Option<[u8; 32]> {
     (URL_SAFE_NO_PAD.decode_slice(raw, &mut result).ok()? == 32).then_some(result)
 }
 
+/// The SHA-256 of the companion proof a request carries, which is what the store keeps; `None`
+/// when it carries none. One proof of 32 bytes in lowercase hex, or `Unauthorized`.
+pub(super) fn companion_proof(headers: &HeaderMap) -> Result<Option<[u8; 32]>, AppError> {
+    match headers.get_all(COMPANION).iter().count() {
+        0 => return Ok(None),
+        1 => {}
+        _ => return Err(AppError::Unauthorized),
+    }
+    let proof = value(headers, COMPANION)
+        .filter(|proof| lower_hex(proof, 64))
+        .ok_or(AppError::Unauthorized)?;
+    let bytes: Vec<u8> = (0..32)
+        .map(|index| u8::from_str_radix(&proof[index * 2..index * 2 + 2], 16))
+        .collect::<Result<_, _>>()
+        .map_err(|_| AppError::Unauthorized)?;
+    Ok(Some(Sha256::digest(bytes).into()))
+}
+
+fn lower_hex(text: &str, length: usize) -> bool {
+    text.len() == length
+        && text
+            .bytes()
+            .all(|byte| matches!(byte, b'0'..=b'9' | b'a'..=b'f'))
+}
+
 fn put(headers: &mut HeaderMap, name: &'static str, raw: &str) -> Result<(), AppError> {
     let mut header = HeaderValue::from_str(raw).map_err(|_| AppError::Internal)?;
-    if name == PROOF {
+    if name == PROOF || name == COMPANION {
         header.set_sensitive(true);
     }
     headers.insert(name, header);

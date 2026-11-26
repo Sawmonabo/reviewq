@@ -23,6 +23,9 @@ CREATE TABLE claude_companions (
     host_namespace TEXT CHECK (length(CAST(host_namespace AS BLOB)) BETWEEN 1 AND 64),
     host_since_ms INTEGER,
     host_trusted INTEGER NOT NULL DEFAULT 0 CHECK (host_trusted IN (0,1)),
+    -- The SHA-256 of the proof this generation's first report carried; every later report of
+    -- the generation and every plugin request of the session must carry the same proof.
+    proof_sha256 BLOB NOT NULL CHECK (length(proof_sha256) = 32),
     CHECK (latest_prompt_turn_id IS NULL OR latest_prompt_id IS NOT NULL),
     CHECK ((host_pid IS NULL) = (host_start IS NULL) AND (host_pid IS NULL) = (host_boot IS NULL)
        AND (host_pid IS NULL) = (host_namespace IS NULL) AND (host_pid IS NULL) = (host_since_ms IS NULL)),

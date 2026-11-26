@@ -62,6 +62,8 @@ class DevService:
         self.provider = None
         self.browser = None
         self.csrf = None
+        # Each lead's companion proof, which the plugin makes with its generation.
+        self.proofs = {}
 
     def __enter__(self):
         self.root.mkdir(mode=0o700)
@@ -153,7 +155,7 @@ class DevService:
     def heartbeat(self, native_id, phase, sequence, turn=None):
         """Reports the lead's activity as the plugin's heartbeat does."""
         body = {"generation": native_id.replace("-", ""), "sequence": sequence, "phase": phase,
-                "hasQuestions": False, "latestPromptManual": False}
+                "hasQuestions": False, "latestPromptManual": False, "proof": self.proof(native_id)}
         if turn:
             body["turnId"] = turn
         self.cli("internal", "claude-bridge", "heartbeat", native_id, stdin=json.dumps(body).encode())
@@ -161,7 +163,7 @@ class DevService:
     def ledger(self, native_id, tool, value, call_id, agent=None, turn=None):
         """One ledger tool call through the bridge. Returns the route's reply, a result under
         `data` or a refusal under `error`."""
-        call = {"tool": tool, "callId": call_id, "input": value}
+        call = {"tool": tool, "callId": call_id, "input": value, "proof": self.proof(native_id)}
         if agent:
             call["agentId"] = agent
         if turn:
@@ -171,6 +173,10 @@ class DevService:
         if result.returncode:
             raise RuntimeError(f"{tool} failed: {result.stderr.decode(errors='replace').strip()}")
         return json.loads(result.stdout)
+
+    def proof(self, native_id):
+        """The lead's companion proof, as the plugin keeps it beside its generation."""
+        return self.proofs.setdefault(native_id, os.urandom(32).hex())
 
     def request(self, method, path, body=None, headers=None):
         """One request to the browser listener. Returns `(status, headers, bytes)`."""

@@ -206,11 +206,22 @@ pub(crate) async fn bridge(
     path: &str,
     body: Vec<u8>,
 ) -> Result<reqwest::Response, Failure> {
+    bridge_as(client, endpoint, path, body, endpoint.bridge_headers()?).await
+}
+
+/// `bridge` with `headers` in place of the bare bridge credential, which they include.
+pub(crate) async fn bridge_as(
+    client: &Client,
+    endpoint: &ServiceEndpoint,
+    path: &str,
+    body: Vec<u8>,
+    headers: reqwest::header::HeaderMap,
+) -> Result<reqwest::Response, Failure> {
     let status = signed(client, endpoint, "GET", "/api/v1/status", b"").await?;
     verify_ready(endpoint, &status)?;
     Ok(client
         .post(format!("http://{}{path}", endpoint.native()))
-        .headers(endpoint.bridge_headers()?)
+        .headers(headers)
         .header("content-type", "application/json")
         .body(body)
         .send()

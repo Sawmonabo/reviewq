@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 use sha2::{Digest, Sha256};
 
 use reviewq_domain::identity::{
-    DeliveryFence, DeliveryId, NativeInputId, NativeSessionId, NativeTurnId, ReportHash,
+    DeliveryFence, DeliveryId, NativeInputId, NativeSessionId, NativeTurnId, ReportHash, SessionKey,
 };
 use reviewq_domain::session::{AbsolutePath, LeadTarget, NativeBinding, SessionTarget};
 
@@ -33,6 +33,9 @@ pub struct ClaudeHeartbeat {
     pub effort: Option<String>,
     /// The process hosting the session, as the heartbeat helper named its parent.
     pub host: Option<ClaudeHost>,
+    /// The SHA-256 of the companion proof the report carried, which its generation's first
+    /// report registers and every later report and plugin request must match.
+    pub proof: [u8; 32],
 }
 
 impl ClaudeHeartbeat {
@@ -161,8 +164,9 @@ pub struct ProvenClaudeChild {
 
 pub enum ClaudeClassicEvent {
     PermissionPending,
+    /// A chunk of a message Claude displayed, in the companion's running turn: the hook's own
+    /// turn ID is not the one the companion reports.
     Display {
-        turn: NativeTurnId,
         message: NativeInputId,
         index: u64,
         final_chunk: bool,
@@ -231,6 +235,16 @@ pub trait ClaudeStore: Send + Sync {
         lead: LeadTarget,
         observation: ClaudeHeartbeat,
     ) -> AppFuture<'_, Snapshot<ClaudeHeartbeatResult>>;
+
+    /// Admits a request of the Claude plugin for `session` when `proof`, the SHA-256 of the
+    /// proof it carried, is the one the session's companion registered. A session ReviewQ does
+    /// not store is admitted, so the call gets its own answer for that. Fails with
+    /// `Unauthorized` otherwise, a stored session with no companion included.
+    fn prove_claude_companion(
+        &self,
+        session: SessionKey,
+        proof: Option<[u8; 32]>,
+    ) -> AppFuture<'_, ()>;
 }
 
 pub enum ClaudeDeliveryAck {

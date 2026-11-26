@@ -62,7 +62,7 @@ function needsAttempt(previous, signature) {
 async function observe($, state, metadata, signature, previous) {
   const same = previous?.signature === signature;
   const sequence = same ? previous.sequence : ++state.childSequence;
-  const result = await invoke($, "hook", state.id, {
+  const result = await invoke($, "hook", state, {
     ...metadata,
     generation: state.generation,
     sequence,

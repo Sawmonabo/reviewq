@@ -21,14 +21,19 @@ function reset() {
   session = undefined;
 }
 
+function randomHex(bytes) {
+  return Array.from(crypto.getRandomValues(new Uint8Array(bytes)), byte => byte.toString(16).padStart(2, "0")).join("");
+}
+
 async function current($) {
   const id = await $.session.id();
   if (session?.id !== id) {
     reset();
-    const salt = crypto.getRandomValues(new Uint8Array(16));
     session = {
       id,
-      generation: Array.from(salt, byte => byte.toString(16).padStart(2, "0")).join(""),
+      generation: randomHex(16),
+      // Proves this module's requests to ReviewQ, which keeps only its hash; see `invoke`.
+      proof: randomHex(32),
       sequence: 0,
       inputRevision: 0,
       childSequence: 0,
@@ -44,7 +49,7 @@ async function current($) {
 
 async function refresh($, target) {
   const state = await current($);
-  const result = await invoke($, "registration", state.id, target);
+  const result = await invoke($, "registration", state, target);
   if (state === session && await $.session.id() === state.id && !result.error) {
     state.linked = !!result.linked;
     if (result.pendingLaunch && !state.pendingUntil) {
@@ -74,7 +79,7 @@ async function workflowLead($) {
 
 async function heartbeat($, state, allowDelivery = true) {
   const settings = await currentSettings($, state);
-  const result = await invoke($, "heartbeat", state.id, {
+  const result = await invoke($, "heartbeat", state, {
     generation: state.generation,
     sequence: ++state.sequence,
     phase: state.question ? "blocked" : state.working || state.activeTurn || state.pendingPrompt ? "working" : state.phase ?? null,
@@ -147,6 +152,8 @@ export function register(on) {
   on("prompt.submit", async ($, event, next) => {
     const state = await current($);
     state.pendingPrompt = true;
+    // Every prompt Claude Code takes, typed mid-turn and queued included; see `stageAction`.
+    state.submitted = (state.submitted ?? 0) + 1;
     const owned = state.delivery?.started && reviewqOrigin(event.origin);
     if (!owned) state.inputRevision += 1;
     try {
@@ -227,6 +234,7 @@ export function register(on) {
       session.lastPromptTurn = undefined;
       session.lastPromptManual = event.origin?.kind === "composer" || event.origin?.kind === "bridge";
       session.inputRevision += 1;
+      session.promptSubmitted = session.submitted;
       observeInput(session, event, result.uuid);
     }
     return result;
@@ -262,7 +270,7 @@ export function register(on) {
     recheck = false;
     if (state?.linked) {
       await $.env.set("REVIEWQ_CLAUDE_LINKED", "");
-      await invoke($, "hook", state.id, { classic: { kind: "disconnected", generation: state.generation } });
+      await invoke($, "hook", state, { classic: { kind: "disconnected", generation: state.generation } });
     }
     return next(event);
   });

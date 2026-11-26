@@ -20,7 +20,7 @@ pub(super) async fn restarted_companion(store: &SqliteStore) {
     // After a restart a companion that has not reported yet is unknown: neither idle for
     // dispatch nor settled, whatever it last reported, until the watch lets it be gone.
     let companion = "INSERT INTO claude_companions(session_key,generation,sequence,seen_at_ms,
-        turn_id,latest_prompt_manual) VALUES('claude:lead',printf('%032d',0),1,1000,'turn-1',0)";
+        turn_id,latest_prompt_manual,proof_sha256) VALUES('claude:lead',printf('%032d',0),1,1000,'turn-1',0,zeroblob(32))";
     sql(store, companion).await;
     let lead = store.read(|db| Ok(lead_for_run(db, &"run".parse().unwrap())?.unwrap()));
     let lead = lead.await.unwrap();
@@ -141,6 +141,7 @@ fn report(generation: &str, sequence: u64, phase: HostPhase, turn: &str) -> Clau
         model: None,
         effort: None,
         host: ClaudeHost::of(std::process::id()),
+        proof: [0; 32],
     }
 }
 

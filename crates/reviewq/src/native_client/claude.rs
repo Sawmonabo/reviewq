@@ -13,7 +13,7 @@ use reviewq_transport::{ServiceEndpoint, field_error_text, ledger_refusal_text};
 use serde::Deserialize;
 
 use super::hook::{Answer, GateHost, INPUT_LIMIT, forward};
-use super::{Failure, bounded, bridge, client, client_with_timeout, read_input, read_within};
+use super::{Failure, bounded, bridge_as, client, client_with_timeout, read_input, read_within};
 use crate::runtime;
 
 /// Room for the call's other fields, each ID at most 512 bytes, around a tool input of the
@@ -60,6 +60,7 @@ pub(crate) async fn claude_bridge(
     if fields.contains_key("context") {
         return Err("ReviewQ companion context is supplied by the native client.".into());
     }
+    let proof = fields.remove("proof");
     if matches!(operation, ClaudeBridgeOperation::QuestionFinished) {
         fields.remove("answerDigest");
         if let Some(answers) = fields.remove("nativeAnswers")
@@ -92,6 +93,7 @@ pub(crate) async fn claude_bridge(
         fields.insert("host".into(), host());
     }
     let endpoint = runtime::read_native_endpoint(profile)?;
+    let headers = companion_headers(&endpoint, proof)?;
     let body = serde_json::to_vec(&payload)?;
     let (status, body) = match operation {
         // `review_action` answers within its tool's deadline, the one limit on the call, so a
@@ -100,15 +102,15 @@ pub(crate) async fn claude_bridge(
             let deadline = tool_deadline("review_action");
             tokio::time::timeout(
                 deadline.limit,
-                post(&client_with_timeout(None)?, &endpoint, path, body),
+                post(&client_with_timeout(None)?, &endpoint, path, body, headers),
             )
             .await
             .map_err(|_| deadline.timed_out)??
         }
         ClaudeBridgeOperation::Question => {
-            post(&client_with_timeout(None)?, &endpoint, path, body).await?
+            post(&client_with_timeout(None)?, &endpoint, path, body, headers).await?
         }
-        _ => post(&client()?, &endpoint, path, body).await?,
+        _ => post(&client()?, &endpoint, path, body, headers).await?,
     };
     if !status.is_success() {
         let detail = match operation {
@@ -141,14 +143,31 @@ fn host() -> serde_json::Value {
     })
 }
 
-/// One bridge request after the signed status check: the reply's status and its body.
+/// The bridge headers for a plugin request, with the companion proof it carried. The plugin
+/// sends the proof on standard input only, and it travels on as a header, never in a body or
+/// argv. A request with none, from a session with no companion yet, goes without it, and
+/// ReviewQ refuses it for a session it stores.
+fn companion_headers(
+    endpoint: &ServiceEndpoint,
+    proof: Option<serde_json::Value>,
+) -> Result<reqwest::header::HeaderMap, Failure> {
+    Ok(match proof {
+        None => endpoint.bridge_headers()?,
+        Some(serde_json::Value::String(proof)) => endpoint.companion_headers(&proof)?,
+        Some(_) => return Err("Invalid ReviewQ companion proof.".into()),
+    })
+}
+
+/// One bridge request with `headers` after the signed status check: the reply's status and its
+/// body.
 async fn post(
     client: &reqwest::Client,
     endpoint: &ServiceEndpoint,
     path: &str,
     body: Vec<u8>,
+    headers: reqwest::header::HeaderMap,
 ) -> Result<(reqwest::StatusCode, Vec<u8>), Failure> {
-    let response = bridge(client, endpoint, path, body).await?;
+    let response = bridge_as(client, endpoint, path, body, headers).await?;
     let status = response.status();
     Ok((status, bounded(response, 256 * 1024).await?))
 }
@@ -194,7 +213,7 @@ fn action_refusal(declare: bool, reply: &[u8]) -> &'static str {
             "Something newer stands in this declaration's way: the merge request is not open, the user has a newer instruction waiting, a later action is declared, or this turn changed while ReviewQ checked it. Nothing was recorded. Call review_action with operation reconcile to read the current action."
         }
         (Ok(ErrorCode::Conflict), false) => {
-            "The merge request or the GitLab user changed since the action was declared, or this turn changed while ReviewQ checked it."
+            "The merge request or the GitLab user changed since the action was declared, the user has a newer instruction waiting, or this turn changed while ReviewQ checked it."
         }
         (Ok(ErrorCode::IdempotencyConflict), _) => {
             "This review_action call already declared a different action, so nothing new was recorded. Call review_action with operation reconcile to read it."
@@ -228,6 +247,7 @@ struct LedgerCall {
     turn_id: Option<HistoryTurnIdDto>,
     agent_id: Option<ResourceIdDto>,
     input: serde_json::Value,
+    proof: Option<serde_json::Value>,
 }
 
 /// Sends one ledger tool call for the Claude session `native` to the tool's route and prints
@@ -256,12 +276,13 @@ async fn ledger(profile: &Path, native: &NativeSessionId) -> Result<(), Failure>
         input: call.input,
     })?;
     let endpoint = runtime::read_native_endpoint(profile)?;
+    let headers = companion_headers(&endpoint, call.proof)?;
     // The tool's deadline is the one limit, so a slow call always ends with its message.
     let client = client_with_timeout(None)?;
     let path = format!("/api/v1/native/ledger/{}", tool.route());
     let deadline = tool_deadline(tool.name());
     let (status, reply) = tokio::time::timeout(deadline.limit, async {
-        let response = bridge(&client, &endpoint, &path, body).await?;
+        let response = bridge_as(&client, &endpoint, &path, body, headers).await?;
         let status = response.status();
         Ok::<_, Failure>((status, bounded(response, LEDGER_REPLY_LIMIT).await?))
     })
@@ -296,7 +317,6 @@ struct ClassicInput {
     agent_id: Option<String>,
     notification_type: Option<String>,
     tool_name: Option<String>,
-    turn_id: Option<String>,
     message_id: Option<String>,
     index: Option<u64>,
     #[serde(rename = "final")]
@@ -330,7 +350,6 @@ pub(crate) async fn claude_hook(profile: &Path) -> Result<(), Failure> {
         "MessageDisplay" if hook.index == Some(0) || hook.final_chunk == Some(true) => (
             serde_json::json!({
                 "kind": "display",
-                "turnId": hook.turn_id.ok_or("Missing native turn.")?,
                 "messageId": hook.message_id.ok_or("Missing native display message.")?,
                 "index": hook.index.ok_or("Missing native display sequence.")?,
                 "finalChunk": hook.final_chunk.unwrap_or(false),

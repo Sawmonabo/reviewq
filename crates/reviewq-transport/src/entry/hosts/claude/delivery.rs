@@ -15,7 +15,7 @@ use reviewq_protocol::Success;
 use reviewq_protocol::ledger::GateReply;
 use serde::{Deserialize, Serialize};
 
-use super::{ClaudeCommand, ClaudeOffer, registered_lead, verified_context};
+use super::{ClaudeCommand, ClaudeOffer, registered_lead, require_companion, verified_context};
 use crate::entry::error::ApiBytes;
 use crate::entry::features::ledger::{answer_gate, read_back};
 use crate::entry::pages::{parse, success};
@@ -84,6 +84,7 @@ pub(super) async fn check(
         return Err(AppError::Unavailable.into());
     }
     let (lead, session) = verified_context(&entry, command.context).await?;
+    require_companion(&entry, &headers, lead.session_key()).await?;
     let companion = entry.claude.as_ref().ok_or(AppError::Unavailable)?;
     let offer = command.offer.checked()?;
     let pending = entry
@@ -232,8 +233,6 @@ struct ClassicHook {
 enum Classic {
     PermissionPending,
     Display {
-        #[serde(rename = "turnId")]
-        turn_id: String,
         #[serde(rename = "messageId")]
         message_id: String,
         index: u64,
@@ -263,19 +262,11 @@ enum Hook {
 }
 
 impl Hook {
-    /// The gate, the read-back and a companion's disconnect, which send nothing to the
-    /// session and so are answered even while sends are off, as in validation. A disconnect
-    /// is the heartbeat's end, and heartbeats are recorded then too.
+    /// Every event but a delivery's outcome only observes the session or answers it, and
+    /// sends nothing to it, so it is answered even while sends are off, as in validation, where
+    /// heartbeats are recorded too.
     fn sends_nothing(&self) -> bool {
-        matches!(
-            self,
-            Self::Classic(ClassicHook {
-                classic: Classic::Stopping { .. }
-                    | Classic::Compacted
-                    | Classic::Disconnected { .. },
-                ..
-            })
-        )
+        !matches!(self, Self::Delivery(_))
     }
 }
 
@@ -319,23 +310,27 @@ pub(super) async fn hook(
                     ClaudeClassicEvent::Disconnected { generation }
                 }
                 Classic::Display {
-                    turn_id,
                     message_id,
                     index,
                     final_chunk,
                 } => ClaudeClassicEvent::Display {
-                    turn: parse(&turn_id)?,
                     message: parse(&message_id)?,
                     index,
                     final_chunk,
                 },
             };
             let (lead, _) = verified_context(&entry, call.context).await?;
+            // Claude Code runs the plugin's command hooks as processes that cannot hold the
+            // module's proof, so only the module's own disconnect must carry it.
+            if matches!(event, ClaudeClassicEvent::Disconnected { .. }) {
+                require_companion(&entry, &headers, lead.session_key()).await?;
+            }
             entry.store.record_claude_classic(lead, event).await?;
             return answered(&entry, ());
         }
         Hook::Child(child) => {
             let (root, history) = verified_context(&entry, child.context).await?;
+            require_companion(&entry, &headers, root.session_key()).await?;
             let companion = entry.claude.as_ref().ok_or(AppError::Unavailable)?;
             let (status, phase) = child.status.facts();
             let proof = companion
@@ -367,6 +362,7 @@ pub(super) async fn hook(
         }
         Hook::Turn(turn) => {
             let (lead, _) = verified_context(&entry, turn.context).await?;
+            require_companion(&entry, &headers, lead.session_key()).await?;
             entry
                 .store
                 .record_claude_turn(
@@ -382,6 +378,7 @@ pub(super) async fn hook(
         }
     };
     let (lead, session) = verified_context(&entry, command.context).await?;
+    require_companion(&entry, &headers, lead.session_key()).await?;
     let offer = command.offer.checked()?;
     let replay = match &command.outcome {
         Outcome::Deferred => Some(ClaudeDeliveryAck::Deferred),

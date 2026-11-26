@@ -74,11 +74,10 @@ pub(super) fn record(
             }
         }
         ClaudeClassicEvent::Display {
-            turn,
             message,
             index,
             final_chunk,
-        } if turn.as_str() == active => {
+        } => {
             if index != 0 && !final_chunk {
                 return Ok(());
             }
@@ -88,7 +87,7 @@ pub(super) fn record(
                  ON CONFLICT(session_key,turn_id,display_id) DO UPDATE SET
                     first_seen=max(first_seen,excluded.first_seen), final_seen=max(final_seen,excluded.final_seen)
                  WHERE first_seen<excluded.first_seen OR final_seen<excluded.final_seen",
-                params![key,turn.as_str(),message.as_str(),index==0,final_chunk],
+                params![key,active,message.as_str(),index==0,final_chunk],
             )?;
             if changed != 0 {
                 tx.emit(&[ResourceKey::History(Some(lead.session_key().clone()))])?;

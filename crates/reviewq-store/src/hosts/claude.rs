@@ -270,6 +270,30 @@ impl ClaudeStore for SqliteStore {
         })
     }
 
+    fn prove_claude_companion(
+        &self,
+        session: reviewq_domain::identity::SessionKey,
+        proof: Option<[u8; 32]>,
+    ) -> AppFuture<'_, ()> {
+        Box::pin(async move {
+            self.read(move |db| {
+                let (stored, known): (Option<Vec<u8>>, bool) = db
+                    .prepare_cached(
+                        "SELECT (SELECT proof_sha256 FROM claude_companions WHERE session_key=?1),
+                           EXISTS(SELECT 1 FROM sessions WHERE session_key=?1)",
+                    )?
+                    .query_row([session.as_str()], |row| Ok((row.get(0)?, row.get(1)?)))?;
+                match stored {
+                    Some(stored) if proof.is_some_and(|proof| stored == proof) => Ok(()),
+                    None if !known => Ok(()),
+                    _ => Err(AppError::Unauthorized.into()),
+                }
+            })
+            .await
+            .map_err(StoreError::app)
+        })
+    }
+
     fn record_claude_heartbeat(
         &self,
         lead: LeadTarget,
@@ -328,11 +352,12 @@ fn heartbeat(
     let (host_pid, host_start, host_boot, host_namespace) = host::params(observation.host.as_ref());
     let recorded = db.execute(
         &format!("INSERT INTO claude_companions(session_key,generation,sequence,seen_at_ms,turn_id,latest_prompt_id,model,effort,latest_prompt_turn_id,latest_prompt_manual,turn_step,
-           host_pid,host_start,host_boot,host_namespace,host_since_ms)
-         VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,CASE WHEN ?12 IS NULL THEN NULL ELSE ?4 END)
+           host_pid,host_start,host_boot,host_namespace,host_since_ms,proof_sha256)
+         VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,CASE WHEN ?12 IS NULL THEN NULL ELSE ?4 END,?17)
          ON CONFLICT(session_key) DO UPDATE SET
             {},
             generation=excluded.generation, sequence=excluded.sequence, seen_at_ms=excluded.seen_at_ms,
+            proof_sha256=excluded.proof_sha256,
             permission_turn_id=CASE
               WHEN ?16 THEN excluded.turn_id
               WHEN generation=excluded.generation AND turn_id IS excluded.turn_id
@@ -344,7 +369,7 @@ fn heartbeat(
             turn_id=excluded.turn_id, latest_prompt_id=excluded.latest_prompt_id,
             model=excluded.model,effort=excluded.effort,
             latest_prompt_turn_id=excluded.latest_prompt_turn_id,latest_prompt_manual=excluded.latest_prompt_manual
-         WHERE (generation=excluded.generation AND sequence<excluded.sequence) OR
+         WHERE (generation=excluded.generation AND proof_sha256=excluded.proof_sha256 AND sequence<excluded.sequence) OR
                (generation<>excluded.generation AND reviewq_companion_gone(seen_at_ms))", host::upsert()),
         params![key, observation.generation, observation.sequence as i64, now,
             observation.turn.as_ref().map(|value| value.as_str()),
@@ -352,7 +377,7 @@ fn heartbeat(
             observation.model, observation.effort,
             observation.latest_prompt_turn.as_ref().map(|value| value.as_str()),
             observation.latest_prompt_manual, observation.step.map(|value| value as i64),
-            host_pid, host_start, host_boot, host_namespace, binds],
+            host_pid, host_start, host_boot, host_namespace, binds, observation.proof.as_slice()],
     )?;
     if recorded == 0 {
         return Err(AppError::StaleRevision.into());

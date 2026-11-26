@@ -7,17 +7,24 @@ async function nativeArgv($) {
   return [binary || `${home}/.local/bin/reviewq`, "internal"];
 }
 
-export async function invoke($, action, id, value, timeoutMs = 5000) {
+// `state` names the session and carries the companion's proof: a secret made with its
+// generation that lives only in this module's memory. It reaches the helper on standard input,
+// never in argv or the environment, which other processes of the same user can read.
+function withProof(state, value) {
+  return state.proof ? { ...value, proof: state.proof } : value;
+}
+
+export async function invoke($, action, state, value, timeoutMs = 5000) {
   try {
     const argv = await nativeArgv($);
     if (!argv) return { error: "ReviewQ could not resolve the installed native helper." };
     let stdin;
     if (action === "registration") {
-      argv.push("claude-companion", id);
+      argv.push("claude-companion", state.id);
       if (value) argv.push("--target", value);
     } else {
-      argv.push("claude-bridge", action, id);
-      stdin = JSON.stringify(value);
+      argv.push("claude-bridge", action, state.id);
+      stdin = JSON.stringify(withProof(state, value));
     }
     const result = await $.process.run(argv, { stdin, timeoutMs, env: await $.process.hookEnv() });
     if (result.exitCode === 0 && !result.isStdoutTruncated) {
@@ -32,11 +39,12 @@ export async function invoke($, action, id, value, timeoutMs = 5000) {
   }
 }
 
-export async function waitForQuestion($, id, address, questions) {
+export async function waitForQuestion($, state, address, questions) {
   const argv = await nativeArgv($);
   if (!argv) return undefined;
-  argv.push("claude-bridge", "question", id);
-  const stream = $.process.spawn({ argv, input: JSON.stringify({ address, input: { questions } }), env: await $.process.hookEnv() });
+  argv.push("claude-bridge", "question", state.id);
+  const input = JSON.stringify(withProof(state, { address, input: { questions } }));
+  const stream = $.process.spawn({ argv, input, env: await $.process.hookEnv() });
   let stdout = "";
   for await (const chunk of stream) {
     if (chunk.stream !== "stdout") continue;

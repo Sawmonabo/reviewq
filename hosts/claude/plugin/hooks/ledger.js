@@ -25,8 +25,7 @@ export async function callLedger($, state, event) {
   const call = { tool: tool.name, callId: event.tool_use_id, input: toolInput(event) };
   if (state?.activeTurn) call.turnId = state.activeTurn;
   if (event.agentId) call.agentId = event.agentId;
-  const id = state?.id ?? await $.session.id();
-  return toolResult(await invoke($, "ledger", id, call, tool.waitMs));
+  return toolResult(await invoke($, "ledger", state ?? { id: await $.session.id() }, call, tool.waitMs));
 }
 
 // The event spreads the tool's arguments beside the host's fields. Drop only the host's and put

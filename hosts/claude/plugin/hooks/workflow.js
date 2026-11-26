@@ -34,16 +34,22 @@ export async function registerWorkflowTools($) {
 export async function stageAction($, state, event) {
   const context = { callId: event.tool_use_id };
   const declare = event.operation === "declare";
+  // A declaration answers the latest prompt in the conversation. A prompt Claude Code took after
+  // it, such as one the user typed during this turn, has not entered the conversation as a
+  // prompt yet, so the declaration is refused, and so is one when no prompt was seen entering.
+  if (declare && (state.promptSubmitted === undefined || state.submitted !== state.promptSubmitted)) {
+    return refusal("The user has a newer instruction waiting. Nothing was recorded. Read it before you declare an action.");
+  }
   if (declare) {
     context.turnId = state.activeTurn;
     context.declaration = event.declaration;
   }
-  const result = await invoke($, declare ? "action" : "action-status", state.id, context, actionWaitMs);
+  const result = await invoke($, declare ? "action" : "action-status", state, context, actionWaitMs);
   return toolResult(result);
 }
 
 export async function reportTurn($, state, event) {
-  await invoke($, "hook", state.id, {
+  await invoke($, "hook", state, {
     generation: state.generation, turnId: event.turnId, normal: event.reason === "answer",
   });
 }

@@ -46,7 +46,7 @@ export async function observeQuestion($, state, event, next, refresh) {
   } finally {
     state.questionCalls.delete(callId);
     if (state.question === callId) state.question = state.questionCalls.keys().next().value;
-    if (question.waiting) await invoke($, "question-finished", state.id, { address: question.address, status, nativeAnswers });
+    if (question.waiting) await invoke($, "question-finished", state, { address: question.address, status, nativeAnswers });
     refresh();
   }
 }
@@ -70,7 +70,7 @@ export async function answerQuestion($, state, event, next, heartbeat, current) 
   try {
     await heartbeat();
     if (active()) {
-      const answers = await waitForQuestion($, state.id, question.address, input.questions);
+      const answers = await waitForQuestion($, state, question.address, input.questions);
       if (answers && active()) return { decision: { behavior: "allow", updatedInput: { ...input, answers } } };
     }
   } catch {

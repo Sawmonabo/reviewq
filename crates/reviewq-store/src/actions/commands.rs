@@ -205,13 +205,17 @@ fn declare(
         return Err(AppError::Conflict.into());
     }
     let position = i64::try_from(call.source_position).map_err(|_| AppError::InvalidRequest)?;
-    let current_order: Option<(String, i64)> = db.query_row(
-        "SELECT a.source_generation,a.source_position FROM action_heads h JOIN actions a USING(run_id,action_id)
+    // A declaration answers a later input than the head's, or the same one: calls under one
+    // input share its position, and the later to arrive here replaces the head.
+    let current_order: Option<(String, i64, String)> = db.query_row(
+        "SELECT a.source_generation,a.source_position,a.request_entry_id FROM action_heads h JOIN actions a USING(run_id,action_id)
          WHERE h.run_id=?1 AND a.authority_verified=1",
-        [run], |row| Ok((row.get(0)?, row.get(1)?)),
+        [run], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
     ).optional()?;
-    if current_order.is_some_and(|(generation, prior)| {
-        generation != call.source_generation || prior >= position
+    if current_order.is_some_and(|(generation, prior, input)| {
+        generation != call.source_generation
+            || prior > position
+            || (prior == position && input != request.as_str())
     }) {
         return Err(AppError::Conflict.into());
     }

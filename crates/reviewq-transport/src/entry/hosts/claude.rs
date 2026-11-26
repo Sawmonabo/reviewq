@@ -9,11 +9,13 @@ use reviewq_app::history::HistorySession;
 use reviewq_app::hosts::{
     ClaudeContext, ClaudeHeartbeat, ClaudeHost, ClaudeOffer, HostActivity, HostPhase,
 };
+use reviewq_domain::identity::SessionKey;
 use reviewq_domain::session::{HostProvider, LeadTarget, NativeBinding, NativeIdentity};
 use reviewq_protocol::Success;
 use serde::{Deserialize, Serialize};
 
 use super::ClaudeCommand;
+use crate::entry::control::companion_proof;
 use crate::entry::error::ApiBytes;
 use crate::entry::pages::{parse, success};
 use crate::entry::{ApiError, Entry};
@@ -82,6 +84,7 @@ async fn heartbeat(
     ApiBytes(bytes): ApiBytes,
 ) -> Result<Json<Success<HeartbeatResponse>>, ApiError> {
     let command: Heartbeat = entry.auth.bridge_command(&headers, &bytes, 16_384)?;
+    let proof = companion_proof(&headers)?.ok_or(AppError::Unauthorized)?;
     let (lead, _) = verified_context(&entry, command.context).await?;
     let activity = command.phase.map(|phase| HostActivity {
         phase: match phase {
@@ -114,6 +117,7 @@ async fn heartbeat(
             boot_id: host.boot_id,
             pid_namespace: host.pid_namespace,
         }),
+        proof,
     };
     let recorded = entry
         .store
@@ -137,6 +141,22 @@ async fn heartbeat(
         },
         recorded.cursor,
     )?))
+}
+
+/// Admits a request that only the Claude plugin's module can make for `session`: one carrying
+/// the proof its companion's generation registered with its first heartbeat. Every request of
+/// the module passes here but the registration and the heartbeat, which registers and matches
+/// the proof itself. The plugin's command hooks run outside the module and carry none.
+pub(in crate::entry) async fn require_companion(
+    entry: &Entry,
+    headers: &HeaderMap,
+    session: &SessionKey,
+) -> Result<(), AppError> {
+    let proof = companion_proof(headers)?;
+    entry
+        .store
+        .prove_claude_companion(session.clone(), proof)
+        .await
 }
 
 /// The registered lead a hook's context names, its context and its binding, read from the

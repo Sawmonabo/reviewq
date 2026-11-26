@@ -26,6 +26,7 @@ use serde::Serialize;
 use serde_json::Value;
 
 use crate::entry::error::ApiBytes;
+use crate::entry::hosts::claude::require_companion;
 use crate::entry::pages::{parse, success};
 use crate::entry::{ApiError, Entry};
 
@@ -152,6 +153,9 @@ async fn tool_route(
             .auth
             .bridge_command(&headers, &bytes, MAX_TOOL_BODY_BYTES)?;
     let binding = claude_binding(request.binding)?;
+    if let HostSession::Claude { session, .. } = &binding.session {
+        require_companion(&entry, &headers, session).await?;
+    }
     let result = call(&entry, binding, tool, &request.input).await?;
     Ok(Json(success(result, *entry.commits.borrow())?))
 }

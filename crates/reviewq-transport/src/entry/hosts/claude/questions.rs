@@ -9,7 +9,7 @@ use reviewq_domain::identity::ReportHash;
 use reviewq_protocol::Success;
 use serde::Deserialize;
 
-use super::{ClaudeCommand, verified_context};
+use super::{ClaudeCommand, require_companion, verified_context};
 use crate::entry::error::ApiBytes;
 use crate::entry::pages::{parse, success};
 use crate::entry::{ApiError, Entry};
@@ -61,6 +61,7 @@ pub(super) async fn watch(
     }
     let address = command.address.checked()?;
     let (lead, session) = verified_context(&entry, command.context).await?;
+    require_companion(&entry, &headers, lead.session_key()).await?;
     let companion = entry.claude.as_ref().ok_or(AppError::Unavailable)?;
     entry
         .store
@@ -123,6 +124,7 @@ pub(super) async fn finish(
     let command: Finish = entry.auth.bridge_command(&headers, &bytes, 4096)?;
     let address = command.address.checked()?;
     let (lead, session) = verified_context(&entry, command.context).await?;
+    require_companion(&entry, &headers, lead.session_key()).await?;
     let companion = entry.claude.as_ref().ok_or(AppError::Unavailable)?;
     entry
         .store

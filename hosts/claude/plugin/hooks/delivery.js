@@ -26,14 +26,14 @@ async function postOutcome($, state, attempt) {
   const { offer, outcome } = attempt;
   if (!outcome || outcome === attempt.posted || await $.session.id() !== state.id) return;
   let accepted = outcome;
-  let result = await invoke($, "hook", state.id, { offer, outcome });
+  let result = await invoke($, "hook", state, { offer, outcome });
   if (result.error && attempt.authorizationUnknown && !attempt.started
       && outcome.kind === "deferred" && await $.session.id() === state.id
       && state.delivery === attempt) {
     // A lost authorization reply can leave a sealed fence. This Mod has never
     // called prompt.submit for the offer, so it can safely settle either state.
     accepted = { kind: "dropped" };
-    result = await invoke($, "hook", state.id, { offer, outcome: accepted });
+    result = await invoke($, "hook", state, { offer, outcome: accepted });
   }
   if (!result.error && state.delivery === attempt) {
     attempt.posted = accepted;
@@ -78,7 +78,7 @@ export async function deliver($, state, offer) {
     await postOutcome($, state, attempt);
     return;
   }
-  const authorization = await invoke($, "delivery-check", state.id, { offer });
+  const authorization = await invoke($, "delivery-check", state, { offer });
   if (!authorization.data) {
     attempt.authorizationUnknown = true;
     attempt.outcome = { kind: "deferred" };

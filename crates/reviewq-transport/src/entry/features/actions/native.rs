@@ -8,12 +8,14 @@ use reviewq_app::actions::{
     ActionDeclaration, CommentTarget, Intent, declare_publication, reconcile_publication,
 };
 use reviewq_domain::identity::ReportHash;
+use reviewq_domain::session::{HostProvider, LeadTarget};
 use reviewq_protocol::Success;
 use reviewq_protocol::actions as dto;
 use sha2::{Digest, Sha256};
 
 use super::project;
 use crate::entry::error::ApiBytes;
+use crate::entry::hosts::claude::require_companion;
 use crate::entry::pages::{parse, success};
 use crate::entry::{ApiError, Entry};
 
@@ -21,6 +23,19 @@ use crate::entry::{ApiError, Entry};
 pub(in crate::entry::features) const MAX_DECLARE_BODY_BYTES: usize = 80 * 1024;
 /// Largest reconcile body, as the API's default body limit allows.
 const MAX_RECONCILE_BODY_BYTES: usize = 64 * 1024;
+
+/// A Claude lead's action call comes only from its plugin, which proves it; a Codex lead's
+/// comes from ReviewQ's own command in that lead's shell.
+async fn from_plugin(
+    entry: &Entry,
+    headers: &HeaderMap,
+    lead: &LeadTarget,
+) -> Result<(), AppError> {
+    if lead.binding().identity().provider() == HostProvider::Claude {
+        require_companion(entry, headers, lead.session_key()).await?;
+    }
+    Ok(())
+}
 
 pub(in crate::entry::features) async fn declare(
     State(entry): State<Arc<Entry>>,
@@ -41,6 +56,7 @@ pub(in crate::entry::features) async fn declare(
         .store
         .run_lead(parse(command.session_key.as_str())?)
         .await?;
+    from_plugin(&entry, &headers, &lead).await?;
     let turn = command
         .turn_id
         .as_ref()
@@ -110,6 +126,7 @@ pub(in crate::entry::features) async fn reconcile(
         .store
         .run_lead(parse(command.session_key.as_str())?)
         .await?;
+    from_plugin(&entry, &headers, &lead).await?;
     let verified = proof
         .verify_active_call(lead.clone(), None, command.call_id.as_str().to_owned())
         .await?;
