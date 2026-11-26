@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use crate::checkout_setup::files::{Existing, read};
-use crate::profile_config::{self, Lock, Profile};
+use crate::profile_config::{self, Profile, Replacement};
 
 use super::{Failure, Paths, paths};
 
@@ -198,29 +198,30 @@ impl Registration {
     }
 
     fn edit(&self, installing: bool) -> Result<(), Failure> {
-        let Some(lock) = Lock::acquire(&self.path, Profile::Codex)? else {
-            if installing {
-                return Err(paths::conflict(&self.path));
+        let replaced = profile_config::replace(&self.path, Profile::Codex, |before| {
+            let bytes = before.map(|file| file.bytes.as_slice());
+            let change = if installing {
+                json::install(bytes, self.event, &self.command, self.added, self.applied)?
+            } else {
+                json::remove(bytes, self.event, &self.command, self.added)?
+            };
+            Ok(change.map(|change| {
+                let after = change.map(|bytes| Existing {
+                    bytes,
+                    mode: before.map_or(0o600, |file| file.mode),
+                });
+                (after, ())
+            }))
+        })?;
+        match replaced {
+            Replacement::Unchanged => Ok(()),
+            Replacement::Missing if installing => Err(paths::conflict(&self.path)),
+            Replacement::Missing => Ok(()),
+            Replacement::Replaced { verified, .. } => {
+                verified?;
+                profile_config::sync_parent(&self.path)
             }
-            return Ok(());
-        };
-        let before = read(&self.path)?;
-        let bytes = before.as_ref().map(|file| file.bytes.as_slice());
-        let change = if installing {
-            json::install(bytes, self.event, &self.command, self.added, self.applied)?
-        } else {
-            json::remove(bytes, self.event, &self.command, self.added)?
-        };
-        let Some(change) = change else {
-            return Ok(());
-        };
-        let after = change.map(|bytes| Existing {
-            bytes,
-            mode: before.as_ref().map_or(0o600, |file| file.mode),
-        });
-        lock.write(before.as_ref(), after.as_ref())?;
-        lock.readback(after.as_ref())?;
-        profile_config::sync_parent(&self.path)
+        }
     }
 }
 

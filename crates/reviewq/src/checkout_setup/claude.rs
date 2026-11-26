@@ -1,7 +1,7 @@
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
-use crate::profile_config::{self, Lock, Profile};
+use crate::profile_config::{self, Profile, Replacement};
 
 use super::files::{Existing, read};
 use super::{Failure, git};
@@ -25,7 +25,7 @@ struct Selection {
 
 struct Applied {
     before: Option<Existing>,
-    after: Existing,
+    after: Option<Existing>,
     undo: Vec<json::Undo>,
 }
 
@@ -56,51 +56,53 @@ impl Edit {
             applied: None,
         };
         // Find incompatible entries before issuing a grant. The write itself
-        // recalculates the patch from the current file under Claude's lock.
+        // recalculates the patch from the file it replaces.
         edit.changes(read(file)?.as_ref())?;
         Ok(edit)
     }
 
+    /// Writes the entries, computed again from the file if Claude changes it before the
+    /// write; `profile_config::replace` owns that loop and Claude's lock.
     pub(super) fn apply(&mut self) -> Result<(), Failure> {
-        let Some(lock) = Lock::acquire(&self.file, Profile::Claude)? else {
-            if self.selected.is_none() {
-                return Ok(());
+        let replaced = profile_config::replace(&self.file, Profile::Claude, |before| {
+            let (after, undo) = self.changes(before)?;
+            Ok(after.map(|after| (Some(after), undo)))
+        })?;
+        let (before, after, undo, verified) = match replaced {
+            Replacement::Unchanged => return Ok(()),
+            Replacement::Missing => {
+                return Err("The selected Claude profile directory is missing.".into());
             }
-            return Err("The selected Claude profile directory is missing.".into());
+            Replacement::Replaced {
+                before,
+                after,
+                value,
+                verified,
+            } => (before, after, value, verified),
         };
-        let before = read(&self.file)?;
-        let (after, undo) = self.changes(before.as_ref())?;
-        let Some(after) = after else {
-            return Ok(());
-        };
-        lock.write(before.as_ref(), Some(&after))?;
-        let verified = lock.readback(Some(&after));
         self.applied = Some(Applied {
             before,
             after,
             undo,
         });
-        drop(lock);
         verified?;
         profile_config::sync_parent(&self.file)
     }
 
+    /// Reverses the entries `apply` wrote, computed again from the file if Claude changes it
+    /// before the write, as there.
     pub(super) fn rollback(&mut self) -> Result<(), Failure> {
         let Some(applied) = &self.applied else {
             return Ok(());
         };
-        let lock = Lock::acquire(&self.file, Profile::Claude)?
-            .ok_or("The Claude profile directory changed during setup.")?;
-        let current = read(&self.file)?;
-        if profile_config::same(current.as_ref(), applied.before.as_ref()) {
-            self.applied = None;
-            return Ok(());
-        }
-        let current = current.ok_or("The Claude profile config changed during setup.")?;
-        let verified = if profile_config::same(Some(&current), Some(&applied.after)) {
-            lock.write(Some(&current), applied.before.as_ref())?;
-            lock.readback(applied.before.as_ref())
-        } else {
+        let replaced = profile_config::replace(&self.file, Profile::Claude, |current| {
+            if profile_config::same(current, applied.before.as_ref()) {
+                return Ok(None);
+            }
+            let current = current.ok_or("The Claude profile config changed during setup.")?;
+            if profile_config::same(Some(current), applied.after.as_ref()) {
+                return Ok(Some((applied.before.clone(), ())));
+            }
             // A concurrent writer may have changed another project, or Claude
             // may have reformatted the whole document. Reverse our entries only.
             let mut bytes = None;
@@ -109,19 +111,19 @@ impl Edit {
                     bytes = Some(restored);
                 }
             }
-            match bytes {
-                Some(bytes) => {
-                    let restored = Existing { bytes, mode: 0o600 };
-                    lock.write(Some(&current), Some(&restored))?;
-                    lock.readback(Some(&restored))
-                }
-                None => Ok(()),
-            }
-        };
+            Ok(bytes.map(|bytes| (Some(Existing { bytes, mode: 0o600 }), ())))
+        })?;
         self.applied = None;
-        drop(lock);
-        verified?;
-        profile_config::sync_parent(&self.file)
+        match replaced {
+            Replacement::Unchanged => Ok(()),
+            Replacement::Missing => {
+                Err("The Claude profile directory changed during setup.".into())
+            }
+            Replacement::Replaced { verified, .. } => {
+                verified?;
+                profile_config::sync_parent(&self.file)
+            }
+        }
     }
 
     fn changes(
