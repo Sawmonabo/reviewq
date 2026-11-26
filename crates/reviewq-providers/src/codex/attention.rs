@@ -268,6 +268,8 @@ fn daemon_alive(profile: &Path) -> bool {
     #[serde(rename_all = "camelCase")]
     struct Record {
         pid: u32,
+        /// Codex also reads this field under the name it gave it first.
+        #[serde(alias = "linuxProcessIdentity")]
         process_identity: Option<Identity>,
     }
     #[derive(Deserialize)]
