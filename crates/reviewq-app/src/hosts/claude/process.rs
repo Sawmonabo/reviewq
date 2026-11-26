@@ -1,7 +1,9 @@
 //! The process hosting a Claude session, as `/proc` names it, and the one proof that it died.
 //! The heartbeat helper names its own parent, the `claude` process that runs the session, and
 //! the service reads that process back. Only the absence of the process proves anything: a
-//! process that exists says nothing about whether the session is there.
+//! process that exists says nothing about whether the session is there. The service keeps a
+//! host only when it ran on the service's own boot and pid namespace when it was reported
+//! (`is_local`), so a later boot proves that host's kernel, and the host with it, has stopped.
 
 use std::fs;
 use std::io::ErrorKind;
@@ -49,12 +51,27 @@ impl ClaudeHost {
                 .all(|label| !label.is_empty() && label.len() <= MAX_LABEL_BYTES)
     }
 
-    /// Whether this process is proven dead, read from this machine and pid namespace: its
+    /// Whether this process names this service's own boot and pid namespace, read now.
+    /// Anything unreadable is not.
+    pub fn is_local(&self) -> bool {
+        here().is_some_and(|(boot, namespace)| {
+            boot == self.boot_id && namespace == self.pid_namespace
+        })
+    }
+
+    /// Whether this host, which was `is_local` when it was reported, is proven dead: this
+    /// service now runs on another boot, or on the same boot and pid namespace its
     /// `/proc/<pid>/stat` is missing, names another start time, or shows it a zombie (`Z`) or
-    /// dead (`X`). Anything unreadable or unclear, and a host on another boot or in another
-    /// pid namespace, proves nothing.
+    /// dead (`X`). Anything unreadable or unclear, and another pid namespace on the same boot,
+    /// proves nothing.
     pub fn is_dead(&self) -> bool {
-        if here().as_ref() != Some(&(self.boot_id.clone(), self.pid_namespace.clone())) {
+        let Some((boot, namespace)) = here() else {
+            return false;
+        };
+        if boot != self.boot_id {
+            return true;
+        }
+        if namespace != self.pid_namespace {
             return false;
         }
         match stat(self.pid) {

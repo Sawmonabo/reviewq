@@ -263,13 +263,16 @@ enum Hook {
 }
 
 impl Hook {
-    /// The gate and the read-back, which send nothing to the session and so are answered
-    /// even while sends are off.
-    fn asks_ledger(&self) -> bool {
+    /// The gate, the read-back and a companion's disconnect, which send nothing to the
+    /// session and so are answered even while sends are off, as in validation. A disconnect
+    /// is the heartbeat's end, and heartbeats are recorded then too.
+    fn sends_nothing(&self) -> bool {
         matches!(
             self,
             Self::Classic(ClassicHook {
-                classic: Classic::Stopping { .. } | Classic::Compacted,
+                classic: Classic::Stopping { .. }
+                    | Classic::Compacted
+                    | Classic::Disconnected { .. },
                 ..
             })
         )
@@ -300,7 +303,7 @@ pub(super) async fn hook(
     ApiBytes(bytes): ApiBytes,
 ) -> Result<Response, ApiError> {
     let command: Hook = entry.auth.bridge_command(&headers, &bytes, 16_384)?;
-    if !entry.sends_allowed && !command.asks_ledger() {
+    if !entry.sends_allowed && !command.sends_nothing() {
         return Err(AppError::Unavailable.into());
     }
     let command = match command {

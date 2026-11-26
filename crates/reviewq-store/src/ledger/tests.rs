@@ -3,10 +3,6 @@ use std::time::Duration;
 
 use reviewq_app::access::{Actor, AppError};
 use reviewq_app::followups::{NextAction, ResultKind};
-use reviewq_app::hosts::{
-    ClaudeClassicEvent, ClaudeHeartbeat, ClaudeHost, ClaudeStore, ClaudeWorkflowStore,
-    HostActivity, HostPhase,
-};
 use reviewq_app::ledger::publish::{finish_review, settle_due};
 use reviewq_app::ledger::{
     CallBinding, CardSpan, ClosingCommit, ClosingRead, ClosingSnapshot, ClosingSummary, CommitKind,
@@ -31,7 +27,8 @@ use reviewq_domain::session::AbsolutePath;
 use sha2::{Digest, Sha256};
 
 use crate::SqliteStore;
-use crate::queue::lead_for_run;
+
+mod companion;
 
 const SHA: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 
@@ -237,74 +234,7 @@ fn publish_is_conditional() {
         // The idle lead has not started the delivered batch, so the run does not settle yet.
         select_thread(&store, receipt.as_str()).await;
         assert_eq!(lead_idle(&store).await, [false]);
-        // After a restart a companion that has not reported yet is unknown: neither idle for
-        // dispatch nor settled, whatever it last reported, until the watch lets it be gone.
-        let companion = "INSERT INTO claude_companions(session_key,generation,sequence,seen_at_ms,
-            turn_id,latest_prompt_manual) VALUES('claude:lead',printf('%032d',0),1,1000,'turn-1',0)";
-        let inserted = store.write(|tx| Ok(tx.sql.execute(companion, [])?));
-        inserted.await.unwrap();
-        let lead = store.read(|db| Ok(lead_for_run(db, &"run".parse().unwrap())?.unwrap()));
-        let lead = lead.await.unwrap();
-        let live = async || {
-            let context = store.claude_workflow_context(lead.clone(), None);
-            let context = context.await.unwrap();
-            (context.active_turn.is_some(), context.idle)
-        };
-        activity(&store, "working").await;
-        assert_eq!(lead_idle(&store).await, [false]);
-        assert_eq!(live().await, (false, false));
-        // A permission prompt from Claude's own hook shows the session present, and is kept.
-        let prompt =
-            store.record_claude_classic(lead.clone(), ClaudeClassicEvent::PermissionPending);
-        prompt.await.unwrap();
-        activity(&store, "idle").await;
-        assert_eq!(lead_idle(&store).await, [false]);
-        assert_eq!(live().await, (false, false));
-        // The prompt binds to the turn and step of the companion's next report, with one alert.
-        let (phase, has_questions) = (HostPhase::Working, false);
-        let report = ClaudeHeartbeat {
-            generation: "0".repeat(32),
-            sequence: 2,
-            activity: Some(HostActivity {
-                phase,
-                has_questions,
-            }),
-            turn: Some("turn-2".parse().unwrap()),
-            step: Some(3),
-            question_id: None,
-            latest_prompt: None,
-            latest_prompt_turn: None,
-            latest_prompt_manual: false,
-            model: None,
-            effort: None,
-            host: ClaudeHost::of(std::process::id()),
-        };
-        let reported = store.record_claude_heartbeat(lead.clone(), report);
-        reported.await.unwrap();
-        let shown = store.read(|db| {
-            let sql = "SELECT host_activity, (SELECT group_concat(event_ref) FROM notifications
-                WHERE kind='agent_permission') FROM sessions WHERE session_key='claude:lead'";
-            Ok(db.query_row(sql, [], |row| Ok((row.get(0)?, row.get(1)?)))?)
-        });
-        let shown: (String, Option<String>) = shown.await.unwrap();
-        assert_eq!(shown, ("blocked".into(), Some("turn-2".into())));
-        // Its host is this test's own process, trusted as two reports 5 seconds apart make it.
-        let silent = "UPDATE claude_companions SET seen_at_ms=1000, host_trusted=1";
-        let silenced = store.write(|tx| Ok(tx.sql.execute(silent, [])?));
-        silenced.await.unwrap();
-        // A ReviewQ stopped for a minute has not watched it, and its live host proves nothing:
-        // the companion is still unknown. A host process that no longer exists ends it at once.
-        store.companions.watched_long_enough();
-        store.companions.stopped_for(Duration::from_secs(60));
-        store.end_companions().await.unwrap();
-        assert_eq!(lead_idle(&store).await, [false]);
-        let dead = "UPDATE claude_companions SET host_pid=4294967295";
-        store
-            .write(|tx| Ok(tx.sql.execute(dead, [])?))
-            .await
-            .unwrap();
-        store.end_companions().await.unwrap();
-        assert_eq!(lead_idle(&store).await, [true]);
+        companion::restarted_companion(&store).await;
         let selected = closing(&store, "finish-thread").await;
         let kind = selected.snapshot.pass.as_ref().map(|pass| pass.kind);
         assert_eq!(kind, Some(PassKind::SelectedThreads));

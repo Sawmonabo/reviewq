@@ -279,7 +279,7 @@ impl ClaudeStore for SqliteStore {
             observation.validate()?;
             self.write(move |tx| heartbeat(tx, lead, observation))
                 .await
-                .map_err(StoreError::app)
+                .map_err(StoreError::app)?
         })
     }
 }
@@ -288,7 +288,7 @@ fn heartbeat(
     tx: &mut WriteTx<'_>,
     lead: LeadTarget,
     observation: ClaudeHeartbeat,
-) -> Result<Snapshot<ClaudeHeartbeatResult>, StoreError> {
+) -> Result<Result<Snapshot<ClaudeHeartbeatResult>, AppError>, StoreError> {
     let db = &tx.sql;
     let native = lead.binding().identity();
     if native.provider() != HostProvider::Claude
@@ -299,22 +299,30 @@ fn heartbeat(
     allow_target(db, &Actor::native_session(native.clone()), &lead)?;
     let key = lead.session_key().as_str();
     let now = now_ms()?;
-    // Another generation takes over a companion that is not gone only once its trusted host
-    // is proven dead, which ends it now.
-    if let Some(generation) = host::dead_generation(db, key, &observation.generation)? {
+    // A stored companion whose trusted host is proven dead ends now. A report of its own
+    // generation, as from a helper that outlived the process, is refused; another generation
+    // takes the session over at once.
+    if let Some(generation) = host::dead_generation(db, key)? {
         classic::store_ended(tx, lead.run_id(), lead.session_key(), &generation, false)?;
+        if generation == observation.generation {
+            return Ok(Err(AppError::StaleRevision));
+        }
     }
     let db = &tx.sql;
     // Whether the queue showed the companion, and whether this report binds a permission
-    // prompt that arrived while the companion was unknown.
+    // prompt that arrived while the companion was unknown: to the turn it names when that turn
+    // is still running, whatever its generation, since a newer generation that takes over
+    // mid-turn was refused while the stored one was unknown and its prompt landed there. A
+    // report with no turn or an ended one drops the prompt: a newer generation's first report
+    // names none, so a prompt of the process it replaced is dropped.
+    let turn = observation.turn.as_ref().map(|value| value.as_str());
     let (was_connected, binds): (bool, bool) = db
         .prepare_cached(
-            "SELECT NOT reviewq_companion_gone(seen_at_ms), permission_unbound=1 AND generation=?2
+            "SELECT NOT reviewq_companion_gone(seen_at_ms), permission_unbound=1 AND ?2 IS NOT NULL
+               AND NOT EXISTS(SELECT 1 FROM claude_turns WHERE session_key=?1 AND turn_id=?2)
              FROM claude_companions WHERE session_key=?1",
         )?
-        .query_row(params![key, observation.generation], |row| {
-            Ok((row.get(0)?, row.get(1)?))
-        })
+        .query_row(params![key, turn], |row| Ok((row.get(0)?, row.get(1)?)))
         .optional()?
         .unwrap_or((false, false));
     let (host_pid, host_start, host_boot, host_namespace) = host::params(observation.host.as_ref());
@@ -326,12 +334,11 @@ fn heartbeat(
             {},
             generation=excluded.generation, sequence=excluded.sequence, seen_at_ms=excluded.seen_at_ms,
             permission_turn_id=CASE
-              WHEN generation=excluded.generation AND permission_unbound=1 THEN excluded.turn_id
+              WHEN ?16 THEN excluded.turn_id
               WHEN generation=excluded.generation AND turn_id IS excluded.turn_id
                 AND coalesce(excluded.turn_step,-1)<=coalesce(permission_step,-1)
               THEN permission_turn_id ELSE NULL END,
-            permission_step=CASE WHEN generation=excluded.generation AND permission_unbound=1
-              THEN excluded.turn_step ELSE permission_step END,
+            permission_step=CASE WHEN ?16 THEN excluded.turn_step ELSE permission_step END,
             permission_unbound=0,
             turn_step=excluded.turn_step,
             turn_id=excluded.turn_id, latest_prompt_id=excluded.latest_prompt_id,
@@ -345,7 +352,7 @@ fn heartbeat(
             observation.model, observation.effort,
             observation.latest_prompt_turn.as_ref().map(|value| value.as_str()),
             observation.latest_prompt_manual, observation.step.map(|value| value as i64),
-            host_pid, host_start, host_boot, host_namespace],
+            host_pid, host_start, host_boot, host_namespace, binds],
     )?;
     if recorded == 0 {
         return Err(AppError::StaleRevision.into());
@@ -422,5 +429,5 @@ fn heartbeat(
         [lead.review_id().as_str()],
         |row| row.get(0),
     )?;
-    snapshot(&tx.sql, ClaudeHeartbeatResult { label })
+    Ok(Ok(snapshot(&tx.sql, ClaudeHeartbeatResult { label })?))
 }

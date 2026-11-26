@@ -51,21 +51,19 @@ pub(super) fn trusted(row: &Row<'_>, first: usize) -> rusqlite::Result<Option<Cl
     }))
 }
 
-/// The generation of `session`'s companion when it is another than `reporting`, not gone, and
-/// its trusted host is proven dead, as another generation's report checks before it takes the
-/// session over.
+/// The generation of `session`'s stored companion when its trusted host is proven dead, which
+/// every report checks first: a report of that generation is refused, since a generation lives
+/// in one process, and a report of another takes the session over at once.
 pub(super) fn dead_generation(
     db: &Connection,
     session: &str,
-    reporting: &str,
 ) -> Result<Option<String>, StoreError> {
     let found = db
         .prepare_cached(&format!(
             "SELECT c.generation, {COLUMNS} FROM claude_companions c
-             WHERE c.session_key=?1 AND c.generation<>?2 AND c.host_trusted=1
-               AND NOT reviewq_companion_gone(c.seen_at_ms)"
+             WHERE c.session_key=?1 AND c.host_trusted=1"
         ))?
-        .query_row([session, reporting], |row| {
+        .query_row([session], |row| {
             Ok((row.get::<_, String>(0)?, trusted(row, 1)?))
         })
         .optional()?;
@@ -75,12 +73,14 @@ pub(super) fn dead_generation(
     }))
 }
 
-/// The report's host as the upsert's `?12` to `?15`, or all `NULL` without one.
+/// The report's host as the upsert's `?12` to `?15`, or all `NULL` without one or when it is
+/// not on this service's own boot and pid namespace now, so a stored host can be proven dead.
 pub(super) type HostParams<'a> = (Option<i64>, Option<i64>, Option<&'a str>, Option<&'a str>);
 
 pub(super) fn params(host: Option<&ClaudeHost>) -> HostParams<'_> {
-    let Some((host, start)) =
-        host.and_then(|host| Some((host, i64::try_from(host.start_time).ok()?)))
+    let Some((host, start)) = host
+        .filter(|host| host.is_local())
+        .and_then(|host| Some((host, i64::try_from(host.start_time).ok()?)))
     else {
         return (None, None, None, None);
     };

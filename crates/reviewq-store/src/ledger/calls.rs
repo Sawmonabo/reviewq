@@ -107,16 +107,6 @@ pub(super) fn store(
     Ok(())
 }
 
-/// The ordinal of the lead's last accepted closing call on `run`, or 0 before its first.
-pub(super) fn last_closing_ordinal(db: &Connection, run: &str) -> Result<i64, StoreError> {
-    Ok(db
-        .prepare_cached(
-            "SELECT coalesce(max(ordinal), 0) FROM ledger_calls
-             WHERE run_id=?1 AND tool='finish_review'",
-        )?
-        .query_row([run], |row| row.get(0))?)
-}
-
 /// The lead's last accepted closing call on `run`: its stored result, the ledger sequence it
 /// closed at and its ordinal. Every closing call answered with success is stored, including
 /// one answered with the current version.

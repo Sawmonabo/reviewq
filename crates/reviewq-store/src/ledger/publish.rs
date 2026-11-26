@@ -57,7 +57,7 @@ pub(super) fn commit(
     if sequence(db, run)? != guard.sequence
         || disposition != guard.disposition_revision.as_sqlite_integer()
         || head.as_ref().map(|head| head.0.as_str()) != guard.head.as_ref().map(ReceiptId::as_str)
-        || calls::last_closing_ordinal(db, run)? != guard.closing
+        || calls::last_closing(db, run)?.map_or(0, |(_, _, ordinal)| ordinal) != guard.closing
     {
         return Ok(PublishOutcome::Stale);
     }

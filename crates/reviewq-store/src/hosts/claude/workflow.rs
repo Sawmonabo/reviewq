@@ -144,9 +144,11 @@ fn finish_turn(
             return Err(AppError::Conflict.into());
         }
     }
+    // The turn's permission prompt ends with it, bound or not: a prompt stored unbound while
+    // the companion was unknown and the turn ended belonged to this turn or an earlier one.
     db.execute(
-        "UPDATE claude_companions SET permission_turn_id=NULL
-         WHERE session_key=?1 AND turn_id=?2 AND generation=?3 AND permission_turn_id=?2",
+        "UPDATE claude_companions SET permission_turn_id=NULL, permission_unbound=0
+         WHERE session_key=?1 AND turn_id=?2 AND generation=?3",
         params![key, id, result.generation],
     )?;
     Ok(())
