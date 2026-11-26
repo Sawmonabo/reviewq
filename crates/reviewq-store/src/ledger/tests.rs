@@ -7,8 +7,8 @@ use reviewq_app::ledger::{
     CallBinding, CardSpan, ClosingCommit, ClosingRead, ClosingSnapshot, ClosingSummary, CommitKind,
     Composed, FailureRecord, FindingFields, FindingPatch, HostSession, LedgerEntries, LedgerRead,
     LedgerSelection, LedgerStore, NewVersion, NoteKey, NoteSection, NoteWrite, PublishCommit,
-    PublishOutcome, RecordField, RecordReceipt, RecordWrite, SectionSpan, Span, VersionFacts,
-    WriteRefusal,
+    PublishOutcome, RecordField, RecordReceipt, RecordWrite, ReportLinks, SectionSpan, Span,
+    VersionFacts, WriteRefusal,
 };
 use reviewq_app::reports::{
     ArtifactStats, Assessment, Collection, ContextRequest, Coverage, Descriptor, DispositionEdit,
@@ -266,6 +266,23 @@ fn publish_is_conditional() {
             selected.snapshot.pass.as_ref().map(|pass| pass.kind),
             Some(PassKind::SelectedThreads)
         );
+        // The cover carries the review's Jira link, its ticket and the note its monitored
+        // discussion resolves to.
+        let cover = &selected.snapshot.cover;
+        assert_eq!(
+            cover.links,
+            ReportLinks::new(
+                "https://git.example",
+                "billing/api",
+                cover.iid,
+                Some("https://example.atlassian.net")
+            )
+            .unwrap()
+        );
+        assert_eq!(
+            (cover.tickets.as_slice(), cover.thread_notes.get("D1")),
+            (["RQ-41".parse().unwrap()].as_slice(), Some(&"9001".into()))
+        );
         let commit = PublishCommit {
             guard: selected.snapshot.guard,
             kind: CommitKind::Closing(Box::new(ClosingCommit {
@@ -484,8 +501,9 @@ fn summary(result: ResultKind) -> ClosingSummary {
 
 /// A full review whose text holds one card per active finding and one section.
 fn full_review(closing: ClosingSnapshot) -> PublishCommit {
-    let mut text =
-        String::from("[billing/api · !7](https://git.example/billing/api/-/merge_requests/7)\n\n");
+    let mut text = String::from(
+        "[api](https://git.example/billing/api) · [MR !7](https://git.example/billing/api/-/merge_requests/7)\n\n",
+    );
     let mut cards = Vec::new();
     for finding in closing
         .snapshot
@@ -590,10 +608,18 @@ async fn select_thread(store: &SqliteStore, receipt: &str) {
     let receipt = receipt.to_owned();
     store
         .write(move |tx| {
-            tx.sql.execute(
+            tx.sql.execute_batch(
                 "INSERT INTO followup_monitors(review_id,run_id,generation,state,reviewer_id,binding_verified,updated_at_ms)
-                 VALUES('review','run',1,'enabled','7',1,0)",
-                [],
+                 VALUES('review','run',1,'enabled','7',1,0);
+                 INSERT INTO followup_threads(review_id,generation,original_note_id,discussion_id,reviewer_id,selected)
+                   VALUES('review',1,'9001','D1','7',0);
+                 INSERT INTO followup_thread_findings VALUES('review',1,'9001','F-01');
+                 INSERT INTO settings(provider,origin,email,token_type,cloud_id,identity_id,identity_label)
+                   VALUES('jira','https://example.atlassian.net','reviewer@example.com','scoped',
+                     printf('%036d',0),'reviewer','Reviewer');
+                 INSERT INTO scoped_issues(board_id,ticket_key,title,project_key,status_id,status)
+                   VALUES(1,'RQ-41','Bound invoice retries','RQ',1,'Open');
+                 INSERT INTO scoped_review_issues VALUES('review',1,'RQ-41');",
             )?;
             tx.sql.execute(
                 "INSERT INTO followup_batches(batch_id,review_id,run_id,lead_session_key,generation,state,source_sha,

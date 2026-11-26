@@ -81,6 +81,8 @@ pub(crate) enum CardLabel {
     Confirmed,
     /// Before a gap, whose text the composer starts with `Not confirmed.`
     Evidence,
+    /// A line of its own above the quoted comment: `PROPOSED_COMMENT_OPENING`, where the
+    /// comment would go, then `:`.
     ProposedComment,
 }
 
@@ -96,6 +98,8 @@ impl CardLabel {
         Self::ProposedComment,
     ];
 
+    /// The label as an error message names it. `ProposedComment` stands for every lead line
+    /// with `…`.
     pub(crate) const fn text(self) -> &'static str {
         match self {
             Self::Location => "Location:",
@@ -103,10 +107,36 @@ impl CardLabel {
             Self::WhyItMatters => "Why it matters:",
             Self::Confirmed => "Confirmed:",
             Self::Evidence => "Evidence:",
-            Self::ProposedComment => "Proposed comment:",
+            Self::ProposedComment => "Proposed comment — …:",
+        }
+    }
+
+    /// Whether a paragraph's leading bold text, `bold`, reads as this label, as the reader
+    /// matches it: the whole text, or for `ProposedComment` any text that starts with
+    /// `PROPOSED_COMMENT_OPENING` and ends with `:`.
+    pub(crate) fn matches(self, bold: &str) -> bool {
+        match self {
+            Self::ProposedComment => {
+                bold.starts_with(PROPOSED_COMMENT_OPENING) && bold.ends_with(':')
+            }
+            Self::Location
+            | Self::Issue
+            | Self::WhyItMatters
+            | Self::Confirmed
+            | Self::Evidence => bold == self.text(),
         }
     }
 }
+
+/// The start of the proposed comment's bold lead line.
+pub(crate) const PROPOSED_COMMENT_OPENING: &str = "Proposed comment — ";
+
+/// Where a proposed comment would go, after `PROPOSED_COMMENT_OPENING`: a reply in the
+/// finding's linked thread, a new comment at its first location, or a new comment on the MR.
+pub(crate) const REPLY_IN: &str = "reply in ";
+pub(crate) const REPLY_THREAD: &str = "thread";
+pub(crate) const NEW_COMMENT_AT: &str = "new comment at ";
+pub(crate) const NEW_COMMENT_ON_MR: &str = "new comment on the MR";
 
 /// Whether an `extra` note's `title` repeats a fixed section's heading. The composer writes
 /// the title as a level-two heading, whose text Markdown trims, and a heading that differs
@@ -210,8 +240,7 @@ impl Display for CountsLine {
     }
 }
 
-/// What the cover's reviewed source or target says when ReviewQ does not know the SHA, and
-/// what a previous-threads row says for an unknown checked revision.
+/// What the cover's reviewed source or target says when ReviewQ does not know the SHA.
 pub(crate) const UNKNOWN_REVISION: &str = "unknown";
 
 /// The first words of gap evidence, written after the `Evidence:` label.
@@ -233,11 +262,16 @@ pub(crate) const fn outcome_label(conclusion: FindingConclusion) -> &'static str
     }
 }
 
-/// A previous-threads row's last cell when the outcome links no discussion.
-pub(crate) const NO_LINKED_DISCUSSION: &str = "No linked discussion";
+/// The text of a previous-threads link to a discussion's note, numbered from 1 after a space
+/// when the row links several.
+pub(crate) const THREAD_LINK: &str = "Thread";
 
-/// Before the checked revision in a previous-threads row's last cell.
-pub(crate) const CHECKED_REVISION_LABEL: &str = "Checked revision:";
+/// How many characters of the checked revision's SHA its previous-threads link shows.
+pub(crate) const SHORT_SHA_CHARS: usize = 8;
+
+/// A previous-threads row's last cell when the outcome links no discussion and its checked
+/// revision is unknown.
+pub(crate) const NO_THREAD_OR_EVIDENCE: &str = "—";
 
 /// Before a disposition's publication choice in a `Publication and dispositions` line.
 pub(crate) const PUBLICATION_LABEL: &str = "Publication:";

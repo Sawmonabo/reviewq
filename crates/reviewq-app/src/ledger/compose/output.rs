@@ -7,8 +7,10 @@ use std::fmt::{self, Display, Formatter, Write};
 use reviewq_domain::identity::ReportHash;
 use reviewq_domain::ledger::FindingId;
 use sha2::{Digest, Sha256};
+use url::Url;
 
 use crate::ledger::layout::FixedSection;
+use crate::ledger::markdown::fenced_code;
 use crate::ledger::{CardSpan, Composed, SectionSpan, Span};
 use crate::reports::{ArtifactStats, LineStats};
 
@@ -16,6 +18,13 @@ use crate::reports::{ArtifactStats, LineStats};
 /// an extra note's title and a card's category. `#` is among them so a title that ends in
 /// `#` keeps it instead of losing it as a heading's closing sequence.
 const INLINE_MARKUP: [char; 10] = ['\\', '`', '*', '_', '[', ']', '<', '&', '~', '#'];
+
+/// Characters a URL from the `url` crate may keep that a Markdown link destination would end
+/// on or decode: parentheses, a backslash escape and a character reference.
+const LINK_TARGET_RESERVED: [char; 4] = ['(', ')', '\\', '&'];
+
+/// Columns between Markdown's tab stops.
+const TAB_STOP: usize = 4;
 
 /// The composed text as it grows, with its scalar count and line statistics counted from
 /// each piece as it is appended, and the spans recorded so far.
@@ -57,6 +66,52 @@ impl Output {
     /// Authored Markdown without its outer blank lines. Its own lines are written unchanged.
     pub(super) fn authored(&mut self, text: &str) -> fmt::Result {
         self.write_str(without_blank_lines(text))
+    }
+
+    /// Authored Markdown without its outer blank lines, as one block quote: each line after
+    /// `> `, and an empty line as `>` alone. The marker moves the tab stops, so outside a
+    /// top-level fenced code block each tab in a line's indentation and container markers is
+    /// written as the spaces it stood for. Every block inside the quote then reads as it did
+    /// on its own, and a fenced block keeps its content as written.
+    pub(super) fn quoted(&mut self, text: &str) -> fmt::Result {
+        let text = without_blank_lines(text);
+        let fences = fenced_code(text);
+        let mut offset = 0;
+        for (index, line) in text.split('\n').enumerate() {
+            let start = offset;
+            offset += line.len() + 1;
+            if index > 0 {
+                self.write_char('\n')?;
+            }
+            if line.trim_end_matches('\r').is_empty() {
+                self.write_char('>')?;
+                self.write_str(line)?;
+                continue;
+            }
+            self.write_str("> ")?;
+            let verbatim = fences
+                .iter()
+                .any(|fence| fence.start < start && start < fence.end);
+            let structure = if verbatim {
+                0
+            } else {
+                line.find(|character: char| !is_structure(character))
+                    .unwrap_or(line.len())
+            };
+            let mut column = 0;
+            for character in line[..structure].chars() {
+                if character == '\t' {
+                    let width = TAB_STOP - column % TAB_STOP;
+                    self.write_str(&"    "[..width])?;
+                    column += width;
+                } else {
+                    self.write_char(character)?;
+                    column += 1;
+                }
+            }
+            self.write_str(&line[structure..])?;
+        }
+        Ok(())
     }
 
     pub(super) fn mark(&self) -> Mark {
@@ -226,6 +281,41 @@ pub(super) fn write_literal(out: &mut impl Write, text: &str) -> fmt::Result {
         rest = &rest[index + 1..];
     }
     out.write_str(rest)
+}
+
+/// Writes each piece through `write_literal`, so formatted text reads as written.
+struct Literal<'a, W>(&'a mut W);
+
+impl<W: Write> Write for Literal<'_, W> {
+    fn write_str(&mut self, piece: &str) -> fmt::Result {
+        write_literal(self.0, piece)
+    }
+}
+
+/// `[text](url)`: the text as written (`write_literal`), and the URL with each
+/// `LINK_TARGET_RESERVED` character percent-encoded, so neither can end the link early or
+/// open markup.
+pub(super) fn write_link(out: &mut impl Write, text: impl Display, url: &Url) -> fmt::Result {
+    out.write_char('[')?;
+    write!(Literal(out), "{text}")?;
+    out.write_str("](")?;
+    let mut rest = url.as_str();
+    while let Some(index) = rest.find(LINK_TARGET_RESERVED) {
+        out.write_str(&rest[..index])?;
+        write!(out, "%{:02X}", rest.as_bytes()[index])?;
+        rest = &rest[index + 1..];
+    }
+    out.write_str(rest)?;
+    out.write_char(')')
+}
+
+/// Whether `character` can make up a line's indentation and container markers: a space, a
+/// tab, a quote marker or part of a list marker.
+fn is_structure(character: char) -> bool {
+    matches!(
+        character,
+        ' ' | '\t' | '>' | '-' | '+' | '*' | '.' | ')' | '0'..='9'
+    )
 }
 
 /// `text` without its leading and trailing blank lines. The remaining lines keep their

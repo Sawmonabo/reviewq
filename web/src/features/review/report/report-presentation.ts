@@ -23,16 +23,19 @@ export type ReportBlock = GroupPosition & {
 // The composed card: `### F-01 · {title}`, then `**P1 · {category} · Blocking**`.
 const findingHeading = /^(F-\d{2,}) · /;
 const cardLine = /^(P[0-3]) · ([^·\n]+) · (Blocking|Nonblocking)$/;
-// The composed field labels in the order ReviewQ writes them. A label out of this order,
-// such as one quoted inside a card's details, stays part of the field before it.
+// The composed field labels in the order ReviewQ writes them, each a bold `Label:` that opens
+// its paragraph. The last field opens with a bold paragraph that says where the comment goes,
+// such as `**Proposed comment — new comment at invoices.rs:74:**`, and keeps that paragraph as
+// its first line. A label out of this order, such as one quoted inside a card's details, stays
+// part of the field before it.
 const fieldOrder = new Map([
   ["Location", 0],
   ["Issue", 1],
   ["Why it matters", 2],
   ["Confirmed", 3],
   ["Evidence", 3],
-  ["Proposed comment", 4],
 ]);
+const proposedComment = { label: "Proposed comment", order: 4, lead: /^Proposed comment — .+:$/ };
 
 export type GroupPosition = {
   readonly offset: number;
@@ -215,17 +218,21 @@ function authoredFinding(
   for (const node of rest.slice(1)) {
     const paragraph = node.type === "element" && node.tagName === "p" ? node : undefined;
     const first = paragraph?.children[0];
-    const label =
-      first?.type === "element" && first.tagName === "strong"
-        ? /^(.+):$/.exec(text(first))?.[1]
-        : undefined;
-    const order = label === undefined ? undefined : fieldOrder.get(label);
+    const bold = first?.type === "element" && first.tagName === "strong" ? text(first) : "";
+    const comment = paragraph?.children.length === 1 && proposedComment.lead.test(bold);
+    const label = comment ? proposedComment.label : /^(.+):$/.exec(bold)?.[1];
+    const order = comment
+      ? proposedComment.order
+      : label === undefined
+        ? undefined
+        : fieldOrder.get(label);
     if (paragraph && label && order !== undefined && order > rank) {
       rank = order;
       fields.push({
         label,
-        nodes:
-          paragraph.children.length > 1
+        nodes: comment
+          ? [paragraph]
+          : paragraph.children.length > 1
             ? [{ ...paragraph, children: paragraph.children.slice(1) }]
             : [],
       });

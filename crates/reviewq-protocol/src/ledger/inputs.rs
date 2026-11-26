@@ -173,7 +173,12 @@ pub struct AssessFinding {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct RecordNote {
     /// `title` is the report's title, on one line. `summary` says what the MR does in at most
-    /// four plain paragraphs and `rationale` gives the reason for the verdict in one.
+    /// four plain paragraphs and `rationale` gives the reason for the verdict in one. `flow` is
+    /// a Mermaid diagram of the principal code and data flow, then a short explanation.
+    /// `changes` is a table with the two columns Before and After, then a table with the
+    /// columns Affected operation, What changes and Source. `threads`, `questions`,
+    /// `verification` and `publication` fill the report sections of those names, and `extra`
+    /// adds a section under its own title.
     pub section: NoteSection,
     /// One line naming an `extra` note. Required for `extra` and only for it.
     #[serde(default, skip_serializing_if = "Option::is_none")]

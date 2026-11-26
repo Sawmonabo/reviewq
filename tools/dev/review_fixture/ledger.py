@@ -52,7 +52,7 @@ def worked(head):
             "`retry_key` is called inside the loop, so each attempt gets a new key.",
             "The server cannot tell a retry from a new request.",
             "The unit test `retries_reuse_key` fails at the reviewed commit.",
-            category="Reliability",
+            category="Reliability", proposedComment="Build the key once, before the loop.",
             locations=[{"path": "src/retry.rs", "line": 12}, {"path": "docs/retry`notes.md"}]), agent="agent-7"),
         call("record_finding", finding(
             "Two retry paths build separate keys", "P1", True, "functional",
@@ -64,10 +64,16 @@ def worked(head):
                                             "no longer fails the request.\n\nThe retry reuses the request's idempotency key.")),
         call("record_note", note("rationale", "The retry still creates a new key on one path, which can write a "
                                               "duplicate invoice.")),
-        call("record_note", note("flow", "1. `POST /invoices` reaches `InvoiceService::create`.\n"
-                                         "2. The service writes the row and returns the receipt.")),
-        call("record_note", note("changes", "- Adds `retry_write` in `src/retry.rs`.\n"
-                                            "- Moves key creation into `src/invoices.rs`.")),
+        call("record_note", note("flow", "```mermaid\nflowchart LR\n  Client --> InvoiceService --> Database\n```\n\n"
+                                         "`POST /invoices` reaches `InvoiceService::create`, which writes the row "
+                                         "and returns the receipt.")),
+        call("record_note", note("changes", "| Before | After |\n| --- | --- |\n"
+                                            "| A dropped acknowledgement fails the request. | The write is retried "
+                                            "with the stored key. |\n\n"
+                                            "| Affected operation | What changes | Source |\n| --- | --- | --- |\n"
+                                            "| `POST /invoices` | Retries the write once. | `src/retry.rs` |\n"
+                                            "| `InvoiceService::create` | Builds the key before the first attempt. | "
+                                            "`src/invoices.rs` |")),
         call("record_note", note("questions", "Should a retry give up after three attempts or after a time limit?")),
         call("record_note", note("verification", "Ran `cargo test -p invoices` at the reviewed commit. The replay "
                                                  "check ran against a local database only.")),
@@ -92,7 +98,9 @@ def worked(head):
         call("record_finding", finding(
             "Retry delay is not configurable", "P3", False, "quality",
             "The delay between attempts is a constant.", "Operators cannot slow retries during an outage.",
-            "The production retry settings were not available to check.", kind="gap")),
+            "The production retry settings were not available to check.", kind="gap",
+            proposedComment="Make the delay a setting.\n\n- Read it from `RETRY_DELAY_MS`.\n"
+                            "- Keep 200 ms as the default.\n")),
         call("record_note", note("threads", "The author replied on D7 that the shared key landed in the second commit.")),
         finish(head, fullReview=True),
     ]
@@ -147,7 +155,7 @@ def specimens(head):
     line_over = [call("record_finding", finding(
         "Locations in long Unicode paths", "P3", False, "quality", "Every path is long.", "The line is long.",
         "The location line exceeds 16 KiB.",
-        locations=[{"path": "🧪" * 511 + str(i)} for i in range(8)]))]
+        locations=[{"path": "🧪" * 200 + str(i)} for i in range(8)]))]
     edges = "\n".join(f"  N{i} --> N{i + 1}" for i in range(650))
     edges_over = [call("record_finding", finding(
         "A diagram with 650 edges", "P3", False, "quality", "The flow has many steps.", "It is hard to read.",
@@ -234,54 +242,54 @@ def ledger_plans(reviews, sessions):
 # fixed; receipts, digests and the checked time differ on every run.
 LEDGER_VERSIONS = {
     "quiet": [
-        {"bytes": 2353, "lines": 91, "max_line_bytes": 104, "code_points": 2338, "findings": 3},
-        {"bytes": 3448, "lines": 108, "max_line_bytes": 204, "code_points": 3424, "findings": 3},
+        {"bytes": 3194, "lines": 105, "max_line_bytes": 251, "code_points": 3177, "findings": 3},
+        {"bytes": 4458, "lines": 131, "max_line_bytes": 251, "code_points": 4429, "findings": 3},
     ],
     "reader-report": [
-        {"bytes": 1218, "lines": 64, "max_line_bytes": 92, "code_points": 1206, "findings": 1,
-         "marker": {"text": "**one** &amp; two 🧪", "scalar": 670, "byte": 679}},
-        {"bytes": 1054, "lines": 51, "max_line_bytes": 201, "code_points": 1046, "findings": 0},
+        {"bytes": 1253, "lines": 64, "max_line_bytes": 111, "code_points": 1241, "findings": 1,
+         "marker": {"text": "**one** &amp; two 🧪", "scalar": 705, "byte": 714}},
+        {"bytes": 1101, "lines": 51, "max_line_bytes": 213, "code_points": 1094, "findings": 0},
     ],
     "specimen-bytes": [
-        {"bytes": 1075960, "lines": 773, "max_line_bytes": 2052, "code_points": 1075882, "findings": 22,
-         "marker": {"text": "**one** &amp; two 🧪", "scalar": 1075844, "byte": 1075919}},
+        {"bytes": 1076765, "lines": 817, "max_line_bytes": 2050, "code_points": 1076643, "findings": 22,
+         "marker": {"text": "**one** &amp; two 🧪", "scalar": 1076605, "byte": 1076724}},
     ],
     "specimen-lines": [
-        {"bytes": 131689, "lines": 10123, "max_line_bytes": 76, "code_points": 131683, "findings": 0,
-         "marker": {"text": "REPORT-LINES-TAIL", "scalar": 131665, "byte": 131671}},
+        {"bytes": 131724, "lines": 10123, "max_line_bytes": 111, "code_points": 131718, "findings": 0,
+         "marker": {"text": "REPORT-LINES-TAIL", "scalar": 131700, "byte": 131706}},
     ],
     "specimen-line": [
-        {"bytes": 17293, "lines": 57, "max_line_bytes": 16404, "code_points": 5020, "findings": 1,
-         "marker": {"text": "REPORT-LINE-TAIL", "scalar": 5003, "byte": 17276}},
+        {"bytes": 27264, "lines": 57, "max_line_bytes": 26340, "code_points": 22455, "findings": 1,
+         "marker": {"text": "REPORT-LINE-TAIL", "scalar": 22438, "byte": 27247}},
     ],
     "specimen-edges": [
-        {"bytes": 11098, "lines": 709, "max_line_bytes": 76, "code_points": 11089, "findings": 1,
-         "marker": {"text": "REPORT-EDGES-TAIL", "scalar": 11071, "byte": 11080}},
+        {"bytes": 11133, "lines": 709, "max_line_bytes": 111, "code_points": 11124, "findings": 1,
+         "marker": {"text": "REPORT-EDGES-TAIL", "scalar": 11106, "byte": 11115}},
     ],
     "specimen-characters": [
-        {"bytes": 33409, "lines": 105, "max_line_bytes": 593, "code_points": 33403, "findings": 0,
-         "marker": {"text": "REPORT-CHARACTERS-TAIL", "scalar": 33380, "byte": 33386}},
+        {"bytes": 33444, "lines": 105, "max_line_bytes": 593, "code_points": 33438, "findings": 0,
+         "marker": {"text": "REPORT-CHARACTERS-TAIL", "scalar": 33415, "byte": 33421}},
     ],
     "specimen-nodes": [
-        {"bytes": 100162, "lines": 123, "max_line_bytes": 8187, "code_points": 100138, "findings": 6,
-         "marker": {"text": "REPORT-NODES-TAIL", "scalar": 100120, "byte": 100144}},
+        {"bytes": 100197, "lines": 123, "max_line_bytes": 8187, "code_points": 100173, "findings": 6,
+         "marker": {"text": "REPORT-NODES-TAIL", "scalar": 100155, "byte": 100179}},
     ],
     "specimen-depth": [
-        {"bytes": 1148, "lines": 57, "max_line_bytes": 264, "code_points": 1139, "findings": 1,
-         "marker": {"text": "REPORT-DEPTH-TAIL", "scalar": 1121, "byte": 1130}},
+        {"bytes": 1183, "lines": 57, "max_line_bytes": 264, "code_points": 1174, "findings": 1,
+         "marker": {"text": "REPORT-DEPTH-TAIL", "scalar": 1156, "byte": 1165}},
     ],
     "specimen-windowed": [
-        {"bytes": 66800, "lines": 381, "max_line_bytes": 781, "code_points": 66710, "findings": 28,
-         "marker": {"text": "REPORT-WINDOWED-TAIL", "scalar": 66689, "byte": 66779}},
+        {"bytes": 69654, "lines": 381, "max_line_bytes": 781, "code_points": 69564, "findings": 28,
+         "marker": {"text": "REPORT-WINDOWED-TAIL", "scalar": 69543, "byte": 69633}},
     ],
     "specimen-changes": [
-        {"bytes": 28847, "lines": 189, "max_line_bytes": 781, "code_points": 28805, "findings": 12,
-         "marker": {"text": "REPORT-CHANGES-TAIL", "scalar": 28785, "byte": 28827}},
-        {"bytes": 26732, "lines": 179, "max_line_bytes": 781, "code_points": 26691, "findings": 11,
-         "marker": {"text": "REPORT-CHANGES-TAIL", "scalar": 26671, "byte": 26712}},
+        {"bytes": 30085, "lines": 189, "max_line_bytes": 781, "code_points": 30043, "findings": 12,
+         "marker": {"text": "REPORT-CHANGES-TAIL", "scalar": 30023, "byte": 30065}},
+        {"bytes": 27882, "lines": 179, "max_line_bytes": 781, "code_points": 27842, "findings": 11,
+         "marker": {"text": "REPORT-CHANGES-TAIL", "scalar": 27822, "byte": 27862}},
     ],
     "specimen-blocks": [
-        {"bytes": 79556, "lines": 2445, "max_line_bytes": 167, "code_points": 78950, "findings": 200,
-         "marker": {"text": "REPORT-BLOCKS-TAIL", "scalar": 78931, "byte": 79537}},
+        {"bytes": 100083, "lines": 2445, "max_line_bytes": 167, "code_points": 99477, "findings": 200,
+         "marker": {"text": "REPORT-BLOCKS-TAIL", "scalar": 99458, "byte": 100064}},
     ],
 }

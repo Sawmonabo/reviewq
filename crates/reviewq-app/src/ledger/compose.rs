@@ -1,9 +1,10 @@
 //! Composes a version's text from a snapshot's cover facts, findings and notes and the
 //! version's own facts, in one pass that records each card's and section's span as it
 //! writes. Fields were checked when filed, so composing cannot fail. The only parsing is
-//! `markdown::shift_headings`, which parses each Markdown field to find its headings. A span
-//! runs from its heading to the end of its last line, without the line ending; a section's
-//! span holds its cards.
+//! `markdown::shift_headings`, which parses each Markdown field to find its headings, and
+//! `markdown::fenced_code`, which finds the fenced code a proposed comment's quote keeps as
+//! written. A span runs from its heading to the end of its last line, without the line
+//! ending; a section's span holds its cards.
 
 mod output;
 #[cfg(test)]
@@ -14,19 +15,25 @@ use std::fmt::{self, Write};
 use reviewq_domain::identity::GitSha;
 use reviewq_domain::ledger::{VersionState, version_state};
 
+use url::Url;
+
 use super::layout::{
-    CHECKED_REVISION_LABEL, COVER_LABELS, CardLabel, CountsLine, DISCUSSIONS_LABEL, FixedSection,
-    GAP_OPENING, NO_LINKED_DISCUSSION, PUBLICATION_LABEL, SEPARATOR, THREADS_HEADER,
-    UNKNOWN_REVISION, blocking_word, outcome_label, scope, verdict_line,
+    COVER_LABELS, CardLabel, CountsLine, DISCUSSIONS_LABEL, FixedSection, GAP_OPENING,
+    NEW_COMMENT_AT, NEW_COMMENT_ON_MR, NO_THREAD_OR_EVIDENCE, PROPOSED_COMMENT_OPENING,
+    PUBLICATION_LABEL, REPLY_IN, REPLY_THREAD, SEPARATOR, SHORT_SHA_CHARS, THREAD_LINK,
+    THREADS_HEADER, UNKNOWN_REVISION, blocking_word, outcome_label, scope, verdict_line,
 };
 use super::markdown::shift_headings;
 use super::{
     Composed, CoverFacts, FindingOutcome, NoteRecord, NoteSection, SnapshotFinding, VersionFacts,
     default_category,
 };
-use crate::reports::{FindingBasisKind, FindingSection, RevisionEvidence, Severity};
+use crate::reports::{
+    FindingBasisKind, FindingLocation, FindingSection, RevisionEvidence, Severity,
+};
 use output::{
-    Cell, Output, UtcSeconds, without_blank_lines, write_code, write_heading_text, write_literal,
+    Cell, Output, UtcSeconds, without_blank_lines, write_code, write_heading_text, write_link,
+    write_literal,
 };
 
 /// Bytes reserved per card or note beyond its record's own text: labels, the card line and
@@ -35,6 +42,9 @@ const BLOCK_OVERHEAD_BYTES: usize = 256;
 /// Bytes reserved for the identity line, the verdict, counts and cover lines, the fixed
 /// headings and the lines of empty sections.
 const FRAME_BYTES: usize = 2048;
+/// Bytes reserved per link beyond the URL it starts from and the text it encodes: its marks,
+/// the `/-/blob/{sha}/`, `/-/commit/{sha}` or `#note_{id}` part and its text.
+const LINK_BYTES: usize = 160;
 
 /// Composes the version `facts` describes from the snapshot's cover facts, findings (in ID
 /// order) and notes (fixed sections in layout order, then extra notes in the order first
@@ -110,12 +120,38 @@ struct Report<'a> {
 }
 
 impl Report<'_> {
-    /// An upper estimate of the text's size, so the output is allocated once.
+    /// An upper estimate of the text's size, so the output is allocated once. A location's
+    /// link holds its path up to three times percent-encoded and once more as text, and a
+    /// quote adds two bytes to every line.
     fn reserve(&self) -> usize {
+        let cover = self.cover;
+        let link = cover.links.project().as_str().len() + LINK_BYTES;
         let findings: usize = self
             .findings
             .iter()
-            .map(|finding| finding.record.fields.text_bytes() + BLOCK_OVERHEAD_BYTES)
+            .map(|finding| {
+                let fields = &finding.record.fields;
+                let locations: usize = fields
+                    .body
+                    .locations
+                    .iter()
+                    .map(|location| 4 * location.path.len() + link)
+                    .sum();
+                let comment = fields
+                    .body
+                    .proposed_comment
+                    .as_ref()
+                    .map_or(0, |comment| 2 * comment.lines().count() + link);
+                let outcome = finding.record.outcome.as_ref().map_or(0, |outcome| {
+                    let discussions: usize = outcome
+                        .discussion_ids
+                        .iter()
+                        .map(|id| id.len() + link)
+                        .sum();
+                    discussions + link
+                });
+                fields.text_bytes() + BLOCK_OVERHEAD_BYTES + locations + comment + outcome
+            })
             .sum();
         let notes: usize = self
             .notes
@@ -124,10 +160,15 @@ impl Report<'_> {
                 note.body.len() + note.key.title().map_or(0, str::len) + BLOCK_OVERHEAD_BYTES
             })
             .sum();
-        let cover = self.cover;
+        let tickets: usize = cover
+            .tickets
+            .iter()
+            .map(|key| key.as_str().len() + cover.links.jira_len() + LINK_BYTES)
+            .sum();
         FRAME_BYTES
             + cover.project_path.len()
-            + cover.mr_url.len()
+            + 2 * link
+            + tickets
             + cover.mr_title.len()
             + findings
             + notes
@@ -171,10 +212,7 @@ impl Report<'_> {
     /// and the four cover lines.
     fn header(&self, out: &mut Output) -> fmt::Result {
         let cover = self.cover;
-        out.block()?;
-        out.write_char('[')?;
-        write_literal(out, &cover.project_path)?;
-        write!(out, "{SEPARATOR}!{}]({})", cover.iid, cover.mr_url)?;
+        self.identity(out)?;
         out.block()?;
         out.write_str("# ")?;
         let title = self
@@ -195,6 +233,38 @@ impl Report<'_> {
         }
         self.counts(out)?;
         self.cover_lines(out)
+    }
+
+    /// `[{project}]({project URL}) · [MR !{iid}]({MR URL})`, then one part per linked ticket:
+    /// a link to it on the Jira site, or its key as text without one.
+    fn identity(&self, out: &mut Output) -> fmt::Result {
+        let cover = self.cover;
+        let links = &cover.links;
+        out.block()?;
+        write_link(out, file_name(&cover.project_path), links.project())?;
+        out.write_str(SEPARATOR)?;
+        write_link(
+            out,
+            format_args!("MR !{}", cover.iid),
+            links.merge_request(),
+        )?;
+        for key in &cover.tickets {
+            out.write_str(SEPARATOR)?;
+            match links.ticket(key) {
+                Some(url) => write_link(out, key, &url)?,
+                None => write_literal(out, key.as_str())?,
+            }
+        }
+        Ok(())
+    }
+
+    /// The link to the GitLab note `discussion` resolves to, if ReviewQ tracks one.
+    fn thread(&self, discussion: &str) -> Option<Url> {
+        self.cover
+            .thread_notes
+            .get(discussion)
+            .filter(|note| !note.is_empty() && note.bytes().all(|byte| byte.is_ascii_digit()))
+            .map(|note| self.cover.links.note(note))
     }
 
     fn counts(&self, out: &mut Output) -> fmt::Result {
@@ -264,10 +334,14 @@ impl Report<'_> {
         out.close_fixed_section(section, start)
     }
 
-    /// `Our previous threads`: one table row per outcome this version records, then the
-    /// `threads` note.
+    /// `Our previous threads`: the `threads` note, then one table row per outcome this
+    /// version records.
     fn threads(&self, out: &mut Output) -> fmt::Result {
         let start = out.open_section(FixedSection::Threads)?;
+        if let Some(note) = self.note(NoteSection::Threads) {
+            out.block()?;
+            out.authored(&shift_headings(&note.body))?;
+        }
         let mut rows = self
             .findings
             .iter()
@@ -287,13 +361,13 @@ impl Report<'_> {
                 self.threads_row(out, finding, outcome)?;
             }
         }
-        if let Some(note) = self.note(NoteSection::Threads) {
-            out.block()?;
-            out.authored(&shift_headings(&note.body))?;
-        }
         out.close_fixed_section(FixedSection::Threads, start)
     }
 
+    /// One previous-threads row. Its last cell holds, joined by `SEPARATOR`, each linked
+    /// discussion in the outcome's order (a `Thread` link to its note, numbered when the row
+    /// has several, or its ID as code when ReviewQ tracks no note for it), then the checked
+    /// revision as a link to the commit. With neither it holds `NO_THREAD_OR_EVIDENCE`.
     fn threads_row(
         &self,
         out: &mut Output,
@@ -305,20 +379,42 @@ impl Report<'_> {
         write!(out, " | **{}.** ", outcome_label(outcome.conclusion))?;
         Cell::new(out).write_str(&outcome.reason)?;
         out.write_str(" | ")?;
+        let threads: Vec<Option<Url>> = outcome
+            .discussion_ids
+            .iter()
+            .map(|discussion| self.thread(discussion))
+            .collect();
+        let numbered = threads.iter().flatten().count() > 1;
         let mut cell = Cell::new(out);
-        if outcome.discussion_ids.is_empty() {
-            cell.write_str(NO_LINKED_DISCUSSION)?;
-        }
-        for (index, discussion) in outcome.discussion_ids.iter().enumerate() {
-            if index > 0 {
-                cell.write_str(", ")?;
+        let mut parts = 0;
+        let mut number = 0;
+        for (discussion, thread) in outcome.discussion_ids.iter().zip(&threads) {
+            if parts > 0 {
+                cell.write_str(SEPARATOR)?;
             }
-            write_code(&mut cell, discussion, None)?;
+            match thread {
+                Some(url) => {
+                    number += 1;
+                    if numbered {
+                        write_link(&mut cell, format_args!("{THREAD_LINK} {number}"), url)?;
+                    } else {
+                        write_link(&mut cell, THREAD_LINK, url)?;
+                    }
+                }
+                None => write_code(&mut cell, discussion, None)?,
+            }
+            parts += 1;
         }
-        write!(cell, "{SEPARATOR}{CHECKED_REVISION_LABEL} ")?;
-        match checked_revision(outcome, &self.facts.reviewed) {
-            Some(sha) => write_code(&mut cell, sha.as_str(), None)?,
-            None => cell.write_str(UNKNOWN_REVISION)?,
+        if let Some(sha) = checked_revision(outcome, &self.facts.reviewed) {
+            if parts > 0 {
+                cell.write_str(SEPARATOR)?;
+            }
+            let short = &sha.as_str()[..SHORT_SHA_CHARS];
+            write_link(&mut cell, short, &self.cover.links.commit(sha))?;
+            parts += 1;
+        }
+        if parts == 0 {
+            cell.write_str(NO_THREAD_OR_EVIDENCE)?;
         }
         out.write_str(" |")
     }
@@ -336,9 +432,106 @@ impl Report<'_> {
             .active()
             .filter(|finding| finding.record.fields.section == kind)
         {
-            card(out, finding)?;
+            self.card(out, finding)?;
         }
         out.close_fixed_section(section, start)
+    }
+
+    /// One card: the heading, the card line, then each given field in the reader's order.
+    fn card(&self, out: &mut Output, finding: &SnapshotFinding) -> fmt::Result {
+        let record = &finding.record;
+        let fields = &record.fields;
+        let body = &fields.body;
+        out.block()?;
+        let start = out.mark();
+        write!(out, "### {}{SEPARATOR}", record.id)?;
+        write_heading_text(out, &fields.title)?;
+        out.block()?;
+        write!(out, "**{}{SEPARATOR}", fields.severity)?;
+        match &fields.category {
+            Some(category) => write_literal(out, category)?,
+            None => out.write_str(default_category(fields.section))?,
+        }
+        write!(
+            out,
+            "{SEPARATOR}{}**",
+            blocking_word(effective_blocking(finding))
+        )?;
+        if !body.locations.is_empty() {
+            out.block()?;
+            write!(out, "**{}** ", CardLabel::Location.text())?;
+            for (index, location) in body.locations.iter().enumerate() {
+                if index > 0 {
+                    out.write_str(", ")?;
+                }
+                self.location(out, location)?;
+            }
+        }
+        labelled_field(out, CardLabel::Issue, &body.issue)?;
+        labelled_field(out, CardLabel::WhyItMatters, &body.consequence)?;
+        match body.evidence.kind {
+            FindingBasisKind::Observed => {
+                labelled_field(out, CardLabel::Confirmed, &body.evidence.text)?;
+            }
+            FindingBasisKind::Gap => gap_field(out, &body.evidence.text)?,
+        }
+        if let Some(details) = &body.details {
+            out.block()?;
+            out.authored(&shift_headings(details))?;
+        }
+        if let Some(comment) = &body.proposed_comment {
+            self.proposed_comment(out, finding, comment)?;
+        }
+        out.close_card(record.id, start);
+        Ok(())
+    }
+
+    /// A location as a link to its file at the version's reviewed source, named by the file
+    /// and line. With the source unknown, its full path and line as code.
+    fn location(&self, out: &mut Output, location: &FindingLocation) -> fmt::Result {
+        let RevisionEvidence::Exact(sha) = &self.facts.reviewed else {
+            return write_code(out, &location.path, location.line);
+        };
+        let url = self.cover.links.blob(sha, &location.path, location.line);
+        let name = file_name(&location.path);
+        match location.line {
+            Some(line) => write_link(out, format_args!("{name}:{line}"), &url),
+            None => write_link(out, name, &url),
+        }
+    }
+
+    /// The bold lead line, which says where the comment would go, then the comment as a block
+    /// quote. It goes as a reply in the first linked discussion ReviewQ tracks a note for,
+    /// otherwise as a new comment at the first location, otherwise on the MR.
+    fn proposed_comment(
+        &self,
+        out: &mut Output,
+        finding: &SnapshotFinding,
+        comment: &str,
+    ) -> fmt::Result {
+        out.block()?;
+        write!(out, "**{PROPOSED_COMMENT_OPENING}")?;
+        let thread = finding
+            .discussion_ids
+            .iter()
+            .find_map(|discussion| self.thread(discussion));
+        match (thread, finding.record.fields.body.locations.first()) {
+            (Some(url), _) => {
+                out.write_str(REPLY_IN)?;
+                write_link(out, REPLY_THREAD, &url)?;
+            }
+            (None, Some(location)) => {
+                out.write_str(NEW_COMMENT_AT)?;
+                write_literal(out, file_name(&location.path))?;
+                if let Some(line) = location.line {
+                    write!(out, ":{line}")?;
+                }
+            }
+            (None, None) => out.write_str(NEW_COMMENT_ON_MR)?,
+        }
+        out.write_str(":**")?;
+        out.block()?;
+        out.quoted(&shift_headings(comment))
     }
 
     /// Each extra note as its own level-two section, in the order first filed.
@@ -384,53 +577,12 @@ impl Report<'_> {
     }
 }
 
-/// One card: the heading, the card line, then each given field in the reader's order.
-fn card(out: &mut Output, finding: &SnapshotFinding) -> fmt::Result {
-    let record = &finding.record;
-    let fields = &record.fields;
-    let body = &fields.body;
-    out.block()?;
-    let start = out.mark();
-    write!(out, "### {}{SEPARATOR}", record.id)?;
-    write_heading_text(out, &fields.title)?;
-    out.block()?;
-    write!(out, "**{}{SEPARATOR}", fields.severity)?;
-    match &fields.category {
-        Some(category) => write_literal(out, category)?,
-        None => out.write_str(default_category(fields.section))?,
-    }
-    write!(
-        out,
-        "{SEPARATOR}{}**",
-        blocking_word(effective_blocking(finding))
-    )?;
-    if !body.locations.is_empty() {
-        out.block()?;
-        write!(out, "**{}** ", CardLabel::Location.text())?;
-        for (index, location) in body.locations.iter().enumerate() {
-            if index > 0 {
-                out.write_str(", ")?;
-            }
-            write_code(out, &location.path, location.line)?;
-        }
-    }
-    labelled_field(out, CardLabel::Issue, &body.issue)?;
-    labelled_field(out, CardLabel::WhyItMatters, &body.consequence)?;
-    match body.evidence.kind {
-        FindingBasisKind::Observed => {
-            labelled_field(out, CardLabel::Confirmed, &body.evidence.text)?;
-        }
-        FindingBasisKind::Gap => gap_field(out, &body.evidence.text)?,
-    }
-    if let Some(details) = &body.details {
-        out.block()?;
-        out.authored(&shift_headings(details))?;
-    }
-    if let Some(comment) = &body.proposed_comment {
-        labelled_field(out, CardLabel::ProposedComment, comment)?;
-    }
-    out.close_card(record.id, start);
-    Ok(())
+/// The last segment of a path that is not empty, or the whole path without one: a
+/// location's file name, or a project's name.
+fn file_name(path: &str) -> &str {
+    path.rsplit('/')
+        .find(|segment| !segment.is_empty())
+        .unwrap_or(path)
 }
 
 /// A field whose first paragraph follows its bold label on the same line.

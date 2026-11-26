@@ -4,7 +4,9 @@ use reviewq_domain::identity::MergeRequestIid;
 use reviewq_domain::ledger::{FindingId, RecordRevision, VersionKind};
 
 use super::*;
-use crate::ledger::{Author, FindingFields, FindingRecord, NoteKey, ParentFinding, Span};
+use crate::ledger::{
+    Author, FindingFields, FindingRecord, NoteKey, ParentFinding, ReportLinks, Span,
+};
 use crate::reports::{
     Coverage, DisplayIndex, FindingBasis, FindingConclusion, FindingDetails, FindingDisposition,
     FindingLocation, Publication, Verdict, build_report_display_index,
@@ -91,9 +93,11 @@ fn note(section: NoteSection, body: &str) -> NoteRecord {
 
 /// The worked snapshot: a lead's and a subagent's finding, a gap, two locations, a
 /// retired finding with `|` in its reason, a keeping outcome on every other finding of the
-/// parent version, one of them with no linked discussion, a user disposition that overrides
-/// the lead's blocking value, every fixed note and one extra note, a title that starts with
-/// code, a level-two heading inside details and a line with `Vec<u8>` and `<runner>`.
+/// parent version, one of them with no linked discussion, an outcome on a discussion that
+/// resolves to a note and one on a discussion that does not, a user disposition that
+/// overrides the lead's blocking value, a proposed comment in each of its three places,
+/// every fixed note and one extra note, a title that starts with code, a level-two heading
+/// inside details and a line with `Vec<u8>` and `<runner>`.
 fn worked_findings() -> Vec<SnapshotFinding> {
     let mut retry_twice = finding(
         1,
@@ -157,7 +161,7 @@ fn worked_findings() -> Vec<SnapshotFinding> {
                     FindingBasisKind::Observed,
                     "The unit test `retries_reuse_key` fails at the reviewed commit.",
                 ),
-                proposed_comment: None,
+                proposed_comment: Some("Build the key once, before the loop.".to_owned()),
                 details: None,
             },
         },
@@ -227,7 +231,10 @@ fn worked_findings() -> Vec<SnapshotFinding> {
                     FindingBasisKind::Gap,
                     "The production retry settings were not available to check.",
                 ),
-                proposed_comment: None,
+                proposed_comment: Some(
+                    "Make the delay a setting.\n\n- Read it from `RETRY_DELAY_MS`.\n- Keep 200 ms as the default.\n"
+                        .to_owned(),
+                ),
                 details: None,
             },
         },
@@ -252,11 +259,11 @@ fn worked_notes() -> Vec<NoteRecord> {
         ),
         note(
             NoteSection::Flow,
-            "1. `POST /invoices` reaches `InvoiceService::create`.\n2. The service writes the row and returns the receipt.",
+            "```mermaid\nflowchart LR\n  Client --> InvoiceService --> Database\n```\n\n`POST /invoices` reaches `InvoiceService::create`, which writes the row and returns the receipt.",
         ),
         note(
             NoteSection::Changes,
-            "- Adds `retry_write` in `src/retry.rs`.\n- Moves key creation into `src/invoices.rs`.",
+            "| Before | After |\n| --- | --- |\n| A dropped acknowledgement fails the request. | The write is retried with the stored key. |\n\n| Affected operation | What changes | Source |\n| --- | --- | --- |\n| `POST /invoices` | Retries the write once. | `src/retry.rs` |\n| `InvoiceService::create` | Builds the key before the first attempt. | `src/invoices.rs` |",
         ),
         note(
             NoteSection::Threads,
@@ -319,10 +326,19 @@ fn assert_slices(span: &Span, expected: std::ops::Range<usize>, what: &str) {
 
 #[test]
 fn composed_worked_set_matches() {
+    let iid = MergeRequestIid::try_from(42_u64).expect("an MR IID");
     let cover = CoverFacts {
+        links: ReportLinks::new(
+            "https://gitlab.example.com",
+            "acme/billing",
+            iid,
+            Some("https://example.atlassian.net"),
+        )
+        .expect("valid origins"),
         project_path: "acme/billing".to_owned(),
-        iid: MergeRequestIid::try_from(42_u64).expect("an MR IID"),
-        mr_url: "https://gitlab.example.com/acme/billing/-/merge_requests/42".to_owned(),
+        iid,
+        tickets: vec!["RQ-41".parse().expect("a ticket key")],
+        thread_notes: [("D9".to_owned(), "9001".to_owned())].into(),
         mr_title: "Retry invoice writes safely".to_owned(),
         target_sha: Some(sha(TARGET)),
         read_at_ms: 1_795_615_387_250,

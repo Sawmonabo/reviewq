@@ -67,7 +67,7 @@ Both providers expose the same six tools from one generated set of input schemas
 |---|---|---|
 | `record_finding` | Lead or subagent | Files or changes one finding. Without `id`, ReviewQ assigns the next unused ID and the input needs `title`, `severity`, `blocking`, `section`, `issue`, `consequence` and `evidence`. With `id` and `expectedRevision`, only the fields given change. Changing a retired finding reopens it. Returns `{id,revision,unpublished}`. |
 | `assess_finding` | Lead or subagent | `{id,expectedRevision,outcome,reason,discussionIds?,checkedSha?}` records what became of a finding already on the run. `fixed`, `clarified_withdrawn` and `superseded` retire it. `partly_addressed`, `still_present` and `unverified` keep it active. Reason is one line of 1–1,024 characters and at most 10 discussion IDs apply. Returns `{id,revision,unpublished}`. |
-| `record_note` | Lead or subagent | `{section,title?,body,expectedRevision?}` replaces one review note. An `extra` note is identified by its `title`. An empty body, or one of only whitespace, removes the note. `expectedRevision` is required once the note exists. Returns `{section,title?,revision,unpublished}`. |
+| `record_note` | Lead or subagent | `{section,title?,body,expectedRevision?}` replaces one review note. The tool's description and the `section` field's description say what each note holds: `flow` is a Mermaid diagram of the principal code and data flow, then a short explanation, and `changes` is a two-column table headed Before and After, then a table of the affected operations with the columns Affected operation, What changes and Source. An `extra` note is identified by its `title`. An empty body, or one of only whitespace, removes the note. `expectedRevision` is required once the note exists. Returns `{section,title?,revision,unpublished}`. |
 | `review_ledger` | Lead or subagent | Read only. With no input it returns the short list: the current version's receipt, the open pass and what it owes, with the question the pass last asked with `needs_input`, one line per active finding (ID, revision, severity, blocking, title and author) and one per note (section, revision and length). `{ids}` with at most 10 IDs, or `{sections}`, returns those records in full, and `extra` returns every extra note. A result holds whole records up to 64 KiB, which always fits one, and a `cursor` to pass back for the rest. |
 | `finish_review` | Lead | `{verdict?,revision?,fullReview?,assessments?}` closes the review and publishes. See [Publishing a version](#publishing-a-version). |
 | `needs_input` | Lead | `{reason}` of 1–1,024 characters records a question the reviewer must answer before the review can finish. It holds the open pass and its scope, completes no assessment, publishes nothing and lets the turn end. The app shows only that the review needs input, so the lead also asks the question in its reply. The pass waits on the reviewer until the lead's next turn starts. From then it is open again and owes its closing call. Without an open pass the call is refused. |
@@ -91,7 +91,7 @@ IDs are `F-01`, `F-02` and so on. ReviewQ assigns them per run and never reuses 
 
 Three rules stop a repeated call from making a duplicate. A repeat of the same native call returns its stored result. A write whose content equals the stored record succeeds without a new revision, whatever revision it names. A new finding matches an active one when their titles and first locations are equal, or their titles are equal and neither has a location. When the rest of its content is equal too, the call returns that finding's ID and revision. Otherwise it is refused with that ID, so the caller changes the finding instead.
 
-Schema and value errors return while the call is open and name each field, capped at 50 errors plus one entry that counts the rest. A refused call changes nothing. No line of a body may exceed 8 KiB, a run holds at most 200 active findings, and one tool input fits 128 KiB. Markdown is stored as written. Each Markdown field must stand alone, which means a heading written after it still reads as a heading. A code fence left open fails this, and so does an HTML block that never ends, such as an unclosed comment or `<pre>`. ReviewQ tests it with the Markdown parser it already uses, never with its own scanner. `issue`, `consequence`, the evidence text and `proposedComment` each begin with a paragraph, so their first words follow the card's label. No paragraph in a finding's field begins with one of the card's bold labels, such as `**Proposed comment:**`, so a reader never takes authored text for a field. A field holds no link reference definition and no footnote, because both resolve across fields once the report is composed. A finding's `details` and the `publication` note begin with a sentence, not with a list or indented text, because either would join the list written just before it. A field that breaks a rule is refused with the line where the problem starts. A finding leaves the active set only through a retiring outcome. A finding withdrawn before any version published it is left out of the report and kept in the ledger's history. An outcome's checked revision is its `checkedSha` when given, otherwise the reviewed SHA of the closing call that publishes it, otherwise unknown.
+Schema and value errors return while the call is open and name each field, capped at 50 errors plus one entry that counts the rest. A refused call changes nothing. No line of a body may exceed 8 KiB, a run holds at most 200 active findings, and one tool input fits 128 KiB. Markdown is stored as written. Each Markdown field must stand alone, which means a heading written after it still reads as a heading. A code fence left open fails this, and so does an HTML block that never ends, such as an unclosed comment or `<pre>`. ReviewQ tests it with the Markdown parser it already uses, never with its own scanner. `issue`, `consequence` and the evidence text each begin with a paragraph, so their first words follow the card's label. `proposedComment` may begin with any block, because the report writes it as one block quote. No paragraph of `issue`, `consequence`, the evidence text or `details` begins with one of the card's bold labels, such as `**Issue:**` or a `**Proposed comment — …:**` lead line, so a reader never takes authored text for a field. A field holds no link reference definition and no footnote, because both resolve across fields once the report is composed. A finding's `details` and the `publication` note begin with a sentence, not with a list or indented text, because either would join the list written just before it. A field that breaks a rule is refused with the line where the problem starts. A finding leaves the active set only through a retiring outcome. A finding withdrawn before any version published it is left out of the report and kept in the ledger's history. An outcome's checked revision is its `checkedSha` when given, otherwise the reviewed SHA of the closing call that publishes it, otherwise unknown.
 
 ReviewQ binds every call to its provider, native session, turn, call and calling agent from what the call itself carries. Claude's plugin supplies the session, the active turn, the tool-use ID and the subagent's ID when a subagent calls. Codex's MCP request names the calling thread, call and item, and carries the turn in its turn metadata. A Codex subagent calls from its own thread, which must descend from the registered lead in the same run. ReviewQ verifies that from the parent thread the request names, or from the children it has already discovered. A ledger call reads no transcript and resumes no thread. A lead-only tool is accepted only from the registered lead itself: a Claude call without a subagent ID, or a Codex call from the lead's own thread. A call that cannot be attributed to the lead or a verified child is refused. A write is durable when its transaction commits and the tool result says so. ReviewQ reads nothing back from the provider afterwards. Terminal output, ordinary replies and text that resembles a receipt carry no authority.
 
@@ -166,7 +166,7 @@ Only a full review advances fullMrReviewedSha. A full review and a selected-thre
 Every version has the same layout, which ReviewQ writes from the records. The reader, History, quotes and downloads work on this stored text.
 
 ```markdown
-[{project path} · !{MR IID}]({MR URL})
+[{project}]({project URL}) · [MR !{MR IID}]({MR URL}) · [{ticket key}]({Jira URL}) · …
 
 # {title}
 
@@ -190,9 +190,11 @@ P0: {n} · P1: {n} · P2: {n} · P3: {n} · Blocking: {n} · Nonblocking: {n}
 ## What changes across the MR
 ## Our previous threads
 
+{threads}
+
 | Finding | Outcome and verification | Thread or evidence |
 | --- | --- | --- |
-| F-03 · {title} | **Fixed.** {reason} | {discussions and checked revision} |
+| F-03 · {title} | **Fixed.** {reason} | [Thread]({MR URL}#note_{note ID}) · [{SHA prefix}]({commit URL}) |
 
 ## Functional findings
 
@@ -200,7 +202,7 @@ P0: {n} · P1: {n} · P2: {n} · P3: {n} · Blocking: {n} · Nonblocking: {n}
 
 **P1 · {category} · Blocking**
 
-**Location:** `{path:line}`, …
+**Location:** [{file}:{line}]({file URL}), …
 
 **Issue:** {issue}
 
@@ -210,7 +212,9 @@ P0: {n} · P1: {n} · P2: {n} · P3: {n} · Blocking: {n} · Nonblocking: {n}
 
 {details}
 
-**Proposed comment:** {proposedComment}
+**Proposed comment — {reply in [thread]({MR URL}#note_{note ID}) | new comment at {file}:{line} | new comment on the MR}:**
+
+> {proposedComment}
 
 ## Quality findings
 ## Open questions and decisions
@@ -219,17 +223,21 @@ P0: {n} · P1: {n} · P2: {n} · P3: {n} · Blocking: {n} · Nonblocking: {n}
 ## Publication and dispositions
 ```
 
-- The first line names the project and MR and links to the MR. The title is the `title` note, or the MR title when there is none. `summary` and `rationale` appear only when recorded.
+- The first line links the project, named by the last segment of its path, to `{GitLab origin}/{project path}`, and `MR !{IID}` to the MR. Then come the tickets linked to the review, at most three distinct keys in key order, each linked to `{Jira origin}/browse/{key}`. Without a stored Jira origin a key is written as text, and without a ticket the line ends after the MR link. The title is the `title` note, or the MR title when there is none. `summary` and `rationale` appear only when recorded.
 - The verdict line states the version's verdict in capitals and is left out for `not_specified`. The counts line counts the active findings by severity and by effective blocking value. The four cover lines come from ReviewQ's own facts for the version.
 - The eight fixed sections always appear in this order. `flow`, `changes`, `questions` and `verification` fill their sections. An empty section says `Not recorded.`, `No earlier threads.`, `No functional findings.`, `No quality findings.`, `No open questions.` or `No publication or disposition changes recorded.` as fits.
-- Cards appear in ID order within their section. The card line states the severity, the category, and `Blocking` or `Nonblocking` from the effective blocking value at publish: the user's disposition when one exists, otherwise the lead's. Locations are written as code. `Location`, the details and `Proposed comment` appear only when given, and `Proposed comment` is always the last field.
+- Cards appear in ID order within their section. The card line states the severity, the category, and `Blocking` or `Nonblocking` from the effective blocking value at publish: the user's disposition when one exists, otherwise the lead's. `Location`, the details and the proposed comment appear only when given, and the proposed comment is always the last field.
+- Each location links its file name, with `:{line}` when it has a line, to the file at the version's reviewed source: `{GitLab origin}/{project path}/-/blob/{SHA}/{path}`, with `#L{line}` when it has a line, each path segment percent-encoded. When the reviewed source is unknown, the location is its full path and line as code.
+- The proposed comment opens with a bold line that starts `Proposed comment — ` and ends with `:`, and says where the comment would go: a reply in the finding's first monitored discussion that ReviewQ can resolve to a note, otherwise a new comment at the file name and line of its first location, otherwise a new comment on the MR. The comment follows as a block quote: each line after `> `, and an empty line as `>`. A tab in a line's indentation or container markers is written as the spaces it stood for, because the quote marker moves the tab stops.
+- A discussion resolves to a note when ReviewQ's follow-up monitor tracks it for this review. The note is the one the monitor tracks the discussion by, in the newest generation that has it, the lowest note ID when it tracks several, and its link is `{MR URL}#note_{note ID}`.
+- Link text is escaped so it reads as written, and `(`, `)`, `\` and `&` are percent-encoded in a link target, so no file name or stored value can end a link early or open markup.
 - `Confirmed` holds observed evidence. A gap is written under `Evidence` instead and begins `Not confirmed.`, which ReviewQ adds unless the author's text already starts with that phrase.
-- `Our previous threads` holds the table above with one row per outcome recorded on this version, then the `threads` note. The Finding cell starts with the ID. The outcome cell starts with the outcome in bold (`Fixed`, `Clarified and withdrawn`, `Superseded`, `Partly addressed`, `Still present` or `Unverified`), followed by its reason. The last cell lists the linked discussions and the checked revision. ReviewQ escapes `|` in a cell. A retired finding has a row and no card. Its last card stays readable in the earlier version.
+- `Our previous threads` holds the `threads` note, then the table above with one row per outcome recorded on this version. The Finding cell starts with the ID. The outcome cell starts with the outcome in bold (`Fixed`, `Clarified and withdrawn`, `Superseded`, `Partly addressed`, `Still present` or `Unverified`), followed by its reason. The last cell holds, joined by ` · `, each of the outcome's discussions in order, as a `Thread` link to the note it resolves to, or its ID as code when it resolves to none, then the checked revision as a link whose text is the SHA's first eight characters and whose target is `{GitLab origin}/{project path}/-/commit/{SHA}`. When the row links several notes they read `Thread 1`, `Thread 2` and so on. A row with no discussion and an unknown checked revision holds `—`. ReviewQ escapes `|` in a cell. A retired finding has a row and no card. Its last card stays readable in the earlier version.
 - Extra notes follow `Verification and limits` as level-two sections in the order first filed.
 - `Publication and dispositions` holds one line per active finding that has a user disposition or a monitored discussion link at the version's starting disposition revision, then the `publication` note.
 - Headings inside an authored field, ATX or setext, are written as ATX headings shifted so that the shallowest is level four, with deeper levels stopping at six. Together with the stand-alone rule, no authored text can open or swallow a section or a card.
 - Raw HTML is shown as text. Only `<br>` keeps its meaning, as a line break.
-- Apart from the heading shift, ReviewQ writes authored lines unchanged and puts a blank line between blocks. It records each card's and section's scalar offset and length as it writes them.
+- Apart from the heading shift and the proposed comment's quote, ReviewQ writes authored lines unchanged and puts a blank line between blocks. It records each card's and section's scalar offset and length as it writes them.
 
 ### Worked ledger calls
 
@@ -266,7 +274,7 @@ The functional section of that version reads as follows.
 
 **P1 · Functional · Blocking**
 
-**Location:** `src/invoices.rs:74`
+**Location:** [invoices.rs:74](https://gitlab.example.com/acme/billing/-/blob/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/src/invoices.rs#L74)
 
 **Issue:** The retry builds a fresh idempotency key after the first insert commits.
 

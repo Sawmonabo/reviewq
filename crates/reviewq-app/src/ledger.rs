@@ -8,6 +8,7 @@
 
 mod compose;
 mod layout;
+mod links;
 pub(crate) mod markdown;
 pub mod passes;
 pub mod publish;
@@ -16,6 +17,7 @@ pub mod record;
 mod refusal;
 mod version;
 
+pub use links::{MAX_TICKET_LINKS, ReportLinks};
 pub use version::{
     CardSpan, ClosingCommit, ClosingRead, ClosingSnapshot, ClosingSummary, CommitKind, Composed,
     CoverFacts, FinishReceipt, FinishReview, LastClosing, LedgerSnapshot, NewVersion,

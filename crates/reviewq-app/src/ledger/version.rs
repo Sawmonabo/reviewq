@@ -2,15 +2,16 @@
 //! acknowledgement, the snapshot publishing reads, the composed text and the conditional
 //! commit with its outcome.
 
+use std::collections::HashMap;
 use std::ops::Range;
 
 use reviewq_domain::identity::{
-    GitSha, MergeRequestIid, NativeTurnId, ReceiptId, ReportHash, Revision, RunId,
+    GitSha, MergeRequestIid, NativeTurnId, ReceiptId, ReportHash, Revision, RunId, TicketKey,
 };
 use reviewq_domain::ledger::{FindingId, RecordRevision, VersionKind};
 use reviewq_domain::session::LeadTarget;
 
-use super::{Caller, FindingRecord, NoteRecord, NoteSection, OpenPass, PassId};
+use super::{Caller, FindingRecord, NoteRecord, NoteSection, OpenPass, PassId, ReportLinks};
 use crate::access::FieldError;
 use crate::followups::ResultKind;
 use crate::reports::{
@@ -130,12 +131,18 @@ pub struct SnapshotGuard {
     pub batch: Option<String>,
 }
 
-/// ReviewQ's own facts for the first line and the cover lines.
+/// ReviewQ's own facts for the first line, the cover lines and the report's links.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CoverFacts {
+    pub links: ReportLinks,
     pub project_path: String,
     pub iid: MergeRequestIid,
-    pub mr_url: String,
+    /// The tickets linked to the review: distinct keys in key order, at most
+    /// `MAX_TICKET_LINKS`.
+    pub tickets: Vec<TicketKey>,
+    /// The GitLab note each discussion named by the snapshot's outcomes and monitored links
+    /// resolves to, by discussion ID. A discussion ReviewQ does not track is absent.
+    pub thread_notes: HashMap<String, String>,
     /// The report's title when no `title` note exists.
     pub mr_title: String,
     /// The MR's target-branch SHA, when ReviewQ knows it.

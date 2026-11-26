@@ -8,7 +8,7 @@ use std::borrow::Cow;
 use std::fmt::{self, Display, Formatter};
 use std::ops::Range;
 
-use satteri_pulldown_cmark::{Event, Parser, Tag, TagEnd};
+use satteri_pulldown_cmark::{CodeBlockKind, Event, Parser, Tag, TagEnd};
 
 use super::NoteSection;
 use super::layout::{COVER_LABELS, CardLabel, CountsLine};
@@ -37,7 +37,8 @@ pub(crate) enum MarkdownField {
     Consequence,
     /// The evidence text, observed or gap. Begins with a paragraph.
     Evidence,
-    /// Begins with a paragraph, which follows the card's `Proposed comment` label.
+    /// The card's comment, written as one block quote, which contains any block it begins
+    /// with or holds.
     ProposedComment,
     /// A finding's `details`, written after the evidence, which may end in a list. It may
     /// begin with any block but a list or indented text, which would join that list.
@@ -191,9 +192,10 @@ impl Display for FieldProblem {
 /// Checks one non-empty authored field. Every field keeps each line within
 /// `MAX_FIELD_LINE_BYTES`, stands alone (a heading written after it still reads as a heading,
 /// so an open code fence or an HTML block that never ends is refused), defines no link
-/// reference and holds no footnote. `field` adds its own rules: a finding's fields begin no
-/// paragraph with a card's bold label, all but `details` begin with a paragraph, and
-/// `details` and the `publication` note begin with no list or indented text. Returns the
+/// reference and holds no footnote. `field` adds its own rules: `issue`, `consequence`,
+/// the evidence text and `details` begin no paragraph with a card's bold label, the first
+/// three begin with a paragraph, and `details` and the `publication` note begin with no list
+/// or indented text. A proposed comment has no rule of its own, because it is quoted. Returns the
 /// first problem found.
 ///
 /// A removal is never passed here: an empty note body removes the note, and a change that
@@ -258,20 +260,19 @@ pub(crate) fn check_field(field: MarkdownField, text: &str) -> Result<(), FieldP
         });
     };
     match field {
-        MarkdownField::Issue
-        | MarkdownField::Consequence
-        | MarkdownField::Evidence
-        | MarkdownField::ProposedComment => match first.kind {
-            BlockKind::Paragraph { .. } => card_labels(text, &blocks),
-            BlockKind::Heading
-            | BlockKind::List
-            | BlockKind::Code
-            | BlockKind::Html
-            | BlockKind::Other => Err(FieldProblem {
-                line: line_of(text, first.start),
-                kind: ProblemKind::NoOpeningParagraph,
-            }),
-        },
+        MarkdownField::Issue | MarkdownField::Consequence | MarkdownField::Evidence => {
+            match first.kind {
+                BlockKind::Paragraph { .. } => card_labels(text, &blocks),
+                BlockKind::Heading
+                | BlockKind::List
+                | BlockKind::Code
+                | BlockKind::Html
+                | BlockKind::Other => Err(FieldProblem {
+                    line: line_of(text, first.start),
+                    kind: ProblemKind::NoOpeningParagraph,
+                }),
+            }
+        }
         MarkdownField::Details => {
             joins_list(text, first)?;
             card_labels(text, &blocks)
@@ -279,7 +280,7 @@ pub(crate) fn check_field(field: MarkdownField, text: &str) -> Result<(), FieldP
         MarkdownField::Publication => joins_list(text, first),
         MarkdownField::Summary => plain_paragraphs(text, &blocks, MAX_SUMMARY_PARAGRAPHS),
         MarkdownField::Rationale => plain_paragraphs(text, &blocks, 1),
-        MarkdownField::Note => Ok(()),
+        MarkdownField::ProposedComment | MarkdownField::Note => Ok(()),
     }
 }
 
@@ -320,6 +321,27 @@ pub(crate) fn shift_headings(text: &str) -> Cow<'_, str> {
     }
     shifted.push_str(&text[copied..]);
     Cow::Owned(shifted)
+}
+
+/// The byte range of each top-level fenced code block of `text`, from its opening fence to
+/// the end of its closing one. A line that starts inside a range after its first byte is the
+/// block's content.
+pub(crate) fn fenced_code(text: &str) -> Vec<Range<usize>> {
+    let mut found = Vec::new();
+    let mut depth = 0_usize;
+    for (event, range) in Parse::new(text).events() {
+        match event {
+            Event::Start(tag) => {
+                if depth == 0 && matches!(tag, Tag::CodeBlock(CodeBlockKind::Fenced(_))) {
+                    found.push(range);
+                }
+                depth += 1;
+            }
+            Event::End(_) => depth = depth.saturating_sub(1),
+            _ => {}
+        }
+    }
+    found
 }
 
 /// `text` parsed with the reader's options (`REPORT_MARKDOWN`), so a field is judged as the
@@ -476,16 +498,14 @@ fn top_level_blocks(parse: Parse<'_>) -> (Vec<Block>, Option<usize>) {
 }
 
 /// No top-level paragraph begins with a card's bold label, such as `**Issue:**`, which the
-/// reader would take for a field of the card. The label must be the whole strong text, as the
-/// reader matches it.
+/// reader would take for a field of the card. The strong text is matched as the reader matches
+/// it (`CardLabel::matches`).
 fn card_labels(text: &str, blocks: &[Block]) -> Result<(), FieldProblem> {
     for block in blocks {
         if let BlockKind::Paragraph {
             bold: Some(bold), ..
         } = &block.kind
-            && let Some(label) = CardLabel::ALL
-                .into_iter()
-                .find(|label| label.text() == bold)
+            && let Some(label) = CardLabel::ALL.into_iter().find(|label| label.matches(bold))
         {
             return Err(FieldProblem {
                 line: line_of(text, block.start),
@@ -658,7 +678,7 @@ mod tests {
             (
                 "a details paragraph that starts with a card label",
                 MarkdownField::Details,
-                "Context.\n\n**Proposed comment:** Ship it.",
+                "Context.\n\n**Proposed comment — reply in thread:** Ship it.",
                 refused(3, ProblemKind::CardLabel(CardLabel::ProposedComment)),
             ),
             (

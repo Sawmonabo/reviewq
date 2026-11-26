@@ -1,12 +1,13 @@
 //! What publishing composes from, read in one read transaction: the closing call's snapshot,
 //! with its replay and refusal, and an update's.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 
 use reviewq_app::access::AppError;
 use reviewq_app::ledger::{
-    CallBinding, ClosingRead, ClosingSnapshot, CoverFacts, LastClosing, LedgerSnapshot, NoteRecord,
-    ParentFinding, ParentVersion, RefusedClosing, SnapshotFinding, SnapshotGuard,
+    CallBinding, ClosingRead, ClosingSnapshot, CoverFacts, LastClosing, LedgerSnapshot,
+    MAX_TICKET_LINKS, NoteRecord, ParentFinding, ParentVersion, RefusedClosing, ReportLinks,
+    SnapshotFinding, SnapshotGuard,
 };
 use reviewq_app::reports::FindingDisposition;
 use reviewq_domain::identity::{MergeRequestIid, Revision, RunId};
@@ -136,11 +137,6 @@ fn read(db: &Connection, lead: LeadTarget) -> Result<Option<LedgerSnapshot>, Sto
         .as_ref()
         .map(|row| passes::describe(db, row))
         .transpose()?;
-    let cover = cover(
-        db,
-        &lead,
-        pass.as_ref().and_then(|pass| pass.batch.as_ref()),
-    )?;
     let since = parent
         .as_ref()
         .map_or(0, |parent| parent.sequence.as_sqlite_integer());
@@ -166,6 +162,12 @@ fn read(db: &Connection, lead: LeadTarget) -> Result<Option<LedgerSnapshot>, Sto
         &touched,
         disposition_revision,
     )?;
+    let cover = cover(
+        db,
+        &lead,
+        pass.as_ref().and_then(|pass| pass.batch.as_ref()),
+        &findings,
+    )?;
     let notes = notes(db, run)?;
     Ok(Some(LedgerSnapshot {
         guard: SnapshotGuard {
@@ -185,24 +187,82 @@ fn read(db: &Connection, lead: LeadTarget) -> Result<Option<LedgerSnapshot>, Sto
     }))
 }
 
+/// The review's own facts: its MR, the Jira site, its linked tickets and the notes the
+/// discussions named by `findings` resolve to.
 fn cover(
     db: &Connection,
     lead: &LeadTarget,
     batch: Option<&reviewq_app::ledger::FrozenBatch>,
+    findings: &[SnapshotFinding],
 ) -> Result<CoverFacts, StoreError> {
+    let review = lead.review_id().as_str();
     let (origin, project_path, iid, mr_title): (String, String, i64, String) = db
         .prepare_cached("SELECT origin, project_path, iid, title FROM reviews WHERE review_id=?1")?
-        .query_row([lead.review_id().as_str()], |row| {
+        .query_row([review], |row| {
             Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
         })?;
+    let iid = MergeRequestIid::try_from(iid).map_err(|_| AppError::Internal)?;
+    let jira: Option<String> = db
+        .prepare_cached("SELECT origin FROM settings WHERE provider='jira'")?
+        .query_row([], |row| row.get(0))
+        .optional()?;
+    let tickets = db
+        .prepare_cached(
+            "SELECT DISTINCT ticket_key FROM scoped_review_issues WHERE review_id=?1
+             ORDER BY ticket_key LIMIT ?2",
+        )?
+        .query_map(params![review, MAX_TICKET_LINKS as i64], |row| {
+            row.get::<_, String>(0)
+        })?
+        .map(|key| parse(&key?))
+        .collect::<Result<_, _>>()?;
     Ok(CoverFacts {
-        mr_url: format!("{origin}/{project_path}/-/merge_requests/{iid}"),
+        links: ReportLinks::new(&origin, &project_path, iid, jira.as_deref())?,
         project_path,
-        iid: MergeRequestIid::try_from(iid).map_err(|_| AppError::Internal)?,
+        iid,
+        tickets,
+        thread_notes: thread_notes(db, review, findings)?,
         mr_title,
         target_sha: batch.and_then(|batch| batch.target_sha.clone()),
         read_at_ms: now_ms()?,
     })
+}
+
+/// The GitLab note each discussion that `findings` name, in an outcome or a monitored link,
+/// resolves to, by discussion ID: the original note ReviewQ tracks the discussion by, in the
+/// newest monitor generation that has it, and the lowest note ID when it tracks several.
+fn thread_notes(
+    db: &Connection,
+    review: &str,
+    findings: &[SnapshotFinding],
+) -> Result<HashMap<String, String>, StoreError> {
+    let named: BTreeSet<&str> = findings
+        .iter()
+        .flat_map(|finding| {
+            let outcome = finding.record.outcome.iter();
+            outcome
+                .flat_map(|outcome| &outcome.discussion_ids)
+                .chain(&finding.discussion_ids)
+        })
+        .map(String::as_str)
+        .collect();
+    let mut notes = HashMap::new();
+    if named.is_empty() {
+        return Ok(notes);
+    }
+    let named = serde_json::to_string(&named).map_err(|_| AppError::Internal)?;
+    let mut statement = db.prepare_cached(
+        "SELECT discussion_id, original_note_id FROM followup_threads
+         WHERE review_id=?1 AND discussion_id IN (SELECT value FROM json_each(?2))
+         ORDER BY generation DESC, length(original_note_id), original_note_id",
+    )?;
+    let mut found = statement.query(params![review, named])?;
+    while let Some(row) = found.next()? {
+        notes
+            .entry(row.get::<_, String>(0)?)
+            .or_insert(row.get::<_, String>(1)?);
+    }
+    Ok(notes)
 }
 
 /// Where the work a full review is checked against begins: the open pass's opening, or the

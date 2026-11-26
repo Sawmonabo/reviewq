@@ -258,7 +258,7 @@ export const ledgerTools = [
   },
   {
     "deadlineMs": 30000,
-    "description": "Writes one review note, replacing its earlier text. Give section and body: section is title, summary, rationale, flow, changes, threads, questions, verification, publication or extra, and an extra note also needs a title, which no other note takes. Leave out expectedRevision when you first write a note, and give the revision you last read once it exists. An empty body removes the note. Returns the note's section, its revision and how many records wait to be published. A refused call files nothing and says what to correct.",
+    "description": "Writes one review note, replacing its earlier text. Give section and body. title is the report's title; summary says what the MR does; rationale gives the reason for the verdict; flow is a Mermaid diagram of the principal code and data flow, then a short explanation; changes is a Before and After table, then a table of the affected operations; threads says what became of earlier review threads; questions holds open questions and decisions; verification says what you checked and what you could not; publication says which comments were posted or held back; extra is any other section, under its own title, which no other note takes. Leave out expectedRevision when you first write a note, and give the revision you last read once it exists. An empty body removes the note. Returns the note's section, its revision and how many records wait to be published. A refused call files nothing and says what to correct.",
     "inputSchema": {
       "$schema": "http://json-schema.org/draft-07/schema#",
       "additionalProperties": false,
@@ -300,7 +300,7 @@ export const ledgerTools = [
               "$ref": "#/definitions/NoteSection"
             }
           ],
-          "description": "`title` is the report's title, on one line. `summary` says what the MR does in at most four plain paragraphs and `rationale` gives the reason for the verdict in one."
+          "description": "`title` is the report's title, on one line. `summary` says what the MR does in at most four plain paragraphs and `rationale` gives the reason for the verdict in one. `flow` is a Mermaid diagram of the principal code and data flow, then a short explanation. `changes` is a table with the two columns Before and After, then a table with the columns Affected operation, What changes and Source. `threads`, `questions`, `verification` and `publication` fill the report sections of those names, and `extra` adds a section under its own title."
         },
         "title": {
           "description": "One line naming an `extra` note. Required for `extra` and only for it.",

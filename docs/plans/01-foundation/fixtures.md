@@ -76,7 +76,7 @@ For the acknowledgement exercise, obtain Active's `native_id` from registrations
 
 The export holds no report text. `provider/ledger.json` lists, per Claude lead, the ledger calls that file its records and close each version, and the dispositions saved between versions. Run `tools/dev/publish-reviews --inputs "$new_directory" --root <new-directory>` from the checkout. It builds `reviewq`, starts the provider and `reviewq serve --validation` in `<root>/profile` with a synthetic Claude profile in `<root>/claude`, links each lead with the plugin's link helper, and sends every call through `reviewq internal claude-bridge ledger`, the plugin's client of the native ledger routes. A disposition goes through the browser's disposition route. The product composes and stores every version. The tool reads each one back through the summary, source download and section routes, checks the summary and ETag against the stored bytes, and compares the sizes and marker offsets with the values pinned in `tools/dev/review_fixture/ledger.py`. It prints the profile, runs and receipts as JSON and exits 1 on any difference. `--serve` keeps the service until Ctrl+C. Afterwards `pnpm --dir web run dev --profile <root>/profile --validation` opens the populated profile.
 
-Five-digit provider ports keep the MR link, and so the byte offsets, fixed. Receipts, SHA-256 digests and the checked time differ on every run, so the manifest pins measurements, not digests. Every preset except `empty` publishes Quiet's two versions as full reviews. After a disposition on F-02 the second changes F-01, assesses F-01, F-02 and F-03, settles F-03 and adds F-04, because a full review must assess every finding it does not change. Together they file the records of the worked ledger example in `crates/reviewq-app/src/ledger/compose/tests.rs`, and the second version matches [`fixtures/reviews/ledger/worked.md`](../../../fixtures/reviews/ledger/worked.md) apart from the MR link, revisions and time and two differences. `Reviewed target` is `unknown`, because ReviewQ knows a target commit only for a selected-thread check. `Publication and dispositions` has no `Discussions:` line, because that line comes only from monitored discussion links and a validation-mode service has none. `reader` adds the `reader-report` lead and `rich` adds it and the specimen leads, all on Large.
+Five-digit provider ports keep the MR link, and so the byte offsets, fixed. Receipts, SHA-256 digests and the checked time differ on every run, so the manifest pins measurements, not digests. Every preset except `empty` publishes Quiet's two versions as full reviews. After a disposition on F-02 the second changes F-01, assesses F-01, F-02 and F-03, settles F-03 and adds F-04, because a full review must assess every finding it does not change. Together they file the records of the worked ledger example in `crates/reviewq-app/src/ledger/compose/tests.rs`, and the second version matches [`fixtures/reviews/ledger/worked.md`](../../../fixtures/reviews/ledger/worked.md) apart from the GitLab address in every link, revisions and time and five differences. `Reviewed target` is `unknown`, because ReviewQ knows a target commit only for a selected-thread check. A validation-mode service stores no Jira site, linked ticket or monitored discussion link, so the first line ends after the MR link, F-01's row under `Our previous threads` shows `D9` as code instead of a `Thread` link, F-01's proposed comment opens `Proposed comment — new comment at invoices.rs:74:` instead of a reply in the thread, and `Publication and dispositions` has no `Discussions:` line. `reader` adds the `reader-report` lead and `rich` adds it and the specimen leads, all on Large.
 
 ## Handoff
 
@@ -100,7 +100,7 @@ for name, expected in files.items():
     assert hashlib.sha256(data).hexdigest() == expected["sha256"], name
 provider = root / "provider"
 provider_manifest = (provider / "manifest.json").read_bytes()
-assert hashlib.sha256(provider_manifest).hexdigest() == "33b9e996ce7dc025dbc9c30511a9ac48bdb5fe83964d8630b0b0d36dc05312cc"
+assert hashlib.sha256(provider_manifest).hexdigest() == "64b7a24292327cda087b88ffd85dc3e6a9c08398bbbdeec9ba3fc896bd5e188e"
 companion = json.loads(provider_manifest)
 assert {p.relative_to(provider).as_posix() for p in provider.rglob("*") if p.is_file()} == {"manifest.json", *companion["files"]}
 for name, expected in companion["files"].items():
@@ -118,30 +118,30 @@ Generate `empty`, `busy`, `busy-filter`, `rich` and `reader` with the same comma
 | Preset | MRs / registrations / queued intents | Provider manifest SHA-256 |
 | --- | --- | --- |
 | `empty` | 0 / 0 / 0 | `e9fa6cc39852f216d32e056cba7677daa0ef93886f27d9ef1ce8ff7f3128e5c6` |
-| `worked` | 12 / 5 / 0 | `33b9e996ce7dc025dbc9c30511a9ac48bdb5fe83964d8630b0b0d36dc05312cc` |
-| `busy` | 67 / 506 / 200 | `26d6e0ed055aa7cf2a1962eee2d09ed3392c3472ebdd4a9a28e78f3d7f95df21` |
-| `busy-filter` | 300 / 506 / 200 | `4ae961169c03877aa0c90f66a71f522c09345ab480617b75454a1e68f837d774` |
-| `reader` | 12 / 9 / 0 | `a12d82bf317c9f3793fe394585a60a922b79b1d76c38f015cea4611b7f1a7446` |
-| `rich` | 12 / 19 / 0 | `99487dcd9c3d75d625d723d6a8a69385b9bfc69b50dc82d6e573f6398fe78971` |
+| `worked` | 12 / 5 / 0 | `64b7a24292327cda087b88ffd85dc3e6a9c08398bbbdeec9ba3fc896bd5e188e` |
+| `busy` | 67 / 506 / 200 | `f34175f77dbdaea27a4d20338c8959a66cbe137f1f2cdae494ef722b8e2684e8` |
+| `busy-filter` | 300 / 506 / 200 | `00eacecac766c76783b1608271505d5b9f685e40b502351aa22362f320bfc94c` |
+| `reader` | 12 / 9 / 0 | `07384c17338a416af514e17efa8b43d62ef450f58faac20a9308fd6420209068` |
+| `rich` | 12 / 19 / 0 | `a50d36caedde3313c1123d13ddfd1e3914f2ce9efe361cd730a9eb0c69e716a4` |
 
-- Active's native source ID is `af785ec1-cf3a-56f6-8329-0a800b8ef407` and run ID is `9eeca80e-4e18-5c48-a465-5dc4acbbff92`. Its child uses the same run and names Active as its native parent. Quiet's native source ID is `ca43678e-b86c-593f-8e90-3dc74f835451`. It has one Claude assistant record containing `Quiet complete`. Its published versions measure 2,353 bytes in 91 lines, then 3,448 bytes in 108 lines, each with three findings. Large has 240 initial Codex items and its own run.
+- Active's native source ID is `af785ec1-cf3a-56f6-8329-0a800b8ef407` and run ID is `9eeca80e-4e18-5c48-a465-5dc4acbbff92`. Its child uses the same run and names Active as its native parent. Quiet's native source ID is `ca43678e-b86c-593f-8e90-3dc74f835451`. It has one Claude assistant record containing `Quiet complete`. Its published versions measure 3,194 bytes in 105 lines, then 4,458 bytes in 131 lines, each with three findings. Large has 240 initial Codex items and its own run.
 - Busy queues 200 distinct leads. `busy-5` has a pending native question. The two closed branch-only MRs use `feature/RQ-641-fix` and `feature/RQ-6410-fix`. Match only the first to Jira `RQ-641`. Busy-filter has 15 titles with the prefix `Review the parser ` and 200 Active messages of 12,000 ASCII bytes each.
 - Reader has 10,000 completed items and 400 matching command starts. Each 25th item is a user prompt, with equal text at 25 and 50 and distinct item IDs. The first, middle and last IDs are `reader-item-0`, `reader-item-5000` and `reader-item-9999`. Item 5's decoded output is exactly 327,680 bytes and ends with `READER-OUTPUT-TAIL`. The explicit page cue ends at `reader-item-10099`.
 - Rich's renamed mixed patch is 6,482 bytes with 244 physical lines. Its initial large review has 205 discussions, including 200 distributed over the mixed file. The `crlf-limit.patch` longest line is exactly 16,384 bytes before CRLF. `over-bytes.patch` is 2,249,289 bytes, `over-lines.patch` has 20,002 physical lines, and `unicode-line.patch` has a 16,819-byte line. The provider manifest records each document's digest, line measurements and exact final bytes.
-- Reader adds the Claude lead `reader-report` on Large. Its first version, 1,218 bytes, holds a finding whose issue contains `**one** &amp; two 🧪` at byte 679 (scalar 670), with visible text `one & two 🧪`, and whose details hold a blockquote and a Mermaid diagram. Its second version, 1,054 bytes, retires that finding as fixed and approves, so its digest differs.
-- Rich adds one Claude lead per reader limit on Large. Each version is composed from ledger records within the ledger's own limits and ends in a unique marker. The server refuses the rich view of the first three; the browser parser counts 73,851 nodes in `specimen-nodes` and depth 132 in `specimen-depth`, and the diagrams hold 650 edges and 32,693 characters:
+- Reader adds the Claude lead `reader-report` on Large. Its first version, 1,253 bytes, holds a finding whose issue contains `**one** &amp; two 🧪` at byte 714 (scalar 705), with visible text `one & two 🧪`, and whose details hold a blockquote and a Mermaid diagram. Its second version, 1,101 bytes, retires that finding as fixed and approves, so its digest differs.
+- Rich adds one Claude lead per reader limit on Large. Each version is composed from ledger records within the ledger's own limits and ends in a unique marker. The server refuses the rich view of the first three; the browser parser counts 73,912 nodes in `specimen-nodes` and depth 132 in `specimen-depth`, and the diagrams hold 650 edges and 32,693 characters:
 
 | Lead | Limit crossed | Bytes / lines / longest line | Marker, byte (scalar) offset |
 | --- | --- | --- | --- |
-| `specimen-bytes` | 1 MiB | 1,075,960 / 773 / 2,052 | `**one** &amp; two 🧪` 1,075,919 (1,075,844), then `REPORT-BYTE-TAIL` |
-| `specimen-lines` | 10,000 lines | 131,689 / 10,123 / 76 | `REPORT-LINES-TAIL` 131,671 (131,665) |
-| `specimen-line` | 16 KiB line | 17,293 / 57 / 16,404 | `REPORT-LINE-TAIL` 17,276 (5,003) |
-| `specimen-edges` | 500 diagram edges | 11,098 / 709 / 76 | `REPORT-EDGES-TAIL` 11,080 (11,071) |
-| `specimen-characters` | 30,000 diagram characters | 33,409 / 105 / 593 | `REPORT-CHARACTERS-TAIL` 33,386 (33,380) |
-| `specimen-nodes` | 60,000 nodes | 100,162 / 123 / 8,187 | `REPORT-NODES-TAIL` 100,144 (100,120) |
-| `specimen-depth` | 128 nesting levels | 1,148 / 57 / 264 | `REPORT-DEPTH-TAIL` 1,130 (1,121) |
-| `specimen-windowed` | windowed reader at 64 KiB | 66,800 / 381 / 781 | `REPORT-WINDOWED-TAIL` 66,779 (66,689) |
-| `specimen-changes` | windowed reader at 24 KiB with changes | 28,847 / 189 / 781, then 26,732 / 179 / 781 after one finding is fixed | `REPORT-CHANGES-TAIL` 28,827 (28,785), then 26,712 (26,671) |
-| `specimen-blocks` | 512 display blocks | 79,556 / 2,445 / 167 | `REPORT-BLOCKS-TAIL` 79,537 (78,931) |
+| `specimen-bytes` | 1 MiB | 1,076,765 / 817 / 2,050 | `**one** &amp; two 🧪` 1,076,724 (1,076,605), then `REPORT-BYTE-TAIL` |
+| `specimen-lines` | 10,000 lines | 131,724 / 10,123 / 111 | `REPORT-LINES-TAIL` 131,706 (131,700) |
+| `specimen-line` | 16 KiB line | 27,264 / 57 / 26,340 | `REPORT-LINE-TAIL` 27,247 (22,438) |
+| `specimen-edges` | 500 diagram edges | 11,133 / 709 / 111 | `REPORT-EDGES-TAIL` 11,115 (11,106) |
+| `specimen-characters` | 30,000 diagram characters | 33,444 / 105 / 593 | `REPORT-CHARACTERS-TAIL` 33,421 (33,415) |
+| `specimen-nodes` | 60,000 nodes | 100,197 / 123 / 8,187 | `REPORT-NODES-TAIL` 100,179 (100,155) |
+| `specimen-depth` | 128 nesting levels | 1,183 / 57 / 264 | `REPORT-DEPTH-TAIL` 1,165 (1,156) |
+| `specimen-windowed` | windowed reader at 64 KiB | 69,654 / 381 / 781 | `REPORT-WINDOWED-TAIL` 69,633 (69,543) |
+| `specimen-changes` | windowed reader at 24 KiB with changes | 30,085 / 189 / 781, then 27,882 / 179 / 781 after one finding is fixed | `REPORT-CHANGES-TAIL` 30,065 (30,023), then 27,862 (27,822) |
+| `specimen-blocks` | 512 display blocks | 100,083 / 2,445 / 167 | `REPORT-BLOCKS-TAIL` 100,064 (99,458) |
 
   A field line is limited to 8 KiB, so the only line over 16 KiB is the composed `**Location:**` line of eight long Unicode paths. A version opens in the windowed reader only when its display index fits 512 blocks. A composed card with a location and three short fields takes six blocks and a report with no notes takes 23 more, so such a report stays windowed through 81 findings (509 blocks) and falls back with `layout_budget` at 82, as measured through the window route. `specimen-windowed` (28 cards, 191 blocks) and the changed `specimen-changes` version (11 cards, 89 blocks) therefore reach their size thresholds with a few long cards and come back `ready`, while `specimen-blocks` keeps 200 short cards to cross the block budget on purpose and opens in the full reader. The manifest also records expected clipboard bytes, accessible reading order and viewport settings for the wide, narrow, wrapped and reduced-motion specimens. Record actual presentation through the browser.
