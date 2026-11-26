@@ -25,7 +25,7 @@ mod work;
 
 pub use claude::{
     ClaudeAnchor, ClaudeChild, ClaudeClassicEvent, ClaudeDeliveryAck, ClaudeDeliveryResult,
-    ClaudeHeartbeat, ClaudeHeartbeatResult, ClaudeOffer, ClaudeQuestionAddress,
+    ClaudeHeartbeat, ClaudeHeartbeatResult, ClaudeHost, ClaudeOffer, ClaudeQuestionAddress,
     ClaudeQuestionAnswers, ClaudeSend, ClaudeStore, ClaudeTurnResult, ClaudeWorkflowContext,
     ClaudeWorkflowStore, ProvenClaudeChild, claude_answer_digest,
 };

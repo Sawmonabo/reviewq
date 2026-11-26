@@ -19,46 +19,55 @@ use crate::{SqliteStore, StoreError};
 mod child;
 mod classic;
 mod delivery;
+mod host;
 pub(crate) mod watch;
 mod workflow;
 
 impl SqliteStore {
-    /// Stores each Claude companion that counts as gone by silence as ended, as a companion
-    /// that reports disconnecting is, and announces each change. Reads first, and opens a
-    /// write only when one timed out. The runtime calls it every `WATCH_TICK`, and it reads
-    /// the watch each time even with no companion stored, so a longer gap between readings
-    /// means ReviewQ was not running.
-    pub async fn end_silent_companions(&self) -> Result<(), AppError> {
+    /// Stores each Claude companion that counts as gone by silence, or whose trusted host
+    /// process is proven dead, as ended, as a companion that reports disconnecting is, and
+    /// announces each change. Reads first, and opens a write only when one is to end. The
+    /// runtime calls it at startup and every `WATCH_TICK`, and it reads the watch each time
+    /// even with no companion stored, so a longer gap between readings means ReviewQ was not
+    /// running.
+    pub async fn end_companions(&self) -> Result<(), AppError> {
         self.companions.now();
-        let silent = self
+        let ending = self
             .read(|db| {
-                let mut statement = db.prepare_cached(
-                    "SELECT s.run_id, c.session_key, c.generation
+                let mut statement = db.prepare_cached(&format!(
+                    "SELECT s.run_id, c.session_key, c.generation,
+                       reviewq_companion_gone(c.seen_at_ms), {}
                      FROM claude_companions c JOIN sessions s USING(session_key)
-                     WHERE c.seen_at_ms<>0 AND reviewq_companion_gone(c.seen_at_ms)",
-                )?;
+                     WHERE c.seen_at_ms<>0
+                       AND (c.host_trusted=1 OR reviewq_companion_gone(c.seen_at_ms))",
+                    host::COLUMNS
+                ))?;
                 let rows = statement.query_map([], |row| {
                     Ok((
                         row.get::<_, String>(0)?,
                         row.get::<_, String>(1)?,
-                        row.get(2)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, bool>(3)?,
+                        host::trusted(row, 4)?,
                     ))
                 })?;
-                let mut silent = Vec::new();
+                let mut ending = Vec::new();
                 for row in rows {
-                    let (run, session, generation): (String, String, String) = row?;
-                    silent.push((parse(&run)?, parse(&session)?, generation));
+                    let (run, session, generation, silent, host) = row?;
+                    if silent || host.is_some_and(|host| host.is_dead()) {
+                        ending.push((parse(&run)?, parse(&session)?, generation, silent));
+                    }
                 }
-                Ok(silent)
+                Ok(ending)
             })
             .await
             .map_err(StoreError::app)?;
-        if silent.is_empty() {
+        if ending.is_empty() {
             return Ok(());
         }
         self.write(move |tx| {
-            for (run, session, generation) in &silent {
-                classic::store_ended(tx, run, session, generation, true)?;
+            for (run, session, generation, silent) in &ending {
+                classic::store_ended(tx, run, session, generation, *silent)?;
             }
             Ok(())
         })
@@ -290,6 +299,12 @@ fn heartbeat(
     allow_target(db, &Actor::native_session(native.clone()), &lead)?;
     let key = lead.session_key().as_str();
     let now = now_ms()?;
+    // Another generation takes over a companion that is not gone only once its trusted host
+    // is proven dead, which ends it now.
+    if let Some(generation) = host::dead_generation(db, key, &observation.generation)? {
+        classic::store_ended(tx, lead.run_id(), lead.session_key(), &generation, false)?;
+    }
+    let db = &tx.sql;
     // Whether the queue showed the companion, and whether this report binds a permission
     // prompt that arrived while the companion was unknown.
     let (was_connected, binds): (bool, bool) = db
@@ -302,10 +317,13 @@ fn heartbeat(
         })
         .optional()?
         .unwrap_or((false, false));
+    let (host_pid, host_start, host_boot, host_namespace) = host::params(observation.host.as_ref());
     let recorded = db.execute(
-        "INSERT INTO claude_companions(session_key,generation,sequence,seen_at_ms,turn_id,latest_prompt_id,model,effort,latest_prompt_turn_id,latest_prompt_manual,turn_step)
-         VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)
+        &format!("INSERT INTO claude_companions(session_key,generation,sequence,seen_at_ms,turn_id,latest_prompt_id,model,effort,latest_prompt_turn_id,latest_prompt_manual,turn_step,
+           host_pid,host_start,host_boot,host_namespace,host_since_ms)
+         VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,CASE WHEN ?12 IS NULL THEN NULL ELSE ?4 END)
          ON CONFLICT(session_key) DO UPDATE SET
+            {},
             generation=excluded.generation, sequence=excluded.sequence, seen_at_ms=excluded.seen_at_ms,
             permission_turn_id=CASE
               WHEN generation=excluded.generation AND permission_unbound=1 THEN excluded.turn_id
@@ -320,13 +338,14 @@ fn heartbeat(
             model=excluded.model,effort=excluded.effort,
             latest_prompt_turn_id=excluded.latest_prompt_turn_id,latest_prompt_manual=excluded.latest_prompt_manual
          WHERE (generation=excluded.generation AND sequence<excluded.sequence) OR
-               (generation<>excluded.generation AND reviewq_companion_gone(seen_at_ms))",
+               (generation<>excluded.generation AND reviewq_companion_gone(seen_at_ms))", host::upsert()),
         params![key, observation.generation, observation.sequence as i64, now,
             observation.turn.as_ref().map(|value| value.as_str()),
             observation.latest_prompt.as_ref().map(|value| value.as_str()),
             observation.model, observation.effort,
             observation.latest_prompt_turn.as_ref().map(|value| value.as_str()),
-            observation.latest_prompt_manual, observation.step.map(|value| value as i64)],
+            observation.latest_prompt_manual, observation.step.map(|value| value as i64),
+            host_pid, host_start, host_boot, host_namespace],
     )?;
     if recorded == 0 {
         return Err(AppError::StaleRevision.into());

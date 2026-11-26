@@ -1,7 +1,7 @@
 use std::io::Write;
 use std::path::Path;
 
-use reviewq_app::hosts::{ClaudeQuestionAnswers, claude_answer_digest};
+use reviewq_app::hosts::{ClaudeHost, ClaudeQuestionAnswers, claude_answer_digest};
 use reviewq_domain::identity::NativeSessionId;
 use reviewq_protocol::deadlines::tool_deadline;
 use reviewq_protocol::ledger::{
@@ -88,6 +88,9 @@ pub(crate) async fn claude_bridge(
             );
         }
     }
+    if matches!(operation, ClaudeBridgeOperation::Heartbeat) {
+        fields.insert("host".into(), host());
+    }
     let endpoint = runtime::read_native_endpoint(profile)?;
     let body = serde_json::to_vec(&payload)?;
     let (status, body) = match operation {
@@ -122,6 +125,20 @@ pub(crate) async fn claude_bridge(
     }
     println!("{}", String::from_utf8(body)?);
     Ok(())
+}
+
+/// The process hosting the Claude session, which is the helper's parent, for a heartbeat:
+/// `{pid,startTime,bootId,pidNamespace}`, or null when it cannot be read. It replaces any
+/// `host` the plugin sent.
+fn host() -> serde_json::Value {
+    ClaudeHost::parent().map_or(serde_json::Value::Null, |host| {
+        serde_json::json!({
+            "pid": host.pid,
+            "startTime": host.start_time,
+            "bootId": host.boot_id,
+            "pidNamespace": host.pid_namespace,
+        })
+    })
 }
 
 /// One bridge request after the signed status check: the reply's status and its body.

@@ -6,7 +6,9 @@ use axum::routing::post;
 use axum::{Json, Router};
 use reviewq_app::access::{Actor, AppError};
 use reviewq_app::history::HistorySession;
-use reviewq_app::hosts::{ClaudeContext, ClaudeHeartbeat, ClaudeOffer, HostActivity, HostPhase};
+use reviewq_app::hosts::{
+    ClaudeContext, ClaudeHeartbeat, ClaudeHost, ClaudeOffer, HostActivity, HostPhase,
+};
 use reviewq_domain::session::{HostProvider, LeadTarget, NativeBinding, NativeIdentity};
 use reviewq_protocol::Success;
 use serde::{Deserialize, Serialize};
@@ -44,6 +46,17 @@ struct Heartbeat {
     latest_prompt_manual: bool,
     model: Option<String>,
     effort: Option<String>,
+    /// Added by the heartbeat helper, not the plugin: the process hosting the session.
+    host: Option<Host>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct Host {
+    pid: u32,
+    start_time: u64,
+    boot_id: String,
+    pid_namespace: String,
 }
 
 #[derive(Deserialize)]
@@ -95,6 +108,12 @@ async fn heartbeat(
         latest_prompt_manual: command.latest_prompt_manual,
         model: command.model,
         effort: command.effort,
+        host: command.host.map(|host| ClaudeHost {
+            pid: host.pid,
+            start_time: host.start_time,
+            boot_id: host.boot_id,
+            pid_namespace: host.pid_namespace,
+        }),
     };
     let recorded = entry
         .store

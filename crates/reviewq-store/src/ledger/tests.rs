@@ -4,7 +4,8 @@ use std::time::Duration;
 use reviewq_app::access::{Actor, AppError};
 use reviewq_app::followups::{NextAction, ResultKind};
 use reviewq_app::hosts::{
-    ClaudeClassicEvent, ClaudeHeartbeat, ClaudeStore, ClaudeWorkflowStore, HostActivity, HostPhase,
+    ClaudeClassicEvent, ClaudeHeartbeat, ClaudeHost, ClaudeStore, ClaudeWorkflowStore,
+    HostActivity, HostPhase,
 };
 use reviewq_app::ledger::publish::{finish_review, settle_due};
 use reviewq_app::ledger::{
@@ -260,13 +261,13 @@ fn publish_is_conditional() {
         assert_eq!(lead_idle(&store).await, [false]);
         assert_eq!(live().await, (false, false));
         // The prompt binds to the turn and step of the companion's next report, with one alert.
-        let phase = HostPhase::Working;
+        let (phase, has_questions) = (HostPhase::Working, false);
         let report = ClaudeHeartbeat {
             generation: "0".repeat(32),
             sequence: 2,
             activity: Some(HostActivity {
                 phase,
-                has_questions: false,
+                has_questions,
             }),
             turn: Some("turn-2".parse().unwrap()),
             step: Some(3),
@@ -276,11 +277,10 @@ fn publish_is_conditional() {
             latest_prompt_manual: false,
             model: None,
             effort: None,
+            host: ClaudeHost::of(std::process::id()),
         };
-        store
-            .record_claude_heartbeat(lead.clone(), report)
-            .await
-            .unwrap();
+        let reported = store.record_claude_heartbeat(lead.clone(), report);
+        reported.await.unwrap();
         let shown = store.read(|db| {
             let sql = "SELECT host_activity, (SELECT group_concat(event_ref) FROM notifications
                 WHERE kind='agent_permission') FROM sessions WHERE session_key='claude:lead'";
@@ -288,16 +288,22 @@ fn publish_is_conditional() {
         });
         let shown: (String, Option<String>) = shown.await.unwrap();
         assert_eq!(shown, ("blocked".into(), Some("turn-2".into())));
-        let silent = "UPDATE claude_companions SET seen_at_ms=1000";
+        // Its host is this test's own process, trusted as two reports 5 seconds apart make it.
+        let silent = "UPDATE claude_companions SET seen_at_ms=1000, host_trusted=1";
         let silenced = store.write(|tx| Ok(tx.sql.execute(silent, [])?));
         silenced.await.unwrap();
-        // A ReviewQ stopped for a minute has not watched it: the companion is still unknown.
+        // A ReviewQ stopped for a minute has not watched it, and its live host proves nothing:
+        // the companion is still unknown. A host process that no longer exists ends it at once.
         store.companions.watched_long_enough();
         store.companions.stopped_for(Duration::from_secs(60));
-        store.end_silent_companions().await.unwrap();
+        store.end_companions().await.unwrap();
         assert_eq!(lead_idle(&store).await, [false]);
-        store.companions.watched_long_enough();
-        store.end_silent_companions().await.unwrap();
+        let dead = "UPDATE claude_companions SET host_pid=4294967295";
+        store
+            .write(|tx| Ok(tx.sql.execute(dead, [])?))
+            .await
+            .unwrap();
+        store.end_companions().await.unwrap();
         assert_eq!(lead_idle(&store).await, [true]);
         let selected = closing(&store, "finish-thread").await;
         let kind = selected.snapshot.pass.as_ref().map(|pass| pass.kind);

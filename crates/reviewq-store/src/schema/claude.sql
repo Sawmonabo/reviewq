@@ -15,7 +15,18 @@ CREATE TABLE claude_companions (
     latest_prompt_manual INTEGER NOT NULL CHECK (latest_prompt_manual IN (0,1)),
     model TEXT CHECK (length(CAST(model AS BLOB)) BETWEEN 1 AND 128),
     effort TEXT CHECK (length(CAST(effort AS BLOB)) BETWEEN 1 AND 64),
+    -- The process hosting this generation, as its heartbeats name it, since the first report
+    -- that named it; trusted once a report at least 5 seconds later named the same process.
+    host_pid INTEGER CHECK (host_pid > 0),
+    host_start INTEGER CHECK (host_start >= 0),
+    host_boot TEXT CHECK (length(CAST(host_boot AS BLOB)) BETWEEN 1 AND 64),
+    host_namespace TEXT CHECK (length(CAST(host_namespace AS BLOB)) BETWEEN 1 AND 64),
+    host_since_ms INTEGER,
+    host_trusted INTEGER NOT NULL DEFAULT 0 CHECK (host_trusted IN (0,1)),
     CHECK (latest_prompt_turn_id IS NULL OR latest_prompt_id IS NOT NULL),
+    CHECK ((host_pid IS NULL) = (host_start IS NULL) AND (host_pid IS NULL) = (host_boot IS NULL)
+       AND (host_pid IS NULL) = (host_namespace IS NULL) AND (host_pid IS NULL) = (host_since_ms IS NULL)),
+    CHECK (host_trusted = 0 OR host_pid IS NOT NULL),
     CHECK (latest_prompt_manual=0 OR latest_prompt_turn_id IS NOT NULL)
 ) STRICT, WITHOUT ROWID;
 

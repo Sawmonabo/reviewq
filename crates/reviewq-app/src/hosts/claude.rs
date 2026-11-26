@@ -16,6 +16,9 @@ use crate::workflow::ReadyWorkflow;
 
 use super::{ClaudeContext, DeliveryClaim, HostActivity, ObservedInput};
 
+mod process;
+pub use process::ClaudeHost;
+
 pub struct ClaudeHeartbeat {
     pub generation: String,
     pub sequence: u64,
@@ -28,6 +31,8 @@ pub struct ClaudeHeartbeat {
     pub latest_prompt_manual: bool,
     pub model: Option<String>,
     pub effort: Option<String>,
+    /// The process hosting the session, as the heartbeat helper named its parent.
+    pub host: Option<ClaudeHost>,
 }
 
 impl ClaudeHeartbeat {
@@ -47,6 +52,7 @@ impl ClaudeHeartbeat {
                 .effort
                 .as_ref()
                 .is_some_and(|value| !setting(value, 64))
+            || self.host.as_ref().is_some_and(|host| !host.is_valid())
         {
             return Err(AppError::InvalidRequest);
         }

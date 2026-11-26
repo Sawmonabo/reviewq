@@ -12,12 +12,14 @@ use reviewq_store::{SqliteStore, WATCH_TICK};
 use tokio::sync::watch;
 use tokio::time::MissedTickBehavior;
 
-/// Until shutdown, two ticks. Every `WATCH_TICK`, on its own so a slow step never delays it,
-/// the store reads its companion watch and stores each Claude companion that went silent as
-/// ended. Every 10 seconds: reads native attention, settles the ledger runs that are due, which
-/// it also does once on start, then polls the configured sources and runs the due follow-ups,
-/// recoveries and publications. With `settle_only`, as in validation, the second tick only
-/// settles, which reads stored state alone and asks no provider. A step's error skips that
+/// Until shutdown, two ticks. First, and then every `WATCH_TICK` on its own so a slow step
+/// never delays it, the store reads its companion watch and stores each Claude companion that
+/// went silent, or whose host process is proven dead, as ended; so a session that died while
+/// ReviewQ was stopped is gone before the first settle. Every 10 seconds: reads native
+/// attention, settles the ledger runs that are due, which it also does once on start, then
+/// polls the configured sources and runs the due follow-ups, recoveries and publications.
+/// With `settle_only`, as in validation, the second tick only settles, which reads stored
+/// state alone and asks no provider. A step's error skips that
 /// step for the tick, as a settle error does. Every step that reads whether a Claude session
 /// is live or gone asks the store's one companion watch.
 pub(super) async fn run(
@@ -27,19 +29,21 @@ pub(super) async fn run(
     settle_only: bool,
     shutdown: watch::Receiver<bool>,
 ) {
+    let _ = store.end_companions().await;
     tokio::select! {
         () = watch_companions(&store) => {},
         () = work(Arc::clone(&store), sources, native, settle_only, shutdown) => {},
     }
 }
 
-/// Ends silent companions every `WATCH_TICK`, which also reads the watch each time.
+/// Ends silent and dead companions every `WATCH_TICK`, which also reads the watch each time.
 async fn watch_companions(store: &SqliteStore) {
-    let mut tick = tokio::time::interval(WATCH_TICK);
+    let first = tokio::time::Instant::now() + WATCH_TICK;
+    let mut tick = tokio::time::interval_at(first, WATCH_TICK);
     tick.set_missed_tick_behavior(MissedTickBehavior::Delay);
     loop {
         tick.tick().await;
-        let _ = store.end_silent_companions().await;
+        let _ = store.end_companions().await;
     }
 }
 
