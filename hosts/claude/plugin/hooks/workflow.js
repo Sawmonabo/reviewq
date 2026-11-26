@@ -1,4 +1,5 @@
 import { invoke } from "./bridge.js";
+import { actionWaitMs } from "./ledger-schema.js";
 
 const sha = { type: "string", pattern: "^(?:[a-f0-9]{40}|[a-f0-9]{64})$" };
 const digest = { type: "string", pattern: "^[a-f0-9]{64}$" };
@@ -37,7 +38,7 @@ export async function stageAction($, state, event) {
     context.turnId = state.activeTurn;
     context.declaration = event.declaration;
   }
-  const result = await invoke($, declare ? "action" : "action-status", state.id, context);
+  const result = await invoke($, declare ? "action" : "action-status", state.id, context, actionWaitMs);
   return toolResult(result);
 }
 
@@ -48,8 +49,14 @@ export async function reportTurn($, state, event) {
 }
 
 // A reply's `data` becomes the tool result. Its `error`, a sentence from `invoke` or the
-// bridge's text for a refused ledger call, becomes a tool error.
+// bridge's text for a refused ledger call, becomes a refusal.
 export function toolResult(result) {
   if (!result.error && Object.hasOwn(result, "data")) return { result: JSON.stringify(result.data) };
-  return { result: result.error || "ReviewQ returned no result for this call.", isError: true };
+  return refusal(result.error || "ReviewQ returned no result for this call.");
+}
+
+// Every refusal of a call to one of the plugin's own tools. The host gives `deny` to the model
+// as the call's error result; an `isError` beside a hook's own `result` is ignored.
+export function refusal(text) {
+  return { deny: text };
 }

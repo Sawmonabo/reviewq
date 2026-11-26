@@ -3,12 +3,13 @@ use std::path::Path;
 
 use reviewq_app::hosts::{ClaudeQuestionAnswers, claude_answer_digest};
 use reviewq_domain::identity::NativeSessionId;
+use reviewq_protocol::deadlines::tool_deadline;
 use reviewq_protocol::ledger::{
-    LEDGER_TIMED_OUT, LedgerBinding, LedgerRequest, LedgerTool, MAX_LEDGER_RESULT_BYTES,
-    MAX_TOOL_INPUT_BYTES, oversized_input,
+    LedgerBinding, LedgerRequest, LedgerTool, MAX_LEDGER_RESULT_BYTES, MAX_TOOL_INPUT_BYTES,
+    oversized_input,
 };
-use reviewq_protocol::{HistoryTurnIdDto, ResourceIdDto, SessionKeyDto};
-use reviewq_transport::{field_error_text, ledger_refusal_text};
+use reviewq_protocol::{ErrorCode, HistoryTurnIdDto, ResourceIdDto, SessionKeyDto};
+use reviewq_transport::{ServiceEndpoint, field_error_text, ledger_refusal_text};
 use serde::Deserialize;
 
 use super::hook::{Answer, GateHost, INPUT_LIMIT, forward};
@@ -88,25 +89,112 @@ pub(crate) async fn claude_bridge(
         }
     }
     let endpoint = runtime::read_native_endpoint(profile)?;
-    let client = if matches!(operation, ClaudeBridgeOperation::Question) {
-        client_with_timeout(None)?
-    } else {
-        client()?
+    let body = serde_json::to_vec(&payload)?;
+    let (status, body) = match operation {
+        // `review_action` answers within its tool's deadline, the one limit on the call, so a
+        // slow GitLab read ends with its message.
+        ClaudeBridgeOperation::Action | ClaudeBridgeOperation::ActionStatus => {
+            let deadline = tool_deadline("review_action");
+            tokio::time::timeout(
+                deadline.limit,
+                post(&client_with_timeout(None)?, &endpoint, path, body),
+            )
+            .await
+            .map_err(|_| deadline.timed_out)??
+        }
+        ClaudeBridgeOperation::Question => {
+            post(&client_with_timeout(None)?, &endpoint, path, body).await?
+        }
+        _ => post(&client()?, &endpoint, path, body).await?,
     };
-    let result = bridge(&client, &endpoint, path, serde_json::to_vec(&payload)?).await?;
-    let status = result.status();
-    let body = bounded(result, 256 * 1024).await?;
     if !status.is_success() {
-        let detail = match status.as_u16() {
-            404 => "This Claude session has no verified ReviewQ binding.",
-            409 => "Another ReviewQ companion owns this Claude session.",
-            412 => "Reload the ReviewQ plugin in this Claude session.",
-            _ => "ReviewQ could not record this Claude session observation.",
+        let detail = match operation {
+            ClaudeBridgeOperation::Action => action_refusal(true, &body),
+            ClaudeBridgeOperation::ActionStatus => action_refusal(false, &body),
+            _ => match status.as_u16() {
+                404 => "This Claude session has no verified ReviewQ binding.",
+                409 => "Another ReviewQ companion owns this Claude session.",
+                412 => "Reload the ReviewQ plugin in this Claude session.",
+                _ => "ReviewQ could not record this Claude session observation.",
+            },
         };
         return Err(detail.into());
     }
     println!("{}", String::from_utf8(body)?);
     Ok(())
+}
+
+/// One bridge request after the signed status check: the reply's status and its body.
+async fn post(
+    client: &reqwest::Client,
+    endpoint: &ServiceEndpoint,
+    path: &str,
+    body: Vec<u8>,
+) -> Result<(reqwest::StatusCode, Vec<u8>), Failure> {
+    let response = bridge(client, endpoint, path, body).await?;
+    let status = response.status();
+    Ok((status, bounded(response, 256 * 1024).await?))
+}
+
+/// What the model reads when ReviewQ refuses `review_action`, from the refusal's error code:
+/// a declaration when `declare`, else a reconcile. A refused declaration stores nothing.
+fn action_refusal(declare: bool, reply: &[u8]) -> &'static str {
+    #[derive(Deserialize)]
+    struct Refusal {
+        error: Code,
+    }
+    #[derive(Deserialize)]
+    struct Code {
+        code: ErrorCode,
+    }
+    let code = serde_json::from_slice::<Refusal>(reply).map(|refusal| refusal.error.code);
+    match (code, declare) {
+        (Ok(ErrorCode::InvalidRequest), true) => {
+            "ReviewQ refused this declaration, so nothing was recorded. It needs intent and reviewedSha, the merge request's full head SHA; comments and both take 1 to 50 distinct comments, and approval and cancel take none. Correct it and declare the action again."
+        }
+        (Ok(ErrorCode::InvalidRequest), false) => {
+            "ReviewQ could not read this reconcile call. Reload the ReviewQ plugin in this Claude session."
+        }
+        (Ok(ErrorCode::Unauthorized), _) => {
+            "ReviewQ did not accept the plugin's credential. Check the installed service and plugin."
+        }
+        (Ok(ErrorCode::Forbidden), _) => {
+            "ReviewQ takes a publication action only in a turn that the user's latest instruction started, typed in this conversation or sent from ReviewQ. This turn did not start that way, so nothing was recorded. Ask the user for the instruction."
+        }
+        (Ok(ErrorCode::NotFound), true) => {
+            "ReviewQ found no open review_action call in the current turn of this conversation's linked review, or a comment names a discussion that is not on the merge request, so nothing was recorded."
+        }
+        (Ok(ErrorCode::NotFound), false) => {
+            "ReviewQ found no open review_action call in the current turn of this conversation's linked review."
+        }
+        (Ok(ErrorCode::StaleRevision), true) => {
+            "The merge request no longer matches this declaration: it is not open at reviewedSha, or ReviewQ's settings changed. Nothing was recorded. Read the merge request again before declaring the action."
+        }
+        (Ok(ErrorCode::StaleRevision), false) => {
+            "The action changed while ReviewQ checked it. Call review_action with operation reconcile again to read it."
+        }
+        (Ok(ErrorCode::Conflict), true) => {
+            "Something newer stands in this declaration's way: the merge request is not open, the user has a newer instruction waiting, a later action is declared, or this turn changed while ReviewQ checked it. Nothing was recorded. Call review_action with operation reconcile to read the current action."
+        }
+        (Ok(ErrorCode::Conflict), false) => {
+            "The merge request or the GitLab user changed since the action was declared, or this turn changed while ReviewQ checked it."
+        }
+        (Ok(ErrorCode::IdempotencyConflict), _) => {
+            "This review_action call already declared a different action, so nothing new was recorded. Call review_action with operation reconcile to read it."
+        }
+        (Ok(ErrorCode::PayloadTooLarge), _) => {
+            "This action, or the transcript entry ReviewQ read to check it, is larger than ReviewQ accepts."
+        }
+        (Ok(ErrorCode::Busy), _) => {
+            "ReviewQ cannot settle this action yet, so nothing was recorded. Call review_action again in a moment."
+        }
+        (Ok(ErrorCode::Unavailable), _) => {
+            "ReviewQ could not read GitLab or this conversation's transcript, or the merge request's project is no longer configured, so it could not check the action. Check the GitLab connection and project settings, then call review_action again."
+        }
+        _ => {
+            "ReviewQ failed while checking this action. Call review_action with operation reconcile before declaring the action again."
+        }
+    }
 }
 
 /// ReviewQ's key for a linked Claude session.
@@ -132,8 +220,8 @@ struct LedgerCall {
 /// tool's deadline, and nothing else. A call too large to carry gets the validator's refusal
 /// without either request. Fails, with the message on stderr, when the call on stdin cannot be
 /// read or names no ledger tool, when the listener is not this installation's ready service,
-/// when ReviewQ cannot be reached or gives no readable reply, or with `LEDGER_TIMED_OUT` when
-/// the tool's deadline passes.
+/// when ReviewQ cannot be reached or gives no readable reply, or with the tool's timeout
+/// sentence when its deadline passes.
 async fn ledger(profile: &Path, native: &NativeSessionId) -> Result<(), Failure> {
     let Some(call) = read_within(LEDGER_CALL_LIMIT)? else {
         return print_refusal(&field_error_text(&[oversized_input()]));
@@ -154,13 +242,14 @@ async fn ledger(profile: &Path, native: &NativeSessionId) -> Result<(), Failure>
     // The tool's deadline is the one limit, so a slow call always ends with its message.
     let client = client_with_timeout(None)?;
     let path = format!("/api/v1/native/ledger/{}", tool.route());
-    let (status, reply) = tokio::time::timeout(tool.deadline(), async {
+    let deadline = tool_deadline(tool.name());
+    let (status, reply) = tokio::time::timeout(deadline.limit, async {
         let response = bridge(&client, &endpoint, &path, body).await?;
         let status = response.status();
         Ok::<_, Failure>((status, bounded(response, LEDGER_REPLY_LIMIT).await?))
     })
     .await
-    .map_err(|_| LEDGER_TIMED_OUT)??;
+    .map_err(|_| deadline.timed_out)??;
     if !status.is_success() {
         let text = ledger_refusal_text(&reply)
             .ok_or("ReviewQ gave no readable reply to this ledger call.")?;

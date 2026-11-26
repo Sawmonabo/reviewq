@@ -1,5 +1,4 @@
 use std::sync::Arc;
-use std::time::Duration;
 
 use axum::Router;
 use axum::extract::{Request, State};
@@ -8,7 +7,8 @@ use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use reviewq_app::access::{Actor, AppError};
-use reviewq_protocol::ledger::{LEDGER_TIMED_OUT, LedgerTool};
+use reviewq_protocol::deadlines::{GRANT_CHECK_LIMIT, tool_deadline};
+use reviewq_protocol::ledger::LedgerTool;
 use reviewq_protocol::mcp::{
     AnswerReviewQuestion, ConfigureFollowups, GetReview, ListReviews, ReadTranscript,
     SendReviewMessage, StartReview,
@@ -26,6 +26,7 @@ use schemars::JsonSchema;
 use serde::de::DeserializeOwned;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
+use tokio::time::Instant;
 
 use super::{ApiError, Entry};
 
@@ -40,8 +41,13 @@ const MAX_TOOL_RESPONSE: usize = 512 * 1024;
 /// exceed the arguments a model writes in one tool call, so a call whose input is too large
 /// still reaches the ledger validator and gets its field error. rmcp answers a larger body with `413` before
 /// any tool code runs; the body is read under the router's 30-second body timeout and only
-/// after the grant is authenticated.
+/// after the grant is authenticated, or after the store did not check it in time.
 const MAX_REQUEST_BODY_BYTES: usize = 1024 * 1024;
+
+/// When a request reached the MCP server. A tool call's deadline runs from here, so the time
+/// its grant check took counts toward it.
+#[derive(Clone, Copy)]
+struct Arrived(Instant);
 
 #[derive(Clone)]
 struct Server {
@@ -111,6 +117,7 @@ async fn authenticate(
     mut request: Request,
     next: Next,
 ) -> Response {
+    let arrived = Arrived(Instant::now());
     let header = request
         .headers()
         .get(header::AUTHORIZATION)
@@ -125,15 +132,43 @@ async fn authenticate(
     }) else {
         return challenge();
     };
-    match entry.store.authenticate_grant(verifier).await {
-        Ok(actor) => {
+    let checked =
+        tokio::time::timeout(GRANT_CHECK_LIMIT, entry.store.authenticate_grant(verifier)).await;
+    match checked {
+        Ok(Ok(actor)) => {
             request.headers_mut().remove(header::AUTHORIZATION);
             request.extensions_mut().insert(actor);
+            request.extensions_mut().insert(arrived);
             next.run(request).await
         }
-        Err(AppError::Unauthorized) => challenge(),
-        Err(error) => ApiError::from(error).into_response(),
+        Ok(Err(AppError::Unauthorized)) => challenge(),
+        Ok(Err(error)) => ApiError::from(error).into_response(),
+        Err(_) => unchecked(request).await,
     }
+}
+
+/// The answer to a request whose grant the store did not check in time, so nothing ran. A tool
+/// call gets its tool's timeout sentence as its error result, which the model reads; any other
+/// request is refused as unavailable. Only here is an unauthenticated body read, within the
+/// same limit as an authenticated one.
+async fn unchecked(request: Request) -> Response {
+    let unavailable = || ApiError::from(AppError::Unavailable).into_response();
+    let Ok(body) = axum::body::to_bytes(request.into_body(), MAX_REQUEST_BODY_BYTES).await else {
+        return unavailable();
+    };
+    let Ok(call) = serde_json::from_slice::<Value>(&body) else {
+        return unavailable();
+    };
+    let (Some(id), Some("tools/call"), Some(name)) = (
+        call.get("id"),
+        call.get("method").and_then(Value::as_str),
+        call.pointer("/params/name").and_then(Value::as_str),
+    ) else {
+        return unavailable();
+    };
+    let result = CallToolResult::error(vec![ContentBlock::text(tool_deadline(name).timed_out)]);
+    let reply = serde_json::json!({ "jsonrpc": "2.0", "id": id, "result": result });
+    axum::Json(reply).into_response()
 }
 
 fn verify_bearer(value: &str) -> Option<[u8; 32]> {
@@ -198,25 +233,22 @@ impl ServerHandler for Server {
             .and_then(|parts| parts.extensions.get::<Actor>())
             .cloned()
             .ok_or_else(|| ErrorData::invalid_request("checkout authorization required", None))?;
-        let ledger = LedgerTool::from_name(&request.name);
-        let deadline = match (ledger, request.name.as_ref()) {
-            (Some(tool), _) => tool.deadline(),
-            (None, "SendReviewMessage" | "StartReview" | "ConfigureFollowups") => {
-                Duration::from_secs(60)
-            }
-            (None, _) => Duration::from_secs(30),
-        };
+        let arrived = context
+            .extensions
+            .get::<Parts>()
+            .and_then(|parts| parts.extensions.get::<Arrived>())
+            .map_or_else(Instant::now, |arrived| arrived.0);
+        let deadline = tool_deadline(&request.name);
         let meta = context.meta;
         let cancelled = context.ct;
         let result = tokio::select! {
             _ = cancelled.cancelled() => return Err(ErrorData::internal_error("request cancelled", None)),
-            result = tokio::time::timeout(deadline, self.call(request, &meta, actor)) => result,
+            result = tokio::time::timeout_at(arrived + deadline.limit, self.call(request, &meta, actor)) => result,
         };
         let text = match result {
             Ok(Ok(output)) => return Ok(output.into()),
             Ok(Err(error)) => super::error::tool_error_text(error),
-            Err(_) if ledger.is_some() => LEDGER_TIMED_OUT.to_owned(),
-            Err(_) => super::error::tool_error_text(AppError::Busy.into()),
+            Err(_) => deadline.timed_out.to_owned(),
         };
         Ok(CallToolResult::error(vec![ContentBlock::text(text)]).into())
     }

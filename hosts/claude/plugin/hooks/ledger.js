@@ -1,10 +1,7 @@
 import { invoke } from "./bridge.js";
 import { ledgerTools } from "./ledger-schema.js";
-import { toolResult } from "./workflow.js";
+import { refusal, toolResult } from "./workflow.js";
 
-// How much longer than a tool's deadline the plugin waits for the bridge, which spends that
-// deadline on the service, so the bridge always answers first with ReviewQ's own message.
-const BRIDGE_MARGIN_MS = 5000;
 // The host's own fields on a tool-call event. An input key that collides with one of them is
 // moved under `$shadowed`.
 const SHADOWED = "$shadowed";
@@ -24,12 +21,12 @@ export async function registerLedgerTools($) {
 // closing call from a subagent. `state` is the session's state, absent before it is known.
 export async function callLedger($, state, event) {
   const tool = ledgerTools[ledgerToolIds.indexOf(event.tool)];
-  if (!tool) return { result: "ReviewQ does not serve this tool.", isError: true };
+  if (!tool) return refusal("ReviewQ does not serve this tool.");
   const call = { tool: tool.name, callId: event.tool_use_id, input: toolInput(event) };
   if (state?.activeTurn) call.turnId = state.activeTurn;
   if (event.agentId) call.agentId = event.agentId;
   const id = state?.id ?? await $.session.id();
-  return toolResult(await invoke($, "ledger", id, call, tool.deadlineMs + BRIDGE_MARGIN_MS));
+  return toolResult(await invoke($, "ledger", id, call, tool.waitMs));
 }
 
 // The event spreads the tool's arguments beside the host's fields. Drop only the host's and put

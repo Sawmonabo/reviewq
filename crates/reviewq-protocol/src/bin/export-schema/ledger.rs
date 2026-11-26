@@ -4,6 +4,7 @@
 use std::error::Error;
 use std::io::{self, Write};
 
+use reviewq_protocol::deadlines::tool_deadline;
 use reviewq_protocol::followups::NextAction;
 use reviewq_protocol::ledger::{
     AssessFinding, FinishReview, LEDGER_TOOLS, LedgerTool, NeedsInput, NoteSection, RecordFinding,
@@ -43,7 +44,7 @@ pub(super) fn export(mode: &str) -> Result<(), Box<dyn Error>> {
                     json!({
                         "name": tool.name(),
                         "description": tool.description(),
-                        "deadlineMs": tool.deadline().as_secs() * 1000,
+                        "waitMs": plugin_wait_ms(tool.name()),
                         "inputSchema": schema,
                     })
                 })
@@ -54,12 +55,23 @@ pub(super) fn export(mode: &str) -> Result<(), Box<dyn Error>> {
             )?;
             write!(output, "export const ledgerTools = ")?;
             serde_json::to_writer_pretty(&mut output, &tools)?;
-            write!(output, ";")?;
+            writeln!(output, ";")?;
+            write!(
+                output,
+                "export const actionWaitMs = {};",
+                plugin_wait_ms("review_action")
+            )?;
         }
         _ => return Err(format!("Unknown contract export mode: {mode}").into()),
     }
     writeln!(output)?;
     Ok(())
+}
+
+/// How long the plugin waits for the bridge's answer to a call of the tool it registers as
+/// `name`, in milliseconds.
+fn plugin_wait_ms(name: &str) -> u128 {
+    tool_deadline(name).plugin_wait().as_millis()
 }
 
 fn input_schema(tool: LedgerTool) -> Value {

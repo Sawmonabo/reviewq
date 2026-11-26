@@ -2,7 +2,6 @@
 //! bodies, and the one validator every entry point calls.
 
 use std::sync::LazyLock;
-use std::time::Duration;
 
 use serde_json::{Map, Value};
 
@@ -55,11 +54,6 @@ pub enum LedgerTool {
 /// escaped. So a full page always fits, and a refusal, at most 51 short field errors, does too.
 pub const MAX_LEDGER_RESULT_BYTES: usize = 1024 * 1024;
 
-/// What the model reads when ReviewQ does not answer a ledger call within its tool's deadline.
-/// The service may still have stored the call, so a blind repeat of a revision-guarded call
-/// would be refused as stale.
-pub const LEDGER_TIMED_OUT: &str = "ReviewQ did not answer this ledger call in time, but it may have stored it. Read the ledger with review_ledger before repeating the call.";
-
 /// Every ledger tool, in the order hosts list them.
 pub const LEDGER_TOOLS: [LedgerTool; 6] = [
     LedgerTool::RecordFinding,
@@ -92,23 +86,6 @@ impl LedgerTool {
             Self::ReviewLedger => "list",
             Self::FinishReview => "finish",
             Self::NeedsInput => "needs-input",
-        }
-    }
-
-    /// How long ReviewQ takes at most to answer one call of the tool, on either host: the
-    /// Claude bridge's status check and call together, and the MCP server's handling of a Codex
-    /// call. `finish_review` composes and publishes a version, so it gets longer. Both are
-    /// chosen below the 60 seconds taken as Codex's default MCP tool timeout, so that ReviewQ's
-    /// own `LEDGER_TIMED_OUT` answers first; the Claude plugin waits a few seconds longer than
-    /// this for the bridge.
-    pub const fn deadline(self) -> Duration {
-        match self {
-            Self::FinishReview => Duration::from_secs(55),
-            Self::RecordFinding
-            | Self::AssessFinding
-            | Self::RecordNote
-            | Self::ReviewLedger
-            | Self::NeedsInput => Duration::from_secs(30),
         }
     }
 

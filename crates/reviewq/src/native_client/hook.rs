@@ -17,7 +17,7 @@ const TOTAL_TIMEOUT: Duration = Duration::from_secs(3);
 /// Largest hook input read. A `Stop` input can carry the turn's whole last message, and a
 /// larger input is not forwarded.
 pub(super) const INPUT_LIMIT: usize = 4 * 1024 * 1024;
-/// Largest reply: a read-back of at most 4,000 characters inside the envelope.
+/// Largest reply: a read-back of at most 8,000 bytes of UTF-8 inside the envelope.
 const REPLY_LIMIT: usize = 64 * 1024;
 
 /// The answer a forwarded hook expects from ReviewQ.
